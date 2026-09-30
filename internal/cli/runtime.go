@@ -179,14 +179,18 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 			age = &s
 		}
 	}
+	const syncHint = "run teamscrawl sync"
 	if age == nil {
-		rt.hint("run teamscrawl sync")
+		rt.hint(syncHint)
 	}
 	res, err := fn(st)
 	if err != nil {
 		return asCoded(err)
 	}
 	res.setMeta(age, syncErr)
+	if age == nil {
+		res.setNeedsSync(syncHint)
+	}
 	return rt.write(label, res)
 }
 

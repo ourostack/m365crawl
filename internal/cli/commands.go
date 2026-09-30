@@ -150,11 +150,12 @@ func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []stor
 
 // msgFlags are the filters messages, search and unread share.
 type msgFlags struct {
-	Conversation string `short:"c" help:"Conversation id, or its exact title or display name."`
-	From         string `help:"Sender: a person id, or a case-insensitive part of the name."`
-	Since        string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
-	Until        string `help:"Only messages at or before this time (same formats as --since)."`
-	Limit        int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	Conversation  string `short:"c" help:"Conversation id, or its exact title or display name."`
+	From          string `help:"Sender: a person id, or a case-insensitive part of the name."`
+	Since         string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
+	Until         string `help:"Only messages at or before this time (same formats as --since)."`
+	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
 
 func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
@@ -169,7 +170,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	return store.Filter{Account: rt.account, Conversation: f.Conversation, From: f.From, Since: since, Until: until, Limit: f.Limit}, nil
+	return store.Filter{Account: rt.account, Conversation: f.Conversation, From: f.From, Since: since, Until: until, Limit: f.Limit, IncludeSystem: f.IncludeSystem}, nil
 }
 
 type searchCmd struct {
@@ -203,10 +204,11 @@ func (c *searchCmd) Run(rt *runtime) error {
 
 type messagesCmd struct {
 	msgFlags
-	IncludeDeleted bool `name:"include-deleted" help:"Also list deleted messages."`
-	MentionsMe     bool `name:"mentions-me" help:"Only messages that mention you."`
-	Unread         bool `name:"unread" help:"Only unread messages."`
-	HTML           bool `name:"html" help:"Add each message's HTML body as html."`
+	IncludeDeleted  bool `name:"include-deleted" help:"Also list deleted messages."`
+	MentionsMe      bool `name:"mentions-me" help:"Only messages that mention you."`
+	Unread          bool `name:"unread" help:"Only unread messages (chats and meetings unless --include-channels)."`
+	IncludeChannels bool "name:\"include-channels\" help:\"include channels (off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`)\""
+	HTML            bool `name:"html" help:"Add each message's HTML body as html."`
 }
 
 func (c *messagesCmd) Run(rt *runtime) error {
@@ -217,7 +219,7 @@ func (c *messagesCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
-	f.IncludeDeleted, f.MentionsMe, f.Unread = c.IncludeDeleted, c.MentionsMe, c.Unread
+	f.IncludeDeleted, f.MentionsMe, f.Unread, f.IncludeChannels = c.IncludeDeleted, c.MentionsMe, c.Unread, c.IncludeChannels
 	return rt.read("messages", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -231,22 +233,56 @@ func (c *messagesCmd) Run(rt *runtime) error {
 }
 
 type unreadCmd struct {
-	Conversation string `short:"c" help:"Conversation id, or its exact title or display name."`
-	Limit        int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
-	HTML         bool   `name:"html" help:"Add each message's HTML body as html."`
+	Conversation    string `short:"c" help:"Conversation id, or its exact title or display name."`
+	Limit           int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	HTML            bool   `name:"html" help:"Add each message's HTML body as html."`
+	IncludeChannels bool   "name:\"include-channels\" help:\"include channels (off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`)\""
+	ByConversation  bool   `name:"by-conversation" help:"One item per conversation with its unread count, oldest and newest unread time and a link, most unread first (the overview; ignores --html)."`
+	IncludeSystem   bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
+}
+
+type unreadConversationItem struct {
+	ConversationID          string    `json:"conversation_id"`
+	ConversationDisplayName string    `json:"conversation_display_name"`
+	Kind                    string    `json:"kind"`
+	UnreadCount             int       `json:"unread_count"`
+	OldestUnreadAt          time.Time `json:"oldest_unread_at,omitzero"`
+	NewestUnreadAt          time.Time `json:"newest_unread_at,omitzero"`
+	Link                    string    `json:"link,omitempty"`
 }
 
 func (c *unreadCmd) Run(rt *runtime) error {
-	if err := checkFields[messageItem](rt); err != nil {
+	if c.ByConversation {
+		if err := checkFields[unreadConversationItem](rt); err != nil {
+			return err
+		}
+	} else if err := checkFields[messageItem](rt); err != nil {
 		return err
 	}
-	f, err := rt.filter(msgFlags{Conversation: c.Conversation, Limit: c.Limit})
+	f, err := rt.filter(msgFlags{Conversation: c.Conversation, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
 	if err != nil {
 		return err
 	}
+	f.IncludeChannels = c.IncludeChannels
 	return rt.read("unread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
+		}
+		if c.ByConversation {
+			rows, trunc, err := st.UnreadByConversation(rt.ctx, f)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]unreadConversationItem, len(rows))
+			for i, r := range rows {
+				items[i] = unreadConversationItem{ConversationID: r.ConversationID, ConversationDisplayName: r.DisplayName, Kind: r.Kind,
+					UnreadCount: r.UnreadCount, OldestUnreadAt: r.OldestUnreadAt, NewestUnreadAt: r.NewestUnreadAt, Link: r.Link}
+			}
+			shaped, err := shape(rt, items)
+			if err != nil {
+				return nil, err
+			}
+			return newList(shaped, trunc), nil
 		}
 		rows, trunc, err := st.Unread(rt.ctx, f)
 		if err != nil {
@@ -261,6 +297,7 @@ type threadCmd struct {
 	Root           string `arg:"" optional:"" help:"Root message id (not needed with a link)."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also show deleted messages."`
 	HTML           bool   `name:"html" help:"Add each message's HTML body as html."`
+	IncludeSystem  bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
 
 func (c *threadCmd) Run(rt *runtime) error {
@@ -275,7 +312,7 @@ func (c *threadCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted})
+		rows, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem})
 		if err != nil {
 			return nil, err
 		}
@@ -329,9 +366,10 @@ func parseThreadTarget(target, root string) (conversation, rootID string, err er
 }
 
 type conversationsCmd struct {
-	Kind  string `help:"Only this kind, for example Chat, Topic (channel), Space (team) or Meeting."`
-	Query string `help:"Words to find in conversation titles."`
-	Limit int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	Kind          string `help:"Only this kind, for example Chat, Topic (channel), Space (team) or Meeting."`
+	Query         string `help:"Words to find in conversation titles."`
+	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
 
 func (c *conversationsCmd) Run(rt *runtime) error {
@@ -345,7 +383,7 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.Conversations(rt.ctx, c.Kind, c.Query, store.Filter{Account: rt.account, Limit: c.Limit})
+		rows, trunc, err := st.Conversations(rt.ctx, c.Kind, c.Query, store.Filter{Account: rt.account, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
 		if err != nil {
 			return nil, err
 		}
@@ -395,10 +433,11 @@ func (c *peopleCmd) Run(rt *runtime) error {
 }
 
 type activityCmd struct {
-	Unread bool   `help:"Only unread items."`
-	Type   string `help:"Only this activity type, for example mentionInChat."`
-	Since  string `help:"Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h)."`
-	Limit  int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	Unread        bool   `help:"Only unread items."`
+	Type          string `help:"Only this activity type, for example mentionInChat."`
+	Since         string `help:"Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h)."`
+	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
 
 func (c *activityCmd) Run(rt *runtime) error {
@@ -416,7 +455,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.Activity(rt.ctx, store.ActivityFilter{Account: rt.account, Unread: c.Unread, Type: c.Type, Since: since, Limit: c.Limit})
+		rows, trunc, err := st.Activity(rt.ctx, store.ActivityFilter{Account: rt.account, Unread: c.Unread, Type: c.Type, Since: since, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
 		if err != nil {
 			return nil, err
 		}

@@ -29,9 +29,15 @@ Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read co
 
 `--json`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`.
 
-List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds":N}`. `truncated: true` means more exist: raise `--limit` (default 50) or narrow the filters. Times are RFC3339 UTC. Filter time flags accept RFC3339, `YYYY-MM-DD` (local midnight) or relative `90m`, `24h`, `7d`, `2w`.
+List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds":N}`. `truncated: true` means more exist: raise `--limit` (default 50) or narrow the filters. Times are RFC3339 UTC. Sort orders: `search` and `unread` are newest first, `messages` is chronological (oldest first; with `--limit` you get the newest matches), `conversations` is sorted by last activity, newest first. Every list stops at `--limit` (default 50), so check `truncated`. Filter time flags accept RFC3339, `YYYY-MM-DD` (local midnight) or relative `90m`, `24h`, `7d`, `2w`.
 
 ## Commands
+
+If the archive has never had a successful sync, every read result also carries `"needs_sync":true` and `"hint":"run teamscrawl sync"` (both omitted otherwise). An empty result with `needs_sync` means no data yet, not no match: run `teamscrawl sync` and repeat.
+
+System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are excluded by default from `search`, `messages`, `unread`, `thread`, the message text in `activity`, and `conversations`, because their messages duplicate real ones with blank sender and conversation names. Pass `--include-system` to bring them back. Your own notes (`48:notes`) stay included.
+
+An @-mention appears in `text` as the person's plain name; `mentions` lists who was mentioned and `mentions_me` is exact.
 
 ### whoami
 
@@ -43,7 +49,7 @@ Accounts in the archive and its state. Use `self_id` to recognize the user's own
 
 ### unread
 
-Unread messages, newest first (newer than the conversation's read marker and not sent by the user). Flag: `-c/--conversation`, `--limit`, `--html`.
+Unread messages, newest first (newer than the conversation's read marker and not sent by the user). By default it covers chats and meetings only: most channels are never opened, so their unread counts are noise, and channel mentions and replies reach you through `activity`. Add `--include-channels` to count channels and teams too (`messages --unread` takes the same flag). `--by-conversation` gives the overview instead of messages: one item per conversation `{conversation_id, conversation_display_name, kind, unread_count, oldest_unread_at, newest_unread_at, link}`, most unread first; start there, then read a conversation with `messages -c <id> --unread`. Flags: `-c/--conversation`, `--limit`, `--html`, `--include-channels`, `--by-conversation`, `--include-system`.
 
 ```json
 {"items":[{"conversation_id":"19:topicchannel1@thread.tacv2","conversation_display_name":"Fixture team 1 › General","id":"1700000046000","reply_chain_id":"1700000045000","sender_name":"Pat Example","sent_at":"2023-11-14T22:14:06Z","text":"Channel post with a subject\nReply in thread","mentions_me":false,"link":"https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?tenantId=...&parentMessageId=1700000045000"}],"count":1,"truncated":false,"archive_age_seconds":0}
@@ -51,7 +57,7 @@ Unread messages, newest first (newer than the conversation's read marker and not
 
 ### activity
 
-The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mentionInChat`, `--since 1h`, `--limit`.
+The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mentionInChat`, `--since 1h`, `--limit`, `--include-system`.
 
 ```json
 {"items":[{"id":"fixture-activity-1-8","type":"follow","is_read":false,"at":"2023-11-14T22:22:00Z","conversation_display_name":"Fixture team 1 › Planning","message_id":"1700000047000","sender_name":"Pat Example","text":"Planning channel message","link":"https://teams.microsoft.com/l/message/19:planningchannel1@thread.tacv2/1700000047000?tenantId=..."}],"count":1,"truncated":false,"archive_age_seconds":0}
@@ -59,11 +65,11 @@ The Teams activity feed (mentions, replies, reactions, follows) joined with mess
 
 ### search
 
-Full-text (FTS5) over message text, newest first. Supports `"quoted phrases"` and a trailing `*` prefix. Flags: `-c/--conversation` (id, exact title or display name such as `"Team › Channel"`), `--from` (person id or part of a name), `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--html`, `--limit`. Items have the same shape as `messages`.
+Full-text (FTS5) over message text, newest first. Supports `"quoted phrases"` and a trailing `*` prefix. Flags: `-c/--conversation` (id, exact title or display name such as `"Team › Channel"`), `--from` (person id or part of a name), `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--html`, `--include-system`, `--limit`. Items have the same shape as `messages`.
 
 ### messages
 
-Chronological listing with the same filters as `search`, plus `--unread`. Use `-c "Team › Channel" --since 1d` to read a channel.
+Chronological listing (oldest first) with the same filters as `search`, plus `--unread` and `--include-channels` (which only affects `--unread`). Use `-c "Team › Channel" --since 1d` to read a channel.
 
 ```json
 {"items":[{"conversation_display_name":"Fixture chat 1","id":"1700000039000","sender_name":"Pat Example","sent_at":"2023-11-14T22:13:59Z","text":"Alex Fixture and Sam Tag see this","mentions":[{"id":"8:orgid:00000000-0000-4000-8000-0000000000a1","display_name":"Alex Fixture"}],"mentions_me":true,"importance":"normal","pinned":false,"link":"https://teams.microsoft.com/l/message/..."}],"count":1,"truncated":false,"archive_age_seconds":0}
@@ -73,11 +79,11 @@ Optional keys (omitted when empty): `edited_at`, `deleted_at`, `mentions`, `reac
 
 ### thread
 
-One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (the root is an item's `parent_message_id`/`reply_chain_id`) or a Teams message link copied from any `link`. Flags: `--include-deleted`, `--html`.
+One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (the root is an item's `parent_message_id`/`reply_chain_id`) or a Teams message link copied from any `link`. Flags: `--include-deleted`, `--html`, `--include-system`.
 
 ### conversations and people
 
-`conversations --kind Chat|Topic|Space|Meeting --query words` lists conversations with `display_name`, `kind`, `last_message_at`, `read_horizon_at`, `favorite`. `people --query name` resolves a name to a `sender_id` for `--from`.
+`conversations --kind Chat|Topic|Space|Meeting --query words [--include-system]` lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`), with `display_name`, `kind`, `last_message_at`, `read_horizon_at`, `favorite`. `people --query name` resolves a name to a `sender_id` for `--from`.
 
 ### sql
 

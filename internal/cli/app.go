@@ -48,12 +48,12 @@ type cliApp struct {
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Copy the Teams cache into the archive once and print what changed."`
 	Status        statusCmd        `cmd:"" help:"Show archive counts per account, the last sync and other Teams origins."`
-	Search        searchCmd        `cmd:"" help:"Full-text search over message text, newest first."`
-	Messages      messagesCmd      `cmd:"" help:"List messages in chronological order."`
-	Conversations conversationsCmd `cmd:"" help:"List conversations by latest activity."`
+	Search        searchCmd        "cmd:\"\" help:\"Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).\""
+	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
+	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
-	Unread        unreadCmd        `cmd:"" help:"List unread messages, newest first."`
+	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
 	Thread        threadCmd        `cmd:"" help:"Show one thread: <conversation> <root-message-id>, or a Teams message link."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
