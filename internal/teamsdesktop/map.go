@@ -207,8 +207,11 @@ func canonical(v any) ([]byte, error) {
 	return raw, nil
 }
 
-// channelIDSuffix marks a Teams channel's thread id.
-const channelIDSuffix = "@thread.tacv2"
+// isChannelID reports whether a conversation id is a channel thread: the current "@thread.tacv2"
+// ids and the legacy "@thread.skype" ids (real caches hold both, of kinds Topic and Space).
+func isChannelID(id string) bool {
+	return strings.HasSuffix(id, "@thread.tacv2") || strings.HasSuffix(id, "@thread.skype")
+}
 
 // DeepLink returns the Teams link to one message, in the documented form
 // https://teams.microsoft.com/l/message/<conversationId>/<messageId>?tenantId=<tenant>[&parentMessageId=<root>]&context={"contextType":"chat"|"channel"}.
@@ -326,7 +329,7 @@ func mapMessage(acct Account, mo *v8.Object, chainConv, chainID string, people *
 	if linkParent == "" && m.ReplyChainID != id {
 		linkParent = m.ReplyChainID
 	}
-	m.Link = DeepLink(conv, id, linkParent, acct.TenantID, strings.HasSuffix(conv, channelIDSuffix))
+	m.Link = DeepLink(conv, id, linkParent, acct.TenantID, isChannelID(conv))
 
 	people.add(m.SenderID, m.SenderName, sentAt)
 	for _, mn := range m.Mentions {
