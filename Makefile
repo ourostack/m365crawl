@@ -9,7 +9,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot clean
+.PHONY: help build test e2e v8vectors fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot clean
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,7 @@ help:
 		'  build          Build the CLI into $(BINARY).' \
 		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
 		'  e2e            Run end-to-end tests (build tag e2e).' \
+		'  v8vectors      Regenerate testdata/v8 with Node 22 (scripts/v8vectors/gen.mjs).' \
 		'  fmt            Apply Go formatting.' \
 		'  fmt-check      Fail if any file needs formatting.' \
 		'  vet            Run go vet.' \
@@ -35,6 +36,9 @@ test:
 
 e2e:
 	go test -count=1 -tags e2e ./e2e/...
+
+v8vectors:
+	node scripts/v8vectors/gen.mjs
 
 fmt:
 	gofmt -w cmd internal e2e
