@@ -1,0 +1,50 @@
+STATUS
+======
+
+db path   : /tmp/x.db
+disabled  : no
+empty     : -
+enabled   : yes
+missing   : -
+never     : never
+status    : ok
+synced at : 2026-09-30T12:00:00Z
+
+empty list
+----------
+  no rows
+
+empty map
+---------
+  (empty)
+
+mixed
+-----
+  - a
+  -
+    k : v
+
+nested
+------
+  a : 1
+  b : 2.5
+
+ptr
+---
+  count : 4
+
+rows
+----
+  id  name  extra
+  --  ----  -----
+  1   日本  -
+  22  b     yes
+
+struct
+------
+  count : 3
+
+tags
+----
+  - x
+  - y

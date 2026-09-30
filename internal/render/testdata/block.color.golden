@@ -1,0 +1,50 @@
+[1m[36mSTATUS[0m
+[2m======[0m
+
+[2mdb path  [0m[2m : [0m/tmp/x.db
+[2mdisabled [0m[2m : [0m[33mno[0m
+[2mempty    [0m[2m : [0m[2m-[0m
+[2menabled  [0m[2m : [0m[32myes[0m
+[2mmissing  [0m[2m : [0m[2m-[0m
+[2mnever    [0m[2m : [0m[2mnever[0m
+[2mstatus   [0m[2m : [0mok
+[2msynced at[0m[2m : [0m2026-09-30T12:00:00Z
+
+[36mempty list[0m
+[2m----------[0m
+  no rows
+
+[36mempty map[0m
+[2m---------[0m
+  (empty)
+
+[36mmixed[0m
+[2m-----[0m
+  - a
+  -
+    [2mk[0m[2m : [0mv
+
+[36mnested[0m
+[2m------[0m
+  [2ma[0m[2m : [0m1
+  [2mb[0m[2m : [0m2.5
+
+[36mptr[0m
+[2m---[0m
+  [2mcount[0m[2m : [0m4
+
+[36mrows[0m
+[2m----[0m
+  [2mid[0m  [2mname[0m  [2mextra[0m
+  [2m--[0m  [2m----[0m  [2m-----[0m
+  1   日本  -
+  22  b     yes
+
+[36mstruct[0m
+[2m------[0m
+  [2mcount[0m[2m : [0m3
+
+[36mtags[0m
+[2m----[0m
+  - x
+  - y

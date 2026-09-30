@@ -1,0 +1,25 @@
+MISC
+====
+
+cx : (1+2i)
+i  : 7
+np : -
+
+n
+-
+  count : 0
+TOP
+===
+
+count : 1
+LIST
+====
+
+count
+-----
+1
+2
+EMPTY
+=====
+
+(empty)
