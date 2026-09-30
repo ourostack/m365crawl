@@ -1,6 +1,7 @@
 package indexeddb
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
 )
@@ -90,13 +91,16 @@ func (o *Origin) stores(dbID int64) ([]Store, error) {
 	return out, err
 }
 
-// Record is one object store entry. Raw is the stored value without its
-// leading IndexedDB version varint; pass it to Decode. Raw is empty for an
+// Record is one object store entry. Err is an *OmissionError (code bad_key)
+// when the record key could not be decoded; Key is then nil. Raw is the stored
+// value without its leading IndexedDB version varint; pass it to Decode.
+// Raw aliases the in-memory LevelDB value: treat it as read-only. Raw is empty for an
 // empty value. For blob-replaced values Records rewrites the blob index to
 // the blob number, so Raw is self-contained.
 type Record struct {
 	Key any
 	Raw []byte
+	Err error
 }
 
 // Records calls fn for every record in the object store, in key order.
@@ -111,11 +115,12 @@ func (o *Origin) Records(dbID, storeID int64, fn func(Record) error) error {
 	return o.kv.Scan(prefix, func(k, v []byte) error {
 		rawKey := k[len(prefix):]
 		key, n, err := decodeKey(rawKey)
-		if err != nil {
-			return fmt.Errorf("indexeddb: record key: %w", err)
+		if err == nil && n != len(rawKey) {
+			err = fmt.Errorf("%d trailing bytes", len(rawKey)-n)
 		}
-		if n != len(rawKey) {
-			return fmt.Errorf("indexeddb: record key has %d trailing bytes", len(rawKey)-n)
+		if err != nil {
+			h := rawKey[:min(len(rawKey), envelopeHexBytes)]
+			return fn(Record{Raw: v, Err: &OmissionError{Omission{Code: CodeBadKey, Detail: fmt.Sprintf("undecodable record key (%v); key %s", err, hex.EncodeToString(h))}}})
 		}
 		var raw []byte
 		if len(v) > 0 {

@@ -9,7 +9,10 @@ import (
 
 // unresolvedBlob is the blob number Records writes when a record's blob entry
 // is absent or unreadable. No file has this number, so Decode reports blob_missing.
+// The index is encoded as unresolvedBlob-index so the detail can name it.
 const unresolvedBlob = math.MaxUint64
+
+const maxUnresolvedIndex = 1 << 32
 
 // resolveBlobRef rewrites a kReplaceWithBlob value (ff 11 01 size index) so
 // the index becomes the real blob number taken from the record's blob entry.
@@ -19,6 +22,9 @@ func (o *Origin) resolveBlobRef(dbID, storeID uint64, rawKey, raw []byte) []byte
 		return raw
 	}
 	number := uint64(unresolvedBlob)
+	if index < maxUnresolvedIndex {
+		number -= index
+	}
 	if prefix, err := makePrefix(dbID, storeID, indexBlobEntries); err == nil {
 		if v, found := o.kv.Get(append(prefix, rawKey...)); found {
 			if nums, err := externalObjects(v); err == nil && index < uint64(len(nums)) {
@@ -67,6 +73,9 @@ func parseBlobRef(raw []byte) (size, number uint64, n int, ok bool) {
 
 // readBlob reads <blobDir>/<db id hex>/<(n>>8) as 2 hex digits>/<n hex>.
 func (o *Origin) readBlob(dbID int64, number uint64) ([]byte, error) {
+	if number > unresolvedBlob-maxUnresolvedIndex {
+		return nil, &OmissionError{Omission{Code: CodeBlobMissing, Detail: fmt.Sprintf("blob entry missing for index %d of database %x", unresolvedBlob-number, dbID)}}
+	}
 	if o.blobDir == "" {
 		return nil, &OmissionError{Omission{Code: CodeBlobMissing, Detail: "no blob directory"}}
 	}

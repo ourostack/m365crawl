@@ -1,11 +1,14 @@
 package indexeddb
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -80,6 +83,29 @@ func TestEnvelopeV21Trailer(t *testing.T) {
 	if _, err := o.Decode(1, broken); omissionCode(t, err) != "unknown_envelope" {
 		t.Errorf("overrun: %v", err)
 	}
+	// Zero offset and size: Blink leaves the trailer empty (every v21 value in
+	// the real cache looks like this); the payload follows at the fixed offset 15.
+	zero := append([]byte{0xff, 0x15, 0xfe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, v8Hi...)
+	if got, err := o.Decode(1, zero); err != nil || got != "hi" {
+		t.Errorf("zero trailer: %v %v", got, err)
+	}
+	// Offset 0 with a nonzero size is inconsistent.
+	zeroOff := append([]byte{0xff, 0x15, 0xfe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3}, v8Hi...)
+	if _, err := o.Decode(1, zeroOff); omissionCode(t, err) != CodeUnknownEnvelope {
+		t.Errorf("zero offset, size 3: %v", err)
+	}
+	// Size that does not match the bytes remaining after the offset.
+	short := v21Envelope(v8Hi, []byte{1, 2, 3})
+	binary.BigEndian.PutUint32(short[11:15], 2)
+	if _, err := o.Decode(1, short); omissionCode(t, err) != CodeUnknownEnvelope {
+		t.Errorf("size mismatch: %v", err)
+	}
+	// Offset before the fixed payload start (15).
+	early := v21Envelope(v8Hi, nil)
+	binary.BigEndian.PutUint64(early[3:11], 10)
+	if _, err := o.Decode(1, early); omissionCode(t, err) != CodeUnknownEnvelope {
+		t.Errorf("early offset: %v", err)
+	}
 	// Missing trailer tag.
 	if _, err := o.Decode(1, []byte{0xff, 0x15, 0x00, 0, 0}); omissionCode(t, err) != "unknown_envelope" {
 		t.Errorf("no tag: %v", err)
@@ -128,24 +154,34 @@ func TestBlobMissing(t *testing.T) {
 
 func TestUnknownEnvelope(t *testing.T) {
 	o := newTestOrigin(fakeKV{}, "")
-	for _, raw := range [][]byte{
-		{0x00, 0x01},             // no Blink tag
-		{0xff},                   // header cut off
-		{0xff, 0x11, 0x07},       // unknown wrapper kind
-		{0xff, 0x11},             // wrapper kind missing
-		{0xff, 0x11, 0x01, 0x05}, // blob ref truncated
-		{0xff, 0x00, 0xff, 0x0f}, // version 0
+	for _, c := range []struct {
+		raw  []byte
+		kind string
+	}{
+		{[]byte{0x00, 0x01}, "unknown"},             // no Blink tag
+		{[]byte{0xff}, "unknown"},                   // header cut off
+		{[]byte{0xff, 0x11, 0x07}, "unknown"},       // unknown wrapper kind
+		{[]byte{0xff, 0x11}, "unknown"},             // wrapper kind missing
+		{[]byte{0xff, 0x11, 0x01, 0x05}, "blob"},    // blob ref truncated: still a blob envelope
+		{[]byte{0xff, 0x00, 0xff, 0x0f}, "unknown"}, // version 0
 	} {
-		_, err := o.Decode(1, raw)
-		if omissionCode(t, err) != "unknown_envelope" {
-			t.Errorf("% x: %v", raw, err)
+		_, err := o.Decode(1, c.raw)
+		if omissionCode(t, err) != CodeUnknownEnvelope {
+			t.Errorf("% x: %v", c.raw, err)
+			continue
 		}
-		if k := EnvelopeKind(raw); k != "unknown" && k != "blob" {
-			t.Errorf("% x: kind %q", raw, k)
+		if want := "envelope " + hex.EncodeToString(c.raw); !strings.Contains(err.Error(), want) {
+			t.Errorf("% x: detail %q lacks %q", c.raw, err.Error(), want)
+		}
+		if k := EnvelopeKind(c.raw); k != c.kind {
+			t.Errorf("% x: kind %q, want %q", c.raw, k, c.kind)
 		}
 	}
-	if k := EnvelopeKind([]byte{0x00}); k != "unknown" {
-		t.Errorf("kind %q", k)
+	// Only the first 16 bytes are reported.
+	long := append([]byte{0x00}, bytes.Repeat([]byte{0xab}, 40)...)
+	_, err := o.Decode(1, long)
+	if !strings.Contains(err.Error(), "envelope "+hex.EncodeToString(long[:16])) || strings.Contains(err.Error(), hex.EncodeToString(long[:17])) {
+		t.Errorf("hex prefix wrong: %v", err)
 	}
 }
 
@@ -169,7 +205,7 @@ func TestV8ErrorsPassThrough(t *testing.T) {
 	_, err := o.Decode(1, raw)
 	var ue *v8.UnsupportedError
 	if _, probe := v8.Deserialize([]byte{0xff, 0x0f, 0x5c}); !errors.As(probe, &ue) {
-		t.Skip("probe byte is not an unsupported tag in this v8 build")
+		t.Fatalf("probe byte 0x5c no longer yields *v8.UnsupportedError: %v", probe)
 	}
 	if got := omissionCode(t, err); got != ue.Code {
 		t.Errorf("code %q, want %q", got, ue.Code)
@@ -252,5 +288,80 @@ func TestEnvelopeKindValues(t *testing.T) {
 		if got := EnvelopeKind([]byte(raw)); got != want {
 			t.Errorf("%q: got %s want %s", raw, got, want)
 		}
+	}
+}
+
+func TestBlobIndexAboveZeroAndMissingEntryDetail(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "5", "00"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "5", "00", "22"), v21Envelope(v8Hi, nil), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := append([]byte{1}, idbString("k")...)
+	pfx1, _ := makePrefix(5, 2, 1)
+	pfx3, _ := makePrefix(5, 2, 3)
+	obj := func(n uint64) []byte {
+		return append(append(append([]byte{0}, varint(n)...), varint(0)...), varint(1)...)
+	}
+	ext := append(obj(0x11), obj(0x22)...)
+	f := fakeKV{
+		string(append(append([]byte{}, pfx1...), key...)): append([]byte{0}, blobRefValue(1, 1)...),
+		string(append(append([]byte{}, pfx3...), key...)): ext,
+	}
+	k2 := append([]byte{1}, idbString("m")...)
+	f[string(append(append([]byte{}, pfx1...), k2...))] = append([]byte{0}, blobRefValue(1, 7)...)
+	o := newTestOrigin(f, dir)
+	var details []string
+	var vals []any
+	_ = o.Records(5, 2, func(r Record) error {
+		v, err := o.Decode(5, r.Raw)
+		vals = append(vals, v)
+		if err != nil {
+			details = append(details, err.Error())
+		}
+		return nil
+	})
+	if vals[0] != "hi" {
+		t.Errorf("index 1 should read blob 0x22, got %v", vals[0])
+	}
+	if len(details) != 1 || !strings.Contains(details[0], "blob entry missing") || !strings.Contains(details[0], "index 7") || !strings.Contains(details[0], "database 5") {
+		t.Errorf("details %v", details)
+	}
+}
+
+func TestRecordsBadKeyIsOmission(t *testing.T) {
+	pfx, _ := makePrefix(5, 2, 1)
+	good1 := append([]byte{1}, idbString("a")...)
+	good2 := append([]byte{1}, idbString("z")...)
+	val := append([]byte{0x00, 0xff, 0x10}, v8Hi...)
+	mk := func(k []byte) string { return string(append(append([]byte{}, pfx...), k...)) }
+	f := fakeKV{
+		mk(good1):                   val,
+		mk([]byte{5}):               val, // MinKey
+		mk([]byte{9, 1, 2}):         val, // unknown type
+		mk(append([]byte{0}, 0xee)): val, // trailing bytes after a null key
+		mk(good2):                   val,
+	}
+	o := newTestOrigin(f, "")
+	var ok, bad int
+	err := o.Records(5, 2, func(r Record) error {
+		if r.Err != nil {
+			var oe *OmissionError
+			if !errors.As(r.Err, &oe) || oe.Code != CodeBadKey || r.Key != nil {
+				t.Errorf("bad record: %v key %v", r.Err, r.Key)
+			}
+			if !strings.Contains(oe.Detail, "key ") {
+				t.Errorf("detail %q", oe.Detail)
+			}
+			bad++
+			return nil
+		}
+		ok++
+		return nil
+	})
+	if err != nil || ok != 2 || bad != 3 {
+		t.Fatalf("err %v ok %d bad %d", err, ok, bad)
 	}
 }
