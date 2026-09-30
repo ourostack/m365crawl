@@ -166,8 +166,31 @@ node('array_undefined_not_holes', [undefined, undefined]);
 node('array_nested', [[1, [2, [3, []]]], []]);
 {
   const a = [1, 2];
-  a.extra = 'dropped';
+  a.extra = 'kept';
   node('array_named_property', a);
+}
+{
+  const a = [];
+  a.name = 'empty but named';
+  node('array_empty_named_property', a);
+}
+{
+  const a = [1, , 3]; // eslint-disable-line no-sparse-arrays
+  a.first = { n: 1 };
+  a.second = [2];
+  a[-1] = 'negative';
+  a['4294967295'] = 'not an index';
+  node('array_named_properties_many', a);
+}
+{
+  const a = [1];
+  a.self = a;
+  node('array_named_property_cycle', a);
+}
+{
+  const a = [];
+  a.self = a;
+  node('array_empty_cycle_through_property', a);
 }
 {
   const a = [];
@@ -227,6 +250,8 @@ for (const [name, ms] of [
   ['epoch', 0], ['recent', Date.UTC(2024, 1, 29, 12, 34, 56, 789)], ['trailing_zero_ms', Date.UTC(2020, 0, 1, 0, 0, 0, 100)],
   ['ten_ms', Date.UTC(2020, 0, 1, 0, 0, 0, 10)], ['whole_second', Date.UTC(2021, 5, 7, 8, 9, 10, 0)],
   ['pre_epoch', -1], ['year_1', Date.UTC(1, 0, 1)], ['year_9999', Date.UTC(9999, 11, 31, 23, 59, 59, 999)],
+  ['year_10000', Date.UTC(10000, 0, 1)], ['year_0', -62167219200000], ['year_minus_1', -62198755200000],
+  ['max_js_date', 8.64e15], ['min_js_date', -8.64e15], ['invalid_nan', NaN],
 ]) {
   const d = new Date(ms);
   if (name === 'year_1') d.setUTCFullYear(1);
@@ -257,6 +282,13 @@ node('error_uri', err(URIError, 'uri'));
 node('error_empty_message', err(Error, ''));
 node('error_unicode_message', err(Error, 'café \u{1F600} 日'));
 node('error_with_cause', err(Error, 'outer', { cause: { code: 7 } }));
+node('error_with_error_cause', err(TypeError, 'outer', { cause: err(RangeError, 'inner') }));
+node('error_with_null_cause', err(Error, 'outer', { cause: null }));
+{
+  const e = err(Error, 'self cause');
+  e.cause = e;
+  node('error_cause_cycle', e);
+}
 {
   const e = err(Error, 'no stack');
   delete e.stack;
@@ -376,9 +408,9 @@ hand('object_duplicate_key_last_wins', [15], (v) => ({
   json: '{"a":3,"b":2}',
 }));
 
-hand('array_sparse_handbuilt', [15, 16], (v) => ({
-  bytes: [...hdr(v), tag('a'), 10, ...B.int32(2), ...B.int32(5), ...B.int32(7), ...B.str1('x'), ...B.str1('name'), ...B.str1('dropped'), tag('@'), 3, 10],
-  json: '[{"$hole":true},{"$hole":true},5,{"$hole":true},{"$hole":true},{"$hole":true},{"$hole":true},"x",{"$hole":true},{"$hole":true}]',
+hand('array_sparse_handbuilt_with_named_property', [15, 16], (v) => ({
+  bytes: [...hdr(v), tag('a'), 10, ...B.int32(2), ...B.int32(5), ...B.int32(7), ...B.str1('x'), ...B.str1('name'), ...B.str1('kept'), tag('@'), 3, 10],
+  json: '{"$array":[{"$hole":true},{"$hole":true},5,{"$hole":true},{"$hole":true},{"$hole":true},{"$hole":true},"x",{"$hole":true},{"$hole":true}],"$props":{"name":"kept"}}',
 }));
 hand('array_dense_the_hole_tag', [15, 16], (v) => ({
   bytes: [...hdr(v), tag('A'), 3, tag('-'), ...B.int32(1), tag('-'), tag('$'), 0, 3],
@@ -388,30 +420,16 @@ hand('array_dense_trailing_index_property', [15], (v) => ({
   bytes: [...hdr(v), tag('A'), 2, ...B.int32(1), ...B.int32(2), ...B.int32(1), ...B.str1('patched'), tag('$'), 1, 2],
   json: '[1,"patched"]',
 }));
-// Wire versions before 11 wrote holes as undefined in dense arrays.
-hand('array_dense_undefined_is_hole_v10', [10], (v) => ({
-  bytes: [...hdr(v), tag('A'), 3, tag('_'), ...B.int32(1), tag('_'), tag('$'), 0, 3],
-  json: '[{"$hole":true},1,{"$hole":true}]',
-}));
-hand('array_dense_undefined_v11', [11, 12, 13, 14], (v) => ({
+hand('array_dense_undefined_not_hole', [13, 14], (v) => ({
   bytes: [...hdr(v), tag('A'), 2, tag('_'), ...B.int32(1), tag('$'), 0, 2],
   json: '[{"$undefined":true},1]',
 }));
 
-// Strings inside regexps and string wrappers: UTF-8 before version 12, ordinary string values since.
-hand('regexp_utf8_pattern_v11', [11], (v) => ({
-  bytes: [...hdr(v), tag('R'), ...varint(Buffer.byteLength('café+')), ...utf8('café+'), 3],
-  json: '{"$regexp":["café+","gi"]}',
-}));
-hand('regexp_string_value_v12', [12, 13, 14], (v) => ({
+hand('regexp_string_value', [13, 14], (v) => ({
   bytes: [...hdr(v), tag('R'), ...B.str1('ab'), 1],
   json: '{"$regexp":["ab","g"]}',
 }));
-hand('wrapper_string_utf8_v11', [11], (v) => ({
-  bytes: [...hdr(v), tag('s'), ...varint(Buffer.byteLength('hé')), ...utf8('hé')],
-  json: '{"$wrapper":["String","hé"]}',
-}));
-hand('string_utf8_tag', [11, 12, 13, 14, 15, 16], (v) => ({
+hand('string_utf8_tag', [13, 14, 15, 16], (v) => ({
   bytes: [...hdr(v), ...B.str8('café \u{1F600}')],
   json: JSON.stringify('café \u{1F600}'),
 }));
@@ -481,7 +499,7 @@ hand('error_message_only_handbuilt', [15], (v) => ({
 hand('error_bare_end', [15], (v) => ({ bytes: [...hdr(v), tag('r'), tag('.')], json: '{"$error":{"name":"Error","message":""}}' }));
 hand('error_cause_then_stack', [15], (v) => ({
   bytes: [...hdr(v), tag('r'), tag('m'), ...B.str1('m'), tag('c'), ...B.int32(1), tag('s'), ...B.str1('st'), tag('.')],
-  json: '{"$error":{"name":"Error","message":"m"}}',
+  json: '{"$error":{"name":"Error","message":"m","stack":"st","cause":1}}',
 }));
 
 // --- error inputs (no .json) -------------------------------------------------

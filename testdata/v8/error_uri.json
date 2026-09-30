@@ -1,1 +1,1 @@
-{"$error":{"name":"URIError","message":"uri"}}
+{"$error":{"name":"URIError","message":"uri","stack":"URIError: uri\n    at fixture (teams.js:1:1)"}}

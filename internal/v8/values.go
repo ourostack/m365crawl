@@ -39,12 +39,32 @@ type RegExp struct {
 	Flags  string
 }
 
-// Error is a JS error object. Stack is empty when the source had none; a cause
-// is read and discarded.
+// Error is a JS error object. HasStack and HasCause say whether the source
+// carried a stack string or a cause; Cause may itself be nil (JS null).
 type Error struct {
-	Name    string
-	Message string
-	Stack   string
+	Name     string
+	Message  string
+	Stack    string
+	HasStack bool
+	Cause    any
+	HasCause bool
+}
+
+// InvalidDate is a JS Date whose time value is NaN.
+type InvalidDate struct{}
+
+// ArrayWithProps is an array that also carries named (non-index) properties.
+// Arrays without them decode to a plain []any.
+type ArrayWithProps struct {
+	Items []any
+	Props *Object
+}
+
+// VersionError reports a wire format version outside the supported range.
+type VersionError struct{ Version uint64 }
+
+func (e *VersionError) Error() string {
+	return fmt.Sprintf("v8: unsupported wire format version %d (supported: 13 to 16)", e.Version)
 }
 
 // Wrapper is a primitive wrapper object. Kind is "Boolean", "Number",

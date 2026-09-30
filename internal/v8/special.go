@@ -13,7 +13,10 @@ func (d *decoder) readDate() (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if math.IsNaN(ms) || math.Abs(ms) > 8.64e15 {
+	if math.IsNaN(ms) {
+		return d.register(InvalidDate{}, false), nil
+	}
+	if math.Abs(ms) > 8.64e15 {
 		return nil, d.errorf("date value %v out of range", ms)
 	}
 	return d.register(time.UnixMilli(int64(ms)).UTC(), false), nil
@@ -110,10 +113,12 @@ func (d *decoder) readError() (any, error) {
 			if e.Stack, err = d.readString(); err != nil {
 				return nil, err
 			}
+			e.HasStack = true
 		case 'c':
-			if _, err = d.readObject(); err != nil { // the cause is read for its ids and discarded
+			if e.Cause, err = d.readObject(); err != nil {
 				return nil, err
 			}
+			e.HasCause = true
 		case '.':
 			return e, nil
 		default:

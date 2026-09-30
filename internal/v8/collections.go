@@ -147,11 +147,23 @@ func sortJSKeyOrder(o *Object) {
 }
 
 // arrayProperties reads the trailing properties of an array. Index keys
-// overwrite elements; named properties have no place in []any and are dropped.
-func (d *decoder) arrayProperties(arr []any, endTag byte) (uint32, error) {
-	return d.readProperties(endTag, func(key string, value any) error {
+// overwrite elements; named properties are collected, in order, into props
+// (nil when there are none).
+func (d *decoder) arrayProperties(arr []any, endTag byte) (props *Object, n uint32, err error) {
+	index := map[string]int{}
+	n, err = d.readProperties(endTag, func(key string, value any) error {
 		idx, ok := arrayIndex(key)
 		if !ok {
+			if props == nil {
+				props = &Object{}
+			}
+			if i, dup := index[key]; dup {
+				props.Values[i] = value
+				return nil
+			}
+			index[key] = len(props.Keys)
+			props.Keys = append(props.Keys, key)
+			props.Values = append(props.Values, value)
 			return nil
 		}
 		if uint64(idx) >= uint64(len(arr)) { //nolint:gosec // len is never negative
@@ -160,6 +172,24 @@ func (d *decoder) arrayProperties(arr []any, endTag byte) (uint32, error) {
 		arr[idx] = value
 		return nil
 	})
+	return props, n, err
+}
+
+// newArray makes the slice for an array. Zero-length arrays get capacity 1 so
+// every array has distinct storage to identify it by when it is part of a cycle.
+func newArray(length uint32) []any {
+	if length == 0 {
+		return make([]any, 0, 1)
+	}
+	return make([]any, length)
+}
+
+// finishArray returns arr, or an *ArrayWithProps when it carries named properties.
+func finishArray(arr []any, props *Object) any {
+	if props == nil {
+		return arr
+	}
+	return &ArrayWithProps{Items: arr, Props: props}
 }
 
 func (d *decoder) readSparseArray() (any, error) {
@@ -170,12 +200,12 @@ func (d *decoder) readSparseArray() (any, error) {
 	if length > maxSparseLength {
 		return nil, d.errorf("sparse array length %d above the supported %d", length, maxSparseLength)
 	}
-	arr := make([]any, length)
+	arr := newArray(length)
 	for i := range arr {
 		arr[i] = Hole{}
 	}
 	d.register(arr, false)
-	n, err := d.arrayProperties(arr, tagEndSparse)
+	props, n, err := d.arrayProperties(arr, tagEndSparse)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +215,7 @@ func (d *decoder) readSparseArray() (any, error) {
 	if err := d.expectCount("array length", uint64(length)); err != nil {
 		return nil, err
 	}
-	return arr, nil
+	return finishArray(arr, props), nil
 }
 
 func (d *decoder) readDenseArray() (any, error) {
@@ -197,7 +227,7 @@ func (d *decoder) readDenseArray() (any, error) {
 	if uint64(length) > uint64(len(d.b)-d.pos) { //nolint:gosec // the remaining length is never negative
 		return nil, d.errorf("dense array length %d exceeds remaining data", length)
 	}
-	arr := make([]any, length)
+	arr := newArray(length)
 	d.register(arr, false)
 	for i := range arr {
 		if t, ok := d.peekTag(); ok && t == tagTheHole {
@@ -209,12 +239,9 @@ func (d *decoder) readDenseArray() (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, undef := v.(Undefined); undef && d.version < 11 {
-			v = Hole{} // before version 11 a hole was written as undefined
-		}
 		arr[i] = v
 	}
-	n, err := d.arrayProperties(arr, tagEndDense)
+	props, n, err := d.arrayProperties(arr, tagEndDense)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +251,7 @@ func (d *decoder) readDenseArray() (any, error) {
 	if err := d.expectCount("array length", uint64(length)); err != nil {
 		return nil, err
 	}
-	return arr, nil
+	return finishArray(arr, props), nil
 }
 
 func (d *decoder) readMap() (any, error) {

@@ -3,12 +3,8 @@ package v8
 import "unicode/utf8"
 
 // readString reads a string-valued field (regexp source, error message, String
-// wrapper). Before wire version 12 it is raw UTF-8 with no tag; since then it
-// is an ordinary value that must be a string.
+// wrapper): an ordinary value that must be a string.
 func (d *decoder) readString() (string, error) {
-	if d.version < 12 {
-		return d.readUTF8String()
-	}
 	v, err := d.readObject()
 	if err != nil {
 		return "", err

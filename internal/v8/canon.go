@@ -104,12 +104,12 @@ func (c *canonWriter) value(v any) error {
 		c.buf.WriteByte(',')
 		c.str(x.Flags)
 		c.buf.WriteString(`]}`)
+	case InvalidDate:
+		c.buf.WriteString(`{"$date":null}`)
 	case *Error:
-		c.buf.WriteString(`{"$error":{"name":`)
-		c.str(x.Name)
-		c.buf.WriteString(`,"message":`)
-		c.str(x.Message)
-		c.buf.WriteString(`}}`)
+		return c.container(v, func() error { return c.errorValue(x) })
+	case *ArrayWithProps:
+		return c.container(v, func() error { return c.arrayWithProps(x) })
 	case *Wrapper:
 		return c.wrapper(x)
 	case *Object:
@@ -139,10 +139,54 @@ func (c *canonWriter) number(f float64) {
 
 func (c *canonWriter) date(t time.Time) error {
 	t = t.UTC()
-	if y := t.Year(); y < 0 || y > 9999 {
-		return fmt.Errorf("v8: date year %d outside 0000-9999", y)
+	c.buf.WriteString(`{"$date":"`)
+	if y := t.Year(); y >= 0 && y <= 9999 {
+		c.buf.WriteString(t.Format(time.RFC3339Nano))
+	} else {
+		// JS toISOString writes years outside 0000-9999 as a sign and six digits.
+		sign := byte('+')
+		if y < 0 {
+			sign, y = '-', -y
+		}
+		c.buf.WriteByte(sign)
+		fmt.Fprintf(&c.buf, "%06d", y)
+		c.buf.WriteString(t.Format("-01-02T15:04:05.999999999Z"))
 	}
-	c.buf.WriteString(`{"$date":"` + t.Format(time.RFC3339Nano) + `"}`)
+	c.buf.WriteString(`"}`)
+	return nil
+}
+
+func (c *canonWriter) errorValue(e *Error) error {
+	c.buf.WriteString(`{"$error":{"name":`)
+	c.str(e.Name)
+	c.buf.WriteString(`,"message":`)
+	c.str(e.Message)
+	if e.HasStack {
+		c.buf.WriteString(`,"stack":`)
+		c.str(e.Stack)
+	}
+	if e.HasCause {
+		c.buf.WriteString(`,"cause":`)
+		if err := c.value(e.Cause); err != nil {
+			return err
+		}
+	}
+	c.buf.WriteString(`}}`)
+	return nil
+}
+
+func (c *canonWriter) arrayWithProps(a *ArrayWithProps) error {
+	c.buf.WriteString(`{"$array":`)
+	if err := c.array(a.Items); err != nil {
+		return err
+	}
+	c.buf.WriteString(`,"$props":`)
+	if a.Props == nil {
+		c.buf.WriteString(`{}`)
+	} else if err := c.object(a.Props); err != nil {
+		return err
+	}
+	c.buf.WriteByte('}')
 	return nil
 }
 
@@ -163,14 +207,25 @@ func (c *canonWriter) wrapper(w *Wrapper) error {
 }
 
 // identity returns a comparable identity for containers, which may be cyclic.
+// Arrays are identified by their storage, so a reference to the []any inside an
+// *ArrayWithProps matches the wrapper.
 func identity(v any) any {
-	if a, ok := v.([]any); ok {
-		if len(a) == 0 {
-			return nil
-		}
-		return &a[0]
+	switch a := v.(type) {
+	case []any:
+		return storage(a)
+	case *ArrayWithProps:
+		return storage(a.Items)
 	}
 	return v
+}
+
+// storage identifies a slice by its first backing element; a slice without
+// capacity has none, so it cannot take part in a cycle.
+func storage(a []any) any {
+	if cap(a) == 0 {
+		return nil
+	}
+	return &a[:1][0]
 }
 
 func (c *canonWriter) container(v any, write func() error) error {

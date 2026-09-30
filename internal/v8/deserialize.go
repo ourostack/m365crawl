@@ -9,6 +9,10 @@ import (
 )
 
 const (
+	// Wire versions 13 to 16 are supported: Chromium has written 13 or later since
+	// 2016, so older versions (with UTF-8 regexp strings, undefined-as-hole) cannot
+	// appear in a Teams cache.
+	minVersion    = 13
 	latestVersion = 16
 	// maxDepth bounds recursion on hostile input; V8 bounds it by stack size.
 	maxDepth = 1000
@@ -141,8 +145,8 @@ func (d *decoder) readHeader() error {
 	if err != nil {
 		return err
 	}
-	if v == 0 || v > latestVersion {
-		return fmt.Errorf("v8: unsupported wire format version %d", v)
+	if v < minVersion || v > latestVersion {
+		return &VersionError{Version: v}
 	}
 	d.version = uint32(v)
 	return nil
@@ -167,9 +171,7 @@ func (d *decoder) readVarint() (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		if i < 10 {
-			v |= uint64(c&0x7f) << (7 * uint(i))
-		}
+		v |= uint64(c&0x7f) << (7 * uint(i))
 		if c&0x80 == 0 {
 			return v, nil
 		}
@@ -382,10 +384,6 @@ func (d *decoder) readInternal() (v any, isBuffer bool, err error) {
 			return nil, false, d.unsupported(codeShared, tag, off)
 		}
 	case tagBufferTransfer, tagWasmModule, tagWasmMemory, tagHostObject:
-		return nil, false, d.unsupported(codeHostObject, tag, off)
-	}
-	// Before version 13 every unknown tag was delegated to the host.
-	if d.version < 13 {
 		return nil, false, d.unsupported(codeHostObject, tag, off)
 	}
 	return nil, false, d.unsupported(codeUnknownTag, tag, off)

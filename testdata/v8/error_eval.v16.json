@@ -1,1 +1,1 @@
-{"$error":{"name":"EvalError","message":"eval"}}
+{"$error":{"name":"EvalError","message":"eval","stack":"EvalError: eval\n    at fixture (teams.js:1:1)"}}

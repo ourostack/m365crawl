@@ -3,6 +3,7 @@ package v8
 import (
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,7 +64,19 @@ func TestCanonicalScalars(t *testing.T) {
 		{"bytes", Bytes{0, 1, 2, 255}, `{"$bytes":"AAEC/w=="}`},
 		{"empty bytes", Bytes{}, `{"$bytes":""}`},
 		{"regexp", &RegExp{Source: `a"b`, Flags: "gi"}, `{"$regexp":["a\"b","gi"]}`},
-		{"error", &Error{Name: "TypeError", Message: "m", Stack: "ignored"}, `{"$error":{"name":"TypeError","message":"m"}}`},
+		{"error", &Error{Name: "TypeError", Message: "m"}, `{"$error":{"name":"TypeError","message":"m"}}`},
+		{"error with stack", &Error{Name: "E", Message: "m", Stack: "s\n", HasStack: true}, `{"$error":{"name":"E","message":"m","stack":"s\n"}}`},
+		{"error with empty stack", &Error{Name: "E", HasStack: true}, `{"$error":{"name":"E","message":"","stack":""}}`},
+		{"error with null cause", &Error{Name: "E", HasCause: true}, `{"$error":{"name":"E","message":"","cause":null}}`},
+		{"error with stack and cause", &Error{Name: "E", Stack: "s", HasStack: true, Cause: int64(1), HasCause: true}, `{"$error":{"name":"E","message":"","stack":"s","cause":1}}`},
+		{"invalid date", InvalidDate{}, `{"$date":null}`},
+		{"date year 10000", time.Date(10000, 1, 2, 3, 4, 5, 6_000_000, time.UTC), `{"$date":"+010000-01-02T03:04:05.006Z"}`},
+		{"date max JS", time.UnixMilli(8_640_000_000_000_000).UTC(), `{"$date":"+275760-09-13T00:00:00Z"}`},
+		{"date year 0", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), `{"$date":"0000-01-01T00:00:00Z"}`},
+		{"date year -1", time.Date(-1, 12, 31, 23, 59, 59, 999_000_000, time.UTC), `{"$date":"-000001-12-31T23:59:59.999Z"}`},
+		{"date min JS", time.UnixMilli(-8_640_000_000_000_000).UTC(), `{"$date":"-271821-04-20T00:00:00Z"}`},
+		{"array with props", &ArrayWithProps{Items: []any{int64(1)}, Props: &Object{Keys: []string{"k"}, Values: []any{"v"}}}, `{"$array":[1],"$props":{"k":"v"}}`},
+		{"array with props and no items", &ArrayWithProps{Items: []any{}, Props: &Object{Keys: []string{"k"}, Values: []any{nil}}}, `{"$array":[],"$props":{"k":null}}`},
 		{"wrapper", &Wrapper{Kind: "Number", Value: 1.5}, `{"$wrapper":["Number",1.5]}`},
 		{"wrapper string", &Wrapper{Kind: "String", Value: "x"}, `{"$wrapper":["String","x"]}`},
 		{"map", &Map{Entries: [][2]any{{"k", int64(1)}, {int64(2), nil}}}, `{"$map":[["k",1],[2,null]]}`},
@@ -142,12 +155,27 @@ func TestCanonicalCycles(t *testing.T) {
 	}
 }
 
+func TestCanonicalErrorCycle(t *testing.T) {
+	e := &Error{Name: "E", HasCause: true}
+	e.Cause = e
+	if got := canon(t, e); got != `{"$error":{"name":"E","message":"","cause":{"$cycle":0}}}` {
+		t.Fatalf("got %s", got)
+	}
+	// An array cycling through its named property, whether or not it has items.
+	for _, items := range [][]any{make([]any, 0, 1), {int64(1)}} {
+		a := &ArrayWithProps{Items: items, Props: &Object{Keys: []string{"self"}, Values: []any{nil}}}
+		a.Props.Values[0] = a.Items
+		got := canon(t, a)
+		if !strings.HasSuffix(got, `"$props":{"self":{"$cycle":0}}}`) {
+			t.Fatalf("got %s", got)
+		}
+	}
+}
+
 func TestCanonicalErrors(t *testing.T) {
 	bad := []any{
 		struct{}{},
 		int(3),
-		time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
-		time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC),
 		&Wrapper{Kind: "Number", Value: struct{}{}},
 		[]any{struct{}{}},
 		&Object{Keys: []string{"a"}},

@@ -4,10 +4,12 @@
 // JSON.stringify (well-formed: lone surrogates become lowercase \udxxx).
 // Values JSON cannot express use single-key tagged objects:
 //   undefined -> {"$undefined":true}     array hole  -> {"$hole":true}
-//   Date      -> {"$date":"<RFC3339Nano UTC>"}
+//   Date      -> {"$date":"<toISOString() with trailing fractional zeros trimmed>"}; invalid Date -> {"$date":null}
 //   BigInt    -> {"$bigint":"<dec>"}     non-finite and -0 -> {"$number":"NaN"|"Infinity"|"-Infinity"|"-0"}
 //   bytes     -> {"$bytes":"<base64>"}   Map -> {"$map":[[k,v],...]}   Set -> {"$set":[...]}
-//   RegExp    -> {"$regexp":[source,flags]}   Error -> {"$error":{"name":n,"message":m}}
+//   RegExp    -> {"$regexp":[source,flags]}
+//   Error     -> {"$error":{"name":n,"message":m,"stack":s?,"cause":c?}} (stack and cause only when present)
+//   array with named (non-index) properties -> {"$array":[...],"$props":{...}}
 //   wrapper   -> {"$wrapper":[kind,value]}
 // A reference to an ancestor still being written (a cycle) is {"$cycle":<ancestor depth, root = 0>}.
 // Shared, non-cyclic references are written out in full each time.
@@ -15,17 +17,16 @@
 const str = (s) => JSON.stringify(s);
 
 function dateString(d) {
-  const ms = d.getTime();
-  const year = d.getUTCFullYear();
-  if (!Number.isFinite(ms) || year < 0 || year > 9999) {
-    throw new RangeError('date outside RFC3339 range');
-  }
-  // toISOString always has three fractional digits; Go's RFC3339Nano trims trailing zeros.
-  const iso = d.toISOString(); // YYYY-MM-DDTHH:MM:SS.mmmZ
-  const base = iso.slice(0, 19);
-  const frac = iso.slice(20, 23).replace(/0+$/, '');
+  // toISOString is YYYY-MM-DDTHH:MM:SS.mmmZ, or +YYYYYY-/-YYYYYY- outside years 0000-9999.
+  // Trailing fractional zeros are trimmed, and a zero fraction dropped, as Go's RFC3339Nano does.
+  const iso = d.toISOString();
+  const dot = iso.indexOf('.');
+  const frac = iso.slice(dot + 1, dot + 4).replace(/0+$/, '');
+  const base = iso.slice(0, dot);
   return frac === '' ? `${base}Z` : `${base}.${frac}Z`;
 }
+
+const isIndex = (k) => /^(0|[1-9][0-9]*)$/.test(k) && Number(k) <= 4294967294;
 
 function number(n) {
   if (Number.isNaN(n)) return '{"$number":"NaN"}';
@@ -56,13 +57,12 @@ export function canonical(value) {
       default: throw new TypeError(`unsupported type ${typeof v}`);
     }
     if (v === null) return 'null';
-    if (v instanceof Date) return `{"$date":${str(dateString(v))}}`;
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? '{"$date":null}' : `{"$date":${str(dateString(v))}}`;
     if (v instanceof RegExp) return `{"$regexp":[${str(v.source)},${str(v.flags)}]}`;
     if (v instanceof ArrayBuffer) return `{"$bytes":"${Buffer.from(v).toString('base64')}"}`;
     if (ArrayBuffer.isView(v)) {
       return `{"$bytes":"${Buffer.from(v.buffer, v.byteOffset, v.byteLength).toString('base64')}"}`;
     }
-    if (v instanceof Error) return `{"$error":{"name":${str(v.name)},"message":${str(v.message)}}}`;
     const kind = wrapperKind(v);
     if (kind !== null) return `{"$wrapper":[${str(kind)},${enc(v.valueOf())}]}`;
 
@@ -70,10 +70,19 @@ export function canonical(value) {
     if (depth >= 0) return `{"$cycle":${depth}}`;
     stack.push(v);
     try {
+      if (v instanceof Error) {
+        let out = `{"name":${str(v.name)},"message":${str(v.message)}`;
+        if (typeof v.stack === 'string') out += `,"stack":${str(v.stack)}`;
+        if (Object.hasOwn(v, 'cause')) out += `,"cause":${enc(v.cause)}`;
+        return `{"$error":${out}}}`;
+      }
       if (Array.isArray(v)) {
         const out = [];
         for (let i = 0; i < v.length; i++) out.push(i in v ? enc(v[i]) : '{"$hole":true}');
-        return `[${out.join(',')}]`;
+        const items = `[${out.join(',')}]`;
+        const named = Object.keys(v).filter((k) => !isIndex(k));
+        if (named.length === 0) return items;
+        return `{"$array":${items},"$props":{${named.map((k) => `${str(k)}:${enc(v[k])}`).join(',')}}}`;
       }
       if (v instanceof Map) {
         return `{"$map":[${[...v].map(([k, x]) => `[${enc(k)},${enc(x)}]`).join(',')}]}`;

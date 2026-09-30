@@ -3,6 +3,7 @@ package v8
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"os"
@@ -60,16 +61,21 @@ func TestVectors(t *testing.T) {
 }
 
 func TestGeneratorIsCurrent(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node not on PATH")
+	node, lookErr := exec.LookPath("node")
+	major := ""
+	if lookErr == nil {
+		ver, err := exec.Command(node, "-p", "process.versions.node.split('.')[0]").Output() //nolint:gosec // node path comes from LookPath
+		if err != nil {
+			lookErr = err
+		}
+		major = strings.TrimSpace(string(ver))
 	}
-	ver, err := exec.Command(node, "-p", "process.versions.node.split('.')[0]").Output() //nolint:gosec // node path comes from LookPath
-	if err != nil {
-		t.Skipf("node unusable: %v", err)
+	skip, fail := nodeGate(os.Getenv("CI") != "", lookErr, major)
+	if fail != "" {
+		t.Fatal(fail)
 	}
-	if strings.TrimSpace(string(ver)) != "22" {
-		t.Skipf("vectors are generated with Node 22, found major %s", strings.TrimSpace(string(ver)))
+	if skip != "" {
+		t.Skip(skip)
 	}
 	out := t.TempDir()
 	cmd := exec.Command(node, "../../scripts/v8vectors/gen.mjs", "--out", out) //nolint:gosec // node path comes from LookPath
@@ -143,7 +149,6 @@ func TestUnsupportedTags(t *testing.T) {
 		{"shared immutable array buffer", []byte{0xff, 16, 'E', 0}, "v8_shared", 'E'},
 		{"the hole outside an array", []byte{0xff, 15, '-'}, "v8_unknown_tag", '-'},
 		{"shared object before version 15", []byte{0xff, 14, 'p', 0}, "v8_unknown_tag", 'p'},
-		{"unknown tag before version 13 goes to the host", []byte{0xff, 12, 0x01}, "v8_host_object", 0x01},
 		{"host object nested", []byte{0xff, 15, 'A', 1, '\\', 0}, "v8_host_object", '\\'},
 	}
 	for _, tt := range tests {
@@ -208,6 +213,8 @@ func TestVersionHandling(t *testing.T) {
 		{"version 15", []byte{0xff, 15, '0'}, true},
 		{"version 16", []byte{0xff, 16, '0'}, true},
 		{"version 13", []byte{0xff, 13, '0'}, true},
+		{"version 12 is older than supported", []byte{0xff, 12, '0'}, false},
+		{"version 1 is older than supported", []byte{0xff, 1, '0'}, false},
 		{"future version 17", []byte{0xff, 17, '0'}, false},
 		{"version 0 legacy", []byte{0xff, 0, '0'}, false},
 		{"no header", []byte{'0'}, false},
@@ -220,6 +227,69 @@ func TestVersionHandling(t *testing.T) {
 			_, err := Deserialize(tt.in)
 			if (err == nil) != tt.ok {
 				t.Fatalf("err = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+}
+
+func TestVersionErrorIsNamed(t *testing.T) {
+	for _, v := range []byte{0, 1, 12, 17, 99} {
+		_, err := Deserialize([]byte{0xff, v, '0'})
+		var ve *VersionError
+		if !errors.As(err, &ve) || ve.Version != uint64(v) {
+			t.Fatalf("version %d: got %v, want *VersionError", v, err)
+		}
+	}
+}
+
+func TestInvalidDate(t *testing.T) {
+	v, err := Deserialize(mustRead(t, "date_invalid_nan.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := v.(InvalidDate); !ok {
+		t.Fatalf("got %#v, want InvalidDate", v)
+	}
+	// A record with an invalid Date still decodes around it.
+	v, err = Deserialize([]byte{0xff, 15, 'A', 2, 'D', 0, 0, 0, 0, 0, 0, 0xf8, 0x7f, 'I', 2, '$', 0, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := v.([]any)
+	if _, ok := a[0].(InvalidDate); !ok || a[1].(int64) != 1 {
+		t.Fatalf("got %#v", a)
+	}
+}
+
+func mustRead(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := readFile(filepath.Join(vectorDir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestNodeGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		ci         bool
+		lookErr    error
+		major      string
+		skip, fail bool
+	}{
+		{"local without node skips", false, errors.New("no node"), "", true, false},
+		{"local with wrong node skips", false, nil, "24", true, false},
+		{"local with node 22 runs", false, nil, "22", false, false},
+		{"CI without node fails", true, errors.New("no node"), "", false, true},
+		{"CI with wrong node fails", true, nil, "24", false, true},
+		{"CI with node 22 runs", true, nil, "22", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, fail := nodeGate(tt.ci, tt.lookErr, tt.major)
+			if (skip != "") != tt.skip || (fail != "") != tt.fail {
+				t.Fatalf("skip=%q fail=%q", skip, fail)
 			}
 		})
 	}
@@ -254,7 +324,6 @@ func TestMalformed(t *testing.T) {
 		{"typed array misaligned", []byte{0xff, 15, 'B', 4, 1, 2, 3, 4, 'V', 'w', 1, 2, 0}},
 		{"buffer length past end", []byte{0xff, 15, 'B', 9, 1}},
 		{"resizable length above max", []byte{0xff, 16, '~', 4, 2, 1, 2, 3, 4}},
-		{"date NaN", append([]byte{0xff, 15, 'D'}, 0, 0, 0, 0, 0, 0, 0xf8, 0x7f)},
 		{"date out of range", append([]byte{0xff, 15, 'D'}, 0, 0, 0, 0, 0, 0, 0xf0, 0x7f)},
 		{"regexp unknown flag bit", []byte{0xff, 15, 'R', '"', 1, 'a', 0x80, 0x40}},
 		{"regexp pattern not a string", []byte{0xff, 15, 'R', 'I', 2, 0}},
@@ -318,6 +387,36 @@ func TestDecodedTypes(t *testing.T) {
 		{"wrapper_true", func(t *testing.T, v any) { mustEq(t, *v.(*Wrapper), Wrapper{Kind: "Boolean", Value: true}) }},
 		{"wrapper_string", func(t *testing.T, v any) { mustEq(t, *v.(*Wrapper), Wrapper{Kind: "String", Value: "héllo"}) }},
 		{"arraybuffer_bytes", func(t *testing.T, v any) { mustEq(t, string(v.(Bytes)), "\x00\x01\x02\xfd\xfe\xff") }},
+		{"array_named_property", func(t *testing.T, v any) {
+			a := v.(*ArrayWithProps)
+			mustEq(t, len(a.Items), 2)
+			mustEq(t, strings.Join(a.Props.Keys, ","), "extra")
+			mustEq(t, a.Props.Values[0].(string), "kept")
+		}},
+		{"array_empty_cycle_through_property", func(t *testing.T, v any) {
+			a := v.(*ArrayWithProps)
+			inner, ok := a.Props.Values[0].([]any)
+			mustEq(t, ok, true)
+			mustEq(t, len(inner), 0)
+		}},
+		{"date_invalid_nan", func(t *testing.T, v any) { _ = v.(InvalidDate) }},
+		{"date_max_js_date", func(t *testing.T, v any) { mustEq(t, v.(time.Time).UnixMilli(), int64(8.64e15)) }},
+		{"error_with_cause", func(t *testing.T, v any) {
+			e := v.(*Error)
+			mustEq(t, e.HasCause, true)
+			mustEq(t, e.HasStack, true)
+			mustEq(t, e.Cause.(*Object).Keys[0], "code")
+		}},
+		{"error_with_null_cause", func(t *testing.T, v any) {
+			e := v.(*Error)
+			mustEq(t, e.HasCause, true)
+			mustEq(t, e.Cause == nil, true)
+		}},
+		{"error_no_stack", func(t *testing.T, v any) { mustEq(t, v.(*Error).HasStack, false) }},
+		{"error_cause_cycle", func(t *testing.T, v any) {
+			e := v.(*Error)
+			mustEq(t, e.Cause == any(e), true)
+		}},
 		{"array_holes", func(t *testing.T, v any) {
 			a := v.([]any)
 			mustEq(t, len(a), 5)
@@ -438,4 +537,22 @@ func FuzzDeserialize(f *testing.F) {
 		// Anything that decodes must also render (or fail cleanly) without panicking.
 		_, _ = Canonical(v)
 	})
+}
+
+// nodeGate decides whether TestGeneratorIsCurrent runs. Locally a missing or
+// wrong Node skips; under CI it fails, so the drift check cannot silently vanish.
+func nodeGate(ci bool, lookErr error, major string) (skip, fail string) {
+	var problem string
+	switch {
+	case lookErr != nil:
+		problem = fmt.Sprintf("node unavailable: %v", lookErr)
+	case major != "22":
+		problem = fmt.Sprintf("vectors are generated with Node 22, found major %q", major)
+	default:
+		return "", ""
+	}
+	if ci {
+		return "", problem + " (CI requires Node 22; the ci.yml test job sets it up)"
+	}
+	return problem, ""
 }
