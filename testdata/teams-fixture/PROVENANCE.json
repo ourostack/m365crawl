@@ -1,0 +1,16 @@
+{
+  "browser": "msedge",
+  "browser_version": "154.0.4258.48",
+  "blink_versions": [
+    21
+  ],
+  "v8_versions": [
+    16
+  ],
+  "envelope_counts": {
+    "blob": 2,
+    "snappy": 4,
+    "v21": 88
+  },
+  "generated_at": "2026-09-30T21:23:31.447Z"
+}
