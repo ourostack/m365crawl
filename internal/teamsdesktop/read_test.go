@@ -50,10 +50,12 @@ func TestReadFixtureKinds(t *testing.T) {
 		t.Fatalf("omissions = %v", om)
 	}
 	want := map[string]int{
-		KindReplyChain + "|" + tenant1 + "|" + user1:   42,
-		KindReplyChain + "|" + tenant2 + "|" + user2:   42,
-		KindConversation + "|" + tenant1 + "|" + user1: 5,
-		KindConversation + "|" + tenant2 + "|" + user2: 5,
+		KindReplyChain + "|" + tenant1 + "|" + user1:   51,
+		KindReplyChain + "|" + tenant2 + "|" + user2:   51,
+		KindConversation + "|" + tenant1 + "|" + user1: 7,
+		KindConversation + "|" + tenant2 + "|" + user2: 7,
+		KindActivity + "|" + tenant1 + "|" + user1:     8,
+		KindActivity + "|" + tenant2 + "|" + user2:     8,
 	}
 	if fmt.Sprint(counts) != fmt.Sprint(want) {
 		t.Fatalf("counts = %v\nwant    %v", counts, want)
@@ -71,7 +73,7 @@ func TestReadAccountFilter(t *testing.T) {
 		n++
 		return nil
 	})
-	if err != nil || n != 47 {
+	if err != nil || n != 66 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 }
