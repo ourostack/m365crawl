@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	glerrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/journal"
 )
 
@@ -65,17 +66,26 @@ func readManifest(dir, name string) (*manifest, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("leveldb: read manifest %s: %w", name, err)
+			return nil, manifestReadError(name, err)
 		}
 		rec, err := io.ReadAll(r)
 		if err != nil {
-			return nil, fmt.Errorf("leveldb: read manifest %s: %w", name, err)
+			return nil, manifestReadError(name, err)
 		}
 		if err := m.apply(rec); err != nil {
 			return nil, fmt.Errorf("leveldb: manifest %s: %w", name, err)
 		}
 	}
 	return m, nil
+}
+
+// manifestReadError classifies a journal read failure: a cut-off record is ErrManifestTruncated.
+func manifestReadError(name string, err error) error {
+	var jc *journal.ErrCorrupted
+	if glerrors.IsCorrupted(err) || errors.As(err, &jc) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("%w: %s: %w", ErrManifestTruncated, name, err)
+	}
+	return fmt.Errorf("leveldb: read manifest %s: %w", name, err)
 }
 
 type decoder struct {
@@ -145,3 +155,7 @@ func (m *manifest) apply(rec []byte) error {
 	}
 	return d.err
 }
+
+// ErrManifestTruncated is returned when the MANIFEST ends in the middle of a record, which
+// happens when the copy raced a write. Callers retry the copy.
+var ErrManifestTruncated = errors.New("leveldb: manifest truncated mid-record")
