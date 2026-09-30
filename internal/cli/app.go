@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/alecthomas/kong"
@@ -21,6 +23,9 @@ var version = "dev"
 
 const exitOK = 0
 
+// panicHook lets tests inject a panic into the run path.
+var panicHook func()
+
 // Globals are the flags every command accepts.
 type Globals struct {
 	Format    string `help:"Output format: text, json or log. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
@@ -30,8 +35,8 @@ type Globals struct {
 	Account   string `help:"Only this account, as <tenantId>/<userId>. Default: every account." placeholder:"TENANT/USER"`
 	NoColor   bool   `name:"no-color" help:"Disable colored output."`
 	MaxAge    string `name:"max-age" env:"TEAMSCRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
-	Fields    string `help:"Keep only these top-level keys of each item, comma separated." placeholder:"a,b,c"`
-	MaxText   int    `name:"max-text" help:"Truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
+	Fields    string `help:"List commands only: keep only these top-level keys of each item, comma separated." placeholder:"a,b,c"`
+	MaxText   int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
 }
 
 type cliApp struct {
@@ -67,8 +72,27 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	return runCLI(ctx, args, stdout, stderr)
 }
 
-func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+// listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
+var listCommands = []string{"search", "messages", "conversations", "people", "activity", "unread", "thread"}
+
+const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
+
+func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	var app cliApp
+	rt := newRuntime(ctx, &app.Globals, stdout, stderr)
+	rt.format = guessFormat(args, rt.stdoutTTY) // until the real flags are validated
+	// Defense in depth: no path may print a Go stack trace unasked.
+	defer func() {
+		if r := recover(); r != nil {
+			c := errs.Internal(fmt.Errorf("unexpected failure: %v", r))
+			c.Fix = "Re-run with TEAMSCRAWL_DEBUG=1 and report the output at " + issuesURL
+			rt.printError(c)
+			if os.Getenv("TEAMSCRAWL_DEBUG") == "1" {
+				_, _ = stderr.Write(debug.Stack())
+			}
+			code = c.Exit
+		}
+	}()
 	exited := false
 	parser, err := kong.New(&app,
 		kong.Name("teamscrawl"),
@@ -80,23 +104,54 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err)
 		return errs.ExitRuntime
 	}
-	rt := newRuntime(ctx, &app.Globals, stdout, stderr)
-	rt.format = guessFormat(args, rt.stdoutTTY) // until the real flags are validated
 	kctx, err := parser.Parse(args)
 	if exited {
 		return exitOK
 	}
 	if err != nil {
+		var pe *kong.ParseError
+		if errors.As(err, &pe) && pe.Context != nil {
+			rt.cmd = commandName(pe.Context)
+		}
 		return rt.fail(err)
 	}
+	rt.cmd = commandName(kctx)
 	if err := rt.setup(); err != nil {
 		return rt.fail(err)
+	}
+	if err := rt.checkListOnly(); err != nil {
+		return rt.fail(err)
+	}
+	if panicHook != nil {
+		panicHook()
 	}
 	kctx.Bind(rt)
 	if err := kctx.Run(); err != nil {
 		return rt.fail(err)
 	}
 	return exitOK
+}
+
+// commandName is the command path without its argument placeholders: "search <query>" -> "search".
+func commandName(k *kong.Context) string {
+	var words []string
+	for _, w := range strings.Fields(k.Command()) {
+		if strings.HasPrefix(w, "<") || strings.HasPrefix(w, "[") {
+			break
+		}
+		words = append(words, w)
+	}
+	return strings.Join(words, " ")
+}
+
+// checkListOnly rejects --fields and --max-text on commands that do not return item lists.
+func (rt *runtime) checkListOnly() error {
+	if (rt.g.Fields == "" && rt.g.MaxText == 0) || contains(listCommands, rt.cmd) {
+		return nil
+	}
+	c := errs.Usage(fmt.Sprintf("--fields and --max-text apply to list commands only (%s), not %q", strings.Join(listCommands, ", "), rt.cmd))
+	c.Fix = "Drop the flag, or use it with a list command, for example `teamscrawl search <query> --fields id,text`."
+	return c
 }
 
 // fail prints err as a coded error and returns its exit status.
@@ -111,6 +166,14 @@ func (rt *runtime) fail(err error) int {
 			coded = errs.Internal(errors.New("interrupted"))
 		default:
 			coded = errs.Internal(err)
+		}
+	}
+	if coded.Code == errs.CodeUsage && strings.HasPrefix(coded.Fix, "Run the command with --help") {
+		// The generic fix becomes command-specific: name the command whose help to read.
+		if rt.cmd != "" {
+			coded.Fix = fmt.Sprintf("Run `teamscrawl %s --help` to see the accepted arguments and flags.", rt.cmd)
+		} else {
+			coded.Fix = "Run `teamscrawl --help` to see the commands and global flags."
 		}
 	}
 	rt.printError(coded)

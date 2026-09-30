@@ -235,7 +235,9 @@ func checkFields[T any](rt *runtime) error {
 	valid = removeKey(valid, "text_truncated")
 	for _, f := range rt.fields {
 		if !contains(valid, f) {
-			return errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))
+			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))
+			c.Fix = "Pick keys from the list in the message."
+			return c
 		}
 	}
 	return nil
