@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
 func TestSyncJSON(t *testing.T) {
@@ -687,5 +690,163 @@ func TestLinkBytesIdenticalWithAndWithoutFields(t *testing.T) {
 	plain, fields := linkOf(), linkOf("--fields", "id,link")
 	if plain != fields || !strings.Contains(plain, "&context=") || strings.Contains(plain, `\u0026`) {
 		t.Fatalf("plain %q vs fields %q", plain, fields)
+	}
+}
+
+func TestNeedsSyncSignalInBand(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"search", "x"}, {"messages"}, {"unread"}, {"unread", "--by-conversation"}, {"conversations"}, {"people"}, {"activity"}, {"status"}, {"whoami"}, {"sql", "select 1"}} {
+		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, stderr)
+		}
+		m := decode(t, stdout)
+		if m["needs_sync"] != true || m["hint"] != "run teamscrawl sync" {
+			t.Errorf("%v: needs_sync/hint missing: %s", args, stdout)
+		}
+		if !strings.Contains(stderr, "run teamscrawl sync") {
+			t.Errorf("%v: stderr hint must stay: %q", args, stderr)
+		}
+	}
+	e.sync()
+	_, stdout, _ := e.run("--max-age", "0", "messages")
+	m := decode(t, stdout)
+	if _, ok := m["needs_sync"]; ok {
+		t.Fatalf("needs_sync must be omitted after a sync: %s", stdout)
+	}
+	if _, ok := m["hint"]; ok {
+		t.Fatalf("hint must be omitted after a sync: %s", stdout)
+	}
+}
+
+func TestErrorJSONNotHTMLEscaped(t *testing.T) {
+	e := newEnv(t)
+	code, _, stderr := e.run("--json", "messages", "--account", "nope")
+	if code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(stderr, "<tenantId>/<userId>") || strings.Contains(stderr, `\u003c`) {
+		t.Fatalf("error must not HTML-escape: %q", stderr)
+	}
+	errorOf(t, stderr) // still one valid JSON error line
+}
+
+func TestUnreadByConversationJSON(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	code, stdout, stderr := e.run("--max-age", "0", "unread", "--by-conversation", "--account", tenantA+"/"+userA)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	m := decode(t, stdout)
+	its := items(t, m)
+	if len(its) == 0 {
+		t.Fatalf("expected conversations with unread: %s", stdout)
+	}
+	want := []string{"conversation_id", "conversation_display_name", "kind", "unread_count", "oldest_unread_at", "newest_unread_at", "link"}
+	prev := -1.0
+	total := 0.0
+	for i, it := range its {
+		for _, k := range want {
+			if _, ok := it[k]; !ok {
+				t.Fatalf("item %d lacks %s: %v", i, k, it)
+			}
+		}
+		if len(it) != len(want) {
+			t.Fatalf("unexpected keys: %v", it)
+		}
+		n := it["unread_count"].(float64)
+		if i > 0 && n > prev {
+			t.Fatalf("not sorted by unread_count desc: %v after %v", n, prev)
+		}
+		prev = n
+		total += n
+	}
+	_, stdout, _ = e.run("--max-age", "0", "unread", "--limit", "1000", "--account", tenantA+"/"+userA)
+	if float64(len(items(t, decode(t, stdout)))) != total {
+		t.Fatalf("by-conversation counts (%v) disagree with unread messages", total)
+	}
+	_, stdout, _ = e.run("--max-age", "0", "unread", "--by-conversation", "--limit", "1", "--fields", "conversation_id,unread_count")
+	its = items(t, decode(t, stdout))
+	if len(its) != 1 || len(its[0]) != 2 {
+		t.Fatalf("limit/fields: %s", stdout)
+	}
+	code, _, stderr = e.run("--max-age", "0", "unread", "--by-conversation", "--fields", "id")
+	if code != 2 || !strings.Contains(stderr, "unread_count") {
+		t.Fatalf("--fields must validate against the by-conversation keys: %d %q", code, stderr)
+	}
+}
+
+func TestIncludeChannelsFlags(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	for _, args := range [][]string{{"unread", "--include-channels"}, {"messages", "--unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"}} {
+		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, stderr)
+		}
+		_ = decode(t, stdout)
+	}
+	_, a, _ := e.run("--max-age", "0", "unread", "--limit", "1000")
+	_, b, _ := e.run("--max-age", "0", "unread", "--include-channels", "--limit", "1000")
+	if len(items(t, decode(t, b))) < len(items(t, decode(t, a))) {
+		t.Fatal("--include-channels cannot return fewer messages")
+	}
+}
+
+func TestSystemConversationsFlag(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	ctx := context.Background()
+	st, err := store.Open(ctx, e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := teamsdesktop.Account{TenantID: tenantA, UserID: userA}
+	if _, err := st.ApplyConversations(ctx, []teamsdesktop.Conversation{{TenantID: tenantA, UserID: userA, ID: "48:notifications", Kind: "Chat", Title: "Feed", DisplayName: "Feed", Raw: []byte(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ApplyMessages(ctx, []teamsdesktop.Message{{TenantID: acct.TenantID, UserID: acct.UserID, ConversationID: "48:notifications", ID: "sys1", SenderID: "8:x", SentAt: time.Now().Add(-time.Hour), MessageType: "Text", ContentText: "sysneedle", Raw: []byte(`{"id":"sys1"}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	n := func(args ...string) int {
+		t.Helper()
+		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, stderr)
+		}
+		return len(items(t, decode(t, stdout)))
+	}
+	if n("search", "sysneedle") != 0 || n("messages", "--limit", "1000", "--until", "2100-01-01", "--from", "8:x") != 0 {
+		t.Fatal("system messages leaked into search/messages")
+	}
+	if n("search", "sysneedle", "--include-system") != 1 || n("messages", "--from", "8:x", "--include-system") != 1 {
+		t.Fatal("--include-system must bring them back")
+	}
+	base := n("conversations", "--limit", "1000")
+	if n("conversations", "--limit", "1000", "--include-system") != base+1 {
+		t.Fatal("conversations --include-system must add the system conversation")
+	}
+	if n("thread", "48:notifications", "sys1") != 0 || n("thread", "48:notifications", "sys1", "--include-system") != 1 {
+		t.Fatal("thread and --include-system")
+	}
+}
+
+func TestHelpStatesOrderingAndFlags(t *testing.T) {
+	e := newEnv(t)
+	for cmd, want := range map[string][]string{
+		"conversations": {"sorted by last activity, newest first; default --limit 50 (check `truncated`)", "--include-system"},
+		"search":        {"newest first", "--include-system"},
+		"messages":      {"chronological", "--include-channels", "--include-system"},
+		"unread":        {"--include-channels", "--by-conversation", "most channels are never opened", "reach you through `activity`"},
+	} {
+		_, stdout, stderr := e.run(cmd, "--help")
+		out := strings.Join(strings.Fields(stdout+stderr), " ")
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s --help lacks %q:\n%s", cmd, w, out)
+			}
+		}
 	}
 }

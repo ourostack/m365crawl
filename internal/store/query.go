@@ -26,6 +26,27 @@ type Filter struct {
 	// IncludeChannels counts channel and team conversations (kinds Topic, Space) as unread
 	// sources too; by default unread covers chats and meetings only.
 	IncludeChannels bool
+	// IncludeSystem keeps Teams' system pseudo-conversations (see SystemConversationIDs), which
+	// are left out by default.
+	IncludeSystem bool
+}
+
+// systemConversationIDs are the pseudo-conversations Teams keeps for its notification feed, call
+// log and annotations. Their messages mirror real ones, so reads leave them out unless asked.
+// 48:notes (the user's own notes) is a real conversation and stays in.
+var systemConversationIDs = []string{"48:notifications", "48:calllogs", "48:annotations"}
+
+// SystemConversationIDs returns a copy of the system pseudo-conversation ids.
+func SystemConversationIDs() []string { return append([]string(nil), systemConversationIDs...) }
+
+// notSystemCond is a condition that holds when the conversation id in col is not a system one.
+// The ids are package constants, so they are safe to inline.
+func notSystemCond(col string) string {
+	q := make([]string, len(systemConversationIDs))
+	for i, id := range systemConversationIDs {
+		q[i] = "'" + id + "'"
+	}
+	return col + ` not in (` + strings.Join(q, ",") + `)`
 }
 
 func (f Filter) limit() int {
@@ -98,6 +119,8 @@ type ActivityFilter struct {
 	Type    string // case-insensitive exact match
 	Since   time.Time
 	Limit   int // 0 means DefaultLimit
+	// IncludeSystem also joins messages of the system pseudo-conversations.
+	IncludeSystem bool
 }
 
 // ActivityRow is a feed item joined to its message (when archived) and conversation.
@@ -185,6 +208,9 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 	}
 	if !f.IncludeDeleted || f.Unread {
 		w.add(`m.deleted_at is null`)
+	}
+	if !f.IncludeSystem {
+		w.add(notSystemCond(`m.conversation_id`))
 	}
 	if f.Conversation != "" {
 		w.add(`(m.conversation_id=? or c.title=? collate nocase or c.display_name=? collate nocase or `+cdnExpr+`=? collate nocase)`, f.Conversation, f.Conversation, f.Conversation, f.Conversation)
@@ -302,6 +328,56 @@ func (s *Store) Unread(ctx context.Context, f Filter) ([]MessageRow, bool, error
 	return s.runMessages(ctx, ` from messages m`+msgJoin, &w, f.limit(), nil)
 }
 
+// UnreadConversationRow is one conversation's unread summary.
+type UnreadConversationRow struct {
+	ConversationID string
+	DisplayName    string
+	Kind           string
+	UnreadCount    int
+	OldestUnreadAt time.Time
+	NewestUnreadAt time.Time
+	Link           string // the newest unread message's link
+}
+
+// UnreadByConversation counts unread messages per conversation (same rules as Unread), most
+// unread first, then newest activity first. Link is the newest unread message's link.
+func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadConversationRow, bool, error) {
+	f.Unread = true
+	var w where
+	if err := s.messageWhere(ctx, &w, f); err != nil {
+		return nil, false, err
+	}
+	limit := f.limit()
+	//nolint:gosec // G202: fragments are package constants; values are placeholders
+	q := `select conv_id,name,kind,cnt,oldest,newest,link from (select m.conversation_id as conv_id,` + cdnExpr + ` as name,coalesce(c.kind,'') as kind,m.sent_at as newest,m.link as link,
+ count(*) over (partition by m.tenant_id,m.user_id,m.conversation_id) as cnt,
+ min(m.sent_at) over (partition by m.tenant_id,m.user_id,m.conversation_id) as oldest,
+ row_number() over (partition by m.tenant_id,m.user_id,m.conversation_id order by m.sent_at desc, m.id desc) as rn
+ from messages m` + msgJoin + w.sql() + `) where rn=1 order by cnt desc, newest desc, conv_id limit ?`
+	rows, err := s.db.QueryContext(ctx, q, append(w.args, limit+1)...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []UnreadConversationRow{}
+	for rows.Next() {
+		var r UnreadConversationRow
+		var oldest, newest sql.NullString
+		if err := rows.Scan(&r.ConversationID, &r.DisplayName, &r.Kind, &r.UnreadCount, &oldest, &newest, &r.Link); err != nil {
+			return nil, false, err
+		}
+		r.OldestUnreadAt, r.NewestUnreadAt = parseTime(oldest), parseTime(newest)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(out) > limit {
+		return out[:limit], true, nil
+	}
+	return out, false, nil
+}
+
 // Thread returns a thread's root message and its replies, oldest first. f.Account narrows to one
 // account and f.IncludeDeleted keeps deleted messages; its other fields are ignored.
 func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Filter) ([]MessageRow, error) {
@@ -313,6 +389,9 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 	}
 	if !f.IncludeDeleted {
 		w.add(`m.deleted_at is null`)
+	}
+	if !f.IncludeSystem {
+		w.add(notSystemCond(`m.conversation_id`))
 	}
 	rows, err := s.db.QueryContext(ctx, `select `+msgCols+` from messages m`+msgJoin+w.sql()+` order by m.sent_at, m.id`, w.args...) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
@@ -336,6 +415,9 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	}
 	if f.Account != nil {
 		w.add(`c.tenant_id=? and c.user_id=?`, f.Account.TenantID, f.Account.UserID)
+	}
+	if !f.IncludeSystem {
+		w.add(notSystemCond(`c.id`))
 	}
 	if kind != "" {
 		w.add(`c.kind=? collate nocase`, kind)
@@ -425,10 +507,14 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 		w.add(`a.at>=?`, fmtTime(f.Since))
 	}
 	limit := Filter{Limit: f.Limit}.limit()
+	msgOn := ``
+	if !f.IncludeSystem {
+		msgOn = ` and ` + notSystemCond(`m.conversation_id`)
+	}
 	//nolint:gosec // G202: fragments are package constants; values are placeholders
 	rows, err := s.db.QueryContext(ctx, `select a.tenant_id,a.user_id,a.id,a.type,a.subtype,a.is_read,a.at,a.conversation_id,`+cdnExpr+`,a.message_id,a.reply_chain_id,a.app_id,coalesce(m.content_text,''),coalesce(m.sender_id,''),coalesce(m.sender_name,''),m.sent_at,coalesce(m.link,'')
 from activity a
- left join messages m on m.tenant_id=a.tenant_id and m.user_id=a.user_id and m.conversation_id=a.conversation_id and m.id=a.message_id
+ left join messages m on m.tenant_id=a.tenant_id and m.user_id=a.user_id and m.conversation_id=a.conversation_id and m.id=a.message_id`+msgOn+`
  left join conversations c on c.tenant_id=a.tenant_id and c.user_id=a.user_id and c.id=a.conversation_id
  left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`+
 		w.sql()+` order by a.at desc, a.id desc limit ?`, append(w.args, limit+1)...)

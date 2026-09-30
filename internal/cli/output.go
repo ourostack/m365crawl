@@ -22,6 +22,10 @@ import (
 type meta struct {
 	ArchiveAgeSeconds *int64     `json:"archive_age_seconds"`
 	SyncError         *syncError `json:"sync_error,omitempty"`
+	// NeedsSync and Hint tell an agent in-band that the archive has never synced, so an empty
+	// result means "no data yet", not "nothing matched". Omitted once a sync has succeeded.
+	NeedsSync bool   `json:"needs_sync,omitempty"`
+	Hint      string `json:"hint,omitempty"`
 }
 
 // syncError is the implicit sync's failure, reported beside a result that was still served.
@@ -32,7 +36,12 @@ type syncError struct {
 
 func (m *meta) setMeta(age *int64, se *syncError) { m.ArchiveAgeSeconds, m.SyncError = age, se }
 
-type result interface{ setMeta(*int64, *syncError) }
+func (m *meta) setNeedsSync(hint string) { m.NeedsSync, m.Hint = true, hint }
+
+type result interface {
+	setMeta(*int64, *syncError)
+	setNeedsSync(hint string)
+}
 
 // listResult is the shape of every list command.
 type listResult struct {
@@ -126,8 +135,7 @@ func (rt *runtime) printError(c *errs.Coded) {
 		_, _ = fmt.Fprintf(rt.stderr, "error: %s\nfix: %s\n", b.Message, b.Fix)
 		return
 	}
-	line, _ := json.Marshal(errorDoc{Error: b})
-	_, _ = rt.stderr.Write(append(line, '\n'))
+	rt.writeJSONLine(errorDoc{Error: b})
 }
 
 // printWarning reports a problem that did not stop the command (a failed implicit sync).
@@ -137,8 +145,15 @@ func (rt *runtime) printWarning(c *errs.Coded) {
 		_, _ = fmt.Fprintf(rt.stderr, "warning: %s\nfix: %s\n", b.Message, b.Fix)
 		return
 	}
-	line, _ := json.Marshal(warningDoc{Warning: b})
-	_, _ = rt.stderr.Write(append(line, '\n'))
+	rt.writeJSONLine(warningDoc{Warning: b})
+}
+
+// writeJSONLine writes one compact JSON line to stderr with the same encoder settings as results:
+// fix text such as <tenantId>/<userId> keeps its < and > instead of \u003c.
+func (rt *runtime) writeJSONLine(v any) {
+	enc := json.NewEncoder(rt.stderr)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
 }
 
 func (rt *runtime) hint(msg string) { _, _ = fmt.Fprintf(rt.stderr, "hint: %s\n", msg) }
