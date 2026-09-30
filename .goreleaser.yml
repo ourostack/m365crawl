@@ -46,18 +46,15 @@ homebrew_casks:
     homepage: https://github.com/ourostack/teamscrawl
     description: Mirror the Microsoft Teams desktop cache into local SQLite for agents. Read-only, offline, no tokens.
     license: MIT
-    # Publish prereleases (vX.Y.Z-alpha.N) too; the default "auto" would skip them.
-    skip_upload: false
+    # The tap pulls the rendered cask from the release asset teamscrawl.rb
+    # (uploaded by release.yml), so goreleaser never pushes to the tap.
+    skip_upload: true
     commit_author:
       name: Ari Mendelow
       email: 16390116+arimendelow@users.noreply.github.com
     repository:
       owner: ourostack
       name: homebrew-tap
-      branch: main
-      git:
-        url: git@github.com:ourostack/homebrew-tap.git
-        private_key: '{{ index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}'
     # The binary is unsigned until an Apple identity is wired into CI.
     hooks:
       post:
