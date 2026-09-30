@@ -128,6 +128,29 @@ func TestTextDoctorSyncAndBanner(t *testing.T) {
 	}
 }
 
+func TestHelpHonorsNoColor(t *testing.T) {
+	e := textEnv(t)
+	t.Setenv("CLICOLOR_FORCE", "1")
+	for _, args := range [][]string{
+		{"--format", "text", "--no-color", "--help"},
+		{"--format", "text", "--help", "--no-color"},
+		{"--format", "text", "doctor", "--help", "--no-color"},
+	} {
+		_, out, _ := e.run(args...)
+		if !strings.Contains(out, "|  help") || strings.Contains(out, "\x1b") {
+			t.Errorf("%v: want plain banner, got %q", args, out)
+		}
+	}
+	_, out, _ := e.run("--format", "text", "--help")
+	if !strings.Contains(out, "\x1b[") {
+		t.Error("CLICOLOR_FORCE must color help when --no-color is absent")
+	}
+	t.Setenv("NO_COLOR", "1")
+	if _, out, _ = e.run("--format", "text", "--help"); strings.Contains(out, "\x1b") {
+		t.Error("NO_COLOR must win over CLICOLOR_FORCE in help")
+	}
+}
+
 func TestColorSwitches(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
@@ -159,7 +182,7 @@ func TestTextTruncatesToTerminalWidth(t *testing.T) {
 	t.Setenv("COLUMNS", "80")
 	_, out, _ := e.run("--format", "text", "--max-age", "0", "unread")
 	for _, l := range strings.Split(out, "\n") {
-		if l != "" && len([]rune(l)) > 80 { // 60 plus the unclipped name columns' slack
+		if l != "" && len([]rune(l)) > 80 {
 			t.Errorf("row not clipped: %q", l)
 		}
 	}
