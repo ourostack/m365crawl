@@ -14,8 +14,8 @@
 ## Why not a Teams MCP server or the Graph API?
 
 - **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. teamscrawl needs a signed-in Teams app and one macOS permission.
-- **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
 - **Built for agent context budgets.** Every item carries stable ids and a deep link; `--fields` and `--max-text` return only what you need, instead of full message payloads eating your context window.
+- **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
 - **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not a file on your disk.
 - **Read-only by construction.** There is no write path in the code. It cannot post, react or mark anything read, so handing it to an agent is safe.
 - **Keeps what Teams evicts.** Teams trims its cache as it runs, and its cached message count can drop by thousands between two reads. The archive never deletes a message, so history survives as long as you sync regularly.
