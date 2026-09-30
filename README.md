@@ -128,6 +128,8 @@ Flags that matter for agents:
 
 Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `teamscrawl <command> --help` for the rest.
 
+Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off; `CLICOLOR_FORCE=1` turns it on when output is piped (this is how `make screenshot` renders `screenshot.png`). JSON output is never colored and never changes with any of these.
+
 ## How it works
 
 1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private 0700 temp directory, retrying if Teams writes mid-copy. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.

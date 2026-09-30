@@ -544,3 +544,20 @@ func colorEnabled(tty, noColorFlag bool, lookup func(string) (string, bool)) boo
 	}
 	return true
 }
+
+// Dim wraps s in the dim style when color is on.
+func Dim(s string, color bool) string { return colorize(color, ansiDim, s) }
+
+// Truncate clips s to at most width display columns, ending in "..." when it
+// had to cut. Width is measured like Table measures it, so CJK and emoji are
+// neither split nor counted as one column.
+func Truncate(s string, width int) string {
+	if width <= 0 || displayWidth(s) <= width {
+		return s
+	}
+	const ellipsis = "..."
+	if width <= len(ellipsis) {
+		return cond.Truncate(s, width, "")
+	}
+	return cond.Truncate(s, width, ellipsis)
+}

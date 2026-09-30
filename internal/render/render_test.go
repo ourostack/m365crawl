@@ -220,3 +220,25 @@ func TestDoctorEmptySnapshotAndNormalizeDefault(t *testing.T) {
 		t.Errorf("json:- and untagged fields: %v", got)
 	}
 }
+
+func TestTruncateAndDim(t *testing.T) {
+	cases := []struct {
+		in    string
+		width int
+		want  string
+	}{
+		{"hello world", 8, "hello..."},
+		{"short", 8, "short"},
+		{"anything", 0, "anything"},
+		{"abcdef", 3, "abc"},
+		{"日本語チャット", 7, "日本..."},
+	}
+	for _, c := range cases {
+		if got := Truncate(c.in, c.width); got != c.want {
+			t.Errorf("Truncate(%q,%d) = %q, want %q", c.in, c.width, got, c.want)
+		}
+	}
+	if Dim("x", false) != "x" || Dim("x", true) != "\x1b[2mx\x1b[0m" {
+		t.Error("Dim")
+	}
+}

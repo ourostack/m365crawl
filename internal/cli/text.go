@@ -1,28 +1,36 @@
 package cli
 
 import (
+	"github.com/mattn/go-runewidth"
+
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ourostack/teamscrawl/internal/render"
+	"github.com/ourostack/teamscrawl/internal/store"
 	"github.com/ourostack/teamscrawl/internal/syncer"
 )
+
+// displayZone is the zone text output shows times in; tests pin it.
+var displayZone = time.Local
 
 func stamp(t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return t.In(displayZone).Format("2006-01-02 15:04")
 }
 
-func metaLines(w io.Writer, m meta) {
+func metaLines(w io.Writer, m meta, color bool) {
 	if m.ArchiveAgeSeconds != nil {
-		_, _ = fmt.Fprintf(w, "archive age: %s\n", (time.Duration(*m.ArchiveAgeSeconds) * time.Second).String())
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("archive age: "+(time.Duration(*m.ArchiveAgeSeconds)*time.Second).String(), color))
 	} else {
-		_, _ = fmt.Fprintln(w, "archive age: never synced")
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("archive age: never synced", color))
 	}
 	if m.SyncError != nil {
 		_, _ = fmt.Fprintf(w, "sync error: %s: %s\n", m.SyncError.Code, m.SyncError.Message)
@@ -31,132 +39,218 @@ func metaLines(w io.Writer, m meta) {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-func renderItem(w io.Writer, it any) {
-	switch x := it.(type) {
-	case messageItem:
-		del := ""
-		if !x.DeletedAt.IsZero() {
-			del = " (deleted)"
-		}
-		_, _ = fmt.Fprintf(w, "%s  %s  [%s]%s\n    %s\n", stamp(x.SentAt), x.SenderName, x.ConversationDisplayName, del, oneLine(x.Text))
-	case conversationItem:
-		_, _ = fmt.Fprintf(w, "%s  %-8s %s  (%d members)\n", stamp(x.LastMessageAt), x.Kind, x.DisplayName, x.MemberCount)
-	case personItem:
-		_, _ = fmt.Fprintf(w, "%s  %s  last seen %s\n", x.DisplayName, x.ID, stamp(x.LastSeenAt))
-	case activityItem:
-		read := "unread"
-		if x.IsRead {
-			read = "read"
-		}
-		_, _ = fmt.Fprintf(w, "%s  %s  %s  %s [%s]\n    %s\n", stamp(x.At), x.Type, read, x.SenderName, x.ConversationDisplayName, oneLine(x.Text))
-	case projected:
-		parts := make([]string, 0, len(x.keys))
-		for _, k := range x.keys {
-			var v any
-			_ = json.Unmarshal(x.vals[k], &v)
-			parts = append(parts, fmt.Sprintf("%s=%s", k, oneLine(fmt.Sprint(v))))
-		}
-		_, _ = fmt.Fprintln(w, strings.Join(parts, "  "))
-	default:
-		b, _ := json.Marshal(it)
-		_, _ = fmt.Fprintln(w, string(b))
-	}
-}
+// textBanners are the commands whose text output opens with the wordmark.
+var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, "whoami": true}
 
-// renderText prints a result for a person.
-func renderText(w io.Writer, v any) error {
+// renderText prints a result for a person, in color when rt.color is set.
+func (rt *runtime) renderText(label string, v any) error {
+	w, color := rt.stdout, rt.color
+	if textBanners[label] {
+		render.Banner(w, label, color)
+	}
 	switch r := v.(type) {
 	case *listResult:
-		for _, it := range r.Items {
-			renderItem(w, it)
-		}
+		rt.listTable(r)
+		_, _ = fmt.Fprintln(w)
 		more := ""
 		if r.Truncated {
 			more = " (more exist; raise --limit)"
 		}
-		_, _ = fmt.Fprintf(w, "%d items%s\n", r.Count, more)
-		metaLines(w, r.meta)
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%d items%s", r.Count, more), color))
+		metaLines(w, r.meta, color)
 	case syncer.Report:
-		_, _ = fmt.Fprintf(w, "sync %s\n", r.Status)
+		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)
+		_, _ = fmt.Fprintln(w)
+		rows := [][]string{}
 		for _, p := range []struct {
 			n string
-			c any
+			c store.Counts
 		}{{"conversations", r.Conversations}, {"messages", r.Messages}, {"people", r.People}, {"activity", r.Activity}} {
-			b, _ := json.Marshal(p.c)
-			_, _ = fmt.Fprintf(w, "  %-14s %s\n", p.n, b)
+			rows = append(rows, []string{p.n, strconv.Itoa(p.c.Seen), strconv.Itoa(p.c.Inserted), strconv.Itoa(p.c.Updated), strconv.Itoa(p.c.Unchanged)})
 		}
+		render.Table(w, []string{"kind", "seen", "inserted", "updated", "unchanged"}, rows, color)
 		keys := make([]string, 0, len(r.Omissions))
 		for k := range r.Omissions {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			_, _ = fmt.Fprintf(w, "  omitted %s: %d\n", k, r.Omissions[k])
+			_, _ = fmt.Fprintf(w, "omitted %s: %d\n", k, r.Omissions[k])
 		}
 	case *statusResult:
-		renderStatus(w, r)
-		metaLines(w, r.meta)
+		rt.statusBlock("Status", r)
+		metaLines(w, r.meta, color)
 	case *whoamiResult:
+		rows := [][]string{}
 		for _, a := range r.Accounts {
 			name := a.DisplayName
 			if name == "" {
 				name = "(name not seen yet)"
 			}
-			_, _ = fmt.Fprintf(w, "%s  tenant %s  user %s\n", name, a.TenantID, a.UserID)
+			rows = append(rows, []string{name, a.TenantID, a.UserID, stamp(a.LastSyncedAt)})
 		}
-		if len(r.Accounts) == 0 {
+		if len(rows) == 0 {
 			_, _ = fmt.Fprintln(w, "no accounts archived yet; run teamscrawl sync")
+		} else {
+			render.Table(w, []string{"name", "tenant", "user", "last synced"}, rows, color)
+			_, _ = fmt.Fprintln(w)
 		}
-		renderStatus(w, r.Archive)
-		metaLines(w, r.meta)
+		rt.statusBlock("Archive", r.Archive)
+		metaLines(w, r.meta, color)
 	case *sqlResult:
-		_, _ = fmt.Fprintln(w, strings.Join(r.Columns, "\t"))
-		for _, row := range r.Rows {
-			cells := make([]string, len(row))
-			for i, c := range row {
-				cells[i] = fmt.Sprint(c)
+		rows := make([][]string, len(r.Rows))
+		for i, row := range r.Rows {
+			rows[i] = make([]string, len(row))
+			for j, c := range row {
+				rows[i][j] = oneLine(fmt.Sprint(c))
 			}
-			_, _ = fmt.Fprintln(w, strings.Join(cells, "\t"))
 		}
-		metaLines(w, r.meta)
+		render.Table(w, r.Columns, rows, color)
+		metaLines(w, r.meta, color)
 	case *doctorResult:
-		for _, c := range r.Checks {
-			mark := "ok  "
+		checks := make([]render.Check, len(r.Checks))
+		for i, c := range r.Checks {
+			st := render.OK
 			switch {
 			case !c.OK:
-				mark = "FAIL"
+				st = render.Fail
 			case c.Warn:
-				mark = "warn"
+				st = render.Warn
 			}
-			_, _ = fmt.Fprintf(w, "%s %-18s %s\n", mark, c.Name, c.Detail)
-			if c.Fix != "" && (!c.OK || c.Warn) {
-				_, _ = fmt.Fprintf(w, "     fix: %s\n", c.Fix)
-			}
+			checks[i] = render.Check{Name: c.Name, Detail: c.Detail, Fix: c.Fix, Status: st}
 		}
+		render.Doctor(w, "Doctor", checks, r.snap, color)
 	default:
-		b, err := json.MarshalIndent(v, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintln(w, string(b))
+		render.Block(w, label, v, color)
 	}
 	return nil
 }
 
-func renderStatus(w io.Writer, r *statusResult) {
+// statusBlock prints the archive summary: a key/value block and a per-account table.
+func (rt *runtime) statusBlock(title string, r *statusResult) {
+	w := rt.stdout
 	if !r.ArchiveExists {
-		_, _ = fmt.Fprintf(w, "archive %s does not exist yet; run teamscrawl sync\n", r.ArchivePath)
+		render.Block(w, title, map[string]any{"archive_path": r.ArchivePath, "archive_exists": false}, rt.color)
+		_, _ = fmt.Fprintln(w, "run teamscrawl sync to create it")
 		return
 	}
-	_, _ = fmt.Fprintf(w, "archive %s (schema v%d, fts %v)\n", r.ArchivePath, r.SchemaVersion, r.FTSPresent)
-	for _, a := range r.Accounts {
-		_, _ = fmt.Fprintf(w, "  %s/%s  %d conversations, %d messages, %d people, %d activity, newest %s\n",
-			a.TenantID, a.UserID, a.Conversations, a.Messages, a.People, a.Activity, stamp(a.NewestSentAt))
-	}
+	m := map[string]any{"archive_path": r.ArchivePath, "schema_version": r.SchemaVersion, "fts_present": r.FTSPresent}
 	if r.LastRun != nil {
-		_, _ = fmt.Fprintf(w, "last run: %s at %s\n", r.LastRun.Status, stamp(r.LastRun.FinishedAt))
+		m["last_run"] = r.LastRun.Status + " at " + stamp(r.LastRun.FinishedAt)
 	}
 	if len(r.OtherOrigins) > 0 {
-		_, _ = fmt.Fprintf(w, "other origins: %s\n", strings.Join(r.OtherOrigins, ", "))
+		m["other_origins"] = strings.Join(r.OtherOrigins, ", ")
 	}
+	render.Block(w, title, m, rt.color)
+	if len(r.Accounts) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w)
+	rows := make([][]string, len(r.Accounts))
+	for i, a := range r.Accounts {
+		rows[i] = []string{a.TenantID + "/" + a.UserID, strconv.Itoa(a.Conversations), strconv.Itoa(a.Messages), strconv.Itoa(a.People), strconv.Itoa(a.Activity), stamp(a.NewestSentAt)}
+	}
+	render.Table(w, []string{"account", "conversations", "messages", "people", "activity", "newest"}, rows, rt.color)
+}
+
+// listTable prints a list result as an aligned table with a column subset per item type; the
+// free-text column is clipped so a row fits the terminal.
+func (rt *runtime) listTable(r *listResult) {
+	var cols []string
+	var rows [][]string
+	textCol := -1
+	for _, it := range r.Items {
+		switch x := it.(type) {
+		case messageItem:
+			cols, textCol = []string{"sent_at", "conversation", "sender", "text"}, 3
+			text := oneLine(x.Text)
+			if !x.DeletedAt.IsZero() {
+				text += " (deleted)"
+			}
+			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
+		case conversationItem:
+			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
+			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})
+		case personItem:
+			cols, textCol = []string{"name", "id", "last_seen_at"}, -1
+			rows = append(rows, []string{x.DisplayName, x.ID, stamp(x.LastSeenAt)})
+		case activityItem:
+			read := "unread"
+			if x.IsRead {
+				read = "read"
+			}
+			cols, textCol = []string{"at", "type", "state", "sender", "conversation", "text"}, 5
+			rows = append(rows, []string{stamp(x.At), x.Type, read, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
+		case projected:
+			cols, textCol = x.keys, -1
+			row := make([]string, len(x.keys))
+			for i, k := range x.keys {
+				var v any
+				_ = json.Unmarshal(x.vals[k], &v)
+				if v != nil {
+					row[i] = oneLine(fmt.Sprint(v))
+				}
+				if k == "text" {
+					textCol = i
+				}
+			}
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		render.Table(rt.stdout, []string{"items"}, nil, rt.color)
+		return
+	}
+	for _, row := range rows {
+		for i := range row {
+			if i != textCol {
+				row[i] = render.Truncate(row[i], 40)
+			}
+		}
+	}
+	if textCol >= 0 {
+		used := 2 * (len(cols) - 1)
+		for i := range cols {
+			if i == textCol {
+				continue
+			}
+			w := len(cols[i])
+			for _, row := range rows {
+				w = max(w, runewidth.StringWidth(row[i]))
+			}
+			used += w
+		}
+		room := max(rt.termWidth()-used, 20)
+		for _, row := range rows {
+			row[textCol] = render.Truncate(row[textCol], room)
+		}
+	}
+	render.Table(rt.stdout, cols, rows, rt.color)
+}
+
+// doctorSnapshot summarizes the archive for the doctor screen; nil when there is no archive.
+func (rt *runtime) doctorSnapshot() *render.Snapshot {
+	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = st.Close() }()
+	row, err := st.Status(rt.ctx)
+	if err != nil {
+		return nil
+	}
+	var conv, msgs, people, act int
+	for _, a := range row.Accounts {
+		conv, msgs, people, act = conv+a.Conversations, msgs+a.Messages, people+a.People, act+a.Activity
+	}
+	snap := &render.Snapshot{Pairs: [][2]string{
+		{"accounts", strconv.Itoa(len(row.Accounts))}, {"conversations", strconv.Itoa(conv)}, {"messages", strconv.Itoa(msgs)},
+		{"people", strconv.Itoa(people)}, {"activity", strconv.Itoa(act)},
+	}}
+	age := "never synced"
+	if !row.LastSuccessAt.IsZero() {
+		age = max(rt.now().Sub(row.LastSuccessAt), 0).Round(time.Second).String()
+	}
+	snap.Lines = [][2]string{{"last sync", stamp(row.LastSuccessAt)}, {"archive age", age}}
+	return snap
 }
