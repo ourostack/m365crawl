@@ -37,7 +37,12 @@ window.buildAccount = async function (acct) {
     topic: '19:topicchannel' + acct.seed + '@thread.tacv2',
     space: '19:space' + acct.seed + '@thread.v2',
     meeting: '19:meeting_FIXTURE' + acct.seed + '@thread.v2',
+    channel2: '19:planningchannel' + acct.seed + '@thread.tacv2',
+    group: '19:untitledgroup' + acct.seed + '@thread.v2',
   };
+  const other = '8:orgid:00000000-0000-4000-8000-0000000000ee';
+  const me = '8:orgid:' + acct.user;
+  const ts = (n) => 1700000000000 + n * 1000;
   // Same conversation id in both accounts.
   const shared = '19:shared-fixture-conversation@thread.v2';
 
@@ -70,6 +75,48 @@ window.buildAccount = async function (acct) {
   }
   await put(c1);
 
+  // Agent-oriented enrichment. Messages from the other person (Pat Example) are candidates for unread.
+  const pat = { creator: other, imDisplayName: 'Pat Example' };
+  const c2 = [];
+  const add2 = (conv, over) => { const m = msg(acct, conv, ++n, Object.assign({}, pat, over)); c2.push(chain(conv, m)); return m; };
+  const props = (p) => Object.assign({ importance: 'normal', subject: '' }, p);
+  const mentionOther = add2(convs.chat, {
+    content: '<p><span itemscope itemtype="http://schema.skype.com/Mention" itemid="0">Alex Fixture</span> and <at id="1">Sam Tag</at> see this</p>',
+    properties: props({ mentions: JSON.stringify([{ '@type': 'http://schema.skype.com/Mention', itemid: 0, mentionType: 'person', mri: me, displayName: acct.name }, { itemid: 1, mentionType: 'tag', mri: 'tag:fixture-tag', displayName: 'Sam Tag' }]) }),
+  });
+  const mentionNotMe = add2(convs.chat, {
+    content: '<p><span itemscope itemtype="http://schema.skype.com/Mention" itemid="0">Sam Example</span> is not you</p>',
+    properties: props({ mentions: JSON.stringify([{ itemid: 0, mentionType: 'person', mri: '8:orgid:00000000-0000-4000-8000-0000000000dd', displayName: 'Sam Example' }]) }),
+  });
+  const reacted = add2(convs.chat, {
+    content: '<p>Reactions here</p>',
+    properties: props({ emotions: [
+      { key: 'like', users: [{ mri: me, time: ts(n) + 10, value: String(ts(n) + 10) }, { mri: other, time: ts(n) + 20, value: String(ts(n) + 20) }] },
+      { key: 'heart', users: [{ mri: me, time: ts(n) + 30, value: String(ts(n) + 30) }] },
+    ] }),
+  });
+  add2(convs.chat, {
+    content: '<p>Files attached</p>',
+    properties: props({ files: JSON.stringify([
+      { '@type': 'http://schema.skype.com/File', id: 'f1', itemid: 'f1', fileName: 'Quarterly report.docx', fileType: 'docx', objectUrl: 'https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx', fileInfo: { fileUrl: 'https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx', shareUrl: null } },
+      { itemid: 'f2', fileName: 'diagram.png', fileType: 'png', objectUrl: null, fileInfo: { fileUrl: 'https://fixture.sharepoint.example/teams/fixture/diagram.png', shareUrl: 'https://fixture.sharepoint.example/s/diagram' } },
+    ]) }),
+  });
+  add2(convs.chat, {
+    content: '<p>Read <a href="https://example.com/docs?a=1&amp;b=2">the docs</a> and https://example.org/plain</p>',
+    properties: props({ links: JSON.stringify([{ '@type': 'http://schema.skype.com/HyperLink', itemid: 'l1', url: 'https://example.com/docs?a=1&b=2', previewenabled: true, preview: {} }, { itemid: 'l2', url: 'https://example.org/plain' }]) }),
+  });
+  add2(convs.chat, { content: '<p>Zero-width horizon newer message</p>' });
+  const root = add2(convs.topic, {
+    content: '<p>Channel post with a subject</p>',
+    properties: props({ subject: 'Fixture subject', importance: 'high', pinned: JSON.stringify({ creatorId: me, pinnedTime: ts(n) + 400000 }) }),
+  });
+  const reply = msg(acct, convs.topic, ++n, Object.assign({}, pat, { parentMessageId: root.id, content: '<blockquote itemscope itemtype="http://schema.skype.com/Reply"><p>Channel post with a subject</p></blockquote><p>Reply in thread</p>', properties: props({}) }));
+  c2.push({ conversationId: convs.topic, replyChainId: root.id, messageMap: { [root.id]: root, [reply.id]: reply }, latestDeliveryTime: reply.originalArrivalTime });
+  const poll = add2(convs.channel2, { content: '<p>Planning channel message</p>' });
+  add2(convs.group, { content: '<p>Group chat message</p>' });
+  await put(c2);
+
   // Highly compressible chains (snappy).
   const comp = [];
   for (const reps of [400, 1500, 3000, 6000]) comp.push(chain(convs.topic, msg(acct, convs.topic, ++n, { content: '<p>' + 'compressible fixture text. '.repeat(reps) + '</p>' })));
@@ -100,17 +147,44 @@ window.buildAccount = async function (acct) {
   const tx = cdb.transaction('conversations', 'readwrite');
   const st = tx.objectStore('conversations');
   const mk = (id, type, title, tp, extra) => Object.assign({
-    id, type, chatTitle: title, threadProperties: Object.assign({ topic: title, threadType: type.toLowerCase() }, tp || {}),
-    members: [{ id: '8:orgid:' + acct.user, role: 'Admin' }, { id: '8:orgid:00000000-0000-4000-8000-0000000000ee', role: 'User' }],
-    lastMessageTimeUtc: '2023-11-14T22:13:20.000Z', parentId: null,
+    id, type, chatTitle: { shortTitle: title, longTitle: title + ' (long)' }, threadProperties: Object.assign({ topic: title, threadType: type.toLowerCase() }, tp || {}),
+    members: [{ id: me, role: 'Admin' }, { id: other, role: 'User' }],
+    lastMessageTimeUtc: 1700000100000, parentId: null, teamId: '',
+    properties: { consumptionhorizon: '', favorite: 'false' },
   }, extra);
-  st.put(mk(convs.chat, 'Chat', 'Fixture chat ' + acct.seed, { threadType: 'chat' }));
-  st.put(mk(convs.topic, 'Topic', 'General', { threadType: 'topic' }, { parentId: convs.space }));
-  st.put(mk(convs.space, 'Space', 'Fixture team ' + acct.seed, { threadType: 'space' }));
-  st.put(mk(convs.meeting, 'Meeting', 'Fixture standup', { threadType: 'meeting' }));
+  const horizon = (n0) => ts(n0) + ';' + (ts(n0) + 5000) + ';' + ts(n0);
+  // The chat's horizon sits after message 4, so its later messages are newer than the read marker.
+  st.put(mk(convs.chat, 'Chat', 'Fixture chat ' + acct.seed, { threadType: 'chat' }, { properties: { consumptionhorizon: horizon(4), favorite: 'true' } }));
+  // A channel: its DisplayName is the channel topic; the team's record (below) supplies the team name.
+  st.put(mk(convs.topic, 'Topic', 'General', { threadType: 'topic' }, { chatTitle: undefined, threadProperties: { topicThreadTopic: 'General', threadType: 'topic' }, parentId: convs.space, teamId: convs.space, properties: { consumptionhorizon: horizon(30), favorite: 'false' } }));
+  st.put(mk(convs.channel2, 'Topic', 'Planning', { threadType: 'topic' }, { chatTitle: undefined, threadProperties: { topic: 'Planning', threadType: 'topic' }, parentId: convs.space, teamId: convs.space, properties: { consumptionhorizon: '0;0;0' } }));
+  st.put(mk(convs.space, 'Space', 'Fixture team ' + acct.seed, { threadType: 'space' }, { chatTitle: undefined, threadProperties: { spaceThreadTopic: 'Fixture team ' + acct.seed, threadType: 'space' }, teamId: convs.space, members: [], properties: {} }));
+  st.put(mk(convs.meeting, 'Meeting', 'Fixture standup', { threadType: 'meeting' }, { properties: { consumptionhorizon: horizon(2) } }));
   st.put(mk(shared, 'Chat', 'Shared conversation id', { threadType: 'chat' }));
+  // A group chat with no title at all: its name comes from the members.
+  st.put(mk(convs.group, 'Chat', '', { threadType: 'chat' }, { chatTitle: null, threadProperties: { topic: null, threadType: 'chat' }, members: [{ id: me, role: 'Admin', friendlyName: acct.name }, { id: other, role: 'User', friendlyName: 'Pat Example' }, { id: '8:orgid:00000000-0000-4000-8000-0000000000dd', role: 'User', friendlyName: 'Sam Example' }] }));
   await done(tx);
   cdb.close();
+
+
+  // Activity feed: one mention, reply and reaction each, read and unread, plus a non-message item.
+  const adbf = await open('Teams:activity-manager:react-web-client:' + suffix, [['feed-items', 'activityId']]);
+  const ftx = adbf.transaction('feed-items', 'readwrite');
+  const fst = ftx.objectStore('feed-items');
+  const feed = (i, type, subtype, isRead, src, extra) => fst.put(Object.assign({
+    activityId: 'fixture-activity-' + acct.seed + '-' + i, activityType: type, activitySubtype: subtype, activityVersion: '1.0', isRead,
+    timestamp: ts(40) + i * 60000, sourceThreadId: src.conversationId, sourceMessageId: src.id, sourceReplyChainId: src.parentMessageId, messageId: src.id,
+  }, extra || {}));
+  feed(1, 'mentionInChat', 'person', false, mentionOther);
+  feed(2, 'mention', 'channel', true, root);
+  feed(3, 'reply', 'channel', false, reply);
+  feed(4, 'reactionInChat', 'like', false, reacted);
+  feed(5, 'reaction', 'heart', true, root);
+  feed(6, 'msGraph', 'approvalCompleted', false, { conversationId: '', id: 'graph-message-' + acct.seed, parentMessageId: '' }, { teamsAppId: 'fixture-app-id' });
+  feed(7, 'replyToReply', 'channel', true, reply);
+  feed(8, 'follow', '', false, poll);
+  await done(ftx);
+  adbf.close();
 
   // Decoy authentication database that must never be decoded.
   const adb = await open('Teams:auth:react-web-client:' + suffix, [['tokens', 'id']]);

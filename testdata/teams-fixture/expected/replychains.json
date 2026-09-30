@@ -1231,32 +1231,381 @@
     {
       "key": "1700000039000",
       "envelope": "v21",
-      "canonical_bytes": 11423,
-      "canonical_sha256": "81fba975584262eb1870ca1bc68d4a07d0fa769fd42d496ce2b4b07455a4e7e1"
+      "canonical_bytes": 1166,
+      "canonical_sha256": "df960637ce8d8a526a70dc7c4c7dfef4601ce427a4995c54467db81ecabd6ee7",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000039000",
+        "messageMap": {
+          "1700000039000": {
+            "id": "1700000039000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000039000",
+            "clientMessageId": "9000000039",
+            "version": 1700000039000,
+            "sequenceId": 39,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Alex Fixture</span> and <at id=\"1\">Sam Tag</at> see this</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000039000,
+            "clientArrivalTime": 1700000039005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"@type\":\"http://schema.skype.com/Mention\",\"itemid\":0,\"mentionType\":\"person\",\"mri\":\"8:orgid:00000000-0000-4000-8000-0000000000a1\",\"displayName\":\"Alex Fixture\"},{\"itemid\":1,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag\",\"displayName\":\"Sam Tag\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000039000
+      }
     },
     {
       "key": "1700000040000",
       "envelope": "v21",
-      "canonical_bytes": 41123,
-      "canonical_sha256": "49fb6630cedff8a1bab2a561ceb7d1eca2ad699eca6b27a6b9673bd76076ffa7"
+      "canonical_bytes": 995,
+      "canonical_sha256": "50b363e15d82d6a774b9cec50c8d9241841a057936935fea4a0765633f007783",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000040000",
+        "messageMap": {
+          "1700000040000": {
+            "id": "1700000040000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000040000",
+            "clientMessageId": "9000000040",
+            "version": 1700000040000,
+            "sequenceId": 40,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Sam Example</span> is not you</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000040000,
+            "clientArrivalTime": 1700000040005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"person\",\"mri\":\"8:orgid:00000000-0000-4000-8000-0000000000dd\",\"displayName\":\"Sam Example\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000040000
+      }
     },
     {
       "key": "1700000041000",
-      "envelope": "snappy",
-      "canonical_bytes": 81623,
-      "canonical_sha256": "7ee46921d5a6974973eb7f92d5fc29e4e242502379cbdfb4020c7ed4855a18a8"
+      "envelope": "v21",
+      "canonical_bytes": 1124,
+      "canonical_sha256": "be4356c29d159d74f5a04b660c40affd1bd2810fabcceadbae5a0562d91da5fc",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000041000",
+        "messageMap": {
+          "1700000041000": {
+            "id": "1700000041000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000041000",
+            "clientMessageId": "9000000041",
+            "version": 1700000041000,
+            "sequenceId": 41,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Reactions here</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000041000,
+            "clientArrivalTime": 1700000041005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "emotions": [
+                {
+                  "key": "like",
+                  "users": [
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+                      "time": 1700000040010,
+                      "value": "1700000040010"
+                    },
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+                      "time": 1700000040020,
+                      "value": "1700000040020"
+                    }
+                  ]
+                },
+                {
+                  "key": "heart",
+                  "users": [
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+                      "time": 1700000040030,
+                      "value": "1700000040030"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000041000
+      }
     },
     {
       "key": "1700000042000",
-      "envelope": "snappy",
-      "canonical_bytes": 162623,
-      "canonical_sha256": "76cad7cf14dcf1d63092a965535a01ac21bedc0d4aa09a799aa17f9ee7ed952b"
+      "envelope": "v21",
+      "canonical_bytes": 1366,
+      "canonical_sha256": "0fe17faf74ac76cca5fe4f009fe00ed82f2c2b2bc15b4367013450565d6c7bf8",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000042000",
+        "messageMap": {
+          "1700000042000": {
+            "id": "1700000042000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000042000",
+            "clientMessageId": "9000000042",
+            "version": 1700000042000,
+            "sequenceId": 42,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Files attached</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000042000,
+            "clientArrivalTime": 1700000042005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "files": "[{\"@type\":\"http://schema.skype.com/File\",\"id\":\"f1\",\"itemid\":\"f1\",\"fileName\":\"Quarterly report.docx\",\"fileType\":\"docx\",\"objectUrl\":\"https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx\",\"fileInfo\":{\"fileUrl\":\"https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx\",\"shareUrl\":null}},{\"itemid\":\"f2\",\"fileName\":\"diagram.png\",\"fileType\":\"png\",\"objectUrl\":null,\"fileInfo\":{\"fileUrl\":\"https://fixture.sharepoint.example/teams/fixture/diagram.png\",\"shareUrl\":\"https://fixture.sharepoint.example/s/diagram\"}}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000042000
+      }
     },
     {
       "key": "1700000043000",
+      "envelope": "v21",
+      "canonical_bytes": 1064,
+      "canonical_sha256": "17312b5397143ef64a8a8cb0ec7355c1f490ca6d905cd357e3f79c937bf627b2",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000043000",
+        "messageMap": {
+          "1700000043000": {
+            "id": "1700000043000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000043000",
+            "clientMessageId": "9000000043",
+            "version": 1700000043000,
+            "sequenceId": 43,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Read <a href=\"https://example.com/docs?a=1&amp;b=2\">the docs</a> and https://example.org/plain</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000043000,
+            "clientArrivalTime": 1700000043005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "links": "[{\"@type\":\"http://schema.skype.com/HyperLink\",\"itemid\":\"l1\",\"url\":\"https://example.com/docs?a=1&b=2\",\"previewenabled\":true,\"preview\":{}},{\"itemid\":\"l2\",\"url\":\"https://example.org/plain\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000043000
+      }
+    },
+    {
+      "key": "1700000044000",
+      "envelope": "v21",
+      "canonical_bytes": 778,
+      "canonical_sha256": "1214423d5b6fba4d6665676be34ec69d8167b95db600874d9b83236ba438d690",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000044000",
+        "messageMap": {
+          "1700000044000": {
+            "id": "1700000044000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000044000",
+            "clientMessageId": "9000000044",
+            "version": 1700000044000,
+            "sequenceId": 44,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Zero-width horizon newer message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000044000,
+            "clientArrivalTime": 1700000044005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000044000
+      }
+    },
+    {
+      "key": "1700000045000",
+      "envelope": "v21",
+      "canonical_bytes": 1385,
+      "canonical_sha256": "b99ab55c9eafae91672e4eebad2f58e2af27f5e1b6a738c3726eca281479d587",
+      "canonical": {
+        "conversationId": "19:topicchannel1@thread.tacv2",
+        "replyChainId": "1700000045000",
+        "messageMap": {
+          "1700000045000": {
+            "id": "1700000045000",
+            "conversationId": "19:topicchannel1@thread.tacv2",
+            "parentMessageId": "1700000045000",
+            "clientMessageId": "9000000045",
+            "version": 1700000045000,
+            "sequenceId": 45,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Channel post with a subject</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000045000,
+            "clientArrivalTime": 1700000045005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "high",
+              "subject": "Fixture subject",
+              "pinned": "{\"creatorId\":\"8:orgid:00000000-0000-4000-8000-0000000000a1\",\"pinnedTime\":1700000444000}"
+            }
+          },
+          "1700000046000": {
+            "id": "1700000046000",
+            "conversationId": "19:topicchannel1@thread.tacv2",
+            "parentMessageId": "1700000045000",
+            "clientMessageId": "9000000046",
+            "version": 1700000046000,
+            "sequenceId": 46,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<blockquote itemscope itemtype=\"http://schema.skype.com/Reply\"><p>Channel post with a subject</p></blockquote><p>Reply in thread</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000046000,
+            "clientArrivalTime": 1700000046005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000046000
+      }
+    },
+    {
+      "key": "1700000047000",
+      "envelope": "v21",
+      "canonical_bytes": 652,
+      "canonical_sha256": "19d37cffb4e2bc85a0684148a433fe7ce936b5ee1227ecb7703d8503c0c3d405",
+      "canonical": {
+        "conversationId": "19:planningchannel1@thread.tacv2",
+        "replyChainId": "1700000047000",
+        "messageMap": {
+          "1700000047000": {
+            "id": "1700000047000",
+            "conversationId": "19:planningchannel1@thread.tacv2",
+            "parentMessageId": "1700000047000",
+            "clientMessageId": "9000000047",
+            "version": 1700000047000,
+            "sequenceId": 47,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Planning channel message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000047000,
+            "clientArrivalTime": 1700000047005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000047000
+      }
+    },
+    {
+      "key": "1700000048000",
+      "envelope": "v21",
+      "canonical_bytes": 636,
+      "canonical_sha256": "d29471a46c5404cc0cae65cd50ab94c5e8b6872e4379a8affd371999a46d988d",
+      "canonical": {
+        "conversationId": "19:untitledgroup1@thread.v2",
+        "replyChainId": "1700000048000",
+        "messageMap": {
+          "1700000048000": {
+            "id": "1700000048000",
+            "conversationId": "19:untitledgroup1@thread.v2",
+            "parentMessageId": "1700000048000",
+            "clientMessageId": "9000000048",
+            "version": 1700000048000,
+            "sequenceId": 48,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Group chat message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000048000,
+            "clientArrivalTime": 1700000048005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000048000
+      }
+    },
+    {
+      "key": "1700000049000",
+      "envelope": "v21",
+      "canonical_bytes": 11423,
+      "canonical_sha256": "0bfca3f5392d677c313fdd4f58df87d15453b6aef8560e106402ecda9d9b5f63"
+    },
+    {
+      "key": "1700000050000",
+      "envelope": "v21",
+      "canonical_bytes": 41123,
+      "canonical_sha256": "756b9fccf07acfadaf235bd78c84b3d50bacaeb89b9ea75b6b245e073f09d25e"
+    },
+    {
+      "key": "1700000051000",
+      "envelope": "snappy",
+      "canonical_bytes": 81623,
+      "canonical_sha256": "675e6882d46319e608a6bb04e1bd4f55d0b106b1452a24cc77badc135fe10d63"
+    },
+    {
+      "key": "1700000052000",
+      "envelope": "snappy",
+      "canonical_bytes": 162623,
+      "canonical_sha256": "2f9c4371fc2f7281e2ed5ecf642392311b3fa7762285792277371f48f128ec49"
+    },
+    {
+      "key": "1700000053000",
       "envelope": "blob",
       "canonical_bytes": 1127023,
-      "canonical_sha256": "c6412331c1272bc7a092d5c09b25bb5dff1cf4dc10af42c90369eacd7f8f9a51"
+      "canonical_sha256": "7b81e0e524bd6f3c4e7b56d921dfd5c04c72ba9fbe6dbbf26bfa83c708e4b18a"
     }
   ],
   "Teams:replychain-manager:react-web-client:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-0000000000a2:en-us": [
@@ -2491,32 +2840,381 @@
     {
       "key": "1700000039000",
       "envelope": "v21",
-      "canonical_bytes": 11424,
-      "canonical_sha256": "9f9fd53b9ee991bbbc0f9913110df7ac0fa5e094dfbf91e4f749a6ddf1aeaa85"
+      "canonical_bytes": 1167,
+      "canonical_sha256": "9264d60e686bfa2305b5ecfc18b340c128da9c425491196899993cc34eb0932c",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000039000",
+        "messageMap": {
+          "1700000039000": {
+            "id": "1700000039000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000039000",
+            "clientMessageId": "9000000039",
+            "version": 1700000039000,
+            "sequenceId": 39,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Alex Fixture</span> and <at id=\"1\">Sam Tag</at> see this</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000039000,
+            "clientArrivalTime": 1700000039005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"@type\":\"http://schema.skype.com/Mention\",\"itemid\":0,\"mentionType\":\"person\",\"mri\":\"8:orgid:00000000-0000-4000-8000-0000000000a2\",\"displayName\":\"Blair Fixture\"},{\"itemid\":1,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag\",\"displayName\":\"Sam Tag\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000039000
+      }
     },
     {
       "key": "1700000040000",
       "envelope": "v21",
-      "canonical_bytes": 41124,
-      "canonical_sha256": "143e5d5129c34ab585fb88dffa927e96b4e5d6d2df18859497db3558a24f637e"
+      "canonical_bytes": 995,
+      "canonical_sha256": "fc879a1222c61c4de041b65bf8ee218a5165f8194988c270ea115a5c41b9fb0b",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000040000",
+        "messageMap": {
+          "1700000040000": {
+            "id": "1700000040000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000040000",
+            "clientMessageId": "9000000040",
+            "version": 1700000040000,
+            "sequenceId": 40,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Sam Example</span> is not you</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000040000,
+            "clientArrivalTime": 1700000040005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"person\",\"mri\":\"8:orgid:00000000-0000-4000-8000-0000000000dd\",\"displayName\":\"Sam Example\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000040000
+      }
     },
     {
       "key": "1700000041000",
-      "envelope": "snappy",
-      "canonical_bytes": 81624,
-      "canonical_sha256": "56266af889a4e1113c673c7afa405168ec12a483faa65c5b71ce5ebb946740f9"
+      "envelope": "v21",
+      "canonical_bytes": 1124,
+      "canonical_sha256": "e6d5ca6810eba09920ce1b5a28fb7112d95ab3bd4000bbe02521d535cc2492c5",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000041000",
+        "messageMap": {
+          "1700000041000": {
+            "id": "1700000041000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000041000",
+            "clientMessageId": "9000000041",
+            "version": 1700000041000,
+            "sequenceId": 41,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Reactions here</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000041000,
+            "clientArrivalTime": 1700000041005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "emotions": [
+                {
+                  "key": "like",
+                  "users": [
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+                      "time": 1700000040010,
+                      "value": "1700000040010"
+                    },
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+                      "time": 1700000040020,
+                      "value": "1700000040020"
+                    }
+                  ]
+                },
+                {
+                  "key": "heart",
+                  "users": [
+                    {
+                      "mri": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+                      "time": 1700000040030,
+                      "value": "1700000040030"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000041000
+      }
     },
     {
       "key": "1700000042000",
-      "envelope": "snappy",
-      "canonical_bytes": 162624,
-      "canonical_sha256": "f2de7821988f19c24dd8b4efffa0f0542d6f2d6a12a6a534c7affface52a0e11"
+      "envelope": "v21",
+      "canonical_bytes": 1366,
+      "canonical_sha256": "2226454a31016d247a34c78190821d0bf08568160b3116e230e2fa27cba6c95e",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000042000",
+        "messageMap": {
+          "1700000042000": {
+            "id": "1700000042000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000042000",
+            "clientMessageId": "9000000042",
+            "version": 1700000042000,
+            "sequenceId": 42,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Files attached</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000042000,
+            "clientArrivalTime": 1700000042005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "files": "[{\"@type\":\"http://schema.skype.com/File\",\"id\":\"f1\",\"itemid\":\"f1\",\"fileName\":\"Quarterly report.docx\",\"fileType\":\"docx\",\"objectUrl\":\"https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx\",\"fileInfo\":{\"fileUrl\":\"https://fixture.sharepoint.example/teams/fixture/Quarterly%20report.docx\",\"shareUrl\":null}},{\"itemid\":\"f2\",\"fileName\":\"diagram.png\",\"fileType\":\"png\",\"objectUrl\":null,\"fileInfo\":{\"fileUrl\":\"https://fixture.sharepoint.example/teams/fixture/diagram.png\",\"shareUrl\":\"https://fixture.sharepoint.example/s/diagram\"}}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000042000
+      }
     },
     {
       "key": "1700000043000",
+      "envelope": "v21",
+      "canonical_bytes": 1064,
+      "canonical_sha256": "b40574152e180292012b51bb4eaf9573f9e601e93db462794ef56181af71e193",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000043000",
+        "messageMap": {
+          "1700000043000": {
+            "id": "1700000043000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000043000",
+            "clientMessageId": "9000000043",
+            "version": 1700000043000,
+            "sequenceId": 43,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Read <a href=\"https://example.com/docs?a=1&amp;b=2\">the docs</a> and https://example.org/plain</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000043000,
+            "clientArrivalTime": 1700000043005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "links": "[{\"@type\":\"http://schema.skype.com/HyperLink\",\"itemid\":\"l1\",\"url\":\"https://example.com/docs?a=1&b=2\",\"previewenabled\":true,\"preview\":{}},{\"itemid\":\"l2\",\"url\":\"https://example.org/plain\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000043000
+      }
+    },
+    {
+      "key": "1700000044000",
+      "envelope": "v21",
+      "canonical_bytes": 778,
+      "canonical_sha256": "583d00f48ef4d211c18d377741cb67c4daa663b1928deed00e0ad52a7327fd27",
+      "canonical": {
+        "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "replyChainId": "1700000044000",
+        "messageMap": {
+          "1700000044000": {
+            "id": "1700000044000",
+            "conversationId": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+            "parentMessageId": "1700000044000",
+            "clientMessageId": "9000000044",
+            "version": 1700000044000,
+            "sequenceId": 44,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Zero-width horizon newer message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000044000,
+            "clientArrivalTime": 1700000044005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000044000
+      }
+    },
+    {
+      "key": "1700000045000",
+      "envelope": "v21",
+      "canonical_bytes": 1385,
+      "canonical_sha256": "aa967979908b4d6c32c37b193d39ba53dfdb4324193f067a4bcbdc8ef4be7c3b",
+      "canonical": {
+        "conversationId": "19:topicchannel2@thread.tacv2",
+        "replyChainId": "1700000045000",
+        "messageMap": {
+          "1700000045000": {
+            "id": "1700000045000",
+            "conversationId": "19:topicchannel2@thread.tacv2",
+            "parentMessageId": "1700000045000",
+            "clientMessageId": "9000000045",
+            "version": 1700000045000,
+            "sequenceId": 45,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Channel post with a subject</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000045000,
+            "clientArrivalTime": 1700000045005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "high",
+              "subject": "Fixture subject",
+              "pinned": "{\"creatorId\":\"8:orgid:00000000-0000-4000-8000-0000000000a2\",\"pinnedTime\":1700000444000}"
+            }
+          },
+          "1700000046000": {
+            "id": "1700000046000",
+            "conversationId": "19:topicchannel2@thread.tacv2",
+            "parentMessageId": "1700000045000",
+            "clientMessageId": "9000000046",
+            "version": 1700000046000,
+            "sequenceId": 46,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<blockquote itemscope itemtype=\"http://schema.skype.com/Reply\"><p>Channel post with a subject</p></blockquote><p>Reply in thread</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000046000,
+            "clientArrivalTime": 1700000046005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000046000
+      }
+    },
+    {
+      "key": "1700000047000",
+      "envelope": "v21",
+      "canonical_bytes": 652,
+      "canonical_sha256": "37f8532eed972ec3386b1bc89d3f1b197fa29c68d5fb15e8d9c17bc677d014e7",
+      "canonical": {
+        "conversationId": "19:planningchannel2@thread.tacv2",
+        "replyChainId": "1700000047000",
+        "messageMap": {
+          "1700000047000": {
+            "id": "1700000047000",
+            "conversationId": "19:planningchannel2@thread.tacv2",
+            "parentMessageId": "1700000047000",
+            "clientMessageId": "9000000047",
+            "version": 1700000047000,
+            "sequenceId": 47,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Planning channel message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000047000,
+            "clientArrivalTime": 1700000047005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000047000
+      }
+    },
+    {
+      "key": "1700000048000",
+      "envelope": "v21",
+      "canonical_bytes": 636,
+      "canonical_sha256": "f1dabb0426dde2bdb204e61740eb536df512cc6be95089110dc80a0f6b252d91",
+      "canonical": {
+        "conversationId": "19:untitledgroup2@thread.v2",
+        "replyChainId": "1700000048000",
+        "messageMap": {
+          "1700000048000": {
+            "id": "1700000048000",
+            "conversationId": "19:untitledgroup2@thread.v2",
+            "parentMessageId": "1700000048000",
+            "clientMessageId": "9000000048",
+            "version": 1700000048000,
+            "sequenceId": 48,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p>Group chat message</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000048000,
+            "clientArrivalTime": 1700000048005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000048000
+      }
+    },
+    {
+      "key": "1700000049000",
+      "envelope": "v21",
+      "canonical_bytes": 11424,
+      "canonical_sha256": "1bf5a32ef8748cfdeffafc6c026054964a6772253fd9429bad7053153c40720e"
+    },
+    {
+      "key": "1700000050000",
+      "envelope": "v21",
+      "canonical_bytes": 41124,
+      "canonical_sha256": "38ef63730fbf920615a1fdd073a34dc3d92184c3cfe23c69c13e9960ce66f7b4"
+    },
+    {
+      "key": "1700000051000",
+      "envelope": "snappy",
+      "canonical_bytes": 81624,
+      "canonical_sha256": "9beba2d74248d10b85260979c238efd93e0be1d0646c8256a9e41e2ab9f87332"
+    },
+    {
+      "key": "1700000052000",
+      "envelope": "snappy",
+      "canonical_bytes": 162624,
+      "canonical_sha256": "77f534c6a899796bb5fc96968c1a84b7aae54ae01d92e7d59a457559f80f91f5"
+    },
+    {
+      "key": "1700000053000",
       "envelope": "blob",
       "canonical_bytes": 205424,
-      "canonical_sha256": "8f76d7b930d2fb34f498fc35ce52b7ff2ba540817c7aefe7c92f5d3be7e204f6"
+      "canonical_sha256": "7a5518bdcf65eeda2b05e69020f94d15b91f8b149b23907c430a6ee51f75a981"
     }
   ]
 }
