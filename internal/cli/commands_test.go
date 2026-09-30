@@ -850,3 +850,51 @@ func TestHelpStatesOrderingAndFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchEmptyQueryFixPointsToMessages(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	code, _, stderr := e.run("--max-age", "0", "search", "")
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	body := errorOf(t, stderr)
+	want := "To list messages without a text query, use `teamscrawl messages` with filters (for example `teamscrawl messages --mentions-me --since 24h`)."
+	if body["fix"] != want || !strings.Contains(body["message"].(string), "no searchable terms") {
+		t.Fatalf("error = %v", body)
+	}
+}
+
+func TestChannelsExcludedFlag(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	for _, args := range [][]string{{"unread"}, {"unread", "--by-conversation"}, {"messages", "--unread"}} {
+		_, stdout, _ := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if m := decode(t, stdout); m["channels_excluded"] != true {
+			t.Fatalf("%v: channels_excluded = %v in %s", args, m["channels_excluded"], stdout)
+		}
+	}
+	for _, args := range [][]string{{"unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"}, {"messages", "--unread", "--include-channels"}, {"messages"}, {"search", "x"}} {
+		_, stdout, _ := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if _, ok := decode(t, stdout)["channels_excluded"]; ok {
+			t.Fatalf("%v: channels_excluded must be omitted: %s", args, stdout)
+		}
+	}
+}
+
+func TestThreadLimit(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	base := []string{"--max-age", "0", "thread", "19:topicchannel1@thread.tacv2", "1700000045000", "--account", tenantA + "/" + userA}
+	m := decode(t, func() string { _, o, _ := e.run(append(base, "--limit", "1")...); return o }())
+	if its := items(t, m); len(its) != 1 || its[0]["id"] != "1700000045000" || m["truncated"] != true {
+		t.Fatalf("--limit 1 = %v", m)
+	}
+	m = decode(t, func() string { _, o, _ := e.run(base...); return o }())
+	if len(items(t, m)) != 2 || m["truncated"] != false {
+		t.Fatalf("default limit = %v", m)
+	}
+	if code, _, _ := e.run(append(base, "--limit", "0")...); code != 2 {
+		t.Fatalf("--limit 0 exit %d, want 2", code)
+	}
+}

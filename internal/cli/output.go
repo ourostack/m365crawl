@@ -48,6 +48,9 @@ type listResult struct {
 	Items     []any `json:"items"`
 	Count     int   `json:"count"`
 	Truncated bool  `json:"truncated"`
+	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
+	// does not read the result as covering every conversation. Omitted otherwise.
+	ChannelsExcluded bool `json:"channels_excluded,omitempty"`
 	meta
 }
 

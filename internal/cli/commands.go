@@ -228,8 +228,18 @@ func (c *messagesCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		return rt.messageList(rt.ctx, st, rows, trunc, c.HTML)
+		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, c.HTML))(c.Unread && !c.IncludeChannels)
 	})
+}
+
+// excludingChannels marks a list result as having left channels out when on is true.
+func excludingChannels(res result, err error) func(on bool) (result, error) {
+	return func(on bool) (result, error) {
+		if l, ok := res.(*listResult); ok && err == nil {
+			l.ChannelsExcluded = on
+		}
+		return res, err
+	}
 }
 
 type unreadCmd struct {
@@ -282,19 +292,20 @@ func (c *unreadCmd) Run(rt *runtime) error {
 			if err != nil {
 				return nil, err
 			}
-			return newList(shaped, trunc), nil
+			return excludingChannels(newList(shaped, trunc), nil)(!c.IncludeChannels)
 		}
 		rows, trunc, err := st.Unread(rt.ctx, f)
 		if err != nil {
 			return nil, err
 		}
-		return rt.messageList(rt.ctx, st, rows, trunc, c.HTML)
+		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, c.HTML))(!c.IncludeChannels)
 	})
 }
 
 type threadCmd struct {
 	Target         string `arg:"" help:"Conversation id, or a Teams message link."`
 	Root           string `arg:"" optional:"" help:"Root message id (not needed with a link)."`
+	Limit          int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also show deleted messages."`
 	HTML           bool   `name:"html" help:"Add each message's HTML body as html."`
 	IncludeSystem  bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
@@ -302,6 +313,9 @@ type threadCmd struct {
 
 func (c *threadCmd) Run(rt *runtime) error {
 	if err := checkFields[messageItem](rt); err != nil {
+		return err
+	}
+	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
 	conv, root, err := parseThreadTarget(c.Target, c.Root)
@@ -312,11 +326,11 @@ func (c *threadCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem})
+		rows, trunc, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem, Limit: c.Limit})
 		if err != nil {
 			return nil, err
 		}
-		return rt.messageList(rt.ctx, st, rows, false, c.HTML)
+		return rt.messageList(rt.ctx, st, rows, trunc, c.HTML)
 	})
 }
 

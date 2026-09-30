@@ -104,7 +104,7 @@ Flags that matter for agents:
 
 - `--max-age 15m` (or `TEAMSCRAWL_MAX_AGE`) makes a read command run a sync first when the last successful one is older. `0` disables it. If the implicit sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
 - `--fields a,b,c` keeps only those top-level keys of each item.
-- `--max-text N` truncates each item's text to N characters and sets `text_truncated`.
+- `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
 - `archive_age_seconds` tells you how stale the answer can be. A never-synced archive adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
 - System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact.
 
@@ -118,9 +118,9 @@ Flags that matter for agents:
 | `status` | Shows archive counts per account, the last sync and other Teams origins seen. |
 | `search <query>` | Full-text search over message text, newest first. Filters: `--conversation`, `--from`, `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--include-system`. |
 | `messages` | Lists messages chronologically (oldest first). Same filters as `search`, plus `--unread` and `--include-channels`. |
-| `unread` | Lists unread messages in chats and meetings, newest first. Flags: `--include-channels` (channels are off by default because their unread counts are noise), `--by-conversation` (one item per conversation with its unread count, most unread first), `--include-system`. |
+| `unread` | Lists unread messages in chats and meetings, newest first. Flags: `--include-channels` (channels are off by default because their unread counts are noise; results then carry `"channels_excluded":true`), `--by-conversation` (one item per conversation with its unread count, most unread first), `--include-system`. |
 | `activity` | Lists activity-feed items (mentions, replies, reactions) joined with their messages. Filters: `--unread`, `--type`, `--since`, `--include-system`. |
-| `thread <conversation> <root-id>` | Shows one thread. Accepts a Teams message link instead of the two arguments. |
+| `thread <conversation> <root-id>` | Shows one thread. Accepts a Teams message link instead of the two arguments, and `--limit` (default 50, check `truncated`). |
 | `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query`, `--include-system`. |
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
