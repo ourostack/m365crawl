@@ -135,3 +135,36 @@ func TestFingerprintSkipsVanishedFile(t *testing.T) {
 		t.Fatal("fingerprint with the file vanished mid-walk must equal the fingerprint without it")
 	}
 }
+
+func TestFingerprintDependsOnDecoderVersion(t *testing.T) {
+	s := fingerprintSource(t)
+	before, _ := FingerprintOf(s)
+	old := decoderVersion
+	decoderVersion = old + 1
+	t.Cleanup(func() { decoderVersion = old })
+	after, _ := FingerprintOf(s)
+	if before == after {
+		t.Fatal("bumping DecoderVersion must change the fingerprint of unchanged files")
+	}
+	if DecoderVersion != old {
+		t.Fatal("decoderVersion must start at DecoderVersion")
+	}
+}
+
+func TestFingerprintSkipsVanishedSubdirectory(t *testing.T) {
+	s := fingerprintSource(t)
+	want, _ := FingerprintOf(s)
+	old := walkDir
+	walkDir = func(root string, fn fs.WalkDirFunc) error {
+		err := filepath.WalkDir(root, fn)
+		if err == nil && root == s.BlobDir { // a subdirectory purged between its listing and its read
+			err = fn(filepath.Join(root, "1", "00"), nil, &fs.PathError{Op: "open", Path: filepath.Join(root, "1", "00"), Err: fs.ErrNotExist})
+		}
+		return err
+	}
+	t.Cleanup(func() { walkDir = old })
+	got, err := FingerprintOf(s)
+	if err != nil || got != want {
+		t.Fatalf("a vanished subdirectory must be skipped: %v", err)
+	}
+}

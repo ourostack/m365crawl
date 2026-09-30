@@ -30,11 +30,20 @@ func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 
 // ApplyAccount records the account, keeping first_seen_at and stamping last_synced_at.
 func (s *Store) ApplyAccount(ctx context.Context, a teamsdesktop.Account) error {
+	return applyAccount(ctx, s.db, a)
+}
+
+// execer is what a statement needs: a database or a transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func applyAccount(ctx context.Context, db execer, a teamsdesktop.Account) error {
 	if a.TenantID == "" || a.UserID == "" {
 		return errors.New("account needs tenant and user ids")
 	}
 	now := nowText()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 insert into accounts(tenant_id, user_id, locale, first_seen_at, last_synced_at) values(?,?,?,?,?)
 on conflict(tenant_id, user_id) do update set locale = case when excluded.locale <> '' then excluded.locale else accounts.locale end, last_synced_at = excluded.last_synced_at`,
 		a.TenantID, a.UserID, a.Locale, now, now)
@@ -61,9 +70,14 @@ func bool01(b bool) int {
 }
 
 // ApplyConversations upserts conversations (one transaction) and refreshes their title index.
-func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conversation) (Counts, error) {
+func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conversation) (n Counts, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, e = applyConversations(ctx, tx, cs); return })
+	return n, err
+}
+
+func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conversation) (Counts, error) {
 	var n Counts
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select rowid, content_hash, read_horizon_at, read_horizon_client_message_id from conversations where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
 			return err
@@ -128,7 +142,7 @@ func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conver
 			touched = append(touched, c)
 		}
 		return reindexTitles(ctx, tx, touched)
-	})
+	}()
 	return n, err
 }
 
@@ -256,10 +270,18 @@ func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (C
 // ApplyMessagesChanges is ApplyMessages that also reports each inserted or updated row: "new" for
 // an insert, "deleted" when the row gains its tombstone, "edited" for any other update. A
 // deleted_at, once set, stays set unless a newer version arrives without it.
-func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Message) (Counts, []Change, error) {
+func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Message) (n Counts, changes []Change, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, e = applyMessages(ctx, tx, ms); return })
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	return n, changes, nil
+}
+
+func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (Counts, []Change, error) {
 	var n Counts
 	var changes []Change
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select rowid, version, content_hash, deleted_at from messages where tenant_id=? and user_id=? and conversation_id=? and id=?`)
 		if err != nil {
 			return err
@@ -340,15 +362,23 @@ func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Mess
 			}
 		}
 		return nil
-	})
-	return n, changes, err
+	}()
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	return n, changes, nil
 }
 
 // ApplyPeople upserts people: the display name follows the latest non-empty value, first_seen_at
 // keeps the earliest sighting and last_seen_at the latest.
-func (s *Store) ApplyPeople(ctx context.Context, ps []teamsdesktop.Person) (Counts, error) {
+func (s *Store) ApplyPeople(ctx context.Context, ps []teamsdesktop.Person) (n Counts, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, e = applyPeople(ctx, tx, ps); return })
+	return n, err
+}
+
+func applyPeople(ctx context.Context, tx *sql.Tx, ps []teamsdesktop.Person) (Counts, error) {
 	var n Counts
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select display_name, first_seen_at, last_seen_at from people where tenant_id=? and id=?`)
 		if err != nil {
 			return err
@@ -405,7 +435,7 @@ func (s *Store) ApplyPeople(ctx context.Context, ps []teamsdesktop.Person) (Coun
 			n.Updated++
 		}
 		return nil
-	})
+	}()
 	return n, err
 }
 
@@ -417,10 +447,18 @@ func (s *Store) ApplyActivity(ctx context.Context, as []teamsdesktop.Activity) (
 
 // ApplyActivityChanges is ApplyActivity that also reports each inserted ("new") or updated
 // ("edited") item.
-func (s *Store) ApplyActivityChanges(ctx context.Context, as []teamsdesktop.Activity) (Counts, []Change, error) {
+func (s *Store) ApplyActivityChanges(ctx context.Context, as []teamsdesktop.Activity) (n Counts, changes []Change, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, e = applyActivity(ctx, tx, as); return })
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	return n, changes, nil
+}
+
+func applyActivity(ctx context.Context, tx *sql.Tx, as []teamsdesktop.Activity) (Counts, []Change, error) {
 	var n Counts
 	var changes []Change
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select content_hash from activity where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
 			return err
@@ -465,6 +503,9 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 			}
 		}
 		return nil
-	})
-	return n, changes, err
+	}()
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	return n, changes, nil
 }
