@@ -61,7 +61,7 @@ func TestSystemConversationsExcludedByDefault(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("unread: %v", ids(rows))
 	}
-	rows = must(s.Thread(ctx, "48:notifications", "n1", f))
+	rows, _ = must2(s.Thread(ctx, "48:notifications", "n1", f))
 	if len(rows) != 0 {
 		t.Fatalf("thread: %v", ids(rows))
 	}
@@ -82,7 +82,7 @@ func TestSystemConversationsExcludedByDefault(t *testing.T) {
 	if len(rows) != 5 {
 		t.Fatalf("unread include system: %v", ids(rows))
 	}
-	rows = must(s.Thread(ctx, "48:notifications", "n1", f))
+	rows, _ = must2(s.Thread(ctx, "48:notifications", "n1", f))
 	if len(rows) != 1 {
 		t.Fatalf("thread include system: %v", ids(rows))
 	}

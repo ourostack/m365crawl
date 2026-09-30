@@ -306,7 +306,7 @@ func (s *Store) Messages(ctx context.Context, f Filter) ([]MessageRow, bool, err
 func (s *Store) Search(ctx context.Context, query string, f Filter) ([]MessageRow, bool, error) {
 	match := buildFTSQuery(query)
 	if match == "" {
-		return nil, false, errs.Usage("search query has no searchable terms")
+		return nil, false, searchUsage("search query has no searchable terms")
 	}
 	var w where
 	w.add(`message_fts match ?`, match)
@@ -380,7 +380,7 @@ func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadCon
 
 // Thread returns a thread's root message and its replies, oldest first. f.Account narrows to one
 // account and f.IncludeDeleted keeps deleted messages; its other fields are ignored.
-func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Filter) ([]MessageRow, error) {
+func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Filter) ([]MessageRow, bool, error) {
 	var w where
 	w.add(`m.conversation_id=?`, conversationID)
 	w.add(`(m.id=? or m.parent_message_id=? or m.reply_chain_id=?)`, rootID, rootID, rootID)
@@ -393,11 +393,18 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 	if !f.IncludeSystem {
 		w.add(notSystemCond(`m.conversation_id`))
 	}
-	rows, err := s.db.QueryContext(ctx, `select `+msgCols+` from messages m`+msgJoin+w.sql()+` order by m.sent_at, m.id`, w.args...) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, err := s.db.QueryContext(ctx, `select `+msgCols+` from messages m`+msgJoin+w.sql()+` order by m.sent_at, m.id limit ?`, append(w.args, f.limit()+1)...) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return scanMessages(rows)
+	out, err := scanMessages(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out) > f.limit() {
+		return out[:f.limit()], true, nil
+	}
+	return out, false, nil
 }
 
 // Conversations lists conversations by latest activity. kind is a case-insensitive exact match
@@ -603,4 +610,11 @@ func buildFTSQuery(in string) string {
 	}
 	flush(inPhrase)
 	return strings.Join(out, " ")
+}
+
+// searchUsage is a usage error for an empty search that points at messages for filter-only listing.
+func searchUsage(msg string) *errs.Coded {
+	c := errs.Usage(msg)
+	c.Fix = "To list messages without a text query, use `teamscrawl messages` with filters (for example `teamscrawl messages --mentions-me --since 24h`)."
+	return c
 }

@@ -23,6 +23,8 @@ teamscrawl search "quarterly plan" --since 7d --limit 10 --max-text 300
 teamscrawl thread <conversation_id> <root_message_id>   # or: teamscrawl thread "<link>"
 ```
 
+No text query? Use `messages` with filters; `search` needs at least one word.
+
 Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read commands sync first when the archive is older than `--max-age`; pass `--max-age 15m` for fresh answers or `--max-age 0` to skip the sync.
 
 ## Global flags
@@ -49,7 +51,7 @@ Accounts in the archive and its state. Use `self_id` to recognize the user's own
 
 ### unread
 
-Unread messages, newest first (newer than the conversation's read marker and not sent by the user). By default it covers chats and meetings only: most channels are never opened, so their unread counts are noise, and channel mentions and replies reach you through `activity`. Add `--include-channels` to count channels and teams too (`messages --unread` takes the same flag). `--by-conversation` gives the overview instead of messages: one item per conversation `{conversation_id, conversation_display_name, kind, unread_count, oldest_unread_at, newest_unread_at, link}`, most unread first; start there, then read a conversation with `messages -c <id> --unread`. Flags: `-c/--conversation`, `--limit`, `--html`, `--include-channels`, `--by-conversation`, `--include-system`.
+Unread messages, newest first (newer than the conversation's read marker and not sent by the user). By default it covers chats and meetings only: most channels are never opened, so their unread counts are noise, and channel mentions and replies reach you through `activity`. Add `--include-channels` to count channels and teams too (`messages --unread` takes the same flag). `--by-conversation` gives the overview instead of messages: one item per conversation `{conversation_id, conversation_display_name, kind, unread_count, oldest_unread_at, newest_unread_at, link}`, most unread first; start there, then read a conversation with `messages -c <id> --unread` (pass `--include-channels` too when that conversation is a channel, or the channel's messages are filtered out). When channels are left out (no `--include-channels`), `unread` and `messages --unread` results carry `"channels_excluded":true`; it is omitted when channels are included. Flags: `-c/--conversation`, `--limit`, `--html`, `--include-channels`, `--by-conversation`, `--include-system`.
 
 ```json
 {"items":[{"conversation_id":"19:topicchannel1@thread.tacv2","conversation_display_name":"Fixture team 1 › General","id":"1700000046000","reply_chain_id":"1700000045000","sender_name":"Pat Example","sent_at":"2023-11-14T22:14:06Z","text":"Channel post with a subject\nReply in thread","mentions_me":false,"link":"https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?tenantId=...&parentMessageId=1700000045000"}],"count":1,"truncated":false,"archive_age_seconds":0}
@@ -79,7 +81,7 @@ Optional keys (omitted when empty): `edited_at`, `deleted_at`, `mentions`, `reac
 
 ### thread
 
-One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (the root is an item's `parent_message_id`/`reply_chain_id`) or a Teams message link copied from any `link`. Flags: `--include-deleted`, `--html`, `--include-system`.
+One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (the root is an item's `parent_message_id`/`reply_chain_id`) or a Teams message link copied from any `link`. Flags: `--limit` (default 50; check `truncated`), `--include-deleted`, `--html`, `--include-system`.
 
 ### conversations and people
 
@@ -103,7 +105,7 @@ One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands
 
 ## Context budget
 
-Messages can be long. Start with `--max-text 300` (sets `text_truncated: true` on cut items), `--fields id,sender_name,sent_at,text,link` to drop the rest, and a small `--limit`. Fetch full text later for the few items that matter with `thread` or `messages -c ... --limit 1`. Fields accepted by `--fields` are the item's top-level keys; an unknown key is a `usage` error that lists the valid ones.
+Messages can be long. Start with `--max-text 300` (sets `text_truncated: true` on cut items; it keeps the first N characters including the trailing `…` and may cut mid-word), `--fields id,sender_name,sent_at,text,link` to drop the rest, and a small `--limit`. Fetch full text later for the few items that matter with `thread` or `messages -c ... --limit 1`. Fields accepted by `--fields` are the item's top-level keys; an unknown key is a `usage` error that lists the valid ones.
 
 ## Citing
 

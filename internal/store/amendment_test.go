@@ -201,18 +201,18 @@ func TestThread(t *testing.T) {
 	ms = append(ms, other, otherAcct, gone)
 	must(s.ApplyMessages(ctx, ms))
 
-	rows, err := s.Thread(ctx, "chan", "r1", Filter{Account: &acctA})
+	rows, _, err := s.Thread(ctx, "chan", "r1", Filter{Account: &acctA})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !eqStrings(ids(rows), []string{"r1", "r3", "r2", "r4"}) {
 		t.Fatalf("thread order: %v", ids(rows))
 	}
-	rows, _ = s.Thread(ctx, "chan", "r1", Filter{Account: &acctA, IncludeDeleted: true})
+	rows, _, _ = s.Thread(ctx, "chan", "r1", Filter{Account: &acctA, IncludeDeleted: true})
 	if len(rows) != 5 {
 		t.Fatalf("include deleted: %v", ids(rows))
 	}
-	rows, _ = s.Thread(ctx, "chan", "r1", Filter{})
+	rows, _, _ = s.Thread(ctx, "chan", "r1", Filter{})
 	if len(rows) != 5 {
 		t.Fatalf("both accounts: %v", ids(rows))
 	}
