@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"github.com/mattn/go-runewidth"
-
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-runewidth"
 
 	"github.com/ourostack/teamscrawl/internal/render"
 	"github.com/ourostack/teamscrawl/internal/store"
@@ -214,7 +214,7 @@ func (rt *runtime) listTable(r *listResult) {
 			if i == textCol {
 				continue
 			}
-			w := len(cols[i])
+			w := runewidth.StringWidth(cols[i])
 			for _, row := range rows {
 				w = max(w, runewidth.StringWidth(row[i]))
 			}

@@ -105,6 +105,8 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		kong.Help(func(opts kong.HelpOptions, kctx *kong.Context) error {
 			// Text mode opens help with the wordmark, like every other text screen.
 			if rt.format == output.Text {
+				// The flag is not parsed yet when help runs, so read it from the raw args.
+				rt.g.NoColor = rt.g.NoColor || contains(args, "--no-color")
 				rt.color = rt.colorEnabled()
 				render.Banner(kctx.Stdout, "help", rt.color)
 			}

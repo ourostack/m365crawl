@@ -17,6 +17,8 @@ export function ansiToHtml(input) {
       else if (c === 2) state.dim = true;
       else if (PALETTE[c]) state.color = PALETTE[c];
       else if (c === 38 && codes[i + 1] === 2) { state.color = `rgb(${codes[i + 2]},${codes[i + 3]},${codes[i + 4]})`; i += 4; }
+      // 256-color codes are the non-truecolor fallback; the screenshot always forces truecolor, so a
+      // single lavender stands in for them.
       else if (c === 38 && codes[i + 1] === 5) { state.color = `var(--c256-${codes[i + 2]}, #8b8dc9)`; i += 2; }
     }
   };
