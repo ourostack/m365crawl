@@ -1,0 +1,34 @@
+version: 2
+
+project_name: teamscrawl
+
+builds:
+  - id: teamscrawl
+    main: ./cmd/teamscrawl
+    binary: teamscrawl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }}
+
+archives:
+  - id: bundles
+    ids:
+      - teamscrawl
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true

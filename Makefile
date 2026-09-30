@@ -1,0 +1,73 @@
+BINARY ?= bin/teamscrawl
+GOLANGCI_LINT_VERSION ?= v2.14.0
+GOVULNCHECK_VERSION ?= v1.8.0
+ACTIONLINT_VERSION ?= v1.7.12
+GORELEASER_VERSION ?= v2.18.2
+VERSION ?= dev
+
+export GOWORK := off
+
+.DEFAULT_GOAL := help
+
+.PHONY: help build test e2e fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot clean
+
+help:
+	@printf '%s\n' \
+		'Available targets:' \
+		'  help           Print available targets (default).' \
+		'  build          Build the CLI into $(BINARY).' \
+		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
+		'  e2e            Run end-to-end tests (build tag e2e).' \
+		'  fmt            Apply Go formatting.' \
+		'  fmt-check      Fail if any file needs formatting.' \
+		'  vet            Run go vet.' \
+		'  lint           Run golangci-lint, govulncheck and actionlint.' \
+		'  tidy-check     Verify go.mod and go.sum are tidy.' \
+		'  check          Run every local gate enforced by CI.' \
+		'  snapshot       Build release artifacts locally without publishing.' \
+		'  clean          Remove local build output.'
+
+build:
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/teamscrawl/internal/cli.version=$(VERSION)" -o "$(BINARY)" ./cmd/teamscrawl
+
+test:
+	go test -race -count=1 $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...
+
+e2e:
+	go test -count=1 -tags e2e ./e2e/...
+
+fmt:
+	gofmt -w cmd internal e2e
+
+fmt-check:
+	@set -e; \
+	changed="$$(gofmt -l .)"; \
+	if [ -n "$$changed" ]; then printf 'gofmt wants changes in:\n%s\n' "$$changed"; exit 1; fi
+
+vet:
+	go vet ./...
+	go vet -tags e2e ./...
+
+lint: golangci vulncheck workflow-lint
+
+golangci:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...
+
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
+workflow-lint:
+	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+tidy-check:
+	go mod verify
+	go mod tidy -diff
+
+check: tidy-check fmt-check vet lint test e2e
+
+snapshot:
+	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=publish
+
+clean:
+	rm -rf -- bin dist
