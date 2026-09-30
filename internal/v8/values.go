@@ -3,11 +3,7 @@
 // and renders those values as canonical JSON for golden files.
 package v8
 
-import (
-	"fmt"
-	"math/big"
-	"time"
-)
+import "fmt"
 
 // Object is a plain JS object. Keys are in JS property order: integer-like
 // keys ascending first, then the remaining keys in insertion order. Numeric
@@ -57,11 +53,6 @@ type Wrapper struct {
 	Kind  string
 	Value any
 }
-
-var (
-	_ = big.NewInt
-	_ = time.Time{}
-)
 
 // UnsupportedError reports a construct that needs state outside the byte
 // stream (host objects, shared values, transfers) or an unrecognized tag.

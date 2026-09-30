@@ -15,6 +15,11 @@ import (
 
 const vectorDir = "../../testdata/v8"
 
+// readFile reads a test fixture; every path is built from the testdata directory or a t.TempDir.
+func readFile(path string) ([]byte, error) {
+	return os.ReadFile(path) //nolint:gosec // test fixture path
+}
+
 func readVectors(t testing.TB) []string {
 	t.Helper()
 	bins, err := filepath.Glob(filepath.Join(vectorDir, "*.bin"))
@@ -31,11 +36,11 @@ func TestVectors(t *testing.T) {
 	for _, bin := range readVectors(t) {
 		name := strings.TrimSuffix(filepath.Base(bin), ".bin")
 		t.Run(name, func(t *testing.T) {
-			in, err := os.ReadFile(bin)
+			in, err := readFile(bin)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := os.ReadFile(strings.TrimSuffix(bin, ".bin") + ".json")
+			want, err := readFile(strings.TrimSuffix(bin, ".bin") + ".json")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,8 +101,8 @@ func compareTrees(t *testing.T, generated, committed string) {
 			t.Errorf("%s is generated but not committed; run make v8vectors", name)
 			continue
 		}
-		a, _ := os.ReadFile(filepath.Join(generated, name))
-		b, _ := os.ReadFile(filepath.Join(committed, name))
+		a, _ := readFile(filepath.Join(generated, name))
+		b, _ := readFile(filepath.Join(committed, name))
 		if !bytes.Equal(a, b) {
 			t.Errorf("%s differs from gen.mjs output; run make v8vectors", name)
 		}
@@ -160,7 +165,7 @@ func TestUnsupportedTags(t *testing.T) {
 
 func TestHostObject(t *testing.T) {
 	for _, name := range []string{"host_buffer.bin", "host_uint8array.bin"} {
-		in, err := os.ReadFile(filepath.Join(vectorDir, "errors", name))
+		in, err := readFile(filepath.Join(vectorDir, "errors", name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +179,7 @@ func TestHostObject(t *testing.T) {
 
 func TestTruncated(t *testing.T) {
 	for _, bin := range readVectors(t) {
-		in, err := os.ReadFile(bin)
+		in, err := readFile(bin)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +188,11 @@ func TestTruncated(t *testing.T) {
 			end-- // trailing padding is legal, so cutting into it is not a truncation
 		}
 		for n := 0; n < end; n++ {
-			if _, err := Deserialize(in[:n]); err == nil {
+			v, err := Deserialize(in[:n])
+			if _, bare := v.(Bytes); err == nil && bare && strings.HasPrefix(filepath.Base(bin), "view_") {
+				continue // a view vector cut just before the view tag is a valid bare ArrayBuffer
+			}
+			if err == nil {
 				t.Fatalf("%s truncated to %d of %d bytes decoded without error", filepath.Base(bin), n, len(in))
 			}
 		}
@@ -328,7 +337,7 @@ func TestDecodedTypes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.vector, func(t *testing.T) {
-			in, err := os.ReadFile(filepath.Join(vectorDir, tt.vector+".bin"))
+			in, err := readFile(filepath.Join(vectorDir, tt.vector+".bin"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -350,7 +359,7 @@ func mustEq[T comparable](t *testing.T, got, want T) {
 
 func TestBackReferencesShareIdentity(t *testing.T) {
 	load := func(name string) any {
-		in, err := os.ReadFile(filepath.Join(vectorDir, name+".bin"))
+		in, err := readFile(filepath.Join(vectorDir, name+".bin"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +392,7 @@ func TestBackReferencesShareIdentity(t *testing.T) {
 }
 
 func TestDuplicateKeyKeepsFirstPosition(t *testing.T) {
-	in, err := os.ReadFile(filepath.Join(vectorDir, "object_duplicate_key_last_wins.bin"))
+	in, err := readFile(filepath.Join(vectorDir, "object_duplicate_key_last_wins.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +424,7 @@ func FuzzDeserialize(f *testing.F) {
 		if strings.Contains(bin, ".v16.") {
 			continue
 		}
-		in, err := os.ReadFile(bin)
+		in, err := readFile(bin)
 		if err != nil {
 			f.Fatal(err)
 		}
