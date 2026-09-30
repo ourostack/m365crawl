@@ -131,7 +131,7 @@ func TestUnread(t *testing.T) {
 	s := newStore(t)
 	c1 := conv(acctA, "c1", "Chat", "Read up to m2")
 	c1.ReadHorizonAt = base.Add(2 * time.Minute)
-	c1.ReadHorizonMessageID = "m2"
+	c1.ReadHorizonClientMessageID = "m2"
 	c2 := conv(acctA, "c2", "Chat", "Nothing read")
 	c2.ReadHorizonAt = base
 	c3 := conv(acctA, "c3", "Chat", "Horizon unknown")

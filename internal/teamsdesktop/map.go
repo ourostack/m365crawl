@@ -321,7 +321,12 @@ func mapMessage(acct Account, mo *v8.Object, chainConv, chainID string, people *
 	m.Reactions = mapReactions(props)
 	m.Files = mapFiles(fld(props, "files"))
 	m.Links = mapLinks(fld(props, "links"))
-	m.Link = DeepLink(conv, id, parent, acct.TenantID, strings.HasSuffix(conv, channelIDSuffix))
+	// A channel reply without parentMessageId is still in its root's chain: link through the chain.
+	linkParent := parent
+	if linkParent == "" && m.ReplyChainID != id {
+		linkParent = m.ReplyChainID
+	}
+	m.Link = DeepLink(conv, id, linkParent, acct.TenantID, strings.HasSuffix(conv, channelIDSuffix))
 
 	people.add(m.SenderID, m.SenderName, sentAt)
 	for _, mn := range m.Mentions {
@@ -468,7 +473,7 @@ func (s *peopleSet) list() []Person {
 // different batch, so the store composes it at query time from TeamID and the team's
 // conversation. The read marker (properties.consumptionhorizon, "<time>;<time>;<messageId>")
 // is split into ReadHorizonAt, the first time (the timestamp of the last message read), and
-// ReadHorizonMessageID; a horizon of zeros is absent. People are members who carry a name.
+// ReadHorizonClientMessageID; a horizon of zeros is absent. People are members who carry a name.
 func MapConversation(acct Account, v any) (Conversation, []Person, error) {
 	co, ok := v.(*v8.Object)
 	if !ok || co == nil {
@@ -520,7 +525,7 @@ func MapConversation(acct Account, v any) (Conversation, []Person, error) {
 		}
 	}
 	c.DisplayName = firstNonEmpty(short, c.Topic, strings.Join(names, ", "), long)
-	c.ReadHorizonAt, c.ReadHorizonMessageID = parseHorizon(str(path(co, "properties", "consumptionhorizon")))
+	c.ReadHorizonAt, c.ReadHorizonClientMessageID = parseHorizon(str(path(co, "properties", "consumptionhorizon")))
 	return c, people.list(), nil
 }
 

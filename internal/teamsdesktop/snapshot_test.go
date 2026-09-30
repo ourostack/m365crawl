@@ -211,3 +211,66 @@ func TestSweepStaleSnapshots(t *testing.T) {
 		}
 	}
 }
+
+// manifestSource is a fake LevelDB source and the path of its live MANIFEST.
+func manifestSource(t *testing.T) (Source, string) {
+	t.Helper()
+	base := t.TempDir()
+	s := Source{Profile: "p", Origin: "o", LevelDBDir: filepath.Join(base, "leveldb")}
+	fakeLevelDB(t, s.LevelDBDir)
+	cur, err := os.ReadFile(filepath.Join(s.LevelDBDir, "CURRENT")) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, filepath.Join(s.LevelDBDir, strings.TrimSpace(string(cur)))
+}
+
+func TestSnapshotManifestSizeMismatchRetries(t *testing.T) {
+	s, manifest := manifestSource(t)
+	orig, _ := os.ReadFile(manifest) //nolint:gosec // test temp dir
+	attempts := 0
+	oldCopy, oldAttempt := afterCopy, onSnapshotAttempt
+	afterCopy = func(n int) {
+		attempts = n
+		if n == 1 { // Teams appends to the MANIFEST after we copied it
+			f, _ := os.OpenFile(manifest, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test temp dir
+			_, _ = f.Write([]byte("more"))
+			_ = f.Close()
+		}
+	}
+	onSnapshotAttempt = func(n int) {
+		if n == 2 {
+			_ = os.WriteFile(manifest, orig, 0o600) //nolint:gosec // test temp dir
+		}
+	}
+	t.Cleanup(func() { afterCopy, onSnapshotAttempt = oldCopy, oldAttempt })
+	_, cleanup, err := Snapshot(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestSnapshotManifestSizeMismatchFails(t *testing.T) {
+	s, manifest := manifestSource(t)
+	attempts := 0
+	oldCopy := afterCopy
+	afterCopy = func(n int) {
+		attempts = n
+		f, _ := os.OpenFile(manifest, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test temp dir
+		_, _ = f.Write([]byte("x"))
+		_ = f.Close()
+	}
+	t.Cleanup(func() { afterCopy = oldCopy })
+	snap, cleanup, err := Snapshot(context.Background(), s)
+	cleanup()
+	if snap != "" || codeOf(t, err).Code != errs.CodeSnapshotInconsistent || attempts != 3 {
+		t.Fatalf("snap=%q attempts=%d err=%v", snap, attempts, err)
+	}
+	if !strings.Contains(err.Error(), "MANIFEST") {
+		t.Fatalf("error should name the MANIFEST: %v", err)
+	}
+}

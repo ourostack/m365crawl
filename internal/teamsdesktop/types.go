@@ -41,18 +41,18 @@ type File struct{ Name, URL, Type string }
 
 // Conversation is a chat, channel, meeting chat or space.
 type Conversation struct {
-	TenantID, UserID     string
-	ID                   string
-	Kind                 string // Teams type, e.g. "Chat", "Topic", "Space", "Meeting"
-	Title, Topic         string
-	DisplayName          string // "Team › Channel" for channels, chat title otherwise
-	TeamID, ParentID     string
-	Members              []string // member MRIs
-	LastMessageAt        time.Time
-	ReadHorizonAt        time.Time
-	ReadHorizonMessageID string
-	Favorite             bool
-	Raw                  []byte
+	TenantID, UserID           string
+	ID                         string
+	Kind                       string // Teams type, e.g. "Chat", "Topic", "Space", "Meeting"
+	Title, Topic               string
+	DisplayName                string // "Team › Channel" for channels, chat title otherwise
+	TeamID, ParentID           string
+	Members                    []string // member MRIs
+	LastMessageAt              time.Time
+	ReadHorizonAt              time.Time
+	ReadHorizonClientMessageID string
+	Favorite                   bool
+	Raw                        []byte
 }
 
 // Person is someone seen as a sender or member.

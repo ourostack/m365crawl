@@ -522,12 +522,12 @@ func TestConversationFields(t *testing.T) {
 func TestReadHorizon(t *testing.T) {
 	d := mapFixture(t, acct1)
 	chat := d.conv(t, "Fixture chat 1")
-	if !chat.ReadHorizonAt.Equal(time.UnixMilli(1700000004000)) || chat.ReadHorizonMessageID != "1700000004000" {
-		t.Errorf("chat horizon = %v %q", chat.ReadHorizonAt, chat.ReadHorizonMessageID)
+	if !chat.ReadHorizonAt.Equal(time.UnixMilli(1700000004000)) || chat.ReadHorizonClientMessageID != "1700000004000" {
+		t.Errorf("chat horizon = %v %q", chat.ReadHorizonAt, chat.ReadHorizonClientMessageID)
 	}
 	zero := d.conv(t, "Planning")
-	if !zero.ReadHorizonAt.IsZero() || zero.ReadHorizonMessageID != "" {
-		t.Errorf("0;0;0 horizon = %v %q", zero.ReadHorizonAt, zero.ReadHorizonMessageID)
+	if !zero.ReadHorizonAt.IsZero() || zero.ReadHorizonClientMessageID != "" {
+		t.Errorf("0;0;0 horizon = %v %q", zero.ReadHorizonAt, zero.ReadHorizonClientMessageID)
 	}
 	if none := d.conv(t, "Fixture team 1"); !none.ReadHorizonAt.IsZero() {
 		t.Errorf("no horizon = %v", none.ReadHorizonAt)
@@ -559,8 +559,8 @@ func TestReadHorizon(t *testing.T) {
 		"1700000004000;1700000009000;": {time.UnixMilli(1700000004000), ""},
 	} {
 		c, _, err := MapConversation(acct1, obj("id", "19:a@thread.v2", "type", "Chat", "properties", obj("consumptionhorizon", in)))
-		if err != nil || !c.ReadHorizonAt.Equal(want.at) || c.ReadHorizonMessageID != want.id {
-			t.Errorf("horizon %q = %v %q err %v, want %v %q", in, c.ReadHorizonAt, c.ReadHorizonMessageID, err, want.at, want.id)
+		if err != nil || !c.ReadHorizonAt.Equal(want.at) || c.ReadHorizonClientMessageID != want.id {
+			t.Errorf("horizon %q = %v %q err %v, want %v %q", in, c.ReadHorizonAt, c.ReadHorizonClientMessageID, err, want.at, want.id)
 		}
 	}
 }
@@ -699,5 +699,29 @@ func TestUnmapped(t *testing.T) {
 	}
 	if _, err := MapActivity(acct1, obj("activityId", "a", "timestamp", "soon", "isRead", "yes")); err != nil {
 		t.Errorf("weird activity: %v", err)
+	}
+}
+
+func TestChannelReplyLinkFallsBackToReplyChain(t *testing.T) {
+	const conv = "19:chan@thread.tacv2"
+	rec := obj("conversationId", conv, "replyChainId", "100", "messageMap", obj(
+		"100", obj("id", "100", "originalArrivalTime", float64(1)),
+		"101", obj("id", "101", "originalArrivalTime", float64(2)), // a reply with no parentMessageId
+	))
+	ms, _, err := MapReplyChain(acct1, rec)
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("%v %v", ms, err)
+	}
+	if want := DeepLink(conv, "100", "", tenant1, true); ms[0].Link != want {
+		t.Errorf("root link = %q want %q (the chain id equals its own id, no parent)", ms[0].Link, want)
+	}
+	if want := DeepLink(conv, "101", "100", tenant1, true); ms[1].Link != want || !strings.Contains(ms[1].Link, "parentMessageId=100") {
+		t.Errorf("reply link = %q want %q", ms[1].Link, want)
+	}
+	// A chat reply with no parent keeps the plain chat link.
+	chat := obj("conversationId", "19:g@thread.v2", "replyChainId", "5", "messageMap", obj("6", obj("id", "6", "originalArrivalTime", float64(2))))
+	ms, _, _ = MapReplyChain(acct1, chat)
+	if want := DeepLink("19:g@thread.v2", "6", "", tenant1, false); ms[0].Link != want {
+		t.Errorf("chat link = %q want %q", ms[0].Link, want)
 	}
 }

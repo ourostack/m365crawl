@@ -36,7 +36,12 @@ type Store struct {
 }
 
 // Counts reports what one Apply call did.
-type Counts struct{ Seen, Inserted, Updated, Unchanged int }
+type Counts struct {
+	Seen      int `json:"seen"`
+	Inserted  int `json:"inserted"`
+	Updated   int `json:"updated"`
+	Unchanged int `json:"unchanged"`
+}
 
 // Open creates or opens the archive at path for writing: parent directory 0700, file 0600.
 func Open(ctx context.Context, path string) (*Store, error) {

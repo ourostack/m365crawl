@@ -176,7 +176,11 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 	}
 	if f.From != "" {
 		var exact int
-		if err := s.db.QueryRowContext(ctx, `select exists(select 1 from messages where sender_id=?)`, f.From).Scan(&exact); err != nil {
+		probeScope, probeArgs := "", []any{f.From}
+		if f.Account != nil { // another account's sender ids must not decide how this account's filter matches
+			probeScope, probeArgs = ` and tenant_id=? and user_id=?`, append(probeArgs, f.Account.TenantID, f.Account.UserID)
+		}
+		if err := s.db.QueryRowContext(ctx, `select exists(select 1 from messages where sender_id=?`+probeScope+`)`, probeArgs...).Scan(&exact); err != nil {
 			return err
 		}
 		if exact == 1 {

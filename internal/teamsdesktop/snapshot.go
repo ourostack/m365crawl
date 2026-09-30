@@ -97,6 +97,12 @@ func copyOnce(ctx context.Context, s Source, dir string, attempt int) (retry boo
 		return true, errors.New("CURRENT changed during the copy")
 	}
 
+	// The MANIFEST grows while Teams writes. A copy whose MANIFEST is not the size of the live one
+	// was taken mid-write, so take it again.
+	if err := sameManifestSize(s.LevelDBDir, ldbDst, string(copied)); err != nil {
+		return true, err
+	}
+
 	if _, err := leveldb.Load(ldbDst); err != nil {
 		var missing *leveldb.MissingFileError
 		switch {
@@ -111,6 +117,26 @@ func copyOnce(ctx context.Context, s Source, dir string, attempt int) (retry boo
 		}
 	}
 	return false, nil
+}
+
+// sameManifestSize compares the MANIFEST named by CURRENT in the source and in the copy.
+func sameManifestSize(src, dst, current string) error {
+	name := strings.TrimSpace(current)
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		return nil // leveldb.Load reports a bad CURRENT
+	}
+	srcInfo, err := os.Stat(filepath.Join(src, name)) //nolint:gosec // G703: name is a bare file name checked above
+	if err != nil {
+		return fmt.Errorf("MANIFEST %s unreadable in the live cache: %w", name, err)
+	}
+	dstInfo, err := os.Stat(filepath.Join(dst, name)) //nolint:gosec // G703: name is a bare file name checked above
+	if err != nil {
+		return fmt.Errorf("MANIFEST %s missing from the copy: %w", name, err)
+	}
+	if srcInfo.Size() != dstInfo.Size() {
+		return fmt.Errorf("MANIFEST %s is %d bytes in the live cache but %d in the copy", name, srcInfo.Size(), dstInfo.Size())
+	}
+	return nil
 }
 
 // copyLevelDB copies files in the order that keeps the copy self-consistent: data files, then

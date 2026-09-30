@@ -40,7 +40,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:24Z",
-    "ReadHorizonMessageID": "1700000004000",
+    "ReadHorizonClientMessageID": "1700000004000",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "Fixture chat 1",
@@ -87,7 +87,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:22Z",
-    "ReadHorizonMessageID": "1700000002000",
+    "ReadHorizonClientMessageID": "1700000002000",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "Fixture standup",
@@ -133,7 +133,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "19:space1@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "",
@@ -181,7 +181,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "Shared conversation id",
@@ -213,7 +213,7 @@
       "properties": {}
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "19:space1@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "",
@@ -260,7 +260,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:50Z",
-    "ReadHorizonMessageID": "1700000030000",
+    "ReadHorizonClientMessageID": "1700000030000",
     "TeamID": "19:space1@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "",
@@ -313,7 +313,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000001",
     "Title": "",
@@ -361,7 +361,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:24Z",
-    "ReadHorizonMessageID": "1700000004000",
+    "ReadHorizonClientMessageID": "1700000004000",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "Fixture chat 2",
@@ -408,7 +408,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:22Z",
-    "ReadHorizonMessageID": "1700000002000",
+    "ReadHorizonClientMessageID": "1700000002000",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "Fixture standup",
@@ -454,7 +454,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "19:space2@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "",
@@ -502,7 +502,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "Shared conversation id",
@@ -534,7 +534,7 @@
       "properties": {}
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "19:space2@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "",
@@ -581,7 +581,7 @@
       }
     },
     "ReadHorizonAt": "2023-11-14T22:13:50Z",
-    "ReadHorizonMessageID": "1700000030000",
+    "ReadHorizonClientMessageID": "1700000030000",
     "TeamID": "19:space2@thread.v2",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "",
@@ -634,7 +634,7 @@
       }
     },
     "ReadHorizonAt": "0001-01-01T00:00:00Z",
-    "ReadHorizonMessageID": "",
+    "ReadHorizonClientMessageID": "",
     "TeamID": "",
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "Title": "",
