@@ -1,0 +1,25 @@
+ ▄▄                                                       ▄▄
+ ██                                                       ██
+▀██▀ ▄███▄  ▀▀█▄ ██▀█▀██ ▄█▀▀▀ ▄████  ████▄  ▀▀█▄ ██   ██ ██
+ ██  ██▀▀▀ ▄█▀██ ██ █ ██ ▀███▄ ██     ██ ▀▀ ▄█▀██ ██ █ ██ ██
+ ▀█▄ ▀████ ▀█▄██ ██   ██ ▄▄▄█▀ ▀████  ██    ▀█▄██  ██▀██  ██
+local-first Teams mirror for SQLite  |  doctor
+
+DOCTOR
+======
+
+Ready checks
+------------
+  ● teams_installed    Teams data found at <teams-root>
+  ● full_disk_access   the Teams container is readable
+  ● teams_origin       1 Teams origin(s) found
+  ● database_writable  <db> is writable
+  ● schema_version     schema v2
+  ● fts                full-text indexes present
+  ● last_sync_age      last successful sync <age> ago
+
+Snapshot
+--------
+  accounts=2  |  conversations=14  |  messages=104  |  people=6  |  activity=16
+  last sync    <stamp>
+  archive age  <age>

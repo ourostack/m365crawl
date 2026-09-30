@@ -79,7 +79,7 @@ func isTTY(w io.Writer) bool {
 // write prints one result to stdout in the chosen format.
 func (rt *runtime) write(label string, v any) error {
 	if rt.format == output.Text {
-		return renderText(rt.stdout, v)
+		return rt.renderText(label, v)
 	}
 	if rt.format == output.JSON {
 		// Compact for pipes (agents pay per token), indented on a terminal; links keep their & intact.

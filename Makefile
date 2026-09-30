@@ -9,7 +9,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot clean
+.PHONY: help build test e2e v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -27,6 +27,7 @@ help:
 		'  tidy-check     Verify go.mod and go.sum are tidy.' \
 		'  check          Run every local gate enforced by CI.' \
 		'  snapshot       Build release artifacts locally without publishing.' \
+		'  screenshot     Regenerate screenshot.png from the committed fixture (Node 22, Edge via Playwright).' \
 		'  clean          Remove local build output.'
 
 build:
@@ -74,6 +75,10 @@ tidy-check:
 	go mod tidy -diff
 
 check: tidy-check fmt-check vet lint test e2e
+
+screenshot:
+	cd scripts/fixture && npm ci --no-audit --no-fund
+	GO="$$(command -v go)" node scripts/screenshot/generate.mjs
 
 snapshot:
 	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=publish

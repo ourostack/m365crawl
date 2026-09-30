@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openclaw/crawlkit/output"
+
 	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/render"
 	"github.com/ourostack/teamscrawl/internal/store"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
@@ -26,6 +29,8 @@ type check struct {
 type doctorResult struct {
 	OK     bool    `json:"ok"`
 	Checks []check `json:"checks"`
+
+	snap *render.Snapshot // text mode only; never serialized
 }
 
 type doctorCmd struct{}
@@ -38,6 +43,9 @@ func (doctorCmd) Run(rt *runtime) error {
 			res.OK = false
 			failed = append(failed, c.Name)
 		}
+	}
+	if rt.format == output.Text {
+		res.snap = rt.doctorSnapshot()
 	}
 	if err := rt.write("doctor", res); err != nil {
 		return err

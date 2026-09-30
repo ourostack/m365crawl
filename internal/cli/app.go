@@ -14,7 +14,10 @@ import (
 
 	"github.com/alecthomas/kong"
 
+	"github.com/openclaw/crawlkit/output"
+
 	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/render"
 )
 
 // version is set at build time with
@@ -33,7 +36,7 @@ type Globals struct {
 	DB        string `name:"db" env:"TEAMSCRAWL_DB" help:"Archive database path (default ~/.teamscrawl/teamscrawl.db)." placeholder:"PATH"`
 	TeamsRoot string `name:"teams-root" env:"TEAMSCRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
 	Account   string `help:"Only this account, as <tenantId>/<userId>. Default: every account." placeholder:"TENANT/USER"`
-	NoColor   bool   `name:"no-color" help:"Disable colored output."`
+	NoColor   bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
 	MaxAge    string `name:"max-age" env:"TEAMSCRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
 	Fields    string `help:"List commands only: keep only these top-level keys of each item, comma separated." placeholder:"a,b,c"`
 	MaxText   int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
@@ -99,6 +102,14 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		kong.Description("Mirror the Microsoft Teams desktop cache into local SQLite so agents can read Teams offline."),
 		kong.Writers(stdout, stderr),
 		kong.Exit(func(int) { exited = true }),
+		kong.Help(func(opts kong.HelpOptions, kctx *kong.Context) error {
+			// Text mode opens help with the wordmark, like every other text screen.
+			if rt.format == output.Text {
+				rt.color = rt.colorEnabled()
+				render.Banner(kctx.Stdout, "help", rt.color)
+			}
+			return kong.DefaultHelpPrinter(opts, kctx)
+		}),
 	)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)

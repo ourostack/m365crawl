@@ -26,6 +26,7 @@ type runtime struct {
 	stdout, stderr io.Writer
 	stdoutTTY      bool
 	stderrTTY      bool
+	color          bool // ANSI color in text output
 	format         output.Format
 	cmd            string // the running command, for command-specific fixes
 	maxAge         time.Duration
@@ -59,6 +60,7 @@ func (rt *runtime) setup() error {
 		return errs.Usage(err.Error() + " (use text, json or log)")
 	}
 	rt.format = format
+	rt.color = rt.colorEnabled()
 	maxAge := g.MaxAge
 	if strings.TrimSpace(maxAge) == "" {
 		rt.maxAge = defaultMaxAge
