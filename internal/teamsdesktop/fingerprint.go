@@ -26,8 +26,11 @@ func FingerprintOf(s Source) (string, error) {
 		if d.dir == "" {
 			continue
 		}
-		err := filepath.WalkDir(d.dir, func(path string, e fs.DirEntry, err error) error {
+		err := walkDir(d.dir, func(path string, e fs.DirEntry, err error) error {
 			if err != nil {
+				if path != d.dir && errors.Is(err, fs.ErrNotExist) {
+					return nil // a subdirectory purged mid-walk
+				}
 				return err
 			}
 			if e.IsDir() {
@@ -66,7 +69,7 @@ func FingerprintOf(s Source) (string, error) {
 	}
 	sort.Strings(lines)
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "decoder_version=%d\n", DecoderVersion)
+	_, _ = fmt.Fprintf(h, "decoder_version=%d\n", decoderVersion)
 	for _, l := range lines {
 		_, _ = fmt.Fprintln(h, l)
 	}
@@ -76,3 +79,9 @@ func FingerprintOf(s Source) (string, error) {
 // statEntry stats a listed directory entry. It is a seam so a test can make a file vanish
 // between the listing and the stat.
 var statEntry = func(e fs.DirEntry) (fs.FileInfo, error) { return e.Info() }
+
+// decoderVersion is DecoderVersion; a variable so a test can prove it feeds the fingerprint.
+var decoderVersion = DecoderVersion
+
+// walkDir is filepath.WalkDir, a seam for tests.
+var walkDir = filepath.WalkDir

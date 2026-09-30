@@ -1,7 +1,7 @@
 package store
 
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // schemaDDL is applied on every Open; every statement is idempotent. Timestamps are UTC text in
 // timeLayout so they sort and compare as strings. Messages and conversations are rowid tables

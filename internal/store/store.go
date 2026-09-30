@@ -56,7 +56,26 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = cs.Close()
 		return nil, fmt.Errorf("chmod archive: %w", err)
 	}
-	return &Store{cs: cs, db: cs.DB()}, nil
+	st := &Store{cs: cs, db: cs.DB()}
+	if err := st.migrate(ctx); err != nil {
+		_ = cs.Close()
+		return nil, err
+	}
+	return st, nil
+}
+
+// migrate upgrades an archive made by an older build. Version 2 renamed
+// conversations.read_horizon_message_id to read_horizon_client_message_id.
+func (s *Store) migrate(ctx context.Context) error {
+	var old int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'`).Scan(&old); err != nil {
+		return err
+	}
+	if old == 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`)
+	return err
 }
 
 // OpenReadOnly opens an existing archive read-only (safe beside an active writer). It returns
@@ -172,7 +191,9 @@ var attachWord = regexp.MustCompile(`(?i)\battach\b`)
 const successStatuses = `('ok','ok_with_omissions','unchanged')`
 
 // RecordRun appends a sync attempt.
-func (s *Store) RecordRun(ctx context.Context, r Run) error {
+func (s *Store) RecordRun(ctx context.Context, r Run) error { return recordRun(ctx, s.db, r) }
+
+func recordRun(ctx context.Context, db execer, r Run) error {
 	var counts, omissions any
 	if r.Counts != nil {
 		b, err := json.Marshal(r.Counts)
@@ -185,7 +206,7 @@ func (s *Store) RecordRun(ctx context.Context, r Run) error {
 		b, _ := json.Marshal(r.Omissions)
 		omissions = string(b)
 	}
-	_, err := s.db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json) values(?,?,?,?,?,?,?)`,
+	_, err := db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json) values(?,?,?,?,?,?,?)`,
 		fmtTime(r.StartedAt), fmtTime(r.FinishedAt), r.Source, r.Fingerprint, r.Status, counts, omissions)
 	return err
 }
