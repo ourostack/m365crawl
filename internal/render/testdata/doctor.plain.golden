@@ -1,0 +1,18 @@
+DOCTOR
+======
+
+Ready checks
+------------
+  ● config            /home/u/.config/teamscrawl/config.toml
+  ● cache             Edge profile Default, 2 accounts
+  ✖ full disk access  cache not readable
+                      fix: grant Full Disk Access to your terminal
+  ▲ archive age       last sync 3d ago
+                      fix: run: teamscrawl sync
+  ● fts               -
+
+Snapshot
+--------
+  accounts=2  |  conversations=41  |  messages=18230  |  people=97  |  activity=312
+  last sync    2026-09-27T10:00:00Z
+  archive age  3d

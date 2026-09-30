@@ -7,14 +7,16 @@ toolchain go1.27.1
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db
+	github.com/mattn/go-isatty v0.0.24
+	github.com/mattn/go-runewidth v0.0.30
 	github.com/openclaw/crawlkit v0.16.7-0.20260928011744-a03fdea219d3
 	github.com/syndtr/goleveldb v1.0.0
 )
 
 require (
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.48.0 // indirect
