@@ -1,0 +1,65 @@
+package errs
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+func TestConstructorsMatchOutputContract(t *testing.T) {
+	cause := errors.New("boom")
+	cases := []struct {
+		err  *Coded
+		code string
+		exit int
+	}{
+		{SnapshotInconsistent("x"), "snapshot_inconsistent", 1},
+		{UnsupportedBlockCompression("x"), "unsupported_block_compression", 1},
+		{StoreMissing("x"), "store_missing", 1},
+		{DBError(cause), "db_error", 1},
+		{Internal(cause), "internal", 1},
+		{Usage("x"), "usage", 2},
+		{TeamsNotInstalled("/r"), "teams_not_installed", 3},
+		{NoFullDiskAccess("/r", cause), "no_full_disk_access", 3},
+		{NoTeamsOrigin("/r"), "no_teams_origin", 3},
+		{DoctorFailed("x"), "doctor_failed", 3},
+		{Locked("x"), "locked", 4},
+	}
+	for _, c := range cases {
+		if c.err.Code != c.code || c.err.Exit != c.exit {
+			t.Errorf("%s: got code=%q exit=%d", c.code, c.err.Code, c.err.Exit)
+		}
+		if c.err.Message == "" || c.err.Fix == "" {
+			t.Errorf("%s: empty message or fix", c.code)
+		}
+		var e error = c.err
+		if e.Error() == "" {
+			t.Errorf("%s: empty Error()", c.code)
+		}
+	}
+	var coded *Coded
+	if !errors.As(fmt.Errorf("wrap: %w", DBError(cause)), &coded) || !errors.Is(coded, cause) {
+		t.Fatal("Coded must be matchable by errors.As and unwrap to its cause")
+	}
+	if fda := NoFullDiskAccess("/r", cause); !containsAll(fda.Fix, "System Settings", "Privacy & Security", "Full Disk Access") {
+		t.Fatalf("fix = %q", fda.Fix)
+	}
+}
+
+func containsAll(s string, subs ...string) bool {
+	for _, x := range subs {
+		if !contains(s, x) {
+			return false
+		}
+	}
+	return true
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

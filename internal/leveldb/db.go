@@ -4,7 +4,9 @@
 package leveldb
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -91,12 +93,15 @@ func sortedNums(set map[uint64]struct{}) []uint64 {
 // tableName finds the on-disk name for table n (.ldb, or the legacy .sst).
 func tableName(dir string, n uint64) (string, error) {
 	ldb := fmt.Sprintf("%06d.ldb", n)
-	if _, err := os.Stat(filepath.Join(dir, ldb)); err == nil {
-		return ldb, nil
-	}
 	sst := fmt.Sprintf("%06d.sst", n)
-	if _, err := os.Stat(filepath.Join(dir, sst)); err == nil {
-		return sst, nil
+	for _, name := range []string{ldb, sst} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if err == nil {
+			return name, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("leveldb: stat %s: %w", name, err)
+		}
 	}
 	return "", &MissingFileError{Name: ldb}
 }
