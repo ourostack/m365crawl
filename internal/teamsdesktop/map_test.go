@@ -725,3 +725,35 @@ func TestChannelReplyLinkFallsBackToReplyChain(t *testing.T) {
 		t.Errorf("chat link = %q want %q", ms[0].Link, want)
 	}
 }
+
+func TestIsChannelID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"19:a@thread.tacv2": true, "19:a@thread.skype": true,
+		"19:a@thread.v2": false, "19:a_b@unq.gbl.spaces": false, "": false, "@thread.tacv2x": false,
+	} {
+		if got := isChannelID(id); got != want {
+			t.Errorf("isChannelID(%q) = %v, want %v", id, got, want)
+		}
+	}
+}
+
+func TestMapMessageChannelLinks(t *testing.T) {
+	for _, suffix := range []string{"@thread.tacv2", "@thread.skype"} {
+		conv := "19:chan" + suffix
+		rec := obj("conversationId", conv, "replyChainId", "100", "messageMap", obj(
+			"a", obj("id", "100", "parentMessageId", "100", "originalArrivalTime", float64(1)),
+			"b", obj("id", "200", "parentMessageId", "100", "originalArrivalTime", float64(2)),
+		))
+		ms, _, err := MapReplyChain(acct1, rec)
+		if err != nil || len(ms) != 2 {
+			t.Fatalf("%s: %v %v", suffix, ms, err)
+		}
+		root, reply := ms[0].Link, ms[1].Link
+		if !strings.Contains(root, "%22channel%22") || strings.Contains(root, "parentMessageId") {
+			t.Errorf("%s root link: %s", suffix, root)
+		}
+		if !strings.Contains(reply, "%22channel%22") || !strings.Contains(reply, "parentMessageId=100") {
+			t.Errorf("%s reply link: %s", suffix, reply)
+		}
+	}
+}

@@ -23,6 +23,9 @@ type Filter struct {
 	IncludeDeleted bool
 	MentionsMe     bool // only messages that mention the account's own user
 	Unread         bool // only unread messages (see unreadCond)
+	// IncludeChannels counts channel and team conversations (kinds Topic, Space) as unread
+	// sources too; by default unread covers chats and meetings only.
+	IncludeChannels bool
 }
 
 func (f Filter) limit() int {
@@ -136,10 +139,19 @@ const (
 	teamName = `coalesce(nullif(t.display_name,''),nullif(t.topic,''),nullif(t.title,''),'')`
 	cdnExpr  = `(case when t.id is not null and ` + teamName + `<>'' and ` + chanName + `<>'' and instr(` + chanName + `,' › ')=0 then ` + teamName + `||' › '||` + chanName + ` else ` + chanName + ` end)`
 	// unreadCond: newer than the conversation's read horizon, not sent by the account's own user,
-	// not deleted. A conversation with no known horizon has no unread messages.
+	// not deleted; messageWhere also limits it to non-channel kinds unless Filter.IncludeChannels. A conversation with no known horizon has no unread messages.
 	unreadCond = `(c.read_horizon_at is not null and m.sent_at > c.read_horizon_at and m.deleted_at is null and lower(m.sender_id) <> lower('8:orgid:' || m.user_id))`
 
-	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,m.sender_name,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,m.mentions_me,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link`
+	// channelKinds are the conversation kinds that are channels: Topic (channel) and Space (team).
+	// Every other kind (Chat, Meeting, and the few unnamed ones) counts as a chat for unread.
+	channelKinds = `('Topic','Space')`
+	// mentionsMeExpr: the mapper saw a person mention of the account's user, or the account's own
+	// activity feed holds a mention row (mention, mentionInChat; covers team, channel, tag and
+	// everyone mentions) for this conversation and message. Evaluated at query time so activity
+	// that arrives in a later sync counts without rewriting the message.
+	mentionsMeExpr = `(m.mentions_me=1 or exists(select 1 from activity a where a.tenant_id=m.tenant_id and a.user_id=m.user_id and a.conversation_id=m.conversation_id and a.message_id=m.id and a.type like 'mention%'))`
+
+	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,m.sender_name,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link`
 	msgJoin = ` left join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
  left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`
 )
@@ -196,10 +208,13 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 		w.add(`m.sent_at<=?`, fmtTime(f.Until))
 	}
 	if f.MentionsMe {
-		w.add(`m.mentions_me=1`)
+		w.add(mentionsMeExpr)
 	}
 	if f.Unread {
 		w.add(unreadCond)
+		if !f.IncludeChannels {
+			w.add(`c.kind not in ` + channelKinds)
+		}
 	}
 	return nil
 }
