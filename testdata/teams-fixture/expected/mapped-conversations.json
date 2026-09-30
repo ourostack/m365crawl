@@ -1,0 +1,644 @@
+[
+  {
+    "DisplayName": "Fixture chat 1",
+    "Favorite": true,
+    "ID": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+      "type": "Chat",
+      "chatTitle": {
+        "shortTitle": "Fixture chat 1",
+        "longTitle": "Fixture chat 1 (long)"
+      },
+      "threadProperties": {
+        "topic": "Fixture chat 1",
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "1700000004000;1700000009000;1700000004000",
+        "favorite": "true"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:24Z",
+    "ReadHorizonMessageID": "1700000004000",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "Fixture chat 1",
+    "Topic": "Fixture chat 1",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Fixture standup",
+    "Favorite": false,
+    "ID": "19:meeting_FIXTURE1@thread.v2",
+    "Kind": "Meeting",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:meeting_FIXTURE1@thread.v2",
+      "type": "Meeting",
+      "chatTitle": {
+        "shortTitle": "Fixture standup",
+        "longTitle": "Fixture standup (long)"
+      },
+      "threadProperties": {
+        "topic": "Fixture standup",
+        "threadType": "meeting"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "1700000002000;1700000007000;1700000002000"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:22Z",
+    "ReadHorizonMessageID": "1700000002000",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "Fixture standup",
+    "Topic": "Fixture standup",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Planning",
+    "Favorite": false,
+    "ID": "19:planningchannel1@thread.tacv2",
+    "Kind": "Topic",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "19:space1@thread.v2",
+    "Raw": {
+      "id": "19:planningchannel1@thread.tacv2",
+      "type": "Topic",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "topic": "Planning",
+        "threadType": "topic"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": "19:space1@thread.v2",
+      "teamId": "19:space1@thread.v2",
+      "properties": {
+        "consumptionhorizon": "0;0;0"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "19:space1@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "",
+    "Topic": "Planning",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Shared conversation id",
+    "Favorite": false,
+    "ID": "19:shared-fixture-conversation@thread.v2",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:shared-fixture-conversation@thread.v2",
+      "type": "Chat",
+      "chatTitle": {
+        "shortTitle": "Shared conversation id",
+        "longTitle": "Shared conversation id (long)"
+      },
+      "threadProperties": {
+        "topic": "Shared conversation id",
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "Shared conversation id",
+    "Topic": "Shared conversation id",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Fixture team 1",
+    "Favorite": false,
+    "ID": "19:space1@thread.v2",
+    "Kind": "Space",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": null,
+    "ParentID": "",
+    "Raw": {
+      "id": "19:space1@thread.v2",
+      "type": "Space",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "spaceThreadTopic": "Fixture team 1",
+        "threadType": "space"
+      },
+      "members": [],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "19:space1@thread.v2",
+      "properties": {}
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "19:space1@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "",
+    "Topic": "Fixture team 1",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "General",
+    "Favorite": false,
+    "ID": "19:topicchannel1@thread.tacv2",
+    "Kind": "Topic",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "19:space1@thread.v2",
+    "Raw": {
+      "id": "19:topicchannel1@thread.tacv2",
+      "type": "Topic",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "topicThreadTopic": "General",
+        "threadType": "topic"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": "19:space1@thread.v2",
+      "teamId": "19:space1@thread.v2",
+      "properties": {
+        "consumptionhorizon": "1700000030000;1700000035000;1700000030000",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:50Z",
+    "ReadHorizonMessageID": "1700000030000",
+    "TeamID": "19:space1@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "",
+    "Topic": "General",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Pat Example, Sam Example",
+    "Favorite": false,
+    "ID": "19:untitledgroup1@thread.v2",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a1",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "8:orgid:00000000-0000-4000-8000-0000000000dd"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:untitledgroup1@thread.v2",
+      "type": "Chat",
+      "chatTitle": null,
+      "threadProperties": {
+        "topic": null,
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+          "role": "Admin",
+          "friendlyName": "Alex Fixture"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User",
+          "friendlyName": "Pat Example"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000dd",
+          "role": "User",
+          "friendlyName": "Sam Example"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "Title": "",
+    "Topic": "",
+    "UserID": "00000000-0000-4000-8000-0000000000a1"
+  },
+  {
+    "DisplayName": "Fixture chat 2",
+    "Favorite": true,
+    "ID": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+      "type": "Chat",
+      "chatTitle": {
+        "shortTitle": "Fixture chat 2",
+        "longTitle": "Fixture chat 2 (long)"
+      },
+      "threadProperties": {
+        "topic": "Fixture chat 2",
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "1700000004000;1700000009000;1700000004000",
+        "favorite": "true"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:24Z",
+    "ReadHorizonMessageID": "1700000004000",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "Fixture chat 2",
+    "Topic": "Fixture chat 2",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "Fixture standup",
+    "Favorite": false,
+    "ID": "19:meeting_FIXTURE2@thread.v2",
+    "Kind": "Meeting",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:meeting_FIXTURE2@thread.v2",
+      "type": "Meeting",
+      "chatTitle": {
+        "shortTitle": "Fixture standup",
+        "longTitle": "Fixture standup (long)"
+      },
+      "threadProperties": {
+        "topic": "Fixture standup",
+        "threadType": "meeting"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "1700000002000;1700000007000;1700000002000"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:22Z",
+    "ReadHorizonMessageID": "1700000002000",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "Fixture standup",
+    "Topic": "Fixture standup",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "Planning",
+    "Favorite": false,
+    "ID": "19:planningchannel2@thread.tacv2",
+    "Kind": "Topic",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "19:space2@thread.v2",
+    "Raw": {
+      "id": "19:planningchannel2@thread.tacv2",
+      "type": "Topic",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "topic": "Planning",
+        "threadType": "topic"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": "19:space2@thread.v2",
+      "teamId": "19:space2@thread.v2",
+      "properties": {
+        "consumptionhorizon": "0;0;0"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "19:space2@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "",
+    "Topic": "Planning",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "Shared conversation id",
+    "Favorite": false,
+    "ID": "19:shared-fixture-conversation@thread.v2",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:shared-fixture-conversation@thread.v2",
+      "type": "Chat",
+      "chatTitle": {
+        "shortTitle": "Shared conversation id",
+        "longTitle": "Shared conversation id (long)"
+      },
+      "threadProperties": {
+        "topic": "Shared conversation id",
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "Shared conversation id",
+    "Topic": "Shared conversation id",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "Fixture team 2",
+    "Favorite": false,
+    "ID": "19:space2@thread.v2",
+    "Kind": "Space",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": null,
+    "ParentID": "",
+    "Raw": {
+      "id": "19:space2@thread.v2",
+      "type": "Space",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "spaceThreadTopic": "Fixture team 2",
+        "threadType": "space"
+      },
+      "members": [],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "19:space2@thread.v2",
+      "properties": {}
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "19:space2@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "",
+    "Topic": "Fixture team 2",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "General",
+    "Favorite": false,
+    "ID": "19:topicchannel2@thread.tacv2",
+    "Kind": "Topic",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee"
+    ],
+    "ParentID": "19:space2@thread.v2",
+    "Raw": {
+      "id": "19:topicchannel2@thread.tacv2",
+      "type": "Topic",
+      "chatTitle": {
+        "$undefined": true
+      },
+      "threadProperties": {
+        "topicThreadTopic": "General",
+        "threadType": "topic"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": "19:space2@thread.v2",
+      "teamId": "19:space2@thread.v2",
+      "properties": {
+        "consumptionhorizon": "1700000030000;1700000035000;1700000030000",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "2023-11-14T22:13:50Z",
+    "ReadHorizonMessageID": "1700000030000",
+    "TeamID": "19:space2@thread.v2",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "",
+    "Topic": "General",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  },
+  {
+    "DisplayName": "Pat Example, Sam Example",
+    "Favorite": false,
+    "ID": "19:untitledgroup2@thread.v2",
+    "Kind": "Chat",
+    "LastMessageAt": "2023-11-14T22:15:00Z",
+    "Members": [
+      "8:orgid:00000000-0000-4000-8000-0000000000a2",
+      "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "8:orgid:00000000-0000-4000-8000-0000000000dd"
+    ],
+    "ParentID": "",
+    "Raw": {
+      "id": "19:untitledgroup2@thread.v2",
+      "type": "Chat",
+      "chatTitle": null,
+      "threadProperties": {
+        "topic": null,
+        "threadType": "chat"
+      },
+      "members": [
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+          "role": "Admin",
+          "friendlyName": "Blair Fixture"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+          "role": "User",
+          "friendlyName": "Pat Example"
+        },
+        {
+          "id": "8:orgid:00000000-0000-4000-8000-0000000000dd",
+          "role": "User",
+          "friendlyName": "Sam Example"
+        }
+      ],
+      "lastMessageTimeUtc": 1700000100000,
+      "parentId": null,
+      "teamId": "",
+      "properties": {
+        "consumptionhorizon": "",
+        "favorite": "false"
+      }
+    },
+    "ReadHorizonAt": "0001-01-01T00:00:00Z",
+    "ReadHorizonMessageID": "",
+    "TeamID": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "Title": "",
+    "Topic": "",
+    "UserID": "00000000-0000-4000-8000-0000000000a2"
+  }
+]
