@@ -1,0 +1,276 @@
+{
+  "Teams:conversation-manager:react-web-client:00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-0000000000a1:en-us": [
+    {
+      "key": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+      "envelope": "v21",
+      "canonical_bytes": 422,
+      "canonical_sha256": "c699422d6752e8e5351062ac2edec8b485f36df63071a1bbd2a98376360c2141",
+      "canonical": {
+        "id": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "type": "Chat",
+        "chatTitle": "Fixture chat 1",
+        "threadProperties": {
+          "topic": "Fixture chat 1",
+          "threadType": "chat"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:meeting_FIXTURE1@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 368,
+      "canonical_sha256": "55e7be9f99e590f344df6c829595c09d3f6746126b4f3e3500aeb8a70bb692ee",
+      "canonical": {
+        "id": "19:meeting_FIXTURE1@thread.v2",
+        "type": "Meeting",
+        "chatTitle": "Fixture standup",
+        "threadProperties": {
+          "topic": "Fixture standup",
+          "threadType": "meeting"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:shared-fixture-conversation@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 387,
+      "canonical_sha256": "72ff6b2eaedd38463a2358db3e3970b3e589ed7264a069f83c7e1ef5cacdf8f9",
+      "canonical": {
+        "id": "19:shared-fixture-conversation@thread.v2",
+        "type": "Chat",
+        "chatTitle": "Shared conversation id",
+        "threadProperties": {
+          "topic": "Shared conversation id",
+          "threadType": "chat"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:space1@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 352,
+      "canonical_sha256": "a5e27bbde3f717b40991e7edc9e1ee821c5254f80a3faa96057e53b7af8a3855",
+      "canonical": {
+        "id": "19:space1@thread.v2",
+        "type": "Space",
+        "chatTitle": "Fixture team 1",
+        "threadProperties": {
+          "topic": "Fixture team 1",
+          "threadType": "space"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:topicchannel1@thread.tacv2",
+      "envelope": "v21",
+      "canonical_bytes": 365,
+      "canonical_sha256": "2f96ba08261f58f380e68e721399a5dc9d65eb892770423365260fb8473a8f52",
+      "canonical": {
+        "id": "19:topicchannel1@thread.tacv2",
+        "type": "Topic",
+        "chatTitle": "General",
+        "threadProperties": {
+          "topic": "General",
+          "threadType": "topic"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": "19:space1@thread.v2"
+      }
+    }
+  ],
+  "Teams:conversation-manager:react-web-client:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-0000000000a2:en-us": [
+    {
+      "key": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+      "envelope": "v21",
+      "canonical_bytes": 422,
+      "canonical_sha256": "175d4359d2258c5abbf654a700a41d4b1c2c5891473dd34a26f9746294817970",
+      "canonical": {
+        "id": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
+        "type": "Chat",
+        "chatTitle": "Fixture chat 2",
+        "threadProperties": {
+          "topic": "Fixture chat 2",
+          "threadType": "chat"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:meeting_FIXTURE2@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 368,
+      "canonical_sha256": "93217306e767f889fcf67f00ca59b164afba176272494443d69dd6124885b2c1",
+      "canonical": {
+        "id": "19:meeting_FIXTURE2@thread.v2",
+        "type": "Meeting",
+        "chatTitle": "Fixture standup",
+        "threadProperties": {
+          "topic": "Fixture standup",
+          "threadType": "meeting"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:shared-fixture-conversation@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 387,
+      "canonical_sha256": "426b2af68b3c37a5c92e855af40e46ae31634ec680c5f1dd363b0b76a14f0a50",
+      "canonical": {
+        "id": "19:shared-fixture-conversation@thread.v2",
+        "type": "Chat",
+        "chatTitle": "Shared conversation id",
+        "threadProperties": {
+          "topic": "Shared conversation id",
+          "threadType": "chat"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:space2@thread.v2",
+      "envelope": "v21",
+      "canonical_bytes": 352,
+      "canonical_sha256": "25a66abfc648d74b4d410e7c86844f5bb9fff8c85828bda58b3055af7703ba49",
+      "canonical": {
+        "id": "19:space2@thread.v2",
+        "type": "Space",
+        "chatTitle": "Fixture team 2",
+        "threadProperties": {
+          "topic": "Fixture team 2",
+          "threadType": "space"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": null
+      }
+    },
+    {
+      "key": "19:topicchannel2@thread.tacv2",
+      "envelope": "v21",
+      "canonical_bytes": 365,
+      "canonical_sha256": "77d8cff433b85cc88e4f1d27d72051a24385c7e53c675a422ef7589f6f47beac",
+      "canonical": {
+        "id": "19:topicchannel2@thread.tacv2",
+        "type": "Topic",
+        "chatTitle": "General",
+        "threadProperties": {
+          "topic": "General",
+          "threadType": "topic"
+        },
+        "members": [
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "role": "Admin"
+          },
+          {
+            "id": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "role": "User"
+          }
+        ],
+        "lastMessageTimeUtc": "2023-11-14T22:13:20.000Z",
+        "parentId": "19:space2@thread.v2"
+      }
+    }
+  ]
+}
