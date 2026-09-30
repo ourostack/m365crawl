@@ -180,10 +180,13 @@ func (p projected) MarshalJSON() ([]byte, error) {
 }
 
 func project(item any, fields []string) (any, error) {
-	raw, err := json.Marshal(item)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // same bytes as the unprojected path: links keep their &
+	if err := enc.Encode(item); err != nil {
 		return nil, err
 	}
+	raw := buf.Bytes()
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &all); err != nil {
 		return nil, err
