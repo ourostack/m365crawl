@@ -139,12 +139,15 @@ const (
 	teamName = `coalesce(nullif(t.display_name,''),nullif(t.topic,''),nullif(t.title,''),'')`
 	cdnExpr  = `(case when t.id is not null and ` + teamName + `<>'' and ` + chanName + `<>'' and instr(` + chanName + `,' › ')=0 then ` + teamName + `||' › '||` + chanName + ` else ` + chanName + ` end)`
 	// unreadCond: newer than the conversation's read horizon, not sent by the account's own user,
-	// not deleted; messageWhere also limits it to non-channel kinds unless Filter.IncludeChannels. A conversation with no known horizon has no unread messages.
+	// not deleted; messageWhere also excludes channels (isChannelCond) unless Filter.IncludeChannels.
+	// A conversation with no known horizon has no unread messages.
 	unreadCond = `(c.read_horizon_at is not null and m.sent_at > c.read_horizon_at and m.deleted_at is null and lower(m.sender_id) <> lower('8:orgid:' || m.user_id))`
 
-	// channelKinds are the conversation kinds that are channels: Topic (channel) and Space (team).
-	// Every other kind (Chat, Meeting, and the few unnamed ones) counts as a chat for unread.
-	channelKinds = `('Topic','Space')`
+	// isChannelCond is the store's single channel test: the conversation kind is Topic (channel) or
+	// Space (team), compared case-insensitively, or its id is a channel thread id (the same
+	// @thread.tacv2 / @thread.skype suffixes as teamsdesktop's isChannelID). Either signal alone
+	// makes it a channel, so a kind/id disagreement cannot leak channel unread.
+	isChannelCond = `(lower(c.kind) in ('topic','space') or c.id like '%@thread.tacv2' or c.id like '%@thread.skype')`
 	// mentionsMeExpr: the mapper saw a person mention of the account's user, or the account's own
 	// activity feed holds a mention row (mention, mentionInChat; covers team, channel, tag and
 	// everyone mentions) for this conversation and message. Evaluated at query time so activity
@@ -213,7 +216,7 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 	if f.Unread {
 		w.add(unreadCond)
 		if !f.IncludeChannels {
-			w.add(`c.kind not in ` + channelKinds)
+			w.add(`not ` + isChannelCond)
 		}
 	}
 	return nil

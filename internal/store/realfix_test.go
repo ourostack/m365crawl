@@ -48,6 +48,31 @@ func TestUnreadDefaultsToNonChannelKinds(t *testing.T) {
 	}
 }
 
+func TestUnreadChannelnessUsesKindOrID(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	lower := conv(acctA, "19:l@thread.v2", "topic", "Lowercase kind")
+	lower.ReadHorizonAt = base
+	shaped := conv(acctA, "19:x@thread.skype", "Chat", "Chat kind, channel id")
+	shaped.ReadHorizonAt = base
+	plain := conv(acctA, "19:p@thread.v2", "Chat", "Plain chat")
+	plain.ReadHorizonAt = base
+	must(s.ApplyConversations(ctx, []teamsdesktop.Conversation{lower, shaped, plain}))
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{
+		msg(acctA, "19:l@thread.v2", "l1", "l", base.Add(time.Minute)),
+		msg(acctA, "19:x@thread.skype", "x1", "x", base.Add(time.Minute)),
+		msg(acctA, "19:p@thread.v2", "p1", "p", base.Add(time.Minute)),
+	}))
+	rows, _ := must2(s.Unread(ctx, Filter{Account: &acctA}))
+	if !eqStrings(ids(rows), []string{"p1"}) {
+		t.Fatalf("default: %v", ids(rows))
+	}
+	rows, _ = must2(s.Unread(ctx, Filter{Account: &acctA, IncludeChannels: true}))
+	if len(rows) != 3 {
+		t.Fatalf("include channels: %v", ids(rows))
+	}
+}
+
 func TestMentionsMeFromActivity(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
@@ -65,46 +90,41 @@ func TestMentionsMeFromActivity(t *testing.T) {
 		return teamsdesktop.Activity{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: id, Type: typ, At: base, ConversationID: "c", MessageID: msgID}
 	}
 	must(s.ApplyActivity(ctx, []teamsdesktop.Activity{
-		a("a1", "mention", "ch1"), a("a2", "mentionInChat", "tag1"), a("a3", "reaction", "like1"), a("a4", "reply", "none1"),
+		a("a1", "mention", "ch1"), a("a1b", "mentionInChat", "ch1"), // two mention items on one message
+		a("a2", "mentionInChat", "tag1"), a("a3", "reaction", "like1"), a("a4", "reply", "none1"),
 		{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: "a5", Type: "mention", At: base, ConversationID: "other", MessageID: "none1"},
 	}))
-	for name, run := range map[string]func() []MessageRow{
-		"messages": func() []MessageRow { r, _ := must2(s.Messages(ctx, Filter{MentionsMe: true})); return r },
-		"search":   func() []MessageRow { r, _ := must2(s.Search(ctx, "deploy", Filter{MentionsMe: true})); return r },
+	// Messages list oldest first, Search newest first; account B's ch1 has no activity.
+	for name, c := range map[string]struct {
+		run  func() []MessageRow
+		want []string
+	}{
+		"messages": {func() []MessageRow { r, _ := must2(s.Messages(ctx, Filter{MentionsMe: true})); return r }, []string{"p1", "ch1", "tag1"}},
+		"search":   {func() []MessageRow { r, _ := must2(s.Search(ctx, "deploy", Filter{MentionsMe: true})); return r }, []string{"tag1", "ch1", "p1"}},
 	} {
-		got := run()
-		if len(got) != 4 { // p1, ch1 and tag1 for account A plus ch1's... see below
-			// account B's ch1 has no activity, so exactly three rows are expected
-			if len(got) != 3 {
-				t.Fatalf("%s: %v", name, ids(got))
-			}
+		got, want := c.run(), c.want
+		if !eqStrings(ids(got), want) {
+			t.Fatalf("%s: %v, want %v", name, ids(got), want)
 		}
-		set := map[string]bool{}
 		for _, r := range got {
-			set[r.ID+"/"+r.UserID] = true
-			if !r.MentionsMe {
-				t.Fatalf("%s: mentions_me false for %s", name, r.ID)
+			if !r.MentionsMe || r.UserID != acctA.UserID {
+				t.Fatalf("%s: %+v", name, r)
 			}
-		}
-		for _, want := range []string{"p1/" + acctA.UserID, "ch1/" + acctA.UserID, "tag1/" + acctA.UserID} {
-			if !set[want] {
-				t.Fatalf("%s: missing %s in %v", name, want, set)
-			}
-		}
-		if len(set) != 3 {
-			t.Fatalf("%s: %v", name, set)
 		}
 	}
 	all, _ := must2(s.Messages(ctx, Filter{Account: &acctA}))
+	if len(all) != 5 {
+		t.Fatalf("all: %v", ids(all))
+	}
 	for _, r := range all {
-		if want := r.ID == "p1" || r.ID == "ch1" || r.ID == "tag1"; r.MentionsMe != want {
+		if w := r.ID == "p1" || r.ID == "ch1" || r.ID == "tag1"; r.MentionsMe != w {
 			t.Fatalf("%s mentions_me=%v", r.ID, r.MentionsMe)
 		}
 	}
 	// Activity arriving in a later sync updates the result with no message rewrite.
 	must(s.ApplyActivity(ctx, []teamsdesktop.Activity{a("a6", "mention", "none1")}))
 	got, _ := must2(s.Messages(ctx, Filter{Account: &acctA, MentionsMe: true}))
-	if len(got) != 4 {
+	if !eqStrings(ids(got), []string{"p1", "ch1", "tag1", "none1"}) {
 		t.Fatalf("late activity: %v", ids(got))
 	}
 }
