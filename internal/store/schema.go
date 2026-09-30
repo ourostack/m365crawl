@@ -30,7 +30,7 @@ create table if not exists conversations(
   members_json text,
   last_message_at text,
   read_horizon_at text,
-  read_horizon_message_id text not null default '',
+  read_horizon_client_message_id text not null default '',
   favorite integer not null default 0,
   raw_json text,
   content_hash text not null default '',

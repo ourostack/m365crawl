@@ -1,6 +1,7 @@
 package teamsdesktop
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,5 +112,26 @@ func TestFingerprintMissingBlobDir(t *testing.T) {
 	_ = os.RemoveAll(s.BlobDir)
 	if _, err := FingerprintOf(s); err != nil {
 		t.Fatalf("absent blob dir should be fine: %v", err)
+	}
+}
+
+func TestFingerprintSkipsVanishedFile(t *testing.T) {
+	s := fingerprintSource(t)
+	victim := filepath.Join(s.LevelDBDir, "000003.log")
+	old := statEntry
+	statEntry = func(e fs.DirEntry) (fs.FileInfo, error) {
+		if e.Name() == "000003.log" {
+			_ = os.Remove(victim) // Teams compacts the file between the listing and the stat
+		}
+		return e.Info()
+	}
+	t.Cleanup(func() { statEntry = old })
+	got, err := FingerprintOf(s)
+	if err != nil {
+		t.Fatalf("a vanished file must be skipped, got %v", err)
+	}
+	statEntry = old
+	if want, _ := FingerprintOf(s); got != want {
+		t.Fatal("fingerprint with the file vanished mid-walk must equal the fingerprint without it")
 	}
 }

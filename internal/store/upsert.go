@@ -41,6 +41,18 @@ on conflict(tenant_id, user_id) do update set locale = case when excluded.locale
 	return err
 }
 
+// Change kinds reported by ApplyMessagesChanges and ApplyActivityChanges.
+const (
+	ChangeNew     = "new"
+	ChangeEdited  = "edited"
+	ChangeDeleted = "deleted"
+)
+
+// Change is one row an Apply call inserted or updated. Key identifies the row:
+// "<tenant>|<user>|<conversation>|<id>" for a message, "<tenant>|<user>|<id>" for an activity
+// item. Rows that were unchanged are not reported.
+type Change struct{ Change, Key string }
+
 func bool01(b bool) int {
 	if b {
 		return 1
@@ -52,32 +64,23 @@ func bool01(b bool) int {
 func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conversation) (Counts, error) {
 	var n Counts
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		sel, err := tx.PrepareContext(ctx, `select rowid, content_hash from conversations where tenant_id=? and user_id=? and id=?`)
+		sel, err := tx.PrepareContext(ctx, `select rowid, content_hash, read_horizon_at, read_horizon_client_message_id from conversations where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = sel.Close() }()
-		ins, err := tx.PrepareContext(ctx, `insert into conversations(tenant_id,user_id,id,kind,title,topic,display_name,team_id,parent_id,members_json,last_message_at,read_horizon_at,read_horizon_message_id,favorite,raw_json,content_hash,updated_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		ins, err := tx.PrepareContext(ctx, `insert into conversations(tenant_id,user_id,id,kind,title,topic,display_name,team_id,parent_id,members_json,last_message_at,read_horizon_at,read_horizon_client_message_id,favorite,raw_json,content_hash,updated_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = ins.Close() }()
-		upd, err := tx.PrepareContext(ctx, `update conversations set kind=?,title=?,topic=?,display_name=?,team_id=?,parent_id=?,members_json=?,last_message_at=?,read_horizon_at=?,read_horizon_message_id=?,favorite=?,raw_json=?,content_hash=?,updated_at=? where rowid=?`)
+		upd, err := tx.PrepareContext(ctx, `update conversations set kind=?,title=?,topic=?,display_name=?,team_id=?,parent_id=?,members_json=?,last_message_at=?,read_horizon_at=?,read_horizon_client_message_id=?,favorite=?,raw_json=?,content_hash=?,updated_at=? where rowid=?`)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = upd.Close() }()
-		ftsDel, err := tx.PrepareContext(ctx, `delete from conversation_fts where rowid=?`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = ftsDel.Close() }()
-		ftsIns, err := tx.PrepareContext(ctx, `insert into conversation_fts(rowid, conversation_id, title) values(?,?,?)`)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = ftsIns.Close() }()
 		now := nowText()
+		var touched []teamsdesktop.Conversation
 		for _, c := range cs {
 			n.Seen++
 			if c.TenantID == "" || c.UserID == "" || c.ID == "" {
@@ -85,13 +88,25 @@ func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conver
 			}
 			members, last, horizon := jsonOrNil(c.Members), fmtTime(c.LastMessageAt), fmtTime(c.ReadHorizonAt)
 			raw := rawOrNil(c.Raw)
-			hash := hashOf(c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonMessageID, c.Favorite, raw)
 			var rowid int64
 			var old string
-			err := sel.QueryRowContext(ctx, c.TenantID, c.UserID, c.ID).Scan(&rowid, &old)
+			var oldHorizon sql.NullString
+			var oldClientID string
+			err := sel.QueryRowContext(ctx, c.TenantID, c.UserID, c.ID).Scan(&rowid, &old, &oldHorizon, &oldClientID)
+			known := err == nil
+			if known {
+				// A later snapshot that lost the read marker must not forget a known one.
+				if horizon == nil && oldHorizon.Valid {
+					horizon = oldHorizon.String
+				}
+				if c.ReadHorizonClientMessageID == "" && horizon == oldHorizon.String {
+					c.ReadHorizonClientMessageID = oldClientID
+				}
+			}
+			hash := hashOf(c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonClientMessageID, c.Favorite, raw)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
-				res, err := ins.ExecContext(ctx, c.TenantID, c.UserID, c.ID, c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonMessageID, bool01(c.Favorite), raw, hash, now)
+				res, err := ins.ExecContext(ctx, c.TenantID, c.UserID, c.ID, c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonClientMessageID, bool01(c.Favorite), raw, hash, now)
 				if err != nil {
 					return err
 				}
@@ -105,21 +120,116 @@ func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conver
 				n.Unchanged++
 				continue
 			default:
-				if _, err := upd.ExecContext(ctx, c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonMessageID, bool01(c.Favorite), raw, hash, now, rowid); err != nil {
-					return err
-				}
-				if _, err := ftsDel.ExecContext(ctx, rowid); err != nil {
+				if _, err := upd.ExecContext(ctx, c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonClientMessageID, bool01(c.Favorite), raw, hash, now, rowid); err != nil {
 					return err
 				}
 				n.Updated++
 			}
-			if _, err := ftsIns.ExecContext(ctx, rowid, c.ID, titleText(c)); err != nil {
+			touched = append(touched, c)
+		}
+		return reindexTitles(ctx, tx, touched)
+	})
+	return n, err
+}
+
+// reindexTitles refreshes the title index of the given conversations and of every channel whose
+// team is among them. It runs after the whole batch is stored, so a team and its channels find
+// each other whatever order they arrived in. A channel is indexed under its own names plus its
+// team's name, the same name the display composes ("Team › Channel").
+func reindexTitles(ctx context.Context, tx *sql.Tx, touched []teamsdesktop.Conversation) error {
+	if len(touched) == 0 {
+		return nil
+	}
+	own, err := tx.PrepareContext(ctx, `select rowid, id, title, topic, display_name, team_id from conversations where tenant_id=? and user_id=? and id=?`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = own.Close() }()
+	children, err := tx.PrepareContext(ctx, `select id from conversations where tenant_id=? and user_id=? and team_id=? and id<>?`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = children.Close() }()
+	ftsDel, err := tx.PrepareContext(ctx, `delete from conversation_fts where rowid=?`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ftsDel.Close() }()
+	ftsIns, err := tx.PrepareContext(ctx, `insert into conversation_fts(rowid, conversation_id, title) values(?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ftsIns.Close() }()
+
+	type key struct{ tenant, user, id string }
+	done := map[key]bool{}
+	index := func(k key) error {
+		if done[k] {
+			return nil
+		}
+		done[k] = true
+		var rowid int64
+		var c teamsdesktop.Conversation
+		if err := own.QueryRowContext(ctx, k.tenant, k.user, k.id).Scan(&rowid, &c.ID, &c.Title, &c.Topic, &c.DisplayName, &c.TeamID); err != nil {
+			return err
+		}
+		text := titleText(c)
+		if c.TeamID != "" && c.TeamID != c.ID {
+			var t teamsdesktop.Conversation
+			var trow int64
+			switch err := own.QueryRowContext(ctx, k.tenant, k.user, c.TeamID).Scan(&trow, &t.ID, &t.Title, &t.Topic, &t.DisplayName, &t.TeamID); {
+			case errors.Is(err, sql.ErrNoRows):
+			case err != nil:
+				return err
+			default:
+				text = strings.TrimSpace(text + " " + firstNonEmpty(t.DisplayName, t.Topic, t.Title))
+			}
+		}
+		if _, err := ftsDel.ExecContext(ctx, rowid); err != nil {
+			return err
+		}
+		_, err := ftsIns.ExecContext(ctx, rowid, c.ID, text)
+		return err
+	}
+	for _, c := range touched {
+		if err := index(key{c.TenantID, c.UserID, c.ID}); err != nil {
+			return err
+		}
+		rows, err := children.QueryContext(ctx, c.TenantID, c.UserID, c.ID, c.ID)
+		if err != nil {
+			return err
+		}
+		var kids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			kids = append(kids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range kids {
+			if err := index(key{c.TenantID, c.UserID, id}); err != nil {
 				return err
 			}
 		}
-		return nil
-	})
-	return n, err
+	}
+	return nil
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // titleText is what the title index holds: each distinct name the conversation goes by.
@@ -139,9 +249,18 @@ func titleText(c teamsdesktop.Conversation) string {
 // changes only when the incoming version is newer, or the version is equal and the content
 // differs; an older version is ignored. Messages absent from the batch are never touched.
 func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (Counts, error) {
+	n, _, err := s.ApplyMessagesChanges(ctx, ms)
+	return n, err
+}
+
+// ApplyMessagesChanges is ApplyMessages that also reports each inserted or updated row: "new" for
+// an insert, "deleted" when the row gains its tombstone, "edited" for any other update. A
+// deleted_at, once set, stays set unless a newer version arrives without it.
+func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Message) (Counts, []Change, error) {
 	var n Counts
+	var changes []Change
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		sel, err := tx.PrepareContext(ctx, `select rowid, version, content_hash from messages where tenant_id=? and user_id=? and conversation_id=? and id=?`)
+		sel, err := tx.PrepareContext(ctx, `select rowid, version, content_hash, deleted_at from messages where tenant_id=? and user_id=? and conversation_id=? and id=?`)
 		if err != nil {
 			return err
 		}
@@ -177,10 +296,15 @@ func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (C
 				sent = "" // sent_at is NOT NULL; a message with no time sorts first
 			}
 			mentions, reactions, files, links, raw := jsonOrNil(m.Mentions), jsonOrNil(m.Reactions), jsonOrNil(m.Files), jsonOrNil(m.Links), rawOrNil(m.Raw)
-			hash := hashOf(m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, m.MentionsMe, reactions, files, links, m.Subject, m.Importance, m.Pinned, m.Link, raw)
 			var rowid, version int64
 			var old string
-			err := sel.QueryRowContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID).Scan(&rowid, &version, &old)
+			var oldDeleted sql.NullString
+			err := sel.QueryRowContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID).Scan(&rowid, &version, &old, &oldDeleted)
+			if err == nil && deleted == nil && oldDeleted.Valid && m.Version <= version {
+				deleted = oldDeleted.String // a known tombstone is sticky
+			}
+			hash := hashOf(m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, m.MentionsMe, reactions, files, links, m.Subject, m.Importance, m.Pinned, m.Link, raw)
+			key := m.TenantID + "|" + m.UserID + "|" + m.ConversationID + "|" + m.ID
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				res, err := ins.ExecContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now)
@@ -191,6 +315,7 @@ func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (C
 					return err
 				}
 				n.Inserted++
+				changes = append(changes, Change{Change: ChangeNew, Key: key})
 			case err != nil:
 				return err
 			case m.Version < version, old == hash:
@@ -204,15 +329,19 @@ func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (C
 					return err
 				}
 				n.Updated++
+				if deleted != nil && !oldDeleted.Valid {
+					changes = append(changes, Change{Change: ChangeDeleted, Key: key})
+				} else {
+					changes = append(changes, Change{Change: ChangeEdited, Key: key})
+				}
 			}
-			key := m.TenantID + "|" + m.UserID + "|" + m.ConversationID + "|" + m.ID
 			if _, err := ftsIns.ExecContext(ctx, rowid, key, m.ContentText); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-	return n, err
+	return n, changes, err
 }
 
 // ApplyPeople upserts people: the display name follows the latest non-empty value, first_seen_at
@@ -282,7 +411,15 @@ func (s *Store) ApplyPeople(ctx context.Context, ps []teamsdesktop.Person) (Coun
 
 // ApplyActivity upserts activity-feed items; a changed item (read state, content) updates.
 func (s *Store) ApplyActivity(ctx context.Context, as []teamsdesktop.Activity) (Counts, error) {
+	n, _, err := s.ApplyActivityChanges(ctx, as)
+	return n, err
+}
+
+// ApplyActivityChanges is ApplyActivity that also reports each inserted ("new") or updated
+// ("edited") item.
+func (s *Store) ApplyActivityChanges(ctx context.Context, as []teamsdesktop.Activity) (Counts, []Change, error) {
 	var n Counts
+	var changes []Change
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		sel, err := tx.PrepareContext(ctx, `select content_hash from activity where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
@@ -309,9 +446,11 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 			hash := hashOf(a.Type, a.Subtype, a.IsRead, at, a.ConversationID, a.MessageID, a.ReplyChainID, a.AppID, raw)
 			var old string
 			err := sel.QueryRowContext(ctx, a.TenantID, a.UserID, a.ID).Scan(&old)
+			key := a.TenantID + "|" + a.UserID + "|" + a.ID
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				n.Inserted++
+				changes = append(changes, Change{Change: ChangeNew, Key: key})
 			case err != nil:
 				return err
 			case old == hash:
@@ -319,6 +458,7 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 				continue
 			default:
 				n.Updated++
+				changes = append(changes, Change{Change: ChangeEdited, Key: key})
 			}
 			if _, err := up.ExecContext(ctx, a.TenantID, a.UserID, a.ID, a.Type, a.Subtype, bool01(a.IsRead), at, a.ConversationID, a.MessageID, a.ReplyChainID, a.AppID, raw, hash, now); err != nil {
 				return err
@@ -326,5 +466,5 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 		}
 		return nil
 	})
-	return n, err
+	return n, changes, err
 }

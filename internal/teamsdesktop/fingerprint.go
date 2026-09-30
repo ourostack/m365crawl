@@ -37,7 +37,10 @@ func FingerprintOf(s Source) (string, error) {
 			if base == "LOCK" || strings.HasPrefix(base, "LOG") {
 				return nil
 			}
-			info, err := e.Info()
+			info, err := statEntry(e)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil // compacted away between the listing and the stat
+			}
 			if err != nil {
 				return err
 			}
@@ -69,3 +72,7 @@ func FingerprintOf(s Source) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// statEntry stats a listed directory entry. It is a seam so a test can make a file vanish
+// between the listing and the stat.
+var statEntry = func(e fs.DirEntry) (fs.FileInfo, error) { return e.Info() }
