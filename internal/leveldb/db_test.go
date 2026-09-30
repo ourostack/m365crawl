@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	gl "github.com/syndtr/goleveldb/leveldb"
@@ -247,5 +249,79 @@ func TestMissingCurrent(t *testing.T) {
 	var mf *MissingFileError
 	if !errors.As(err, &mf) || mf.Name != "CURRENT" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func compactedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	db := openGL(t, dir)
+	for i := 0; i < 50; i++ {
+		_ = db.Put([]byte(fmt.Sprintf("k%d", i)), []byte("v"), nil)
+	}
+	if err := db.CompactRange(util.Range{}); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	return dir
+}
+
+// A permission error is not a missing file: it must surface as-is so callers do not retry it.
+func TestPermissionErrorIsNotMissingFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 000 does not restrict root")
+	}
+	dir := compactedDir(t)
+	tabs := listExt(t, dir, ".ldb")
+	if len(tabs) == 0 {
+		t.Fatal("no table")
+	}
+	if err := os.Chmod(tabs[0], 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(tabs[0], 0o600) })
+	_, err := Load(dir)
+	var mf *MissingFileError
+	if err == nil || errors.As(err, &mf) || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("err = %v, want a permission error that is not MissingFileError", err)
+	}
+}
+
+// Same for an unreadable directory entry probed by tableName.
+func TestTableNameStatPermission(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 000 does not restrict root")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restoring a test temp dir so cleanup can remove it
+	_, err := tableName(dir, 7)
+	var mf *MissingFileError
+	if err == nil || errors.As(err, &mf) {
+		t.Fatalf("err = %v, want a non-MissingFileError", err)
+	}
+}
+
+// A manifest cut off in the middle of a record (Teams was writing during the copy) is a typed,
+// retryable error.
+func TestManifestTruncatedMidRecord(t *testing.T) {
+	dir := compactedDir(t)
+	cur, err := os.ReadFile(filepath.Join(dir, "CURRENT")) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	mpath := filepath.Join(dir, strings.TrimSpace(string(cur)))
+	b, err := os.ReadFile(mpath) //nolint:gosec // test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mpath, b[:len(b)-3], 0o600); err != nil { //nolint:gosec // test temp dir
+		t.Fatal(err)
+	}
+	_, err = Load(dir)
+	if !errors.Is(err, ErrManifestTruncated) {
+		t.Fatalf("err = %v, want ErrManifestTruncated", err)
 	}
 }
