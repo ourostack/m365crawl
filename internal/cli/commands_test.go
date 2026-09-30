@@ -595,3 +595,78 @@ func TestSinceUntil(t *testing.T) {
 		t.Fatal("relative since must count back from now")
 	}
 }
+
+func TestMalformedLinkNoPanic(t *testing.T) {
+	e := newEnv(t)
+	code, _, stderr := e.run("--max-age", "0", "thread", "https://teams.microsoft.com/l/message/%zz/1", "--json")
+	if code != 2 || strings.Contains(stderr, "goroutine") || errorOf(t, stderr)["code"] != "usage" {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+}
+
+func TestPanicBecomesInternalError(t *testing.T) {
+	e := newEnv(t)
+	panicHook = func() { panic("boom") }
+	t.Cleanup(func() { panicHook = nil })
+	code, stdout, stderr := e.run("version", "--json")
+	if code != 1 || stdout != "" {
+		t.Fatalf("exit %d stdout %q", code, stdout)
+	}
+	er := errorOf(t, stderr)
+	if er["code"] != "internal" || !strings.Contains(er["fix"].(string), "TEAMSCRAWL_DEBUG=1") || !strings.Contains(er["fix"].(string), "github.com/ourostack/teamscrawl/issues") {
+		t.Fatalf("error = %v", er)
+	}
+	if strings.Contains(stderr, "goroutine") {
+		t.Fatalf("no stack without TEAMSCRAWL_DEBUG: %s", stderr)
+	}
+	t.Setenv("TEAMSCRAWL_DEBUG", "1")
+	code, _, stderr = e.run("version", "--json")
+	lines := strings.SplitN(stderr, "\n", 2)
+	if code != 1 || !strings.HasPrefix(lines[0], `{"error"`) || !strings.Contains(lines[1], "goroutine") {
+		t.Fatalf("debug: exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestCommandSpecificUsageFix(t *testing.T) {
+	e := newEnv(t)
+	cases := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"search"}, []string{"teamscrawl search --help"}},
+		{[]string{"messages", "--since", "zzz"}, []string{"teamscrawl messages --help"}},
+		{[]string{"--max-age", "0", "sql", "delete from messages"}, []string{"read-only by design", "SELECT"}},
+		{[]string{"--max-age", "0", "messages", "--fields", "bogus"}, []string{"Pick keys from the list in the message"}},
+	}
+	for _, c := range cases {
+		code, _, stderr := e.run(append(c.args, "--json")...)
+		fix, _ := errorOf(t, stderr)["fix"].(string)
+		if code != 2 {
+			t.Errorf("%v: exit %d", c.args, code)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(fix, w) {
+				t.Errorf("%v: fix %q lacks %q", c.args, fix, w)
+			}
+		}
+	}
+}
+
+func TestFieldsMaxTextOnNonListCommands(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	for _, cmd := range []string{"status", "whoami", "sync", "doctor", "sql"} {
+		for _, flag := range [][]string{{"--fields", "id"}, {"--max-text", "5"}} {
+			args := append([]string{"--max-age", "0", cmd}, flag...)
+			if cmd == "sql" {
+				args = append(args, "select 1")
+			}
+			code, _, stderr := e.run(append(args, "--json")...)
+			er := errorOf(t, stderr)
+			msg, _ := er["message"].(string)
+			if code != 2 || er["code"] != "usage" || !strings.Contains(msg, "list commands") || !strings.Contains(msg, "search") {
+				t.Errorf("%v: exit %d, %v", args, code, er)
+			}
+		}
+	}
+}

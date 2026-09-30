@@ -27,6 +27,7 @@ type runtime struct {
 	stdoutTTY      bool
 	stderrTTY      bool
 	format         output.Format
+	cmd            string // the running command, for command-specific fixes
 	maxAge         time.Duration
 	fields         []string
 	dbPath         string

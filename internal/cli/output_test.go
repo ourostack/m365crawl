@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ourostack/teamscrawl/internal/errs"
 )
 
 func TestParseWhen(t *testing.T) {
@@ -81,5 +85,25 @@ func TestParseDeepLink(t *testing.T) {
 	conv, root, err = parseThreadTarget("19:abc@thread.v2", "5")
 	if err != nil || conv != "19:abc@thread.v2" || root != "5" {
 		t.Fatalf("%q %q %v", conv, root, err)
+	}
+}
+
+func TestParseThreadTargetMalformedLinks(t *testing.T) {
+	for _, bad := range []string{
+		"https://teams.microsoft.com/l/message/%zz/1",
+		"https://teams.microsoft.com/l/message/19%3Aabc/%zz",
+		"https://teams.microsoft.com/l/message/",
+		"https://teams.microsoft.com/l/message/19%3Aabc",
+		"https://teams.microsoft.com/l/message//1",
+		"https://teams.microsoft.com/l/chat/19%3Aabc/1",
+		"https://evil.example/l/message/19%3Aabc/1",
+		"https://[::1",
+		"http://%",
+	} {
+		_, _, err := parseThreadTarget(bad, "")
+		var c *errs.Coded
+		if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "https://teams.microsoft.com/l/message/") || !strings.Contains(c.Fix, "thread <conversation-id> <root-message-id>") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
 	}
 }

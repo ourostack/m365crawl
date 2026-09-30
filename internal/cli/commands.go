@@ -32,31 +32,33 @@ type file struct {
 }
 
 type messageItem struct {
-	TenantID                string     `json:"tenant_id"`
-	UserID                  string     `json:"user_id"`
-	ConversationID          string     `json:"conversation_id"`
-	ConversationDisplayName string     `json:"conversation_display_name"`
-	ID                      string     `json:"id"`
-	ReplyChainID            string     `json:"reply_chain_id,omitempty"`
-	ParentMessageID         string     `json:"parent_message_id,omitempty"`
-	SenderID                string     `json:"sender_id"`
-	SenderName              string     `json:"sender_name"`
-	SentAt                  time.Time  `json:"sent_at"`
-	EditedAt                time.Time  `json:"edited_at,omitzero"`
-	DeletedAt               time.Time  `json:"deleted_at,omitzero"`
-	MessageType             string     `json:"message_type"`
-	Text                    string     `json:"text"`
-	TextTruncated           bool       `json:"text_truncated,omitempty"`
-	HTML                    string     `json:"html,omitempty"`
-	Mentions                []mention  `json:"mentions,omitempty"`
-	MentionsMe              bool       `json:"mentions_me"`
-	Reactions               []reaction `json:"reactions,omitempty"`
-	Files                   []file     `json:"files,omitempty"`
-	Links                   []string   `json:"links,omitempty"`
-	Subject                 string     `json:"subject,omitempty"`
-	Importance              string     `json:"importance,omitempty"`
-	Pinned                  bool       `json:"pinned"`
-	Link                    string     `json:"link,omitempty"`
+	TenantID                string    `json:"tenant_id"`
+	UserID                  string    `json:"user_id"`
+	ConversationID          string    `json:"conversation_id"`
+	ConversationDisplayName string    `json:"conversation_display_name"`
+	ID                      string    `json:"id"`
+	ReplyChainID            string    `json:"reply_chain_id,omitempty"`
+	ParentMessageID         string    `json:"parent_message_id,omitempty"`
+	SenderID                string    `json:"sender_id"`
+	SenderName              string    `json:"sender_name"`
+	SentAt                  time.Time `json:"sent_at"`
+	EditedAt                time.Time `json:"edited_at,omitzero"`
+	DeletedAt               time.Time `json:"deleted_at,omitzero"`
+	MessageType             string    `json:"message_type"`
+	Text                    string    `json:"text"`
+	TextTruncated           bool      `json:"text_truncated,omitempty"`
+	HTML                    string    `json:"html,omitempty"`
+	Mentions                []mention `json:"mentions,omitempty"`
+	// mentions_me and pinned are always present, false included: stable keys are easier for agents
+	// than keys that come and go. Every other optional field is omitted when empty.
+	MentionsMe bool       `json:"mentions_me"`
+	Reactions  []reaction `json:"reactions,omitempty"`
+	Files      []file     `json:"files,omitempty"`
+	Links      []string   `json:"links,omitempty"`
+	Subject    string     `json:"subject,omitempty"`
+	Importance string     `json:"importance,omitempty"`
+	Pinned     bool       `json:"pinned"`
+	Link       string     `json:"link,omitempty"`
 }
 
 type conversationItem struct {
@@ -281,6 +283,19 @@ func (c *threadCmd) Run(rt *runtime) error {
 	})
 }
 
+func badLink(why string) *errs.Coded {
+	c := errs.Usage(why)
+	c.Fix = "Pass a link like https://teams.microsoft.com/l/message/<conversationId>/<messageId>, or use thread <conversation-id> <root-message-id>."
+	return c
+}
+
+// sqlUsage is a usage error for sql that says why the archive rejects writes.
+func sqlUsage(msg string) *errs.Coded {
+	c := errs.Usage(msg)
+	c.Fix = "The archive is read-only by design. Run `teamscrawl sql --help`; sql accepts one SELECT, WITH, EXPLAIN or VALUES statement."
+	return c
+}
+
 // parseThreadTarget resolves "<conversation> <root>" or a Teams message link to a conversation
 // id and the thread's root message id. A channel reply's link names the root as parentMessageId.
 func parseThreadTarget(target, root string) (conversation, rootID string, err error) {
@@ -291,18 +306,21 @@ func parseThreadTarget(target, root string) (conversation, rootID string, err er
 		return target, root, nil
 	}
 	u, perr := url.Parse(target)
+	if perr != nil {
+		return "", "", badLink("the link is not a valid URL")
+	}
 	rest, ok := strings.CutPrefix(u.EscapedPath(), "/l/message/")
-	if perr != nil || !ok || !strings.Contains(u.Host, "teams") {
-		return "", "", errs.Usage("not a Teams message link; expected https://teams.microsoft.com/l/message/<conversationId>/<messageId>")
+	if !ok || !strings.Contains(u.Hostname(), "teams") {
+		return "", "", badLink("not a Teams message link")
 	}
 	convEsc, msgEsc, ok := strings.Cut(rest, "/")
-	if !ok {
-		return "", "", errs.Usage("the Teams message link has no message id")
+	if !ok || msgEsc == "" {
+		return "", "", badLink("the link has no message id")
 	}
 	conversation, err1 := url.PathUnescape(convEsc)
 	msg, err2 := url.PathUnescape(strings.TrimSuffix(msgEsc, "/"))
 	if err1 != nil || err2 != nil || conversation == "" || msg == "" {
-		return "", "", errs.Usage("the Teams message link is malformed")
+		return "", "", badLink("the link has a malformed conversation or message id")
 	}
 	if p := u.Query().Get("parentMessageId"); p != "" {
 		msg = p
@@ -506,7 +524,10 @@ func (c *sqlCmd) Run(rt *runtime) error {
 	}
 	q := strings.TrimSpace(c.Query)
 	if hasSecondStatement(q) {
-		return errs.Usage("sql takes a single statement")
+		return sqlUsage("sql takes a single statement")
+	}
+	if w := strings.Fields(strings.ToLower(q)); len(w) == 0 || !contains([]string{"select", "with", "explain", "values"}, w[0]) {
+		return sqlUsage("sql accepts only read statements")
 	}
 	return rt.read("sql", func(st *store.Store) (result, error) {
 		if st == nil {
@@ -517,7 +538,7 @@ func (c *sqlCmd) Run(rt *runtime) error {
 			if rt.ctx.Err() != nil {
 				return nil, err
 			}
-			return nil, errs.Usage("sql: " + err.Error())
+			return nil, sqlUsage("sql: " + err.Error())
 		}
 		res := &sqlResult{Columns: cols, Rows: rows}
 		if res.Columns == nil {
@@ -535,7 +556,9 @@ func (c *sqlCmd) Run(rt *runtime) error {
 }
 
 // hasSecondStatement reports whether q has anything after a statement-ending semicolon, ignoring
-// semicolons inside quoted strings and identifiers.
+// semicolons inside quoted strings and identifiers. It is only a friendly early error for
+// "two statements" mistakes (it does not understand SQL comments). It is not a security control:
+// the read-only archive connection is the boundary that stops writes.
 func hasSecondStatement(q string) bool {
 	var quote rune
 	for i, r := range q {
