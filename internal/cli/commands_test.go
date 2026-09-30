@@ -670,3 +670,22 @@ func TestFieldsMaxTextOnNonListCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkBytesIdenticalWithAndWithoutFields(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	linkOf := func(args ...string) string {
+		t.Helper()
+		_, stdout, _ := e.run(append([]string{"--max-age", "0", "messages", "--conversation", "Fixture chat 1", "--limit", "1"}, args...)...)
+		i := strings.Index(stdout, `"link":"`)
+		if i < 0 {
+			t.Fatalf("no link in %s", stdout)
+		}
+		rest := stdout[i:]
+		return rest[:strings.Index(rest[8:], `"`)+9]
+	}
+	plain, fields := linkOf(), linkOf("--fields", "id,link")
+	if plain != fields || !strings.Contains(plain, "&context=") || strings.Contains(plain, `\u0026`) {
+		t.Fatalf("plain %q vs fields %q", plain, fields)
+	}
+}
