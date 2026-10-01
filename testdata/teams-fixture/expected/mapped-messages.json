@@ -349,7 +349,7 @@
   {
     "ClientMessageID": "9000000008",
     "ContentHTML": "<attachment id=\"card-1\"></attachment>",
-    "ContentText": "",
+    "ContentText": "Adaptive fixture card",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",
@@ -396,7 +396,7 @@
   {
     "ClientMessageID": "9000000009",
     "ContentHTML": "<addmember><eventtime>1700000100000</eventtime><initiator>8:orgid:00000000-0000-4000-8000-0000000000a1</initiator><target>8:orgid:00000000-0000-4000-8000-0000000000ee</target></addmember>",
-    "ContentText": "",
+    "ContentText": "Member added",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",
@@ -444,7 +444,7 @@
   {
     "ClientMessageID": "9000000010",
     "ContentHTML": "<ended/><partlist type=\"ended\" alt=\"\"><part identity=\"00000000-0000-4000-8000-0000000000a1\"><name>Alex Fixture</name></part></partlist>",
-    "ContentText": "",
+    "ContentText": "Call ended",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",
@@ -2838,7 +2838,7 @@
   {
     "ClientMessageID": "9000000008",
     "ContentHTML": "<attachment id=\"card-1\"></attachment>",
-    "ContentText": "",
+    "ContentText": "Adaptive fixture card",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",
@@ -2885,7 +2885,7 @@
   {
     "ClientMessageID": "9000000009",
     "ContentHTML": "<addmember><eventtime>1700000100000</eventtime><initiator>8:orgid:00000000-0000-4000-8000-0000000000a2</initiator><target>8:orgid:00000000-0000-4000-8000-0000000000ee</target></addmember>",
-    "ContentText": "",
+    "ContentText": "Member added",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",
@@ -2933,7 +2933,7 @@
   {
     "ClientMessageID": "9000000010",
     "ContentHTML": "<ended/><partlist type=\"ended\" alt=\"\"><part identity=\"00000000-0000-4000-8000-0000000000a2\"><name>Blair Fixture</name></part></partlist>",
-    "ContentText": "",
+    "ContentText": "Call ended",
     "ContentType": "Text",
     "ConversationID": "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces",
     "DeletedAt": "0001-01-01T00:00:00Z",

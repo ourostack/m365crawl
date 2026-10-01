@@ -237,15 +237,15 @@ func TestMapFixtureBasics(t *testing.T) {
 
 func TestMapNonTextMessages(t *testing.T) {
 	d := mapFixture(t, acct1)
-	for _, c := range []struct{ contains, typ string }{
-		{"AMSImage", "RichText/Html"},
-		{`<attachment id="card-1">`, "RichText/Html"},
-		{"<addmember>", "ThreadActivity/AddMember"},
-		{"<partlist", "Event/Call"},
+	for _, c := range []struct{ contains, typ, text string }{
+		{"AMSImage", "RichText/Html", ""},
+		{`<attachment id="card-1">`, "RichText/Html", "Adaptive fixture card"},
+		{"<addmember>", "ThreadActivity/AddMember", "Member added"},
+		{"<partlist", "Event/Call", "Call ended"},
 	} {
 		m := d.msg(t, c.contains)
-		if m.ContentText != "" {
-			t.Errorf("%s: ContentText = %q, want empty", c.contains, m.ContentText)
+		if m.ContentText != c.text {
+			t.Errorf("%s: ContentText = %q, want %q", c.contains, m.ContentText, c.text)
 		}
 		if m.MessageType != c.typ || m.ContentHTML == "" || m.ID == "" {
 			t.Errorf("%s: %+v", c.contains, m)
