@@ -183,7 +183,7 @@ func copyLevelDB(ctx context.Context, src, dst string) error {
 }
 
 func copyTree(ctx context.Context, src, dst string) error {
-	err := filepath.WalkDir(src, func(path string, e fs.DirEntry, err error) error {
+	err := walkDir(src, func(path string, e fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil // deleted by Teams while we walked
@@ -209,14 +209,14 @@ func copyTree(ctx context.Context, src, dst string) error {
 		}
 		return nil
 	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil // no blob directory
-	}
 	if err != nil {
 		return mapFSError(src, err)
 	}
 	return nil
 }
+
+// statOpen is f.Stat, a variable so a test can force the failure.
+var statOpen = func(f *os.File) (fs.FileInfo, error) { return f.Stat() }
 
 // copyFile copies src to dst with mode 0600, stopping early when ctx is cancelled.
 func copyFile(ctx context.Context, src, dst string) error {
@@ -225,7 +225,7 @@ func copyFile(ctx context.Context, src, dst string) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	st, err := in.Stat()
+	st, err := statOpen(in)
 	if err != nil {
 		return err
 	}
@@ -236,28 +236,33 @@ func copyFile(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
+	if err := copyStream(ctx, out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// copyStream copies r to w, stopping early when ctx is cancelled.
+func copyStream(ctx context.Context, w io.Writer, r io.Reader) error {
 	buf := make([]byte, 1<<20)
 	for {
 		if cerr := ctx.Err(); cerr != nil {
-			_ = out.Close()
 			return cerr
 		}
-		n, rerr := in.Read(buf)
+		n, rerr := r.Read(buf)
 		if n > 0 {
-			if _, werr := out.Write(buf[:n]); werr != nil {
-				_ = out.Close()
+			if _, werr := w.Write(buf[:n]); werr != nil {
 				return werr
 			}
 		}
 		if errors.Is(rerr, io.EOF) {
-			break
+			return nil
 		}
 		if rerr != nil {
-			_ = out.Close()
 			return rerr
 		}
 	}
-	return out.Close()
 }
 
 // mapFSError turns filesystem errors into coded ones; context errors pass through.
