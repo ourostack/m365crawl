@@ -298,7 +298,7 @@ func mapMessage(acct Account, mo *v8.Object, chainConv, chainID string, people *
 		ParentMessageID: parent,
 		ClientMessageID: idStr(fld(mo, "clientMessageId")),
 		SenderID:        firstNonEmpty(idStr(fld(mo, "creator")), idStr(fld(mo, "from"))),
-		SenderName:      str(fld(mo, "imDisplayName")),
+		SenderName:      firstNonEmpty(str(fld(mo, "imDisplayName")), str(fld(mo, "fromDisplayNameInToken"))),
 		SentAt:          sentAt,
 		EditedAt:        asTime(fld(props, "edittime")),
 		MessageType:     str(fld(mo, "messageType")),
@@ -310,9 +310,7 @@ func mapMessage(acct Account, mo *v8.Object, chainConv, chainID string, people *
 		Pinned:          isPinned(fld(props, "pinned")),
 		Raw:             raw,
 	}
-	if !isSystemMessage(m.MessageType) {
-		m.ContentText = HTMLToText(m.ContentHTML)
-	}
+	m.ContentText = messageText(m.MessageType, m.ContentHTML, fld(props, "cards"))
 	m.DeletedAt = deletedAt(mo, props, sentAt)
 	m.Mentions = mapMentions(fld(props, "mentions"))
 	me := orgIDPrefix + acct.UserID
@@ -340,8 +338,31 @@ func mapMessage(acct Account, mo *v8.Object, chainConv, chainID string, people *
 	return m, nil
 }
 
-// isSystemMessage is true for call events and thread activity, whose content is markup with no
-// message text to search.
+// messageText is the readable text of a message. A system message (call event, thread activity)
+// has no text in its markup, so it gets a short synthesized one (see systemText); Control
+// messages stay blank. A call recording or transcript notice whose content is bare JSON metadata
+// reads as a one-line notice. Any other message is its HTML as text, followed by the text of its
+// cards (one per line) unless the message text already says it.
+func messageText(messageType, html string, cards any) string {
+	if isSystemMessage(messageType) {
+		return systemText(messageType, html)
+	}
+	if t := mediaMetadataText(messageType, html); t != "" {
+		return t
+	}
+	text := HTMLToText(html)
+	card := cardsText(cards)
+	switch {
+	case card == "" || strings.Contains(text, card):
+		return text
+	case text == "":
+		return card
+	}
+	return text + "\n" + card
+}
+
+// isSystemMessage is true for call events, thread activity and control messages, whose content
+// is markup with no message text to search.
 func isSystemMessage(messageType string) bool {
 	for _, p := range []string{"ThreadActivity/", "Event/", "Control/"} {
 		if strings.HasPrefix(messageType, p) {
@@ -514,6 +535,7 @@ func MapConversation(acct Account, v any) (Conversation, []Person, error) {
 
 	people := newPeople(acct)
 	var names []string
+	others := 0
 	me := orgIDPrefix + acct.UserID
 	for _, m := range items(fld(co, "members")) {
 		mid := firstNonEmpty(str(m), str(fld(m, "id")))
@@ -523,13 +545,35 @@ func MapConversation(acct Account, v any) (Conversation, []Person, error) {
 		c.Members = append(c.Members, mid)
 		name := firstNonEmpty(str(fld(m, "friendlyName")), str(fld(m, "displayName")))
 		people.add(mid, name, c.LastMessageAt)
-		if name != "" && mid != me {
-			names = append(names, name)
+		if mid != me {
+			others++
+			if name != "" {
+				names = append(names, name)
+			}
 		}
 	}
-	c.DisplayName = firstNonEmpty(short, c.Topic, strings.Join(names, ", "), long)
+	c.DisplayName = firstNonEmpty(short, c.Topic, MemberListName(names, others), long)
 	c.ReadHorizonAt, c.ReadHorizonClientMessageID = parseHorizon(str(path(co, "properties", "consumptionhorizon")))
 	return c, people.list(), nil
+}
+
+// MaxMemberNames is how many member names an untitled group chat's display name lists.
+const MaxMemberNames = 3
+
+// MemberListName builds the display name of an untitled chat from its other members' names: up to
+// MaxMemberNames of them, then "+N" for the other members not listed, as in "Ana, Ben, Chao +2".
+// others counts every other member, named or not; names are the known ones in member order. It
+// returns "" when no name is known.
+func MemberListName(names []string, others int) string {
+	if len(names) == 0 {
+		return ""
+	}
+	shown := names[:min(len(names), MaxMemberNames)]
+	out := strings.Join(shown, ", ")
+	if rest := others - len(shown); rest > 0 {
+		out += " +" + strconv.Itoa(rest)
+	}
+	return out
 }
 
 // parseHorizon splits a Skype consumption horizon "<time>;<time>;<messageId>".
