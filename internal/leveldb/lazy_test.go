@@ -17,10 +17,16 @@ import (
 
 // buildMixed writes a database whose live state spans several tables and a log, with small,
 // large and multi-block values, overwrites and deletions, and returns goleveldb's own view.
+//
+// The shape does not depend on goleveldb's background work. The write buffer is larger than
+// everything written, so nothing is flushed until a CompactRange asks for it, and CompactRange
+// returns only once its flush and compaction are done. Compaction outputs are capped at a few
+// kilobytes, so those compactions leave many tables however background compactions interleave.
 func buildMixed(t *testing.T, compression opt.Compression) (string, map[string][]byte) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := gl.OpenFile(dir, &opt.Options{Compression: compression, BlockSize: 1024, WriteBuffer: 64 << 10})
+	db, err := gl.OpenFile(dir, &opt.Options{Compression: compression, BlockSize: 1024,
+		WriteBuffer: 64 << 20, CompactionTableSize: 32 << 10, CompactionTotalSize: 64 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}
