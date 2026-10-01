@@ -740,8 +740,13 @@ func TestE2EMentionsMe(t *testing.T) {
 func TestE2EMaxAge(t *testing.T) {
 	t.Run("a never-synced archive syncs implicitly", func(t *testing.T) {
 		e := newEnv(t)
-		items, whole := list(t, e.cmd("messages", "-c", "Fixture chat 1"))
-		if len(items) == 0 {
+		res := e.cmd("messages", "-c", "Fixture chat 1")
+		mustExit(t, res, 0)
+		if res.stderr != "teamscrawl: syncing — no complete sync yet (max-age 15m)\n" {
+			t.Fatalf("stderr = %q, want the sync notice alone", res.stderr)
+		}
+		whole := mustJSON(t, res.stdout)
+		if items, _ := whole["items"].([]any); len(items) == 0 {
 			t.Fatal("the implicit sync produced no messages")
 		}
 		if age, ok := whole["archive_age_seconds"].(float64); !ok || age > 30 {
@@ -801,7 +806,11 @@ func TestE2EMaxAge(t *testing.T) {
 		if se == nil || se["code"] != "teams_not_installed" || se["message"] == "" {
 			t.Fatalf("sync_error = %v", whole["sync_error"])
 		}
-		warn := mustJSON(t, res.stderr)
+		lines := strings.Split(strings.TrimSpace(res.stderr), "\n")
+		if len(lines) != 2 || !strings.HasPrefix(lines[0], "teamscrawl: syncing — archive is ") || !strings.HasSuffix(lines[0], " old (max-age 1ns)") {
+			t.Fatalf("stderr = %q, want the notice then the warning", res.stderr)
+		}
+		warn := mustJSON(t, lines[1])
 		w, _ := warn["warning"].(map[string]any)
 		if w == nil || w["code"] != "teams_not_installed" || w["fix"] == "" {
 			t.Fatalf("stderr warning = %s", res.stderr)
@@ -1401,5 +1410,149 @@ func TestSkillPrintsTheGuide(t *testing.T) {
 		if res.stdout != string(want) || res.stderr != "" {
 			t.Fatalf("teamscrawl %v: stdout differs from SKILL.md (%d vs %d bytes), stderr %q", args, len(res.stdout), len(want), res.stderr)
 		}
+	}
+}
+
+// The friction round after the first fresh-agent run: sync notice, mention kinds, activity actors,
+// the teams list and unread --since, each through the built binary.
+
+func TestE2EImplicitSyncNotice(t *testing.T) {
+	e := newEnv(t)
+	res := e.cmd("unread", "--limit", "1")
+	mustExit(t, res, 0)
+	if !strings.HasPrefix(res.stderr, "teamscrawl: syncing — no complete sync yet (max-age 15m)\n") || strings.Contains(res.stdout, "teamscrawl:") {
+		t.Fatalf("stderr %q stdout %q", res.stderr, res.stdout)
+	}
+	whole := mustJSON(t, res.stdout)
+	synced, _ := whole["synced"].(map[string]any)
+	if synced["status"] != "ok" || synced["seconds"] == nil || whole["archive_age_seconds"] == nil {
+		t.Fatalf("synced = %v, archive_age_seconds = %v", whole["synced"], whole["archive_age_seconds"])
+	}
+	// A second read finds the archive fresh: silent, and no synced key.
+	res = e.cmd("unread", "--limit", "1")
+	if _, has := ok(t, res)["synced"]; has {
+		t.Fatalf("a fresh read reports a sync: %s", res.stdout)
+	}
+	// Text mode: the same notice on stderr, a clean table on stdout.
+	archiveExec(t, e.db, `update sync_runs set finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-30 seconds'), started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-31 seconds')`)
+	res = e.cmd("--format", "text", "unread", "--limit", "1")
+	mustExit(t, res, 0)
+	if res.stderr != "teamscrawl: syncing — archive is 2h14m old (max-age 15m)\n" || strings.Contains(res.stdout, "teamscrawl: syncing") {
+		t.Fatalf("text: stderr %q stdout %q", res.stderr, res.stdout)
+	}
+}
+
+func TestE2EMentionKindAndDirectMentions(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	items, _ := list(t, e.cmd("messages", "--mentions-me", "--limit", "100"))
+	kinds := map[string]int{}
+	for _, it := range items {
+		k, _ := it["mention_kind"].(string)
+		kinds[k]++
+	}
+	want := map[string]int{"person": 4, "channel": 2, "team": 2, "tag": 2, "everyone": 2}
+	if fmt.Sprint(kinds) != fmt.Sprint(want) {
+		t.Fatalf("mention kinds = %v, want %v", kinds, want)
+	}
+	for _, cmd := range [][]string{{"messages"}, {"search", "see this"}, {"search"}} {
+		direct, _ := list(t, e.cmd(append(cmd, "--direct-mentions", "--limit", "100")...))
+		if len(direct) == 0 {
+			t.Fatalf("%v --direct-mentions found nothing", cmd)
+		}
+		for _, it := range direct {
+			if it["mention_kind"] != "person" {
+				t.Fatalf("%v --direct-mentions returned %v", cmd, it["mention_kind"])
+			}
+		}
+	}
+	acts, _ := list(t, e.cmd("activity", "--direct-mentions"))
+	if len(acts) != 2 || acts[0]["subtype"] != "person" {
+		t.Fatalf("activity --direct-mentions = %v", acts)
+	}
+}
+
+func TestE2EActivityActors(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	acts, _ := list(t, e.cmd("--account", account1, "activity", "--limit", "100"))
+	seen := map[string]bool{}
+	for _, it := range acts {
+		typ, _ := it["type"].(string)
+		name, hasName := it["actor_name"]
+		switch typ {
+		case "reactionInChat", "mentionInChat", "reply", "replyToReply", "follow", "mention":
+			if name != "Pat Example" || it["actor_id"] == nil {
+				t.Errorf("%s: actor %v / %v", typ, it["actor_id"], name)
+			}
+			seen[typ] = true
+		default:
+			if hasName || it["actor_id"] != nil {
+				t.Errorf("%s must have no actor: %v", typ, it)
+			}
+		}
+	}
+	if len(seen) != 6 {
+		t.Fatalf("types with an actor = %v", seen)
+	}
+}
+
+func TestE2ETeams(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	teams, whole := list(t, e.cmd("teams"))
+	if len(teams) != 2 || whole["truncated"] != false {
+		t.Fatalf("teams = %v", whole)
+	}
+	for _, tm := range teams {
+		if tm["channel_count"] != float64(2) || tm["last_activity_at"] == nil || tm["unread_count"] == nil || tm["team_id"] == nil {
+			t.Fatalf("team = %v", tm)
+		}
+	}
+	one, _ := list(t, e.cmd("teams", "--account", account2, "--fields", "display_name,channel_count"))
+	if len(one) != 1 || one[0]["display_name"] != "Fixture team 2" || len(one[0]) != 2 {
+		t.Fatalf("--account/--fields: %v", one)
+	}
+	cut, whole := list(t, e.cmd("teams", "--limit", "1"))
+	if len(cut) != 1 || whole["truncated"] != true || whole["total"] != float64(2) {
+		t.Fatalf("--limit: %v", whole)
+	}
+	// The id and the name from the list both work as --team.
+	for _, v := range []any{teams[0]["team_id"], teams[0]["display_name"]} {
+		if convs, _ := list(t, e.cmd("conversations", "--team", v.(string))); len(convs) < 3 {
+			t.Fatalf("--team %v: %d conversations", v, len(convs))
+		}
+	}
+	res := e.cmd("messages", "--team", "No such team")
+	mustExit(t, res, 2)
+	if !strings.Contains(res.stderr, "teamscrawl teams") {
+		t.Fatalf("the --team error does not point at `teams`: %s", res.stderr)
+	}
+}
+
+func TestE2EUnreadSince(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	count := func(args ...string) float64 {
+		t.Helper()
+		_, whole := list(t, e.cmd(append([]string{"unread", "--limit", "1"}, args...)...))
+		if total, ok := whole["total"].(float64); ok {
+			return total
+		}
+		return whole["count"].(float64)
+	}
+	all := count()
+	if all == 0 || count("--since", "2023-01-01") != all || count("--since", "7d") != 0 {
+		t.Fatalf("unread %v, since 2023 %v, since 7d %v", all, count("--since", "2023-01-01"), count("--since", "7d"))
+	}
+	if mid := count("--since", "2023-11-14T22:14:00Z"); mid == 0 || mid >= all {
+		t.Fatalf("a cutoff inside the fixture must keep some unread messages: %v of %v", mid, all)
+	}
+	by, whole := list(t, e.cmd("unread", "--by-conversation", "--include-channels", "--team", "Fixture team 1", "--since", "2023-01-01"))
+	if len(by) == 0 || whole["channels_excluded"] != nil {
+		t.Fatalf("by-conversation with team and channels: %v", whole)
+	}
+	if none, _ := list(t, e.cmd("unread", "--by-conversation", "--since", "7d")); len(none) != 0 {
+		t.Fatalf("by-conversation since 7d = %v", none)
 	}
 }
