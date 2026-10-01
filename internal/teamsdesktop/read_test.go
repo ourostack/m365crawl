@@ -269,3 +269,42 @@ func TestReadContextCancelled(t *testing.T) {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 }
+
+// Read loads only the databases it will decode: the allowlisted managers, for the chosen account.
+func TestKeepDatabase(t *testing.T) {
+	acct := Account{TenantID: tenant2, UserID: user2}
+	for _, c := range []struct {
+		name    string
+		account *Account
+		want    bool
+	}{
+		{dbName("replychain-manager", tenant1, user1), nil, true},
+		{dbName("conversation-manager", tenant1, "8:orgid:"+user1), nil, true},
+		{dbName("activity-manager", tenant1, user1), nil, true},
+		{dbName("auth", tenant1, user1), nil, false},
+		{dbName("calling-manager", tenant1, user1), nil, false},
+		{"Teams:auth:secret", nil, false},
+		{"some-other-db", nil, false},
+		{dbName("replychain-manager", tenant1, user1), &acct, false},
+		{dbName("replychain-manager", tenant2, user2), &acct, true},
+	} {
+		if got := keepDatabase(c.account)(c.name); got != c.want {
+			t.Errorf("keepDatabase(%v)(%q) = %v want %v", c.account, c.name, got, c.want)
+		}
+	}
+}
+
+// Cancelling removes the snapshot, so a value re-read after cancellation fails with a missing
+// file; the read reports the cancellation, not snapshot_inconsistent.
+func TestReadCancelledDuringValueReread(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &fakeOrigin{
+		dbs:    []indexeddb.Database{{ID: 1, Name: dbName("replychain-manager", tenant1, user1), Stores: []indexeddb.Store{{ID: 1, Name: "replychains-2"}}}},
+		recErr: fmt.Errorf("leveldb: %w", &leveldb.MissingFileError{Name: "000005.ldb"}),
+	}
+	_, err := readOrigin(ctx, f, nil, func(Account, string, any) error { return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}

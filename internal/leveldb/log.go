@@ -16,7 +16,7 @@ func (d *dropCounter) Drop(error) { d.n++ }
 
 // readLog replays one write-ahead log into the store. It reports whether the log ended in a
 // truncated or corrupt tail, which is expected when Teams was writing during the copy.
-func readLog(path, name string, into store) (truncated bool, err error) {
+func readLog(path, name string, into *store) (truncated bool, err error) {
 	f, err := os.Open(path) //nolint:gosec // path is built from a manifest-derived file name inside the caller-chosen directory
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -55,7 +55,7 @@ func readLog(path, name string, into store) (truncated bool, err error) {
 
 // applyBatch applies a write batch: 8-byte sequence, 4-byte count, then records. It returns false
 // when the batch is malformed; records decoded before the defect are kept.
-func applyBatch(b []byte, into store) bool {
+func applyBatch(b []byte, into *store) bool {
 	if len(b) < 12 {
 		return false
 	}
@@ -78,9 +78,9 @@ func applyBatch(b []byte, into store) bool {
 			if d.err != nil {
 				return false
 			}
-			into.put(key, seq+uint64(i), false, val)
+			into.put(key, seq+uint64(i), false, val, nil)
 		case typeDeletion:
-			into.put(key, seq+uint64(i), true, nil)
+			into.put(key, seq+uint64(i), true, nil, nil)
 		default:
 			return false
 		}

@@ -33,9 +33,26 @@ type Store struct {
 
 // Databases lists every database and its object stores, ordered by id.
 func (o *Origin) Databases() ([]Database, error) {
+	dbs, err := databaseNames(o.kv)
+	if err != nil {
+		return nil, err
+	}
+	for i := range dbs {
+		stores, err := o.stores(dbs[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		dbs[i].Stores = stores
+	}
+	sort.Slice(dbs, func(i, j int) bool { return dbs[i].ID < dbs[j].ID })
+	return dbs, nil
+}
+
+// databaseNames lists every database's id, origin and name from the global metadata, without stores.
+func databaseNames(kv kv) ([]Database, error) {
 	prefix := []byte{0, 0, 0, 0, metaDatabaseName}
 	var dbs []Database
-	err := o.kv.Scan(prefix, func(k, v []byte) error {
+	err := kv.Scan(prefix, func(k, v []byte) error {
 		rest := k[len(prefix):]
 		origin, n, err := readUTF16(rest)
 		if err != nil {
@@ -52,18 +69,7 @@ func (o *Origin) Databases() ([]Database, error) {
 		dbs = append(dbs, Database{ID: id, Origin: origin, Name: name})
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	for i := range dbs {
-		stores, err := o.stores(dbs[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		dbs[i].Stores = stores
-	}
-	sort.Slice(dbs, func(i, j int) bool { return dbs[i].ID < dbs[j].ID })
-	return dbs, nil
+	return dbs, err
 }
 
 func (o *Origin) stores(dbID int64) ([]Store, error) {
@@ -94,7 +100,7 @@ func (o *Origin) stores(dbID int64) ([]Store, error) {
 // Record is one object store entry. Err is an *OmissionError (code bad_key)
 // when the record key could not be decoded; Key is then nil. Raw is the stored
 // value without its leading IndexedDB version varint; pass it to Decode.
-// Raw aliases the in-memory LevelDB value: treat it as read-only. Raw is empty for an
+// Raw aliases the LevelDB reader's copy of the value: treat it as read-only. Raw is empty for an
 // empty value. For blob-replaced values Records rewrites the blob index to
 // the blob number, so Raw is self-contained.
 type Record struct {
