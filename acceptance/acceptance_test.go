@@ -260,7 +260,7 @@ func TestRealDifferential(t *testing.T) {
 		for side := range results {
 			line, err := rd.ReadString('\n')
 			if err != nil {
-				t.Fatalf("reading node output after %d records: %v (stderr: %s)", total, err, truncate(stderr.String(), 200))
+				t.Fatalf("reading node output after %d records: %v; %s", total, err, stderrNote(t, "node", stderr.Bytes()))
 			}
 			line = strings.TrimSuffix(line, "\n")
 			total++
@@ -288,7 +288,7 @@ func TestRealDifferential(t *testing.T) {
 			t.Fatalf("writing to node: %v", err)
 		}
 		if err := cmd.Wait(); err != nil {
-			t.Fatalf("node: %v (stderr: %s)", err, truncate(stderr.String(), 200))
+			t.Fatalf("node: %v; %s", err, stderrNote(t, "node", stderr.Bytes()))
 		}
 	}
 	t.Logf("differential: records=%d checked=%d not_checkable=%d no_payload=%d mismatches=%d in %v (snapshot %v)",
@@ -302,19 +302,19 @@ func TestRealDifferential(t *testing.T) {
 	if total == 0 {
 		t.Fatal("no allowlisted records were compared")
 	}
-	if checked == 0 {
-		t.Fatal("Node could not check a single record")
+	allowlisted := total + noPayload
+	if noPayload != 0 {
+		t.Errorf("%d of %d allowlisted records yielded no payload to compare", noPayload, allowlisted)
+	}
+	if notCheckable*1000 > allowlisted*5 {
+		t.Errorf("%d of %d allowlisted records are not checkable by Node, more than 0.5%%", notCheckable, allowlisted)
+	}
+	if checked*100 < allowlisted*99 {
+		t.Errorf("only %d of %d allowlisted records were checked, want at least 99%%", checked, allowlisted)
 	}
 	if mismatches > 0 {
 		t.Errorf("%d of %d checked records decode differently from Node (paths above)", mismatches, checked)
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
 }
 
 func sortedKeys(m map[string]int) []string {
@@ -324,126 +324,6 @@ func sortedKeys(m map[string]int) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// safeKey keeps an object key in a reported path only when it looks like a field name; keys
-// that are data (ids, guids, numbers) become <key>.
-var (
-	fieldName   = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$-]{0,40}$`)
-	digitsInKey = regexp.MustCompile(`[0-9]{4}`)
-)
-
-func safeKey(k string) string {
-	if fieldName.MatchString(k) && !digitsInKey.MatchString(k) {
-		return k
-	}
-	return "<key>"
-}
-
-type tokEvent struct {
-	text string // token text; for a delimiter the delimiter
-	path string // path of the value or key the token belongs to
-	key  bool
-	end  bool
-}
-
-// tokens streams a canonical JSON document as events with field paths.
-type tokenizer struct {
-	dec   *json.Decoder
-	stack []frame
-}
-
-type frame struct {
-	obj       bool
-	expectKey bool
-	key       string
-}
-
-func newTokenizer(s string) *tokenizer {
-	d := json.NewDecoder(strings.NewReader(s))
-	d.UseNumber()
-	return &tokenizer{dec: d}
-}
-
-func (z *tokenizer) path() string {
-	var b strings.Builder
-	for _, f := range z.stack {
-		if f.obj {
-			if f.key != "" {
-				b.WriteString("." + safeKey(f.key))
-			}
-		} else {
-			b.WriteString("[]")
-		}
-	}
-	if b.Len() == 0 {
-		return "$"
-	}
-	return "$" + b.String()
-}
-
-// valueDone marks the value just finished in the enclosing container.
-func (z *tokenizer) valueDone() {
-	if n := len(z.stack); n > 0 && z.stack[n-1].obj {
-		z.stack[n-1].expectKey = true
-	}
-}
-
-func (z *tokenizer) next() (tokEvent, bool) {
-	tok, err := z.dec.Token()
-	if err != nil {
-		return tokEvent{}, false
-	}
-	switch v := tok.(type) {
-	case json.Delim:
-		switch v {
-		case '{', '[':
-			ev := tokEvent{text: string(v), path: z.path()}
-			z.stack = append(z.stack, frame{obj: v == '{', expectKey: v == '{'})
-			return ev, true
-		default:
-			z.stack = z.stack[:len(z.stack)-1]
-			ev := tokEvent{text: string(v), path: z.path(), end: true}
-			z.valueDone()
-			return ev, true
-		}
-	case string:
-		if n := len(z.stack); n > 0 && z.stack[n-1].obj && z.stack[n-1].expectKey {
-			z.stack[n-1].key, z.stack[n-1].expectKey = v, false
-			return tokEvent{text: v, path: z.path(), key: true}, true
-		}
-		ev := tokEvent{text: "s:" + v, path: z.path()}
-		z.valueDone()
-		return ev, true
-	default:
-		ev := tokEvent{text: fmt.Sprintf("%T:%v", v, v), path: z.path()}
-		z.valueDone()
-		return ev, true
-	}
-}
-
-// firstDifference returns the field path of the first token where two canonical documents
-// differ, with the kind of difference. It never returns a value.
-func firstDifference(a, b string) string {
-	za, zb := newTokenizer(a), newTokenizer(b)
-	for {
-		ea, oka := za.next()
-		eb, okb := zb.next()
-		switch {
-		case !oka && !okb:
-			return "$ [documents differ, tokens equal]"
-		case !oka || !okb:
-			return "$ [one document ends early]"
-		case ea.text == eb.text && ea.path == eb.path:
-			continue
-		case ea.key || eb.key:
-			return ea.path + " [key]"
-		case ea.end != eb.end || (len(ea.text) > 0 && len(eb.text) > 0 && (ea.text[0] == '{' || ea.text[0] == '[' || eb.text[0] == '{' || eb.text[0] == '[')):
-			return ea.path + " [shape]"
-		default:
-			return ea.path + " [value]"
-		}
-	}
 }
 
 // --- reference counts --------------------------------------------------------
@@ -470,19 +350,41 @@ type refCounts struct {
 	} `json:"hashes"`
 }
 
+// requireReference fails with setup instructions when a reference clone is missing. It is a
+// failure, not a skip: the acceptance run is not complete without the reference counts.
+func requireReference(t *testing.T) {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	for _, r := range []struct{ env, def, module, url string }{
+		{"CCL_READER", "~/code/_refs/ccl_chromium_reader", "ccl_chromium_reader", "https://github.com/cclgroupltd/ccl_chromium_reader"},
+		{"CCL_SNAPPY", "~/code/_refs/ccl_simplesnappy", "ccl_simplesnappy", "https://github.com/cclgroupltd/ccl_simplesnappy"},
+	} {
+		dir := os.Getenv(r.env)
+		if dir == "" {
+			dir = r.def
+		}
+		dir = strings.Replace(dir, "~", home, 1)
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("reference %s not found at %s. Clone %s there (default %s) or point %s at an existing clone; python3 needs no pip packages.",
+				r.module, dir, r.url, r.def, r.env)
+		}
+	}
+}
+
 func runCCL(t *testing.T, snapDir string) refCounts {
 	t.Helper()
 	py := os.Getenv("TEAMSCRAWL_PYTHON")
 	if py == "" {
 		py = "python3"
 	}
+	requireReference(t)
 	start := time.Now()
 	cmd := exec.Command(py, "ccl_count.py", snapDir) //nolint:gosec // the interpreter is the developer's own choice
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("ccl_count.py: %v\n%s", err, truncate(stderr.String(), 400))
+		t.Fatalf("ccl_count.py: %v; %s", err, stderrNote(t, "ccl_count", stderr.Bytes()))
 	}
 	var rc refCounts
 	if err := json.Unmarshal(out, &rc); err != nil {
@@ -532,7 +434,10 @@ func readOurs(t *testing.T, snapDir string) ours {
 			return nil
 		})
 		// Every version, tombstones included: Keep sees each one before newest-wins.
-		if c.db < 256 && c.store < 256 {
+		if c.db >= 256 || c.store >= 256 {
+			t.Fatalf("database or store id too large for the raw version count: %d, %d", c.db, c.store)
+		}
+		{
 			prefix := []byte{0, byte(c.db), byte(c.store), 1} //nolint:gosec // both ids are below 256 here
 			if _, err := leveldb.LoadWith(filepath.Join(snapDir, "leveldb"), leveldb.LoadOptions{Keep: func(k []byte) bool {
 				if bytes.HasPrefix(k, prefix) {
@@ -635,12 +540,12 @@ func TestRealConversationAccounting(t *testing.T) {
 		t.Logf("conversation record versions: reference=%d raw_leveldb=%d", rc.Conversations.RecordVersions, us.rawVersions)
 		t.Logf("  superseded by a newer version: %d", superseded)
 		t.Logf("  tombstoned (newest version is a deletion): %d", rc.Conversations.LatestTombstoned)
-		t.Logf("  undecodable or unmapped (omissions): %d %v", undecodable, us.omissions)
+		t.Logf("  omissions of every kind (conversations are the only kind that could drop a conversation): %d %v", undecodable, us.omissions)
 		t.Logf("  mapped under a different id than the record key: %d", us.keyMismatches)
 		t.Logf("  mapped as conversations: %d (reference newest live: %d)", len(us.convIDs), rc.Conversations.LatestLive)
 		droppedFromRef := missing(rc.Hashes.Conversations, us.convIDs)
 		t.Logf("  reference conversations teamscrawl does not map (genuinely dropped): %d", droppedFromRef)
-		if us.rawVersions != 0 && us.rawVersions != rc.Conversations.RecordVersions {
+		if us.rawVersions != rc.Conversations.RecordVersions {
 			t.Errorf("LevelDB reader sees %d conversation record versions, reference %d", us.rawVersions, rc.Conversations.RecordVersions)
 		}
 		if droppedFromRef != 0 {
@@ -697,8 +602,13 @@ func messageAccounting(t *testing.T, rc refCounts, us ours) (matching int) {
 	lacking := missing(rc.Hashes.Messages, us.messages)
 	extra, extraInRefFailed := 0, 0
 	seen := map[string]bool{}
-	for key, ms := range us.chainMsgs {
-		for _, m := range ms {
+	chainKeys := make([]string, 0, len(us.chainMsgs))
+	for key := range us.chainMsgs {
+		chainKeys = append(chainKeys, key)
+	}
+	sort.Strings(chainKeys) // a message under two record keys is attributed to the smallest key
+	for _, key := range chainKeys {
+		for _, m := range us.chainMsgs[key] {
 			if ref[m] || seen[m] {
 				continue
 			}
@@ -899,68 +809,5 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	t.Logf("token-shaped strings: %d in message content columns, %d elsewhere", inContent, elsewhere)
 	if elsewhere != 0 {
 		t.Errorf("%d token-shaped strings outside message content", elsewhere)
-	}
-}
-
-// --- self-tests of the harness (no real cache needed) -------------------------
-
-func TestFirstDifference(t *testing.T) {
-	cases := []struct{ a, b, want string }{
-		{`{"a":{"b":[1,2]}}`, `{"a":{"b":[1,3]}}`, "$.a.b[] [value]"},
-		{`{"a":1}`, `{"b":1}`, "$.a [key]"},
-		{`{"a":[1]}`, `{"a":{"x":1}}`, "$.a [shape]"},
-		{`{"a":"1"}`, `{"a":1}`, "$.a [value]"},
-		{`{"1234567":{"x":1}}`, `{"1234567":{"x":2}}`, "$.<key>.x [value]"},
-		{`[1,2]`, `[1]`, "$[] [shape]"},
-	}
-	for _, c := range cases {
-		if got := firstDifference(c.a, c.b); got != c.want {
-			t.Errorf("firstDifference(%s, %s) = %q, want %q", c.a, c.b, got, c.want)
-		}
-	}
-}
-
-// TestDiffScriptAgreesWithGo feeds synthetic payloads through diff.mjs: a decodable value, a
-// version 16 relabel, and a payload Node rejects.
-func TestDiffScriptAgreesWithGo(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node not installed")
-	}
-	payloads := [][]byte{
-		{0xff, 0x0f, 0x22, 0x02, 'h', 'i'},
-		{0xff, 0x10, 0x22, 0x02, 'h', 'i'},
-		{0xff, 0x0f, 0x6f, 0x22, 0x01, 'a', 0x49, 0x02, 0x7b, 0x01}, // {a: 1}
-		{0xff, 0x0f, 0x5c},                                          // host object: Node rejects it
-	}
-	var in bytes.Buffer
-	for _, p := range payloads {
-		var n [4]byte
-		binary.BigEndian.PutUint32(n[:], uint32(len(p))) //nolint:gosec // tiny test payloads
-		in.Write(n[:])
-		in.Write(p)
-	}
-	cmd := exec.Command(node, "diff.mjs") //nolint:gosec // node comes from PATH; the script is this package's own
-	cmd.Stdin = &in
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-	if len(lines) != len(payloads) {
-		t.Fatalf("got %d lines for %d payloads: %q", len(lines), len(payloads), lines)
-	}
-	for i, p := range payloads[:3] {
-		v, err := v8.Deserialize(p)
-		if err != nil {
-			t.Fatalf("payload %d: %v", i, err)
-		}
-		c, _ := v8.Canonical(v)
-		if want := "ok " + string(c); lines[i] != want {
-			t.Errorf("payload %d: node %q, go %q", i, lines[i], want)
-		}
-	}
-	if !strings.HasPrefix(lines[3], "nc ") {
-		t.Errorf("rejected payload: %q", lines[3])
 	}
 }

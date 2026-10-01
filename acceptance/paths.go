@@ -1,0 +1,224 @@
+// Helpers shared by the real-cache acceptance tests. They need neither the cache nor the
+// acceptance build tag, so CI exercises them.
+package acceptance
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// knownFields are the field names of the Teams records and of the canonical encoding. A mismatch
+// path prints only these: any other object key may be data (an id, a name used as a key), so it
+// prints as <field>.
+var knownFields = map[string]bool{
+	"activityId":          true,
+	"activitySubtype":     true,
+	"activityType":        true,
+	"chatTitle":           true,
+	"clientArrivalTime":   true,
+	"clientMessageId":     true,
+	"content":             true,
+	"contentType":         true,
+	"conversationId":      true,
+	"creator":             true,
+	"creatorId":           true,
+	"deletetime":          true,
+	"deleteTime":          true,
+	"deletionInfo":        true,
+	"deltaEmotions":       true,
+	"displayName":         true,
+	"edittime":            true,
+	"emotions":            true,
+	"fileName":            true,
+	"files":               true,
+	"fileType":            true,
+	"friendlyName":        true,
+	"from":                true,
+	"id":                  true,
+	"imDisplayName":       true,
+	"importance":          true,
+	"isRead":              true,
+	"key":                 true,
+	"lastMessageTimeUtc":  true,
+	"links":               true,
+	"longTitle":           true,
+	"members":             true,
+	"mentions":            true,
+	"messageId":           true,
+	"messageMap":          true,
+	"messageType":         true,
+	"mri":                 true,
+	"objectUrl":           true,
+	"openUrl":             true,
+	"originalArrivalTime": true,
+	"parentId":            true,
+	"parentMessageId":     true,
+	"pinned":              true,
+	"pinnedTime":          true,
+	"properties":          true,
+	"replyChainId":        true,
+	"shortTitle":          true,
+	"sourceMessageId":     true,
+	"sourceReplyChainId":  true,
+	"sourceThreadId":      true,
+	"spaceThreadTopic":    true,
+	"subject":             true,
+	"teamId":              true,
+	"teamsAppId":          true,
+	"threadProperties":    true,
+	"timestamp":           true,
+	"title":               true,
+	"topic":               true,
+	"topicThreadTopic":    true,
+	"type":                true,
+	"url":                 true,
+	"users":               true,
+	"version":             true,
+	"$array":              true,
+	"$props":              true,
+	"$map":                true,
+	"$set":                true,
+	"$date":               true,
+	"$bytes":              true,
+	"$error":              true,
+	"$wrapper":            true,
+	"$regexp":             true,
+	"$bigint":             true,
+	"$number":             true,
+	"$undefined":          true,
+	"$hole":               true,
+	"$cycle":              true,
+	"name":                true,
+	"message":             true,
+	"stack":               true,
+	"cause":               true,
+}
+
+func safeKey(k string) string {
+	if knownFields[k] {
+		return k
+	}
+	return "<field>"
+}
+
+type tokEvent struct {
+	text string // token text; for a delimiter the delimiter
+	path string // path of the value or key the token belongs to
+	key  bool
+	end  bool
+}
+
+// tokens streams a canonical JSON document as events with field paths.
+type tokenizer struct {
+	dec   *json.Decoder
+	stack []frame
+}
+
+type frame struct {
+	obj       bool
+	expectKey bool
+	key       string
+}
+
+func newTokenizer(s string) *tokenizer {
+	d := json.NewDecoder(strings.NewReader(s))
+	d.UseNumber()
+	return &tokenizer{dec: d}
+}
+
+func (z *tokenizer) path() string {
+	var b strings.Builder
+	for _, f := range z.stack {
+		if f.obj {
+			if f.key != "" {
+				b.WriteString("." + safeKey(f.key))
+			}
+		} else {
+			b.WriteString("[]")
+		}
+	}
+	if b.Len() == 0 {
+		return "$"
+	}
+	return "$" + b.String()
+}
+
+// valueDone marks the value just finished in the enclosing container.
+func (z *tokenizer) valueDone() {
+	if n := len(z.stack); n > 0 && z.stack[n-1].obj {
+		z.stack[n-1].expectKey = true
+	}
+}
+
+func (z *tokenizer) next() (tokEvent, bool) {
+	tok, err := z.dec.Token()
+	if err != nil {
+		return tokEvent{}, false
+	}
+	switch v := tok.(type) {
+	case json.Delim:
+		switch v {
+		case '{', '[':
+			ev := tokEvent{text: string(v), path: z.path()}
+			z.stack = append(z.stack, frame{obj: v == '{', expectKey: v == '{'})
+			return ev, true
+		default:
+			z.stack = z.stack[:len(z.stack)-1]
+			ev := tokEvent{text: string(v), path: z.path(), end: true}
+			z.valueDone()
+			return ev, true
+		}
+	case string:
+		if n := len(z.stack); n > 0 && z.stack[n-1].obj && z.stack[n-1].expectKey {
+			z.stack[n-1].key, z.stack[n-1].expectKey = v, false
+			return tokEvent{text: v, path: z.path(), key: true}, true
+		}
+		ev := tokEvent{text: "s:" + v, path: z.path()}
+		z.valueDone()
+		return ev, true
+	default:
+		ev := tokEvent{text: fmt.Sprintf("%T:%v", v, v), path: z.path()}
+		z.valueDone()
+		return ev, true
+	}
+}
+
+// firstDifference returns the field path of the first token where two canonical documents
+// differ, with the kind of difference. It never returns a value.
+func firstDifference(a, b string) string {
+	za, zb := newTokenizer(a), newTokenizer(b)
+	for {
+		ea, oka := za.next()
+		eb, okb := zb.next()
+		switch {
+		case !oka && !okb:
+			return "$ [documents differ, tokens equal]"
+		case !oka || !okb:
+			return "$ [one document ends early]"
+		case ea.text == eb.text && ea.path == eb.path:
+			continue
+		case ea.key || eb.key:
+			return ea.path + " [key]"
+		case ea.end != eb.end || (len(ea.text) > 0 && len(eb.text) > 0 && (ea.text[0] == '{' || ea.text[0] == '[' || eb.text[0] == '{' || eb.text[0] == '[')):
+			return ea.path + " [shape]"
+		default:
+			return ea.path + " [value]"
+		}
+	}
+}
+
+// stderrNote saves a subprocess's stderr to a file in the test's temp directory and returns a
+// description with only the byte count and the file path: stderr can quote record keys or
+// content, so it never goes into a failure message.
+func stderrNote(t *testing.T, name string, stderr []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name+".stderr")
+	if err := os.WriteFile(path, stderr, 0o600); err != nil {
+		return fmt.Sprintf("%d bytes of stderr (not saved: %v)", len(stderr), err)
+	}
+	return fmt.Sprintf("%d bytes of stderr saved to %s", len(stderr), path)
+}
