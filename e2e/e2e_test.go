@@ -1064,3 +1064,58 @@ func wantDoctorFailed(t *testing.T, res result) {
 		t.Fatalf("stderr is not a doctor_failed error: %s", res.stderr)
 	}
 }
+
+func TestE2EPolish(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	// search with filters alone matches messages with the same filters.
+	filtered, _ := list(t, e.cmd("search", "--mentions-me"))
+	if len(filtered) != 6 {
+		t.Fatalf("search --mentions-me = %d, want 6", len(filtered))
+	}
+	if res := e.cmd("search"); res.code != 2 || !strings.Contains(res.stderr, "teamscrawl messages") {
+		t.Fatalf("bare search: exit %d %s", res.code, res.stderr)
+	}
+	// --team picks one account's team by name.
+	team, _ := list(t, e.cmd("conversations", "--team", "fixture team 1"))
+	if len(team) < 3 {
+		t.Fatalf("--team conversations = %d", len(team))
+	}
+	for _, it := range team {
+		if it["user_id"] != user1 {
+			t.Errorf("--team leaked another account: %v", it)
+		}
+	}
+	// total appears on a truncated list, equals the full count, and is absent otherwise.
+	cut, whole := list(t, e.cmd("messages", "--limit", "2"))
+	all, full := list(t, e.cmd("messages", "--limit", "500"))
+	if len(cut) != 2 || whole["truncated"] != true || int(whole["total"].(float64)) != len(all) {
+		t.Fatalf("total = %v, want %d", whole["total"], len(all))
+	}
+	if _, has := full["total"]; has {
+		t.Fatalf("total on a complete list: %v", full["total"])
+	}
+	// Channel roots count their replies.
+	var roots int
+	for _, it := range all {
+		if n, has := it["reply_count"].(float64); has && n == 1 {
+			roots++
+		}
+	}
+	if roots != 2 {
+		t.Fatalf("channel roots with one reply = %d, want 2 (one per account)", roots)
+	}
+	// Cards and system events read as text.
+	var card, call int
+	for _, it := range all {
+		switch it["text"] {
+		case "Adaptive fixture card":
+			card++
+		case "Call ended":
+			call++
+		}
+	}
+	if card != 2 || call != 2 {
+		t.Fatalf("card text %d, call text %d, want 2 each", card, call)
+	}
+}

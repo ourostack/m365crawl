@@ -528,9 +528,12 @@ func TestActivityTypeList(t *testing.T) {
 		rows, _ := must2(s.Activity(ctx, ActivityFilter{Type: typ}))
 		return len(rows)
 	}
-	for typ, want := range map[string]int{"mention": 1, "MENTIONINCHAT": 1, "mention,mentionInChat": 2, " mention , reply ,": 2, "mention,nope": 1, "": 4, ",": 4} {
-		if got := count(typ); got != want {
-			t.Errorf("type %q: %d, want %d", typ, got, want)
+	for _, c := range []struct {
+		typ  string
+		want int
+	}{{"mention", 1}, {"MENTIONINCHAT", 1}, {"mention,mentionInChat", 2}, {" mention , reply ,", 2}, {"mention,nope", 1}, {"", 4}, {",", 4}} {
+		if got := count(c.typ); got != c.want {
+			t.Errorf("type %q: %d, want %d", c.typ, got, c.want)
 		}
 	}
 }
@@ -604,5 +607,27 @@ func TestPruneJoins(t *testing.T) {
 	// A from clause with no joins is returned as is.
 	if got := pruneJoins(` from people p`, ` where p.id=?`); got != ` from people p` {
 		t.Errorf("no joins: %q", got)
+	}
+}
+
+// A bot's repeated post is two Teams records (own id, client id and version), and both are kept;
+// the same record seen twice (it can sit in two reply chains) is one row.
+func TestRepeatedBotPostsAreDistinctRecords(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	post := func(id, client string, at time.Time) teamsdesktop.Message {
+		m := msg(acctA, "19:c@thread.skype", id, "Build finished", at)
+		m.SenderID, m.SenderName, m.ClientMessageID = "28:bot", "Build bot", client
+		return m
+	}
+	first, second := post("1001", "c1", base), post("1002", "c2", base.Add(2*time.Second))
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{first, second}))
+	again := must(s.ApplyMessages(ctx, []teamsdesktop.Message{first, first}))
+	if again.Inserted != 0 || again.Unchanged != 2 {
+		t.Fatalf("same record twice: %+v", again)
+	}
+	rows, _ := must2(s.Messages(ctx, Filter{}))
+	if !eqStrings(ids(rows), []string{"1001", "1002"}) {
+		t.Fatalf("both records must stay, once each: %v", ids(rows))
 	}
 }
