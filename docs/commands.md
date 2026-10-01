@@ -17,6 +17,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($TEAMSCRAWL_MAX_AGE). |
 | `--fields=a,b,c` | List commands only: keep only these top-level keys of each item, comma separated. |
 | `--max-text=N` | List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it. |
+| `--version` | Print the version, commit and build date, then exit. |
 
 Output is JSON when stdout is not a terminal and text on a terminal. Errors go to stderr as `{"error": {"code", "message", "fix"}}`. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. See [SPEC.md](../SPEC.md) section 6 for every error code.
 
@@ -37,7 +38,8 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`watch`](#watch) | Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted). |
 | [`whoami`](#whoami) | Show the accounts in the archive and the archive's state. |
 | [`sql`](#sql) | Run a read-only SQL query against the archive. |
-| [`version`](#version) | Print the teamscrawl version. |
+| [`skill`](#skill) | Print the agent guide (SKILL.md) for this version, as Markdown in every output mode. |
+| [`version`](#version) | Print the teamscrawl version, commit and build date. |
 
 ## doctor
 
@@ -49,7 +51,7 @@ teamscrawl doctor [flags]
 
 No flags beyond the global ones.
 
-Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync.
+Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade` and `last_sync_status` (warnings).
 
 Examples:
 
@@ -67,7 +69,7 @@ teamscrawl sync [flags]
 
 No flags beyond the global ones.
 
-Result: The sync report (see SPEC.md section 5). Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. `--account` limits the run to one account and skips the unchanged shortcut.
+Result: The sync report (see SPEC.md sections 4 and 5). Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
 Examples:
 
@@ -365,9 +367,9 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--limit=50` | Maximum rows to return; truncated says whether more exist. |
+| `--limit=50` | Maximum rows to return; the query stops there and truncated says whether more rows exist. |
 
-Result: `{"columns", "rows", "count", "truncated", "total"?}`. Returns every account's rows regardless of `--account`.
+Result: `{"columns", "rows", "count", "truncated"}`; it stops reading at `--limit`, so there is no `total`. Returns every account's rows regardless of `--account`.
 
 Examples:
 
@@ -375,9 +377,27 @@ Examples:
 teamscrawl sql "select kind, count(*) as n from conversations group by kind"
 ```
 
+## skill
+
+Print the agent guide (SKILL.md) for this version, as Markdown in every output mode.
+
+```
+teamscrawl skill [flags]
+```
+
+No flags beyond the global ones.
+
+Result: Raw Markdown on stdout in every output mode (the one exception to the JSON default, like `--help`); the same text as `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary. Needs no archive or Teams cache.
+
+Examples:
+
+```sh
+teamscrawl skill
+```
+
 ## version
 
-Print the teamscrawl version.
+Print the teamscrawl version, commit and build date.
 
 ```
 teamscrawl version [flags]
@@ -385,10 +405,11 @@ teamscrawl version [flags]
 
 No flags beyond the global ones.
 
-Result: The build version on one line.
+Result: `{"version", "commit", "date"}` as one JSON document, or one human line in text mode. `teamscrawl --version` prints the same.
 
 Examples:
 
 ```sh
 teamscrawl version
+teamscrawl --version
 ```

@@ -16,6 +16,7 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
+	"github.com/ourostack/teamscrawl"
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/render"
 )
@@ -67,7 +68,17 @@ type cliApp struct {
 	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
+	Skill         skillCmd         `cmd:"" help:"Print the agent guide (SKILL.md) for this version, as Markdown in every output mode."`
 	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the teamscrawl version, commit and build date."`
+}
+
+// skillCmd prints the agent guide embedded in the binary. It is the documented exception to the
+// JSON default (like --help): the output is raw Markdown whatever --format says.
+type skillCmd struct{}
+
+func (skillCmd) Run(rt *runtime) error {
+	_, err := io.WriteString(rt.stdout, teamscrawl.Skill)
+	return err
 }
 
 type versionCmd struct{}

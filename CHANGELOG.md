@@ -16,6 +16,12 @@ The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No J
 - `activity --type` takes a comma-separated list, and `--help` and the skill document every activity type seen in a real cache.
 - `conversations --query` ranks an exact name first, then a prefix, then a substring, then word matches.
 - Archive upgrade: `meta.derivation_version` and the `migrated` report field (`{from, to, rows}`). See Changed.
+- `skill`: prints the agent guide, embedded in the binary, as raw Markdown in every output mode (an exception to the JSON default, like `--help`), so the guide always matches the installed version.
+- `version` prints `{"version", "commit", "date"}` as JSON (a human line in text mode), and `teamscrawl --version` does the same.
+- Partial syncs: each Teams source commits on its own. When one fails and another succeeds, `sync` reports status `partial` with a result per source (`accounts`, `counts` or `error`), prints the report on stdout and a new `partial_sync` error (exit 1) on stderr. `watch` emits the committed sources' changes, then an error line, and retries only the failed sources.
+- `doctor` checks `archive_newer` (fails when a newer teamscrawl wrote the archive), `archive_upgrade` (warns that the next sync upgrades an older archive) and `last_sync_status` (warns after a partial or failed sync).
+- A second Ctrl-C (or SIGTERM) during a stop quits at once with exit 130.
+- The release workflow runs `make check` before it publishes.
 - Error codes `interrupted` (exit 1; a command stopped by SIGINT or SIGTERM, which alpha.1 reported as `internal`) and `archive_newer` (exit 3; an archive written by a newer teamscrawl is refused for writing before anything is written, and read commands keep working).
 - Real-cache acceptance tests (`make acceptance`, local only): a differential test of the native V8 decoder against Node's `v8.deserialize` for every allowlisted record, volume comparison against an independent Python reader, blob resolution, recency, and a check that the auth databases are never decoded.
 - End-to-end tests that run the built binary against the committed fixture (`make e2e`), including the lock, interruption and environment error paths.
@@ -31,6 +37,9 @@ The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No J
 - Peak memory during a full sync fell from about 0.8 GB to about 0.2 GB on a real cache: the reader keeps values only for the allowlisted databases and re-reads values of 512 bytes or more from the snapshot on demand. The reader decodes LevelDB tables with its own block reader instead of goleveldb's.
 - `sync` applies each source in one transaction in batches of 2,000 records, so memory stays bounded and a failed source rolls back completely.
 - A relative `--db` path is resolved against the current directory.
+- `archive_age_seconds` counts from the last fully successful sync of the accounts the read covers (`--account`, or the stalest account); a partial or failed sync refreshes nobody. `needs_sync` also appears when no complete sync exists yet, including an archive from an older version that has not been upgraded. In JSON mode the plain-text `hint:` line on stderr is gone (the result carries `hint`); text mode still prints it.
+- `sql` streams rows and stops at `--limit`: `truncated` is still set, but `total` is no longer reported. A word such as `attach` inside a string literal, comment or quoted name no longer makes a query a usage error.
+- `whoami`'s nested `archive.archive_age_seconds` equals the top-level one.
 
 ### Fixed
 
