@@ -69,6 +69,7 @@ func TestDamagedArchivesSurfaceAsDatabaseErrors(t *testing.T) {
 		{"unread by conversation", "drop table messages", []string{"unread", "--by-conversation"}},
 		{"thread", "drop table messages", []string{"thread", "19:abc@thread.v2", "1"}},
 		{"conversations", "drop table conversations", []string{"conversations"}},
+		{"teams", "drop table conversations", []string{"teams"}},
 		{"people", "drop table people", []string{"people"}},
 		{"activity", "drop table activity", []string{"activity"}},
 		{"status", "drop table activity", []string{"status"}},

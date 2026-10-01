@@ -20,8 +20,11 @@ import (
 
 // meta is embedded last in every read result so its keys come after the command's own.
 type meta struct {
-	ArchiveAgeSeconds *int64     `json:"archive_age_seconds"`
-	SyncError         *syncError `json:"sync_error,omitempty"`
+	ArchiveAgeSeconds *int64 `json:"archive_age_seconds"`
+	// Synced is present only when this read ran the implicit sync first (--max-age): how long the
+	// sync took and how it ended. Absent when the archive was fresh enough to read as it was.
+	Synced    *syncedInfo `json:"synced,omitempty"`
+	SyncError *syncError  `json:"sync_error,omitempty"`
 	// NeedsSync and Hint tell an agent in-band that the archive has never synced, so an empty
 	// result means "no data yet", not "nothing matched". Omitted once a sync has succeeded.
 	NeedsSync bool   `json:"needs_sync,omitempty"`
@@ -34,12 +37,21 @@ type syncError struct {
 	Message string `json:"message"`
 }
 
+// syncedInfo reports the implicit sync a read ran before answering.
+type syncedInfo struct {
+	Seconds float64 `json:"seconds"` // how long the sync took, to a tenth of a second
+	Status  string  `json:"status"`  // the sync report's status: ok, ok_with_omissions, unchanged, partial or failed
+}
+
+func (m *meta) setSynced(si *syncedInfo) { m.Synced = si }
+
 func (m *meta) setMeta(age *int64, se *syncError) { m.ArchiveAgeSeconds, m.SyncError = age, se }
 
 func (m *meta) setNeedsSync(hint string) { m.NeedsSync, m.Hint = true, hint }
 
 type result interface {
 	setMeta(*int64, *syncError)
+	setSynced(*syncedInfo)
 	setNeedsSync(hint string)
 }
 

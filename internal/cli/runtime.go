@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +37,9 @@ type runtime struct {
 	root           string
 	account        *teamsdesktop.Account
 	now            func() time.Time
-	exitErr        error  // a failure while printing for a flag that ends the run (--version)
-	team           string // --team of the running read command, validated before any implicit sync
+	exitErr        error       // a failure while printing for a flag that ends the run (--version)
+	team           string      // --team of the running read command, validated before any implicit sync
+	synced         *syncedInfo // the implicit sync this read ran, if any
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
@@ -114,10 +117,20 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge {
 		return nil, nil
 	}
+	age := time.Duration(0) // zero: no complete sync yet
+	if !last.IsZero() {
+		age = rt.now().Sub(last)
+	}
+	_, _ = fmt.Fprintln(rt.stderr, syncNotice(age, rt.maxAge)) // stderr in every format; stdout stays the result
+	began := rt.now()
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
-	_, _, err = runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
+	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
+	rt.synced = &syncedInfo{Seconds: math.Round(rt.now().Sub(began).Seconds()*10) / 10, Status: rep.Status}
 	if err == nil {
 		return nil, nil
+	}
+	if rt.synced.Status == "" {
+		rt.synced.Status = syncer.StatusFailed
 	}
 	if rt.ctx.Err() != nil {
 		return nil, rt.ctx.Err()
@@ -221,6 +234,7 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 		return asCoded(err)
 	}
 	res.setMeta(age, syncErr)
+	res.setSynced(rt.synced)
 	if age == nil {
 		res.setNeedsSync(syncHint)
 	}
@@ -253,4 +267,31 @@ func checkLimit(n int) error {
 		return errs.Usage("--limit must be at least 1")
 	}
 	return nil
+}
+
+// syncNotice is the line a read prints to stderr before its implicit sync, so a wait of several
+// seconds is not silent. An age of zero means the archive has no complete sync yet.
+func syncNotice(age, maxAge time.Duration) string {
+	why := "no complete sync yet"
+	if age > 0 {
+		if age >= time.Minute {
+			age = age.Truncate(time.Minute)
+		} else {
+			age = age.Truncate(time.Second)
+		}
+		why = "archive is " + compactDuration(age) + " old"
+	}
+	return "teamscrawl: syncing — " + why + " (max-age " + compactDuration(maxAge) + ")"
+}
+
+// compactDuration is d without the zero parts Go's String keeps: 15m, 2h14m, 1m30s.
+func compactDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = s[:len(s)-2]
+	}
+	return s
 }

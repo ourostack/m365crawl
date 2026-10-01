@@ -91,7 +91,7 @@ func TestTeamFlagOnEveryCommand(t *testing.T) {
 	// Unknown team: usage error with a way forward.
 	code, _, stderr := e.run("--max-age", "0", "messages", "--team", "No such team")
 	body := errorOf(t, stderr)
-	if code != 2 || body["code"] != "usage" || !strings.Contains(body["fix"].(string), "conversations --kind Space") {
+	if code != 2 || body["code"] != "usage" || !strings.Contains(body["fix"].(string), "teamscrawl teams") {
 		t.Errorf("unknown team: exit %d %v", code, body)
 	}
 }
