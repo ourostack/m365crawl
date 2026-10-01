@@ -52,7 +52,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := chmodFile(path, 0o600); err != nil {
 		_ = cs.Close()
 		return nil, fmt.Errorf("chmod archive: %w", err)
 	}
@@ -63,6 +63,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	return st, nil
 }
+
+// chmodFile is os.Chmod; tests replace it to force the failure.
+var chmodFile = os.Chmod
 
 // migrate upgrades an archive made by an older build. Version 2 renamed
 // conversations.read_horizon_message_id to read_horizon_client_message_id.
@@ -102,7 +105,7 @@ func ensureParent(path string) error {
 		return fmt.Errorf("create archive dir: %w", err)
 	}
 	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(parent) == filepath.Join(home, ".teamscrawl") {
-		if err := os.Chmod(parent, 0o700); err != nil { //nolint:gosec // G302: a directory, 0700 is the point
+		if err := chmodFile(parent, 0o700); err != nil { //nolint:gosec // G302: a directory, 0700 is the point
 			return fmt.Errorf("chmod archive dir: %w", err)
 		}
 	}

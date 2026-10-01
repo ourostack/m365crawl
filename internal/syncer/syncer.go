@@ -167,6 +167,8 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 		}
 	}
 
+	afterSnapshot()
+
 	sess, err := r.st.Begin(ctx)
 	if err != nil {
 		return SourceReport{}, false, errs.DBError(err)
@@ -376,9 +378,11 @@ func asCoded(err error) error {
 	return errs.DBError(err)
 }
 
-// Test seams: the most records the syncer hands the store at once, and a hook called before each
-// batch is applied.
+// Test seams: the most records the syncer hands the store at once, a hook called before each
+// batch is applied, and a hook called once a source's snapshot is taken, before its transaction
+// begins.
 var (
-	batchSize   = 2000
-	beforeFlush = func(kind string, n int) error { return nil }
+	batchSize     = 2000
+	beforeFlush   = func(kind string, n int) error { return nil }
+	afterSnapshot = func() {}
 )
