@@ -35,6 +35,8 @@ type runtime struct {
 	root           string
 	account        *teamsdesktop.Account
 	now            func() time.Time
+	exitErr        error  // a failure while printing for a flag that ends the run (--version)
+	team           string // --team of the running read command, validated before any implicit sync
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
@@ -138,16 +140,51 @@ func (rt *runtime) lastSuccess() (time.Time, error) {
 		return time.Time{}, errs.DBError(err)
 	}
 	defer func() { _ = st.Close() }()
-	t, err := st.LastSuccess(rt.ctx)
+	return rt.freshness(st)
+}
+
+// freshness is when the accounts this read covers were last fully synced: --account's own time, or
+// the stalest account's for a read of every account. A partial or failed sync does not count.
+func (rt *runtime) freshness(st *store.Store) (time.Time, error) {
+	var t time.Time
+	var err error
+	if a := rt.account; a != nil {
+		t, err = st.LastSuccessFor(rt.ctx, a.TenantID+"/"+a.UserID)
+	} else {
+		t, err = st.LastSuccess(rt.ctx)
+	}
 	if err != nil {
 		return time.Time{}, errs.DBError(err)
 	}
 	return t, nil
 }
 
+// checkTeam rejects an unknown or ambiguous --team before the implicit sync spends time on it. An
+// archive that does not exist yet cannot say, so the check is repeated after the sync.
+func (rt *runtime) checkTeam() error {
+	if rt.team == "" {
+		return nil
+	}
+	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	if errors.Is(err, store.ErrNoArchive) {
+		return nil
+	}
+	if err != nil {
+		return errs.DBError(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CheckTeam(rt.ctx, rt.account, rt.team); err != nil {
+		return asCoded(err)
+	}
+	return nil
+}
+
 // read runs a read command: implicit sync, open the archive read-only (nil when there is none),
 // run fn, stamp the result with the archive's age and any sync error, and print it.
 func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) error {
+	if err := rt.checkTeam(); err != nil {
+		return err
+	}
 	syncErr, err := rt.ensureFresh()
 	if err != nil {
 		return err
@@ -155,6 +192,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
 	switch {
 	case errors.Is(err, store.ErrNoArchive):
+		if rt.team != "" {
+			return store.NoTeam(rt.team)
+		}
 		st = nil
 	case err != nil:
 		return errs.DBError(err)
@@ -163,9 +203,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	}
 	var age *int64
 	if st != nil {
-		last, err := st.LastSuccess(rt.ctx)
+		last, err := rt.freshness(st)
 		if err != nil {
-			return errs.DBError(err)
+			return err
 		}
 		if !last.IsZero() {
 			s := max(int64(rt.now().Sub(last).Seconds()), 0)
@@ -173,8 +213,8 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 		}
 	}
 	const syncHint = "run teamscrawl sync"
-	if age == nil {
-		rt.hint(syncHint)
+	if age == nil && rt.format == output.Text {
+		rt.hint(syncHint) // JSON mode carries the same hint in the result (needs_sync, hint)
 	}
 	res, err := fn(st)
 	if err != nil {

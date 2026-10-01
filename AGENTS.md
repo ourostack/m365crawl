@@ -9,7 +9,7 @@
 - Never write to Teams' storage. Only decode the `replychain-manager` and `conversation-manager` databases. Never read Teams tokens.
 - Every function in `internal/...` is 100% statement-covered by `go test ./...` (unit tests; the e2e and acceptance tags do not count). `make coverage` (`scripts/check-coverage.sh`) enforces it in the CI `coverage` job and fails on any uncovered function that is not carved out. Write tests that assert behavior, with synthetic data only. Prefer injecting a failure (an interface or a function variable) over listing a function.
 - Carve-outs live only in `coverage/allow/<package>.txt` (one file per Go package, for example `internal-leveldb.txt`), one entry per line: `<path relative to the repo root>:<FuncName> <reason>`, the name exactly as `go tool cover -func` prints it. List a function only when its uncovered statements are unreachable from a deterministic test without unreasonable contortion (OS or platform glue, a syscall error that cannot be forced portably); "it would take effort" is not a reason. A stale entry (the function is already 100% or gone) fails the gate, so the list only shrinks. See `coverage/allow/README.md`. `COVERAGE_PACKAGES` narrows the check for local runs.
-- Signal handling lives only in `cli.Main`. Lower layers take a `context.Context` and clean up when it is cancelled.
+- Signal handling lives only in `cli.Main`. Lower layers take a `context.Context` and clean up when it is cancelled. The first SIGINT or SIGTERM cancels the context; a second one exits immediately with status 130 (`exitForced`), which can leave a snapshot directory in TMPDIR that the next sync sweeps.
 - Tests that rely on `chmod 000` must skip when `os.Geteuid() == 0`.
 - Do not add AI attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines, no AI credit in commits, PRs, code comments or docs.
 - Use conventional commit messages (`feat:`, `fix:`, `ci:`, `chore:`).
@@ -23,3 +23,4 @@
 ## Test hooks
 
 - `TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=<duration>`: when set, the syncer prints `teamscrawl-test: paused after snapshot` to stderr and then sleeps that long after the snapshot is taken. Used only by the e2e tests, which signal the process once the marker appears.
+- `TEAMSCRAWL_TEST_PAUSE_IGNORES_CANCEL=1`: makes that pause ignore cancellation, so a graceful stop cannot finish and the e2e test can prove that a second SIGINT or SIGTERM force-quits with exit 130.

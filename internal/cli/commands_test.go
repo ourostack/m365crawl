@@ -133,8 +133,8 @@ func TestEmptyArchiveSearch(t *testing.T) {
 	if v, ok := m["archive_age_seconds"]; !ok || v != nil {
 		t.Fatalf("archive_age_seconds must be null with no sync: %v (present %v)", v, ok)
 	}
-	if !strings.Contains(stderr, "run teamscrawl sync") {
-		t.Fatalf("stderr hint missing: %q", stderr)
+	if strings.Contains(stderr, "hint:") {
+		t.Fatalf("JSON mode keeps stderr to JSON lines, the hint is in the result: %q", stderr)
 	}
 	if _, err := os.Stat(e.db); err == nil {
 		t.Fatal("a read must not create the archive when auto-sync is off")
@@ -243,14 +243,14 @@ func TestImplicitSyncNoTeamsEmptyArchive(t *testing.T) {
 	if m["count"].(float64) != 0 || m["sync_error"].(map[string]any)["code"] != "teams_not_installed" {
 		t.Fatalf("result = %v", m)
 	}
-	if !strings.Contains(stderr, "run teamscrawl sync") {
-		t.Fatalf("hint missing: %q", stderr)
+	if strings.Contains(stderr, "hint:") || m["hint"] != "run teamscrawl sync" {
+		t.Fatalf("hint %q stderr %q", m["hint"], stderr)
 	}
 }
 
 func syncRunCount(t *testing.T, e *env) int {
 	t.Helper()
-	_, stdout, _ := e.run("--max-age", "0", "sql", "select count(*) as n from sync_runs")
+	_, stdout, _ := e.run("--max-age", "0", "sql", "select count(*) as n from sync_runs where accounts_json is not null")
 	rows := decode(t, stdout)["rows"].([]any)
 	return int(rows[0].([]any)[0].(float64))
 }
@@ -493,10 +493,10 @@ func TestWhoamiAndStatus(t *testing.T) {
 func TestStatusEmptyArchive(t *testing.T) {
 	e := newEnv(t)
 	code, stdout, stderr := e.run("--max-age", "0", "status")
-	if code != 0 || !strings.Contains(stderr, "run teamscrawl sync") {
+	if code != 0 || strings.Contains(stderr, "hint:") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
-	if m := decode(t, stdout); m["archive_exists"] != false {
+	if m := decode(t, stdout); m["archive_exists"] != false || m["hint"] != "run teamscrawl sync" {
 		t.Fatalf("status = %v", m)
 	}
 }
@@ -705,8 +705,8 @@ func TestNeedsSyncSignalInBand(t *testing.T) {
 		if m["needs_sync"] != true || m["hint"] != "run teamscrawl sync" {
 			t.Errorf("%v: needs_sync/hint missing: %s", args, stdout)
 		}
-		if !strings.Contains(stderr, "run teamscrawl sync") {
-			t.Errorf("%v: stderr hint must stay: %q", args, stderr)
+		if stderr != "" {
+			t.Errorf("%v: JSON mode keeps stderr empty, the hint is in the result: %q", args, stderr)
 		}
 	}
 	e.sync()

@@ -216,7 +216,7 @@ func TestDoctorWarnsWhenTheArchiveNeverSucceededOrIsStale(t *testing.T) {
 	if code != 0 || c["ok"] != true || c["warn"] != true || c["detail"] != "no successful sync yet" {
 		t.Fatalf("empty sync log: exit %d, %v", code, c)
 	}
-	e.exec(`insert into sync_runs(started_at, finished_at, status) values ('2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'ok')`)
+	e.exec(`insert into sync_runs(started_at, finished_at, status, accounts_json) values ('2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'ok', '["*"]')`)
 	code, cs, _ = doctorChecksFor(t, e)
 	c = cs["last_sync_age"]
 	if code != 0 || c["ok"] != true || c["warn"] != true || !strings.HasPrefix(c["detail"].(string), "last successful sync ") {

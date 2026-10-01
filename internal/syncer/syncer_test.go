@@ -548,7 +548,7 @@ func TestFailedSourceRollsBackEverything(t *testing.T) {
 	})
 	db := newDB(t)
 	r, ch, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
-	if err == nil || r.Status != "" || ch != nil {
+	if err == nil || r.Status != StatusFailed || ch != nil {
 		t.Fatalf("%v %+v %v", err, r, ch)
 	}
 	if !sawMessages {

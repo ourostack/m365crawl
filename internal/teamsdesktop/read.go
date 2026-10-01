@@ -45,6 +45,11 @@ func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Ac
 	o, err := indexeddb.OpenWith(filepath.Join(snapDir, "leveldb"), filepath.Join(snapDir, "blob"),
 		indexeddb.OpenOptions{KeepDatabase: keepDatabase(account)})
 	if err != nil {
+		// Cancelling removes the snapshot while its tables load, so the failure can look like a
+		// damaged cache: report the cancellation instead.
+		if cerr := ctx.Err(); cerr != nil {
+			return map[string]int{}, cerr
+		}
 		return map[string]int{}, classify(err)
 	}
 	return readOrigin(ctx, o, account, fn)

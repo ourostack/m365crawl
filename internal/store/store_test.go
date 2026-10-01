@@ -202,22 +202,22 @@ func TestReadOnlySQLRejectsWrites(t *testing.T) {
 
 	ro := must(OpenReadOnly(ctx, p))
 	defer func() { _ = ro.Close() }()
-	cols, rows, err := ro.SQL(ctx, "select count(*) as n from messages")
+	cols, rows, _, err := ro.SQL(ctx, "select count(*) as n from messages", 10)
 	if err != nil || len(cols) != 1 || cols[0] != "n" || len(rows) != 1 || rows[0][0] != int64(1) {
 		t.Fatalf("select: %v %v %v", cols, rows, err)
 	}
 	for _, q := range []string{"delete from messages", "insert into people(tenant_id,id) values('a','b')", "drop table messages", "pragma query_only=0; delete from messages", "attach database '/etc/hosts' as x"} {
-		if _, _, err := ro.SQL(ctx, q); err == nil {
+		if _, _, _, err := ro.SQL(ctx, q, 10); err == nil {
 			t.Fatalf("write accepted: %s", q)
 		}
 	}
-	if _, rows, _ := ro.SQL(ctx, "select count(*) from messages"); rows[0][0] != int64(1) {
+	if _, rows, _, _ := ro.SQL(ctx, "select count(*) from messages", 10); rows[0][0] != int64(1) {
 		t.Fatalf("data changed")
 	}
 	// A writable store refuses SQL too: the escape hatch is read-only by construction.
 	rw := must(Open(ctx, filepath.Join(t.TempDir(), "b.db")))
 	defer func() { _ = rw.Close() }()
-	if _, _, err := rw.SQL(ctx, "select 1"); err == nil {
+	if _, _, _, err := rw.SQL(ctx, "select 1", 10); err == nil {
 		t.Fatal("SQL allowed on writable store")
 	}
 }
@@ -232,7 +232,7 @@ func TestReadOnlyWhileWriterActive(t *testing.T) {
 	defer func() { _ = ro.Close() }()
 	// Write while the reader is open: the reader must see it.
 	must(w.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m2", "there", base.Add(time.Minute))}))
-	_, rows, err := ro.SQL(ctx, "select count(*) from messages")
+	_, rows, _, err := ro.SQL(ctx, "select count(*) from messages", 10)
 	if err != nil || rows[0][0] != int64(2) {
 		t.Fatalf("%v %v", rows, err)
 	}
@@ -270,7 +270,7 @@ func TestRunsAndFingerprint(t *testing.T) {
 	t0 := base
 	must0(s.RecordRun(ctx, Run{StartedAt: t0, FinishedAt: t0.Add(time.Second), Source: "src", Fingerprint: "fp1", Status: "ok", Counts: map[string]int{"messages": 1}}))
 	must0(s.RecordRun(ctx, Run{StartedAt: t0.Add(time.Minute), FinishedAt: t0.Add(time.Minute), Source: "src", Fingerprint: "fp2", Status: "failed"}))
-	must0(s.RecordRun(ctx, Run{StartedAt: t0.Add(2 * time.Minute), FinishedAt: t0.Add(2 * time.Minute), Source: "other", Fingerprint: "zz", Status: "ok"}))
+	must0(s.RecordRun(ctx, Run{StartedAt: t0.Add(2 * time.Minute), FinishedAt: t0.Add(2 * time.Minute), Source: "other", Fingerprint: "zz", Status: "ok", Accounts: []string{"*"}}))
 	if fp := must(s.LastFingerprint(ctx, "src")); fp != "fp1" {
 		t.Fatalf("failed runs must not count, got %q", fp)
 	}

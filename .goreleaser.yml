@@ -16,7 +16,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }}
+      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }} -X github.com/ourostack/teamscrawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/teamscrawl/internal/cli.date={{ .Date }}
     # Developer ID sign and notarize each binary before it is archived, so the
     # archives, checksums and cask sha256 all describe the signed binary. The
     # script is a no-op when the Apple signing secrets are not available.

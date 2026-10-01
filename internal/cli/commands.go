@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -175,6 +176,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 	if err := checkLimit(f.Limit); err != nil {
 		return store.Filter{}, err
 	}
+	rt.team = f.Team
 	since, err := rt.when("--since", f.Since)
 	if err != nil {
 		return store.Filter{}, err
@@ -361,6 +363,13 @@ func sqlUsage(msg string) *errs.Coded {
 	return c
 }
 
+// sqlEngineError is a usage error for a query SQLite itself rejected (a typo, a missing table).
+func sqlEngineError(err error) *errs.Coded {
+	c := errs.Usage("sql: " + err.Error())
+	c.Fix = "Fix the query. List the tables with `teamscrawl sql \"select name from sqlite_master where type = 'table'\"` and a table's columns with `teamscrawl sql \"select name from pragma_table_info('messages')\"`."
+	return c
+}
+
 // parseThreadTarget resolves "<conversation> <root>" or a Teams message link to a conversation
 // id and the thread's root message id. A channel reply's link names the root as parentMessageId.
 func parseThreadTarget(target, root string) (conversation, rootID string, err error) {
@@ -408,6 +417,7 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
+	rt.team = c.Team
 	return rt.read("conversations", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -475,6 +485,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	rt.team = c.Team
 	return rt.read("activity", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -494,7 +505,15 @@ func (c *activityCmd) Run(rt *runtime) error {
 type syncCmd struct{}
 
 func (syncCmd) Run(rt *runtime) error {
-	rep, _, err := syncer.Run(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress()})
+	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress()})
+	var coded *errs.Coded
+	if errors.As(err, &coded) && coded.Code == errs.CodePartialSync && rt.ctx.Err() == nil {
+		// Some sources committed: the report says which, and the error makes the exit status nonzero.
+		if werr := rt.write("sync", rep); werr != nil {
+			return werr
+		}
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -539,6 +558,17 @@ type whoamiResult struct {
 	meta
 }
 
+// setMeta stamps the nested archive block too, so its archive_age_seconds equals the top-level one.
+func (r *whoamiResult) setMeta(age *int64, se *syncError) {
+	r.meta.setMeta(age, se)
+	r.Archive.setMeta(age, se)
+}
+
+func (r *whoamiResult) setNeedsSync(hint string) {
+	r.meta.setNeedsSync(hint)
+	r.Archive.setNeedsSync(hint)
+}
+
 type whoamiCmd struct{}
 
 func (whoamiCmd) Run(rt *runtime) error {
@@ -564,13 +594,12 @@ type sqlResult struct {
 	Rows      [][]any  `json:"rows"`
 	Count     int      `json:"count"`
 	Truncated bool     `json:"truncated"`
-	Total     int      `json:"total,omitempty"` // every row the query returned, only when truncated
 	meta
 }
 
 type sqlCmd struct {
 	Query string `arg:"" help:"One SELECT (or WITH/EXPLAIN/VALUES) statement."`
-	Limit int    `default:"50" help:"Maximum rows to return; truncated says whether more exist."`
+	Limit int    `default:"50" help:"Maximum rows to return; the query stops there and truncated says whether more rows exist."`
 }
 
 func (c *sqlCmd) Run(rt *runtime) error {
@@ -578,52 +607,25 @@ func (c *sqlCmd) Run(rt *runtime) error {
 		return err
 	}
 	q := strings.TrimSpace(c.Query)
-	if hasSecondStatement(q) {
-		return sqlUsage("sql takes a single statement")
-	}
-	if w := strings.Fields(strings.ToLower(q)); len(w) == 0 || !contains([]string{"select", "with", "explain", "values"}, w[0]) {
-		return sqlUsage("sql accepts only read statements")
+	if err := store.CheckSQL(q); err != nil {
+		return sqlUsage(strings.TrimPrefix(err.Error(), store.ErrQueryRefused.Error()+": "))
 	}
 	return rt.read("sql", func(st *store.Store) (result, error) {
 		if st == nil {
 			return &sqlResult{Columns: []string{}, Rows: [][]any{}}, nil
 		}
-		cols, rows, err := st.SQL(rt.ctx, strings.TrimRight(q, "; \t\n"))
+		cols, rows, truncated, err := st.SQL(rt.ctx, strings.TrimRight(q, "; \t\n"), c.Limit)
 		if err != nil {
 			if rt.ctx.Err() != nil {
 				return nil, err
 			}
-			return nil, sqlUsage("sql: " + err.Error())
+			return nil, sqlEngineError(err)
 		}
-		res := &sqlResult{Columns: append([]string{}, cols...), Rows: rows} // never null in JSON
-		if len(rows) > c.Limit {
-			res.Rows, res.Truncated, res.Total = rows[:c.Limit], true, len(rows)
-		}
+		res := &sqlResult{Columns: append([]string{}, cols...), Rows: rows, Truncated: truncated} // never null in JSON
 		if res.Rows == nil {
 			res.Rows = [][]any{}
 		}
 		res.Count = len(res.Rows)
 		return res, nil
 	})
-}
-
-// hasSecondStatement reports whether q has anything after a statement-ending semicolon, ignoring
-// semicolons inside quoted strings and identifiers. It is only a friendly early error for
-// "two statements" mistakes (it does not understand SQL comments). It is not a security control:
-// the read-only archive connection is the boundary that stops writes.
-func hasSecondStatement(q string) bool {
-	var quote rune
-	for i, r := range q {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			}
-		case r == '\'' || r == '"' || r == '`':
-			quote = r
-		case r == ';':
-			return strings.TrimSpace(q[i+1:]) != ""
-		}
-	}
-	return false
 }

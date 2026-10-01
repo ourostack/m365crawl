@@ -25,6 +25,7 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{NoFullDiskAccess("/r", cause), "no_full_disk_access", 3},
 		{NoTeamsOrigin("/r"), "no_teams_origin", 3},
 		{DoctorFailed("x"), "doctor_failed", 3},
+		{PartialSync("x"), "partial_sync", 1},
 		{Locked("x"), "locked", 4},
 	}
 	for _, c := range cases {

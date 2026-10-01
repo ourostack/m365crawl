@@ -44,9 +44,7 @@ func (s *Store) resolveTeam(ctx context.Context, acct *teamsdesktop.Account, q s
 	}
 	switch len(ids) {
 	case 0:
-		c := errs.Usage(fmt.Sprintf("no team matches %q", q))
-		c.Fix = "Find the team with `teamscrawl conversations --kind Space --query <words>`, then pass its exact name or its id to --team."
-		return "", c
+		return "", NoTeam(q)
 	case 1:
 		return ids[0], nil
 	}
@@ -57,6 +55,19 @@ func (s *Store) resolveTeam(ctx context.Context, acct *teamsdesktop.Account, q s
 	c := errs.Usage(fmt.Sprintf("team %q is ambiguous: %s%s", q, strings.Join(labels, ", "), more))
 	c.Fix = "Pass the team's id (the value in parentheses) to --team."
 	return "", c
+}
+
+// NoTeam is the usage error for a --team that matches nothing.
+func NoTeam(q string) *errs.Coded {
+	c := errs.Usage(fmt.Sprintf("no team matches %q", q))
+	c.Fix = "Find the team with `teamscrawl conversations --kind Space --query <words>`, then pass its exact name or its id to --team. A team Teams has not written to the cache yet is not archived: run `teamscrawl sync` first."
+	return c
+}
+
+// CheckTeam reports the usage error resolveTeam would raise for q, without running a query.
+func (s *Store) CheckTeam(ctx context.Context, acct *teamsdesktop.Account, q string) error {
+	_, err := s.resolveTeam(ctx, acct, q)
+	return err
 }
 
 // convRef names one conversation of one account.

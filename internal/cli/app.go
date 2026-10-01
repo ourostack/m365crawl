@@ -20,9 +20,17 @@ import (
 	"github.com/ourostack/teamscrawl/internal/render"
 )
 
-// version is set at build time with
-// -ldflags "-X github.com/ourostack/teamscrawl/internal/cli.version=...".
-var version = "dev"
+// version, commit and date are set at build time with
+// -ldflags "-X github.com/ourostack/teamscrawl/internal/cli.version=..." (and .commit, .date).
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
+// exitForced is the exit status of a run that a second SIGINT or SIGTERM cut short: 128 plus
+// SIGINT's number, what a shell reports for a process killed by Ctrl-C.
+const exitForced = 130
 
 const exitOK = 0
 
@@ -44,6 +52,7 @@ type Globals struct {
 
 type cliApp struct {
 	Globals
+	Version versionFlag `name:"version" help:"Print the version, commit and build date, then exit."`
 
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Copy the Teams cache into the archive once and print what changed."`
@@ -58,22 +67,71 @@ type cliApp struct {
 	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
-	Version       versionCmd       `cmd:"" help:"Print the teamscrawl version."`
+	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the teamscrawl version, commit and build date."`
 }
 
 type versionCmd struct{}
 
-func (versionCmd) Run(rt *runtime) error {
-	_, err := fmt.Fprintln(rt.stdout, version)
-	return err
+func (versionCmd) Run(rt *runtime) error { return rt.printVersion() }
+
+// versionFlag is --version: it prints what the version command prints and ends the parse, so it
+// works without a command.
+type versionFlag bool
+
+func (versionFlag) BeforeReset(app *kong.Kong, rt *runtime) error {
+	rt.exitErr = rt.printVersion() // reported by runCLI as a runtime error, not a usage error
+	app.Exit(exitOK)
+	return nil
 }
 
-// Main runs the CLI and returns the process exit code. It owns signal handling: SIGINT and
-// SIGTERM cancel the context every lower layer cleans up on.
+// versionInfo is the version command's JSON document.
+type versionInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+}
+
+// printVersion prints one JSON document, or the human line in text mode.
+func (rt *runtime) printVersion() error {
+	if rt.format == output.Text {
+		_, err := fmt.Fprintf(rt.stdout, "teamscrawl %s (commit %s, built %s)\n", version, commit, date)
+		return err
+	}
+	return rt.write("version", versionInfo{Version: version, Commit: commit, Date: date})
+}
+
+// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT
+// or SIGTERM cancels the context every lower layer cleans up on; a second one force-quits at once
+// with status 130, in case that cleanup is stuck.
 func Main(args []string, stdout, stderr io.Writer) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchSignals(sigs, cancel, os.Exit)
+	}()
+	defer func() {
+		signal.Stop(sigs)
+		close(sigs)
+		<-done
+		cancel()
+	}()
 	return runCLI(ctx, args, stdout, stderr)
+}
+
+// watchSignals cancels on the first signal and calls exit(exitForced) on the second. It returns
+// when sigs is closed.
+func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
+	if _, ok := <-sigs; !ok {
+		return
+	}
+	cancel()
+	if _, ok := <-sigs; !ok {
+		return
+	}
+	exit(exitForced)
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
@@ -105,6 +163,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		kong.Name("teamscrawl"),
 		kong.Description("Mirror the Microsoft Teams desktop cache into local SQLite so agents can read Teams offline."),
 		kong.Writers(stdout, stderr),
+		kong.Bind(rt),
 		kong.Exit(func(int) { exited = true }),
 		kong.Help(func(opts kong.HelpOptions, kctx *kong.Context) error {
 			// Text mode opens help with the wordmark, like every other text screen.
@@ -123,6 +182,9 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 	}
 	kctx, err := parser.Parse(args)
 	if exited {
+		if rt.exitErr != nil {
+			return rt.fail(rt.exitErr)
+		}
 		return exitOK
 	}
 	if err != nil {

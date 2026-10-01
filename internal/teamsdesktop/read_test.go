@@ -322,3 +322,19 @@ func TestReadUnreadableValueFails(t *testing.T) {
 		t.Fatalf("err = %v, omissions %v", err, om)
 	}
 }
+
+// Cancelling removes the snapshot while its tables are still loading; the load then fails as a
+// missing file, and Read must report the cancellation instead of a damaged cache.
+func TestReadReportsCancellationWhenTheSnapshotLoadFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Read(ctx, t.TempDir(), nil, func(Account, string, any) error { return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	// Without a cancellation the same failure is still classified.
+	_, err = Read(context.Background(), t.TempDir(), nil, func(Account, string, any) error { return nil })
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+}

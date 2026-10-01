@@ -140,6 +140,10 @@ func (rt *runtime) archiveChecks() []check {
 	} else {
 		cs = append(cs, check{Name: "fts", Detail: "full-text indexes are missing", Fix: "Run `teamscrawl sync`; if they stay missing, move " + rt.dbPath + " aside and sync again."})
 	}
+	cs = append(cs, rt.archiveNewerCheck(st))
+	if c, ok := lastSyncStatusCheck(row.LastRun); ok {
+		cs = append(cs, c)
+	}
 	switch {
 	case row.LastSuccessAt.IsZero():
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "no successful sync yet", Fix: "Run `teamscrawl sync`."})
@@ -149,6 +153,38 @@ func (rt *runtime) archiveChecks() []check {
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
 	return cs
+}
+
+// archiveNewerCheck fails when the archive was written by a newer build: every sync would refuse
+// it (archive_newer, exit 3) while the other checks pass.
+func (rt *runtime) archiveNewerCheck(st *store.Store) check {
+	have, err := st.DerivationVersion(rt.ctx)
+	switch {
+	case err != nil:
+		return check{Name: "archive_newer", Detail: "cannot read the archive's derivation version: " + err.Error(), Fix: "Run `teamscrawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."}
+	case have > store.DerivationVersion:
+		e := errs.ArchiveNewer(have, store.DerivationVersion)
+		return check{Name: "archive_newer", Detail: e.Message, Fix: e.Fix}
+	}
+	return check{Name: "archive_newer", OK: true, Detail: fmt.Sprintf("the archive was written by this or an older teamscrawl (derivation version %d)", have)}
+}
+
+// lastSyncStatusCheck warns when the last sync did not finish cleanly. A partial or failed sync is
+// not a failure of the environment (it can be transient), so it never fails doctor; the fix says
+// how to find the cause.
+func lastSyncStatusCheck(r *store.RunRow) (check, bool) {
+	if r == nil {
+		return check{}, false
+	}
+	switch r.Status {
+	case "partial":
+		return check{Name: "last_sync_status", OK: true, Warn: true, Detail: "the last sync was partial: some Teams sources synced and others failed",
+			Fix: "Run `teamscrawl sync` to see which sources failed and why, fix them (the checks above name the usual causes) and sync again."}, true
+	case "failed":
+		return check{Name: "last_sync_status", OK: true, Warn: true, Detail: "the last sync failed",
+			Fix: "Run `teamscrawl sync` to see the error; the checks above name the usual causes."}, true
+	}
+	return check{Name: "last_sync_status", OK: true, Detail: "the last sync was " + r.Status}, true
 }
 
 // writableCheck proves the archive can be written without touching it: it creates and removes a

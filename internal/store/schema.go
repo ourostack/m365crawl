@@ -119,7 +119,8 @@ create table if not exists sync_runs(
   fingerprint text not null default '',
   status text not null,
   counts_json text,
-  omissions_json text
+  omissions_json text,
+  accounts_json text
 );
 create table if not exists meta(
   key text primary key,

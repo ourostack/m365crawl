@@ -43,19 +43,33 @@ func (s *Store) Rederive(ctx context.Context) (*Migration, error) {
 	return m, nil
 }
 
-func rederive(ctx context.Context, tx *sql.Tx) (*Migration, error) {
-	from := alpha1Version
+// DerivationVersion is the derivation version the archive was written with: the stored
+// meta.derivation_version, or 1 (alpha.1) when there is none.
+func (s *Store) DerivationVersion(ctx context.Context) (int, error) {
+	return storedDerivation(ctx, s.db)
+}
+
+func storedDerivation(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (int, error) {
 	var v string
-	switch err := tx.QueryRowContext(ctx, `select value from meta where key=?`, derivationKey).Scan(&v); {
+	switch err := q.QueryRowContext(ctx, `select value from meta where key=?`, derivationKey).Scan(&v); {
 	case errors.Is(err, sql.ErrNoRows):
+		return alpha1Version, nil
 	case err != nil:
+		return 0, err
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, errors.New("archive meta.derivation_version is not a number: " + v)
+	}
+	return n, nil
+}
+
+func rederive(ctx context.Context, tx *sql.Tx) (*Migration, error) {
+	from, err := storedDerivation(ctx, tx)
+	if err != nil {
 		return nil, err
-	default:
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, errors.New("archive meta.derivation_version is not a number: " + v)
-		}
-		from = n
 	}
 	if from > DerivationVersion {
 		return nil, errs.ArchiveNewer(from, DerivationVersion)
