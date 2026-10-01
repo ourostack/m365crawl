@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -228,16 +229,27 @@ func TestProjectFailsOnItemsThatAreNotJSONObjects(t *testing.T) {
 	}
 }
 
-func TestShapePanicsWithAnInternalErrorWhenAnItemCannotBeProjected(t *testing.T) {
+func TestShapePanicsWhenAnItemCannotBeProjectedAndRunCLIReportsItOnce(t *testing.T) {
 	rt := &runtime{fields: []string{"a"}}
-	defer func() {
-		c, ok := recover().(*errs.Coded)
-		if !ok || c.Code != errs.CodeInternal {
-			t.Fatalf("recovered %v, want an internal coded error", c)
-		}
+	func() {
+		defer func() {
+			err, ok := recover().(error)
+			if !ok || !strings.Contains(err.Error(), "cannot project an item") {
+				t.Fatalf("recovered %v, want a projection error", err)
+			}
+		}()
+		shape(rt, []any{make(chan int)})
+		t.Fatal("shape did not panic")
 	}()
-	shape(rt, []any{make(chan int)})
-	t.Fatal("shape did not panic")
+
+	panicHook = func() { shape(rt, []any{make(chan int)}) }
+	t.Cleanup(func() { panicHook = nil })
+	var out, errb bytes.Buffer
+	code := runCLI(context.Background(), []string{"--json", "version"}, &out, &errb)
+	msg, _ := errorOf(t, errb.String())["message"].(string)
+	if code != errs.ExitRuntime || strings.Count(msg, "internal") != 1 {
+		t.Fatalf("exit %d, message %q: want one internal error that names the cause once", code, msg)
+	}
 }
 
 func TestShapeKeepsItemsWhole(t *testing.T) {

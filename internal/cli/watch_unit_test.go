@@ -398,18 +398,23 @@ func brokenAfterBaseline(t *testing.T, w *watcher, err error) {
 		return oldF(s)
 	}
 	t.Cleanup(func() { fingerprintOf = oldF })
+	quit := make(chan struct{})
+	t.Cleanup(func() { close(quit) })
 	go func() {
-		for !w.rtBaselined() {
-			time.Sleep(2 * time.Millisecond)
+		for !archiveFilled(w.rt.dbPath) {
+			select {
+			case <-quit:
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
 		}
 		broken.Store(true)
 	}()
 }
 
-// rtBaselined reads whether the archive has been filled, which the baseline sync does.
-func (w *watcher) rtBaselined() bool {
-	env := &watchEnv{env: &env{t: nil, db: w.rt.dbPath}}
-	return env.archiveCount("select count(*) from messages") > 0
+// archiveFilled reports whether the baseline sync has put messages in the archive.
+func archiveFilled(db string) bool {
+	return (&watchEnv{env: &env{db: db}}).archiveCount("select count(*) from messages") > 0
 }
 
 func TestWatchEndsWithTheEnvironmentErrorWhenPollingFindsTeamsGone(t *testing.T) {

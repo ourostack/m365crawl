@@ -231,8 +231,8 @@ func contains(ss []string, s string) bool {
 }
 
 // shape applies --fields to typed items. Every T is one of this package's own item structs, which
-// always encode, so a projection failure is a programming error: it panics and runCLI reports it
-// as an internal error.
+// always encode, so a projection failure is a programming error: it panics with a plain error and runCLI
+// reports it as an internal error.
 func shape[T any](rt *runtime, in []T) []any {
 	out := make([]any, len(in))
 	for i, it := range in {
@@ -242,7 +242,7 @@ func shape[T any](rt *runtime, in []T) []any {
 		}
 		p, err := project(it, rt.fields)
 		if err != nil {
-			panic(errs.Internal(err))
+			panic(fmt.Errorf("cannot project an item onto --fields: %w", err))
 		}
 		out[i] = p
 	}

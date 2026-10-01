@@ -8,7 +8,7 @@ A function may be carved out only through a file here, one file per Go package, 
 <path relative to the repo root>:<FuncName> <reason>
 ```
 
-`FuncName` is the name exactly as `go tool cover -func` prints it (a method is its bare name, such as `Run`, so two methods with the same name in one file share one entry). Blank lines and lines starting with `#` are ignored.
+`FuncName` is the name exactly as `go tool cover -func` prints it. That is the bare name even for a method (`Run`, not `(*searchCmd).Run`), so the receiver cannot be part of the key. The gate therefore rejects an entry when its file holds more than one function with that name: rename one of them so the entry names a single function. Blank lines and lines starting with `#` are ignored.
 
 ## What may be listed
 
@@ -21,8 +21,12 @@ Only functions whose uncovered statements are unreachable from a deterministic t
 
 ## The list only shrinks
 
-The script fails on an entry with no reason, on an entry whose function is already at 100%, and on an entry whose function no longer exists. Remove the entry in the same change that covers or deletes the function.
+The script fails on an entry with no reason, an entry whose path is outside its package, an allow file that matches no Go package, on an entry whose function is already at 100%, and on an entry whose function no longer exists. Remove the entry in the same change that covers or deletes the function.
 
 ## Narrowing the check
 
 `COVERAGE_PACKAGES` overrides the packages to test (default `./internal/...`), for example `make coverage COVERAGE_PACKAGES="./internal/cli ./internal/errs"`. CI sets it only while some packages are still being brought up to the gate.
+
+## Files outside the gate
+
+Platform-tagged files that do not compile on the CI platform (for example `internal/cli/width_other.go`, built only off Unix) never appear in the coverage profile, so the gate neither measures nor lists them. Keep such files trivial.
