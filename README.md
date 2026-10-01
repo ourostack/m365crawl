@@ -31,7 +31,7 @@ Homebrew is the shortest path:
 brew install ourostack/tap/teamscrawl
 ```
 
-Alpha builds are unsigned. The Homebrew cask clears the macOS quarantine flag for you. If you download a binary by hand, run `xattr -dr com.apple.quarantine teamscrawl` once.
+Release binaries are Developer ID signed and notarized by Apple when the release was built with signing credentials; the release notes say which. Unsigned builds are still possible, so the Homebrew cask clears the macOS quarantine flag for you. If you download an unsigned binary by hand, run `xattr -dr com.apple.quarantine teamscrawl` once.
 
 [GitHub Releases](https://github.com/ourostack/teamscrawl/releases) has `teamscrawl_<version>_darwin_arm64.tar.gz` and `teamscrawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
 
@@ -152,7 +152,7 @@ The archive holds your real Teams conversations. It stays on your Mac in `~/.tea
 - Read-only: no sending, reacting or marking read.
 - Attachments and media are not downloaded; files and links are recorded as metadata.
 - Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
-- Alpha builds are unsigned.
+- Release binaries are signed and notarized only when the release had signing credentials; the release notes say which.
 
 ## Development
 

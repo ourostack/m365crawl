@@ -17,6 +17,12 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }}
+    # Developer ID sign and notarize each binary before it is archived, so the
+    # archives, checksums and cask sha256 all describe the signed binary. The
+    # script is a no-op when the Apple signing secrets are not available.
+    hooks:
+      post:
+        - cmd: scripts/sign-notarize.sh "{{ .Path }}"
 
 archives:
   - id: bundles
@@ -55,7 +61,9 @@ homebrew_casks:
     repository:
       owner: ourostack
       name: homebrew-tap
-    # The binary is unsigned until an Apple identity is wired into CI.
+    # Signed releases are Developer ID signed and notarized, so this quarantine
+    # removal is unnecessary for them. It stays because it is harmless and
+    # releases built without signing secrets are still unsigned.
     hooks:
       post:
         install: |
