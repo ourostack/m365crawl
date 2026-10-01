@@ -1606,6 +1606,108 @@
       "envelope": "blob",
       "canonical_bytes": 1127023,
       "canonical_sha256": "7b81e0e524bd6f3c4e7b56d921dfd5c04c72ba9fbe6dbbf26bfa83c708e4b18a"
+    },
+    {
+      "key": "1700000054000",
+      "envelope": "v21",
+      "canonical_bytes": 850,
+      "canonical_sha256": "5fef00b06807dffc640e3f12bcba79834ff4102225bf36e43ccc6269142de792",
+      "canonical": {
+        "conversationId": "19:untitledgroup1@thread.v2",
+        "replyChainId": "1700000054000",
+        "messageMap": {
+          "1700000054000": {
+            "id": "1700000054000",
+            "conversationId": "19:untitledgroup1@thread.v2",
+            "parentMessageId": "1700000054000",
+            "clientMessageId": "9000000054",
+            "version": 1700000054000,
+            "sequenceId": 54,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 1</span> broadcast team</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000054000,
+            "clientArrivalTime": 1700000054005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"team\",\"mri\":\"19:space1@thread.v2\",\"displayName\":\"Fixture team 1\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000054000
+      }
+    },
+    {
+      "key": "1700000055000",
+      "envelope": "v21",
+      "canonical_bytes": 848,
+      "canonical_sha256": "0ed03ecb583f9b2b0ece289067ffe6538d640234ebdd87b1e3a531912ac16ddb",
+      "canonical": {
+        "conversationId": "19:untitledgroup1@thread.v2",
+        "replyChainId": "1700000055000",
+        "messageMap": {
+          "1700000055000": {
+            "id": "1700000055000",
+            "conversationId": "19:untitledgroup1@thread.v2",
+            "parentMessageId": "1700000055000",
+            "clientMessageId": "9000000055",
+            "version": 1700000055000,
+            "sequenceId": 55,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000055000,
+            "clientArrivalTime": 1700000055005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag-2\",\"displayName\":\"Fixture Tag Two\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000055000
+      }
+    },
+    {
+      "key": "1700000056000",
+      "envelope": "v21",
+      "canonical_bytes": 835,
+      "canonical_sha256": "40f669e5bf3cfbec2aca97b345ce5f89328e15704ea9ff0ba17f30fd8844e6c2",
+      "canonical": {
+        "conversationId": "19:untitledgroup1@thread.v2",
+        "replyChainId": "1700000056000",
+        "messageMap": {
+          "1700000056000": {
+            "id": "1700000056000",
+            "conversationId": "19:untitledgroup1@thread.v2",
+            "parentMessageId": "1700000056000",
+            "clientMessageId": "9000000056",
+            "version": 1700000056000,
+            "sequenceId": 56,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000056000,
+            "clientArrivalTime": 1700000056005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"everyone\",\"mri\":\"everyone\",\"displayName\":\"everyone\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000056000
+      }
     }
   ],
   "Teams:replychain-manager:react-web-client:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-0000000000a2:en-us": [
@@ -3215,6 +3317,108 @@
       "envelope": "blob",
       "canonical_bytes": 205424,
       "canonical_sha256": "7a5518bdcf65eeda2b05e69020f94d15b91f8b149b23907c430a6ee51f75a981"
+    },
+    {
+      "key": "1700000054000",
+      "envelope": "v21",
+      "canonical_bytes": 850,
+      "canonical_sha256": "59470d91af3efc7770ffe27b76fecb5b511985557f67acaa09d2112a21c59c2c",
+      "canonical": {
+        "conversationId": "19:untitledgroup2@thread.v2",
+        "replyChainId": "1700000054000",
+        "messageMap": {
+          "1700000054000": {
+            "id": "1700000054000",
+            "conversationId": "19:untitledgroup2@thread.v2",
+            "parentMessageId": "1700000054000",
+            "clientMessageId": "9000000054",
+            "version": 1700000054000,
+            "sequenceId": 54,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 2</span> broadcast team</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000054000,
+            "clientArrivalTime": 1700000054005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"team\",\"mri\":\"19:space2@thread.v2\",\"displayName\":\"Fixture team 2\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000054000
+      }
+    },
+    {
+      "key": "1700000055000",
+      "envelope": "v21",
+      "canonical_bytes": 848,
+      "canonical_sha256": "5d501b3ba95345f02a82564ecbfd2f4952dc734d2f5b4bb8986b3228ebc77cf2",
+      "canonical": {
+        "conversationId": "19:untitledgroup2@thread.v2",
+        "replyChainId": "1700000055000",
+        "messageMap": {
+          "1700000055000": {
+            "id": "1700000055000",
+            "conversationId": "19:untitledgroup2@thread.v2",
+            "parentMessageId": "1700000055000",
+            "clientMessageId": "9000000055",
+            "version": 1700000055000,
+            "sequenceId": 55,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000055000,
+            "clientArrivalTime": 1700000055005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag-2\",\"displayName\":\"Fixture Tag Two\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000055000
+      }
+    },
+    {
+      "key": "1700000056000",
+      "envelope": "v21",
+      "canonical_bytes": 835,
+      "canonical_sha256": "b81588672fc94b576857b9e2b815a7e889cd6e5271c2af4a7054527eedcbcc47",
+      "canonical": {
+        "conversationId": "19:untitledgroup2@thread.v2",
+        "replyChainId": "1700000056000",
+        "messageMap": {
+          "1700000056000": {
+            "id": "1700000056000",
+            "conversationId": "19:untitledgroup2@thread.v2",
+            "parentMessageId": "1700000056000",
+            "clientMessageId": "9000000056",
+            "version": 1700000056000,
+            "sequenceId": 56,
+            "messageType": "RichText/Html",
+            "contentType": "Text",
+            "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+            "imDisplayName": "Pat Example",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+            "originalArrivalTime": 1700000056000,
+            "clientArrivalTime": 1700000056005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": "",
+              "mentions": "[{\"itemid\":0,\"mentionType\":\"everyone\",\"mri\":\"everyone\",\"displayName\":\"everyone\"}]"
+            }
+          }
+        },
+        "latestDeliveryTime": 1700000056000
+      }
     }
   ]
 }

@@ -2489,6 +2489,168 @@
     "Version": 1700000048000
   },
   {
+    "ClientMessageID": "9000000054",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 1</span> broadcast team</p>",
+    "ContentText": "Fixture team 1 broadcast team",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup1@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000054000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup1@thread.v2/1700000054000?tenantId=00000000-0000-4000-8000-000000000001&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "Fixture team 1",
+        "ID": "19:space1@thread.v2"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000054000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000054000",
+      "conversationId": "19:untitledgroup1@thread.v2",
+      "parentMessageId": "1700000054000",
+      "clientMessageId": "9000000054",
+      "version": 1700000054000,
+      "sequenceId": 54,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 1</span> broadcast team</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000054000,
+      "clientArrivalTime": 1700000054005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"team\",\"mri\":\"19:space1@thread.v2\",\"displayName\":\"Fixture team 1\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000054000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:14Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "UserID": "00000000-0000-4000-8000-0000000000a1",
+    "Version": 1700000054000
+  },
+  {
+    "ClientMessageID": "9000000055",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+    "ContentText": "Fixture Tag Two broadcast tag",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup1@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000055000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup1@thread.v2/1700000055000?tenantId=00000000-0000-4000-8000-000000000001&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "Fixture Tag Two",
+        "ID": "tag:fixture-tag-2"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000055000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000055000",
+      "conversationId": "19:untitledgroup1@thread.v2",
+      "parentMessageId": "1700000055000",
+      "clientMessageId": "9000000055",
+      "version": 1700000055000,
+      "sequenceId": 55,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000055000,
+      "clientArrivalTime": 1700000055005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag-2\",\"displayName\":\"Fixture Tag Two\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000055000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:15Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "UserID": "00000000-0000-4000-8000-0000000000a1",
+    "Version": 1700000055000
+  },
+  {
+    "ClientMessageID": "9000000056",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+    "ContentText": "everyone broadcast everyone",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup1@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000056000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup1@thread.v2/1700000056000?tenantId=00000000-0000-4000-8000-000000000001&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "everyone",
+        "ID": "everyone"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000056000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000056000",
+      "conversationId": "19:untitledgroup1@thread.v2",
+      "parentMessageId": "1700000056000",
+      "clientMessageId": "9000000056",
+      "version": 1700000056000,
+      "sequenceId": 56,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000056000,
+      "clientArrivalTime": 1700000056005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"everyone\",\"mri\":\"everyone\",\"displayName\":\"everyone\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000056000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:16Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000001",
+    "UserID": "00000000-0000-4000-8000-0000000000a1",
+    "Version": 1700000056000
+  },
+  {
     "ClientMessageID": "9000000001",
     "ContentHTML": "<p>Hello from Blair Fixture</p>",
     "ContentText": "Hello from Blair Fixture",
@@ -4976,5 +5138,167 @@
     "TenantID": "00000000-0000-4000-8000-000000000002",
     "UserID": "00000000-0000-4000-8000-0000000000a2",
     "Version": 1700000048000
+  },
+  {
+    "ClientMessageID": "9000000054",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 2</span> broadcast team</p>",
+    "ContentText": "Fixture team 2 broadcast team",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup2@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000054000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup2@thread.v2/1700000054000?tenantId=00000000-0000-4000-8000-000000000002&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "Fixture team 2",
+        "ID": "19:space2@thread.v2"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000054000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000054000",
+      "conversationId": "19:untitledgroup2@thread.v2",
+      "parentMessageId": "1700000054000",
+      "clientMessageId": "9000000054",
+      "version": 1700000054000,
+      "sequenceId": 54,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture team 2</span> broadcast team</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000054000,
+      "clientArrivalTime": 1700000054005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"team\",\"mri\":\"19:space2@thread.v2\",\"displayName\":\"Fixture team 2\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000054000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:14Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "UserID": "00000000-0000-4000-8000-0000000000a2",
+    "Version": 1700000054000
+  },
+  {
+    "ClientMessageID": "9000000055",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+    "ContentText": "Fixture Tag Two broadcast tag",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup2@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000055000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup2@thread.v2/1700000055000?tenantId=00000000-0000-4000-8000-000000000002&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "Fixture Tag Two",
+        "ID": "tag:fixture-tag-2"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000055000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000055000",
+      "conversationId": "19:untitledgroup2@thread.v2",
+      "parentMessageId": "1700000055000",
+      "clientMessageId": "9000000055",
+      "version": 1700000055000,
+      "sequenceId": 55,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Fixture Tag Two</span> broadcast tag</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000055000,
+      "clientArrivalTime": 1700000055005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"tag\",\"mri\":\"tag:fixture-tag-2\",\"displayName\":\"Fixture Tag Two\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000055000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:15Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "UserID": "00000000-0000-4000-8000-0000000000a2",
+    "Version": 1700000055000
+  },
+  {
+    "ClientMessageID": "9000000056",
+    "ContentHTML": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+    "ContentText": "everyone broadcast everyone",
+    "ContentType": "Text",
+    "ConversationID": "19:untitledgroup2@thread.v2",
+    "DeletedAt": "0001-01-01T00:00:00Z",
+    "EditedAt": "0001-01-01T00:00:00Z",
+    "Files": null,
+    "ID": "1700000056000",
+    "Importance": "normal",
+    "Link": "https://teams.microsoft.com/l/message/19:untitledgroup2@thread.v2/1700000056000?tenantId=00000000-0000-4000-8000-000000000002&context=%7B%22contextType%22%3A%22chat%22%7D",
+    "Links": null,
+    "Mentions": [
+      {
+        "DisplayName": "everyone",
+        "ID": "everyone"
+      }
+    ],
+    "MentionsMe": false,
+    "MessageType": "RichText/Html",
+    "ParentMessageID": "1700000056000",
+    "Pinned": false,
+    "Raw": {
+      "id": "1700000056000",
+      "conversationId": "19:untitledgroup2@thread.v2",
+      "parentMessageId": "1700000056000",
+      "clientMessageId": "9000000056",
+      "version": 1700000056000,
+      "sequenceId": 56,
+      "messageType": "RichText/Html",
+      "contentType": "Text",
+      "content": "<p><span itemscope itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">everyone</span> broadcast everyone</p>",
+      "imDisplayName": "Pat Example",
+      "creator": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+      "originalArrivalTime": 1700000056000,
+      "clientArrivalTime": 1700000056005,
+      "deletionInfo": null,
+      "properties": {
+        "importance": "normal",
+        "subject": "",
+        "mentions": "[{\"itemid\":0,\"mentionType\":\"everyone\",\"mri\":\"everyone\",\"displayName\":\"everyone\"}]"
+      }
+    },
+    "Reactions": null,
+    "ReplyChainID": "1700000056000",
+    "SenderID": "8:orgid:00000000-0000-4000-8000-0000000000ee",
+    "SenderName": "Pat Example",
+    "SentAt": "2023-11-14T22:14:16Z",
+    "Subject": "",
+    "TenantID": "00000000-0000-4000-8000-000000000002",
+    "UserID": "00000000-0000-4000-8000-0000000000a2",
+    "Version": 1700000056000
   }
 ]

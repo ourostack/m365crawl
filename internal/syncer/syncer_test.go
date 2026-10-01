@@ -29,9 +29,9 @@ var (
 
 // Golden totals of the fixture (distinct rows in testdata/teams-fixture/expected/mapped-*.json).
 const (
-	fixtureMessages      = 104
+	fixtureMessages      = 110
 	fixtureConversations = 14
-	fixtureActivity      = 16
+	fixtureActivity      = 22
 )
 
 func newDB(t *testing.T) string { return filepath.Join(t.TempDir(), "data", "teamscrawl.db") }
