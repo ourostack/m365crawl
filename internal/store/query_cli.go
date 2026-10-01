@@ -25,6 +25,9 @@ func (s *Store) LastSuccessFor(ctx context.Context, account string) (time.Time, 
 }
 
 func (s *Store) lastSuccess(ctx context.Context, account string, stalest bool) (time.Time, error) {
+	if old, err := s.NeedsUpgrade(ctx); err != nil || old {
+		return time.Time{}, err // no complete per-account run is recorded yet
+	}
 	const newest = `max(coalesce(finished_at, started_at))`
 	const covering = `status in ` + successStatuses + ` and accounts_json is not null`
 	q, args := `select `+newest+` from sync_runs where `+covering+`

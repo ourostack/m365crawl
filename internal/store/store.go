@@ -31,6 +31,8 @@ type Store struct {
 	cs       *crawlstore.Store
 	db       *sql.DB
 	readOnly bool
+	// upgrade caches NeedsUpgrade: 0 unknown, 1 current, 2 needs the migration.
+	upgrade int
 }
 
 // Counts reports what one Apply call did.
@@ -103,6 +105,26 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// NeedsUpgrade reports an archive written before run-level sync_runs rows existed: it has no
+// sync_runs.accounts_json column, and only a writable open (the next sync) adds it. Reads work on
+// such an archive and treat it as having no complete sync yet. The answer is cached per open.
+func (s *Store) NeedsUpgrade(ctx context.Context) (bool, error) {
+	if s.upgrade == 0 {
+		var cols, has int
+		if err := s.db.QueryRowContext(ctx, `select count(*), count(case when name='accounts_json' then 1 end) from pragma_table_info('sync_runs')`).Scan(&cols, &has); err != nil {
+			return false, err
+		}
+		if cols == 0 {
+			return false, errors.New("no such table: sync_runs")
+		}
+		s.upgrade = 1
+		if has == 0 {
+			s.upgrade = 2
+		}
+	}
+	return s.upgrade == 2, nil
 }
 
 // OpenReadOnly opens an existing archive read-only (safe beside an active writer). It returns

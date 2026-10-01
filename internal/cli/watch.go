@@ -276,17 +276,19 @@ func (w *watcher) sync() (done bool, err error) {
 	rep, changes, err := runSync(w.rt.ctx, syncer.Options{Root: w.rt.root, DBPath: w.rt.dbPath})
 	var coded *errs.Coded
 	partial := errors.As(err, &coded) && coded.Code == errs.CodePartialSync && w.rt.ctx.Err() == nil
-	if err != nil && !partial {
+	// Sources committed but the run could not be recorded: their changes are in the archive too.
+	unrecorded := err != nil && !partial && (rep.Status == syncer.StatusOK || rep.Status == syncer.StatusOmissions || rep.Status == syncer.StatusUnchanged)
+	if err != nil && !partial && !unrecorded {
 		return false, err
 	}
 	if m := rep.Migrated; m != nil {
 		w.migrated(*m)
 	}
-	if partial {
+	if partial || unrecorded {
 		// Some sources committed: their changes are in the archive and the next sync will skip
 		// them as unchanged, so they are emitted now. The fingerprints stay as they were, which
-		// makes the next pass retry the failed sources.
-		w.emitPartial(rep, changes)
+		// makes the next pass retry the failed sources (or the record).
+		w.emitCommitted(rep, changes)
 		return false, err
 	}
 	w.fps, w.lastErr = cur, ""
@@ -316,13 +318,16 @@ func lostChanges(err error, n int) error {
 	return errs.Internal(fmt.Errorf("%d change(s) from the last sync could not be emitted: %w", n, err))
 }
 
-// emitPartial emits the changes of the sources a partial sync committed. Before the baseline is
-// taken (and without --emit-initial) nothing is emitted: those changes are the silent baseline.
-// A failure to read them back is reported as an error line; the caller still reports the partial
-// sync. (A read-back failure is a database error, never an environment error that would end the
-// watch, so the result of reportErr is nil here.)
-func (w *watcher) emitPartial(rep syncer.Report, changes []syncer.Change) {
-	if !w.baselined && !w.emitInitial {
+// emitCommitted emits the changes of the sources a partial (or unrecorded) sync committed. The
+// first sync that commits anything is the baseline, as for a normal first sync: those changes are
+// not emitted unless --emit-initial. Afterwards they are emitted. A failure to read them back is
+// reported as an error line; the caller still reports the sync's own error. (A read-back failure
+// is a database error, never an environment error that would end the watch, so the result of
+// reportErr is nil here.)
+func (w *watcher) emitCommitted(rep syncer.Report, changes []syncer.Change) {
+	first := !w.baselined
+	w.baselined = true
+	if first && !w.emitInitial {
 		return
 	}
 	if err := w.emit(rep, changes); err != nil {

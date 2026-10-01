@@ -11,6 +11,7 @@ import (
 
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
 // failNthSource makes the n-th source that reaches its snapshot fail with a coded error while it
@@ -203,5 +204,29 @@ func TestStubbornPauseIgnoresCancellation(t *testing.T) {
 	_, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: newDB(t)})
 	if !errors.Is(err, context.Canceled) || time.Since(start) < 30*time.Millisecond {
 		t.Fatalf("err = %v after %v", err, time.Since(start))
+	}
+}
+
+func TestPanicsInRederiveAndDiscoveryAreContained(t *testing.T) {
+	isolateTmp(t)
+	oldR, oldD := rederiveArchive, discoverSources
+	t.Cleanup(func() { rederiveArchive, discoverSources = oldR, oldD })
+	rederiveArchive = func(context.Context, *store.Store) (*store.Migration, error) { panic("boom in rederive") }
+	db := newDB(t)
+	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	codedErr(t, err, errs.CodeDBError) // an error from Rederive is a database error
+	if !strings.Contains(err.Error(), "boom in rederive") {
+		t.Fatalf("err = %v", err)
+	}
+	rederiveArchive = oldR
+	discoverSources = func(string) ([]teamsdesktop.Source, []string, error) { panic("boom in discover") }
+	_, _, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	codedErr(t, err, errs.CodeInternal)
+	if !strings.Contains(err.Error(), "boom in discover") {
+		t.Fatalf("err = %v", err)
+	}
+	discoverSources = oldD
+	if r, _ := run(t, Options{Root: fixtureRoot, DBPath: db}); r.Status != StatusOK {
+		t.Fatalf("the lock was released and a clean run works: %+v", r)
 	}
 }

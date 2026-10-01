@@ -60,7 +60,8 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	}
 	// An archive written by an older build gets its derived fields recomputed first, so that this
 	// sync's content hashes compare against current ones and the upgrade is not read as edits.
-	migrated, err := st.Rederive(ctx)
+	var migrated *store.Migration
+	err = contained(func() (e error) { migrated, e = rederiveArchive(ctx, st); return })
 	var coded *errs.Coded
 	if errors.As(err, &coded) && coded.Code == errs.CodeArchiveNewer {
 		return Report{}, nil, err // before any write: not even a failed-run record
@@ -108,7 +109,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	if root == "" {
 		root = teamsdesktop.DefaultRoot()
 	}
-	sources, other, err := teamsdesktop.Discover(root)
+	var sources []teamsdesktop.Source
+	var other []string
+	err := contained(func() (e error) { sources, other, e = discoverSources(root); return })
 	if err != nil {
 		return Report{}, nil, err
 	}
@@ -204,6 +207,16 @@ func bodyMessage(c *errs.Coded) string {
 		return c.Message + ": " + c.Unwrap().Error()
 	}
 	return c.Message
+}
+
+// contained runs fn and turns a panic into an internal error, so a bug never crashes the caller.
+func contained(fn func() error) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = errs.Internal(fmt.Errorf("panic while syncing: %v", p))
+		}
+	}()
+	return fn()
 }
 
 // safeSource is source with a bug that panics while decoding contained: the source's transaction
@@ -492,7 +505,9 @@ func asCoded(err error) error {
 // batch is applied, and a hook called once a source's snapshot is taken, before its transaction
 // begins.
 var (
-	batchSize     = 2000
-	beforeFlush   = func(kind string, n int) error { return nil }
-	afterSnapshot = func() {}
+	discoverSources = teamsdesktop.Discover
+	rederiveArchive = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
+	batchSize       = 2000
+	beforeFlush     = func(kind string, n int) error { return nil }
+	afterSnapshot   = func() {}
 )
