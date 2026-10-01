@@ -174,6 +174,9 @@ type ActivityRow struct {
 	// mentioned. They stay empty for a type whose data names no one (see actorOf).
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorName string `json:"actor_name,omitempty"`
+	// ActorInferred is true when the actor is a best-effort match (a reaction's reactor, picked by
+	// time), false when the data names it exactly (the related message's sender).
+	ActorInferred bool `json:"actor_inferred,omitempty"`
 }
 
 // WhoamiRow is one archived account.
@@ -765,7 +768,9 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 		w.add(teamCond, id, id)
 	}
 	if f.DirectMentions {
-		w.add(`(a.type like 'mention%' and lower(a.subtype)='person')`)
+		// Same meaning as Filter.DirectMentions: a person-subtype item, or a mention by id on the
+		// item's archived message.
+		w.add(`(a.type like 'mention%' and (lower(a.subtype)='person' or m.mentions_me=1))`)
 	}
 	if !f.Since.IsZero() {
 		w.add(`a.at>=?`, fmtTime(f.Since))
@@ -783,8 +788,9 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 // fillActors sets ActorID and ActorName on the items whose type names who acted:
 //   - mention*, reply*, follow: the sender of the message the item points at (the person who
 //     mentioned, replied or posted); empty when that message is not archived;
-//   - reaction*: the reactor, read from the reacted-to message's reactions (the item's own
-//     sender is that message's author); empty when no one but the account reacted;
+//   - reaction*: the reactor, inferred from the reacted-to message's reactions (the item's own
+//     sender is that message's author) and flagged ActorInferred; empty when no one but the
+//     account reacted. The account's own id is taken as "8:orgid:"+user id, as whoami's self_id;
 //   - any other type (msGraph system notices, membership changes, thread activity): no actor.
 func (s *Store) fillActors(ctx context.Context, rows []ActivityRow) error {
 	for i := range rows {
@@ -798,6 +804,7 @@ func (s *Store) fillActors(ctx context.Context, rows []ActivityRow) error {
 				return err
 			}
 			if r.ActorID = id; id != "" {
+				r.ActorInferred = true
 				if err := s.db.QueryRowContext(ctx, `select coalesce((select display_name from people where tenant_id=? and id=?),'')`, r.TenantID, id).Scan(&r.ActorName); err != nil {
 					return err
 				}

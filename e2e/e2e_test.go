@@ -742,8 +742,8 @@ func TestE2EMaxAge(t *testing.T) {
 		e := newEnv(t)
 		res := e.cmd("messages", "-c", "Fixture chat 1")
 		mustExit(t, res, 0)
-		if res.stderr != "teamscrawl: syncing — no complete sync yet (max-age 15m)\n" {
-			t.Fatalf("stderr = %q, want the sync notice alone", res.stderr)
+		if n := mustJSON(t, strings.TrimSpace(res.stderr)); n["notice"] != "syncing" || n["reason"] != "never_synced" || n["max_age_seconds"] != float64(900) || n["archive_age_seconds"] != nil {
+			t.Fatalf("stderr = %q, want the sync notice alone, as JSON", res.stderr)
 		}
 		whole := mustJSON(t, res.stdout)
 		if items, _ := whole["items"].([]any); len(items) == 0 {
@@ -807,8 +807,11 @@ func TestE2EMaxAge(t *testing.T) {
 			t.Fatalf("sync_error = %v", whole["sync_error"])
 		}
 		lines := strings.Split(strings.TrimSpace(res.stderr), "\n")
-		if len(lines) != 2 || !strings.HasPrefix(lines[0], "teamscrawl: syncing — archive is ") || !strings.HasSuffix(lines[0], " old (max-age 1ns)") {
+		if len(lines) != 2 {
 			t.Fatalf("stderr = %q, want the notice then the warning", res.stderr)
+		}
+		if n := mustJSON(t, lines[0]); n["notice"] != "syncing" || n["reason"] != "stale" || n["archive_age_seconds"] == nil {
+			t.Fatalf("notice = %s", lines[0])
 		}
 		warn := mustJSON(t, lines[1])
 		w, _ := warn["warning"].(map[string]any)
@@ -1420,7 +1423,7 @@ func TestE2EImplicitSyncNotice(t *testing.T) {
 	e := newEnv(t)
 	res := e.cmd("unread", "--limit", "1")
 	mustExit(t, res, 0)
-	if !strings.HasPrefix(res.stderr, "teamscrawl: syncing — no complete sync yet (max-age 15m)\n") || strings.Contains(res.stdout, "teamscrawl:") {
+	if n := mustJSON(t, strings.TrimSpace(res.stderr)); n["notice"] != "syncing" || n["reason"] != "never_synced" || strings.Contains(res.stdout, "notice") {
 		t.Fatalf("stderr %q stdout %q", res.stderr, res.stdout)
 	}
 	whole := mustJSON(t, res.stdout)
@@ -1433,7 +1436,14 @@ func TestE2EImplicitSyncNotice(t *testing.T) {
 	if _, has := ok(t, res)["synced"]; has {
 		t.Fatalf("a fresh read reports a sync: %s", res.stdout)
 	}
-	// Text mode: the same notice on stderr, a clean table on stdout.
+	// A stale archive: the JSON notice carries the age and the limit.
+	archiveExec(t, e.db, `update sync_runs set finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-30 seconds'), started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-31 seconds')`)
+	res = e.cmd("unread", "--limit", "1")
+	mustExit(t, res, 0)
+	if n := mustJSON(t, strings.TrimSpace(res.stderr)); n["reason"] != "stale" || n["max_age_seconds"] != float64(900) || n["archive_age_seconds"].(float64) < 8040 || n["archive_age_seconds"].(float64) > 8100 {
+		t.Fatalf("stale notice = %s", res.stderr)
+	}
+	// Text mode: the plain line on stderr, a clean table on stdout.
 	archiveExec(t, e.db, `update sync_runs set finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-30 seconds'), started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-31 seconds')`)
 	res = e.cmd("--format", "text", "unread", "--limit", "1")
 	mustExit(t, res, 0)
