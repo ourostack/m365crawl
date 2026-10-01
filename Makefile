@@ -51,7 +51,7 @@ fixture:
 	GO="$$(command -v go)" node scripts/fixture/generate.mjs
 
 fmt:
-	gofmt -w cmd internal e2e
+	gofmt -w acceptance cmd internal e2e
 
 fmt-check:
 	@set -e; \
