@@ -597,9 +597,6 @@ func buildFTSQuery(in string) string {
 			}
 			return
 		}
-		if !phrase && strings.Trim(text, "*") == "" {
-			return
-		}
 		out = append(out, crawlstore.FTS5Phrase(text))
 	}
 	for _, r := range in {

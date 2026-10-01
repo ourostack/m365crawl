@@ -9,6 +9,9 @@ import (
 	"github.com/ourostack/teamscrawl/internal/errs"
 )
 
+// flock is syscall.Flock; tests replace it to force a failure other than contention.
+var flock = syscall.Flock
+
 // AcquireLock takes the exclusive, non-blocking run lock on <dbPath>.lock. A second holder gets
 // the coded `locked` error at once. The lock is also released if the process dies. release is
 // idempotent.
@@ -20,7 +23,7 @@ func AcquireLock(dbPath string) (release func(), err error) {
 	if err != nil {
 		return nil, errs.DBError(err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return nil, errs.Locked("another teamscrawl run holds the archive lock " + dbPath + ".lock")

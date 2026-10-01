@@ -24,8 +24,21 @@ func hashOf(parts ...any) string {
 
 func nowText() string { return time.Now().UTC().Format(timeLayout) }
 
+// inTx runs fn in one write transaction on the store's connection pool, rolling back when fn or
+// the commit fails.
 func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	return s.cs.WithTx(ctx, fn)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }
 
 // ApplyAccount records the account, keeping first_seen_at and stamping last_synced_at.
@@ -222,9 +235,9 @@ func reindexTitles(ctx context.Context, tx *sql.Tx, touched []teamsdesktop.Conve
 			}
 			kids = append(kids, id)
 		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
+		// database/sql has already closed rows by now (Next closes at the end or on error), so a
+		// Close error cannot surface here; Err reports the failure that ended the loop.
+		_ = rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}
