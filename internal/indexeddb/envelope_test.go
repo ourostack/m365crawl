@@ -365,3 +365,28 @@ func TestRecordsBadKeyIsOmission(t *testing.T) {
 		t.Fatalf("err %v ok %d bad %d", err, ok, bad)
 	}
 }
+
+func TestPayloadUnwrapsEveryEnvelope(t *testing.T) {
+	o := newTestOrigin(fakeKV{}, "")
+	inner := append([]byte{0xff, 0x10}, v8Hi...)
+	cases := map[string][]byte{
+		"plain":  inner,
+		"snappy": append([]byte{0xff, 0x11, 0x02}, snappy.Encode(nil, inner)...),
+		"v21":    v21Envelope(v8Hi, []byte{0xa0, 0x01, 0x02}),
+	}
+	for name, raw := range cases {
+		got, err := o.Payload(1, raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !bytes.Equal(got, v8Hi) {
+			t.Errorf("%s: payload % x, want % x", name, got, v8Hi)
+		}
+	}
+	if _, err := o.Payload(1, nil); omissionCode(t, err) != "empty_value" {
+		t.Errorf("empty value: %v", err)
+	}
+	if _, err := o.Payload(1, []byte{0x01, 0x02}); omissionCode(t, err) != "unknown_envelope" {
+		t.Errorf("unknown envelope: %v", err)
+	}
+}
