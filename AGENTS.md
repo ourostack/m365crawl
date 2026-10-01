@@ -14,4 +14,4 @@
 
 ## Test hooks
 
-- `TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=<duration>`: when set, the syncer sleeps that long after the snapshot is taken. Used only by the SIGINT e2e test.
+- `TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=<duration>`: when set, the syncer prints `teamscrawl-test: paused after snapshot` to stderr and then sleeps that long after the snapshot is taken. Used only by the e2e tests, which signal the process once the marker appears.
