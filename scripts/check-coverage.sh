@@ -10,6 +10,7 @@ export GOWORK=off
 modpath="$(go list -m)"
 packages="${COVERAGE_PACKAGES:-./internal/...}"
 tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 profile="$tmp/cover.out"
 
 # shellcheck disable=SC2086
@@ -20,57 +21,75 @@ go test -count=1 -coverprofile="$profile" $packages >"$tmp/test.log" 2>&1 || {
 }
 go tool cover -func="$profile" | grep -v '^total:' >"$tmp/func.txt"
 
-# Functions below 100%, as "<repo-relative file>:<FuncName>".
-awk -v mod="$modpath/" '$NF != "100.0%" {
-	loc = $1; sub(/:[0-9]+:$/, "", loc); sub(/:[0-9]+:[0-9]+:$/, "", loc)
-	sub("^" mod, "", loc)
-	print loc ":" $2
-}' "$tmp/func.txt" | sort -u >"$tmp/below.txt"
-
-# Every function seen at all, to detect stale entries.
+# One line per function: "<repo-relative file>:<FuncName><TAB><percent><TAB><file:line>".
+# go tool cover prints only the bare name, so same-named methods in one file share a key.
 awk -v mod="$modpath/" '{
 	loc = $1; sub(/:[0-9]+:$/, "", loc); sub(/:[0-9]+:[0-9]+:$/, "", loc)
 	sub("^" mod, "", loc)
-	print loc ":" $2
-}' "$tmp/func.txt" | sort -u >"$tmp/all.txt"
+	row = $1; sub("^" mod, "", row)
+	print loc ":" $2 "\t" $NF "\t" row
+}' "$tmp/func.txt" >"$tmp/rows.tsv"
+cut -f1 "$tmp/rows.tsv" | sort | uniq -d >"$tmp/ambiguous.txt"
+cut -f1 "$tmp/rows.tsv" | sort -u >"$tmp/all.txt"
+awk -F'\t' '$2 != "100.0%" {print $1}' "$tmp/rows.tsv" | sort -u >"$tmp/below.txt"
 
-# Package directories under test, as repo-relative paths.
+# Package paths under test, repo-relative, and every package that exists in the module.
 # shellcheck disable=SC2086
 go list -f '{{.ImportPath}}' $packages | sed "s#^$modpath/##" | sort -u >"$tmp/pkgs.txt"
+go list -f '{{.ImportPath}}' ./... | sed "s#^$modpath/##" | sort -u >"$tmp/existing.txt"
 
 : >"$tmp/allowed.txt"
 status=0
-while IFS= read -r pkg; do
-	name="${pkg//\//-}"
-	file="coverage/allow/$name.txt"
-	[ -f "$file" ] || continue
+for file in coverage/allow/*.txt; do
+	[ -e "$file" ] || continue
+	name="$(basename "$file" .txt)"
+	pkg=""
+	while IFS= read -r p; do
+		if [ "${p//\//-}" = "$name" ]; then pkg="$p"; fi
+	done <"$tmp/existing.txt"
+	if [ -z "$pkg" ]; then
+		echo "FAIL $file: orphan allow file, no Go package matches $name" >&2
+		status=1
+		continue
+	fi
+	under_test=0
+	grep -Fxq -- "$pkg" "$tmp/pkgs.txt" && under_test=1
 	while IFS= read -r line || [ -n "$line" ]; do
 		case "$line" in '' | '#'*) continue ;; esac
-		key="${line%% *}"
+		key="${line%%[[:space:]]*}"
 		reason="${line#"$key"}"
-		reason="${reason# }"
+		reason="${reason#"${reason%%[![:space:]]*}"}"
 		if [ -z "$reason" ]; then
 			echo "FAIL $file: entry has no reason: $key" >&2
 			status=1
 		fi
+		path="${key%%:*}"
+		if [ "$(dirname "$path")" != "$pkg" ]; then
+			echo "FAIL $file: entry names a function outside package $pkg: $key" >&2
+			status=1
+			continue
+		fi
+		[ "$under_test" -eq 1 ] || continue
 		echo "$key" >>"$tmp/allowed.txt"
 		if ! grep -Fxq -- "$key" "$tmp/all.txt"; then
 			echo "FAIL $file: stale entry, function no longer exists: $key" >&2
+			status=1
+		elif grep -Fxq -- "$key" "$tmp/ambiguous.txt"; then
+			echo "FAIL $file: ambiguous entry, $path has several functions named ${key#*:}; rename one so the entry names a single function: $key" >&2
 			status=1
 		elif ! grep -Fxq -- "$key" "$tmp/below.txt"; then
 			echo "FAIL $file: stale entry, function is already 100% covered: $key" >&2
 			status=1
 		fi
 	done <"$file"
-done <"$tmp/pkgs.txt"
+done
 sort -u "$tmp/allowed.txt" -o "$tmp/allowed.txt"
 
-uncovered="$(grep -Fxv -f "$tmp/allowed.txt" "$tmp/below.txt" || true)"
-if [ -n "$uncovered" ]; then
+grep -Fxv -f "$tmp/allowed.txt" "$tmp/below.txt" >"$tmp/uncovered.txt" || true
+if [ -s "$tmp/uncovered.txt" ]; then
 	echo "FAIL functions below 100% statement coverage and not in coverage/allow:" >&2
-	while IFS= read -r key; do
-		grep -F -- "${key##*:}" "$tmp/func.txt" | grep -F -- "${key%:*}" | head -1 >&2
-	done <<<"$uncovered"
+	awk -F'\t' 'NR == FNR {bad[$1] = 1; next} ($1 in bad) && $2 != "100.0%" {print "  " $3 "  " $2 "  " $1}' \
+		"$tmp/uncovered.txt" "$tmp/rows.tsv" >&2
 	status=1
 fi
 
