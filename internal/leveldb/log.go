@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	glerrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/journal"
 )
 
@@ -25,20 +26,28 @@ func readLog(path, name string, into *store) (truncated bool, err error) {
 		return false, fmt.Errorf("leveldb: open %s: %w", name, err)
 	}
 	defer func() { _ = f.Close() }()
+	return replayLog(f, name, into)
+}
 
+// replayLog applies every record read from r, which is the content of the log called name.
+func replayLog(r io.Reader, name string, into *store) (truncated bool, err error) {
 	dc := &dropCounter{}
-	jr := journal.NewReader(f, dc, false, true)
+	jr := journal.NewReader(r, dc, false, true)
 	for {
-		r, nerr := jr.Next()
+		rr, nerr := jr.Next()
 		if errors.Is(nerr, io.EOF) {
 			break
 		}
 		if nerr != nil {
-			truncated = true
-			break
+			// A non-strict journal reader reports damage through the dropper, not from Next,
+			// so an error here is a real read failure.
+			return false, fmt.Errorf("leveldb: read %s: %w", name, nerr)
 		}
-		rec, rerr := io.ReadAll(r)
+		rec, rerr := io.ReadAll(rr)
 		if rerr != nil {
+			if !isTornRead(rerr) {
+				return false, fmt.Errorf("leveldb: read %s: %w", name, rerr)
+			}
 			truncated = true
 			break
 		}
@@ -51,6 +60,14 @@ func readLog(path, name string, into *store) (truncated bool, err error) {
 		truncated = true
 	}
 	return truncated, nil
+}
+
+// isTornRead reports whether a journal read error means the log was cut off or damaged, which is
+// the expected result of copying while Teams writes. Any other error is a real I/O failure and
+// must not be mistaken for a torn tail, or the records after it would be dropped silently.
+func isTornRead(err error) bool {
+	var jc *journal.ErrCorrupted
+	return glerrors.IsCorrupted(err) || errors.As(err, &jc) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // applyBatch applies a write batch: 8-byte sequence, 4-byte count, then records. It returns false

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	glerrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/journal"
 )
 
@@ -81,8 +80,7 @@ func readManifest(dir, name string) (*manifest, error) {
 
 // manifestReadError classifies a journal read failure: a cut-off record is ErrManifestTruncated.
 func manifestReadError(name string, err error) error {
-	var jc *journal.ErrCorrupted
-	if glerrors.IsCorrupted(err) || errors.As(err, &jc) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if isTornRead(err) {
 		return fmt.Errorf("%w: %s: %w", ErrManifestTruncated, name, err)
 	}
 	return fmt.Errorf("leveldb: read manifest %s: %w", name, err)
