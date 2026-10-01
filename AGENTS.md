@@ -17,7 +17,7 @@
 ## Database allowlist
 
 - `internal/teamsdesktop/read.go` holds the complete allowlist: `replychain-manager` (store `replychains-2`), `conversation-manager` (store `conversations`) and `activity-manager` (store `feed-items`). Nothing else in the Teams cache is decoded, and `keepDatabase` keeps no value of any other database in memory.
-- The allowlist exists for two reasons. Privacy: the cache also holds `Teams:auth:*` (sign-in material) and about a hundred other databases that teamscrawl has no reason to read, so the rule is "named and allowed, or never read". Memory: dropping the other databases' values is what took a full sync from about 0.8 GB to about 0.2 GB.
+- The allowlist exists for two reasons. Privacy: the cache also holds `Teams:auth:*` (sign-in material) and over a hundred other databases on a real cache (the acceptance run counted 103) that teamscrawl has no reason to read, so the rule is "named and allowed, or never read". Memory: dropping the other databases' values is what took a full sync from about 0.8 GB to about 0.2 GB.
 - Adding a database is a design change: add a decoder and mapper, a fixture record, tests, and a SPEC.md section 2 row in the same PR. `TestRealNoAuthDecoded` asserts on a real cache that every non-allowlisted database yields no records.
 
 ## Archive rules
