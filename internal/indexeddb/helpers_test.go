@@ -2,6 +2,7 @@ package indexeddb
 
 import (
 	"bytes"
+	"os"
 	"sort"
 	"strings"
 	"unicode/utf16"
@@ -12,9 +13,9 @@ import (
 // fakeKV is an in-memory key-value store that satisfies the kv interface.
 type fakeKV map[string][]byte
 
-func (f fakeKV) Get(k []byte) ([]byte, bool) {
+func (f fakeKV) Get(k []byte) ([]byte, bool, error) {
 	v, ok := f[string(k)]
-	return v, ok
+	return v, ok, nil
 }
 
 func (f fakeKV) Scan(prefix []byte, fn func(k, v []byte) error) error {
@@ -65,3 +66,5 @@ func dbNameKey(origin, name string) []byte {
 func storeNameKey(db, store byte) []byte {
 	return []byte{0x00, db, 0, 0, 50, store, 0}
 }
+
+func removeFile(p string) error { return os.Remove(p) }

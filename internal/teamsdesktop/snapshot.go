@@ -32,8 +32,10 @@ var (
 // <snapDir>/blob (open with indexeddb.Open(snapDir+"/leveldb", snapDir+"/blob")). Teams may
 // write or compact while we copy, so the copy runs in a safe order (tables and logs first, then
 // the MANIFEST, then CURRENT, then blobs), CURRENT is re-read afterwards, and the copy is
-// validated with leveldb.Load. A copy that names missing files, has a truncated MANIFEST or saw
-// CURRENT change is retried, up to three attempts, then snapshot_inconsistent.
+// validated by reading every table and log with leveldb.LoadWith, holding no values. A copy
+// that names missing files, has a truncated MANIFEST or saw CURRENT change is retried, up to
+// three attempts, then snapshot_inconsistent. The snapshot must outlive every read of it: the
+// LevelDB reader re-reads large values from it on demand.
 //
 // The snapshot (mode 0700) is removed by cleanup, which is always non-nil and idempotent, and
 // also when ctx is cancelled.

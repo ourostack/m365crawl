@@ -136,7 +136,11 @@ func (o *Origin) Records(dbID, storeID int64, fn func(Record) error) error {
 			}
 			raw = v[used:]
 			if EnvelopeKind(raw) == "blob" {
-				raw = o.resolveBlobRef(uint64(dbID), uint64(storeID), rawKey, raw) //nolint:gosec // bounded by earlier length checks
+				resolved, err := o.resolveBlobRef(uint64(dbID), uint64(storeID), rawKey, raw) //nolint:gosec // bounded by earlier length checks
+				if err != nil {
+					return err
+				}
+				raw = resolved
 			}
 		}
 		return fn(Record{Key: key, Raw: raw})

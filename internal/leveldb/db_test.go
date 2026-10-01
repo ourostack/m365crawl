@@ -74,7 +74,7 @@ func TestManifestLiveSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	for k, v := range want {
-		got, ok := d.Get([]byte(k))
+		got, ok, _ := d.Get([]byte(k))
 		if !ok || string(got) != v {
 			t.Fatalf("Get(%s) = %q,%v want %q", k, got, ok, v)
 		}
@@ -132,7 +132,7 @@ func TestScanPrefixOrdered(t *testing.T) {
 	if err := d.Scan(nil, func(k, v []byte) error { return stop }); !errors.Is(err, stop) {
 		t.Fatalf("Scan did not propagate error: %v", err)
 	}
-	if _, ok := d.Get([]byte("nope")); ok {
+	if _, ok, _ := d.Get([]byte("nope")); ok {
 		t.Fatal("Get of absent key returned ok")
 	}
 }
@@ -154,7 +154,7 @@ func TestDeletionNewestWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, ok := d.Get([]byte("k")); ok {
+	if v, ok, _ := d.Get([]byte("k")); ok {
 		t.Fatalf("deleted key visible: %q", v)
 	}
 	if d.Stats().Keys != 0 {
@@ -179,7 +179,7 @@ func TestHighestSequenceWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, ok := d.Get([]byte("k")); !ok || string(v) != "new" {
+	if v, ok, _ := d.Get([]byte("k")); !ok || string(v) != "new" {
 		t.Fatalf("got %q,%v", v, ok)
 	}
 }
@@ -214,7 +214,7 @@ func TestTruncatedLogTail(t *testing.T) {
 		t.Fatalf("TruncatedLogTails = %d", d.Stats().TruncatedLogTails)
 	}
 	for i := 0; i < 5; i++ {
-		if v, ok := d.Get([]byte{'k', byte('0' + i)}); !ok || !bytes.Equal(v, []byte{'v', byte('0' + i)}) {
+		if v, ok, _ := d.Get([]byte{'k', byte('0' + i)}); !ok || !bytes.Equal(v, []byte{'v', byte('0' + i)}) {
 			t.Fatalf("record %d lost", i)
 		}
 	}

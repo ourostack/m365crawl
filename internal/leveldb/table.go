@@ -43,7 +43,8 @@ type location struct {
 }
 
 // lazyMin is the smallest table value that is re-read on demand instead of held in memory.
-// Small values (metadata, blob entries) are held so Get never reads a file for them.
+// The rule is by size only: most metadata and blob entries are small and held, but a large blob
+// entry is re-read like any other value, and Get reports a failed re-read as an error.
 var lazyMin = 512
 
 // store holds the newest record for every retained key. Keys that keep rejects are never held,
@@ -99,6 +100,11 @@ const (
 	compressionSnappy = 1
 )
 
+// maxBlockLen caps a block's uncompressed size. LevelDB blocks are a few KiB (a single large
+// value makes one larger block); a snappy header claiming more than this is corrupt, and is
+// rejected before its claimed length is allocated.
+const maxBlockLen = 64 << 20
+
 // blockHandle locates a block (without its trailer) in a table file.
 type blockHandle struct{ off, size uint64 }
 
@@ -131,6 +137,13 @@ func readBlock(f io.ReaderAt, size int64, h blockHandle) ([]byte, error) {
 	case compressionNone:
 		return raw[:h.size], nil
 	case compressionSnappy:
+		n, err := snappy.DecodedLen(raw[:h.size])
+		if err != nil {
+			return nil, fmt.Errorf("block at %d: snappy: %w", h.off, err)
+		}
+		if n > maxBlockLen {
+			return nil, fmt.Errorf("block at %d: decoded length %d exceeds %d", h.off, n, maxBlockLen)
+		}
 		out, err := snappy.Decode(nil, raw[:h.size])
 		if err != nil {
 			return nil, fmt.Errorf("block at %d: snappy: %w", h.off, err)

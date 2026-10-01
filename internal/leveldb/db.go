@@ -46,10 +46,13 @@ type DB struct {
 
 type tableRef struct{ path, name string }
 
-// Load reads dir (a copy; it is never written) and returns its live contents.
+// Load reads dir (a copy; it is never written) and returns its live contents. Large table
+// values are re-read from dir on demand, so dir must stay in place and unchanged for as long as
+// the DB is used; a value that can no longer be read is an error from Get or Scan.
 func Load(dir string) (*DB, error) { return LoadWith(dir, LoadOptions{}) }
 
-// LoadWith is Load with options: with a Keep filter only the chosen keys are held.
+// LoadWith is Load with options: with a Keep filter only the chosen keys are held. The same
+// directory-lifetime rule as Load applies.
 func LoadWith(dir string, opts LoadOptions) (*DB, error) {
 	cur, err := readCurrent(dir)
 	if err != nil {
@@ -154,18 +157,19 @@ func liveLogs(dir string, m *manifest) ([]uint64, error) {
 	return out, nil
 }
 
-// Get returns the live value for key. A large value that can no longer be re-read from its
-// table (the directory changed or vanished) is reported as absent.
-func (d *DB) Get(key []byte) ([]byte, bool) {
+// Get returns the live value for key. ok is false when the key is absent or deleted. err is set
+// when a large value cannot be re-read from its table (the directory changed or vanished, or
+// the block is damaged): that is a failure, never an absent key.
+func (d *DB) Get(key []byte) (value []byte, ok bool, err error) {
 	e, ok := d.entries[string(key)]
 	if !ok || e.deleted {
-		return nil, false
+		return nil, false, nil
 	}
 	v, err := d.value(e)
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return v, true
+	return v, true, nil
 }
 
 // Scan calls fn for every live key with the given prefix, in bytewise ascending order.
