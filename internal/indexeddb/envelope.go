@@ -89,10 +89,7 @@ func EnvelopeKind(raw []byte) string {
 // hand-built values are read with the blob number in place of the index.
 // Failures are *OmissionError.
 func (o *Origin) Decode(dbID int64, raw []byte) (any, error) {
-	if len(raw) == 0 {
-		return nil, &OmissionError{Omission{Code: CodeEmptyValue, Detail: "record has no value"}}
-	}
-	payload, err := o.unwrap(dbID, raw, 0)
+	payload, err := o.Payload(dbID, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +106,16 @@ func (o *Origin) Decode(dbID int64, raw []byte) (any, error) {
 		return nil, &OmissionError{Omission{Code: CodeV8Malformed, Detail: err.Error()}}
 	}
 	return v, nil
+}
+
+// Payload unwraps the Blink envelope of a record value as Decode does and returns the V8 payload
+// (starting at its own ff <version> header) without deserializing it, so another decoder can be
+// compared against this one. The result may alias raw. Failures are *OmissionError.
+func (o *Origin) Payload(dbID int64, raw []byte) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, &OmissionError{Omission{Code: CodeEmptyValue, Detail: "record has no value"}}
+	}
+	return o.unwrap(dbID, raw, 0)
 }
 
 // unwrap returns the V8 payload (starting at its own ff <version> header).

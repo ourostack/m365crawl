@@ -12,6 +12,12 @@
 - Do not add AI attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines, no AI credit in commits, PRs, code comments or docs.
 - Use conventional commit messages (`feat:`, `fix:`, `ci:`, `chore:`).
 
+## Real-cache acceptance tests
+
+- `TEAMSCRAWL_REAL_CACHE=1 make acceptance` runs `acceptance/` (build tag `acceptance`) against the live Teams cache on this Mac. It needs Full Disk Access, Node 22, and python3 with two read-only reference clones: `~/code/_refs/ccl_chromium_reader` and `~/code/_refs/ccl_simplesnappy` (override with `CCL_READER`, `CCL_SNAPPY`; `TEAMSCRAWL_PYTHON` picks the interpreter). `ccl_count.py` stands in empty `brotli` and `zstd` modules, so no `pip install` is needed. CI never runs it, and without `TEAMSCRAWL_REAL_CACHE=1` the real-cache tests skip.
+- `TestRealDifferential` decodes every allowlisted record twice, with `v8.Deserialize` and with Node's `v8.deserialize` (`acceptance/diff.mjs`), and compares canonical JSON. `TestRealVolumes` and `TestRealConversationAccounting` compare record and message counts with `ccl_count.py` on the same snapshot; the reference counts only the newest version of each record, so superseded versions and deletions are excluded by design.
+- The tests log counts, timings and field paths only. Never add a log line, failure message or comment that prints a name, id or content from the real cache.
+
 ## Test hooks
 
 - `TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=<duration>`: when set, the syncer prints `teamscrawl-test: paused after snapshot` to stderr and then sleeps that long after the snapshot is taken. Used only by the e2e tests, which signal the process once the marker appears.

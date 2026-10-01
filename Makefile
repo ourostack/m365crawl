@@ -9,7 +9,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot screenshot clean
+.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,7 @@ help:
 		'  build          Build the CLI into $(BINARY).' \
 		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
 		'  e2e            Run end-to-end tests (build tag e2e).' \
+		'  acceptance     Run the real-cache acceptance tests (build tag acceptance; needs TEAMSCRAWL_REAL_CACHE=1, Full Disk Access, node, python3).' \
 		'  v8vectors      Regenerate testdata/v8 with Node 22 (scripts/v8vectors/gen.mjs).' \
 		'  fixture        Regenerate testdata/teams-fixture with Edge via Playwright (scripts/fixture).' \
 		'  fmt            Apply Go formatting.' \
@@ -39,6 +40,9 @@ test:
 e2e:
 	go test -count=1 -tags e2e ./e2e/...
 
+acceptance:
+	go test -count=1 -tags acceptance -timeout 30m -v ./acceptance/...
+
 v8vectors:
 	node scripts/v8vectors/gen.mjs
 
@@ -57,12 +61,14 @@ fmt-check:
 vet:
 	go vet ./...
 	go vet -tags e2e ./...
+	go vet -tags acceptance ./...
 
 lint: golangci vulncheck workflow-lint
 
 golangci:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags acceptance ./...
 
 vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
