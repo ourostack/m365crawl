@@ -142,13 +142,16 @@ func (rt *runtime) archiveChecks() []check {
 	}
 	cs = append(cs, rt.archiveNewerCheck(st))
 	// Status just read the archive, so the probe cannot fail here; a failure would only hide the warning.
-	if old, _ := st.NeedsUpgrade(rt.ctx); old {
+	old, _ := st.NeedsUpgrade(rt.ctx)
+	if old {
 		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `teamscrawl sync`."})
 	}
 	if c, ok := lastSyncStatusCheck(row.LastRun); ok {
 		cs = append(cs, c)
 	}
 	switch {
+	case old: // the archive_upgrade warning already says to sync
+		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "no per-account sync record yet (archive from an older version)"})
 	case row.LastSuccessAt.IsZero():
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "no successful sync yet", Fix: "Run `teamscrawl sync`."})
 	case rt.now().Sub(row.LastSuccessAt) > staleSyncAfter:

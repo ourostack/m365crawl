@@ -1317,7 +1317,7 @@ func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
 			t.Run(mode+"/"+c[0], func(t *testing.T) {
 				e := newEnv(t)
 				e.sync()
-				archiveExec(t, e.db, `alter table sync_runs drop column accounts_json`)
+				makeAlpha1(t, e.db)
 				args := append([]string{}, c...)
 				if mode == "max-age-0" {
 					args = append(args, "--max-age", "0")
@@ -1349,5 +1349,40 @@ func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// makeAlpha1 turns a current archive into the exact alpha.1 shape: no meta table and no
+// sync_runs.accounts_json column.
+func makeAlpha1(t *testing.T, path string) {
+	t.Helper()
+	archiveExec(t, path, `drop table meta`)
+	archiveExec(t, path, `alter table sync_runs drop column accounts_json`)
+}
+
+func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	makeAlpha1(t, e.db)
+	res := e.cmd("doctor")
+	mustExit(t, res, 0)
+	var warns []string
+	for _, ch := range mustJSON(t, res.stdout)["checks"].([]any) {
+		m := ch.(map[string]any)
+		if m["ok"] != true {
+			t.Fatalf("a failing check on an alpha.1 archive: %s", res.stdout)
+		}
+		if m["warn"] == true {
+			warns = append(warns, m["name"].(string))
+		}
+	}
+	if len(warns) != 1 || warns[0] != "archive_upgrade" {
+		t.Fatalf("warnings %v: %s", warns, res.stdout)
+	}
+	e.sync()
+	res = e.cmd("doctor")
+	mustExit(t, res, 0)
+	if strings.Contains(res.stdout, `"warn":true`) || strings.Contains(res.stdout, "archive_upgrade") {
+		t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 	}
 }
