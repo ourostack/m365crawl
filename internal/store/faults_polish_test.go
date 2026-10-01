@@ -58,6 +58,10 @@ func TestPolishReadFailuresSurface(t *testing.T) {
 			_, _, err := s.Thread(ctx, "c1", "m1", Filter{Limit: 1, Total: &total})
 			return err
 		},
+		"Thread channel root": func(ctx context.Context, s *Store) error {
+			_, _, err := s.Thread(ctx, "chan", "m3", Filter{Limit: 1})
+			return err
+		},
 		"Thread untitled": func(ctx context.Context, s *Store) error {
 			_, _, err := s.Thread(ctx, "u1", "m5", Filter{Limit: 1})
 			return err
