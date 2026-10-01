@@ -81,7 +81,7 @@ tidy-check:
 	go mod verify
 	go mod tidy -diff
 
-check: tidy-check fmt-check vet lint test e2e
+check: tidy-check fmt-check vet lint test coverage e2e
 
 coverage:
 	./scripts/check-coverage.sh
