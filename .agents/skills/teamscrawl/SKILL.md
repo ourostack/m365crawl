@@ -5,7 +5,7 @@ description: Use when an agent needs to read the user's Microsoft Teams messages
 
 # teamscrawl
 
-Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read.
+Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in `SPEC.md` at the repository root; this file is the short version.
 
 ## When to use
 
@@ -29,7 +29,7 @@ Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read co
 
 ## Global flags
 
-`--json`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`.
+`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`.
 
 List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds":N}`. `truncated: true` means more exist: raise `--limit` (default 50) or narrow the filters. When `truncated` is true the result also has `"total":N`, the exact number of matches ignoring `--limit` (so you can tell 51 from 5,000 before deciding to page); it is omitted when not truncated, because then `count` is the total. `sql` stops reading at `--limit`, so it sets `truncated` but never `total`. Times are RFC3339 UTC. Sort orders: `search` and `unread` are newest first, `messages` is chronological (oldest first; with `--limit` you get the newest matches), `conversations` is sorted by last activity, newest first. Every list stops at `--limit` (default 50), so check `truncated`. Filter time flags accept RFC3339, `YYYY-MM-DD` (local midnight) or relative `90m`, `24h`, `7d`, `2w`.
 
@@ -52,7 +52,7 @@ Teams can hold two distinct bot posts with the same text a few seconds apart (di
 Accounts in the archive and its state. Use `self_id` to recognize the user's own messages.
 
 ```json
-{"accounts":[{"tenant_id":"00000000-0000-4000-8000-000000000001","user_id":"00000000-0000-4000-8000-0000000000a1","self_id":"8:orgid:00000000-0000-4000-8000-0000000000a1","display_name":"Alex Fixture","locale":"en-us"}],"archive":{"schema_version":1,"fts_present":true},"archive_age_seconds":0}
+{"accounts":[{"tenant_id":"00000000-0000-4000-8000-000000000001","user_id":"00000000-0000-4000-8000-0000000000a1","self_id":"8:orgid:00000000-0000-4000-8000-0000000000a1","display_name":"Alex Fixture","locale":"en-us","first_seen_at":"...","last_synced_at":"..."}],"archive":{"archive_path":"...","archive_exists":true,"schema_version":2,"fts_present":true,"accounts":[{"tenant_id":"...","user_id":"...","conversations":7,"messages":52,"people":3,"activity":8}]},"archive_age_seconds":0}
 ```
 
 ### unread
@@ -151,6 +151,8 @@ Every item has a `link`, a Teams deep link (`https://teams.microsoft.com/l/messa
 ## Errors
 
 Errors go to stderr as `{"error":{"code","message","fix"}}` and set the exit status. Follow `fix`.
+
+Exit 0 is success, including a `sync` with status `ok_with_omissions` or `unchanged`. This table lists every code; `SPEC.md` section 6.7 has the same table with when each is raised.
 
 | Exit | Code | Meaning and action |
 | --- | --- | --- |

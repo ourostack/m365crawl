@@ -142,7 +142,6 @@ func PartialSync(detail string) *Coded {
 		Fix:     "Run `teamscrawl doctor` to see what is wrong with the failing source, fix it and run `teamscrawl sync` again; the sources that synced are already in the archive."}
 }
 
-// Locked reports that another teamscrawl run holds the archive lock.
 // Interrupted is a command stopped by SIGINT or SIGTERM. Every write is one transaction per
 // source, so a stopped run leaves each source either fully applied or not at all.
 func Interrupted() *Coded {
@@ -151,6 +150,7 @@ func Interrupted() *Coded {
 		Fix:     "Run the command again."}
 }
 
+// Locked reports that another teamscrawl run holds the archive lock.
 func Locked(msg string) *Coded {
 	return &Coded{Code: CodeLocked, Exit: ExitLocked, Message: msg,
 		Fix: "Wait for the other teamscrawl run to finish, then run again."}
