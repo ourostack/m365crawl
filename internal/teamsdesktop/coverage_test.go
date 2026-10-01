@@ -382,7 +382,7 @@ func TestCallbackErrorUnwrapsAndPrints(t *testing.T) {
 	if cb.Error() != inner.Error() || !errors.Is(cb, inner) {
 		t.Fatalf("callbackError = %v", cb)
 	}
-	if got := classifyRead(cb); got != inner {
+	if got := classifyRead(cb); !errors.Is(got, inner) {
 		t.Fatalf("classifyRead(callbackError) = %v, want the caller's own error", got)
 	}
 	if got := classifyRead(context.DeadlineExceeded); !errors.Is(got, context.DeadlineExceeded) {

@@ -100,7 +100,7 @@ func TestCopyOnceDestinationErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stuck, "old"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(stuck, 0o500); err != nil {
+	if err := os.Chmod(stuck, 0o500); err != nil { //nolint:gosec // a read-only directory is the point of the test
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(stuck, 0o700) }) //nolint:gosec // restoring a test temp dir so cleanup can remove it
@@ -415,10 +415,10 @@ func TestMapFSError(t *testing.T) {
 	if err := mapFSError("p", context.DeadlineExceeded); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("deadline: %v", err)
 	}
-	if c := mapFSError("p", &fs.PathError{Err: fs.ErrPermission}); c.(*errs.Coded).Code != errs.CodeNoFullDiskAccess {
+	if c := codeOf(t, mapFSError("p", &fs.PathError{Err: fs.ErrPermission})); c.Code != errs.CodeNoFullDiskAccess {
 		t.Errorf("permission: %v", c)
 	}
-	if c := mapFSError("p", errors.New("other")); c.(*errs.Coded).Code != errs.CodeInternal {
+	if c := codeOf(t, mapFSError("p", errors.New("other"))); c.Code != errs.CodeInternal {
 		t.Errorf("other: %v", c)
 	}
 }
@@ -460,7 +460,7 @@ func TestSweepStaleSnapshotsSkipsFreshAndForeign(t *testing.T) {
 func TestCopyOnceCannotCreateDestination(t *testing.T) {
 	skipIfRoot(t)
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o500); err != nil {
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // a read-only directory is the point of the test
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restoring a test temp dir so cleanup can remove it

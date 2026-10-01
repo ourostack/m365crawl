@@ -89,7 +89,7 @@ func TestPayloadRejectsMalformedEnvelopes(t *testing.T) {
 	nested := []byte{0xff, 0x0f, 0x30}
 	// snappy block: varint length then literal tag.
 	wrap := func(inner []byte) []byte {
-		enc := append(varint(uint64(len(inner))), byte((len(inner)-1)<<2))
+		enc := append(varint(uint64(len(inner))), byte((len(inner)-1)<<2)) //nolint:gosec // the test payload is a few bytes
 		enc = append(enc, inner...)
 		return append([]byte{0xff, 0x11, 0x02}, enc...)
 	}

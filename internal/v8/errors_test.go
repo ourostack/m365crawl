@@ -10,11 +10,11 @@ import (
 func obj(keys ...string) []byte {
 	b := []byte{0xff, 15, 'o'}
 	for _, k := range keys {
-		b = append(b, '"', byte(len(k)))
+		b = append(b, '"', byte(len(k))) //nolint:gosec // test keys are short
 		b = append(b, k...)
 		b = append(b, 'I', 2)
 	}
-	return append(b, '{', byte(len(keys)))
+	return append(b, '{', byte(len(keys))) //nolint:gosec // a few keys
 }
 
 func TestObjectKeyOrder(t *testing.T) {
