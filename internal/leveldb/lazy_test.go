@@ -2,10 +2,12 @@ package leveldb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 
 	gl "github.com/syndtr/goleveldb/leveldb"
@@ -81,7 +83,7 @@ func checkAgainst(t *testing.T, d *DB, want map[string][]byte) {
 		if !bytes.Equal(got[k], v) {
 			t.Fatalf("%s: scan value differs (%d vs %d bytes)", k, len(got[k]), len(v))
 		}
-		if g, ok := d.Get([]byte(k)); !ok || !bytes.Equal(g, v) {
+		if g, ok, err := d.Get([]byte(k)); err != nil || !ok || !bytes.Equal(g, v) {
 			t.Fatalf("%s: Get differs", k)
 		}
 	}
@@ -159,7 +161,7 @@ func TestAllTableValuesLazy(t *testing.T) {
 	checkAgainst(t, d, want)
 }
 
-// A lazy value whose table vanished is an error from Scan and absent from Get.
+// A lazy value whose table vanished is an error from Scan and from Get, never an absent key.
 func TestLazyValueRereadFailure(t *testing.T) {
 	dir, want := buildMixed(t, opt.SnappyCompression)
 	d, err := Load(dir)
@@ -181,11 +183,11 @@ func TestLazyValueRereadFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, ok := d.Get([]byte(lazyKey)); ok {
-		t.Fatal("Get of an unreadable lazy value reported ok")
+	var mf *MissingFileError
+	if v, ok, err := d.Get([]byte(lazyKey)); !errors.As(err, &mf) || ok || v != nil {
+		t.Fatalf("Get of an unreadable lazy value = %d bytes, %v, %v; want a MissingFileError", len(v), ok, err)
 	}
 	err = d.Scan([]byte(lazyKey), func(k, v []byte) error { return nil })
-	var mf *MissingFileError
 	if !errors.As(err, &mf) {
 		t.Fatalf("Scan err = %v, want MissingFileError", err)
 	}
@@ -240,6 +242,43 @@ func TestBlockEntriesRejectsMalformed(t *testing.T) {
 	} {
 		if err := blockEntries(b, func([]byte, int, int) error { return nil }); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// A block whose snappy header claims an absurd decoded length is rejected before allocating.
+func TestReadBlockCapsDecodedLength(t *testing.T) {
+	body := binary.AppendUvarint(nil, maxBlockLen+1)
+	body = append(body, 0) // a literal tag; never reached
+	raw := append(append([]byte(nil), body...), compressionSnappy)
+	raw = binary.LittleEndian.AppendUint32(raw, util.NewCRC(raw).Value())
+	_, err := readBlock(bytes.NewReader(raw), int64(len(raw)), blockHandle{off: 0, size: uint64(len(body))})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("err = %v, want a decoded-length cap error", err)
+	}
+}
+
+// Filtering and on-demand values together: keeping half the keys of a multi-table database
+// gives goleveldb's values for those keys, with every table value lazy or with the default.
+func TestFilteredLazyMatchesGoleveldb(t *testing.T) {
+	for _, min := range []int{512, 0} {
+		for _, c := range []opt.Compression{opt.SnappyCompression, opt.NoCompression} {
+			old := lazyMin
+			lazyMin = min
+			dir, all := buildMixed(t, c)
+			keep := func(k []byte) bool { return k[len(k)-1]%2 == 0 }
+			d, err := LoadWith(dir, LoadOptions{Keep: keep})
+			lazyMin = old
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string][]byte{}
+			for k, v := range all {
+				if keep([]byte(k)) {
+					want[k] = v
+				}
+			}
+			checkAgainst(t, d, want)
 		}
 	}
 }

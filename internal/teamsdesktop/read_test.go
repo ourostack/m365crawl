@@ -308,3 +308,17 @@ func TestReadCancelledDuringValueReread(t *testing.T) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
+
+// A value that cannot be re-read from the snapshot fails the read as snapshot_inconsistent; it
+// is never counted as an omission.
+func TestReadUnreadableValueFails(t *testing.T) {
+	f := &fakeOrigin{
+		dbs:    []indexeddb.Database{{ID: 1, Name: dbName("replychain-manager", tenant1, user1), Stores: []indexeddb.Store{{ID: 1, Name: "replychains-2"}}}},
+		recErr: fmt.Errorf("leveldb: %w", &leveldb.MissingFileError{Name: "000005.ldb"}),
+	}
+	om, err := readOrigin(context.Background(), f, nil, func(Account, string, any) error { return nil })
+	c := codeOf(t, err)
+	if c.Code != errs.CodeSnapshotInconsistent || len(om) != 0 {
+		t.Fatalf("err = %v, omissions %v", err, om)
+	}
+}

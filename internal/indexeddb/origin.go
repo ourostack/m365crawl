@@ -20,7 +20,7 @@ import (
 
 // kv is the read-only view of the LevelDB the package needs.
 type kv interface {
-	Get(key []byte) ([]byte, bool)
+	Get(key []byte) ([]byte, bool, error)
 	Scan(prefix []byte, fn func(key, value []byte) error) error
 }
 
@@ -33,7 +33,9 @@ type Origin struct {
 
 // Open loads a copied <origin>.indexeddb.leveldb directory. blobDir is the
 // sibling .blob directory; it may be empty or absent, in which case blob-backed
-// values decode as blob_missing.
+// values decode as blob_missing. Large values are re-read from the LevelDB
+// directory on demand, so it must stay in place and unchanged while the Origin
+// is used; a value that can no longer be read makes Records fail.
 func Open(leveldbDir, blobDir string) (*Origin, error) {
 	return OpenWith(leveldbDir, blobDir, OpenOptions{})
 }
@@ -54,7 +56,9 @@ type OpenOptions struct {
 // second read: Keys counts the retained keys and Skipped the records dropped.
 //
 // The Origin re-reads large values from the LevelDB directory, which must stay in place while
-// the Origin is used.
+// the Origin is used. Known cost: with snapshot validation, a sync reads every table three
+// times (validation, this metadata pass, the data pass); folding validation into the metadata
+// pass would save one.
 func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
 	if opts.KeepDatabase == nil {
 		db, err := leveldb.Load(leveldbDir)

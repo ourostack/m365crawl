@@ -67,15 +67,15 @@ func TestLoadWithKeepFilters(t *testing.T) {
 
 	want := map[string]string{"a/over": "new", "a/back": "v2", "a/new": "fresh"}
 	for k, v := range want {
-		if got, ok := d.Get([]byte(k)); !ok || string(got) != v {
+		if got, ok, _ := d.Get([]byte(k)); !ok || string(got) != v {
 			t.Errorf("Get(%s) = %q,%v want %q", k, got, ok, v)
 		}
-		if got, _ := full.Get([]byte(k)); string(got) != v {
+		if got, _, _ := full.Get([]byte(k)); string(got) != v {
 			t.Errorf("unfiltered Get(%s) = %q want %q", k, got, v)
 		}
 	}
 	for _, k := range []string{"a/gone", "a/tabledel", "b/over", "b/x", "b/y", "b/gone"} {
-		if v, ok := d.Get([]byte(k)); ok {
+		if v, ok, _ := d.Get([]byte(k)); ok {
 			t.Errorf("Get(%s) = %q, want absent", k, v)
 		}
 	}

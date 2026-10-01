@@ -16,17 +16,23 @@ const maxUnresolvedIndex = 1 << 32
 
 // resolveBlobRef rewrites a kReplaceWithBlob value (ff 11 01 size index) so
 // the index becomes the real blob number taken from the record's blob entry.
-func (o *Origin) resolveBlobRef(dbID, storeID uint64, rawKey, raw []byte) []byte {
+// An absent or unparsable blob entry leaves an unresolved number (blob_missing
+// later); a blob entry that exists but cannot be read is an error.
+func (o *Origin) resolveBlobRef(dbID, storeID uint64, rawKey, raw []byte) ([]byte, error) {
 	size, index, _, ok := parseBlobRef(raw)
 	if !ok {
-		return raw
+		return raw, nil
 	}
 	number := uint64(unresolvedBlob)
 	if index < maxUnresolvedIndex {
 		number -= index
 	}
 	if prefix, err := makePrefix(dbID, storeID, indexBlobEntries); err == nil {
-		if v, found := o.kv.Get(append(prefix, rawKey...)); found {
+		v, found, err := o.kv.Get(append(prefix, rawKey...))
+		if err != nil {
+			return nil, err
+		}
+		if found {
 			if nums, err := externalObjects(v); err == nil && index < uint64(len(nums)) {
 				number = nums[index]
 			}
@@ -34,7 +40,7 @@ func (o *Origin) resolveBlobRef(dbID, storeID uint64, rawKey, raw []byte) []byte
 	}
 	out := []byte{0xff, 0x11, 0x01}
 	out = appendVarint(out, size)
-	return appendVarint(out, number)
+	return appendVarint(out, number), nil
 }
 
 func appendVarint(b []byte, n uint64) []byte {

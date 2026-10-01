@@ -76,13 +76,13 @@ func TestPrevLogNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := d.Get([]byte("prev")); !ok {
+	if _, ok, _ := d.Get([]byte("prev")); !ok {
 		t.Fatal("prev log not read")
 	}
-	if _, ok := d.Get([]byte("cur")); !ok {
+	if _, ok, _ := d.Get([]byte("cur")); !ok {
 		t.Fatal("current log not read")
 	}
-	if _, ok := d.Get([]byte("old")); ok {
+	if _, ok, _ := d.Get([]byte("old")); ok {
 		t.Fatal("obsolete log was read")
 	}
 	if st := d.Stats(); st.Logs != 2 || st.Comparator != "idb_cmp1" {
