@@ -240,6 +240,15 @@ func TestTotalWhenTruncated(t *testing.T) {
 			r, tr, err := s.Search(ctx, "needle", Filter{Limit: 2, Total: tot})
 			return len(r), tr, err
 		}, 9},
+		// Filters that read the joined conversation, people and team rows keep those joins in the count.
+		"Messages by conversation name": {func(tot *int) (int, bool, error) {
+			r, tr, err := s.Messages(ctx, Filter{Conversation: "One", Limit: 2, Total: tot})
+			return len(r), tr, err
+		}, 5},
+		"Messages by sender name": {func(tot *int) (int, bool, error) {
+			r, tr, err := s.Messages(ctx, Filter{From: "Sender", Limit: 2, Total: tot})
+			return len(r), tr, err
+		}, 9},
 		"Unread": {func(tot *int) (int, bool, error) {
 			r, tr, err := s.Unread(ctx, Filter{Limit: 2, Total: tot})
 			return len(r), tr, err
@@ -298,7 +307,7 @@ func TestTotalWhenTruncated(t *testing.T) {
 func runUntruncated(ctx context.Context, s *Store, name string, total *int) (int, bool, error) {
 	f := Filter{Limit: 100, Total: total}
 	switch name {
-	case "Messages":
+	case "Messages", "Messages by conversation name", "Messages by sender name":
 		r, tr, err := s.Messages(ctx, f)
 		return len(r), tr, err
 	case "Search":
@@ -554,6 +563,11 @@ func TestOpenReadOnlyAcceptsRelativePath(t *testing.T) {
 	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m1", "hello", base)}))
 	_ = s.Close()
 	t.Chdir(dir)
+	rw, err := Open(ctx, "rel.db") // a relative path opens the writer too
+	if err != nil {
+		t.Fatalf("relative path, writer: %v", err)
+	}
+	_ = rw.Close()
 	ro, err := OpenReadOnly(ctx, "rel.db")
 	if err != nil {
 		t.Fatalf("relative path: %v", err)
@@ -561,5 +575,34 @@ func TestOpenReadOnlyAcceptsRelativePath(t *testing.T) {
 	defer func() { _ = ro.Close() }()
 	if rows, _ := must2(ro.Messages(ctx, Filter{})); len(rows) != 1 {
 		t.Fatalf("rows: %v", ids(rows))
+	}
+}
+
+func TestPruneJoins(t *testing.T) {
+	from := ` from messages m` + msgJoin
+	for _, c := range []struct {
+		where string
+		keep  []string
+	}{
+		{` where m.deleted_at is null`, nil},
+		{` where c.read_horizon_at is not null`, []string{"conversations c"}},
+		{` where p.display_name like ?`, []string{"people p"}},
+		{` where ` + cdnExpr + `=?`, []string{"conversations c", "conversations t"}},
+		{` where t.id=?`, []string{"conversations c", "conversations t"}}, // t's own join clause reads c
+	} {
+		got := pruneJoins(from, c.where)
+		for _, j := range []string{"conversations c on", "conversations t on", "people p on"} {
+			want := false
+			for _, k := range c.keep {
+				want = want || strings.HasPrefix(j, k)
+			}
+			if has := strings.Contains(got, "left join "+j); has != want {
+				t.Errorf("where %q: join %q kept=%v, want %v", c.where, j, has, want)
+			}
+		}
+	}
+	// A from clause with no joins is returned as is.
+	if got := pruneJoins(` from people p`, ` where p.id=?`); got != ` from people p` {
+		t.Errorf("no joins: %q", got)
 	}
 }

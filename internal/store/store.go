@@ -45,6 +45,7 @@ type Counts struct {
 
 // Open creates or opens the archive at path for writing: parent directory 0700, file 0600.
 func Open(ctx context.Context, path string) (*Store, error) {
+	path = absPath(path)
 	if err := ensureParent(path); err != nil {
 		return nil, err
 	}
@@ -62,6 +63,16 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, err
 	}
 	return st, nil
+}
+
+// absPath returns path as an absolute path. The SQLite driver takes the path as a URI and reads a
+// relative one as a host name, so a relative --db would fail; a path that cannot be made absolute
+// is used as given.
+func absPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // chmodFile is os.Chmod; tests replace it to force the failure.
@@ -84,11 +95,7 @@ func (s *Store) migrate(ctx context.Context) error {
 // OpenReadOnly opens an existing archive read-only (safe beside an active writer). It returns
 // ErrNoArchive when the file is missing.
 func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
-	// The read-only driver takes a URI, which misreads a relative path as a host: use the absolute
-	// path (a relative --db works for the writer already).
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
+	path = absPath(path)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoArchive
 	}
