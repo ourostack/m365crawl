@@ -208,3 +208,14 @@ func TestConversationsQueryHelpDocumentsRanking(t *testing.T) {
 		}
 	}
 }
+
+func TestRelativeDBPath(t *testing.T) {
+	e := newEnv(t)
+	t.Chdir(t.TempDir())
+	e.db = "rel.db"
+	e.sync()
+	code, stdout, stderr := e.run("--max-age", "0", "messages", "--limit", "1")
+	if code != 0 || len(items(t, decode(t, stdout))) != 1 {
+		t.Fatalf("relative --db: exit %d %s %s", code, stdout, stderr)
+	}
+}
