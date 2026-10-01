@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -99,4 +100,34 @@ func skipIfRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("chmod 000 does not restrict root")
 	}
+}
+
+// exec runs SQL directly against the env's archive, to damage it on purpose.
+func (e *env) exec(q string) {
+	e.t.Helper()
+	db, err := sql.Open("sqlite", e.db+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(q); err != nil {
+		e.t.Fatalf("%s: %v", q, err)
+	}
+}
+
+// teamsRoot builds a synthetic EBWebView root holding one profile with the given IndexedDB origins.
+func teamsRoot(t *testing.T, origins ...string) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "EBWebView")
+	for _, o := range origins {
+		if err := os.MkdirAll(filepath.Join(root, "WV2Profile_x", "IndexedDB", o+".indexeddb.leveldb"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(origins) == 0 {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
 }

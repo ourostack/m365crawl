@@ -16,11 +16,19 @@ func ResponsibleApp() string {
 	return responsibleApp(psLookup, os.Getpid(), os.Getenv("TERM_PROGRAM"))
 }
 
-// psLookup returns a process's parent id and full command line.
-func psLookup(pid int) (ppid int, command string, err error) {
+// runPS is a test seam for the ps program.
+var runPS = psOutput
+
+// psOutput returns the raw "ppid command" line for pid.
+func psOutput(pid int) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=,command=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // G204: fixed program, pid is an integer
+	return exec.CommandContext(ctx, "ps", "-o", "ppid=,command=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // G204: fixed program, pid is an integer
+}
+
+// psLookup returns a process's parent id and full command line.
+func psLookup(pid int) (ppid int, command string, err error) {
+	out, err := runPS(pid)
 	if err != nil {
 		return 0, "", err
 	}

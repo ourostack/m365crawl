@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
 )
@@ -105,5 +111,152 @@ func TestParseThreadTargetMalformedLinks(t *testing.T) {
 		if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "https://teams.microsoft.com/l/message/") || !strings.Contains(c.Fix, "thread <conversation-id> <root-message-id>") {
 			t.Errorf("%q: err = %v", bad, err)
 		}
+	}
+}
+
+func TestGuessFormatFallsBackToTextOnATerminal(t *testing.T) {
+	if got := guessFormat([]string{"search"}, true); got != output.Text {
+		t.Fatalf("tty format = %q, want text", got)
+	}
+	if got := guessFormat([]string{"search"}, false); got != output.JSON {
+		t.Fatalf("pipe format = %q, want json", got)
+	}
+	if got := guessFormat([]string{"--format", "log"}, true); got != output.Log {
+		t.Fatalf("explicit format = %q, want log", got)
+	}
+}
+
+func TestIsTTYMeansACharacterDevice(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = null.Close() }()
+	if !isTTY(null) {
+		t.Error("a character device must count as a terminal")
+	}
+	reg, err := os.CreateTemp(t.TempDir(), "f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isTTY(reg) {
+		t.Error("a regular file is not a terminal")
+	}
+	_ = reg.Close()
+	if isTTY(reg) {
+		t.Error("a closed file is not a terminal")
+	}
+	if isTTY(&bytes.Buffer{}) {
+		t.Error("a buffer is not a terminal")
+	}
+}
+
+func TestJSONIsIndentedOnlyOnATerminal(t *testing.T) {
+	var out bytes.Buffer
+	rt := &runtime{stdout: &out, format: output.JSON, stdoutTTY: true}
+	if err := rt.write("x", map[string]int{"a": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "{\n  \"a\": 1\n}\n" {
+		t.Fatalf("tty json = %q", out.String())
+	}
+	out.Reset()
+	rt.stdoutTTY = false
+	if err := rt.write("x", map[string]int{"a": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "{\"a\":1}\n" {
+		t.Fatalf("pipe json = %q", out.String())
+	}
+}
+
+func TestBodyOfAppendsTheDatabaseCause(t *testing.T) {
+	b := bodyOf(errs.DBError(errors.New("disk full")))
+	if b.Code != errs.CodeDBError || !strings.HasSuffix(b.Message, ": disk full") {
+		t.Fatalf("body = %+v", b)
+	}
+	if got := bodyOf(errs.DBError(nil)).Message; strings.Contains(got, "disk full") || strings.HasSuffix(got, ": ") {
+		t.Fatalf("a db error without a cause keeps its plain message: %q", got)
+	}
+}
+
+func TestWarningsAndErrorsHaveTextAndJSONForms(t *testing.T) {
+	c := errs.Usage("bad flag")
+	c.Fix = "fix it"
+	var out, errb bytes.Buffer
+	rt := &runtime{stdout: &out, stderr: &errb, format: output.Text}
+	rt.printWarning(c)
+	if errb.String() != "warning: bad flag\nfix: fix it\n" {
+		t.Fatalf("text warning = %q", errb.String())
+	}
+	errb.Reset()
+	rt.format = output.JSON
+	rt.printWarning(c)
+	var doc warningDoc
+	if err := json.Unmarshal(errb.Bytes(), &doc); err != nil || doc.Warning.Code != errs.CodeUsage || doc.Warning.Fix != "fix it" {
+		t.Fatalf("json warning = %q (%v)", errb.String(), err)
+	}
+}
+
+type fieldedKeys struct {
+	Shown   string `json:"shown,omitempty"`
+	Skipped string `json:"-"`
+	Bare    string
+}
+
+func TestJSONKeysSkipsDashAndUntaggedFields(t *testing.T) {
+	got := jsonKeys(reflect.TypeFor[fieldedKeys]())
+	if len(got) != 1 || got[0] != "shown" {
+		t.Fatalf("jsonKeys = %v, want [shown]", got)
+	}
+}
+
+func TestProjectFailsOnItemsThatAreNotJSONObjects(t *testing.T) {
+	if _, err := project(make(chan int), []string{"a"}); err == nil {
+		t.Error("an unencodable item must fail")
+	}
+	if _, err := project("just a string", []string{"a"}); err == nil {
+		t.Error("an item that encodes to a non-object must fail")
+	}
+	p, err := project(map[string]int{"a": 1, "b": 2}, []string{"b", "zzz"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(p)
+	if string(b) != `{"b":2}` {
+		t.Fatalf("projection = %s", b)
+	}
+}
+
+func TestShapePanicsWithAnInternalErrorWhenAnItemCannotBeProjected(t *testing.T) {
+	rt := &runtime{fields: []string{"a"}}
+	defer func() {
+		c, ok := recover().(*errs.Coded)
+		if !ok || c.Code != errs.CodeInternal {
+			t.Fatalf("recovered %v, want an internal coded error", c)
+		}
+	}()
+	shape(rt, []any{make(chan int)})
+	t.Fatal("shape did not panic")
+}
+
+func TestShapeKeepsItemsWhole(t *testing.T) {
+	in := []map[string]int{{"a": 1, "b": 2}}
+	if got := shape(&runtime{}, in); len(got) != 1 || got[0].(map[string]int)["b"] != 2 {
+		t.Fatalf("shape without fields = %v", got)
+	}
+	b, _ := json.Marshal(shape(&runtime{fields: []string{"b"}}, in))
+	if string(b) != `[{"b":2}]` {
+		t.Fatalf("shape with fields = %s", b)
+	}
+}
+
+func TestParseDurationRejectsAnOutOfRangeNumber(t *testing.T) {
+	huge := strings.Repeat("9", 400) + "d"
+	if _, err := parseDuration(huge); err == nil {
+		t.Fatal("a number beyond float64 must fail")
+	}
+	if d, err := parseDuration("1.5d"); err != nil || d != 36*time.Hour {
+		t.Fatalf("1.5d = %v, %v", d, err)
 	}
 }

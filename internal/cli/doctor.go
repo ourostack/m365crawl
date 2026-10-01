@@ -155,15 +155,11 @@ func (rt *runtime) archiveChecks() []check {
 // scratch file beside it (in the nearest existing directory when the archive dir is missing).
 func (rt *runtime) writableCheck() check {
 	dir := filepath.Dir(rt.dbPath)
-	for {
+	for dir != filepath.Dir(dir) {
 		if _, err := os.Stat(dir); err == nil {
 			break
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+		dir = filepath.Dir(dir)
 	}
 	fix := "Make " + dir + " writable, or pass --db with a path you can write."
 	f, err := os.CreateTemp(dir, ".teamscrawl-doctor-*")
