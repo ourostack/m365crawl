@@ -230,8 +230,10 @@ func contains(ss []string, s string) bool {
 	return false
 }
 
-// shape applies --fields to typed items.
-func shape[T any](rt *runtime, in []T) ([]any, error) {
+// shape applies --fields to typed items. Every T is one of this package's own item structs, which
+// always encode, so a projection failure is a programming error: it panics and runCLI reports it
+// as an internal error.
+func shape[T any](rt *runtime, in []T) []any {
 	out := make([]any, len(in))
 	for i, it := range in {
 		if len(rt.fields) == 0 {
@@ -240,11 +242,11 @@ func shape[T any](rt *runtime, in []T) ([]any, error) {
 		}
 		p, err := project(it, rt.fields)
 		if err != nil {
-			return nil, errs.Internal(err)
+			panic(errs.Internal(err))
 		}
 		out[i] = p
 	}
-	return out, nil
+	return out
 }
 
 // checkFields rejects --fields keys that item type T does not have.

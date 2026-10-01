@@ -152,11 +152,7 @@ func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []stor
 			return nil, err
 		}
 	}
-	items, err := shape(rt, messageItems(rows, rt.g.MaxText, html))
-	if err != nil {
-		return nil, err
-	}
-	return newList(items, truncated), nil
+	return newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated), nil
 }
 
 // msgFlags are the filters messages, search and unread share.
@@ -299,11 +295,7 @@ func (c *unreadCmd) Run(rt *runtime) error {
 				items[i] = unreadConversationItem{ConversationID: r.ConversationID, ConversationDisplayName: r.DisplayName, Kind: r.Kind,
 					UnreadCount: r.UnreadCount, OldestUnreadAt: r.OldestUnreadAt, NewestUnreadAt: r.NewestUnreadAt, Link: r.Link}
 			}
-			shaped, err := shape(rt, items)
-			if err != nil {
-				return nil, err
-			}
-			return excludingChannels(newList(shaped, trunc), nil)(!c.IncludeChannels)
+			return excludingChannels(newList(shape(rt, items), trunc), nil)(!c.IncludeChannels)
 		}
 		rows, trunc, err := st.Unread(rt.ctx, f)
 		if err != nil {
@@ -417,11 +409,7 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 			items[i] = conversationItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Kind: r.Kind, Title: r.Title, DisplayName: r.DisplayName,
 				TeamID: r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite}
 		}
-		shaped, err := shape(rt, items)
-		if err != nil {
-			return nil, err
-		}
-		return newList(shaped, trunc), nil
+		return newList(shape(rt, items), trunc), nil
 	})
 }
 
@@ -449,11 +437,7 @@ func (c *peopleCmd) Run(rt *runtime) error {
 		for i, r := range rows {
 			items[i] = personItem{TenantID: r.TenantID, ID: r.ID, DisplayName: r.DisplayName, LastSeenAt: r.LastSeenAt}
 		}
-		shaped, err := shape(rt, items)
-		if err != nil {
-			return nil, err
-		}
-		return newList(shaped, trunc), nil
+		return newList(shape(rt, items), trunc), nil
 	})
 }
 
@@ -485,11 +469,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		items := activityItems(rows, rt.g.MaxText)
-		shaped, err := shape(rt, items)
-		if err != nil {
-			return nil, err
-		}
-		return newList(shaped, trunc), nil
+		return newList(shape(rt, items), trunc), nil
 	})
 }
 
@@ -598,10 +578,7 @@ func (c *sqlCmd) Run(rt *runtime) error {
 			}
 			return nil, sqlUsage("sql: " + err.Error())
 		}
-		res := &sqlResult{Columns: cols, Rows: rows}
-		if res.Columns == nil {
-			res.Columns = []string{}
-		}
+		res := &sqlResult{Columns: append([]string{}, cols...), Rows: rows} // never null in JSON
 		if len(rows) > c.Limit {
 			res.Rows, res.Truncated = rows[:c.Limit], true
 		}

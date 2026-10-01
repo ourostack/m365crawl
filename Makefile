@@ -9,7 +9,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check snapshot screenshot clean
+.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check coverage snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -26,6 +26,7 @@ help:
 		'  vet            Run go vet.' \
 		'  lint           Run golangci-lint, govulncheck and actionlint.' \
 		'  tidy-check     Verify go.mod and go.sum are tidy.' \
+		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow).' \
 		'  check          Run every local gate enforced by CI.' \
 		'  snapshot       Build release artifacts locally without publishing.' \
 		'  screenshot     Regenerate screenshot.png from the committed fixture (Node 22, Edge via Playwright).' \
@@ -81,6 +82,9 @@ tidy-check:
 	go mod tidy -diff
 
 check: tidy-check fmt-check vet lint test e2e
+
+coverage:
+	./scripts/check-coverage.sh
 
 screenshot:
 	cd scripts/fixture && npm ci --no-audit --no-fund

@@ -64,3 +64,13 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestInternalWithNilCauseSaysUnknown(t *testing.T) {
+	err := Internal(nil)
+	if err.Message != "internal error: unknown error" {
+		t.Errorf("message = %q", err.Message)
+	}
+	if got := Internal(errors.New("boom")).Message; got != "internal error: boom" {
+		t.Errorf("message = %q", got)
+	}
+}

@@ -30,6 +30,9 @@ var (
 	// watchLockedRetry is the wait before retrying a sync that found the archive locked.
 	watchLockedRetry = 5 * time.Second
 	runSync          = syncer.Run
+	discover         = teamsdesktop.Discover
+	fingerprintOf    = teamsdesktop.FingerprintOf
+	newFSWatcher     = fsnotify.NewWatcher
 	// watchEvents reports (coalesced) file-system events under dirs on the returned channel until
 	// ctx is cancelled or the returned function is called.
 	watchEvents = fileEvents
@@ -111,7 +114,7 @@ type watcher struct {
 // failures that end the watch (environment problems).
 func (w *watcher) run() error {
 	ctx := w.rt.ctx
-	srcs, _, err := teamsdesktop.Discover(w.rootDir())
+	srcs, _, err := discover(w.rootDir())
 	if err != nil {
 		return err
 	}
@@ -139,12 +142,7 @@ func (w *watcher) run() error {
 		retryAt   time.Time
 	)
 	arm := func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
+		timer.Stop() // Go 1.23 timers never leave a stale value on C after Stop
 		if !want {
 			return
 		}
@@ -184,10 +182,7 @@ func (w *watcher) run() error {
 				}
 				arm()
 			}
-		case <-timer.C:
-			if !want {
-				continue
-			}
+		case <-timer.C: // armed only while a sync is wanted
 			lastStart, burstFrom = time.Now(), time.Time{}
 			done, err := w.sync()
 			switch {
@@ -225,13 +220,13 @@ func (w *watcher) rootDir() string {
 
 // fingerprints fingerprints every Teams source now.
 func (w *watcher) fingerprints() (map[string]string, error) {
-	srcs, _, err := teamsdesktop.Discover(w.rootDir())
+	srcs, _, err := discover(w.rootDir())
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]string, len(srcs))
 	for _, s := range srcs {
-		fp, err := teamsdesktop.FingerprintOf(s)
+		fp, err := fingerprintOf(s)
 		if err != nil {
 			return nil, err
 		}
@@ -372,11 +367,7 @@ func (w *watcher) emit(rep syncer.Report, changes []syncer.Change) error {
 			w.textLine(c, it)
 			continue
 		}
-		shaped, err := shape(w.rt, []any{it.item})
-		if err != nil {
-			return err
-		}
-		w.line(changeLine{Kind: c.Kind, Change: c.Change, Item: shaped[0]})
+		w.line(changeLine{Kind: c.Kind, Change: c.Change, Item: shape(w.rt, []any{it.item})[0]})
 	}
 	if text {
 		_, _ = fmt.Fprintf(w.rt.stdout, "%s sync %s: %d new, %d updated messages; %d new, %d updated activity items\n",
@@ -459,7 +450,7 @@ func (w *watcher) textLine(c syncer.Change, it watchItem) {
 // the returned channel when something in them is created, written, removed or renamed. Events
 // coalesce: the channel holds at most one pending signal.
 func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), error) {
-	fw, err := fsnotify.NewWatcher()
+	fw, err := newFSWatcher()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -488,29 +479,7 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 	stop := make(chan struct{})
 	go func() {
 		defer func() { _ = fw.Close() }()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stop:
-				return
-			case ev, ok := <-fw.Events:
-				if !ok {
-					return
-				}
-				if ev.Op == fsnotify.Chmod {
-					continue
-				}
-				select {
-				case out <- struct{}{}:
-				default:
-				}
-			case _, ok := <-fw.Errors: // an overflow loses events; the poll covers it
-				if !ok {
-					return
-				}
-			}
-		}
+		pumpEvents(ctx, stop, fw.Events, fw.Errors, out)
 	}()
 	var once = make(chan struct{}, 1)
 	return out, func() {
@@ -520,4 +489,33 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 		default:
 		}
 	}, nil
+}
+
+// pumpEvents forwards file events to out until ctx is cancelled, stop is closed or a source
+// channel closes. Chmod events are ignored, errors are dropped (an overflow loses events and the
+// poll covers it) and a signal is dropped when one is already pending.
+func pumpEvents(ctx context.Context, stop <-chan struct{}, events <-chan fsnotify.Event, errc <-chan error, out chan<- struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Op == fsnotify.Chmod {
+				continue
+			}
+			select {
+			case out <- struct{}{}:
+			default:
+			}
+		case _, ok := <-errc:
+			if !ok {
+				return
+			}
+		}
+	}
 }

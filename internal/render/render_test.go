@@ -242,3 +242,62 @@ func TestTruncateAndDim(t *testing.T) {
 		t.Error("Dim")
 	}
 }
+
+func TestDoctorWidensNameColumnForLongCheckNames(t *testing.T) {
+	long := "a-check-name-longer-than-sixteen"
+	var b bytes.Buffer
+	Doctor(&b, "", []Check{{Name: long, Status: OK, Detail: "fine"}, {Name: "short", Status: OK, Detail: "fine"}}, nil, false)
+	var lines []string
+	for _, l := range strings.Split(b.String(), "\n") {
+		if strings.Contains(l, "fine") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) != 2 {
+		t.Fatalf("want 2 check lines, got %q", b.String())
+	}
+	if strings.Index(lines[0], "fine") != strings.Index(lines[1], "fine") {
+		t.Errorf("details are not aligned:\n%s\n%s", lines[0], lines[1])
+	}
+	if strings.Index(lines[0], "fine") < len(long) {
+		t.Errorf("name column was not widened to the long name:\n%s", lines[0])
+	}
+}
+
+func TestNormalizeSkipsUnexportedAndDashFieldsAndFallsBackToFieldName(t *testing.T) {
+	type row struct {
+		Tagged   string `json:"tagged,omitempty"`
+		Hidden   string `json:"-"`
+		Untagged string
+		private  string
+	}
+	got, ok := normalize(row{Tagged: "a", Hidden: "b", Untagged: "c", private: "d"}).(map[string]any)
+	if !ok {
+		t.Fatal("normalize(struct) is not a map")
+	}
+	want := map[string]any{"tagged": "a", "Untagged": "c"}
+	if len(got) != len(want) || got["tagged"] != "a" || got["Untagged"] != "c" {
+		t.Errorf("normalize = %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeNilPointerIsNilAndPointerToStructIsMap(t *testing.T) {
+	type row struct {
+		A string `json:"a"`
+	}
+	var nilRow *row
+	if got := normalize(nilRow); got != nil {
+		t.Errorf("normalize(nil pointer) = %v, want nil", got)
+	}
+	got, ok := normalize(&row{A: "x"}).(map[string]any)
+	if !ok || got["a"] != "x" {
+		t.Errorf("normalize(&row) = %v", got)
+	}
+}
+
+func TestNormalizeDereferencesPointerToScalar(t *testing.T) {
+	s := "hello"
+	if got := normalize(&s); got != "hello" {
+		t.Errorf("normalize(*string) = %v, want hello", got)
+	}
+}

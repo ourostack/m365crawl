@@ -44,20 +44,13 @@ func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runt
 // setup validates the global flags and resolves their defaults.
 func (rt *runtime) setup() error {
 	g := rt.g
-	f := g.Format
-	if f == "" && !g.JSON {
-		if rt.stdoutTTY {
-			f = string(output.Text)
-		} else {
-			f = string(output.JSON)
-		}
-	}
-	if _, err := output.Resolve(g.Format, false); err != nil {
-		return errs.Usage(err.Error() + " (use text, json or log)")
-	}
-	format, err := output.Resolve(f, g.JSON)
+	// Validate --format even when --json wins over it.
+	format, err := output.Resolve(g.Format, false)
 	if err != nil {
 		return errs.Usage(err.Error() + " (use text, json or log)")
+	}
+	if g.JSON || (g.Format == "" && !rt.stdoutTTY) {
+		format = output.JSON
 	}
 	rt.format = format
 	rt.color = rt.colorEnabled()
@@ -120,7 +113,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		return nil, nil
 	}
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
-	_, _, err = syncer.Run(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
+	_, _, err = runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
 	if err == nil {
 		return nil, nil
 	}

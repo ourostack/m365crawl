@@ -81,6 +81,9 @@ var listCommands = []string{"search", "messages", "conversations", "people", "ac
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 
+// newParser builds the kong parser; a test seam for its construction error.
+var newParser = kong.New
+
 func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	var app cliApp
 	rt := newRuntime(ctx, &app.Globals, stdout, stderr)
@@ -98,7 +101,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		}
 	}()
 	exited := false
-	parser, err := kong.New(&app,
+	parser, err := newParser(&app,
 		kong.Name("teamscrawl"),
 		kong.Description("Mirror the Microsoft Teams desktop cache into local SQLite so agents can read Teams offline."),
 		kong.Writers(stdout, stderr),

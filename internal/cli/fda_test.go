@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +62,58 @@ func TestResponsibleAppDeepBundlePath(t *testing.T) {
 	}
 	if got := responsibleApp(lookup, 9, ""); got != "Some Tool" {
 		t.Fatalf("outermost bundle expected, got %q", got)
+	}
+}
+
+func stubPS(t *testing.T, fn func(pid int) ([]byte, error)) {
+	t.Helper()
+	old := runPS
+	runPS = fn
+	t.Cleanup(func() { runPS = old })
+}
+
+func TestPsLookupParsesParentAndCommand(t *testing.T) {
+	stubPS(t, func(pid int) ([]byte, error) {
+		return []byte("  321 /Applications/Foo.app/Contents/MacOS/foo --bar\n"), nil
+	})
+	ppid, cmd, err := psLookup(9)
+	if err != nil || ppid != 321 || cmd != "/Applications/Foo.app/Contents/MacOS/foo --bar" {
+		t.Fatalf("psLookup = %d, %q, %v", ppid, cmd, err)
+	}
+}
+
+func TestPsLookupReportsEveryFailureMode(t *testing.T) {
+	cases := map[string]struct {
+		out []byte
+		err error
+	}{
+		"ps fails":          {nil, fmt.Errorf("exit 1")},
+		"no such process":   {[]byte(""), nil},
+		"one field only":    {[]byte("12\n"), nil},
+		"ppid not a number": {[]byte("abc /bin/zsh\n"), nil},
+	}
+	for name, c := range cases {
+		stubPS(t, func(int) ([]byte, error) { return c.out, c.err })
+		if _, _, err := psLookup(9); err == nil {
+			t.Errorf("%s: psLookup succeeded", name)
+		}
+	}
+}
+
+func TestRealPsFindsThisProcess(t *testing.T) {
+	ppid, cmd, err := psLookup(os.Getpid())
+	if err != nil {
+		t.Skipf("ps is not usable here: %v", err)
+	}
+	if ppid != os.Getppid() || cmd == "" {
+		t.Fatalf("psLookup(self) = %d, %q; want parent %d and a command", ppid, cmd, os.Getppid())
+	}
+}
+
+func TestFdaFixNamesTheResponsibleApp(t *testing.T) {
+	stubPS(t, func(int) ([]byte, error) { return nil, fmt.Errorf("no ps") })
+	t.Setenv("TERM_PROGRAM", "ghostty")
+	if got := fdaFix(); !strings.Contains(got, "turn it on for Ghostty") {
+		t.Fatalf("fdaFix = %q", got)
 	}
 }
