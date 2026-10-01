@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"regexp"
 	"strings"
 	"time"
 
@@ -96,6 +97,8 @@ type MessageRow struct {
 	// message), so 0 means "a root nobody has answered".
 	ReplyCount  *int      `json:"reply_count,omitempty"`
 	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
+
+	replyRoot bool // a channel thread root: its replies are counted by fillReplies
 }
 
 // ConversationRow is a conversation with its composed display name.
@@ -196,13 +199,11 @@ const (
 	senderNameExpr = `coalesce(nullif(m.sender_name,''),p.display_name,'')`
 
 	// replyRootCond holds for a channel thread root: a channel message that starts its own reply
-	// chain. replyFrom selects its live replies, matched through the reply chain id every stored
-	// reply carries (the mapper falls back to the parent, then the message's own id).
+	// chain. Only such rows get a reply count (see fillReplies), which is looked up after the
+	// limit so a long list is not counted row by row before it is cut.
 	replyRootCond = `(` + isChannelCond + ` and (m.reply_chain_id='' or m.reply_chain_id=m.id))`
-	replyFrom     = ` from messages r where r.tenant_id=m.tenant_id and r.user_id=m.user_id and r.conversation_id=m.conversation_id and r.reply_chain_id=m.id and r.id<>m.id and r.deleted_at is null`
-	replyCols     = `case when ` + replyRootCond + ` then (select count(*)` + replyFrom + `) end,case when ` + replyRootCond + ` then (select max(r.sent_at)` + replyFrom + `) end`
 
-	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,` + senderNameExpr + `,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link,` + replyCols
+	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,` + senderNameExpr + `,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link,case when ` + replyRootCond + ` then 1 else 0 end`
 	msgJoin = ` left join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
  left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id
  left join people p on p.tenant_id=m.tenant_id and p.id=m.sender_id`
@@ -289,17 +290,12 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 	out := []MessageRow{}
 	for rows.Next() {
 		var r MessageRow
-		var sent, edited, deleted, mentions, reactions, files, links, lastReply sql.NullString
-		var mentionsMe, pinned int
-		var replies sql.NullInt64
-		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &replies, &lastReply); err != nil {
+		var sent, edited, deleted, mentions, reactions, files, links sql.NullString
+		var mentionsMe, pinned, root int
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &root); err != nil {
 			return nil, err
 		}
-		r.SentAt, r.EditedAt, r.DeletedAt, r.LastReplyAt = parseTime(sent), parseTime(edited), parseTime(deleted), parseTime(lastReply)
-		if replies.Valid {
-			n := int(replies.Int64)
-			r.ReplyCount = &n
-		}
+		r.SentAt, r.EditedAt, r.DeletedAt, r.replyRoot = parseTime(sent), parseTime(edited), parseTime(deleted), root == 1
 		r.Mentions, r.Reactions, r.Files, r.Links = unmarshalNull[teamsdesktop.Mention](mentions), unmarshalNull[teamsdesktop.Reaction](reactions), unmarshalNull[teamsdesktop.File](files), unmarshalNull[string](links)
 		r.MentionsMe, r.Pinned = mentionsMe == 1, pinned == 1
 		out = append(out, r)
@@ -327,6 +323,9 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 			return nil, false, err
 		}
 	}
+	if err := s.fillReplies(ctx, out); err != nil {
+		return nil, false, err
+	}
 	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
 		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName
 	}); err != nil {
@@ -335,13 +334,72 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 	return out, trunc, nil
 }
 
+// fillReplies sets ReplyCount and LastReplyAt on the channel thread roots among rows: the live
+// replies stored under the root's reply chain, and the newest one's send time.
+func (s *Store) fillReplies(ctx context.Context, rows []MessageRow) error {
+	var stmt *sql.Stmt
+	defer func() {
+		if stmt != nil {
+			_ = stmt.Close()
+		}
+	}()
+	for i := range rows {
+		r := &rows[i]
+		if !r.replyRoot {
+			continue
+		}
+		if stmt == nil {
+			var err error
+			if stmt, err = s.db.PrepareContext(ctx, `select count(*),max(sent_at) from messages where tenant_id=? and user_id=? and conversation_id=? and reply_chain_id=? and id<>? and deleted_at is null`); err != nil {
+				return err
+			}
+		}
+		var n int
+		var last sql.NullString
+		if err := stmt.QueryRowContext(ctx, r.TenantID, r.UserID, r.ConversationID, r.ID, r.ID).Scan(&n, &last); err != nil {
+			return err
+		}
+		r.ReplyCount, r.LastReplyAt = &n, parseTime(last)
+	}
+	return nil
+}
+
 // countTotal stores in total the number of rows the query "select ... <from> <where>" matches
 // without its limit. A nil total means the caller does not want it.
 func (s *Store) countTotal(ctx context.Context, total *int, from string, w *where) error {
 	if total == nil {
 		return nil
 	}
-	return s.db.QueryRowContext(ctx, `select count(*)`+from+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	return s.db.QueryRowContext(ctx, `select count(*)`+pruneJoins(from, w.sql())+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
+}
+
+// pruneJoins drops the left joins of a from clause that the where clause (and the joins kept)
+// never refer to. Every join here is a left join on a unique key, so it adds no rows and a count
+// is the same without it; skipping them makes the count over a large archive several times faster.
+func pruneJoins(from, whereSQL string) string {
+	parts := strings.Split(from, " left join ")
+	base, joins := parts[0], parts[1:]
+	keep := make([]bool, len(joins))
+	text := whereSQL
+	for changed := true; changed; {
+		changed = false
+		for i, j := range joins {
+			if keep[i] {
+				continue
+			}
+			alias := strings.Fields(j)[1]
+			if regexp.MustCompile(`\b` + alias + `\.`).MatchString(text) {
+				keep[i], changed = true, true
+				text += " " + j
+			}
+		}
+	}
+	for i, j := range joins {
+		if keep[i] {
+			base += " left join " + j
+		}
+	}
+	return base
 }
 
 // Messages lists messages in chronological order. With a Limit it returns the newest Limit
@@ -451,7 +509,7 @@ func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadCon
 	if trunc {
 		out = out[:limit]
 		if f.Total != nil {
-			if err := s.db.QueryRowContext(ctx, `select count(*) from (select 1 from messages m`+msgJoin+w.sql()+` group by m.tenant_id,m.user_id,m.conversation_id)`, w.args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
+			if err := s.db.QueryRowContext(ctx, `select count(*) from (select 1 from messages m`+pruneJoins(msgJoin, w.sql())+w.sql()+` group by m.tenant_id,m.user_id,m.conversation_id)`, w.args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
 				return nil, false, err
 			}
 		}
@@ -493,6 +551,9 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 		if err := s.countTotal(ctx, f.Total, ` from messages m`+msgJoin, &w); err != nil {
 			return nil, false, err
 		}
+	}
+	if err := s.fillReplies(ctx, out); err != nil {
+		return nil, false, err
 	}
 	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
 		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName

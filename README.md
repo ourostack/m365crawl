@@ -95,7 +95,7 @@ teamscrawl activity --unread --limit 1 --fields at,type,conversation_display_nam
 Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md). It holds the workflow, every command, every error code and what to do about each. The contract in five bullets:
 
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
-- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50). Keys are snake_case and stable; new fields may appear, renames are breaking changes.
+- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
 - Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
 - Every item carries a `link` (a Teams deep link) for citing, and every read result carries `archive_age_seconds`.
 - Nothing ever writes to Teams.
@@ -106,7 +106,7 @@ Flags that matter for agents:
 - `--fields a,b,c` keeps only those top-level keys of each item.
 - `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
 - `archive_age_seconds` tells you how stale the answer can be. A never-synced archive adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
-- System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact.
+- System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 
 ## Commands
 
@@ -116,12 +116,12 @@ Flags that matter for agents:
 | `whoami` | Lists the accounts in the archive and the archive's state. |
 | `sync` | Copies the Teams cache into the archive once and prints what changed. |
 | `status` | Shows archive counts per account, the last sync and other Teams origins seen. |
-| `search <query>` | Full-text search over message text, newest first. Filters: `--conversation`, `--from`, `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--include-system`. |
-| `messages` | Lists messages chronologically (oldest first). Same filters as `search`, plus `--unread` and `--include-channels`. |
-| `unread` | Lists unread messages in chats and meetings, newest first. Flags: `--include-channels` (channels are off by default because their unread counts are noise; results then carry `"channels_excluded":true`), `--by-conversation` (one item per conversation with its unread count, most unread first), `--include-system`. |
-| `activity` | Lists activity-feed items (mentions, replies, reactions) joined with their messages. Filters: `--unread`, `--type`, `--since`, `--include-system`. |
+| `search [query]` | Full-text search over message text, newest first. The query is optional when a filter is given. Filters: `--conversation`, `--team`, `--from`, `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--include-system`. |
+| `messages` | Lists messages chronologically (oldest first). Same filters as `search`, plus `--unread` and `--include-channels`. Channel thread roots carry `reply_count` and `last_reply_at`. |
+| `unread` | Lists unread messages in chats and meetings, newest first. Flags: `--team`, `--include-channels` (channels are off by default because their unread counts are noise; results then carry `"channels_excluded":true`), `--by-conversation` (one item per conversation with its unread count, most unread first), `--include-system`. |
+| `activity` | Lists activity-feed items (mentions, replies, reactions) joined with their messages. Filters: `--unread`, `--type` (comma separated; `mention` and `mentionInChat` are different types), `--team`, `--since`, `--include-system`. |
 | `thread <conversation> <root-id>` | Shows one thread. Accepts a Teams message link instead of the two arguments, and `--limit` (default 50, check `truncated`). |
-| `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query`, `--include-system`. |
+| `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query` (best match first: exact name, then prefix, then substring), `--team`, `--include-system`. Untitled group chats are named after their members (`Ana, Ben, Chao +2`). |
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
 | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync. Flags: `--every` (poll interval, default `60s`), `--emit-initial`; honors `--account`, `--fields` and `--max-text`; system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations) are skipped. |
