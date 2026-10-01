@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -540,5 +541,25 @@ func TestAmbiguousTeamListIsCapped(t *testing.T) {
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || !strings.HasSuffix(coded.Message, ", ...") || strings.Count(coded.Message, "19:dup") != maxTeamMatches {
 		t.Fatalf("capped list: %v", err)
+	}
+}
+
+func TestOpenReadOnlyAcceptsRelativePath(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := Open(ctx, filepath.Join(dir, "rel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m1", "hello", base)}))
+	_ = s.Close()
+	t.Chdir(dir)
+	ro, err := OpenReadOnly(ctx, "rel.db")
+	if err != nil {
+		t.Fatalf("relative path: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+	if rows, _ := must2(ro.Messages(ctx, Filter{})); len(rows) != 1 {
+		t.Fatalf("rows: %v", ids(rows))
 	}
 }

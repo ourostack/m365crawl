@@ -52,11 +52,14 @@ func (rt *runtime) renderText(label string, v any) error {
 	case *listResult:
 		rt.listTable(r)
 		_, _ = fmt.Fprintln(w)
-		more := ""
+		more, count := "", strconv.Itoa(r.Count)
 		if r.Truncated {
 			more = " (more exist; raise --limit)"
+			if r.Total > 0 {
+				count += " of " + strconv.Itoa(r.Total)
+			}
 		}
-		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%d items%s", r.Count, more), color))
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%s items%s", count, more), color))
 		metaLines(w, r.meta, color)
 	case syncer.Report:
 		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)

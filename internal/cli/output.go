@@ -48,6 +48,10 @@ type listResult struct {
 	Items     []any `json:"items"`
 	Count     int   `json:"count"`
 	Truncated bool  `json:"truncated"`
+	// Total is the exact number of matches ignoring --limit. It is present only when truncated is
+	// true: counting costs one extra query, and a result that is not truncated is its own total
+	// (count).
+	Total int `json:"total,omitempty"`
 	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
 	// does not read the result as covering every conversation. Omitted otherwise.
 	ChannelsExcluded bool `json:"channels_excluded,omitempty"`
@@ -59,6 +63,14 @@ func newList(items []any, truncated bool) *listResult {
 		items = []any{}
 	}
 	return &listResult{Items: items, Count: len(items), Truncated: truncated}
+}
+
+// withTotal records total on a truncated list and leaves any other list as it is.
+func (l *listResult) withTotal(total int) *listResult {
+	if l.Truncated {
+		l.Total = total
+	}
+	return l
 }
 
 // guessFormat picks the error format before flags are validated, by looking at the raw args.

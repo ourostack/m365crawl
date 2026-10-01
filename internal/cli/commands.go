@@ -59,6 +59,10 @@ type messageItem struct {
 	Importance string     `json:"importance,omitempty"`
 	Pinned     bool       `json:"pinned"`
 	Link       string     `json:"link,omitempty"`
+	// reply_count (live replies) and last_reply_at appear on channel thread roots only; a root
+	// nobody has answered has reply_count 0, so a missing key means "not a channel root".
+	ReplyCount  *int      `json:"reply_count,omitempty"`
+	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
 }
 
 type conversationItem struct {
@@ -124,6 +128,7 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 			SentAt: r.SentAt, EditedAt: r.EditedAt, DeletedAt: r.DeletedAt, MessageType: r.MessageType, Text: text, TextTruncated: cut,
 			HTML:       html[store.MessageKey{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ID: r.ID}],
 			MentionsMe: r.MentionsMe, Links: r.Links, Subject: r.Subject, Importance: r.Importance, Pinned: r.Pinned, Link: r.Link,
+			ReplyCount: r.ReplyCount, LastReplyAt: r.LastReplyAt,
 		}
 		for _, m := range r.Mentions {
 			it.Mentions = append(it.Mentions, mention{ID: m.ID, DisplayName: m.DisplayName})
@@ -140,7 +145,7 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 }
 
 // messageList turns message rows into a list result, adding html when asked.
-func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []store.MessageRow, truncated, withHTML bool) (result, error) {
+func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []store.MessageRow, truncated bool, total int, withHTML bool) (result, error) {
 	var html map[store.MessageKey]string
 	if withHTML {
 		keys := make([]store.MessageKey, len(rows))
@@ -152,7 +157,7 @@ func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []stor
 			return nil, err
 		}
 	}
-	return newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated), nil
+	return newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated).withTotal(total), nil
 }
 
 // msgFlags are the filters messages, search and unread share.
@@ -161,6 +166,7 @@ type msgFlags struct {
 	From          string `help:"Sender: a person id, or a case-insensitive part of the name."`
 	Since         string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
 	Until         string `help:"Only messages at or before this time (same formats as --since)."`
+	Team          string `help:"Only this team and its channels: the team's exact name (any case) or its id. An unknown or ambiguous name is a usage error."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
@@ -177,11 +183,11 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	return store.Filter{Account: rt.account, Conversation: f.Conversation, From: f.From, Since: since, Until: until, Limit: f.Limit, IncludeSystem: f.IncludeSystem}, nil
+	return store.Filter{Account: rt.account, Conversation: f.Conversation, From: f.From, Since: since, Until: until, Limit: f.Limit, IncludeSystem: f.IncludeSystem, Team: f.Team}, nil
 }
 
 type searchCmd struct {
-	Query string `arg:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported."`
+	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --from, --conversation, --team, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
 	IncludeDeleted bool `name:"include-deleted" help:"Also search deleted messages."`
 	MentionsMe     bool `name:"mentions-me" help:"Only messages that mention you."`
@@ -197,6 +203,7 @@ func (c *searchCmd) Run(rt *runtime) error {
 		return err
 	}
 	f.IncludeDeleted, f.MentionsMe = c.IncludeDeleted, c.MentionsMe
+	f.Total = new(int)
 	return rt.read("search", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -205,7 +212,7 @@ func (c *searchCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		return rt.messageList(rt.ctx, st, rows, trunc, c.HTML)
+		return rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML)
 	})
 }
 
@@ -227,6 +234,7 @@ func (c *messagesCmd) Run(rt *runtime) error {
 		return err
 	}
 	f.IncludeDeleted, f.MentionsMe, f.Unread, f.IncludeChannels = c.IncludeDeleted, c.MentionsMe, c.Unread, c.IncludeChannels
+	f.Total = new(int)
 	return rt.read("messages", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -235,7 +243,7 @@ func (c *messagesCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, c.HTML))(c.Unread && !c.IncludeChannels)
+		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML))(c.Unread && !c.IncludeChannels)
 	})
 }
 
@@ -251,6 +259,7 @@ func excludingChannels(res result, err error) func(on bool) (result, error) {
 
 type unreadCmd struct {
 	Conversation    string `short:"c" help:"Conversation id, or its exact title or display name."`
+	Team            string `help:"Only this team and its channels: the team's exact name (any case) or its id. An unknown or ambiguous name is a usage error."`
 	Limit           int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	HTML            bool   `name:"html" help:"Add each message's HTML body as html."`
 	IncludeChannels bool   "name:\"include-channels\" help:\"include channels (off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`)\""
@@ -276,11 +285,12 @@ func (c *unreadCmd) Run(rt *runtime) error {
 	} else if err := checkFields[messageItem](rt); err != nil {
 		return err
 	}
-	f, err := rt.filter(msgFlags{Conversation: c.Conversation, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
+	f, err := rt.filter(msgFlags{Conversation: c.Conversation, Team: c.Team, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
 	if err != nil {
 		return err
 	}
 	f.IncludeChannels = c.IncludeChannels
+	f.Total = new(int)
 	return rt.read("unread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -295,13 +305,13 @@ func (c *unreadCmd) Run(rt *runtime) error {
 				items[i] = unreadConversationItem{ConversationID: r.ConversationID, ConversationDisplayName: r.DisplayName, Kind: r.Kind,
 					UnreadCount: r.UnreadCount, OldestUnreadAt: r.OldestUnreadAt, NewestUnreadAt: r.NewestUnreadAt, Link: r.Link}
 			}
-			return excludingChannels(newList(shape(rt, items), trunc), nil)(!c.IncludeChannels)
+			return excludingChannels(newList(shape(rt, items), trunc).withTotal(*f.Total), nil)(!c.IncludeChannels)
 		}
 		rows, trunc, err := st.Unread(rt.ctx, f)
 		if err != nil {
 			return nil, err
 		}
-		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, c.HTML))(!c.IncludeChannels)
+		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML))(!c.IncludeChannels)
 	})
 }
 
@@ -329,11 +339,12 @@ func (c *threadCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem, Limit: c.Limit})
+		var total int
+		rows, trunc, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem, Limit: c.Limit, Total: &total})
 		if err != nil {
 			return nil, err
 		}
-		return rt.messageList(rt.ctx, st, rows, trunc, c.HTML)
+		return rt.messageList(rt.ctx, st, rows, trunc, total, c.HTML)
 	})
 }
 
@@ -384,7 +395,8 @@ func parseThreadTarget(target, root string) (conversation, rootID string, err er
 
 type conversationsCmd struct {
 	Kind          string `help:"Only this kind, for example Chat, Topic (channel), Space (team) or Meeting."`
-	Query         string `help:"Words to find in conversation titles."`
+	Query         string `help:"Find conversations by name, best match first: an exact name, then names that start with the query, then names that contain it, then conversations whose title holds all the words; ties go newest first."`
+	Team          string `help:"Only this team's own conversation and its channels: the team's exact name (any case) or its id. An unknown or ambiguous name is a usage error."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
@@ -400,7 +412,8 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.Conversations(rt.ctx, c.Kind, c.Query, store.Filter{Account: rt.account, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
+		var total int
+		rows, trunc, err := st.Conversations(rt.ctx, c.Kind, c.Query, store.Filter{Account: rt.account, Limit: c.Limit, IncludeSystem: c.IncludeSystem, Team: c.Team, Total: &total})
 		if err != nil {
 			return nil, err
 		}
@@ -409,7 +422,7 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 			items[i] = conversationItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Kind: r.Kind, Title: r.Title, DisplayName: r.DisplayName,
 				TeamID: r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite}
 		}
-		return newList(shape(rt, items), trunc), nil
+		return newList(shape(rt, items), trunc).withTotal(total), nil
 	})
 }
 
@@ -429,7 +442,8 @@ func (c *peopleCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.People(rt.ctx, c.Query, store.Filter{Account: rt.account, Limit: c.Limit})
+		var total int
+		rows, trunc, err := st.People(rt.ctx, c.Query, store.Filter{Account: rt.account, Limit: c.Limit, Total: &total})
 		if err != nil {
 			return nil, err
 		}
@@ -437,13 +451,14 @@ func (c *peopleCmd) Run(rt *runtime) error {
 		for i, r := range rows {
 			items[i] = personItem{TenantID: r.TenantID, ID: r.ID, DisplayName: r.DisplayName, LastSeenAt: r.LastSeenAt}
 		}
-		return newList(shape(rt, items), trunc), nil
+		return newList(shape(rt, items), trunc).withTotal(total), nil
 	})
 }
 
 type activityCmd struct {
 	Unread        bool   `help:"Only unread items."`
-	Type          string `help:"Only this activity type, for example mentionInChat."`
+	Type          string `help:"Only these activity types, comma separated, matched exactly in any case. Seen in the cache: mention (you were @-mentioned in a channel, as a team or tag), mentionInChat (in a chat, or by @everyone), reply, replyToReply, follow, reaction, reactionInChat, msGraph (system notices such as meeting updates and approvals), teamMembershipChange, threadActivity. Example: --type mention,mentionInChat."`
+	Team          string `help:"Only items in this team and its channels: the team's exact name (any case) or its id. An unknown or ambiguous name is a usage error."`
 	Since         string `help:"Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h)."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
@@ -464,12 +479,13 @@ func (c *activityCmd) Run(rt *runtime) error {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, trunc, err := st.Activity(rt.ctx, store.ActivityFilter{Account: rt.account, Unread: c.Unread, Type: c.Type, Since: since, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
+		var total int
+		rows, trunc, err := st.Activity(rt.ctx, store.ActivityFilter{Account: rt.account, Unread: c.Unread, Type: c.Type, Since: since, Limit: c.Limit, IncludeSystem: c.IncludeSystem, Team: c.Team, Total: &total})
 		if err != nil {
 			return nil, err
 		}
 		items := activityItems(rows, rt.g.MaxText)
-		return newList(shape(rt, items), trunc), nil
+		return newList(shape(rt, items), trunc).withTotal(total), nil
 	})
 }
 
@@ -548,6 +564,7 @@ type sqlResult struct {
 	Rows      [][]any  `json:"rows"`
 	Count     int      `json:"count"`
 	Truncated bool     `json:"truncated"`
+	Total     int      `json:"total,omitempty"` // every row the query returned, only when truncated
 	meta
 }
 
@@ -580,7 +597,7 @@ func (c *sqlCmd) Run(rt *runtime) error {
 		}
 		res := &sqlResult{Columns: append([]string{}, cols...), Rows: rows} // never null in JSON
 		if len(rows) > c.Limit {
-			res.Rows, res.Truncated = rows[:c.Limit], true
+			res.Rows, res.Truncated, res.Total = rows[:c.Limit], true, len(rows)
 		}
 		if res.Rows == nil {
 			res.Rows = [][]any{}

@@ -637,7 +637,7 @@ func TestCommandSpecificUsageFix(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"search"}, []string{"teamscrawl search --help"}},
+		{[]string{"thread"}, []string{"teamscrawl thread --help"}},
 		{[]string{"messages", "--since", "zzz"}, []string{"teamscrawl messages --help"}},
 		{[]string{"--max-age", "0", "sql", "delete from messages"}, []string{"read-only by design", "SELECT"}},
 		{[]string{"--max-age", "0", "messages", "--fields", "bogus"}, []string{"Pick keys from the list in the message"}},
@@ -861,7 +861,7 @@ func TestSearchEmptyQueryFixPointsToMessages(t *testing.T) {
 	}
 	body := errorOf(t, stderr)
 	want := "To list messages without a text query, use `teamscrawl messages` with filters (for example `teamscrawl messages --mentions-me --since 24h`)."
-	if body["fix"] != want || !strings.Contains(body["message"].(string), "no searchable terms") {
+	if body["fix"] != want || !strings.Contains(body["message"].(string), "at least one filter") {
 		t.Fatalf("error = %v", body)
 	}
 }
