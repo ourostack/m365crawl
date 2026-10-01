@@ -67,7 +67,7 @@ func (s *Store) ActivityByKey(ctx context.Context, keys []string) ([]ActivityRow
 			continue
 		}
 		w.add(`(`+strings.Join(conds, ` or `)+`)`, args...)
-		rows, _, err := s.activityRows(ctx, &w, byKeyChunk, true)
+		rows, _, err := s.activityRows(ctx, &w, byKeyChunk, true, nil)
 		if err != nil {
 			return nil, err
 		}
