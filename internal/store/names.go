@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
@@ -175,4 +176,62 @@ func unnamedConversation(kind, id string, members int) string {
 		return fmt.Sprintf("Unnamed %s (1 member, id %s)", noun, short)
 	}
 	return fmt.Sprintf("Unnamed %s (%d members, id %s)", noun, members, short)
+}
+
+// TeamRow is one team: a conversation other conversations point at through team_id.
+type TeamRow struct {
+	TenantID, UserID, ID string
+	DisplayName          string
+	ChannelCount         int       // conversations that belong to the team, not counting its own
+	LastActivityAt       time.Time // newest message time across the team's own conversation and channels
+	UnreadCount          int       // unread messages in the team's channels (and its own conversation)
+}
+
+// teamsFrom selects the teams: conversations that other conversations name as their team.
+const teamsFrom = ` from conversations t where exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id)`
+
+// Teams lists the archived teams, newest channel activity first. f.Account narrows to one
+// account, f.Limit caps the list and f.Total receives the exact count when it is cut.
+func (s *Store) Teams(ctx context.Context, f Filter) ([]TeamRow, bool, error) {
+	var w where
+	if f.Account != nil {
+		w.add(`t.tenant_id=? and t.user_id=?`, f.Account.TenantID, f.Account.UserID)
+	}
+	cond := strings.TrimPrefix(w.sql(), " where ")
+	if cond != "" {
+		cond = " and " + cond
+	}
+	limit := f.limit()
+	//nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, err := s.db.QueryContext(ctx, `select t.tenant_id,t.user_id,t.id,`+teamName+`,
+ (select count(*) from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id),
+ (select max(x.last_message_at) from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and (x.team_id=t.id or x.id=t.id)) as last_activity,
+ (select count(*) from messages m join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id where c.tenant_id=t.tenant_id and c.user_id=t.user_id and (c.team_id=t.id or c.id=t.id) and `+unreadCond+`)`+
+		teamsFrom+cond+` order by last_activity desc, t.id, t.tenant_id, t.user_id limit ?`, append(w.args, limit+1)...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []TeamRow{}
+	for rows.Next() {
+		var r TeamRow
+		var last sql.NullString
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ID, &r.DisplayName, &r.ChannelCount, &last, &r.UnreadCount); err != nil {
+			return nil, false, err
+		}
+		r.LastActivityAt = parseTime(last)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(out) <= limit {
+		return out, false, nil
+	}
+	if f.Total != nil {
+		if err := s.db.QueryRowContext(ctx, `select count(*)`+teamsFrom+cond, w.args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
+			return nil, false, err
+		}
+	}
+	return out[:limit], true, nil
 }
