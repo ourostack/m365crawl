@@ -69,11 +69,14 @@ func Open(ctx context.Context, path string) (*Store, error) {
 // relative one as a host name, so a relative --db would fail; a path that cannot be made absolute
 // is used as given.
 func absPath(path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
+	if abs, err := absFn(path); err == nil {
 		return abs
 	}
 	return path
 }
+
+// absFn is filepath.Abs; tests replace it to force the failure.
+var absFn = filepath.Abs
 
 // chmodFile is os.Chmod; tests replace it to force the failure.
 var chmodFile = os.Chmod

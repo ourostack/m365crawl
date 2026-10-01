@@ -631,3 +631,12 @@ func TestRepeatedBotPostsAreDistinctRecords(t *testing.T) {
 		t.Fatalf("both records must stay, once each: %v", ids(rows))
 	}
 }
+
+func TestAbsPathFallsBackToTheGivenPath(t *testing.T) {
+	old := absFn
+	t.Cleanup(func() { absFn = old })
+	absFn = func(string) (string, error) { return "", errors.New("no working directory") }
+	if got := absPath("rel.db"); got != "rel.db" {
+		t.Fatalf("absPath = %q", got)
+	}
+}
