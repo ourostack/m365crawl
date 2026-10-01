@@ -103,6 +103,17 @@ type activityItem struct {
 	Link                    string    `json:"link,omitempty"`
 }
 
+func activityItems(rows []store.ActivityRow, maxText int) []activityItem {
+	items := make([]activityItem, len(rows))
+	for i, r := range rows {
+		text, cut := truncateRunes(r.MessageText, maxText)
+		items[i] = activityItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Type: r.Type, Subtype: r.Subtype, IsRead: r.IsRead, At: r.At,
+			ConversationID: r.ConversationID, ConversationDisplayName: r.ConversationDisplayName, MessageID: r.MessageID, ReplyChainID: r.ReplyChainID,
+			AppID: r.AppID, SenderID: r.SenderID, SenderName: r.SenderName, MessageSentAt: r.MessageSentAt, Text: text, TextTruncated: cut, Link: r.MessageLink}
+	}
+	return items
+}
+
 func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKey]string) []messageItem {
 	out := make([]messageItem, len(rows))
 	for i, r := range rows {
@@ -473,13 +484,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		items := make([]activityItem, len(rows))
-		for i, r := range rows {
-			text, cut := truncateRunes(r.MessageText, rt.g.MaxText)
-			items[i] = activityItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Type: r.Type, Subtype: r.Subtype, IsRead: r.IsRead, At: r.At,
-				ConversationID: r.ConversationID, ConversationDisplayName: r.ConversationDisplayName, MessageID: r.MessageID, ReplyChainID: r.ReplyChainID,
-				AppID: r.AppID, SenderID: r.SenderID, SenderName: r.SenderName, MessageSentAt: r.MessageSentAt, Text: text, TextTruncated: cut, Link: r.MessageLink}
-		}
+		items := activityItems(rows, rt.g.MaxText)
 		shaped, err := shape(rt, items)
 		if err != nil {
 			return nil, err

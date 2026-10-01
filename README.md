@@ -124,7 +124,7 @@ Flags that matter for agents:
 | `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query`, `--include-system`. |
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
-| `watch` (coming in v0.1.0) | Streams one JSON line per new, edited or deleted message or activity item as Teams writes, using macOS FSEvents. |
+| `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync. Flags: `--every` (poll interval, default `60s`), `--emit-initial`; honors `--account`, `--fields` and `--max-text`. |
 | `version` | Prints the build version. |
 
 Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `teamscrawl <command> --help` for the rest.

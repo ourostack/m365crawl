@@ -513,9 +513,14 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 	if !f.Since.IsZero() {
 		w.add(`a.at>=?`, fmtTime(f.Since))
 	}
-	limit := Filter{Limit: f.Limit}.limit()
+	return s.activityRows(ctx, &w, Filter{Limit: f.Limit}.limit(), f.IncludeSystem)
+}
+
+// activityRows runs the activity query for the conditions in w, newest first, and trims the extra
+// row that detects truncation.
+func (s *Store) activityRows(ctx context.Context, w *where, limit int, includeSystem bool) ([]ActivityRow, bool, error) {
 	msgOn := ``
-	if !f.IncludeSystem {
+	if !includeSystem {
 		msgOn = ` and ` + notSystemCond(`m.conversation_id`)
 	}
 	//nolint:gosec // G202: fragments are package constants; values are placeholders

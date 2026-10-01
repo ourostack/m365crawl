@@ -55,6 +55,7 @@ type cliApp struct {
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
 	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
 	Thread        threadCmd        `cmd:"" help:"Show one thread: <conversation> <root-message-id>, or a Teams message link."`
+	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
 	Version       versionCmd       `cmd:"" help:"Print the teamscrawl version."`
@@ -76,7 +77,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "people", "activity", "unread", "thread"}
+var listCommands = []string{"search", "messages", "conversations", "people", "activity", "unread", "thread", "watch"}
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 
