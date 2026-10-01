@@ -84,6 +84,11 @@ func (s *Store) migrate(ctx context.Context) error {
 // OpenReadOnly opens an existing archive read-only (safe beside an active writer). It returns
 // ErrNoArchive when the file is missing.
 func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	// The read-only driver takes a URI, which misreads a relative path as a host: use the absolute
+	// path (a relative --db works for the writer already).
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoArchive
 	}
