@@ -94,6 +94,10 @@ func TestWatchSIGTERM(t *testing.T) {
 	}
 }
 
+// pausedMarker is what the binary prints to stderr when TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT starts
+// its pause: the snapshot is complete and the process is waiting, so a signal lands inside the pause.
+const pausedMarker = "teamscrawl-test: paused after snapshot"
+
 const (
 	chat1 = "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces"
 	chat2 = "19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces"
@@ -161,7 +165,7 @@ func TestE2EFreshMachine(t *testing.T) {
 	if len(accts) != 2 {
 		t.Fatalf("want 2 accounts, got %v", st["accounts"])
 	}
-	var convs, msgs, people, acts int
+	var convs, msgs, acts int
 	for _, a := range accts {
 		m, _ := a.(map[string]any)
 		if num(t, m, "conversations") != 7 || num(t, m, "messages") != 52 || num(t, m, "people") != 3 || num(t, m, "activity") != 8 {
@@ -169,13 +173,11 @@ func TestE2EFreshMachine(t *testing.T) {
 		}
 		convs += num(t, m, "conversations")
 		msgs += num(t, m, "messages")
-		people += num(t, m, "people")
 		acts += num(t, m, "activity")
 	}
 	if convs != goldenCount(t, "mapped-conversations.json") || msgs != goldenCount(t, "mapped-messages.json") || acts != goldenCount(t, "mapped-activity.json") {
 		t.Fatalf("totals %d/%d/%d do not match the golden files", convs, msgs, acts)
 	}
-	_ = people
 
 	items, _ := list(t, e.run(append([]string{"search", "Hello from Alex"}, root...)...))
 	if len(items) != 1 || items[0]["text"] != "Hello from Alex Fixture" || items[0]["conversation_display_name"] != "Fixture chat 1" {
@@ -343,7 +345,7 @@ func TestE2EErrors(t *testing.T) {
 		if !contains(failing, "full_disk_access") {
 			t.Fatalf("failing checks = %v", failing)
 		}
-		wantError(t, result{stderr: res.stderr}, 0, "doctor_failed")
+		wantDoctorFailed(t, res)
 	})
 
 	t.Run("teams not installed", func(t *testing.T) {
@@ -355,7 +357,7 @@ func TestE2EErrors(t *testing.T) {
 		if doc := mustJSON(t, res.stdout); doc["ok"] != false {
 			t.Fatalf("doctor ok = %v", doc["ok"])
 		}
-		wantError(t, result{stderr: res.stderr}, 0, "doctor_failed")
+		wantDoctorFailed(t, res)
 	})
 
 	t.Run("no teams origin", func(t *testing.T) {
@@ -370,6 +372,7 @@ func TestE2EErrors(t *testing.T) {
 
 	t.Run("usage", func(t *testing.T) {
 		e := newEnv(t)
+		e.sync() // the archive exists, so only the arguments can be at fault
 		for _, args := range [][]string{
 			{"bogus"},
 			{"search"},
@@ -382,15 +385,14 @@ func TestE2EErrors(t *testing.T) {
 			{"thread", chat1},
 			{"sql", "delete from messages"},
 		} {
-			e.sync() // the archive exists, so only the arguments can be at fault
 			wantError(t, e.cmd(args...), 2, "usage")
 		}
 	})
 
 	t.Run("archive locked", func(t *testing.T) {
 		e := newEnv(t)
-		holder := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=30s"}, append([]string{"sync"}, e.baseArgs()...)...)
-		holder.waitFor("the snapshot", func() bool { return len(snapshots(t, e.tmp)) > 0 })
+		holder := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
+		holder.waitFor("the pause", func() bool { return strings.Contains(holder.stderr.String(), pausedMarker) })
 		errBody := wantError(t, e.cmd("sync"), 4, "locked")
 		if !strings.Contains(errBody["message"].(string), ".lock") {
 			t.Fatalf("locked message = %v", errBody["message"])
@@ -410,14 +412,13 @@ func TestE2EErrors(t *testing.T) {
 		wantError(t, e.cmd("sync"), 1, "snapshot_inconsistent")
 		// The attempt is recorded as failed and the archive is still readable.
 		// (stderr carries the "run teamscrawl sync" hint: no run has succeeded.)
-		res := mustJSON(t, mustRun(t, e.cmd("sql", "--max-age", "0", "select status from sync_runs")))
-		rows, _ := res["rows"].([]any)
-		if len(rows) != 1 || rows[0].([]any)[0] != "failed" {
-			t.Fatalf("sync_runs = %v", res["rows"])
+		if st := lastRunStatuses(t, e); len(st) != 1 || st[0] != "failed" {
+			t.Fatalf("sync_runs statuses = %v, want [failed]", st)
 		}
 	})
 
-	t.Run("a bad flag value never prints a stack trace", func(t *testing.T) {
+	t.Run("a missing archive directory and a missing root", func(t *testing.T) {
+		// The environment error wins, and nothing prints a stack trace (wantError checks that).
 		e := newEnv(t)
 		res := e.run("sync", "--db", filepath.Join(e.tmp, "nodir", "a", "b.db"), "--teams-root", filepath.Join(e.tmp, "missing"))
 		wantError(t, res, 3, "teams_not_installed")
@@ -479,16 +480,28 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		mustExit(t, e.cmd("sync"), 1)
+		// The failure is inside the snapshot step (the copy is retried and then given up), so a
+		// test cannot observe the snapshot directory deterministically; the SIGINT case below
+		// proves cleanup of a completed snapshot. Here we pin the error and the recorded attempt.
+		wantError(t, e.cmd("sync"), 1, "snapshot_inconsistent")
 		if m := snapshots(t, e.tmp); len(m) != 0 {
 			t.Fatalf("snapshot left behind: %v", m)
+		}
+		if st := lastRunStatuses(t, e); len(st) != 1 || st[0] != "failed" {
+			t.Fatalf("sync_runs statuses = %v, want [failed]", st)
 		}
 	})
 	t.Run("after SIGINT mid-sync", func(t *testing.T) {
 		e := newEnv(t)
-		s := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=5s"}, append([]string{"sync"}, e.baseArgs()...)...)
-		s.waitFor("the snapshot", func() bool { return len(snapshots(t, e.tmp)) > 0 })
-		fi, err := os.Stat(snapshots(t, e.tmp)[0])
+		// A 10 s pause is far longer than the test needs: it signals as soon as the marker shows
+		// that the snapshot is complete and the process is waiting.
+		s := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
+		s.waitFor("the pause", func() bool { return strings.Contains(s.stderr.String(), pausedMarker) })
+		snaps := snapshots(t, e.tmp)
+		if len(snaps) != 1 {
+			t.Fatalf("snapshots during the pause = %v, want exactly one", snaps)
+		}
+		fi, err := os.Stat(snaps[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,18 +510,45 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 		}
 		start := time.Now()
 		res := s.signal(syscall.SIGINT)
-		if time.Since(start) > 4*time.Second {
+		if time.Since(start) > 8*time.Second {
 			t.Errorf("SIGINT took %v; the pause was not interrupted", time.Since(start))
 		}
-		if res.code == 0 {
-			t.Errorf("an interrupted sync must not exit 0")
+		// An interrupted sync is a runtime failure (exit 1) with one coded error after the marker.
+		if res.code != 1 {
+			t.Fatalf("exit = %d, want 1\nstderr: %s", res.code, res.stderr)
+		}
+		rest := strings.TrimSpace(strings.Replace(res.stderr, pausedMarker, "", 1))
+		body := mustJSON(t, rest)
+		ee, _ := body["error"].(map[string]any)
+		if ee == nil || ee["code"] != "internal" || !strings.Contains(ee["message"].(string), "interrupted") || ee["fix"] == "" {
+			t.Fatalf("stderr error = %s", rest)
+		}
+		if res.stdout != "" {
+			t.Fatalf("an interrupted sync printed a report: %s", res.stdout)
 		}
 		if m := snapshots(t, e.tmp); len(m) != 0 {
 			t.Fatalf("snapshot left behind after SIGINT: %v", m)
 		}
-		// The interrupted run released the lock: the next sync works.
-		e.sync()
+		if st := lastRunStatuses(t, e); len(st) != 1 || st[0] != "failed" {
+			t.Fatalf("sync_runs statuses = %v, want [failed]", st)
+		}
+		// The interrupted run released the lock and wrote nothing: the next sync is a full one.
+		if rep := e.sync(); rep["status"] != "ok" {
+			t.Fatalf("sync after the interrupt = %v", rep["status"])
+		}
 	})
+}
+
+// lastRunStatuses lists the recorded sync_runs statuses, oldest first.
+func lastRunStatuses(t *testing.T, e *env) []string {
+	t.Helper()
+	res := e.cmd("sql", "--max-age", "0", "select status from sync_runs order by id")
+	mustExit(t, res, 0) // stderr may carry the "run teamscrawl sync" hint: no run has succeeded
+	var out []string
+	for _, r := range mustJSON(t, res.stdout)["rows"].([]any) {
+		out = append(out, r.([]any)[0].(string))
+	}
+	return out
 }
 
 func TestE2EActivity(t *testing.T) {
@@ -734,9 +774,10 @@ func TestE2EMaxAge(t *testing.T) {
 	t.Run("a failing implicit sync warns and still returns results", func(t *testing.T) {
 		e := newEnv(t)
 		e.sync()
-		time.Sleep(1100 * time.Millisecond)
+		// --max-age 1ns makes any archive stale without sleeping: the last successful sync is
+		// always older than a nanosecond by the time the next process starts.
 		bad := []string{"--teams-root", filepath.Join(e.tmp, "missing"), "--db", e.db}
-		res := e.run(append([]string{"people", "--max-age", "1s"}, bad...)...)
+		res := e.run(append([]string{"people", "--max-age", "1ns"}, bad...)...)
 		mustExit(t, res, 0)
 		whole := mustJSON(t, res.stdout)
 		if n, _ := whole["items"].([]any); len(n) == 0 {
@@ -922,7 +963,10 @@ func TestE2EWatch(t *testing.T) {
 	e := newEnv(t)
 	s := e.start(nil, append([]string{"watch", "--every", "1s"}, e.baseArgs()...)...)
 	count := func(q string) int { return archiveCount(t, e.db, q) }
-	s.waitFor("the baseline sync", func() bool { return count("select count(*) from messages") == 104 })
+	// The baseline is done once its sync run is recorded as successful (it is written last).
+	s.waitFor("the baseline sync", func() bool {
+		return count("select count(*) from sync_runs where status='ok'") == 1 && count("select count(*) from messages") == 104
+	})
 	if out := s.stdout.String(); out != "" {
 		t.Fatalf("the baseline must print nothing, got %q", out)
 	}
@@ -950,6 +994,18 @@ func TestE2EWatch(t *testing.T) {
 		}
 		return false
 	})
+	// Exactly one message line in all: the baseline emitted none, and only the forgotten message
+	// came back.
+	var messageLines int
+	for _, l := range strings.Split(s.stdout.String(), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(l), &m) == nil && m["kind"] == "message" {
+			messageLines++
+		}
+	}
+	if messageLines != 1 {
+		t.Fatalf("message lines = %d, want 1\n%s", messageLines, s.stdout.String())
+	}
 	if line["change"] != "new" {
 		t.Fatalf("change = %v, want new: %v", line["change"], line)
 	}
@@ -997,9 +1053,13 @@ func archiveExec(t *testing.T, path, q string, args ...any) {
 	}
 }
 
-// mustRun asserts a clean exit and returns stdout.
-func mustRun(t *testing.T, res result) string {
+// wantDoctorFailed checks the stderr half of a failed doctor run: a coded doctor_failed error.
+// (doctor prints its checks on stdout, so wantError, which wants an empty stdout, does not apply.)
+func wantDoctorFailed(t *testing.T, res result) {
 	t.Helper()
-	mustExit(t, res, 0)
-	return res.stdout
+	body := mustJSON(t, res.stderr)
+	e, _ := body["error"].(map[string]any)
+	if e == nil || e["code"] != "doctor_failed" || e["fix"] == "" {
+		t.Fatalf("stderr is not a doctor_failed error: %s", res.stderr)
+	}
 }

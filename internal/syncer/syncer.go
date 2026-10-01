@@ -158,7 +158,8 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	if err != nil {
 		return SourceReport{}, false, err
 	}
-	if d, _ := time.ParseDuration(os.Getenv(testPauseEnv)); d > 0 { // test hook for the SIGINT e2e test
+	if d, _ := time.ParseDuration(os.Getenv(testPauseEnv)); d > 0 { // test hook for the e2e tests
+		_, _ = fmt.Fprintln(os.Stderr, testPauseMarker) // lets a test signal from inside the pause
 		select {
 		case <-time.After(d):
 		case <-ctx.Done():

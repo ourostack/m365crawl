@@ -9,13 +9,15 @@ import (
 
 // Report statuses.
 const (
-	StatusOK           = "ok"
-	StatusOmissions    = "ok_with_omissions"
-	StatusUnchanged    = "unchanged"
-	statusFailed       = "failed"
-	kindMessage        = "message"
-	kindActivity       = "activity"
-	testPauseEnv       = "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
+	StatusOK        = "ok"
+	StatusOmissions = "ok_with_omissions"
+	StatusUnchanged = "unchanged"
+	statusFailed    = "failed"
+	kindMessage     = "message"
+	kindActivity    = "activity"
+	testPauseEnv    = "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
+	// testPauseMarker is the stderr line printed when the test pause starts (e2e tests wait for it).
+	testPauseMarker    = "teamscrawl-test: paused after snapshot"
 	staleSnapshotAfter = time.Hour
 )
 
