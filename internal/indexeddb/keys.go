@@ -82,6 +82,13 @@ func makePrefix(db, store, index uint64, end ...byte) ([]byte, error) {
 	return append(out, end...), nil
 }
 
+// idPrefix is makePrefix for the index ids this package builds itself, which are one byte, so
+// the only failure makePrefix has (an index id of more than four bytes) cannot happen.
+func idPrefix(db, store uint64, index byte, end ...byte) []byte {
+	p, _ := makePrefix(db, store, uint64(index), end...)
+	return p
+}
+
 // readPrefix parses a key prefix and returns the ids and the prefix length.
 func readPrefix(b []byte) (db, store, index uint64, n int, err error) {
 	if len(b) < 1 {
