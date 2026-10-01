@@ -364,7 +364,7 @@ func requireReference(t *testing.T) {
 			dir = r.def
 		}
 		dir = strings.Replace(dir, "~", home, 1)
-		if _, err := os.Stat(dir); err != nil {
+		if _, err := os.Stat(dir); err != nil { //nolint:gosec // developer-chosen reference path
 			t.Fatalf("reference %s not found at %s. Clone %s there (default %s) or point %s at an existing clone; python3 needs no pip packages.",
 				r.module, dir, r.url, r.def, r.env)
 		}
