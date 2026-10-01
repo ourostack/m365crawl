@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
@@ -104,17 +106,26 @@ func TestRederiveSkipsNewAndCurrentArchives(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `select value from meta where key='derivation_version'`).Scan(&v); err != nil || v != "2" {
 		t.Errorf("a new archive should be stamped current: %q (%v)", v, err)
 	}
-	// A newer archive (from a later build) is left alone.
-	if _, err := s.db.ExecContext(ctx, `update meta set value='99'`); err != nil {
+}
+
+func TestRederiveRefusesANewerArchive(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	seedAlpha1(t, s)
+	if _, err := s.db.ExecContext(ctx, `insert into meta values('derivation_version','99')`); err != nil {
 		t.Fatal(err)
 	}
-	seedAlpha1Rows := func() {
-		seedAlpha1(t, s)
-		_, _ = s.db.ExecContext(ctx, `insert into meta values('derivation_version','99')`)
+	before := dump(t, s)
+	m, err := s.Rederive(ctx)
+	var coded *errs.Coded
+	if m != nil || !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || coded.Exit != errs.ExitEnvironment {
+		t.Fatalf("Rederive = %+v, %v", m, err)
 	}
-	seedAlpha1Rows()
-	if m, err := s.Rederive(ctx); err != nil || m != nil {
-		t.Errorf("newer archive: %+v, %v", m, err)
+	if !strings.Contains(coded.Message, "99") || !strings.Contains(coded.Message, "2") || !strings.Contains(coded.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+		t.Errorf("message %q fix %q", coded.Message, coded.Fix)
+	}
+	if dump(t, s) != before {
+		t.Error("a refused Rederive changed the archive")
 	}
 }
 

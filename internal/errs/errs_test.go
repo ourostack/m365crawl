@@ -3,6 +3,7 @@ package errs
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,12 @@ func TestInternalWithNilCauseSaysUnknown(t *testing.T) {
 	}
 	if got := Internal(errors.New("boom")).Message; got != "internal error: boom" {
 		t.Errorf("message = %q", got)
+	}
+}
+
+func TestArchiveNewer(t *testing.T) {
+	e := ArchiveNewer(5, 2)
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "version 5") || !strings.Contains(e.Message, "version 2") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+		t.Errorf("%+v", e)
 	}
 }

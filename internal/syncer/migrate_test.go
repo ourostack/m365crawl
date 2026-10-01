@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/store"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
@@ -163,4 +165,34 @@ func TestMigrationFailureFailsTheSync(t *testing.T) {
 	if _, _, err := Run(context.Background(), Options{Root: root, DBPath: db}); err == nil {
 		t.Fatal("a corrupt derivation version should fail the sync")
 	}
+}
+
+func TestNewerArchiveIsNeverWritten(t *testing.T) {
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	d := openRaw(t, db)
+	exec(t, d, `update meta set value='99' where key='derivation_version'`)
+	exec(t, d, `update messages set content_text='sentinel' where rowid=(select min(rowid) from messages)`)
+	before, runs := snapshot(t, db), runCount(t, d)
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || coded.Exit != errs.ExitEnvironment || !strings.Contains(coded.Message, "99") {
+		t.Fatalf("err = %v", err)
+	}
+	if snapshot(t, db) != before || runCount(t, d) != runs {
+		t.Error("a refused sync wrote to the archive")
+	}
+}
+
+func runCount(t *testing.T, d *sql.DB) (n int) {
+	t.Helper()
+	if err := d.QueryRow(`select count(*) from sync_runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

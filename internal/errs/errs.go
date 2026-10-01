@@ -2,6 +2,8 @@
 // from the spec's output contract table; the CLI prints them as {"error": {code, message, fix}}.
 package errs
 
+import "fmt"
+
 // Exit statuses from the output contract.
 const (
 	ExitRuntime     = 1
@@ -24,6 +26,7 @@ const (
 	CodeNoTeamsOrigin               = "no_teams_origin"
 	CodeDoctorFailed                = "doctor_failed"
 	CodeLocked                      = "locked"
+	CodeArchiveNewer                = "archive_newer"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -120,6 +123,14 @@ func NoTeamsOrigin(root string) *Coded {
 func DoctorFailed(msg string) *Coded {
 	return &Coded{Code: CodeDoctorFailed, Exit: ExitEnvironment, Message: msg,
 		Fix: "Resolve the failing checks listed by `teamscrawl doctor`, then run again."}
+}
+
+// ArchiveNewer reports an archive written by a newer teamscrawl (a higher derivation version). An
+// older build must not write it: it would mix its own derived fields into rows the newer one keeps.
+func ArchiveNewer(found, have int) *Coded {
+	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
+		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (derivation version %d; this build writes version %d)", found, have),
+		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
 }
 
 // Locked reports that another teamscrawl run holds the archive lock.

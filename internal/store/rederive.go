@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
@@ -30,7 +31,7 @@ const (
 // Rederive brings an archive written by an older build up to DerivationVersion: it recomputes the
 // derived fields of every message and conversation from the stored raw_json, rewrites the text
 // indexes of the rows that changed, and records the new version, all in one transaction. It
-// returns nil when the archive is already current or has nothing to recompute (a new archive).
+// returns an archive_newer error, writing nothing, when the archive carries a higher version than this build's. It returns nil when the archive is already current or has nothing to recompute (a new archive).
 // The sync calls it before it reads the Teams cache, so rows the cache no longer holds are
 // upgraded too.
 func (s *Store) Rederive(ctx context.Context) (*Migration, error) {
@@ -56,7 +57,10 @@ func rederive(ctx context.Context, tx *sql.Tx) (*Migration, error) {
 		}
 		from = n
 	}
-	if from >= DerivationVersion {
+	if from > DerivationVersion {
+		return nil, errs.ArchiveNewer(from, DerivationVersion)
+	}
+	if from == DerivationVersion {
 		return nil, nil
 	}
 	rows, err := rederiveMessages(ctx, tx)

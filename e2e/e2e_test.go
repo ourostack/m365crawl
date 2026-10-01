@@ -1119,3 +1119,40 @@ func TestE2EPolish(t *testing.T) {
 		t.Fatalf("card text %d, call text %d, want 2 each", card, call)
 	}
 }
+
+// An archive stamped by a newer build is never written: sync and watch fail before any write, and
+// reads still answer (an implicit sync degrades to a warning and a sync_error field).
+func TestE2EArchiveNewer(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	archiveExec(t, e.db, `update meta set value='99' where key='derivation_version'`)
+	rows := archiveCount(t, e.db, `select count(*) from messages`)
+	runs := archiveCount(t, e.db, `select count(*) from sync_runs`)
+
+	for _, args := range [][]string{{"sync"}, {"watch", "--every", "1h"}} {
+		res := e.cmd(args...)
+		if res.code != 3 || res.stdout != "" {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %s", args, res.code, res.stdout, res.stderr)
+		}
+		body, _ := mustJSON(t, res.stderr)["error"].(map[string]any)
+		if body["code"] != "archive_newer" || !strings.Contains(body["message"].(string), "99") || !strings.Contains(body["fix"].(string), "brew upgrade ourostack/tap/teamscrawl") {
+			t.Fatalf("%v: error = %v", args, body)
+		}
+	}
+	res := e.run(append([]string{"people", "--max-age", "1ns"}, e.baseArgs()...)...)
+	mustExit(t, res, 0)
+	whole := mustJSON(t, res.stdout)
+	se, _ := whole["sync_error"].(map[string]any)
+	if n, _ := whole["items"].([]any); len(n) == 0 || se == nil || se["code"] != "archive_newer" {
+		t.Fatalf("stale read on a newer archive: %s", res.stdout)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from messages`); got != rows {
+		t.Errorf("messages %d, was %d", got, rows)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from sync_runs`); got != runs {
+		t.Errorf("sync_runs %d, was %d: a refused sync must record nothing", got, runs)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from meta where value='99'`); got != 1 {
+		t.Error("the archive version changed")
+	}
+}
