@@ -113,6 +113,9 @@ type activityItem struct {
 	// sender_* fields stay the related message's author). Omitted for types whose data names no one.
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorName string `json:"actor_name,omitempty"`
+	// actor_inferred is true on reaction items: the reactor is the user whose reaction is nearest
+	// in time, a best-effort match that can be wrong when several people reacted together.
+	ActorInferred bool `json:"actor_inferred,omitempty"`
 }
 
 func activityItems(rows []store.ActivityRow, maxText int) []activityItem {
@@ -122,7 +125,7 @@ func activityItems(rows []store.ActivityRow, maxText int) []activityItem {
 		items[i] = activityItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Type: r.Type, Subtype: r.Subtype, IsRead: r.IsRead, At: r.At,
 			ConversationID: r.ConversationID, ConversationDisplayName: r.ConversationDisplayName, MessageID: r.MessageID, ReplyChainID: r.ReplyChainID,
 			AppID: r.AppID, SenderID: r.SenderID, SenderName: r.SenderName, MessageSentAt: r.MessageSentAt, Text: text, TextTruncated: cut, Link: r.MessageLink,
-			ActorID: r.ActorID, ActorName: r.ActorName}
+			ActorID: r.ActorID, ActorName: r.ActorName, ActorInferred: r.ActorInferred}
 	}
 	return items
 }
@@ -518,7 +521,7 @@ type activityCmd struct {
 	Unread         bool   `help:"Only unread items."`
 	Type           string `help:"Only these activity types, comma separated, matched exactly in any case. Seen in the cache: mention (you were @-mentioned in a channel, as a team or tag), mentionInChat (in a chat, or by @everyone), reply, replyToReply, follow, reaction, reactionInChat, msGraph (system notices such as meeting updates and approvals), teamMembershipChange, threadActivity. Example: --type mention,mentionInChat."`
 	Team           string `help:"Only items in this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
-	DirectMentions bool   `name:"direct-mentions" help:"Only mention items that name you (type mention or mentionInChat, subtype person), not channel, team, tag or @everyone mentions."`
+	DirectMentions bool   `name:"direct-mentions" help:"Only mention items that name you (type mention or mentionInChat, subtype person, or a message that mentions you by name), not channel, team, tag or @everyone mentions."`
 	Since          string `help:"Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h)."`
 	Limit          int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem  bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`

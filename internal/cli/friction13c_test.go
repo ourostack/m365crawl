@@ -103,6 +103,12 @@ func TestActivityActors(t *testing.T) {
 	// A reaction names who reacted. The reacted-to message's sender is Pat; the like came from Pat
 	// (the account's own heart never reaches its feed), and the sender stays the message author.
 	react := byType["reactionInChat/like"]
+	if react["actor_inferred"] != true {
+		t.Errorf("a reaction actor is inferred: %v", react)
+	}
+	if mention := byType["mention/channel"]; mention["actor_inferred"] != nil {
+		t.Errorf("an exact actor must not say inferred: %v", mention)
+	}
 	if react["actor_id"] != patID || react["actor_name"] != pat {
 		t.Errorf("reaction actor = %v / %v", react["actor_id"], react["actor_name"])
 	}
@@ -252,10 +258,10 @@ func TestImplicitSyncNotice(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	if m := notice.FindStringSubmatch(stderr); m == nil || m[1] != "no complete sync yet (max-age 15m)" {
+	if n := decode(t, stderr); n["notice"] != "syncing" || n["reason"] != "never_synced" || n["max_age_seconds"] != float64(900) || len(n) != 3 {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if strings.Contains(stdout, "teamscrawl: syncing") {
+	if strings.Contains(stdout, "syncing") {
 		t.Fatalf("the notice leaked to stdout: %s", stdout)
 	}
 	res := decode(t, stdout)
@@ -281,7 +287,7 @@ func TestImplicitSyncNotice(t *testing.T) {
 	// Stale: the notice gives the age and the limit.
 	e.exec(`update sync_runs set finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-30 seconds'), started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-31 seconds')`)
 	_, stdout, stderr = e.run("messages", "--limit", "1")
-	if m := notice.FindStringSubmatch(stderr); m == nil || m[1] != "archive is 2h14m old (max-age 15m)" {
+	if n := decode(t, stderr); n["notice"] != "syncing" || n["reason"] != "stale" || n["max_age_seconds"] != float64(900) || n["archive_age_seconds"].(float64) < 8040 || n["archive_age_seconds"].(float64) > 8100 {
 		t.Fatalf("stale stderr = %q", stderr)
 	}
 	if s, _ := decode(t, stdout)["synced"].(map[string]any); s["status"] == nil {
@@ -339,7 +345,7 @@ func TestImplicitSyncStatuses(t *testing.T) {
 		}
 		res := decode(t, stdout)
 		synced, _ := res["synced"].(map[string]any)
-		if synced["status"] != tc.status || res["sync_error"] == nil || !notice.MatchString(stderr) {
+		if synced["status"] != tc.status || res["sync_error"] == nil || !strings.Contains(stderr, `"notice":"syncing"`) {
 			t.Errorf("%s: synced %v, sync_error %v, stderr %q", tc.name, res["synced"], res["sync_error"], stderr)
 		}
 	}
@@ -352,5 +358,13 @@ func TestWhoamiCarriesSyncedInBothPlaces(t *testing.T) {
 	archive, _ := res["archive"].(map[string]any)
 	if res["synced"] == nil || archive["synced"] == nil {
 		t.Fatalf("whoami synced: %v", res)
+	}
+}
+
+func TestImplicitSyncNoticeIsJSONInLogMode(t *testing.T) {
+	e := newEnv(t)
+	_, _, stderr := e.run("--format", "log", "messages", "--limit", "1")
+	if n := decode(t, stderr); n["notice"] != "syncing" || n["reason"] != "never_synced" {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }

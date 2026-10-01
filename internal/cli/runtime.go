@@ -121,7 +121,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	if !last.IsZero() {
 		age = rt.now().Sub(last)
 	}
-	_, _ = fmt.Fprintln(rt.stderr, syncNotice(age, rt.maxAge)) // stderr in every format; stdout stays the result
+	rt.printSyncNotice(age) // stderr only; stdout stays the result
 	began := rt.now()
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
 	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
@@ -294,4 +294,28 @@ func compactDuration(d time.Duration) string {
 		s = s[:len(s)-2]
 	}
 	return s
+}
+
+// syncNoticeDoc is the JSON form of the notice: one line on stderr in json and log modes.
+type syncNoticeDoc struct {
+	Notice            string `json:"notice"`
+	Reason            string `json:"reason"` // stale or never_synced
+	ArchiveAgeSeconds *int64 `json:"archive_age_seconds,omitempty"`
+	MaxAgeSeconds     int64  `json:"max_age_seconds"`
+}
+
+// printSyncNotice tells stderr an implicit sync is starting: a plain line in text mode, one JSON
+// line otherwise so every stderr line of a JSON run stays machine-readable. age is zero when the
+// archive has no complete sync yet.
+func (rt *runtime) printSyncNotice(age time.Duration) {
+	if rt.format == output.Text {
+		_, _ = fmt.Fprintln(rt.stderr, syncNotice(age, rt.maxAge))
+		return
+	}
+	doc := syncNoticeDoc{Notice: "syncing", Reason: "never_synced", MaxAgeSeconds: int64(rt.maxAge.Seconds())}
+	if age > 0 {
+		secs := int64(age.Seconds())
+		doc.Reason, doc.ArchiveAgeSeconds = "stale", &secs
+	}
+	rt.writeJSONLine(doc)
 }

@@ -81,8 +81,14 @@ func TestActivityDirectMentions(t *testing.T) {
 		{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: "reply", Type: "reply", Subtype: "person", At: base.Add(3 * time.Minute)},
 	}
 	must(s.ApplyActivity(ctx, acts))
+	// A mention by id is direct whatever the feed subtype says, as in messages and search, when the
+	// item's message is archived.
+	byID := msg(acctA, "c", "byid", "ping", base)
+	byID.MentionsMe = true
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{byID}))
+	must(s.ApplyActivity(ctx, []teamsdesktop.Activity{mentionAct("byid-item", "team", "c", "byid", base.Add(4*time.Minute))}))
 	rows, _, err := s.Activity(ctx, ActivityFilter{DirectMentions: true})
-	if err != nil || len(rows) != 2 || rows[0].ID != "chat" || rows[1].ID != "direct" {
+	if err != nil || len(rows) != 3 || rows[0].ID != "byid-item" || rows[1].ID != "chat" || rows[2].ID != "direct" {
 		t.Fatalf("%v %+v", err, rows)
 	}
 }
@@ -123,6 +129,9 @@ func TestActivityActor(t *testing.T) {
 	got := map[string][2]string{}
 	for _, r := range rows {
 		got[r.ID] = [2]string{r.ActorID, r.ActorName}
+		if inferred := r.ID == "react"; r.ActorInferred != inferred {
+			t.Errorf("actor_inferred of %s = %v", r.ID, r.ActorInferred)
+		}
 	}
 	want := map[string][2]string{
 		"react": {"8:orgid:rea", "Rae Reactor"}, "selfonly": {}, "noreactor": {}, "reaction-no-message": {},
