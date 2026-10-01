@@ -67,6 +67,39 @@ prepare_keychain() {
   : > "$base/ready"
 }
 
+# Submits a zip to the notary service and succeeds only when the final status is
+# exactly "Accepted". `notarytool submit --wait` can exit 0 for an "Invalid"
+# submission, so the JSON status is checked explicitly.
+notarize_zip() {
+  local zip="$1" out id status
+  out="$(xcrun notarytool submit "$zip" \
+    --apple-id "$APPLE_ID" \
+    --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+    --team-id "$APPLE_TEAM_ID" \
+    --wait --output-format json)" || fail "notarytool submit failed"
+  status="$(json_field status "$out")"
+  id="$(json_field id "$out")"
+  if [[ "$status" != "Accepted" ]]; then
+    echo "notarization status: ${status:-unknown} (submission ${id:-unknown})" >&2
+    if [[ -n "$id" ]]; then
+      xcrun notarytool log "$id" \
+        --apple-id "$APPLE_ID" \
+        --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+        --team-id "$APPLE_TEAM_ID" >&2 || true
+    fi
+    fail "notarization was not accepted"
+  fi
+  echo "notarization status: Accepted (submission $id)"
+}
+
+json_field() {
+  if command -v plutil >/dev/null 2>&1; then
+    printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null || true
+  else
+    printf '%s' "$2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("'"$1"'",""))' 2>/dev/null || true
+  fi
+}
+
 selftest() {
   local self="$0" out status=0
   out="$(env -u APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 "$self" /definitely/missing 2>&1)" \
@@ -78,11 +111,36 @@ selftest() {
   status=0
   env APPLE_DEVELOPER_ID_CERTIFICATE_BASE64=Zm9v "$self" >/dev/null 2>&1 || status=$?
   [[ "$status" -ne 0 ]] || fail "selftest: expected usage failure without a binary"
+  # Stubbed xcrun: Accepted succeeds, Invalid fails and fetches the log.
+  local stub tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/sign-notarize-selftest.XXXXXX")"
+  stub="$tmp/bin"
+  mkdir "$stub"
+  cat > "$stub/xcrun" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$2" == "submit" ]]; then
+  printf '{"id":"abc-123","status":"%s"}\n' "${STUB_STATUS:-Accepted}"
+elif [[ "$2" == "log" ]]; then
+  echo "stub notary log for $3"
+fi
+STUB
+  chmod +x "$stub/xcrun"
+  export APPLE_ID=a@example.com APPLE_APP_SPECIFIC_PASSWORD=x APPLE_TEAM_ID=T
+  out="$(PATH="$stub:$PATH" STUB_STATUS=Accepted "$self" --selftest-notarize z.zip 2>&1)" \
+    || fail "selftest: Accepted should succeed"
+  grep -Fq "Accepted" <<<"$out" || fail "selftest: Accepted output missing"
+  status=0
+  out="$(PATH="$stub:$PATH" STUB_STATUS=Invalid "$self" --selftest-notarize z.zip 2>&1)" || status=$?
+  [[ "$status" -ne 0 ]] || fail "selftest: Invalid should fail"
+  grep -Fq "stub notary log for abc-123" <<<"$out" || fail "selftest: Invalid should print the notary log"
+  rm -f "$stub/xcrun"
+  rmdir "$stub" "$tmp"
   echo "sign-notarize selftest ok"
 }
 
 case "${1:-}" in
   --selftest) selftest; exit 0 ;;
+  --selftest-notarize) notarize_zip "${2:-}"; exit 0 ;;
   -h|--help) usage; exit 0 ;;
 esac
 
@@ -116,11 +174,7 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/teamscrawl-notary.XXXXXX")"
 trap 'rm -f "$work/notary.zip"; rmdir "$work" 2>/dev/null || true' EXIT
 echo "==> Submitting to Apple notary service"
 ditto -c -k "$BINARY" "$work/notary.zip"
-xcrun notarytool submit "$work/notary.zip" \
-  --apple-id "$APPLE_ID" \
-  --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-  --team-id "$APPLE_TEAM_ID" \
-  --wait
+notarize_zip "$work/notary.zip"
 
 echo "==> Verifying"
 codesign -dv --verbose=2 "$BINARY" 2>&1 | grep -E 'Authority|TeamIdentifier|flags|Timestamp' || true
