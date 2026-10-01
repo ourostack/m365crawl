@@ -1307,3 +1307,47 @@ func TestE2EDoubleSIGINT(t *testing.T) {
 		t.Fatalf("the second SIGINT took %v", time.Since(start))
 	}
 }
+
+// An archive written before run-level sync_runs rows existed (no accounts_json column) is read
+// without errors, and the next sync upgrades it.
+func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
+	commands := [][]string{{"messages"}, {"status"}, {"whoami"}, {"sql", "select count(*) from messages"}, {"doctor"}}
+	for _, mode := range []string{"default", "max-age-0"} {
+		for _, c := range commands {
+			t.Run(mode+"/"+c[0], func(t *testing.T) {
+				e := newEnv(t)
+				e.sync()
+				archiveExec(t, e.db, `alter table sync_runs drop column accounts_json`)
+				args := append([]string{}, c...)
+				if mode == "max-age-0" {
+					args = append(args, "--max-age", "0")
+				}
+				res := e.cmd(args...)
+				mustExit(t, res, 0)
+				if strings.Contains(res.stderr, "db_error") || strings.Contains(res.stdout, "db_error") {
+					t.Fatalf("db_error on an older archive: %s %s", res.stdout, res.stderr)
+				}
+				whole := mustJSON(t, res.stdout)
+				if c[0] == "doctor" {
+					for _, ch := range whole["checks"].([]any) {
+						m := ch.(map[string]any)
+						if m["name"] == "archive_upgrade" && m["warn"] == true {
+							return
+						}
+					}
+					t.Fatalf("doctor lacks the archive_upgrade warning: %s", res.stdout)
+				}
+				migrated := archiveCount(t, e.db, `select count(*) from pragma_table_info('sync_runs') where name='accounts_json'`) == 1
+				if mode == "max-age-0" {
+					if migrated || whole["needs_sync"] != true || whole["hint"] != "run teamscrawl sync" {
+						t.Fatalf("--max-age 0 must not sync and must say needs_sync: migrated %v, %s", migrated, res.stdout)
+					}
+					return
+				}
+				if !migrated || whole["needs_sync"] != nil || whole["archive_age_seconds"] == nil {
+					t.Fatalf("the implicit sync must upgrade the archive: migrated %v, %s", migrated, res.stdout)
+				}
+			})
+		}
+	}
+}

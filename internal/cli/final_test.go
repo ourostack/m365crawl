@@ -534,16 +534,17 @@ func TestWatcherPartialSyncRules(t *testing.T) {
 	if len(kinds(out.lines(t), "sync")) != 1 || w.fps != nil {
 		t.Fatalf("lines %v, fps %v", out.lines(t), w.fps)
 	}
-	// Before the baseline without --emit-initial: nothing is emitted and the baseline is not taken.
+	// The first sync that commits anything is the baseline: nothing is emitted, and the baseline
+	// is taken, so later partial ticks emit.
 	w, out, _, err = run(false, false)
 	codedErr(t, err, errs.CodePartialSync)
-	if out.String() != "" || w.baselined {
+	if out.String() != "" || !w.baselined || w.fps != nil {
 		t.Fatalf("out %q, baselined %v", out.String(), w.baselined)
 	}
-	// With --emit-initial the committed changes are emitted even though the baseline is not complete.
+	// With --emit-initial the committed changes are emitted for that first sync too.
 	w, out, _, err = run(true, false)
 	codedErr(t, err, errs.CodePartialSync)
-	if len(kinds(out.lines(t), "sync")) != 1 || w.baselined {
+	if len(kinds(out.lines(t), "sync")) != 1 || !w.baselined {
 		t.Fatalf("out %q, baselined %v", out.String(), w.baselined)
 	}
 	// A read-back failure while emitting is reported and does not hide the partial error.
@@ -649,4 +650,65 @@ func TestWatchItemsReportAFailedHTMLRead(t *testing.T) {
 	w.rt.fields = []string{"id", "html"}
 	_, err = w.items([]syncer.Change{{Kind: "message", Change: "new", Key: rows[0][0].(string)}})
 	codedErr(t, err, errs.CodeDBError)
+}
+
+func TestWatcherEmitsCommittedChangesWhenTheRunCannotBeRecorded(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	w, out, _ := jsonWatcher(t, e.root, e.db)
+	w.baselined = true
+	stubSync(t, func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
+		return syncer.Report{Status: syncer.StatusOK}, []syncer.Change{{Kind: "message", Change: "new", Key: "t|u|c|m"}}, errs.DBError(errors.New("disk full"))
+	})
+	done, err := w.sync()
+	codedErr(t, err, errs.CodeDBError)
+	if done || len(kinds(out.lines(t), "sync")) != 1 || w.fps != nil {
+		t.Fatalf("done %v, lines %v", done, out.lines(t))
+	}
+	// A failed run (nothing committed) is still just an error.
+	stubSync(t, func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
+		return syncer.Report{Status: syncer.StatusFailed}, nil, errs.DBError(errors.New("x"))
+	})
+	out.b.Reset()
+	if _, err := w.sync(); err == nil || out.String() != "" {
+		t.Fatalf("err %v out %q", err, out.String())
+	}
+}
+
+// Watch started while one source is already failing: the first partial sync is the baseline, and
+// a change in the healthy source afterwards is emitted.
+func TestWatchStartedWithABrokenSourceStillEmitsLaterChanges(t *testing.T) {
+	skipIfRoot(t)
+	w := newWatchEnv(t)
+	noEvents(t)
+	healthy, broken := w.secondSource()
+	manifest := filepath.Join(broken.LevelDBDir, "MANIFEST-000001")
+	if err := os.Chmod(manifest, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifest, 0o600) })
+	w.start("watch", "--every", "30ms")
+	w.waitFor("the baseline (partial) sync", func() bool { return w.archiveCount("select count(*) from sync_runs where status='partial'") > 0 })
+	w.waitFor("the partial error line", func() bool { return len(kinds(w.out.lines(t), "error")) > 0 })
+	if n := len(kinds(w.out.lines(t), "message")); n != 0 {
+		t.Fatalf("the baseline must be silent, got %d message lines", n)
+	}
+	w.forget(`rowid=(select min(rowid) from messages)`)
+	ts := time.Now().Add(5 * time.Hour)
+	_ = os.Chtimes(filepath.Join(healthy.LevelDBDir, "000003.log"), ts, ts)
+	w.waitFor("the healthy source's change", func() bool { return len(kinds(w.out.lines(t), "message")) == 1 })
+	if code := w.stop(); code != 0 {
+		t.Fatalf("exit %d: %s", code, w.errb.String())
+	}
+}
+
+func TestDoctorWarnsAboutAnArchiveFromAnOlderVersion(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	e.exec(`alter table sync_runs drop column accounts_json`)
+	code, stdout, stderr := e.run("doctor", "--json")
+	c := checks(t, decode(t, stdout))["archive_upgrade"]
+	if code != 0 || c["ok"] != true || c["warn"] != true || !strings.Contains(c["detail"].(string), "next sync upgrades it") {
+		t.Fatalf("exit %d: %v %s", code, c, stderr)
+	}
 }

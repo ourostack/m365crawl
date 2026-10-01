@@ -35,7 +35,7 @@ List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds
 
 ## Commands
 
-If the archive has never had a successful sync, every read result also carries `"needs_sync":true` and `"hint":"run teamscrawl sync"` (both omitted otherwise). An empty result with `needs_sync` means no data yet, not no match: run `teamscrawl sync` and repeat.
+If the archive has no complete sync yet, every read result also carries `"needs_sync":true` and `"hint":"run teamscrawl sync"` (both omitted otherwise). `needs_sync` means no complete sync yet: the archive has never synced, or only partial or failed syncs so far, or it was written by an older teamscrawl whose next sync upgrades it. An empty result with `needs_sync` means no data yet, not no match: run `teamscrawl sync` and repeat.
 
 System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are excluded by default from `search`, `messages`, `unread`, `thread`, the message text in `activity`, and `conversations`, because their messages duplicate real ones with blank sender and conversation names. Pass `--include-system` to bring them back. Your own notes (`48:notes`) stay included.
 
@@ -126,7 +126,7 @@ One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands
 
 When the first sync after an upgrade re-derives an older archive (see `sync`), watch prints one `{"kind":"migrated","from":1,"to":2,"rows":2854}` line before anything else, even for the silent baseline. It is not a change: no `edited` lines follow for those rows.
 
-`change` is `new`, `edited` or `deleted`; `item` has the same shape as a `messages` or `activity` item and honors `--fields`, `--max-text` and `--account` (system pseudo-conversations are skipped). A failed sync prints `{"kind":"error","error":{"code","message","fix"}}` and watching continues. When some sources committed and others failed (`partial_sync`), watch first prints the committed sources' changes and a `sync` line with `"status":"partial"`, then the error line, and the next pass retries only the failed sources, so no change is lost. `--fields html` fills `html`. a locked archive prints a `locked` warning on stderr and retries. Environment errors (`teams_not_installed`, `no_full_disk_access`, `no_teams_origin`, `archive_newer`) end the run with exit 3. Run it in the background and read its stdout; use `--fields` and `--max-text` to keep lines small.
+`change` is `new`, `edited` or `deleted`; `item` has the same shape as a `messages` or `activity` item and honors `--fields`, `--max-text` and `--account` (system pseudo-conversations are skipped). A failed sync prints `{"kind":"error","error":{"code","message","fix"}}` and watching continues. When some sources committed and others failed (`partial_sync`), watch first prints the committed sources' changes and a `sync` line with `"status":"partial"`, then the error line, and the next pass retries only the failed sources, so no change is lost. `--fields html` fills `html`. A locked archive prints a `locked` warning on stderr and retries. Environment errors (`teams_not_installed`, `no_full_disk_access`, `no_teams_origin`, `archive_newer`) end the run with exit 3. Run it in the background and read its stdout; use `--fields` and `--max-text` to keep lines small.
 
 ### doctor, sync, status
 
@@ -166,7 +166,7 @@ Errors go to stderr as `{"error":{"code","message","fix"}}` and set the exit sta
 | 1 | `store_missing` | A Teams store vanished. Ask the user to open Teams until it loads, then retry; if it persists, update teamscrawl. |
 | 1 | `db_error` | The archive cannot be read or written. Check `--db` path, permissions and disk space. |
 | 1 | `partial_sync` | Some Teams sources synced and others failed; the message names each failed source and its code. The synced sources are in the archive. Run `teamscrawl doctor`, fix the cause and sync again. |
-| 1 | `interrupted` | The command was stopped (Ctrl-C or a signal) before it finished; nothing was half-written. Run it again. A second Ctrl-C or SIGTERM during the stop quits at once with exit 130 and may leave a temporary snapshot that the next sync removes. |
+| 1 | `interrupted` | The command was stopped (Ctrl-C or a signal) before it finished; nothing was half-written. Run it again. A second Ctrl-C or SIGTERM during the stop quits at once with exit 130 and may leave a temporary snapshot, which a later sync removes once it is older than an hour. |
 | 1 | `internal` | A teamscrawl bug. Report the command you ran. |
 
 Recovering from an empty or stale archive: run `teamscrawl sync`, then repeat the read. An empty result after a successful sync means the desktop cache has nothing matching, not that teamscrawl failed.

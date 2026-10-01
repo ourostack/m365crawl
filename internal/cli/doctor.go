@@ -141,6 +141,10 @@ func (rt *runtime) archiveChecks() []check {
 		cs = append(cs, check{Name: "fts", Detail: "full-text indexes are missing", Fix: "Run `teamscrawl sync`; if they stay missing, move " + rt.dbPath + " aside and sync again."})
 	}
 	cs = append(cs, rt.archiveNewerCheck(st))
+	// Status just read the archive, so the probe cannot fail here; a failure would only hide the warning.
+	if old, _ := st.NeedsUpgrade(rt.ctx); old {
+		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `teamscrawl sync`."})
+	}
 	if c, ok := lastSyncStatusCheck(row.LastRun); ok {
 		cs = append(cs, c)
 	}

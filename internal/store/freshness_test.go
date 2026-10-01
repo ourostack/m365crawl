@@ -162,3 +162,53 @@ func TestCheckTeam(t *testing.T) {
 		t.Fatalf("known team: %v", err)
 	}
 }
+
+func TestReadOnlyFreshnessOnAnArchiveWithoutRunLevelRows(t *testing.T) {
+	ctx := context.Background()
+	p := filepath.Join(t.TempDir(), "old.db")
+	s := must(Open(ctx, p))
+	must0(s.ApplyAccount(ctx, acctA))
+	must0(s.RecordRun(ctx, Run{StartedAt: at(0), FinishedAt: at(time.Minute), Status: "ok", Accounts: []string{"*"}}))
+	if _, err := s.db.ExecContext(ctx, `alter table sync_runs drop column accounts_json`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	ro := must(OpenReadOnly(ctx, p))
+	defer func() { _ = ro.Close() }()
+	for i := 0; i < 2; i++ { // the second call uses the cached answer
+		if old := must(ro.NeedsUpgrade(ctx)); !old {
+			t.Fatal("the missing column must be detected")
+		}
+	}
+	if got := must(ro.LastSuccess(ctx)); !got.IsZero() {
+		t.Fatalf("no complete run yet, got %v", got)
+	}
+	if got := must(ro.LastSuccessFor(ctx, "a/b")); !got.IsZero() {
+		t.Fatalf("got %v", got)
+	}
+	if st := must(ro.Status(ctx)); !st.LastSuccessAt.IsZero() {
+		t.Fatalf("status: %v", st.LastSuccessAt)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := ro.LastSuccess(cctx); err != nil {
+		// cached: a cancelled context no longer matters
+		t.Fatalf("cached answer: %v", err)
+	}
+	fresh := must(OpenReadOnly(ctx, p))
+	defer func() { _ = fresh.Close() }()
+	if _, err := fresh.NeedsUpgrade(cctx); err == nil {
+		t.Fatal("a failing probe must be an error")
+	}
+}
+
+func TestNeedsUpgradeReportsAMissingSyncLog(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if _, err := s.db.ExecContext(ctx, `drop table sync_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.NeedsUpgrade(ctx); err == nil {
+		t.Fatal("a missing sync_runs table is an error, not an old archive")
+	}
+}
