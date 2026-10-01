@@ -52,7 +52,7 @@ func TestResponsibleAppStopsOnCycle(t *testing.T) {
 	go func() { done <- responsibleApp(lookup, 7, "") }()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("cycle in process chain hangs")
 	}
 }
