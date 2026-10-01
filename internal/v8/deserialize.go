@@ -197,6 +197,17 @@ func (d *decoder) readSize() (int, error) {
 	return int(v), nil //nolint:gosec // bounded by the remaining input length above
 }
 
+// readLengthPrefixed reads a varint length and then that many bytes, which alias the input.
+func (d *decoder) readLengthPrefixed() ([]byte, error) {
+	n, err := d.readSize() // already checked against the remaining input
+	if err != nil {
+		return nil, err
+	}
+	out := d.b[d.pos : d.pos+n]
+	d.pos += n
+	return out, nil
+}
+
 func (d *decoder) readRaw(n int) ([]byte, error) {
 	if n < 0 || n > len(d.b)-d.pos {
 		return nil, d.truncated()

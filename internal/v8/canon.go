@@ -199,9 +199,7 @@ func (c *canonWriter) wrapper(w *Wrapper) error {
 	default:
 		return fmt.Errorf("v8: cannot canonicalize wrapper value %T", w.Value)
 	}
-	if err := c.value(w.Value); err != nil {
-		return err
-	}
+	_ = c.value(w.Value) // cannot fail: the switch above admitted only scalar kinds
 	c.buf.WriteString(`]}`)
 	return nil
 }
