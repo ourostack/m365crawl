@@ -346,7 +346,7 @@ func TestManifestCutInsideLaterChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, b[:32768+20], 0o600); err != nil {
+	if err := os.WriteFile(p, b[:32768+20], 0o600); err != nil { //nolint:gosec // test temp dir
 		t.Fatal(err)
 	}
 	if _, err := readManifest(dir, "MANIFEST-000001"); !errors.Is(err, ErrManifestTruncated) {
@@ -450,10 +450,10 @@ func TestLiveLogsEdgeCases(t *testing.T) {
 func TestLoadDirectoryNotListable(t *testing.T) {
 	skipIfRoot(t)
 	dir := minimalDir(t)
-	if err := os.Chmod(dir, 0o100); err != nil { // search but not read
+	if err := os.Chmod(dir, 0o100); err != nil { //nolint:gosec // search but not read is the point of the test
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chmod(dir, 0o700) }()
+	defer func() { _ = os.Chmod(dir, 0o700) }() //nolint:gosec // restoring a test temp dir so cleanup can remove it
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "read dir") {
 		t.Fatalf("err = %v", err)
 	}
@@ -502,7 +502,7 @@ func TestReadLogCutInsideLaterChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, b[:32768+20], 0o600); err != nil {
+	if err := os.WriteFile(p, b[:32768+20], 0o600); err != nil { //nolint:gosec // test temp dir
 		t.Fatal(err)
 	}
 	s := newStore(nil)
