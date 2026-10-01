@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,6 +25,9 @@ type Filter struct {
 	// IncludeDeleted lists deleted messages too (they are never counted as unread).
 	IncludeDeleted bool
 	MentionsMe     bool // only messages that mention the account's own user
+	// DirectMentions keeps only messages that mention the account's own user by name: a person
+	// mention, not a channel, team, tag or @everyone broadcast (see MessageRow.MentionKind).
+	DirectMentions bool
 	Unread         bool // only unread messages (see unreadCond)
 	// IncludeChannels counts channel and team conversations (kinds Topic, Space) as unread
 	// sources too; by default unread covers chats and meetings only.
@@ -67,32 +71,36 @@ func (f Filter) limit() int {
 
 // MessageRow is a message as read back, with its conversation's composed display name.
 type MessageRow struct {
-	TenantID                string                  `json:"tenant_id"`
-	UserID                  string                  `json:"user_id"`
-	ConversationID          string                  `json:"conversation_id"`
-	ConversationDisplayName string                  `json:"conversation_display_name"`
-	ID                      string                  `json:"id"`
-	ReplyChainID            string                  `json:"reply_chain_id,omitempty"`
-	ParentMessageID         string                  `json:"parent_message_id,omitempty"`
-	ClientMessageID         string                  `json:"client_message_id,omitempty"`
-	SenderID                string                  `json:"sender_id"`
-	SenderName              string                  `json:"sender_name"`
-	SentAt                  time.Time               `json:"sent_at"`
-	EditedAt                time.Time               `json:"edited_at,omitzero"`
-	DeletedAt               time.Time               `json:"deleted_at,omitzero"`
-	MessageType             string                  `json:"message_type"`
-	ContentType             string                  `json:"content_type"`
-	ContentText             string                  `json:"content_text"`
-	Version                 int64                   `json:"version"`
-	Mentions                []teamsdesktop.Mention  `json:"mentions"`
-	MentionsMe              bool                    `json:"mentions_me"`
-	Reactions               []teamsdesktop.Reaction `json:"reactions"`
-	Files                   []teamsdesktop.File     `json:"files"`
-	Links                   []string                `json:"links"`
-	Subject                 string                  `json:"subject,omitempty"`
-	Importance              string                  `json:"importance,omitempty"`
-	Pinned                  bool                    `json:"pinned"`
-	Link                    string                  `json:"link,omitempty"`
+	TenantID                string                 `json:"tenant_id"`
+	UserID                  string                 `json:"user_id"`
+	ConversationID          string                 `json:"conversation_id"`
+	ConversationDisplayName string                 `json:"conversation_display_name"`
+	ID                      string                 `json:"id"`
+	ReplyChainID            string                 `json:"reply_chain_id,omitempty"`
+	ParentMessageID         string                 `json:"parent_message_id,omitempty"`
+	ClientMessageID         string                 `json:"client_message_id,omitempty"`
+	SenderID                string                 `json:"sender_id"`
+	SenderName              string                 `json:"sender_name"`
+	SentAt                  time.Time              `json:"sent_at"`
+	EditedAt                time.Time              `json:"edited_at,omitzero"`
+	DeletedAt               time.Time              `json:"deleted_at,omitzero"`
+	MessageType             string                 `json:"message_type"`
+	ContentType             string                 `json:"content_type"`
+	ContentText             string                 `json:"content_text"`
+	Version                 int64                  `json:"version"`
+	Mentions                []teamsdesktop.Mention `json:"mentions"`
+	MentionsMe              bool                   `json:"mentions_me"`
+	// MentionKind says how the message mentions the account: person (by name), channel, team, tag,
+	// everyone, or other when the feed gives a kind this version does not know. Empty unless
+	// MentionsMe.
+	MentionKind string                  `json:"mention_kind,omitempty"`
+	Reactions   []teamsdesktop.Reaction `json:"reactions"`
+	Files       []teamsdesktop.File     `json:"files"`
+	Links       []string                `json:"links"`
+	Subject     string                  `json:"subject,omitempty"`
+	Importance  string                  `json:"importance,omitempty"`
+	Pinned      bool                    `json:"pinned"`
+	Link        string                  `json:"link,omitempty"`
 	// ReplyCount and LastReplyAt describe a channel thread root: the number of live replies and
 	// when the newest one was sent. ReplyCount is nil for every other message (a reply, a chat
 	// message), so 0 means "a root nobody has answered".
@@ -133,8 +141,10 @@ type ActivityFilter struct {
 	Account *teamsdesktop.Account
 	Unread  bool
 	Type    string // case-insensitive exact match
-	Since   time.Time
-	Limit   int // 0 means DefaultLimit
+	// DirectMentions keeps only mention items that name the account's own user (subtype person).
+	DirectMentions bool
+	Since          time.Time
+	Limit          int // 0 means DefaultLimit
 	// IncludeSystem also joins messages of the system pseudo-conversations.
 	IncludeSystem bool
 	Team          string // as Filter.Team
@@ -160,6 +170,10 @@ type ActivityRow struct {
 	SenderName              string    `json:"sender_name"`
 	MessageSentAt           time.Time `json:"message_sent_at,omitzero"`
 	MessageLink             string    `json:"message_link,omitempty"`
+	// ActorID and ActorName say who did the thing the item reports: who reacted, replied or
+	// mentioned. They stay empty for a type whose data names no one (see actorOf).
+	ActorID   string `json:"actor_id,omitempty"`
+	ActorName string `json:"actor_name,omitempty"`
 }
 
 // WhoamiRow is one archived account.
@@ -195,6 +209,15 @@ const (
 	// that arrives in a later sync counts without rewriting the message.
 	mentionsMeExpr = `(m.mentions_me=1 or exists(select 1 from activity a where a.tenant_id=m.tenant_id and a.user_id=m.user_id and a.conversation_id=m.conversation_id and a.message_id=m.id and a.type like 'mention%'))`
 
+	// mentionKindExpr is how the message mentions the account, for a message that does (see
+	// mentionsMeExpr). A person mention by id is "person"; otherwise the account's own feed says
+	// why it was notified (the mention item's subtype), the person subtype first. A subtype this
+	// version does not know is "other". Without any feed item the message is not a mention.
+	mentionKindExpr = `(case when m.mentions_me=1 then 'person' else coalesce((select case lower(a.subtype) when 'person' then 'person' when 'channel' then 'channel' when 'team' then 'team' when 'tag' then 'tag' when 'everyone' then 'everyone' else 'other' end from activity a where a.tenant_id=m.tenant_id and a.user_id=m.user_id and a.conversation_id=m.conversation_id and a.message_id=m.id and a.type like 'mention%' order by lower(a.subtype)='person' desc, a.at desc limit 1),'') end)`
+	// directMentionExpr holds for a message that mentions the account by name: a person mention by
+	// id, or a mention item whose subtype is person.
+	directMentionExpr = `(m.mentions_me=1 or exists(select 1 from activity a where a.tenant_id=m.tenant_id and a.user_id=m.user_id and a.conversation_id=m.conversation_id and a.message_id=m.id and a.type like 'mention%' and lower(a.subtype)='person'))`
+
 	// senderNameExpr is the message's own sender name, else the name the people table holds for
 	// the sender id (call events and many bot posts carry an id but no name).
 	senderNameExpr = `coalesce(nullif(m.sender_name,''),p.display_name,'')`
@@ -204,7 +227,7 @@ const (
 	// limit so a long list is not counted row by row before it is cut.
 	replyRootCond = `(` + isChannelCond + ` and (m.reply_chain_id='' or m.reply_chain_id=m.id))`
 
-	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,` + senderNameExpr + `,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link,case when ` + replyRootCond + ` then 1 else 0 end`
+	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,` + senderNameExpr + `,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,` + mentionKindExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link,case when ` + replyRootCond + ` then 1 else 0 end`
 	msgJoin = ` left join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
  left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id
  left join people p on p.tenant_id=m.tenant_id and p.id=m.sender_id`
@@ -277,6 +300,9 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 	if f.MentionsMe {
 		w.add(mentionsMeExpr)
 	}
+	if f.DirectMentions {
+		w.add(directMentionExpr)
+	}
 	if f.Unread {
 		w.add(unreadCond)
 		if !f.IncludeChannels {
@@ -293,7 +319,7 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 		var r MessageRow
 		var sent, edited, deleted, mentions, reactions, files, links sql.NullString
 		var mentionsMe, pinned, root int
-		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &root); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &r.MentionKind, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &root); err != nil {
 			return nil, err
 		}
 		r.SentAt, r.EditedAt, r.DeletedAt, r.replyRoot = parseTime(sent), parseTime(edited), parseTime(deleted), root == 1
@@ -447,7 +473,7 @@ func (s *Store) Messages(ctx context.Context, f Filter) ([]MessageRow, bool, err
 // hasFilter reports whether f narrows messages by anything but the account and the listing
 // switches: the filters that make a search with no words meaningful.
 func (f Filter) hasFilter() bool {
-	return f.MentionsMe || f.From != "" || f.Conversation != "" || f.Team != "" || !f.Since.IsZero() || !f.Until.IsZero()
+	return f.MentionsMe || f.DirectMentions || f.From != "" || f.Conversation != "" || f.Team != "" || !f.Since.IsZero() || !f.Until.IsZero()
 }
 
 // Search matches message text with FTS5, newest first. Terms are ANDed; "quoted" segments are
@@ -738,10 +764,61 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 		}
 		w.add(teamCond, id, id)
 	}
+	if f.DirectMentions {
+		w.add(`(a.type like 'mention%' and lower(a.subtype)='person')`)
+	}
 	if !f.Since.IsZero() {
 		w.add(`a.at>=?`, fmtTime(f.Since))
 	}
-	return s.activityRows(ctx, &w, Filter{Limit: f.Limit}.limit(), f.IncludeSystem, f.Total)
+	rows, trunc, err := s.activityRows(ctx, &w, Filter{Limit: f.Limit}.limit(), f.IncludeSystem, f.Total)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.fillActors(ctx, rows); err != nil {
+		return nil, false, err
+	}
+	return rows, trunc, nil
+}
+
+// fillActors sets ActorID and ActorName on the items whose type names who acted:
+//   - mention*, reply*, follow: the sender of the message the item points at (the person who
+//     mentioned, replied or posted); empty when that message is not archived;
+//   - reaction*: the reactor, read from the reacted-to message's reactions (the item's own
+//     sender is that message's author); empty when no one but the account reacted;
+//   - any other type (msGraph system notices, membership changes, thread activity): no actor.
+func (s *Store) fillActors(ctx context.Context, rows []ActivityRow) error {
+	for i := range rows {
+		r := &rows[i]
+		switch typ := strings.ToLower(r.Type); {
+		case strings.HasPrefix(typ, "mention"), strings.HasPrefix(typ, "reply"), typ == "follow":
+			r.ActorID, r.ActorName = r.SenderID, r.SenderName
+		case strings.HasPrefix(typ, "reaction"):
+			id, err := s.reactor(ctx, r)
+			if err != nil {
+				return err
+			}
+			if r.ActorID = id; id != "" {
+				if err := s.db.QueryRowContext(ctx, `select coalesce((select display_name from people where tenant_id=? and id=?),'')`, r.TenantID, id).Scan(&r.ActorName); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// reactor is the MRI of whoever caused the reaction item r, or "" when the reacted-to message is
+// not archived or names no one else.
+func (s *Store) reactor(ctx context.Context, r *ActivityRow) (string, error) {
+	var raw sql.NullString
+	err := s.db.QueryRowContext(ctx, `select raw_json from messages where tenant_id=? and user_id=? and conversation_id=? and id=?`, r.TenantID, r.UserID, r.ConversationID, r.MessageID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return teamsdesktop.ReactionActor([]byte(raw.String), r.Subtype, r.At, "8:orgid:"+r.UserID), nil
 }
 
 // splitTypes splits a comma-separated list of activity types, dropping blanks.
