@@ -182,6 +182,9 @@ func (rt *runtime) listTable(r *listResult) {
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})
+		case teamItem:
+			cols, textCol = []string{"last_activity_at", "team", "channels", "unread"}, -1
+			rows = append(rows, []string{stamp(x.LastActivityAt), x.DisplayName, strconv.Itoa(x.ChannelCount), strconv.Itoa(x.UnreadCount)})
 		case personItem:
 			cols, textCol = []string{"name", "id", "last_seen_at"}, -1
 			rows = append(rows, []string{x.DisplayName, x.ID, stamp(x.LastSeenAt)})
@@ -190,8 +193,8 @@ func (rt *runtime) listTable(r *listResult) {
 			if x.IsRead {
 				read = "read"
 			}
-			cols, textCol = []string{"at", "type", "state", "sender", "conversation", "text"}, 5
-			rows = append(rows, []string{stamp(x.At), x.Type, read, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
+			cols, textCol = []string{"at", "type", "state", "actor", "sender", "conversation", "text"}, 6
+			rows = append(rows, []string{stamp(x.At), x.Type, read, x.ActorName, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
 		case projected:
 			cols, textCol = x.keys, -1
 			row := make([]string, len(x.keys))

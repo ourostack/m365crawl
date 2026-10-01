@@ -61,6 +61,7 @@ type cliApp struct {
 	Search        searchCmd        "cmd:\"\" help:\"Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).\""
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
+	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
 	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
@@ -146,7 +147,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "people", "activity", "unread", "thread", "watch"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "unread", "thread", "watch"}
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 

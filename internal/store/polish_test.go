@@ -178,7 +178,7 @@ func TestTeamFilter(t *testing.T) {
 	}
 	// No match: usage error with a fix that says how to find a team.
 	_, _, err = s.Messages(ctx, Filter{Team: "Nope"})
-	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || !strings.Contains(coded.Fix, "conversations") {
+	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || !strings.Contains(coded.Fix, "teamscrawl teams") {
 		t.Fatalf("no match: %v", err)
 	}
 	// A chat is not a team: its name does not resolve.

@@ -61,7 +61,7 @@ func (s *Store) resolveTeam(ctx context.Context, acct *teamsdesktop.Account, q s
 // NoTeam is the usage error for a --team that matches nothing.
 func NoTeam(q string) *errs.Coded {
 	c := errs.Usage(fmt.Sprintf("no team matches %q", q))
-	c.Fix = "Find the team with `teamscrawl conversations --kind Space --query <words>`, then pass its exact name or its id to --team. A team Teams has not written to the cache yet is not archived: run `teamscrawl sync` first."
+	c.Fix = "List the teams with `teamscrawl teams`, then pass the team's exact display_name or its team_id to --team. A team Teams has not written to the cache yet is not archived: run `teamscrawl sync` first."
 	return c
 }
 
