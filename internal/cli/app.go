@@ -171,13 +171,14 @@ func (rt *runtime) checkListOnly() error {
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
 	var coded *errs.Coded
-	if !errors.As(err, &coded) {
+	if errors.Is(err, context.Canceled) {
+		// SIGINT or SIGTERM cancelled the context, possibly under a wrapping coded error.
+		coded = errs.Interrupted()
+	} else if !errors.As(err, &coded) {
 		var pe *kong.ParseError
 		switch {
 		case errors.As(err, &pe):
 			coded = errs.Usage(pe.Error())
-		case errors.Is(err, context.Canceled):
-			coded = errs.Internal(errors.New("interrupted"))
 		default:
 			coded = errs.Internal(err)
 		}

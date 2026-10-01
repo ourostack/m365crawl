@@ -139,6 +139,7 @@ Errors go to stderr as `{"error":{"code","message","fix"}}` and set the exit sta
 | 1 | `unsupported_block_compression` | The cache uses a format this version cannot read. Update teamscrawl and report it with `doctor` output. |
 | 1 | `store_missing` | A Teams store vanished. Ask the user to open Teams until it loads, then retry; if it persists, update teamscrawl. |
 | 1 | `db_error` | The archive cannot be read or written. Check `--db` path, permissions and disk space. |
+| 1 | `interrupted` | The command was stopped (Ctrl-C or a signal) before it finished; nothing was half-written. Run it again. |
 | 1 | `internal` | A teamscrawl bug. Report the command you ran. |
 
 Recovering from an empty or stale archive: run `teamscrawl sync`, then repeat the read. An empty result after a successful sync means the desktop cache has nothing matching, not that teamscrawl failed.
