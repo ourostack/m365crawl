@@ -288,3 +288,20 @@ func TestFilteredLazyMatchesGoleveldb(t *testing.T) {
 		}
 	}
 }
+
+// A version of a key that is not newer than the one held is ignored, whichever order the files
+// are read in. A compacted fixture rarely holds two versions of a key, so this is checked
+// directly rather than left to what goleveldb happens to leave on disk.
+func TestStorePutKeepsNewestVersion(t *testing.T) {
+	s := newStore(nil)
+	s.put([]byte("k"), 5, false, []byte("new"), nil)
+	s.put([]byte("k"), 3, false, []byte("old"), nil)
+	s.put([]byte("k"), 5, true, nil, nil)
+	if e := s.m["k"]; e.seq != 5 || e.deleted || string(e.value) != "new" {
+		t.Fatalf("entry = %+v, want the seq 5 value %q", e, "new")
+	}
+	s.put([]byte("k"), 6, true, nil, nil)
+	if e := s.m["k"]; e.seq != 6 || !e.deleted {
+		t.Fatalf("entry = %+v, want the seq 6 deletion", e)
+	}
+}
