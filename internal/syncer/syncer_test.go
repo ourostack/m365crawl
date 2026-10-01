@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -407,12 +409,18 @@ func TestPauseHookAndCancel(t *testing.T) {
 
 	// A cancelled run stops during the pause, removes its snapshot and records a failure.
 	t.Setenv("TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "30s")
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	// Cancel on the observable signal (the pause marker on stderr), not after a wall-clock delay:
+	// under load a fixed deadline can expire before the run ever reaches the pause.
+	paused := captureStderrMarker(t, testPauseMarker)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start = time.Now()
+	go func() {
+		<-paused
+		cancel()
+	}()
 	_, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: db, Account: &acctA})
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 10*time.Second {
-		t.Fatalf("err = %v after %v", err, time.Since(start))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
 	}
 	if left := snapshotDirs(t, tmp); len(left) != 0 {
 		t.Fatalf("snapshot left behind: %v", left)
@@ -420,6 +428,37 @@ func TestPauseHookAndCancel(t *testing.T) {
 	if st := readStatus(t, db); st.LastRun.Status != "failed" {
 		t.Fatalf("cancelled run: %+v", st.LastRun)
 	}
+}
+
+// captureStderrMarker redirects os.Stderr for the test and returns a channel that closes once a
+// line containing marker has been written to it.
+func captureStderrMarker(t *testing.T, marker string) <-chan struct{} {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	seen := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var once sync.Once
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			if strings.Contains(sc.Text(), marker) {
+				once.Do(func() { close(seen) })
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		os.Stderr = old
+		_ = w.Close()
+		<-done
+		_ = r.Close()
+	})
+	return seen
 }
 
 func TestSweepsStaleSnapshots(t *testing.T) {

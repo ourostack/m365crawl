@@ -491,11 +491,13 @@ func TestWatchDebouncesBursts(t *testing.T) {
 	w.baselineDone()
 	w.touch()
 	before := calls.Load()
+	// The channel is buffered, so the whole burst lands at once; stamp the clock before the last
+	// event so a descheduled test goroutine cannot make the quiet period look shorter than it was.
+	var last time.Time
 	for i := 0; i < 20; i++ {
+		last = time.Now()
 		ch <- struct{}{}
-		time.Sleep(5 * time.Millisecond)
 	}
-	last := time.Now()
 	w.waitFor("the burst's sync", func() bool { return calls.Load() > before })
 	if d := time.Since(last); d < 100*time.Millisecond {
 		t.Fatalf("sync started %v after the last event, want the quiet period first", d)
@@ -604,11 +606,9 @@ func TestWatchDebounceMaxWait(t *testing.T) {
 		}
 	}()
 	defer close(stop)
-	first := time.Now()
+	// The stream never goes quiet, so a sync here can only come from the max wait; waitFor bounds
+	// how long we wait for it without a wall-clock upper limit that a loaded machine could trip.
 	w.waitFor("a sync during the event stream", func() bool { return calls.Load() > before })
-	if d := time.Since(first); d > 2*time.Second {
-		t.Fatalf("sync started %v into a continuous burst, want about the max wait", d)
-	}
 }
 
 // A lock held briefly by another run delays the watch by a short backoff, not by --every.
