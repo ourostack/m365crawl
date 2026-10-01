@@ -49,7 +49,7 @@ IndexedDB names its databases `Teams:<manager>:react-web-client:<tenantId>:<user
 | `conversation-manager` | `conversations` |
 | `activity-manager` | `feed-items` |
 
-Every other database, including `Teams:auth:*`, is never decoded, and its values are never held in memory. This is both a privacy rule and a memory rule: a real origin holds about a hundred other databases, and the three above are a small share of its bytes.
+Every other database, including `Teams:auth:*`, is never decoded, and its values are never held in memory. This is both a privacy rule and a memory rule: a real origin holds over a hundred other databases, and the three above are a small share of its bytes.
 
 Even within the allowlist, a table value of 512 bytes or more is not kept in memory. The reader remembers where the value lives and re-reads that one block from the snapshot when the record is decoded, through a small cache of recently used blocks. This is why the snapshot must stay in place until the source is finished, and why a full sync peaks near 0.2 GB where loading every database's values took about 0.8 GB.
 
