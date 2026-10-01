@@ -17,11 +17,7 @@ func (d *decoder) readString() (string, error) {
 }
 
 func (d *decoder) readUTF8String() (string, error) {
-	n, err := d.readSize()
-	if err != nil {
-		return "", err
-	}
-	raw, err := d.readRaw(n)
+	raw, err := d.readLengthPrefixed()
 	if err != nil {
 		return "", err
 	}
@@ -39,11 +35,7 @@ func (d *decoder) readUTF8String() (string, error) {
 
 // readOneByteString reads a Latin-1 string and returns it as UTF-8.
 func (d *decoder) readOneByteString() (string, error) {
-	n, err := d.readSize()
-	if err != nil {
-		return "", err
-	}
-	raw, err := d.readRaw(n)
+	raw, err := d.readLengthPrefixed()
 	if err != nil {
 		return "", err
 	}
@@ -58,16 +50,13 @@ func (d *decoder) readOneByteString() (string, error) {
 // surrogates are encoded as three-byte WTF-8 sequences (ED A0 80 to ED BF BF)
 // so the original code units can be recovered.
 func (d *decoder) readTwoByteString() (string, error) {
-	n, err := d.readSize()
+	raw, err := d.readLengthPrefixed()
 	if err != nil {
 		return "", err
 	}
+	n := len(raw)
 	if n%2 != 0 {
 		return "", d.errorf("two-byte string has odd byte length %d", n)
-	}
-	raw, err := d.readRaw(n)
-	if err != nil {
-		return "", err
 	}
 	out := make([]byte, 0, n*3/2)
 	for i := 0; i < n; i += 2 {
