@@ -31,12 +31,25 @@ func TestSearchWithoutWordsUsesFilters(t *testing.T) {
 			t.Errorf("%v: exit %d %v", args, code, body)
 		}
 	}
-	// A query still works and combines with a filter.
-	code, stdout, _ := e.run("--max-age", "0", "search", "Fixture", "--from", "Pat")
-	if code != 0 {
-		t.Fatalf("exit %d", code)
+	// A query still works and combines with a filter: every item matches both.
+	_, stdout, _ = e.run("--max-age", "0", "search", "Fixture", "--limit", "500")
+	byQuery := items(t, decode(t, stdout))
+	_, stdout, _ = e.run("--max-age", "0", "search", "Fixture", "--from", "Alex", "--limit", "500")
+	both := items(t, decode(t, stdout))
+	if len(both) == 0 || len(both) > len(byQuery) {
+		t.Fatalf("query alone found %d, with --from %d", len(byQuery), len(both))
 	}
-	_ = stdout
+	for _, it := range both {
+		text, _ := it["text"].(string)
+		sender, _ := it["sender_name"].(string)
+		if !strings.Contains(strings.ToLower(text), "fixture") || !strings.Contains(strings.ToLower(sender), "alex") {
+			t.Errorf("item matches only one of query and --from: sender %q text %q", sender, text)
+		}
+	}
+	_, stdout, _ = e.run("--max-age", "0", "search", "Fixture", "--from", "Nobody Atall")
+	if n := len(items(t, decode(t, stdout))); n != 0 {
+		t.Errorf("--from with no such sender still found %d", n)
+	}
 }
 
 func TestTeamFlagOnEveryCommand(t *testing.T) {
@@ -183,6 +196,13 @@ func TestReplyCountAndCardTextInOutput(t *testing.T) {
 func TestActivityTypeListFlag(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
+	// A list that names no type is a usage error, not "every type".
+	for _, typ := range []string{",", " , ,"} {
+		code, _, stderr := e.run("--max-age", "0", "activity", "--type", typ)
+		if body := errorOf(t, stderr); code != 2 || !strings.Contains(body["message"].(string), "--type") {
+			t.Errorf("--type %q: exit %d %v", typ, code, body)
+		}
+	}
 	n := func(typ string) int {
 		return e.runCount([]string{"--max-age", "0", "activity", "--type", typ})
 	}

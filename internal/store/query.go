@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
@@ -370,11 +371,19 @@ func (s *Store) countTotal(ctx context.Context, total *int, from string, w *wher
 	if total == nil {
 		return nil
 	}
+	if pruneJoinsOff {
+		return s.db.QueryRowContext(ctx, `select count(*)`+from+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	}
 	return s.db.QueryRowContext(ctx, `select count(*)`+pruneJoins(from, w.sql())+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
 }
 
+// pruneJoinsOff makes countTotal count over the full from clause; a test sets it to compare.
+var pruneJoinsOff bool
+
 // pruneJoins drops the left joins of a from clause that the where clause (and the joins kept)
-// never refer to. Every join here is a left join on a unique key, so it adds no rows and a count
+// never refer to. It rewrites SQL text: a join is kept when its alias followed by a dot ("t.")
+// occurs in the where clause or in a kept join, so the aliases (c, t, p, m, sp) must never appear
+// as "<alias>." inside a literal or another token. Every join here is a left join on a unique key, so it adds no rows and a count
 // is the same without it; skipping them makes the count over a large archive several times faster.
 func pruneJoins(from, whereSQL string) string {
 	parts := strings.Split(from, " left join ")
@@ -388,7 +397,7 @@ func pruneJoins(from, whereSQL string) string {
 				continue
 			}
 			alias := strings.Fields(j)[1]
-			if regexp.MustCompile(`\b` + alias + `\.`).MatchString(text) {
+			if aliasRef(alias).MatchString(text) {
 				keep[i], changed = true, true
 				text += " " + j
 			}
@@ -401,6 +410,22 @@ func pruneJoins(from, whereSQL string) string {
 	}
 	return base
 }
+
+var aliasRefs = map[string]*regexp.Regexp{}
+
+// aliasRef is the pattern for a reference to a join alias, compiled once per alias.
+func aliasRef(alias string) *regexp.Regexp {
+	aliasRefsMu.Lock()
+	defer aliasRefsMu.Unlock()
+	re, ok := aliasRefs[alias]
+	if !ok {
+		re = regexp.MustCompile(`\b` + regexp.QuoteMeta(alias) + `\.`)
+		aliasRefs[alias] = re
+	}
+	return re
+}
+
+var aliasRefsMu sync.Mutex
 
 // Messages lists messages in chronological order. With a Limit it returns the newest Limit
 // messages matching the filter (still oldest first), and truncated says older ones exist.
@@ -694,7 +719,11 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 	if f.Unread {
 		w.add(`a.is_read=0`)
 	}
-	if types := splitTypes(f.Type); len(types) > 0 {
+	types := splitTypes(f.Type)
+	if f.Type != "" && len(types) == 0 {
+		return nil, false, errs.Usage("--type names no activity type: give one or more, comma separated (for example --type mention,reply)")
+	}
+	if len(types) > 0 {
 		conds := make([]string, len(types))
 		args := make([]any, len(types))
 		for i, t := range types {

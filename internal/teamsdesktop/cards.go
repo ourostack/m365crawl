@@ -19,7 +19,7 @@ func cardsText(v any) string {
 		if content == nil {
 			continue
 		}
-		lines = appendCardLines(lines, content)
+		lines = appendCardLines(lines, content, 0)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -27,7 +27,14 @@ func cardsText(v any) string {
 // cardNesting are the Adaptive Card keys whose values hold more elements.
 var cardNesting = []string{"body", "items", "columns", "rows", "cells"}
 
-func appendCardLines(lines []string, el any) []string {
+// maxCardDepth bounds how deep card elements nest. A structured clone can hold a reference back
+// to an ancestor (a cycle); without a bound the walk would overflow the stack, which is fatal.
+const maxCardDepth = 32
+
+func appendCardLines(lines []string, el any, depth int) []string {
+	if depth > maxCardDepth {
+		return lines
+	}
 	add := func(s string) {
 		if s = strings.TrimSpace(s); s != "" {
 			lines = append(lines, s)
@@ -58,7 +65,7 @@ func appendCardLines(lines []string, el any) []string {
 	}
 	for _, k := range cardNesting {
 		for _, child := range items(fld(el, k)) {
-			lines = appendCardLines(lines, child)
+			lines = appendCardLines(lines, child, depth+1)
 		}
 	}
 	return lines

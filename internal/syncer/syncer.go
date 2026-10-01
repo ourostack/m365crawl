@@ -61,10 +61,17 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 			rep, changes, err = fail(errs.Internal(fmt.Errorf("panic while syncing: %v", p)))
 		}
 	}()
+	// An archive written by an older build gets its derived fields recomputed first, so that this
+	// sync's content hashes compare against current ones and the upgrade is not read as edits.
+	migrated, err := st.Rederive(ctx)
+	if err != nil {
+		return fail(errs.DBError(err))
+	}
 	rep, changes, err = r.run(ctx, started)
 	if err != nil {
 		return fail(err)
 	}
+	rep.Migrated = migrated
 	return rep, changes, nil
 }
 
