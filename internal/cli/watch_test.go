@@ -102,9 +102,9 @@ func copyTree(t *testing.T, src, dst string) {
 // fastWatch shrinks the debounce so tests run in milliseconds.
 func fastWatch(t *testing.T) {
 	t.Helper()
-	q, g := watchQuiet, watchMinGap
-	watchQuiet, watchMinGap = 20*time.Millisecond, 40*time.Millisecond
-	t.Cleanup(func() { watchQuiet, watchMinGap = q, g })
+	q, g, m, l := watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry
+	watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry = 20*time.Millisecond, 40*time.Millisecond, 10*time.Second, 30*time.Millisecond
+	t.Cleanup(func() { watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry = q, g, m, l })
 }
 
 // noEvents makes watch poll only.
@@ -519,4 +519,154 @@ func TestWatchFileEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.waitFor("a sync from a file event", func() bool { return len(kinds(w.out.lines(t), "sync")) > 0 })
+}
+
+// firstLog is an existing .log (or .ldb) file in the first source's leveldb directory.
+func (w *watchEnv) firstLog() string {
+	w.t.Helper()
+	dir := w.sources()[0].LevelDBDir
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if strings.HasSuffix(e.Name(), ".log") && !strings.HasPrefix(e.Name(), "LOG") {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	w.t.Fatal("no .log file in the fixture's leveldb dir")
+	return ""
+}
+
+// Teams appends to the live .log file: no create, no mtime-only change. The real watcher must see it.
+func TestWatchFileEventsAppend(t *testing.T) {
+	w := newWatchEnv(t)
+	w.start("watch", "--every", "1h")
+	w.baselineDone()
+	time.Sleep(300 * time.Millisecond) // let the watcher settle after the baseline
+	f, err := os.OpenFile(w.firstLog(), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	w.waitFor("a sync from an append", func() bool { return len(kinds(w.out.lines(t), "sync")) > 0 })
+}
+
+// LevelDB renames a finished temp file into place (MANIFEST, CURRENT); the real watcher must see it.
+func TestWatchFileEventsRename(t *testing.T) {
+	w := newWatchEnv(t)
+	w.start("watch", "--every", "1h")
+	w.baselineDone()
+	time.Sleep(300 * time.Millisecond)
+	dir := w.sources()[0].LevelDBDir
+	tmp := filepath.Join(dir, "000998.dbtmp")
+	if err := os.WriteFile(tmp, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Drain the create event's sync, then rename and expect another.
+	w.waitFor("a sync from the create", func() bool { return len(kinds(w.out.lines(t), "sync")) > 0 })
+	n := len(kinds(w.out.lines(t), "sync"))
+	if err := os.Rename(tmp, filepath.Join(dir, "000998.ldb.moved")); err != nil {
+		t.Fatal(err)
+	}
+	w.waitFor("a sync from the rename", func() bool { return len(kinds(w.out.lines(t), "sync")) > n })
+}
+
+// Events that never stop must not postpone the sync forever: it starts at most watchMaxWait after
+// the burst's first event.
+func TestWatchDebounceMaxWait(t *testing.T) {
+	w := newWatchEnv(t)
+	ch := make(chan struct{}, 64)
+	old := watchEvents
+	watchEvents = func(context.Context, []string) (<-chan struct{}, func(), error) { return ch, func() {}, nil }
+	t.Cleanup(func() { watchEvents = old })
+	var calls atomic.Int32
+	oldSync := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		calls.Add(1)
+		return oldSync(ctx, o)
+	}
+	t.Cleanup(func() { runSync = oldSync })
+	w.start("watch", "--every", "1h")
+	w.baselineDone()
+	watchQuiet, watchMinGap, watchMaxWait = 200*time.Millisecond, 0, 400*time.Millisecond
+	w.touch()
+	before := calls.Load()
+	stop := make(chan struct{})
+	go func() { // an event every 20 ms: the quiet period never elapses
+		for {
+			select {
+			case <-stop:
+				return
+			case ch <- struct{}{}:
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+	}()
+	defer close(stop)
+	first := time.Now()
+	w.waitFor("a sync during the event stream", func() bool { return calls.Load() > before })
+	if d := time.Since(first); d > 2*time.Second {
+		t.Fatalf("sync started %v into a continuous burst, want about the max wait", d)
+	}
+}
+
+// A lock held briefly by another run delays the watch by a short backoff, not by --every.
+func TestWatchLockedRetriesQuickly(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	release, err := store.AcquireLock(w.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	w.start("watch", "--every", "1h")
+	w.waitFor("the locked warning", func() bool { return strings.Contains(w.errb.String(), "locked") })
+	release()
+	w.baselineDone() // would take an hour if the retry waited for --every
+}
+
+// If the changed rows cannot be read back after a successful sync, say so instead of dropping them.
+func TestWatchReadbackFailureIsReported(t *testing.T) {
+	skipIfRoot(t)
+	w := newWatchEnv(t)
+	noEvents(t)
+	var calls atomic.Int32
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		rep, ch, err := old(ctx, o)
+		if calls.Add(1) == 2 {
+			_ = os.Chmod(w.db, 0) // the archive can no longer be opened for the read-back
+			t.Cleanup(func() { _ = os.Chmod(w.db, 0o600) })
+		}
+		return rep, ch, err
+	}
+	t.Cleanup(func() { runSync = old })
+	w.start("watch", "--every", "30ms")
+	w.baselineDone()
+	w.forget(`rowid=(select min(rowid) from messages)`)
+	w.touch()
+	w.waitFor("the error line", func() bool { return len(kinds(w.out.lines(t), "error")) > 0 })
+	e := kinds(w.out.lines(t), "error")[0]["error"].(map[string]any)
+	if !strings.Contains(e["message"].(string), "1 change") || e["fix"] == "" {
+		t.Fatalf("error line: %v", e)
+	}
+}
+
+// A baseline that failed and was followed by a successful sync is silent about its changes; say so.
+func TestWatchLateBaselineWarns(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	var calls atomic.Int32
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		if calls.Add(1) == 1 {
+			return syncer.Report{}, nil, errs.SnapshotInconsistent("a file vanished")
+		}
+		return old(ctx, o)
+	}
+	t.Cleanup(func() { runSync = old })
+	w.start("watch", "--every", "30ms")
+	w.baselineDone()
+	w.waitFor("the late-baseline warning", func() bool { return strings.Contains(w.errb.String(), "baseline_delayed") })
 }
