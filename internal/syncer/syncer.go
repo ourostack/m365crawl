@@ -64,6 +64,10 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	// An archive written by an older build gets its derived fields recomputed first, so that this
 	// sync's content hashes compare against current ones and the upgrade is not read as edits.
 	migrated, err := st.Rederive(ctx)
+	var coded *errs.Coded
+	if errors.As(err, &coded) && coded.Code == errs.CodeArchiveNewer {
+		return Report{}, nil, err // before any write: not even a failed-run record
+	}
 	if err != nil {
 		return fail(errs.DBError(err))
 	}
