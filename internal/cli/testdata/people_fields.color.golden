@@ -1,11 +1,15 @@
-[2mdisplay_name[0m   [2mlast_seen_at[0m
-[2m-------------[0m  [2m--------------------[0m
-Alex Fixture   2023-11-14T22:15:00Z
-Blair Fixture  2023-11-14T22:15:00Z
-Pat Example    2023-11-14T22:15:00Z
-Pat Example    2023-11-14T22:15:00Z
-Sam Example    2023-11-14T22:15:00Z
-Sam Example    2023-11-14T22:15:00Z
+[2mdisplay_name[0m    [2mlast_seen_at[0m
+[2m--------------[0m  [2m--------------------[0m
+Alex Fixture    2023-11-14T22:15:00Z
+Blair Fixture   2023-11-14T22:15:00Z
+everyone        2023-11-14T22:14:16Z
+everyone        2023-11-14T22:14:16Z
+Fixture team 1  2023-11-14T22:14:14Z
+Fixture team 2  2023-11-14T22:14:14Z
+Pat Example     2023-11-14T22:15:00Z
+Pat Example     2023-11-14T22:15:00Z
+Sam Example     2023-11-14T22:15:00Z
+Sam Example     2023-11-14T22:15:00Z
 
-[2m6 items[0m
+[2m10 items[0m
 [2marchive age: <age>[0m

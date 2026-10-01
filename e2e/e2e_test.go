@@ -178,8 +178,8 @@ func TestE2EFreshMachine(t *testing.T) {
 	var convs, msgs, acts int
 	for _, a := range accts {
 		m, _ := a.(map[string]any)
-		if num(t, m, "conversations") != 7 || num(t, m, "messages") != 52 || num(t, m, "people") != 3 || num(t, m, "activity") != 8 {
-			t.Fatalf("account counts = %v, want 7/52/3/8", m)
+		if num(t, m, "conversations") != 7 || num(t, m, "messages") != 55 || num(t, m, "people") != 5 || num(t, m, "activity") != 11 {
+			t.Fatalf("account counts = %v, want 7/55/5/11", m)
 		}
 		convs += num(t, m, "conversations")
 		msgs += num(t, m, "messages")
@@ -236,7 +236,7 @@ func TestE2EFreshMachine(t *testing.T) {
 	}
 
 	res := ok(t, e.run(append([]string{"sql", "select count(*) from messages"}, root...)...))
-	if rows, _ := res["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0] != float64(104) {
+	if rows, _ := res["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0] != float64(110) {
 		t.Fatalf("sql rows = %v", res["rows"])
 	}
 }
@@ -255,7 +255,7 @@ func TestE2EIdempotent(t *testing.T) {
 		t.Fatalf("second sync changed messages: %v", m)
 	}
 	res := ok(t, e.cmd("sql", "select count(*) from messages"))
-	if rows, _ := res["rows"].([]any); rows[0].([]any)[0] != float64(104) {
+	if rows, _ := res["rows"].([]any); rows[0].([]any)[0] != float64(110) {
 		t.Fatalf("rows after two syncs = %v", res["rows"])
 	}
 }
@@ -567,8 +567,8 @@ func TestE2EActivity(t *testing.T) {
 	e.sync()
 
 	all, _ := list(t, e.cmd("activity"))
-	if len(all) != 16 {
-		t.Fatalf("activity items = %d, want 16", len(all))
+	if len(all) != 22 {
+		t.Fatalf("activity items = %d, want 22", len(all))
 	}
 	for _, k := range []string{"id", "type", "is_read", "at", "conversation_display_name", "sender_name", "text"} {
 		if _, has := all[0][k]; !has {
@@ -576,8 +576,8 @@ func TestE2EActivity(t *testing.T) {
 		}
 	}
 	unread, _ := list(t, e.cmd("activity", "--unread"))
-	if len(unread) != 10 {
-		t.Fatalf("unread activity = %d, want 10", len(unread))
+	if len(unread) != 14 {
+		t.Fatalf("unread activity = %d, want 14", len(unread))
 	}
 	for _, it := range unread {
 		if it["is_read"] != false {
@@ -585,12 +585,12 @@ func TestE2EActivity(t *testing.T) {
 		}
 	}
 	mentions, _ := list(t, e.cmd("activity", "--type", "mentionInChat"))
-	if len(mentions) != 2 || mentions[0]["text"] != "Alex Fixture and Sam Tag see this" {
+	if len(mentions) != 4 || mentions[3]["text"] != "Alex Fixture and Sam Tag see this" {
 		t.Fatalf("mentionInChat = %v", mentions)
 	}
 	one, _ := list(t, e.cmd("activity", "--account", account1))
-	if len(one) != 8 {
-		t.Fatalf("account 1 activity = %d, want 8", len(one))
+	if len(one) != 11 {
+		t.Fatalf("account 1 activity = %d, want 11", len(one))
 	}
 	newest, whole := list(t, e.cmd("activity", "--limit", "1"))
 	if len(newest) != 1 || whole["truncated"] != true {
@@ -719,8 +719,8 @@ func TestE2EMentionsMe(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	items, _ := list(t, e.cmd("messages", "--mentions-me"))
-	if len(items) != 6 {
-		t.Fatalf("messages --mentions-me = %d, want 6", len(items))
+	if len(items) != 12 {
+		t.Fatalf("messages --mentions-me = %d, want 12", len(items))
 	}
 	for _, it := range items {
 		if it["mentions_me"] != true {
@@ -728,8 +728,8 @@ func TestE2EMentionsMe(t *testing.T) {
 		}
 	}
 	one, _ := list(t, e.cmd("messages", "--mentions-me", "--account", account2))
-	if len(one) != 3 {
-		t.Fatalf("account 2 mentions = %d, want 3", len(one))
+	if len(one) != 6 {
+		t.Fatalf("account 2 mentions = %d, want 6", len(one))
 	}
 	s, _ := list(t, e.cmd("search", "Alex", "--mentions-me"))
 	if len(s) != 2 {
@@ -979,7 +979,7 @@ func TestE2EWatch(t *testing.T) {
 	count := func(q string) int { return archiveCount(t, e.db, q) }
 	// The baseline is done once its sync run is recorded as successful (it is written last).
 	s.waitFor("the baseline sync", func() bool {
-		return count("select count(*) from sync_runs where status='ok' and accounts_json is not null") == 1 && count("select count(*) from messages") == 104
+		return count("select count(*) from sync_runs where status='ok' and accounts_json is not null") == 1 && count("select count(*) from messages") == 110
 	})
 	if out := s.stdout.String(); out != "" {
 		t.Fatalf("the baseline must print nothing, got %q", out)
@@ -1083,8 +1083,8 @@ func TestE2EPolish(t *testing.T) {
 	e.sync()
 	// search with filters alone matches messages with the same filters.
 	filtered, _ := list(t, e.cmd("search", "--mentions-me"))
-	if len(filtered) != 6 {
-		t.Fatalf("search --mentions-me = %d, want 6", len(filtered))
+	if len(filtered) != 12 {
+		t.Fatalf("search --mentions-me = %d, want 12", len(filtered))
 	}
 	if res := e.cmd("search"); res.code != 2 || !strings.Contains(res.stderr, "teamscrawl messages") {
 		t.Fatalf("bare search: exit %d %s", res.code, res.stderr)

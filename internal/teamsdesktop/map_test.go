@@ -567,7 +567,7 @@ func TestReadHorizon(t *testing.T) {
 
 func TestMapActivityFields(t *testing.T) {
 	d := mapFixture(t, acct1)
-	if len(d.Activity) != 8 {
+	if len(d.Activity) != 11 {
 		t.Fatalf("activity items = %d", len(d.Activity))
 	}
 	read, unread := 0, 0

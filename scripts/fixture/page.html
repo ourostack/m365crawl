@@ -141,6 +141,17 @@ window.buildAccount = async function (acct) {
   await put([editedChain], [gone.replyChainId]);
   const over = c1[1];
   await put([chain(over.conversationId, Object.assign({}, over.messageMap[over.replyChainId], { content: '<p>Overwritten twice</p>', version: 1700000999000 }))]);
+  // Broadcast mentions of the account (no person mention of it): a team, a tag and @everyone. The
+  // activity feed below says why each reached the account. They sit in the untitled group chat,
+  // which has no read marker, so they never count as unread.
+  const c3 = [];
+  const broadcast = {};
+  for (const [kind, mri, name] of [['team', convs.space, 'Fixture team ' + acct.seed], ['tag', 'tag:fixture-tag-2', 'Fixture Tag Two'], ['everyone', 'everyone', 'everyone']]) {
+    const m = msg(acct, convs.group, ++n, Object.assign({}, pat, { content: '<p><span itemscope itemtype="http://schema.skype.com/Mention" itemid="0">' + name + '</span> broadcast ' + kind + '</p>', properties: props({ mentions: JSON.stringify([{ itemid: 0, mentionType: kind, mri, displayName: name }]) }) }));
+    c3.push(chain(convs.group, m));
+    broadcast[kind] = m;
+  }
+  await put(c3);
   rdb.close();
 
   const cdb = await open('Teams:conversation-manager:react-web-client:' + suffix, [['conversations', 'id']]);
@@ -183,6 +194,9 @@ window.buildAccount = async function (acct) {
   feed(6, 'msGraph', 'approvalCompleted', false, { conversationId: '', id: 'graph-message-' + acct.seed, parentMessageId: '' }, { teamsAppId: 'fixture-app-id' });
   feed(7, 'replyToReply', 'channel', true, reply);
   feed(8, 'follow', '', false, poll);
+  feed(9, 'mention', 'team', false, broadcast.team);
+  feed(10, 'mention', 'tag', true, broadcast.tag);
+  feed(11, 'mentionInChat', 'everyone', false, broadcast.everyone);
   await done(ftx);
   adbf.close();
 
