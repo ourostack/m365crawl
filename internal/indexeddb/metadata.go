@@ -76,12 +76,9 @@ func (o *Origin) stores(dbID int64) ([]Store, error) {
 	if dbID < 0 || dbID > maxReasonableDBID {
 		return nil, fmt.Errorf("indexeddb: database id %d out of range", dbID)
 	}
-	prefix, err := makePrefix(uint64(dbID), 0, 0, metaObjectStore)
-	if err != nil {
-		return nil, err
-	}
+	prefix := idPrefix(uint64(dbID), 0, 0, metaObjectStore)
 	var out []Store
-	err = o.kv.Scan(prefix, func(k, v []byte) error {
+	err := o.kv.Scan(prefix, func(k, v []byte) error {
 		rest := k[len(prefix):]
 		id, n, err := readVarint(rest)
 		if err != nil || n >= len(rest) {
@@ -114,10 +111,7 @@ func (o *Origin) Records(dbID, storeID int64, fn func(Record) error) error {
 	if dbID < 0 || storeID < 0 {
 		return fmt.Errorf("indexeddb: negative id")
 	}
-	prefix, err := makePrefix(uint64(dbID), uint64(storeID), indexData)
-	if err != nil {
-		return err
-	}
+	prefix := idPrefix(uint64(dbID), uint64(storeID), indexData)
 	return o.kv.Scan(prefix, func(k, v []byte) error {
 		rawKey := k[len(prefix):]
 		key, n, err := decodeKey(rawKey)

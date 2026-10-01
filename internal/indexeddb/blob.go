@@ -27,15 +27,13 @@ func (o *Origin) resolveBlobRef(dbID, storeID uint64, rawKey, raw []byte) ([]byt
 	if index < maxUnresolvedIndex {
 		number -= index
 	}
-	if prefix, err := makePrefix(dbID, storeID, indexBlobEntries); err == nil {
-		v, found, err := o.kv.Get(append(prefix, rawKey...))
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			if nums, err := externalObjects(v); err == nil && index < uint64(len(nums)) {
-				number = nums[index]
-			}
+	v, found, err := o.kv.Get(append(idPrefix(dbID, storeID, indexBlobEntries), rawKey...))
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		if nums, err := externalObjects(v); err == nil && index < uint64(len(nums)) {
+			number = nums[index]
 		}
 	}
 	out := []byte{0xff, 0x11, 0x01}
