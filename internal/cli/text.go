@@ -72,6 +72,9 @@ func (rt *runtime) renderText(label string, v any) error {
 			rows = append(rows, []string{p.n, strconv.Itoa(p.c.Seen), strconv.Itoa(p.c.Inserted), strconv.Itoa(p.c.Updated), strconv.Itoa(p.c.Unchanged)})
 		}
 		render.Table(w, []string{"kind", "seen", "inserted", "updated", "unchanged"}, rows, color)
+		if m := r.Migrated; m != nil {
+			_, _ = fmt.Fprintf(w, "migrated: %d rows re-derived from stored records (derivation %d to %d); not counted as updates\n", m.Rows, m.From, m.To)
+		}
 		keys := make([]string, 0, len(r.Omissions))
 		for k := range r.Omissions {
 			keys = append(keys, k)

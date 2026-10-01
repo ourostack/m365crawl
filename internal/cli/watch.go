@@ -56,6 +56,13 @@ type syncLine struct {
 	Report syncer.Report `json:"report"`
 }
 
+// migratedLine says the archive's derived fields (text, names) were recomputed from the stored
+// records because this build derives them differently. It is not a change: no edited lines follow.
+type migratedLine struct {
+	Kind string `json:"kind"` // migrated
+	store.Migration
+}
+
 type errorLine struct {
 	Kind  string    `json:"kind"` // error
 	Error errorBody `json:"error"`
@@ -271,6 +278,9 @@ func (w *watcher) sync() (done bool, err error) {
 		return false, err
 	}
 	w.fps, w.lastErr = cur, ""
+	if m := rep.Migrated; m != nil {
+		w.migrated(*m)
+	}
 	first := !w.baselined
 	w.baselined = true
 	if first && !w.emitInitial {
@@ -291,6 +301,15 @@ func (w *watcher) sync() (done bool, err error) {
 		return true, w.reportErr(lost)
 	}
 	return true, nil
+}
+
+// migrated reports an archive upgrade once, whether or not this sync's changes are emitted.
+func (w *watcher) migrated(m store.Migration) {
+	if w.rt.format == output.Text {
+		_, _ = fmt.Fprintf(w.rt.stdout, "%s archive upgraded: %d rows re-derived (derivation %d to %d); not changes\n", time.Now().Format("15:04:05"), m.Rows, m.From, m.To)
+		return
+	}
+	w.line(migratedLine{Kind: "migrated", Migration: m})
 }
 
 // retryAfter is how long to wait before retrying after err: a held lock is usually brief.

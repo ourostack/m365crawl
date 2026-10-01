@@ -41,11 +41,11 @@ System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`
 
 An @-mention appears in `text` as the person's plain name; `mentions` lists who was mentioned and `mentions_me` is exact.
 
-`text` is always readable, never raw card JSON or markup: a bot's Adaptive Card, hero or connector card contributes its title, text blocks and facts (`Name: value`), one per line, after the message's own text; a call or meeting event reads `Call ended · 23m`, `Meeting started`; a thread event reads `Member added`, `Topic updated`; a call recording or transcript notice reads `Call recording available`. The original payload stays in the archive (`sql` over `messages.raw_json`). A few messages still have empty `text`: deleted ones, image- or file-only posts, and meeting-chat notices (`properties.meeting`). When a sender has no name in the message, `sender_name` comes from the people table (so call events show who started them); it stays empty only for someone teamscrawl never saw named.
+`text` is readable, not raw card JSON or markup, for every row the archive holds (an archive made by alpha.1 is upgraded in place by its first sync, see `sync` below): a bot's Adaptive Card, hero or connector card contributes its title, text blocks and facts (`Name: value`), one per line, after the message's own text; a call or meeting event reads `Call ended · 23m`, `Meeting started`; a thread event reads `Member added`, `Topic updated`; a call recording or transcript notice reads `Call recording available`. The original payload stays in the archive (`sql` over `messages.raw_json`). A few messages still have empty `text`: deleted ones, image- or file-only posts, and meeting-chat notices (`properties.meeting`). When a sender has no name in the message, `sender_name` comes from the people table (so call events show who started them); it stays empty only for someone teamscrawl never saw named.
 
 Teams can hold two distinct bot posts with the same text a few seconds apart (different ids, client ids and versions). Both are kept, as Teams stored them; they are not one record shown twice.
 
-`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name in any case, or its id (`conversations --kind Space --query <words>` finds both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
+`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name (case-insensitive for ASCII letters only, so `Équipe` and `équipe` differ), or its id (`conversations --kind Space --query <words>` finds both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
 
 ### whoami
 
@@ -65,7 +65,7 @@ Unread messages, newest first (newer than the conversation's read marker and not
 
 ### activity
 
-The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mention,mentionInChat` (comma separated, exact, any case), `--team`, `--since 1h`, `--limit`, `--include-system`.
+The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mention,mentionInChat` (comma separated, exact, case-insensitive for ASCII letters; a list naming no type is a `usage` error), `--team`, `--since 1h`, `--limit`, `--include-system`.
 
 Activity `type` values seen in a real cache (`subtype` in parentheses):
 
@@ -108,7 +108,7 @@ One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (t
 
 With `--query`, the order is by match quality instead: first conversations whose name equals the query (any case), then names that start with it, then names that contain it, then conversations whose title holds all of the query's words (for example `ana ben` finds a chat titled "Ana, Ben"); each group is newest first. A channel matches on its own name (`General`) or its full name (`Team › General`). The match is case-insensitive for ASCII letters.
 
-A chat with no title is named after its other members: up to three names, then `+N` for the rest (`Ana, Ben, Chao +2`), using the names teamscrawl has seen for them. If none of them is known the name is `Unnamed chat (5 members, id 3fa9c2d1)`, which still tells chats apart. These names are display-only: to select such a chat with `-c`, use its `conversation_id`.
+A chat with no title is named after its other members: up to three names, then `+N` for the rest (`Ana, Ben, Chao +2`), using the names teamscrawl has seen for them. If none of them is known the name is `Unnamed chat (5 members, id 3fa9c2d1)`, which still tells chats apart. A name built from known members is stored and matches `-c`; the `Unnamed chat (...)` form is made when you list and does not, and you cannot tell which kind you are looking at, so select an untitled chat with its `conversation_id`.
 
 ### sql
 
@@ -124,12 +124,14 @@ One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands
 {"kind":"sync","report":{"status":"ok","messages":{"seen":104,"inserted":1,"updated":0,"unchanged":103},"...":"..."}}
 ```
 
+When the first sync after an upgrade re-derives an older archive (see `sync`), watch prints one `{"kind":"migrated","from":1,"to":2,"rows":2854}` line before anything else, even for the silent baseline. It is not a change: no `edited` lines follow for those rows.
+
 `change` is `new`, `edited` or `deleted`; `item` has the same shape as a `messages` or `activity` item and honors `--fields`, `--max-text` and `--account` (system pseudo-conversations are skipped). A failed sync prints `{"kind":"error","error":{"code","message","fix"}}` and watching continues; a locked archive prints a `locked` warning on stderr and retries. Environment errors (`teams_not_installed`, `no_full_disk_access`, `no_teams_origin`) end the run with exit 3. Run it in the background and read its stdout; use `--fields` and `--max-text` to keep lines small.
 
 ### doctor, sync, status
 
 - `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced") does not fail it. Follow each failing check's `fix`.
-- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity, `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged`. All exit 0.
+- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity, `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged`. All exit 0. When a build derives text, sender names or chat names differently from the one that wrote the archive (alpha.1 to this release), the first `sync` re-derives every row from its stored `raw_json` before reading the cache, so rows Teams has since evicted are upgraded too. The report then has `"migrated":{"from":1,"to":2,"rows":N}` (rows whose stored text or name changed); those rows count as no update. The archive records its version in `meta.derivation_version`, read-only commands never migrate, and an implicit `--max-age` sync migrates like any other.
 - `status` shows per-account counts, the last run and other Teams origins seen.
 
 ## Freshness

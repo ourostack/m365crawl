@@ -290,6 +290,14 @@ func TestTotalWhenTruncated(t *testing.T) {
 			if err != nil || !trunc || total != l.total || n == 0 {
 				t.Fatalf("truncated: n=%d trunc=%v total=%d (want %d) err=%v", n, trunc, total, l.total, err)
 			}
+			// Dropping the joins the filter never reads must not change the count.
+			pruneJoinsOff = true
+			unpruned := -1
+			_, _, err = l.run(&unpruned)
+			pruneJoinsOff = false
+			if err != nil || unpruned != total {
+				t.Fatalf("pruned count %d, full-join count %d (%v)", total, unpruned, err)
+			}
 			// Not truncated: the total is left alone (the caller omits it).
 			total = -1
 			if _, _, err := runUntruncated(ctx, s, name, &total); err != nil || total != -1 {
@@ -531,7 +539,7 @@ func TestActivityTypeList(t *testing.T) {
 	for _, c := range []struct {
 		typ  string
 		want int
-	}{{"mention", 1}, {"MENTIONINCHAT", 1}, {"mention,mentionInChat", 2}, {" mention , reply ,", 2}, {"mention,nope", 1}, {"", 4}, {",", 4}} {
+	}{{"mention", 1}, {"MENTIONINCHAT", 1}, {"mention,mentionInChat", 2}, {" mention , reply ,", 2}, {"mention,nope", 1}, {"", 4}} {
 		if got := count(c.typ); got != c.want {
 			t.Errorf("type %q: %d, want %d", c.typ, got, c.want)
 		}
@@ -592,6 +600,7 @@ func TestPruneJoins(t *testing.T) {
 		{` where p.display_name like ?`, []string{"people p"}},
 		{` where ` + cdnExpr + `=?`, []string{"conversations c", "conversations t"}},
 		{` where t.id=?`, []string{"conversations c", "conversations t"}}, // t's own join clause reads c
+		{` where abc.x=? and spc.y=?`, nil},                               // an alias inside a longer token is no reference
 	} {
 		got := pruneJoins(from, c.where)
 		for _, j := range []string{"conversations c on", "conversations t on", "people p on"} {
@@ -638,5 +647,16 @@ func TestAbsPathFallsBackToTheGivenPath(t *testing.T) {
 	absFn = func(string) (string, error) { return "", errors.New("no working directory") }
 	if got := absPath("rel.db"); got != "rel.db" {
 		t.Fatalf("absPath = %q", got)
+	}
+}
+
+func TestActivityTypeListNeedsANames(t *testing.T) {
+	s := newStore(t)
+	for _, typ := range []string{",", " , ,"} {
+		_, _, err := s.Activity(context.Background(), ActivityFilter{Type: typ})
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != errs.CodeUsage {
+			t.Errorf("Type %q: %v", typ, err)
+		}
 	}
 }

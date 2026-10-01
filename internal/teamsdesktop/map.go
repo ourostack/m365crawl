@@ -353,12 +353,28 @@ func messageText(messageType, html string, cards any) string {
 	text := HTMLToText(html)
 	card := cardsText(cards)
 	switch {
-	case card == "" || strings.Contains(text, card):
+	case card == "" || linesWithin(card, text):
 		return text
 	case text == "":
 		return card
 	}
 	return text + "\n" + card
+}
+
+// linesWithin reports whether every line of card is a whole line of text, so a card that the
+// message already spells out adds nothing while one whose words merely occur inside a longer
+// line ("Done" in "Done with the build") is kept.
+func linesWithin(card, text string) bool {
+	have := map[string]bool{}
+	for _, l := range strings.Split(text, "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
+	for _, l := range strings.Split(card, "\n") {
+		if !have[strings.TrimSpace(l)] {
+			return false
+		}
+	}
+	return true
 }
 
 // isSystemMessage is true for call events, thread activity and control messages, whose content

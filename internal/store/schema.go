@@ -3,6 +3,14 @@ package store
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
 const SchemaVersion = 2
 
+// DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
+// fields: message text and sender name, and the display name of a conversation. It is stored as
+// meta.derivation_version, and an archive with no such row was written by alpha.1, version 1.
+// Version 2 added readable text for cards, call events and thread activity, sender names from
+// fromDisplayNameInToken, and member-list names for untitled chats. Raise it whenever a mapper
+// change alters a derived field, and make Rederive recompute the new field from raw_json.
+const DerivationVersion = 2
+
 // schemaDDL is applied on every Open; every statement is idempotent. Timestamps are UTC text in
 // timeLayout so they sort and compare as strings. Messages and conversations are rowid tables
 // because the FTS tables reuse the owning row's rowid, which makes index maintenance a primary
@@ -112,6 +120,10 @@ create table if not exists sync_runs(
   status text not null,
   counts_json text,
   omissions_json text
+);
+create table if not exists meta(
+  key text primary key,
+  value text not null
 );
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);

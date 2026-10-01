@@ -31,8 +31,11 @@ type Report struct {
 	Activity      store.Counts   `json:"activity"`
 	Omissions     map[string]int `json:"omissions"`
 	OtherOrigins  []string       `json:"other_origins"`
-	StartedAt     time.Time      `json:"started_at"`
-	FinishedAt    time.Time      `json:"finished_at"`
+	// Migrated is set when this run first recomputed an older archive's derived fields from their
+	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
+	Migrated   *store.Migration `json:"migrated,omitempty"`
+	StartedAt  time.Time        `json:"started_at"`
+	FinishedAt time.Time        `json:"finished_at"`
 }
 
 // SourceReport is one Teams origin's outcome.
