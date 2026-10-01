@@ -91,6 +91,18 @@ One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (t
 
 One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands do not cover. Returns `{"columns":[...],"rows":[[...]],"count":N,"truncated":bool}`. Tables: `accounts`, `conversations`, `messages`, `people`, `activity`, `sync_runs`; FTS tables `message_fts`, `conversation_fts`. Note that `sql` returns every account's rows regardless of `--account`.
 
+### watch
+
+`watch [--every 60s] [--emit-initial]` runs until interrupted (SIGINT or SIGTERM exit 0) and prints JSON Lines, the one exception to the one-document rule. It syncs once at start as a silent baseline (nothing is printed unless `--emit-initial`), then syncs whenever the Teams cache changes (file events, with a poll every `--every` as the safety net; bursts are debounced) and prints one line per change followed by one report line:
+
+```
+{"kind":"message","change":"new","item":{"conversation_display_name":"...","sender_name":"...","text":"...","link":"..."}}
+{"kind":"activity","change":"edited","item":{"type":"mentionInChat","is_read":true,"...":"..."}}
+{"kind":"sync","report":{"status":"ok","messages":{"seen":104,"inserted":1,"updated":0,"unchanged":103},"...":"..."}}
+```
+
+`change` is `new`, `edited` or `deleted`; `item` has the same shape as a `messages` or `activity` item and honors `--fields`, `--max-text` and `--account` (system pseudo-conversations are skipped). A failed sync prints `{"kind":"error","error":{"code","message","fix"}}` and watching continues; a locked archive prints a `locked` warning on stderr and retries. Environment errors (`teams_not_installed`, `no_full_disk_access`, `no_teams_origin`) end the run with exit 3. Run it in the background and read its stdout; use `--fields` and `--max-text` to keep lines small.
+
 ### doctor, sync, status
 
 - `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced") does not fail it. Follow each failing check's `fix`.
