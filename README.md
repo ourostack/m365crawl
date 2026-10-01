@@ -31,7 +31,7 @@ Homebrew is the shortest path:
 brew install ourostack/tap/teamscrawl
 ```
 
-Release binaries are Developer ID signed and notarized by Apple when the release was built with signing credentials; the release notes say which. Unsigned builds are still possible, so the Homebrew cask clears the macOS quarantine flag for you. If you download an unsigned binary by hand, run `xattr -dr com.apple.quarantine teamscrawl` once.
+Release binaries are Developer ID signed and notarized by Apple only when the release was built with the Apple signing secrets; otherwise they are unsigned. The last line of each release's notes says which. The Homebrew cask clears the macOS quarantine flag either way. If you download a binary by hand and it is unsigned, run `xattr -dr com.apple.quarantine teamscrawl` once.
 
 [GitHub Releases](https://github.com/ourostack/teamscrawl/releases) has `teamscrawl_<version>_darwin_arm64.tar.gz` and `teamscrawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
 
@@ -51,7 +51,14 @@ teamscrawl doctor
 
 ## Quick start
 
-The examples below run against the repository's committed test fixture, so every name and message is synthetic.
+The examples below run against the repository's committed test fixture, so every name and message is synthetic. To reproduce them from a clone, point teamscrawl at the fixture and a scratch archive:
+
+```sh
+export TEAMSCRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
+export TEAMSCRAWL_DB="$(mktemp -d)/teamscrawl.db"
+```
+
+Against your own Teams, skip those two lines.
 
 ```sh
 teamscrawl doctor
@@ -88,11 +95,25 @@ teamscrawl activity --unread --limit 1 --fields at,type,conversation_display_nam
 {"items":[{"at":"2023-11-14T22:22:00Z","type":"follow","conversation_display_name":"Fixture team 2 › Planning","text":"Planning channel message"}],"count":1,"truncated":true,"archive_age_seconds":0}
 ```
 
+To stream changes as Teams writes them, run `watch`. It prints JSON Lines (one object per line, the one exception to the one-document rule): a `message` or `activity` line per change, then a `sync` line per sync. The first sync is a silent baseline, so only later changes appear; `--emit-initial` prints that one too, as here:
+
+```sh
+teamscrawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
+```
+
+```json
+{"kind":"message","change":"new","item":{"id":"1700000001000","text":"Hello from Alex Fixture","sender_name":"Alex Fixture"}}
+{"kind":"activity","change":"new","item":{"id":"fixture-activity-1-1","type":"mentionInChat","text":"Alex Fixture and Sam Tag see t…","sender_name":"Pat Example","text_truncated":true}}
+{"kind":"sync","report":{"status":"ok","sources":[{"source":"WV2Profile_fixture|https_teams.microsoft.com_0","status":"ok"}],"conversations":{"seen":14,"inserted":14,"updated":0,"unchanged":0},"messages":{"seen":104,"inserted":104,"updated":0,"unchanged":0},"people":{"seen":6,"inserted":6,"updated":0,"unchanged":0},"activity":{"seen":16,"inserted":16,"updated":0,"unchanged":0},"omissions":{},"other_origins":[],"started_at":"2026-10-01T20:07:12.88674Z","finished_at":"2026-10-01T20:07:13.109182Z"}}
+```
+
+Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with exit 0. A change reaches the output after Teams flushes it to its cache plus a few seconds of debounce; measured against a real cache that was about 12 to 32 seconds from the moment a message was sent.
+
 `--account <tenantId>/<userId>` limits any command to one signed-in account; `teamscrawl whoami` lists them. The archive lives at `~/.teamscrawl/teamscrawl.db` (override with `--db` or `TEAMSCRAWL_DB`).
 
 ## For agents
 
-Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md). It holds the workflow, every command, every error code and what to do about each. The contract in five bullets:
+Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md). It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
 
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
 - Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
@@ -131,6 +152,15 @@ Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root
 
 Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off; `CLICOLOR_FORCE=1` turns it on when output is piped (this is how `make screenshot` renders `screenshot.png`). JSON output is never colored and never changes with any of these.
 
+## Documentation
+
+- [`SPEC.md`](SPEC.md): the normative specification (data model, sync, output contract, every error code, `watch`, privacy, known limits).
+- [`docs/commands.md`](docs/commands.md): every command and flag, as `--help` prints them.
+- [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the allowlist, full-text search).
+- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, how `doctor` checks it.
+- [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
+- [`AGENTS.md`](AGENTS.md): development rules for agents working on this repository.
+
 ## How it works
 
 1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private 0700 temp directory, retrying if Teams writes mid-copy. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
@@ -138,7 +168,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 3. **Allowlist.** Only the conversation, reply-chain (message) and activity-feed stores are decoded. Everything else, including sign-in data, is listed by name and never read.
 4. **Store.** Rows go into SQLite (WAL) with FTS5 indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing. Messages that vanish from Teams' cache stay in the archive; Teams deletions set `deleted_at`.
 
-Full Disk Access is the only permission it asks for. If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
+Full Disk Access is the only permission it asks for ([why and how](docs/full-disk-access.md)). If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
 
 ## Privacy
 
@@ -160,10 +190,11 @@ The archive holds your real Teams conversations. It stays on your Mac in `~/.tea
 make build      # bin/teamscrawl
 make test       # unit tests with the race detector
 make e2e        # end-to-end tests against the committed fixture
-make check      # every gate CI runs: tidy, fmt, vet, lint, test, e2e
+make coverage   # 100% function coverage gate on internal/...
+make check      # every gate CI runs: tidy, fmt, vet, lint, test, coverage, e2e
 ```
 
-The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance runs locally only (`TEAMSCRAWL_REAL_CACHE=1`, needs Full Disk Access); its results are recorded as counts and pass/fail, never content. See [`AGENTS.md`](AGENTS.md) for the development rules.
+The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`TEAMSCRAWL_REAL_CACHE=1 make acceptance`, needs Full Disk Access, Node 22 and python3) runs locally only; its results are recorded as counts and pass/fail, never content. See [`AGENTS.md`](AGENTS.md) for the development rules.
 
 ## Credits
 
