@@ -68,10 +68,6 @@ jobs:
     name: coverage
     runs-on: macos-latest
     timeout-minutes: 20
-    env:
-      # Packages already at 100%. The controller widens this to the default (./internal/...) as the
-      # remaining packages reach the gate; delete the line once every package is covered.
-      COVERAGE_PACKAGES: ./internal/cli ./internal/errs ./internal/render
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

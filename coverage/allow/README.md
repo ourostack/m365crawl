@@ -25,7 +25,7 @@ The script fails on an entry with no reason, an entry whose path is outside its 
 
 ## Narrowing the check
 
-`COVERAGE_PACKAGES` overrides the packages to test (default `./internal/...`), for example `make coverage COVERAGE_PACKAGES="./internal/cli ./internal/errs"`. CI sets it only while some packages are still being brought up to the gate.
+`COVERAGE_PACKAGES` overrides the packages to test (default `./internal/...`), for example `make coverage COVERAGE_PACKAGES="./internal/cli ./internal/errs"`. CI checks every package.
 
 ## Files outside the gate
 
