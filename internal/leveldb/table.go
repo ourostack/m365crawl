@@ -191,6 +191,9 @@ func blockEntries(b []byte, fn func(key []byte, off, n int) error) error {
 	return nil
 }
 
+// statFile is f.Stat, a variable so a test can force the failure.
+var statFile = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+
 func openTable(path, name string) (*os.File, int64, error) {
 	f, err := os.Open(path) //nolint:gosec // path is built from a manifest-derived file name inside the caller-chosen directory
 	if err != nil {
@@ -199,7 +202,7 @@ func openTable(path, name string) (*os.File, int64, error) {
 		}
 		return nil, 0, fmt.Errorf("leveldb: open %s: %w", name, err)
 	}
-	st, err := f.Stat()
+	st, err := statFile(f)
 	if err != nil {
 		_ = f.Close()
 		return nil, 0, fmt.Errorf("leveldb: stat %s: %w", name, err)
