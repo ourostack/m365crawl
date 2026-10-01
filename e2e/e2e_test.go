@@ -513,14 +513,15 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 		if time.Since(start) > 8*time.Second {
 			t.Errorf("SIGINT took %v; the pause was not interrupted", time.Since(start))
 		}
-		// An interrupted sync is a runtime failure (exit 1) with one coded error after the marker.
+		// An interrupted sync is a runtime failure (exit 1) with one coded "interrupted" error
+		// after the marker.
 		if res.code != 1 {
 			t.Fatalf("exit = %d, want 1\nstderr: %s", res.code, res.stderr)
 		}
 		rest := strings.TrimSpace(strings.Replace(res.stderr, pausedMarker, "", 1))
 		body := mustJSON(t, rest)
 		ee, _ := body["error"].(map[string]any)
-		if ee == nil || ee["code"] != "internal" || !strings.Contains(ee["message"].(string), "interrupted") || ee["fix"] == "" {
+		if ee == nil || ee["code"] != "interrupted" || ee["message"] != "interrupted before finishing; nothing was half-written" || ee["fix"] != "Run the command again." {
 			t.Fatalf("stderr error = %s", rest)
 		}
 		if res.stdout != "" {

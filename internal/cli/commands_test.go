@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -896,5 +897,34 @@ func TestThreadLimit(t *testing.T) {
 	}
 	if code, _, _ := e.run(append(base, "--limit", "0")...); code != 2 {
 		t.Fatalf("--limit 0 exit %d, want 2", code)
+	}
+}
+
+// An interrupted command (the context SIGINT and SIGTERM cancel) is a coded "interrupted" error
+// with exit 1, not an "internal" bug report.
+func TestInterruptedIsCoded(t *testing.T) {
+	for _, format := range []string{"json", "text"} {
+		t.Run(format, func(t *testing.T) {
+			e := newEnv(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var out, errb bytes.Buffer
+			code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--format", format, "sync"}, &out, &errb)
+			if code != 1 || out.Len() != 0 {
+				t.Fatalf("exit %d, stdout %q, stderr %q; want exit 1 and no stdout", code, out.String(), errb.String())
+			}
+			const msg, fix = "interrupted before finishing; nothing was half-written", "Run the command again."
+			if format == "text" {
+				if want := "error: " + msg + "\nfix: " + fix + "\n"; !strings.Contains(errb.String(), want) {
+					t.Fatalf("stderr = %q, want it to contain %q", errb.String(), want)
+				}
+				return
+			}
+			body := decode(t, errb.String())
+			ee, _ := body["error"].(map[string]any)
+			if ee["code"] != "interrupted" || ee["message"] != msg || ee["fix"] != fix {
+				t.Fatalf("stderr = %s", errb.String())
+			}
+		})
 	}
 }

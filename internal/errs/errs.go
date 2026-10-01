@@ -17,6 +17,7 @@ const (
 	CodeStoreMissing                = "store_missing"
 	CodeDBError                     = "db_error"
 	CodeInternal                    = "internal"
+	CodeInterrupted                 = "interrupted"
 	CodeUsage                       = "usage"
 	CodeTeamsNotInstalled           = "teams_not_installed"
 	CodeNoFullDiskAccess            = "no_full_disk_access"
@@ -122,6 +123,14 @@ func DoctorFailed(msg string) *Coded {
 }
 
 // Locked reports that another teamscrawl run holds the archive lock.
+// Interrupted is a command stopped by SIGINT or SIGTERM. Every write is one transaction per
+// source, so a stopped run leaves each source either fully applied or not at all.
+func Interrupted() *Coded {
+	return &Coded{Code: CodeInterrupted, Exit: ExitRuntime,
+		Message: "interrupted before finishing; nothing was half-written",
+		Fix:     "Run the command again."}
+}
+
 func Locked(msg string) *Coded {
 	return &Coded{Code: CodeLocked, Exit: ExitLocked, Message: msg,
 		Fix: "Wait for the other teamscrawl run to finish, then run again."}

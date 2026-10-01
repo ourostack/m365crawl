@@ -18,6 +18,7 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{StoreMissing("x"), "store_missing", 1},
 		{DBError(cause), "db_error", 1},
 		{Internal(cause), "internal", 1},
+		{Interrupted(), "interrupted", 1},
 		{Usage("x"), "usage", 2},
 		{TeamsNotInstalled("/r"), "teams_not_installed", 3},
 		{NoFullDiskAccess("/r", cause), "no_full_disk_access", 3},
