@@ -52,6 +52,14 @@ func (s *Store) DerivationVersion(ctx context.Context) (int, error) {
 func storedDerivation(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }) (int, error) {
+	// An alpha.1 archive has no meta table at all, and a read-only open cannot create it.
+	var tables int
+	if err := q.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table' and name='meta'`).Scan(&tables); err != nil {
+		return 0, err
+	}
+	if tables == 0 {
+		return alpha1Version, nil
+	}
 	var v string
 	switch err := q.QueryRowContext(ctx, `select value from meta where key=?`, derivationKey).Scan(&v); {
 	case errors.Is(err, sql.ErrNoRows):

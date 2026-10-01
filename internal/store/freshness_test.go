@@ -140,8 +140,13 @@ func TestDerivationVersion(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `drop table meta`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DerivationVersion(ctx); err == nil {
-		t.Fatal("a missing meta table must be an error")
+	if v := must(s.DerivationVersion(ctx)); v != 1 {
+		t.Fatalf("a missing meta table is alpha.1, got %d", v)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.DerivationVersion(cctx); err == nil {
+		t.Fatal("a failing probe must be an error")
 	}
 }
 
