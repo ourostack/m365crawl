@@ -25,7 +25,11 @@ var (
 	// least time between the starts of two syncs. Teams writes in bursts.
 	watchQuiet  = 2 * time.Second
 	watchMinGap = 5 * time.Second
-	runSync     = syncer.Run
+	// watchMaxWait caps the debounce: a sync starts at most this long after a burst's first event.
+	watchMaxWait = 10 * time.Second
+	// watchLockedRetry is the wait before retrying a sync that found the archive locked.
+	watchLockedRetry = 5 * time.Second
+	runSync          = syncer.Run
 	// watchEvents reports (coalesced) file-system events under dirs on the returned channel until
 	// ctx is cancelled or the returned function is called.
 	watchEvents = fileEvents
@@ -97,9 +101,10 @@ type watcher struct {
 	every       time.Duration
 	emitInitial bool
 
-	fps       map[string]string // source -> fingerprint at the last successful sync
-	baselined bool
-	lastErr   string // the last failure reported, so a repeated failure is reported once
+	fps            map[string]string // source -> fingerprint at the last successful sync
+	baselined      bool
+	baselineFailed bool   // a sync failed before the baseline succeeded
+	lastErr        string // the last failure reported, so a repeated failure is reported once
 }
 
 // run is the watch loop. It returns nil when the context is cancelled and an error only for
@@ -129,6 +134,7 @@ func (w *watcher) run() error {
 	var (
 		want      = true // a sync is wanted; the first one is the baseline
 		lastEvent time.Time
+		burstFrom time.Time // the first event since the last sync started
 		lastStart time.Time
 		retryAt   time.Time
 	)
@@ -142,7 +148,11 @@ func (w *watcher) run() error {
 		if !want {
 			return
 		}
-		due := latest(lastEvent.Add(watchQuiet), lastStart.Add(watchMinGap), retryAt)
+		settled := lastEvent.Add(watchQuiet)
+		if !burstFrom.IsZero() && burstFrom.Add(watchMaxWait).Before(settled) {
+			settled = burstFrom.Add(watchMaxWait) // events keep coming: stop waiting for quiet
+		}
+		due := latest(settled, lastStart.Add(watchMinGap), retryAt)
 		timer.Reset(max(time.Until(due), 0))
 	}
 	arm()
@@ -152,6 +162,9 @@ func (w *watcher) run() error {
 			return nil
 		case <-events:
 			want, lastEvent = true, time.Now()
+			if burstFrom.IsZero() {
+				burstFrom = lastEvent
+			}
 			arm()
 		case <-ticker.C:
 			if want {
@@ -166,13 +179,16 @@ func (w *watcher) run() error {
 			}
 			if changed {
 				want, lastEvent = true, time.Now()
+				if burstFrom.IsZero() {
+					burstFrom = lastEvent
+				}
 				arm()
 			}
 		case <-timer.C:
 			if !want {
 				continue
 			}
-			lastStart = time.Now()
+			lastStart, burstFrom = time.Now(), time.Time{}
 			done, err := w.sync()
 			switch {
 			case ctx.Err() != nil:
@@ -181,7 +197,7 @@ func (w *watcher) run() error {
 				if fatal := w.report(err); fatal != nil {
 					return fatal
 				}
-				retryAt = time.Now().Add(w.every)
+				retryAt = time.Now().Add(w.retryAfter(err))
 			default:
 				want = !done
 			}
@@ -263,12 +279,32 @@ func (w *watcher) sync() (done bool, err error) {
 	first := !w.baselined
 	w.baselined = true
 	if first && !w.emitInitial {
+		if w.baselineFailed {
+			// The first attempts failed, so this sync's changes are not emitted.
+			w.rt.printWarning(&errs.Coded{Code: "baseline_delayed", Exit: errs.ExitRuntime,
+				Message: "the first sync failed, so the sync that finally succeeded was taken as the baseline and its changes are not emitted",
+				Fix:     "Read the archive (for example `teamscrawl messages --since 1h`) to catch up on what arrived meanwhile, or restart watch with --emit-initial."})
+		}
 		return true, nil
 	}
 	if err := w.emit(rep, changes); err != nil {
-		return true, w.reportErr(err)
+		lost := errs.Internal(fmt.Errorf("%d change(s) from the last sync could not be emitted: %w", len(changes), err))
+		var coded *errs.Coded
+		if errors.As(err, &coded) {
+			lost = &errs.Coded{Code: coded.Code, Exit: coded.Exit, Message: fmt.Sprintf("%d change(s) from the last sync could not be emitted: %s", len(changes), coded.Message), Fix: coded.Fix}
+		}
+		return true, w.reportErr(lost)
 	}
 	return true, nil
+}
+
+// retryAfter is how long to wait before retrying after err: a held lock is usually brief.
+func (w *watcher) retryAfter(err error) time.Duration {
+	var coded *errs.Coded
+	if errors.As(err, &coded) && coded.Code == errs.CodeLocked {
+		return min(watchLockedRetry, w.every)
+	}
+	return w.every
 }
 
 // reportErr keeps a failure to read changes back from ending the watch.
@@ -292,6 +328,9 @@ func (w *watcher) report(err error) error {
 	}
 	if coded.Exit == errs.ExitEnvironment {
 		return coded
+	}
+	if !w.baselined {
+		w.baselineFailed = true
 	}
 	sig := coded.Code + ": " + coded.Message
 	if sig == w.lastErr {
