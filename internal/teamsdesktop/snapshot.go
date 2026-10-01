@@ -103,7 +103,8 @@ func copyOnce(ctx context.Context, s Source, dir string, attempt int) (retry boo
 		return true, err
 	}
 
-	if _, err := leveldb.Load(ldbDst); err != nil {
+	// Validation reads every table and log but holds no values.
+	if _, err := leveldb.LoadWith(ldbDst, leveldb.LoadOptions{Keep: func([]byte) bool { return false }}); err != nil {
 		var missing *leveldb.MissingFileError
 		switch {
 		case errors.As(err, &missing) || errors.Is(err, leveldb.ErrManifestTruncated):

@@ -42,11 +42,27 @@ type origin interface {
 // that is present without its store is store_missing. Other errors from fn stop the read and are
 // returned as is.
 func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Account, kind string, v any) error) (omissions map[string]int, err error) {
-	o, err := indexeddb.Open(filepath.Join(snapDir, "leveldb"), filepath.Join(snapDir, "blob"))
+	o, err := indexeddb.OpenWith(filepath.Join(snapDir, "leveldb"), filepath.Join(snapDir, "blob"),
+		indexeddb.OpenOptions{KeepDatabase: keepDatabase(account)})
 	if err != nil {
 		return map[string]int{}, classify(err)
 	}
 	return readOrigin(ctx, o, account, fn)
+}
+
+// keepDatabase selects the databases Read loads into memory: the allowlisted managers, for the
+// chosen account when there is one. readOrigin applies the same rule again when it walks them.
+func keepDatabase(account *Account) func(name string) bool {
+	return func(name string) bool {
+		manager, acct, ok := ParseDatabaseName(name)
+		if !ok {
+			return false
+		}
+		if _, allowed := allowlist[manager]; !allowed {
+			return false
+		}
+		return account == nil || (account.TenantID == acct.TenantID && account.UserID == acct.UserID)
+	}
 }
 
 func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Account, kind string, v any) error) (map[string]int, error) {
@@ -99,6 +115,11 @@ func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Ac
 			return nil
 		})
 		if err != nil {
+			// Cancelling removes the snapshot, so a value re-read after it fails as a missing
+			// file: report the cancellation instead.
+			if cerr := ctx.Err(); cerr != nil {
+				return omissions, cerr
+			}
 			return omissions, classifyRead(err)
 		}
 	}

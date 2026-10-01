@@ -35,7 +35,65 @@ type Origin struct {
 // sibling .blob directory; it may be empty or absent, in which case blob-backed
 // values decode as blob_missing.
 func Open(leveldbDir, blobDir string) (*Origin, error) {
-	db, err := leveldb.Load(leveldbDir)
+	return OpenWith(leveldbDir, blobDir, OpenOptions{})
+}
+
+// OpenOptions tunes Open.
+type OpenOptions struct {
+	// KeepDatabase reports whether a database's records are loaded, by database name. Nil
+	// loads every database. Metadata is always loaded, so Databases lists every database
+	// with its object stores either way; Records of a database that is not kept yields
+	// nothing, and its values are never held in memory.
+	KeepDatabase func(name string) bool
+}
+
+// OpenWith is Open with options. With KeepDatabase set it reads the LevelDB twice: first
+// the global metadata alone, to map the kept database names to ids, then the metadata plus
+// the object store records and blob entries of the kept databases. Index entries (secondary
+// indexes, exists entries) are not kept: this package never reads them. Stats describes the
+// second read: Keys counts the retained keys and Skipped the records dropped.
+//
+// The Origin re-reads large values from the LevelDB directory, which must stay in place while
+// the Origin is used.
+func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
+	if opts.KeepDatabase == nil {
+		db, err := leveldb.Load(leveldbDir)
+		if err != nil {
+			return nil, err
+		}
+		return &Origin{kv: db, blobDir: blobDir, stats: db.Stats()}, nil
+	}
+	meta, err := leveldb.LoadWith(leveldbDir, leveldb.LoadOptions{Keep: func(k []byte) bool {
+		id, store, index, _, err := readPrefix(k)
+		return err == nil && id == 0 && store == 0 && index == 0
+	}})
+	if err != nil {
+		return nil, err
+	}
+	names, err := databaseNames(meta)
+	if err != nil {
+		return nil, err
+	}
+	kept := map[uint64]bool{}
+	for _, d := range names {
+		if opts.KeepDatabase(d.Name) {
+			kept[uint64(d.ID)] = true //nolint:gosec // ids are non-negative truncated ints
+		}
+	}
+	db, err := leveldb.LoadWith(leveldbDir, leveldb.LoadOptions{Keep: func(k []byte) bool {
+		id, store, index, _, err := readPrefix(k)
+		if err != nil {
+			return false // too short for a prefix: no Scan or Get of this package can reach it
+		}
+		switch {
+		case id == 0, store == 0 && index == 0:
+			return true // global and per-database metadata
+		case !kept[id]:
+			return false
+		default:
+			return index == indexData || index == indexBlobEntries
+		}
+	}})
 	if err != nil {
 		return nil, err
 	}

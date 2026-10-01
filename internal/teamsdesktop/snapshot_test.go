@@ -62,7 +62,15 @@ func TestSnapshotCleanup(t *testing.T) {
 	cleanup() // idempotent
 }
 
+// privateTempDir points os.TempDir at a directory of this test's own, so counting snapshot
+// directories is not disturbed by other packages' tests running at the same time.
+func privateTempDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+}
+
 func TestSnapshotRetryThenFail(t *testing.T) {
+	privateTempDir(t)
 	base := t.TempDir()
 	s := Source{Profile: "p", Origin: "o", LevelDBDir: filepath.Join(base, "leveldb"), BlobDir: filepath.Join(base, "blob")}
 	tabs := fakeLevelDB(t, s.LevelDBDir)
@@ -151,6 +159,7 @@ func TestSnapshotCurrentChangedRetries(t *testing.T) {
 }
 
 func TestSnapshotCancel(t *testing.T) {
+	privateTempDir(t)
 	// Cancelled before the copy: error, nothing left behind.
 	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
 	ctx, cancel := context.WithCancel(context.Background())

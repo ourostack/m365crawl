@@ -12,25 +12,45 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // Stats summarizes what Load read. Counts only; never contains keys or values.
+//
+// Keys counts live retained keys: with a LoadOptions.Keep filter, keys the filter rejects are
+// not counted. Skipped counts the table and log records (every version, puts and deletions) the
+// filter rejected; it is 0 for an unfiltered load. Tables, Logs, TruncatedLogTails and
+// Comparator describe the files and do not depend on the filter.
 type Stats struct {
-	Tables, Logs, Keys, TruncatedLogTails int
-	Comparator                            string
+	Tables, Logs, Keys, TruncatedLogTails, Skipped int
+	Comparator                                     string
 }
 
-// DB is an in-memory, read-only view of a LevelDB directory.
+// LoadOptions tunes Load.
+type LoadOptions struct {
+	// Keep reports whether a user key is retained. It must depend on the key alone. Records of
+	// rejected keys are dropped as they are read, so their values are never held and the keys
+	// are absent from Get and Scan. Nil retains every key.
+	Keep func(key []byte) bool
+}
+
+// DB is a read-only view of a LevelDB directory. Keys and small values are held in memory;
+// table values of lazyMin bytes or more are re-read from the table files on demand, so the
+// directory must stay in place and unchanged while the DB is used.
 type DB struct {
-	entries store
+	entries map[string]entry
 	keys    []string // live keys, bytewise ascending
+	tables  []tableRef
+	cache   blockCache
 	stats   Stats
 }
 
+type tableRef struct{ path, name string }
+
 // Load reads dir (a copy; it is never written) and returns its live contents.
-func Load(dir string) (*DB, error) {
+func Load(dir string) (*DB, error) { return LoadWith(dir, LoadOptions{}) }
+
+// LoadWith is Load with options: with a Keep filter only the chosen keys are held.
+func LoadWith(dir string, opts LoadOptions) (*DB, error) {
 	cur, err := readCurrent(dir)
 	if err != nil {
 		return nil, err
@@ -40,15 +60,17 @@ func Load(dir string) (*DB, error) {
 		return nil, err
 	}
 
-	all := store{}
-	bp := util.NewBufferPool(1 << 16)
+	all := newStore(opts.Keep)
 	tableNums := sortedNums(m.tables)
-	for _, n := range tableNums {
+	tables := make([]tableRef, 0, len(tableNums))
+	for i, n := range tableNums {
 		name, err := tableName(dir, n)
 		if err != nil {
 			return nil, err
 		}
-		if err := readTable(filepath.Join(dir, name), name, bp, all); err != nil {
+		path := filepath.Join(dir, name)
+		tables = append(tables, tableRef{path: path, name: name})
+		if err := readTable(path, name, i, all); err != nil {
 			return nil, err
 		}
 	}
@@ -69,14 +91,15 @@ func Load(dir string) (*DB, error) {
 		}
 	}
 
-	d := &DB{entries: all}
-	for k, e := range all {
+	d := &DB{entries: all.m, tables: tables}
+	for k, e := range all.m {
 		if !e.deleted {
 			d.keys = append(d.keys, k)
 		}
 	}
 	sort.Strings(d.keys)
 	stats.Keys = len(d.keys)
+	stats.Skipped = all.skipped
 	d.stats = stats
 	return d, nil
 }
@@ -131,17 +154,22 @@ func liveLogs(dir string, m *manifest) ([]uint64, error) {
 	return out, nil
 }
 
-// Get returns the live value for key.
+// Get returns the live value for key. A large value that can no longer be re-read from its
+// table (the directory changed or vanished) is reported as absent.
 func (d *DB) Get(key []byte) ([]byte, bool) {
 	e, ok := d.entries[string(key)]
 	if !ok || e.deleted {
 		return nil, false
 	}
-	return e.value, true
+	v, err := d.value(e)
+	if err != nil {
+		return nil, false
+	}
+	return v, true
 }
 
 // Scan calls fn for every live key with the given prefix, in bytewise ascending order.
-// It stops at, and returns, the first error from fn.
+// It stops at, and returns, the first error from fn or from re-reading a value.
 func (d *DB) Scan(prefix []byte, fn func(key, value []byte) error) error {
 	p := string(prefix)
 	start := sort.SearchStrings(d.keys, p)
@@ -149,11 +177,30 @@ func (d *DB) Scan(prefix []byte, fn func(key, value []byte) error) error {
 		if !strings.HasPrefix(k, p) {
 			break
 		}
-		if err := fn([]byte(k), d.entries[k].value); err != nil {
+		v, err := d.value(d.entries[k])
+		if err != nil {
+			return err
+		}
+		if err := fn([]byte(k), v); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// value returns an entry's value, re-reading a lazy one from its table block.
+func (d *DB) value(e entry) ([]byte, error) {
+	if !e.lazy {
+		return e.value, nil
+	}
+	b, err := d.cache.get(d.tables, e.loc.table, e.loc.block)
+	if err != nil {
+		return nil, err
+	}
+	if e.loc.off+e.loc.n > len(b) {
+		return nil, fmt.Errorf("leveldb: table %s: block at %d changed since load", d.tables[e.loc.table].name, e.loc.block.off)
+	}
+	return b[e.loc.off : e.loc.off+e.loc.n : e.loc.off+e.loc.n], nil
 }
 
 // Stats reports counts describing the load.
