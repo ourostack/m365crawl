@@ -465,25 +465,20 @@ func TestWatchPartialSyncEmitsTheCommittedChangesThenAnError(t *testing.T) {
 	w.forget(`rowid=(select min(rowid) from messages)`)
 	ts := time.Now().Add(3 * time.Hour)
 	_ = os.Chtimes(filepath.Join(healthy.LevelDBDir, "000003.log"), ts, ts)
-	w.waitFor("the error line", func() bool { return len(kinds(w.out.lines(t), "error")) > 0 })
+	// The error line is deduplicated and can come from a tick before the change is made, so wait
+	// for both; the order within one tick (changes, then the error) is pinned by the unit tests.
+	w.waitFor("the error line and the change", func() bool {
+		return len(kinds(w.out.lines(t), "error")) > 0 && len(kinds(w.out.lines(t), "message")) > 0
+	})
 	ls := w.out.lines(t)
 	var order []string
 	for _, l := range ls {
 		order = append(order, l["kind"].(string))
 	}
-	idxError := -1
-	for i, k := range order {
-		if k == "error" && idxError < 0 {
-			idxError = i
-		}
-	}
 	news := 0
-	for i, l := range ls {
+	for _, l := range ls {
 		if l["kind"] == "message" && l["change"] == "new" {
 			news++
-			if i > idxError {
-				t.Fatalf("a change after the error line: %v", order)
-			}
 		}
 	}
 	if news != 1 {
