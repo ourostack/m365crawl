@@ -29,6 +29,13 @@ type Filter struct {
 	// IncludeSystem keeps Teams' system pseudo-conversations (see SystemConversationIDs), which
 	// are left out by default.
 	IncludeSystem bool
+	// Team narrows to one team: its id, or its name compared case-insensitively and exactly. It
+	// matches the team's own conversation and every conversation whose team_id is the team. An
+	// unknown or ambiguous name is a usage error.
+	Team string
+	// Total, when non-nil, receives the exact number of matches ignoring Limit, but only when the
+	// result is truncated (it costs one extra COUNT query then); otherwise it is left unchanged.
+	Total *int
 }
 
 // systemConversationIDs are the pseudo-conversations Teams keeps for its notification feed, call
@@ -84,6 +91,11 @@ type MessageRow struct {
 	Importance              string                  `json:"importance,omitempty"`
 	Pinned                  bool                    `json:"pinned"`
 	Link                    string                  `json:"link,omitempty"`
+	// ReplyCount and LastReplyAt describe a channel thread root: the number of live replies and
+	// when the newest one was sent. ReplyCount is nil for every other message (a reply, a chat
+	// message), so 0 means "a root nobody has answered".
+	ReplyCount  *int      `json:"reply_count,omitempty"`
+	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
 }
 
 // ConversationRow is a conversation with its composed display name.
@@ -121,6 +133,8 @@ type ActivityFilter struct {
 	Limit   int // 0 means DefaultLimit
 	// IncludeSystem also joins messages of the system pseudo-conversations.
 	IncludeSystem bool
+	Team          string // as Filter.Team
+	Total         *int   // as Filter.Total
 }
 
 // ActivityRow is a feed item joined to its message (when archived) and conversation.
@@ -177,9 +191,24 @@ const (
 	// that arrives in a later sync counts without rewriting the message.
 	mentionsMeExpr = `(m.mentions_me=1 or exists(select 1 from activity a where a.tenant_id=m.tenant_id and a.user_id=m.user_id and a.conversation_id=m.conversation_id and a.message_id=m.id and a.type like 'mention%'))`
 
-	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,m.sender_name,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link`
+	// senderNameExpr is the message's own sender name, else the name the people table holds for
+	// the sender id (call events and many bot posts carry an id but no name).
+	senderNameExpr = `coalesce(nullif(m.sender_name,''),p.display_name,'')`
+
+	// replyRootCond holds for a channel thread root: a channel message that starts its own reply
+	// chain. replyFrom selects its live replies, matched through the reply chain id every stored
+	// reply carries (the mapper falls back to the parent, then the message's own id).
+	replyRootCond = `(` + isChannelCond + ` and (m.reply_chain_id='' or m.reply_chain_id=m.id))`
+	replyFrom     = ` from messages r where r.tenant_id=m.tenant_id and r.user_id=m.user_id and r.conversation_id=m.conversation_id and r.reply_chain_id=m.id and r.id<>m.id and r.deleted_at is null`
+	replyCols     = `case when ` + replyRootCond + ` then (select count(*)` + replyFrom + `) end,case when ` + replyRootCond + ` then (select max(r.sent_at)` + replyFrom + `) end`
+
+	msgCols = `m.tenant_id,m.user_id,m.conversation_id,` + cdnExpr + `,m.id,m.reply_chain_id,m.parent_message_id,m.client_message_id,m.sender_id,` + senderNameExpr + `,m.sent_at,m.edited_at,m.deleted_at,m.message_type,m.content_type,m.content_text,m.version,m.mentions_json,` + mentionsMeExpr + `,m.reactions_json,m.files_json,m.links_json,m.subject,m.importance,m.pinned,m.link,` + replyCols
 	msgJoin = ` left join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
- left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`
+ left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id
+ left join people p on p.tenant_id=m.tenant_id and p.id=m.sender_id`
+
+	// teamCond narrows to one resolved team id: the team's own conversation and its channels.
+	teamCond = `(c.team_id=? or c.id=?)`
 )
 
 func escapeLike(s string) string { return crawlstore.EscapeLike(s) }
@@ -215,6 +244,13 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 	if f.Conversation != "" {
 		w.add(`(m.conversation_id=? or c.title=? collate nocase or c.display_name=? collate nocase or `+cdnExpr+`=? collate nocase)`, f.Conversation, f.Conversation, f.Conversation, f.Conversation)
 	}
+	if f.Team != "" {
+		id, err := s.resolveTeam(ctx, f.Account, f.Team)
+		if err != nil {
+			return err
+		}
+		w.add(teamCond, id, id)
+	}
 	if f.From != "" {
 		var exact int
 		probeScope, probeArgs := "", []any{f.From}
@@ -227,7 +263,7 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 		if exact == 1 {
 			w.add(`m.sender_id=?`, f.From)
 		} else {
-			w.add(`lower(m.sender_name) like ? escape '\'`, "%"+strings.ToLower(escapeLike(f.From))+"%")
+			w.add(`lower(`+senderNameExpr+`) like ? escape '\'`, "%"+strings.ToLower(escapeLike(f.From))+"%")
 		}
 	}
 	if !f.Since.IsZero() {
@@ -253,12 +289,17 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 	out := []MessageRow{}
 	for rows.Next() {
 		var r MessageRow
-		var sent, edited, deleted, mentions, reactions, files, links sql.NullString
+		var sent, edited, deleted, mentions, reactions, files, links, lastReply sql.NullString
 		var mentionsMe, pinned int
-		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link); err != nil {
+		var replies sql.NullInt64
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &replies, &lastReply); err != nil {
 			return nil, err
 		}
-		r.SentAt, r.EditedAt, r.DeletedAt = parseTime(sent), parseTime(edited), parseTime(deleted)
+		r.SentAt, r.EditedAt, r.DeletedAt, r.LastReplyAt = parseTime(sent), parseTime(edited), parseTime(deleted), parseTime(lastReply)
+		if replies.Valid {
+			n := int(replies.Int64)
+			r.ReplyCount = &n
+		}
 		r.Mentions, r.Reactions, r.Files, r.Links = unmarshalNull[teamsdesktop.Mention](mentions), unmarshalNull[teamsdesktop.Reaction](reactions), unmarshalNull[teamsdesktop.File](files), unmarshalNull[string](links)
 		r.MentionsMe, r.Pinned = mentionsMe == 1, pinned == 1
 		out = append(out, r)
@@ -266,11 +307,12 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 	return out, rows.Err()
 }
 
-// runMessages runs a message query ordered newest first and trims the extra row that detects truncation.
-func (s *Store) runMessages(ctx context.Context, from string, w *where, limit int, extraArgs []any) ([]MessageRow, bool, error) {
+// runMessages runs a message query ordered newest first and trims the extra row that detects
+// truncation. When the result is truncated and total is not nil, total receives the number of
+// matching messages.
+func (s *Store) runMessages(ctx context.Context, from string, w *where, limit int, total *int) ([]MessageRow, bool, error) {
 	q := `select ` + msgCols + from + w.sql() + ` order by m.sent_at desc, m.id desc limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
-	args := append(append(extraArgs, w.args...), limit+1)
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.db.QueryContext(ctx, q, append(w.args, limit+1)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -278,10 +320,28 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 	if err != nil {
 		return nil, false, err
 	}
-	if len(out) > limit {
-		return out[:limit], true, nil
+	trunc := len(out) > limit
+	if trunc {
+		out = out[:limit]
+		if err := s.countTotal(ctx, total, from, w); err != nil {
+			return nil, false, err
+		}
 	}
-	return out, false, nil
+	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
+		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName
+	}); err != nil {
+		return nil, false, err
+	}
+	return out, trunc, nil
+}
+
+// countTotal stores in total the number of rows the query "select ... <from> <where>" matches
+// without its limit. A nil total means the caller does not want it.
+func (s *Store) countTotal(ctx context.Context, total *int, from string, w *where) error {
+	if total == nil {
+		return nil
+	}
+	return s.db.QueryRowContext(ctx, `select count(*)`+from+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
 }
 
 // Messages lists messages in chronological order. With a Limit it returns the newest Limit
@@ -291,7 +351,7 @@ func (s *Store) Messages(ctx context.Context, f Filter) ([]MessageRow, bool, err
 	if err := s.messageWhere(ctx, &w, f); err != nil {
 		return nil, false, err
 	}
-	rows, trunc, err := s.runMessages(ctx, ` from messages m`+msgJoin, &w, f.limit(), nil)
+	rows, trunc, err := s.runMessages(ctx, ` from messages m`+msgJoin, &w, f.limit(), f.Total)
 	if err != nil {
 		return nil, false, err
 	}
@@ -301,20 +361,33 @@ func (s *Store) Messages(ctx context.Context, f Filter) ([]MessageRow, bool, err
 	return rows, trunc, nil
 }
 
+// hasFilter reports whether f narrows messages by anything but the account and the listing
+// switches: the filters that make a search with no words meaningful.
+func (f Filter) hasFilter() bool {
+	return f.MentionsMe || f.From != "" || f.Conversation != "" || f.Team != "" || !f.Since.IsZero() || !f.Until.IsZero()
+}
+
 // Search matches message text with FTS5, newest first. Terms are ANDed; "quoted" segments are
-// phrases and a trailing * makes a prefix term.
+// phrases and a trailing * makes a prefix term. With no words at all (blank query) it lists the
+// messages the filters select, newest first; a blank query with no filter is a usage error.
 func (s *Store) Search(ctx context.Context, query string, f Filter) ([]MessageRow, bool, error) {
-	match := buildFTSQuery(query)
-	if match == "" {
-		return nil, false, searchUsage("search query has no searchable terms")
-	}
 	var w where
-	w.add(`message_fts match ?`, match)
+	from := ` from messages m` + msgJoin
+	if strings.TrimSpace(query) != "" {
+		match := buildFTSQuery(query)
+		if match == "" {
+			return nil, false, searchUsage("search query has no searchable terms")
+		}
+		w.add(`message_fts match ?`, match)
+		from = ` from message_fts join messages m on m.rowid=message_fts.rowid` + msgJoin
+	} else if !f.hasFilter() {
+		return nil, false, searchUsage("search needs words to find or at least one filter (--mentions-me, --from, --conversation, --team, --since, --until)")
+	}
 	if err := s.messageWhere(ctx, &w, f); err != nil {
 		return nil, false, err
 	}
 	// The match argument comes first in w.args; FROM has no placeholders of its own.
-	return s.runMessages(ctx, ` from message_fts join messages m on m.rowid=message_fts.rowid`+msgJoin, &w, f.limit(), nil)
+	return s.runMessages(ctx, from, &w, f.limit(), f.Total)
 }
 
 // Unread lists unread messages, newest first: sent after the conversation's read horizon, not by
@@ -325,11 +398,13 @@ func (s *Store) Unread(ctx context.Context, f Filter) ([]MessageRow, bool, error
 	if err := s.messageWhere(ctx, &w, f); err != nil {
 		return nil, false, err
 	}
-	return s.runMessages(ctx, ` from messages m`+msgJoin, &w, f.limit(), nil)
+	return s.runMessages(ctx, ` from messages m`+msgJoin, &w, f.limit(), f.Total)
 }
 
 // UnreadConversationRow is one conversation's unread summary.
 type UnreadConversationRow struct {
+	TenantID       string
+	UserID         string
 	ConversationID string
 	DisplayName    string
 	Kind           string
@@ -349,7 +424,7 @@ func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadCon
 	}
 	limit := f.limit()
 	//nolint:gosec // G202: fragments are package constants; values are placeholders
-	q := `select conv_id,name,kind,cnt,oldest,newest,link from (select m.conversation_id as conv_id,` + cdnExpr + ` as name,coalesce(c.kind,'') as kind,m.sent_at as newest,m.link as link,
+	q := `select tenant,user,conv_id,name,kind,cnt,oldest,newest,link from (select m.tenant_id as tenant,m.user_id as user,m.conversation_id as conv_id,` + cdnExpr + ` as name,coalesce(c.kind,'') as kind,m.sent_at as newest,m.link as link,
  count(*) over (partition by m.tenant_id,m.user_id,m.conversation_id) as cnt,
  min(m.sent_at) over (partition by m.tenant_id,m.user_id,m.conversation_id) as oldest,
  row_number() over (partition by m.tenant_id,m.user_id,m.conversation_id order by m.sent_at desc, m.id desc) as rn
@@ -363,7 +438,7 @@ func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadCon
 	for rows.Next() {
 		var r UnreadConversationRow
 		var oldest, newest sql.NullString
-		if err := rows.Scan(&r.ConversationID, &r.DisplayName, &r.Kind, &r.UnreadCount, &oldest, &newest, &r.Link); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.DisplayName, &r.Kind, &r.UnreadCount, &oldest, &newest, &r.Link); err != nil {
 			return nil, false, err
 		}
 		r.OldestUnreadAt, r.NewestUnreadAt = parseTime(oldest), parseTime(newest)
@@ -372,10 +447,21 @@ func (s *Store) UnreadByConversation(ctx context.Context, f Filter) ([]UnreadCon
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(out) > limit {
-		return out[:limit], true, nil
+	trunc := len(out) > limit
+	if trunc {
+		out = out[:limit]
+		if f.Total != nil {
+			if err := s.db.QueryRowContext(ctx, `select count(*) from (select 1 from messages m`+msgJoin+w.sql()+` group by m.tenant_id,m.user_id,m.conversation_id)`, w.args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
+				return nil, false, err
+			}
+		}
 	}
-	return out, false, nil
+	if err := nameUntitled(ctx, s, out, func(r *UnreadConversationRow) (convRef, *string) {
+		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.DisplayName
+	}); err != nil {
+		return nil, false, err
+	}
+	return out, trunc, nil
 }
 
 // Thread returns a thread's root message and its replies, oldest first. f.Account narrows to one
@@ -401,24 +487,45 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 	if err != nil {
 		return nil, false, err
 	}
-	if len(out) > f.limit() {
-		return out[:f.limit()], true, nil
+	trunc := len(out) > f.limit()
+	if trunc {
+		out = out[:f.limit()]
+		if err := s.countTotal(ctx, f.Total, ` from messages m`+msgJoin, &w); err != nil {
+			return nil, false, err
+		}
 	}
-	return out, false, nil
+	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
+		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName
+	}); err != nil {
+		return nil, false, err
+	}
+	return out, trunc, nil
 }
 
 // Conversations lists conversations by latest activity. kind is a case-insensitive exact match
-// on the Teams type; query matches titles and display names through conversation_fts.
+// on the Teams type. query is a fuzzy match on the conversation's name, ranked: an exact name
+// first, then names that start with the query, then names that contain it, then conversations
+// that hold all of the query's words in their title index (conversation_fts); each rank is
+// ordered by latest activity. A channel is named both "Team › Channel" and by its own name, and
+// either may match. f.Team limits the list to one team and its channels.
 func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter) ([]ConversationRow, bool, error) {
 	var w where
 	from := ` from conversations c left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`
+	order := ` order by c.last_message_at desc, c.id`
+	var orderArgs []any
 	if query != "" {
 		match := buildFTSQuery(query)
 		if match == "" {
 			return nil, false, errs.Usage("conversation query has no searchable terms")
 		}
-		from = ` from conversation_fts join conversations c on c.rowid=conversation_fts.rowid left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`
-		w.add(`conversation_fts match ?`, match)
+		q := strings.ToLower(escapeLike(query))
+		names := [2]string{`lower(` + cdnExpr + `)`, `lower(` + chanName + `)`}
+		like := func(pat string) string {
+			return `(` + names[0] + ` like ? escape '\' or ` + names[1] + ` like ? escape '\')`
+		}
+		w.add(`(c.rowid in (select rowid from conversation_fts where conversation_fts match ?) or `+like("%")+`)`, match, "%"+q+"%", "%"+q+"%")
+		order = ` order by case when ` + names[0] + `=? or ` + names[1] + `=? then 0 when ` + like("") + ` then 1 when ` + like("") + ` then 2 else 3 end, c.last_message_at desc, c.id`
+		orderArgs = []any{strings.ToLower(query), strings.ToLower(query), q + "%", q + "%", "%" + q + "%", "%" + q + "%"}
 	}
 	if f.Account != nil {
 		w.add(`c.tenant_id=? and c.user_id=?`, f.Account.TenantID, f.Account.UserID)
@@ -429,6 +536,13 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	if kind != "" {
 		w.add(`c.kind=? collate nocase`, kind)
 	}
+	if f.Team != "" {
+		id, err := s.resolveTeam(ctx, f.Account, f.Team)
+		if err != nil {
+			return nil, false, err
+		}
+		w.add(teamCond, id, id)
+	}
 	if !f.Since.IsZero() {
 		w.add(`c.last_message_at>=?`, fmtTime(f.Since))
 	}
@@ -437,7 +551,7 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	}
 	limit := f.limit()
 	rows, err := s.db.QueryContext(ctx, `select c.tenant_id,c.user_id,c.id,c.kind,c.title,c.topic,`+cdnExpr+`,c.team_id,c.parent_id,c.members_json,c.last_message_at,c.read_horizon_at,c.favorite`+ //nolint:gosec // G202: fragments are package constants; values are placeholders
-		from+w.sql()+` order by c.last_message_at desc, c.id limit ?`, append(w.args, limit+1)...)
+		from+w.sql()+order+` limit ?`, append(append(w.args, orderArgs...), limit+1)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -456,10 +570,19 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(out) > limit {
-		return out[:limit], true, nil
+	trunc := len(out) > limit
+	if trunc {
+		out = out[:limit]
+		if err := s.countTotal(ctx, f.Total, from, &w); err != nil {
+			return nil, false, err
+		}
 	}
-	return out, false, nil
+	if err := nameUntitled(ctx, s, out, func(r *ConversationRow) (convRef, *string) {
+		return convRef{r.TenantID, r.UserID, r.ID}, &r.DisplayName
+	}); err != nil {
+		return nil, false, err
+	}
+	return out, trunc, nil
 }
 
 // People lists people by name, matching query as a case-insensitive substring of the display
@@ -492,6 +615,9 @@ func (s *Store) People(ctx context.Context, query string, f Filter) ([]PersonRow
 		return nil, false, err
 	}
 	if len(out) > limit {
+		if err := s.countTotal(ctx, f.Total, ` from people p`, &w); err != nil {
+			return nil, false, err
+		}
 		return out[:limit], true, nil
 	}
 	return out, false, nil
@@ -507,29 +633,53 @@ func (s *Store) Activity(ctx context.Context, f ActivityFilter) ([]ActivityRow, 
 	if f.Unread {
 		w.add(`a.is_read=0`)
 	}
-	if f.Type != "" {
-		w.add(`a.type=? collate nocase`, f.Type)
+	if types := splitTypes(f.Type); len(types) > 0 {
+		conds := make([]string, len(types))
+		args := make([]any, len(types))
+		for i, t := range types {
+			conds[i], args[i] = `a.type=? collate nocase`, t
+		}
+		w.add(`(`+strings.Join(conds, ` or `)+`)`, args...)
+	}
+	if f.Team != "" {
+		id, err := s.resolveTeam(ctx, f.Account, f.Team)
+		if err != nil {
+			return nil, false, err
+		}
+		w.add(teamCond, id, id)
 	}
 	if !f.Since.IsZero() {
 		w.add(`a.at>=?`, fmtTime(f.Since))
 	}
-	return s.activityRows(ctx, &w, Filter{Limit: f.Limit}.limit(), f.IncludeSystem)
+	return s.activityRows(ctx, &w, Filter{Limit: f.Limit}.limit(), f.IncludeSystem, f.Total)
+}
+
+// splitTypes splits a comma-separated list of activity types, dropping blanks.
+func splitTypes(list string) []string {
+	var out []string
+	for _, t := range strings.Split(list, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // activityRows runs the activity query for the conditions in w, newest first, and trims the extra
 // row that detects truncation.
-func (s *Store) activityRows(ctx context.Context, w *where, limit int, includeSystem bool) ([]ActivityRow, bool, error) {
+func (s *Store) activityRows(ctx context.Context, w *where, limit int, includeSystem bool, total *int) ([]ActivityRow, bool, error) {
 	msgOn := ``
 	if !includeSystem {
 		msgOn = ` and ` + notSystemCond(`m.conversation_id`)
 	}
-	//nolint:gosec // G202: fragments are package constants; values are placeholders
-	rows, err := s.db.QueryContext(ctx, `select a.tenant_id,a.user_id,a.id,a.type,a.subtype,a.is_read,a.at,a.conversation_id,`+cdnExpr+`,a.message_id,a.reply_chain_id,a.app_id,coalesce(m.content_text,''),coalesce(m.sender_id,''),coalesce(m.sender_name,''),m.sent_at,coalesce(m.link,'')
-from activity a
- left join messages m on m.tenant_id=a.tenant_id and m.user_id=a.user_id and m.conversation_id=a.conversation_id and m.id=a.message_id`+msgOn+`
+	from := ` from activity a
+ left join messages m on m.tenant_id=a.tenant_id and m.user_id=a.user_id and m.conversation_id=a.conversation_id and m.id=a.message_id` + msgOn + `
+ left join people sp on sp.tenant_id=m.tenant_id and sp.id=m.sender_id
  left join conversations c on c.tenant_id=a.tenant_id and c.user_id=a.user_id and c.id=a.conversation_id
- left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`+
-		w.sql()+` order by a.at desc, a.id desc limit ?`, append(w.args, limit+1)...)
+ left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`
+	//nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, err := s.db.QueryContext(ctx, `select a.tenant_id,a.user_id,a.id,a.type,a.subtype,a.is_read,a.at,a.conversation_id,`+cdnExpr+`,a.message_id,a.reply_chain_id,a.app_id,coalesce(m.content_text,''),coalesce(m.sender_id,''),coalesce(nullif(m.sender_name,''),sp.display_name,''),m.sent_at,coalesce(m.link,'')`+
+		from+w.sql()+` order by a.at desc, a.id desc limit ?`, append(w.args, limit+1)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -548,10 +698,19 @@ from activity a
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(out) > limit {
-		return out[:limit], true, nil
+	trunc := len(out) > limit
+	if trunc {
+		out = out[:limit]
+		if err := s.countTotal(ctx, total, from, w); err != nil {
+			return nil, false, err
+		}
 	}
-	return out, false, nil
+	if err := nameUntitled(ctx, s, out, func(r *ActivityRow) (convRef, *string) {
+		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName
+	}); err != nil {
+		return nil, false, err
+	}
+	return out, trunc, nil
 }
 
 // Whoami lists the archived accounts with their own MRI and display name (when the account's own
