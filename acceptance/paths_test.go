@@ -83,8 +83,8 @@ func TestSafeKey(t *testing.T) {
 }
 
 func TestStderrNoteHidesContent(t *testing.T) {
-	secret := "KeyError: 'private-value'"
-	note := stderrNote(t, "tool", []byte(secret))
+	stderr := "KeyError: 'private-value'"
+	note := stderrNote(t, "tool", []byte(stderr))
 	if strings.Contains(note, "private-value") || !strings.Contains(note, "25 bytes") {
 		t.Errorf("note leaks or miscounts: %q", note)
 	}
