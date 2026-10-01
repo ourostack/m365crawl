@@ -8,6 +8,11 @@ The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No J
 
 ### Added
 
+- Implicit sync notice: a read that runs the `--max-age` sync first prints one line on stderr before it starts (`teamscrawl: syncing — archive is 2h14m old (max-age 15m)`, or `… no complete sync yet …`), in every output format and never on stdout, and its result gains `synced: {seconds, status}` beside `archive_age_seconds`. Reads of a fresh archive stay silent and carry no `synced`.
+- `mention_kind` on message items that mention you (`person`, `channel`, `team`, `tag`, `everyone`, or `other` for a kind this version does not know), and `--direct-mentions` on `messages`, `search` and `activity` to keep only `person` mentions, so @channel and @team broadcasts do not drown "who mentioned me".
+- `actor_id` and `actor_name` on activity items: who reacted, replied, mentioned or posted, distinct from `sender_*` (the related message's author). `msGraph`, `teamMembershipChange` and `threadActivity` have no actor and omit them.
+- `teams`: lists teams `{team_id, display_name, channel_count, last_activity_at, unread_count}` (with `tenant_id`, `user_id`), honoring `--account`, `--limit` and `--fields`. The `--team` usage error now points at it.
+- `unread --since <duration|time>` counts only unread messages sent at or after the cutoff, with `--by-conversation`, `--team` and `--include-channels` too: the recency cap for "what needs my attention", since old read markers leave conversations with hundreds of unread messages.
 - `watch [--every 60s] [--emit-initial]`: streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache (file events with a poll as the safety net, debounced), plus one `sync` line per sync and one `migrated` line when an upgrade re-derives an older archive. It honors `--account`, `--fields` and `--max-text`, skips system pseudo-conversations and exits 0 on SIGINT or SIGTERM.
 - `--team <name|id>` on `conversations`, `messages`, `search`, `unread` and `activity`: limits results to one team and its channels. An unknown or ambiguous name is a `usage` error that lists the matches.
 - `total` on truncated list results and on truncated `sql` results: the exact number of matches ignoring `--limit`. It is omitted when the result is not truncated.

@@ -4,7 +4,7 @@ This reference reproduces the output of `teamscrawl --help` and `teamscrawl <com
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `people`, `activity`, `unread`, `thread`, `watch`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `unread`, `thread`, `watch`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -14,7 +14,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($TEAMSCRAWL_TEAMS_ROOT). |
 | `--account=TENANT/USER` | Only this account, as &lt;tenantId&gt;/&lt;userId&gt;. Default: every account. |
 | `--no-color` | Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color. |
-| `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($TEAMSCRAWL_MAX_AGE). |
+| `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($TEAMSCRAWL_MAX_AGE). When a read does sync first, stderr gets one line before it starts (`teamscrawl: syncing — archive is 2h14m old (max-age 15m)`, or `… no complete sync yet …`) and the result gains `synced: {seconds, status}`. |
 | `--fields=a,b,c` | List commands only: keep only these top-level keys of each item, comma separated. |
 | `--max-text=N` | List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it. |
 | `--version` | Print the version, commit and build date, then exit. |
@@ -31,6 +31,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`search`](#search) | Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`). |
 | [`messages`](#messages) | List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). |
 | [`conversations`](#conversations) | List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`). |
+| [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
@@ -108,7 +109,7 @@ Arguments:
 
 | Argument | Meaning |
 | --- | --- |
-| `[&lt;query&gt;]` | Words to find; "quoted phrases" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --from, --conversation, --team, --since, --until) is given: then the filters alone select the messages. |
+| `[&lt;query&gt;]` | Words to find; "quoted phrases" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --since, --until) is given: then the filters alone select the messages. |
 
 Flags:
 
@@ -122,10 +123,11 @@ Flags:
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
 | `--include-deleted` | Also search deleted messages. |
-| `--mentions-me` | Only messages that mention you. |
+| `--mentions-me` | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). |
+| `--direct-mentions` | Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts. |
 | `--html` | Add each message's HTML body as html. |
 
-Result: A list of message items, newest first.
+Result: A list of message items, newest first. Items that mention you carry `mention_kind`: `person` (you by name), `channel`, `team`, `tag`, `everyone` or `other`.
 
 Examples:
 
@@ -154,12 +156,13 @@ Flags:
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
 | `--include-deleted` | Also list deleted messages. |
-| `--mentions-me` | Only messages that mention you. |
+| `--mentions-me` | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). |
+| `--direct-mentions` | Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts. |
 | `--unread` | Only unread messages (chats and meetings unless --include-channels). |
 | `--include-channels` | include channels (off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`) |
 | `--html` | Add each message's HTML body as html. |
 
-Result: A list of message items, oldest first. Channel thread roots carry `reply_count` and `last_reply_at`.
+Result: A list of message items, oldest first. Channel thread roots carry `reply_count` and `last_reply_at`; items that mention you carry `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone` or `other`).
 
 Examples:
 
@@ -193,6 +196,29 @@ Examples:
 ```sh
 teamscrawl conversations --kind Space
 teamscrawl conversations --query planning
+```
+
+## teams
+
+List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes.
+
+```
+teamscrawl teams [flags]
+```
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--limit=50` | Maximum items to return; truncated says whether more exist. |
+
+Result: A list of team items `{tenant_id, user_id, team_id, display_name, channel_count, last_activity_at, unread_count}`, newest activity first. `channel_count` counts the team's channels, `last_activity_at` is the newest message time across the team and its channels, and `unread_count` counts unread messages in its channels (channels count here whatever `--include-channels` says elsewhere). Honors `--account`, `--limit` and `--fields`.
+
+Examples:
+
+```sh
+teamscrawl teams --fields team_id,display_name,unread_count
+teamscrawl messages --team "Platform" --since 1d
 ```
 
 ## people
@@ -233,11 +259,12 @@ Flags:
 | `--unread` | Only unread items. |
 | `--type=STRING` | Only these activity types, comma separated, matched exactly in any case. Seen in the cache: mention (you were @-mentioned in a channel, as a team or tag), mentionInChat (in a chat, or by @everyone), reply, replyToReply, follow, reaction, reactionInChat, msGraph (system notices such as meeting updates and approvals), teamMembershipChange, threadActivity. Example: --type mention,mentionInChat. |
 | `--team=STRING` | Only items in this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
+| `--direct-mentions` | Only mention items that name you (type mention or mentionInChat, subtype person), not channel, team, tag or @everyone mentions. |
 | `--since=STRING` | Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h). |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
 
-Result: A list of activity items joined with their messages.
+Result: A list of activity items joined with their messages. `actor_id` and `actor_name` say who did it and differ from `sender_*` (the related message's author): the reactor for `reaction` and `reactionInChat`; the message's sender for `mention`, `mentionInChat`, `reply`, `replyToReply` and `follow`; omitted for `msGraph`, `teamMembershipChange` and `threadActivity`, and when the message is not archived.
 
 Examples:
 
@@ -260,6 +287,7 @@ Flags:
 | --- | --- |
 | `-c, --conversation=STRING` | Conversation id, or its exact title or display name. |
 | `--team=STRING` | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
+| `--since=STRING` | Count only unread messages sent at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). Use it for "what needs my attention": old read markers leave stale conversations with hundreds of unread messages. |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--html` | Add each message's HTML body as html. |
 | `--include-channels` | include channels (off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`) |
@@ -273,6 +301,7 @@ Examples:
 ```sh
 teamscrawl unread --limit 5
 teamscrawl unread --by-conversation --include-channels
+teamscrawl unread --by-conversation --since 7d
 ```
 
 ## thread

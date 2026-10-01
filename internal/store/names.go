@@ -187,27 +187,32 @@ type TeamRow struct {
 	UnreadCount          int       // unread messages in the team's channels (and its own conversation)
 }
 
-// teamsFrom selects the teams: conversations that other conversations name as their team.
-const teamsFrom = ` from conversations t where exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id)`
+// teamsFrom and teamsExists select the teams: conversations that other conversations name as
+// their team.
+const (
+	teamsFrom   = ` from conversations t`
+	teamsExists = `exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id)`
+)
 
 // Teams lists the archived teams, newest channel activity first. f.Account narrows to one
 // account, f.Limit caps the list and f.Total receives the exact count when it is cut.
 func (s *Store) Teams(ctx context.Context, f Filter) ([]TeamRow, bool, error) {
-	var w where
+	cond, unreadScope, args := "", "", []any{}
 	if f.Account != nil {
-		w.add(`t.tenant_id=? and t.user_id=?`, f.Account.TenantID, f.Account.UserID)
-	}
-	cond := strings.TrimPrefix(w.sql(), " where ")
-	if cond != "" {
-		cond = " and " + cond
+		cond, unreadScope, args = ` and t.tenant_id=?  and t.user_id=?`, ` and c.tenant_id=? and c.user_id=?`, []any{f.Account.TenantID, f.Account.UserID}
 	}
 	limit := f.limit()
+	// Unread counts come from one pass over the messages, grouped by team (a channel's team_id, or
+	// the team's own conversation id), not one lookup per team.
 	//nolint:gosec // G202: fragments are package constants; values are placeholders
 	rows, err := s.db.QueryContext(ctx, `select t.tenant_id,t.user_id,t.id,`+teamName+`,
  (select count(*) from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id),
  (select max(x.last_message_at) from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and (x.team_id=t.id or x.id=t.id)) as last_activity,
- (select count(*) from messages m join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id where c.tenant_id=t.tenant_id and c.user_id=t.user_id and (c.team_id=t.id or c.id=t.id) and `+unreadCond+`)`+
-		teamsFrom+cond+` order by last_activity desc, t.id, t.tenant_id, t.user_id limit ?`, append(w.args, limit+1)...)
+ coalesce(u.n,0)`+teamsFrom+`
+ left join (select c.tenant_id as tenant,c.user_id as user,case when c.team_id<>'' then c.team_id else c.id end as team,count(*) as n
+  from messages m join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
+  where `+unreadCond+unreadScope+` group by 1,2,3) u on u.tenant=t.tenant_id and u.user=t.user_id and u.team=t.id`+
+		` where `+teamsExists+cond+` order by last_activity desc, t.id, t.tenant_id, t.user_id limit ?`, append(append(append([]any{}, args...), args...), limit+1)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -229,7 +234,7 @@ func (s *Store) Teams(ctx context.Context, f Filter) ([]TeamRow, bool, error) {
 		return out, false, nil
 	}
 	if f.Total != nil {
-		if err := s.db.QueryRowContext(ctx, `select count(*)`+teamsFrom+cond, w.args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
+		if err := s.db.QueryRowContext(ctx, `select count(*)`+teamsFrom+` where `+teamsExists+cond, args...).Scan(f.Total); err != nil { //nolint:gosec // G202: fragments are package constants; values are placeholders
 			return nil, false, err
 		}
 	}

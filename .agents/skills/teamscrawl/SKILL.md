@@ -17,6 +17,7 @@ Read-only, offline access to the user's Teams history. It copies the new Teams d
 ```sh
 teamscrawl doctor                      # once; exit 3 means fix the environment first
 teamscrawl whoami                      # accounts (self_id is the user's own sender id), how fresh
+teamscrawl unread --by-conversation --since 7d   # "what needs my attention": recent unread only
 teamscrawl unread --limit 20 --max-text 300
 teamscrawl activity --unread --limit 20 --max-text 300
 teamscrawl search "quarterly plan" --since 7d --limit 10 --max-text 300
@@ -25,7 +26,7 @@ teamscrawl thread <conversation_id> <root_message_id>   # or: teamscrawl thread 
 
 No words to search for? `search` also works with filters alone (`search --mentions-me --since 24h`, newest first); with neither words nor a filter it is a usage error whose fix names `messages`.
 
-Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read commands sync first when the archive is older than `--max-age`; pass `--max-age 15m` for fresh answers or `--max-age 0` to skip the sync.
+Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read commands sync first when the archive is older than `--max-age` (stderr gets one line first, `teamscrawl: syncing — archive is 2h14m old (max-age 15m)`, and the result gains `synced: {seconds, status}`); pass `--max-age 15m` for fresh answers or `--max-age 0` to skip the sync.
 
 ## Global flags
 
@@ -39,15 +40,15 @@ If the archive has no complete sync yet, every read result also carries `"needs_
 
 System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are excluded by default from `search`, `messages`, `unread`, `thread`, the message text in `activity`, and `conversations`, because their messages duplicate real ones with blank sender and conversation names. Pass `--include-system` to bring them back. Your own notes (`48:notes`) stay included.
 
-An @-mention appears in `text` as the person's plain name; `mentions` lists who was mentioned and `mentions_me` is exact.
+An @-mention appears in `text` as the person's plain name; `mentions` lists who was mentioned and `mentions_me` is exact. When `mentions_me` is true, `mention_kind` says how: `person` (you by name), `channel`, `team`, `tag`, `everyone` (a broadcast) or `other`. `--direct-mentions` (on `messages`, `search`, `activity`) keeps only `person` mentions, so use it to leave @channel and @team noise out of "who mentioned me".
 
 `text` is always readable, never raw card JSON or markup: bot cards give their title, text blocks and facts, call and thread events read like `Call ended · 23m` or `Member added`, and `raw_json` (via `sql`) keeps the original. A few messages have empty `text` (deleted, image- or file-only, meeting notices). Details, and how an alpha.1 archive is upgraded by its first `sync`, are in SPEC.md section 3.
 
-`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name (case-insensitive for ASCII letters only, so `Équipe` and `équipe` differ), or its id (`conversations --kind Space --query <words>` finds both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
+`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name (case-insensitive for ASCII letters only, so `Équipe` and `équipe` differ), or its id (`teamscrawl teams` lists both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
 
 ### unread
 
-Unread messages, newest first (newer than the conversation's read marker and not sent by the user). By default it covers chats and meetings only: most channels are never opened, so their unread counts are noise, and channel mentions and replies reach you through `activity`. Add `--include-channels` to count channels and teams too (`messages --unread` takes the same flag). `--by-conversation` gives the overview instead of messages: one item per conversation `{conversation_id, conversation_display_name, kind, unread_count, oldest_unread_at, newest_unread_at, link}`, most unread first; start there, then read a conversation with `messages -c <id> --unread` (pass `--include-channels` too when that conversation is a channel, or the channel's messages are filtered out). When channels are left out (no `--include-channels`), `unread` and `messages --unread` results carry `"channels_excluded":true`; it is omitted when channels are included. Flags: `-c/--conversation`, `--team`, `--limit`, `--html`, `--include-channels`, `--by-conversation`, `--include-system`.
+Unread messages, newest first (newer than the conversation's read marker and not sent by the user). By default it covers chats and meetings only: most channels are never opened, so their unread counts are noise, and channel mentions and replies reach you through `activity`. Add `--include-channels` to count channels and teams too (`messages --unread` takes the same flag). `--by-conversation` gives the overview instead of messages: one item per conversation `{conversation_id, conversation_display_name, kind, unread_count, oldest_unread_at, newest_unread_at, link}`, most unread first; start there, then read a conversation with `messages -c <id> --unread` (pass `--include-channels` too when that conversation is a channel, or the channel's messages are filtered out). When channels are left out (no `--include-channels`), `unread` and `messages --unread` results carry `"channels_excluded":true`; it is omitted when channels are included. Old read markers leave stale conversations with hundreds of unread messages, so for "what needs my attention" pass `--since 7d`: only unread messages sent at or after the cutoff count (also with `--by-conversation`, `--team`, `--include-channels`). Flags: `-c/--conversation`, `--team`, `--since`, `--limit`, `--html`, `--include-channels`, `--by-conversation`, `--include-system`.
 
 ```json
 {"items":[{"conversation_id":"19:topicchannel1@thread.tacv2","conversation_display_name":"Fixture team 1 › General","id":"1700000046000","reply_chain_id":"1700000045000","sender_name":"Pat Example","sent_at":"2023-11-14T22:14:06Z","text":"Channel post with a subject\nReply in thread","mentions_me":false,"link":"https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?tenantId=...&parentMessageId=1700000045000"}],"count":1,"truncated":false,"archive_age_seconds":0}
@@ -55,9 +56,9 @@ Unread messages, newest first (newer than the conversation's read marker and not
 
 ### activity
 
-The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mention,mentionInChat` (comma separated, exact, case-insensitive for ASCII letters; a list naming no type is a `usage` error), `--team`, `--since 1h`, `--limit`, `--include-system`.
+The Teams activity feed (mentions, replies, reactions, follows) joined with message text, sender and conversation. Flags: `--unread`, `--type mention,mentionInChat` (comma separated, exact, case-insensitive for ASCII letters; a list naming no type is a `usage` error), `--direct-mentions`, `--team`, `--since 1h`, `--limit`, `--include-system`.
 
-Activity `type` values: `mention` (@-mentioned in a channel) and `mentionInChat` (in a chat) are different types, so for everything that mentions you use `--type mention,mentionInChat` or `search --mentions-me`; also `reply`, `replyToReply`, `follow`, `reaction`, `reactionInChat`, `msGraph` (Microsoft 365 notices), `teamMembershipChange`, `threadActivity`. `--type` takes the type, not the subtype; an unknown type matches nothing and is not an error.
+Activity `type` values: `mention` (@-mentioned in a channel) and `mentionInChat` (in a chat) are different types, so for everything that mentions you use `--type mention,mentionInChat` or `search --mentions-me`; also `reply`, `replyToReply`, `follow`, `reaction`, `reactionInChat`, `msGraph` (Microsoft 365 notices), `teamMembershipChange`, `threadActivity`. `--type` takes the type, not the subtype; an unknown type matches nothing and is not an error. `actor_id` and `actor_name` say who did it (who reacted, replied, mentioned or posted) and differ from `sender_*`, which is the related message's author: for `reaction` and `reactionInChat` the actor is the reactor, for `mention`, `mentionInChat`, `reply`, `replyToReply` and `follow` it is the message's sender, and `msGraph`, `teamMembershipChange` and `threadActivity` have none (the keys are omitted, as they are when the message is not archived). `msGraph` rows often have empty conversation, sender and text.
 ```json
 {"items":[{"id":"fixture-activity-1-8","type":"follow","is_read":false,"at":"2023-11-14T22:22:00Z","conversation_display_name":"Fixture team 1 › Planning","message_id":"1700000047000","sender_name":"Pat Example","text":"Planning channel message","link":"https://teams.microsoft.com/l/message/19:planningchannel1@thread.tacv2/1700000047000?tenantId=..."}],"count":1,"truncated":false,"archive_age_seconds":0}
 ```
@@ -81,7 +82,10 @@ Optional keys (omitted when empty): `edited_at`, `deleted_at`, `mentions`, `reac
 
 One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (the root is an item's `parent_message_id`/`reply_chain_id`) or a Teams message link copied from any `link`. Flags: `--limit` (default 50; check `truncated`), `--include-deleted`, `--html`, `--include-system`.
 
-### conversations and people
+### conversations, teams and people
+
+`teams` lists teams `{team_id, display_name, channel_count, last_activity_at, unread_count}` (plus `tenant_id`, `user_id`), newest activity first, with `--limit` and `--fields`; `unread_count` counts the team's channels too. Its `team_id` or `display_name` is what `--team` takes.
+
 
 `conversations --kind Chat|Topic|Space|Meeting --query words --team <name|id> [--include-system]` lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`), with `display_name`, `kind`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`. `people --query name` resolves a name to a `sender_id` for `--from`.
 
