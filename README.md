@@ -113,12 +113,12 @@ Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with 
 
 ## For agents
 
-Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md). It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
+Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md), or run `teamscrawl skill` to print the same guide from the installed binary. It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
 
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
 - Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
 - Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
-- Every item carries a `link` (a Teams deep link) for citing, and every read result carries `archive_age_seconds`.
+- Every item carries a `link` (a Teams deep link) for citing, and every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts the read covers (a partial or failed sync refreshes nobody).
 - Nothing ever writes to Teams.
 
 Flags that matter for agents:
@@ -126,7 +126,7 @@ Flags that matter for agents:
 - `--max-age 15m` (or `TEAMSCRAWL_MAX_AGE`) makes a read command run a sync first when the last successful one is older. `0` disables it. If the implicit sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
 - `--fields a,b,c` keeps only those top-level keys of each item.
 - `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
-- `archive_age_seconds` tells you how stale the answer can be. A never-synced archive adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
+- `archive_age_seconds` tells you how stale the answer can be. An archive with no complete sync yet (never synced, only partial or failed syncs, or written by an older teamscrawl) adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
 - System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 
 ## Commands
@@ -135,7 +135,7 @@ Flags that matter for agents:
 | --- | --- |
 | `doctor` | Checks Teams, Full Disk Access, origins, the archive and the last sync. Exits 3 on a blocking failure. |
 | `whoami` | Lists the accounts in the archive and the archive's state. |
-| `sync` | Copies the Teams cache into the archive once and prints what changed. The first sync after an upgrade first re-derives older rows' text and names from their stored `raw_json` (report field `migrated`, counted as no update). |
+| `sync` | Copies the Teams cache into the archive once and prints what changed. The first sync after an upgrade first re-derives older rows' text and names from their stored `raw_json` (report field `migrated`, counted as no update). Each Teams source commits on its own: if one fails and another succeeds the status is `partial`, the report is on stdout, a `partial_sync` error is on stderr and the exit status is 1. |
 | `status` | Shows archive counts per account, the last sync and other Teams origins seen. |
 | `search [query]` | Full-text search over message text, newest first. The query is optional when a filter is given. Filters: `--conversation`, `--team`, `--from`, `--since`, `--until`, `--mentions-me`, `--include-deleted`, `--include-system`. |
 | `messages` | Lists messages chronologically (oldest first). Same filters as `search`, plus `--unread` and `--include-channels`. Channel thread roots carry `reply_count` and `last_reply_at`. |
@@ -146,6 +146,7 @@ Flags that matter for agents:
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
 | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync, and one `{"kind":"migrated","from":1,"to":2,"rows":N}` line when an upgrade re-derives an older archive (not a change: no `edited` lines). Flags: `--every` (poll interval, default `60s`), `--emit-initial`; honors `--account`, `--fields` and `--max-text`; system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations) are skipped. |
+| `skill` | Prints the agent guide (the same text as `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary) as raw Markdown in every output mode, so an agent can read the guide that matches the installed version. |
 | `version` | Prints `{"version","commit","date"}` (one JSON document; a human line in text mode). `teamscrawl --version` does the same. |
 
 Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `teamscrawl <command> --help` for the rest.

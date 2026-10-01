@@ -51,7 +51,7 @@ Rows are partitioned by account: `(tenant_id, user_id)`. Two accounts never mix.
 | `messages` | `(tenant_id, user_id, conversation_id, id)` | `reply_chain_id`, `parent_message_id`, `client_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `content_type`, `content_html`, `content_text`, `version`, `mentions_json`, `mentions_me`, `reactions_json`, `files_json`, `links_json`, `subject`, `importance`, `pinned`, `link`, `raw_json` |
 | `people` | `(tenant_id, id)` | `display_name`, `first_seen_at`, `last_seen_at` |
 | `activity` | `(tenant_id, user_id, id)` | `type`, `subtype`, `is_read`, `at`, `conversation_id`, `message_id`, `reply_chain_id`, `app_id`, `raw_json` |
-| `sync_runs` | `id` | `started_at`, `finished_at`, `source`, `fingerprint`, `status` (`ok`, `ok_with_omissions`, `unchanged`, `failed`), `counts_json`, `omissions_json` |
+| `sync_runs` | `id` | `started_at`, `finished_at`, `source`, `fingerprint`, `status` (`ok`, `ok_with_omissions`, `unchanged`, `partial`, `failed`), `counts_json`, `omissions_json`, `accounts_json`. A run writes one row per source it tried and one run-level row (empty `source`, `accounts_json` set to the accounts it covered: `["*"]` for every account, or one `<tenantId>/<userId>`). Only run-level rows with a fully successful status count as a fresh sync. |
 | `meta` | `key` | `derivation_version` |
 | `message_fts`, `conversation_fts` | rowid of the owning row | FTS5 indexes over message text and conversation titles |
 
@@ -89,10 +89,10 @@ A `search` query is split on whitespace into terms that are ANDed. `"quoted phra
    - The **fingerprint** is a SHA-256 over the decoder version and the sorted name, size and modification time of every file in the origin's `.leveldb` and `.blob` directories, excluding `LOCK` and `LOG*`. If it equals the fingerprint of the last successful run for that source, the source is `unchanged`, nothing is decoded and no row changes. A run with `--account` records no fingerprint and never skips, so a filtered run cannot hide another account's data from a later run.
    - The **snapshot** copies the two directories into a private temp directory (mode 0700, files 0600), regular files only. LevelDB data files are copied first, then the `MANIFEST`, then `CURRENT`; blobs last. The copy is retried, up to three attempts, when `CURRENT` changed during the copy, the copied manifest is not the size of the live one, or a file the manifest names is missing. After three attempts the run fails with `snapshot_inconsistent`. The snapshot is validated by reading every table and log. It contains Teams' sign-in database, so it is removed when the source is done, on failure, and on SIGINT or SIGTERM.
    - **Decode and map** read only the allowlisted stores of the snapshot (section 2).
-6. **Write.** Each source is applied in **one write transaction**: accounts, conversations, messages, activity items, people and the `sync_runs` row commit together or not at all. Records are applied in batches of 2,000 so memory stays bounded. People are merged across the whole source; the newest sighting names a person. A source that fails rolls back completely and a `failed` row is recorded. Sources committed earlier in the same run stay committed, so a multi-source sync can be partly applied; the next sync repairs it.
-7. **Report.** The run prints its report (section 5, `sync`).
+6. **Write.** Each source is applied in **one write transaction**: accounts, conversations, messages, activity items, people and the source's `sync_runs` row commit together or not at all. Records are applied in batches of 2,000 so memory stays bounded. People are merged across the whole source; the newest sighting names a person. Sources are independent: a source that fails (including from a panic, which becomes `internal`) rolls back completely, is recorded as `failed`, and does not stop the sources after it. Sources that committed stay committed.
+7. **Record and report.** The run writes its run-level `sync_runs` row (section 3.1) and prints its report (section 5, `sync`). Only a run in which every source succeeded counts as a fresh sync, for every account (or for the one account of `sync --account`). A partial or failed run refreshes no account.
 
-**Consistency.** Teams keeps writing while teamscrawl copies. The copy order, the retry and the validation above give a self-consistent copy or a `snapshot_inconsistent` error. A truncated tail in the active log file (Teams was mid-write) is tolerated and counted as the omission `truncated_log_tail`. Because each source is one transaction, a reader never sees half a source.
+**Consistency.** Teams keeps writing while teamscrawl copies. The copy order, the retry and the validation above give a self-consistent copy or a `snapshot_inconsistent` error. A truncated tail in the active log file (Teams was mid-write) is tolerated and counted as the omission `truncated_log_tail`. Because each source is one transaction, a reader never sees half a source. A source that fails leaves the archive as it was for that source, and the next sync retries it.
 
 **Omissions.** A record teamscrawl cannot decode or map is skipped, counted by reason in `omissions`, and never guessed. A sync with at least one omission has status `ok_with_omissions` and still exits 0.
 
@@ -112,19 +112,29 @@ A `search` query is split on whitespace into terms that are ANDed. `"quoted phra
 
 A new omission code may be added in a minor release. The `sources[].omissions` map in a report breaks the totals down by source.
 
-**Report statuses.** `ok`, `ok_with_omissions` and `unchanged` all exit 0. A failed run returns a coded error and prints no report; the attempt is recorded in `sync_runs` as `failed`.
+**Report statuses.**
+
+| Status | Meaning | Exit |
+| --- | --- | --- |
+| `ok` | Every source synced and nothing was omitted. | 0 |
+| `ok_with_omissions` | Every source synced; at least one record was omitted. | 0 |
+| `unchanged` | No source's cache changed since its last successful sync. | 0 |
+| `partial` | At least one source committed and at least one failed (or the run was interrupted after one committed). The report is printed on stdout and a `partial_sync` error on stderr. | 1 |
+| `failed` | No source committed. No report is printed, only the coded error of the first failure; the attempt is recorded in `sync_runs` as `failed`. | the error's |
+
+In a `partial` report each entry of `sources` has a `status` (`ok`, `ok_with_omissions`, `unchanged` or `failed`). A committed source also lists its `accounts` and `counts`; a failed source has `error: {code, message}`. The top-level counts add up the committed sources only.
 
 ## 5. Commands
 
 Every command accepts the global flags in section 6.1. This section states what each command does and the shape of its result; every flag with its help text is in [docs/commands.md](docs/commands.md).
 
-Commands that run an implicit sync before answering (`--max-age`): `whoami`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `people`, `sql`. `doctor`, `sync`, `watch` and `version` do not.
+Commands that run an implicit sync before answering (`--max-age`): `whoami`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `people`, `sql`. `doctor`, `sync`, `watch`, `skill` and `version` do not.
 
 | Command | Purpose and result |
 | --- | --- |
-| `doctor` | One check per prerequisite. Result `{"ok": bool, "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Checks, in order: `teams_installed`, `full_disk_access`, `teams_origin`, `database_writable`, `schema_version`, `fts`, `last_sync_age`. A warning (`warn: true`, `ok: true`) never fails the run. If any check has `ok: false`, the result still prints on stdout and the command then exits 3 with `doctor_failed`. Non-teamscrawl IndexedDB origins appear in the `teams_origin` detail. |
-| `whoami` | `{"accounts": [{"tenant_id", "user_id", "self_id", "display_name", "locale", "first_seen_at", "last_synced_at"}], "archive": {...same body as status...}}`. `self_id` is the account's own sender id. The nested `archive` object also carries an `archive_age_seconds` key that is always `null`; use the top-level one (a known quirk, section 9). |
-| `sync` | Runs one sync (section 4) and prints the report: `{"status", "sources": [{"source", "status", "omissions"?}], "conversations", "messages", "people", "activity", "omissions", "other_origins", "migrated"?, "started_at", "finished_at"}`. Each entity has `{"seen", "inserted", "updated", "unchanged"}`. `migrated` is `{"from", "to", "rows"}` and appears only on the run that upgraded an older archive. `--account` limits the run to one account. |
+| `doctor` | One check per prerequisite. Result `{"ok": bool, "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Checks, in order: `teams_installed`, `full_disk_access`, `teams_origin`, `database_writable`, `schema_version`, `fts`, `archive_newer`, `archive_upgrade` (only when it applies), `last_sync_status` (only when a run is recorded), `last_sync_age`. `archive_newer` fails when a newer teamscrawl wrote the archive (every sync would refuse it). `archive_upgrade` is a warning: the archive is from an older version and the next `sync` upgrades it. `last_sync_status` is a warning after a `partial` or `failed` run. A warning (`warn: true`, `ok: true`) never fails the run. If any check has `ok: false`, the result still prints on stdout and the command then exits 3 with `doctor_failed`. Non-teamscrawl IndexedDB origins appear in the `teams_origin` detail. |
+| `whoami` | `{"accounts": [{"tenant_id", "user_id", "self_id", "display_name", "locale", "first_seen_at", "last_synced_at"}], "archive": {...same body as status...}}`. `self_id` is the account's own sender id. The nested `archive` object carries the same `archive_age_seconds`, `needs_sync` and `hint` as the top level. |
+| `sync` | Runs one sync (section 4) and prints the report: `{"status", "sources": [{"source", "status", "omissions"?}], "conversations", "messages", "people", "activity", "omissions", "other_origins", "migrated"?, "started_at", "finished_at"}`. Each entity has `{"seen", "inserted", "updated", "unchanged"}`. `migrated` is `{"from", "to", "rows"}` and appears only on the run that upgraded an older archive. `--account` limits the run to one account. A `partial` run exits 1 (section 4). |
 | `status` | `{"archive_path", "archive_exists", "schema_version", "fts_present", "accounts": [{"tenant_id", "user_id", "conversations", "messages", "people", "activity", "newest_sent_at", "last_synced_at"}], "newest_sent_at", "last_run"?, "last_success_at", "other_origins"?}`. |
 | `search [query]` | FTS5 over message text, newest first. The query is optional when a filter is given (`--conversation`, `--team`, `--from`, `--since`, `--until`, `--mentions-me`): the filters alone then select the messages. No query and no filter is a `usage` error whose `fix` names `messages`. Also `--include-deleted`, `--include-system`, `--html`, `--limit`. Items are message items. |
 | `messages` | Chronological listing, oldest first (with `--limit`, the newest matches, still oldest first). Same filters as `search`, plus `--unread` and `--include-channels` (which only affects `--unread`). `--conversation` takes an id, an exact title or a display name such as `Team › Channel`. |
@@ -133,9 +143,10 @@ Commands that run an implicit sync before answering (`--max-age`): `whoami`, `st
 | `thread <conversation> <root-id>` | One thread, root first. Accepts a Teams message link instead of the two arguments (`.../l/message/<conversationId>/<messageId>`; a `parentMessageId` query parameter names the root). Also `--limit`, `--include-deleted`, `--include-system`, `--html`. |
 | `conversations` | Conversations, newest activity first. `--kind`, `--team`, `--query` (ranked: exact name, then prefix, then substring, then all words; each group newest first), `--include-system`. Items add `member_count` and `read_horizon_at`. |
 | `people` | People seen as senders or members. `--query` is part of a display name or an exact id; use it to resolve `--from`. |
-| `sql <query>` | One read-only `SELECT`, `WITH`, `EXPLAIN` or `VALUES` statement on a read-only connection. Result `{"columns", "rows", "count", "truncated", "total"?}`; `--limit` (default 50) caps `rows`. Writes, `ATTACH` and a second statement are `usage` errors. It returns every account's rows regardless of `--account`. |
+| `sql <query>` | One read-only `SELECT`, `WITH`, `EXPLAIN` or `VALUES` statement on a read-only connection. Result `{"columns", "rows", "count", "truncated"}`. It streams rows and stops reading at `--limit` (default 50), so `truncated` says more rows exist but there is no `total`. The statement is read as SQL tokens, so a word such as `attach` inside a string, comment or quoted name is harmless; a statement that is not a read, or a second statement, is a `usage` error, as is a query SQLite rejects (a typo, a missing table). Writes are impossible: the connection is read-only. It returns every account's rows regardless of `--account`. |
 | `watch` | Runs until interrupted and streams JSON Lines (section 7). |
-| `version` | Prints the build version on one line. |
+| `skill` | Prints the agent guide (the repository's `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary) as raw Markdown on stdout, in every output mode, exit 0. It is a documented exception to the JSON default, like `--help`. It needs no archive and no Teams cache. |
+| `version` | Prints `{"version", "commit", "date"}` as one JSON document, or one human line (`teamscrawl <version> (commit <commit>, built <date>)`) in text mode. `teamscrawl --version` prints the same and exits 0. |
 
 Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midnight) or a relative duration such as `90m`, `24h`, `7d`, `2w`. `--from` takes a person id or a case-insensitive part of a name. `--team` takes a team's exact name (case-insensitive for ASCII letters only) or its id; an unknown or ambiguous name is a `usage` error that lists the matches.
 
@@ -152,6 +163,7 @@ Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midni
 | `--account TENANT/USER` | | Limit results (and `sync`) to one account. Default: every account. `whoami` lists the ids. |
 | `--no-color` | `NO_COLOR` | Disable ANSI color. `CLICOLOR_FORCE=1` forces it when output is piped. |
 | `--max-age DURATION` | `TEAMSCRAWL_MAX_AGE` | Default `15m`. A read command first syncs when the last successful sync is older, or when the archive has never synced. `0` disables the implicit sync. |
+| `--version` | | Print the version document and exit 0. |
 | `--fields a,b,c` | | List commands only. |
 | `--max-text N` | | List commands only. |
 
@@ -160,7 +172,7 @@ Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midni
 ### 6.2 Streams and documents
 
 - Results go to stdout. Progress, warnings and hints go to stderr. Sync progress lines print only when stderr is a terminal.
-- In JSON mode (including every non-TTY run) a command prints exactly one JSON document on stdout, compact on a pipe and indented on a terminal. `watch` is the single exception (section 7).
+- In JSON mode (including every non-TTY run) a command prints exactly one JSON document on stdout, compact on a pipe and indented on a terminal. Two exceptions: `watch` prints JSON Lines (section 7), and `skill` prints raw Markdown in every mode, as `--help` prints help text.
 - Keys are snake_case and stable. Adding a field is compatible; renaming or removing one is a breaking change recorded in `CHANGELOG.md`. Optional fields are omitted when empty, except the always-present fields listed below. Times are RFC3339 UTC. Links keep a literal `&`.
 
 ### 6.3 List results
@@ -173,16 +185,18 @@ Every list command returns:
 
 - `items` is always an array. `count` is its length. `--limit` (default 50, at least 1) caps it.
 - `truncated` is true when more matches exist than were returned.
-- `total` is the exact number of matches ignoring `--limit`. It is present only when `truncated` is true; otherwise `count` is the total.
+- `total` is the exact number of matches ignoring `--limit`. It is present only when `truncated` is true; otherwise `count` is the total. `sql` results never carry `total`.
 - `channels_excluded: true` appears on `unread` and `messages --unread` when channels were left out; it is omitted when they are included.
 - `archive_age_seconds` (below) and the optional `sync_error`, `needs_sync` and `hint` fields close the document.
 
 ### 6.4 Freshness and degraded answers
 
-- `archive_age_seconds` is on every read result (the list commands, `sql`, `status`, `whoami`). It is the number of seconds since the last successful sync (`ok`, `ok_with_omissions` or `unchanged`), or `null` when the archive has never synced.
-- `needs_sync: true` and `"hint": "run teamscrawl sync"` appear together when the archive has never synced (or does not exist), so an empty result reads as "no data yet", not "nothing matched". They are omitted otherwise. The same hint also prints on stderr as a plain `hint:` line.
-- If the implicit sync fails, the command still answers from the archive, prints the failure on stderr as `{"warning": {"code", "message", "fix"}}` (a `warning:` and a `fix:` line in text mode) and adds `"sync_error": {"code", "message"}` to the result. Only cancellation by a signal turns it into an error.
+- `archive_age_seconds` is on every read result (the list commands, `sql`, `status`, `whoami`). It is the number of seconds since the covered accounts were last fully synced, or `null` when no complete sync covers them. "Covered accounts" means the one in `--account`, or, for a read of every account, the stalest account. Only a run in which every source succeeded (`ok`, `ok_with_omissions`, `unchanged`) refreshes an account; a partial or failed run refreshes nobody, and `sync --account X` refreshes only X.
+- `needs_sync: true` and `"hint": "run teamscrawl sync"` appear together when there is no complete sync yet: the archive does not exist, has never synced, has only had partial or failed syncs, or was written by an older teamscrawl whose next sync upgrades it. An empty result then reads as "no data yet", not "nothing matched". They are omitted otherwise. In text mode the same hint also prints on stderr as a `hint:` line; in JSON mode there is no stderr hint, because the result carries it.
+- If the implicit sync fails, the command still answers from the archive, prints the failure on stderr as `{"warning": {"code", "message", "fix"}}` (a `warning:` and a `fix:` line in text mode) and adds `"sync_error": {"code", "message"}` to the result. A partial implicit sync reports `partial_sync` the same way. Only cancellation by a signal turns it into an error.
 - The implicit sync always covers every account, even with `--account`, so a filtered read never hides data from later reads. A held lock makes the implicit sync fail with `locked`, which becomes a `sync_error`.
+- Reads work on an archive written by alpha.1 before its first upgrading sync; they treat it as having no complete sync yet.
+- `--team` is validated before an implicit sync runs, so a mistyped team name fails fast.
 
 ### 6.5 Item shapes
 
@@ -222,7 +236,8 @@ Every error code:
 | `unsupported_block_compression` | 1 | A LevelDB table uses a block compression other than none or snappy. Nothing is dropped silently. | `Update teamscrawl; if it is already current, report the issue with the output of `teamscrawl doctor`.` |
 | `store_missing` | 1 | An allowlisted Teams database exists but has no expected object store, so Teams changed its storage layout or has not finished loading. | `Open Teams, let it finish loading, and run again; if it persists Teams changed its storage layout, so update teamscrawl.` |
 | `db_error` | 1 | The archive cannot be created, opened, read or written, or a LevelDB or IndexedDB structure is unreadable for a reason not listed above. The message ends with the underlying cause. | `Check that the archive path is writable and has free space; run `teamscrawl doctor`.` |
-| `interrupted` | 1 | SIGINT or SIGTERM stopped the command before it finished. Each source is one transaction, so nothing is half-written. (`watch` exits 0 on a signal.) | `Run the command again.` |
+| `partial_sync` | 1 | A sync committed at least one source and failed at least one. The message names each failed source and its code. The sync report is on stdout, so a caller sees both. | `Run `teamscrawl doctor` to see what is wrong with the failing source, fix it and run `teamscrawl sync` again; the sources that synced are already in the archive.` |
+| `interrupted` | 1 | SIGINT or SIGTERM stopped the command before it finished. Each source is one transaction, so nothing is half-written. (`watch` exits 0 on a signal.) A second SIGINT or SIGTERM during the stop quits at once with exit 130 and no error document; it can leave a snapshot directory in the temp directory, which a later sync removes once it is older than an hour. | `Run the command again.` |
 | `internal` | 1 | A teamscrawl bug, an unexpected failure, or a recovered panic. | `This is a bug in teamscrawl; report it with the command you ran.` (a panic: re-run with `TEAMSCRAWL_DEBUG=1` and report the output at the issues page.) |
 | `teams_not_installed` | 3 | The EBWebView directory does not exist. | `Install the new Microsoft Teams app and sign in once.` |
 | `no_full_disk_access` | 3 | macOS denied access to the Teams container (`EPERM`). | `Open System Settings > Privacy & Security > Full Disk Access, turn it on for <the app that runs teamscrawl>, then quit and reopen that app and run the command again.` The app name is derived from the process tree. |
@@ -238,10 +253,11 @@ Warning codes (never an exit status; emitted as `{"warning": ...}` on stderr, or
 | Exit | Meaning | Codes |
 | --- | --- | --- |
 | 0 | Success, including a sync with status `ok`, `ok_with_omissions` or `unchanged`, and `watch` stopped by a signal. | none |
-| 1 | Runtime failure. | `snapshot_inconsistent`, `unsupported_block_compression`, `store_missing`, `db_error`, `interrupted`, `internal` |
+| 1 | Runtime failure. | `snapshot_inconsistent`, `unsupported_block_compression`, `store_missing`, `db_error`, `partial_sync`, `interrupted`, `internal` |
 | 2 | Usage error. | `usage` |
 | 3 | Environment not ready. | `teams_not_installed`, `no_full_disk_access`, `no_teams_origin`, `doctor_failed`, `archive_newer` |
 | 4 | Another run holds the lock. | `locked` |
+| 130 | A second SIGINT or SIGTERM forced an immediate quit. | none |
 
 ## 7. `watch`
 
@@ -261,9 +277,11 @@ Line kinds:
 | `activity` | `{"kind": "activity", "change": "new" \| "edited", "item": <activity item>}` | An activity item was inserted or changed. |
 | `sync` | `{"kind": "sync", "report": <sync report>}` | After each sync that ran and emitted, one line, after that sync's change lines. |
 | `migrated` | `{"kind": "migrated", "from": 1, "to": 2, "rows": N}` | The first sync upgraded an older archive. Printed before anything else, even for a silent baseline. It is not a change: no `edited` lines follow for those rows. |
-| `error` | `{"kind": "error", "error": {"code", "message", "fix"}}` | A sync or check failed with a runtime error. Watching continues, and an unchanged repeat of the same failure is reported once. |
+| `error` | `{"kind": "error", "error": {"code", "message", "fix"}}` | A sync or check failed with a runtime error, including `partial_sync`. Watching continues, and an unchanged repeat of the same failure is reported once. |
 
 `item` has the same shape as the matching `messages` or `activity` item and honors `--fields`, `--max-text` and `--account`. System pseudo-conversations are skipped. `change: "deleted"` means the message gained its `deleted_at`.
+
+Partial syncs: when a sync commits some sources and fails others (`partial_sync`), `watch` first emits the changes of the committed sources and a `sync` line with `"status": "partial"`, then the `error` line. The fingerprints stay as they were, so the next pass retries only what failed and no change is lost. The first sync that commits anything is the baseline, exactly as for a normal first sync: its changes are printed only with `--emit-initial`. `--fields html` fills `html` as `messages --html` does.
 
 Failures: a held lock prints a `locked` warning on stderr and retries after at most 5 seconds. Environment errors (`teams_not_installed`, `no_full_disk_access`, `no_teams_origin`, `archive_newer`) end the run with a plain error on stderr and exit 3. If the first sync fails and a later one succeeds, that later sync is taken as the baseline, its changes are not printed, and a `baseline_delayed` warning on stderr says so (its `fix` suggests reading the archive, or restarting with `--emit-initial`). In text mode (`--format text`) `watch` prints one human line per event instead of JSON.
 
@@ -286,10 +304,9 @@ Latency: a change reaches the output after Teams flushes it to its cache, plus t
 - Full Disk Access is required for the app that runs teamscrawl.
 - Read-only: no sending, reacting or marking read. Attachments and media are not downloaded.
 - `reply_count` and `last_reply_at` are counted from archived replies and can lag Teams.
-- `whoami` has two `archive_age_seconds` keys; the one inside `archive` is always `null` (an artifact of reusing the `status` body). Read the top-level key.
 - People display names follow the most recent sighting; after an archive upgrade a few can differ from what a fresh sync would give.
 - Teams can change its storage layout at any time. teamscrawl then fails with a named error or reports counted omissions; it never guesses. A new V8 wire version fails with the version.
-- A multi-source sync is atomic per source, not per run (section 4).
+- A multi-source sync is atomic per source, not per run: a `partial` sync leaves the committed sources in the archive (section 4).
 - `watch` latency is dominated by when Teams writes its cache, not by teamscrawl.
 - Release binaries are Developer ID signed and notarized only when the release was built with the Apple signing secrets; the release notes of each release say which.
 

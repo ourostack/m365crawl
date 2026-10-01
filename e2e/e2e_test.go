@@ -1386,3 +1386,20 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 		t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 	}
 }
+
+// skill prints the embedded agent guide as raw Markdown in every output mode, with no archive or
+// Teams cache needed, and it is the same text as the file in the repository.
+func TestSkillPrintsTheGuide(t *testing.T) {
+	want, err := os.ReadFile("../.agents/skills/teamscrawl/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t)
+	for _, args := range [][]string{{"skill"}, {"skill", "--json"}, {"skill", "--format", "text"}} {
+		res := e.run(args...)
+		mustExit(t, res, 0)
+		if res.stdout != string(want) || res.stderr != "" {
+			t.Fatalf("teamscrawl %v: stdout differs from SKILL.md (%d vs %d bytes), stderr %q", args, len(res.stdout), len(want), res.stderr)
+		}
+	}
+}

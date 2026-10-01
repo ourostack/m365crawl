@@ -5,7 +5,7 @@ description: Use when an agent needs to read the user's Microsoft Teams messages
 
 # teamscrawl
 
-Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in `SPEC.md` at the repository root; this file is the short version.
+Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in `SPEC.md` at the repository root; this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 
 ## When to use
 
