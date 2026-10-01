@@ -8,12 +8,37 @@ import (
 	"time"
 )
 
-// LastSuccess is when the newest successful sync run finished, or the zero time when the archive
-// has never synced. It is cheap, so read commands use it to decide whether to sync first.
+// LastSuccess is when the archive was last fully synced, or the zero time when it has never been.
+// With several accounts it is the stalest account's time, so one account that no full sync has
+// covered makes the whole archive stale. See LastSuccessFor.
 func (s *Store) LastSuccess(ctx context.Context) (time.Time, error) {
+	return s.lastSuccess(ctx, "", true)
+}
+
+// LastSuccessFor is when account ("<tenantId>/<userId>") was last covered by a fully successful
+// sync (ok, ok_with_omissions or unchanged), or the zero time. Each sync records one run-level
+// row (accounts_json set) that says which accounts it covered: every account for an unfiltered
+// sync, one for `sync --account`. A partial or failed sync records a row that counts for nobody,
+// so an account whose source failed stays stale. Per-source rows do not count.
+func (s *Store) LastSuccessFor(ctx context.Context, account string) (time.Time, error) {
+	return s.lastSuccess(ctx, account, false)
+}
+
+func (s *Store) lastSuccess(ctx context.Context, account string, stalest bool) (time.Time, error) {
+	const newest = `max(coalesce(finished_at, started_at))`
+	const covering = `status in ` + successStatuses + ` and accounts_json is not null`
+	q, args := `select `+newest+` from sync_runs where `+covering+`
+  and exists(select 1 from json_each(accounts_json) where value in ('*', ?))`, []any{account}
+	if stalest {
+		// The oldest of every account's newest covering run; an account no run covered counts as
+		// never synced (the empty string). With no accounts in the archive, any full run will do.
+		q, args = `select case when count(a.user_id) = 0 then (select `+newest+` from sync_runs where `+covering+`)
+  else min(coalesce((select `+newest+` from sync_runs r where `+covering+`
+    and exists(select 1 from json_each(r.accounts_json) where value in ('*', a.tenant_id || '/' || a.user_id))), '')) end
+from (select 1) left join accounts a`, nil
+	}
 	var ok sql.NullString
-	err := s.db.QueryRowContext(ctx, `select max(coalesce(finished_at, started_at)) from sync_runs where status in `+successStatuses).Scan(&ok)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&ok); err != nil {
 		return time.Time{}, err
 	}
 	return parseTime(ok), nil

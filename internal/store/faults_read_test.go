@@ -35,6 +35,7 @@ func seedReadable(t *testing.T, s *Store) {
 	must(s.ApplyMessages(ctx, []teamsdesktop.Message{m1, m2, m3}))
 	must(s.ApplyPeople(ctx, []teamsdesktop.Person{{TenantID: acctA.TenantID, ID: "8:orgid:p1", DisplayName: "Pat", SeenAt: base}, {TenantID: acctA.TenantID, ID: selfMRI(acctA), DisplayName: "Me", SeenAt: base}}))
 	must(s.ApplyActivity(ctx, []teamsdesktop.Activity{{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: "a1", Type: "mention", At: base, ConversationID: "c1", MessageID: "m1"}}))
+	must0(s.RecordRun(ctx, Run{StartedAt: base, FinishedAt: base.Add(time.Second), Status: "ok", Accounts: []string{"*"}}))
 	must0(s.RecordRun(ctx, Run{StartedAt: base, FinishedAt: base.Add(time.Second), Source: "s", Fingerprint: "fp", Status: "ok", Counts: map[string]int{"a": 1}, Omissions: map[string]int{"x": 1}}))
 }
 
@@ -78,6 +79,16 @@ func TestReadFailuresSurface(t *testing.T) {
 		"Status":          func(ctx context.Context, s *Store) error { _, err := s.Status(ctx); return err },
 		"LastSuccess":     func(ctx context.Context, s *Store) error { _, err := s.LastSuccess(ctx); return err },
 		"LastFingerprint": func(ctx context.Context, s *Store) error { _, err := s.LastFingerprint(ctx, "s"); return err },
+		"SQL": func(ctx context.Context, s *Store) error {
+			s.readOnly = true // the fault driver replaced the connection; the guard is not under test here
+			_, _, _, err := s.SQL(ctx, "select id, 1 from messages", 10)
+			return err
+		},
+		"SQL cut at the limit": func(ctx context.Context, s *Store) error {
+			s.readOnly = true
+			_, _, _, err := s.SQL(ctx, "select id from messages", 1)
+			return err
+		},
 		"MessageHTML": func(ctx context.Context, s *Store) error {
 			_, err := s.MessageHTML(ctx, []MessageKey{{TenantID: acctA.TenantID, UserID: acctA.UserID, ConversationID: "c1", ID: "m1"}})
 			return err
@@ -90,7 +101,7 @@ func TestReadFailuresSurface(t *testing.T) {
 		},
 	}
 	// Rows whose every Scan destination is a NullString cannot fail on NULL.
-	nullSafe := map[string][]int{"Status": {4}, "LastSuccess": {1}, "MessageHTML": {1}}
+	nullSafe := map[string][]int{"Status": {4, 5}, "LastSuccess": {1}, "MessageHTML": {1}, "SQL": {1, 2, 3, 4}, "SQL cut at the limit": {1, 2, 3}}
 	for name, op := range ops {
 		t.Run(name, func(t *testing.T) { sweepReadFaults(t, seedReadable, op, nullSafe[name]...) })
 	}

@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
@@ -82,17 +80,29 @@ var absFn = filepath.Abs
 var chmodFile = os.Chmod
 
 // migrate upgrades an archive made by an older build. Version 2 renamed
-// conversations.read_horizon_message_id to read_horizon_client_message_id.
+// conversations.read_horizon_message_id to read_horizon_client_message_id, and added
+// sync_runs.accounts_json (which run-level rows use to say which accounts they refreshed).
 func (s *Store) migrate(ctx context.Context) error {
-	var old int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'`).Scan(&old); err != nil {
+	var old, has int
+	if err := s.db.QueryRowContext(ctx, `select
+  (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
+  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json')`).Scan(&old, &has); err != nil {
 		return err
 	}
-	if old == 0 {
-		return nil
+	if old != 0 {
+		if _, err := s.db.ExecContext(ctx, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.ExecContext(ctx, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`)
-	return err
+	if has == 0 {
+		if _, err := s.db.ExecContext(ctx, `alter table sync_runs add column accounts_json text`); err != nil {
+			return err
+		}
+		// Runs recorded before run-level rows existed counted for every account; keep them that way.
+		_, err := s.db.ExecContext(ctx, `update sync_runs set accounts_json = '["*"]' where status in `+successStatuses)
+		return err
+	}
+	return nil
 }
 
 // OpenReadOnly opens an existing archive read-only (safe beside an active writer). It returns
@@ -170,41 +180,60 @@ func rawOrNil(b []byte) any {
 	return string(b)
 }
 
-// SQL runs a read-only query. It is only available on a store opened with OpenReadOnly, and only
-// for statements that read (the connection is also read-only at the file level).
-func (s *Store) SQL(ctx context.Context, q string) (cols []string, rows [][]any, err error) {
+// SQL runs a read-only query and streams its rows, stopping once limit rows are read; truncated
+// says whether more rows existed. It is only available on a store opened with OpenReadOnly. The
+// statement check (CheckSQL) is a friendly early error; the connection is also read-only at the
+// file level, which is what actually stops writes.
+func (s *Store) SQL(ctx context.Context, q string, limit int) (cols []string, out [][]any, truncated bool, err error) {
 	if !s.readOnly {
-		return nil, nil, errors.New("sql requires a read-only archive connection")
+		return nil, nil, false, errors.New("sql requires a read-only archive connection")
 	}
-	fields := strings.Fields(strings.ToLower(q))
-	if len(fields) == 0 {
-		return nil, nil, errors.New("empty query")
+	if err := CheckSQL(q); err != nil {
+		return nil, nil, false, err
 	}
-	switch fields[0] {
-	case "select", "with", "explain", "values":
-	default:
-		return nil, nil, fmt.Errorf("only read queries are allowed, got %q", fields[0])
-	}
-	if attachWord.MatchString(q) {
-		return nil, nil, errors.New("attach is not allowed")
-	}
-	res, err := s.cs.Query(ctx, q)
+	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	return res.Columns, res.Rows, nil
+	defer func() { _ = rows.Close() }()
+	cols, _ = rows.Columns() // fails only on closed rows
+	for rows.Next() {
+		if len(out) == limit {
+			if err := rows.Close(); err != nil {
+				return nil, nil, false, err
+			}
+			return cols, out, true, nil
+		}
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		_ = rows.Scan(ptrs...) // scanning into *any cannot fail
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				values[i] = string(b)
+			}
+		}
+		out = append(out, values)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, false, err
+	}
+	return cols, out, false, nil
 }
 
 // Run is one sync attempt, recorded in sync_runs.
 type Run struct {
 	StartedAt, FinishedAt time.Time
 	Source, Fingerprint   string
-	Status                string // ok, ok_with_omissions, unchanged, failed
+	Status                string // ok, ok_with_omissions, unchanged, partial, failed
 	Counts                any    // marshaled as counts_json
 	Omissions             map[string]int
+	// Accounts marks a run-level row (Source ""): the accounts the whole run covered, as
+	// "<tenantId>/<userId>", or "*" for every account. Per-source rows leave it nil.
+	Accounts []string
 }
-
-var attachWord = regexp.MustCompile(`(?i)\battach\b`)
 
 const successStatuses = `('ok','ok_with_omissions','unchanged')`
 
@@ -224,8 +253,13 @@ func recordRun(ctx context.Context, db execer, r Run) error {
 		b, _ := json.Marshal(r.Omissions)
 		omissions = string(b)
 	}
-	_, err := db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json) values(?,?,?,?,?,?,?)`,
-		fmtTime(r.StartedAt), fmtTime(r.FinishedAt), r.Source, r.Fingerprint, r.Status, counts, omissions)
+	var accounts any
+	if r.Accounts != nil {
+		b, _ := json.Marshal(r.Accounts)
+		accounts = string(b)
+	}
+	_, err := db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json, accounts_json) values(?,?,?,?,?,?,?,?)`,
+		fmtTime(r.StartedAt), fmtTime(r.FinishedAt), r.Source, r.Fingerprint, r.Status, counts, omissions, accounts)
 	return err
 }
 
@@ -333,10 +367,8 @@ from accounts a order by a.tenant_id, a.user_id`)
 		}
 		st.LastRun = &r
 	}
-	var ok sql.NullString
-	if err := s.db.QueryRowContext(ctx, `select max(coalesce(finished_at, started_at)) from sync_runs where status in `+successStatuses).Scan(&ok); err != nil {
+	if st.LastSuccessAt, err = s.LastSuccess(ctx); err != nil {
 		return st, err
 	}
-	st.LastSuccessAt = parseTime(ok)
 	return st, nil
 }

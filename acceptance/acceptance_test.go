@@ -659,9 +659,12 @@ func atLeast99(t *testing.T, what string, got, ref int) {
 	}
 }
 
+// acceptanceRowLimit is higher than any table here: these checks read whole results.
+const acceptanceRowLimit = 1 << 30
+
 func count(t *testing.T, st *store.Store, q string) int {
 	t.Helper()
-	_, rows, err := st.SQL(context.Background(), q)
+	_, rows, _, err := st.SQL(context.Background(), q, acceptanceRowLimit)
 	if err != nil || len(rows) != 1 || len(rows[0]) != 1 {
 		t.Fatalf("%s: %v", q, err)
 	}
@@ -679,7 +682,7 @@ func count(t *testing.T, st *store.Store, q string) int {
 
 func scalarText(t *testing.T, st *store.Store, q string) time.Time {
 	t.Helper()
-	_, rows, err := st.SQL(context.Background(), q)
+	_, rows, _, err := st.SQL(context.Background(), q, acceptanceRowLimit)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("%s: %v", q, err)
 	}
@@ -772,20 +775,20 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	// received said so), so token-shaped strings are tolerated in the message content columns
 	// and nowhere else: not in conversations, people, activity or sync bookkeeping.
 	contentColumns := map[string]bool{"messages.content_html": true, "messages.content_text": true, "messages.raw_json": true, "messages.links_json": true}
-	_, tables, err := st.SQL(context.Background(), "select name from sqlite_master where type = 'table' and name not like '%fts%' and name not like 'sqlite_%'")
+	_, tables, _, err := st.SQL(context.Background(), "select name from sqlite_master where type = 'table' and name not like '%fts%' and name not like 'sqlite_%'", acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
 	inContent, elsewhere := 0, 0
 	for _, row := range tables {
 		table, _ := row[0].(string)
-		_, cols, err := st.SQL(context.Background(), fmt.Sprintf("select name from pragma_table_info('%s')", table))
+		_, cols, _, err := st.SQL(context.Background(), fmt.Sprintf("select name from pragma_table_info('%s')", table), acceptanceRowLimit)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, c := range cols {
 			col, _ := c[0].(string)
-			_, vals, err := st.SQL(context.Background(), fmt.Sprintf("select cast(%q as text) from %q where cast(%q as text) like '%%eyJ%%'", col, table, col))
+			_, vals, _, err := st.SQL(context.Background(), fmt.Sprintf("select cast(%q as text) from %q where cast(%q as text) like '%%eyJ%%'", col, table, col), acceptanceRowLimit)
 			if err != nil {
 				t.Fatal(err)
 			}

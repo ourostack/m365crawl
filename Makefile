@@ -4,6 +4,8 @@ GOVULNCHECK_VERSION ?= v1.8.0
 ACTIONLINT_VERSION ?= v1.7.12
 GORELEASER_VERSION ?= v2.18.2
 VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 export GOWORK := off
 
@@ -33,7 +35,7 @@ help:
 		'  clean          Remove local build output.'
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/teamscrawl/internal/cli.version=$(VERSION)" -o "$(BINARY)" ./cmd/teamscrawl
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/teamscrawl/internal/cli.version=$(VERSION) -X github.com/ourostack/teamscrawl/internal/cli.commit=$(COMMIT) -X github.com/ourostack/teamscrawl/internal/cli.date=$(DATE)" -o "$(BINARY)" ./cmd/teamscrawl
 
 test:
 	go test -race -count=1 $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...

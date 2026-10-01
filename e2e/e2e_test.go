@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,14 +47,23 @@ func run(m *testing.M) int {
 }
 
 func TestVersion(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(binary, "version")
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("teamscrawl version: %v\nstderr: %s", err, stderr.String())
+	for _, args := range [][]string{{"version"}, {"--version"}, {"--json", "--version"}} {
+		var stdout, stderr bytes.Buffer
+		cmd := exec.Command(binary, args...) //nolint:gosec // G204: binary is the one TestMain built
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("teamscrawl %v: %v\nstderr: %s", args, err, stderr.String())
+		}
+		m := mustJSON(t, stdout.String()) // piped, so JSON: exactly one document
+		if len(m) != 3 || m["version"] != "e2e" || m["commit"] == "" || m["date"] == "" || stderr.Len() != 0 {
+			t.Fatalf("teamscrawl %v: %s (stderr %q)", args, stdout.String(), stderr.String())
+		}
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "e2e" {
-		t.Fatalf("version output = %q, want %q", got, "e2e")
+	var stdout bytes.Buffer
+	cmd := exec.Command(binary, "version", "--format", "text")
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil || !strings.HasPrefix(stdout.String(), "teamscrawl e2e (commit ") {
+		t.Fatalf("text version: %v %q", err, stdout.String())
 	}
 }
 
@@ -543,7 +553,7 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 // lastRunStatuses lists the recorded sync_runs statuses, oldest first.
 func lastRunStatuses(t *testing.T, e *env) []string {
 	t.Helper()
-	res := e.cmd("sql", "--max-age", "0", "select status from sync_runs order by id")
+	res := e.cmd("sql", "--max-age", "0", "select status from sync_runs where accounts_json is not null order by id")
 	mustExit(t, res, 0) // stderr may carry the "run teamscrawl sync" hint: no run has succeeded
 	var out []string
 	for _, r := range mustJSON(t, res.stdout)["rows"].([]any) {
@@ -671,10 +681,13 @@ func TestE2EWhoami(t *testing.T) {
 	e := newEnv(t)
 	res := e.cmd("whoami", "--max-age", "0")
 	mustExit(t, res, 0)
-	if !strings.Contains(res.stderr, "teamscrawl sync") {
-		t.Fatalf("stderr should hint at sync: %q", res.stderr)
+	if res.stderr != "" {
+		t.Fatalf("JSON mode keeps stderr empty (the hint is in the result): %q", res.stderr)
 	}
 	who := mustJSON(t, res.stdout)
+	if who["needs_sync"] != true || who["hint"] != "run teamscrawl sync" {
+		t.Fatalf("whoami before a sync lacks the in-band hint: %v", who)
+	}
 	if accts, _ := who["accounts"].([]any); len(accts) != 0 {
 		t.Fatalf("accounts before a sync = %v", who["accounts"])
 	}
@@ -750,8 +763,8 @@ func TestE2EMaxAge(t *testing.T) {
 		if _, err := os.Stat(e.db); err == nil {
 			t.Fatal("--max-age 0 must not create the archive")
 		}
-		if !strings.Contains(res.stderr, "teamscrawl sync") {
-			t.Fatalf("stderr should hint at sync: %q", res.stderr)
+		if strings.Contains(res.stderr, "hint:") {
+			t.Fatalf("no plain-text hint line in JSON mode: %q", res.stderr)
 		}
 		// The same through the environment.
 		res = e.runWith([]string{"TEAMSCRAWL_MAX_AGE=0"}, append([]string{"people"}, e.baseArgs()...)...)
@@ -966,7 +979,7 @@ func TestE2EWatch(t *testing.T) {
 	count := func(q string) int { return archiveCount(t, e.db, q) }
 	// The baseline is done once its sync run is recorded as successful (it is written last).
 	s.waitFor("the baseline sync", func() bool {
-		return count("select count(*) from sync_runs where status='ok'") == 1 && count("select count(*) from messages") == 104
+		return count("select count(*) from sync_runs where status='ok' and accounts_json is not null") == 1 && count("select count(*) from messages") == 104
 	})
 	if out := s.stdout.String(); out != "" {
 		t.Fatalf("the baseline must print nothing, got %q", out)
@@ -1154,5 +1167,143 @@ func TestE2EArchiveNewer(t *testing.T) {
 	}
 	if got := archiveCount(t, e.db, `select count(*) from meta where value='99'`); got != 1 {
 		t.Error("the archive version changed")
+	}
+}
+
+// twoProfiles gives the machine a second Teams profile (a copy of the first, same accounts) and
+// returns the second profile's MANIFEST, which tests make unreadable to break that source.
+func twoProfiles(t *testing.T, e *env) (manifest string) {
+	t.Helper()
+	src := filepath.Join(e.root, "WV2Profile_fixture")
+	dst := filepath.Join(e.root, "WV2Profile_second")
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o700)
+		}
+		b, err := os.ReadFile(p) //nolint:gosec // G304: copying the test's own fixture copy
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o600) //nolint:gosec // G703: under the test's temp dir
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms, _ := filepath.Glob(filepath.Join(dst, "IndexedDB", "*.leveldb", "MANIFEST-*"))
+	if len(ms) != 1 {
+		t.Fatalf("manifests: %v", ms)
+	}
+	return ms[0]
+}
+
+// A sync in which one of two sources fails prints the report, then a coded partial_sync error, and
+// the archive does not count as fresh: the next read says so and tries again.
+func TestE2EPartialSync(t *testing.T) {
+	skipIfRoot(t)
+	e := newEnv(t)
+	manifest := twoProfiles(t, e)
+	if err := os.Chmod(manifest, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifest, 0o600) })
+
+	res := e.cmd("sync")
+	mustExit(t, res, 1)
+	rep := mustJSON(t, res.stdout)
+	srcs, _ := rep["sources"].([]any)
+	if rep["status"] != "partial" || len(srcs) != 2 {
+		t.Fatalf("report: %s", res.stdout)
+	}
+	good, bad := srcs[0].(map[string]any), srcs[1].(map[string]any)
+	if good["status"] != "ok" || bad["status"] != "failed" || !strings.Contains(bad["source"].(string), "WV2Profile_second") {
+		t.Fatalf("sources: %v", srcs)
+	}
+	if be, _ := bad["error"].(map[string]any); be["code"] != "no_full_disk_access" || be["message"] == "" {
+		t.Fatalf("failed source error: %v", bad)
+	}
+	if n := num(t, rep["messages"].(map[string]any), "inserted"); n != goldenCount(t, "mapped-messages.json") {
+		t.Errorf("the committed source's messages inserted = %d", n)
+	}
+	body := mustJSON(t, res.stderr)["error"].(map[string]any)
+	if body["code"] != "partial_sync" || !strings.Contains(body["message"].(string), "WV2Profile_second") || !strings.Contains(body["message"].(string), "no_full_disk_access") || !strings.Contains(body["fix"].(string), "teamscrawl doctor") {
+		t.Fatalf("stderr error: %s", res.stderr)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from messages`); got == 0 {
+		t.Fatal("the committed source's rows must be in the archive")
+	}
+	if st := lastRunStatuses(t, e); len(st) == 0 || st[len(st)-1] != "partial" {
+		t.Fatalf("run statuses = %v", st)
+	}
+
+	// The partial run did not refresh: a read tries the implicit sync again and reports why it is stale.
+	runs := archiveCount(t, e.db, `select count(*) from sync_runs where accounts_json is not null`)
+	res = e.cmd("people")
+	mustExit(t, res, 0)
+	whole := mustJSON(t, res.stdout)
+	se, _ := whole["sync_error"].(map[string]any)
+	if se["code"] != "partial_sync" || whole["archive_age_seconds"] != nil {
+		t.Fatalf("read after a partial sync: %s", res.stdout)
+	}
+	if !strings.Contains(res.stderr, `"warning"`) {
+		t.Fatalf("stderr = %q", res.stderr)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from sync_runs where accounts_json is not null`); got != runs+1 {
+		t.Fatalf("the read must attempt an implicit sync: runs %d -> %d", runs, got)
+	}
+
+	// Repair the source: the next sync is complete, and reads stop retrying.
+	if err := os.Chmod(manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep = e.sync()
+	if rep["status"] != "ok" {
+		t.Fatalf("repaired sync: %v", rep)
+	}
+	runs = archiveCount(t, e.db, `select count(*) from sync_runs where accounts_json is not null`)
+	whole = ok(t, e.cmd("people"))
+	if whole["archive_age_seconds"] == nil || whole["sync_error"] != nil {
+		t.Fatalf("after a full sync: %v", whole)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from sync_runs where accounts_json is not null`); got != runs {
+		t.Fatalf("a fresh archive must not sync again: %d -> %d", runs, got)
+	}
+}
+
+// whoami's nested archive block carries the same age as the top level.
+func TestE2EWhoamiNestedAge(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	who := ok(t, e.cmd("whoami"))
+	nested, _ := who["archive"].(map[string]any)
+	if who["archive_age_seconds"] == nil || nested["archive_age_seconds"] != who["archive_age_seconds"] {
+		t.Fatalf("top %v, nested %v", who["archive_age_seconds"], nested["archive_age_seconds"])
+	}
+}
+
+// A second SIGINT force-quits at once (exit 130) even when the graceful stop is stuck.
+func TestE2EDoubleSIGINT(t *testing.T) {
+	e := newEnv(t)
+	// The stubborn pause ignores cancellation, so the graceful stop cannot finish within the test.
+	s := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=60s", "TEAMSCRAWL_TEST_PAUSE_IGNORES_CANCEL=1"}, append([]string{"sync"}, e.baseArgs()...)...)
+	s.waitFor("the pause", func() bool { return strings.Contains(s.stderr.String(), pausedMarker) })
+	if err := s.cmd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.done:
+		t.Fatalf("the first SIGINT must not end a stuck stop\nstderr: %s", s.stderr.String())
+	case <-time.After(300 * time.Millisecond):
+	}
+	start := time.Now()
+	res := s.signal(syscall.SIGINT)
+	if res.code != 130 {
+		t.Fatalf("exit = %d, want 130\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("the second SIGINT took %v", time.Since(start))
 	}
 }

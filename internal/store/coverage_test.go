@@ -146,34 +146,6 @@ func TestParseTime(t *testing.T) {
 	}
 }
 
-func TestSQLGuards(t *testing.T) {
-	ctx := context.Background()
-	p := filepath.Join(t.TempDir(), "r.db")
-	w := must(Open(ctx, p))
-	must0(w.ApplyAccount(ctx, acctA))
-	must0(w.Close())
-	ro := must(OpenReadOnly(ctx, p))
-	defer func() { _ = ro.Close() }()
-	for q, want := range map[string]string{
-		"   ":                  "empty query",
-		"delete from accounts": "only read queries",
-		"select 1; attach database ':memory:' as x": "attach is not allowed",
-		"select * from no_such_table":               "no such table",
-	} {
-		_, _, err := ro.SQL(ctx, q)
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("SQL(%q) = %v, want %q", q, err, want)
-		}
-	}
-	cols, rows, err := ro.SQL(ctx, "select tenant_id from accounts")
-	if err != nil || len(cols) != 1 || len(rows) != 1 || rows[0][0] != acctA.TenantID {
-		t.Fatalf("select: %v %v %v", cols, rows, err)
-	}
-	if _, _, err := w.SQL(ctx, "select 1"); err == nil {
-		t.Fatal("SQL worked on a writable store")
-	}
-}
-
 func TestRecordRunRejectsUnmarshalableCounts(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

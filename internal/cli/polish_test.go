@@ -123,11 +123,11 @@ func TestTotalAppearsOnlyWhenTruncated(t *testing.T) {
 	if _, has := decode(t, stdout)["total"]; has {
 		t.Error("total on a complete list")
 	}
-	// sql reports the rows it saw when it cuts.
+	// sql stops reading at the limit, so it cannot know the total.
 	_, stdout, _ = e.run("--max-age", "0", "sql", "select id from messages", "--limit", "2")
 	m := decode(t, stdout)
-	if m["truncated"] != true || int(m["total"].(float64)) <= 2 {
-		t.Errorf("sql: %v", m["total"])
+	if _, has := m["total"]; m["truncated"] != true || has {
+		t.Errorf("sql: %v", m)
 	}
 	_, stdout, _ = e.run("--max-age", "0", "sql", "select 1", "--limit", "2")
 	if _, has := decode(t, stdout)["total"]; has {

@@ -87,8 +87,8 @@ create trigger boom after insert on sync_runs when new.status in ('ok','ok_with_
 			if !strings.Contains(err.Error(), "injected") && name != "commit" {
 				t.Fatalf("cause lost: %v", err)
 			}
-			if r.Status != "" || ch != nil {
-				t.Fatalf("a failed run returns no report: %+v", r)
+			if r.Status != StatusFailed || ch != nil {
+				t.Fatalf("a failed run reports status failed and no changes: %+v", r)
 			}
 			requireNothingKept(t, db)
 		})
@@ -140,7 +140,10 @@ func TestCancelledBeforeTransactionBegins(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}
-	codedErr(t, err, errs.CodeDBError)
+	var coded *errs.Coded
+	if errors.As(err, &coded) {
+		t.Fatalf("a cancellation is reported as such, not under the code %s", coded.Code)
+	}
 	if left := snapshotDirs(t, tmp); len(left) != 0 {
 		t.Fatalf("snapshot left behind: %v", left)
 	}
@@ -159,8 +162,8 @@ func TestCancelledBetweenSources(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	st := readStatus(t, db)
-	if st.LastRun == nil || st.LastRun.Status != "failed" {
-		t.Fatalf("last run: %+v", st.LastRun)
+	if st.LastRun == nil || st.LastRun.Status != StatusPartial {
+		t.Fatalf("one source committed before the cancel, so the run is partial: %+v", st.LastRun)
 	}
 }
 

@@ -72,7 +72,7 @@ func TestDamagedArchivesSurfaceAsDatabaseErrors(t *testing.T) {
 		{"people", "drop table people", []string{"people"}},
 		{"activity", "drop table activity", []string{"activity"}},
 		{"status", "drop table activity", []string{"status"}},
-		{"whoami accounts", "drop table accounts", []string{"whoami"}},
+		{"whoami accounts", "drop table people", []string{"whoami"}},
 		{"whoami status", "drop table activity", []string{"whoami"}},
 	}
 	for _, c := range cases {

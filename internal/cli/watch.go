@@ -274,13 +274,22 @@ func (w *watcher) sync() (done bool, err error) {
 	}
 	// The sync covers every account so --account only filters what is emitted, never the archive.
 	rep, changes, err := runSync(w.rt.ctx, syncer.Options{Root: w.rt.root, DBPath: w.rt.dbPath})
-	if err != nil {
+	var coded *errs.Coded
+	partial := errors.As(err, &coded) && coded.Code == errs.CodePartialSync && w.rt.ctx.Err() == nil
+	if err != nil && !partial {
 		return false, err
 	}
-	w.fps, w.lastErr = cur, ""
 	if m := rep.Migrated; m != nil {
 		w.migrated(*m)
 	}
+	if partial {
+		// Some sources committed: their changes are in the archive and the next sync will skip
+		// them as unchanged, so they are emitted now. The fingerprints stay as they were, which
+		// makes the next pass retry the failed sources.
+		w.emitPartial(rep, changes)
+		return false, err
+	}
+	w.fps, w.lastErr = cur, ""
 	first := !w.baselined
 	w.baselined = true
 	if first && !w.emitInitial {
@@ -293,14 +302,32 @@ func (w *watcher) sync() (done bool, err error) {
 		return true, nil
 	}
 	if err := w.emit(rep, changes); err != nil {
-		lost := errs.Internal(fmt.Errorf("%d change(s) from the last sync could not be emitted: %w", len(changes), err))
-		var coded *errs.Coded
-		if errors.As(err, &coded) {
-			lost = &errs.Coded{Code: coded.Code, Exit: coded.Exit, Message: fmt.Sprintf("%d change(s) from the last sync could not be emitted: %s", len(changes), coded.Message), Fix: coded.Fix}
-		}
-		return true, w.reportErr(lost)
+		return true, w.reportErr(lostChanges(err, len(changes)))
 	}
 	return true, nil
+}
+
+// lostChanges is the error for changes that were synced but could not be read back to emit.
+func lostChanges(err error, n int) error {
+	var coded *errs.Coded
+	if errors.As(err, &coded) {
+		return &errs.Coded{Code: coded.Code, Exit: coded.Exit, Message: fmt.Sprintf("%d change(s) from the last sync could not be emitted: %s", n, coded.Message), Fix: coded.Fix}
+	}
+	return errs.Internal(fmt.Errorf("%d change(s) from the last sync could not be emitted: %w", n, err))
+}
+
+// emitPartial emits the changes of the sources a partial sync committed. Before the baseline is
+// taken (and without --emit-initial) nothing is emitted: those changes are the silent baseline.
+// A failure to read them back is reported as an error line; the caller still reports the partial
+// sync. (A read-back failure is a database error, never an environment error that would end the
+// watch, so the result of reportErr is nil here.)
+func (w *watcher) emitPartial(rep syncer.Report, changes []syncer.Change) {
+	if !w.baselined && !w.emitInitial {
+		return
+	}
+	if err := w.emit(rep, changes); err != nil {
+		_ = w.reportErr(lostChanges(err, len(changes)))
+	}
 }
 
 // migrated reports an archive upgrade once, whether or not this sync's changes are emitted.
@@ -436,7 +463,17 @@ func (w *watcher) items(changes []syncer.Change) (map[string]watchItem, error) {
 	if err != nil {
 		return nil, errs.DBError(err)
 	}
-	for i, it := range messageItems(mrows, w.rt.g.MaxText, nil) {
+	var html map[store.MessageKey]string
+	if contains(w.rt.fields, "html") { // as messages --html: fill the body the field asks for
+		keys := make([]store.MessageKey, len(mrows))
+		for i, r := range mrows {
+			keys[i] = store.MessageKey{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ID: r.ID}
+		}
+		if html, err = st.MessageHTML(w.rt.ctx, keys); err != nil {
+			return nil, errs.DBError(err)
+		}
+	}
+	for i, it := range messageItems(mrows, w.rt.g.MaxText, html) {
 		r := mrows[i]
 		if keep(r.TenantID, r.UserID, r.ConversationID) {
 			out["message\x00"+r.TenantID+"|"+r.UserID+"|"+r.ConversationID+"|"+r.ID] = watchItem{item: it, at: r.SentAt, conv: r.ConversationDisplayName, sender: r.SenderName, text: it.Text}

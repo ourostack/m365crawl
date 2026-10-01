@@ -12,18 +12,23 @@ const (
 	StatusOK        = "ok"
 	StatusOmissions = "ok_with_omissions"
 	StatusUnchanged = "unchanged"
-	statusFailed    = "failed"
-	kindMessage     = "message"
-	kindActivity    = "activity"
-	testPauseEnv    = "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
+	// StatusPartial is a run in which at least one source committed and at least one failed (or the run
+	// was interrupted after one committed); StatusFailed is a run in which none did.
+	StatusPartial = "partial"
+	StatusFailed  = "failed"
+	kindMessage   = "message"
+	kindActivity  = "activity"
+	testPauseEnv  = "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
+	// testPauseStubbornEnv=1 makes that pause ignore cancellation (the e2e test of the forced exit).
+	testPauseStubbornEnv = "TEAMSCRAWL_TEST_PAUSE_IGNORES_CANCEL"
 	// testPauseMarker is the stderr line printed when the test pause starts (e2e tests wait for it).
 	testPauseMarker    = "teamscrawl-test: paused after snapshot"
 	staleSnapshotAfter = time.Hour
 )
 
-// Report is what one successful sync did. Counts add up over all sources.
+// Report is what one sync did. Counts add up over the sources that committed.
 type Report struct {
-	Status        string         `json:"status"` // ok | ok_with_omissions | unchanged
+	Status        string         `json:"status"` // ok | ok_with_omissions | unchanged | partial | failed
 	Sources       []SourceReport `json:"sources"`
 	Conversations store.Counts   `json:"conversations"`
 	Messages      store.Counts   `json:"messages"`
@@ -41,8 +46,27 @@ type Report struct {
 // SourceReport is one Teams origin's outcome.
 type SourceReport struct {
 	Source    string         `json:"source"` // "<profile>|<origin>"
-	Status    string         `json:"status"`
+	Status    string         `json:"status"` // ok | ok_with_omissions | unchanged | failed
 	Omissions map[string]int `json:"omissions,omitempty"`
+	// Accounts and Counts describe a source that was decoded and committed; Error is set when the
+	// source failed (its rows were rolled back).
+	Accounts []string      `json:"accounts,omitempty"` // "<tenantId>/<userId>"
+	Counts   *SourceCounts `json:"counts,omitempty"`
+	Error    *SourceError  `json:"error,omitempty"`
+}
+
+// SourceCounts is what one source's commit did.
+type SourceCounts struct {
+	Conversations store.Counts `json:"conversations"`
+	Messages      store.Counts `json:"messages"`
+	People        store.Counts `json:"people"`
+	Activity      store.Counts `json:"activity"`
+}
+
+// SourceError is why a source failed: an error code from the output contract and its message.
+type SourceError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // Change is one message or activity item the sync added, edited or deleted, taken from what the

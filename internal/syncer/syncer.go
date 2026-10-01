@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
@@ -27,9 +28,14 @@ type Options struct {
 }
 
 // Run syncs every Teams origin under o.Root into the archive at o.DBPath while holding the
-// archive's run lock. Failures return an error and no report; the attempt is still recorded in
-// sync_runs with status "failed". Only runs without an account filter record a fingerprint, and
-// a source is skipped ("unchanged") only when an unfiltered run's stored fingerprint for it
+// archive's run lock. Each source commits on its own, and a source that fails does not stop the
+// others. The report and the changes of the sources that committed come back even when the run
+// returns an error: with at least one committed source and one failed source the report's status
+// is "partial" and the error has code partial_sync; when no source committed the status is
+// "failed" and the error is the first failure's. Whatever happens, the run is recorded in
+// sync_runs, and only a run in which every source succeeded counts as a fresh sync (for every
+// account, or for the filtered account). Only runs without an account filter record a fingerprint,
+// and a source is skipped ("unchanged") only when an unfiltered run's stored fingerprint for it
 // equals the current one, so a filtered run can never hide another account's data from a later
 // run. changes lists the messages and activity items the store inserted or updated.
 func Run(ctx context.Context, o Options) (rep Report, changes []Change, err error) {
@@ -48,19 +54,10 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	defer func() { _ = st.Close() }()
 
 	r := &runner{o: o, st: st}
-	fail := func(err error) (Report, []Change, error) {
-		now := time.Now().UTC()
-		// The attempt is recorded even when ctx is cancelled.
-		_ = st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: started, FinishedAt: now, Source: r.current, Status: statusFailed})
-		return Report{}, nil, err
+	// The attempt is recorded even when ctx is cancelled.
+	record := func(status string) error {
+		return st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: started, FinishedAt: time.Now().UTC(), Status: status, Accounts: r.scope()})
 	}
-	// A bug that panics while decoding must not crash the caller: the source's transaction and
-	// snapshot are already unwound by their own defers, so report it as an internal error.
-	defer func() {
-		if p := recover(); p != nil {
-			rep, changes, err = fail(errs.Internal(fmt.Errorf("panic while syncing: %v", p)))
-		}
-	}()
 	// An archive written by an older build gets its derived fields recomputed first, so that this
 	// sync's content hashes compare against current ones and the upgrade is not read as edits.
 	migrated, err := st.Rederive(ctx)
@@ -69,20 +66,33 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		return Report{}, nil, err // before any write: not even a failed-run record
 	}
 	if err != nil {
-		return fail(errs.DBError(err))
+		_ = record(StatusFailed)
+		return Report{}, nil, errs.DBError(err)
 	}
 	rep, changes, err = r.run(ctx, started)
-	if err != nil {
-		return fail(err)
+	if rep.Status == "" { // failed before any source ran
+		_ = record(StatusFailed)
+		return rep, changes, err
 	}
 	rep.Migrated = migrated
-	return rep, changes, nil
+	if rerr := record(rep.Status); rerr != nil && err == nil {
+		// The sources committed, but the run could not be recorded: it is not a fresh sync.
+		return rep, changes, errs.DBError(rerr)
+	}
+	return rep, changes, err
 }
 
 type runner struct {
-	o       Options
-	st      *store.Store
-	current string // source being processed, for the failed-run record
+	o  Options
+	st *store.Store
+}
+
+// scope is the accounts a run-level sync_runs row covers: every account, or the filtered one.
+func (r *runner) scope() []string {
+	if a := r.o.Account; a != nil {
+		return []string{a.TenantID + "/" + a.UserID}
+	}
+	return []string{"*"}
 }
 
 func (r *runner) progress(format string, args ...any) {
@@ -91,6 +101,8 @@ func (r *runner) progress(format string, args ...any) {
 	}
 }
 
+// run syncs every source. It returns an empty-status report only when it fails before any source
+// is tried (discovery); afterwards the report is always filled in.
 func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, error) {
 	root := r.o.Root
 	if root == "" {
@@ -104,25 +116,46 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	if rep.OtherOrigins == nil {
 		rep.OtherOrigins = []string{}
 	}
-	var changes []Change
-	decoded := false
+	var (
+		changes   []Change
+		failures  []sourceFailure
+		committed int
+		decoded   bool
+		stopped   error // cancellation: the sources after it are not tried
+	)
 	for _, src := range sources {
-		if err := ctx.Err(); err != nil {
-			return Report{}, nil, err
+		if stopped = ctx.Err(); stopped != nil {
+			break
 		}
-		r.current = src.Key()
-		sr, didDecode, err := r.source(ctx, src, &rep, &changes)
+		sr, didDecode, err := r.safeSource(ctx, src, &rep, &changes)
 		if err != nil {
-			return Report{}, nil, err
+			// Cancelling removes the snapshot a source is still reading, so its failure can look like
+			// a damaged cache: the cancellation is the real reason.
+			if stopped = ctx.Err(); stopped != nil {
+				break
+			}
+			coded := codedOf(err)
+			failures = append(failures, sourceFailure{src.Key(), err, coded})
+			rep.Sources = append(rep.Sources, SourceReport{Source: src.Key(), Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded)}})
+			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: src.Key(), Status: StatusFailed})
+			r.progress("%s: failed (%s)", src.Key(), coded.Code)
+			continue
 		}
+		committed++
 		decoded = decoded || didDecode
 		rep.Sources = append(rep.Sources, sr)
 		for k, v := range sr.Omissions {
 			rep.Omissions[k] += v
 		}
 	}
-	r.current = ""
+	rep.FinishedAt = time.Now().UTC()
 	switch {
+	case stopped != nil && committed > 0:
+		rep.Status = StatusPartial
+	case stopped != nil || (len(failures) > 0 && committed == 0):
+		rep.Status = StatusFailed
+	case len(failures) > 0:
+		rep.Status = StatusPartial
 	case !decoded:
 		rep.Status = StatusUnchanged
 	case sum(rep.Omissions) > 0:
@@ -130,8 +163,59 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	default:
 		rep.Status = StatusOK
 	}
-	rep.FinishedAt = time.Now().UTC()
-	return rep, changes, nil
+	switch {
+	case stopped != nil:
+		return rep, changes, stopped
+	case len(failures) == 0:
+		return rep, changes, nil
+	case committed == 0:
+		return rep, changes, failures[0].err
+	}
+	return rep, changes, errs.PartialSync(describe(failures))
+}
+
+// sourceFailure is a source that failed and why.
+type sourceFailure struct {
+	source string
+	err    error
+	coded  *errs.Coded
+}
+
+func describe(fs []sourceFailure) string {
+	parts := make([]string, len(fs))
+	for i, f := range fs {
+		parts[i] = fmt.Sprintf("%s (%s)", f.source, f.coded.Code)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// codedOf is err as a coded error, wrapping anything else as an internal error.
+func codedOf(err error) *errs.Coded {
+	var coded *errs.Coded
+	if errors.As(err, &coded) {
+		return coded
+	}
+	return errs.Internal(err)
+}
+
+// bodyMessage is a coded error's message with its cause, as the CLI prints it.
+func bodyMessage(c *errs.Coded) string {
+	if c.Code == errs.CodeDBError && c.Unwrap() != nil {
+		return c.Message + ": " + c.Unwrap().Error()
+	}
+	return c.Message
+}
+
+// safeSource is source with a bug that panics while decoding contained: the source's transaction
+// and snapshot are already unwound by their own defers, so the panic becomes that source's
+// internal error and the other sources still run.
+func (r *runner) safeSource(ctx context.Context, src teamsdesktop.Source, rep *Report, changes *[]Change) (sr SourceReport, decoded bool, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			sr, decoded, err = SourceReport{}, false, errs.Internal(fmt.Errorf("panic while syncing: %v", p))
+		}
+	}()
+	return r.source(ctx, src, rep, changes)
 }
 
 // runCounts is the counts_json of a sync_runs row.
@@ -171,10 +255,14 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	}
 	if d, _ := time.ParseDuration(os.Getenv(testPauseEnv)); d > 0 { // test hook for the e2e tests
 		_, _ = fmt.Fprintln(os.Stderr, testPauseMarker) // lets a test signal from inside the pause
-		select {
-		case <-time.After(d):
-		case <-ctx.Done():
-			return SourceReport{}, false, ctx.Err()
+		if os.Getenv(testPauseStubbornEnv) == "1" {
+			time.Sleep(d) // a stop that does not finish, so a test can send the second signal
+		} else {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return SourceReport{}, false, ctx.Err()
+			}
 		}
 	}
 
@@ -212,7 +300,8 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	add(&rep.Activity, w.counts.Activity)
 	*changes = append(*changes, w.changes...)
 	r.progress("%s: %s (%d messages, %d conversations, %d activity items)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen)
-	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions}, true, nil
+	counts := SourceCounts(w.counts)
+	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions, Accounts: w.accounts(), Counts: &counts}, true, nil
 }
 
 // writer maps records as Read decodes them and hands them to the source's transaction in batches
@@ -346,6 +435,16 @@ func (w *writer) finish() error {
 	}
 	add(&w.counts.People, n)
 	return nil
+}
+
+// accounts lists the accounts the source had records for, as "<tenantId>/<userId>".
+func (w *writer) accounts() []string {
+	out := make([]string, 0, len(w.seenAcct))
+	for k := range w.seenAcct {
+		out = append(out, k[0]+"/"+k[1])
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (w *writer) addPeople(ps []teamsdesktop.Person) {

@@ -27,6 +27,7 @@ const (
 	CodeDoctorFailed                = "doctor_failed"
 	CodeLocked                      = "locked"
 	CodeArchiveNewer                = "archive_newer"
+	CodePartialSync                 = "partial_sync"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -131,6 +132,14 @@ func ArchiveNewer(found, have int) *Coded {
 	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
 		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (derivation version %d; this build writes version %d)", found, have),
 		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
+}
+
+// PartialSync reports a sync in which some sources committed and others failed. detail names the
+// failed sources and their error codes. The committed sources' rows are in the archive.
+func PartialSync(detail string) *Coded {
+	return &Coded{Code: CodePartialSync, Exit: ExitRuntime,
+		Message: "some Teams sources synced and others failed: " + detail,
+		Fix:     "Run `teamscrawl doctor` to see what is wrong with the failing source, fix it and run `teamscrawl sync` again; the sources that synced are already in the archive."}
 }
 
 // Locked reports that another teamscrawl run holds the archive lock.

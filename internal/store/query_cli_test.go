@@ -15,13 +15,13 @@ func TestLastSuccess(t *testing.T) {
 	if err != nil || !got.IsZero() {
 		t.Fatalf("empty archive: %v %v", got, err)
 	}
-	must0(s.RecordRun(ctx, Run{StartedAt: base, FinishedAt: base.Add(time.Second), Status: "ok"}))
-	must0(s.RecordRun(ctx, Run{StartedAt: base.Add(time.Hour), FinishedAt: base.Add(time.Hour + time.Second), Status: "failed"}))
+	must0(s.RecordRun(ctx, Run{StartedAt: base, FinishedAt: base.Add(time.Second), Status: "ok", Accounts: []string{"*"}}))
+	must0(s.RecordRun(ctx, Run{StartedAt: base.Add(time.Hour), FinishedAt: base.Add(time.Hour + time.Second), Status: "failed", Accounts: []string{"*"}}))
 	got, err = s.LastSuccess(ctx)
 	if err != nil || !got.Equal(base.Add(time.Second)) {
 		t.Fatalf("a failed run must not count: %v %v", got, err)
 	}
-	must0(s.RecordRun(ctx, Run{StartedAt: base.Add(2 * time.Hour), FinishedAt: base.Add(2*time.Hour + time.Second), Status: "unchanged"}))
+	must0(s.RecordRun(ctx, Run{StartedAt: base.Add(2 * time.Hour), FinishedAt: base.Add(2*time.Hour + time.Second), Status: "unchanged", Accounts: []string{"*"}}))
 	got, _ = s.LastSuccess(ctx)
 	if !got.Equal(base.Add(2*time.Hour + time.Second)) {
 		t.Fatalf("unchanged counts as success: %v", got)
