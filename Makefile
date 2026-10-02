@@ -11,7 +11,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint tidy-check check coverage snapshot screenshot clean
+.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint script-lint tidy-check check coverage snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -26,7 +26,7 @@ help:
 		'  fmt            Apply Go formatting.' \
 		'  fmt-check      Fail if any file needs formatting.' \
 		'  vet            Run go vet.' \
-		'  lint           Run golangci-lint, govulncheck and actionlint.' \
+		'  lint           Run golangci-lint, govulncheck, actionlint, shellcheck and the signing script selftest.' \
 		'  tidy-check     Verify go.mod and go.sum are tidy.' \
 		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow).' \
 		'  check          Run every local gate enforced by CI.' \
@@ -66,7 +66,7 @@ vet:
 	go vet -tags e2e ./...
 	go vet -tags acceptance ./...
 
-lint: golangci vulncheck workflow-lint
+lint: golangci vulncheck workflow-lint script-lint
 
 golangci:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
@@ -78,6 +78,11 @@ vulncheck:
 
 workflow-lint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+script-lint:
+	@command -v shellcheck >/dev/null || { echo "shellcheck is required (brew install shellcheck)"; exit 1; }
+	shellcheck scripts/*.sh
+	scripts/sign-notarize.sh --selftest
 
 tidy-check:
 	go mod verify
