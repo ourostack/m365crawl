@@ -61,7 +61,7 @@ func (rt *runtime) doctorChecks() []check {
 	if root == "" {
 		root = teamsdesktop.DefaultRoot()
 	}
-	sources, other, derr := teamsdesktop.Discover(root)
+	sources, other, derr := discover(root)
 	var coded *errs.Coded
 	errors.As(derr, &coded)
 	code := ""
