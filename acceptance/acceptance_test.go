@@ -722,33 +722,42 @@ func TestRealBlobsResolve(t *testing.T) {
 // with "eyJ" (a base64 JSON header and payload).
 var jwt = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
 
-// TestRealNoAuthDecoded checks that the Teams auth databases are present in the cache yet never
-// read: every database outside the allowlist yields no records, only allowlisted record kinds are
-// delivered, and the archive holds nothing shaped like a bearer token.
+// tokenPatterns are the credential shapes the archive scan looks for in records.value_json: a
+// bearer token (three base64url segments), the OAuth field names, and an Authorization scheme.
+var tokenPatterns = []*regexp.Regexp{
+	jwt,
+	regexp.MustCompile(`refresh_token`),
+	regexp.MustCompile(`access_token`),
+	regexp.MustCompile(`Bearer `),
+}
+
+// messageContentManagers are the managers whose records legitimately carry message text, in which
+// a token-shaped string can be part of a link someone shared. A hit in any other manager fails.
+var messageContentManagers = map[string]bool{
+	"replychain-manager": true, "conversation-manager": true, "activity-manager": true,
+}
+
+// TestRealNoAuthDecoded checks that credential databases and stores are present in the cache yet
+// never read: ReadGeneric delivers no record from a denied database or store, Read delivers only
+// the typed record kinds, and the archive holds nothing shaped like a credential outside message
+// content (hits are reported by manager and store name only).
 func TestRealNoAuthDecoded(t *testing.T) {
 	for _, snap := range snapshots(t) {
-		o := openSnapshot(t, snap.dir)
-		dbs, err := o.Databases()
+		var recs, deniedRecords int
+		res, err := teamsdesktop.ReadGeneric(context.Background(), snap.dir, nil, teamsdesktop.DefaultGenericBudget, func(r teamsdesktop.GenericRecord) error {
+			recs++
+			if teamsdesktop.Denied(r.Database) || teamsdesktop.Denied(r.Store) {
+				deniedRecords++
+			}
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		var allowed, other, auth, otherRecords int
-		for _, db := range dbs {
-			if keepAllowlisted(db.Name) {
-				allowed++
-				continue
-			}
-			other++
-			if strings.HasPrefix(db.Name, "Teams:auth:") {
-				auth++
-			}
-			for _, s := range db.Stores {
-				_ = o.Records(db.ID, s.ID, func(indexeddb.Record) error { otherRecords++; return nil })
-			}
-		}
-		t.Logf("databases: allowlisted=%d other=%d (auth=%d); records readable from non-allowlisted databases=%d", allowed, other, auth, otherRecords)
-		if otherRecords != 0 {
-			t.Errorf("%d records were readable from non-allowlisted databases", otherRecords)
+		t.Logf("generic records=%d from %d databases; denied databases=%d, denied stores=%d, records from denied=%d",
+			recs, len(res.Present), res.Omissions["denied_database"], res.Omissions["denied_store"], deniedRecords)
+		if deniedRecords != 0 {
+			t.Errorf("%d records were read from denied databases or stores", deniedRecords)
 		}
 		kinds := map[string]int{}
 		if _, err := teamsdesktop.Read(context.Background(), snap.dir, nil, func(a teamsdesktop.Account, kind string, v any) error {
@@ -773,9 +782,10 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	// Message content may legitimately carry a token inside a shared link (a message the user
 	// received said so), so token-shaped strings are tolerated in the message content columns
-	// and nowhere else: not in conversations, people, activity or sync bookkeeping.
+	// and nowhere else: not in conversations, people, activity or sync bookkeeping. The records
+	// table is scanned separately, below, by manager and store.
 	contentColumns := map[string]bool{"messages.content_html": true, "messages.content_text": true, "messages.raw_json": true, "messages.links_json": true}
-	_, tables, _, err := st.SQL(context.Background(), "select name from sqlite_master where type = 'table' and name not like '%fts%' and name not like 'sqlite_%'", acceptanceRowLimit)
+	_, tables, _, err := st.SQL(context.Background(), "select name from sqlite_master where type = 'table' and name not like '%fts%' and name not like 'sqlite_%' and name != 'records'", acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -812,5 +822,44 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	t.Logf("token-shaped strings: %d in message content columns, %d elsewhere", inContent, elsewhere)
 	if elsewhere != 0 {
 		t.Errorf("%d token-shaped strings outside message content", elsewhere)
+	}
+
+	// The generic records table: report hits by manager and store name only, never the value.
+	_, hits, _, err := st.SQL(context.Background(), "select source, database, store, value_json from records where value_json like '%eyJ%' or value_json like '%refresh_token%' or value_json like '%access_token%' or value_json like '%Bearer %'", acceptanceRowLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byStore := map[string]int{}
+	outside := 0
+	for _, row := range hits {
+		database, _ := row[1].(string)
+		store, _ := row[2].(string)
+		value, _ := row[3].(string)
+		n := 0
+		for _, p := range tokenPatterns {
+			n += len(p.FindAllStringIndex(value, -1))
+		}
+		if n == 0 {
+			continue
+		}
+		manager, _, ok := teamsdesktop.ParseDatabaseName(database)
+		if !ok {
+			manager = "(unparsed)"
+		}
+		byStore[manager+"/"+store] += n
+		if !messageContentManagers[manager] {
+			outside += n
+		}
+	}
+	keys := make([]string, 0, len(byStore))
+	for k := range byStore {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		t.Logf("credential-shaped strings in records %s: %d", k, byStore[k])
+	}
+	if outside != 0 {
+		t.Errorf("%d credential-shaped strings in records outside message-content managers", outside)
 	}
 }

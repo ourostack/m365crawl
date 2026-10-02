@@ -1,6 +1,6 @@
 {
   "browser": "msedge",
-  "browser_version": "154.0.4258.48",
+  "browser_version": "152.0.4191.62",
   "blink_versions": [
     21
   ],
@@ -12,5 +12,5 @@
     "snappy": 4,
     "v21": 116
   },
-  "generated_at": "2026-10-01T22:56:06.006Z"
+  "generated_at": "2026-10-02T18:52:01.391Z"
 }

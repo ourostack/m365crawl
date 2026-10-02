@@ -200,12 +200,44 @@ window.buildAccount = async function (acct) {
   await done(ftx);
   adbf.close();
 
-  // Decoy authentication database that must never be decoded.
-  const adb = await open('Teams:auth:react-web-client:' + suffix, [['tokens', 'id']]);
-  const atx = adb.transaction('tokens', 'readwrite');
-  atx.objectStore('tokens').put({ id: 'decoy', secret: 'FIXTURE-SECRET-TOKEN' });
-  await done(atx);
-  adb.close();
+  // Extra managers that are neither typed nor credential-like: read generically, with date, binary
+  // and array keys. The first account's calendar-manager also holds a store named like a credential,
+  // which must be skipped.
+  const kdb = await open('Teams:calendar-manager:react-web-client:' + suffix, [['events', 'id']].concat(acct.big ? [['sessionTokens', 'id']] : []));
+  const ktx = kdb.transaction(acct.big ? ['events', 'sessionTokens'] : ['events'], 'readwrite');
+  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-1', subject: 'Fixture planning', start: new Date(1700000000000), allDay: false });
+  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-2', subject: 'Fixture holiday', start: new Date(1700006400000), allDay: true });
+  if (acct.big) ktx.objectStore('sessionTokens').put({ id: 'decoy', value: 'FIXTURE-SESSION-DECOY' });
+  await done(ktx);
+  kdb.close();
+  const pdb = await open('Teams:pinned-manager:react-web-client:' + suffix, [['pins', 'pinKey']]);
+  const ptx = pdb.transaction('pins', 'readwrite');
+  ptx.objectStore('pins').put({ pinKey: 'fixture-pin-' + acct.seed, label: 'Fixture pin' });
+  ptx.objectStore('pins').put({ pinKey: new Date(1700000000000 + acct.seed * 1000), label: 'Date-keyed pin' });
+  ptx.objectStore('pins').put({ pinKey: new Uint8Array([1, 2, 3, acct.seed]), label: 'Binary-keyed pin' });
+  ptx.objectStore('pins').put({ pinKey: ['fixture', acct.seed, 'array'], label: 'Array-keyed pin' });
+  await done(ptx);
+  pdb.close();
+
+  // Decoy credential databases that must never be decoded. The first account only, so the fixture
+  // holds three of them: Teams:auth, a token cache under another manager, and a bare keyval store.
+  if (acct.big) {
+    const adb = await open('Teams:auth:react-web-client:' + suffix, [['tokens', 'id']]);
+    const atx = adb.transaction('tokens', 'readwrite');
+    atx.objectStore('tokens').put({ id: 'decoy', secret: 'FIXTURE-SECRET-TOKEN' });
+    await done(atx);
+    adb.close();
+    const tdb = await open('Teams:token-cache-manager:react-web-client:' + suffix, [['entries', 'id']]);
+    const ttx = tdb.transaction('entries', 'readwrite');
+    ttx.objectStore('entries').put({ id: 'decoy', access_token: 'FIXTURE-ACCESS-DECOY' });
+    await done(ttx);
+    tdb.close();
+    const vdb = await open('keyval-store', [['keyval', 'id']]);
+    const vtx = vdb.transaction('keyval', 'readwrite');
+    vtx.objectStore('keyval').put({ id: 'decoy', value: 'FIXTURE-KEYVAL-DECOY' });
+    await done(vtx);
+    vdb.close();
+  }
   return { chains: n };
 };
 </script>
