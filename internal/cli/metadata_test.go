@@ -61,7 +61,7 @@ func TestMetadataNeverSyncs(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	code, _, stderr := e.run("--max-age", "1ns", "metadata", "--json")
-	if code != 0 || strings.Contains(stderr, "syncing") || stderr != "" {
+	if code != 0 || stderr != "" {
 		t.Fatalf("metadata must not sync: exit %d, stderr %q", code, stderr)
 	}
 	if n := syncRunCount(t, e); n != 1 {

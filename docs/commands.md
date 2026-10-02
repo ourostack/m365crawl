@@ -437,7 +437,7 @@ teamscrawl metadata [flags]
 
 No flags beyond the global ones.
 
-Result: One crawlkit `control.Manifest` JSON document on stdout in every output mode (like `skill`, it has one fixed format): the app id, description, default database path, the `status`, `sync`, `doctor` and `search` commands crawlkit can run, capabilities and privacy flags. Needs no archive or Teams cache and never runs the implicit sync.
+Result: One crawlkit `control.Manifest` JSON document on stdout, indented in every output mode and regardless of `--format` (like `skill`, it has one fixed format): the app id, description, default database path, the `status`, `sync`, `doctor` and `search` commands crawlkit can run, capabilities and privacy flags. Needs no archive or Teams cache and never runs the implicit sync.
 
 Examples:
 
