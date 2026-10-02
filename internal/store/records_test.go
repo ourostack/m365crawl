@@ -619,3 +619,19 @@ func TestPurgeDenied(t *testing.T) {
 		}
 	})
 }
+
+func TestUpsertRecordsRescrubbedValueReplacesStored(t *testing.T) {
+	s := newStore(t)
+	old := `{"access_token":{"a":"secret"}}`
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, old)}, base)
+	scrubbed, n := teamsdesktop.Scrub([]byte(old))
+	if n != 1 {
+		t.Fatalf("scrub n = %d", n)
+	}
+	if c := upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, string(scrubbed))}, base.Add(time.Hour)); c != (Counts{Seen: 1, Updated: 1}) {
+		t.Fatalf("counts: %+v", c)
+	}
+	if v, _, _ := recRow(t, s, dbA, "events", `"e1"`); v != `{"access_token":"[redacted]"}` {
+		t.Fatalf("stored value still unredacted: %s", v)
+	}
+}

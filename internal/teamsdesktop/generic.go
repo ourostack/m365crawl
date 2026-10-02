@@ -250,6 +250,8 @@ func readGenericDatabase(ctx context.Context, o genericOrigin, g genericDB, res 
 				res.Omissions[indexeddb.CodeBadKey]++
 				return nil
 			}
+			keyJSON, kn := Scrub(keyJSON)
+			res.Redacted += kn
 			seen[string(keyJSON)] = struct{}{}
 			rec := GenericRecord{Account: acct, Database: db.Name, Store: st.Name, KeyJSON: keyJSON}
 			if v, err := o.Decode(db.ID, r.Raw); err != nil {
