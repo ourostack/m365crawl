@@ -40,6 +40,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`whoami`](#whoami) | Show the accounts in the archive and the archive's state. |
 | [`sql`](#sql) | Run a read-only SQL query against the archive. |
 | [`skill`](#skill) | Print the agent guide (SKILL.md) for this version, as Markdown in every output mode. |
+| [`metadata`](#metadata) | Print the crawlkit app manifest (for crawlctl discovery). |
 | [`version`](#version) | Print the teamscrawl version, commit and build date. |
 
 ## doctor
@@ -424,6 +425,24 @@ Examples:
 
 ```sh
 teamscrawl skill
+```
+
+## metadata
+
+Print the crawlkit app manifest (for crawlctl discovery).
+
+```
+teamscrawl metadata [flags]
+```
+
+No flags beyond the global ones.
+
+Result: One crawlkit `control.Manifest` JSON document on stdout, indented in every output mode and regardless of `--format` (like `skill`, it has one fixed format): the app id, description, default database path, the `status`, `sync`, `doctor` and `search` commands crawlkit can run, capabilities and privacy flags. Needs no archive or Teams cache and never runs the implicit sync.
+
+Examples:
+
+```sh
+teamscrawl metadata --json
 ```
 
 ## version

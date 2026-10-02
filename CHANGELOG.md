@@ -2,6 +2,12 @@
 
 All notable changes to teamscrawl are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) with the 0.x caveat that the JSON contract in [SPEC.md](SPEC.md) is stable except where an entry below says "Breaking".
 
+## [Unreleased]
+
+### Added
+
+- `metadata`: prints the crawlkit app manifest (`control.Manifest`) as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. It needs no archive or Teams cache and never syncs. No schema or existing field changed.
+
 ## [0.1.0] - 2026-10-01
 
 The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No JSON field was renamed or removed and the exit codes did not change, so scripts written against the alpha keep working, with the text changes noted under Changed.
