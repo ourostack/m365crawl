@@ -33,7 +33,7 @@ Homebrew is the shortest path:
 brew install ourostack/tap/teamscrawl
 ```
 
-Release binaries are Developer ID signed and notarized by Apple only when the release was built with the Apple signing secrets; otherwise the darwin tarballs are unsigned. The last line of each release's notes says which. The Homebrew cask clears the macOS quarantine flag either way. If you download a darwin binary by hand and it is unsigned, run `xattr -dr com.apple.quarantine teamscrawl` once.
+Published macOS release binaries are always Developer ID signed and notarized by Apple; the release workflow fails instead of shipping an unsigned darwin tarball. The release notes say so explicitly. The Homebrew cask clears the macOS quarantine flag after install. If you built teamscrawl yourself instead of using a published release, you may still need `xattr -dr com.apple.quarantine teamscrawl` once.
 
 [GitHub Releases](https://github.com/ourostack/teamscrawl/releases) has `teamscrawl_<version>_darwin_arm64.tar.gz` and `teamscrawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
 
@@ -199,7 +199,7 @@ The archive holds your real Teams conversations. It stays on your machine in a p
 - Read-only: no sending, reacting or marking read.
 - Attachments and media are not downloaded; files and links are recorded as metadata.
 - Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
-- macOS release binaries are signed and notarized only when the release had signing credentials; the release notes say which. Windows release binaries are intentionally unsigned.
+- Published macOS release binaries are always signed and notarized; Windows release binaries are intentionally unsigned.
 
 ## Development
 

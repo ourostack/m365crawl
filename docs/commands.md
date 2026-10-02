@@ -9,7 +9,7 @@ This reference reproduces the output of `teamscrawl --help` and `teamscrawl <com
 | macOS | `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` | `~/.teamscrawl/teamscrawl.db` |
 | Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` |
 
-On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself as a new private directory; otherwise open fails with `db_error` before SQLite writes anything.
+On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself as a new private directory. If that direct parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite writes anything.
 
 ## Global flags
 
@@ -19,7 +19,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | --- | --- |
 | `--format=text\|json\|log` | Output format: text, json or log. Default: text on a terminal, json otherwise. |
 | `--json` | Alias for --format json. |
-| `--db=PATH` | Archive database path (default ~/.teamscrawl/teamscrawl.db) ($TEAMSCRAWL_DB). |
+| `--db=PATH` | Archive database path (default `~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) (`$TEAMSCRAWL_DB`). On Windows the default path is private by construction; a custom path must use a private existing parent, let teamscrawl create a new private parent, and any pre-existing archive file must already be private, or open fails with `db_error` before SQLite writes anything. |
 | `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($TEAMSCRAWL_TEAMS_ROOT). |
 | `--account=TENANT/USER` | Only this account, as &lt;tenantId&gt;/&lt;userId&gt;. Default: every account. |
 | `--no-color` | Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color. |
