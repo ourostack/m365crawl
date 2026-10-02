@@ -25,7 +25,7 @@ Each darwin binary must pass all of these, at signing time and again on the down
 | `runtime` | hardened runtime flag (`flags=0x10000(runtime)`) |
 | `timestamp` | a secure timestamp is present |
 | notarization | at signing time, `notarytool` final status is exactly `Accepted`; on a downloaded binary, Apple's own verdict below |
-| `spctl` | `spctl --assess --type exec -vv` reports `source=Notarized Developer ID`; retried with 15, 30, 60 and 90 second backoff because Gatekeeper's online lookup can lag notarization |
+| `spctl` | `spctl --assess --type install -vv` reports `accepted` and `source=Notarized Developer ID` (a bare CLI binary must be assessed as `install`: `--type exec` rejects every non-app binary); retried with 15, 30, 60 and 90 second backoff because Gatekeeper's online lookup can lag notarization |
 
 `verify-release` also checks that the release is a prerelease exactly when the tag has a hyphen and is never "latest" when it is one; that every tarball matches `checksums.txt`; that `file` and `lipo` report the right architecture per tarball; that Gatekeeper still accepts each binary after a `com.apple.quarantine` attribute is added (simulating a browser download); and that the arm64 binary's `teamscrawl --json version` reports the tag without the leading `v` and the tagged commit.
 
