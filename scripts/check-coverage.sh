@@ -94,6 +94,6 @@ if [ -s "$tmp/uncovered.txt" ]; then
 fi
 
 if [ "$status" -eq 0 ]; then
-	echo "coverage OK: every function in [$(echo $packages)] is at 100% or allowlisted"
+	echo "coverage OK: every function in [$(printf '%s' "$packages" | tr -s '[:space:]' ' ' | sed 's/ *$//')] is at 100% or allowlisted"
 fi
 exit "$status"
