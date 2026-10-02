@@ -31,6 +31,8 @@ func TestScrub(t *testing.T) {
 		{"sibling nested", `{"a":{"key":"client_secret","Value":[1,{"b":2}]},"value":"top"}`, `{"a":{"key":"client_secret","Value":"[redacted]"},"value":"top"}`, 1},
 		{"stringified json", `{"data":"{\"refresh_token\":\"0.AXYZopaque\"}","n":"{not json"}`, `{"data":"{\"refresh_token\":\"[redacted]\"}","n":"{not json"}`, 1},
 		{"stringified array", `{"data":" [ {\"password\":1}, \"<&>\" ] "}`, `{"data":"[ {\"password\":\"[redacted]\"}, \"<&>\" ]"}`, 1},
+		{"truncated stringified json", `{"data":"{\"refresh_token\":\"0.AX\"","o":"{\"x\":\"0.AX\""}`, `{"data":"[redacted]","o":"{\"x\":\"0.AX\""}`, 1},
+		{"stringified json with nothing to scrub", `{"data":"{\"a\": 1}"}`, `{"data":"{\"a\": 1}"}`, 0},
 		{"sig any case", `"?SIG=a&x=1&Sig=b"`, `"?SIG=[redacted]&x=1&Sig=[redacted]"`, 2},
 		{"bearer string", `{"h":"bEARER abc.def","l":"bearer  x\"y","n":"not bearer x","m":"Bearers"}`,
 			`{"h":"[redacted]","l":"[redacted]","n":"not bearer x","m":"Bearers"}`, 2},
@@ -83,12 +85,14 @@ func TestScrubStringifiedNesting(t *testing.T) {
 		t.Fatalf("inner: %v %v", mid, err)
 	}
 	// Past the depth bound the text is left as is (and stays valid JSON).
-	deep := level0
-	for i := 0; i < 7; i++ {
-		deep = `{"d":` + wrap(deep) + `}`
-	}
-	got, _ = Scrub([]byte(deep))
-	if !json.Valid(got) {
-		t.Fatalf("deep: %s", got)
+	for levels := 5; levels <= 8; levels++ {
+		deep := level0
+		for i := 0; i < levels; i++ {
+			deep = `{"d":` + wrap(deep) + `}`
+		}
+		got, n := Scrub([]byte(deep))
+		if !json.Valid(got) || n != 1 || bytes.Contains(got, []byte("AXYZ")) {
+			t.Fatalf("deep %d: %s (%d)", levels, got, n)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -201,7 +202,7 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 			_ = rows.Close()
 			return 0, err
 		}
-		if _, n := scrub([]byte(key)); n > 0 {
+		if scrubbed, _ := scrub([]byte(key)); !bytes.Equal(scrubbed, []byte(key)) {
 			hit = append(hit, [3]string{db, st, key})
 		}
 	}

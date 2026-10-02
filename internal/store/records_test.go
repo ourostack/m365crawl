@@ -644,6 +644,8 @@ func TestPurgeUnscrubbedKeys(t *testing.T) {
 	upsert(t, s, []teamsdesktop.GenericRecord{
 		grec(&acctA, dbA, "events", bad, `{"n":1}`),
 		grec(&acctA, dbA, "events", `"fine"`, `{"n":2}`),
+		grec(&acctA, dbA, "events", `"https://x/y?sig=[redacted]"`, `{"n":4}`),
+		grec(&acctA, dbA, "events", `{"password":"[redacted]"}`, `{"n":5}`),
 		grec(&acctA, dbA, "events", `"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2ln"`, `{"n":3}`),
 	}, base)
 	later := base.Add(time.Hour)
@@ -668,6 +670,11 @@ func TestPurgeUnscrubbedKeys(t *testing.T) {
 	}
 	if v, removed, _ := recRow(t, s, dbA, "events", `"fine"`); v != `{"n":2}` || removed != "" {
 		t.Fatalf("fine row changed: %q %q", v, removed)
+	}
+	for _, k := range []string{`"https://x/y?sig=[redacted]"`, `{"password":"[redacted]"}`} {
+		if v, removed, _ := recRow(t, s, dbA, "events", k); v == "" || removed != "" {
+			t.Fatalf("an already scrubbed key %s was purged: %q %q", k, v, removed)
+		}
 	}
 	if got := rowCount(t, s, `select count(*) from records where content_hash=''`); got != 2 {
 		t.Fatalf("%d rows with cleared hash", got)

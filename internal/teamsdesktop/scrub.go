@@ -16,6 +16,8 @@ var (
 	jwtRE = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
 	// bearerRE matches a whole JSON string that starts with "Bearer" and whitespace (an opaque bearer token).
 	bearerRE = regexp.MustCompile(`(?i)"bearer(?:\s|\\[tnr]|\\u00(?:09|0a|0d|20|a0))(?:[^"\\]|\\.)*"`)
+	// secretNameRE matches a credential key name between quotes or escaped quotes inside text.
+	secretNameRE = regexp.MustCompile(`(?i)["\\](?:access_token|refresh_token|id_token|authorization|client_secret|password)["\\]`)
 	// sigRE matches the value of a sig= query parameter (a signed URL's signature), any case.
 	sigRE = regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+`)
 )
@@ -37,7 +39,8 @@ const maxStringifiedDepth = 4
 // "type", "name" or "key" field is one of those names, any string that starts with "Bearer"
 // and whitespace (ignoring case), JWT-shaped substrings, and the value of a sig= query parameter
 // (ignoring case). A string that holds JSON (an object or array, up to four levels deep) is
-// scrubbed inside and written back as a string. A value with nothing to scrub comes back as is,
+// scrubbed inside and written back as a string; one that is truncated or nested deeper has the
+// whole string redacted if it names a credential key. A value with nothing to scrub comes back as is,
 // and the output stays valid JSON.
 func Scrub(valueJSON []byte) ([]byte, int) { return scrub(valueJSON, 0) }
 
@@ -202,15 +205,19 @@ func siblingValues(obj []byte) map[int]int {
 // scrubStringified scrubs a string literal that holds a JSON object or array and returns the
 // literal re-encoded with the redactions, or the literal and 0 when there is nothing to change.
 func scrubStringified(lit []byte, depth int) ([]byte, int) {
-	if depth >= maxStringifiedDepth {
-		return lit, 0
-	}
 	var text string
 	if json.Unmarshal(lit, &text) != nil {
 		return lit, 0
 	}
 	t := strings.TrimSpace(text)
-	if t == "" || (t[0] != '{' && t[0] != '[') || !json.Valid([]byte(t)) {
+	if t == "" || (t[0] != '{' && t[0] != '[') {
+		return lit, 0
+	}
+	if depth >= maxStringifiedDepth || !json.Valid([]byte(t)) {
+		// Too deep to unwrap, or truncated JSON: redact the whole string when it names a credential.
+		if secretNameRE.MatchString(t) {
+			return []byte(`"` + redacted + `"`), 1
+		}
 		return lit, 0
 	}
 	inner, n := scrub([]byte(t), depth+1)
