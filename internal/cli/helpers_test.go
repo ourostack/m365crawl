@@ -25,7 +25,10 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	t.Setenv("TMPDIR", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
 	t.Setenv("TEAMSCRAWL_MAX_AGE", "")
 	t.Setenv("TEAMSCRAWL_DB", "")
 	t.Setenv("TEAMSCRAWL_TEAMS_ROOT", "")
