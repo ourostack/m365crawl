@@ -62,8 +62,8 @@ func TestDiscoverRootIsAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err := Discover(f)
-	if c := codeOf(t, err); c.Code == errs.CodeTeamsNotInstalled || c.Code == errs.CodeNoFullDiskAccess {
-		t.Fatalf("a root that is a file is an internal error, got %v", err)
+	if c := codeOf(t, err); c.Code != errs.CodeInternal {
+		t.Fatalf("a root that is a file must stay an internal error even on Windows readdir(file), got %v", err)
 	}
 }
 

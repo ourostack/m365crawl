@@ -140,16 +140,11 @@ func securePath(path string, isDir bool) error {
 }
 
 func hasPrivateACL(path string) (bool, error) {
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION)
+	// Existing custom parents are safe when their effective DACL is private, even if that privacy
+	// is inherited from a private ancestor rather than protected directly on the path itself.
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false, err
-	}
-	control, _, err := sd.Control()
-	if err != nil {
-		return false, err
-	}
-	if control&windows.SE_DACL_PROTECTED == 0 {
-		return false, nil
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil {

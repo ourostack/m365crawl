@@ -89,6 +89,8 @@ func Discover(root string) (sources []Source, otherOrigins []string, err error) 
 func readDir(root, dir string) ([]fs.DirEntry, error) {
 	info, err := os.Stat(dir)
 	if err == nil && !info.IsDir() {
+		// Windows maps os.ReadDir(file) to fs.ErrNotExist, which would incorrectly turn a file root
+		// into teams_not_installed without this explicit directory check.
 		return nil, errs.Internal(&fs.PathError{Op: "readdir", Path: dir, Err: fs.ErrInvalid})
 	}
 	ents, err := os.ReadDir(dir)
