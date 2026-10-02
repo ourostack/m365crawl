@@ -175,7 +175,7 @@ func hasPrivateACL(path string) (bool, error) {
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			return false, nil
 		}
-		got[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] = struct{}{}
+		got[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] = struct{}{} //nolint:gosec // Windows ACCESS_ALLOWED_ACE stores the SID inline after SidStart
 	}
 	if len(got) != len(want) {
 		return false, nil

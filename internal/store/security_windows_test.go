@@ -236,7 +236,7 @@ func aceSIDStrings(t *testing.T, acl *windows.ACL) map[string]struct{} {
 		if err := windows.GetAce(acl, uint32(i), &ace); err != nil {
 			t.Fatalf("get ace %d: %v", i, err)
 		}
-		out[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] = struct{}{}
+		out[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] = struct{}{} //nolint:gosec // Windows ACCESS_ALLOWED_ACE stores the SID inline after SidStart
 	}
 	return out
 }
