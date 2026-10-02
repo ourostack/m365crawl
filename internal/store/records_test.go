@@ -619,3 +619,86 @@ func TestPurgeDenied(t *testing.T) {
 		}
 	})
 }
+
+func TestUpsertRecordsRescrubbedValueReplacesStored(t *testing.T) {
+	s := newStore(t)
+	old := `{"access_token":{"a":"secret"}}`
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, old)}, base)
+	scrubbed, n := teamsdesktop.Scrub([]byte(old))
+	if n != 1 {
+		t.Fatalf("scrub n = %d", n)
+	}
+	if c := upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, string(scrubbed))}, base.Add(time.Hour)); c != (Counts{Seen: 1, Updated: 1}) {
+		t.Fatalf("counts: %+v", c)
+	}
+	if v, _, _ := recRow(t, s, dbA, "events", `"e1"`); v != `{"access_token":"[redacted]"}` {
+		t.Fatalf("stored value still unredacted: %s", v)
+	}
+}
+
+// A row archived under a key that scrubs differently loses its value and hash and is marked
+// removed; rows whose keys scrub to themselves are untouched.
+func TestPurgeUnscrubbedKeys(t *testing.T) {
+	s := newStore(t)
+	const bad = `"Bearer abc"`
+	upsert(t, s, []teamsdesktop.GenericRecord{
+		grec(&acctA, dbA, "events", bad, `{"n":1}`),
+		grec(&acctA, dbA, "events", `"fine"`, `{"n":2}`),
+		grec(&acctA, dbA, "events", `"https://x/y?sig=[redacted]"`, `{"n":4}`),
+		grec(&acctA, dbA, "events", `{"password":"[redacted]"}`, `{"n":5}`),
+		grec(&acctA, dbA, "events", `"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2ln"`, `{"n":3}`),
+	}, base)
+	later := base.Add(time.Hour)
+	var n int
+	inSession(t, s, func(x *Session) {
+		var err error
+		if n, err = x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, later); err != nil {
+			t.Fatal(err)
+		}
+		if again, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, later); err != nil || again != 0 {
+			t.Fatalf("second pass: %d %v", again, err)
+		}
+		if other, err := x.PurgeUnscrubbedKeys("other-source", teamsdesktop.Scrub, later); err != nil || other != 0 {
+			t.Fatalf("other source: %d %v", other, err)
+		}
+	})
+	if n != 2 {
+		t.Fatalf("cleared %d rows, want 2", n)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", bad); v != "" || removed != fmtTime(later) {
+		t.Fatalf("bad key row: %q %q", v, removed)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", `"fine"`); v != `{"n":2}` || removed != "" {
+		t.Fatalf("fine row changed: %q %q", v, removed)
+	}
+	for _, k := range []string{`"https://x/y?sig=[redacted]"`, `{"password":"[redacted]"}`} {
+		if v, removed, _ := recRow(t, s, dbA, "events", k); v == "" || removed != "" {
+			t.Fatalf("an already scrubbed key %s was purged: %q %q", k, v, removed)
+		}
+	}
+	if got := rowCount(t, s, `select count(*) from records where content_hash=''`); got != 2 {
+		t.Fatalf("%d rows with cleared hash", got)
+	}
+}
+
+func TestPurgeUnscrubbedKeysFaultsSurface(t *testing.T) {
+	seed := func(t *testing.T, s *Store) {
+		t.Helper()
+		upsert(t, s, []teamsdesktop.GenericRecord{
+			grec(&acctA, dbA, "events", `"Bearer x"`, `1`),
+			grec(&acctA, dbA, "events", `"Bearer y"`, `2`),
+		}, base)
+	}
+	op := func(ctx context.Context, s *Store) error {
+		x, err := s.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer x.Rollback()
+		if _, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base); err != nil {
+			return err
+		}
+		return x.Commit()
+	}
+	sweepFaults(t, seed, op)
+}

@@ -54,6 +54,17 @@ func TestDeniedNames(t *testing.T) {
 		{"Teams:aadvark", false},
 		{"Teams:jwtx", false},
 		{"Teams:e2eex", false},
+		{"userKeys", true},
+		{"foo/keys", true},
+		{"authToken", true},
+		{"Teams:userAAD", true},
+		{"AADToken", true},
+		{"myJWTStore", true},
+		{"load", false},
+		{"monkeys", false},
+		{"Teams:loadManager", false},
+		{"fooKeysBar", true},
+		{"a/load", false},
 	} {
 		if got := Denied(c.name); got != c.want {
 			t.Errorf("Denied(%q) = %v want %v", c.name, got, c.want)
@@ -698,5 +709,33 @@ func TestOpenBatchReal(t *testing.T) {
 	}
 	if _, err := openBatch(t.TempDir(), func(int64, int64) bool { return false }); err == nil {
 		t.Fatal("empty directory opened")
+	}
+}
+
+func TestReadGenericScrubsKeysAndValues(t *testing.T) {
+	const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2ln"
+	f := &fakeGeneric{
+		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+		held:    map[int64]int64{1: 1},
+		records: map[int64][]indexeddb.Record{1: {strRec(jwt, "x"), strRec("Bearer abc", "y")}},
+		decode: func(raw []byte) (any, error) {
+			if string(raw) == "x" {
+				return &v8.Map{Entries: [][2]any{{"Access_Token", &v8.Object{Keys: []string{"a"}, Values: []any{1.0}}}, {"k", "v"}}}, nil
+			}
+			return "Bearer zzz", nil
+		},
+	}
+	g, err := f.run(t, nil, DefaultGenericBudget)
+	if err != nil || len(g.recs) != 2 {
+		t.Fatalf("err=%v recs=%+v", err, g.recs)
+	}
+	if string(g.recs[0].KeyJSON) != `"[redacted]"` || string(g.recs[1].KeyJSON) != `"[redacted]"` {
+		t.Fatalf("keys: %s %s", g.recs[0].KeyJSON, g.recs[1].KeyJSON)
+	}
+	if string(g.recs[0].ValueJSON) != `{"$map":[["Access_Token","[redacted]"],["k","v"]]}` || string(g.recs[1].ValueJSON) != `"[redacted]"` {
+		t.Fatalf("values: %s %s", g.recs[0].ValueJSON, g.recs[1].ValueJSON)
+	}
+	if g.res.Redacted != 4 {
+		t.Fatalf("redacted = %d", g.res.Redacted)
 	}
 }

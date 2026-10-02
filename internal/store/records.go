@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -174,6 +175,46 @@ func (x *Session) PurgeDenied(source string, denied func(name string) bool, at t
 	for _, h := range hit {
 		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
 			fmtTime(at), source, h[0], h[1])
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+	}
+	return total, nil
+}
+
+// PurgeUnscrubbedKeys clears the rows of source whose key_json changes when scrub is applied to
+// it (a row archived under a key that held credential material before keys were scrubbed):
+// value_json becomes NULL, content_hash ” and removed_at is set when it was not, as PurgeDenied
+// does. The record is archived again under its scrubbed key on the next read. It returns how many
+// rows it cleared.
+func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte, int), at time.Time) (int, error) {
+	ctx := context.Background()
+	rows, err := x.tx.QueryContext(ctx, `select database, store, key_json from records where source=? and (value_json is not null or content_hash != '')`, source)
+	if err != nil {
+		return 0, err
+	}
+	var hit [][3]string
+	for rows.Next() {
+		var db, st, key string
+		if err := rows.Scan(&db, &st, &key); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		if scrubbed, _ := scrub([]byte(key)); !bytes.Equal(scrubbed, []byte(key)) {
+			hit = append(hit, [3]string{db, st, key})
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, h := range hit {
+		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
+			fmtTime(at), source, h[0], h[1], h[2])
 		if err != nil {
 			return total, err
 		}

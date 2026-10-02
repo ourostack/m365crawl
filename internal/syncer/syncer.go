@@ -485,6 +485,9 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
 		return nil, 0, asCoded(err)
 	}
+	if _, err := w.sess.PurgeUnscrubbedKeys(source, teamsdesktop.Scrub, at); err != nil {
+		return nil, 0, asCoded(err)
+	}
 	return res.Omissions, res.Redacted, nil
 }
 

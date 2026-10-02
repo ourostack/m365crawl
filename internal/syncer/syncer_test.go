@@ -887,6 +887,8 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
 		// Already removed, so only the purge touches it.
 		{"purge", `update records set removed_at = '2020-01-01T00:00:00.000Z' where store = 'things'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+		// A removed row under a key that scrubs differently: only the key purge touches it.
+		{"purge keys", `update records set removed_at = '2020-01-01T00:00:00.000Z', key_json = '"Bearer x"' where store = 'other'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "other"))},
 	}
 	old := deniedFn
 	t.Cleanup(func() { deniedFn = old })

@@ -1,6 +1,11 @@
 package teamsdesktop
 
-import "regexp"
+import (
+	"bytes"
+	"encoding/json"
+	"regexp"
+	"strings"
+)
 
 // redacted replaces the secret part of a generic record's value.
 const redacted = "[redacted]"
@@ -9,24 +14,39 @@ var (
 	// jwtRE matches a JSON Web Token: a header and a payload (both base64url JSON, so both start
 	// with "eyJ") and a signature.
 	jwtRE = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
-	// secretKeyRE matches, in canonical JSON, a string value under a credential-named object key.
-	secretKeyRE = regexp.MustCompile(`(?i)("(?:access_token|refresh_token|id_token|authorization|client_secret|password)":)"(?:[^"\\]|\\.)*"`)
-	// sigRE matches the value of a sig= query parameter (a signed URL's signature).
-	sigRE = regexp.MustCompile(`([?&]sig=)[^&"\\\s#]+`)
+	// bearerRE matches a whole JSON string that starts with "Bearer" and whitespace (an opaque bearer token).
+	bearerRE = regexp.MustCompile(`(?i)"bearer(?:\s|\\[tnr]|\\u00(?:09|0a|0d|20|a0))(?:[^"\\]|\\.)*"`)
+	// secretNameRE matches a credential key name between quotes or escaped quotes inside text.
+	secretNameRE = regexp.MustCompile(`(?i)["\\](?:access_token|refresh_token|id_token|authorization|client_secret|password)["\\]`)
+	// sigRE matches the value of a sig= query parameter (a signed URL's signature), any case.
+	sigRE = regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+`)
 )
 
-// Scrub removes credential material from a generic record's canonical JSON value and returns the
-// scrubbed JSON with the number of redactions: JWT-shaped substrings, the string value of any
-// object key named access_token, refresh_token, id_token, authorization, client_secret or password
-// (ignoring case), and the value of a sig= query parameter, each replaced by "[redacted]". A value
-// with nothing to scrub comes back as is.
-func Scrub(valueJSON []byte) ([]byte, int) {
-	n := 0
-	out := secretKeyRE.ReplaceAllFunc(valueJSON, func(m []byte) []byte {
-		n++
-		i := secretKeyRE.FindSubmatchIndex(m)[3]
-		return append(append([]byte(nil), m[:i]...), `"`+redacted+`"`...)
-	})
+// secretKeys are the object keys (compared in lower case) whose value is always credential material.
+var secretKeys = map[string]bool{
+	"access_token": true, "refresh_token": true, "id_token": true,
+	"authorization": true, "client_secret": true, "password": true,
+}
+
+// maxStringifiedDepth bounds how many levels of JSON-inside-a-string Scrub unwraps.
+const maxStringifiedDepth = 4
+
+// Scrub removes credential material from a generic record's canonical JSON (a value or a key) and
+// returns the scrubbed JSON with the number of redactions, each replaced by "[redacted]": the
+// whole value (a string, number, object, array or null) of any object key named access_token,
+// refresh_token, id_token, authorization, client_secret or password (ignoring case), the same
+// for a V8 Map pair whose key is one of those names, the "value" field of an object whose
+// "type", "name" or "key" field is one of those names, any string that starts with "Bearer"
+// and whitespace (ignoring case), JWT-shaped substrings, and the value of a sig= query parameter
+// (ignoring case). A string that holds JSON (an object or array, up to four levels deep) is
+// scrubbed inside and written back as a string; one that is truncated or nested deeper has the
+// whole string redacted if it names a credential key. A value with nothing to scrub comes back as is,
+// and the output stays valid JSON.
+func Scrub(valueJSON []byte) ([]byte, int) { return scrub(valueJSON, 0) }
+
+func scrub(valueJSON []byte, depth int) ([]byte, int) {
+	out, n := redactKeyed(valueJSON, depth)
+	out = bearerRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
 	out = jwtRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
 	out = sigRE.ReplaceAllFunc(out, func(m []byte) []byte {
 		n++
@@ -34,4 +54,179 @@ func Scrub(valueJSON []byte) ([]byte, int) {
 		return append(append([]byte(nil), m[:i]...), redacted...)
 	})
 	return out, n
+}
+
+// redactKeyed walks the JSON text once, tracking string literals. It replaces the value that
+// follows a credential-named string (after "name": in an object, or after "name", when the name
+// is the first element of an array, as in a V8 Map pair [key,value]), the "value" field of an
+// object named by a sibling field, and scrubs strings that hold JSON.
+func redactKeyed(in []byte, depth int) ([]byte, int) {
+	var out bytes.Buffer
+	n := 0
+	siblings := map[int]int{} // start of a "value" field's value -> its end
+	for i := 0; i < len(in); {
+		if end, ok := siblings[i]; ok {
+			out.WriteString(`"` + redacted + `"`)
+			n++
+			i = end
+			continue
+		}
+		if in[i] == '{' {
+			for start, end := range siblingValues(in[i:valueEnd(in, i)]) {
+				siblings[i+start] = i + end
+			}
+		}
+		if in[i] != '"' {
+			out.WriteByte(in[i])
+			i++
+			continue
+		}
+		start := i
+		i = stringEnd(in, start)
+		lit := in[start:i]
+		if !secretKeyLiteral(lit) {
+			if inner, k := scrubStringified(lit, depth); k > 0 {
+				lit = inner
+				n += k
+			}
+			out.Write(lit)
+			continue
+		}
+		out.Write(lit)
+		j := skipSpace(in, i)
+		if j >= len(in) {
+			continue
+		}
+		if in[j] == ':' || (in[j] == ',' && bytes.HasSuffix(bytes.TrimRight(in[:start], " \t\r\n"), []byte("["))) {
+			k := skipSpace(in, j+1)
+			out.Write(in[i:k])
+			i = valueEnd(in, k)
+			out.WriteString(`"` + redacted + `"`)
+			n++
+		}
+	}
+	return out.Bytes(), n
+}
+
+// secretKeyLiteral reports whether a JSON string literal (quotes included) names a credential.
+func secretKeyLiteral(lit []byte) bool {
+	var s string
+	if json.Unmarshal(lit, &s) != nil {
+		return false
+	}
+	return secretKeys[strings.ToLower(s)]
+}
+
+// stringEnd returns the index just past the string literal that starts at in[i] (a quote).
+func stringEnd(in []byte, i int) int {
+	for j := i + 1; j < len(in); j++ {
+		switch in[j] {
+		case '\\':
+			j++
+		case '"':
+			return j + 1
+		}
+	}
+	return len(in)
+}
+
+// valueEnd returns the index just past the JSON value that starts at in[i].
+func valueEnd(in []byte, i int) int {
+	if i >= len(in) {
+		return i
+	}
+	switch in[i] {
+	case '"':
+		return stringEnd(in, i)
+	case '{', '[':
+		depth := 0
+		for j := i; j < len(in); {
+			switch in[j] {
+			case '"':
+				j = stringEnd(in, j)
+				continue
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return j + 1
+				}
+			}
+			j++
+		}
+		return len(in)
+	}
+	j := i
+	for j < len(in) && !strings.ContainsRune(",}] \t\r\n", rune(in[j])) {
+		j++
+	}
+	return j
+}
+
+// skipSpace returns the index of the first non-whitespace byte at or after i.
+func skipSpace(in []byte, i int) int {
+	for i < len(in) && strings.ContainsRune(" \t\r\n", rune(in[i])) {
+		i++
+	}
+	return i
+}
+
+// siblingValues takes the text of one JSON object and, when its "type", "name" or "key" field is
+// a credential name, returns the span (start and end offsets) of its "value" field's value.
+func siblingValues(obj []byte) map[int]int {
+	named := false
+	spans := map[int]int{}
+	i := skipSpace(obj, 1)
+	for i < len(obj) && obj[i] == '"' {
+		ke := stringEnd(obj, i)
+		var key string
+		_ = json.Unmarshal(obj[i:ke], &key)
+		vs := skipSpace(obj, ke)
+		vs = skipSpace(obj, vs+1)
+		ve := valueEnd(obj, vs)
+		switch strings.ToLower(key) {
+		case "type", "name", "key":
+			if secretKeyLiteral(obj[vs:ve]) {
+				named = true
+			}
+		case "value":
+			spans[vs] = ve
+		}
+		i = skipSpace(obj, ve)
+		i = skipSpace(obj, i+1)
+	}
+	if !named {
+		return nil
+	}
+	return spans
+}
+
+// scrubStringified scrubs a string literal that holds a JSON object or array and returns the
+// literal re-encoded with the redactions, or the literal and 0 when there is nothing to change.
+func scrubStringified(lit []byte, depth int) ([]byte, int) {
+	var text string
+	if json.Unmarshal(lit, &text) != nil {
+		return lit, 0
+	}
+	t := strings.TrimSpace(text)
+	if t == "" || (t[0] != '{' && t[0] != '[') {
+		return lit, 0
+	}
+	if depth >= maxStringifiedDepth || !json.Valid([]byte(t)) {
+		// Too deep to unwrap, or truncated JSON: redact the whole string when it names a credential.
+		if secretNameRE.MatchString(t) {
+			return []byte(`"` + redacted + `"`), 1
+		}
+		return lit, 0
+	}
+	inner, n := scrub([]byte(t), depth+1)
+	if n == 0 {
+		return lit, 0
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(string(inner))
+	return bytes.TrimRight(buf.Bytes(), "\n"), n
 }
