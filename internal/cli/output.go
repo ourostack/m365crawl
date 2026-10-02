@@ -276,7 +276,6 @@ func checkFields[T any](rt *runtime) error {
 		return nil
 	}
 	valid := jsonKeys(reflect.TypeFor[T]())
-	valid = removeKey(valid, "text_truncated")
 	for _, f := range rt.fields {
 		if !contains(valid, f) {
 			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))

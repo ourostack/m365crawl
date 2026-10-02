@@ -316,6 +316,21 @@ func TestWatchFieldsMaxTextAndAccount(t *testing.T) {
 	}
 }
 
+func TestWatchFieldsExplicitTextTruncated(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	w.start("watch", "--every", "30ms", "--fields", "id,text_truncated", "--max-text", "5")
+	w.baselineDone()
+	w.forget(`content_text<>''`)
+	w.touch()
+	w.waitFor("a change", func() bool { return len(kinds(w.out.lines(t), "message")) > 0 })
+	l := kinds(w.out.lines(t), "message")[0]
+	it := l["item"].(map[string]any)
+	if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
+		t.Fatalf("explicit text_truncated field: %v", it)
+	}
+}
+
 func TestWatchAccountFilter(t *testing.T) {
 	w := newWatchEnv(t)
 	noEvents(t)

@@ -85,7 +85,6 @@ func checkWatchFields(rt *runtime) error {
 		return nil
 	}
 	valid := append(jsonKeys(reflect.TypeFor[messageItem]()), jsonKeys(reflect.TypeFor[activityItem]())...)
-	valid = removeKey(valid, "text_truncated")
 	for _, f := range rt.fields {
 		if !contains(valid, f) {
 			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(dedupe(valid), ", ")))
