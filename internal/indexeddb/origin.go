@@ -106,3 +106,53 @@ func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
 
 // Stats reports what the LevelDB reader loaded.
 func (o *Origin) Stats() leveldb.Stats { return o.stats }
+
+// Census estimates, per database id, the heap bytes an OpenWith that keeps only that database
+// would hold, without holding any record value. It loads the global and per-database metadata
+// and observes every other record as it is read: a data or blob entry costs its key plus
+// leveldb.EntryOverhead, plus its value when the value is held (any log value, or a table value
+// shorter than the lazy threshold). Index entries are not counted because OpenWith never keeps
+// them. The estimate counts every stored version of a record, so it can overstate a database
+// that was rewritten since its last compaction, never understate it. dbs is what
+// Origin.Databases returns for the directory. The directory is only read.
+func Census(leveldbDir string) (held map[int64]int64, dbs []Database, err error) {
+	held = map[int64]int64{}
+	db, err := leveldb.LoadWith(leveldbDir, leveldb.LoadOptions{
+		Keep: isMetadataKey,
+		Observe: func(k []byte, valueLen int, fromTable bool) {
+			id, store, index, _, err := readPrefix(k)
+			if err != nil || id == 0 {
+				return
+			}
+			var cost int
+			switch {
+			case store == 0 && index == 0: // per-database metadata: held by every keep-load
+				cost = len(k) + leveldb.EntryOverhead + valueLen
+			case index == indexData || index == indexBlobEntries:
+				cost = len(k) + leveldb.EntryOverhead
+				if !fromTable || valueLen < leveldb.LazyMin() {
+					cost += valueLen
+				}
+			default:
+				return
+			}
+			held[int64(id)] += int64(cost) //nolint:gosec // ids are bounded well below int64
+		},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	o := &Origin{kv: db, stats: db.Stats()}
+	dbs, err = o.Databases()
+	if err != nil {
+		return nil, nil, err
+	}
+	return held, dbs, nil
+}
+
+// isMetadataKey keeps the global metadata and each database's own metadata (object store
+// names and the like), which Databases needs, and nothing else.
+func isMetadataKey(k []byte) bool {
+	id, store, index, _, err := readPrefix(k)
+	return err == nil && (id == 0 || (store == 0 && index == 0))
+}

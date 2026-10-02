@@ -31,7 +31,21 @@ type LoadOptions struct {
 	// rejected keys are dropped as they are read, so their values are never held and the keys
 	// are absent from Get and Scan. Nil retains every key.
 	Keep func(key []byte) bool
+	// Observe, when not nil, is called once for every record read (every version, puts and
+	// deletions) before Keep is consulted, so it sees rejected keys too. valueLen is the
+	// record's value length (0 for a deletion) and fromTable says whether it came from a table
+	// rather than a log. The key and its backing array are only valid during the call. Observe
+	// must not retain them.
+	Observe func(key []byte, valueLen int, fromTable bool)
 }
+
+// EntryOverhead is the heap bytes a loaded DB holds per retained key beyond the key's and the
+// value's own bytes: the map slot, the entry struct and the sorted key slice. It is calibrated
+// by TestEntryOverheadCalibrated, which fails when the number drifts from a measurement.
+const EntryOverhead = 155
+
+// LazyMin is the smallest table value length that a DB does not hold in memory.
+func LazyMin() int { return lazyMin }
 
 // DB is a read-only view of a LevelDB directory. Keys and small values are held in memory;
 // table values of lazyMin bytes or more are re-read from the table files on demand, so the
@@ -64,6 +78,7 @@ func LoadWith(dir string, opts LoadOptions) (*DB, error) {
 	}
 
 	all := newStore(opts.Keep)
+	all.observe = opts.Observe
 	tableNums := sortedNums(m.tables)
 	tables := make([]tableRef, 0, len(tableNums))
 	for i, n := range tableNums {
