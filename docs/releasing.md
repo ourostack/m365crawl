@@ -7,12 +7,16 @@ A release is a pushed tag. Nothing is published by hand. Darwin binaries cannot 
 Pushing a tag `v*` starts `.github/workflows/release.yml`:
 
 1. `verify` runs `make check` on the tagged commit.
-2. `release` first requires all six Apple secrets (`scripts/sign-notarize.sh --check-secrets`, which names any missing secret and never prints values). It then runs goreleaser, whose post-build hook (`scripts/sign-notarize.sh`) signs, notarizes and gates each darwin binary (arm64 and amd64) before it is archived. The notes always say the binaries are signed and notarized. For a stable tag it also attaches `teamscrawl.rb` (the Homebrew cask) to the release.
+2. `release` first requires all six Apple secrets (`scripts/sign-notarize.sh --check-secrets`, which names any missing secret and never prints values). It then runs goreleaser, whose post-build hook (`scripts/sign-notarize.sh`) signs, notarizes and gates each darwin binary (arm64 and amd64) before it is archived. The notes always say whether the macOS binaries are signed and notarized and that the Windows zip assets are intentionally unsigned. For a stable tag it also attaches `teamscrawl.rb` (the Homebrew cask) to the release.
 3. `verify-release-darwin` downloads the published darwin tarballs and `checksums.txt` and checks them as a user would receive them (`scripts/verify-release.sh`).
 4. `verify-release-windows` downloads the published Windows zip files on native Windows amd64 and Windows arm64 runners, checks them against `checksums.txt`, confirms the PE architecture, proves they are intentionally unsigned, and runs `teamscrawl.exe --json version` from the downloaded archive (`scripts/verify-release.ps1`).
 5. `verify-homebrew` (stable tags only) waits for the tap, installs the cask and checks the installed binary (`scripts/verify-homebrew.sh`).
 
 Tags with a hyphen, such as `v0.1.0-rc.2`, are prereleases: GitHub marks them as prereleases, they never become "latest", they attach no cask (so the tap's `update-casks` finds nothing to pull) and `verify-homebrew` is skipped. Use `v0.1.0-rc.N` to rehearse the whole pipeline before a stable tag.
+
+## Local candidate prep
+
+Before tagging `v0.2.0` (or the next minor), update the product docs plus `docs/releases/<version>.md`, then run the local candidate checks on the branch you intend to tag. The canonical gate is `make check` plus real-cache acceptance, but on Windows hosts without `make` you may run the underlying commands directly with `GOWORK=off`: `go mod verify`, `go mod tidy -diff`, `gofmt -l .`, the `go vet` / lint / unit-test / e2e commands from `Makefile`, and `go test -tags acceptance ./acceptance/...` with `TEAMSCRAWL_REAL_CACHE=1`. Record only counts, timings, paths and field names from the real-cache run. The release notes must state the Windows install path (download the zip, unzip, run `teamscrawl.exe`) and that the Windows assets are intentionally unsigned.
 
 ## The gates
 

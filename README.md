@@ -3,17 +3,17 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/ourostack/teamscrawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/teamscrawl/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ourostack/teamscrawl?include_prereleases&style=flat-square)](https://github.com/ourostack/teamscrawl/releases)
 [![Go](https://img.shields.io/github/go-mod/go-version/ourostack/teamscrawl?style=flat-square)](https://go.dev/)
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square)](https://github.com/ourostack/teamscrawl/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/teamscrawl/releases)
 [![License](https://img.shields.io/github/license/ourostack/teamscrawl?style=flat-square)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
-`teamscrawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
+`teamscrawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
 
 <p align="center"><img src="screenshot.png" alt="teamscrawl doctor output" width="801"></p>
 
 ## Why not a Teams MCP server or the Graph API?
 
-- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. teamscrawl needs a signed-in Teams app and one macOS permission.
+- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. teamscrawl needs a signed-in Teams app and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
 - **Built for agent context budgets.** Every item carries stable ids and a deep link; `--fields` and `--max-text` return only what you need, instead of full message payloads eating your context window.
 - **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
 - **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not a file on your disk.
@@ -21,9 +21,11 @@
 - **Keeps what Teams evicts.** Teams trims its cache as it runs, and its cached message count can drop by thousands between two reads. The archive never deletes a message, so history survives as long as you sync regularly.
 - **Full-text search and SQL over everything.** Messages, the activity feed, unread state and mentions sit in one database that an agent can query with FTS5 or plain SQL.
 
-**When you want something else.** Use the Graph API or a Teams MCP server if you need to send or react, need data the desktop app never cached (old history you never scrolled to, other people's chats), run Teams on anything but macOS new Teams, or cannot grant Full Disk Access to your terminal or agent host.
+**When you want something else.** Use the Graph API or a Teams MCP server if you need to send or react, need data the desktop app never cached (old history you never scrolled to, other people's chats), run Teams on Linux or classic Teams, or cannot grant Full Disk Access to your terminal or agent host on macOS.
 
 ## Install
+
+### macOS
 
 Homebrew is the shortest path:
 
@@ -31,7 +33,7 @@ Homebrew is the shortest path:
 brew install ourostack/tap/teamscrawl
 ```
 
-Release binaries are Developer ID signed and notarized by Apple only when the release was built with the Apple signing secrets; otherwise they are unsigned. The last line of each release's notes says which. The Homebrew cask clears the macOS quarantine flag either way. If you download a binary by hand and it is unsigned, run `xattr -dr com.apple.quarantine teamscrawl` once.
+Release binaries are Developer ID signed and notarized by Apple only when the release was built with the Apple signing secrets; otherwise the darwin tarballs are unsigned. The last line of each release's notes says which. The Homebrew cask clears the macOS quarantine flag either way. If you download a darwin binary by hand and it is unsigned, run `xattr -dr com.apple.quarantine teamscrawl` once.
 
 [GitHub Releases](https://github.com/ourostack/teamscrawl/releases) has `teamscrawl_<version>_darwin_arm64.tar.gz` and `teamscrawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
 
@@ -39,7 +41,11 @@ Release binaries are Developer ID signed and notarized by Apple only when the re
 go install github.com/ourostack/teamscrawl/cmd/teamscrawl@latest
 ```
 
-### Grant Full Disk Access
+### Windows
+
+Download `teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/teamscrawl/releases), unzip it somewhere under your user profile, and run `teamscrawl.exe`. Add that directory to `PATH` if you want to call it without the full path. Windows release assets are intentionally unsigned; verify what you downloaded with `checksums.txt` and `teamscrawl.exe --json version`.
+
+### macOS: Grant Full Disk Access
 
 macOS protects Teams' container, so the app that runs teamscrawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches teamscrawl), then quit and reopen that app. Verify with:
 
@@ -49,6 +55,10 @@ teamscrawl doctor
 
 `doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails.
 
+### Windows: no extra permission step
+
+Windows keeps the Teams cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, not behind macOS TCC. Run `teamscrawl doctor`; on Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows`.
+
 ## Quick start
 
 The examples below run against the repository's committed test fixture, so every name and message is synthetic. To reproduce them from a clone, point teamscrawl at the fixture and a scratch archive:
@@ -56,6 +66,11 @@ The examples below run against the repository's committed test fixture, so every
 ```sh
 export TEAMSCRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
 export TEAMSCRAWL_DB="$(mktemp -d)/teamscrawl.db"
+```
+
+```powershell
+$env:TEAMSCRAWL_TEAMS_ROOT = (Resolve-Path '.\testdata\teams-fixture\EBWebView').Path
+$env:TEAMSCRAWL_DB = Join-Path $env:TEMP 'teamscrawl-fixture.db'
 ```
 
 Against your own Teams, skip those two lines.
@@ -109,7 +124,7 @@ teamscrawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
 
 Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with exit 0. A change reaches the output after Teams flushes it to its cache plus a few seconds of debounce; measured against a real cache that was about 12 to 32 seconds from the moment a message was sent.
 
-`--account <tenantId>/<userId>` limits any command to one signed-in account; `teamscrawl whoami` lists them. The archive lives at `~/.teamscrawl/teamscrawl.db` (override with `--db` or `TEAMSCRAWL_DB`).
+`--account <tenantId>/<userId>` limits any command to one signed-in account; `teamscrawl whoami` lists them. The archive lives at `~/.teamscrawl/teamscrawl.db` on macOS and `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows (override with `--db` or `TEAMSCRAWL_DB`). On Windows the default path is private by construction; for a custom `--db`, teamscrawl creates missing parent directories as private ones, but an unsafe pre-existing parent or pre-existing archive file fails with `db_error` before SQLite writes anything.
 
 ## For agents
 
@@ -133,7 +148,7 @@ Flags that matter for agents:
 
 | Command | What it does |
 | --- | --- |
-| `doctor` | Checks Teams, Full Disk Access, origins, the archive and the last sync. Exits 3 on a blocking failure. |
+| `doctor` | Checks Teams, platform access prerequisites, origins, the archive and the last sync. Exits 3 on a blocking failure. |
 | `whoami` | Lists the accounts in the archive and the archive's state. |
 | `sync` | Copies the Teams cache into the archive once and prints what changed. The first sync after an upgrade first re-derives older rows' text and names from their stored `raw_json` (report field `migrated`, counted as no update). Each Teams source commits on its own: if one fails and another succeeds the status is `partial`, the report is on stdout, a `partial_sync` error is on stderr and the exit status is 1. |
 | `status` | Shows archive counts per account, the last sync and other Teams origins seen. |
@@ -159,32 +174,32 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 - [`SPEC.md`](SPEC.md): the normative specification (data model, sync, output contract, every error code, `watch`, privacy, known limits).
 - [`docs/commands.md`](docs/commands.md): every command and flag, as `--help` prints them.
 - [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the allowlist, full-text search).
-- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, how `doctor` checks it.
+- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, and why Windows does not need that step.
 - [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
 - [`AGENTS.md`](AGENTS.md): development rules for agents working on this repository.
 
 ## How it works
 
-1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private 0700 temp directory, retrying if Teams writes mid-copy. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
+1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. On macOS that directory is mode 0700; on Windows it is ACL-restricted to the current user and SYSTEM. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
 2. **Decode.** A built-in reader parses LevelDB, Chromium's IndexedDB coding and V8's structured-clone format. No Node, Python or browser is needed at runtime.
 3. **Allowlist.** Only the conversation, reply-chain (message) and activity-feed stores are decoded. Everything else, including sign-in data, is listed by name and never read.
 4. **Store.** Rows go into SQLite (WAL) with FTS5 indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing. Messages that vanish from Teams' cache stay in the archive; Teams deletions set `deleted_at`.
 
-Full Disk Access is the only permission it asks for ([why and how](docs/full-disk-access.md)). If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
+On macOS, Full Disk Access is the only extra permission it asks for ([why and how](docs/full-disk-access.md)); on Windows the default cache path is readable without an extra OS prompt. If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
 
 ## Privacy
 
-The archive holds your real Teams conversations. It stays on your Mac in `~/.teamscrawl/` (directory 0700, database 0600) and teamscrawl has no network code. Treat the database like the chats it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data.
+The archive holds your real Teams conversations. It stays on your machine in a private directory (`~/.teamscrawl/` on macOS, `%LOCALAPPDATA%\teamscrawl\` on Windows) and teamscrawl has no network code. On Windows the default archive directory is private by construction, and a custom `--db` parent must already be private or be created by teamscrawl as a new private directory before the archive opens. Treat the database like the chats it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data.
 
 ## Limits
 
 - It sees only what the desktop app has cached. History you never scrolled to may be missing, and Teams evicts old messages from its cache, so sync regularly.
-- macOS and the new Teams app (`com.microsoft.teams2`) only. Classic Teams, Windows and Linux are not supported.
-- Full Disk Access is required for the app that runs it.
+- macOS and Windows with the new Teams app are supported. Classic Teams and Linux are not.
+- Full Disk Access is required only for the app that runs it on macOS. Windows uses the LocalCache path and does not require that step.
 - Read-only: no sending, reacting or marking read.
 - Attachments and media are not downloaded; files and links are recorded as metadata.
 - Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
-- Release binaries are signed and notarized only when the release had signing credentials; the release notes say which.
+- macOS release binaries are signed and notarized only when the release had signing credentials; the release notes say which. Windows release binaries are intentionally unsigned.
 
 ## Development
 
@@ -196,7 +211,7 @@ make coverage   # 100% function coverage gate on internal/...
 make check      # every gate CI runs: tidy, fmt, vet, lint, test, coverage, e2e
 ```
 
-The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`TEAMSCRAWL_REAL_CACHE=1 make acceptance`, needs Full Disk Access, Node 22 and python3) runs locally only; its results are recorded as counts and pass/fail, never content. See [`AGENTS.md`](AGENTS.md) for the development rules.
+The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`TEAMSCRAWL_REAL_CACHE=1 make acceptance`, plus the equivalent direct `go test -tags acceptance ./acceptance/...` if you do not have `make`) runs locally only; it needs Full Disk Access on macOS, a live Teams cache on the current Windows host, Node 22, python3, and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never message content.
 
 ## Credits
 

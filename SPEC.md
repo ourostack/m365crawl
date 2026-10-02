@@ -1,26 +1,26 @@
 # teamscrawl specification
 
-Status: normative for v0.1.0.
+Status: normative for v0.2.0.
 
 This document defines what teamscrawl does and what its output promises. Where this document and the code disagree, that is a bug in one of them and is fixed in the same change that finds it. The words MUST, MUST NOT and SHOULD carry their usual meaning. Command-by-command flag tables live in [docs/commands.md](docs/commands.md); the reading path through the Teams cache lives in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## 1. Purpose and scope
 
-teamscrawl lets an agent on a Mac read the operator's Microsoft Teams history quickly and offline. It mirrors the new Teams desktop app's local cache into a local SQLite archive with full-text search, then answers queries from that archive. Its primary users are agents, so it favors predictable commands, stable JSON, coded errors with a `fix`, and self-diagnosis over interactive features.
+teamscrawl lets an agent on a supported desktop host read the operator's Microsoft Teams history quickly and offline. It mirrors the new Teams desktop app's local cache into a local SQLite archive with full-text search, then answers queries from that archive. Its primary users are agents, so it favors predictable commands, stable JSON, coded errors with a `fix`, and self-diagnosis over interactive features.
 
 It never talks to the Teams service, never reads or uses Teams credentials, and never writes to Teams' storage. It has no network code.
 
-In scope for v0.1.0:
+In scope for v0.2.0:
 
-- macOS and the new Teams app (`com.microsoft.teams2`), every WebView2 profile, every Teams origin and every signed-in account found in them.
+- macOS and Windows with the new Teams app (`com.microsoft.teams2` / `MSTeams_8wekyb3d8bbwe`), every WebView2 profile, every Teams origin and every signed-in account found in them.
 - Conversations (chats, channels, teams, meetings), messages (channel posts, replies, chat and meeting messages), the activity feed, read state, and people derived from message senders and conversation members.
 - Commands: `doctor`, `whoami`, `sync`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `people`, `sql`, `watch`, `version`.
 
-Out of scope: sending, reacting, marking read or any other write to Teams; using Teams tokens; classic Teams; Windows and Linux hosts (CI runs on Linux, but there is no Teams to read there); downloading attachments or media (files and links are stored as metadata); a terminal UI.
+Out of scope: sending, reacting, marking read or any other write to Teams; using Teams tokens; classic Teams; Linux hosts (CI runs on Linux, but there is no Teams desktop cache to read there); downloading attachments or media (files and links are stored as metadata); a terminal UI.
 
 ## 2. Data sources and the database allowlist
 
-New Teams runs an Edge WebView2 whose user data directory is `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` (the default `--teams-root`). teamscrawl reads that directory as follows.
+New Teams runs an Edge WebView2 whose user data directory is `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` on macOS and `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` on Windows (the default `--teams-root`). teamscrawl reads that directory as follows.
 
 - **Profiles.** Every `WV2Profile_*` directory (any directory under the root that has an `IndexedDB` subdirectory).
 - **Origins.** In each profile, every directory `IndexedDB/https_teams.microsoft.com_<n>.indexeddb.leveldb` or `https_teams.cloud.microsoft_<n>.indexeddb.leveldb` (with its sibling `.indexeddb.blob` directory). One profile and origin pair is one **source**, identified as `<profile>|<origin>`. Other IndexedDB origins are never read; `status`, `sync` and `doctor` list their names (`other_origins`) so drift is visible.
@@ -38,7 +38,7 @@ Every other database is skipped by name, above all `Teams:auth:*`, which holds s
 
 ## 3. The archive
 
-The archive is one SQLite file (WAL mode) at `~/.teamscrawl/teamscrawl.db` by default, overridable with `--db` or `TEAMSCRAWL_DB`. A relative `--db` path is resolved against the current directory. The archive's schema version is 2 (`schema_migrations`, shown as `schema_version` by `status` and `doctor`). Timestamps are stored as UTC text with millisecond precision and printed as RFC3339 UTC.
+The archive is one SQLite file (WAL mode) at `~/.teamscrawl/teamscrawl.db` on macOS and `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows by default, overridable with `--db` or `TEAMSCRAWL_DB`. A relative `--db` path is resolved against the current directory. On Windows the default path is private by construction: teamscrawl creates the default directory boundary with a current-user + SYSTEM ACL before SQLite writes bytes. A custom `--db` path is allowed when its direct parent directory is already private enough or teamscrawl can create that parent itself as a new private directory; if the direct parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite opens the database. The archive's schema version is 2 (`schema_migrations`, shown as `schema_version` by `status` and `doctor`). Timestamps are stored as UTC text with millisecond precision and printed as RFC3339 UTC.
 
 Rows are partitioned by account: `(tenant_id, user_id)`. Two accounts never mix. The user id is the bare GUID; the account's own sender id is `8:orgid:<user_id>`.
 
@@ -81,13 +81,13 @@ A `search` query is split on whitespace into terms that are ANDed. `"quoted phra
 
 `sync` mirrors every source into the archive once. A run proceeds as follows.
 
-1. **Lock.** The run takes an exclusive, non-blocking `flock` on `<db>.lock` (mode 0600). If another sync or watch sync holds it, the run fails at once with `locked` (exit 4); it never waits. Read commands do not take the lock and work beside a writer.
+1. **Lock.** The run takes an exclusive, non-blocking lock on `<db>.lock` (a mode-0600 file on macOS, a current-user + SYSTEM protected file on Windows). The implementation uses `flock` on Unix and `LockFileEx` on Windows. If another sync or watch sync holds it, the run fails at once with `locked` (exit 4); it never waits. Read commands do not take the lock and work beside a writer.
 2. **Sweep.** Snapshot directories named `teamscrawl-snapshot-*` in the temp directory that are older than one hour (left by a killed process) are removed.
 3. **Migrate.** An older archive is re-derived as described in section 3.2. An archive that is newer than this build fails with `archive_newer`, and nothing is written, not even a failed-run record.
 4. **Discover** the sources (section 2). Errors: `teams_not_installed`, `no_full_disk_access`, `no_teams_origin`.
 5. **Per source:** fingerprint, skip or snapshot, decode, map, write.
    - The **fingerprint** is a SHA-256 over the decoder version and the sorted name, size and modification time of every file in the origin's `.leveldb` and `.blob` directories, excluding `LOCK` and `LOG*`. If it equals the fingerprint of the last successful run for that source, the source is `unchanged`, nothing is decoded and no row changes. A run with `--account` records no fingerprint and never skips, so a filtered run cannot hide another account's data from a later run.
-   - The **snapshot** copies the two directories into a private temp directory (mode 0700, files 0600), regular files only. LevelDB data files are copied first, then the `MANIFEST`, then `CURRENT`; blobs last. The copy is retried, up to three attempts, when `CURRENT` changed during the copy, the copied manifest is not the size of the live one, or a file the manifest names is missing. After three attempts the run fails with `snapshot_inconsistent`. The snapshot is validated by reading every table and log. It contains Teams' sign-in database, so it is removed when the source is done, on failure, and on SIGINT or SIGTERM.
+   - The **snapshot** copies the two directories into a private temp directory (mode 0700 with mode-0600 files on macOS, current-user + SYSTEM ACLs on Windows), regular files only. LevelDB data files are copied first, then the `MANIFEST`, then `CURRENT`; blobs last. The copy is retried, up to three attempts, when `CURRENT` changed during the copy, the copied manifest is not the size of the live one, or a file the manifest names is missing. After three attempts the run fails with `snapshot_inconsistent`. The snapshot is validated by reading every table and log. It contains Teams' sign-in database, so it is removed when the source is done, on failure, and on SIGINT or SIGTERM.
    - **Decode and map** read only the allowlisted stores of the snapshot (section 2).
 6. **Write.** Each source is applied in **one write transaction**: accounts, conversations, messages, activity items, people and the source's `sync_runs` row commit together or not at all. Records are applied in batches of 2,000 so memory stays bounded. People are merged across the whole source; the newest sighting names a person. Sources are independent: a source that fails (including from a panic, which becomes `internal`) rolls back completely, is recorded as `failed`, and does not stop the sources after it. Sources that committed stay committed.
 7. **Record and report.** The run writes its run-level `sync_runs` row (section 3.1) and prints its report (section 5, `sync`). Only a run in which every source succeeded counts as a fresh sync, for every account (or for the one account of `sync --account`). A partial or failed run refreshes no account.
@@ -132,7 +132,7 @@ Commands that run an implicit sync before answering (`--max-age`): `whoami`, `st
 
 | Command | Purpose and result |
 | --- | --- |
-| `doctor` | One check per prerequisite. Result `{"ok": bool, "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Checks, in order: `teams_installed`, `full_disk_access`, `teams_origin`, `database_writable`, `schema_version`, `fts`, `archive_newer`, `archive_upgrade` (only when it applies), `last_sync_status` (only when a run is recorded), `last_sync_age`. `archive_newer` fails when a newer teamscrawl wrote the archive (every sync would refuse it). `archive_upgrade` is a warning: the archive is from an older version and the next `sync` upgrades it. `last_sync_status` is a warning after a `partial` or `failed` run. A warning (`warn: true`, `ok: true`) never fails the run. If any check has `ok: false`, the result still prints on stdout and the command then exits 3 with `doctor_failed`. Non-teamscrawl IndexedDB origins appear in the `teams_origin` detail. |
+| `doctor` | One check per prerequisite. Result `{"ok": bool, "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Checks, in order: `teams_installed`, `full_disk_access`, `teams_origin`, `database_writable`, `schema_version`, `fts`, `archive_newer`, `archive_upgrade` (only when it applies), `last_sync_status` (only when a run is recorded), `last_sync_age`. On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.` `archive_newer` fails when a newer teamscrawl wrote the archive (every sync would refuse it). `archive_upgrade` is a warning: the archive is from an older version and the next `sync` upgrades it. `last_sync_status` is a warning after a `partial` or `failed` run. A warning (`warn: true`, `ok: true`) never fails the run. If any check has `ok: false`, the result still prints on stdout and the command then exits 3 with `doctor_failed`. Non-teamscrawl IndexedDB origins appear in the `teams_origin` detail. |
 | `whoami` | `{"accounts": [{"tenant_id", "user_id", "self_id", "display_name", "locale", "first_seen_at", "last_synced_at"}], "archive": {...same body as status...}}`. `self_id` is the account's own sender id. The nested `archive` object carries the same `archive_age_seconds`, `needs_sync` and `hint` as the top level. |
 | `sync` | Runs one sync (section 4) and prints the report: `{"status", "sources": [{"source", "status", "omissions"?, "accounts"?, "counts"?, "error"?}], "conversations", "messages", "people", "activity", "omissions", "other_origins", "migrated"?, "started_at", "finished_at"}`. Each entity has `{"seen", "inserted", "updated", "unchanged"}`. `migrated` is `{"from", "to", "rows"}` and appears only on the run that upgraded an older archive. `--account` limits the run to one account. A `partial` run exits 1 (section 4). |
 | `status` | `{"archive_path", "archive_exists", "schema_version", "fts_present", "accounts": [{"tenant_id", "user_id", "conversations", "messages", "people", "activity", "newest_sent_at", "last_synced_at"}], "newest_sent_at", "last_run"?, "last_success_at", "other_origins"?}`. |
@@ -240,7 +240,7 @@ Every error code:
 | `snapshot_inconsistent` | 1 | Teams kept changing the cache during all three copy attempts, or the copy names a missing file or a truncated manifest. | `Run the command again; if Teams is busy syncing, quit Teams or wait a minute first.` |
 | `unsupported_block_compression` | 1 | A LevelDB table uses a block compression other than none or snappy. Nothing is dropped silently. | `Update teamscrawl; if it is already current, report the issue with the output of `teamscrawl doctor`.` |
 | `store_missing` | 1 | An allowlisted Teams database exists but has no expected object store, so Teams changed its storage layout or has not finished loading. | `Open Teams, let it finish loading, and run again; if it persists Teams changed its storage layout, so update teamscrawl.` |
-| `db_error` | 1 | The archive cannot be created, opened, read or written, or a LevelDB or IndexedDB structure is unreadable for a reason not listed above. The message ends with the underlying cause. | `Check that the archive path is writable and has free space; run `teamscrawl doctor`.` |
+| `db_error` | 1 | The archive cannot be created, opened, read or written, or a LevelDB or IndexedDB structure is unreadable for a reason not listed above. On Windows this also covers an unsafe pre-existing custom `--db` parent directory or archive file, which fail before SQLite opens the database. The message ends with the underlying cause. | `Check that the archive path is writable and has free space; on Windows move `--db` to a private directory or pre-create one that grants only the current user and SYSTEM; run `teamscrawl doctor`.` |
 | `partial_sync` | 1 | A sync committed at least one source and failed at least one. The message names each failed source and its code. The sync report is on stdout, so a caller sees both. | `Run `teamscrawl doctor` to see what is wrong with the failing source, fix it and run `teamscrawl sync` again; the sources that synced are already in the archive.` |
 | `interrupted` | 1 | SIGINT or SIGTERM stopped the command before it finished. Each source is one transaction, so nothing is half-written. (`watch` exits 0 on a signal.) A second SIGINT or SIGTERM during the stop quits at once with exit 130 and no error document; it can leave a snapshot directory in the temp directory, which a later sync removes once it is older than an hour. | `Run the command again.` |
 | `internal` | 1 | A teamscrawl bug, an unexpected failure, or a recovered panic. | `This is a bug in teamscrawl; report it with the command you ran.` (a panic: re-run with `TEAMSCRAWL_DEBUG=1` and report the output at the issues page.) |
@@ -297,16 +297,16 @@ Latency: a change reaches the output after Teams flushes it to its cache, plus t
 - **Read-only by construction.** There is no code path that writes to Teams' storage. The Teams cache is only ever opened for reading, and `sql` runs on a read-only database connection (writes, `ATTACH` and multi-statement queries are rejected before and by the connection).
 - **No credentials, no network.** teamscrawl never reads Teams tokens. The `Teams:auth:*` database is never decoded. The program has no network code.
 - **The archive holds message content verbatim.** That includes anything people pasted into a message: links with tokens or secrets, credentials, file names, customer data. `raw_json` keeps the full original record. Treat the archive like the chats it contains: do not commit it, sync it to shared storage or paste its contents into tools you would not show the original messages to.
-- **File permissions.** The archive file and its `<db>.lock` file are mode 0600. The default archive directory `~/.teamscrawl` is mode 0700; a custom `--db` parent directory is created 0700 if missing and otherwise left as it is.
-- **Snapshots.** The temporary copy of the cache includes Teams' sign-in database. It lives in a 0700 directory in the temp directory for the length of one source's sync and is removed on success, on failure, and on SIGINT or SIGTERM. Stale snapshot directories older than one hour are removed at the start of every sync.
-- **Full Disk Access** is the only permission teamscrawl needs (see [docs/full-disk-access.md](docs/full-disk-access.md)).
+- **File permissions.** On macOS the archive file and its `<db>.lock` file are mode 0600 and the default archive directory `~/.teamscrawl` is mode 0700. On Windows the archive directory is the privacy boundary: the default `%LOCALAPPDATA%\teamscrawl` directory is created private before open, the archive and `<db>.lock` inherit that boundary, and a custom `--db` parent that already exists must already be private to the current user and SYSTEM or the open fails before SQLite writes bytes.
+- **Snapshots.** The temporary copy of the cache includes Teams' sign-in database. It lives in a private temp directory for the length of one source's sync (mode 0700 on macOS, current-user + SYSTEM ACL on Windows) and is removed on success, on failure, and on SIGINT or SIGTERM. Stale snapshot directories older than one hour are removed at the start of every sync.
+- **Full Disk Access** is required only on macOS (see [docs/full-disk-access.md](docs/full-disk-access.md)). On Windows the default Teams cache lives under LocalCache and is not TCC-protected.
 - **Tests and docs use synthetic data only.** The committed fixture is written by a real browser from made-up records.
 
 ## 9. Known limits
 
 - teamscrawl sees only what the desktop app has cached. History the user never scrolled to may be missing, and Teams evicts old messages from its cache, so the archive is complete only from the first sync that saw a message onward. Sync regularly (`--max-age` does it for you).
-- macOS and the new Teams app only. Classic Teams, Windows and Linux are not supported. Contact stores, calendar, call history and pinned-message lists are not mirrored.
-- Full Disk Access is required for the app that runs teamscrawl.
+- macOS and Windows with the new Teams app are supported. Classic Teams and Linux are not. Contact stores, calendar, call history and pinned-message lists are not mirrored.
+- Full Disk Access is required only for the app that runs teamscrawl on macOS.
 - Read-only: no sending, reacting or marking read. Attachments and media are not downloaded.
 - `reply_count` and `last_reply_at` are counted from archived replies and can lag Teams.
 - People display names follow the most recent sighting; after an archive upgrade a few can differ from what a fresh sync would give.
@@ -316,7 +316,7 @@ Latency: a change reaches the output after Teams flushes it to its cache, plus t
 - `needs_sync` is advisory: a read of a never-synced archive with `--max-age 0` exits 0 with an empty result and `needs_sync: true`. Check for it before reading an empty result as "no match".
 - Untitled group chats are named after a few members (`Ana, Ben, Chao +2`), so two chats with the same first members can share a name; select such a chat by `conversation_id`.
 - `watch` latency is dominated by when Teams writes its cache, not by teamscrawl.
-- Release binaries are Developer ID signed and notarized only when the release was built with the Apple signing secrets; the release notes of each release say which.
+- macOS release binaries are Developer ID signed and notarized only when the release was built with the Apple signing secrets; the release notes of each release say which. Windows release binaries are intentionally unsigned.
 
 ## 10. Versioning and compatibility
 
