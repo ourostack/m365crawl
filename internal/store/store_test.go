@@ -48,6 +48,10 @@ func TestSchemaModes(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		def := filepath.Join(home, ".teamscrawl")
+		if runtime.GOOS == "windows" {
+			t.Setenv("LOCALAPPDATA", home)
+			def = filepath.Join(home, "teamscrawl")
+		}
 		if err := os.Mkdir(def, 0o755); err != nil { //nolint:gosec // G301: test needs a loose dir
 			t.Fatal(err)
 		}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -34,10 +35,18 @@ func mapArchiveOpenError(err error) error {
 }
 
 func prepareArchiveForWrite(path string) error {
+	// Inspect existing files before securing the default parent: Windows can propagate
+	// a parent's ACL changes to children, masking an unsafe pre-existing inherited ACL.
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := ensurePrivateArchiveFile(path+suffix, false); err != nil {
+			return err
+		}
+	}
 	if err := prepareArchiveDir(path); err != nil {
 		return err
 	}
-	return ensurePrivateArchiveFile(path)
+	// Missing companions inherit the private directory ACL when SQLite creates them.
+	return ensurePrivateArchiveFile(path, true)
 }
 
 func prepareArchiveDir(path string) error {
@@ -52,7 +61,7 @@ func prepareArchiveDir(path string) error {
 	if isDefaultArchiveDir(parent) {
 		return securePath(parent, true)
 	}
-	ok, err := hasPrivateACL(parent)
+	ok, err := hasPrivateACL(parent, true)
 	if err != nil {
 		return err
 	}
@@ -70,14 +79,14 @@ func secureLockHandle(f *os.File) error {
 	return securePath(f.Name(), false)
 }
 
-func ensurePrivateArchiveFile(path string) error {
+func ensurePrivateArchiveFile(path string, create bool) error {
 	info, err := os.Stat(path)
 	switch {
 	case err == nil:
 		if info.IsDir() {
-			return nil
+			return &unsafeArchivePathError{kind: "archive file", path: path}
 		}
-		ok, err := hasPrivateACL(path)
+		ok, err := hasPrivateACL(path, false)
 		if err != nil {
 			return err
 		}
@@ -86,6 +95,9 @@ func ensurePrivateArchiveFile(path string) error {
 		}
 		return securePath(path, false)
 	case errors.Is(err, os.ErrNotExist):
+		if !create {
+			return nil
+		}
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // caller chose the archive path
 		if err != nil {
 			return err
@@ -148,7 +160,7 @@ func securePath(path string, isDir bool) error {
 	)
 }
 
-func hasPrivateACL(path string) (bool, error) {
+func hasPrivateACL(path string, isDir bool) (bool, error) {
 	// Existing custom parents are safe when their effective DACL is private, even if that privacy
 	// is inherited from a private ancestor rather than protected directly on the path itself.
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
@@ -167,6 +179,7 @@ func hasPrivateACL(path string) (bool, error) {
 		return false, err
 	}
 	got := map[string]struct{}{}
+	inherited := map[string]byte{}
 	for i := uint16(0); i < dacl.AceCount; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, uint32(i), &ace); err != nil {
@@ -175,13 +188,28 @@ func hasPrivateACL(path string) (bool, error) {
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			return false, nil
 		}
-		got[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] = struct{}{} //nolint:gosec // Windows ACCESS_ALLOWED_ACE stores the SID inline after SidStart
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String() //nolint:gosec // Windows ACCESS_ALLOWED_ACE stores the SID inline after SidStart
+		if _, ok := want[sid]; !ok {
+			return false, nil
+		}
+		// Windows can split a generic inheritable grant into an effective ACE and an
+		// inheritance-only ACE. Validate the effective and child grants separately.
+		if ace.Header.AceFlags&windows.INHERIT_ONLY_ACE == 0 {
+			got[sid] = struct{}{}
+		}
+		if ace.Header.AceFlags&windows.NO_PROPAGATE_INHERIT_ACE == 0 {
+			inherited[sid] |= ace.Header.AceFlags
+		}
 	}
 	if len(got) != len(want) {
 		return false, nil
 	}
 	for sid := range want {
 		if _, ok := got[sid]; !ok {
+			return false, nil
+		}
+		const inherit = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+		if isDir && inherited[sid]&inherit != inherit {
 			return false, nil
 		}
 	}
@@ -257,13 +285,13 @@ func privateSIDs() (*windows.SID, *windows.SID, error) {
 }
 
 func isDefaultArchiveDir(parent string) bool {
-	home := os.Getenv("HOME")
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		home, err := os.UserHomeDir()
 		if err != nil {
 			return false
 		}
+		base = filepath.Join(home, "AppData", "Local")
 	}
-	return filepath.Clean(parent) == filepath.Join(home, ".teamscrawl")
+	return strings.EqualFold(absPath(parent), absPath(filepath.Join(base, "teamscrawl")))
 }

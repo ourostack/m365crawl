@@ -3,8 +3,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,164 @@ import (
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"golang.org/x/sys/windows"
 )
+
+func TestOpenRejectsNonInheritingPrivateCustomParent(t *testing.T) {
+	for _, flags := range []uint32{0, windows.OBJECT_INHERIT_ACE, windows.CONTAINER_INHERIT_ACE, windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE | windows.NO_PROPAGATE_INHERIT_ACE} {
+		t.Run(fmt.Sprint(flags), func(t *testing.T) {
+			parent := filepath.Join(t.TempDir(), "custom")
+			must0(os.Mkdir(parent, 0o700))
+			setACL(t, parent,
+				aceForSIDWithInheritance(t, mustCurrentUserSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, flags),
+				aceForSIDWithInheritance(t, mustSystemSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, flags),
+			)
+			dbPath := filepath.Join(parent, "archive.db")
+			assertOpenDBError(t, dbPath)
+			assertNoArchiveArtifacts(t, dbPath)
+		})
+	}
+}
+
+func TestOpenRejectsUnsafeExistingSQLiteSidecarsBeforeSQLiteOpen(t *testing.T) {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			parent := filepath.Join(t.TempDir(), "private")
+			must0(os.Mkdir(parent, 0o700))
+			setInheritableCurrentUserAndSystemOnly(t, parent)
+			dbPath := filepath.Join(parent, "archive.db")
+			must0(os.WriteFile(dbPath, nil, 0o600))
+			sidecar := dbPath + suffix
+			content := []byte("synthetic existing sidecar")
+			must0(os.WriteFile(sidecar, content, 0o600))
+			setBroadACL(t, sidecar)
+			assertOpenDBError(t, dbPath)
+			got, err := os.ReadFile(sidecar)
+			if err != nil || !bytes.Equal(got, content) {
+				t.Fatalf("sidecar changed before rejection: %q, %v", got, err)
+			}
+			info, err := os.Stat(dbPath)
+			if err != nil || info.Size() != 0 {
+				t.Fatalf("archive changed before rejection: %v, %v", info, err)
+			}
+			assertWorldTrustee(t, sidecar)
+		})
+	}
+}
+
+func TestPrepareArchivePreservesPrivateExistingSQLiteSidecars(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "private")
+	must0(os.Mkdir(parent, 0o700))
+	setInheritableCurrentUserAndSystemOnly(t, parent)
+	dbPath := filepath.Join(parent, "archive.db")
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		must0(os.WriteFile(dbPath+suffix, []byte("synthetic private companion"), 0o600))
+	}
+	must0(prepareArchiveForWrite(dbPath))
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		got, err := os.ReadFile(dbPath + suffix)
+		if err != nil || string(got) != "synthetic private companion" {
+			t.Fatalf("private sidecar changed: %q, %v", got, err)
+		}
+		assertCurrentUserAndSystemOnly(t, dbPath+suffix)
+	}
+}
+
+func TestOpenRejectsSQLiteSidecarDirectoriesBeforeSQLiteOpen(t *testing.T) {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "new-parent", "archive.db")
+			must0(os.MkdirAll(dbPath+suffix, 0o700))
+			setInheritableCurrentUserAndSystemOnly(t, filepath.Dir(dbPath))
+			assertOpenDBError(t, dbPath)
+			if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+				t.Fatalf("database created before companion validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestOpenRejectsUnsafeMacStyleCustomParentOnWindows(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	parent := filepath.Join(home, ".teamscrawl")
+	must0(os.Mkdir(parent, 0o700))
+	setBroadACL(t, parent)
+	dbPath := filepath.Join(parent, "archive.db")
+	assertOpenDBError(t, dbPath)
+	assertNoArchiveArtifacts(t, dbPath)
+	assertWorldTrustee(t, parent)
+}
+
+func TestOpenSecuresExistingWindowsDefaultParent(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(fmt.Sprint(fallback), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("USERPROFILE", home)
+			base := filepath.Join(home, "AppData", "Local")
+			if fallback {
+				t.Setenv("LOCALAPPDATA", "")
+			} else {
+				t.Setenv("LOCALAPPDATA", base)
+			}
+			parent := filepath.Join(base, "teamscrawl")
+			must0(os.MkdirAll(parent, 0o700))
+			setBroadACL(t, parent)
+			st, err := Open(context.Background(), filepath.Join(parent, "archive.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = st.Close() }()
+			assertCurrentUserAndSystemOnly(t, parent)
+		})
+	}
+}
+
+func TestOpenRejectsUnsafeInheritedFilesInWindowsDefaultParent(t *testing.T) {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			base := t.TempDir()
+			t.Setenv("LOCALAPPDATA", base)
+			parent := filepath.Join(base, "teamscrawl")
+			must0(os.Mkdir(parent, 0o700))
+			setACL(t, parent,
+				aceForSIDWithInheritance(t, mustCurrentUserSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),
+				aceForSIDWithInheritance(t, mustWorldSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),
+			)
+			dbPath := filepath.Join(parent, "archive.db")
+			must0(os.WriteFile(dbPath+suffix, nil, 0o600))
+			assertOpenDBError(t, dbPath)
+			assertWorldTrustee(t, dbPath+suffix)
+		})
+	}
+}
+
+func assertOpenDBError(t *testing.T, dbPath string) {
+	t.Helper()
+	st, err := Open(context.Background(), dbPath)
+	if st != nil {
+		_ = st.Close()
+	}
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeDBError {
+		t.Fatalf("err = %v, want coded db_error before SQLite open", err)
+	}
+}
+
+func assertWorldTrustee(t *testing.T, path string) {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := aceSIDStrings(t, dacl)[mustWorldSID(t).String()]; !ok {
+		t.Fatal("unsafe pre-existing ACL was silently rewritten")
+	}
+}
 
 func TestArchiveSidecarsSecureAgainstLooseParent(t *testing.T) {
 	ctx := context.Background()
@@ -65,7 +225,7 @@ func TestOpenRejectsUnsafeExistingArchiveFileBeforeSQLiteOpen(t *testing.T) {
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	setCurrentUserAndSystemOnly(t, parent)
+	setInheritableCurrentUserAndSystemOnly(t, parent)
 
 	dbPath := filepath.Join(parent, "archive.db")
 	if err := os.WriteFile(dbPath, nil, 0o600); err != nil {
@@ -117,7 +277,7 @@ func assertNoArchiveArtifacts(t *testing.T, dbPath string) {
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat %s: %v", dbPath, err)
 	}
-	for _, suffix := range []string{".lock", "-wal", "-shm"} {
+	for _, suffix := range []string{".lock", "-wal", "-shm", "-journal"} {
 		if _, err := os.Stat(dbPath + suffix); !os.IsNotExist(err) {
 			t.Fatalf("%s exists err=%v", dbPath+suffix, err)
 		}
@@ -152,6 +312,14 @@ func assertCurrentUserAndSystemOnly(t *testing.T, path string) {
 
 func setCurrentUserAndSystemOnly(t *testing.T, path string) {
 	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() {
+		setInheritableCurrentUserAndSystemOnly(t, path)
+		return
+	}
 	setACL(t, path,
 		aceForSID(t, mustCurrentUserSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER),
 		aceForSID(t, mustSystemSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER),

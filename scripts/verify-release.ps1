@@ -57,8 +57,8 @@ gh release download $tag -R $repo -D $work -p checksums.txt -p $zipName | Out-Nu
 
 Write-Host '==> Checksums'
 $checksums = Get-Content (Join-Path $work 'checksums.txt')
-$entry = $checksums | Where-Object { $_ -match "  $([regex]::Escape($zipName))$" }
-if (-not $entry) {
+$entry = @($checksums | Where-Object { $_ -match "  $([regex]::Escape($zipName))$" })
+if ($entry.Count -ne 1) {
     throw "checksums.txt has no entry for windows_$targetArch"
 }
 $expected = ($entry[0] -split '\s+')[0].ToLowerInvariant()

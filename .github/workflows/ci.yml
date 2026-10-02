@@ -62,6 +62,10 @@ jobs:
       - name: Test
         shell: bash
         run: ${{ matrix.test-command }}
+      - name: Windows release checksum regression tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/verify-release_test.ps1
       - name: Test vectors match the generator
         run: go test -count=1 -v -run 'TestGeneratorIsCurrent$' ./internal/v8
       - name: Coverage summary
