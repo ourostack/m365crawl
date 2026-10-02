@@ -14,7 +14,6 @@ import (
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
-	"github.com/ourostack/teamscrawl/internal/errs"
 )
 
 // ErrNoArchive is returned by OpenReadOnly when the archive file does not exist. Read commands
@@ -48,11 +47,7 @@ type Counts struct {
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = absPath(path)
 	if err := prepareArchiveForWrite(path); err != nil {
-		var unsafePath *unsafeArchivePathError
-		if errors.As(err, &unsafePath) {
-			return nil, errs.DBError(err)
-		}
-		return nil, err
+		return nil, mapArchiveOpenError(err)
 	}
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: schemaDDL, SchemaVersion: SchemaVersion})
 	if err != nil {

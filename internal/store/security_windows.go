@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/ourostack/teamscrawl/internal/errs"
 	"golang.org/x/sys/windows"
 )
 
@@ -22,6 +23,14 @@ type unsafeArchivePathError struct {
 
 func (e *unsafeArchivePathError) Error() string {
 	return fmt.Sprintf("unsafe existing %s %s", e.kind, e.path)
+}
+
+func mapArchiveOpenError(err error) error {
+	var unsafePath *unsafeArchivePathError
+	if errors.As(err, &unsafePath) {
+		return errs.DBError(err)
+	}
+	return err
 }
 
 func prepareArchiveForWrite(path string) error {

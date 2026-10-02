@@ -15,6 +15,11 @@ import (
 	"github.com/ourostack/teamscrawl/internal/errs"
 )
 
+var (
+	statDir        = os.Stat
+	readDirEntries = os.ReadDir
+)
+
 // Source is one Teams IndexedDB origin inside one WebView2 profile.
 type Source struct {
 	Profile    string // profile directory name under the EBWebView root
@@ -87,13 +92,13 @@ func Discover(root string) (sources []Source, otherOrigins []string, err error) 
 // readDir lists dir, mapping failures to coded errors. A missing root is teams_not_installed;
 // any other missing directory is reported the same way so callers can skip it.
 func readDir(root, dir string) ([]fs.DirEntry, error) {
-	info, err := os.Stat(dir)
+	info, err := statDir(dir)
 	if err == nil && !info.IsDir() {
 		// Windows maps os.ReadDir(file) to fs.ErrNotExist, which would incorrectly turn a file root
 		// into teams_not_installed without this explicit directory check.
 		return nil, errs.Internal(&fs.PathError{Op: "readdir", Path: dir, Err: fs.ErrInvalid})
 	}
-	ents, err := os.ReadDir(dir)
+	ents, err := readDirEntries(dir)
 	if err == nil {
 		return ents, nil
 	}

@@ -2,6 +2,7 @@ package teamsdesktop
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -124,6 +125,22 @@ func TestDiscoverNoFDAOnInnerDir(t *testing.T) {
 func TestDiscoverMissing(t *testing.T) {
 	_, _, err := Discover(filepath.Join(t.TempDir(), "nope"))
 	if c := codeOf(t, err); c.Code != errs.CodeTeamsNotInstalled || c.Exit != 3 {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestReadDirMapsOtherErrorsToInternal(t *testing.T) {
+	root := t.TempDir()
+	oldStatDir, oldReadDirEntries := statDir, readDirEntries
+	statDir = func(string) (fs.FileInfo, error) { return os.Stat(root) }
+	readDirEntries = func(string) ([]fs.DirEntry, error) { return nil, errors.New("disk on fire") }
+	t.Cleanup(func() {
+		statDir = oldStatDir
+		readDirEntries = oldReadDirEntries
+	})
+
+	_, err := readDir(root, root)
+	if c := codeOf(t, err); c.Code != errs.CodeInternal || !strings.Contains(err.Error(), "disk on fire") {
 		t.Fatalf("err = %v", err)
 	}
 }
