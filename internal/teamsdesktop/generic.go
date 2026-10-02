@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"time"
 
 	"github.com/ourostack/teamscrawl/internal/indexeddb"
 	"github.com/ourostack/teamscrawl/internal/leveldb"
@@ -39,8 +38,8 @@ type GenericResult struct {
 	Present []string
 	// Complete says, per database, that every store was read with no fatal error and no bad_key.
 	Complete map[string]bool
-	// Seen holds, per database, the KeyJSON of every record seen (decoded or not).
-	Seen map[string]map[string]struct{}
+	// Seen holds, per database and store, the KeyJSON of every record seen (decoded or not).
+	Seen map[string]map[string]map[string]struct{}
 }
 
 // genericOrigin is the part of *indexeddb.Origin that ReadGeneric uses (a seam for tests).
@@ -72,7 +71,7 @@ func ReadGeneric(ctx context.Context, snapDir string, account *Account, budget i
 	res := GenericResult{
 		Omissions: map[string]int{},
 		Complete:  map[string]bool{},
-		Seen:      map[string]map[string]struct{}{},
+		Seen:      map[string]map[string]map[string]struct{}{},
 	}
 	held, dbs, err := censusFn(filepath.Join(snapDir, "leveldb"))
 	if err != nil {
@@ -155,14 +154,15 @@ func readGenericDatabase(ctx context.Context, o genericOrigin, db indexeddb.Data
 	if _, a, ok := ParseDatabaseName(db.Name); ok {
 		acct = &a
 	}
-	seen := map[string]struct{}{}
-	res.Seen[db.Name] = seen
+	res.Seen[db.Name] = map[string]map[string]struct{}{}
 	complete := true
 	for _, st := range db.Stores {
 		if Denied(st.Name) {
 			res.Omissions[omitDeniedStore]++
 			continue
 		}
+		seen := map[string]struct{}{}
+		res.Seen[db.Name][st.Name] = seen
 		err := o.Records(db.ID, st.ID, func(r indexeddb.Record) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -213,8 +213,6 @@ func canonKey(k any) any {
 			out[i] = canonKey(e)
 		}
 		return out
-	case time.Time:
-		return x
 	default:
 		return k
 	}

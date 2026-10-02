@@ -743,21 +743,40 @@ var messageContentManagers = map[string]bool{
 // content (hits are reported by manager and store name only).
 func TestRealNoAuthDecoded(t *testing.T) {
 	for _, snap := range snapshots(t) {
-		var recs, deniedRecords int
+		// Enumerate database names independently of ReadGeneric, from the metadata alone.
+		_, dbs, err := indexeddb.Census(filepath.Join(snap.dir, "leveldb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		authNames := map[string]bool{}
+		for _, d := range dbs {
+			if strings.HasPrefix(strings.ToLower(d.Name), "teams:auth") {
+				authNames[d.Name] = true
+			}
+		}
+		emitted := map[string]bool{}
+		recs := 0
 		res, err := teamsdesktop.ReadGeneric(context.Background(), snap.dir, nil, teamsdesktop.DefaultGenericBudget, func(r teamsdesktop.GenericRecord) error {
 			recs++
-			if teamsdesktop.Denied(r.Database) || teamsdesktop.Denied(r.Store) {
-				deniedRecords++
-			}
+			emitted[r.Database] = true
 			return nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("generic records=%d from %d databases; denied databases=%d, denied stores=%d, records from denied=%d",
-			recs, len(res.Present), res.Omissions["denied_database"], res.Omissions["denied_store"], deniedRecords)
-		if deniedRecords != 0 {
-			t.Errorf("%d records were read from denied databases or stores", deniedRecords)
+		t.Logf("generic records=%d from %d databases; teams:auth databases=%d, denied databases=%d, denied stores=%d",
+			recs, len(res.Present), len(authNames), res.Omissions["denied_database"], res.Omissions["denied_store"])
+		present := map[string]bool{}
+		for _, n := range res.Present {
+			present[n] = true
+		}
+		for n := range authNames {
+			if present[n] || emitted[n] {
+				t.Errorf("a Teams:auth database was read (present=%v, emitted=%v)", present[n], emitted[n])
+			}
+		}
+		if res.Omissions["denied_database"] == 0 {
+			t.Errorf("denied_database = 0: the cache has no denied databases, or denial did not run")
 		}
 		kinds := map[string]int{}
 		if _, err := teamsdesktop.Read(context.Background(), snap.dir, nil, func(a teamsdesktop.Account, kind string, v any) error {
@@ -825,9 +844,12 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	}
 
 	// The generic records table: report hits by manager and store name only, never the value.
-	_, hits, _, err := st.SQL(context.Background(), "select source, database, store, value_json from records where value_json like '%eyJ%' or value_json like '%refresh_token%' or value_json like '%access_token%' or value_json like '%Bearer %'", acceptanceRowLimit)
+	_, hits, truncated, err := st.SQL(context.Background(), "select source, database, store, value_json from records where value_json like '%eyJ%' or value_json like '%refresh_token%' or value_json like '%access_token%' or value_json like '%Bearer %'", acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if truncated {
+		t.Fatal("records scan truncated at acceptanceRowLimit: raise the limit")
 	}
 	byStore := map[string]int{}
 	outside := 0

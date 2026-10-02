@@ -93,7 +93,7 @@ func TestReadGenericFixture(t *testing.T) {
 	}
 	for _, n := range g.res.Present {
 		if !g.res.Complete[n] || len(g.res.Seen[n]) == 0 {
-			t.Errorf("%s: complete=%v seen=%d", n, g.res.Complete[n], len(g.res.Seen[n]))
+			t.Errorf("%s: complete=%v stores seen=%d", n, g.res.Complete[n], len(g.res.Seen[n]))
 		}
 	}
 }
@@ -122,7 +122,7 @@ func TestReadGenericKeysCanonical(t *testing.T) {
 		}
 		found := false
 		for _, s := range g.res.Seen {
-			if _, ok := s[k]; ok {
+			if _, ok := s["pins"][k]; ok {
 				found = true
 			}
 		}
@@ -293,7 +293,7 @@ func TestReadGenericDecodeFailureStillSeen(t *testing.T) {
 	if len(g.recs) != 2 || g.recs[0].ValueJSON != nil || string(g.recs[1].ValueJSON) != `"y"` {
 		t.Fatalf("records = %+v", g.recs)
 	}
-	if g.res.Omissions[indexeddb.CodeUnknownEnvelope] != 1 || !g.res.Complete[name] || len(g.res.Seen[name]) != 2 {
+	if g.res.Omissions[indexeddb.CodeUnknownEnvelope] != 1 || !g.res.Complete[name] || len(g.res.Seen[name]["s"]) != 2 {
 		t.Fatalf("res = %+v", g.res)
 	}
 }
