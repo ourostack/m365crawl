@@ -19,10 +19,12 @@ builds:
       - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }} -X github.com/ourostack/teamscrawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/teamscrawl/internal/cli.date={{ .Date }}
     # Developer ID sign and notarize each binary before it is archived, so the
     # archives, checksums and cask sha256 all describe the signed binary. The
-    # script is a no-op when the Apple signing secrets are not available.
+    # script fails the build unless every Apple secret is set and every gate passes.
     hooks:
       post:
-        - cmd: scripts/sign-notarize.sh "{{ .Path }}"
+        # Snapshots (make snapshot, the PR build job) are never published, so they skip signing.
+        # A tagged release is never a snapshot, so it always signs.
+        - cmd: '{{ if .IsSnapshot }}true{{ else }}scripts/sign-notarize.sh "{{ .Path }}"{{ end }}'
 
 archives:
   - id: bundles
@@ -40,7 +42,9 @@ changelog:
   disable: true
 
 release:
+  # Tags with a hyphen (v0.1.0-rc.2) are GitHub prereleases and never become "latest".
   prerelease: auto
+  make_latest: auto
 
 homebrew_casks:
   - name: teamscrawl
@@ -61,9 +65,8 @@ homebrew_casks:
     repository:
       owner: ourostack
       name: homebrew-tap
-    # Signed releases are Developer ID signed and notarized, so this quarantine
-    # removal is unnecessary for them. It stays because it is harmless and
-    # releases built without signing secrets are still unsigned.
+    # Releases are Developer ID signed and notarized, so this quarantine removal
+    # is unnecessary. It stays because it is harmless.
     hooks:
       post:
         install: |
