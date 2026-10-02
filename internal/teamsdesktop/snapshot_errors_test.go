@@ -40,7 +40,10 @@ func tableOf(t *testing.T, dir string) string {
 }
 
 func TestSnapshotTempDirFailure(t *testing.T) {
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missing)
+	t.Setenv("TMP", missing)
+	t.Setenv("TEMP", missing)
 	snap, cleanup, err := Snapshot(context.Background(), compactedSource(t))
 	cleanup()
 	var coded *errs.Coded

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
+	"github.com/ourostack/teamscrawl/internal/errs"
 )
 
 // ErrNoArchive is returned by OpenReadOnly when the archive file does not exist. Read commands
@@ -46,14 +47,18 @@ type Counts struct {
 // Open creates or opens the archive at path for writing: parent directory 0700, file 0600.
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = absPath(path)
-	if err := ensureParent(path); err != nil {
+	if err := prepareArchiveForWrite(path); err != nil {
+		var unsafePath *unsafeArchivePathError
+		if errors.As(err, &unsafePath) {
+			return nil, errs.DBError(err)
+		}
 		return nil, err
 	}
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: schemaDDL, SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}
-	if err := chmodFile(path, 0o600); err != nil {
+	if err := finalizeArchiveFile(path); err != nil {
 		_ = cs.Close()
 		return nil, fmt.Errorf("chmod archive: %w", err)
 	}

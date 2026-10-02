@@ -15,11 +15,15 @@ import (
 // the coded `locked` error at once. The lock is also released if the process dies. release is
 // idempotent.
 func AcquireLock(dbPath string) (release func(), err error) {
-	if err := ensureParent(dbPath); err != nil {
+	if err := prepareArchiveDir(dbPath); err != nil {
 		return nil, errs.DBError(err)
 	}
 	f, err := os.OpenFile(lockPath(dbPath), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: the caller chose the archive path
 	if err != nil {
+		return nil, errs.DBError(err)
+	}
+	if err := secureLockHandle(f); err != nil {
+		_ = f.Close()
 		return nil, errs.DBError(err)
 	}
 	if err := lockFileEx(f); err != nil {

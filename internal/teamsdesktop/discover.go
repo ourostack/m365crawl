@@ -87,6 +87,10 @@ func Discover(root string) (sources []Source, otherOrigins []string, err error) 
 // readDir lists dir, mapping failures to coded errors. A missing root is teams_not_installed;
 // any other missing directory is reported the same way so callers can skip it.
 func readDir(root, dir string) ([]fs.DirEntry, error) {
+	info, err := os.Stat(dir)
+	if err == nil && !info.IsDir() {
+		return nil, errs.Internal(&fs.PathError{Op: "readdir", Path: dir, Err: fs.ErrInvalid})
+	}
 	ents, err := os.ReadDir(dir)
 	if err == nil {
 		return ents, nil

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,9 @@ func TestOpenFailures(t *testing.T) {
 		}
 	})
 	t.Run("chmod of the file fails", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows uses ACL finalization instead of chmod")
+		}
 		boom := errors.New("boom")
 		old := chmodFile
 		chmodFile = func(string, os.FileMode) error { return boom }
@@ -63,6 +67,9 @@ func TestOpenFailures(t *testing.T) {
 		}
 	})
 	t.Run("chmod of the default dir fails", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows uses ACL finalization instead of chmod")
+		}
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		boom := errors.New("boom")
@@ -75,12 +82,19 @@ func TestOpenFailures(t *testing.T) {
 		}
 	})
 	t.Run("a failed migration closes the archive and reports", func(t *testing.T) {
-		p := filepath.Join(t.TempDir(), "old.db")
+		p := filepath.Join(t.TempDir(), "data", "old.db")
+		must0(os.MkdirAll(filepath.Dir(p), 0o700))
+		if runtime.GOOS == "windows" {
+			setCurrentUserAndSystemOnly(t, filepath.Dir(p))
+		}
 		raw := must(sql.Open("sqlite", p))
 		// An archive that has both the old and the new column name: the rename must fail.
 		_, err := raw.Exec(`create table conversations(tenant_id text, user_id text, id text, team_id text, last_message_at text, read_horizon_message_id text, read_horizon_client_message_id text)`)
 		must0(err)
 		must0(raw.Close())
+		if runtime.GOOS == "windows" {
+			setCurrentUserAndSystemOnly(t, p)
+		}
 		if _, err := Open(ctx, p); err == nil {
 			t.Fatal("Open succeeded over an archive whose migration cannot run")
 		}
@@ -97,11 +111,18 @@ func TestOpenFailures(t *testing.T) {
 
 func TestMigrateRenamesOldColumn(t *testing.T) {
 	ctx := context.Background()
-	p := filepath.Join(t.TempDir(), "old.db")
+	p := filepath.Join(t.TempDir(), "data", "old.db")
+	must0(os.MkdirAll(filepath.Dir(p), 0o700))
+	if runtime.GOOS == "windows" {
+		setCurrentUserAndSystemOnly(t, filepath.Dir(p))
+	}
 	raw := must(sql.Open("sqlite", p))
 	_, err := raw.Exec(`create table conversations(tenant_id text not null, user_id text not null, id text not null, team_id text not null default '', last_message_at text, read_horizon_message_id text not null default '')`)
 	must0(err)
 	must0(raw.Close())
+	if runtime.GOOS == "windows" {
+		setCurrentUserAndSystemOnly(t, p)
+	}
 	s, err := Open(ctx, p)
 	if err != nil {
 		t.Fatal(err)
