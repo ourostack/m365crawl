@@ -1,0 +1,64 @@
+{
+  "schema_version": "crawlkit.control.v1",
+  "id": "teamscrawl",
+  "display_name": "teamscrawl",
+  "description": "Mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only.",
+  "binary": {
+    "name": "teamscrawl"
+  },
+  "branding": {},
+  "paths": {
+    "config_env": "TEAMSCRAWL_DB",
+    "default_database": "~/.teamscrawl/teamscrawl.db"
+  },
+  "commands": {
+    "doctor": {
+      "argv": [
+        "teamscrawl",
+        "--json",
+        "doctor"
+      ],
+      "json": true
+    },
+    "search": {
+      "argv": [
+        "teamscrawl",
+        "--json",
+        "search"
+      ],
+      "json": true
+    },
+    "status": {
+      "argv": [
+        "teamscrawl",
+        "--json",
+        "status"
+      ],
+      "json": true
+    },
+    "sync": {
+      "argv": [
+        "teamscrawl",
+        "--json",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    }
+  },
+  "capabilities": [
+    "doctor",
+    "status",
+    "sync",
+    "watch",
+    "search",
+    "sql"
+  ],
+  "privacy": {
+    "contains_private_messages": true,
+    "exports_secrets": false,
+    "local_only_scopes": [
+      "teams_cache"
+    ]
+  }
+}

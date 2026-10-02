@@ -144,7 +144,7 @@ Each entry of `sources` (in every report, not only a partial one) has a `status`
 
 Every command accepts the global flags in section 6.1. This section states what each command does and the shape of its result; every flag with its help text is in [docs/commands.md](docs/commands.md).
 
-Commands that run an implicit sync before answering (`--max-age`): `whoami`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `teams`, `people`, `stores`, `records`, `sql`. `doctor`, `sync`, `watch`, `skill` and `version` do not.
+Commands that run an implicit sync before answering (`--max-age`): `whoami`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `teams`, `people`, `stores`, `records`, `sql`. `doctor`, `sync`, `watch`, `skill`, `metadata` and `version` do not.
 
 | Command | Purpose and result |
 | --- | --- |
@@ -165,6 +165,7 @@ Commands that run an implicit sync before answering (`--max-age`): `whoami`, `st
 | `sql <query>` | One read-only `SELECT`, `WITH`, `EXPLAIN` or `VALUES` statement on a read-only connection. Result `{"columns", "rows", "count", "truncated"}`. It streams rows and stops reading at `--limit` (default 50), so `truncated` says more rows exist but there is no `total`. The statement is read as SQL tokens, so a word such as `attach` inside a string, comment or quoted name is harmless; a statement that is not a read, or a second statement, is a `usage` error, as is a query SQLite rejects (a typo, a missing table). Writes are impossible: the connection is read-only. It returns every account's rows regardless of `--account`. |
 | `watch` | Runs until interrupted and streams JSON Lines (section 7). |
 | `skill` | Prints the agent guide (the repository's `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary) as raw Markdown on stdout, in every output mode, exit 0. It is a documented exception to the JSON default, like `--help`. It needs no archive and no Teams cache. |
+| `metadata` | Prints the crawlkit app manifest (a `control.Manifest`: `schema_version`, `id` `teamscrawl`, `display_name`, `description`, `binary`, `paths` with the default database `~/.teamscrawl/teamscrawl.db` and `TEAMSCRAWL_DB`, the `status`, `sync` (`mutates`), `doctor` and `search` commands as `teamscrawl --json <command>`, `capabilities`, and `privacy` with `contains_private_messages: true`, `exports_secrets: false`, `local_only_scopes: ["teams_cache"]`) as one fixed-shape JSON document on stdout, indented in every output mode and regardless of `--format`, exit 0. It lets crawlkit's `crawlctl` discover teamscrawl. It needs no archive and no Teams cache, and never syncs. |
 | `version` | Prints `{"version", "commit", "date"}` as one JSON document, or one human line (`teamscrawl <version> (commit <commit>, built <date>)`) in text mode. `teamscrawl --version` prints the same and exits 0. |
 
 Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midnight) or a relative duration such as `90m`, `24h`, `7d`, `2w`. `--from` takes a person id or a case-insensitive part of a name. `--team` takes a team's exact name (case-insensitive for ASCII letters only) or its id; an unknown or ambiguous name is a `usage` error that lists the matches.
@@ -191,7 +192,7 @@ Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midni
 ### 6.2 Streams and documents
 
 - Results go to stdout. Progress, warnings, hints and the implicit-sync notice (section 6.4) go to stderr. Sync progress lines print only when stderr is a terminal.
-- In JSON mode (including every non-TTY run) a command prints exactly one JSON document on stdout, compact on a pipe and indented on a terminal. Two exceptions: `watch` prints JSON Lines (section 7), and `skill` prints raw Markdown in every mode, as `--help` prints help text.
+- In JSON mode (including every non-TTY run) a command prints exactly one JSON document on stdout, compact on a pipe and indented on a terminal. Two exceptions: `watch` prints JSON Lines (section 7), and `skill` prints raw Markdown in every mode, as `--help` prints help text. `metadata` always prints one fixed-shape JSON document, indented in every mode, whatever `--format` says.
 - Keys are snake_case and stable. Adding a field is compatible; renaming or removing one is a breaking change recorded in `CHANGELOG.md`. Optional fields are omitted when empty, except the always-present fields listed below. Times are RFC3339 UTC. Links keep a literal `&`.
 
 ### 6.3 List results

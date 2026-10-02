@@ -72,6 +72,7 @@ type cliApp struct {
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
 	Skill         skillCmd         `cmd:"" help:"Print the agent guide (SKILL.md) for this version, as Markdown in every output mode."`
+	Metadata      metadataCmd      `cmd:"" help:"Print the crawlkit app manifest (for crawlctl discovery)."`
 	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the teamscrawl version, commit and build date."`
 }
 

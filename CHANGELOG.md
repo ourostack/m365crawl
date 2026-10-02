@@ -6,6 +6,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ### Added
 
+- `metadata`: prints the crawlkit app manifest (`control.Manifest`) as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. It needs no archive or Teams cache and never syncs. No schema or existing field changed.
 - `records` table (archive schema version 3): every Teams IndexedDB database that has no typed mapper and no credential-like name is mirrored into it, one row per record, with the key and the value as canonical JSON. Rows follow the archive rules: a record that leaves the cache gets a sticky `removed_at` and is never deleted; a value that fails to decode is counted and its key is still archived.
 - `stores`: lists every archived database and object store with `records`, `removed` and `last_updated_at`.
 - `records --database <name or prefix> [--store] [--since] [--include-removed] [--limit 50]`: lists archived generic records, newest change first, with `key_json` and `value_json` as parsed JSON. It honors `--fields` and `--max-text`.
