@@ -14,8 +14,8 @@ var (
 	// jwtRE matches a JSON Web Token: a header and a payload (both base64url JSON, so both start
 	// with "eyJ") and a signature.
 	jwtRE = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
-	// bearerRE matches a whole JSON string that starts with "Bearer " (an opaque bearer token).
-	bearerRE = regexp.MustCompile(`(?i)"bearer (?:[^"\\]|\\.)*"`)
+	// bearerRE matches a whole JSON string that starts with "Bearer" and whitespace (an opaque bearer token).
+	bearerRE = regexp.MustCompile(`(?i)"bearer(?:\s|\\[tnr]|\\u00(?:09|0a|0d|20|a0))(?:[^"\\]|\\.)*"`)
 	// sigRE matches the value of a sig= query parameter (a signed URL's signature), any case.
 	sigRE = regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+`)
 )
@@ -26,15 +26,23 @@ var secretKeys = map[string]bool{
 	"authorization": true, "client_secret": true, "password": true,
 }
 
+// maxStringifiedDepth bounds how many levels of JSON-inside-a-string Scrub unwraps.
+const maxStringifiedDepth = 4
+
 // Scrub removes credential material from a generic record's canonical JSON (a value or a key) and
 // returns the scrubbed JSON with the number of redactions, each replaced by "[redacted]": the
 // whole value (a string, number, object, array or null) of any object key named access_token,
 // refresh_token, id_token, authorization, client_secret or password (ignoring case), the same
-// for a V8 Map pair whose key is one of those names, any string that starts with "Bearer "
-// (ignoring case), JWT-shaped substrings, and the value of a sig= query parameter (ignoring
-// case). A value with nothing to scrub comes back as is, and the output stays valid JSON.
-func Scrub(valueJSON []byte) ([]byte, int) {
-	out, n := redactKeyed(valueJSON)
+// for a V8 Map pair whose key is one of those names, the "value" field of an object whose
+// "type", "name" or "key" field is one of those names, any string that starts with "Bearer"
+// and whitespace (ignoring case), JWT-shaped substrings, and the value of a sig= query parameter
+// (ignoring case). A string that holds JSON (an object or array, up to four levels deep) is
+// scrubbed inside and written back as a string. A value with nothing to scrub comes back as is,
+// and the output stays valid JSON.
+func Scrub(valueJSON []byte) ([]byte, int) { return scrub(valueJSON, 0) }
+
+func scrub(valueJSON []byte, depth int) ([]byte, int) {
+	out, n := redactKeyed(valueJSON, depth)
 	out = bearerRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
 	out = jwtRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
 	out = sigRE.ReplaceAllFunc(out, func(m []byte) []byte {
@@ -45,29 +53,51 @@ func Scrub(valueJSON []byte) ([]byte, int) {
 	return out, n
 }
 
-// redactKeyed walks the JSON text once, tracking string literals, and replaces the value that
-// follows a credential-named string: after "name": in an object, or after "name", when the name
-// is the first element of an array (a V8 Map pair is [key,value]).
-func redactKeyed(in []byte) ([]byte, int) {
+// redactKeyed walks the JSON text once, tracking string literals. It replaces the value that
+// follows a credential-named string (after "name": in an object, or after "name", when the name
+// is the first element of an array, as in a V8 Map pair [key,value]), the "value" field of an
+// object named by a sibling field, and scrubs strings that hold JSON.
+func redactKeyed(in []byte, depth int) ([]byte, int) {
 	var out bytes.Buffer
 	n := 0
+	siblings := map[int]int{} // start of a "value" field's value -> its end
 	for i := 0; i < len(in); {
+		if end, ok := siblings[i]; ok {
+			out.WriteString(`"` + redacted + `"`)
+			n++
+			i = end
+			continue
+		}
+		if in[i] == '{' {
+			for start, end := range siblingValues(in[i:valueEnd(in, i)]) {
+				siblings[i+start] = i + end
+			}
+		}
 		if in[i] != '"' {
 			out.WriteByte(in[i])
 			i++
 			continue
 		}
-		end := stringEnd(in, i)
-		lit := in[i:end]
-		out.Write(lit)
-		i = end
-		if !secretKeyLiteral(lit) || i >= len(in) {
+		start := i
+		i = stringEnd(in, start)
+		lit := in[start:i]
+		if !secretKeyLiteral(lit) {
+			if inner, k := scrubStringified(lit, depth); k > 0 {
+				lit = inner
+				n += k
+			}
+			out.Write(lit)
 			continue
 		}
-		if in[i] == ':' || (in[i] == ',' && bytes.HasSuffix(out.Bytes()[:out.Len()-len(lit)], []byte("["))) {
-			out.WriteByte(in[i])
-			i++
-			i = valueEnd(in, i)
+		out.Write(lit)
+		j := skipSpace(in, i)
+		if j >= len(in) {
+			continue
+		}
+		if in[j] == ':' || (in[j] == ',' && bytes.HasSuffix(bytes.TrimRight(in[:start], " \t\r\n"), []byte("["))) {
+			k := skipSpace(in, j+1)
+			out.Write(in[i:k])
+			i = valueEnd(in, k)
 			out.WriteString(`"` + redacted + `"`)
 			n++
 		}
@@ -125,8 +155,71 @@ func valueEnd(in []byte, i int) int {
 		return len(in)
 	}
 	j := i
-	for j < len(in) && in[j] != ',' && in[j] != '}' && in[j] != ']' {
+	for j < len(in) && !strings.ContainsRune(",}] \t\r\n", rune(in[j])) {
 		j++
 	}
 	return j
+}
+
+// skipSpace returns the index of the first non-whitespace byte at or after i.
+func skipSpace(in []byte, i int) int {
+	for i < len(in) && strings.ContainsRune(" \t\r\n", rune(in[i])) {
+		i++
+	}
+	return i
+}
+
+// siblingValues takes the text of one JSON object and, when its "type", "name" or "key" field is
+// a credential name, returns the span (start and end offsets) of its "value" field's value.
+func siblingValues(obj []byte) map[int]int {
+	named := false
+	spans := map[int]int{}
+	i := skipSpace(obj, 1)
+	for i < len(obj) && obj[i] == '"' {
+		ke := stringEnd(obj, i)
+		var key string
+		_ = json.Unmarshal(obj[i:ke], &key)
+		vs := skipSpace(obj, ke)
+		vs = skipSpace(obj, vs+1)
+		ve := valueEnd(obj, vs)
+		switch strings.ToLower(key) {
+		case "type", "name", "key":
+			if secretKeyLiteral(obj[vs:ve]) {
+				named = true
+			}
+		case "value":
+			spans[vs] = ve
+		}
+		i = skipSpace(obj, ve)
+		i = skipSpace(obj, i+1)
+	}
+	if !named {
+		return nil
+	}
+	return spans
+}
+
+// scrubStringified scrubs a string literal that holds a JSON object or array and returns the
+// literal re-encoded with the redactions, or the literal and 0 when there is nothing to change.
+func scrubStringified(lit []byte, depth int) ([]byte, int) {
+	if depth >= maxStringifiedDepth {
+		return lit, 0
+	}
+	var text string
+	if json.Unmarshal(lit, &text) != nil {
+		return lit, 0
+	}
+	t := strings.TrimSpace(text)
+	if t == "" || (t[0] != '{' && t[0] != '[') || !json.Valid([]byte(t)) {
+		return lit, 0
+	}
+	inner, n := scrub([]byte(t), depth+1)
+	if n == 0 {
+		return lit, 0
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(string(inner))
+	return bytes.TrimRight(buf.Bytes(), "\n"), n
 }

@@ -635,3 +635,63 @@ func TestUpsertRecordsRescrubbedValueReplacesStored(t *testing.T) {
 		t.Fatalf("stored value still unredacted: %s", v)
 	}
 }
+
+// A row archived under a key that scrubs differently loses its value and hash and is marked
+// removed; rows whose keys scrub to themselves are untouched.
+func TestPurgeUnscrubbedKeys(t *testing.T) {
+	s := newStore(t)
+	const bad = `"Bearer abc"`
+	upsert(t, s, []teamsdesktop.GenericRecord{
+		grec(&acctA, dbA, "events", bad, `{"n":1}`),
+		grec(&acctA, dbA, "events", `"fine"`, `{"n":2}`),
+		grec(&acctA, dbA, "events", `"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2ln"`, `{"n":3}`),
+	}, base)
+	later := base.Add(time.Hour)
+	var n int
+	inSession(t, s, func(x *Session) {
+		var err error
+		if n, err = x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, later); err != nil {
+			t.Fatal(err)
+		}
+		if again, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, later); err != nil || again != 0 {
+			t.Fatalf("second pass: %d %v", again, err)
+		}
+		if other, err := x.PurgeUnscrubbedKeys("other-source", teamsdesktop.Scrub, later); err != nil || other != 0 {
+			t.Fatalf("other source: %d %v", other, err)
+		}
+	})
+	if n != 2 {
+		t.Fatalf("cleared %d rows, want 2", n)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", bad); v != "" || removed != fmtTime(later) {
+		t.Fatalf("bad key row: %q %q", v, removed)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", `"fine"`); v != `{"n":2}` || removed != "" {
+		t.Fatalf("fine row changed: %q %q", v, removed)
+	}
+	if got := rowCount(t, s, `select count(*) from records where content_hash=''`); got != 2 {
+		t.Fatalf("%d rows with cleared hash", got)
+	}
+}
+
+func TestPurgeUnscrubbedKeysFaultsSurface(t *testing.T) {
+	seed := func(t *testing.T, s *Store) {
+		t.Helper()
+		upsert(t, s, []teamsdesktop.GenericRecord{
+			grec(&acctA, dbA, "events", `"Bearer x"`, `1`),
+			grec(&acctA, dbA, "events", `"Bearer y"`, `2`),
+		}, base)
+	}
+	op := func(ctx context.Context, s *Store) error {
+		x, err := s.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer x.Rollback()
+		if _, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base); err != nil {
+			return err
+		}
+		return x.Commit()
+	}
+	sweepFaults(t, seed, op)
+}
