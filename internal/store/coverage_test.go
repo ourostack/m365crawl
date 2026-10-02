@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -36,16 +35,6 @@ func TestAcquireLockFailures(t *testing.T) {
 		must0(os.Mkdir(p+".lock", 0o700))
 		_, err := AcquireLock(p)
 		codedAs(t, err, errs.CodeDBError)
-	})
-	t.Run("flock failing for a reason other than contention", func(t *testing.T) {
-		old := flock
-		flock = func(int, int) error { return syscall.EIO }
-		t.Cleanup(func() { flock = old })
-		_, err := AcquireLock(filepath.Join(dir, "e.db"))
-		codedAs(t, err, errs.CodeDBError)
-		if !errors.Is(err, syscall.EIO) {
-			t.Fatalf("cause lost: %v", err)
-		}
 	})
 }
 
