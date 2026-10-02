@@ -23,7 +23,8 @@ func Merge(rows []Event, fresh map[Source]time.Time) Event {
 	return base
 }
 
-// better reports whether a outranks b.
+// better reports whether a outranks b. It is a total order only for at most two rows per key (one
+// per source), which is all the calendar holds; with more rows the tie-breaks could cycle.
 func better(a, b Event, fresh map[Source]time.Time) bool {
 	if a.LastModified != nil && b.LastModified != nil && !a.LastModified.Equal(*b.LastModified) {
 		return a.LastModified.After(*b.LastModified)

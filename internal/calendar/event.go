@@ -25,7 +25,9 @@ type Event struct {
 	// GlobalID is the id shared across sources (iCalUId or equivalent); empty when the source has none.
 	GlobalID string
 	// OriginalStart is the occurrence's original start (iCalendar RECURRENCE-ID); nil for a single
-	// event. Moving an occurrence changes Start but not OriginalStart.
+	// event. Moving an occurrence changes Start but not OriginalStart. For an all-day occurrence
+	// the adapter passes midnight of the occurrence's own date in the event's time zone (or UTC
+	// midnight of that date); Key takes the wall-clock date of the value as given.
 	OriginalStart *time.Time
 	Start, End    time.Time
 	// AllDay events carry dates, never instants: StartDate and EndDate are YYYY-MM-DD, and EndDate

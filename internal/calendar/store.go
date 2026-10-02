@@ -63,9 +63,13 @@ func ApplySnapshot(ctx context.Context, db *sql.DB, w Window, events []Event, at
 			_ = tx.Rollback()
 		}
 	}()
+	// Process in SourceID order so keys never depend on the order the adapter listed events in.
+	events = append([]Event(nil), events...)
+	sort.SliceStable(events, func(i, j int) bool { return events[i].SourceID < events[j].SourceID })
+	snap := newSnapshot(events)
 	seen := make(map[string]bool, len(events))
 	for _, e := range events {
-		key, err := resolveKey(ctx, tx, e)
+		key, err := resolveKey(ctx, tx, e, snap)
 		if err != nil {
 			return err
 		}
@@ -87,9 +91,47 @@ func ApplySnapshot(ctx context.Context, db *sql.DB, w Window, events []Event, at
 	return tx.Commit()
 }
 
+// snapshot indexes a snapshot's events so resolveKey can count same-hash events in the snapshot
+// no matter where in the list the current event sits.
+type snapshot struct {
+	ids    map[string]bool            // every source id in the snapshot
+	byHash map[string]map[string]bool // composite hash -> source ids with that hash
+	keys   map[string]bool            // keys the snapshot's global-id events will take
+}
+
+func newSnapshot(events []Event) snapshot {
+	s := snapshot{ids: map[string]bool{}, byHash: map[string]map[string]bool{}, keys: map[string]bool{}}
+	for _, e := range events {
+		h := compositeKey(e)
+		if s.byHash[h] == nil {
+			s.byHash[h] = map[string]bool{}
+		}
+		s.byHash[h][e.SourceID] = true
+		s.ids[e.SourceID] = true
+		if e.GlobalID != "" {
+			s.keys[Key(e)] = true
+		}
+	}
+	return s
+}
+
+// otherRow is a live row of the other source that shares an event's composite hash.
+type otherRow struct {
+	key       string
+	composite bool // the row is keyed without a global id
+	blocked   bool // moving it would collide with a row that already holds the target key
+}
+
 // resolveKey returns the key e is stored under, recording the match the first time. An existing
 // match for (source, source_id) always wins so keys never flip between syncs.
-func resolveKey(ctx context.Context, tx *sql.Tx, e Event) (string, error) {
+//
+// Upgrade rule, symmetric so the result does not depend on which source syncs first: events with
+// the same composite hash are joined across sources only when exactly one event on each side has
+// that hash (and one of them has a global id and the other none). Any other count is ambiguous and
+// nothing is joined. The counts see the whole current snapshot plus stored rows, so the decision
+// is the same wherever e sits in the snapshot. A twin that first appears in a later sync cannot
+// undo an upgrade already made: the requirement is "same snapshots, same agenda".
+func resolveKey(ctx context.Context, tx *sql.Tx, e Event, snap snapshot) (string, error) {
 	var key string
 	err := tx.QueryRowContext(ctx, `SELECT event_key FROM calendar_matches WHERE source=? AND source_id=?`,
 		string(e.Source), e.SourceID).Scan(&key)
@@ -100,41 +142,45 @@ func resolveKey(ctx context.Context, tx *sql.Tx, e Event) (string, error) {
 		return "", err
 	}
 	composite := compositeKey(e)
-	method := matchComposite
-	var cands []string
-	if e.GlobalID != "" {
+	global := e.GlobalID != ""
+	key, method := composite, matchComposite
+	if global {
 		key, method = Key(e), matchGlobal
-		// Other-source rows minted without an id that carry this event's composite hash.
-		if cands, err = candidates(ctx, tx, e.Source, composite, true, key); err != nil {
+	}
+	own, err := ownCount(ctx, tx, e.Source, composite, snap)
+	if err != nil {
+		return "", err
+	}
+	others, err := otherRows(ctx, tx, e, composite, key)
+	if err != nil {
+		return "", err
+	}
+	// Candidates are the other side's rows of the opposite kind.
+	var cands []otherRow
+	for _, o := range others {
+		if o.composite == global {
+			cands = append(cands, o)
+		}
+	}
+	upgrade := false
+	if len(cands) > 0 {
+		switch {
+		case len(cands) > 1 || len(others) > 1 || own > 1:
+			method = matchAmbiguous
+		case !cands[0].blocked && (global || !snap.keys[cands[0].key]):
+			upgrade = true
+		}
+	}
+	switch {
+	case upgrade && global:
+		if err := rekey(ctx, tx, e.Source, cands[0].key, key); err != nil {
 			return "", err
 		}
-		switch len(cands) {
-		case 0:
-		case 1:
-			if err = rekey(ctx, tx, e.Source, cands[0], key); err != nil {
-				return "", err
-			}
-		default:
-			method = matchAmbiguous
-		}
-	} else {
-		key = composite
-		// Other-source rows that already hold a global key with this event's composite hash.
-		if cands, err = candidates(ctx, tx, e.Source, composite, false, ""); err != nil {
-			return "", err
-		}
-		switch len(cands) {
-		case 0:
-		case 1:
-			key, method = cands[0], matchUpgraded
-		default:
-			method = matchAmbiguous
-		}
-		if method != matchUpgraded {
-			if key, err = freeKey(ctx, tx, e, composite); err != nil {
-				return "", err
-			}
-		}
+	case upgrade:
+		key, method = cands[0].key, matchUpgraded
+	case !global && own > 1:
+		// Colliding twins all carry their source id; none owns the bare hash.
+		key = composite + "#" + e.SourceID
 	}
 	if err := recordMatch(ctx, tx, key, e.Source, e.SourceID, method); err != nil {
 		return "", err
@@ -142,31 +188,77 @@ func resolveKey(ctx context.Context, tx *sql.Tx, e Event) (string, error) {
 	return key, nil
 }
 
-const candidatesHead = `SELECT c.event_key FROM calendar_source_events c WHERE c.source <> ? AND c.composite_key = ?
-  AND substr(c.event_key, 1, ?) `
-
-// compositeCandidates finds composite-keyed rows of the other source to move onto a global key (arg 5).
-const compositeCandidates = candidatesHead + `= ? AND NOT EXISTS (SELECT 1 FROM calendar_source_events m
-  WHERE m.source = c.source AND m.event_key = ?) ORDER BY c.source, c.event_key`
-
-// globalCandidates finds global-keyed rows of the other source that this source has no row under (arg 5).
-const globalCandidates = candidatesHead + `<> ? AND NOT EXISTS (SELECT 1 FROM calendar_source_events m
-  WHERE m.source = ? AND m.event_key = c.event_key) ORDER BY c.source, c.event_key`
-
-// candidates lists the keys of the other source's rows (live or removed) whose composite hash is
-// composite: composite-keyed rows when wantComposite, else global-keyed rows. A row is skipped
-// when the upgrade would collide: moving an other-source row to target when that source already
-// holds target, or taking an other-source key this source already holds.
-func candidates(ctx context.Context, tx *sql.Tx, self Source, composite string, wantComposite bool, target string) ([]string, error) {
-	query, guardArg := globalCandidates, string(self)
-	if wantComposite {
-		query, guardArg = compositeCandidates, target
+// ownCount counts the distinct events of source that share composite: those in the snapshot, plus
+// live stored rows that the snapshot does not mention.
+func ownCount(ctx context.Context, tx *sql.Tx, source Source, composite string, snap snapshot) (int, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT source_id FROM calendar_source_events WHERE source=? AND composite_key=? AND removed_at IS NULL`,
+		string(source), composite)
+	if err != nil {
+		return 0, err
 	}
-	rows, err := tx.QueryContext(ctx, query, string(self), composite, len(compositePrefix), compositePrefix, guardArg)
+	ids, err := scanStrings(rows)
+	if err != nil {
+		return 0, err
+	}
+	n := len(snap.byHash[composite])
+	for _, id := range ids {
+		if !snap.ids[id] {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// otherRows lists the other source's live rows with the composite hash. target is the key e is
+// about to take: for an event with a global id, a row is blocked when its source already holds
+// target; for one without, when this source already holds the row's key.
+func otherRows(ctx context.Context, tx *sql.Tx, e Event, composite, target string) ([]otherRow, error) {
+	query, blockedArg := compositeArrivalRows, string(e.Source)
+	if e.GlobalID != "" {
+		query, blockedArg = globalArrivalRows, target
+	}
+	rows, err := tx.QueryContext(ctx, query, blockedArg, string(e.Source), composite)
 	if err != nil {
 		return nil, err
 	}
-	return scanStrings(rows)
+	defer func() { _ = rows.Close() }()
+	var out []otherRow
+	for rows.Next() {
+		var o otherRow
+		if err := scanRow(rows, &o.key, &o.composite, &o.blocked); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rowsErr(rows)
+}
+
+const otherRowsHead = `SELECT c.event_key, substr(c.event_key, 1, 10) = 'composite|', `
+const otherRowsTail = ` FROM calendar_source_events c WHERE c.source <> ? AND c.composite_key = ? AND c.removed_at IS NULL
+  ORDER BY c.source, c.event_key`
+
+const globalArrivalRows = otherRowsHead +
+	`EXISTS (SELECT 1 FROM calendar_source_events m WHERE m.source = c.source AND m.event_key = ?)` + otherRowsTail
+
+const compositeArrivalRows = otherRowsHead +
+	`EXISTS (SELECT 1 FROM calendar_source_events m WHERE m.source = ? AND m.event_key = c.event_key)` + otherRowsTail
+
+// rekey moves the other source's row from key old to key to, and its match.
+func rekey(ctx context.Context, tx *sql.Tx, self Source, old, to string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE calendar_source_events SET event_key=? WHERE source<>? AND event_key=?`,
+		to, string(self), old); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE calendar_matches SET event_key=?, match_method=? WHERE source<>? AND event_key=?`,
+		to, matchUpgraded, string(self), old)
+	return err
+}
+
+func recordMatch(ctx context.Context, tx *sql.Tx, key string, source Source, sourceID, method string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO calendar_matches (event_key, source, source_id, match_method) VALUES (?,?,?,?)`,
+		key, string(source), sourceID, method)
+	return err
 }
 
 // scanStrings drains rows of one text column and closes them.
@@ -181,38 +273,6 @@ func scanStrings(rows *sql.Rows) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, rowsErr(rows)
-}
-
-// rekey moves the other source's row from key old to key to, and its match.
-func rekey(ctx context.Context, tx *sql.Tx, self Source, old, to string) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE calendar_source_events SET event_key=? WHERE source<>? AND event_key=?`,
-		to, string(self), old); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `UPDATE calendar_matches SET event_key=?, match_method=? WHERE source<>? AND event_key=?`,
-		to, matchUpgraded, string(self), old)
-	return err
-}
-
-// freeKey returns composite, or composite#source_id when another event of the same source already
-// holds it (two distinct events with the same organizer, subject and start).
-func freeKey(ctx context.Context, tx *sql.Tx, e Event, composite string) (string, error) {
-	var n int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT count(*) FROM calendar_source_events WHERE source=? AND event_key=? AND source_id<>?`,
-		string(e.Source), composite, e.SourceID).Scan(&n); err != nil {
-		return "", err
-	}
-	if n > 0 {
-		return composite + "#" + e.SourceID, nil
-	}
-	return composite, nil
-}
-
-func recordMatch(ctx context.Context, tx *sql.Tx, key string, source Source, sourceID, method string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO calendar_matches (event_key, source, source_id, match_method) VALUES (?,?,?,?)`,
-		key, string(source), sourceID, method)
-	return err
 }
 
 func upsertEvent(ctx context.Context, tx *sql.Tx, e Event, key string, at time.Time) error {

@@ -217,15 +217,17 @@ func TestCompositeAmbiguousNotUpgraded(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("want three separate events, got %d", len(items))
 	}
-	// The reverse order: one Outlook global row, two Teams composite twins arriving later.
+	// The reverse order: the Outlook row first, then the twins. Same answer.
 	db2 := openDB(t)
-	o2 := o
-	apply(t, db2, ow, "2026-10-02T01:00:00Z", o2)
+	apply(t, db2, ow, "2026-10-02T01:00:00Z", o)
 	apply(t, db2, tw, "2026-10-02T02:00:00Z", t1, t2)
-	items2, _ := agenda(t, db2, octStart, octEnd)
-	// The first twin takes the global row; the second must not collide with it.
-	if len(items2) != 2 {
-		t.Fatalf("want two events, got %d: %+v", len(items2), items2)
+	if items2, _ := agenda(t, db2, octStart, octEnd); len(items2) != 3 {
+		t.Fatalf("want three separate events, got %d: %+v", len(items2), items2)
+	}
+	for _, key := range []string{"composite|", "#t1", "#t2"} {
+		if n := count(t, db2, `SELECT count(*) FROM calendar_source_events WHERE source='teams' AND event_key LIKE ?`, "%"+key+"%"); n == 0 {
+			t.Fatalf("twin key part %q missing", key)
+		}
 	}
 }
 
@@ -410,6 +412,122 @@ func TestAgendaSameSnapshotsSameResult(t *testing.T) {
 			t.Fatalf("merge result %+v", it)
 		}
 	}
+
+	// Probe scenarios: whichever source syncs first, the agenda is identical.
+	t.Run("two outlook ids, one teams without", func(t *testing.T) {
+		o1 := timed(t, SourceOutlook, "o1", "Standup", "2026-10-05T16:00:00Z")
+		o1.GlobalID = "uid-1"
+		o2 := o1
+		o2.SourceID, o2.GlobalID = "o2", "uid-2"
+		items := bothOrders(t, tw, []Event{timed(t, SourceTeams, "t1", "Standup", "2026-10-05T16:00:00Z")}, ow, []Event{o1, o2})
+		if len(items) != 3 {
+			t.Fatalf("want 3 events, got %d", len(items))
+		}
+	})
+	t.Run("two teams twins, one outlook id", func(t *testing.T) {
+		o := timed(t, SourceOutlook, "o1", "Standup", "2026-10-05T16:00:00Z")
+		o.GlobalID = "uid-1"
+		items := bothOrders(t, tw, []Event{
+			timed(t, SourceTeams, "t1", "Standup", "2026-10-05T16:00:00Z"),
+			timed(t, SourceTeams, "t2", "Standup", "2026-10-05T16:00:00Z"),
+		}, ow, []Event{o})
+		if len(items) != 3 {
+			t.Fatalf("want 3 events, got %d", len(items))
+		}
+	})
+	t.Run("one each upgrades", func(t *testing.T) {
+		o := timed(t, SourceOutlook, "o1", "Standup", "2026-10-05T16:00:00Z")
+		o.GlobalID = "uid-1"
+		items := bothOrders(t, tw, []Event{timed(t, SourceTeams, "t1", "Standup", "2026-10-05T16:00:00Z")}, ow, []Event{o})
+		if len(items) != 1 {
+			t.Fatalf("want 1 event, got %d", len(items))
+		}
+	})
+	t.Run("outlook with and without id, one teams", func(t *testing.T) {
+		o1 := timed(t, SourceOutlook, "o1", "Standup", "2026-10-05T16:00:00Z")
+		o1.GlobalID = "uid-1"
+		o2 := o1
+		o2.SourceID, o2.GlobalID = "o2", ""
+		bothOrders(t, tw, []Event{timed(t, SourceTeams, "t1", "Standup", "2026-10-05T16:00:00Z")}, ow, []Event{o1, o2})
+	})
+}
+
+// bothOrders feeds the two snapshots to two fresh databases in opposite order and requires the
+// same agenda, keys included.
+func bothOrders(t *testing.T, tw Window, teams []Event, ow Window, outlook []Event) []AgendaItem {
+	t.Helper()
+	a, b := openDB(t), openDB(t)
+	apply(t, a, tw, "2026-10-02T06:00:00Z", teams...)
+	apply(t, a, ow, "2026-10-02T07:00:00Z", outlook...)
+	apply(t, b, ow, "2026-10-02T07:00:00Z", outlook...)
+	apply(t, b, tw, "2026-10-02T06:00:00Z", teams...)
+	ia, _ := agenda(t, a, octStart, octEnd)
+	ib, _ := agenda(t, b, octStart, octEnd)
+	if !reflect.DeepEqual(ia, ib) {
+		t.Fatalf("order changed the agenda:\n%+v\n%+v", ia, ib)
+	}
+	return ia
+}
+
+func TestTwinKeysIgnoreSnapshotOrder(t *testing.T) {
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	t1 := timed(t, SourceTeams, "t1", "Standup", "2026-10-05T16:00:00Z")
+	t2 := timed(t, SourceTeams, "t2", "Standup", "2026-10-05T16:00:00Z")
+	a, b := openDB(t), openDB(t)
+	apply(t, a, w, "2026-10-02T01:00:00Z", t1, t2)
+	apply(t, b, w, "2026-10-02T01:00:00Z", t2, t1)
+	ia, _ := agenda(t, a, octStart, octEnd)
+	ib, _ := agenda(t, b, octStart, octEnd)
+	if len(ia) != 2 || !reflect.DeepEqual(ia, ib) {
+		t.Fatalf("a=%+v b=%+v", ia, ib)
+	}
+	for _, it := range ia {
+		if !strings.HasSuffix(it.Key, "#"+it.SourceID) {
+			t.Fatalf("every twin carries its source id, got %q", it.Key)
+		}
+	}
+	// A twin appearing in a later sync gets the suffix; the first one keeps the bare hash it was given.
+	c := openDB(t)
+	apply(t, c, w, "2026-10-02T01:00:00Z", t1)
+	apply(t, c, w, "2026-10-02T02:00:00Z", t1, t2)
+	ic, _ := agenda(t, c, octStart, octEnd)
+	if len(ic) != 2 {
+		t.Fatalf("got %+v", ic)
+	}
+	// A twin the snapshot no longer lists still counts while its row is live, so the newcomer is suffixed.
+	d := openDB(t)
+	apply(t, d, w, "2026-10-02T01:00:00Z", t1)
+	apply(t, d, w, "2026-10-02T02:00:00Z", t2)
+	if n := count(t, d, `SELECT count(*) FROM calendar_source_events WHERE event_key LIKE '%#t2'`); n != 1 {
+		t.Fatal("newcomer next to a live stored twin must carry its source id")
+	}
+}
+
+func TestUpgradeBlockedByExistingKey(t *testing.T) {
+	tw := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	ow := window(t, SourceOutlook, octStart, octEnd, "2026-10-02T00:00:00Z")
+	// Teams already holds the global key under a different subject, so joining would collide.
+	tg := timed(t, SourceTeams, "tg", "B", "2026-10-05T16:00:00Z")
+	tg.GlobalID = "uid-1"
+	tc := timed(t, SourceTeams, "tc", "A", "2026-10-05T16:00:00Z")
+	og := timed(t, SourceOutlook, "og", "A", "2026-10-05T16:00:00Z")
+	og.GlobalID = "uid-1"
+	for _, outlookFirst := range []bool{false, true} {
+		db := openDB(t)
+		if outlookFirst {
+			apply(t, db, ow, "2026-10-02T01:00:00Z", og)
+			apply(t, db, tw, "2026-10-02T02:00:00Z", tg, tc)
+		} else {
+			apply(t, db, tw, "2026-10-02T01:00:00Z", tg, tc)
+			apply(t, db, ow, "2026-10-02T02:00:00Z", og)
+		}
+		if n := count(t, db, `SELECT count(*) FROM calendar_source_events WHERE source='teams'`); n != 2 {
+			t.Fatalf("outlookFirst=%v: teams rows = %d, a row was overwritten", outlookFirst, n)
+		}
+		if n := count(t, db, `SELECT count(*) FROM calendar_matches WHERE match_method IN ('upgraded','ambiguous')`); n != 0 {
+			t.Fatalf("outlookFirst=%v: blocked upgrade was recorded", outlookFirst)
+		}
+	}
 }
 
 func TestEventRoundTrip(t *testing.T) {
@@ -465,20 +583,15 @@ func TestApplySnapshotErrors(t *testing.T) {
 	}{
 		{"closed db", func(t *testing.T, db *sql.DB) { _ = db.Close() }, w, []Event{teams}},
 		{"match lookup", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_matches`) }, w, []Event{teams}},
-		{"candidate lookup", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }, w, []Event{teams}},
-		{"candidate lookup global", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }, ow, []Event{outlook}},
+		{"own count", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }, w, []Event{teams}},
+		{"own count global", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }, ow, []Event{outlook}},
+		{"other rows composite", func(t *testing.T, db *sql.DB) {
+			exec(t, db, `ALTER TABLE calendar_source_events RENAME COLUMN event_key TO ek`)
+		}, w, []Event{teams}},
+		{"other rows global", func(t *testing.T, db *sql.DB) {
+			exec(t, db, `ALTER TABLE calendar_source_events RENAME COLUMN event_key TO ek`)
+		}, ow, []Event{outlook}},
 		{"match insert", func(t *testing.T, db *sql.DB) { exec(t, db, raise("INSERT", "calendar_matches")) }, w, []Event{teams}},
-		{"collision lookup", func(t *testing.T, db *sql.DB) {
-			exec(t, db, `ALTER TABLE calendar_source_events RENAME COLUMN source_id TO sid`)
-		}, w, []Event{teams}},
-		{"collision lookup ambiguous", func(t *testing.T, db *sql.DB) {
-			o1 := timed(t, SourceOutlook, "o1", "Sync", "2026-10-05T16:00:00Z")
-			o1.GlobalID = "uid-1"
-			o2 := o1
-			o2.SourceID, o2.GlobalID = "o2", "uid-2"
-			apply(t, db, ow, "2026-10-02T01:00:00Z", o1, o2)
-			exec(t, db, `ALTER TABLE calendar_source_events RENAME COLUMN source_id TO sid`)
-		}, w, []Event{teams}},
 		{"upsert", func(t *testing.T, db *sql.DB) { exec(t, db, raise("INSERT", "calendar_source_events")) }, w, []Event{teams}},
 		{"remove select", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }, w, nil},
 		{"remove update", func(t *testing.T, db *sql.DB) {
@@ -515,6 +628,32 @@ func TestApplySnapshotRollsBack(t *testing.T) {
 	}
 	if n := count(t, db, `SELECT count(*) FROM calendar_source_events`); n != 0 {
 		t.Fatal("failed snapshot left rows behind")
+	}
+}
+
+func TestScanErrorsInResolve(t *testing.T) {
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	ow := window(t, SourceOutlook, octStart, octEnd, "2026-10-02T00:00:00Z")
+	orig := scanRow
+	t.Cleanup(func() { scanRow = orig })
+	scanRow = func(*sql.Rows, ...any) error { return errBoom }
+
+	// A stored same-hash row of the same source reaches ownCount's scan.
+	scanRow = orig
+	db := openDB(t)
+	apply(t, db, w, "2026-10-02T01:00:00Z", timed(t, SourceTeams, "t0", "Sync", "2026-10-05T16:00:00Z"))
+	scanRow = func(*sql.Rows, ...any) error { return errBoom }
+	if err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
+		t.Fatal("own count scan: want error")
+	}
+
+	// A stored row of the other source reaches otherRows' scan.
+	scanRow = orig
+	db2 := openDB(t)
+	apply(t, db2, ow, "2026-10-02T01:00:00Z", timed(t, SourceOutlook, "o0", "Sync", "2026-10-05T16:00:00Z"))
+	scanRow = func(*sql.Rows, ...any) error { return errBoom }
+	if err := ApplySnapshot(ctx, db2, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
+		t.Fatal("other rows scan: want error")
 	}
 }
 
