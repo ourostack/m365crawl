@@ -3,6 +3,7 @@ package acceptance
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -51,7 +52,8 @@ func TestDiffScriptAgreesWithGo(t *testing.T) {
 	cmd.Stdin = &in
 	out, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			t.Fatalf("%v: %s", err, exitErr.Stderr)
 		}
 		t.Fatal(err)

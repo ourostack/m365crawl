@@ -252,7 +252,7 @@ func TestOpenTableErrors(t *testing.T) {
 	if err := os.Chmod(p, 0); err != nil {
 		t.Fatal(err)
 	}
-	probe, err := os.Open(p)
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
 	if err == nil {
 		_ = probe.Close()
 		t.Skipf("%s permissions are not enforced", p)
@@ -350,7 +350,7 @@ func TestReadManifestErrors(t *testing.T) {
 	if err := os.WriteFile(p, nil, 0); err != nil {
 		t.Fatal(err)
 	}
-	probe, err := os.Open(p)
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
 	if err == nil {
 		_ = probe.Close()
 		t.Skipf("%s permissions are not enforced", p)
@@ -518,7 +518,7 @@ func TestReadLogErrors(t *testing.T) {
 	if err := os.WriteFile(p, nil, 0); err != nil {
 		t.Fatal(err)
 	}
-	probe, err := os.Open(p)
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
 	if err == nil {
 		_ = probe.Close()
 		t.Skipf("%s permissions are not enforced", p)
