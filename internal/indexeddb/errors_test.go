@@ -372,6 +372,15 @@ func TestOpenWithErrors(t *testing.T) {
 		t.Fatalf("Databases = %+v, %v", dbs, err)
 	}
 
+	// The single-pass KeepStore open skips a key too short to carry a prefix as well.
+	o, err = OpenWith(good, "", OpenOptions{KeepStore: func(int64, int64) bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := o.Stats().Skipped; got < 1 {
+		t.Fatalf("KeepStore Skipped = %d, want the short key counted", got)
+	}
+
 	// The data pass fails when a table disappears between the two passes.
 	dir := writeTables(t, map[string][]byte{string(dbNameKey("o", "n")): {1}})
 	removing := OpenOptions{KeepDatabase: func(string) bool {

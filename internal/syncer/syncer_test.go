@@ -885,7 +885,12 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 		{"upsert", `create trigger boom before insert on records begin select raise(abort, 'boom'); end`, nil},
 		{"mark records", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale(cal, "events"))},
 		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+		// Already removed, so only the purge touches it.
+		{"purge", `update records set removed_at = '2020-01-01T00:00:00.000Z' where store = 'things'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
 	}
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool { return name == "things" }
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := fixtureCopy(t)
@@ -920,5 +925,98 @@ func TestMergeOmissions(t *testing.T) {
 	}
 	if lost(map[string]int{"denied_database": 3, "denied_store": 1}) != 0 || lost(m) != 5 {
 		t.Fatalf("lost: %d", lost(m))
+	}
+}
+
+// A database the generic read could not read is data loss: the sync reports ok_with_omissions,
+// the typed data still syncs, and the rows of the unreadable database are neither removed nor
+// lost. Redactions are reported as a count and are not an omission.
+func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
+	db := newDB(t)
+	calendar := "Teams:calendar-manager:react-web-client:" + acctA.UserID
+	acct := acctA
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: calendar, Store: "events", KeyJSON: []byte(`"kept"`), ValueJSON: []byte(`1`)})
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, _ func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+		if err := opts.OnDatabase(calendar, false, nil); err != nil {
+			return teamsdesktop.GenericResult{}, err
+		}
+		return teamsdesktop.GenericResult{
+			Omissions: map[string]int{"database_unreadable": 1},
+			Present:   []string{calendar},
+			Complete:  map[string]bool{calendar: false},
+			Redacted:  3,
+		}, nil
+	}
+	db2 := newDB(t)
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db2})
+	if r.Status != StatusOmissions || r.Omissions["database_unreadable"] != 1 || r.Messages.Inserted != fixtureMessages {
+		t.Fatalf("status=%s omissions=%v messages=%+v", r.Status, r.Omissions, r.Messages)
+	}
+	if r.Redacted != 3 || r.Sources[0].Redacted != 3 {
+		t.Fatalf("redacted = %d / %d", r.Redacted, r.Sources[0].Redacted)
+	}
+	// An archive that already holds rows of that database keeps them live.
+	root := fixtureCopy(t)
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	run(t, Options{Root: root, DBPath: db})
+	if n := recordsQuery(t, db, `select count(*) from records where key_json = '"kept"' and removed_at is null`); n != 1 {
+		t.Fatalf("rows of an unreadable database were marked removed")
+	}
+	if l := lost(map[string]int{"database_unreadable": 1}); l != 1 {
+		t.Fatalf("lost = %d", l)
+	}
+}
+
+// Rows archived under a name the denylist now matches are cleared on the next sync: the key stays,
+// the value and hash go, and the row is marked removed.
+func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	acct := acctA
+	seedRecords(t, db,
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":1}`)},
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "private", KeyJSON: []byte(`"y"`), ValueJSON: []byte(`{"v":2}`)},
+	)
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool {
+		return old(name) || name == "private" || strings.Contains(name, "gone-manager")
+	}
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	run(t, Options{Root: root, DBPath: db})
+	if n := recordsQuery(t, db, `select count(*) from records where key_json in ('"x"','"y"') and value_json is null and content_hash = '' and removed_at is not null`); n != 2 {
+		t.Fatalf("%d rows purged, want 2", n)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where value_json is null`); n != 2 {
+		t.Fatalf("%d rows without a value, want only the purged 2", n)
+	}
+}
+
+// Records of a database that was not read completely are flushed after the read, and a failure of
+// that last flush fails the source.
+func TestFinalRecordFlushFailureFailsTheSource(t *testing.T) {
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, fn func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+		a := acctA
+		if err := fn(teamsdesktop.GenericRecord{Account: &a, Database: "Teams:x-manager:react-web-client:" + acctA.UserID, Store: "s", KeyJSON: []byte(`"k"`), ValueJSON: []byte(`1`)}); err != nil {
+			return teamsdesktop.GenericResult{}, err
+		}
+		return teamsdesktop.GenericResult{Omissions: map[string]int{}}, opts.OnDatabase("Teams:x-manager:react-web-client:"+acctA.UserID, false, nil)
+	}
+	hookFlush(t, 2000, func(kind string, _ int) error {
+		if kind == "record" {
+			return errors.New("flush refused")
+		}
+		return nil
+	})
+	if _, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t)}); err == nil || !strings.Contains(err.Error(), "flush refused") {
+		t.Fatalf("err = %v", err)
 	}
 }

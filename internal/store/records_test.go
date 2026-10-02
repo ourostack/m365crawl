@@ -295,7 +295,7 @@ func TestSchemaMigratesV2ToV3(t *testing.T) {
 	if v := rowCount(t, s, `select version from schema_migrations`); v != SchemaVersion || SchemaVersion != 3 {
 		t.Fatalf("version %d, want 3", v)
 	}
-	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('records','records_db_store')`); n != 2 {
+	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('records','records_db_store','records_updated')`); n != 3 {
 		t.Fatalf("records table and index: %d", n)
 	}
 	if n := rowCount(t, s, `select count(*) from messages`); n != 1 {
@@ -499,6 +499,10 @@ func TestRecordsWritesFaultsSurface(t *testing.T) {
 			_, err := x.MarkRecordsRemoved(srcA, dbA, map[string]map[string]struct{}{}, base)
 			return err
 		}),
+		"purge denied": run(func(x *Session) error {
+			_, err := x.PurgeDenied(srcA, func(n string) bool { return n == "events" }, base)
+			return err
+		}),
 		"mark databases": run(func(x *Session) error {
 			_, err := x.MarkDatabasesRemoved(srcA, nil, &acctA, base)
 			return err
@@ -507,4 +511,111 @@ func TestRecordsWritesFaultsSurface(t *testing.T) {
 	for name, op := range ops {
 		t.Run(name, func(t *testing.T) { sweepFaults(t, seed, op, 1, 2, 3, 4) })
 	}
+}
+
+func TestPrefixSuccessor(t *testing.T) {
+	for _, c := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"Teams:", "Teams;", true},
+		{"a\xff", "b", true},
+		{"a\xff\xff", "b", true},
+		{"\xff", "", false},
+	} {
+		got, ok := prefixSuccessor(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("prefixSuccessor(%q) = %q, %v", c.in, got, ok)
+		}
+	}
+}
+
+// The prefix filter is a range, so it uses the (database, store) index and matches exactly the
+// names that start with the prefix, including ones that sort next to it.
+func TestRecordsPrefixIsARange(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	upsert(t, s, []teamsdesktop.GenericRecord{
+		grec(&acctA, "ab", "s", `"1"`, `1`),
+		grec(&acctA, "abc", "s", `"1"`, `2`),
+		grec(&acctA, "ac", "s", `"1"`, `3`),
+		grec(&acctA, "aa", "s", `"1"`, `4`),
+		grec(&acctA, "\xff\xffz", "s", `"1"`, `5`),
+	}, base)
+	for prefix, want := range map[string]int{"ab": 2, "a": 4, "abc": 1, "b": 0, "\xff": 1, "": 5} {
+		rows, _, err := s.Records(ctx, RecordFilter{Database: prefix})
+		if err != nil || len(rows) != want {
+			t.Errorf("prefix %q: %d rows (want %d) %v", prefix, len(rows), want, err)
+		}
+	}
+	var plan string
+	rows, err := s.db.Query(`explain query plan select 1 from records where database >= 'ab' and database < 'ac'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		if err := rows.Scan(&a, &b, &c, &d); err != nil {
+			t.Fatal(err)
+		}
+		plan += d
+	}
+	_ = rows.Close()
+	if !strings.Contains(plan, "USING") {
+		t.Fatalf("prefix range does not use an index: %s", plan)
+	}
+}
+
+// PurgeDenied is the archive's one deletion of content: a row whose database or store now
+// matches the denylist keeps its key but loses its value and hash, and is marked removed.
+func TestPurgeDenied(t *testing.T) {
+	s := newStore(t)
+	upsert(t, s, []teamsdesktop.GenericRecord{
+		grec(&acctA, dbA, "events", `"e1"`, `{"n":1}`),
+		grec(&acctA, dbA, "events", `"e2"`, `{"n":2}`),
+		grec(&acctA, dbA, "vault", `"v1"`, `{"token":"x"}`),
+		grec(&acctA, "Teams:vault-manager:"+acctA.UserID, "any", `"k"`, `{"n":3}`),
+	}, base)
+	later := base.Add(time.Hour)
+	var n int
+	inSession(t, s, func(x *Session) {
+		if _, err := x.MarkRecordsRemoved(srcA, dbA, map[string]map[string]struct{}{"vault": {}, "events": {`"e1"`: {}, `"e2"`: {}}}, base.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		n, err = x.PurgeDenied(srcA, func(name string) bool { return name == "vault" || strings.HasPrefix(name, "Teams:vault") }, later)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	if n != 2 {
+		t.Fatalf("cleared %d rows, want 2", n)
+	}
+	v, removed, _ := recRow(t, s, dbA, "vault", `"v1"`)
+	if v != "" || removed != fmtTime(base.Add(time.Minute)) {
+		t.Fatalf("store purge: value %q removed %q (an existing removal time is kept)", v, removed)
+	}
+	if got := rowCount(t, s, `select count(*) from records where database like 'Teams:vault%' and value_json is null and content_hash='' and removed_at is not null`); got != 1 {
+		t.Fatalf("database purge: %d rows", got)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", `"e1"`); v != `{"n":1}` || removed != "" {
+		t.Fatalf("a row that is not denied changed: %q %q", v, removed)
+	}
+	// Idempotent: nothing left to clear.
+	inSession(t, s, func(x *Session) {
+		if n, err := x.PurgeDenied(srcA, func(string) bool { return true }, later); err != nil || n != 2 {
+			// events rows are now denied too, so they are cleared; the already cleared rows are not.
+			t.Fatalf("second purge: %d %v", n, err)
+		}
+		if n, err := x.PurgeDenied(srcA, func(string) bool { return true }, later); err != nil || n != 0 {
+			t.Fatalf("third purge: %d %v", n, err)
+		}
+	})
+	// Another source is untouched.
+	inSession(t, s, func(x *Session) {
+		if n, err := x.PurgeDenied("other-source", func(string) bool { return true }, later); err != nil || n != 0 {
+			t.Fatalf("other source: %d %v", n, err)
+		}
+	})
 }

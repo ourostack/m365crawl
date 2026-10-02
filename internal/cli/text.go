@@ -84,6 +84,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		for _, k := range keys {
 			_, _ = fmt.Fprintf(w, "omitted %s: %d\n", k, r.Omissions[k])
 		}
+		if r.Redacted > 0 {
+			_, _ = fmt.Fprintf(w, "redacted: %d credential-looking values in generic records\n", r.Redacted)
+		}
 		for _, src := range r.Sources {
 			if src.Error != nil {
 				_, _ = fmt.Fprintf(w, "failed %s: %s: %s\n", src.Source, src.Error.Code, src.Error.Message)

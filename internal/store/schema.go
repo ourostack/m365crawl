@@ -142,6 +142,7 @@ create table if not exists records(
   primary key(source, database, store, key_json)
 );
 create index if not exists records_db_store on records(database, store);
+create index if not exists records_updated on records(updated_at);
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);
 `

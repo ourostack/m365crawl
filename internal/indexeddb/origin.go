@@ -47,6 +47,11 @@ type OpenOptions struct {
 	// with its object stores either way; Records of a database that is not kept yields
 	// nothing, and its values are never held in memory.
 	KeepDatabase func(name string) bool
+	// KeepStore, when set, replaces KeepDatabase: it reports whether the records of one object
+	// store (database id, object store id) are loaded. The caller already knows the ids (from
+	// Census), so OpenWith skips the metadata-only pass and reads the LevelDB once. Databases
+	// still works (metadata is always loaded).
+	KeepStore func(dbID, storeID int64) bool
 }
 
 // OpenWith is Open with options. With KeepDatabase set it reads the LevelDB twice: first
@@ -60,6 +65,26 @@ type OpenOptions struct {
 // times (validation, this metadata pass, the data pass); folding validation into the metadata
 // pass would save one.
 func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
+	if opts.KeepStore != nil {
+		db, err := leveldb.LoadWith(leveldbDir, leveldb.LoadOptions{Keep: func(k []byte) bool {
+			id, store, index, _, err := readPrefix(k)
+			if err != nil {
+				return false
+			}
+			switch {
+			case id == 0, store == 0 && index == 0:
+				return true
+			case index != indexData && index != indexBlobEntries:
+				return false
+			default:
+				return opts.KeepStore(int64(id), int64(store)) //nolint:gosec // ids are bounded well below int64
+			}
+		}})
+		if err != nil {
+			return nil, err
+		}
+		return &Origin{kv: db, blobDir: blobDir, stats: db.Stats()}, nil
+	}
 	if opts.KeepDatabase == nil {
 		db, err := leveldb.Load(leveldbDir)
 		if err != nil {

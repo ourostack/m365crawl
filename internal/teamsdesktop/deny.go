@@ -8,10 +8,15 @@ import "strings"
 var deniedTerms = []string{
 	"auth", "token", "credential", "secret", "cookie", "msal", "oneauth",
 	"key-store", "keystore", "keyval", "session",
+	"key-value", "keyring", "crypto", "encrypt", "pkce", "bearer", "password", "refresh", "adal",
 }
 
+// deniedTokens are terms too short to match as substrings ("aad" is in "load"): they match only
+// as a whole segment, delimited by the start or end of the name or one of - _ : .
+var deniedTokens = []string{"aad", "keys", "jwt", "e2ee"}
+
 // Denied reports whether a database name or an object store name looks like credential material:
-// it starts with "Teams:auth" or contains one of the denied terms, ignoring case. Denied names are
+// it starts with "Teams:auth", contains one of the denied terms or has one of the denied tokens as a whole segment, ignoring case. Denied names are
 // never listed beyond their count, walked or decoded.
 func Denied(name string) bool {
 	n := strings.ToLower(name)
@@ -21,6 +26,13 @@ func Denied(name string) bool {
 	for _, t := range deniedTerms {
 		if strings.Contains(n, t) {
 			return true
+		}
+	}
+	for _, seg := range strings.FieldsFunc(n, func(r rune) bool { return r == '-' || r == '_' || r == ':' || r == '.' }) {
+		for _, t := range deniedTokens {
+			if seg == t {
+				return true
+			}
 		}
 	}
 	return false

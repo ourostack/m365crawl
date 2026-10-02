@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sort"
 	"time"
-	"unicode/utf8"
 
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
@@ -144,6 +143,46 @@ func (x *Session) MarkDatabasesRemoved(source string, present []string, account 
 	return total, nil
 }
 
+// PurgeDenied clears credential material from the rows of source whose database or object store
+// name now satisfies denied: value_json becomes NULL, content_hash ” and removed_at is set when
+// it was not. It is the one place the archive deletes content (a name added to the denylist after
+// rows were archived under it) and it is a no-op for rows already cleared. It returns how many
+// rows it cleared.
+func (x *Session) PurgeDenied(source string, denied func(name string) bool, at time.Time) (int, error) {
+	ctx := context.Background()
+	rows, err := x.tx.QueryContext(ctx, `select distinct database, store from records where source=? and (value_json is not null or content_hash != '')`, source)
+	if err != nil {
+		return 0, err
+	}
+	var hit [][2]string
+	for rows.Next() {
+		var db, st string
+		if err := rows.Scan(&db, &st); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		if denied(db) || denied(st) {
+			hit = append(hit, [2]string{db, st})
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, h := range hit {
+		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
+			fmtTime(at), source, h[0], h[1])
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+	}
+	return total, nil
+}
+
 // StoreRow is one object store of one database, as `stores` lists it. Records counts the live
 // rows and Removed the rows no longer in Teams' cache.
 type StoreRow struct {
@@ -198,13 +237,33 @@ type RecordRow struct {
 	FirstSeenAt, UpdatedAt, RemovedAt         time.Time
 }
 
+// prefixSuccessor is the smallest string greater than every string that starts with prefix: the
+// prefix with its last byte below 0xff incremented and what follows cut off. ok is false when
+// every byte is 0xff, so no string is greater than all of them.
+func prefixSuccessor(prefix string) (string, bool) {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < 0xff {
+			b[i]++
+			return string(b[:i+1]), true
+		}
+	}
+	return "", false
+}
+
 // Records lists archived records, newest updated_at first.
 func (s *Store) Records(ctx context.Context, f RecordFilter) ([]RecordRow, bool, error) {
 	var w where
 	if f.Account != nil {
 		w.add(`tenant_id=? and user_id=?`, f.Account.TenantID, f.Account.UserID)
 	}
-	w.add(`substr(database, 1, ?)=?`, utf8.RuneCountInString(f.Database), f.Database)
+	if f.Database != "" {
+		if hi, ok := prefixSuccessor(f.Database); ok {
+			w.add(`database >= ? and database < ?`, f.Database, hi)
+		} else {
+			w.add(`database >= ?`, f.Database)
+		}
+	}
 	if f.Store != "" {
 		w.add(`store=?`, f.Store)
 	}

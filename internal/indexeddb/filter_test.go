@@ -215,3 +215,50 @@ func BenchmarkOpenFixture(b *testing.B) {
 		})
 	}
 }
+
+// KeepStore keeps exactly the named object stores, reading the LevelDB once: the kept stores
+// decode as in the unfiltered origin and every other store yields nothing.
+func TestOpenWithKeepStoreMatchesUnfiltered(t *testing.T) {
+	full := openFixture(t)
+	dbs, err := full.Databases()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep := map[[2]int64]bool{}
+	for _, db := range dbs {
+		if keepManagers(db.Name) && len(db.Stores) > 0 {
+			keep[[2]int64{db.ID, db.Stores[0].ID}] = true
+		}
+	}
+	ldb, blob := fixtureDirs()
+	o, err := OpenWith(ldb, blob, OpenOptions{KeepStore: func(d, s int64) bool { return keep[[2]int64{d, s}] }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := o.Databases(); err != nil || !reflect.DeepEqual(got, dbs) {
+		t.Fatalf("Databases = %+v, %v", got, err)
+	}
+	kept, dropped := 0, 0
+	for _, db := range dbs {
+		for _, s := range db.Stores {
+			want, got := dumpStore(t, full, db.ID, s.ID), dumpStore(t, o, db.ID, s.ID)
+			if keep[[2]int64{db.ID, s.ID}] {
+				kept += len(want)
+				if !reflect.DeepEqual(want, got) {
+					t.Errorf("db %d store %d: kept store differs", db.ID, s.ID)
+				}
+			} else {
+				dropped += len(want)
+				if len(got) != 0 {
+					t.Errorf("db %d store %d: not kept but yielded %d records", db.ID, s.ID, len(got))
+				}
+			}
+		}
+	}
+	if kept == 0 || dropped == 0 {
+		t.Fatalf("fixture coverage too thin: kept %d dropped %d", kept, dropped)
+	}
+	if _, err := OpenWith(t.TempDir()+"/missing", "", OpenOptions{KeepStore: func(int64, int64) bool { return true }}); err == nil {
+		t.Fatal("missing directory opened")
+	}
+}

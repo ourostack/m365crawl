@@ -36,7 +36,10 @@ type Report struct {
 	Activity      store.Counts   `json:"activity"`
 	Records       store.Counts   `json:"records"`
 	Omissions     map[string]int `json:"omissions"`
-	OtherOrigins  []string       `json:"other_origins"`
+	// Redacted counts the credential-looking fragments removed from generic records before they
+	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
+	Redacted     int      `json:"redacted"`
+	OtherOrigins []string `json:"other_origins"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
 	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
 	Migrated   *store.Migration `json:"migrated,omitempty"`
@@ -49,6 +52,7 @@ type SourceReport struct {
 	Source    string         `json:"source"` // "<profile>|<origin>"
 	Status    string         `json:"status"` // ok | ok_with_omissions | unchanged | failed
 	Omissions map[string]int `json:"omissions,omitempty"`
+	Redacted  int            `json:"redacted,omitempty"`
 	// Accounts and Counts describe a source that was decoded and committed; Error is set when the
 	// source failed (its rows were rolled back).
 	Accounts []string      `json:"accounts,omitempty"` // "<tenantId>/<userId>"

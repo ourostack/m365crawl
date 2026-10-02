@@ -13,6 +13,7 @@ import (
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/indexeddb"
 	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/teamscrawl/internal/v8"
 )
 
 func TestDeniedNames(t *testing.T) {
@@ -33,6 +34,26 @@ func TestDeniedNames(t *testing.T) {
 		{"Teams:secret-store", true},
 		{"Teams:session-manager", true},
 		{"Teams:key-store-manager", true},
+		{"Teams:key-value-store", true},
+		{"keyring", true},
+		{"Teams:crypto-manager", true},
+		{"Teams:encrypted-blobs", true},
+		{"pkce-verifiers", true},
+		{"BearerCache", true},
+		{"Teams:password-store", true},
+		{"refresh-info", true},
+		{"adal-cache", true},
+		{"Teams:aad-cache:t:u", true},
+		{"aad", true},
+		{"Teams:keys", true},
+		{"Teams:jwt", true},
+		{"Teams:e2ee", true},
+		{"e2ee_store", true},
+		{"Teams:load-manager", false},
+		{"Teams:monkeys-manager", false},
+		{"Teams:aadvark", false},
+		{"Teams:jwtx", false},
+		{"Teams:e2eex", false},
 	} {
 		if got := Denied(c.name); got != c.want {
 			t.Errorf("Denied(%q) = %v want %v", c.name, got, c.want)
@@ -49,12 +70,22 @@ func TestDeniedStoreNames(t *testing.T) {
 type genericRead struct {
 	recs []GenericRecord
 	res  GenericResult
+	// seen is what OnDatabase was given, per database.
+	seen map[string]map[string]map[string]struct{}
+}
+
+func (g *genericRead) opts() GenericOptions {
+	g.seen = map[string]map[string]map[string]struct{}{}
+	return GenericOptions{OnDatabase: func(db string, _ bool, seen map[string]map[string]struct{}) error {
+		g.seen[db] = seen
+		return nil
+	}}
 }
 
 func readGenericAll(t *testing.T, snap string, account *Account, budget int64) genericRead {
 	t.Helper()
 	var g genericRead
-	res, err := ReadGeneric(context.Background(), snap, account, budget, func(r GenericRecord) error {
+	res, err := ReadGeneric(context.Background(), snap, account, budget, g.opts(), func(r GenericRecord) error {
 		g.recs = append(g.recs, r)
 		return nil
 	})
@@ -92,8 +123,8 @@ func TestReadGenericFixture(t *testing.T) {
 		t.Fatalf("present = %v", g.res.Present)
 	}
 	for _, n := range g.res.Present {
-		if !g.res.Complete[n] || len(g.res.Seen[n]) == 0 {
-			t.Errorf("%s: complete=%v stores seen=%d", n, g.res.Complete[n], len(g.res.Seen[n]))
+		if !g.res.Complete[n] || len(g.seen[n]) == 0 {
+			t.Errorf("%s: complete=%v stores seen=%d", n, g.res.Complete[n], len(g.seen[n]))
 		}
 	}
 }
@@ -117,11 +148,11 @@ func TestReadGenericKeysCanonical(t *testing.T) {
 		t.Fatalf("keys = %q want %q", keys, want)
 	}
 	for _, k := range want {
-		if _, ok := g.res.Seen[g.recs[0].Database]; !ok {
+		if _, ok := g.seen[g.recs[0].Database]; !ok {
 			t.Fatal("seen missing")
 		}
 		found := false
-		for _, s := range g.res.Seen {
+		for _, s := range g.seen {
 			if _, ok := s["pins"][k]; ok {
 				found = true
 			}
@@ -179,7 +210,7 @@ func (f *fakeGeneric) install(t *testing.T) {
 		}
 		return f.held, f.dbs, nil
 	}
-	openBatch = func(_ string, keep func(string) bool) (genericOrigin, error) {
+	openBatch = func(_ string, keep func(int64, int64) bool) (genericOrigin, error) {
 		if f.openErr != nil {
 			return nil, f.openErr
 		}
@@ -189,8 +220,11 @@ func (f *fakeGeneric) install(t *testing.T) {
 		}
 		var names []string
 		for _, d := range f.dbs {
-			if keep(d.Name) {
-				names = append(names, d.Name)
+			for _, st := range d.Stores {
+				if keep(d.ID, st.ID) {
+					names = append(names, d.Name)
+					break
+				}
 			}
 		}
 		f.opens = append(f.opens, names)
@@ -214,7 +248,7 @@ func (f *fakeGeneric) run(t *testing.T, account *Account, budget int64) (generic
 	t.Helper()
 	f.install(t)
 	var g genericRead
-	res, err := ReadGeneric(context.Background(), "/snap", account, budget, func(r GenericRecord) error {
+	res, err := ReadGeneric(context.Background(), "/snap", account, budget, g.opts(), func(r GenericRecord) error {
 		g.recs = append(g.recs, r)
 		return nil
 	})
@@ -293,24 +327,41 @@ func TestReadGenericDecodeFailureStillSeen(t *testing.T) {
 	if len(g.recs) != 2 || g.recs[0].ValueJSON != nil || string(g.recs[1].ValueJSON) != `"y"` {
 		t.Fatalf("records = %+v", g.recs)
 	}
-	if g.res.Omissions[indexeddb.CodeUnknownEnvelope] != 1 || !g.res.Complete[name] || len(g.res.Seen[name]["s"]) != 2 {
+	if g.res.Omissions[indexeddb.CodeUnknownEnvelope] != 1 || !g.res.Complete[name] || len(g.seen[name]["s"]) != 2 {
 		t.Fatalf("res = %+v", g.res)
 	}
 }
 
-func TestReadGenericDecodeFatal(t *testing.T) {
+func TestReadGenericDecodeFatalIsolatesDatabase(t *testing.T) {
 	f := &fakeGeneric{
-		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
-		held:    map[int64]int64{1: 1},
-		records: map[int64][]indexeddb.Record{1: {strRec("k", "x")}},
-		decode:  func([]byte) (any, error) { return nil, errors.New("boom") },
+		dbs:  []indexeddb.Database{gdb(1, "a-manager", "s"), gdb(2, "b-manager", "s")},
+		held: map[int64]int64{1: 1, 2: 1},
+		records: map[int64][]indexeddb.Record{
+			1: {strRec("k", "boom")}, 2: {strRec("k", "fine")},
+		},
+		decode: func(raw []byte) (any, error) {
+			if string(raw) == "boom" {
+				return nil, errors.New("boom")
+			}
+			return string(raw), nil
+		},
 	}
 	g, err := f.run(t, nil, DefaultGenericBudget)
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("err = %v", err)
+	if err != nil {
+		t.Fatalf("a broken database stopped the read: %v", err)
 	}
-	if g.res.Complete[f.dbs[0].Name] {
-		t.Fatal("a failed database is complete")
+	a, b := f.dbs[0].Name, f.dbs[1].Name
+	if g.res.Complete[a] || !g.res.Complete[b] || g.res.Omissions[omitDatabaseUnreadable] != 1 {
+		t.Fatalf("res = %+v", g.res)
+	}
+	if len(g.recs) != 1 || g.recs[0].Database != b {
+		t.Fatalf("records = %+v", g.recs)
+	}
+	if seen, ok := g.seen[a]; !ok || seen != nil || len(g.seen[b]["s"]) != 1 {
+		t.Fatalf("OnDatabase seen = %v", g.seen)
+	}
+	if len(g.res.Present) != 2 {
+		t.Fatalf("present = %v", g.res.Present)
 	}
 }
 
@@ -349,14 +400,15 @@ func TestReadGenericBadKeyIncomplete(t *testing.T) {
 	}
 }
 
-func TestReadGenericBadKeyNonOmissionIsFatal(t *testing.T) {
+func TestReadGenericPlainRecordErrorMarksDatabaseUnreadable(t *testing.T) {
 	f := &fakeGeneric{
 		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
 		held:    map[int64]int64{1: 1},
 		records: map[int64][]indexeddb.Record{1: {{Err: errors.New("plain")}}},
 	}
-	if _, err := f.run(t, nil, DefaultGenericBudget); err == nil || !strings.Contains(err.Error(), "plain") {
-		t.Fatalf("err = %v", err)
+	g, err := f.run(t, nil, DefaultGenericBudget)
+	if err != nil || g.res.Omissions[omitDatabaseUnreadable] != 1 || g.res.Complete[f.dbs[0].Name] {
+		t.Fatalf("err=%v res=%+v", err, g.res)
 	}
 }
 
@@ -435,13 +487,13 @@ func TestReadGenericCancel(t *testing.T) {
 	// Cancelled before the first batch.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := ReadGeneric(ctx, "/snap", nil, 15, func(GenericRecord) error { return nil }); !errors.Is(err, context.Canceled) {
+	if _, err := ReadGeneric(ctx, "/snap", nil, 15, GenericOptions{}, func(GenericRecord) error { return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}
 	// Cancelled from the callback: the in-flight record loop and the next batch both stop.
 	ctx, cancel = context.WithCancel(context.Background())
 	n := 0
-	_, err := ReadGeneric(ctx, "/snap", nil, 15, func(GenericRecord) error { n++; cancel(); return nil })
+	_, err := ReadGeneric(ctx, "/snap", nil, 15, GenericOptions{}, func(GenericRecord) error { n++; cancel(); return nil })
 	if !errors.Is(err, context.Canceled) || n != 1 {
 		t.Fatalf("err=%v n=%d", err, n)
 	}
@@ -449,20 +501,145 @@ func TestReadGenericCancel(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	cancel()
 	f.censusEr = errors.New("snapshot removed")
-	if _, err := ReadGeneric(ctx, "/snap", nil, 15, nil); !errors.Is(err, context.Canceled) {
+	if _, err := ReadGeneric(ctx, "/snap", nil, 15, GenericOptions{}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("census err = %v", err)
 	}
 	f.censusEr = nil
 	f.openErr = errors.New("snapshot removed")
 	ctx, cancel = context.WithCancel(context.Background())
-	_ = cancel
-	if _, err := ReadGeneric(ctx, "/snap", nil, 15, func(GenericRecord) error { return nil }); err == nil {
-		t.Fatal("open error swallowed")
-	}
 	cancel()
-	f.openErr = errors.New("snapshot removed")
-	if err := readBatch(ctx, "/snap", f.dbs, &GenericResult{}, nil); !errors.Is(err, context.Canceled) {
+	batch := []genericDB{{db: f.dbs[0]}}
+	if err := readBatch(ctx, "/snap", batch, &GenericResult{}, GenericOptions{}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("open err = %v", err)
+	}
+	// Cancelled while a database is read: the cancellation, not an unreadable database.
+	f.openErr = nil
+	f.recErr = errors.New("file removed")
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	res := &GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}}
+	if err := readBatch(ctx, "/snap", []genericDB{{db: f.dbs[0], stores: f.dbs[0].Stores}}, res, GenericOptions{}, nil); !errors.Is(err, context.Canceled) || res.Omissions[omitDatabaseUnreadable] != 0 {
+		t.Fatalf("read err = %v omissions = %v", err, res.Omissions)
+	}
+}
+
+// A batch that cannot be opened makes every database in it unreadable and the read goes on with
+// the next batch; the other databases and the typed read are not lost.
+func TestReadGenericOpenFailureMarksBatchUnreadable(t *testing.T) {
+	f := &fakeGeneric{
+		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s"), gdb(2, "b-manager", "s"), gdb(3, "c-manager", "s")},
+		held:    map[int64]int64{1: 10, 2: 10, 3: 100},
+		records: map[int64][]indexeddb.Record{3: {strRec("k", "v")}},
+	}
+	f.install(t)
+	real := openBatch
+	opens := 0
+	openBatch = func(dir string, keep func(int64, int64) bool) (genericOrigin, error) {
+		if opens++; opens == 1 {
+			return nil, errors.New("open failed")
+		}
+		return real(dir, keep)
+	}
+	var g genericRead
+	res, err := ReadGeneric(context.Background(), "/snap", nil, 25, g.opts(), func(r GenericRecord) error {
+		g.recs = append(g.recs, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Omissions[omitDatabaseUnreadable] != 2 || res.Complete[f.dbs[0].Name] || res.Complete[f.dbs[1].Name] || !res.Complete[f.dbs[2].Name] || len(g.recs) != 1 {
+		t.Fatalf("res = %+v recs = %v", res, g.recs)
+	}
+	if _, ok := g.seen[f.dbs[0].Name]; !ok || g.seen[f.dbs[0].Name] != nil {
+		t.Fatalf("seen = %v", g.seen)
+	}
+}
+
+func TestReadGenericOnDatabaseErrorStops(t *testing.T) {
+	f := &fakeGeneric{
+		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+		held:    map[int64]int64{1: 1},
+		records: map[int64][]indexeddb.Record{1: {strRec("k", "v")}},
+	}
+	f.install(t)
+	boom := errors.New("mark failed")
+	if _, err := ReadGeneric(context.Background(), "/snap", nil, 1, GenericOptions{OnDatabase: func(string, bool, map[string]map[string]struct{}) error { return boom }}, func(GenericRecord) error { return nil }); !errors.Is(err, boom) {
+		t.Fatalf("complete database: %v", err)
+	}
+	f.recErr = errors.New("unreadable")
+	if _, err := ReadGeneric(context.Background(), "/snap", nil, 1, GenericOptions{OnDatabase: func(string, bool, map[string]map[string]struct{}) error { return boom }}, func(GenericRecord) error { return nil }); !errors.Is(err, boom) {
+		t.Fatalf("unreadable database: %v", err)
+	}
+	f.recErr = nil
+	f.openErr = errors.New("open failed")
+	if _, err := ReadGeneric(context.Background(), "/snap", nil, 1, GenericOptions{OnDatabase: func(string, bool, map[string]map[string]struct{}) error { return boom }}, func(GenericRecord) error { return nil }); !errors.Is(err, boom) {
+		t.Fatalf("unopened batch: %v", err)
+	}
+}
+
+// Typed databases are read for their other stores only; a typed database whose only store is
+// consumed by its mapper contributes nothing; excluded and denied stores are never kept.
+func TestReadGenericTypedDatabasesOtherStores(t *testing.T) {
+	f := &fakeGeneric{
+		dbs: []indexeddb.Database{
+			gdb(1, "replychain-manager", "replychains-2"),
+			gdb(2, "conversation-manager", "conversations", "drafts", "sessionTokens"),
+			gdb(3, "a-manager", "events"),
+		},
+		held: map[int64]int64{1: 1, 2: 1, 3: 1},
+		records: map[int64][]indexeddb.Record{
+			1: {strRec("k", "typed")}, 2: {strRec("k", "v")}, 3: {strRec("k", "v")},
+		},
+	}
+	f.install(t)
+	var kept [][2]int64
+	real := openBatch
+	openBatch = func(dir string, keep func(int64, int64) bool) (genericOrigin, error) {
+		for _, d := range f.dbs {
+			for _, st := range d.Stores {
+				if keep(d.ID, st.ID) {
+					kept = append(kept, [2]int64{d.ID, st.ID})
+				}
+			}
+		}
+		return real(dir, keep)
+	}
+	var g genericRead
+	res, err := ReadGeneric(context.Background(), "/snap", nil, 1<<20, g.opts(), func(r GenericRecord) error {
+		g.recs = append(g.recs, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(kept) != "[[2 2] [3 1]]" {
+		t.Fatalf("kept stores = %v", kept)
+	}
+	if len(g.recs) != 2 || g.recs[0].Store != "drafts" || g.recs[1].Store != "events" || res.Omissions[omitDeniedStore] != 1 || len(res.Present) != 2 {
+		t.Fatalf("recs=%+v res=%+v", g.recs, res)
+	}
+}
+
+// Values are scrubbed before they reach the callback, and the redactions are counted.
+func TestReadGenericScrubsValues(t *testing.T) {
+	f := &fakeGeneric{
+		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+		held:    map[int64]int64{1: 1},
+		records: map[int64][]indexeddb.Record{1: {strRec("k", "x"), strRec("k2", "y")}},
+		decode: func(raw []byte) (any, error) {
+			if string(raw) == "x" {
+				return &v8.Object{Keys: []string{"access_token", "ok"}, Values: []any{"secret", "https://h/p?sig=abc"}}, nil
+			}
+			return "plain", nil
+		},
+	}
+	g, err := f.run(t, nil, DefaultGenericBudget)
+	if err != nil || len(g.recs) != 2 {
+		t.Fatalf("err=%v recs=%v", err, g.recs)
+	}
+	if string(g.recs[0].ValueJSON) != `{"access_token":"[redacted]","ok":"https://h/p?sig=[redacted]"}` || g.res.Redacted != 2 {
+		t.Fatalf("value=%s redacted=%d", g.recs[0].ValueJSON, g.res.Redacted)
 	}
 }
 
@@ -481,19 +658,28 @@ func TestReadGenericErrors(t *testing.T) {
 	}
 	f = mk()
 	f.openErr = errors.New("open failed")
-	if _, err := f.run(t, nil, 1); codeOf(t, err).Code != errs.CodeDBError {
-		t.Fatalf("open: %v", err)
+	g, err := f.run(t, nil, 1)
+	if err != nil || g.res.Omissions[omitDatabaseUnreadable] != 1 || g.res.Complete[f.dbs[0].Name] {
+		t.Fatalf("open: err=%v res=%+v", err, g.res)
 	}
 	f = mk()
 	f.recErr = fmt.Errorf("leveldb: %w", &leveldb.MissingFileError{Name: "000005.ldb"})
-	g, err := f.run(t, nil, 1)
-	if codeOf(t, err).Code != errs.CodeSnapshotInconsistent || g.res.Complete[f.dbs[0].Name] {
-		t.Fatalf("records: err=%v complete=%v", err, g.res.Complete)
+	g, err = f.run(t, nil, 1)
+	if err != nil || g.res.Complete[f.dbs[0].Name] || g.res.Omissions[omitDatabaseUnreadable] != 1 {
+		t.Fatalf("records: err=%v res=%+v", err, g.res)
+	}
+	// Without an OnDatabase callback an unreadable database is still counted.
+	f = mk()
+	f.recErr = errors.New("unreadable")
+	f.install(t)
+	res, err := ReadGeneric(context.Background(), "/snap", nil, 1, GenericOptions{}, func(GenericRecord) error { return nil })
+	if err != nil || res.Omissions[omitDatabaseUnreadable] != 1 {
+		t.Fatalf("no callback: err=%v res=%+v", err, res)
 	}
 	f = mk()
 	boom := errors.New("sink full")
 	f.install(t)
-	if _, err := ReadGeneric(context.Background(), "/snap", nil, 1, func(GenericRecord) error { return boom }); !errors.Is(err, boom) {
+	if _, err := ReadGeneric(context.Background(), "/snap", nil, 1, GenericOptions{}, func(GenericRecord) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("callback: %v", err)
 	}
 }
@@ -506,11 +692,11 @@ func TestCanonKeyPassesOtherTypes(t *testing.T) {
 
 func TestOpenBatchReal(t *testing.T) {
 	snap := fixtureSnapshot(t)
-	o, err := openBatch(snap, func(string) bool { return false })
+	o, err := openBatch(snap, func(int64, int64) bool { return false })
 	if err != nil || o == nil {
 		t.Fatalf("openBatch: %v", err)
 	}
-	if _, err := openBatch(t.TempDir(), func(string) bool { return false }); err == nil {
+	if _, err := openBatch(t.TempDir(), func(int64, int64) bool { return false }); err == nil {
 		t.Fatal("empty directory opened")
 	}
 }

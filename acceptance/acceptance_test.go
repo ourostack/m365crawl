@@ -756,7 +756,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 		}
 		emitted := map[string]bool{}
 		recs := 0
-		res, err := teamsdesktop.ReadGeneric(context.Background(), snap.dir, nil, teamsdesktop.DefaultGenericBudget, func(r teamsdesktop.GenericRecord) error {
+		res, err := teamsdesktop.ReadGeneric(context.Background(), snap.dir, nil, teamsdesktop.DefaultGenericBudget, teamsdesktop.GenericOptions{}, func(r teamsdesktop.GenericRecord) error {
 			recs++
 			emitted[r.Database] = true
 			return nil
