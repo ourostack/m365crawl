@@ -64,6 +64,8 @@ type cliApp struct {
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
+	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
+	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
 	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
 	Thread        threadCmd        `cmd:"" help:"Show one thread: <conversation> <root-message-id>, or a Teams message link."`
 	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
@@ -148,7 +150,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "unread", "thread", "watch"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch"}
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 

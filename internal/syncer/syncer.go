@@ -1,6 +1,6 @@
 // Package syncer turns a snapshot of the Teams desktop cache into archive updates: for every
 // Teams origin it fingerprints the files, skips an unchanged one, otherwise copies, decodes and
-// maps the allowlisted records and applies them to the SQLite archive.
+// maps the records and applies them to the SQLite archive.
 package syncer
 
 import (
@@ -161,7 +161,7 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		rep.Status = StatusPartial
 	case !decoded:
 		rep.Status = StatusUnchanged
-	case sum(rep.Omissions) > 0:
+	case lost(rep.Omissions) > 0:
 		rep.Status = StatusOmissions
 	default:
 		rep.Status = StatusOK
@@ -237,6 +237,7 @@ type runCounts struct {
 	Messages      store.Counts `json:"messages"`
 	People        store.Counts `json:"people"`
 	Activity      store.Counts `json:"activity"`
+	Records       store.Counts `json:"records"`
 }
 
 func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Report, changes *[]Change) (SourceReport, bool, error) {
@@ -291,11 +292,16 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	if err != nil {
 		return SourceReport{}, false, err
 	}
+	generic, redacted, err := w.readGeneric(ctx, snap, src.Key(), r.o.Account, begun)
+	if err != nil {
+		return SourceReport{}, false, err
+	}
 	if err := w.finish(); err != nil {
 		return SourceReport{}, false, err
 	}
+	mergeOmissions(&omissions, generic)
 	status := StatusOK
-	if sum(omissions) > 0 {
+	if lost(omissions) > 0 {
 		status = StatusOmissions
 	}
 	if len(omissions) == 0 {
@@ -311,10 +317,12 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	add(&rep.Messages, w.counts.Messages)
 	add(&rep.People, w.counts.People)
 	add(&rep.Activity, w.counts.Activity)
+	add(&rep.Records, w.counts.Records)
+	rep.Redacted += redacted
 	*changes = append(*changes, w.changes...)
-	r.progress("%s: %s (%d messages, %d conversations, %d activity items)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen)
+	r.progress("%s: %s (%d messages, %d conversations, %d activity items, %d records)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen, w.counts.Records.Seen)
 	counts := SourceCounts(w.counts)
-	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions, Accounts: w.accounts(), Counts: &counts}, true, nil
+	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions, Redacted: redacted, Accounts: w.accounts(), Counts: &counts}, true, nil
 }
 
 // writer maps records as Read decodes them and hands them to the source's transaction in batches
@@ -329,6 +337,8 @@ type writer struct {
 	convs    []teamsdesktop.Conversation
 	msgs     []teamsdesktop.Message
 	acts     []teamsdesktop.Activity
+	recs     []teamsdesktop.GenericRecord
+	recBytes int
 	people   map[[2]string]teamsdesktop.Person
 	counts   runCounts
 	changes  []Change // held until the source commits
@@ -431,6 +441,84 @@ func (w *writer) flushActivity() error {
 	return nil
 }
 
+// recordBatchBytes caps the decoded bytes of one batch of generic records, so a few very large
+// values flush sooner than batchSize records would (a variable so a test can lower it).
+var recordBatchBytes = 4 << 20
+
+// readGeneric archives every record of the object stores that no typed mapper consumes. Right
+// after each database is read it flushes that database's records and, when the database was read
+// completely, marks the rows that are not seen any more as removed, so the keys seen are dropped
+// before the next database is read. Then it marks the rows of databases the origin no longer
+// holds, and clears the rows whose database or store name is denied now (credential material is
+// cleared, not kept). Marking is skipped for an incomplete or unreadable database, and entirely
+// when ReadGeneric fails (the source then fails and nothing of it is kept). It returns the
+// omissions the generic read counted and how many values it redacted.
+func (w *writer) readGeneric(ctx context.Context, snap, source string, account *teamsdesktop.Account, at time.Time) (map[string]int, int, error) {
+	opts := teamsdesktop.GenericOptions{OnDatabase: func(db string, complete bool, seen map[string]map[string]struct{}) error {
+		if !complete {
+			return nil
+		}
+		if err := w.flushRecords(source, at); err != nil {
+			return err
+		}
+		if _, err := w.sess.MarkRecordsRemoved(source, db, seen, at); err != nil {
+			return asCoded(err)
+		}
+		return nil
+	}}
+	res, err := readGenericFn(ctx, snap, account, genericBudget, opts, func(rec teamsdesktop.GenericRecord) error {
+		w.recs = append(w.recs, rec)
+		if w.recBytes += len(rec.KeyJSON) + len(rec.ValueJSON); len(w.recs) >= batchSize || w.recBytes >= recordBatchBytes {
+			return w.flushRecords(source, at)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := w.flushRecords(source, at); err != nil {
+		return nil, 0, err
+	}
+	if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
+		return nil, 0, asCoded(err)
+	}
+	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
+		return nil, 0, asCoded(err)
+	}
+	return res.Omissions, res.Redacted, nil
+}
+
+func (w *writer) flushRecords(source string, at time.Time) error {
+	if len(w.recs) == 0 {
+		return nil
+	}
+	if err := beforeFlush("record", len(w.recs)); err != nil {
+		return err
+	}
+	n, err := w.sess.UpsertRecords(source, w.recs, at)
+	if err != nil {
+		return asCoded(err)
+	}
+	add(&w.counts.Records, n)
+	w.recs, w.recBytes = nil, 0
+	return nil
+}
+
+// mergeOmissions adds the generic read's omission counts to the typed read's. A truncated log
+// tail is one fact both reads see, so it takes the larger count instead of the sum.
+func mergeOmissions(into *map[string]int, from map[string]int) {
+	if *into == nil {
+		*into = map[string]int{}
+	}
+	for k, v := range from {
+		if k == "truncated_log_tail" {
+			(*into)[k] = max((*into)[k], v)
+		} else {
+			(*into)[k] += v
+		}
+	}
+}
+
 // finish flushes what is left (conversations first) and applies the merged people.
 func (w *writer) finish() error {
 	if err := w.flushConversations(); err != nil {
@@ -506,6 +594,9 @@ func asCoded(err error) error {
 // begins.
 var (
 	discoverSources = teamsdesktop.Discover
+	genericBudget   = teamsdesktop.DefaultGenericBudget
+	deniedFn        = teamsdesktop.Denied
+	readGenericFn   = teamsdesktop.ReadGeneric
 	rederiveArchive = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
 	batchSize       = 2000
 	beforeFlush     = func(kind string, n int) error { return nil }

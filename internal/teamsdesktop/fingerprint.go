@@ -14,8 +14,8 @@ import (
 )
 
 // DecoderVersion is part of every fingerprint. Bump it whenever decoding or mapping output
-// changes so the next sync re-reads an unchanged cache.
-const DecoderVersion = 1
+// changes so the next sync re-reads an unchanged cache. 3 added the generic records table.
+const DecoderVersion = 3
 
 // FingerprintOf summarizes the source's files as a sha256 over decoder_version plus sorted
 // "name\tsize\tmtime_ns" lines for both directories, excluding Teams' LOCK and LOG* files

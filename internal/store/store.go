@@ -9,11 +9,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
+
+	"github.com/ourostack/teamscrawl/internal/errs"
+	_ "modernc.org/sqlite" // the "sqlite" driver; crawlkit registers it too
 )
 
 // ErrNoArchive is returned by OpenReadOnly when the archive file does not exist. Read commands
@@ -49,6 +53,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := ensureParent(path); err != nil {
 		return nil, err
 	}
+	if err := checkSchemaNotNewer(ctx, path); err != nil {
+		return nil, err
+	}
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: schemaDDL, SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
@@ -63,6 +70,25 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, err
 	}
 	return st, nil
+}
+
+// checkSchemaNotNewer fails with the coded archive_newer error when the archive at path records a
+// schema version above SchemaVersion. crawlkit refuses such an archive too, but with a plain error.
+// A missing file, or one without a version, passes.
+func checkSchemaNotNewer(ctx context.Context, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	db, _ := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()) // lazy: it fails only on an unknown driver
+	defer func() { _ = db.Close() }()
+	var found int
+	if err := db.QueryRowContext(ctx, `select coalesce(max(version), 0) from schema_migrations`).Scan(&found); err != nil {
+		return nil // no version table yet, or not readable here: crawlkit's own open reports it
+	}
+	if found > SchemaVersion {
+		return errs.ArchiveSchemaNewer(found, SchemaVersion)
+	}
+	return nil
 }
 
 // absPath returns path as an absolute path. The SQLite driver takes the path as a URI and reads a
@@ -133,6 +159,9 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 	path = absPath(path)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoArchive
+	}
+	if err := checkSchemaNotNewer(ctx, path); err != nil {
+		return nil, err
 	}
 	cs, err := crawlstore.OpenReadOnly(ctx, path)
 	if err != nil {

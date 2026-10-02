@@ -27,7 +27,7 @@ func TestSnapshotFixtureOpens(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbs, err := o.Databases()
-	if err != nil || len(dbs) != 8 {
+	if err != nil || len(dbs) != 13 {
 		t.Fatalf("dbs=%d err=%v", len(dbs), err)
 	}
 	// Teams' lock and text log are not copied.

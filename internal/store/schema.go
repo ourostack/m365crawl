@@ -1,7 +1,8 @@
 package store
 
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
-const SchemaVersion = 2
+// Version 3 added the records table.
+const SchemaVersion = 3
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -126,6 +127,22 @@ create table if not exists meta(
   key text primary key,
   value text not null
 );
+create table if not exists records(
+  source text not null,
+  tenant_id text not null default '',
+  user_id text not null default '',
+  database text not null,
+  store text not null,
+  key_json text not null,
+  value_json text,
+  content_hash text not null,
+  first_seen_at text not null,
+  updated_at text not null,
+  removed_at text,
+  primary key(source, database, store, key_json)
+);
+create index if not exists records_db_store on records(database, store);
+create index if not exists records_updated on records(updated_at);
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);
 `

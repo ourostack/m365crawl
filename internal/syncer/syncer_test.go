@@ -32,6 +32,8 @@ const (
 	fixtureMessages      = 110
 	fixtureConversations = 14
 	fixtureActivity      = 22
+	// fixtureRecords is the generic fixture records: calendar-manager events and pinned-manager pins.
+	fixtureRecords = 12
 )
 
 func newDB(t *testing.T) string { return filepath.Join(t.TempDir(), "data", "teamscrawl.db") }
@@ -145,8 +147,12 @@ func TestSyncFixture(t *testing.T) {
 	if len(r.Sources) != 1 || r.Sources[0].Status != "ok" || !strings.Contains(r.Sources[0].Source, "https_teams.microsoft.com_0") {
 		t.Fatalf("sources: %+v", r.Sources)
 	}
-	if len(r.Omissions) != 0 {
+	// The credential decoys are denied by name: counted, never a loss, so the status stays ok.
+	if len(r.Omissions) != 2 || r.Omissions["denied_database"] != 3 || r.Omissions["denied_store"] != 1 {
 		t.Fatalf("omissions: %v", r.Omissions)
+	}
+	if r.Records.Inserted != fixtureRecords || r.Records.Seen != fixtureRecords || r.Sources[0].Counts.Records != r.Records {
+		t.Fatalf("records: %+v source %+v", r.Records, r.Sources[0].Counts)
 	}
 	st := readStatus(t, db)
 	c, m, a := totals(st)
@@ -172,7 +178,7 @@ func TestSyncFixture(t *testing.T) {
 	}
 	// Report JSON is snake_case.
 	b, _ := json.Marshal(r)
-	for _, want := range []string{`"status"`, `"sources"`, `"conversations"`, `"messages"`, `"people"`, `"activity"`, `"omissions"`, `"other_origins"`, `"started_at"`, `"finished_at"`, `"inserted"`, `"unchanged"`} {
+	for _, want := range []string{`"status"`, `"sources"`, `"conversations"`, `"messages"`, `"people"`, `"activity"`, `"records"`, `"omissions"`, `"other_origins"`, `"started_at"`, `"finished_at"`, `"inserted"`, `"unchanged"`} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("report JSON lacks %s: %s", want, b)
 		}
@@ -189,7 +195,7 @@ func TestSecondSyncUnchanged(t *testing.T) {
 		t.Fatalf("report: %+v", r)
 	}
 	zero := store.Counts{}
-	if r.Messages != zero || r.Conversations != zero || r.People != zero || r.Activity != zero || len(changes) != 0 {
+	if r.Messages != zero || r.Conversations != zero || r.People != zero || r.Activity != zero || r.Records != zero || len(changes) != 0 {
 		t.Fatalf("an unchanged run wrote: %+v %v", r, changes)
 	}
 	after := readStatus(t, db)
@@ -684,5 +690,333 @@ func TestMultiSourceOmissionsSum(t *testing.T) {
 	r, _ = run(t, Options{Root: root2, DBPath: newDB(t)})
 	if r.Status != "ok_with_omissions" || r.Omissions["blob_missing"] != 1 {
 		t.Fatalf("one source: %q %v", r.Status, r.Omissions)
+	}
+}
+
+// sourceKey is the fixture source's key, as `sync_runs.source` and `records.source` hold it.
+const sourceKey = "WV2Profile_fixture|https_teams.microsoft.com_0"
+
+// recordsQuery runs a count query straight against the archive file.
+func recordsQuery(t *testing.T, db, q string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := openRaw(t, db).QueryRow(q, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func execSQL(t *testing.T, db, q string) {
+	t.Helper()
+	if _, err := openRaw(t, db).Exec(q); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+}
+
+// seedRecords writes stale generic rows for the fixture source straight through the store.
+func seedRecords(t *testing.T, db string, rs ...teamsdesktop.GenericRecord) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	x, err := st.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Rollback()
+	if _, err := x.UpsertRecords(sourceKey, rs, time.Now().Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSyncWritesGenericRecords(t *testing.T) {
+	db := newDB(t)
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if r.Records.Inserted != fixtureRecords {
+		t.Fatalf("records: %+v", r.Records)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where source = ?`, sourceKey); n != fixtureRecords {
+		t.Fatalf("records rows = %d, want %d", n, fixtureRecords)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where removed_at is not null or value_json is null`); n != 0 {
+		t.Fatalf("%d rows removed or without a value", n)
+	}
+	// No credential store is archived.
+	if n := recordsQuery(t, db, `select count(*) from records where database like 'Teams:auth%' or lower(database) like '%token%' or lower(store) like '%token%'`); n != 0 {
+		t.Fatalf("%d credential rows archived", n)
+	}
+	// A re-read of a changed cache changes no generic row either.
+	root := fixtureCopy(t)
+	db2 := newDB(t)
+	run(t, Options{Root: root, DBPath: db2})
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	r, _ = run(t, Options{Root: root, DBPath: db2})
+	if r.Records.Seen != fixtureRecords || r.Records.Unchanged != fixtureRecords {
+		t.Fatalf("second read: %+v", r.Records)
+	}
+}
+
+func TestSyncMarksVanishedRecordsRemoved(t *testing.T) {
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	acct := acctA
+	seedRecords(t, db,
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "events", KeyJSON: []byte(`"stale-key"`), ValueJSON: []byte(`1`)},
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`2`)},
+	)
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	run(t, Options{Root: root, DBPath: db})
+	if n := recordsQuery(t, db, `select count(*) from records where removed_at is not null`); n != 2 {
+		t.Fatalf("%d rows removed, want the stale key and the vanished database", n)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where removed_at is not null and key_json in ('"stale-key"','"x"')`); n != 2 {
+		t.Fatalf("the wrong rows were removed")
+	}
+	if n := recordsQuery(t, db, `select count(*) from records`); n != fixtureRecords+2 {
+		t.Fatalf("rows were deleted: %d", n)
+	}
+}
+
+func TestFilteredSyncLeavesOtherAccountsRecordsAlone(t *testing.T) {
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	acct := acctB
+	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctB.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`2`)})
+	a := acctA
+	run(t, Options{Root: root, DBPath: db, Account: &a})
+	if n := recordsQuery(t, db, `select count(*) from records where removed_at is not null`); n != 0 {
+		t.Fatalf("a sync filtered to account A removed %d rows of account B", n)
+	}
+	b := acctB
+	run(t, Options{Root: root, DBPath: db, Account: &b})
+	if n := recordsQuery(t, db, `select count(*) from records where removed_at is not null`); n != 1 {
+		t.Fatalf("a sync of account B removed %d rows, want its vanished database", n)
+	}
+}
+
+func TestRecordsRollBackWithTheSource(t *testing.T) {
+	// Records are flushed before the typed rows; a later failure keeps none of them.
+	hookFlush(t, 1000, func(kind string, _ int) error {
+		if kind == "activity" {
+			return errors.New("injected activity failure")
+		}
+		return nil
+	})
+	db := newDB(t)
+	if _, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db}); err == nil {
+		t.Fatal("expected the injected failure")
+	}
+	if n := recordsQuery(t, db, `select count(*) from records`); n != 0 {
+		t.Fatalf("a failed source left %d records", n)
+	}
+}
+
+func TestRecordFlushFailuresFailTheSource(t *testing.T) {
+	for _, size := range []int{3, 1000} { // 3: fails inside the read; 1000: at the final flush
+		hookFlush(t, size, func(kind string, _ int) error {
+			if kind == "record" {
+				return errors.New("injected record failure")
+			}
+			return nil
+		})
+		db := newDB(t)
+		r, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+		if err == nil || r.Status != StatusFailed {
+			t.Fatalf("size %d: %v %+v", size, err, r)
+		}
+		if n := recordsQuery(t, db, `select count(*) from records`); n != 0 {
+			t.Fatalf("size %d: %d records kept", size, n)
+		}
+	}
+}
+
+func TestRecordBatchesAreBounded(t *testing.T) {
+	log := hookFlush(t, 5, nil)
+	run(t, Options{Root: fixtureRoot, DBPath: newDB(t)})
+	total := 0
+	for i, k := range log.kinds {
+		if k == "record" {
+			if log.sizes[i] > 5 {
+				t.Fatalf("batch of %d records (limit 5)", log.sizes[i])
+			}
+			total += log.sizes[i]
+		}
+	}
+	if total != fixtureRecords {
+		t.Fatalf("flushed %d records, want %d", total, fixtureRecords)
+	}
+	// The byte cap flushes before the count does.
+	old := recordBatchBytes
+	recordBatchBytes = 1
+	t.Cleanup(func() { recordBatchBytes = old })
+	log = hookFlush(t, 1000, nil)
+	run(t, Options{Root: fixtureRoot, DBPath: newDB(t)})
+	n := 0
+	for _, k := range log.kinds {
+		if k == "record" {
+			n++
+		}
+	}
+	if n != fixtureRecords {
+		t.Fatalf("with a 1 byte cap each record flushes alone: %d flushes", n)
+	}
+}
+
+func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
+	stale := func(database, store string) teamsdesktop.GenericRecord {
+		a := acctA
+		return teamsdesktop.GenericRecord{Account: &a, Database: database, Store: store, KeyJSON: []byte(`"stale"`), ValueJSON: []byte(`2`)}
+	}
+	cal := "Teams:calendar-manager:react-web-client:" + acctA.TenantID + ":" + acctA.UserID + ":en-us"
+	cases := []struct {
+		name, trigger string
+		seed          *teamsdesktop.GenericRecord
+	}{
+		{"upsert", `create trigger boom before insert on records begin select raise(abort, 'boom'); end`, nil},
+		{"mark records", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale(cal, "events"))},
+		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+		// Already removed, so only the purge touches it.
+		{"purge", `update records set removed_at = '2020-01-01T00:00:00.000Z' where store = 'things'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+	}
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool { return name == "things" }
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := fixtureCopy(t)
+			db := newDB(t)
+			run(t, Options{Root: root, DBPath: db})
+			if c.seed != nil {
+				seedRecords(t, db, *c.seed)
+			} else {
+				execSQL(t, db, `delete from records`)
+			}
+			execSQL(t, db, c.trigger)
+			later := time.Now().Add(time.Hour)
+			_ = os.Chtimes(logFile(t, root), later, later)
+			_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
+			var coded *errs.Coded
+			if err == nil || !errors.As(err, &coded) || coded.Code != errs.CodeDBError {
+				t.Fatalf("err = %v, want db_error", err)
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestMergeOmissions(t *testing.T) {
+	var m map[string]int
+	mergeOmissions(&m, map[string]int{"blob_missing": 1, "truncated_log_tail": 2})
+	mergeOmissions(&m, map[string]int{"blob_missing": 2, "truncated_log_tail": 1, "denied_database": 3})
+	want := map[string]int{"blob_missing": 3, "truncated_log_tail": 2, "denied_database": 3}
+	if !reflect.DeepEqual(m, want) {
+		t.Fatalf("merged = %v", m)
+	}
+	if lost(map[string]int{"denied_database": 3, "denied_store": 1}) != 0 || lost(m) != 5 {
+		t.Fatalf("lost: %d", lost(m))
+	}
+}
+
+// A database the generic read could not read is data loss: the sync reports ok_with_omissions,
+// the typed data still syncs, and the rows of the unreadable database are neither removed nor
+// lost. Redactions are reported as a count and are not an omission.
+func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
+	db := newDB(t)
+	calendar := "Teams:calendar-manager:react-web-client:" + acctA.UserID
+	acct := acctA
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: calendar, Store: "events", KeyJSON: []byte(`"kept"`), ValueJSON: []byte(`1`)})
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, _ func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+		if err := opts.OnDatabase(calendar, false, nil); err != nil {
+			return teamsdesktop.GenericResult{}, err
+		}
+		return teamsdesktop.GenericResult{
+			Omissions: map[string]int{"database_unreadable": 1},
+			Present:   []string{calendar},
+			Complete:  map[string]bool{calendar: false},
+			Redacted:  3,
+		}, nil
+	}
+	db2 := newDB(t)
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db2})
+	if r.Status != StatusOmissions || r.Omissions["database_unreadable"] != 1 || r.Messages.Inserted != fixtureMessages {
+		t.Fatalf("status=%s omissions=%v messages=%+v", r.Status, r.Omissions, r.Messages)
+	}
+	if r.Redacted != 3 || r.Sources[0].Redacted != 3 {
+		t.Fatalf("redacted = %d / %d", r.Redacted, r.Sources[0].Redacted)
+	}
+	// An archive that already holds rows of that database keeps them live.
+	root := fixtureCopy(t)
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	run(t, Options{Root: root, DBPath: db})
+	if n := recordsQuery(t, db, `select count(*) from records where key_json = '"kept"' and removed_at is null`); n != 1 {
+		t.Fatalf("rows of an unreadable database were marked removed")
+	}
+	if l := lost(map[string]int{"database_unreadable": 1}); l != 1 {
+		t.Fatalf("lost = %d", l)
+	}
+}
+
+// Rows archived under a name the denylist now matches are cleared on the next sync: the key stays,
+// the value and hash go, and the row is marked removed.
+func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	acct := acctA
+	seedRecords(t, db,
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":1}`)},
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "private", KeyJSON: []byte(`"y"`), ValueJSON: []byte(`{"v":2}`)},
+	)
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool {
+		return old(name) || name == "private" || strings.Contains(name, "gone-manager")
+	}
+	later := time.Now().Add(time.Hour)
+	_ = os.Chtimes(logFile(t, root), later, later)
+	run(t, Options{Root: root, DBPath: db})
+	if n := recordsQuery(t, db, `select count(*) from records where key_json in ('"x"','"y"') and value_json is null and content_hash = '' and removed_at is not null`); n != 2 {
+		t.Fatalf("%d rows purged, want 2", n)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where value_json is null`); n != 2 {
+		t.Fatalf("%d rows without a value, want only the purged 2", n)
+	}
+}
+
+// Records of a database that was not read completely are flushed after the read, and a failure of
+// that last flush fails the source.
+func TestFinalRecordFlushFailureFailsTheSource(t *testing.T) {
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, fn func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+		a := acctA
+		if err := fn(teamsdesktop.GenericRecord{Account: &a, Database: "Teams:x-manager:react-web-client:" + acctA.UserID, Store: "s", KeyJSON: []byte(`"k"`), ValueJSON: []byte(`1`)}); err != nil {
+			return teamsdesktop.GenericResult{}, err
+		}
+		return teamsdesktop.GenericResult{Omissions: map[string]int{}}, opts.OnDatabase("Teams:x-manager:react-web-client:"+acctA.UserID, false, nil)
+	}
+	hookFlush(t, 2000, func(kind string, _ int) error {
+		if kind == "record" {
+			return errors.New("flush refused")
+		}
+		return nil
+	})
+	if _, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t)}); err == nil || !strings.Contains(err.Error(), "flush refused") {
+		t.Fatalf("err = %v", err)
 	}
 }

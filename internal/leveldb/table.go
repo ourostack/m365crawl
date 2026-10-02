@@ -52,6 +52,7 @@ var lazyMin = 512
 type store struct {
 	m       map[string]entry
 	keep    func(key []byte) bool
+	observe func(key []byte, valueLen int, fromTable bool)
 	skipped int
 }
 
@@ -65,6 +66,9 @@ func newStore(keep func(key []byte) bool) *store {
 //
 // loc, when not nil, is where value lives in a table; a large value is then not copied.
 func (s *store) put(key []byte, seq uint64, deleted bool, value []byte, loc *location) {
+	if s.observe != nil {
+		s.observe(key, len(value), loc != nil)
+	}
 	if s.keep != nil && !s.keep(key) {
 		s.skipped++
 		return
