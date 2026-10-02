@@ -71,8 +71,9 @@ func TestEntryOverheadCalibrated(t *testing.T) {
 	db := openGL(t, dir)
 	payload := 0
 	for i := 0; i < n; i++ {
-		k := fmt.Sprintf("key-%012d", i) // 16 bytes: an exact size class
-		v := fmt.Sprintf("val-%012d", i)
+		// Odd lengths (23 and 37 bytes) so allocator size-class rounding is in the measurement.
+		k := fmt.Sprintf("key-%019d", i)
+		v := fmt.Sprintf("val-%033d", i)
 		payload += len(k) + len(v)
 		if err := db.Put([]byte(k), []byte(v), nil); err != nil {
 			t.Fatal(err)
@@ -98,7 +99,9 @@ func TestEntryOverheadCalibrated(t *testing.T) {
 	}
 	per := (float64(after.HeapAlloc) - float64(before.HeapAlloc) - float64(payload)) / n
 	t.Logf("measured %.1f overhead bytes per entry; EntryOverhead = %d", per, EntryOverhead)
-	if lo, hi := per*0.75, per*1.25; float64(EntryOverhead) < lo || float64(EntryOverhead) > hi {
+	// Under-estimating is the dangerous direction: allow no more than 5% below the measurement
+	// and up to 50% above it.
+	if lo, hi := per*0.95, per*1.5; float64(EntryOverhead) < lo || float64(EntryOverhead) > hi {
 		t.Errorf("EntryOverhead = %d, measured %.1f per entry (allowed %.1f to %.1f)", EntryOverhead, per, lo, hi)
 	}
 }

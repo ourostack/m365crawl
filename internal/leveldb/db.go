@@ -42,7 +42,7 @@ type LoadOptions struct {
 // EntryOverhead is the heap bytes a loaded DB holds per retained key beyond the key's and the
 // value's own bytes: the map slot, the entry struct and the sorted key slice. It is calibrated
 // by TestEntryOverheadCalibrated, which fails when the number drifts from a measurement.
-const EntryOverhead = 155
+const EntryOverhead = 176
 
 // LazyMin is the smallest table value length that a DB does not hold in memory.
 func LazyMin() int { return lazyMin }

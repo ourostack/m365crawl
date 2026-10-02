@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ourostack/teamscrawl/internal/leveldb"
 	gl "github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -59,7 +60,7 @@ func TestCensusWithin2xOfKeepLoad(t *testing.T) {
 	}
 	names := []string{"small", "big"}
 	counts := []int{50000, 50000}
-	sizes := []int{20, 700} // "big" values exceed the lazy threshold
+	sizes := []int{37, 701} // "big" values exceed the lazy threshold
 	for i, name := range names {
 		id := uint64(i + 1)
 		key := append([]byte{0, 0, 0, 0, metaDatabaseName}, append(idbString("https://x"), idbString(name)...)...)
@@ -104,8 +105,8 @@ func TestCensusWithin2xOfKeepLoad(t *testing.T) {
 		runtime.KeepAlive(o)
 		est := held[d.ID]
 		t.Logf("%s: estimate %d, measured %d", d.Name, est, measured)
-		if est > 2*measured || measured > 2*est {
-			t.Errorf("%s: estimate %d not within 2x of measured %d", d.Name, est, measured)
+		if float64(est) < 0.9*float64(measured) || est > 2*measured {
+			t.Errorf("%s: estimate %d outside 0.9x to 2x of measured %d", d.Name, est, measured)
 		}
 	}
 }
@@ -126,5 +127,59 @@ func TestCensusErrors(t *testing.T) {
 	_ = db.Close()
 	if _, _, err := Census(dir); err == nil {
 		t.Error("malformed database name: want an error")
+	}
+}
+
+// Exact sums: a table value one byte under the lazy threshold is held and counted, one at the
+// threshold is not; a log value, a superseded version and a deletion each count as an entry.
+func TestCensusExactSums(t *testing.T) {
+	dir := t.TempDir()
+	db, err := gl.OpenFile(dir, &opt.Options{Compression: opt.NoCompression})
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(k, v []byte) {
+		t.Helper()
+		if err := db.Put(k, v, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dk := func(name string) []byte { return append(idPrefix(1, 1, indexData, 1), name...) }
+	lazy := leveldb.LazyMin()
+	overhead := leveldb.EntryOverhead
+	put(append([]byte{0, 0, 0, 0, metaDatabaseName}, append(idbString("https://x"), idbString("d")...)...), []byte{1})
+	storeKey := idPrefix(1, 0, 0, metaObjectStore, 1, storeMetaName)
+	storeVal := u16("s")
+	put(storeKey, storeVal)
+	// Table generation.
+	put(dk("A"), make([]byte, lazy-1))
+	put(dk("B"), make([]byte, lazy))
+	put(dk("C"), make([]byte, 5))
+	put(dk("D"), make([]byte, 7))
+	if err := db.CompactRange(util.Range{}); err != nil {
+		t.Fatal(err)
+	}
+	// Log generation: a log value, a superseded version, a deletion.
+	put(dk("L"), make([]byte, 11))
+	put(dk("C"), make([]byte, 9))
+	if err := db.Delete(dk("D"), nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	want := int64(len(storeKey) + overhead + len(storeVal)) // per-database metadata
+	want += int64(len(dk("A")) + overhead + lazy - 1)       // table, under threshold: held
+	want += int64(len(dk("B")) + overhead)                  // table, at threshold: lazy
+	want += int64(len(dk("C")) + overhead + 5)              // table version of C
+	want += int64(len(dk("D")) + overhead + 7)              // table version of D
+	want += int64(len(dk("L")) + overhead + 11)             // log value
+	want += int64(len(dk("C")) + overhead + 9)              // superseded by a log version
+	want += int64(len(dk("D")) + overhead)                  // deletion
+	held, _, err := Census(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held[1] != want {
+		t.Errorf("held[1] = %d, want %d", held[1], want)
 	}
 }
