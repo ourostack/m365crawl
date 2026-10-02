@@ -52,7 +52,10 @@ spctl_gate() {
   local -a delays
   read -r -a delays <<<"${SPCTL_BACKOFF:-15 30 60 90}"
   while :; do
-    if out="$(spctl --assess --type exec -vv "$binary" 2>&1)" && grep -Fq "Notarized Developer ID" <<<"$out"; then
+    # A bare Mach-O CLI is assessed as an install, not exec: `--type exec` only
+    # accepts app bundles and rejects every CLI with "does not seem to be an app".
+    if out="$(spctl --assess --type install -vv "$binary" 2>&1)" \
+      && grep -Fq "accepted" <<<"$out" && grep -Fq "source=Notarized Developer ID" <<<"$out"; then
       echo "gate spctl: accepted, source=Notarized Developer ID"
       return 0
     fi
@@ -189,11 +192,17 @@ n=0
 [[ -f "$STUB_SPCTL_COUNT" ]] && n="$(cat "$STUB_SPCTL_COUNT")"
 n=$((n + 1))
 echo "$n" > "$STUB_SPCTL_COUNT"
-if [[ "$n" -le "${STUB_SPCTL_FAILS:-0}" ]]; then
-  echo "stub: rejected" >&2
+bin="${*: -1}"
+# Mirror real spctl: exec assessment rejects any bare Mach-O CLI.
+if [[ " $* " == *" --type exec "* ]]; then
+  echo "$bin: rejected (the code is valid but does not seem to be an app)" >&2
   exit 3
 fi
-echo "$3: accepted" >&2
+if [[ "$n" -le "${STUB_SPCTL_FAILS:-0}" ]]; then
+  echo "$bin: rejected" >&2
+  exit 3
+fi
+echo "$bin: accepted" >&2
 echo "source=${STUB_SPCTL_SOURCE:-Notarized Developer ID}" >&2
 STUB
   printf '#!/usr/bin/env bash\nexit 0\n' > "$stub/xattr"
