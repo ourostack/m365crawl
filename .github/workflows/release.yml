@@ -68,6 +68,7 @@ jobs:
             : > "$notes"
           fi
           printf '\nThe darwin binaries are Developer ID signed and notarized by Apple.\n' >> "$notes"
+          printf 'The Windows binaries are unsigned.\n' >> "$notes"
           echo "args=release --clean --release-notes=${notes}" >> "$GITHUB_OUTPUT"
       - name: Release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -98,7 +99,7 @@ jobs:
         run: gh release upload "$TAG" dist/homebrew/Casks/teamscrawl.rb --clobber
 
   # Verifies the published artifacts exactly as a user downloads them.
-  verify-release:
+  verify-release-darwin:
     needs: release
     runs-on: macos-latest
     timeout-minutes: 30
@@ -116,11 +117,41 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: scripts/verify-release.sh
 
+  verify-release-windows:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: amd64
+          - runner: windows-11-arm
+            arch: arm64
+    name: verify-release-windows (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify the published Windows artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          EXPECT_COMMIT: ${{ github.sha }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: scripts/verify-release.ps1
+
   # Stable tags only: a prerelease never reaches the tap. The tap's update-casks workflow
   # runs hourly and this repo cannot trigger it, so wait for the tap to serve this version.
   verify-homebrew:
     if: ${{ !contains(github.ref_name, '-') }}
-    needs: verify-release
+    needs:
+      - verify-release-darwin
+      - verify-release-windows
     runs-on: macos-latest
     timeout-minutes: 90
     permissions:
