@@ -46,3 +46,5 @@ The gate logic is tested on every PR: `make lint` runs `scripts/sign-notarize.sh
 - A failure before publish: fix the cause, then either re-run the failed workflow run in the Actions tab (the tag still points at the same commit), or delete the tag and push a corrected one.
 - `verify-release` or `verify-homebrew` flaked: re-run just that job from the workflow run page. They only read the published release and the tap.
 - Run the gates by hand on a binary: `APPLE_TEAM_ID=... scripts/sign-notarize.sh --verify ./teamscrawl`.
+
+A prerelease and a release may point at the same commit (for example `v0.1.0-rc.4` and `v0.1.0`). The release job sets `GORELEASER_CURRENT_TAG` to the tag that triggered the run, so goreleaser always builds that tag rather than whichever tag `git describe` returns.

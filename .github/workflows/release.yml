@@ -77,6 +77,10 @@ jobs:
           args: ${{ steps.notes.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Build the tag that triggered this run. Without it goreleaser picks a tag
+          # from git describe, and a prerelease tag on the same commit (v0.1.0-rc.4
+          # beside v0.1.0) made the v0.1.0 run rebuild and re-upload the rc.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # scripts/sign-notarize.sh fails the build when any is missing or any gate fails.
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
