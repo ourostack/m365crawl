@@ -78,18 +78,17 @@ func (rt *runtime) doctorChecks() []check {
 		cs = append(cs, check{Name: "teams_installed", OK: true, Detail: "Teams data found at " + root})
 	}
 	// full_disk_access
-	switch code {
-	case errs.CodeTeamsNotInstalled:
-		cs = append(cs, check{Name: "full_disk_access", Detail: "not checked: Teams is not installed", Fix: "Fix teams_installed first."})
-	case errs.CodeNoFullDiskAccess:
-		cs = append(cs, check{Name: "full_disk_access", Detail: coded.Message, Fix: fdaFix()})
-	default:
-		cs = append(cs, check{Name: "full_disk_access", OK: true, Detail: "the Teams container is readable"})
-	}
+	cs = append(cs, fullDiskAccessDoctorCheck(code, coded))
 	// teams_origin
 	switch {
 	case code == errs.CodeNoTeamsOrigin:
 		cs = append(cs, check{Name: "teams_origin", Detail: coded.Message, Fix: coded.Fix})
+	case func() bool {
+		_, ok := teamsOriginPermissionCheck(code, coded)
+		return ok
+	}():
+		c, _ := teamsOriginPermissionCheck(code, coded)
+		cs = append(cs, c)
 	case derr != nil:
 		cs = append(cs, check{Name: "teams_origin", Detail: "not checked: the Teams data is not readable", Fix: "Fix the checks above first."})
 	default:

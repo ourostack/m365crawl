@@ -148,9 +148,7 @@ func bodyOf(c *errs.Coded) errorBody {
 	if c.Code == errs.CodeDBError && c.Unwrap() != nil {
 		msg += ": " + c.Unwrap().Error()
 	}
-	if c.Code == errs.CodeNoFullDiskAccess {
-		fix = fdaFix()
-	}
+	fix = outputFix(c)
 	return errorBody{Code: c.Code, Message: msg, Fix: fix}
 }
 

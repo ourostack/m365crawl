@@ -20,9 +20,7 @@ import (
 
 func skipIfRoot(t *testing.T) {
 	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("permission bits do not restrict root")
-	}
+	skipIfPermissionDeniedSimulationUnsupported(t)
 }
 
 // compactedSource is a source whose LevelDB has one table and a consistent MANIFEST.

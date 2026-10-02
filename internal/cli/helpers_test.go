@@ -97,8 +97,11 @@ func errorOf(t *testing.T, stderr string) map[string]any {
 
 func skipIfRoot(t *testing.T) {
 	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("chmod 000 does not restrict root")
+	if !supportsPermissionDeniedSimulation() {
+		t.Skip("permission-denied chmod test is not supported on this platform")
+	}
+	if runningAsPrivilegedUser() {
+		t.Skip("permission bits do not restrict the current user")
 	}
 }
 

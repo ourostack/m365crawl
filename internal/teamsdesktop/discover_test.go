@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -21,8 +22,15 @@ func codeOf(t *testing.T, err error) *errs.Coded {
 
 func TestDefaultRoot(t *testing.T) {
 	r := DefaultRoot()
-	if !strings.HasSuffix(r, "Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView") {
-		t.Fatalf("DefaultRoot = %q", r)
+	switch goruntime.GOOS {
+	case "windows":
+		if !strings.Contains(r, filepath.Join("AppData", "Local", "Packages", "MSTeams_8wekyb3d8bbwe", "LocalCache", "Microsoft", "MSTeams", "EBWebView")) {
+			t.Fatalf("DefaultRoot = %q", r)
+		}
+	default:
+		if !strings.HasSuffix(r, filepath.Join("Library", "Containers", "com.microsoft.teams2", "Data", "Library", "Application Support", "Microsoft", "MSTeams", "EBWebView")) {
+			t.Fatalf("DefaultRoot = %q", r)
+		}
 	}
 	if !filepath.IsAbs(r) {
 		t.Fatalf("DefaultRoot not absolute: %q", r)
@@ -86,9 +94,7 @@ func TestDiscoverNoTeamsOrigin(t *testing.T) {
 }
 
 func TestDiscoverNoFDA(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("chmod 000 does not restrict root")
-	}
+	skipIfPermissionDeniedSimulationUnsupported(t)
 	root := fakeTree(t, "Default", "https_teams.microsoft.com_0")
 	if err := os.Chmod(root, 0o000); err != nil {
 		t.Fatal(err)
@@ -102,9 +108,7 @@ func TestDiscoverNoFDA(t *testing.T) {
 }
 
 func TestDiscoverNoFDAOnInnerDir(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("chmod 000 does not restrict root")
-	}
+	skipIfPermissionDeniedSimulationUnsupported(t)
 	root := fakeTree(t, "Default", "https_teams.microsoft.com_0")
 	idb := filepath.Join(root, "Default", "IndexedDB")
 	if err := os.Chmod(idb, 0o000); err != nil {
