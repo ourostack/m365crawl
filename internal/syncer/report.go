@@ -34,6 +34,7 @@ type Report struct {
 	Messages      store.Counts   `json:"messages"`
 	People        store.Counts   `json:"people"`
 	Activity      store.Counts   `json:"activity"`
+	Records       store.Counts   `json:"records"`
 	Omissions     map[string]int `json:"omissions"`
 	OtherOrigins  []string       `json:"other_origins"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
@@ -61,6 +62,7 @@ type SourceCounts struct {
 	Messages      store.Counts `json:"messages"`
 	People        store.Counts `json:"people"`
 	Activity      store.Counts `json:"activity"`
+	Records       store.Counts `json:"records"`
 }
 
 // SourceError is why a source failed: an error code from the output contract and its message.
@@ -85,10 +87,15 @@ func add(a *store.Counts, b store.Counts) {
 	a.Unchanged += b.Unchanged
 }
 
-func sum(m map[string]int) int {
+// lost is how many records a sync could not read: the omissions that mean data was missed. The
+// denied_database and denied_store counts are the credential denylist working as designed, not
+// loss, so they never make a sync ok_with_omissions.
+func lost(m map[string]int) int {
 	n := 0
-	for _, v := range m {
-		n += v
+	for k, v := range m {
+		if k != "denied_database" && k != "denied_store" {
+			n += v
+		}
 	}
 	return n
 }

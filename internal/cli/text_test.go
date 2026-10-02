@@ -14,7 +14,8 @@ import (
 var update = flag.Bool("update", false, "rewrite golden files")
 
 var (
-	reAge = regexp.MustCompile(`\d+(\.\d+)?(ms|µs|s|m|h)+ ago`)
+	reSyncStamp = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`)
+	reAge       = regexp.MustCompile(`\d+(\.\d+)?(ms|µs|s|m|h)+ ago`)
 )
 
 // scrub makes text output stable: paths and clocks differ per run.
@@ -83,6 +84,8 @@ func TestTextGoldens(t *testing.T) {
 		{"people_fields", []string{"--fields", "display_name,last_seen_at", "people"}},
 		{"sql", []string{"sql", "select id from messages order by id limit 2"}},
 		{"activity", []string{"activity"}},
+		{"stores", []string{"stores"}},
+		{"records", []string{"records", "--database", "Teams:calendar-manager", "--limit", "3"}},
 	}
 	for _, c := range cases {
 		for _, color := range []bool{false, true} {
@@ -103,7 +106,11 @@ func TestTextGoldens(t *testing.T) {
 			if color && !strings.Contains(out, "\x1b[") {
 				t.Errorf("%s: no color with CLICOLOR_FORCE=1", c.name)
 			}
-			checkGolden(t, c.name+"."+suffix, e.scrub(out))
+			got := e.scrub(out)
+			if c.name == "stores" || c.name == "records" {
+				got = reSyncStamp.ReplaceAllString(got, "<stamp>") // archived rows carry the sync's own time
+			}
+			checkGolden(t, c.name+"."+suffix, got)
 		}
 	}
 }

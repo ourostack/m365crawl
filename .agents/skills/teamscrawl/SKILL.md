@@ -5,7 +5,7 @@ description: Use when an agent needs to read the user's Microsoft Teams messages
 
 # teamscrawl
 
-Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
+Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 
 ## When to use
 
@@ -90,9 +90,13 @@ One thread as `items`, root first. Pass `<conversation_id> <root_message_id>` (t
 
 With `--query`, an exact name ranks first, then prefix, then substring, then all-words matches. A chat with no title is named after its other members (`Ana, Ben, Chao +2`) or `Unnamed chat (5 members, id 3fa9c2d1)`; select an untitled chat by `conversation_id`.
 
+### stores and records
+
+Besides messages, conversations and activity, teamscrawl mirrors every other Teams database the app cached (calendar, pinned messages, contacts, call history and more) into a generic `records` table, with no typed command yet. Credential-like databases are never read. Run `teamscrawl stores` to see what exists: items `{database, store, records, removed, last_updated_at}`, one per database and object store (an account's databases carry its tenant and user ids in the name). Then read one with `teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300`: `--database` takes the full name or any prefix (required), plus `--store`, `--since`, `--include-removed` and `--limit`. Items are `{source, database, store, key_json, value_json, first_seen_at, updated_at, removed_at?}`, newest change first; `key_json` and `value_json` are parsed JSON, and `value_json` is absent when the value could not be decoded. A record Teams' cache no longer holds keeps its last value and gets `removed_at`, hidden unless `--include-removed`. The shape of each value is Teams' own and can change without notice, so look at one record before filtering on its fields, and keep `--max-text` low.
+
 ### sql
 
-One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands do not cover. Returns `{"columns":[...],"rows":[[...]],"count":N,"truncated":bool}`; it streams rows and stops at `--limit`. The word `attach` or `pragma` inside a string literal is fine; only a statement that is not a read is refused (`usage`). Tables: `accounts`, `conversations`, `messages`, `people`, `activity`, `sync_runs`; FTS tables `message_fts`, `conversation_fts`. Note that `sql` returns every account's rows regardless of `--account`.
+One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands do not cover. Returns `{"columns":[...],"rows":[[...]],"count":N,"truncated":bool}`; it streams rows and stops at `--limit`. The word `attach` or `pragma` inside a string literal is fine; only a statement that is not a read is refused (`usage`). Tables: `accounts`, `conversations`, `messages`, `people`, `activity`, `records`, `sync_runs`; FTS tables `message_fts`, `conversation_fts`. Note that `sql` returns every account's rows regardless of `--account`.
 
 ### watch
 
@@ -107,7 +111,7 @@ When the first sync after an upgrade re-derives an older archive, watch prints o
 ### doctor, sync, status
 
 - `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced", or `last_sync_status` after a partial or failed sync) does not fail it; `archive_newer` fails it when a newer teamscrawl wrote the archive. Follow each failing check's `fix`.
-- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity, `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged` (exit 0), or `partial` when some Teams sources committed and others failed (exit 1: the report, with each source's `status` and `error`, is on stdout and a `partial_sync` error is on stderr; run `teamscrawl doctor`, fix the cause, sync again, since the sources that did sync are already in the archive). The first `sync` after upgrading from alpha.1 re-derives older rows and reports `migrated`; read-only commands never migrate (SPEC.md section 3.2).
+- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity (including `records`), `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged` (exit 0), or `partial` when some Teams sources committed and others failed (exit 1: the report, with each source's `status` and `error`, is on stdout and a `partial_sync` error is on stderr; run `teamscrawl doctor`, fix the cause, sync again, since the sources that did sync are already in the archive). The first `sync` after upgrading from alpha.1 re-derives older rows and reports `migrated`; read-only commands never migrate (SPEC.md section 3.2).
 - `status` shows per-account counts, the last run and other Teams origins seen.
 
 ## Freshness

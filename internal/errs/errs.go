@@ -134,6 +134,14 @@ func ArchiveNewer(found, have int) *Coded {
 		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
 }
 
+// ArchiveSchemaNewer reports an archive whose schema version is higher than this build's: a newer
+// teamscrawl created it, and this one does not know its tables.
+func ArchiveSchemaNewer(found, have int) *Coded {
+	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
+		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (schema version %d; this build writes version %d)", found, have),
+		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
+}
+
 // PartialSync reports a sync in which some sources committed and others failed. detail names the
 // failed sources and their error codes. The committed sources' rows are in the archive.
 func PartialSync(detail string) *Coded {

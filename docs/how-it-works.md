@@ -39,9 +39,9 @@ Chromium's IndexedDB opens its LevelDB with a custom key comparator (`idb_cmp1`)
 
 The result is the current key-value set whatever the comparator. A torn last record in the active log (Teams was mid-write) is tolerated and counted as the omission `truncated_log_tail`. Table blocks may be uncompressed or snappy; any other compression fails with `unsupported_block_compression` rather than dropping data.
 
-## Step 4: the allowlist and lazy values
+## Step 4: typed and generic databases, the denylist and lazy values
 
-IndexedDB names its databases `Teams:<manager>:react-web-client:<tenantId>:<userId>:<locale>`. The reader first loads only the global metadata to learn each database's name and numeric id. It then reads again, keeping record values only for the allowlisted databases:
+IndexedDB names its databases `Teams:<manager>:react-web-client:<tenantId>:<userId>:<locale>`. The reader first loads only the global metadata to learn each database's name and numeric id. It then reads again. Three databases are typed, with mappers that turn them into tables:
 
 | Manager | Object store |
 | --- | --- |
@@ -49,9 +49,11 @@ IndexedDB names its databases `Teams:<manager>:react-web-client:<tenantId>:<user
 | `conversation-manager` | `conversations` |
 | `activity-manager` | `feed-items` |
 
-Every other database, including `Teams:auth:*`, is never decoded, and its values are never held in memory. This is both a privacy rule and a memory rule: a real origin holds over a hundred other databases, and the three above are a small share of its bytes.
+Every other database is read generically, unless its name looks like credential material. A database or object store whose name starts with `Teams:auth`, or contains `auth`, `token`, `credential`, `secret`, `cookie`, `msal`, `oneauth`, `key-store`, `keystore`, `keyval` or `session` (ignoring case), is denied: it is never opened for values, decoded or listed, and a sync reports only how many were denied (`denied_database`, `denied_store`). Everything else, calendar, pinned messages, contacts, call history and the rest, goes into the `records` table as canonical JSON, one row per IndexedDB record.
 
-Even within the allowlist, a table value of 512 bytes or more is not kept in memory. The reader remembers where the value lives and re-reads that one block from the snapshot when the record is decoded, through a small cache of recently used blocks. This is why the snapshot must stay in place until the source is finished, and why a full sync peaks near 0.2 GB where loading every database's values took about 0.8 GB.
+A real origin holds over a hundred other databases and most of the bytes, so the generic read is bounded. A census of the snapshot first estimates how much memory each database needs. Databases are grouped, in order, into batches of at most 64 MiB, and the snapshot is opened once per batch with only that batch's databases kept. A database larger than the budget is a batch of its own. Each opened origin is dropped before the next opens, so memory depends on the largest batch, not on the cache.
+
+Even so, a table value of 512 bytes or more is not kept in memory. The reader remembers where the value lives and re-reads that one block from the snapshot when the record is decoded, through a small cache of recently used blocks. This is why the snapshot must stay in place until the source is finished, and why a full sync peaks near 0.2 GB where loading every database's values took about 0.8 GB.
 
 ## Step 5: IndexedDB records
 

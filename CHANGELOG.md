@@ -2,6 +2,22 @@
 
 All notable changes to teamscrawl are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) with the 0.x caveat that the JSON contract in [SPEC.md](SPEC.md) is stable except where an entry below says "Breaking".
 
+## [Unreleased]
+
+### Added
+
+- `records` table (archive schema version 3): every Teams IndexedDB database that has no typed mapper and no credential-like name is mirrored into it, one row per record, with the key and the value as canonical JSON. Rows follow the archive rules: a record that leaves the cache gets a sticky `removed_at` and is never deleted; a value that fails to decode is counted and its key is still archived.
+- `stores`: lists every archived database and object store with `records`, `removed` and `last_updated_at`.
+- `records --database <name or prefix> [--store] [--since] [--include-removed] [--limit 50]`: lists archived generic records, newest change first, with `key_json` and `value_json` as parsed JSON. It honors `--fields` and `--max-text`.
+- Sync reports and `sync_runs.counts_json` gain `records` counts. New omission codes: `denied_database`, `denied_store` (the credential denylist, counted but not a loss: they never make a sync `ok_with_omissions`) and `unencodable_value`.
+
+### Changed
+
+- The database allowlist is now a credential denylist: teamscrawl mirrors everything Teams cached except sign-in credentials. A database or object store whose name starts with `Teams:auth` or contains `auth`, `token`, `credential`, `secret`, `cookie`, `msal`, `oneauth`, `key-store`, `keystore`, `keyval` or `session` is never opened for values.
+- The archive schema version is 3. A version 2 archive gains the `records` table when it is next opened for writing, and its existing rows are untouched. The decoder version is 3, so the first sync after the upgrade re-reads an unchanged cache to fill `records`.
+- An archive written by a newer schema version is refused with the coded `archive_newer` error (exit 3). Builds of v0.1.0 and earlier cannot do this: on a version 3 archive they report a generic `db_error`. Do not point an old binary at an upgraded archive.
+- A sync reads the cache's LevelDB more than once now (once for the typed databases, then once to size the generic databases and once per batch), so a sync takes longer on a real cache. Real-cache timing, memory and record counts per manager are not measured yet.
+
 ## [0.1.0] - 2026-10-01
 
 The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No JSON field was renamed or removed and the exit codes did not change, so scripts written against the alpha keep working, with the text changes noted under Changed.

@@ -195,6 +195,16 @@ func (rt *runtime) listTable(r *listResult) {
 			}
 			cols, textCol = []string{"at", "type", "state", "actor", "sender", "conversation", "text"}, 6
 			rows = append(rows, []string{stamp(x.At), x.Type, read, x.ActorName, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
+		case storeItem:
+			cols, textCol = []string{"database", "store", "records", "removed", "last_updated_at"}, -1
+			rows = append(rows, []string{x.Database, x.Store, strconv.Itoa(x.Records), strconv.Itoa(x.Removed), stamp(x.LastUpdatedAt)})
+		case recordItem:
+			cols, textCol = []string{"updated_at", "database", "store", "key", "value"}, 4
+			value := oneLine(string(x.ValueJSON))
+			if !x.RemovedAt.IsZero() {
+				value = "(removed) " + value // first, so the clipped value column keeps it
+			}
+			rows = append(rows, []string{stamp(x.UpdatedAt), x.Database, x.Store, oneLine(string(x.KeyJSON)), value})
 		case projected:
 			cols, textCol = x.keys, -1
 			row := make([]string, len(x.keys))

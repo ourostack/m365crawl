@@ -83,3 +83,10 @@ func TestArchiveNewer(t *testing.T) {
 		t.Errorf("%+v", e)
 	}
 }
+
+func TestArchiveSchemaNewer(t *testing.T) {
+	e := ArchiveSchemaNewer(4, 3)
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+		t.Errorf("%+v", e)
+	}
+}

@@ -4,7 +4,7 @@ This reference reproduces the output of `teamscrawl --help` and `teamscrawl <com
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `unread`, `thread`, `watch`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -34,6 +34,8 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
+| [`stores`](#stores) | List every database and object store archived without a typed table, with record counts; the database name is what records --database takes. |
+| [`records`](#records) | List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated). |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
 | [`thread`](#thread) | Show one thread: &lt;conversation&gt; &lt;root-message-id&gt;, or a Teams message link. |
 | [`watch`](#watch) | Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted). |
@@ -273,6 +275,60 @@ Examples:
 ```sh
 teamscrawl activity --unread --limit 5 --fields at,type,conversation_display_name,text
 teamscrawl activity --type mention,mentionInChat
+```
+
+## stores
+
+List every database and object store archived without a typed table, with record counts; the database name is what records --database takes.
+
+```
+teamscrawl stores [flags]
+```
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--account=TENANT/USER` | Global flag: only this account's databases. |
+| `--fields=a,b,c` | Global flag: keep only these keys of each item (`database`, `store`, `records`, `removed`, `last_updated_at`). |
+
+Result: A list of store items `{database, store, records, removed, last_updated_at}`, sorted by database and store, never truncated. `records` counts the live rows and `removed` the rows Teams' cache no longer holds.
+
+Examples:
+
+```sh
+teamscrawl stores
+teamscrawl stores --fields database,store,records
+```
+
+## records
+
+List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated).
+
+```
+teamscrawl records --database=STRING [flags]
+```
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--database=STRING` | Database name or a prefix of it, for example Teams:calendar-manager. See the stores command for the names. |
+| `--store=STRING` | Only this object store, matched exactly. |
+| `--since=STRING` | Only records changed at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h). |
+| `--include-removed` | Also include records Teams' cache no longer holds (they keep their last value and have removed_at set). |
+| `--limit=50` | Maximum items to return; truncated says whether more exist. |
+| `--account=TENANT/USER` | Global flag: only this account's databases. |
+| `--fields=a,b,c` | Global flag: keep only these keys of each item (`source`, `tenant_id`, `user_id`, `database`, `store`, `key_json`, `value_json`, `first_seen_at`, `updated_at`, `removed_at`). |
+| `--max-text=N` | Global flag: a `value_json` longer than N characters becomes a JSON string of its first characters and `text_truncated` is true. |
+
+Result: A list of record items `{source, tenant_id?, user_id?, database, store, key_json, value_json?, first_seen_at, updated_at, removed_at?, text_truncated?}`. `key_json` and `value_json` are parsed JSON, not strings. `value_json` is omitted when the value never decoded.
+
+Examples:
+
+```sh
+teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300
+teamscrawl records --database Teams:pinned-manager --store pins --since 7d
 ```
 
 ## unread
