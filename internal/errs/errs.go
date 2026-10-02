@@ -4,7 +4,6 @@ package errs
 
 import (
 	"fmt"
-	"runtime"
 )
 
 // Exit statuses from the output contract.
@@ -111,12 +110,7 @@ func TeamsNotInstalled(root string) *Coded {
 
 // NoFullDiskAccess reports that the OS denied access to the Teams data directory.
 func NoFullDiskAccess(path string, err error) *Coded {
-	msg := "macOS denied access to " + path
-	fix := "Grant Full Disk Access to the app that runs teamscrawl in System Settings › Privacy & Security › Full Disk Access, then restart that app."
-	if runtime.GOOS == "windows" {
-		msg = "Windows denied access to " + path
-		fix = "Check that your Windows account can read that Teams data directory, or pass --teams-root with a readable Teams cache path."
-	}
+	msg, fix := noFullDiskAccessMessage(path)
 	return &Coded{Code: CodeNoFullDiskAccess, Exit: ExitEnvironment, cause: err,
 		Message: msg,
 		Fix:     fix}

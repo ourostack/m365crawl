@@ -144,12 +144,11 @@ type errorBody struct {
 }
 
 func bodyOf(c *errs.Coded) errorBody {
-	msg, fix := c.Message, c.Fix
+	msg := c.Message
 	if c.Code == errs.CodeDBError && c.Unwrap() != nil {
 		msg += ": " + c.Unwrap().Error()
 	}
-	fix = outputFix(c)
-	return errorBody{Code: c.Code, Message: msg, Fix: fix}
+	return errorBody{Code: c.Code, Message: msg, Fix: outputFix(c)}
 }
 
 // printError writes a coded error to stderr: one JSON line in JSON/log mode, or a plain line

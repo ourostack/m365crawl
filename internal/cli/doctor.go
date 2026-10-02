@@ -80,24 +80,7 @@ func (rt *runtime) doctorChecks() []check {
 	// full_disk_access
 	cs = append(cs, fullDiskAccessDoctorCheck(code, coded))
 	// teams_origin
-	switch {
-	case code == errs.CodeNoTeamsOrigin:
-		cs = append(cs, check{Name: "teams_origin", Detail: coded.Message, Fix: coded.Fix})
-	case func() bool {
-		_, ok := teamsOriginPermissionCheck(code, coded)
-		return ok
-	}():
-		c, _ := teamsOriginPermissionCheck(code, coded)
-		cs = append(cs, c)
-	case derr != nil:
-		cs = append(cs, check{Name: "teams_origin", Detail: "not checked: the Teams data is not readable", Fix: "Fix the checks above first."})
-	default:
-		d := fmt.Sprintf("%d Teams origin(s) found", len(sources))
-		if len(other) > 0 {
-			d += "; ignoring non-Teams origins: " + strings.Join(other, ", ")
-		}
-		cs = append(cs, check{Name: "teams_origin", OK: true, Detail: d})
-	}
+	cs = append(cs, teamsOriginDoctorCheck(sources, other, derr, code, coded))
 	return append(cs, rt.archiveChecks()...)
 }
 
