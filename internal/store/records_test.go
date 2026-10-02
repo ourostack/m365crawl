@@ -324,6 +324,27 @@ func TestArchiveNewerV3(t *testing.T) {
 	}
 }
 
+func TestOpenReadOnlyRefusesANewerArchive(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`update schema_migrations set version = 4`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	_, err = OpenReadOnly(ctx, path)
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer {
+		t.Fatalf("OpenReadOnly of a v4 archive = %v, want archive_newer", err)
+	}
+	if _, err := OpenReadOnly(ctx, filepath.Join(t.TempDir(), "none.db")); !errors.Is(err, ErrNoArchive) {
+		t.Fatalf("missing archive: %v", err)
+	}
+}
+
 func TestOpenIgnoresAFileWithoutAVersionTable(t *testing.T) {
 	// checkSchemaNotNewer leaves a file with no schema_migrations table to crawlkit's own open.
 	path := filepath.Join(t.TempDir(), "plain.db")
@@ -401,6 +422,11 @@ func TestRecordsFilters(t *testing.T) {
 	rows, _, _ = s.Records(ctx, RecordFilter{Database: "Teams:", Since: base.Add(30 * time.Minute)})
 	if len(rows) != 1 || rows[0].KeyJSON != `"e2"` {
 		t.Fatalf("since: %+v", rows)
+	}
+	// A removal counts as a change: --since sees a row removed after the cutoff.
+	rows, _, _ = s.Records(ctx, RecordFilter{Database: dbA, Store: "other", IncludeRemoved: true, Since: base.Add(time.Hour + 30*time.Minute)})
+	if len(rows) != 1 || rows[0].KeyJSON != `"o1"` {
+		t.Fatalf("since a removal: %+v", rows)
 	}
 	rows, _, _ = s.Records(ctx, RecordFilter{Database: dbA, Store: "other"})
 	if len(rows) != 0 {

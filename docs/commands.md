@@ -289,10 +289,10 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--account=TENANT/USER` | Global flag: only this account's databases. |
+| `--account=TENANT/USER` | Global flag: only this account's databases. A database whose name carries no account is hidden by it. |
 | `--fields=a,b,c` | Global flag: keep only these keys of each item (`database`, `store`, `records`, `removed`, `last_updated_at`). |
 
-Result: A list of store items `{database, store, records, removed, last_updated_at}`, sorted by database and store, never truncated. `records` counts the live rows and `removed` the rows Teams' cache no longer holds.
+Result: A list of store items `{database, store, records, removed, last_updated_at}`, sorted by database and store, never truncated. In text mode `database` is the manager label and a separate `account` column shows the shortened tenant and user ids. `records` counts the live rows and `removed` the rows Teams' cache no longer holds.
 
 Examples:
 
@@ -315,10 +315,10 @@ Flags:
 | --- | --- |
 | `--database=STRING` | Database name or a prefix of it, for example Teams:calendar-manager. See the stores command for the names. |
 | `--store=STRING` | Only this object store, matched exactly. |
-| `--since=STRING` | Only records changed at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h). |
+| `--since=STRING` | Only records changed at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h). A removal counts as a change. |
 | `--include-removed` | Also include records Teams' cache no longer holds (they keep their last value and have removed_at set). |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
-| `--account=TENANT/USER` | Global flag: only this account's databases. |
+| `--account=TENANT/USER` | Global flag: only this account's databases. A database whose name carries no account is hidden by it. |
 | `--fields=a,b,c` | Global flag: keep only these keys of each item (`source`, `tenant_id`, `user_id`, `database`, `store`, `key_json`, `value_json`, `first_seen_at`, `updated_at`, `removed_at`). |
 | `--max-text=N` | Global flag: a `value_json` longer than N characters becomes a JSON string of its first characters and `text_truncated` is true. |
 

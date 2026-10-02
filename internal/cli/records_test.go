@@ -179,3 +179,17 @@ func TestStoresAndRecordsReportArchiveErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestDatabaseLabelSplitsManagerAndAccount(t *testing.T) {
+	label, acct := databaseLabel("Teams:calendar-manager:react-web-client:" + tenantA + ":" + userA + ":en-us")
+	if label != "Teams:calendar-manager" || acct != "0000…0001/0000…00a1" {
+		t.Fatalf("parsed name: %q %q", label, acct)
+	}
+	label, acct = databaseLabel("Teams:calendar-manager:react-web-client:t1:u1:en-us")
+	if label != "Teams:calendar-manager" || acct != "t1/u1" {
+		t.Fatalf("short ids stay whole: %q %q", label, acct)
+	}
+	if label, acct = databaseLabel("Teams:odd-database"); label != "Teams:odd-database" || acct != "-" {
+		t.Fatalf("unparsed name: %q %q", label, acct)
+	}
+}

@@ -160,6 +160,9 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNoArchive
 	}
+	if err := checkSchemaNotNewer(ctx, path); err != nil {
+		return nil, err
+	}
 	cs, err := crawlstore.OpenReadOnly(ctx, path)
 	if err != nil {
 		return nil, err

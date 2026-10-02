@@ -14,6 +14,7 @@ import (
 	"github.com/ourostack/teamscrawl/internal/render"
 	"github.com/ourostack/teamscrawl/internal/store"
 	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
 // displayZone is the zone text output shows times in; tests pin it.
@@ -164,6 +165,23 @@ func (rt *runtime) statusBlock(title string, r *statusResult) {
 	render.Table(w, []string{"account", "conversations", "messages", "people", "activity", "newest"}, rows, rt.color)
 }
 
+// databaseLabel splits a database name for the text tables: the manager label without the account
+// ("Teams:calendar-manager") and the account as shortened tenant/user ids. A name that carries no
+// account is its own label with "-" as the account.
+func databaseLabel(name string) (label, account string) {
+	manager, acct, ok := teamsdesktop.ParseDatabaseName(name)
+	if !ok {
+		return name, "-"
+	}
+	short := func(id string) string {
+		if len(id) > 9 {
+			return id[:4] + "…" + id[len(id)-4:]
+		}
+		return id
+	}
+	return "Teams:" + manager, short(acct.TenantID) + "/" + short(acct.UserID)
+}
+
 // listTable prints a list result as an aligned table with a column subset per item type; the
 // free-text column is clipped so a row fits the terminal.
 func (rt *runtime) listTable(r *listResult) {
@@ -196,15 +214,17 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = []string{"at", "type", "state", "actor", "sender", "conversation", "text"}, 6
 			rows = append(rows, []string{stamp(x.At), x.Type, read, x.ActorName, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
 		case storeItem:
-			cols, textCol = []string{"database", "store", "records", "removed", "last_updated_at"}, -1
-			rows = append(rows, []string{x.Database, x.Store, strconv.Itoa(x.Records), strconv.Itoa(x.Removed), stamp(x.LastUpdatedAt)})
+			label, acct := databaseLabel(x.Database)
+			cols, textCol = []string{"database", "account", "store", "records", "removed", "last_updated_at"}, -1
+			rows = append(rows, []string{label, acct, x.Store, strconv.Itoa(x.Records), strconv.Itoa(x.Removed), stamp(x.LastUpdatedAt)})
 		case recordItem:
-			cols, textCol = []string{"updated_at", "database", "store", "key", "value"}, 4
+			label, acct := databaseLabel(x.Database)
+			cols, textCol = []string{"updated_at", "database", "account", "store", "key", "value"}, 5
 			value := oneLine(string(x.ValueJSON))
 			if !x.RemovedAt.IsZero() {
 				value = "(removed) " + value // first, so the clipped value column keeps it
 			}
-			rows = append(rows, []string{stamp(x.UpdatedAt), x.Database, x.Store, oneLine(string(x.KeyJSON)), value})
+			rows = append(rows, []string{stamp(x.UpdatedAt), label, acct, x.Store, oneLine(string(x.KeyJSON)), value})
 		case projected:
 			cols, textCol = x.keys, -1
 			row := make([]string, len(x.keys))
@@ -227,7 +247,7 @@ func (rt *runtime) listTable(r *listResult) {
 	}
 	for _, row := range rows {
 		for i := range row {
-			if i != textCol {
+			if i != textCol && cols[i] != "database" {
 				row[i] = render.Truncate(row[i], 40)
 			}
 		}

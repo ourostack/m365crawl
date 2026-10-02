@@ -1,9 +1,9 @@
-database                                  store   records  removed  last_updated_at
-----------------------------------------  ------  -------  -------  ----------------
-Teams:calendar-manager:react-web-clie...  events  2        0        <stamp>
-Teams:calendar-manager:react-web-clie...  events  2        0        <stamp>
-Teams:pinned-manager:react-web-client...  pins    4        0        <stamp>
-Teams:pinned-manager:react-web-client...  pins    4        0        <stamp>
+database                account              store   records  removed  last_updated_at
+----------------------  -------------------  ------  -------  -------  ----------------
+Teams:calendar-manager  0000…0001/0000…00a1  events  2        0        <stamp>
+Teams:calendar-manager  0000…0002/0000…00a2  events  2        0        <stamp>
+Teams:pinned-manager    0000…0001/0000…00a1  pins    4        0        <stamp>
+Teams:pinned-manager    0000…0002/0000…00a2  pins    4        0        <stamp>
 
 4 items
 archive age: <age>

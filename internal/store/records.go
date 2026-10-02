@@ -209,7 +209,7 @@ func (s *Store) Records(ctx context.Context, f RecordFilter) ([]RecordRow, bool,
 		w.add(`store=?`, f.Store)
 	}
 	if !f.Since.IsZero() {
-		w.add(`updated_at>=?`, fmtTime(f.Since))
+		w.add(`max(updated_at, coalesce(removed_at, updated_at))>=?`, fmtTime(f.Since))
 	}
 	if !f.IncludeRemoved {
 		w.add(`removed_at is null`)

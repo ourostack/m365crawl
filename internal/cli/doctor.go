@@ -113,6 +113,14 @@ func (rt *runtime) archiveChecks() []check {
 			check{Name: "schema_version", OK: true, Detail: d},
 			check{Name: "fts", OK: true, Detail: d},
 			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `teamscrawl sync`."})
+	case isArchiveNewer(err):
+		// A newer schema is refused at open, so no other check can read the archive.
+		var coded *errs.Coded
+		_ = errors.As(err, &coded)
+		return append(cs,
+			check{Name: "schema_version", Detail: coded.Message, Fix: coded.Fix},
+			check{Name: "fts", Detail: "cannot read an archive written by a newer teamscrawl", Fix: coded.Fix},
+			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer teamscrawl", Fix: coded.Fix})
 	case err != nil:
 		fix := "Check that " + rt.dbPath + " is a teamscrawl archive; move it aside and run `teamscrawl sync` to rebuild it."
 		return append(cs,
@@ -127,12 +135,9 @@ func (rt *runtime) archiveChecks() []check {
 		return append(cs, check{Name: "schema_version", Detail: "cannot read the archive: " + err.Error(), Fix: fix},
 			check{Name: "fts", Detail: "cannot read the archive", Fix: fix}, check{Name: "last_sync_age", Detail: "cannot read the archive", Fix: fix})
 	}
-	switch {
-	case row.SchemaVersion == store.SchemaVersion:
+	if row.SchemaVersion == store.SchemaVersion {
 		cs = append(cs, check{Name: "schema_version", OK: true, Detail: fmt.Sprintf("schema v%d", row.SchemaVersion)})
-	case row.SchemaVersion > store.SchemaVersion:
-		cs = append(cs, check{Name: "schema_version", Detail: fmt.Sprintf("archive is schema v%d, this teamscrawl knows v%d", row.SchemaVersion, store.SchemaVersion), Fix: "Update teamscrawl."})
-	default:
+	} else { // older: a newer archive is refused when it is opened
 		cs = append(cs, check{Name: "schema_version", Detail: fmt.Sprintf("archive is schema v%d, expected v%d", row.SchemaVersion, store.SchemaVersion), Fix: "Run `teamscrawl sync` to migrate the archive."})
 	}
 	if row.FTSPresent {
@@ -160,6 +165,12 @@ func (rt *runtime) archiveChecks() []check {
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
 	return cs
+}
+
+// isArchiveNewer reports the coded archive_newer error that opening a newer archive returns.
+func isArchiveNewer(err error) bool {
+	var coded *errs.Coded
+	return errors.As(err, &coded) && coded.Code == errs.CodeArchiveNewer
 }
 
 // archiveNewerCheck fails when the archive was written by a newer build: every sync would refuse
