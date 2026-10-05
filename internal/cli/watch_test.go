@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -184,6 +185,9 @@ func (w *watchEnv) baselineDone() {
 }
 
 func (w *watchEnv) archiveCount(q string) int {
+	if _, err := os.Stat(w.db); err != nil {
+		return 0
+	}
 	db, err := sql.Open("sqlite", w.db+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return 0
@@ -194,6 +198,19 @@ func (w *watchEnv) archiveCount(q string) int {
 		return 0
 	}
 	return n
+}
+
+func TestArchiveCountDoesNotCreateArchive(t *testing.T) {
+	w := newWatchEnv(t)
+	if _, err := os.Stat(w.db); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive should start absent: %v", err)
+	}
+	if got := w.archiveCount("select count(*) from messages"); got != 0 {
+		t.Fatalf("archiveCount = %d, want 0", got)
+	}
+	if _, err := os.Stat(w.db); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archiveCount created %s: %v", w.db, err)
+	}
 }
 
 func (w *watchEnv) exec(q string, args ...any) {
