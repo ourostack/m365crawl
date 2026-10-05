@@ -13,6 +13,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/store"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
@@ -250,6 +251,26 @@ func TestDoctorReportsAHealthyArchive(t *testing.T) {
 	}
 	if cs["fts"]["ok"] != true || cs["fts"]["detail"] != "full-text indexes present" {
 		t.Fatalf("fts = %v", cs["fts"])
+	}
+}
+
+func TestDoctorFlagsANewerStatusRowEvenIfOpenSucceeded(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	oldStatus := readArchiveStatus
+	readArchiveStatus = func(st *store.Store, ctx context.Context) (store.StatusRow, error) {
+		row, err := oldStatus(st, ctx)
+		if err != nil {
+			return row, err
+		}
+		row.SchemaVersion = store.SchemaVersion + 100
+		return row, nil
+	}
+	t.Cleanup(func() { readArchiveStatus = oldStatus })
+	code, cs, _ := doctorChecksFor(t, e)
+	d := cs["schema_version"]
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version") || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") {
+		t.Fatalf("newer status row: exit %d, %v", code, d)
 	}
 }
 

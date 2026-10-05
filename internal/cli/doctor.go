@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,12 @@ import (
 )
 
 const staleSyncAfter = 24 * time.Hour
+
+var (
+	openArchiveReadOnly = store.OpenReadOnly
+	readArchiveStatus   = func(st *store.Store, ctx context.Context) (store.StatusRow, error) { return st.Status(ctx) }
+	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
+)
 
 type check struct {
 	Name   string `json:"name"`
@@ -87,7 +94,7 @@ func (rt *runtime) doctorChecks() []check {
 func (rt *runtime) archiveChecks() []check {
 	var cs []check
 	cs = append(cs, rt.writableCheck())
-	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	st, err := openArchiveReadOnly(rt.ctx, rt.dbPath)
 	switch {
 	case errors.Is(err, store.ErrNoArchive):
 		const d = "no archive yet; the first sync creates it"
@@ -111,7 +118,7 @@ func (rt *runtime) archiveChecks() []check {
 			check{Name: "last_sync_age", Detail: "cannot open the archive", Fix: fix})
 	}
 	defer func() { _ = st.Close() }()
-	row, err := st.Status(rt.ctx)
+	row, err := readArchiveStatus(st, rt.ctx)
 	if err != nil {
 		fix := "Run `teamscrawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."
 		return append(cs, check{Name: "schema_version", Detail: "cannot read the archive: " + err.Error(), Fix: fix},
@@ -136,7 +143,7 @@ func (rt *runtime) archiveChecks() []check {
 	}
 	cs = append(cs, rt.archiveNewerCheck(st))
 	// Status just read the archive, so the probe cannot fail here; a failure would only hide the warning.
-	old, _ := st.NeedsUpgrade(rt.ctx)
+	old, _ := needsArchiveUpgrade(st, rt.ctx)
 	if old {
 		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `teamscrawl sync`."})
 	}
