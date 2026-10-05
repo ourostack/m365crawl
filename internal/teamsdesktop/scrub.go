@@ -3,33 +3,13 @@ package teamsdesktop
 import (
 	"bytes"
 	"encoding/json"
-	"regexp"
+	"slices"
 	"strings"
 )
 
-// redacted replaces the secret part of a generic record's value.
-const redacted = "[redacted]"
-
-var (
-	// jwtRE matches a JSON Web Token: a header and a payload (both base64url JSON, so both start
-	// with "eyJ") and a signature.
-	jwtRE = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
-	// bearerRE matches a whole JSON string that starts with "Bearer" and whitespace (an opaque bearer token).
-	bearerRE = regexp.MustCompile(`(?i)"bearer(?:\s|\\[tnr]|\\u00(?:09|0a|0d|20|a0))(?:[^"\\]|\\.)*"`)
-	// secretNameRE matches a credential key name between quotes or escaped quotes inside text.
-	secretNameRE = regexp.MustCompile(`(?i)["\\](?:access_token|refresh_token|id_token|authorization|client_secret|password)["\\]`)
-	// sigRE matches the value of a sig= query parameter (a signed URL's signature), any case.
-	sigRE = regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+`)
-)
-
-// secretKeys are the object keys (compared in lower case) whose value is always credential material.
-var secretKeys = map[string]bool{
-	"access_token": true, "refresh_token": true, "id_token": true,
-	"authorization": true, "client_secret": true, "password": true,
-}
-
-// maxStringifiedDepth bounds how many levels of JSON-inside-a-string Scrub unwraps.
-const maxStringifiedDepth = 4
+// The rules Scrub applies (key names, regular expressions, depth limit) are the fields of rules, in
+// rules.go; nothing in this file keeps a rule of its own, because MemoSignature reads rules and
+// nothing else.
 
 // Scrub removes credential material from a generic record's canonical JSON (a value or a key) and
 // returns the scrubbed JSON with the number of redactions, each replaced by "[redacted]": the
@@ -46,11 +26,11 @@ func Scrub(valueJSON []byte) ([]byte, int) { return scrub(valueJSON, 0) }
 
 func scrub(valueJSON []byte, depth int) ([]byte, int) {
 	out, n := redactKeyed(valueJSON, depth)
-	out = bearerRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
-	out = jwtRE.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
-	out = sigRE.ReplaceAllFunc(out, func(m []byte) []byte {
+	out = rules.Bearer.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
+	out = rules.JWT.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
+	out = rules.Sig.ReplaceAllFunc(out, func(m []byte) []byte {
 		n++
-		i := sigRE.FindSubmatchIndex(m)[3]
+		i := rules.Sig.FindSubmatchIndex(m)[3]
 		return append(append([]byte(nil), m[:i]...), redacted...)
 	})
 	return out, n
@@ -114,7 +94,7 @@ func secretKeyLiteral(lit []byte) bool {
 	if json.Unmarshal(lit, &s) != nil {
 		return false
 	}
-	return secretKeys[strings.ToLower(s)]
+	return rules.SecretKeys[strings.ToLower(s)]
 }
 
 // stringEnd returns the index just past the string literal that starts at in[i] (a quote).
@@ -185,12 +165,12 @@ func siblingValues(obj []byte) map[int]int {
 		vs := skipSpace(obj, ke)
 		vs = skipSpace(obj, vs+1)
 		ve := valueEnd(obj, vs)
-		switch strings.ToLower(key) {
-		case "type", "name", "key":
+		switch lk := strings.ToLower(key); {
+		case slices.Contains(rules.SiblingNameFields, lk):
 			if secretKeyLiteral(obj[vs:ve]) {
 				named = true
 			}
-		case "value":
+		case lk == rules.SiblingValueField:
 			spans[vs] = ve
 		}
 		i = skipSpace(obj, ve)
@@ -213,9 +193,9 @@ func scrubStringified(lit []byte, depth int) ([]byte, int) {
 	if t == "" || (t[0] != '{' && t[0] != '[') {
 		return lit, 0
 	}
-	if depth >= maxStringifiedDepth || !json.Valid([]byte(t)) {
+	if depth >= rules.MaxStringifiedDepth || !json.Valid([]byte(t)) {
 		// Too deep to unwrap, or truncated JSON: redact the whole string when it names a credential.
-		if secretNameRE.MatchString(t) {
+		if rules.SecretName.MatchString(t) {
 			return []byte(`"` + redacted + `"`), 1
 		}
 		return lit, 0

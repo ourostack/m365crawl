@@ -4,12 +4,37 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+	"maps"
+	"reflect"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/ourostack/teamscrawl/internal/indexeddb"
 )
 
-func TestMemoSignatureCoversWhatShapesRows(t *testing.T) {
+// changesSignature applies change to the live rule tables, reports whether the signature moved,
+// and restores the tables.
+func changesSignature(t *testing.T, change func(r *ruleSet)) bool {
+	t.Helper()
+	saved := rules
+	defer func() { rules = saved }()
+	// The tables are shared maps and slices: copy them so the change cannot reach the saved ones.
+	rules.SecretKeys = maps.Clone(saved.SecretKeys)
+	rules.SiblingNameFields = slices.Clone(saved.SiblingNameFields)
+	rules.DeniedPrefixes = slices.Clone(saved.DeniedPrefixes)
+	rules.DeniedTerms = slices.Clone(saved.DeniedTerms)
+	rules.DeniedTokens = slices.Clone(saved.DeniedTokens)
+	before := MemoSignature(2)
+	change(&rules)
+	return !bytes.Equal(before, MemoSignature(2))
+}
+
+func TestMemoSignatureIsStableAndCoversTheVersions(t *testing.T) {
 	base := MemoSignature(2)
 	if len(base) == 0 || !bytes.Equal(base, MemoSignature(2)) {
 		t.Fatal("the signature is not stable")
@@ -19,33 +44,102 @@ func TestMemoSignatureCoversWhatShapesRows(t *testing.T) {
 	}
 	old := decoderVersion
 	decoderVersion = old + 1
+	defer func() { decoderVersion = old }()
 	if bytes.Equal(base, MemoSignature(2)) {
 		t.Error("DecoderVersion does not feed the signature")
 	}
-	decoderVersion = old
+}
 
-	// A changed deny list changes it...
-	terms := deniedTerms
-	deniedTerms = append(append([]string(nil), terms...), "calendar")
-	if bytes.Equal(base, MemoSignature(2)) {
-		t.Error("a new deny term does not change the signature")
+// Every way a rule can change moves the signature: a brand-new key name, a new regular
+// expression, a new deny term, and the other tables. The values are ones no probe list could have
+// anticipated.
+func TestMemoSignatureSeesEveryRuleChange(t *testing.T) {
+	for name, change := range map[string]func(r *ruleSet){
+		"a new secret key name":      func(r *ruleSet) { r.SecretKeys["session_key"] = true },
+		"a secret key name removed":  func(r *ruleSet) { delete(r.SecretKeys, "password") },
+		"a new regular expression":   func(r *ruleSet) { r.Sig = regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+|([?&]token=)[^&]+`) },
+		"another regular expression": func(r *ruleSet) { r.JWT = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+`) },
+		"the bearer expression":      func(r *ruleSet) { r.Bearer = regexp.MustCompile(`"bearer"`) },
+		"the secret name expression": func(r *ruleSet) { r.SecretName = regexp.MustCompile(`"password"`) },
+		"a new deny term":            func(r *ruleSet) { r.DeniedTerms = append(r.DeniedTerms, "calendar") },
+		"a new deny token":           func(r *ruleSet) { r.DeniedTokens = append(r.DeniedTokens, "load") },
+		"a new deny prefix":          func(r *ruleSet) { r.DeniedPrefixes = append(r.DeniedPrefixes, "teams:keys") },
+		"the depth limit":            func(r *ruleSet) { r.MaxStringifiedDepth++ },
+		"a sibling name field":       func(r *ruleSet) { r.SiblingNameFields = append(r.SiblingNameFields, "label") },
+		"the sibling value field":    func(r *ruleSet) { r.SiblingValueField = "secret" },
+		"the replacement text":       func(r *ruleSet) { r.Replacement = "[gone]" },
+	} {
+		if !changesSignature(t, change) {
+			t.Errorf("%s does not change the signature", name)
+		}
 	}
-	deniedTerms = terms
-	tokens := deniedTokens
-	deniedTokens = append(append([]string(nil), tokens...), "load")
-	if bytes.Equal(base, MemoSignature(2)) {
-		t.Error("a new deny token does not change the signature")
+	if changesSignature(t, func(*ruleSet) {}) {
+		t.Error("an unchanged rule set changed the signature")
 	}
-	deniedTokens = tokens
-	// ...and so does a changed scrub rule.
-	keys := secretKeys
-	secretKeys = map[string]bool{"access_token": true}
-	if bytes.Equal(base, MemoSignature(2)) {
-		t.Error("a changed scrub key set does not change the signature")
+}
+
+// The signature reads the whole rule set by reflection: a field added to the set moves it without
+// anyone touching MemoSignature. The walker refuses a kind it cannot hash instead of skipping it.
+func TestMemoSignatureCoversEveryFieldOfTheRegistry(t *testing.T) {
+	typ := reflect.TypeOf(ruleSet{})
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		saved := rules
+		v := reflect.ValueOf(&rules).Elem().Field(i)
+		before := MemoSignature(2)
+		switch v.Kind() {
+		case reflect.String:
+			v.SetString(v.String() + "x")
+		case reflect.Int:
+			v.SetInt(v.Int() + 1)
+		case reflect.Pointer:
+			v.Set(reflect.ValueOf(regexp.MustCompile(`changed-` + f.Name)))
+		case reflect.Slice:
+			v.Set(reflect.Append(v, reflect.ValueOf("added-"+f.Name)))
+		case reflect.Map:
+			v.Set(reflect.ValueOf(map[string]bool{"added-" + f.Name: true}))
+		default:
+			t.Fatalf("%s has kind %s: teach this test and hashValue about it", f.Name, v.Kind())
+		}
+		if bytes.Equal(before, MemoSignature(2)) {
+			t.Errorf("registry field %s does not feed the signature", f.Name)
+		}
+		rules = saved
 	}
-	secretKeys = keys
-	if !bytes.Equal(base, MemoSignature(2)) {
+	if !bytes.Equal(MemoSignature(2), MemoSignature(2)) {
 		t.Fatal("restoring the rules did not restore the signature")
+	}
+	for _, v := range []any{make(chan int), 1.5, map[int]bool{}, struct{ P *int }{}, []func(){nil}} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("hashValue accepted a %T", v)
+				}
+			}()
+			hashValue(io.Discard, "x", reflect.ValueOf(v))
+		}()
+	}
+}
+
+// Scrub and Denied keep no rule outside the registry: scrub.go and deny.go declare no
+// package-level variable or constant. A rule table added there would be invisible to the
+// signature, so this fails until the table is moved into ruleSet (rules.go).
+func TestRuleTablesLiveInTheRegistry(t *testing.T) {
+	fset := token.NewFileSet()
+	for _, file := range []string{"scrub.go", "deny.go"} {
+		f, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			if g, ok := d.(*ast.GenDecl); ok && (g.Tok == token.VAR || g.Tok == token.CONST) {
+				for _, spec := range g.Specs {
+					for _, n := range spec.(*ast.ValueSpec).Names {
+						t.Errorf("%s declares package-level %s: put the rule in ruleSet so the memo signature covers it", file, n.Name)
+					}
+				}
+			}
+		}
 	}
 }
 
