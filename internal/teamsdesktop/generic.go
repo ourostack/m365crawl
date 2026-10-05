@@ -64,7 +64,9 @@ type GenericOptions struct {
 	// the value is decoded. digest is the record's digest under Sig. When Known reports ok the
 	// record is skipped: it is still seen, and redacted (what Known returns) is added to the
 	// result's Redacted as if the value had been scrubbed again. Known must report ok only when
-	// the archive already holds exactly the row a full read of this record would write.
+	// the archive already holds exactly the row a full read of this record would write. It is not
+	// asked about a record whose scrubbed key an earlier record of the same object store already
+	// had (they share one row, which that record may have rewritten): such a record is read in full.
 	Sig   []byte
 	Known func(database, store, keyJSON string, digest []byte) (redacted int, ok bool)
 }
@@ -267,14 +269,21 @@ func readGenericDatabase(ctx context.Context, o genericOrigin, g genericDB, res 
 			}
 			keyJSON, kn := Scrub(keyJSON)
 			res.Redacted += kn
+			// Scrubbing can map several keys to one row. Known vouches for a row as the archive
+			// stood before this read, and an earlier record of this store that maps to the same row
+			// may have changed it since, so only the first record of a row may be skipped. Every
+			// later one is read in full, in order, so the row ends where a full read leaves it.
+			_, shared := seen[string(keyJSON)]
 			seen[string(keyJSON)] = struct{}{}
 			var digest []byte
 			if opts.Known != nil {
 				if payload, perr := o.Payload(db.ID, r.Raw); perr == nil { // an unreadable value is read in full below, as an omission
 					digest = recordDigest(opts.Sig, db.Name, payload)
-					if red, ok := opts.Known(db.Name, st.Name, string(keyJSON), digest); ok {
-						res.Redacted += red
-						return nil
+					if !shared {
+						if red, ok := opts.Known(db.Name, st.Name, string(keyJSON), digest); ok {
+							res.Redacted += red
+							return nil
+						}
 					}
 				}
 			}

@@ -351,3 +351,31 @@ func TestReadWithDigestsOnTheFixture(t *testing.T) {
 		t.Fatalf("%d records were read although Skip took them all", n)
 	}
 }
+
+// Two records whose keys scrub to one key share a row: Known is asked about the first only, the
+// second is read in full and still carries its digest, so the row remembers the bytes it ends on.
+func TestReadGenericKnownIsAskedOncePerRow(t *testing.T) {
+	f := &fakeGeneric{
+		dbs:  []indexeddb.Database{gdb(1, "a-manager", "s")},
+		held: map[int64]int64{1: 1},
+		records: map[int64][]indexeddb.Record{1: {
+			strRec("https://x.test/a?sig=AAA", "first"), strRec("https://x.test/a?sig=BBB", "second"),
+		}},
+	}
+	f.install(t)
+	var asked []string
+	var recs []GenericRecord
+	_, err := ReadGeneric(context.Background(), "/snap", nil, DefaultGenericBudget, GenericOptions{Sig: []byte("s"), Known: func(_, _, key string, _ []byte) (int, bool) {
+		asked = append(asked, key)
+		return 0, true // a stale map would vouch for every record
+	}}, func(r GenericRecord) error { recs = append(recs, r); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 {
+		t.Fatalf("Known asked %v; only the first record of a row may be skipped", asked)
+	}
+	if len(recs) != 1 || string(recs[0].ValueJSON) != `"second"` || recs[0].Digest == nil {
+		t.Fatalf("records = %+v; the second record must be read in full with its digest", recs)
+	}
+}
