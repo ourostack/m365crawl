@@ -40,7 +40,7 @@ const richEvent = `{
  "bodyContent":"<p>Hello&nbsp;team</p>","bodyContentType":"html","bodyPreview":"Hello team",
  "hasAttachments":true,
  "attachments":[{"id":"att-1","name":"agenda.txt","fileName":"ignored.txt","size":12,"contentType":"text/plain","contentId":"cid-1","isInline":true,"attachmentType":"file"},{"id":"att-2","fileName":"b.txt"},{}],
- "categories":["Blue","Fixture",""],"reminderMinutesBeforeStart":15,
+ "categories":["Blue","Fixture",""],"isReminderSet":true,"reminderMinutesBeforeStart":15,
  "recurrencePattern":{"type":"weekly","interval":1},"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"}
 }`
 
@@ -111,6 +111,7 @@ func TestMapEventFieldByField(t *testing.T) {
 		{"CategoriesJSON", e.CategoriesJSON, `["Blue","Fixture"]`},
 		{"RecurrenceJSON", e.RecurrenceJSON, `{"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"},"recurrencePattern":{"interval":1,"type":"weekly"}}`},
 		{"ReminderMinutes", e.ReminderMinutes, &reminder},
+		{"ReminderStated", e.ReminderStated, true},
 		{"DetailRawJSON", e.DetailRawJSON, richEvent},
 		{"DetailAsOf", e.DetailAsOf, (*time.Time)(nil)},
 		{"RemovedAt", e.RemovedAt, (*time.Time)(nil)},
@@ -332,15 +333,15 @@ func TestMapEventTimeForms(t *testing.T) {
 }
 
 func TestMapEventScalarForms(t *testing.T) {
-	e, _ := mapEvent(t, "k", `{"iCalUID":12345,"subject":"S","reminderMinutesBeforeStart":"x","isOrganizer":"TRUE","isPrivate":"no","hasAttachments":1}`)
+	e, _ := mapEvent(t, "k", `{"iCalUID":12345,"subject":"S","isReminderSet":true,"reminderMinutesBeforeStart":"x","isOrganizer":"TRUE","isPrivate":"no","hasAttachments":1}`)
 	if e.ICalUID != "12345" || !e.IsOrganizer || e.IsPrivate || e.HasAttachments || e.ReminderMinutes != nil {
 		t.Fatalf("scalar forms: %+v", e)
 	}
-	e, _ = mapEvent(t, "k", `{"iCalUID":"U","reminderMinutesBeforeStart":7.0}`)
+	e, _ = mapEvent(t, "k", `{"iCalUID":"U","isReminderSet":true,"reminderMinutesBeforeStart":7.0}`)
 	if e.ReminderMinutes == nil || *e.ReminderMinutes != 7 {
 		t.Fatalf("float reminder: %v", e.ReminderMinutes)
 	}
-	e, _ = mapEvent(t, "k", `{"iCalUID":"U","iCalUID2":1,"reminderMinutesBeforeStart":0}`)
+	e, _ = mapEvent(t, "k", `{"iCalUID":"U","iCalUID2":1,"isReminderSet":true,"reminderMinutesBeforeStart":0}`)
 	if e.ReminderMinutes == nil || *e.ReminderMinutes != 0 {
 		t.Fatalf("zero reminder must be kept: %v", e.ReminderMinutes)
 	}
@@ -376,5 +377,52 @@ func TestJoinURLSurvivesScrub(t *testing.T) {
 	e, _ := mapEvent(t, "o", string(out))
 	if e.OnlineMeetingURL != join || strings.Contains(e.OnlineMeetingURL, "[redacted]") {
 		t.Fatalf("join url = %q", e.OnlineMeetingURL)
+	}
+}
+
+func TestMapEventReminderStates(t *testing.T) {
+	cases := []struct {
+		name, js string
+		minutes  *int
+		stated   bool
+	}{
+		{"set with minutes", `"isReminderSet":true,"reminderMinutesBeforeStart":10`, ptrInt(10), true},
+		{"set with zero", `"isReminderSet":true,"reminderMinutesBeforeStart":0`, ptrInt(0), true},
+		{"set without minutes", `"isReminderSet":true`, nil, false},
+		{"not set", `"isReminderSet":false,"reminderMinutesBeforeStart":15`, nil, true},
+		{"absent key", `"reminderMinutesBeforeStart":15`, nil, false},
+		{"null key", `"isReminderSet":null`, nil, false},
+	}
+	for _, c := range cases {
+		e, _ := mapEvent(t, "k", `{"iCalUID":"U",`+c.js+`}`)
+		if !reflect.DeepEqual(e.ReminderMinutes, c.minutes) || e.ReminderStated != c.stated {
+			t.Errorf("%s: minutes %v stated %v", c.name, e.ReminderMinutes, e.ReminderStated)
+		}
+	}
+}
+
+func ptrInt(n int) *int { return &n }
+
+func TestMapEventCategoriesStates(t *testing.T) {
+	cases := map[string]string{
+		`"categories":[]`:           "[]",
+		`"categories":[""]`:         "[]",
+		`"categories":["A"]`:        `["A"]`,
+		`"categories":null`:         "",
+		`"subject":"no categories"`: "",
+	}
+	for js, want := range cases {
+		e, _ := mapEvent(t, "k", `{"iCalUID":"U",`+js+`}`)
+		if e.CategoriesJSON != want {
+			t.Errorf("%s -> %q, want %q", js, e.CategoriesJSON, want)
+		}
+	}
+}
+
+func TestMapCatchUpRecordingFieldsTravelTogether(t *testing.T) {
+	recaps, _, _, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","url":"https://recordings.example.test/a","duration":60000,"recordingStartTime":"2026-03-10T17:00:00Z"}]}`))
+	r := recaps[0]
+	if r.RecordingURL == "" || r.RecordingStartAt == nil || r.RecordingEndAt == nil || r.DurationSeconds != 60 {
+		t.Fatalf("%+v", r)
 	}
 }

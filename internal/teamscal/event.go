@@ -59,15 +59,12 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		BodyPreview:        str(m["bodyPreview"]),
 		AttachmentsJSON:    mapAttachments(m["attachments"]),
 		HasAttachments:     flagValue(m, "hasAttachments"),
-		CategoriesJSON:     mapCategories(m["categories"]),
+		CategoriesJSON:     mapCategories(m),
 		RecurrenceJSON:     mapRecurrence(m),
 		DetailRawJSON:      string(valueJSON),
 	}
 	e.EventType, notes.EventTypeAbsent = normalizeEventType(str(m["eventType"]))
-	if minutes, ok := integer(m["reminderMinutesBeforeStart"]); ok {
-		n := int(minutes)
-		e.ReminderMinutes = &n
-	}
+	e.ReminderMinutes, e.ReminderStated = mapReminder(m)
 
 	e.TeamsThreadID = threadID(m, e.OnlineMeetingURL)
 
@@ -255,14 +252,40 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-func mapCategories(v any) string {
-	var out []string
-	for _, it := range array(v) {
+// mapReminder reads the reminder from isReminderSet: true gives the lead time (zero minutes is a
+// value), false states that no reminder is set (nil minutes, stated), and an absent or null key
+// states nothing.
+func mapReminder(m map[string]any) (minutes *int, stated bool) {
+	set, present := flag(m, "isReminderSet")
+	if !present {
+		return nil, false
+	}
+	if !set {
+		return nil, true
+	}
+	n, ok := integer(m["reminderMinutesBeforeStart"])
+	if !ok {
+		return nil, false
+	}
+	v := int(n)
+	return &v, true
+}
+
+// mapCategories renders the category list. "[]" states "no categories" and is emitted only when
+// the categories key holds a list with no names; an absent, null or unreadable value gives "", which states
+// nothing.
+func mapCategories(m map[string]any) string {
+	list, ok := jsonish(m["categories"]).([]any)
+	if !ok {
+		return ""
+	}
+	out := []string{}
+	for _, it := range list {
 		if s := str(it); s != "" {
 			out = append(out, s)
 		}
 	}
-	return listJSON(out)
+	return marshal(out)
 }
 
 // recurrenceFields are the record fields that together describe a series' rule.
