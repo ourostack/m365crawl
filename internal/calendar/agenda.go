@@ -150,35 +150,52 @@ type coveredDay struct {
 }
 
 // coverage reports whether any part of [from, to) is uncovered, and the oldest verification time
-// among what covers it. A source with covered-day rows covers exactly those days (dates in from's
-// zone); a source without any covers its whole window.
+// among what covers it. Coverage is keyed by (source, account) and judged per account. Within an
+// account, a source with covered-day rows covers exactly those days (dates in from's zone) and a
+// source without any covers its whole window; sources of one account complement each other. A day
+// is a gap when any account in scope does not cover it, so an all-accounts query never hides an
+// account that skipped the day. With nothing in scope every day is a gap.
 func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool, asOf time.Time) {
 	type srcKey struct {
 		source  Source
 		account string
 	}
+	type accountCover struct {
+		verified map[string]time.Time // date -> newest verification across the account's sources
+		spans    []Window             // windows of the account's sources that have no covered days
+	}
 	withDays := map[srcKey]bool{}
-	verified := map[string]time.Time{} // date -> newest verification across sources
+	accounts := map[string]*accountCover{}
+	of := func(account string) *accountCover {
+		if accounts[account] == nil {
+			accounts[account] = &accountCover{verified: map[string]time.Time{}}
+		}
+		return accounts[account]
+	}
 	for _, d := range days {
 		withDays[srcKey{d.Source, d.AccountID}] = true
-		if d.LastVerifiedAt.After(verified[d.Day]) {
-			verified[d.Day] = d.LastVerifiedAt
+		c := of(d.AccountID)
+		if d.LastVerifiedAt.After(c.verified[d.Day]) {
+			c.verified[d.Day] = d.LastVerifiedAt
 		}
 	}
-	var spans []Window
 	for _, w := range windows {
+		c := of(w.AccountID)
 		if !withDays[srcKey{w.Source, w.AccountID}] {
-			spans = append(spans, w)
+			c.spans = append(c.spans, w)
 		}
+	}
+	if len(accounts) == 0 {
+		return true, asOf
 	}
 	note := func(t time.Time) {
 		if asOf.IsZero() || t.Before(asOf) {
 			asOf = t
 		}
 	}
-	usedSpan := false
 	loc := from.Location()
 	y, m, d := from.Date()
+	usedSpan := map[string]bool{}
 	for start := time.Date(y, m, d, 0, 0, 0, 0, loc); start.Before(to); {
 		next := time.Date(start.Year(), start.Month(), start.Day()+1, 0, 0, 0, 0, loc)
 		pieceFrom, pieceTo := start, next
@@ -188,18 +205,20 @@ func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool
 		if pieceTo.After(to) {
 			pieceTo = to
 		}
-		switch t, ok := verified[start.Format(dateLayout)]; {
-		case ok:
-			note(t)
-		case coveredBySpans(spans, pieceFrom, pieceTo):
-			usedSpan = true
-		default:
-			gap = true
+		for name, c := range accounts {
+			switch t, ok := c.verified[start.Format(dateLayout)]; {
+			case ok:
+				note(t)
+			case coveredBySpans(c.spans, pieceFrom, pieceTo):
+				usedSpan[name] = true
+			default:
+				gap = true
+			}
 		}
 		start = next
 	}
-	if usedSpan {
-		for _, w := range spans {
+	for name := range usedSpan {
+		for _, w := range accounts[name].spans {
 			if w.Start.Before(to) && w.End.After(from) {
 				note(w.SyncedAt)
 			}

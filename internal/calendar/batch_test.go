@@ -424,3 +424,23 @@ func TestLinkRecapsEventEarlierThanRecap(t *testing.T) {
 		t.Fatalf("uid %q", uid)
 	}
 }
+
+func TestCoverageGapWhenOneAccountNeverLoadedTheDay(t *testing.T) {
+	db := openDB(t)
+	w1, w2 := tw(t), tw(t)
+	w2.AccountID = "tenant-2/user-2"
+	batch(t, db, Batch{Window: w1, CoveredDays: []string{"2026-10-05", "2026-10-06"}}, "2026-10-07T01:00:00Z")
+	batch(t, db, Batch{Window: w2, CoveredDays: []string{"2026-10-05"}}, "2026-10-08T01:00:00Z")
+	q := func(account, from, to string) AgendaResult {
+		return listed(t, db, AgendaQuery{AccountID: account, From: mustTime(t, from), To: mustTime(t, to)})
+	}
+	if r := q("", "2026-10-05T00:00:00Z", "2026-10-06T00:00:00Z"); r.Gap || !r.AsOf.Equal(mustTime(t, "2026-10-07T01:00:00Z")) {
+		t.Fatalf("both accounts loaded 10-05: %+v", r)
+	}
+	if r := q("", "2026-10-05T00:00:00Z", "2026-10-07T00:00:00Z"); !r.Gap {
+		t.Fatal("the second account never loaded 10-06: gap")
+	}
+	if r := q(acct, "2026-10-05T00:00:00Z", "2026-10-07T00:00:00Z"); r.Gap {
+		t.Fatal("scoped to the first account there is no gap")
+	}
+}
