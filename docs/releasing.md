@@ -9,9 +9,10 @@ Pushing a tag `v*` starts `.github/workflows/release.yml`:
 1. `verify` runs `make check` on the tagged commit.
 2. `release` first requires all six Apple secrets (`scripts/sign-notarize.sh --check-secrets`, which names any missing secret and never prints values). It then runs goreleaser, whose post-build hook (`scripts/sign-notarize.sh`) signs, notarizes and gates each darwin binary (arm64 and amd64) before it is archived. The notes always say the binaries are signed and notarized. For a stable tag it also attaches `teamscrawl.rb` (the Homebrew cask) to the release.
 3. `verify-release` downloads the published tarballs and `checksums.txt` and checks them as a user would receive them (`scripts/verify-release.sh`).
-4. `verify-homebrew` (stable tags only) waits for the tap, installs the cask and checks the installed binary (`scripts/verify-homebrew.sh`).
+4. `publish-homebrew` (stable tags only) pushes the cask to the tap, ourostack/homebrew-tap, as `teamscrawl <version>` (`scripts/publish-cask.sh`). It runs only after `verify-release` passes, so a release with bad artifacts never reaches the tap. It uses the `HOMEBREW_TAP_DEPLOY_KEY` secret, a deploy key that can write to the tap and nothing else.
+5. `verify-homebrew` (stable tags only) installs the cask from the tap and checks the installed binary (`scripts/verify-homebrew.sh`).
 
-Tags with a hyphen, such as `v0.1.0-rc.2`, are prereleases: GitHub marks them as prereleases, they never become "latest", they attach no cask (so the tap's `update-casks` finds nothing to pull) and `verify-homebrew` is skipped. Use `v0.1.0-rc.N` to rehearse the whole pipeline before a stable tag.
+Tags with a hyphen, such as `v0.1.0-rc.2`, are prereleases: GitHub marks them as prereleases, they never become "latest", they attach no cask, and `publish-homebrew` and `verify-homebrew` are skipped. Use `v0.1.0-rc.N` to rehearse the whole pipeline before a stable tag.
 
 ## The gates
 
@@ -29,7 +30,7 @@ Each darwin binary must pass all of these, at signing time and again on the down
 
 `verify-release` also checks that the release is a prerelease exactly when the tag has a hyphen and is never "latest" when it is one; that every tarball matches `checksums.txt`; that `file` and `lipo` report the right architecture per tarball; that Gatekeeper still accepts each binary after a `com.apple.quarantine` attribute is added (simulating a browser download); and that the arm64 binary's `teamscrawl --json version` reports the tag without the leading `v` and the tagged commit.
 
-`verify-homebrew` waits up to 75 minutes for `brew info --cask --json=v2 ourostack/tap/teamscrawl` to report the tag's version (the tap's `update-casks` runs hourly and this repo cannot trigger it), runs `brew install --cask ourostack/tap/teamscrawl`, checks `teamscrawl --json version` equals the tag, and runs the codesign and spctl gates on the installed binary.
+`verify-homebrew` waits up to 10 minutes for `brew info --cask --json=v2 ourostack/tap/teamscrawl` to report the tag's version (the cask is already pushed, so this only covers GitHub serving the new commit), runs `brew install --cask ourostack/tap/teamscrawl`, checks `teamscrawl --json version` equals the tag, and runs the codesign and spctl gates on the installed binary.
 
 The gate logic is tested on every PR: `make lint` runs `scripts/sign-notarize.sh --selftest`, which drives every gate with stubbed `codesign`, `spctl`, `xattr` and `xcrun`.
 
@@ -39,7 +40,8 @@ The gate logic is tested on every PR: `make lint` runs `scripts/sign-notarize.sh
 - `gate ...` failure in `release`: the binary built in CI is not correctly signed or notarized. Nothing was published; read the notary log printed above the failure. A `gate spctl` failure after all retries usually means notarization was not accepted or Apple's service is down.
 - `notarization was not accepted`: Apple rejected the submission; the log is printed.
 - Failure in `verify-release`: the release is already published but a downloaded artifact is wrong. Treat the release as bad: delete or mark it as a prerelease, fix the cause and publish a new tag. Do not leave a failing release as "latest".
-- `verify-homebrew` timeout: the tap did not pick up the cask within 75 minutes. Check the tap's `update-casks` run, then re-run the job.
+- Failure in `publish-homebrew`: the release is published and verified but the tap still serves the previous version. `HOMEBREW_TAP_DEPLOY_KEY is required` means the secret is unset; a push failure means the deploy key was removed from the tap or deploy keys were turned off for the organization. Fix the cause and re-run the job; it is safe to run twice.
+- `verify-homebrew` timeout: the tap does not serve the version 10 minutes after the push. Check the tap's `main` for the `teamscrawl <version>` commit, then re-run the job.
 
 ## How to re-run
 

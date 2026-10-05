@@ -17,6 +17,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ### Changed
 
+- Releases publish their Homebrew cask themselves. A stable tag's release workflow now pushes `teamscrawl.rb` to the tap right after the published artifacts verify, instead of waiting for the tap to poll for it (the poll was scheduled hourly but really ran every three to nine hours).
 - The database allowlist is replaced by a credential denylist: teamscrawl mirrors everything Teams cached except sign-in credentials. A database or object store whose name starts with `Teams:auth`, contains `auth`, `token`, `credential`, `secret`, `cookie`, `msal`, `oneauth`, `key-store`, `keystore`, `keyval`, `session`, `key-value`, `keyring`, `crypto`, `encrypt`, `pkce`, `bearer`, `password`, `refresh` or `adal`, or has `aad`, `keys`, `jwt` or `e2ee` as a whole segment is never opened for values. The three typed databases' other object stores are mirrored too.
 - The archive schema version is 3. A version 2 archive gains the `records` table when it is next opened for writing, and its existing rows are untouched. The decoder version is 3, so the first sync after the upgrade re-reads an unchanged cache to fill `records`.
 - An archive written by a newer schema version is refused with the coded `archive_newer` error (exit 3). Builds of v0.1.0 and earlier cannot do this: on a version 3 archive they report a generic `db_error`. Do not point an old binary at an upgraded archive.
