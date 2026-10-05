@@ -30,7 +30,7 @@ func captureTree(t *testing.T, root string) map[string]fileState {
 		}
 		st := fileState{size: info.Size(), mode: info.Mode(), mtime: info.ModTime()}
 		if info.Mode().IsRegular() {
-			b, err := os.ReadFile(p)
+			b, err := os.ReadFile(p) //nolint:gosec // test works on its own temp fixture and package sources
 			if err != nil {
 				return err
 			}
@@ -63,21 +63,21 @@ func TestReadOnlyFixtureIsUntouched(t *testing.T) {
 		}
 		if info.IsDir() {
 			dirs = append(dirs, p)
-		} else if err := os.Chmod(p, 0o400); err != nil {
+		} else if err := os.Chmod(p, 0o400); err != nil { //nolint:gosec // test works on its own temp fixture and package sources
 			t.Fatal(err)
 		}
 		return nil
 	})
 	sort.Sort(sort.Reverse(sort.StringSlice(dirs))) // children before parents
 	for _, d := range dirs {
-		if err := os.Chmod(d, 0o500); err != nil {
+		if err := os.Chmod(d, 0o500); err != nil { //nolint:gosec // test works on its own temp fixture and package sources
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() { // so TempDir can remove it
 		sort.Strings(dirs)
 		for _, d := range dirs {
-			_ = os.Chmod(d, 0o700)
+			_ = os.Chmod(d, 0o700) //nolint:gosec // test works on its own temp fixture and package sources
 		}
 	})
 	before := captureTree(t, root)
@@ -191,7 +191,7 @@ func TestNoWritingCallsOutsideTheTempHelper(t *testing.T) {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
-		src, err := os.ReadFile(f)
+		src, err := os.ReadFile(f) //nolint:gosec // test works on its own temp fixture and package sources
 		if err != nil {
 			t.Fatal(err)
 		}

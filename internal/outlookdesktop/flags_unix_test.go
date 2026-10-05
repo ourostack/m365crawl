@@ -20,7 +20,7 @@ func TestSourceOpenFlagsDoNotBlockOnAFIFO(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		f, err := os.OpenFile(fifo, sourceOpenFlags, 0)
+		f, err := os.OpenFile(fifo, sourceOpenFlags, 0) //nolint:gosec // test opens its own temp FIFO
 		if err == nil {
 			_ = f.Close()
 		}

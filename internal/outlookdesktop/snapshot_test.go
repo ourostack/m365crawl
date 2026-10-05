@@ -186,6 +186,9 @@ func TestSnapshotRetriesOnModTimeChange(t *testing.T) {
 }
 
 func TestSnapshotRetriesOnInodeChange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows will not rename over a file that is open; TestSnapshotRetriesWhenFileIsReplaced covers the branch")
+	}
 	quiet(t)
 	tempHome(t)
 	store := fakeProfile(t, t.TempDir(), "Main Profile", 1000)
@@ -719,4 +722,22 @@ func TestDefaultTimings(t *testing.T) {
 	if settle != 250*time.Millisecond || retryWaits != [SnapshotAttempts - 1]time.Duration{time.Second, 2 * time.Second} {
 		t.Fatalf("settle=%v retryWaits=%v", settle, retryWaits)
 	}
+}
+
+func TestSnapshotRetriesWhenFileIsReplaced(t *testing.T) {
+	quiet(t)
+	tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 100)
+	calls := 0
+	// The first comparison (handle against the first stat) is real; the second (first stat
+	// against the one after the copy) says the file was replaced, once.
+	swap(t, &sameFile, func(a, b fs.FileInfo) bool {
+		calls++
+		return calls != 2 && os.SameFile(a, b)
+	})
+	info, cleanup, err := Snapshot(context.Background(), store)
+	if err != nil || info.Attempts != 2 {
+		t.Fatalf("info=%+v err=%v", info, err)
+	}
+	cleanup()
 }

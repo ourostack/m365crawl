@@ -46,7 +46,7 @@ func TestFingerprintChangesWithEachInput(t *testing.T) {
 		check(name, fp)
 	}
 
-	setMtime(t, store, time.Nanosecond)
+	setMtime(t, store, time.Microsecond) // above the coarsest timestamp tick (100 ns on NTFS)
 	fp, _ := FingerprintOf(store, baseVersions)
 	check("mtime in nanoseconds", fp)
 
