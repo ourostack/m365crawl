@@ -35,7 +35,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            test-command: make test COVERPROFILE=coverage.out
+            coverprofile: coverage.out
+          - os: ubuntu-latest
+            test-command: make test COVERPROFILE=coverage.out
+            coverprofile: coverage.out
+          - os: windows-latest
+            test-command: go test -race -count=1 -coverprofile=coverage-windows.out ./...
+            coverprofile: coverage-windows.out
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -51,16 +60,22 @@ jobs:
         with:
           node-version: "22"
       - name: Test
-        run: make test COVERPROFILE=coverage.out
+        shell: bash
+        run: ${{ matrix.test-command }}
+      - name: Windows release checksum regression tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/verify-release_test.ps1
       - name: Test vectors match the generator
         run: go test -count=1 -v -run 'TestGeneratorIsCurrent$' ./internal/v8
       - name: Coverage summary
+        shell: bash
         run: |
           {
             echo "### Coverage (${{ matrix.os }})"
             echo
             echo '```'
-            go tool cover -func=coverage.out | tail -n 20
+            go tool cover -func=${{ matrix.coverprofile }} | tail -n 20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -82,11 +97,32 @@ jobs:
       - name: Enforce 100% function coverage
         run: make coverage
 
+  coverage-windows:
+    name: coverage-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Enforce Windows coverage gate
+        shell: pwsh
+        run: scripts/check-coverage.ps1
+
   e2e:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            e2e-command: make e2e
+          - os: ubuntu-latest
+            e2e-command: make e2e
+          - os: windows-latest
+            e2e-command: go test -count=1 -tags e2e ./e2e/...
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -98,7 +134,8 @@ jobs:
         with:
           go-version-file: go.mod
       - name: End-to-end tests
-        run: make e2e
+        shell: bash
+        run: ${{ matrix.e2e-command }}
 
   release-check:
     runs-on: ubuntu-latest
@@ -118,3 +155,6 @@ jobs:
           distribution: goreleaser
           version: v2.18.2
           args: release --snapshot --clean --skip=publish
+      - name: Verify release artifacts
+        shell: pwsh
+        run: scripts/check-release-artifacts.ps1

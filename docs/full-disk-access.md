@@ -1,4 +1,6 @@
-# Full Disk Access
+# Full Disk Access (macOS only)
+
+This page describes the macOS-only permission step. On Windows, Teams stores its cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, so `teamscrawl doctor` reports the `full_disk_access` check as `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
 
 teamscrawl needs one macOS permission: Full Disk Access for the app that runs it. Without it, `teamscrawl sync` and `teamscrawl doctor` fail with `no_full_disk_access` (exit 3), and the `fix` names the app to grant.
 

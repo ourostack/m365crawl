@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -30,6 +32,18 @@ func skipIfRoot(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() == 0 {
 		t.Skip("permission bits do not restrict root")
+	}
+}
+
+func requirePermissionSimulation(t *testing.T, err error, what string) {
+	t.Helper()
+	switch {
+	case err == nil:
+		t.Skipf("%s permissions are not enforced", what)
+	case errors.Is(err, fs.ErrNotExist):
+		t.Skipf("%s masks unreadable paths as not found", what)
+	case !errors.Is(err, fs.ErrPermission):
+		t.Fatalf("%s: got %v, want a permission error", what, err)
 	}
 }
 
@@ -238,16 +252,19 @@ func TestOpenTableErrors(t *testing.T) {
 	if err := os.Chmod(p, 0); err != nil {
 		t.Fatal(err)
 	}
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
+	if err == nil {
+		_ = probe.Close()
+		t.Skipf("%s permissions are not enforced", p)
+	}
+	requirePermissionSimulation(t, err, p)
 	if _, _, err := openTable(p, "t.ldb"); err == nil || errors.As(err, &mf) {
 		t.Fatalf("unreadable table must not read as missing: %v", err)
 	}
 }
 
 func TestBlockCacheErrors(t *testing.T) {
-	d, err := Load(compactedDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, compactedDir(t))
 	if _, err := d.cache.get(d.tables, 5, blockHandle{}); err == nil || !strings.Contains(err.Error(), "out of range") {
 		t.Fatalf("bad table index err = %v", err)
 	}
@@ -261,10 +278,7 @@ func TestBlockCacheErrors(t *testing.T) {
 
 func TestValueDetectsChangedBlock(t *testing.T) {
 	dir, _ := buildMixed(t, 0)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	for _, e := range d.entries {
 		if !e.lazy {
 			continue
@@ -330,6 +344,12 @@ func TestReadManifestErrors(t *testing.T) {
 	if err := os.WriteFile(p, nil, 0); err != nil {
 		t.Fatal(err)
 	}
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
+	if err == nil {
+		_ = probe.Close()
+		t.Skipf("%s permissions are not enforced", p)
+	}
+	requirePermissionSimulation(t, err, p)
 	if _, err := readManifest(filepath.Dir(p), "MANIFEST-000001"); err == nil || errors.As(err, &mf) {
 		t.Fatalf("permission err = %v", err)
 	}
@@ -417,7 +437,11 @@ func TestTableNameStatError(t *testing.T) {
 	}
 	_, err := tableName(f, 1)
 	var mf *MissingFileError
-	if err == nil || errors.As(err, &mf) {
+	if goruntime.GOOS == "windows" {
+		if !errors.As(err, &mf) || mf.Name != "000001.ldb" {
+			t.Fatalf("err = %v", err)
+		}
+	} else if err == nil || errors.As(err, &mf) {
 		t.Fatalf("err = %v", err)
 	}
 	// The legacy .sst name is found when there is no .ldb.
@@ -454,6 +478,8 @@ func TestLoadDirectoryNotListable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Chmod(dir, 0o700) }() //nolint:gosec // restoring a test temp dir so cleanup can remove it
+	_, probeErr := os.ReadDir(dir)
+	requirePermissionSimulation(t, probeErr, dir)
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "read dir") {
 		t.Fatalf("err = %v", err)
 	}
@@ -486,6 +512,12 @@ func TestReadLogErrors(t *testing.T) {
 	if err := os.WriteFile(p, nil, 0); err != nil {
 		t.Fatal(err)
 	}
+	probe, err := os.Open(p) //nolint:gosec // test temp path created in this test
+	if err == nil {
+		_ = probe.Close()
+		t.Skipf("%s permissions are not enforced", p)
+	}
+	requirePermissionSimulation(t, err, p)
 	if _, err := readLog(p, "000004.log", newStore(nil)); err == nil || errors.As(err, &mf) {
 		t.Fatalf("permission err = %v", err)
 	}
