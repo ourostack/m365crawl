@@ -2,7 +2,10 @@ package calendar
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // scanEvent is the scan target of one calendar_source_events row: the Event plus the temporaries
@@ -11,7 +14,7 @@ type scanEvent struct {
 	Event
 	src                                                        string
 	orig, start, end, mod, detailAsOf, detailSeen, first, seen timeText
-	remindAsOf, catAsOf                                        timeText
+	clocks                                                     clockText
 	removed                                                    timeText
 	remind                                                     sql.NullInt64
 }
@@ -22,7 +25,7 @@ func (s *scanEvent) finish() Event {
 	e.Source = Source(s.src)
 	e.OriginalStart, e.Start, e.End, e.LastModified = s.orig.ptr(), s.start.t, s.end.t, s.mod.ptr()
 	e.DetailAsOf, e.DetailSeenAt, e.RemovedAt = s.detailAsOf.ptr(), s.detailSeen.ptr(), s.removed.ptr()
-	e.ReminderAsOf, e.CategoriesAsOf = s.remindAsOf.ptr(), s.catAsOf.ptr()
+	e.FieldClocksJSON = s.clocks.text
 	e.FirstSeenAt, e.SeenAt = s.first.t, s.seen.t
 	if s.remind.Valid {
 		n := int(s.remind.Int64)
@@ -93,8 +96,7 @@ var eventColumns = []column{
 		return *e.ReminderMinutes
 	}, dst: func(s *scanEvent) any { return &s.remind }},
 	{name: "detail_raw_json", heavy: true, val: func(e Event) any { return e.DetailRawJSON }, dst: func(s *scanEvent) any { return &s.DetailRawJSON }},
-	{name: "reminder_as_of", val: func(e Event) any { return formatTimePtr(e.ReminderAsOf) }, dst: func(s *scanEvent) any { return &s.remindAsOf }},
-	{name: "categories_as_of", val: func(e Event) any { return formatTimePtr(e.CategoriesAsOf) }, dst: func(s *scanEvent) any { return &s.catAsOf }},
+	{name: "field_clocks_json", val: func(e Event) any { return e.FieldClocksJSON }, dst: func(s *scanEvent) any { return &s.clocks }},
 	{name: "detail_as_of", val: func(e Event) any { return formatTimePtr(e.DetailAsOf) }, dst: func(s *scanEvent) any { return &s.detailAsOf }},
 	{name: "detail_seen_at", val: func(e Event) any { return formatTimePtr(e.DetailSeenAt) }, dst: func(s *scanEvent) any { return &s.detailSeen }},
 	{name: "first_seen_at", val: func(e Event) any { return formatTime(e.FirstSeenAt) }, dst: func(s *scanEvent) any { return &s.first }},
@@ -154,4 +156,61 @@ func storedEqual(a, b Event) bool {
 		}
 	}
 	return true
+}
+
+// clockMap is a parsed field_clocks_json value.
+type clockMap struct{ m map[string]time.Time }
+
+// clockText scans the field_clocks_json column, rejecting a value that is not a JSON object of
+// stored instants, and keeps it in canonical form.
+type clockText struct{ text string }
+
+// Scan implements sql.Scanner.
+func (c *clockText) Scan(v any) error {
+	var m clockMap
+	err := m.Scan(v)
+	c.text = formatClocks(m.m)
+	return err
+}
+
+// Scan implements sql.Scanner. NULL and "" are no clocks; anything else must be a JSON object of
+// stored instants.
+func (c *clockMap) Scan(v any) error {
+	*c = clockMap{}
+	if v == nil {
+		return nil
+	}
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("calendar: stored field clocks have type %T, want text", v)
+	}
+	if str == "" {
+		return nil
+	}
+	var raw map[string]string
+	if err := json.Unmarshal([]byte(str), &raw); err != nil {
+		return fmt.Errorf("calendar: stored field clocks %q: %w", str, err)
+	}
+	c.m = make(map[string]time.Time, len(raw))
+	for k, text := range raw {
+		var t timeText
+		if err := t.Scan(text); err != nil {
+			return err
+		}
+		c.m[k] = t.t
+	}
+	return nil
+}
+
+// formatClocks renders the clocks as a JSON object (keys sorted by encoding/json), "" for none.
+func formatClocks(m map[string]time.Time) string {
+	if len(m) == 0 {
+		return ""
+	}
+	raw := make(map[string]string, len(m))
+	for k, t := range m {
+		raw[k] = formatTime(t)
+	}
+	b, _ := json.Marshal(raw) // a map of strings always marshals
+	return string(b)
 }

@@ -53,8 +53,7 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
   recurrence_json TEXT NOT NULL DEFAULT '',
   reminder_minutes INTEGER,
   detail_raw_json TEXT NOT NULL DEFAULT '',
-  reminder_as_of TEXT,
-  categories_as_of TEXT,
+  field_clocks_json TEXT NOT NULL DEFAULT '',
   detail_as_of TEXT,
   detail_seen_at TEXT,
   first_seen_at TEXT NOT NULL,
@@ -63,9 +62,8 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
   PRIMARY KEY (source, account_id, event_key)
 );
 CREATE INDEX IF NOT EXISTS calendar_source_events_start ON calendar_source_events(account_id, start_at);
-CREATE INDEX IF NOT EXISTS calendar_source_events_start_date ON calendar_source_events(account_id, start_date);
 CREATE INDEX IF NOT EXISTS calendar_source_events_start_any ON calendar_source_events(start_at);
-CREATE INDEX IF NOT EXISTS calendar_source_events_start_date_any ON calendar_source_events(start_date);
+CREATE INDEX IF NOT EXISTS calendar_source_events_allday_any ON calendar_source_events(start_date) WHERE all_day=1;
 CREATE INDEX IF NOT EXISTS calendar_source_events_ical ON calendar_source_events(ical_uid);
 CREATE INDEX IF NOT EXISTS calendar_source_events_composite ON calendar_source_events(composite_key);
 CREATE INDEX IF NOT EXISTS calendar_source_events_thread ON calendar_source_events(teams_thread_id);

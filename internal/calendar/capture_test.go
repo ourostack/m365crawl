@@ -56,7 +56,12 @@ func TestCaptureNewEventTakesIncoming(t *testing.T) {
 	in := rich(t, t1)
 	got := Capture(nil, in)
 	want := in
-	want.DetailAsOf, want.ReminderAsOf, want.CategoriesAsOf = at(t, t1), at(t, t1), at(t, t1)
+	want.DetailAsOf = at(t, t1)
+	clocks := map[string]time.Time{"raw": *at(t, t1)}
+	for _, u := range units {
+		clocks[u.name] = *at(t, t1)
+	}
+	want.FieldClocksJSON = formatClocks(clocks)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
@@ -392,8 +397,15 @@ func TestCaptureReminderAndAttachmentsFollowDetailClock(t *testing.T) {
 	if got := Capture(&cur, newer); *got.ReminderMinutes != 15 {
 		t.Fatalf("stale reminder: %d", *got.ReminderMinutes)
 	}
+	// Equal times: the greater stated value wins in either order, never the arrival order.
+	tie := rich(t, t1)
+	tie.ReminderMinutes = &five
+	if got := Capture(&old, tie); *got.ReminderMinutes != 15 {
+		t.Fatalf("tied reminder: %d", *got.ReminderMinutes)
+	}
+	// A copy with no time cannot be ordered: it competes as a peer and wins.
 	peer := rich(t, t1)
-	peer.ReminderMinutes = &five
+	peer.LastModified, peer.ReminderMinutes = nil, &five
 	if got := Capture(&old, peer); *got.ReminderMinutes != 5 {
 		t.Fatalf("peer reminder: %d", *got.ReminderMinutes)
 	}

@@ -808,7 +808,8 @@ func TestLoadEventsFiltersByDateInSQL(t *testing.T) {
 	}
 }
 
-func TestEventQueriesUseAnIndex(t *testing.T) {
+func seedForPlans(t *testing.T, analyze bool) *sql.DB {
+	t.Helper()
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
 	w.AccountID = "tenant-1/user-1"
@@ -823,35 +824,133 @@ func TestEventQueriesUseAnIndex(t *testing.T) {
 		events = append(events, e)
 	}
 	apply(t, db, w, "2026-10-02T01:00:00Z", events...)
-	exec(t, db, `ANALYZE`)
+	if analyze {
+		exec(t, db, `ANALYZE`)
+	}
+	return db
+}
+
+func planOf(t *testing.T, db *sql.DB, q eventQuery) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+q.sql, q.args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	return strings.Join(plan, " | ")
+}
+
+// TestEventQueriesUseAnIndex asserts the window queries search an index, with and without table
+// statistics (with them the planner may skip-scan, which hides a missing index), for one account
+// and for all accounts. The load-time checks must never scan the table itself.
+func TestEventQueriesUseAnIndex(t *testing.T) {
 	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
-	for _, account := range []string{"tenant-1/user-1", ""} {
-		queries := eventQueries(selectColumns(false), account, from, to, "2026-10-05", "2026-10-05")
-		if len(queries) != 2 {
-			t.Fatalf("want a timed and an all-day query, got %d", len(queries))
-		}
-		for i, q := range queries {
-			if account == "" && strings.Contains(q.sql, "account_id=?") {
-				t.Errorf("query %d: account predicate present without an account", i)
+	for _, analyze := range []bool{false, true} {
+		db := seedForPlans(t, analyze)
+		for _, account := range []string{"tenant-1/user-1", ""} {
+			queries := eventQueries(selectColumns(false), account, from, to, "2026-10-05", "2026-10-05")
+			if len(queries) != 2 {
+				t.Fatalf("want a timed and an all-day query, got %d", len(queries))
 			}
-			rows, err := db.Query("EXPLAIN QUERY PLAN "+q.sql, q.args...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var plan []string
-			for rows.Next() {
-				var id, parent, unused int
-				var detail string
-				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-					t.Fatal(err)
+			for i, q := range queries {
+				if account == "" && strings.Contains(q.sql, "account_id=?") {
+					t.Errorf("query %d: account predicate present without an account", i)
 				}
-				plan = append(plan, detail)
+				if plan := planOf(t, db, q); !strings.Contains(plan, "SEARCH calendar_source_events USING") {
+					t.Errorf("analyze=%v account %q query %d does not search an index: %s", analyze, account, i, plan)
+				}
 			}
-			_ = rows.Close()
-			joined := strings.Join(plan, " | ")
-			if !strings.Contains(joined, "SEARCH calendar_source_events USING") {
-				t.Errorf("account %q query %d does not search an index: %s", account, i, joined)
+			for i, q := range checkQueries(account) {
+				if plan := planOf(t, db, q); strings.Contains(plan, "SCAN calendar_source_events") && !strings.Contains(plan, "USING COVERING INDEX") {
+					t.Errorf("analyze=%v account %q check %d scans the table: %s", analyze, account, i, plan)
+				}
 			}
 		}
+	}
+}
+
+func TestAgendaRejectsCorruptStoredStarts(t *testing.T) {
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	cases := []struct{ name, col, val string }{
+		{"letters", "start_at", "soon"},
+		{"sorts inside the window", "start_at", "2026-10-05 soon"},
+		{"sorts after the window", "start_at", "2026-10-20 soon"},
+		{"future looking", "start_at", "3000-bad"},
+		{"empty on a timed event", "start_at", ""},
+		{"no milliseconds", "start_at", "2026-10-05T16:00:00Z"},
+		{"bad date", "start_date", "2026-1-5"},
+	}
+	// Each case corrupts a timed event, except the date cases, which corrupt an all-day one.
+
+	for _, tt := range cases {
+		for _, account := range []string{"", "tenant-1/user-1"} {
+			t.Run(tt.name+"/"+account, func(t *testing.T) {
+				db := seedForPlans(t, false)
+				kind := "<>1"
+				if tt.col == "start_date" {
+					kind = "=1"
+				}
+				exec(t, db, `UPDATE calendar_source_events SET `+tt.col+`=? WHERE event_key=(SELECT event_key FROM calendar_source_events WHERE all_day`+kind+` ORDER BY event_key LIMIT 1)`, tt.val)
+				_, err := Agenda(ctx, db, AgendaQuery{AccountID: account, From: from, To: to})
+				if err == nil || !strings.Contains(err.Error(), "1 stored events") {
+					t.Fatalf("want an error naming one row, got %v", err)
+				}
+			})
+		}
+	}
+	// An all-day event with no start date.
+	db := seedForPlans(t, false)
+	exec(t, db, `UPDATE calendar_source_events SET start_date='' WHERE all_day=1 AND event_key=(SELECT event_key FROM calendar_source_events WHERE all_day=1 ORDER BY event_key LIMIT 1)`)
+	if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil || !strings.Contains(err.Error(), "1 stored events") {
+		t.Fatalf("all-day without a start date: %v", err)
+	}
+	// The healthy archive loads.
+	if _, err := Agenda(ctx, seedForPlans(t, false), AgendaQuery{From: from, To: to}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckStoredTimesQueryError(t *testing.T) {
+	db := openDB(t)
+	_ = db.Close()
+	if err := checkStoredTimes(ctx, db, ""); err == nil {
+		t.Fatal("want an error from a closed database")
+	}
+}
+
+func TestAgendaRejectsCorruptFieldClocksAndBrokenQueries(t *testing.T) {
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	for _, bad := range []string{"not json", `{"body":"yesterday"}`, `[1]`} {
+		db := seedForPlans(t, false)
+		exec(t, db, `UPDATE calendar_source_events SET field_clocks_json=?`, bad)
+		if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
+			t.Errorf("field clocks %q: want an error", bad)
+		}
+	}
+	var c clockText
+	if err := c.Scan(42); err == nil {
+		t.Error("a non-text value: want an error")
+	}
+	if err := c.Scan(nil); err != nil || c.text != "" {
+		t.Errorf("NULL: %v %q", err, c.text)
+	}
+	if got := ParseFieldClocks("not json"); len(got) != 0 {
+		t.Errorf("unreadable clocks read as %v", got)
+	}
+	// A column the window queries need but the checks do not: the query itself fails.
+	db := seedForPlans(t, false)
+	exec(t, db, `DROP INDEX calendar_source_events_composite`)
+	exec(t, db, `ALTER TABLE calendar_source_events DROP COLUMN end_at`)
+	if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
+		t.Error("missing column: want an error")
 	}
 }

@@ -28,7 +28,8 @@ const (
 
 // Event is one occurrence of a calendar event as one source holds it. Its fields fall in three
 // groups that Capture treats differently: identity, schedule (compared against LastModified) and
-// detail (compared against DetailAsOf). The bookkeeping fields at the end belong to the archive:
+// detail and small fields (each unit compared against its own clock in
+// FieldClocksJSON). The bookkeeping fields at the end belong to the archive:
 // adapters leave them zero, and Capture and the store maintain them.
 type Event struct {
 	// Identity.
@@ -72,7 +73,7 @@ type Event struct {
 	LastModified           *time.Time
 
 	// Detail group: sources fetch these only for events the user opened, so a later copy often
-	// lacks them. Capture compares them against DetailAsOf, not LastModified.
+	// lacks them. Capture compares each unit against its own clock, not LastModified.
 	OnlineMeetingURL   string
 	ShortJoinURL       string
 	DialInConferenceID string
@@ -93,21 +94,24 @@ type Event struct {
 	ReminderMinutes *int
 	// ReminderStated marks an incoming copy that states the reminder even when ReminderMinutes is
 	// nil, that is, the source said no reminder is set (Teams: isReminderSet false). A copy with a
-	// non-nil ReminderMinutes always states it. Input only: stored rows carry ReminderAsOf instead.
+	// non-nil ReminderMinutes always states it. Input only: Capture clears it, and stored rows carry
+	// the reminder clock in FieldClocksJSON instead.
 	ReminderStated bool
 	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
 	DetailRawJSON string
 
-	// Bookkeeping. DetailAsOf is the LastModified of the copy that supplied the current detail; nil
-	// when detail was never captured.
+	// Bookkeeping. DetailAsOf is the newest LastModified of a copy that stated attendees or a body;
+	// nil when no such copy was captured.
 	DetailAsOf *time.Time
-	// ReminderAsOf and CategoriesAsOf are the LastModified of the newest copy that stated that
-	// field, each advancing only when a copy states it; nil when no timed copy ever did.
-	ReminderAsOf, CategoriesAsOf *time.Time
-	DetailSeenAt                 *time.Time
-	FirstSeenAt                  time.Time
-	SeenAt                       time.Time
-	RemovedAt                    *time.Time
+	// FieldClocksJSON holds one statement clock per unit of fields (see Capture): a JSON object
+	// from unit name to the LastModified (stored time layout) of the newest copy that stated that
+	// unit; "" when none. A string rather than a map keeps Event comparable. Mappers leave it
+	// empty; ParseFieldClocks reads it.
+	FieldClocksJSON string
+	DetailSeenAt    *time.Time
+	FirstSeenAt     time.Time
+	SeenAt          time.Time
+	RemovedAt       *time.Time
 }
 
 // Window is the range one source covered in a snapshot, and how fresh that snapshot was.

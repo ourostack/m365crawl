@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -249,16 +250,21 @@ type eventQuery struct {
 	args []any
 }
 
+// The exact shapes the package writes: formatTime (timeLayout) and dateLayout. GLOB is
+// case-sensitive and anchored.
+const (
+	timeGlob = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z"
+	dateGlob = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+)
+
 // eventQueries builds the SELECTs that read the live events that can overlap [from, to), so memory
 // does not grow with the archive. The predicates mirror overlaps with bound parameters; stored
 // instants have millisecond precision, so the instant bounds are widened to whole milliseconds
 // (from down, to up) and the caller's exact overlaps check decides the edge.
 //
 // Timed and all-day events are read by two queries, not one OR, so each can search its own index
-// (account_id, start_at) or (account_id, start_date); the account predicate is present only when an
-// account is given. A stored start that is not a time at all sorts after every digit, so each
-// timed query also selects start_at >= ':' and the scan then fails loudly on it: a corrupt stored
-// time is an error, never a silent omission.
+// (account_id, start_at) or start_at, and the partial all-day index on start_date; the account predicate is present only when an
+// account is given.
 func eventQueries(cols []column, accountID string, from, to time.Time, fromDate, toDate string) []eventQuery {
 	fromText := formatTime(from.UTC().Truncate(time.Millisecond))
 	toText := formatTime(to.UTC().Truncate(time.Millisecond).Add(time.Millisecond))
@@ -270,7 +276,7 @@ func eventQueries(cols []column, accountID string, from, to time.Time, fromDate,
 	return []eventQuery{
 		{
 			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day<>1
-	  AND (start_at < ? OR start_at >= ':') AND (end_at > ? OR start_at >= ?)`),
+	  AND start_at < ? AND (end_at > ? OR start_at >= ?)`),
 			args: with(toText, fromText, fromText),
 		},
 		{
@@ -281,8 +287,59 @@ func eventQueries(cols []column, accountID string, from, to time.Time, fromDate,
 	}
 }
 
-// loadEvents runs eventQueries and returns every row they select.
+// checkQueries build the count of stored events whose start is not in the exact shape the package
+// writes: a non-empty start_at that is not a timeLayout instant, a non-empty start_date that is
+// not a date, an all-day event with no start_date, and a timed event with no start_at. They run on every load, whatever the window, so a corrupt row
+// cannot hide outside it; each runs on a start index (the partial all-day indexes for the
+// all-day checks), so the cost is one pass over the index entries, and a row lookup for each
+// all-day event in the timed-empty check, never a scan of the table.
+func checkQueries(accountID string) []eventQuery {
+	account, args := "", []any(nil)
+	if accountID != "" {
+		account, args = " AND account_id=?", []any{accountID}
+	}
+	count := func(where string) eventQuery {
+		return eventQuery{sql: "SELECT count(*) FROM calendar_source_events WHERE " + where + account, args: args}
+	}
+	return []eventQuery{
+		count("start_at<>'' AND NOT (start_at GLOB '" + timeGlob + "')"),
+		count("all_day=1 AND (start_date='' OR NOT (start_date GLOB '" + dateGlob + "'))"),
+		count("all_day<>1 AND start_at=''"),
+	}
+}
+
+// checkStoredTimes returns an error naming how many stored events have a start that is not in the
+// shape the package writes.
+func checkStoredTimes(ctx context.Context, db *sql.DB, accountID string) error {
+	bad := 0
+	for _, q := range checkQueries(accountID) {
+		var n int
+		if err := db.QueryRowContext(ctx, q.sql, q.args...).Scan(&n); err != nil {
+			return err
+		}
+		bad += n
+	}
+	if bad > 0 {
+		return fmt.Errorf("calendar: %d stored events have a start that is empty or not in the stored time format", bad)
+	}
+	return nil
+}
+
+// loadEvents runs eventQueries and returns every row they select. A corrupt stored time is never
+// a silent omission. The guarantee is exact:
+//
+//   - A stored start (start_at of a timed event, start_date of an all-day one) that is empty or not
+//     in the exact stored shape fails the load with an error that counts the rows, wherever the
+//     value sorts and whether or not the row is in the window (checkStoredTimes). The shape is
+//     checked, not the calendar: a well-shaped impossible date such as 2026-13-45 is not detected
+//     here, and fails only when its row is loaded and parsed.
+//   - Any other stored time of a row in the window (end_at, original_start, last_modified,
+//     detail_as_of and the rest) that does not parse fails the load when the row is scanned. Those
+//     columns of a row outside the window are not read.
 func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
+	if err := checkStoredTimes(ctx, db, accountID); err != nil {
+		return nil, err
+	}
 	cols := selectColumns(false)
 	var out []keyedEvent
 	for _, q := range eventQueries(cols, accountID, from, to, fromDate, toDate) {

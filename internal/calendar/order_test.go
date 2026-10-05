@@ -1,6 +1,8 @@
 package calendar
 
 import (
+	"fmt"
+	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -36,7 +38,14 @@ func converge(t *testing.T, name string, copies []Event) Event {
 			continue
 		}
 		if !reflect.DeepEqual(*first, *stored) {
-			t.Fatalf("%s: order %v stores a different row\nfirst: %+v\nthis:  %+v", name, order, *first, *stored)
+			var diff []string
+			a, b := reflect.ValueOf(*first), reflect.ValueOf(*stored)
+			for i := 0; i < a.NumField(); i++ {
+				if !reflect.DeepEqual(a.Field(i).Interface(), b.Field(i).Interface()) {
+					diff = append(diff, fmt.Sprintf("%s: %v vs %v", a.Type().Field(i).Name, a.Field(i), b.Field(i)))
+				}
+			}
+			t.Fatalf("%s: order %v stores a different row: %v\ncopies: %+v", name, order, diff, copies)
 		}
 	}
 	return *first
@@ -87,18 +96,18 @@ func TestCaptureSmallFieldsConvergeInAnyArrivalOrder(t *testing.T) {
 
 func TestCaptureSmallFieldClocksAdvanceOnlyWhenStated(t *testing.T) {
 	got := Capture(nil, thin(t, t1))
-	if got.ReminderAsOf != nil || got.CategoriesAsOf != nil || got.DetailAsOf != nil {
+	if got.FieldClocksJSON != "" || got.DetailAsOf != nil {
 		t.Fatalf("a thin copy claimed a clock: %+v", got)
 	}
 	got = Capture(&got, rich(t, t2))
-	if !got.ReminderAsOf.Equal(mustTime(t, t2)) || !got.CategoriesAsOf.Equal(mustTime(t, t2)) {
-		t.Fatalf("a stating copy did not set the clocks: %v %v", got.ReminderAsOf, got.CategoriesAsOf)
+	if !ParseFieldClocks(got.FieldClocksJSON)["reminder"].Equal(mustTime(t, t2)) || !ParseFieldClocks(got.FieldClocksJSON)["categories"].Equal(mustTime(t, t2)) {
+		t.Fatalf("a stating copy did not set the clocks: %v", got.FieldClocksJSON)
 	}
 	onlyCat := thin(t, t3)
 	onlyCat.CategoriesJSON = `["B"]`
 	got = Capture(&got, onlyCat)
-	if !got.ReminderAsOf.Equal(mustTime(t, t2)) || !got.CategoriesAsOf.Equal(mustTime(t, t3)) {
-		t.Fatalf("clocks moved together: %v %v", got.ReminderAsOf, got.CategoriesAsOf)
+	if !ParseFieldClocks(got.FieldClocksJSON)["reminder"].Equal(mustTime(t, t2)) || !ParseFieldClocks(got.FieldClocksJSON)["categories"].Equal(mustTime(t, t3)) {
+		t.Fatalf("clocks moved together: %v", got.FieldClocksJSON)
 	}
 }
 
@@ -149,5 +158,158 @@ func TestCaptureBodyTypeTravelsWithTheBody(t *testing.T) {
 	noBody := Capture(nil, thin(t, t1))
 	if got := Capture(&noBody, rich(t, t2)); got.BodyType != "html" {
 		t.Fatalf("filled body lost its type: %q", got.BodyType)
+	}
+}
+
+// TestEveryEventFieldHasAGroup walks Event by reflection: a field that no group claims, or a
+// detail or small field that no unit clocks, fails here, so a field added later cannot be
+// forgotten.
+func TestEveryEventFieldHasAGroup(t *testing.T) {
+	typ := reflect.TypeOf(Event{})
+	clocked := map[string]string{}
+	for _, u := range units {
+		var probe Event
+		// Each unit names the fields it assigns: find them by assigning from a fully set copy.
+		full := reflect.New(typ).Elem()
+		for i := 0; i < typ.NumField(); i++ {
+			if f := full.Field(i); f.Kind() == reflect.String {
+				f.SetString("x")
+			}
+		}
+		fullEvent := full.Interface().(Event)
+		fullEvent.ReminderMinutes = intp(7)
+		u.assign(&probe, fullEvent)
+		pv := reflect.ValueOf(probe)
+		for i := 0; i < typ.NumField(); i++ {
+			if !pv.Field(i).IsZero() {
+				name := typ.Field(i).Name
+				if prev, dup := clocked[name]; dup {
+					t.Errorf("field %s is in units %s and %s", name, prev, u.name)
+				}
+				clocked[name] = u.name
+				if g := fieldGroups[name]; g != u.group {
+					t.Errorf("unit %s holds %s, which is in group %q, not %q", u.name, name, g, u.group)
+				}
+			}
+		}
+	}
+	for i := 0; i < typ.NumField(); i++ {
+		name := typ.Field(i).Name
+		g, ok := fieldGroups[name]
+		if !ok {
+			t.Errorf("Event.%s is in no group: add it to fieldGroups (and to a unit if it is detail or small)", name)
+			continue
+		}
+		_, inUnit := clocked[name]
+		raw := name == "DetailRawJSON" // clocked by captureRaw
+		if (g == groupDetail || g == groupSmall) && !inUnit && !raw {
+			t.Errorf("Event.%s is in group %s but no unit clocks it", name, g)
+		}
+		if g != groupDetail && g != groupSmall && inUnit {
+			t.Errorf("Event.%s is in group %s but unit %s clocks it", name, g, clocked[name])
+		}
+	}
+	for name := range fieldGroups {
+		if _, ok := typ.FieldByName(name); !ok {
+			t.Errorf("fieldGroups names %s, which Event does not have", name)
+		}
+	}
+}
+
+// randomCopy states a random subset of the groups at one of a few times; equal times are likely.
+func randomCopy(t *testing.T, r *rand.Rand) Event {
+	times := []string{t1, "2026-10-01T15:00:00Z", t2, t3}
+	e := thin(t, times[r.Intn(len(times))])
+	pick := func(vals ...string) string { return vals[r.Intn(len(vals))] }
+	e.Subject = pick("Sync A", "Sync B", "Sync C")
+	e.Location = pick("Fixture Room Alpha", "", "Fixture Room Beta")
+	e.Cancelled = r.Intn(5) == 0
+	e.IsOnlineMeeting = r.Intn(4) != 0
+	e.AttendeesJSON = pick("", "", attendeesOne, attendeesTwo, attendeesThree)
+	switch r.Intn(5) {
+	case 0:
+		e.BodyHTML, e.BodyText, e.BodyType = "<p>A</p>", "A", "html"
+	case 1:
+		e.BodyHTML, e.BodyText, e.BodyType = "", "A", "text" // same body text, different type
+	case 2:
+		e.BodyHTML, e.BodyText, e.BodyType = "<p>Longer body</p>", "Longer body", "html"
+	case 3:
+		e.BodyType = pick("html", "text") // a type alone states nothing
+	}
+	if e.AttendeesJSON != "" || e.BodyText != "" || e.BodyHTML != "" {
+		e.DetailRawJSON = pick("", `{"r":1}`, `{"r":22}`, `{"r":2}`)
+	}
+	e.BodyPreview = pick("", "", "p1", "p22")
+	e.OnlineMeetingURL = pick("", "", "https://teams.example.test/a", "https://teams.example.test/b")
+	e.TeamsThreadID = pick("", "19:meeting_A@thread.v2")
+	e.LocationsJSON = pick("", roomJSON)
+	e.AttachmentsJSON = pick("", `[{"name":"a"}]`)
+	e.HasAttachments = r.Intn(2) == 0
+	e.CategoriesJSON = pick("", "", `["B"]`, `["C"]`, `[]`)
+	e.RecurrenceJSON = pick("", `{"p":1}`, `{"p":2}`)
+	switch r.Intn(5) {
+	case 0:
+		e.ReminderMinutes = intp(0)
+	case 1:
+		e.ReminderMinutes = intp(15)
+	case 2:
+		e.ReminderStated = true // the source says no reminder is set
+	}
+	return e
+}
+
+func TestCaptureConvergesForRandomSubsetsOfGroups(t *testing.T) {
+	r := rand.New(rand.NewSource(20261005))
+	for n := 0; n < 1000; n++ {
+		size := 2 + r.Intn(3)
+		copies := make([]Event, size)
+		for i := range copies {
+			copies[i] = randomCopy(t, r)
+		}
+		converge(t, fmt.Sprintf("set %d", n), copies)
+	}
+}
+
+func TestCaptureTiesAreDecidedByTheStatedValue(t *testing.T) {
+	a, b := thin(t, t1), thin(t, t1)
+	a.Subject, b.Subject = "A", "B"
+	// Same body text, different body type.
+	a.BodyText, a.BodyType = "same", "html"
+	b.BodyText, b.BodyType = "same", "text"
+	got := converge(t, "tie", []Event{a, b})
+	if got.Subject != "B" || got.BodyType != "text" {
+		t.Fatalf("greater bytes should win: %q %q", got.Subject, got.BodyType)
+	}
+	// A rich copy beats a thin one at the same time, in either order.
+	rc, th := rich(t, t1), thin(t, t1)
+	th.AttendeesJSON = ""
+	rc.AttendeesJSON = attendeesTwo
+	if got := converge(t, "rich vs thin", []Event{rc, th}); got.AttendeesJSON != attendeesTwo {
+		t.Fatalf("attendees %q", got.AttendeesJSON)
+	}
+	// Equal raw records of different size: the larger record wins; equal size, the greater bytes.
+	x, y := rich(t, t1), rich(t, t1)
+	x.DetailRawJSON, y.DetailRawJSON = `{"a":1}`, `{"a":22}`
+	if got := converge(t, "raw size", []Event{x, y}); got.DetailRawJSON != y.DetailRawJSON {
+		t.Fatalf("raw %q", got.DetailRawJSON)
+	}
+	y.DetailRawJSON = `{"a":2}`
+	if got := converge(t, "raw bytes", []Event{x, y}); got.DetailRawJSON != y.DetailRawJSON {
+		t.Fatalf("raw %q", got.DetailRawJSON)
+	}
+}
+
+// A copy that states only a body preview (the Teams list view) must not take the detail clock.
+func TestCapturePartialCopyDoesNotClaimTheDetailClock(t *testing.T) {
+	x, y := rich(t, t1), rich(t, "2026-10-01T15:00:00Z")
+	x.AttendeesJSON, y.AttendeesJSON = attendeesTwo, attendeesThree
+	p := thin(t, t2)
+	p.BodyPreview = "only a preview"
+	got := converge(t, "partial", []Event{x, y, p})
+	if got.AttendeesJSON != attendeesThree || got.BodyPreview != "only a preview" {
+		t.Fatalf("attendees %q preview %q", got.AttendeesJSON, got.BodyPreview)
+	}
+	if !got.DetailAsOf.Equal(mustTime(t, "2026-10-01T15:00:00Z")) {
+		t.Fatalf("detail clock %v", got.DetailAsOf)
 	}
 }
