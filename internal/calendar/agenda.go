@@ -44,7 +44,9 @@ type AgendaItem struct {
 // out unless the query asks for them.
 func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error) {
 	var res AgendaResult
-	rows, err := loadEvents(ctx, db, q.AccountID)
+	fromDate := q.From.Format(dateLayout)
+	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
+	rows, err := loadEvents(ctx, db, q.AccountID, q.From, q.To, fromDate, toDate)
 	if err != nil {
 		return res, err
 	}
@@ -60,8 +62,6 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 		return res, nil
 	}
 	res.Gap, res.AsOf = coverage(windows, days, q.From, q.To)
-	fromDate := q.From.Format(dateLayout)
-	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
 	fresh := map[string]map[Source]time.Time{}
 	for _, w := range windows {
 		if fresh[w.AccountID] == nil {
@@ -247,9 +247,18 @@ func coveredBySpans(windows []Window, from, to time.Time) bool {
 // every row. It takes the account twice.
 const accountFilter = " AND (?='' OR account_id=?)"
 
-func loadEvents(ctx context.Context, db *sql.DB, accountID string) ([]keyedEvent, error) {
+// loadEvents reads the live events that can overlap [from, to) so memory does not grow with the
+// archive. The SQL predicate mirrors overlaps with bound parameters; stored instants have
+// millisecond precision, so the instant bounds are widened to whole milliseconds (from down, to up)
+// and the caller's exact overlaps check decides the edge.
+func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
 	cols := selectColumns(false)
-	rows, err := db.QueryContext(ctx, selectSQL(cols, "removed_at IS NULL"+accountFilter), accountID, accountID)
+	fromText := formatTime(from.UTC().Truncate(time.Millisecond))
+	toText := formatTime(to.UTC().Truncate(time.Millisecond).Add(time.Millisecond))
+	where := "removed_at IS NULL" + accountFilter + ` AND ((all_day<>1 AND start_at < ? AND (end_at > ? OR start_at >= ?))
+	  OR (all_day=1 AND start_date <= ? AND (end_date > ? OR start_date >= ?)))`
+	rows, err := db.QueryContext(ctx, selectSQL(cols, where), accountID, accountID,
+		toText, fromText, fromText, toDate, fromDate, fromDate)
 	if err != nil {
 		return nil, err
 	}

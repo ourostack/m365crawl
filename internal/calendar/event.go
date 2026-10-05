@@ -1,6 +1,6 @@
 // Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model, the
 // keys that identify one occurrence across sources, the merge that picks the freshest copy, and
-// the per-source snapshot tables behind Agenda. It imports no source adapter and no archive code;
+// the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no source adapter and no archive code;
 // callers hand it a *sql.DB opened with SchemaDDL.
 package calendar
 

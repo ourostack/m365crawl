@@ -718,7 +718,7 @@ func TestAgendaErrors(t *testing.T) {
 		{"closed db", func(t *testing.T, db *sql.DB) { _ = db.Close() }},
 		{"events table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }},
 		{"sources table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_sources`) }},
-		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "soon") }},
+		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "2026-10-05 soon") }},
 		{"bad original", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "original_start", "soon") }},
 		{"bad modified", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "last_modified", "soon") }},
 		{"bad flag", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "all_day", "maybe") }},
@@ -782,3 +782,27 @@ var errBoom = errString("boom")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestLoadEventsFiltersByDateInSQL(t *testing.T) {
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	before := timed(t, SourceTeams, "before", "Before", "2026-10-01T10:00:00Z")
+	inside := timed(t, SourceTeams, "inside", "Inside", "2026-10-05T10:00:00Z")
+	after := timed(t, SourceTeams, "after", "After", "2026-10-20T10:00:00Z")
+	dayIn := Event{Source: SourceTeams, SourceID: "dayin", Subject: "Day in", AllDay: true, StartDate: "2026-10-05", EndDate: "2026-10-06"}
+	dayOut := Event{Source: SourceTeams, SourceID: "dayout", Subject: "Day out", AllDay: true, StartDate: "2026-10-12", EndDate: "2026-10-13"}
+	apply(t, db, w, "2026-10-02T01:00:00Z", before, inside, after, dayIn, dayOut)
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	rows, err := loadEvents(ctx, db, "", from, to, "2026-10-05", "2026-10-05")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.SourceID)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "dayin,inside" {
+		t.Fatalf("SQL must load only candidate rows, got %v", got)
+	}
+}
