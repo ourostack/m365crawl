@@ -1194,7 +1194,7 @@ func TestE2EArchiveNewer(t *testing.T) {
 			t.Fatalf("%v: exit %d, stdout %q, stderr %s", args, res.code, res.stdout, res.stderr)
 		}
 		body, _ := mustJSON(t, res.stderr)["error"].(map[string]any)
-		if body["code"] != "archive_newer" || !strings.Contains(body["message"].(string), "99") || !strings.Contains(body["fix"].(string), "brew upgrade ourostack/tap/teamscrawl") {
+		if body["code"] != "archive_newer" || !strings.Contains(body["message"].(string), "99") || !strings.Contains(body["fix"].(string), "Upgrade teamscrawl to a newer build") {
 			t.Fatalf("%v: error = %v", args, body)
 		}
 	}

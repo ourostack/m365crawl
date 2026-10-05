@@ -134,7 +134,7 @@ func DoctorFailed(msg string) *Coded {
 func ArchiveNewer(found, have int) *Coded {
 	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
 		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (derivation version %d; this build writes version %d)", found, have),
-		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
+		Fix:     "Upgrade teamscrawl to a newer build, or point --db at a different archive."}
 }
 
 // ArchiveSchemaNewer reports an archive whose schema version is higher than this build's: a newer
@@ -142,7 +142,7 @@ func ArchiveNewer(found, have int) *Coded {
 func ArchiveSchemaNewer(found, have int) *Coded {
 	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
 		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (schema version %d; this build writes version %d)", found, have),
-		Fix:     "Upgrade teamscrawl (brew upgrade ourostack/tap/teamscrawl), or point --db at a different archive."}
+		Fix:     "Upgrade teamscrawl to a newer build, or point --db at a different archive."}
 }
 
 // PartialSync reports a sync in which some sources committed and others failed. detail names the

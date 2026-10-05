@@ -12,7 +12,9 @@ env:
   GOWORK: "off"
 
 jobs:
-  # A tag publishes only a commit that passes every gate CI enforces: a failing check blocks the release.
+  # A tag reruns the macOS check gate on the tagged commit before publishing. Windows test,
+  # e2e and coverage gates are enforced in pull-request CI, and the published Windows artifacts
+  # are verified below before any stable-tag cask publish.
   verify:
     runs-on: macos-latest
     timeout-minutes: 30

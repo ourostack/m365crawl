@@ -4,7 +4,7 @@ A release is a pushed tag. Nothing is published by hand. Darwin binaries cannot 
 
 ## How a release runs
 
-Pushing a tag `v*` starts `.github/workflows/release.yml`:
+Pushing a tag `v*` starts `.github/workflows/release.yml`. The tag workflow reruns the macOS `make check` gate on the tagged commit before publishing; the Windows test/coverage/e2e gates are enforced in pull-request CI and the published Windows artifacts are verified later in the release workflow before any stable-tag Homebrew publish:
 
 1. `verify` runs `make check` on the tagged commit.
 2. `release` first requires all six Apple secrets (`scripts/sign-notarize.sh --check-secrets`, which names any missing secret and never prints values). It then runs goreleaser, whose post-build hook (`scripts/sign-notarize.sh`) signs, notarizes and gates each darwin binary (arm64 and amd64) before it is archived. The notes always say whether the macOS binaries are signed and notarized and that the Windows zip assets are intentionally unsigned. For a stable tag it also attaches `teamscrawl.rb` (the Homebrew cask) to the release.

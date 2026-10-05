@@ -88,14 +88,14 @@ func TestInternalWithNilCauseSaysUnknown(t *testing.T) {
 
 func TestArchiveNewer(t *testing.T) {
 	e := ArchiveNewer(5, 2)
-	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "version 5") || !strings.Contains(e.Message, "version 2") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "version 5") || !strings.Contains(e.Message, "version 2") || !strings.Contains(e.Fix, "Upgrade teamscrawl to a newer build") {
 		t.Errorf("%+v", e)
 	}
 }
 
 func TestArchiveSchemaNewer(t *testing.T) {
 	e := ArchiveSchemaNewer(4, 3)
-	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "Upgrade teamscrawl to a newer build") {
 		t.Errorf("%+v", e)
 	}
 }
