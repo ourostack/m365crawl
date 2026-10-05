@@ -141,7 +141,7 @@ func TestMapCatchUpDurationForms(t *testing.T) {
 }
 
 const recapRecord = `{
- "callId":"call-1","shortSummary":"A short summary.","adaptiveRecap":{"x":1},
+ "callId":"call-1","shortSummary":"A short summary.","adaptiveRecap":"",
  "meetingSummary":[{"title":"Scope","text":"We agreed on scope."}],
  "actionItems":[{"actionItemTitle":"Send notes","displayCleanContent":"Alex sends the notes","ownerName":"Alex Fixture","speakerName":"Blake Fixture"},
                 {"actionItemTitle":"Book room","displayCleanContent":"","ownerName":"","speakerName":""}, "junk"],
@@ -153,7 +153,7 @@ const recapRecord = `{
 }`
 
 func TestMapRecapRecord(t *testing.T) {
-	r, items, err := MapRecapRecord(testAcct, "recap-key-1", []byte(recapRecord))
+	r, items, notes, err := MapRecapRecord(testAcct, "recap-key-1", []byte(recapRecord))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +166,9 @@ func TestMapRecapRecord(t *testing.T) {
 		r.DurationSeconds != 3540 || r.OrganizerID != "org-1" || r.AttendeesCount != 6 || r.AttendanceStatus != "Attended" || !r.HasConfRoomConnected ||
 		r.RecordingURL != "" || r.ExpiresAt != nil {
 		t.Errorf("recap = %+v", r)
+	}
+	if notes != (MapNotes{}) {
+		t.Errorf("notes = %+v", notes)
 	}
 	if len(items) != 4 {
 		t.Fatalf("items = %+v", items)
@@ -192,7 +195,7 @@ func TestMapRecapRecord(t *testing.T) {
 }
 
 func TestMapRecapNumericForms(t *testing.T) {
-	r, items, err := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","attendeesCount":"7","userAttendanceStatus":2,"recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"}}`))
+	r, items, _, err := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","attendeesCount":"7","userAttendanceStatus":2,"recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"}}`))
 	if err != nil || r.AttendeesCount != 0 || r.AttendanceStatus != "2" || r.DurationSeconds != 0 || len(items) != 0 {
 		t.Fatalf("recap %+v items %v err %v", r, items, err)
 	}
@@ -204,7 +207,7 @@ func TestMapRecapUnmapped(t *testing.T) {
 		"no key":     {"", `{"callId":"c"}`},
 		"not object": {"k", `"x"`},
 	} {
-		_, _, err := MapRecapRecord(testAcct, c.key, []byte(c.js))
+		_, _, _, err := MapRecapRecord(testAcct, c.key, []byte(c.js))
 		var um *UnmappedError
 		if !errors.As(err, &um) {
 			t.Errorf("%s: err = %v", name, err)
@@ -217,7 +220,7 @@ func TestMapRecapJoinsByCallID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, _, err := MapRecapRecord(testAcct, "recap-key-1", []byte(recapRecord))
+	two, _, _, err := MapRecapRecord(testAcct, "recap-key-1", []byte(recapRecord))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,5 +246,66 @@ func TestMapCatchUpDurationIsMilliseconds(t *testing.T) {
 	if recaps[0].DurationSeconds != 302 || !recaps[0].RecordingEndAt.Equal(utcTime("2026-03-10T17:05:02Z")) ||
 		recaps[1].DurationSeconds != 3766 || !recaps[1].RecordingEndAt.Equal(utcTime("2026-03-10T18:02:46Z")) {
 		t.Fatalf("%+v %+v", recaps[0], recaps[1])
+	}
+}
+
+func TestMapCatchUpDurationOutOfRange(t *testing.T) {
+	const start = `"recordingStartTime":"2026-03-10T17:00:00Z"`
+	cases := map[string]bool{`1e300`: true, `9e15`: true, `-5`: true, `0`: true, `86400001`: true, `"60000"`: true, `86400000`: false, `1`: false}
+	for dur, bad := range cases {
+		recaps, _, notes, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","duration":`+dur+`,`+start+`}]}`))
+		r := recaps[0]
+		if bad && (r.DurationSeconds != 0 || r.RecordingEndAt != nil || notes.BadDuration != 1) {
+			t.Errorf("%s: %+v %+v", dur, r, notes)
+		}
+		if !bad && (r.DurationSeconds == 0 && dur != "1" || r.RecordingEndAt == nil || notes.BadDuration != 0) {
+			t.Errorf("%s: %+v %+v", dur, r, notes)
+		}
+	}
+	_, _, notes, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","duration":null},{"callId":"b"}]}`))
+	if notes.BadDuration != 0 {
+		t.Errorf("absent duration counted: %+v", notes)
+	}
+}
+
+func TestMapRecapDurationOutOfRange(t *testing.T) {
+	r, _, _, _ := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-12T17:00:00Z"}`))
+	if r.DurationSeconds != 0 || r.RecordingEndAt == nil {
+		t.Errorf("two-day recording: %+v", r)
+	}
+	r, _, _, _ = MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-10T16:00:00Z"}`))
+	if r.DurationSeconds != 0 {
+		t.Errorf("negative recording: %+v", r)
+	}
+}
+
+func TestMapCatchUpNonObjectItemsSkippedAndCounted(t *testing.T) {
+	_, items, notes, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","tasks":[null,"x",5,{"headline":"real"}],"mentions":[null,"y",{"text":"m"}]}]}`))
+	if len(items) != 2 || notes.SkippedItems != 5 {
+		t.Fatalf("items %+v notes %+v", items, notes)
+	}
+	if items[0].Title != "real" || items[0].Ordinal != 3 {
+		t.Errorf("task %+v", items[0])
+	}
+}
+
+func TestMapCatchUpNonStringHeadlineKeptAsJSON(t *testing.T) {
+	recaps, _, _, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","headline":{"text":"h","n":1},"outline":["x","y"]},{"callId":"b","headline":null,"outline":7},{"callId":"c","headline":"plain","outline":"o"}]}`))
+	if recaps[0].Headline != `{"n":1,"text":"h"}` || recaps[0].Outline != `["x","y"]` {
+		t.Errorf("recap a: %q %q", recaps[0].Headline, recaps[0].Outline)
+	}
+	if recaps[1].Headline != "" || recaps[1].Outline != "7" || recaps[2].Headline != "plain" {
+		t.Errorf("recaps: %+v %+v", recaps[1], recaps[2])
+	}
+}
+
+func TestMapRecapAdaptiveRecapIsNotMappedButNoticed(t *testing.T) {
+	// adaptiveRecap is a string; measured empty in 17 of 18 records and absent in the other, so
+	// there is nothing to map yet. A non-empty value is counted so its first appearance is visible.
+	for js, seen := range map[string]bool{`"adaptiveRecap":"Some text."`: true, `"adaptiveRecap":""`: false, `"adaptiveRecap":null`: false, `"x":1`: false} {
+		r, _, notes, err := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c",`+js+`}`))
+		if err != nil || notes.AdaptiveRecapSeen != seen || r.Outline != "" || r.ShortSummary != "" {
+			t.Errorf("%s: %+v %+v %v", js, r, notes, err)
+		}
 	}
 }

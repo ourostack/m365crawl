@@ -44,9 +44,22 @@ const richEvent = `{
  "recurrencePattern":{"type":"weekly","interval":1},"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"}
 }`
 
+// withTimes adds a valid start and end to a test record that lacks them, because a record with no
+// usable times is unmapped.
+func withTimes(js string) string {
+	add := ""
+	if !strings.Contains(js, `"startTime"`) {
+		add += `"startTime":{"$date":"2026-03-10T17:00:00.000Z"},`
+	}
+	if !strings.Contains(js, `"endTime"`) {
+		add += `"endTime":{"$date":"2026-03-10T18:00:00.000Z"},`
+	}
+	return strings.Replace(js, "{", "{"+add, 1)
+}
+
 func mapEvent(t *testing.T, key, js string) (calendar.Event, MapNotes) {
 	t.Helper()
-	e, notes, err := MapEventRecord(testAcct, key, []byte(js), time.UTC)
+	e, notes, err := MapEventRecord(testAcct, key, []byte(withTimes(js)), time.UTC)
 	if err != nil {
 		t.Fatalf("MapEventRecord: %v", err)
 	}
@@ -235,6 +248,15 @@ func TestHTMLBodyToText(t *testing.T) {
 	}
 }
 
+func TestMapEventZoneJunkIsUnknown(t *testing.T) {
+	for _, name := range []string{"Factory", "EST5EDT", "america/new_york", "Local", "Europe/Nowhere"} {
+		e, notes := mapEvent(t, "k", `{"iCalUID":"U","eventTimeZone":"`+name+`"}`)
+		if e.TimeZoneIANA != "" || notes.UnknownZone != name {
+			t.Errorf("%s -> %q, %+v", name, e.TimeZoneIANA, notes)
+		}
+	}
+}
+
 func TestMapEventUnknownZone(t *testing.T) {
 	e, notes := mapEvent(t, "k", `{"iCalUID":"U","eventTimeZone":"FixtureUnknownSt"}`)
 	if notes.UnknownZone != "FixtureUnknownSt" || e.TimeZone != "FixtureUnknownSt" || e.TimeZoneIANA != "" {
@@ -262,6 +284,7 @@ func TestMapEventAllDayShapes(t *testing.T) {
 		{"three days", `"eventTimeZone":"Utc","startTime":{"$date":"2026-03-10T00:00:00.000Z"},"endTime":{"$date":"2026-03-13T00:00:00.000Z"}`, "", true, "2026-03-10", "2026-03-13", false},
 		{"unknown zone with utc midnight", `"eventTimeZone":"FixtureUnknownSt","startTime":{"$date":"2026-03-10T00:00:00.000Z"},"endTime":{"$date":"2026-03-11T00:00:00.000Z"}`, "", true, "2026-03-10", "2026-03-11", false},
 		{"unaligned falls back to timed", `"eventTimeZone":"PacificSt","startTime":{"$date":"2026-03-10T10:30:00.000Z"},"endTime":{"$date":"2026-03-10T11:30:00.000Z"}`, "", false, "", "", true},
+		{"known zone ignores the sync zone", `"eventTimeZone":"PacificSt","startTime":{"$date":"2026-03-09T15:00:00.000Z"},"endTime":{"$date":"2026-03-10T15:00:00.000Z"}`, "Asia/Tokyo", false, "", "", true},
 		{"unknown zone, sync zone midnight", `"eventTimeZone":"FixtureUnknownSt","startTime":{"$date":"2026-03-09T15:00:00.000Z"},"endTime":{"$date":"2026-03-10T15:00:00.000Z"}`, "Asia/Tokyo", true, "2026-03-10", "2026-03-11", false},
 	}
 	for _, c := range cases {
@@ -282,7 +305,7 @@ func TestMapEventAllDayShapes(t *testing.T) {
 }
 
 func TestMapEventAllDayNilSyncZone(t *testing.T) {
-	e, notes, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","isAllDayEvent":true,"startTime":{"$date":"2026-03-10T10:00:00.000Z"}}`), nil)
+	e, notes, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","isAllDayEvent":true,"startTime":{"$date":"2026-03-10T10:00:00.000Z"},"endTime":{"$date":"2026-03-10T11:00:00.000Z"}}`), nil)
 	if err != nil || e.AllDay || !notes.AllDayUnaligned {
 		t.Fatalf("err %v allDay %v notes %+v", err, e.AllDay, notes)
 	}
@@ -305,30 +328,51 @@ func TestMapEventUnmappedRecord(t *testing.T) {
 }
 
 func TestMapEventTimeForms(t *testing.T) {
-	cases := []struct {
-		v    string
-		want string // RFC3339 or "" for zero
-	}{
+	cases := []struct{ v, want string }{
 		{`{"$date":"2026-03-10T17:00:00.000Z"}`, "2026-03-10T17:00:00Z"},
-		{`{"$date":null}`, ""},
 		{`"2026-03-10T17:00:00Z"`, "2026-03-10T17:00:00Z"},
 		{`"2026-03-10T17:00:00+02:00"`, "2026-03-10T15:00:00Z"},
-		{`"not a time"`, ""},
 		{`1773162000000`, "2026-03-10T17:00:00Z"},
 		{`" 1773162000000 "`, "2026-03-10T17:00:00Z"},
-		{`5`, ""},
-		{`"5"`, ""},
-		{`true`, ""},
 	}
 	for _, c := range cases {
 		e, _ := mapEvent(t, "k", `{"iCalUID":"U","startTime":`+c.v+`}`)
-		var want time.Time
-		if c.want != "" {
-			want = utcTime(c.want)
+		if !e.Start.Equal(utcTime(c.want)) || e.Start.Location() != time.UTC {
+			t.Errorf("startTime %s -> %v, want %s", c.v, e.Start, c.want)
 		}
-		if !e.Start.Equal(want) || e.Start.Location() != time.UTC && !e.Start.IsZero() {
-			t.Errorf("startTime %s -> %v, want %v", c.v, e.Start, want)
+	}
+}
+
+func TestMapEventRequiresUsableTimes(t *testing.T) {
+	good := `"2026-03-10T17:00:00Z"`
+	bad := []string{`{"$date":null}`, `"2026-03-10T17:00:00"`, `"2026-03-10T17:00:00.000"`, `"not a time"`, `5`, `"5"`, `true`, `null`, `{}`}
+	for _, b := range bad {
+		for _, js := range []string{
+			`{"iCalUID":"U","startTime":` + b + `,"endTime":` + good + `}`,
+			`{"iCalUID":"U","startTime":` + good + `,"endTime":` + b + `}`,
+		} {
+			_, _, err := MapEventRecord(testAcct, "k", []byte(js), time.UTC)
+			var um *UnmappedError
+			if !errors.As(err, &um) {
+				t.Errorf("%s: err = %v, want *UnmappedError", js, err)
+			}
 		}
+	}
+	for name, js := range map[string]string{
+		"no times":           `{"iCalUID":"U","subject":"x"}`,
+		"numeric start only": `{"iCalUID":"U","startTime":1773162000000}`,
+		"end only":           `{"iCalUID":"U","endTime":` + good + `}`,
+		"end before start":   `{"iCalUID":"U","startTime":"2026-03-10T18:00:00Z","endTime":"2026-03-10T17:00:00Z"}`,
+	} {
+		_, _, err := MapEventRecord(testAcct, "k", []byte(js), time.UTC)
+		var um *UnmappedError
+		if !errors.As(err, &um) {
+			t.Errorf("%s: err = %v, want *UnmappedError", name, err)
+		}
+	}
+	// A zero-length event is allowed.
+	if _, _, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","startTime":`+good+`,"endTime":`+good+`}`), time.UTC); err != nil {
+		t.Errorf("zero-length event: %v", err)
 	}
 }
 
@@ -398,6 +442,28 @@ func TestMapEventReminderStates(t *testing.T) {
 		if !reflect.DeepEqual(e.ReminderMinutes, c.minutes) || e.ReminderStated != c.stated {
 			t.Errorf("%s: minutes %v stated %v", c.name, e.ReminderMinutes, e.ReminderStated)
 		}
+	}
+}
+
+func TestMapEventReminderRange(t *testing.T) {
+	for js, ok := range map[string]bool{`-1`: false, `40321`: false, `40320`: true, `0`: true} {
+		e, notes := mapEvent(t, "k", `{"iCalUID":"U","isReminderSet":true,"reminderMinutesBeforeStart":`+js+`}`)
+		if ok && (e.ReminderMinutes == nil || !e.ReminderStated || notes.ReminderOutOfRange) {
+			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.ReminderStated, notes)
+		}
+		if !ok && (e.ReminderMinutes != nil || e.ReminderStated || !notes.ReminderOutOfRange) {
+			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.ReminderStated, notes)
+		}
+	}
+}
+
+func TestMapEventMissingICalUID(t *testing.T) {
+	e, notes := mapEvent(t, "k", `{"subject":"no uid"}`)
+	if !notes.MissingICalUID || e.GlobalID != "" || e.ICalUID != "" {
+		t.Fatalf("notes %+v event %+v", notes, e)
+	}
+	if _, notes = mapEvent(t, "k", `{"iCalUID":"U"}`); notes.MissingICalUID {
+		t.Fatal("present uid reported missing")
 	}
 }
 

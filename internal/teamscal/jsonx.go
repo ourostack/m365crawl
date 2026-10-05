@@ -26,6 +26,20 @@ type MapNotes struct {
 	EventTypeAbsent bool
 	// Skipped counts catch-up items dropped for lacking a callId.
 	Skipped int
+	// SkippedItems counts catch-up tasks and mentions dropped because they were not objects.
+	SkippedItems int
+	// BadDuration counts catch-up items whose duration was present but not in (0, 24h] in
+	// milliseconds; the duration and the end time derived from it are dropped.
+	BadDuration int
+	// AdaptiveRecapSeen is set when a recap record carries a non-empty adaptiveRecap string. The
+	// field is not mapped (it was empty or absent in every measured record); this makes its first
+	// real appearance visible.
+	AdaptiveRecapSeen bool
+	// ReminderOutOfRange is set when the reminder lead time was negative or above four weeks; the
+	// reminder is then not stated.
+	ReminderOutOfRange bool
+	// MissingICalUID is set when the event record carried no iCalUID.
+	MissingICalUID bool
 }
 
 // decode parses the canonical JSON of one record, which must be a single JSON object. Numbers
@@ -58,26 +72,34 @@ func str(v any) string {
 	return ""
 }
 
-// boolean reads a JSON boolean or the strings "true" and "false".
-func boolean(v any) bool {
+// parseBool reads a JSON boolean or the strings "true" and "false" (any case). Anything else,
+// numbers included, is not a boolean: ok is false.
+func parseBool(v any) (value, ok bool) {
 	switch x := v.(type) {
 	case bool:
-		return x
+		return x, true
 	case string:
-		return strings.EqualFold(strings.TrimSpace(x), "true")
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
 	}
-	return false
+	return false, false
 }
 
-// flag reads the boolean field key of m and reports whether the key was present (and not null).
-// Every event flag goes through it, so that "absent" stays distinguishable from "present and
-// false" when the core makes its flags three-valued.
+// boolean is parseBool without the presence bit.
+func boolean(v any) bool {
+	b, _ := parseBool(v)
+	return b
+}
+
+// flag reads the boolean field key of m and reports whether the key held a boolean. Every event
+// flag goes through it, so that "absent" (or not a boolean) stays distinguishable from "present
+// and false" when the core makes its flags three-valued.
 func flag(m map[string]any, key string) (value, present bool) {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return false, false
-	}
-	return boolean(v), true
+	return parseBool(m[key])
 }
 
 // integer reads a JSON number, truncating a fraction. Strings are not numbers.
@@ -133,6 +155,17 @@ func epochMillis(s string) time.Time {
 	return time.UnixMilli(n).UTC()
 }
 
+// requiredTime reads a time field that an event cannot do without. The value must be an RFC 3339
+// string with a zone offset (bare or inside {"$date":...}) or a millisecond epoch; a missing,
+// null, offset-less or unparseable value is an UnmappedError.
+func requiredTime(m map[string]any, key string) (time.Time, error) {
+	t := moment(m[key])
+	if t.IsZero() {
+		return t, &UnmappedError{Reason: key + " is missing or not a time with a zone offset"}
+	}
+	return t, nil
+}
+
 // timePtr returns a pointer to t, or nil for the zero time.
 func timePtr(t time.Time) *time.Time {
 	if t.IsZero() {
@@ -181,4 +214,16 @@ func marshal(v any) string {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v) // the values here are strings, numbers and decoded JSON: they always encode
 	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// textOrJSON reads a text field that is not always text: a string is kept as is, null and absent
+// are empty, and any other value is kept as its canonical JSON text rather than dropped.
+func textOrJSON(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	}
+	return marshal(v)
 }

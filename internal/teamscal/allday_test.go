@@ -33,7 +33,9 @@ func TestAllDayDates(t *testing.T) {
 		{"end missing counts one day", "2026-03-10T00:00:00Z", "0001-01-01T00:00:00Z", nil, nil, "2026-03-10", "2026-03-11", true},
 		{"fallback zone midnight", "2026-03-09T15:00:00Z", "2026-03-10T15:00:00Z", nil, tokyo, "2026-03-10", "2026-03-11", true},
 		{"unaligned", "2026-03-10T10:30:00Z", "2026-03-10T11:30:00Z", pacific, tokyo, "", "", false},
-		{"zero start", "0001-01-01T00:00:00Z", "0001-01-01T00:00:00Z", nil, nil, "", "", false},
+		{"known zone ignores the fallback", "2026-03-09T15:00:00Z", "2026-03-10T15:00:00Z", pacific, tokyo, "", "", false},
+		{"one day across the autumn clock change", "2026-11-01T07:00:00Z", "2026-11-02T08:00:00Z", pacific, nil, "2026-11-01", "2026-11-02", true},
+		{"three days across the autumn clock change", "2026-10-31T07:00:00Z", "2026-11-03T08:00:00Z", pacific, nil, "2026-10-31", "2026-11-03", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

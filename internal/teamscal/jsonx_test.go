@@ -3,7 +3,7 @@ package teamscal
 import "testing"
 
 func TestFlagDistinguishesAbsentFromFalse(t *testing.T) {
-	m, err := decode([]byte(`{"yes":true,"no":false,"text":"TRUE","nul":null,"num":1}`))
+	m, err := decode([]byte(`{"yes":true,"no":false,"text":"TRUE","nul":null,"num":1,"word":"no","fstr":" False "}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -12,7 +12,7 @@ func TestFlagDistinguishesAbsentFromFalse(t *testing.T) {
 		value, present bool
 	}{
 		{"yes", true, true}, {"no", false, true}, {"text", true, true},
-		{"nul", false, false}, {"missing", false, false}, {"num", false, true},
+		{"nul", false, false}, {"missing", false, false}, {"num", false, false}, {"word", false, false}, {"fstr", false, true},
 	}
 	for _, c := range cases {
 		if v, p := flag(m, c.key); v != c.value || p != c.present {

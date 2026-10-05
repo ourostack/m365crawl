@@ -27,6 +27,18 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		return calendar.Event{}, notes, err
 	}
 	uid := str(m["iCalUID"])
+	notes.MissingICalUID = uid == ""
+	start, err := requiredTime(m, "startTime")
+	if err != nil {
+		return calendar.Event{}, notes, err
+	}
+	end, err := requiredTime(m, "endTime")
+	if err != nil {
+		return calendar.Event{}, notes, err
+	}
+	if end.Before(start) {
+		return calendar.Event{}, notes, &UnmappedError{Reason: "endTime is before startTime"}
+	}
 	e := calendar.Event{
 		Source:           calendar.SourceTeams,
 		AccountID:        AccountID(acct),
@@ -34,8 +46,8 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		GlobalID:         uid,
 		ICalUID:          uid,
 		SeriesKey:        str(m["cleanGlobalObjectId"]),
-		Start:            moment(m["startTime"]),
-		End:              moment(m["endTime"]),
+		Start:            start,
+		End:              end,
 		TimeZone:         str(m["eventTimeZone"]),
 		UTCOffset:        str(m["utcOffset"]),
 		Subject:          str(m["subject"]),
@@ -64,7 +76,7 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		DetailRawJSON:      string(valueJSON),
 	}
 	e.EventType, notes.EventTypeAbsent = normalizeEventType(str(m["eventType"]))
-	e.ReminderMinutes, e.ReminderStated = mapReminder(m)
+	e.ReminderMinutes, e.ReminderStated, notes.ReminderOutOfRange = mapReminder(m)
 
 	e.TeamsThreadID = threadID(m, e.OnlineMeetingURL)
 
@@ -252,23 +264,30 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
+// maxReminderMinutes is four weeks; a lead time outside 0..maxReminderMinutes is not believed.
+const maxReminderMinutes = 40320
+
 // mapReminder reads the reminder from isReminderSet: true gives the lead time (zero minutes is a
-// value), false states that no reminder is set (nil minutes, stated), and an absent or null key
-// states nothing.
-func mapReminder(m map[string]any) (minutes *int, stated bool) {
+// value), false states that no reminder is set (nil minutes, stated), and an absent or non-boolean
+// key states nothing. A lead time that is negative or above four weeks is not stated, and
+// outOfRange says so.
+func mapReminder(m map[string]any) (minutes *int, stated, outOfRange bool) {
 	set, present := flag(m, "isReminderSet")
 	if !present {
-		return nil, false
+		return nil, false, false
 	}
 	if !set {
-		return nil, true
+		return nil, true, false
 	}
 	n, ok := integer(m["reminderMinutesBeforeStart"])
 	if !ok {
-		return nil, false
+		return nil, false, false
+	}
+	if n < 0 || n > maxReminderMinutes {
+		return nil, false, true
 	}
 	v := int(n)
-	return &v, true
+	return &v, true, false
 }
 
 // mapCategories renders the category list. "[]" states "no categories" and is emitted only when

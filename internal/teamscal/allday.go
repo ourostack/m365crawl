@@ -7,16 +7,18 @@ import (
 
 // allDayDates derives the date span of an all-day event from its instants. The cache has no
 // all-day event yet, so the shape is assumed (A5): startTime is midnight of the start date in the
-// event's zone, or in UTC. The zones are tried in that order, then fallback (the zone the sync
-// groups days in). The first in which start is exactly midnight gives the start date; ok is false
-// when none does, and the caller stores the event as timed. The end date is exclusive: the start
+// event's zone, or in UTC. The event's zone (when known) is tried, then UTC; fallback (the zone the
+// sync groups days in) is tried only when the event's own zone is unknown (eventZone nil). The
+// first in which start is exactly midnight gives the start date; ok is false when none does, and
+// the caller stores the event as timed. The end date is exclusive: the start
 // date plus the span rounded to whole days (rounding, not truncating, so a span across a
 // daylight-saving change still counts its days), at least one.
 func allDayDates(start, end time.Time, eventZone, fallback *time.Location) (startDate, endDate string, ok bool) {
-	if start.IsZero() {
-		return "", "", false
+	zones := []*time.Location{eventZone, time.UTC}
+	if eventZone == nil {
+		zones = []*time.Location{time.UTC, fallback}
 	}
-	for _, loc := range []*time.Location{eventZone, time.UTC, fallback} {
+	for _, loc := range zones {
 		if loc == nil {
 			continue
 		}
