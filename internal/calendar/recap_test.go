@@ -408,7 +408,33 @@ func TestCaptureRecapMergesPerField(t *testing.T) {
 	}
 	// A non-empty value replaces; the sticky booleans stay true when a copy says false.
 	got = CaptureRecap(&old, Recap{AccountID: "a", CallID: "c1", Headline: "New", MeetingStartAt: me, DurationSeconds: 5})
-	if got.Headline != "New" || !got.MeetingStartAt.Equal(*me) || got.DurationSeconds != 5 || !got.IsMissed || !got.HasConfRoomConnected {
+	// (the duration belongs to the stored URL, so a URL-less copy does not move it)
+	if got.Headline != "New" || !got.MeetingStartAt.Equal(*me) || got.DurationSeconds != 3600 || !got.IsMissed || !got.HasConfRoomConnected {
 		t.Fatalf("replace/sticky: %+v", got)
+	}
+}
+
+func TestCaptureRecapRecordingTravelsAsOneUnit(t *testing.T) {
+	old := CaptureRecap(nil, recapOf(t, "c1"))
+	in := Recap{AccountID: acct, CallID: "c1", RecordingURL: "https://media.example.test/other"}
+	got := CaptureRecap(&old, in)
+	if got.RecordingURL != in.RecordingURL || got.RecordingStartAt != nil || got.RecordingEndAt != nil || got.DurationSeconds != 0 {
+		t.Fatalf("old times or duration stayed beside the new URL: %+v", got)
+	}
+	// Without a URL the copy's recording times and duration are not taken over a stored URL.
+	late := Recap{AccountID: acct, CallID: "c1", DurationSeconds: 5, RecordingStartAt: tp(t, "2026-10-05T18:00:00Z")}
+	kept := CaptureRecap(&old, late)
+	if kept.RecordingURL != old.RecordingURL || kept.DurationSeconds != 3600 || !kept.RecordingStartAt.Equal(*old.RecordingStartAt) {
+		t.Fatalf("a URL-less copy moved the recording: %+v", kept)
+	}
+	// With no stored URL they fill, and the sticky booleans stay sticky.
+	bare := CaptureRecap(nil, Recap{AccountID: acct, CallID: "c1", IsMissed: true})
+	filled := CaptureRecap(&bare, late)
+	later := CaptureRecap(&filled, Recap{AccountID: acct, CallID: "c1", RecordingEndAt: tp(t, "2026-10-05T19:00:00Z")})
+	if later.RecordingEndAt == nil || later.RecordingStartAt == nil || later.DurationSeconds != 5 {
+		t.Fatalf("an end time alone must fill without erasing: %+v", later)
+	}
+	if filled.DurationSeconds != 5 || filled.RecordingStartAt == nil || !filled.IsMissed {
+		t.Fatalf("fill: %+v", filled)
 	}
 }

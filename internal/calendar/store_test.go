@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -718,7 +719,7 @@ func TestAgendaErrors(t *testing.T) {
 		{"closed db", func(t *testing.T, db *sql.DB) { _ = db.Close() }},
 		{"events table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }},
 		{"sources table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_sources`) }},
-		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "2026-10-05 soon") }},
+		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "soon") }},
 		{"bad original", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "original_start", "soon") }},
 		{"bad modified", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "last_modified", "soon") }},
 		{"bad flag", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "all_day", "maybe") }},
@@ -804,5 +805,53 @@ func TestLoadEventsFiltersByDateInSQL(t *testing.T) {
 	sort.Strings(got)
 	if strings.Join(got, ",") != "dayin,inside" {
 		t.Fatalf("SQL must load only candidate rows, got %v", got)
+	}
+}
+
+func TestEventQueriesUseAnIndex(t *testing.T) {
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	w.AccountID = "tenant-1/user-1"
+	var events []Event
+	for i := 0; i < 60; i++ {
+		day := time.Date(2026, 10, 1, 16, 0, 0, 0, time.UTC).AddDate(0, 0, i/2)
+		e := timed(t, SourceTeams, fmt.Sprintf("t%02d", i), "S", day.Format("2006-01-02T15:04:05Z"))
+		e.AccountID = "tenant-1/user-1"
+		if i%2 == 1 {
+			e.AllDay, e.StartDate, e.EndDate = true, day.Format(dateLayout), day.AddDate(0, 0, 1).Format(dateLayout)
+		}
+		events = append(events, e)
+	}
+	apply(t, db, w, "2026-10-02T01:00:00Z", events...)
+	exec(t, db, `ANALYZE`)
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	for _, account := range []string{"tenant-1/user-1", ""} {
+		queries := eventQueries(selectColumns(false), account, from, to, "2026-10-05", "2026-10-05")
+		if len(queries) != 2 {
+			t.Fatalf("want a timed and an all-day query, got %d", len(queries))
+		}
+		for i, q := range queries {
+			if account == "" && strings.Contains(q.sql, "account_id=?") {
+				t.Errorf("query %d: account predicate present without an account", i)
+			}
+			rows, err := db.Query("EXPLAIN QUERY PLAN "+q.sql, q.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var plan []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					t.Fatal(err)
+				}
+				plan = append(plan, detail)
+			}
+			_ = rows.Close()
+			joined := strings.Join(plan, " | ")
+			if !strings.Contains(joined, "SEARCH calendar_source_events USING") {
+				t.Errorf("account %q query %d does not search an index: %s", account, i, joined)
+			}
+		}
 	}
 }

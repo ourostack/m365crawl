@@ -56,7 +56,7 @@ func TestCaptureNewEventTakesIncoming(t *testing.T) {
 	in := rich(t, t1)
 	got := Capture(nil, in)
 	want := in
-	want.DetailAsOf = at(t, t1)
+	want.DetailAsOf, want.ReminderAsOf, want.CategoriesAsOf = at(t, t1), at(t, t1), at(t, t1)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
@@ -468,5 +468,18 @@ func TestDetailEqualComparesReminders(t *testing.T) {
 	b.ReminderMinutes = nil
 	if detailEqual(a, b) {
 		t.Fatal("a missing reminder differs")
+	}
+}
+
+func TestDetailEqualComparesBodyTypeAndCategories(t *testing.T) {
+	a, b := thin(t, t1), thin(t, t1)
+	b.BodyType = "text"
+	if detailEqual(a, b) {
+		t.Fatal("different body types differ")
+	}
+	b = thin(t, t1)
+	b.CategoriesJSON = `["Fixture"]`
+	if detailEqual(a, b) {
+		t.Fatal("different categories differ")
 	}
 }

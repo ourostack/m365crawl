@@ -11,6 +11,7 @@ type scanEvent struct {
 	Event
 	src                                                        string
 	orig, start, end, mod, detailAsOf, detailSeen, first, seen timeText
+	remindAsOf, catAsOf                                        timeText
 	removed                                                    timeText
 	remind                                                     sql.NullInt64
 }
@@ -21,6 +22,7 @@ func (s *scanEvent) finish() Event {
 	e.Source = Source(s.src)
 	e.OriginalStart, e.Start, e.End, e.LastModified = s.orig.ptr(), s.start.t, s.end.t, s.mod.ptr()
 	e.DetailAsOf, e.DetailSeenAt, e.RemovedAt = s.detailAsOf.ptr(), s.detailSeen.ptr(), s.removed.ptr()
+	e.ReminderAsOf, e.CategoriesAsOf = s.remindAsOf.ptr(), s.catAsOf.ptr()
 	e.FirstSeenAt, e.SeenAt = s.first.t, s.seen.t
 	if s.remind.Valid {
 		n := int(s.remind.Int64)
@@ -91,6 +93,8 @@ var eventColumns = []column{
 		return *e.ReminderMinutes
 	}, dst: func(s *scanEvent) any { return &s.remind }},
 	{name: "detail_raw_json", heavy: true, val: func(e Event) any { return e.DetailRawJSON }, dst: func(s *scanEvent) any { return &s.DetailRawJSON }},
+	{name: "reminder_as_of", val: func(e Event) any { return formatTimePtr(e.ReminderAsOf) }, dst: func(s *scanEvent) any { return &s.remindAsOf }},
+	{name: "categories_as_of", val: func(e Event) any { return formatTimePtr(e.CategoriesAsOf) }, dst: func(s *scanEvent) any { return &s.catAsOf }},
 	{name: "detail_as_of", val: func(e Event) any { return formatTimePtr(e.DetailAsOf) }, dst: func(s *scanEvent) any { return &s.detailAsOf }},
 	{name: "detail_seen_at", val: func(e Event) any { return formatTimePtr(e.DetailSeenAt) }, dst: func(s *scanEvent) any { return &s.detailSeen }},
 	{name: "first_seen_at", val: func(e Event) any { return formatTime(e.FirstSeenAt) }, dst: func(s *scanEvent) any { return &s.first }},
@@ -117,14 +121,15 @@ type keyedEvent struct {
 }
 
 // selectSQL renders the SELECT for cols, with where as the condition (without the keyword).
+// It has no ORDER BY so the planner may pick the index that serves where; callers that need an
+// order sort the result.
 func selectSQL(cols []column, where string) string {
 	names := make([]string, 0, len(cols)+1)
 	names = append(names, "event_key")
 	for _, c := range cols {
 		names = append(names, c.name)
 	}
-	return "SELECT " + strings.Join(names, ",") + " FROM calendar_source_events WHERE " + where +
-		" ORDER BY source, account_id, event_key"
+	return "SELECT " + strings.Join(names, ",") + " FROM calendar_source_events WHERE " + where
 }
 
 // scanKeyed scans one row selected with selectSQL(cols, ...).

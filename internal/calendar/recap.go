@@ -127,7 +127,7 @@ func CaptureRecap(old *Recap, in Recap) Recap {
 	for _, f := range []struct{ dst, src *string }{
 		{&out.Headline, &in.Headline}, {&out.ShortSummary, &in.ShortSummary}, {&out.Outline, &in.Outline},
 		{&out.SummarySectionsJSON, &in.SummarySectionsJSON}, {&out.SpeakersJSON, &in.SpeakersJSON},
-		{&out.TopicsJSON, &in.TopicsJSON}, {&out.RecordingURL, &in.RecordingURL},
+		{&out.TopicsJSON, &in.TopicsJSON},
 		{&out.AttendanceStatus, &in.AttendanceStatus}, {&out.OrganizerID, &in.OrganizerID},
 	} {
 		if *f.src != "" {
@@ -135,16 +135,13 @@ func CaptureRecap(old *Recap, in Recap) Recap {
 		}
 	}
 	for _, f := range []struct{ dst, src **time.Time }{
-		{&out.RecordingStartAt, &in.RecordingStartAt}, {&out.RecordingEndAt, &in.RecordingEndAt},
 		{&out.ExpiresAt, &in.ExpiresAt}, {&out.MeetingStartAt, &in.MeetingStartAt}, {&out.MeetingEndAt, &in.MeetingEndAt},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src
 		}
 	}
-	if in.DurationSeconds != 0 {
-		out.DurationSeconds = in.DurationSeconds
-	}
+	captureRecording(&out, in)
 	if in.AttendeesCount != 0 {
 		out.AttendeesCount = in.AttendeesCount
 	}
@@ -439,4 +436,28 @@ func timedEvents(ctx context.Context, tx *sql.Tx, accountID string) ([]timedEven
 		out = append(out, c)
 	}
 	return out, rowsErr(rows)
+}
+
+// captureRecording moves the recording as one unit: its URL, start, end and duration describe one
+// file, so they come together from the copy that supplies the URL, including that copy's empty
+// times or zero duration. A copy without a URL fills the times and duration only while no URL is
+// stored, because nothing can then be mismatched; an empty value never erases.
+func captureRecording(out *Recap, in Recap) {
+	if in.RecordingURL != "" {
+		out.RecordingURL, out.RecordingStartAt, out.RecordingEndAt = in.RecordingURL, in.RecordingStartAt, in.RecordingEndAt
+		out.DurationSeconds = in.DurationSeconds
+		return
+	}
+	if out.RecordingURL != "" {
+		return
+	}
+	if in.RecordingStartAt != nil {
+		out.RecordingStartAt = in.RecordingStartAt
+	}
+	if in.RecordingEndAt != nil {
+		out.RecordingEndAt = in.RecordingEndAt
+	}
+	if in.DurationSeconds != 0 {
+		out.DurationSeconds = in.DurationSeconds
+	}
 }

@@ -243,35 +243,78 @@ func coveredBySpans(windows []Window, from, to time.Time) bool {
 	return !cur.Before(to)
 }
 
-// accountFilter is the optional account condition of a query: with an empty account it matches
-// every row. It takes the account twice.
-const accountFilter = " AND (?='' OR account_id=?)"
+// eventQuery is one SELECT of loadEvents with its bound arguments.
+type eventQuery struct {
+	sql  string
+	args []any
+}
 
-// loadEvents reads the live events that can overlap [from, to) so memory does not grow with the
-// archive. The SQL predicate mirrors overlaps with bound parameters; stored instants have
-// millisecond precision, so the instant bounds are widened to whole milliseconds (from down, to up)
-// and the caller's exact overlaps check decides the edge.
-func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
-	cols := selectColumns(false)
+// eventQueries builds the SELECTs that read the live events that can overlap [from, to), so memory
+// does not grow with the archive. The predicates mirror overlaps with bound parameters; stored
+// instants have millisecond precision, so the instant bounds are widened to whole milliseconds
+// (from down, to up) and the caller's exact overlaps check decides the edge.
+//
+// Timed and all-day events are read by two queries, not one OR, so each can search its own index
+// (account_id, start_at) or (account_id, start_date); the account predicate is present only when an
+// account is given. A stored start that is not a time at all sorts after every digit, so each
+// timed query also selects start_at >= ':' and the scan then fails loudly on it: a corrupt stored
+// time is an error, never a silent omission.
+func eventQueries(cols []column, accountID string, from, to time.Time, fromDate, toDate string) []eventQuery {
 	fromText := formatTime(from.UTC().Truncate(time.Millisecond))
 	toText := formatTime(to.UTC().Truncate(time.Millisecond).Add(time.Millisecond))
-	where := "removed_at IS NULL" + accountFilter + ` AND ((all_day<>1 AND start_at < ? AND (end_at > ? OR start_at >= ?))
-	  OR (all_day=1 AND start_date <= ? AND (end_date > ? OR start_date >= ?)))`
-	rows, err := db.QueryContext(ctx, selectSQL(cols, where), accountID, accountID,
-		toText, fromText, fromText, toDate, fromDate, fromDate)
-	if err != nil {
-		return nil, err
+	account, args := "", []any(nil)
+	if accountID != "" {
+		account, args = " AND account_id=?", []any{accountID}
 	}
-	defer func() { _ = rows.Close() }()
+	with := func(more ...any) []any { return append(append([]any(nil), args...), more...) }
+	return []eventQuery{
+		{
+			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day<>1
+	  AND (start_at < ? OR start_at >= ':') AND (end_at > ? OR start_at >= ?)`),
+			args: with(toText, fromText, fromText),
+		},
+		{
+			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day=1
+	  AND start_date <= ? AND (end_date > ? OR start_date >= ?)`),
+			args: with(toDate, fromDate, fromDate),
+		},
+	}
+}
+
+// loadEvents runs eventQueries and returns every row they select.
+func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
+	cols := selectColumns(false)
 	var out []keyedEvent
-	for rows.Next() {
-		e, err := scanKeyed(rows, cols)
+	for _, q := range eventQueries(cols, accountID, from, to, fromDate, toDate) {
+		rows, err := db.QueryContext(ctx, q.sql, q.args...)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, e)
+		for rows.Next() {
+			e, err := scanKeyed(rows, cols)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out = append(out, e)
+		}
+		err = rowsErr(rows)
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out, rowsErr(rows)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		if a.AccountID != b.AccountID {
+			return a.AccountID < b.AccountID
+		}
+		return a.key < b.key
+	})
+	return out, nil
 }
 
 func loadWindows(ctx context.Context, db *sql.DB, accountID string) ([]Window, error) {
