@@ -11,7 +11,7 @@ func realFreeBytes(dir string) (avail uint64, ok bool, err error) {
 	if err := unix.Statfs(dir, &st); err != nil {
 		return 0, false, err
 	}
-	return uint64(st.Bavail) * uint64(st.Bsize), true, nil //nolint:gosec // G115: both are non-negative
+	return uint64(st.Bavail) * blockSize(&st), true, nil //nolint:gosec // G115: Bavail is unsigned
 }
 
 // freeBytes is a variable so a test can force a failure or a small answer.

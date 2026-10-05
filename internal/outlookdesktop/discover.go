@@ -1,8 +1,16 @@
 // Package outlookdesktop finds the new Outlook for Mac profile on this machine, takes a
 // consistent private copy of its HxStore.hxd container and fingerprints the live file. Nothing
-// here writes to Outlook's storage: the original is only ever opened O_RDONLY, once per copy
-// attempt, and no file contents are logged or returned in an error. The package depends on the
-// standard library and internal/errs only.
+// here writes to Outlook's storage: the original is only ever opened read-only (O_RDONLY, plus
+// O_NONBLOCK where it exists so a swapped-in FIFO cannot block the open), once per copy attempt,
+// and no file contents are logged or returned in an error. The package depends on the standard
+// library, golang.org/x/sys/unix and internal/errs only.
+//
+// The copy is best effort. Outlook rewrites HxStore.hxd in place while it runs, and a copy is
+// accepted only when the file's size, modification time and identity are the same before the
+// copy, right after it and again after a short settle pause. A write that leaves size and
+// modification time untouched, for example through a memory mapping that the system has not
+// flushed yet, cannot be seen here. The container reader's per-block checksums are the
+// integrity backstop: a torn block fails its checksum and is rejected and counted there.
 package outlookdesktop
 
 import (
@@ -79,44 +87,86 @@ func DefaultRoot() (string, error) {
 	return platformRoot(home)
 }
 
+// SkippedProfile is a profile directory that could not be examined. Discovery carries on
+// without it so one unreadable profile does not hide the others.
+type SkippedProfile struct {
+	Name   string
+	Dir    string
+	Reason string // "no_full_disk_access" when macOS denied access, else "unreadable"
+	Err    error
+}
+
 // Discover lists the profiles under root (the Outlook 15 Profiles directory; the caller passes
 // it, tests pass a temporary directory). A profile is a subdirectory that holds a regular
 // HxStore.hxd. classicOnly names subdirectories that have only the classic Data/Outlook.sqlite
-// (the old Outlook; it is not read). Profiles and classicOnly are sorted by name. Having no
-// profile is not an error: both lists are empty. Errors: *RootNotFoundError when root is
-// missing, and *errs.Coded no_full_disk_access when macOS denies access.
-func Discover(root string) (profiles []Profile, classicOnly []string, err error) {
+// (the old Outlook; it is not read). skipped names subdirectories whose files could not be
+// examined, with the reason. All three lists are sorted by name. Having no profile is not an
+// error: the lists are empty.
+//
+// Errors: *RootNotFoundError when root is missing; *errs.Coded no_full_disk_access when macOS
+// denies access to root, or when something was skipped and nothing at all was readable (any
+// other failure then is the coded internal error).
+func Discover(root string) (profiles []Profile, classicOnly []string, skipped []SkippedProfile, err error) {
 	ents, err := readDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, &RootNotFoundError{Root: root}
+			return nil, nil, nil, &RootNotFoundError{Root: root}
 		}
-		return nil, nil, mapFSError(root, err)
+		return nil, nil, nil, mapFSError(root, err)
 	}
 	for _, e := range ents {
 		if !e.IsDir() {
 			continue
 		}
 		dir := filepath.Join(root, e.Name())
-		hasStore, err := isRegular(filepath.Join(dir, StoreFileName))
-		if err != nil {
-			return nil, nil, err
-		}
-		if hasStore {
+		kind, err := classify(dir)
+		switch {
+		case err != nil:
+			reason := "unreadable"
+			if errors.Is(err, fs.ErrPermission) {
+				reason = "no_full_disk_access"
+			}
+			skipped = append(skipped, SkippedProfile{Name: e.Name(), Dir: dir, Reason: reason, Err: err})
+		case kind == kindProfile:
 			profiles = append(profiles, Profile{Name: e.Name(), Dir: dir, StorePath: filepath.Join(dir, StoreFileName)})
-			continue
-		}
-		hasClassic, err := isRegular(filepath.Join(dir, filepath.FromSlash(classicSQLiteRel)))
-		if err != nil {
-			return nil, nil, err
-		}
-		if hasClassic {
+		case kind == kindClassic:
 			classicOnly = append(classicOnly, e.Name())
 		}
 	}
+	if len(profiles) == 0 && len(classicOnly) == 0 && len(skipped) > 0 {
+		return nil, nil, skipped, mapFSError(skipped[0].Dir, skipped[0].Err)
+	}
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
 	sort.Strings(classicOnly)
-	return profiles, classicOnly, nil
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Name < skipped[j].Name })
+	return profiles, classicOnly, skipped, nil
+}
+
+type dirKind int
+
+const (
+	kindNone dirKind = iota
+	kindProfile
+	kindClassic
+)
+
+// classify says whether dir holds the new store, only the classic SQLite file, or neither.
+func classify(dir string) (dirKind, error) {
+	hasStore, err := isRegular(filepath.Join(dir, StoreFileName))
+	if err != nil {
+		return kindNone, err
+	}
+	if hasStore {
+		return kindProfile, nil
+	}
+	hasClassic, err := isRegular(filepath.Join(dir, filepath.FromSlash(classicSQLiteRel)))
+	if err != nil {
+		return kindNone, err
+	}
+	if hasClassic {
+		return kindClassic, nil
+	}
+	return kindNone, nil
 }
 
 // isRegular reports whether path is a regular file. A missing path is false, not an error.
@@ -126,7 +176,7 @@ func isRegular(path string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, mapFSError(path, err)
+		return false, err
 	}
 	return info.Mode().IsRegular(), nil
 }

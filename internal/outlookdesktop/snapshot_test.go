@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -27,9 +28,15 @@ func swap[T any](t *testing.T, p *T, v T) {
 }
 
 // quiet clears the hooks every test starts from.
-func quiet(t *testing.T) {
+func quiet(t *testing.T) *[]time.Duration {
 	swap(t, &onAttempt, func(int) {})
 	swap(t, &afterCopy, func(int) {})
+	var waits []time.Duration
+	swap(t, &wait, func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return ctx.Err()
+	})
+	return &waits
 }
 
 func TestSnapshotCopiesOnlyTheStore(t *testing.T) {
@@ -233,6 +240,7 @@ func TestSnapshotRetriesWhenHandleDisagreesWithStat(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			calls := 0
+			swap(t, &sameFile, func(a, b fs.FileInfo) bool { return true }) // isolate the size and time checks
 			swap(t, &statOpen, func(f *os.File) (fs.FileInfo, error) {
 				calls++
 				i, err := f.Stat()
@@ -291,7 +299,7 @@ func TestSnapshotRejectsShortCopy(t *testing.T) {
 }
 
 func TestSnapshotStoreBusyAfterAllAttempts(t *testing.T) {
-	quiet(t)
+	waits := quiet(t)
 	tmp := tempHome(t)
 	store := fakeProfile(t, t.TempDir(), "Main Profile", 1000)
 	size := 1000
@@ -318,6 +326,11 @@ func TestSnapshotStoreBusyAfterAllAttempts(t *testing.T) {
 	}
 	if busy.Error() == "" {
 		t.Fatal("empty message")
+	}
+	// A settle pause after every copy, then 1 s and 2 s between attempts and none after the last.
+	want := []time.Duration{settle, time.Second, settle, 2 * time.Second, settle}
+	if !reflect.DeepEqual(*waits, want) {
+		t.Fatalf("waits = %v, want %v", *waits, want)
 	}
 	assertClean(t, tmp)
 }
@@ -353,8 +366,11 @@ func TestSnapshotOpensReadOnlyAndNeverTouchesTheLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if len(opens) != 1 || opens[0].path != store || opens[0].flag != os.O_RDONLY || opens[0].perm != 0 {
-		t.Fatalf("opens = %+v, want exactly one O_RDONLY open of the store", opens)
+	if len(opens) != 1 || opens[0].path != store || opens[0].flag != sourceOpenFlags || opens[0].perm != 0 {
+		t.Fatalf("opens = %+v, want exactly one read-only open of the store", opens)
+	}
+	if opens[0].flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0 {
+		t.Fatalf("flag %#x contains a write bit", opens[0].flag)
 	}
 	for _, p := range stats {
 		if p != store {
@@ -581,4 +597,126 @@ func TestTeamsSweepRemovesOutlookSnapshots(t *testing.T) {
 		t.Fatalf("swept %d, want 1", got)
 	}
 	assertClean(t, tmp)
+}
+
+func TestSnapshotRetriesWhenChangedDuringSettle(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 1000)
+	first := true
+	// The change lands in the settle pause, after the copy and before the final stat.
+	swap(t, &wait, func(ctx context.Context, d time.Duration) error {
+		if d == settle && first {
+			first = false
+			mustWrite(t, store, syntheticStore(1200))
+		}
+		return ctx.Err()
+	})
+	info, cleanup, err := Snapshot(context.Background(), store)
+	if err != nil || info.Attempts != 2 || info.Size != 1200 {
+		t.Fatalf("info=%+v err=%v", info, err)
+	}
+	cleanup()
+	assertClean(t, tmp)
+}
+
+func TestSnapshotRetriesWhenSwappedBetweenStatAndOpen(t *testing.T) {
+	quiet(t)
+	tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 1000)
+	other := filepath.Join(t.TempDir(), "other")
+	mustWrite(t, other, syntheticStore(1000))
+	calls := 0
+	swap(t, &statOpen, func(f *os.File) (fs.FileInfo, error) {
+		calls++
+		if calls == 1 {
+			return os.Stat(other) // the handle is a different file from the one stat'ed
+		}
+		return f.Stat()
+	})
+	info, cleanup, err := Snapshot(context.Background(), store)
+	if err != nil || info.Attempts != 2 {
+		t.Fatalf("info=%+v err=%v", info, err)
+	}
+	cleanup()
+}
+
+func TestSnapshotRejectsIrregularHandle(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 100)
+	swap(t, &statOpen, func(*os.File) (fs.FileInfo, error) { return os.Stat(t.TempDir()) })
+	_, cleanup, err := Snapshot(context.Background(), store)
+	if codeOf(t, err) != errs.CodeInternal {
+		t.Fatalf("err=%v", err)
+	}
+	cleanup()
+	assertClean(t, tmp)
+}
+
+func TestSnapshotCancelledBetweenAttempts(t *testing.T) {
+	tmp := tempHome(t)
+	quiet(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 1000)
+	ctx, cancel := context.WithCancel(context.Background())
+	size := 1000
+	swap(t, &afterCopy, func(int) { size++; mustWrite(t, store, syntheticStore(size)) })
+	swap(t, &wait, func(c context.Context, d time.Duration) error {
+		if d == time.Second {
+			cancel()
+		}
+		return c.Err()
+	})
+	_, cleanup, err := Snapshot(ctx, store)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	cleanup()
+	assertClean(t, tmp)
+}
+
+func TestSnapshotCancelledDuringSettle(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	swap(t, &wait, func(c context.Context, d time.Duration) error { cancel(); return c.Err() })
+	_, _, err := Snapshot(ctx, store)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	assertClean(t, tmp)
+}
+
+func TestSnapshotPanicDoesNotLeakTheCopy(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 100)
+	swap(t, &afterCopy, func(int) { panic("boom") })
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the panic was swallowed")
+			}
+		}()
+		_, _, _ = Snapshot(context.Background(), store)
+	}()
+	assertClean(t, tmp)
+}
+
+func TestSleepCtx(t *testing.T) {
+	if err := sleepCtx(context.Background(), time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := sleepCtx(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDefaultTimings(t *testing.T) {
+	if settle != 250*time.Millisecond || retryWaits != [SnapshotAttempts - 1]time.Duration{time.Second, 2 * time.Second} {
+		t.Fatalf("settle=%v retryWaits=%v", settle, retryWaits)
+	}
 }

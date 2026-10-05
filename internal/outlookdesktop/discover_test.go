@@ -22,7 +22,7 @@ func codeOf(t *testing.T, err error) string {
 
 func TestDiscoverNoRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing")
-	_, _, err := Discover(root)
+	_, _, _, err := Discover(root)
 	var nf *RootNotFoundError
 	if !errors.Is(err, ErrRootNotFound) || !errors.As(err, &nf) || nf.Root != root || nf.Error() == "" {
 		t.Fatalf("err = %v", err)
@@ -35,7 +35,7 @@ func TestDiscoverNoProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "Empty Profile"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	p, c, err := Discover(root)
+	p, c, _, err := Discover(root)
 	if err != nil || len(p) != 0 || len(c) != 0 {
 		t.Fatalf("got %v %v %v", p, c, err)
 	}
@@ -44,7 +44,7 @@ func TestDiscoverNoProfile(t *testing.T) {
 func TestDiscoverOneProfile(t *testing.T) {
 	root := t.TempDir()
 	store := fakeProfile(t, root, "Main Profile", 64)
-	p, c, err := Discover(root)
+	p, c, _, err := Discover(root)
 	if err != nil || len(c) != 0 {
 		t.Fatal(p, c, err)
 	}
@@ -59,7 +59,7 @@ func TestDiscoverSeveralProfilesSorted(t *testing.T) {
 	fakeProfile(t, root, "Zed", 8)
 	fakeProfile(t, root, "Alpha", 8)
 	fakeProfile(t, root, "Main Profile", 8)
-	p, _, err := Discover(root)
+	p, _, _, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDiscoverClassicSQLiteOnly(t *testing.T) {
 	// A profile with both is a profile, not classic-only.
 	store := fakeProfile(t, root, "Both", 8)
 	mustWrite(t, filepath.Join(filepath.Dir(store), "Data", "Outlook.sqlite"), []byte("sqlite"))
-	p, c, err := Discover(root)
+	p, c, _, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDiscoverIgnoresStoreThatIsADirectory(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "Odd", StoreFileName), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	p, c, err := Discover(root)
+	p, c, _, err := Discover(root)
 	if err != nil || len(p) != 0 || len(c) != 0 {
 		t.Fatal(p, c, err)
 	}
@@ -111,7 +111,7 @@ func TestDiscoverPermissionDeniedMapsToNoFullDiskAccess(t *testing.T) {
 	readDir = func(string) ([]fs.DirEntry, error) {
 		return nil, &fs.PathError{Op: "open", Path: root, Err: fs.ErrPermission}
 	}
-	_, _, err := Discover(root)
+	_, _, _, err := Discover(root)
 	if codeOf(t, err) != errs.CodeNoFullDiskAccess {
 		t.Fatalf("readDir permission: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestDiscoverPermissionDeniedMapsToNoFullDiskAccess(t *testing.T) {
 	origStat := statPath
 	t.Cleanup(func() { statPath = origStat })
 	statPath = func(string) (fs.FileInfo, error) { return nil, fs.ErrPermission }
-	_, _, err = Discover(root)
+	_, _, _, err = Discover(root)
 	if codeOf(t, err) != errs.CodeNoFullDiskAccess {
 		t.Fatalf("stat permission: %v", err)
 	}
@@ -134,23 +134,67 @@ func TestDiscoverOtherErrorsAreInternal(t *testing.T) {
 	orig := readDir
 	t.Cleanup(func() { readDir = orig })
 	readDir = func(string) ([]fs.DirEntry, error) { return nil, boom }
-	if _, _, err := Discover(root); codeOf(t, err) != errs.CodeInternal {
+	if _, _, _, err := Discover(root); codeOf(t, err) != errs.CodeInternal {
 		t.Fatalf("readDir: %v", err)
 	}
 	readDir = orig
 
 	origStat := statPath
 	t.Cleanup(func() { statPath = origStat })
-	// Fail on the classic lookup only.
+	// Every directory unreadable and not for permission: the coded internal error.
+	statPath = func(string) (fs.FileInfo, error) { return nil, boom }
+	if _, _, sk, err := Discover(root); codeOf(t, err) != errs.CodeInternal || len(sk) != 1 {
+		t.Fatalf("all unreadable: %v %v", sk, err)
+	}
+}
+
+func TestDiscoverOneUnreadableProfileDoesNotHideTheOthers(t *testing.T) {
+	root := t.TempDir()
+	fakeProfile(t, root, "Good", 8)
+	fakeProfile(t, root, "Denied", 8)
+	fakeProfile(t, root, "Broken", 8)
 	mustWrite(t, filepath.Join(root, "Classic", "Data", "Outlook.sqlite"), []byte("s"))
+	boom := errors.New("boom")
+	origStat := statPath
+	t.Cleanup(func() { statPath = origStat })
 	statPath = func(p string) (fs.FileInfo, error) {
-		if filepath.Base(p) == "Outlook.sqlite" {
+		switch filepath.Base(filepath.Dir(p)) {
+		case "Denied":
+			return nil, fs.ErrPermission
+		case "Broken":
 			return nil, boom
 		}
 		return os.Stat(p)
 	}
-	if _, _, err := Discover(root); codeOf(t, err) != errs.CodeInternal {
-		t.Fatalf("classic stat: %v", err)
+	p, c, sk, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p) != 1 || p[0].Name != "Good" || !reflect.DeepEqual(c, []string{"Classic"}) {
+		t.Fatalf("p=%v c=%v", p, c)
+	}
+	if len(sk) != 2 || sk[0].Name != "Broken" || sk[0].Reason != "unreadable" || !errors.Is(sk[0].Err, boom) ||
+		sk[1].Name != "Denied" || sk[1].Reason != "no_full_disk_access" || sk[1].Dir != filepath.Join(root, "Denied") {
+		t.Fatalf("skipped = %+v", sk)
+	}
+}
+
+func TestDiscoverClassicStatFailureSkipsOnlyThatProfile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Odd"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	origStat := statPath
+	t.Cleanup(func() { statPath = origStat })
+	statPath = func(p string) (fs.FileInfo, error) {
+		if filepath.Base(p) == "Outlook.sqlite" {
+			return nil, fs.ErrPermission
+		}
+		return os.Stat(p)
+	}
+	_, _, sk, err := Discover(root)
+	if codeOf(t, err) != errs.CodeNoFullDiskAccess || len(sk) != 1 {
+		t.Fatalf("sk=%v err=%v", sk, err)
 	}
 }
 

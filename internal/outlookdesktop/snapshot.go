@@ -37,11 +37,27 @@ var (
 		return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // path is inside our private snapshot directory
 	}
 	statSource   = os.Stat
+	sameFile     = os.SameFile
 	statOpen     = func(f *os.File) (fs.FileInfo, error) { return f.Stat() }
+	wait         = sleepCtx
+	settle       = 250 * time.Millisecond
+	retryWaits   = [SnapshotAttempts - 1]time.Duration{time.Second, 2 * time.Second}
 	onAttempt    = func(int) {}
 	afterCopy    = func(int) {}
 	copyBufBytes = 1 << 20
 )
+
+// sleepCtx waits d, or returns the context's error as soon as ctx is cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
 
 // StoreBusyError is the typed "store busy" result: Outlook changed the container (size, modification
 // time or file identity) during every one of Attempts copies, so no consistent copy was made.
@@ -100,7 +116,7 @@ type Info struct {
 //
 // The returned cleanup is always non-nil and idempotent; the copy is also removed when ctx is
 // cancelled, and on every error path before Snapshot returns.
-func Snapshot(ctx context.Context, storePath string) (Info, func(), error) {
+func Snapshot(ctx context.Context, storePath string) (info Info, cleanup func(), err error) {
 	noop := func() {}
 	dir, err := os.MkdirTemp("", snapshotPrefix)
 	if err != nil {
@@ -108,29 +124,39 @@ func Snapshot(ctx context.Context, storePath string) (Info, func(), error) {
 	}
 	var once sync.Once
 	remove := func() { once.Do(func() { _ = os.RemoveAll(dir) }) }
+	// Every exit but success removes the copy, including a panic in the copy.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			remove()
+		}
+	}()
 	dst := filepath.Join(dir, StoreFileName)
 
 	var last string
 	for attempt := 1; attempt <= SnapshotAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			remove()
 			return Info{}, noop, err
 		}
 		onAttempt(attempt)
-		info, changed, err := copyOnce(ctx, storePath, dir, dst, attempt)
+		got, changed, err := copyOnce(ctx, storePath, dir, dst, attempt)
 		if err != nil {
-			remove()
 			return Info{}, noop, err
 		}
 		if changed == "" {
-			info.Path = dst
-			info.Attempts = attempt
+			got.Path = dst
+			got.Attempts = attempt
+			succeeded = true
 			stop := context.AfterFunc(ctx, remove)
-			return info, func() { stop(); remove() }, nil
+			return got, func() { stop(); remove() }, nil
 		}
 		last = changed
+		if attempt < SnapshotAttempts {
+			if err := wait(ctx, retryWaits[attempt-1]); err != nil {
+				return Info{}, noop, err
+			}
+		}
 	}
-	remove()
 	return Info{}, noop, &StoreBusyError{Path: storePath, Attempts: SnapshotAttempts, Last: last}
 }
 
@@ -155,7 +181,7 @@ func copyOnce(ctx context.Context, src, dir, dst string, attempt int) (info Info
 		return Info{}, "", errs.Internal(err)
 	}
 
-	in, err := openFile(src, os.O_RDONLY, 0)
+	in, err := openFile(src, sourceOpenFlags, 0)
 	if err != nil {
 		return Info{}, "", mapSourceError(src, err)
 	}
@@ -163,6 +189,12 @@ func copyOnce(ctx context.Context, src, dir, dst string, attempt int) (info Info
 	opened, err := statOpen(in)
 	if err != nil {
 		return Info{}, "", errs.Internal(err)
+	}
+	if !opened.Mode().IsRegular() {
+		return Info{}, "", errs.Internal(fmt.Errorf("%s is not a regular file", src))
+	}
+	if !sameFile(opened, before) {
+		return Info{}, "the store file was swapped between stat and open", nil
 	}
 	out, err := createFile(dst)
 	if err != nil {
@@ -179,12 +211,17 @@ func copyOnce(ctx context.Context, src, dir, dst string, attempt int) (info Info
 	}
 	afterCopy(attempt)
 
+	// Settle: a write through a memory mapping may not move the modification time until the
+	// system flushes it, so look again after a short pause.
+	if err := wait(ctx, settle); err != nil {
+		return Info{}, "", err
+	}
 	after, err := statSource(src)
 	if err != nil {
 		return Info{}, "", mapSourceError(src, err)
 	}
 	switch {
-	case !os.SameFile(before, after):
+	case !sameFile(before, after):
 		return Info{}, "the store file was replaced", nil
 	case before.Size() != after.Size() || opened.Size() != before.Size():
 		return Info{}, fmt.Sprintf("size %d before, %d at open, %d after", before.Size(), opened.Size(), after.Size()), nil
