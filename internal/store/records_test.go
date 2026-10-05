@@ -750,3 +750,76 @@ func TestSchemaMigratesV3ToV4(t *testing.T) {
 	must0(err)
 	t.Cleanup(func() { _ = s.Close() })
 }
+
+// A process that died between the two ALTER statements of the 3 to 4 migration leaves an archive
+// that says version 4 but has only one of the two columns. The next open adds the missing one, in
+// either order, and keeps the rows.
+func TestMigrateRepairsAHalfAppliedV4(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct{ name, drop string }{
+		{"digest present, redaction count missing", "value_redacted"},
+		{"redaction count present, digest missing", "raw_digest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "teamscrawl.db")
+			s, err := Open(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			x, err := s.Begin(ctx)
+			must0(err)
+			if _, err := x.UpsertRecords(srcA, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, `1`)}, base); err != nil {
+				t.Fatal(err)
+			}
+			must0(x.Commit())
+			if _, err := s.db.Exec(`alter table records drop column ` + tc.drop); err != nil {
+				t.Fatal(err)
+			}
+			if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
+				t.Fatalf("the half-applied archive must still say version %d, says %d", SchemaVersion, v)
+			}
+			_ = s.Close()
+			s, err = Open(ctx, path)
+			if err != nil {
+				t.Fatalf("open half-applied archive: %v", err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			if n := rowCount(t, s, `select count(*) from pragma_table_info('records') where name in ('raw_digest','value_redacted')`); n != 2 {
+				t.Fatalf("read-memory columns after repair: %d", n)
+			}
+			if n := rowCount(t, s, `select count(*) from records`); n != 1 {
+				t.Fatalf("rows after repair: %d", n)
+			}
+			// A sync's statements work on the repaired table.
+			x = beginSession(t, s)
+			r := grec(&acctA, dbA, "events", `"e2"`, `2`)
+			r.Digest = []byte{9}
+			if _, err := x.UpsertRecords(srcA, []teamsdesktop.GenericRecord{r}, base); err != nil {
+				t.Fatal(err)
+			}
+			must0(x.Commit())
+		})
+	}
+}
+
+// The migration's statements are one transaction: when a later one fails, the earlier ones do not
+// stay applied.
+func TestMigrateIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	for _, q := range []string{
+		`alter table records drop column raw_digest`, `alter table records drop column value_redacted`,
+		// Both the old and the new column name: the rename, which runs after the records columns, fails.
+		`alter table conversations add column read_horizon_message_id text`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.migrate(ctx); err == nil {
+		t.Fatal("migrate succeeded although the rename cannot run")
+	}
+	if n := rowCount(t, s, `select count(*) from pragma_table_info('records') where name in ('raw_digest','value_redacted')`); n != 0 {
+		t.Fatalf("a failed migration left %d of its columns applied", n)
+	}
+}
