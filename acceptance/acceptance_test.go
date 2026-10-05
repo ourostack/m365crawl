@@ -887,4 +887,3 @@ func TestRealNoAuthDecoded(t *testing.T) {
 		t.Errorf("%d credential-shaped strings in records outside message-content managers", outside)
 	}
 }
-

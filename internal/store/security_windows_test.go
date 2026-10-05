@@ -45,7 +45,7 @@ func TestOpenRejectsUnsafeExistingSQLiteSidecarsBeforeSQLiteOpen(t *testing.T) {
 			must0(os.WriteFile(sidecar, content, 0o600))
 			setBroadACL(t, sidecar)
 			assertOpenDBError(t, dbPath)
-			got, err := os.ReadFile(sidecar)
+			got, err := os.ReadFile(sidecar) //nolint:gosec // sidecar is created by this test under t.TempDir
 			if err != nil || !bytes.Equal(got, content) {
 				t.Fatalf("sidecar changed before rejection: %q, %v", got, err)
 			}
@@ -68,7 +68,7 @@ func TestPrepareArchivePreservesPrivateExistingSQLiteSidecars(t *testing.T) {
 	}
 	must0(prepareArchiveForWrite(dbPath))
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-		got, err := os.ReadFile(dbPath + suffix)
+		got, err := os.ReadFile(dbPath + suffix) //nolint:gosec // sidecar is created by this test under t.TempDir
 		if err != nil || string(got) != "synthetic private companion" {
 			t.Fatalf("private sidecar changed: %q, %v", got, err)
 		}

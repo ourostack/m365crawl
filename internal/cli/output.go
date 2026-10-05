@@ -286,16 +286,6 @@ func checkFields[T any](rt *runtime) error {
 	return nil
 }
 
-func removeKey(ss []string, k string) []string {
-	out := make([]string, 0, len(ss))
-	for _, s := range ss {
-		if s != k {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 func splitFields(s string) []string {
 	var out []string
 	for _, f := range strings.Split(s, ",") {
