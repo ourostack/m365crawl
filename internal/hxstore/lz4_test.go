@@ -218,3 +218,115 @@ func TestDecodeLZ4RejectsOversizeBeforeAllocating(t *testing.T) {
 		t.Fatalf("zero size with an empty closing sequence must decode: %v", err)
 	}
 }
+
+// compress is a small greedy LZ4 block compressor that lives only in this test
+// file. It finds the longest earlier match for each position by brute force
+// (inputs are small), emits sequences in the standard layout and ends with a
+// literal-only sequence, so its output exercises the decoder's literal, match,
+// overlap and extension paths on generated data.
+func compress(in []byte) []byte {
+	var out []byte
+	emitLen := func(n int) {
+		for n >= 255 {
+			out = append(out, 255)
+			n -= 255
+		}
+		out = append(out, byte(n))
+	}
+	nib := func(n int) int {
+		if n >= 15 {
+			return 15
+		}
+		return n
+	}
+	litStart, i := 0, 0
+	for i+4 <= len(in) {
+		bestLen, bestOff := 0, 0
+		for start := max(0, i-65535); start < i; start++ {
+			n := 0
+			for i+n < len(in) && in[start+n] == in[i+n] {
+				n++
+			}
+			if n > bestLen {
+				bestLen, bestOff = n, i-start
+			}
+		}
+		if bestLen < 4 {
+			i++
+			continue
+		}
+		lits := in[litStart:i]
+		out = append(out, byte(nib(len(lits))<<4|nib(bestLen-4)))
+		if len(lits) >= 15 {
+			emitLen(len(lits) - 15)
+		}
+		out = append(out, lits...)
+		out = append(out, byte(bestOff), byte(bestOff>>8))
+		if bestLen-4 >= 15 {
+			emitLen(bestLen - 4 - 15)
+		}
+		i += bestLen
+		litStart = i
+	}
+	lits := in[litStart:]
+	out = append(out, byte(nib(len(lits))<<4))
+	if len(lits) >= 15 {
+		emitLen(len(lits) - 15)
+	}
+	return append(out, lits...)
+}
+
+// TestDecodeLZ4RoundTrip compresses invented inputs with the test compressor,
+// decodes them and compares, then repeats with the decoder's buffer reused.
+func TestDecodeLZ4RoundTrip(t *testing.T) {
+	var lcg uint32 = 1
+	rnd := func(n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			lcg = lcg*1664525 + 1013904223
+			b[i] = byte(lcg >> 24)
+		}
+		return b
+	}
+	inputs := map[string][]byte{
+		"one byte":     []byte("a"),
+		"short":        []byte("abcabcabcabcabc"),
+		"zeros":        make([]byte, 5000),
+		"pattern":      bytes.Repeat([]byte("Fixture Room Alpha;"), 300),
+		"random":       rnd(3000),
+		"random+runs":  append(append(rnd(400), bytes.Repeat([]byte("Z"), 700)...), rnd(40)...),
+		"far matches":  append(append(rnd(12000), rnd(10)...), rnd(0)...),
+		"long literal": rnd(1000),
+	}
+	copy(inputs["far matches"][11000:], inputs["far matches"][:900])
+	var buf []byte
+	for name, in := range inputs {
+		t.Run(name, func(t *testing.T) {
+			comp := compress(in)
+			out, err := decodeBlock(buf, comp, len(in), MaxInflated)
+			if err != nil || !bytes.Equal(out, in) {
+				t.Fatalf("round trip failed: %v", err)
+			}
+			buf = out
+		})
+	}
+}
+
+// TestDecodeLZ4LengthSumOverflow feeds extension runs long enough that an
+// unchecked running sum would pass the declared size (and, at scale, overflow
+// the integer): the decoder must stop with an error, long before reading the
+// whole run, at every size up to the cap.
+func TestDecodeLZ4LengthSumOverflow(t *testing.T) {
+	run := bytes.Repeat([]byte{255}, 1<<18)
+	lit := cat([]byte{tok(15, 0)}, run)
+	wantErr(t, lit, MaxInflated, ErrLZ4Overrun) // 256 KiB of 0xff = 66 MB > 32 MiB
+	wantErr(t, lit, 1000, ErrLZ4Overrun)
+	mat := cat([]byte{tok(1, 15)}, []byte("a"), []byte{1, 0}, run)
+	wantErr(t, mat, MaxInflated, ErrLZ4Overrun)
+	wantErr(t, mat, 1000, ErrLZ4Overrun)
+	// A sum exactly at the limit still decodes: 15 + 255*2 + 0 literals.
+	ok := cat([]byte{tok(15, 0), 255, 255, 0}, bytes.Repeat([]byte("k"), 525))
+	if got := mustDecode(t, ok, 525); len(got) != 525 {
+		t.Fatalf("got %d", len(got))
+	}
+}

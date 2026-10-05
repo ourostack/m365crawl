@@ -16,7 +16,12 @@ import (
 	"hash/crc32"
 )
 
-// Block layout constants. All integers are little-endian.
+// Block layout constants. All integers are little-endian. The field positions,
+// the checksum ranges and the constant at +0x1c are reference-derived: they come
+// from the public notes (github.com/ukd1/hxstore-reverse-engineering, SPEC.md
+// section 3.1) and were agreed with by 16,884 valid blocks in the spike's copy of
+// a real store, but this package has not itself been run against a real store.
+// The scan slice confirms them there.
 const (
 	// HeaderSize is the size of a block header; the payload starts here.
 	HeaderSize = 0x28
