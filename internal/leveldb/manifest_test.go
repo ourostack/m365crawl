@@ -72,10 +72,7 @@ func TestPrevLogNumber(t *testing.T) {
 	writeJournal(t, filepath.Join(dir, "000003.log"), batch(2, "prev", "p"))
 	writeJournal(t, filepath.Join(dir, "000005.log"), batch(3, "cur", "c"))
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if _, ok, _ := d.Get([]byte("prev")); !ok {
 		t.Fatal("prev log not read")
 	}

@@ -69,10 +69,7 @@ func TestManifestLiveSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	for k, v := range want {
 		got, ok, _ := d.Get([]byte(k))
 		if !ok || string(got) != v {
@@ -113,10 +110,7 @@ func TestScanPrefixOrdered(t *testing.T) {
 	}
 	_ = db.Close()
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	var got []string
 	if err := d.Scan([]byte("b"), func(k, v []byte) error {
 		got = append(got, string(k)+"="+string(v))
@@ -150,10 +144,7 @@ func TestDeletionNewestWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if v, ok, _ := d.Get([]byte("k")); ok {
 		t.Fatalf("deleted key visible: %q", v)
 	}
@@ -175,10 +166,7 @@ func TestHighestSequenceWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if v, ok, _ := d.Get([]byte("k")); !ok || string(v) != "new" {
 		t.Fatalf("got %q,%v", v, ok)
 	}
@@ -206,10 +194,7 @@ func TestTruncatedLogTail(t *testing.T) {
 	}
 	_ = f.Close()
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if d.Stats().TruncatedLogTails != 1 {
 		t.Fatalf("TruncatedLogTails = %d", d.Stats().TruncatedLogTails)
 	}
@@ -280,7 +265,13 @@ func TestPermissionErrorIsNotMissingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(tabs[0], 0o600) })
-	_, err := Load(dir)
+	probe, err := os.Open(tabs[0])
+	if err == nil {
+		_ = probe.Close()
+		t.Skipf("%s permissions are not enforced", tabs[0])
+	}
+	requirePermissionSimulation(t, err, tabs[0])
+	_, err = Load(dir)
 	var mf *MissingFileError
 	if err == nil || errors.As(err, &mf) || !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("err = %v, want a permission error that is not MissingFileError", err)
@@ -297,6 +288,8 @@ func TestTableNameStatPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restoring a test temp dir so cleanup can remove it
+	_, probeErr := os.Stat(filepath.Join(dir, "000007.ldb"))
+	requirePermissionSimulation(t, probeErr, dir)
 	_, err := tableName(dir, 7)
 	var mf *MissingFileError
 	if err == nil || errors.As(err, &mf) {

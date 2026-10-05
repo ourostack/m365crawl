@@ -121,7 +121,7 @@ func TestRederiveRefusesANewerArchive(t *testing.T) {
 	if m != nil || !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || coded.Exit != errs.ExitEnvironment {
 		t.Fatalf("Rederive = %+v, %v", m, err)
 	}
-	if !strings.Contains(coded.Message, "99") || !strings.Contains(coded.Message, "2") || !strings.Contains(coded.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+	if !strings.Contains(coded.Message, "99") || !strings.Contains(coded.Message, "2") || !strings.Contains(coded.Fix, "Upgrade teamscrawl to a newer build") {
 		t.Errorf("message %q fix %q", coded.Message, coded.Fix)
 	}
 	if dump(t, s) != before {

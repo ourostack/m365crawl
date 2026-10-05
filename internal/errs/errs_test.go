@@ -3,6 +3,7 @@ package errs
 import (
 	"errors"
 	"fmt"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -44,8 +45,16 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 	if !errors.As(fmt.Errorf("wrap: %w", DBError(cause)), &coded) || !errors.Is(coded, cause) {
 		t.Fatal("Coded must be matchable by errors.As and unwrap to its cause")
 	}
-	if fda := NoFullDiskAccess("/r", cause); !containsAll(fda.Fix, "System Settings", "Privacy & Security", "Full Disk Access") {
-		t.Fatalf("fix = %q", fda.Fix)
+	fda := NoFullDiskAccess("/r", cause)
+	switch goruntime.GOOS {
+	case "windows":
+		if containsAll(fda.Fix, "System Settings", "Privacy & Security", "Full Disk Access") {
+			t.Fatalf("fix = %q", fda.Fix)
+		}
+	default:
+		if !containsAll(fda.Fix, "System Settings", "Privacy & Security", "Full Disk Access") {
+			t.Fatalf("fix = %q", fda.Fix)
+		}
 	}
 }
 
@@ -79,14 +88,14 @@ func TestInternalWithNilCauseSaysUnknown(t *testing.T) {
 
 func TestArchiveNewer(t *testing.T) {
 	e := ArchiveNewer(5, 2)
-	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "version 5") || !strings.Contains(e.Message, "version 2") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "version 5") || !strings.Contains(e.Message, "version 2") || !strings.Contains(e.Fix, "Upgrade teamscrawl to a newer build") {
 		t.Errorf("%+v", e)
 	}
 }
 
 func TestArchiveSchemaNewer(t *testing.T) {
 	e := ArchiveSchemaNewer(4, 3)
-	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "brew upgrade ourostack/tap/teamscrawl") {
+	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "Upgrade teamscrawl to a newer build") {
 		t.Errorf("%+v", e)
 	}
 }
