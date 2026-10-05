@@ -9,7 +9,10 @@
 // accepted only when the file's size, modification time and identity are the same before the
 // copy, right after it and again after a short settle pause. A write that leaves size and
 // modification time untouched, for example through a memory mapping that the system has not
-// flushed yet, cannot be seen here. The container reader's per-block checksums are the
+// flushed yet, cannot be seen here. One observation on one Mac (Outlook 16.115, 2026-10-05) is that
+// Outlook holds HxStore.hxd through ordinary file handles, one read-only and one read-write,
+// and memory-maps only HxStore.lock, so the size and time check is meaningful there; the settle
+// re-stat is kept anyway. The container reader's per-block checksums are the
 // integrity backstop: a torn block fails its checksum and is rejected and counted there.
 package outlookdesktop
 

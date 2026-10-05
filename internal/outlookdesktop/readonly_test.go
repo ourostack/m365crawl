@@ -204,7 +204,7 @@ func TestNoWritingCallsOutsideTheTempHelper(t *testing.T) {
 	// Every allowlist entry is still used, so the list cannot rot into a blanket permission.
 	used := map[string]bool{}
 	for _, f := range []string{"snapshot.go"} {
-		src, _ := os.ReadFile(f)
+		src, _ := os.ReadFile(f) //nolint:gosec // package sources
 		for _, hit := range scanSource(t, f, string(src)) {
 			used[hit] = true
 		}
