@@ -214,12 +214,7 @@ func (w *writer) skip(acct teamsdesktop.Account, _, database, keyJSON string, di
 	}
 	if ok && !m.full && bytes.Equal(old.Digest, digest) {
 		if eff, err := decodeEffects(old.Effects); err == nil && !eff.contended {
-			match, err := m.match(eff.rows)
-			if err != nil {
-				m.err = err
-				return false
-			}
-			if match {
+			if m.match(eff.rows) {
 				w.replay(acct, eff)
 				return m.err == nil
 			}
@@ -285,13 +280,13 @@ func (m *memo) finishTyped() {
 
 // match reports whether every referenced row held, when its database's memory was loaded, the
 // hash the record left in it. A row a record of this run rewrites afterwards is caught by conflict.
-func (m *memo) match(refs []store.RowRef) (bool, error) {
+func (m *memo) match(refs []store.RowRef) bool {
 	for _, ref := range refs {
 		if h, ok := m.hashes[ref.Kind][ref.Rowid]; !ok || h != ref.Hash {
-			return false, nil
+			return false
 		}
 	}
-	return true, nil
+	return true
 }
 
 // replay does for a skipped record what applying it would have counted: the account is

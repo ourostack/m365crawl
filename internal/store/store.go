@@ -117,18 +117,9 @@ var chmodFile = os.Chmod
 // columns themselves and adds each missing one on its own, so an archive that a crash left with
 // only one of the two version 4 columns repairs itself on the next open. All of its statements run
 // in one transaction (SQLite's ALTER TABLE is transactional), so a failure keeps none of them.
-func (s *Store) migrate(ctx context.Context) (err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+func (s *Store) migrate(ctx context.Context) error {
 	var old, has, digest, redacted int
-	if err := tx.QueryRowContext(ctx, `select
+	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
   (select count(*) from pragma_table_info('records') where name='raw_digest'),
@@ -150,12 +141,29 @@ func (s *Store) migrate(ctx context.Context) (err error) {
 			// Runs recorded before run-level rows existed counted for every account; keep them that way.
 			`update sync_runs set accounts_json = '["*"]' where status in `+successStatuses)
 	}
-	for _, q := range stmts {
-		if _, err := tx.ExecContext(ctx, q); err != nil {
-			return err
-		}
+	if len(stmts) == 0 {
+		return nil
 	}
-	return tx.Commit()
+	return s.runInTx(ctx, stmts)
+}
+
+// runInTx runs the statements in one transaction: all of them are applied, or none.
+func (s *Store) runInTx(ctx context.Context, stmts []string) (err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err == nil {
+		defer func() {
+			if err != nil {
+				_ = tx.Rollback()
+			}
+		}()
+		for _, q := range stmts {
+			if _, err = tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+		err = tx.Commit()
+	}
+	return err
 }
 
 // NeedsUpgrade reports an archive written before run-level sync_runs rows existed: it has no

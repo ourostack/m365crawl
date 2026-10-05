@@ -80,35 +80,38 @@ func (x *Session) RowHashesOf(kind byte, rowids []int64) (map[int64][DigestLen]b
 	out := map[int64][DigestLen]byte{}
 	for len(rowids) > 0 {
 		n := min(rowHashChunk, len(rowids))
-		args := make([]any, n)
-		for i, id := range rowids[:n] {
-			args[i] = id
+		if err := x.rowHashChunk(table, rowids[:n], out); err != nil {
+			return nil, err
 		}
 		rowids = rowids[n:]
-		rows, err := x.tx.QueryContext(context.Background(), `select rowid, content_hash from `+table+` where rowid in (?`+strings.Repeat(",?", n-1)+`)`, args...)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var rowid int64
-			var hash string
-			if err := rows.Scan(&rowid, &hash); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			if b, err := hex.DecodeString(hash); err == nil && len(b) >= DigestLen {
-				var h [DigestLen]byte
-				copy(h[:], b)
-				out[rowid] = h
-			}
-		}
-		err = rows.Err()
-		_ = rows.Close()
-		if err != nil {
-			return nil, err
-		}
 	}
 	return out, nil
+}
+
+// rowHashChunk adds the hashes of the given rows of table to out.
+func (x *Session) rowHashChunk(table string, rowids []int64, out map[int64][DigestLen]byte) error {
+	args := make([]any, len(rowids))
+	for i, id := range rowids {
+		args[i] = id
+	}
+	rows, err := x.tx.QueryContext(context.Background(), `select rowid, content_hash from `+table+` where rowid in (?`+strings.Repeat(",?", len(rowids)-1)+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var rowid int64
+		var hash string
+		if err := rows.Scan(&rowid, &hash); err != nil {
+			return err
+		}
+		if b, err := hex.DecodeString(hash); err == nil && len(b) >= DigestLen {
+			var h [DigestLen]byte
+			copy(h[:], b)
+			out[rowid] = h
+		}
+	}
+	return rows.Err()
 }
 
 // TypedMemo is what the archive remembers of one typed record.
