@@ -352,40 +352,39 @@ STUB
   decide_run "$sha_c1" STUB_TAGS="v0.2.0:$c1 v0.3.0-rc.2:$c1" STUB_RELEASES="v0.2.0 v0.3.0-rc.2"
   expect_ok "unrelated files" release=false
 
-  # The present state of main: v0.1.0 and v0.1.0-alpha.1 notes, both annotated tags with releases,
-  # and annotated tags v0.1.0-rc.2 and v0.1.0-rc.3 that have no notes file. Nothing to release, no error.
+  # The present state of main: notes for v0.1.0, v0.1.0-alpha.1 and v0.2.0; annotated tags v0.1.0,
+  # v0.1.0-alpha.1, v0.1.0-rc.2, v0.1.0-rc.3 and v0.2.0; releases v0.2.0, v0.1.0 and v0.1.0-alpha.1
+  # (the two rc tags have no notes file and no release). Nothing to release, no error.
   repo="$tmp/repo2"
   mkdir -p "$repo/docs/releases"
   git -C "$repo" init --quiet --initial-branch=main
   git -C "$repo" config user.name t
   git -C "$repo" config user.email t@example.com
   printf '# Changelog\n\n## [Unreleased]\n\n## [0.3.0] - 2026-10-07\n\n## [0.2.0] - 2026-10-06\n\n## [0.1.5] - 2026-10-05\n\n## [0.1.0] - 2026-10-01\n' > "$repo/CHANGELOG.md"
-  commit "state" docs/releases/v0.1.0.md docs/releases/v0.1.0-alpha.1.md > /dev/null
-  local n tags="" present
-  for n in v0.1.0 v0.1.0-alpha.1 v0.1.0-rc.2 v0.1.0-rc.3; do
+  commit "state" docs/releases/v0.1.0.md docs/releases/v0.1.0-alpha.1.md docs/releases/v0.2.0.md > /dev/null
+  local n tags="" present released="v0.2.0 v0.1.0 v0.1.0-alpha.1"
+  for n in v0.1.0 v0.1.0-alpha.1 v0.1.0-rc.2 v0.1.0-rc.3 v0.2.0; do
     git -C "$repo" tag -a "$n" -m "$n" HEAD
     tags="$tags $n:$(git -C "$repo" rev-parse "refs/tags/$n"):tag"
   done
   present="$(git -C "$repo" rev-parse HEAD)"
-  decide_run "$present" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.1.0-rc.2 v0.1.0-rc.3"
+  decide_run "$present" REF=refs/heads/main STUB_TAGS="$tags" STUB_RELEASES="$released"
   expect_ok "the present state of main" release=false
   grep -Fq "nothing to release" <<<"$out" || fail "selftest: the present state should say there is nothing to release: $out"
+  [[ "$(wc -l < "$outputs" | tr -d ' ')" == 1 ]] || fail "selftest: the present state should output only release=false: $(tr '\n' ' ' < "$outputs")"
 
   # Versions only move forward.
   local late
-  git -C "$repo" tag -a v0.2.0 -m v0.2.0 HEAD
-  tags="$tags v0.2.0:$(git -C "$repo" rev-parse refs/tags/v0.2.0):tag"
-  commit "state" docs/releases/v0.2.0.md > /dev/null
   late="$(commit "late" docs/releases/v0.1.5.md)"
-  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="$released"
   expect_fail "a late notes file for an old version" "v0.1.5.md) is not greater than 0.2.0"
   git -C "$repo" rm --quiet docs/releases/v0.1.5.md
   late="$(commit "late rc" docs/releases/v0.2.0-rc.1.md)"
-  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="$released"
   expect_fail "a rehearsal for an already released version" "0.2.0-rc.1 (docs/releases/v0.2.0-rc.1.md) is not greater than 0.2.0"
   git -C "$repo" rm --quiet docs/releases/v0.2.0-rc.1.md
   late="$(commit "next rc" docs/releases/v0.3.0-rc.1.md)"
-  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="$released"
   expect_ok "a rehearsal above the latest stable" release=true tag=v0.3.0-rc.1 rehearsal=true
   repo="$tmp/repo"
 

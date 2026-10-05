@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +56,13 @@ func checkGolden(t *testing.T, name, got string) {
 	if string(want) != got {
 		t.Errorf("%s mismatch\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
 	}
+}
+
+func textGoldenName(name string) string {
+	if name == "doctor" && goruntime.GOOS == "windows" {
+		return name + ".windows"
+	}
+	return name
 }
 
 func textEnv(t *testing.T) *env {
@@ -110,7 +118,7 @@ func TestTextGoldens(t *testing.T) {
 			if c.name == "stores" || c.name == "records" {
 				got = reSyncStamp.ReplaceAllString(got, "<stamp>") // archived rows carry the sync's own time
 			}
-			checkGolden(t, c.name+"."+suffix, got)
+			checkGolden(t, textGoldenName(c.name)+"."+suffix, got)
 		}
 	}
 }

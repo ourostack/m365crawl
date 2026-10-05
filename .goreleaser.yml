@@ -3,7 +3,7 @@ version: 2
 project_name: teamscrawl
 
 builds:
-  - id: teamscrawl
+  - id: teamscrawl-darwin
     main: ./cmd/teamscrawl
     binary: teamscrawl
     env:
@@ -24,15 +24,35 @@ builds:
       post:
         # Snapshots (make snapshot, the PR build job) are never published, so they skip signing.
         # A tagged release is never a snapshot, so it always signs.
-        - cmd: '{{ if .IsSnapshot }}true{{ else }}scripts/sign-notarize.sh "{{ .Path }}"{{ end }}'
+        - cmd: '{{ if .IsSnapshot }}{{ if eq .Runtime.Goos "windows" }}cmd /c exit 0{{ else }}true{{ end }}{{ else }}scripts/sign-notarize.sh "{{ .Path }}"{{ end }}'
+  - id: teamscrawl-windows
+    main: ./cmd/teamscrawl
+    binary: teamscrawl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }} -X github.com/ourostack/teamscrawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/teamscrawl/internal/cli.date={{ .Date }}
 
 archives:
-  - id: bundles
+  - id: darwin-bundles
     ids:
-      - teamscrawl
+      - teamscrawl-darwin
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
+  - id: windows-bundles
+    ids:
+      - teamscrawl-windows
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - zip
 
 checksum:
   name_template: checksums.txt
@@ -49,7 +69,7 @@ release:
 homebrew_casks:
   - name: teamscrawl
     ids:
-      - bundles
+      - darwin-bundles
     binaries:
       - teamscrawl
     directory: Casks
