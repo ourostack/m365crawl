@@ -69,6 +69,17 @@ func boolean(v any) bool {
 	return false
 }
 
+// flag reads the boolean field key of m and reports whether the key was present (and not null).
+// Every event flag goes through it, so that "absent" stays distinguishable from "present and
+// false" when the core makes its flags three-valued.
+func flag(m map[string]any, key string) (value, present bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return false, false
+	}
+	return boolean(v), true
+}
+
 // integer reads a JSON number, truncating a fraction. Strings are not numbers.
 func integer(v any) (int64, bool) {
 	n, ok := v.(json.Number)

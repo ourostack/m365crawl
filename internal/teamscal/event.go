@@ -41,12 +41,12 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		Subject:          str(m["subject"]),
 		Organizer:        str(m["organizerName"]),
 		OrganizerAddress: str(m["organizerAddress"]),
-		IsOrganizer:      boolean(m["isOrganizer"]),
-		IsPrivate:        boolean(m["isPrivate"]),
-		Cancelled:        boolean(m["isCancelled"]),
+		IsOrganizer:      flagValue(m, "isOrganizer"),
+		IsPrivate:        flagValue(m, "isPrivate"),
+		Cancelled:        flagValue(m, "isCancelled"),
 		Response:         normalizeResponse(str(m["myResponseType"])),
 		ShowAs:           strings.ToLower(str(m["showAs"])),
-		IsOnlineMeeting:  boolean(m["isOnlineMeeting"]),
+		IsOnlineMeeting:  flagValue(m, "isOnlineMeeting"),
 		Location:         str(m["location"]),
 		LastModified:     timePtr(moment(m["lastModifiedTime"])),
 
@@ -58,7 +58,7 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		LocationsJSON:      mapLocations(m["meetingLocations"]),
 		BodyPreview:        str(m["bodyPreview"]),
 		AttachmentsJSON:    mapAttachments(m["attachments"]),
-		HasAttachments:     boolean(m["hasAttachments"]),
+		HasAttachments:     flagValue(m, "hasAttachments"),
 		CategoriesJSON:     mapCategories(m["categories"]),
 		RecurrenceJSON:     mapRecurrence(m),
 		DetailRawJSON:      string(valueJSON),
@@ -88,7 +88,7 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		}
 	}
 
-	if boolean(m["isAllDayEvent"]) {
+	if flagValue(m, "isAllDayEvent") {
 		if start, end, ok := allDayDates(e.Start, e.End, eventLoc, zone); ok {
 			e.AllDay, e.StartDate, e.EndDate = true, start, end
 		} else {
@@ -96,6 +96,12 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		}
 	}
 	return e, notes, nil
+}
+
+// flagValue is flag without the presence bit, for fields the core still holds as plain booleans.
+func flagValue(m map[string]any, key string) bool {
+	v, _ := flag(m, key)
+	return v
 }
 
 // normalizeEventType maps Teams' eventType to the core's lower-case vocabulary. An absent type is
