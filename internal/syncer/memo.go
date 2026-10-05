@@ -36,8 +36,9 @@ import (
 // errMemoConflict says a record of this read rewrote a row that a skipped record had vouched for.
 var errMemoConflict = errors.New("syncer: read memory conflict")
 
-// FullReadEnv, set to 1, makes every sync read every record in full (the memory is still
-// refreshed). Options.FullRead does the same for one run.
+// FullReadEnv, set to 1, makes every sync read every record of every source in full, even a
+// source whose fingerprint has not changed (the memory is still refreshed). Options.FullRead does
+// the same for one run.
 const FullReadEnv = "TEAMSCRAWL_FULL_READ"
 
 type typedEffects struct {

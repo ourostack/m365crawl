@@ -25,9 +25,12 @@ type Options struct {
 	Account *teamsdesktop.Account // only this account's databases; nil means every account
 	// Progress receives one human-readable line per source; nil discards them.
 	Progress io.Writer
-	// FullRead reads every record of a changed source in full instead of skipping the records
-	// whose bytes are unchanged since the last committed sync (also: TEAMSCRAWL_FULL_READ=1).
-	// The archive comes out the same either way; this is the check, not a repair.
+	// FullRead reads every record of every source in full, instead of skipping the records whose
+	// bytes are unchanged since the last committed sync (also: TEAMSCRAWL_FULL_READ=1). It does
+	// not stop at the fingerprint shortcut either: a source whose files have not changed since
+	// the last sync is read in full too, so the check works exactly when the cache is stable.
+	// The archive comes out the same either way; this is the check, not a repair. The read
+	// memory is refreshed by it.
 	FullRead bool
 }
 
@@ -40,8 +43,8 @@ type Options struct {
 // sync_runs, and only a run in which every source succeeded counts as a fresh sync (for every
 // account, or for the filtered account). Only runs without an account filter record a fingerprint,
 // and a source is skipped ("unchanged") only when an unfiltered run's stored fingerprint for it
-// equals the current one, so a filtered run can never hide another account's data from a later
-// run. changes lists the messages and activity items the store inserted or updated.
+// equals the current one (and FullRead is not set), so a filtered run can never hide another
+// account's data from a later run. changes lists the messages and activity items the store inserted or updated.
 func Run(ctx context.Context, o Options) (rep Report, changes []Change, err error) {
 	started := time.Now().UTC()
 	release, err := store.AcquireLock(o.DBPath)
@@ -257,7 +260,7 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 		if err != nil {
 			return SourceReport{}, false, errs.DBError(err)
 		}
-		if last == fp {
+		if last == fp && !r.o.FullRead { // a forced full read reads a source whose fingerprint has not changed too
 			if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: src.Key(), Fingerprint: fp, Status: StatusUnchanged}); err != nil {
 				return SourceReport{}, false, errs.DBError(err)
 			}

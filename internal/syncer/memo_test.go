@@ -673,3 +673,39 @@ func TestAccountFailureWhileSkippingFailsTheSource(t *testing.T) {
 	_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
 	codedErr(t, err, errs.CodeDBError)
 }
+
+// A forced full read does not stop at the fingerprint shortcut: when the cache has not changed
+// since the last sync it still reads every record, in full, and says so in the report. Without
+// the force, the same unchanged cache is "unchanged" and reads nothing.
+func TestFullReadBypassesTheFingerprintShortcut(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	db := newDB(t)
+	runs := watchApplies(t)
+	run(t, Options{Root: root, DBPath: db})
+	quiet, _ := run(t, Options{Root: root, DBPath: db}) // nothing changed
+	if quiet.Status != StatusUnchanged || len(*runs) != 1 {
+		t.Fatalf("an unchanged cache must stay unchanged without the force: %q, %d reads", quiet.Status, len(*runs))
+	}
+	for name, o := range map[string]func(*testing.T) Options{
+		"option": func(*testing.T) Options { return Options{Root: root, DBPath: db, FullRead: true} },
+		"env": func(t *testing.T) Options {
+			t.Setenv(FullReadEnv, "1")
+			return Options{Root: root, DBPath: db}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			n := len(*runs)
+			forced, _ := run(t, o(t)) // the same bytes, the same fingerprint
+			if forced.Status == StatusUnchanged || len(*runs) != n+1 {
+				t.Fatalf("the forced read did not run: status %q, %d reads", forced.Status, len(*runs)-n)
+			}
+			if r := (*runs)[n]; !r.full || r.typedSkips != 0 || r.genericSkips != 0 {
+				t.Fatalf("the forced read skipped or was not full: %+v", r)
+			}
+			if forced.Messages.Seen != fixtureMessages || forced.Messages.Unchanged != fixtureMessages || forced.Records.Seen != fixtureRecords {
+				t.Fatalf("counts: %+v", forced)
+			}
+		})
+	}
+}

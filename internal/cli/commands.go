@@ -556,7 +556,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 // --- sync, status, whoami, sql ---
 
 type syncCmd struct {
-	FullRead bool `name:"full-read" env:"TEAMSCRAWL_FULL_READ" help:"Read every record in full instead of skipping the ones whose bytes are unchanged since the last committed sync. The archive comes out the same either way; this is a check, not a repair."`
+	FullRead bool `name:"full-read" env:"TEAMSCRAWL_FULL_READ" help:"Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair."`
 }
 
 func (c syncCmd) Run(rt *runtime) error {
