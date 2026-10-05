@@ -2,6 +2,7 @@ package calendar
 
 import (
 	"database/sql"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -35,7 +36,7 @@ func TestApplyRecapsThinnerKeepsSummary(t *testing.T) {
 		headline != "Fixture headline" || rec == "" || dur != 3600 || att != 4 {
 		t.Fatalf("%v %s %s %d %d", err, headline, rec, dur, att)
 	}
-	// A non-empty group replaces its own group only.
+	// A non-empty field replaces only itself.
 	upd := Recap{AccountID: acct, CallID: "c1", Headline: "New headline", IsMissed: true}
 	c = batch(t, db, Batch{Window: tw(t), Recaps: []Recap{upd}}, "2026-10-06T03:00:00Z")
 	var short, speakers string
@@ -43,8 +44,7 @@ func TestApplyRecapsThinnerKeepsSummary(t *testing.T) {
 	if err := db.QueryRow(`SELECT headline, short_summary, speakers_json, recording_url, is_missed, attendees_count FROM calendar_recaps`).Scan(&headline, &short, &speakers, &rec, &missed, &att); err != nil {
 		t.Fatal(err)
 	}
-	// short_summary belongs to the summary group, which the new headline replaces whole.
-	if c.Recaps.Changed != 1 || headline != "New headline" || short != "" || speakers == "" || rec == "" || !missed || att != 0 {
+	if c.Recaps.Changed != 1 || headline != "New headline" || short == "" || speakers == "" || rec == "" || !missed || att != 4 {
 		t.Fatalf("%+v %s %q %s %s %v %d", c, headline, short, speakers, rec, missed, att)
 	}
 }
@@ -384,4 +384,31 @@ func TestRecapStoreErrors(t *testing.T) {
 			t.Fatal("rows: want error")
 		}
 	})
+}
+
+func TestCaptureRecapMergesPerField(t *testing.T) {
+	ms, me := at(t, "2026-10-05T16:00:00Z"), at(t, "2026-10-05T17:00:00Z")
+	exp := at(t, "2026-11-05T00:00:00Z")
+	old := Recap{
+		AccountID: "a", CallID: "c1", RecordingURL: "https://rec.example.test/1", DurationSeconds: 3600,
+		RecordingStartAt: ms, RecordingEndAt: me, MeetingStartAt: ms, MeetingEndAt: me, IsMissed: true,
+		HasConfRoomConnected: true, AttendanceStatus: "attended", AttendeesCount: 4, OrganizerID: "org-1",
+		Headline: "Head", ShortSummary: "Short", SpeakersJSON: `["s"]`, TopicsJSON: `["t"]`,
+	}
+	got := CaptureRecap(&old, Recap{AccountID: "a", CallID: "c1", ExpiresAt: exp, AttendeesCount: 7})
+	want := old
+	want.ExpiresAt, want.AttendeesCount = exp, 7
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("poorer copy erased data:\n got %+v\nwant %+v", got, want)
+	}
+	// Speakers and topics fill independently.
+	got = CaptureRecap(&Recap{AccountID: "a", CallID: "c1", SpeakersJSON: `["s"]`}, Recap{AccountID: "a", CallID: "c1", TopicsJSON: `["t"]`})
+	if got.SpeakersJSON != `["s"]` || got.TopicsJSON != `["t"]` {
+		t.Fatalf("speakers/topics: %+v", got)
+	}
+	// A non-empty value replaces; the sticky booleans stay true when a copy says false.
+	got = CaptureRecap(&old, Recap{AccountID: "a", CallID: "c1", Headline: "New", MeetingStartAt: me, DurationSeconds: 5})
+	if got.Headline != "New" || !got.MeetingStartAt.Equal(*me) || got.DurationSeconds != 5 || !got.IsMissed || !got.HasConfRoomConnected {
+		t.Fatalf("replace/sticky: %+v", got)
+	}
 }

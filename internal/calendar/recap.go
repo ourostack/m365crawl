@@ -97,12 +97,14 @@ func ItemKey(kind, origin string, ordinal int, title, text string) string {
 }
 
 // CaptureRecap is the recap half of the append-only rule. Recaps carry no modification time, so
-// the rule works per field group: a non-empty incoming group replaces the stored group, and an
-// empty one never does. The groups are the summary (headline, short summary, outline, summary
-// sections), the people (speakers, topics), the recording (url, start, end, duration, expiry) and
-// the status (meeting times, missed flag, attendance, counts, organizer, conference room). The
-// two stores therefore fill only their own columns and neither erases the other. An incoming
-// iCalUID or recap id replaces the stored one only when non-empty; the store flags are sticky.
+// the rule works per field: a non-empty incoming value replaces the stored one, and an empty one
+// (empty text, nil time, zero number) never erases it. A later poorer copy therefore cannot clear
+// the recording, the meeting times LinkRecaps matches on, or the speakers because it carried only
+// some other field. The two stores fill only their own columns and neither erases the other.
+//
+// The model cannot tell a false that means "not stated" from a false that means "no", so the
+// booleans are sticky once true: IsMissed, HasConfRoomConnected, HasCatchUp and HasRecap never
+// return to false. An incoming iCalUID or recap id replaces the stored one only when non-empty.
 func CaptureRecap(old *Recap, in Recap) Recap {
 	var out Recap
 	if old != nil {
@@ -120,27 +122,33 @@ func CaptureRecap(old *Recap, in Recap) Recap {
 	}
 	out.HasCatchUp = out.HasCatchUp || in.HasCatchUp
 	out.HasRecap = out.HasRecap || in.HasRecap
-	if !summaryEmpty(in) {
-		out.Headline, out.ShortSummary, out.Outline, out.SummarySectionsJSON = in.Headline, in.ShortSummary, in.Outline, in.SummarySectionsJSON
+	out.IsMissed = out.IsMissed || in.IsMissed
+	out.HasConfRoomConnected = out.HasConfRoomConnected || in.HasConfRoomConnected
+	for _, f := range []struct{ dst, src *string }{
+		{&out.Headline, &in.Headline}, {&out.ShortSummary, &in.ShortSummary}, {&out.Outline, &in.Outline},
+		{&out.SummarySectionsJSON, &in.SummarySectionsJSON}, {&out.SpeakersJSON, &in.SpeakersJSON},
+		{&out.TopicsJSON, &in.TopicsJSON}, {&out.RecordingURL, &in.RecordingURL},
+		{&out.AttendanceStatus, &in.AttendanceStatus}, {&out.OrganizerID, &in.OrganizerID},
+	} {
+		if *f.src != "" {
+			*f.dst = *f.src
+		}
 	}
-	if in.SpeakersJSON != "" || in.TopicsJSON != "" {
-		out.SpeakersJSON, out.TopicsJSON = in.SpeakersJSON, in.TopicsJSON
+	for _, f := range []struct{ dst, src **time.Time }{
+		{&out.RecordingStartAt, &in.RecordingStartAt}, {&out.RecordingEndAt, &in.RecordingEndAt},
+		{&out.ExpiresAt, &in.ExpiresAt}, {&out.MeetingStartAt, &in.MeetingStartAt}, {&out.MeetingEndAt, &in.MeetingEndAt},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
 	}
-	if in.RecordingURL != "" || in.RecordingStartAt != nil || in.RecordingEndAt != nil || in.DurationSeconds != 0 || in.ExpiresAt != nil {
-		out.RecordingURL, out.RecordingStartAt, out.RecordingEndAt = in.RecordingURL, in.RecordingStartAt, in.RecordingEndAt
-		out.DurationSeconds, out.ExpiresAt = in.DurationSeconds, in.ExpiresAt
+	if in.DurationSeconds != 0 {
+		out.DurationSeconds = in.DurationSeconds
 	}
-	if in.MeetingStartAt != nil || in.MeetingEndAt != nil || in.IsMissed || in.AttendanceStatus != "" ||
-		in.AttendeesCount != 0 || in.OrganizerID != "" || in.HasConfRoomConnected {
-		out.MeetingStartAt, out.MeetingEndAt, out.IsMissed = in.MeetingStartAt, in.MeetingEndAt, in.IsMissed
-		out.AttendanceStatus, out.AttendeesCount, out.OrganizerID = in.AttendanceStatus, in.AttendeesCount, in.OrganizerID
-		out.HasConfRoomConnected = in.HasConfRoomConnected
+	if in.AttendeesCount != 0 {
+		out.AttendeesCount = in.AttendeesCount
 	}
 	return out
-}
-
-func summaryEmpty(r Recap) bool {
-	return r.Headline == "" && r.ShortSummary == "" && r.Outline == "" && r.SummarySectionsJSON == ""
 }
 
 // recapValues renders the stored columns of r (bookkeeping excluded) for comparison and insert.
