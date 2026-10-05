@@ -63,6 +63,16 @@ on conflict(tenant_id, user_id) do update set locale = case when excluded.locale
 	return err
 }
 
+// RowState is where one applied item ended up: the row's rowid and the content hash it holds
+// after the Apply call (the incoming hash for an insert or an update, the stored one when the row
+// was left alone). The syncer remembers it so a later sync can tell the row has not moved.
+type RowState struct {
+	Rowid int64
+	Hash  string
+	// Changed says the call inserted or updated the row.
+	Changed bool
+}
+
 // Change kinds reported by ApplyMessagesChanges and ApplyActivityChanges.
 const (
 	ChangeNew     = "new"
@@ -84,12 +94,13 @@ func bool01(b bool) int {
 
 // ApplyConversations upserts conversations (one transaction) and refreshes their title index.
 func (s *Store) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conversation) (n Counts, err error) {
-	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, e = applyConversations(ctx, tx, cs); return })
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, _, e = applyConversations(ctx, tx, cs); return })
 	return n, err
 }
 
-func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conversation) (Counts, error) {
+func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conversation) (Counts, []RowState, error) {
 	var n Counts
+	rows := make([]RowState, 0, len(cs))
 	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select rowid, content_hash, read_horizon_at, read_horizon_client_message_id from conversations where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
@@ -145,6 +156,7 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 				return err
 			case old == hash:
 				n.Unchanged++
+				rows = append(rows, RowState{rowid, old, false})
 				continue
 			default:
 				if _, err := upd.ExecContext(ctx, c.Kind, c.Title, c.Topic, c.DisplayName, c.TeamID, c.ParentID, members, last, horizon, c.ReadHorizonClientMessageID, bool01(c.Favorite), raw, hash, now, rowid); err != nil {
@@ -152,11 +164,12 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 				}
 				n.Updated++
 			}
+			rows = append(rows, RowState{rowid, hash, true})
 			touched = append(touched, c)
 		}
 		return reindexTitles(ctx, tx, touched)
 	}()
-	return n, err
+	return n, rows, err
 }
 
 // reindexTitles refreshes the title index of the given conversations and of every channel whose
@@ -284,16 +297,17 @@ func (s *Store) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (C
 // an insert, "deleted" when the row gains its tombstone, "edited" for any other update. A
 // deleted_at, once set, stays set unless a newer version arrives without it.
 func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Message) (n Counts, changes []Change, err error) {
-	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, e = applyMessages(ctx, tx, ms); return })
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, _, e = applyMessages(ctx, tx, ms); return })
 	if err != nil {
 		return Counts{}, nil, err
 	}
 	return n, changes, nil
 }
 
-func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (Counts, []Change, error) {
+func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (Counts, []Change, []RowState, error) {
 	var n Counts
 	var changes []Change
+	rows := make([]RowState, 0, len(ms))
 	err := func() error {
 		sel, err := tx.PrepareContext(ctx, `select rowid, version, content_hash, deleted_at from messages where tenant_id=? and user_id=? and conversation_id=? and id=?`)
 		if err != nil {
@@ -355,6 +369,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				return err
 			case m.Version < version, old == hash:
 				n.Unchanged++
+				rows = append(rows, RowState{rowid, old, false})
 				continue
 			default:
 				if _, err := upd.ExecContext(ctx, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now, rowid); err != nil {
@@ -373,13 +388,14 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			if _, err := ftsIns.ExecContext(ctx, rowid, key, m.ContentText); err != nil {
 				return err
 			}
+			rows = append(rows, RowState{rowid, hash, true})
 		}
 		return nil
 	}()
 	if err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
-	return n, changes, nil
+	return n, changes, rows, nil
 }
 
 // ApplyPeople upserts people: the display name follows the latest non-empty value, first_seen_at
@@ -461,18 +477,19 @@ func (s *Store) ApplyActivity(ctx context.Context, as []teamsdesktop.Activity) (
 // ApplyActivityChanges is ApplyActivity that also reports each inserted ("new") or updated
 // ("edited") item.
 func (s *Store) ApplyActivityChanges(ctx context.Context, as []teamsdesktop.Activity) (n Counts, changes []Change, err error) {
-	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, e = applyActivity(ctx, tx, as); return })
+	err = s.inTx(ctx, func(tx *sql.Tx) (e error) { n, changes, _, e = applyActivity(ctx, tx, as); return })
 	if err != nil {
 		return Counts{}, nil, err
 	}
 	return n, changes, nil
 }
 
-func applyActivity(ctx context.Context, tx *sql.Tx, as []teamsdesktop.Activity) (Counts, []Change, error) {
+func applyActivity(ctx context.Context, tx *sql.Tx, as []teamsdesktop.Activity) (Counts, []Change, []RowState, error) {
 	var n Counts
 	var changes []Change
+	rows := make([]RowState, 0, len(as))
 	err := func() error {
-		sel, err := tx.PrepareContext(ctx, `select content_hash from activity where tenant_id=? and user_id=? and id=?`)
+		sel, err := tx.PrepareContext(ctx, `select rowid, content_hash from activity where tenant_id=? and user_id=? and id=?`)
 		if err != nil {
 			return err
 		}
@@ -496,7 +513,9 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 			raw := rawOrNil(a.Raw)
 			hash := hashOf(a.Type, a.Subtype, a.IsRead, at, a.ConversationID, a.MessageID, a.ReplyChainID, a.AppID, raw)
 			var old string
-			err := sel.QueryRowContext(ctx, a.TenantID, a.UserID, a.ID).Scan(&old)
+			var rowid int64
+			err := sel.QueryRowContext(ctx, a.TenantID, a.UserID, a.ID).Scan(&rowid, &old)
+			selErr := err
 			key := a.TenantID + "|" + a.UserID + "|" + a.ID
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
@@ -506,19 +525,27 @@ on conflict(tenant_id,user_id,id) do update set type=excluded.type,subtype=exclu
 				return err
 			case old == hash:
 				n.Unchanged++
+				rows = append(rows, RowState{rowid, old, false})
 				continue
 			default:
 				n.Updated++
 				changes = append(changes, Change{Change: ChangeEdited, Key: key})
 			}
-			if _, err := up.ExecContext(ctx, a.TenantID, a.UserID, a.ID, a.Type, a.Subtype, bool01(a.IsRead), at, a.ConversationID, a.MessageID, a.ReplyChainID, a.AppID, raw, hash, now); err != nil {
+			res, err := up.ExecContext(ctx, a.TenantID, a.UserID, a.ID, a.Type, a.Subtype, bool01(a.IsRead), at, a.ConversationID, a.MessageID, a.ReplyChainID, a.AppID, raw, hash, now)
+			if err != nil {
 				return err
 			}
+			if errors.Is(selErr, sql.ErrNoRows) {
+				if rowid, err = res.LastInsertId(); err != nil {
+					return err
+				}
+			}
+			rows = append(rows, RowState{rowid, hash, true})
 		}
 		return nil
 	}()
 	if err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
-	return n, changes, nil
+	return n, changes, rows, nil
 }

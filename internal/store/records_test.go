@@ -292,8 +292,8 @@ func TestSchemaMigratesV2ToV3(t *testing.T) {
 		t.Fatalf("open v2 archive: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select version from schema_migrations`); v != SchemaVersion || SchemaVersion != 3 {
-		t.Fatalf("version %d, want 3", v)
+	if v := rowCount(t, s, `select version from schema_migrations`); v != SchemaVersion || SchemaVersion != 4 {
+		t.Fatalf("version %d, want 4", v)
 	}
 	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('records','records_db_store','records_updated')`); n != 3 {
 		t.Fatalf("records table and index: %d", n)
@@ -306,21 +306,21 @@ func TestSchemaMigratesV2ToV3(t *testing.T) {
 	}
 }
 
-func TestArchiveNewerV3(t *testing.T) {
+func TestArchiveNewerThanThisBuild(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "teamscrawl.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 4`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = 5`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
 	_, err = Open(ctx, path)
 	var coded *errs.Coded
-	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, "schema version 4") {
-		t.Fatalf("Open of a v4 archive = %v, want archive_newer", err)
+	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, "schema version 5") {
+		t.Fatalf("Open of a v5 archive = %v, want archive_newer", err)
 	}
 }
 
@@ -331,14 +331,14 @@ func TestOpenReadOnlyRefusesANewerArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 4`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = 5`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
 	_, err = OpenReadOnly(ctx, path)
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer {
-		t.Fatalf("OpenReadOnly of a v4 archive = %v, want archive_newer", err)
+		t.Fatalf("OpenReadOnly of a v5 archive = %v, want archive_newer", err)
 	}
 	if _, err := OpenReadOnly(ctx, filepath.Join(t.TempDir(), "none.db")); !errors.Is(err, ErrNoArchive) {
 		t.Fatalf("missing archive: %v", err)
@@ -701,4 +701,52 @@ func TestPurgeUnscrubbedKeysFaultsSurface(t *testing.T) {
 		return x.Commit()
 	}
 	sweepFaults(t, seed, op)
+}
+
+// A v3 archive (a records table without the read-memory columns) gains them, keeping its rows.
+func TestSchemaMigratesV3ToV4(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := s.Begin(ctx)
+	must0(err)
+	if _, err := x.UpsertRecords(srcA, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e1"`, `1`)}, base); err != nil {
+		t.Fatal(err)
+	}
+	must0(x.Commit())
+	// Make it a v3 archive: the old records table, no typed_memo, version 3.
+	for _, q := range []string{
+		`alter table records drop column raw_digest`, `alter table records drop column value_redacted`,
+		`drop table typed_memo`, `update schema_migrations set version = 3`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.Close()
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open v3 archive: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
+		t.Fatalf("version %d, want %d", v, SchemaVersion)
+	}
+	if n := rowCount(t, s, `select count(*) from pragma_table_info('records') where name in ('raw_digest','value_redacted')`); n != 2 {
+		t.Fatalf("read-memory columns: %d", n)
+	}
+	if n := rowCount(t, s, `select count(*) from sqlite_master where name='typed_memo'`); n != 1 {
+		t.Fatal("typed_memo missing")
+	}
+	if n := rowCount(t, s, `select count(*) from records where raw_digest is null and value_redacted = 0`); n != 1 {
+		t.Fatalf("existing row: %d", n)
+	}
+	// Opening again changes nothing.
+	_ = s.Close()
+	s, err = Open(ctx, path)
+	must0(err)
+	t.Cleanup(func() { _ = s.Close() })
 }

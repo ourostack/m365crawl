@@ -21,6 +21,10 @@ Nothing needs Node, Python or a browser at runtime. Node and Python appear only 
 
 Before copying anything, teamscrawl lists the files in the origin's two directories and hashes each file's name, size and modification time (ignoring `LOCK` and `LOG*`, which Teams rewrites at every start without changing data). If the hash equals the one recorded by the last successful sync of that source, the cache has not changed and the sync stops for that source with status `unchanged`. This is why an idle sync takes milliseconds.
 
+## Skipping records that did not change
+
+A fingerprint says only that some file changed. On a busy account the cache changes all day, yet almost every record in it is the same bytes as at the last sync. So a sync remembers, for each record it read in full, a short digest of the record's payload and what the record did to the archive: the rows it produced (with the hash each row holds) and the people it named, kept in the same transaction as the rows. The next sync computes the digest again and, when it matches and the rows still hold what was left in them, skips decoding, mapping, scrubbing and the writes for that record and counts it as seen and unchanged, exactly as reading it again would. Only the records that changed are read in full. The digest covers a signature of the decoder version, the derivation version and the scrub and deny rules, so any change to how bytes become rows makes every record be read in full again. `sync --full-read` forces that on demand, and gives the same archive. SPEC.md section 4.1 has the rules.
+
 ## Step 2: snapshot
 
 Teams keeps writing while teamscrawl reads, and LevelDB compacts files away. So teamscrawl copies the origin into a private temporary directory (mode 0700) and reads the copy.

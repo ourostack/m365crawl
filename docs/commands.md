@@ -71,7 +71,9 @@ Copy the Teams cache into the archive once and print what changed.
 teamscrawl sync [flags]
 ```
 
-No flags beyond the global ones.
+| Flag | Meaning |
+| --- | --- |
+| `--full-read` | Read every record in full instead of skipping the ones whose bytes are unchanged since the last committed sync. The archive comes out the same either way; this is a check, not a repair ($TEAMSCRAWL_FULL_READ). |
 
 Result: The sync report (see SPEC.md sections 4 and 5). Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 

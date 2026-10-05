@@ -110,12 +110,22 @@ var chmodFile = os.Chmod
 // migrate upgrades an archive made by an older build. Version 2 renamed
 // conversations.read_horizon_message_id to read_horizon_client_message_id, and added
 // sync_runs.accounts_json (which run-level rows use to say which accounts they refreshed).
+// Version 4 added records.raw_digest and records.value_redacted; typed_memo is created by the
+// schema itself. Existing rows get no digest, so the first sync after the upgrade reads them all.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has int
+	var old, has, digest int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
-  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json')`).Scan(&old, &has); err != nil {
+  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
+  (select count(*) from pragma_table_info('records') where name='raw_digest')`).Scan(&old, &has, &digest); err != nil {
 		return err
+	}
+	if digest == 0 {
+		for _, q := range []string{`alter table records add column raw_digest blob`, `alter table records add column value_redacted integer not null default 0`} {
+			if _, err := s.db.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
 	}
 	if old != 0 {
 		if _, err := s.db.ExecContext(ctx, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`); err != nil {

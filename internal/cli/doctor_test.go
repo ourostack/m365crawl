@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/openclaw/crawlkit/output"
+
+	"github.com/ourostack/teamscrawl/internal/store"
 )
 
 func checks(t *testing.T, m map[string]any) map[string]map[string]any {
@@ -186,7 +189,7 @@ func TestDoctorFlagsASchemaVersionMismatchEitherWay(t *testing.T) {
 	e.exec("update schema_migrations set version = version + 100")
 	code, cs, _ := doctorChecksFor(t, e)
 	d := cs["schema_version"]
-	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version 103") || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") || cs["fts"]["ok"] != false {
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), fmt.Sprintf("schema version %d", store.SchemaVersion+100)) || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") || cs["fts"]["ok"] != false {
 		t.Fatalf("newer archive: exit %d, %v", code, d)
 	}
 	e.exec("update schema_migrations set version = 1")

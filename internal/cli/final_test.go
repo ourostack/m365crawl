@@ -707,3 +707,25 @@ func TestDoctorWarnsAboutAnArchiveFromAnOlderVersion(t *testing.T) {
 		t.Fatalf("exit %d: %v %s", code, c, stderr)
 	}
 }
+
+// sync --full-read (and TEAMSCRAWL_FULL_READ) asks the syncer to read every record in full.
+func TestSyncFullReadFlag(t *testing.T) {
+	var got []bool
+	stubSync(t, func(_ context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		got = append(got, o.FullRead)
+		return syncer.Report{Status: syncer.StatusOK}, nil, nil
+	})
+	e := newEnv(t)
+	for _, args := range [][]string{{"sync", "--json"}, {"sync", "--json", "--full-read"}} {
+		if code, _, stderr := e.run(args...); code != 0 {
+			t.Fatalf("%v: exit %d\n%s", args, code, stderr)
+		}
+	}
+	t.Setenv("TEAMSCRAWL_FULL_READ", "1")
+	if code, _, stderr := e.run("sync", "--json"); code != 0 {
+		t.Fatalf("env: exit %d\n%s", code, stderr)
+	}
+	if len(got) != 3 || got[0] || !got[1] || !got[2] {
+		t.Fatalf("FullRead passed as %v", got)
+	}
+}

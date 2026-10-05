@@ -1,0 +1,259 @@
+package teamsdesktop
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/ourostack/teamscrawl/internal/indexeddb"
+)
+
+func TestMemoSignatureCoversWhatShapesRows(t *testing.T) {
+	base := MemoSignature(2)
+	if len(base) == 0 || !bytes.Equal(base, MemoSignature(2)) {
+		t.Fatal("the signature is not stable")
+	}
+	if bytes.Equal(base, MemoSignature(3)) {
+		t.Error("the derivation version does not feed the signature")
+	}
+	old := decoderVersion
+	decoderVersion = old + 1
+	if bytes.Equal(base, MemoSignature(2)) {
+		t.Error("DecoderVersion does not feed the signature")
+	}
+	decoderVersion = old
+
+	// A changed deny list changes it...
+	terms := deniedTerms
+	deniedTerms = append(append([]string(nil), terms...), "calendar")
+	if bytes.Equal(base, MemoSignature(2)) {
+		t.Error("a new deny term does not change the signature")
+	}
+	deniedTerms = terms
+	tokens := deniedTokens
+	deniedTokens = append(append([]string(nil), tokens...), "load")
+	if bytes.Equal(base, MemoSignature(2)) {
+		t.Error("a new deny token does not change the signature")
+	}
+	deniedTokens = tokens
+	// ...and so does a changed scrub rule.
+	keys := secretKeys
+	secretKeys = map[string]bool{"access_token": true}
+	if bytes.Equal(base, MemoSignature(2)) {
+		t.Error("a changed scrub key set does not change the signature")
+	}
+	secretKeys = keys
+	if !bytes.Equal(base, MemoSignature(2)) {
+		t.Fatal("restoring the rules did not restore the signature")
+	}
+}
+
+func TestRecordDigest(t *testing.T) {
+	sig := []byte("sig")
+	d := recordDigest(sig, "db", []byte("payload"))
+	if len(d) != DigestLen || !bytes.Equal(d, recordDigest(sig, "db", []byte("payload"))) {
+		t.Fatalf("digest %x", d)
+	}
+	for name, other := range map[string][]byte{
+		"signature": recordDigest([]byte("sig2"), "db", []byte("payload")),
+		"database":  recordDigest(sig, "db2", []byte("payload")),
+		"payload":   recordDigest(sig, "db", []byte("payload2")),
+		// The database name and the payload do not run together.
+		"boundary": recordDigest(sig, "dbp", []byte("ayload")),
+	} {
+		if bytes.Equal(d, other) {
+			t.Errorf("digest ignores the %s", name)
+		}
+	}
+}
+
+// ReadWith asks Skip about every record with a key, hands it a digest when the bytes can be read,
+// and does not decode, or call fn for, a record Skip takes.
+func TestReadWithSkip(t *testing.T) {
+	db := dbName("replychain-manager", tenant1, user1)
+	newOrigin := func() *fakeOrigin {
+		f := &fakeOrigin{
+			dbs: []indexeddb.Database{{ID: 1, Name: db, Stores: []indexeddb.Store{{ID: 1, Name: "replychains-2"}}}},
+			records: map[int64][]indexeddb.Record{1: {
+				{Key: "a", Raw: []byte("one")},
+				{Key: "b", Raw: []byte("two")},
+				{Key: make(chan int), Raw: []byte("three")}, // a key that does not encode
+				{Err: &indexeddb.OmissionError{Omission: indexeddb.Omission{Code: indexeddb.CodeBadKey}}},
+			}},
+		}
+		f.decode = func(_ int64, raw []byte) (any, error) { return string(raw), nil }
+		return f
+	}
+	type call struct {
+		kind, database, key string
+		digest              []byte
+	}
+	var calls []call
+	var got []string
+	skipB := func(_ Account, kind, database, keyJSON string, digest []byte) bool {
+		calls = append(calls, call{kind, database, keyJSON, digest})
+		return keyJSON == `"b"`
+	}
+	f := newOrigin()
+	om, err := readOriginWith(context.Background(), f, nil, ReadOptions{Sig: []byte("s"), Skip: skipB}, func(_ Account, _ string, v any) error {
+		got = append(got, v.(string))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "one" || got[1] != "three" {
+		t.Fatalf("fn saw %v; the skipped record must not reach it", got)
+	}
+	if om["bad_key"] != 1 {
+		t.Fatalf("omissions = %v", om)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("Skip called %d times: %+v", len(calls), calls)
+	}
+	if calls[0].kind != KindReplyChain || calls[0].database != db || calls[0].key != `"a"` || !bytes.Equal(calls[0].digest, recordDigest([]byte("s"), db, []byte("one"))) {
+		t.Fatalf("first call = %+v", calls[0])
+	}
+	if calls[2].key != "" || calls[2].digest != nil {
+		t.Fatalf("a key that does not encode must reach Skip with no key and no digest: %+v", calls[2])
+	}
+
+	// A value whose bytes cannot be read reaches Skip with no digest, and is decoded in full.
+	calls = nil
+	f = newOrigin()
+	f.payloadErr = errors.New("blob gone")
+	_, err = readOriginWith(context.Background(), f, nil, ReadOptions{Skip: skipB}, func(Account, string, any) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range calls {
+		if c.digest != nil {
+			t.Fatalf("a digest for unreadable bytes: %+v", c)
+		}
+	}
+	// Without Skip nothing changes: every record is read.
+	got = nil
+	if _, err := readOrigin(context.Background(), newOrigin(), nil, func(_ Account, _ string, v any) error { got = append(got, v.(string)); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// ReadGeneric asks Known about each record whose bytes can be read; a record Known takes is still
+// seen, adds its redactions, and is not decoded or handed to fn. Records that are read in full
+// carry the digest of their bytes, unless they are omissions.
+func TestReadGenericKnown(t *testing.T) {
+	newFake := func() *fakeGeneric {
+		return &fakeGeneric{
+			dbs:  []indexeddb.Database{gdb(1, "a-manager", "s")},
+			held: map[int64]int64{1: 1},
+			records: map[int64][]indexeddb.Record{1: {
+				strRec("known", "k"), strRec("fresh", "f"), strRec("bad", "x"),
+			}},
+			decode: func(raw []byte) (any, error) {
+				if string(raw) == "x" {
+					return nil, &indexeddb.OmissionError{Omission: indexeddb.Omission{Code: indexeddb.CodeUnknownEnvelope}}
+				}
+				return string(raw), nil
+			},
+		}
+	}
+	sig := []byte("sig")
+	var asked []string
+	var g genericRead
+	f := newFake()
+	f.install(t)
+	opts := g.opts()
+	opts.Sig = sig
+	opts.Known = func(database, store, keyJSON string, digest []byte) (int, bool) {
+		asked = append(asked, store+keyJSON)
+		if keyJSON == `"known"` {
+			if !bytes.Equal(digest, recordDigest(sig, database, []byte("k"))) {
+				t.Errorf("digest %x", digest)
+			}
+			return 4, true
+		}
+		return 0, false
+	}
+	res, err := ReadGeneric(context.Background(), "/snap", nil, DefaultGenericBudget, opts, func(r GenericRecord) error {
+		g.recs = append(g.recs, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 3 {
+		t.Fatalf("Known asked %v", asked)
+	}
+	if res.Redacted != 4 {
+		t.Fatalf("Redacted = %d, want the known record's 4", res.Redacted)
+	}
+	if len(g.recs) != 2 || string(g.recs[0].KeyJSON) != `"fresh"` || string(g.recs[1].KeyJSON) != `"bad"` {
+		t.Fatalf("records = %+v", g.recs)
+	}
+	if !bytes.Equal(g.recs[0].Digest, recordDigest(sig, f.dbs[0].Name, []byte("f"))) {
+		t.Fatalf("a record read in full carries no digest: %+v", g.recs[0])
+	}
+	if g.recs[1].Digest != nil || g.recs[1].ValueJSON != nil {
+		t.Fatalf("an omission must carry no digest: %+v", g.recs[1])
+	}
+	if got := g.seen[f.dbs[0].Name]["s"]; len(got) != 3 {
+		t.Fatalf("seen = %v; a skipped record is still seen", got)
+	}
+	if res.Omissions[indexeddb.CodeUnknownEnvelope] != 1 {
+		t.Fatalf("omissions = %v", res.Omissions)
+	}
+
+	// Bytes that cannot be read are never offered to Known and are read in full.
+	f = newFake()
+	f.payloadErr = errors.New("blob gone")
+	f.install(t)
+	asked = nil
+	var recs []GenericRecord
+	_, err = ReadGeneric(context.Background(), "/snap", nil, DefaultGenericBudget, GenericOptions{Known: func(string, string, string, []byte) (int, bool) {
+		asked = append(asked, "called")
+		return 0, true
+	}}, func(r GenericRecord) error { recs = append(recs, r); return nil })
+	if err != nil || len(asked) != 0 || len(recs) != 3 {
+		t.Fatalf("err=%v asked=%v recs=%d", err, asked, len(recs))
+	}
+	for _, r := range recs {
+		if r.Digest != nil {
+			t.Fatalf("digest without readable bytes: %+v", r)
+		}
+	}
+}
+
+// A real fixture snapshot: reading it with digests twice gives the same digests, and skipping
+// every record leaves nothing to read.
+func TestReadWithDigestsOnTheFixture(t *testing.T) {
+	snap := fixtureSnapshot(t)
+	digests := map[string][]byte{}
+	read := func(skip func(key string, d []byte) bool) (n int) {
+		_, err := ReadWith(context.Background(), snap, nil, ReadOptions{Sig: []byte("s"), Skip: func(_ Account, _, db, key string, d []byte) bool {
+			if d == nil {
+				t.Errorf("no digest for a fixture record")
+			}
+			return skip(db+"|"+key, d)
+		}}, func(Account, string, any) error { n++; return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	full := read(func(k string, d []byte) bool { digests[k] = d; return false })
+	if full == 0 {
+		t.Fatal("nothing read")
+	}
+	if n := read(func(k string, d []byte) bool {
+		if !bytes.Equal(digests[k], d) {
+			t.Errorf("digest of %s moved between reads", k)
+		}
+		return true
+	}); n != 0 {
+		t.Fatalf("%d records were read although Skip took them all", n)
+	}
+}
