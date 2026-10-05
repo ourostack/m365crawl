@@ -231,7 +231,7 @@ func compress(in []byte) []byte {
 			out = append(out, 255)
 			n -= 255
 		}
-		out = append(out, byte(n))
+		out = append(out, byte(n&0xff))
 	}
 	nib := func(n int) int {
 		if n >= 15 {
@@ -261,7 +261,7 @@ func compress(in []byte) []byte {
 			emitLen(len(lits) - 15)
 		}
 		out = append(out, lits...)
-		out = append(out, byte(bestOff), byte(bestOff>>8))
+		out = append(out, byte(bestOff&0xff), byte((bestOff>>8)&0xff))
 		if bestLen-4 >= 15 {
 			emitLen(bestLen - 4 - 15)
 		}
