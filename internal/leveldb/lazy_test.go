@@ -149,8 +149,8 @@ func TestLargeTableValuesAreLazy(t *testing.T) {
 	if d.cache.reads == 0 {
 		t.Fatal("no block was re-read")
 	}
-	if len(d.cache.blocks) > blockCacheSize {
-		t.Fatalf("cache holds %d blocks", len(d.cache.blocks))
+	if d.cache.bytes > cacheBytes {
+		t.Fatalf("cache holds %d bytes, bound %d", d.cache.bytes, cacheBytes)
 	}
 }
 

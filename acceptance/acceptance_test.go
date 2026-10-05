@@ -159,6 +159,7 @@ func openSnapshot(t *testing.T, dir string) *indexeddb.Origin {
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}
+	t.Cleanup(func() { _ = o.Close() })
 	return o
 }
 
@@ -442,14 +443,16 @@ func readOurs(t *testing.T, snapDir string) ours {
 		}
 		{
 			prefix := []byte{0, byte(c.db), byte(c.store), 1} //nolint:gosec // both ids are below 256 here
-			if _, err := leveldb.LoadWith(filepath.Join(snapDir, "leveldb"), leveldb.LoadOptions{Keep: func(k []byte) bool {
+			db, err := leveldb.LoadWith(filepath.Join(snapDir, "leveldb"), leveldb.LoadOptions{Keep: func(k []byte) bool {
 				if bytes.HasPrefix(k, prefix) {
 					o.rawVersions++
 				}
 				return false
-			}}); err != nil {
+			}})
+			if err != nil {
 				t.Fatal(err)
 			}
+			_ = db.Close()
 		}
 	}
 	// Per-record attribution of messages, to explain differences with the reference.

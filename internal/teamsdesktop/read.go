@@ -52,6 +52,7 @@ func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Ac
 		}
 		return map[string]int{}, classify(err)
 	}
+	defer func() { _ = o.Close() }()
 	return readOrigin(ctx, o, account, fn)
 }
 

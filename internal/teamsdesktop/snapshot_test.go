@@ -26,6 +26,7 @@ func TestSnapshotFixtureOpens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = o.Close() }()
 	dbs, err := o.Databases()
 	if err != nil || len(dbs) != 13 {
 		t.Fatalf("dbs=%d err=%v", len(dbs), err)
@@ -123,6 +124,9 @@ func TestSnapshotRetryThenSucceed(t *testing.T) {
 	}
 	defer cleanup()
 	db, err := leveldb.Load(filepath.Join(snap, "leveldb"))
+	if db != nil {
+		defer func() { _ = db.Close() }()
+	}
 	if err != nil || db.Stats().Keys != 50 {
 		t.Fatalf("keys=%v err=%v", db, err)
 	}

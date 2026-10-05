@@ -21,6 +21,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 - The archive schema version is 3. A version 2 archive gains the `records` table when it is next opened for writing, and its existing rows are untouched. The decoder version is 3, so the first sync after the upgrade re-reads an unchanged cache to fill `records`.
 - An archive written by a newer schema version is refused with the coded `archive_newer` error (exit 3). Builds of v0.1.0 and earlier cannot do this: on a version 3 archive they report a generic `db_error`. Do not point an old binary at an upgraded archive.
 - A sync reads the cache's LevelDB more than once now (once for the typed databases, then once to size the generic databases and once per batch), so a sync takes longer on a real cache. Real-cache timing, memory and record counts per manager are not measured yet; sync and watch cost on a large cache is gated on a run on a work machine before release.
+- A sync is faster and allocates less: LevelDB table files stay open for the life of a reader instead of being opened for every block re-read, and the block cache is bounded at 4 MiB instead of 16 blocks. The rows a sync produces are unchanged and the decoder version stays 3.
 
 ## [0.1.0] - 2026-10-01
 
