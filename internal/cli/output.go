@@ -144,14 +144,11 @@ type errorBody struct {
 }
 
 func bodyOf(c *errs.Coded) errorBody {
-	msg, fix := c.Message, c.Fix
+	msg := c.Message
 	if c.Code == errs.CodeDBError && c.Unwrap() != nil {
 		msg += ": " + c.Unwrap().Error()
 	}
-	if c.Code == errs.CodeNoFullDiskAccess {
-		fix = fdaFix()
-	}
-	return errorBody{Code: c.Code, Message: msg, Fix: fix}
+	return errorBody{Code: c.Code, Message: msg, Fix: outputFix(c)}
 }
 
 // printError writes a coded error to stderr: one JSON line in JSON/log mode, or a plain line
@@ -279,7 +276,6 @@ func checkFields[T any](rt *runtime) error {
 		return nil
 	}
 	valid := jsonKeys(reflect.TypeFor[T]())
-	valid = removeKey(valid, "text_truncated")
 	for _, f := range rt.fields {
 		if !contains(valid, f) {
 			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))
@@ -288,16 +284,6 @@ func checkFields[T any](rt *runtime) error {
 		}
 	}
 	return nil
-}
-
-func removeKey(ss []string, k string) []string {
-	out := make([]string, 0, len(ss))
-	for _, s := range ss {
-		if s != k {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func splitFields(s string) []string {

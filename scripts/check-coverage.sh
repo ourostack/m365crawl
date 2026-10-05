@@ -9,7 +9,13 @@ export GOWORK=off
 
 modpath="$(go list -m)"
 packages="${COVERAGE_PACKAGES:-./internal/...}"
-tmp="$(mktemp -d)"
+tmp_root="${TEAMSCRAWL_TMPDIR:-}"
+if [ -n "$tmp_root" ]; then
+	mkdir -p "$tmp_root"
+	tmp="$(mktemp -d "$tmp_root/check-coverage.XXXXXX")"
+else
+	tmp="$(mktemp -d)"
+fi
 trap 'rm -rf "$tmp"' EXIT
 profile="$tmp/cover.out"
 
