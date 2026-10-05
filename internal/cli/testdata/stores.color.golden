@@ -1,0 +1,9 @@
+[2mdatabase[0m                [2maccount[0m              [2mstore[0m   [2mrecords[0m  [2mremoved[0m  [2mlast_updated_at[0m
+[2m----------------------[0m  [2m-------------------[0m  [2m------[0m  [2m-------[0m  [2m-------[0m  [2m----------------[0m
+Teams:calendar-manager  0000…0001/0000…00a1  events  2        0        <stamp>
+Teams:calendar-manager  0000…0002/0000…00a2  events  2        0        <stamp>
+Teams:pinned-manager    0000…0001/0000…00a1  pins    4        0        <stamp>
+Teams:pinned-manager    0000…0002/0000…00a2  pins    4        0        <stamp>
+
+[2m4 items[0m
+[2marchive age: <age>[0m

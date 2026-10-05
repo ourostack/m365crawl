@@ -11,9 +11,9 @@ import (
 	"github.com/ourostack/teamscrawl/internal/leveldb"
 )
 
-// allowlist is the complete set of databases Read will open: manager -> (object store, kind).
-// Every other database in the origin, above all Teams:auth:*, is never listed, walked or decoded.
-var allowlist = map[string]struct{ store, kind string }{
+// typed is the set of databases that have a mapper, and so are read by Read: manager -> (object
+// store, kind). Every other database that is not Denied is read generically by ReadGeneric.
+var typed = map[string]struct{ store, kind string }{
 	"replychain-manager":   {"replychains-2", KindReplyChain},
 	"conversation-manager": {"conversations", KindConversation},
 	"activity-manager":     {"feed-items", KindActivity},
@@ -33,12 +33,12 @@ type origin interface {
 	Stats() leveldb.Stats
 }
 
-// Read opens the snapshot in snapDir and calls fn for every record of the allowlisted stores
+// Read opens the snapshot in snapDir and calls fn for every record of the typed stores
 // (replychain-manager/replychains-2, conversation-manager/conversations,
 // activity-manager/feed-items), optionally only for one account (matched on tenant and user).
 // Records that cannot be decoded are omissions, counted by code in the returned map, as are keys
 // that fail to decode (bad_key), records fn rejects with *UnmappedError (unmapped_record) and
-// truncated log tails (truncated_log_tail). An allowlisted manager that is absent is skipped; one
+// truncated log tails (truncated_log_tail). A typed manager that is absent is skipped; one
 // that is present without its store is store_missing. Other errors from fn stop the read and are
 // returned as is.
 func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Account, kind string, v any) error) (omissions map[string]int, err error) {
@@ -55,7 +55,7 @@ func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Ac
 	return readOrigin(ctx, o, account, fn)
 }
 
-// keepDatabase selects the databases Read loads into memory: the allowlisted managers, for the
+// keepDatabase selects the databases Read loads into memory: the typed managers, for the
 // chosen account when there is one. readOrigin applies the same rule again when it walks them.
 func keepDatabase(account *Account) func(name string) bool {
 	return func(name string) bool {
@@ -63,7 +63,7 @@ func keepDatabase(account *Account) func(name string) bool {
 		if !ok {
 			return false
 		}
-		if _, allowed := allowlist[manager]; !allowed {
+		if _, isTyped := typed[manager]; !isTyped {
 			return false
 		}
 		return account == nil || (account.TenantID == acct.TenantID && account.UserID == acct.UserID)
@@ -81,8 +81,8 @@ func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Ac
 		if !ok {
 			continue
 		}
-		spec, allowed := allowlist[manager]
-		if !allowed {
+		spec, isTyped := typed[manager]
+		if !isTyped {
 			continue
 		}
 		if account != nil && (account.TenantID != acct.TenantID || account.UserID != acct.UserID) {

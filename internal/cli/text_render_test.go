@@ -59,6 +59,15 @@ func TestSyncTextListsOmissionsInNameOrder(t *testing.T) {
 	}
 }
 
+func TestSyncTextShowsRedactionsOnlyWhenThereAreAny(t *testing.T) {
+	if got := renderToString(t, "sync", syncer.Report{Status: "ok", Redacted: 4}); !strings.Contains(got, "redacted: 4 credential-looking values") {
+		t.Fatalf("redactions missing:\n%s", got)
+	}
+	if got := renderToString(t, "sync", syncer.Report{Status: "ok"}); strings.Contains(got, "redacted") {
+		t.Fatalf("zero redactions shown:\n%s", got)
+	}
+}
+
 func TestWhoamiTextNamesUnnamedAccountsAndSaysWhenThereAreNone(t *testing.T) {
 	got := renderToString(t, "whoami", &whoamiResult{Accounts: []store.WhoamiRow{{TenantID: tenantA, UserID: userA}}, Archive: &statusResult{}})
 	if !strings.Contains(got, "(name not seen yet)") || strings.Contains(got, "no accounts archived yet") {

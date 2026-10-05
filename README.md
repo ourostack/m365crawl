@@ -17,7 +17,7 @@
 - **Built for agent context budgets.** Every item carries stable ids and a deep link; `--fields` and `--max-text` return only what you need, instead of full message payloads eating your context window.
 - **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
 - **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not a file on your disk.
-- **Read-only by construction.** There is no write path in the code. It cannot post, react or mark anything read, so handing it to an agent is safe.
+- **Read-only by construction.** There is no write path in the code. It cannot post, react or mark anything read, so handing it to an agent is safe. It mirrors everything Teams cached except sign-in credentials.
 - **Keeps what Teams evicts.** Teams trims its cache as it runs, and its cached message count can drop by thousands between two reads. The archive never deletes a message, so history survives as long as you sync regularly.
 - **Full-text search and SQL over everything.** Messages, the activity feed, unread state and mentions sit in one database that an agent can query with FTS5 or plain SQL.
 
@@ -45,6 +45,9 @@ go install github.com/ourostack/teamscrawl/cmd/teamscrawl@latest
 
 Download `teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/teamscrawl/releases), unzip it somewhere under your user profile, and run `teamscrawl.exe`. Add that directory to `PATH` if you want to call it without the full path. Windows release assets are intentionally unsigned; verify what you downloaded with `checksums.txt` and `teamscrawl.exe --json version`.
 
+crawlkit's `crawlctl discover --app teamscrawl` finds it.
+
+### Grant Full Disk Access
 ### macOS: Grant Full Disk Access
 
 macOS protects Teams' container, so the app that runs teamscrawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches teamscrawl), then quit and reopen that app. Verify with:
@@ -160,8 +163,11 @@ Flags that matter for agents:
 | `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query` (best match first: exact name, then prefix, then substring), `--team`, `--include-system`. Untitled group chats are named after their members (`Ana, Ben, Chao +2`). |
 | `teams` | Lists teams with `channel_count`, `last_activity_at` and `unread_count`; a team's `team_id` or `display_name` is what `--team` takes. |
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
+| `stores` | Lists every database and object store mirrored into the generic `records` table (calendar, pinned messages, contacts, call history and the rest) with record counts. |
+| `records --database <name or prefix>` | Lists the archived records of one database, newest change first. Flags: `--store`, `--since`, `--include-removed`, `--limit`. `key_json` and `value_json` come back as parsed JSON. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
 | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync, and one `{"kind":"migrated","from":1,"to":2,"rows":N}` line when an upgrade re-derives an older archive (not a change: no `edited` lines). Flags: `--every` (poll interval, default `60s`), `--emit-initial`; honors `--account`, `--fields` and `--max-text`; system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations) are skipped. |
+| `metadata` | Prints the crawlkit app manifest as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. Needs no archive and never syncs. |
 | `skill` | Prints the agent guide (the same text as `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary) as raw Markdown in every output mode, so an agent can read the guide that matches the installed version. |
 | `version` | Prints `{"version","commit","date"}` (one JSON document; a human line in text mode). `teamscrawl --version` does the same. |
 
@@ -175,6 +181,8 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 - [`docs/commands.md`](docs/commands.md): every command and flag, as `--help` prints them.
 - [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the allowlist, full-text search).
 - [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, and why Windows does not need that step.
+- [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the credential denylist, full-text search).
+- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, how `doctor` checks it, and why Windows does not need that step.
 - [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
 - [`AGENTS.md`](AGENTS.md): development rules for agents working on this repository.
 
@@ -182,7 +190,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. On macOS that directory is mode 0700; on Windows it is ACL-restricted to the current user and SYSTEM. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
 2. **Decode.** A built-in reader parses LevelDB, Chromium's IndexedDB coding and V8's structured-clone format. No Node, Python or browser is needed at runtime.
-3. **Allowlist.** Only the conversation, reply-chain (message) and activity-feed stores are decoded. Everything else, including sign-in data, is listed by name and never read.
+3. **Denylist.** The conversation, reply-chain (message) and activity-feed stores become typed tables. Every other database is decoded into a generic `records` table, except anything whose name looks like sign-in credentials, which is counted and never opened.
 4. **Store.** Rows go into SQLite (WAL) with FTS5 indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing. Messages that vanish from Teams' cache stay in the archive; Teams deletions set `deleted_at`.
 
 On macOS, Full Disk Access is the only extra permission it asks for ([why and how](docs/full-disk-access.md)); on Windows the default cache path is readable without an extra OS prompt. If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
@@ -197,6 +205,7 @@ The archive holds your real Teams conversations. It stays on your machine in a p
 - macOS and Windows with the new Teams app are supported. Classic Teams and Linux are not.
 - Full Disk Access is required only for the app that runs it on macOS. Windows uses the LocalCache path and does not require that step.
 - Read-only: no sending, reacting or marking read.
+- Contact stores, calendar, call history and pinned-message lists have no typed commands yet: they are mirrored as raw records, readable with `stores` and `records` until typed mappers exist.
 - Attachments and media are not downloaded; files and links are recorded as metadata.
 - Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
 - Published macOS release binaries are always signed and notarized; Windows release binaries are intentionally unsigned.

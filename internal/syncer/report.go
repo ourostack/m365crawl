@@ -34,8 +34,12 @@ type Report struct {
 	Messages      store.Counts   `json:"messages"`
 	People        store.Counts   `json:"people"`
 	Activity      store.Counts   `json:"activity"`
+	Records       store.Counts   `json:"records"`
 	Omissions     map[string]int `json:"omissions"`
-	OtherOrigins  []string       `json:"other_origins"`
+	// Redacted counts the credential-looking fragments removed from generic records before they
+	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
+	Redacted     int      `json:"redacted"`
+	OtherOrigins []string `json:"other_origins"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
 	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
 	Migrated   *store.Migration `json:"migrated,omitempty"`
@@ -48,6 +52,7 @@ type SourceReport struct {
 	Source    string         `json:"source"` // "<profile>|<origin>"
 	Status    string         `json:"status"` // ok | ok_with_omissions | unchanged | failed
 	Omissions map[string]int `json:"omissions,omitempty"`
+	Redacted  int            `json:"redacted,omitempty"`
 	// Accounts and Counts describe a source that was decoded and committed; Error is set when the
 	// source failed (its rows were rolled back).
 	Accounts []string      `json:"accounts,omitempty"` // "<tenantId>/<userId>"
@@ -61,6 +66,7 @@ type SourceCounts struct {
 	Messages      store.Counts `json:"messages"`
 	People        store.Counts `json:"people"`
 	Activity      store.Counts `json:"activity"`
+	Records       store.Counts `json:"records"`
 }
 
 // SourceError is why a source failed: an error code from the output contract and its message.
@@ -85,10 +91,15 @@ func add(a *store.Counts, b store.Counts) {
 	a.Unchanged += b.Unchanged
 }
 
-func sum(m map[string]int) int {
+// lost is how many records a sync could not read: the omissions that mean data was missed. The
+// denied_database and denied_store counts are the credential denylist working as designed, not
+// loss, so they never make a sync ok_with_omissions.
+func lost(m map[string]int) int {
 	n := 0
-	for _, v := range m {
-		n += v
+	for k, v := range m {
+		if k != "denied_database" && k != "denied_store" {
+			n += v
+		}
 	}
 	return n
 }

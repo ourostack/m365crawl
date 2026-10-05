@@ -242,7 +242,7 @@ func TestDoctorFlagsASchemaVersionMismatchEitherWay(t *testing.T) {
 	e.exec("update schema_migrations set version = version + 100")
 	code, cs, _ := doctorChecksFor(t, e)
 	d := cs["schema_version"]
-	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "this teamscrawl knows") || d["fix"] != "Update teamscrawl." {
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version 103") || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") || cs["fts"]["ok"] != false {
 		t.Fatalf("newer archive: exit %d, %v", code, d)
 	}
 	e.exec("update schema_migrations set version = 1")

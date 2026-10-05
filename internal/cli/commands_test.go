@@ -702,7 +702,7 @@ func TestLinkBytesIdenticalWithAndWithoutFields(t *testing.T) {
 
 func TestNeedsSyncSignalInBand(t *testing.T) {
 	e := newEnv(t)
-	for _, args := range [][]string{{"search", "x"}, {"messages"}, {"unread"}, {"unread", "--by-conversation"}, {"conversations"}, {"people"}, {"activity"}, {"status"}, {"whoami"}, {"sql", "select 1"}} {
+	for _, args := range [][]string{{"search", "x"}, {"messages"}, {"unread"}, {"unread", "--by-conversation"}, {"conversations"}, {"people"}, {"activity"}, {"stores"}, {"records", "--database", "Teams:"}, {"status"}, {"whoami"}, {"sql", "select 1"}} {
 		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)

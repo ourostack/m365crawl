@@ -236,7 +236,7 @@ func project(item any, fields []string) (any, error) {
 			p.keys = append(p.keys, f)
 		}
 	}
-	if _, ok := all["text_truncated"]; ok && contains(fields, "text") {
+	if _, ok := all["text_truncated"]; ok && (contains(fields, "text") || contains(fields, "value_json")) {
 		p.keys = append(p.keys, "text_truncated")
 	}
 	return p, nil
