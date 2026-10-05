@@ -395,7 +395,7 @@ func TestCheckSchemaNotNewerHandlesHashInPath(t *testing.T) {
 }
 
 func TestSQLiteFileURI(t *testing.T) {
-	got := sqliteFileURI(`C:\tmp\hash#archive.db`, "mode=ro")
+	got := sqliteFileURI("C:/tmp/hash#archive.db", "mode=ro")
 	if got != "file:///C:/tmp/hash%23archive.db?mode=ro" {
 		t.Fatalf("sqliteFileURI(windows) = %q", got)
 	}
