@@ -31,11 +31,10 @@ func TestLoadObserveSeesRejectedKeys(t *testing.T) {
 		fromTable bool
 	}
 	got := map[string]seen{}
-	d, err := LoadWith(dir, LoadOptions{
+	d := mustLoadWith(t, dir, LoadOptions{
 		Keep:    func([]byte) bool { return false },
 		Observe: func(k []byte, n int, ft bool) { got[string(k)] = seen{n, ft} },
 	})
-	must(err)
 	want := map[string]seen{
 		"tab1": {2, true}, "tab2": {len(big), true}, "log1": {3, false}, "log2": {0, false},
 	}
@@ -58,9 +57,9 @@ func TestLoadObserveNilIsPlain(t *testing.T) {
 	db := openGL(t, dir)
 	_ = db.Put([]byte("k"), []byte("v"), nil)
 	_ = db.Close()
-	d, err := LoadWith(dir, LoadOptions{})
-	if err != nil || d.Stats().Keys != 1 {
-		t.Fatalf("load: %v %+v", err, d)
+	d := mustLoadWith(t, dir, LoadOptions{})
+	if d.Stats().Keys != 1 {
+		t.Fatalf("load: %+v", d)
 	}
 }
 
@@ -87,10 +86,7 @@ func TestEntryOverheadCalibrated(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(d)

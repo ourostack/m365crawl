@@ -6,10 +6,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
 	"github.com/openclaw/crawlkit/output"
+
+	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
 func checks(t *testing.T, m map[string]any) map[string]map[string]any {
@@ -139,6 +144,8 @@ func TestDoctorNamesIgnoredNonTeamsOrigins(t *testing.T) {
 
 func TestDoctorFallsBackToTheDefaultRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("LOCALAPPDATA", filepath.Join(t.TempDir(), "AppData", "Local"))
 	t.Setenv("TEAMSCRAWL_DB", filepath.Join(t.TempDir(), "a.db"))
 	var out, errb bytes.Buffer
 	code := Main([]string{"doctor", "--json"}, &out, &errb)
@@ -146,8 +153,58 @@ func TestDoctorFallsBackToTheDefaultRoot(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	d := checks(t, decode(t, out.String()))["teams_installed"]["detail"].(string)
-	if !strings.Contains(d, "Library/Containers/com.microsoft.teams2") {
-		t.Fatalf("detail = %q does not name the default root", d)
+	switch goruntime.GOOS {
+	case "windows":
+		if !strings.Contains(d, `MSTeams_8wekyb3d8bbwe`) {
+			t.Fatalf("detail = %q does not name the Windows default root", d)
+		}
+	default:
+		if !strings.Contains(d, "Library/Containers/com.microsoft.teams2") {
+			t.Fatalf("detail = %q does not name the default root", d)
+		}
+	}
+}
+
+func TestDoctorFullDiskAccessCheckWindows(t *testing.T) {
+	if goruntime.GOOS != "windows" {
+		t.Skip("Windows-specific doctor wording")
+	}
+	e := newEnv(t)
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	c := cs["full_disk_access"]
+	if c["ok"] != true || c["detail"] != "not applicable on Windows" {
+		t.Fatalf("full_disk_access = %v", c)
+	}
+	if fix, _ := c["fix"].(string); fix != "" {
+		t.Fatalf("full_disk_access fix = %q, want empty", fix)
+	}
+}
+
+func TestDoctorRoutesWindowsPermissionDeniedToTeamsOrigin(t *testing.T) {
+	if goruntime.GOOS != "windows" {
+		t.Skip("Windows-specific doctor wording")
+	}
+	old := discover
+	discover = func(string) ([]teamsdesktop.Source, []string, error) {
+		return nil, nil, errs.NoFullDiskAccess(`C:\locked`, errors.New("access denied"))
+	}
+	t.Cleanup(func() { discover = old })
+	e := newEnv(t)
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 3 {
+		t.Fatalf("exit %d", code)
+	}
+	fda := cs["full_disk_access"]
+	if fda["ok"] != true || fda["detail"] != "not applicable on Windows" {
+		t.Fatalf("full_disk_access = %v", fda)
+	}
+	c := cs["teams_origin"]
+	fix := c["fix"].(string)
+	if c["ok"] != false || !strings.Contains(c["detail"].(string), `Windows denied access to C:\locked`) || strings.Contains(fix, "Full Disk Access") || !strings.Contains(fix, "Windows account can read") || !strings.Contains(fix, "--teams-root") {
+		t.Fatalf("teams_origin = %v", c)
 	}
 }
 
@@ -162,6 +219,58 @@ func TestDoctorReportsAnArchiveThatCannotBeOpened(t *testing.T) {
 		if cs[n]["ok"] != false || !strings.Contains(cs[n]["detail"].(string), "cannot open the archive") || !strings.Contains(cs[n]["fix"].(string), "move it aside") {
 			t.Errorf("%s = %v", n, cs[n])
 		}
+	}
+}
+
+func TestDoctorReportsNoArchiveYet(t *testing.T) {
+	e := newEnv(t)
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	for _, n := range []string{"schema_version", "fts"} {
+		if cs[n]["ok"] != true || cs[n]["detail"] != "no archive yet; the first sync creates it" {
+			t.Errorf("%s = %v", n, cs[n])
+		}
+	}
+	last := cs["last_sync_age"]
+	if last["ok"] != true || last["warn"] != true || last["detail"] != "never synced" {
+		t.Fatalf("last_sync_age = %v", last)
+	}
+}
+
+func TestDoctorReportsAHealthyArchive(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	if cs["schema_version"]["ok"] != true || !strings.Contains(cs["schema_version"]["detail"].(string), "schema v") {
+		t.Fatalf("schema_version = %v", cs["schema_version"])
+	}
+	if cs["fts"]["ok"] != true || cs["fts"]["detail"] != "full-text indexes present" {
+		t.Fatalf("fts = %v", cs["fts"])
+	}
+}
+
+func TestDoctorFlagsANewerStatusRowEvenIfOpenSucceeded(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	oldStatus := readArchiveStatus
+	readArchiveStatus = func(st *store.Store, ctx context.Context) (store.StatusRow, error) {
+		row, err := oldStatus(st, ctx)
+		if err != nil {
+			return row, err
+		}
+		row.SchemaVersion = store.SchemaVersion + 100
+		return row, nil
+	}
+	t.Cleanup(func() { readArchiveStatus = oldStatus })
+	code, cs, _ := doctorChecksFor(t, e)
+	d := cs["schema_version"]
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version") || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") {
+		t.Fatalf("newer status row: exit %d, %v", code, d)
 	}
 }
 
