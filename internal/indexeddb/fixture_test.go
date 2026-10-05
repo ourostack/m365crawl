@@ -31,6 +31,7 @@ func openFixture(t *testing.T) *Origin {
 	if err != nil {
 		t.Fatalf("Open fixture: %v", err)
 	}
+	t.Cleanup(func() { _ = o.Close() })
 	return o
 }
 

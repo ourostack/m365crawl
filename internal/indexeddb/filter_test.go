@@ -34,6 +34,7 @@ func openFiltered(t testing.TB, keep func(string) bool) *Origin {
 	if err != nil {
 		t.Fatalf("OpenWith fixture: %v", err)
 	}
+	t.Cleanup(func() { _ = o.Close() })
 	return o
 }
 

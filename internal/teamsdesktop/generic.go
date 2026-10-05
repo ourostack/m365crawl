@@ -62,6 +62,7 @@ type genericOrigin interface {
 	Records(dbID, storeID int64, fn func(indexeddb.Record) error) error
 	Decode(dbID int64, raw []byte) (any, error)
 	Stats() leveldb.Stats
+	Close() error
 }
 
 // Seams: the census of the snapshot and the opening of one batch's origin, which keeps the
@@ -185,6 +186,7 @@ func readBatch(ctx context.Context, snapDir string, batch []genericDB, res *Gene
 		}
 		return nil
 	}
+	defer func() { _ = o.Close() }()
 	for _, g := range batch {
 		complete, seen, err := readGenericDatabase(ctx, o, g, res, fn)
 		if err != nil {

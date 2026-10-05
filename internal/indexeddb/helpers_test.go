@@ -34,6 +34,8 @@ func (f fakeKV) Scan(prefix []byte, fn func(k, v []byte) error) error {
 	return nil
 }
 
+func (f fakeKV) Close() error { return nil }
+
 func newTestOrigin(f fakeKV, blobDir string) *Origin {
 	return &Origin{kv: f, blobDir: blobDir, stats: leveldb.Stats{Keys: len(f)}}
 }
