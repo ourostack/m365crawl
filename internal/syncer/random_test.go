@@ -63,11 +63,11 @@ func readLogBatches(t *testing.T, path string) []logBatch {
 		for i := uint32(0); i < count; i++ {
 			e := logEntry{typ: rest[0]}
 			kl, n := binary.Uvarint(rest[1:])
-			e.key = rest[1+n : 1+n+int(kl)]
-			rest = rest[1+n+int(kl):]
+			e.key = rest[1+n : 1+n+int(kl)] //nolint:gosec // G115: a length read from a test log
+			rest = rest[1+n+int(kl):] //nolint:gosec // G115: a length read from a test log
 			if e.typ == 1 {
 				vl, n := binary.Uvarint(rest)
-				e.val = rest[n : n+int(vl)]
+				e.val = rest[n : n+int(vl)] //nolint:gosec // G115: a length read from a test log
 				rest = rest[n+int(vl):]
 			}
 			b.entries = append(b.entries, e)
@@ -129,7 +129,7 @@ func changedText(rng *rand.Rand, val []byte) []byte {
 	out := append([]byte(nil), val...)
 	i := bytes.Index(out, []byte("<p>")) + 3
 	for {
-		c := byte('a' + rng.Intn(26))
+		c := byte('a' + rng.Intn(26)) //nolint:gosec // G115: a small value
 		if c != out[i] {
 			out[i] = c
 			return out
@@ -204,10 +204,10 @@ func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 						case 0: // the same key, other text
 							c.val = changedText(rng, e.val)
 						case 1: // another record with the same message and other text
-							c.key[len(c.key)-1] = byte('1' + rng.Intn(9))
+							c.key[len(c.key)-1] = byte('1' + rng.Intn(9)) //nolint:gosec // G115: a small value
 							c.val = changedText(rng, e.val)
 						default: // another record with the very same message
-							c.key[len(c.key)-1] = byte('1' + rng.Intn(9))
+							c.key[len(c.key)-1] = byte('1' + rng.Intn(9)) //nolint:gosec // G115: a small value
 						}
 						extra = append(extra, c)
 					}

@@ -94,7 +94,7 @@ func (x *Session) rowHashChunk(table string, rowids []int64, out map[int64][Dige
 	for i, id := range rowids {
 		args[i] = id
 	}
-	rows, err := x.tx.QueryContext(context.Background(), `select rowid, content_hash from `+table+` where rowid in (?`+strings.Repeat(",?", len(rowids)-1)+`)`, args...)
+	rows, err := x.tx.QueryContext(context.Background(), `select rowid, content_hash from `+table+` where rowid in (?`+strings.Repeat(",?", len(rowids)-1)+`)`, args...) //nolint:gosec // G202: table is from a fixed map; the rest are placeholders
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (x *Session) DeleteTypedMemoOutside(source string, keep []string) error {
 	q := `delete from typed_memo where source=?`
 	args := []any{source}
 	if len(keep) > 0 {
-		q += ` and database not in (?` + strings.Repeat(",?", len(keep)-1) + `)`
+		q += ` and database not in (?` + strings.Repeat(",?", len(keep)-1) + `)` //nolint:gosec // G202: only placeholders are added
 		for _, d := range keep {
 			args = append(args, d)
 		}

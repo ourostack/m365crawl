@@ -168,7 +168,7 @@ func TestCollidingGenericKeysMatchAFullReadOnEverySync(t *testing.T) {
 func TestRedactedAndChangingGenericValuesMatchAFullRead(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	root := copyFixture(t)
-	bearer, signed := "Bearer secret-token-value-1", "https://x.test/f?a=1&sig=deadbeef&b=2"
+	bearer, signed := "Bearer secret-token-value-1", "https://x.test/f?a=1&sig=deadbeef&b=2" //nolint:gosec // G101: a synthetic value
 	states := [][]teamsdesktop.FakeRecord{
 		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
 		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
