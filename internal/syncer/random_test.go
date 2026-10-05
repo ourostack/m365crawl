@@ -68,7 +68,7 @@ func readLogBatches(t *testing.T, path string) []logBatch {
 			if e.typ == 1 {
 				vl, n := binary.Uvarint(rest)
 				e.val = rest[n : n+int(vl)] //nolint:gosec // G115: a length read from a test log
-				rest = rest[n+int(vl):]
+				rest = rest[n+int(vl):]     //nolint:gosec // G115: a length read from a test log
 			}
 			b.entries = append(b.entries, e)
 		}
