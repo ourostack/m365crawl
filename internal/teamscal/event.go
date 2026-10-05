@@ -216,26 +216,29 @@ func addressText(v any) string {
 }
 
 type attachment struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Size           int64  `json:"size"`
+	ContentType    string `json:"content_type"`
+	ContentID      string `json:"content_id"`
+	IsInline       bool   `json:"is_inline"`
+	AttachmentType string `json:"attachment_type"`
 }
 
-// mapAttachments stores attachment metadata as {name, url, size, content_type}; files are never
-// downloaded. The source field names are assumed (only the count of events with attachments is
-// observed), so a few common spellings are accepted.
+// mapAttachments stores attachment metadata as {id, name, size, content_type, content_id,
+// is_inline, attachment_type}; the cache carries no url, and files are never downloaded. The name
+// is name, else fileName.
 func mapAttachments(v any) string {
 	var out []attachment
 	for _, it := range array(v) {
 		m := object(it)
 		a := attachment{
-			Name:        firstNonEmpty(str(m["name"]), str(m["fileName"])),
-			URL:         firstNonEmpty(str(m["url"]), str(m["contentUrl"])),
-			ContentType: str(m["contentType"]),
+			ID: str(m["id"]), Name: firstNonEmpty(str(m["name"]), str(m["fileName"])),
+			ContentType: str(m["contentType"]), ContentID: str(m["contentId"]),
+			IsInline: boolean(m["isInline"]), AttachmentType: str(m["attachmentType"]),
 		}
 		a.Size, _ = integer(m["size"])
-		if a.Name == "" && a.URL == "" {
+		if a.ID == "" && a.Name == "" {
 			continue
 		}
 		out = append(out, a)

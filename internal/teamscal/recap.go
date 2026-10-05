@@ -12,8 +12,8 @@ import (
 // An empty data array creates nothing: no recap, no stand-in call id. An item without a callId is
 // skipped and counted in notes.Skipped. When key is empty the record's own iCalUid is used.
 //
-// Assumptions, unverified against a real cache: duration is in seconds, and the recording ends
-// duration after it starts.
+// The per-call duration is in milliseconds (measured on a real cache); the recording ends that long
+// after it starts.
 func MapCatchUpRecord(acct teamsdesktop.Account, key string, valueJSON []byte) ([]calendar.Recap, []calendar.RecapItem, MapNotes, error) {
 	var notes MapNotes
 	m, err := decode(valueJSON)
@@ -42,12 +42,14 @@ func MapCatchUpRecord(acct teamsdesktop.Account, key string, valueJSON []byte) (
 			RecordingURL: str(c["url"]), IsMissed: boolean(c["isMissed"]),
 			ExpiresAt: timePtr(expires), MeetingEndAt: timePtr(meetingEnd),
 		}
-		if secs, ok := number(c["duration"]); ok {
-			r.DurationSeconds = int(secs)
+		var millis float64
+		if ms, ok := number(c["duration"]); ok && ms > 0 {
+			millis = ms
 		}
+		r.DurationSeconds = int(millis / 1000)
 		r.RecordingStartAt = timePtr(moment(c["recordingStartTime"]))
-		if r.RecordingStartAt != nil && r.DurationSeconds > 0 {
-			end := r.RecordingStartAt.Add(time.Duration(r.DurationSeconds) * time.Second)
+		if r.RecordingStartAt != nil && millis > 0 {
+			end := r.RecordingStartAt.Add(time.Duration(millis) * time.Millisecond)
 			r.RecordingEndAt = &end
 		}
 		recaps = append(recaps, r)

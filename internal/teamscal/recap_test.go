@@ -12,7 +12,7 @@ import (
 const catchUpTwoCalls = `{
  "iCalUid":"UID-RICH","meetingEndTime":{"$date":"2026-03-10T18:00:00.000Z"},"expiration":{"$date":"2026-04-09T18:00:00.000Z"},
  "data":[
-  {"callId":"call-1","isMissed":false,"url":"https://recordings.example.test/1","duration":3600,
+  {"callId":"call-1","isMissed":false,"url":"https://recordings.example.test/1","duration":3600000,
    "recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"},
    "speakers":[{"id":"sp-1","displayName":"Alex Fixture"},{"id":"sp-2","displayName":"Blake Fixture"},"junk",{}],
    "headline":"Planning","outline":"1. Scope\n2. Dates",
@@ -131,8 +131,8 @@ func TestMapCatchUpKeyFallbackAndUnmapped(t *testing.T) {
 }
 
 func TestMapCatchUpDurationForms(t *testing.T) {
-	recaps, _, _, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","duration":90.7,"recordingStartTime":"2026-03-10T17:00:00Z"},{"callId":"b","duration":0,"recordingStartTime":"2026-03-10T17:00:00Z"},{"callId":"c","duration":10}]}`))
-	if recaps[0].DurationSeconds != 90 || recaps[0].RecordingEndAt == nil || !recaps[0].RecordingEndAt.Equal(utcTime("2026-03-10T17:01:30Z")) {
+	recaps, _, _, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","duration":90700,"recordingStartTime":"2026-03-10T17:00:00Z"},{"callId":"b","duration":0,"recordingStartTime":"2026-03-10T17:00:00Z"},{"callId":"c","duration":-5}]}`))
+	if recaps[0].DurationSeconds != 90 || recaps[0].RecordingEndAt == nil || !recaps[0].RecordingEndAt.Equal(utcTime("2026-03-10T17:01:30.7Z")) {
 		t.Errorf("float duration: %+v", recaps[0])
 	}
 	if recaps[1].RecordingEndAt != nil || recaps[2].RecordingEndAt != nil {
@@ -234,5 +234,14 @@ func TestMapRecapJoinsByCallID(t *testing.T) {
 	}
 	if !strings.Contains(merged.SummarySectionsJSON, "Scope") {
 		t.Errorf("summary sections lost: %q", merged.SummarySectionsJSON)
+	}
+}
+
+func TestMapCatchUpDurationIsMilliseconds(t *testing.T) {
+	// Real values run from 302000 to 3766000: 5 to 63 minutes.
+	recaps, _, _, _ := MapCatchUpRecord(testAcct, "U", []byte(`{"data":[{"callId":"a","duration":302000,"recordingStartTime":"2026-03-10T17:00:00Z"},{"callId":"b","duration":3766000,"recordingStartTime":"2026-03-10T17:00:00Z"}]}`))
+	if recaps[0].DurationSeconds != 302 || !recaps[0].RecordingEndAt.Equal(utcTime("2026-03-10T17:05:02Z")) ||
+		recaps[1].DurationSeconds != 3766 || !recaps[1].RecordingEndAt.Equal(utcTime("2026-03-10T18:02:46Z")) {
+		t.Fatalf("%+v %+v", recaps[0], recaps[1])
 	}
 }

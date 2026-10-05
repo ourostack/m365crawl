@@ -39,7 +39,7 @@ const richEvent = `{
  ],
  "bodyContent":"<p>Hello&nbsp;team</p>","bodyContentType":"html","bodyPreview":"Hello team",
  "hasAttachments":true,
- "attachments":[{"name":"agenda.txt","url":"https://example.test/a","size":12,"contentType":"text/plain"},{"fileName":"b.txt","contentUrl":"https://example.test/b"},{}],
+ "attachments":[{"id":"att-1","name":"agenda.txt","fileName":"ignored.txt","size":12,"contentType":"text/plain","contentId":"cid-1","isInline":true,"attachmentType":"file"},{"id":"att-2","fileName":"b.txt"},{}],
  "categories":["Blue","Fixture",""],"reminderMinutesBeforeStart":15,
  "recurrencePattern":{"type":"weekly","interval":1},"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"}
 }`
@@ -106,8 +106,8 @@ func TestMapEventFieldByField(t *testing.T) {
 		{"BodyType", e.BodyType, "html"},
 		{"BodyPreview", e.BodyPreview, "Hello team"},
 		{"HasAttachments", e.HasAttachments, true},
-		{"AttachmentsJSON", e.AttachmentsJSON, `[{"name":"agenda.txt","url":"https://example.test/a","size":12,"content_type":"text/plain"},` +
-			`{"name":"b.txt","url":"https://example.test/b","size":0,"content_type":""}]`},
+		{"AttachmentsJSON", e.AttachmentsJSON, `[{"id":"att-1","name":"agenda.txt","size":12,"content_type":"text/plain","content_id":"cid-1","is_inline":true,"attachment_type":"file"},` +
+			`{"id":"att-2","name":"b.txt","size":0,"content_type":"","content_id":"","is_inline":false,"attachment_type":""}]`},
 		{"CategoriesJSON", e.CategoriesJSON, `["Blue","Fixture"]`},
 		{"RecurrenceJSON", e.RecurrenceJSON, `{"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"},"recurrencePattern":{"interval":1,"type":"weekly"}}`},
 		{"ReminderMinutes", e.ReminderMinutes, &reminder},
