@@ -259,7 +259,7 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 }
 
 func TestCaptureConvergesForRandomSubsetsOfGroups(t *testing.T) {
-	r := rand.New(rand.NewSource(20261005))
+	r := rand.New(rand.NewSource(20261005)) //nolint:gosec // a fixed seed makes the sweep reproducible, not secret
 	for n := 0; n < 1000; n++ {
 		size := 2 + r.Intn(3)
 		copies := make([]Event, size)
