@@ -112,18 +112,20 @@ func ParseBlock(b []byte) (Block, error) {
 	if inflated < 1 || inflated > MaxInflated {
 		return Block{}, ErrBlockOversize
 	}
-	payloadLen := uint64(binary.LittleEndian.Uint32(b[offPayloadLen:]))
-	if HeaderSize+payloadLen > uint64(len(b)) {
+	payloadLen := binary.LittleEndian.Uint32(b[offPayloadLen:])
+	rest := b[HeaderSize:]
+	if uint64(payloadLen) > uint64(len(rest)) {
 		return Block{}, ErrBlockTruncated
 	}
-	end := HeaderSize + int(payloadLen)
+	payload := rest[:payloadLen]
+	end := HeaderSize + len(payload)
 	if crc32.ChecksumIEEE(b[headerCRCFrom:headerCRCTo]) != binary.LittleEndian.Uint32(b[offHeaderCRC:]) {
 		return Block{}, ErrBlockHeaderCRC
 	}
 	if crc32.ChecksumIEEE(b[payloadCRCAt:end]) != binary.LittleEndian.Uint32(b[offPayloadCRC:]) {
 		return Block{}, ErrBlockPayloadCRC
 	}
-	return Block{Type: typ, InflatedLen: int(inflated), Payload: b[HeaderSize:end]}, nil
+	return Block{Type: typ, InflatedLen: int(inflated), Payload: payload}, nil
 }
 
 // Inflate decompresses the payload into dst's storage (see decodeBlock) and

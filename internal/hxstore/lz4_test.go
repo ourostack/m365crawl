@@ -13,7 +13,7 @@ import (
 // tok builds an LZ4 token byte from a literal count and a match length code
 // (each at most 15). The vectors below spell out every other byte by hand
 // instead of going through a compressor.
-func tok(lit, match int) byte { return byte(lit<<4 | match) }
+func tok(lit, match int) byte { return byte((lit<<4 | match) & 0xff) }
 
 func cat(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
 
@@ -256,7 +256,7 @@ func compress(in []byte) []byte {
 			continue
 		}
 		lits := in[litStart:i]
-		out = append(out, byte(nib(len(lits))<<4|nib(bestLen-4)))
+		out = append(out, byte((nib(len(lits))<<4|nib(bestLen-4))&0xff))
 		if len(lits) >= 15 {
 			emitLen(len(lits) - 15)
 		}
@@ -269,7 +269,7 @@ func compress(in []byte) []byte {
 		litStart = i
 	}
 	lits := in[litStart:]
-	out = append(out, byte(nib(len(lits))<<4))
+	out = append(out, byte((nib(len(lits))<<4)&0xff))
 	if len(lits) >= 15 {
 		emitLen(len(lits) - 15)
 	}
