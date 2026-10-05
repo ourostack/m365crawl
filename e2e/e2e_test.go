@@ -987,7 +987,7 @@ func TestE2EOutputContract(t *testing.T) {
 // (copied) cache produces a message line.
 func TestE2EWatch(t *testing.T) {
 	e := newEnv(t)
-	s := e.start(nil, append([]string{"watch", "--every", "1s"}, e.baseArgs()...)...)
+	s := e.start(nil, append([]string{"watch", "--every", "1s", "--min-interval", "0"}, e.baseArgs()...)...)
 	count := func(q string) int { return archiveCount(t, e.db, q) }
 	// The baseline is done once its sync run is recorded as successful (it is written last).
 	s.waitFor("the baseline sync", func() bool {
