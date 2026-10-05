@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -105,7 +106,7 @@ func TestRunFailures(t *testing.T) {
 		{"version", writeStore(t, hxbuild.New(hxbuild.Options{Version: 'j'})), "store_version", `"found": 106`},
 		{"page size", writeStore(t, hxbuild.New(hxbuild.Options{PageSize: 8192})), "page_size", `"found": 8192`},
 	}
-	if os.Geteuid() != 0 {
+	if os.Geteuid() != 0 && runtime.GOOS != "windows" { // mode 000 does not deny reads on Windows
 		cases = append(cases, struct{ name, path, want, found string }{"permission", locked, "permission_denied", ""})
 	}
 	for _, tc := range cases {
