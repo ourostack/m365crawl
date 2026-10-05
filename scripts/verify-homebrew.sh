@@ -5,12 +5,12 @@
 #
 #   TAG                  release tag, e.g. v0.1.0
 #   APPLE_TEAM_ID        expected signing team
-#   POLL_TIMEOUT_MINUTES how long to wait for the tap (default 75)
+#   POLL_TIMEOUT_MINUTES how long to wait for the tap (default 10)
 #
-# The tap's update-casks workflow polls hourly and cannot be triggered from this
-# repository, so the script polls `brew info` until the tap serves this version,
-# then installs the cask and runs the same gates as verify-release on the
-# installed binary.
+# The publish-homebrew job has already pushed the cask to the tap, so the wait only
+# covers the time GitHub takes to serve the new commit. The script polls `brew info`
+# until the tap serves this version, then installs the cask and runs the same gates
+# as verify-release on the installed binary.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,15 +26,15 @@ version="${TAG#v}"
 cask="ourostack/tap/teamscrawl"
 
 brew tap ourostack/tap
-deadline=$((SECONDS + ${POLL_TIMEOUT_MINUTES:-75} * 60))
+deadline=$((SECONDS + ${POLL_TIMEOUT_MINUTES:-10} * 60))
 served=""
 while :; do
   brew update --quiet || true
   served="$(brew info --cask --json=v2 "$cask" | python3 -c 'import json,sys; print(json.load(sys.stdin)["casks"][0]["version"])')"
   [[ "$served" == "$version" ]] && break
-  [[ $SECONDS -lt $deadline ]] || fail "the tap still serves '$served' after ${POLL_TIMEOUT_MINUTES:-75} minutes; expected '$version'"
+  [[ $SECONDS -lt $deadline ]] || fail "the tap still serves '$served' after ${POLL_TIMEOUT_MINUTES:-10} minutes; expected '$version'"
   echo "tap serves '$served', waiting for '$version'"
-  sleep 120
+  sleep 20
 done
 
 brew install --cask "$cask"
