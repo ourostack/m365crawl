@@ -453,3 +453,20 @@ func TestCaptureEmptyRawDetailNeverOverwrites(t *testing.T) {
 		t.Fatalf("empty raw detail overwrote the stored one: %q", got.DetailRawJSON)
 	}
 }
+
+func TestDetailEqualComparesReminders(t *testing.T) {
+	five, fifteen := 5, 15
+	a, b := thin(t, t1), thin(t, t1)
+	a.ReminderMinutes, b.ReminderMinutes = &five, &five
+	if !detailEqual(a, b) {
+		t.Fatal("equal reminders are equal detail")
+	}
+	b.ReminderMinutes = &fifteen
+	if detailEqual(a, b) {
+		t.Fatal("different reminders differ")
+	}
+	b.ReminderMinutes = nil
+	if detailEqual(a, b) {
+		t.Fatal("a missing reminder differs")
+	}
+}
