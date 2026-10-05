@@ -12,6 +12,12 @@ The release comes from the state of `main`, not from the push: the pipeline look
 
 Pushing a tag by hand starts nothing, and nothing needs it. A version is released once: its tag and GitHub release are never reused.
 
+### Versions only move forward
+
+A notes file for a version that is not greater than the highest stable version already released is refused by `decide`, with the file named: it would otherwise become "latest" and move the Homebrew cask backwards. A stable version must be greater than the latest stable release, and a rehearsal must be for a version greater than it (`v0.2.0-rc.1` after `v0.2.0` is refused). The refusal blocks every release until that notes file is deleted or a higher version is released. Separately, `release-flags.sh settle` never marks a release "latest" while a higher stable release exists.
+
+Existing releases are not a problem: a notes file whose tag and GitHub release both exist is skipped. Tags may be lightweight or annotated (the v0.1.0 tags are annotated); an annotated tag is read through to its commit only when a release has to resume.
+
 ## How to rehearse
 
 Merge `docs/releases/vX.Y.Z-rc.N.md` (for example `v0.2.0-rc.1.md`). A version with a hyphen is a rehearsal. It runs the same pipeline with the real signing secrets, the real notarization and the real tap push, but nothing reaches users:
@@ -25,11 +31,13 @@ The cask for a rehearsal is the one goreleaser renders for the rc tag. It is att
 
 ### The first rehearsal, in this order
 
-Nothing in this pipeline has run for real until these have. Do them before the first stable release made this way.
+Nothing in this pipeline has run for real until these have. Do them in this order before the first stable release made this way. Every rehearsal version must be above the latest stable release (see "Versions only move forward").
 
 1. Run "Credential health" by hand (Actions tab, "Run workflow"). It proves the six Apple secrets are set and the tap key authenticates.
-2. Merge an rc notes file. Watch every job go green: the tag appears, goreleaser signs and notarizes, `verify-release` passes, and the tap's `rehearsal` branch gets the commit.
-3. Deliberately fail one rehearsal, to watch containment and reporting work. For example, merge a second rc notes file after temporarily removing the tap deploy key from the tap, which fails `publish-homebrew` and must open the issue "Workflow failed: Release"; restore the key, then run the workflow again and watch it resume. Only ever do this with an `-rc.N` version, never with a stable one.
+2. Merge one `-rc.1` notes file for a version above the latest stable (for example `v0.3.0-rc.1.md`). Watch every job go green: the tag appears, goreleaser signs and notarizes, `verify-release` passes, and the tap's `rehearsal` branch gets the commit.
+3. Merge two rc notes files together (for example `v0.3.0-rc.2.md` and `v0.4.0-rc.1.md` in one merge). The lowest, `v0.3.0-rc.2`, must release first, then `continue-release` must start the workflow again and release `v0.4.0-rc.1` in its own run.
+4. Last, deliberately fail one rc to watch containment and reporting work: merge another rc notes file after temporarily removing the tap deploy key from the tap, which fails `publish-homebrew` and must open the issue "Workflow failed: Release"; restore the key, run the workflow again and watch it resume. Never do this with a stable version.
+
 
 ## How a release runs
 
@@ -92,10 +100,10 @@ The gate logic is tested on every PR: `make lint` runs `scripts/sign-notarize.sh
 
 `make lint` runs on every pull request and runs a `--selftest` for each release script, with a stand-in `gh` and throwaway local git repositories:
 
-- `scripts/release-decide.sh --selftest`: a stable and a rehearsal version, lowest-first order, a rename, add plus edit, a quoted and a non-ASCII file name, the resume case, a tag at the wrong commit, a release without a tag, a stable version without a changelog section, and a tag name git rejects.
+- `scripts/release-decide.sh --selftest`: a stable and a rehearsal version, lowest-first order, a rename, add plus edit, a quoted and a non-ASCII file name, the resume case, a tag at the wrong commit, a release without a tag, a stable version without a changelog section, a tag name git rejects, annotated tags (released: skipped; unreleased: resumed), the present state of `main` (nothing to release), and versions only moving forward.
 - `scripts/publish-cask.sh --selftest`: the first publish pushes one commit, a repeat changes nothing, a cask for another version is refused, a prerelease is refused on `main`, a rehearsal pushes only to its branch, the tap is restored to the previous cask with a new commit, a missing input is named.
-- `scripts/release-flags.sh --selftest`: demote, restore of a demoted stable release, and the rehearsal flag checks.
-- `scripts/automerge-eligible.sh --selftest`, `scripts/check-tap-key.sh --selftest` and `scripts/report-failure.sh --selftest`.
+- `scripts/release-flags.sh --selftest`: demote, restore of a demoted stable release (never latest while a higher stable exists), and the rehearsal flag checks.
+- `scripts/retry.sh --selftest` (the three attempts of the install check), `scripts/automerge-eligible.sh --selftest`, `scripts/check-tap-key.sh --selftest` and `scripts/report-failure.sh --selftest`.
 - `scripts/sign-notarize.sh --selftest`: every signing gate.
 
 What a pull request cannot prove: the workflow wiring, the token's ability to create the tag, start the workflow and open issues, the SSH deploy key and pinned host keys, Apple signing and the real tap, and that a cancelled run still reports. The first rehearsal exercises all of them.
@@ -110,7 +118,7 @@ Every failed or cancelled job also opens or updates an issue (see `report-failur
 - `notarization was not accepted`: Apple rejected the submission; the log is printed.
 - Failure in `verify-release`: the release is published but a downloaded artifact is wrong. `contain` already marked it as a prerelease so it is not "latest". Treat it as bad.
 - Failure in `publish-homebrew`: the release is published and verified but the tap still serves the previous version. `HOMEBREW_TAP_DEPLOY_KEY is required` means the secret is unset; a push failure means the deploy key was removed from the tap or deploy keys were turned off for the organization; `Host key verification failed` means GitHub rotated its SSH host keys (refresh `scripts/github_known_hosts`, see its header).
-- Failure in `verify-homebrew`: the tap served a cask whose install did not verify. `contain` put the tap's `main` back to the previous cask and marked the release as a prerelease.
+- Failure in `verify-homebrew`: the install check failed three times in a row, a minute apart (one transient failure does not count), so the tap served a cask that does not install or verify. `contain` put the tap's `main` back to the previous cask and marked the release as a prerelease. After a real failure like this the next release is a new patch version: the failed version is never re-released.
 - A credential-health failure names the secret that is missing or says the tap key no longer authenticates. Fix it before the next release.
 
 ## How to recover

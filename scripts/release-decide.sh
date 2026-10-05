@@ -21,6 +21,12 @@
 # Outputs: release (true or false), tag, version, sha (the commit to release), rehearsal (true
 # for a version with a hyphen), resume (true when the tag already exists), remaining.
 #
+# Versions only move forward: a candidate whose version is not greater than the highest stable
+# version already released is refused (a late notes file for an old version, or a rehearsal for
+# a version at or below the latest stable), because it would become "latest" and move the
+# Homebrew cask backwards. Tags may be lightweight or annotated; an annotated tag is read through
+# to its commit, and a notes file whose tag and release both exist is skipped without looking at the tag.
+#
 # It refuses, with the reason, when: a notes file name is not valid semantic versioning or not
 # a valid tag name; a GitHub release exists with no tag; a tag with no release exists at a
 # commit that is not on main or lacks the notes file; or (stable only) CHANGELOG.md has no
@@ -84,13 +90,13 @@ semver_cmp() {
   done
 }
 
-# tag_commit TAG prints the commit the tag points at, or nothing when the tag does not exist.
-# gh exits non-zero for both "absent" and "could not ask"; only "not found" means absent.
-tag_commit() {
+# tag_info TAG prints "TYPE OBJECT" (commit or tag, and its object id), or nothing when the
+# tag does not exist. gh exits non-zero for both "absent" and "could not ask"; only "not found"
+# means absent.
+tag_info() {
   local out
   if out="$(gh api "repos/$REPO/git/ref/tags/$1" --jq '.object.type + " " + .object.sha' 2>&1)"; then
-    [[ "${out%% *}" == commit ]] || fail "the tag $1 is an annotated tag; delete it (git push origin :refs/tags/$1) and merge again, because releases use lightweight tags"
-    echo "${out#* }"
+    echo "$out"
     return 0
   fi
   grep -Eqi 'not found|404' <<<"$out" && return 0
@@ -116,7 +122,7 @@ decide() {
   [[ -z "${REF:-}" || "$REF" == refs/heads/main ]] || fail "releases run from main only; this run started on $REF"
   git cat-file -e "${AFTER}^{commit}" 2>/dev/null || fail "the commit $AFTER is not in the checkout (fetch full history)"
 
-  local path base tag version tsha candidates="" line best="" bestline="" count=0 file sha resume
+  local path base tag version tsha info highest="" candidates="" line best="" bestline="" count=0 file sha resume
   # -z: names come back raw, so a quoted or non-ASCII name is judged like any other.
   while IFS= read -r -d '' path; do
     [[ "$path" =~ ^docs/releases/v[^/]+\.md$ ]] || continue
@@ -125,27 +131,33 @@ decide() {
     version="${tag#v}"
     [[ "$version" =~ $semver_re ]] || fail "$path does not name a valid semantic version ($version); use docs/releases/vX.Y.Z.md or vX.Y.Z-rc.N.md"
     git check-ref-format "refs/tags/$tag" || fail "$path does not name a valid git tag ($tag)"
-    tsha="$(tag_commit "$tag")"
-    if [[ -n "$tsha" ]]; then
-      release_exists "$tag" && continue
+    if release_exists "$tag"; then
+      [[ -n "$(tag_info "$tag")" ]] || fail "a GitHub release for $tag exists but the tag does not; delete the release and run the Release workflow again"
+      # Released: skipped without looking at what kind of tag it is.
+      if [[ "$tag" != *-* && ( -z "$highest" || "$(semver_cmp "$version" "$highest")" == 1 ) ]]; then highest="$version"; fi
+      continue
+    fi
+    info="$(tag_info "$tag")"
+    if [[ -n "$info" ]]; then
       # The tag exists with no release: resume at the tag's commit if it is a commit of main that holds the notes.
-      if git cat-file -e "${tsha}^{commit}" 2>/dev/null \
+      tsha="$(git rev-parse --verify --quiet "${info#* }^{commit}" 2>/dev/null || true)"
+      if [[ -n "$tsha" ]] \
         && git merge-base --is-ancestor "$tsha" "$AFTER" \
         && git cat-file -e "${tsha}:${path}" 2>/dev/null; then
         candidates+="$version|$tag|$path|$tsha|true"$'\n'
       else
-        fail "the tag $tag exists at $tsha, which is not a commit of main that holds $path, and no GitHub release exists for it; delete the tag (git push origin :refs/tags/$tag) and run the Release workflow again, or release a newer version"
+        fail "the tag $tag exists at ${info#* }, which is not a commit of main that holds $path, and no GitHub release exists for it; delete the tag (git push origin :refs/tags/$tag) and run the Release workflow again, or release a newer version"
       fi
     else
-      if release_exists "$tag"; then
-        fail "a GitHub release for $tag exists but the tag does not; delete the release and run the Release workflow again"
-      fi
       candidates+="$version|$tag|$path|$AFTER|false"$'\n'
     fi
   done < <(git ls-tree -r -z --name-only "$AFTER" -- docs/releases)
 
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
+    if [[ -n "$highest" && "$(semver_cmp "${line%%|*}" "$highest")" != 1 ]]; then
+      fail "${line%%|*} (docs/releases/v${line%%|*}.md) is not greater than $highest, the highest stable version already released; versions only move forward. Delete that notes file, or release a version above $highest"
+    fi
     count=$((count + 1))
     if [[ -z "$best" || "$(semver_cmp "${line%%|*}" "$best")" == -1 ]]; then
       best="${line%%|*}"
@@ -176,7 +188,7 @@ decide() {
 }
 
 selftest() {
-  local self repo stub out status c0 c1 c2 c3 c4 outputs sha_c1
+  local self repo stub out status c0 c1 c2 c3 c4 outputs sha_c1 annotated
   self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/release-decide-selftest.XXXXXX")"
   trap 'rm -r "${tmp:?}"' EXIT
@@ -187,12 +199,18 @@ selftest() {
   cat > "$stub/gh" <<'STUB'
 #!/usr/bin/env bash
 # Stand-in for gh api repos/R/git/ref/tags/TAG --jq ... and gh release view TAG. STUB_TAGS lists
-# name:commit pairs and STUB_RELEASES lists names that exist.
+# name:object[:type] triples (type commit by default) and STUB_RELEASES lists names that exist.
 case "$1" in
   api)
     name="${2##*/}"
     for pair in ${STUB_TAGS:-}; do
-      if [[ "${pair%%:*}" == "$name" ]]; then echo "${STUB_TAG_TYPE:-commit} ${pair#*:}"; exit 0; fi
+      if [[ "${pair%%:*}" == "$name" ]]; then
+        rest="${pair#*:}"
+        type=commit
+        [[ "$rest" != *:* ]] || type="${rest#*:}"
+        echo "$type ${rest%%:*}"
+        exit 0
+      fi
     done
     ;;
   release)
@@ -271,8 +289,15 @@ STUB
   expect_fail "tag at a commit without the notes" "delete the tag (git push origin :refs/tags/v0.2.0)"
   decide_run "$c2" STUB_TAGS="v0.2.0:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
   expect_fail "tag at an unknown commit" "is not a commit of main that holds docs/releases/v0.2.0.md"
-  decide_run "$c2" STUB_TAGS="v0.2.0:$c1" STUB_TAG_TYPE=tag
-  expect_fail "annotated tag" "annotated tag"
+  # An annotated tag is read through to its commit: skipped when released, resumed when not.
+  git -C "$repo" tag -a v0.2.0 -m annotated "$c1"
+  annotated="$(git -C "$repo" rev-parse refs/tags/v0.2.0)"
+  decide_run "$c2" STUB_TAGS="v0.2.0:$annotated:tag" STUB_RELEASES="v0.2.0"
+  expect_ok "annotated tag with a release" release=true tag=v0.3.0-rc.1 remaining=false
+  decide_run "$c2" STUB_TAGS="v0.2.0:$annotated:tag"
+  expect_ok "annotated tag without a release" release=true tag=v0.2.0 "sha=$c1" resume=true remaining=true
+  decide_run "$c2" STUB_TAGS="v0.2.0:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef:tag"
+  expect_fail "annotated tag that cannot be read" "is not a commit of main that holds docs/releases/v0.2.0.md"
 
   # A release with no tag is refused.
   decide_run "$c2" STUB_RELEASES="v0.2.0"
@@ -326,6 +351,43 @@ STUB
   sha_c1="$(git -C "$repo" rev-parse HEAD)"
   decide_run "$sha_c1" STUB_TAGS="v0.2.0:$c1 v0.3.0-rc.2:$c1" STUB_RELEASES="v0.2.0 v0.3.0-rc.2"
   expect_ok "unrelated files" release=false
+
+  # The present state of main: v0.1.0 and v0.1.0-alpha.1 notes, both annotated tags with releases,
+  # and annotated tags v0.1.0-rc.2 and v0.1.0-rc.3 that have no notes file. Nothing to release, no error.
+  repo="$tmp/repo2"
+  mkdir -p "$repo/docs/releases"
+  git -C "$repo" init --quiet --initial-branch=main
+  git -C "$repo" config user.name t
+  git -C "$repo" config user.email t@example.com
+  printf '# Changelog\n\n## [Unreleased]\n\n## [0.3.0] - 2026-10-07\n\n## [0.2.0] - 2026-10-06\n\n## [0.1.5] - 2026-10-05\n\n## [0.1.0] - 2026-10-01\n' > "$repo/CHANGELOG.md"
+  commit "state" docs/releases/v0.1.0.md docs/releases/v0.1.0-alpha.1.md > /dev/null
+  local n tags="" present
+  for n in v0.1.0 v0.1.0-alpha.1 v0.1.0-rc.2 v0.1.0-rc.3; do
+    git -C "$repo" tag -a "$n" -m "$n" HEAD
+    tags="$tags $n:$(git -C "$repo" rev-parse "refs/tags/$n"):tag"
+  done
+  present="$(git -C "$repo" rev-parse HEAD)"
+  decide_run "$present" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.1.0-rc.2 v0.1.0-rc.3"
+  expect_ok "the present state of main" release=false
+  grep -Fq "nothing to release" <<<"$out" || fail "selftest: the present state should say there is nothing to release: $out"
+
+  # Versions only move forward.
+  local late
+  git -C "$repo" tag -a v0.2.0 -m v0.2.0 HEAD
+  tags="$tags v0.2.0:$(git -C "$repo" rev-parse refs/tags/v0.2.0):tag"
+  commit "state" docs/releases/v0.2.0.md > /dev/null
+  late="$(commit "late" docs/releases/v0.1.5.md)"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  expect_fail "a late notes file for an old version" "v0.1.5.md) is not greater than 0.2.0"
+  git -C "$repo" rm --quiet docs/releases/v0.1.5.md
+  late="$(commit "late rc" docs/releases/v0.2.0-rc.1.md)"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  expect_fail "a rehearsal for an already released version" "0.2.0-rc.1 (docs/releases/v0.2.0-rc.1.md) is not greater than 0.2.0"
+  git -C "$repo" rm --quiet docs/releases/v0.2.0-rc.1.md
+  late="$(commit "next rc" docs/releases/v0.3.0-rc.1.md)"
+  decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="v0.1.0 v0.1.0-alpha.1 v0.2.0"
+  expect_ok "a rehearsal above the latest stable" release=true tag=v0.3.0-rc.1 rehearsal=true
+  repo="$tmp/repo"
 
   # Semantic-version order.
   [[ "$(semver_cmp 0.3.0-rc.1 0.3.0)" == -1 && "$(semver_cmp 0.3.0 0.3.0-rc.1)" == 1 ]] || fail "selftest: a prerelease sorts before its release"

@@ -89,6 +89,7 @@ script-lint:
 	scripts/report-failure.sh --selftest
 	scripts/release-flags.sh --selftest
 	scripts/automerge-eligible.sh --selftest
+	scripts/retry.sh --selftest
 
 tidy-check:
 	go mod verify

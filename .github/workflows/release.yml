@@ -220,7 +220,7 @@ jobs:
     if: ${{ needs.decide.outputs.rehearsal == 'false' }}
     needs: [decide, publish-homebrew]
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -234,7 +234,8 @@ jobs:
           TAG: ${{ needs.decide.outputs.tag }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: scripts/verify-homebrew.sh
+        # Three attempts, a minute apart: a transient failure must not roll the tap back and demote a good release.
+        run: scripts/retry.sh 3 60 scripts/verify-homebrew.sh
 
   # Containment. A release that failed after it may have been published must not stay
   # "latest": it is marked as a prerelease (harmless when no release exists yet). If the

@@ -12,8 +12,9 @@
 #                                     not exist is left alone.
 #   scripts/release-flags.sh settle   after every other check passed: a rehearsal must be a prerelease
 #                                     and not latest; a stable release that an earlier flake demoted is
-#                                     restored (not prerelease, latest), so the flag check never fails a
-#                                     good release.
+#                                     restored (not prerelease, and latest unless a higher stable release
+#                                     exists: versions only move forward, so an old version never becomes
+#                                     latest), so the flag check never fails a good release.
 #   scripts/release-flags.sh --selftest
 # shellcheck disable=SC2015,SC2016,SC2153 # selftest checks are deliberate A && B || fail; the gh stub is a quoted heredoc.
 set -euo pipefail
@@ -34,6 +35,18 @@ prerelease_flag() {
   fail "could not read the release $TAG: $out"
 }
 
+# higher_stable prints a published stable release tag (X.Y.Z, no hyphen) above $TAG, if any.
+higher_stable() {
+  local mine="${TAG#v}" t
+  gh api "repos/$REPO/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' | while IFS= read -r t; do
+    [[ "$t" != *-* && "$t" != "$TAG" ]] || continue
+    if [[ "$(printf '%s\n%s\n' "${t#v}" "$mine" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" == "${t#v}" ]]; then
+      echo "$t"
+      break
+    fi
+  done
+}
+
 demote() {
   local flag
   flag="$(prerelease_flag)"
@@ -46,7 +59,7 @@ demote() {
 }
 
 settle() {
-  local flag latest
+  local flag latest higher
   flag="$(prerelease_flag)"
   [[ -n "$flag" ]] || fail "there is no release for $TAG"
   if [[ "$TAG" == *-* ]]; then
@@ -57,8 +70,14 @@ settle() {
     return 0
   fi
   if [[ "$flag" == true ]]; then
-    echo "release-flags: $TAG is marked as a prerelease, but every check passed; restoring it as the latest release"
-    gh release edit "$TAG" -R "$REPO" --prerelease=false --latest
+    higher="$(higher_stable)"
+    if [[ -n "$higher" ]]; then
+      echo "release-flags: $TAG is marked as a prerelease, but every check passed; restoring it, not as latest, because $higher is a higher stable release"
+      gh release edit "$TAG" -R "$REPO" --prerelease=false --latest=false
+    else
+      echo "release-flags: $TAG is marked as a prerelease, but every check passed; restoring it as the latest release"
+      gh release edit "$TAG" -R "$REPO" --prerelease=false --latest
+    fi
     flag="$(prerelease_flag)"
     [[ "$flag" == false ]] || fail "could not restore $TAG: isPrerelease is still $flag"
   fi
@@ -88,17 +107,19 @@ case "$1 $2" in
       case "$arg" in
         --prerelease) echo true > "$s/pre" ;;
         --prerelease=false) echo false > "$s/pre" ;;
-        --latest=false) : > "$s/latest" ;;
+        --latest=false) [[ "$(cat "$s/latest")" != "$tag" ]] || : > "$s/latest" ;;
         --latest) echo "$tag" > "$s/latest" ;;
       esac
     done ;;
   "api repos/o/r/releases/latest") cat "$s/latest" ;;
+  "api repos/o/r/releases") cat "$s/stable" 2>/dev/null || true ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 64 ;;
 esac
 STUB
   chmod +x "$stub/gh"
-  set_state() { # set_state PRERELEASE LATEST ; "" PRERELEASE means no release
+  set_state() { # set_state PRERELEASE LATEST [STABLE-TAGS...] ; "" PRERELEASE means no release
     rm -f "$state/pre"
+    printf '%s\n' "${@:3}" > "$state/stable"
     [[ -z "$1" ]] || echo "$1" > "$state/pre"
     echo "${2-}" > "$state/latest"
   }
@@ -121,6 +142,17 @@ STUB
   run settle v0.2.0
   [[ "$status" -eq 0 && "$(cat "$state/pre")" == false && "$(cat "$state/latest")" == v0.2.0 ]] || fail "selftest: a demoted stable release is restored: $out"
   grep -Fq "restoring" <<<"$out" || fail "selftest: the restore should be said: $out"
+  # An old version never becomes latest while a higher stable release exists.
+  set_state true v0.2.0 v0.2.0 v0.1.0
+  run settle v0.1.5
+  [[ "$status" -eq 0 && "$(cat "$state/pre")" == false && "$(cat "$state/latest")" == v0.2.0 ]] || fail "selftest: v0.1.5 must be restored without taking latest from v0.2.0: $out"
+  grep -Fq "not as latest" <<<"$out" || fail "selftest: the reason should be said: $out"
+  set_state true "" v0.1.0
+  run settle v0.1.5
+  [[ "$status" -eq 0 && "$(cat "$state/latest")" == v0.1.5 ]] || fail "selftest: with no higher stable release the restore makes it latest: $out"
+  set_state true "" v0.10.0
+  run settle v0.9.0
+  [[ "$status" -eq 0 && -z "$(cat "$state/latest")" ]] || fail "selftest: v0.10.0 is higher than v0.9.0: $out"
   set_state ""
   run settle v0.2.0
   [[ "$status" -ne 0 ]] && grep -Fq "no release for v0.2.0" <<<"$out" || fail "selftest: settling a missing release fails: $out"
