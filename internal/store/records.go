@@ -99,7 +99,7 @@ func (x *Session) MarkRecordsRemoved(source, database string, seen map[string]ma
 		return 0, err
 	}
 	for _, g := range gone {
-		if _, err := x.tx.ExecContext(ctx, `update records set removed_at=? where source=? and database=? and store=? and key_json=?`,
+		if _, err := x.tx.ExecContext(ctx, `update records set removed_at=?, raw_digest=null, value_redacted=0 where source=? and database=? and store=? and key_json=?`,
 			fmtTime(at), source, database, g[0], g[1]); err != nil {
 			return 0, err
 		}
@@ -145,7 +145,7 @@ func (x *Session) MarkDatabasesRemoved(source string, present []string, account 
 	sort.Strings(gone)
 	total := 0
 	for _, db := range gone {
-		res, err := x.tx.ExecContext(ctx, `update records set removed_at=? where source=? and database=? and removed_at is null`, fmtTime(at), source, db)
+		res, err := x.tx.ExecContext(ctx, `update records set removed_at=?, raw_digest=null, value_redacted=0 where source=? and database=? and removed_at is null`, fmtTime(at), source, db)
 		if err != nil {
 			return total, err
 		}

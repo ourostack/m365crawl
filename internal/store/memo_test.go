@@ -3,7 +3,9 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
@@ -100,15 +102,21 @@ func TestRefOf(t *testing.T) {
 	}
 }
 
-func TestRowHashes(t *testing.T) {
+func TestRowHashesOf(t *testing.T) {
 	ctx := context.Background()
 	x := beginSession(t, newStore(t))
 	must0(x.ApplyAccount(ctx, acctA))
 	_, crows, _ := x.ApplyConversationsRows(ctx, []teamsdesktop.Conversation{conv(acctA, "c1", "Chat", "One")})
 	_, _, mrows, _ := x.ApplyMessagesRows(ctx, []teamsdesktop.Message{msg(acctA, "c1", "m1", "hello", base), msg(acctA, "c1", "m2", "again", base)})
 	_, _, arows, _ := x.ApplyActivityRows(ctx, []teamsdesktop.Activity{{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: "a1", Type: "mention", At: base}})
+	ids := func(rows []RowState) (out []int64) {
+		for _, r := range rows {
+			out = append(out, r.Rowid)
+		}
+		return
+	}
 	for kind, rows := range map[byte][]RowState{RowConversation: crows, RowMessage: mrows, RowActivity: arows} {
-		got, err := x.RowHashes(kind)
+		got, err := x.RowHashesOf(kind, ids(rows))
 		if err != nil || len(got) != len(rows) {
 			t.Fatalf("kind %d: %v, %v", kind, got, err)
 		}
@@ -119,29 +127,119 @@ func TestRowHashes(t *testing.T) {
 			}
 		}
 	}
+	// Only the rows asked for come back; a rowid with no row is simply absent.
+	got, err := x.RowHashesOf(RowMessage, []int64{mrows[1].Rowid, 9999})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("asked for one row: %v, %v", got, err)
+	}
+	if got, err := x.RowHashesOf(RowMessage, nil); err != nil || len(got) != 0 {
+		t.Fatalf("asked for nothing: %v, %v", got, err)
+	}
+	// More rowids than one query takes are asked in several.
+	many := make([]int64, 0, 2*rowHashChunk+3)
+	for i := int64(0); i < int64(2*rowHashChunk+3); i++ {
+		many = append(many, 1000+i)
+	}
+	many = append(many, mrows[0].Rowid, mrows[1].Rowid)
+	if got, err := x.RowHashesOf(RowMessage, many); err != nil || len(got) != 2 {
+		t.Fatalf("chunked: %v, %v", got, err)
+	}
 	// A row whose stored hash is unusable is left out: it matches no reference.
 	if _, err := x.tx.Exec(`update messages set content_hash='ab' where rowid=?`, mrows[0].Rowid); err != nil {
 		t.Fatal(err)
 	}
-	got, err := x.RowHashes(RowMessage)
+	got, err = x.RowHashesOf(RowMessage, ids(mrows))
 	if _, ok := got[mrows[0].Rowid]; err != nil || ok || len(got) != 1 {
 		t.Fatalf("after damage: %v, %v", got, err)
 	}
-	if _, err := x.RowHashes(99); err == nil {
+	if _, err := x.RowHashesOf(99, nil); err == nil {
 		t.Fatal("unknown row kind accepted")
 	}
 	// A failing query and a failing scan are errors.
 	y := beginSession(t, newStore(t))
 	_, _ = y.tx.Exec(`drop table messages`)
-	if _, err := y.RowHashes(RowMessage); err == nil {
+	if _, err := y.RowHashesOf(RowMessage, []int64{1}); err == nil {
 		t.Fatal("query error ignored")
 	}
 	w := beginSession(t, newStore(t))
 	_, _ = w.tx.Exec(`drop table conversations`)
 	_, _ = w.tx.Exec(`create table conversations(a, content_hash)`)
 	_, _ = w.tx.Exec(`insert into conversations(a, content_hash) values(1, null)`)
-	if _, err := w.RowHashes(RowConversation); err == nil {
+	if _, err := w.RowHashesOf(RowConversation, []int64{1}); err == nil {
 		t.Fatal("scan error ignored")
+	}
+}
+
+func TestDeleteTypedMemo(t *testing.T) {
+	x := beginSession(t, newStore(t))
+	for _, k := range []string{"a", "b", "c"} {
+		must0(x.PutTypedMemo(srcA, "db1", k, TypedMemo{Digest: []byte{1}, Effects: []byte{1}}))
+	}
+	must0(x.PutTypedMemo(srcA, "db2", "a", TypedMemo{Digest: []byte{1}, Effects: []byte{1}}))
+	must0(x.PutTypedMemo("other", "db1", "a", TypedMemo{Digest: []byte{1}, Effects: []byte{1}}))
+	must0(x.DeleteTypedMemoKeys(srcA, "db1", []string{"a", "c", "missing"}))
+	if got, _ := x.LoadTypedMemo(srcA, "db1"); len(got) != 1 || got["b"].Digest == nil {
+		t.Fatalf("after deleting keys: %v", got)
+	}
+	count := func(source string) (n int) {
+		must0(x.tx.QueryRow(`select count(*) from typed_memo where source=?`, source).Scan(&n))
+		return
+	}
+	must0(x.DeleteTypedMemoOutside(srcA, []string{"db2"}))
+	if count(srcA) != 1 || count("other") != 1 {
+		t.Fatalf("after deleting outside db2: %d, %d", count(srcA), count("other"))
+	}
+	must0(x.DeleteTypedMemoOutside(srcA, nil))
+	if count(srcA) != 0 || count("other") != 1 {
+		t.Fatalf("after deleting everything of one source: %d, %d", count(srcA), count("other"))
+	}
+	y := beginSession(t, newStore(t))
+	_, _ = y.tx.Exec(`drop table typed_memo`)
+	if y.DeleteTypedMemoKeys(srcA, "d", []string{"a"}) == nil || y.DeleteTypedMemoOutside(srcA, []string{"d"}) == nil {
+		t.Fatal("a failing delete was ignored")
+	}
+}
+
+// A removed record keeps no digest, and removed_at is set once and stays.
+func TestRemovedRecordsKeepNoDigest(t *testing.T) {
+	x := beginSession(t, newStore(t))
+	r1, r2, r3 := grec(&acctA, dbA, "events", `"k1"`, `1`), grec(&acctA, dbA, "events", `"k2"`, `2`), grec(&acctA, dbA, "events", `"k3"`, `3`)
+	for _, r := range []*teamsdesktop.GenericRecord{&r1, &r2, &r3} {
+		r.Digest, r.ValueRedacted = []byte{7}, 2
+	}
+	must(x.UpsertRecords(srcA, []teamsdesktop.GenericRecord{r1, r2, r3}, base))
+	later := base.Add(time.Hour)
+	must(x.MarkRecordsRemoved(srcA, dbA, map[string]map[string]struct{}{"events": {`"k1"`: {}}}, later))
+	check := func(key string, wantDigest bool) {
+		t.Helper()
+		var d []byte
+		var red int
+		var removed sql.NullString
+		must0(x.tx.QueryRow(`select raw_digest, value_redacted, removed_at from records where key_json=?`, key).Scan(&d, &red, &removed))
+		if (d != nil) != wantDigest || (wantDigest != (red == 2)) || removed.Valid == wantDigest {
+			t.Fatalf("%s: digest %v redacted %d removed %v", key, d, red, removed)
+		}
+	}
+	check(`"k1"`, true)
+	check(`"k2"`, false)
+	check(`"k3"`, false)
+	var removedAt string
+	must0(x.tx.QueryRow(`select removed_at from records where key_json='"k2"'`).Scan(&removedAt))
+	must(x.MarkRecordsRemoved(srcA, dbA, map[string]map[string]struct{}{}, later.Add(time.Hour)))
+	var again string
+	must0(x.tx.QueryRow(`select removed_at from records where key_json='"k2"'`).Scan(&again))
+	if again != removedAt {
+		t.Fatalf("removed_at moved from %s to %s", removedAt, again)
+	}
+	// The whole database going away clears digests the same way.
+	r4 := grec(&acctA, "Teams:other-manager:react-web-client:00000000-0000-4000-8000-0000000000a1:00000000-0000-4000-8000-0000000000b1:en-us", "events", `"k4"`, `4`)
+	r4.Digest = []byte{7}
+	must(x.UpsertRecords(srcA, []teamsdesktop.GenericRecord{r4}, base))
+	must(x.MarkDatabasesRemoved(srcA, nil, nil, later))
+	var n int
+	must0(x.tx.QueryRow(`select count(*) from records where raw_digest is not null`).Scan(&n))
+	if n != 0 {
+		t.Fatalf("%d rows of removed databases still carry a digest", n)
 	}
 }
 

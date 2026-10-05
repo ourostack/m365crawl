@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/store"
@@ -151,17 +152,26 @@ type memo struct {
 
 	// The archive operations, fields so a test can make them fail.
 	loadTyped   func(source, database string) (map[string]store.TypedMemo, error)
-	rowHashes   func(kind byte) (map[int64][store.DigestLen]byte, error)
+	rowHashes   func(kind byte, rowids []int64) (map[int64][store.DigestLen]byte, error)
 	putTyped    func(source, database, keyJSON string, m store.TypedMemo) error
 	loadRecords func(source, database string) (map[[2]string]store.RecordMemo, error)
+	deleteKeys  func(source, database string, keys []string) error
+	deleteDBs   func(source string, keep []string) error
 
-	hashes  map[byte]map[int64][store.DigestLen]byte // row hashes as the archive stood when the run began, by kind
-	typedDB string
-	typed   map[string]store.TypedMemo
-	cur     *memoEntry // the record being read in full, until add registers it
-	entries []*memoEntry
-	hits    []store.RowRef              // rows vouched for by skipped records
-	changed map[byte]map[int64]struct{} // rows this run inserted or updated, by kind
+	// Bounds: the memory of one database at a time (typed, gen), and the content hashes of the
+	// archive rows that memory names (hashes), loaded when the database's memory is. Rows of the
+	// archive that no remembered record names are never loaded.
+	hashes   map[byte]map[int64][store.DigestLen]byte // by kind
+	typedDB  string
+	typed    map[string]store.TypedMemo
+	seen     map[string]struct{} // keys of typed that the read met, to find the ones that left
+	stale    []staleKey          // remembered records that are no longer in the cache
+	visited  []string            // databases whose memory was loaded
+	filtered bool                // the read covers one account: databases it did not visit are not gone
+	cur      *memoEntry          // the record being read in full, until add registers it
+	entries  []*memoEntry
+	hits     []store.RowRef              // rows vouched for by skipped records
+	changed  map[byte]map[int64]struct{} // rows this run inserted or updated, by kind
 
 	genDB string
 	gen   map[[2]string]store.RecordMemo
@@ -169,23 +179,31 @@ type memo struct {
 	typedSkipped, genericSkipped int // records not read in full, for tests
 }
 
+// staleKey is a remembered typed record that the cache no longer holds.
+type staleKey struct{ database, keyJSON string }
+
 // skip is teamsdesktop.ReadOptions.Skip: it decides whether a typed record can be skipped and,
 // when it can, replays what reading it would have done.
 func (w *writer) skip(acct teamsdesktop.Account, _, database, keyJSON string, digest []byte) bool {
 	m := w.memo
 	m.cur = nil
-	if m.err != nil || digest == nil {
+	if m.err != nil || keyJSON == "" {
 		return false
 	}
 	if m.typedDB != database || m.typed == nil {
-		typed, err := m.loadTyped(m.source, database)
-		if err != nil {
+		if err := m.switchTyped(database); err != nil {
 			m.err = err
 			return false
 		}
-		m.typed, m.typedDB = typed, database
 	}
-	if old, ok := m.typed[keyJSON]; ok && !m.full && bytes.Equal(old.Digest, digest) {
+	old, ok := m.typed[keyJSON]
+	if ok {
+		m.seen[keyJSON] = struct{}{}
+	}
+	if digest == nil {
+		return false
+	}
+	if ok && !m.full && bytes.Equal(old.Digest, digest) {
 		if eff, err := decodeEffects(old.Effects); err == nil {
 			match, err := m.match(eff.rows)
 			if err != nil {
@@ -202,19 +220,65 @@ func (w *writer) skip(acct teamsdesktop.Account, _, database, keyJSON string, di
 	return false
 }
 
-// match reports whether every referenced row held, when this run began, the hash the record left
-// in it. A row a record of this run rewrites afterwards is caught by conflict.
+// switchTyped finishes the database whose memory is loaded and loads the memory of database, and
+// the content hashes of the rows that memory names.
+func (m *memo) switchTyped(database string) error {
+	m.finishTyped()
+	typed, err := m.loadTyped(m.source, database)
+	if err != nil {
+		return err
+	}
+	m.typed, m.typedDB, m.seen = typed, database, map[string]struct{}{}
+	m.visited = append(m.visited, database)
+	want := map[byte]map[int64]struct{}{}
+	for _, tm := range typed {
+		eff, err := decodeEffects(tm.Effects)
+		if err != nil {
+			continue // the record is read in full; nothing to look up
+		}
+		for _, ref := range eff.rows {
+			if want[ref.Kind] == nil {
+				want[ref.Kind] = map[int64]struct{}{}
+			}
+			want[ref.Kind][ref.Rowid] = struct{}{}
+		}
+	}
+	for kind, ids := range want {
+		list := make([]int64, 0, len(ids))
+		for id := range ids {
+			list = append(list, id)
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i] < list[j] })
+		got, err := m.rowHashes(kind, list)
+		if err != nil {
+			return err
+		}
+		if m.hashes[kind] == nil {
+			m.hashes[kind] = map[int64][store.DigestLen]byte{}
+		}
+		for id, h := range got {
+			m.hashes[kind][id] = h
+		}
+	}
+	return nil
+}
+
+// finishTyped notes which remembered records of the loaded database the read did not meet: those
+// have left the cache.
+func (m *memo) finishTyped() {
+	for key := range m.typed {
+		if _, ok := m.seen[key]; !ok {
+			m.stale = append(m.stale, staleKey{m.typedDB, key})
+		}
+	}
+	m.typed, m.seen = nil, nil
+}
+
+// match reports whether every referenced row held, when its database's memory was loaded, the
+// hash the record left in it. A row a record of this run rewrites afterwards is caught by conflict.
 func (m *memo) match(refs []store.RowRef) (bool, error) {
 	for _, ref := range refs {
-		rows, ok := m.hashes[ref.Kind]
-		if !ok {
-			var err error
-			if rows, err = m.rowHashes(ref.Kind); err != nil {
-				return false, err
-			}
-			m.hashes[ref.Kind] = rows
-		}
-		if h, ok := rows[ref.Rowid]; !ok || h != ref.Hash {
+		if h, ok := m.hashes[ref.Kind][ref.Rowid]; !ok || h != ref.Hash {
 			return false, nil
 		}
 	}
@@ -294,15 +358,32 @@ func (m *memo) conflict() bool {
 	return false
 }
 
-// writeMemo remembers the records that were read in full and mapped cleanly.
+// writeMemo remembers the records that were read in full and mapped cleanly, and forgets the ones
+// that are no longer in the cache. A read of one account forgets only within the databases it
+// read; a read of every account also forgets the databases the cache no longer holds. The archive
+// rows the forgotten records produced stay, and so do their removal marks.
 func (w *writer) writeMemo() error {
-	for _, e := range w.memo.entries {
+	m := w.memo
+	m.finishTyped()
+	for _, e := range m.entries {
 		if e.unusable {
 			continue
 		}
-		if err := w.memo.putTyped(w.memo.source, e.database, e.keyJSON, store.TypedMemo{Digest: e.digest, Effects: e.eff.encode()}); err != nil {
+		if err := m.putTyped(m.source, e.database, e.keyJSON, store.TypedMemo{Digest: e.digest, Effects: e.eff.encode()}); err != nil {
 			return err
 		}
+	}
+	byDB := map[string][]string{}
+	for _, s := range m.stale {
+		byDB[s.database] = append(byDB[s.database], s.keyJSON)
+	}
+	for db, keys := range byDB {
+		if err := m.deleteKeys(m.source, db, keys); err != nil {
+			return err
+		}
+	}
+	if !m.filtered {
+		return m.deleteDBs(m.source, m.visited)
 	}
 	return nil
 }

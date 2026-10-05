@@ -589,7 +589,7 @@ func TestMemoFailuresFailTheSource(t *testing.T) {
 				case "load typed":
 					w.memo.loadTyped = func(string, string) (map[string]store.TypedMemo, error) { return nil, boom }
 				case "rows match":
-					w.memo.rowHashes = func(byte) (map[int64][store.DigestLen]byte, error) { return nil, boom }
+					w.memo.rowHashes = func(byte, []int64) (map[int64][store.DigestLen]byte, error) { return nil, boom }
 				case "put typed":
 					w.memo.putTyped = func(string, string, string, store.TypedMemo) error { return boom }
 				case "load records":
@@ -655,7 +655,8 @@ func TestUnusableRowsAreNotRemembered(t *testing.T) {
 	}
 	// writeMemo skips the unusable entry.
 	var put []string
-	w := &writer{memo: &memo{source: "s", putTyped: func(_, _, key string, _ store.TypedMemo) error { put = append(put, key); return nil }}}
+	w := &writer{memo: &memo{source: "s", putTyped: func(_, _, key string, _ store.TypedMemo) error { put = append(put, key); return nil },
+		deleteKeys: func(string, string, []string) error { return nil }, deleteDBs: func(string, []string) error { return nil }}}
 	w.memo.entries = []*memoEntry{{keyJSON: "bad", unusable: true}, {keyJSON: "good"}}
 	if err := w.writeMemo(); err != nil || len(put) != 1 || put[0] != "good" {
 		t.Fatalf("put %v, %v", put, err)
@@ -707,5 +708,134 @@ func TestFullReadBypassesTheFingerprintShortcut(t *testing.T) {
 				t.Fatalf("counts: %+v", forced)
 			}
 		})
+	}
+}
+
+// The read memory is bounded by the cache, not by the archive's age: when records leave the cache,
+// the next sync deletes their typed memory and the digest of their generic row, while the archive
+// rows themselves stay (removed_at stays set).
+func TestMemoIsPrunedWhenRecordsLeaveTheCache(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	full, err := os.ReadFile(logFile(t, root)) //nolint:gosec // test fixture copy
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs := readBlobs(t, root)
+	db, fresh := newDB(t), newDB(t)
+	applyState(t, root, full, blobs, cacheState{"all", 1, nil})
+	run(t, Options{Root: root, DBPath: db})
+	allTyped, allDigests := memoRows(t, db)
+	applyState(t, root, full, blobs, cacheState{"cut", 0.4, nil})
+	touchLog(t, root)
+	run(t, Options{Root: root, DBPath: db})
+	run(t, Options{Root: root, DBPath: fresh})
+	typed, digests := memoRows(t, db)
+	wantTyped, wantDigests := memoRows(t, fresh)
+	if typed >= allTyped || digests >= allDigests {
+		t.Fatalf("the cut removed nothing: %d/%d typed, %d/%d digests", typed, allTyped, digests, allDigests)
+	}
+	if typed != wantTyped || digests != wantDigests {
+		t.Fatalf("memory after the cut: %d typed, %d digests; a fresh archive of the same cache has %d and %d", typed, digests, wantTyped, wantDigests)
+	}
+	d := openRaw(t, db)
+	var removedWithDigest, removed int
+	if err := d.QueryRow(`select count(*) filter (where raw_digest is not null), count(*) from records where removed_at is not null`).Scan(&removedWithDigest, &removed); err != nil {
+		t.Fatal(err)
+	}
+	if removed == 0 || removedWithDigest != 0 {
+		t.Fatalf("%d removed rows, %d of them still carry a digest", removed, removedWithDigest)
+	}
+	// The archive rows of the departed records are kept, as before.
+	if a, b := dumpArchive(t, db), dumpArchive(t, fresh); a == b {
+		t.Fatal("the departed records vanished from the archive")
+	}
+	// Reading the cache back in full restores them: a removed row never matches, so it is read in full.
+	applyState(t, root, full, blobs, cacheState{"all", 1, nil})
+	touchLog(t, root)
+	run(t, Options{Root: root, DBPath: db})
+	if typed, digests := memoRows(t, db); typed != allTyped || digests != allDigests {
+		t.Fatalf("memory after the cache came back: %d typed, %d digests; want %d, %d", typed, digests, allTyped, allDigests)
+	}
+}
+
+// A run for one account only prunes that account's memory: it never saw the others' databases, so
+// it can not say their records left.
+func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	typed, digests := memoRows(t, db)
+	acct := &teamsdesktop.Account{TenantID: "00000000-0000-4000-8000-000000000001", UserID: "00000000-0000-4000-8000-0000000000a1"}
+	touchLog(t, root)
+	run(t, Options{Root: root, DBPath: db, Account: acct})
+	if t2, d2 := memoRows(t, db); t2 != typed || d2 != digests {
+		t.Fatalf("a filtered run changed the memory: %d/%d typed, %d/%d digests", t2, typed, d2, digests)
+	}
+}
+
+// Forgetting records that left the cache can fail like any write; the source then fails and keeps nothing.
+func TestPruneFailuresFailTheSource(t *testing.T) {
+	for _, name := range []string{"keys", "databases"} {
+		t.Run(name, func(t *testing.T) {
+			isolateTmp(t)
+			root := fixtureCopy(t)
+			full, err := os.ReadFile(logFile(t, root)) //nolint:gosec // test fixture copy
+			if err != nil {
+				t.Fatal(err)
+			}
+			blobs := readBlobs(t, root)
+			db := newDB(t)
+			run(t, Options{Root: root, DBPath: db})
+			applyState(t, root, full, blobs, cacheState{"cut", 0.4, nil})
+			touchLog(t, root)
+			boom := errors.New("injected prune failure")
+			old := beforeRead
+			t.Cleanup(func() { beforeRead = old })
+			beforeRead = func(w *writer) {
+				if name == "keys" {
+					w.memo.deleteKeys = func(string, string, []string) error { return boom }
+				} else {
+					w.memo.deleteDBs = func(string, []string) error { return boom }
+				}
+			}
+			before := dumpArchive(t, db)
+			typed, digests := memoRows(t, db)
+			_, _, err = Run(context.Background(), Options{Root: root, DBPath: db})
+			codedErr(t, err, errs.CodeDBError)
+			if !strings.Contains(err.Error(), "injected prune failure") {
+				t.Fatalf("cause lost: %v", err)
+			}
+			if after := dumpArchive(t, db); after != before {
+				t.Fatal("a failed source changed the archive")
+			}
+			if t2, d2 := memoRows(t, db); t2 != typed || d2 != digests {
+				t.Fatal("a failed source changed the memory")
+			}
+		})
+	}
+}
+
+// The hashes of archive rows are loaded for the rows the memory names, not for whole tables.
+func TestRowHashesAreLoadedOnlyForRowsTheMemoryNames(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	db := newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	asked := map[byte]int{}
+	old := beforeRead
+	t.Cleanup(func() { beforeRead = old })
+	beforeRead = func(w *writer) {
+		real := w.memo.rowHashes
+		w.memo.rowHashes = func(kind byte, ids []int64) (map[int64][store.DigestLen]byte, error) {
+			asked[kind] += len(ids)
+			return real(kind, ids)
+		}
+	}
+	touchLog(t, root)
+	run(t, Options{Root: root, DBPath: db})
+	if asked[store.RowMessage] != fixtureMessages || asked[store.RowConversation] != fixtureConversations || asked[store.RowActivity] != fixtureActivity {
+		t.Fatalf("hashes asked for: %v; the memory names %d messages, %d conversations, %d activity items", asked, fixtureMessages, fixtureConversations, fixtureActivity)
 	}
 }

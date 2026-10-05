@@ -325,8 +325,9 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	}
 	defer sess.Rollback() // a no-op after Commit; on any failure nothing of this source is kept
 	w := &writer{ctx: ctx, sess: sess, seenAcct: map[[2]string]bool{}, people: map[[2]string]teamsdesktop.Person{}}
-	w.memo = &memo{source: source, full: full, changed: map[byte]map[int64]struct{}{}, hashes: map[byte]map[int64][store.DigestLen]byte{},
-		loadTyped: sess.LoadTypedMemo, rowHashes: sess.RowHashes, putTyped: sess.PutTypedMemo, loadRecords: sess.LoadRecordMemos}
+	w.memo = &memo{source: source, full: full, filtered: r.o.Account != nil, changed: map[byte]map[int64]struct{}{}, hashes: map[byte]map[int64][store.DigestLen]byte{},
+		loadTyped: sess.LoadTypedMemo, rowHashes: sess.RowHashesOf, putTyped: sess.PutTypedMemo, loadRecords: sess.LoadRecordMemos,
+		deleteKeys: sess.DeleteTypedMemoKeys, deleteDBs: sess.DeleteTypedMemoOutside}
 	beforeRead(w)
 	omissions, err := teamsdesktop.ReadWith(ctx, snap, r.o.Account, teamsdesktop.ReadOptions{Sig: r.sig, Skip: w.skip}, w.add)
 	if err != nil {
@@ -335,7 +336,7 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if w.memo.err != nil {
 		return nil, nil, 0, errs.DBError(w.memo.err)
 	}
-	w.memo.typed = nil
+	w.memo.finishTyped()
 	generic, redacted, err := w.readGeneric(ctx, snap, source, r.o.Account, r.sig, begun)
 	if err != nil {
 		return nil, nil, 0, err

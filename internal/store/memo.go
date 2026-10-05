@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // Read memory. A sync can skip a Teams record whose stored bytes have not changed since the sync
@@ -20,6 +21,13 @@ import (
 //
 // Both are written in the sync's own transaction, so a rollback or a crash forgets them with the
 // rows they describe.
+//
+// What they cost is bounded by the cache, not by the archive's age. A removed generic row keeps no
+// digest (MarkRecordsRemoved, MarkDatabasesRemoved clear it; removed_at itself is never touched,
+// so a record that left stays removed and one that comes back is read in full). A sync deletes
+// the typed_memo rows of records that are no longer in the cache (DeleteTypedMemoKeys,
+// DeleteTypedMemoOutside). A sync loads the memory of one database at a time, and the content
+// hashes of the archive rows that memory names (RowHashesOf), never a whole table.
 
 // Kinds of row a typed record produces, for RowRef.
 const (
@@ -50,39 +58,57 @@ func RefOf(kind byte, r RowState) (RowRef, bool) {
 	return ref, true
 }
 
-var rowHashSQL = map[byte]string{
-	RowConversation: `select rowid, content_hash from conversations`,
-	RowMessage:      `select rowid, content_hash from messages`,
-	RowActivity:     `select rowid, content_hash from activity`,
+var rowHashTable = map[byte]string{
+	RowConversation: "conversations",
+	RowMessage:      "messages",
+	RowActivity:     "activity",
 }
 
-// RowHashes returns, for every row of the table kind names, the first DigestLen bytes of its
-// content hash, by rowid, as the transaction sees it now. One scan answers every later question
-// of whether a row still holds what a record left in it.
-func (x *Session) RowHashes(kind byte) (map[int64][DigestLen]byte, error) {
-	q, ok := rowHashSQL[kind]
+// rowHashChunk is how many rowids one RowHashesOf query names.
+const rowHashChunk = 500
+
+// RowHashesOf returns the first DigestLen bytes of the content hash of the rows of the table kind
+// names with the given rowids, by rowid, as the transaction sees them now. A rowid with no row, or
+// a row with no usable hash, is absent from the answer: it holds nothing a record could have left
+// there. Asking for exactly the rows the memory references keeps the load as large as the memory,
+// which the cache bounds, and not as large as the archive.
+func (x *Session) RowHashesOf(kind byte, rowids []int64) (map[int64][DigestLen]byte, error) {
+	table, ok := rowHashTable[kind]
 	if !ok {
 		return nil, fmt.Errorf("unknown row kind %d", kind)
 	}
-	rows, err := x.tx.QueryContext(context.Background(), q)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
 	out := map[int64][DigestLen]byte{}
-	for rows.Next() {
-		var rowid int64
-		var hash string
-		if err := rows.Scan(&rowid, &hash); err != nil {
+	for len(rowids) > 0 {
+		n := min(rowHashChunk, len(rowids))
+		args := make([]any, n)
+		for i, id := range rowids[:n] {
+			args[i] = id
+		}
+		rowids = rowids[n:]
+		rows, err := x.tx.QueryContext(context.Background(), `select rowid, content_hash from `+table+` where rowid in (?`+strings.Repeat(",?", n-1)+`)`, args...)
+		if err != nil {
 			return nil, err
 		}
-		var h [DigestLen]byte
-		if b, err := hex.DecodeString(hash); err == nil && len(b) >= DigestLen {
-			copy(h[:], b)
-			out[rowid] = h
-		} // a row with no usable hash holds nothing a record could have left: it matches no ref
+		for rows.Next() {
+			var rowid int64
+			var hash string
+			if err := rows.Scan(&rowid, &hash); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if b, err := hex.DecodeString(hash); err == nil && len(b) >= DigestLen {
+				var h [DigestLen]byte
+				copy(h[:], b)
+				out[rowid] = h
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // TypedMemo is what the archive remembers of one typed record.
@@ -112,6 +138,33 @@ func (x *Session) PutTypedMemo(source, database, keyJSON string, m TypedMemo) er
 	_, err := x.tx.ExecContext(context.Background(), `insert into typed_memo(source, database, key_json, digest, effects) values(?,?,?,?,?)
 on conflict(source, database, key_json) do update set digest=excluded.digest, effects=excluded.effects`,
 		source, database, keyJSON, m.Digest, m.Effects)
+	return err
+}
+
+// DeleteTypedMemoKeys forgets the remembered records of one database of source with these keys.
+// The archive rows the records produced are not touched.
+func (x *Session) DeleteTypedMemoKeys(source, database string, keys []string) error {
+	for _, k := range keys {
+		if _, err := x.tx.ExecContext(context.Background(), `delete from typed_memo where source=? and database=? and key_json=?`, source, database, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteTypedMemoOutside forgets every remembered record of source whose database is not in keep
+// (the databases the cache still holds), so the memory of a database that left the cache goes
+// with it. Call it only after reading every database of source.
+func (x *Session) DeleteTypedMemoOutside(source string, keep []string) error {
+	q := `delete from typed_memo where source=?`
+	args := []any{source}
+	if len(keep) > 0 {
+		q += ` and database not in (?` + strings.Repeat(",?", len(keep)-1) + `)`
+		for _, d := range keep {
+			args = append(args, d)
+		}
+	}
+	_, err := x.tx.ExecContext(context.Background(), q, args...)
 	return err
 }
 
