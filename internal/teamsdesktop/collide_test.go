@@ -47,6 +47,14 @@ func copyFixture(t *testing.T) string {
 	return root
 }
 
+// isolateTmp points snapshots at a private temp dir (TMPDIR on Unix, TMP on Windows).
+func isolateTmp(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp)
+}
+
 var touched int
 
 // touchLog makes the next sync see a changed source.
@@ -130,7 +138,7 @@ func newPaths(t *testing.T) (skipDB, fullDB string) {
 // read must leave that row, and count it, the same way on every sync, however the two records and
 // their order change.
 func TestCollidingGenericKeysMatchAFullReadOnEverySync(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateTmp(t)
 	root := copyFixture(t)
 	a, b := "https://x.test/a?sig=AAA", "https://x.test/a?sig=BBB"
 	states := [][]teamsdesktop.FakeRecord{
@@ -166,7 +174,7 @@ func TestCollidingGenericKeysMatchAFullReadOnEverySync(t *testing.T) {
 // come back: a skipping sync and a full read agree on the rows, the redaction counts and the
 // record counts, on every sync.
 func TestRedactedAndChangingGenericValuesMatchAFullRead(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateTmp(t)
 	root := copyFixture(t)
 	bearer, signed := "Bearer secret-token-value-1", "https://x.test/f?a=1&sig=deadbeef&b=2" //nolint:gosec // G101: a synthetic value
 	states := [][]teamsdesktop.FakeRecord{
@@ -214,7 +222,7 @@ func TestRandomGenericStatesSkipEqualsFull(t *testing.T) {
 	}
 	for _, seed := range seeds {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
-			t.Setenv("TMPDIR", t.TempDir())
+			isolateTmp(t)
 			rng := rand.New(rand.NewSource(seed)) //nolint:gosec // a test series, not security
 			root := copyFixture(t)
 			var current map[string][]teamsdesktop.FakeRecord

@@ -933,3 +933,83 @@ func TestMarkContended(t *testing.T) {
 		}
 	}
 }
+
+// A version 3 archive as v0.2.0 writes it (the records table without the read-memory columns, no
+// typed_memo table, schema version 3, every row of the fixture synced) upgrades in place on the
+// next sync: nothing is lost, the first sync reads every record and counts them as a full read
+// does, remembers them, and the sync after that skips.
+func TestUpgradeFromAVersion3ArchiveAsV020WritesIt(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	db, fresh := newDB(t), newDB(t)
+	run(t, Options{Root: root, DBPath: db})
+	d := openRaw(t, db)
+	for _, q := range []string{
+		`alter table records drop column raw_digest`, `alter table records drop column value_redacted`,
+		`drop table typed_memo`, `update schema_migrations set version = 3`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantRows := dumpV3Content(t, db)
+	runs := watchApplies(t)
+	touchLog(t, root)
+	first, _ := run(t, Options{Root: root, DBPath: db})
+	if r := (*runs)[len(*runs)-1]; r.typedSkips != 0 || r.genericSkips != 0 {
+		t.Fatalf("the first sync after the upgrade skipped records that had no memory: %+v", r)
+	}
+	if first.Messages.Unchanged != fixtureMessages || first.Records.Unchanged != fixtureRecords || first.Messages.Updated != 0 {
+		t.Fatalf("the upgrade read as edits: %+v", first)
+	}
+	if got := dumpV3Content(t, db); got != wantRows {
+		t.Fatal("the upgrade changed archived content")
+	}
+	if typed, digests := memoRows(t, db); typed == 0 || digests != fixtureRecords {
+		t.Fatalf("memory after the upgrade: %d typed, %d digests", typed, digests)
+	}
+	touchLog(t, root)
+	again, _ := run(t, Options{Root: root, DBPath: db})
+	if r := (*runs)[len(*runs)-1]; r.typedSkips == 0 || r.genericSkips != fixtureRecords {
+		t.Fatalf("the second sync did not skip: %+v", r)
+	}
+	if again.Messages != first.Messages || again.Records != first.Records {
+		t.Fatalf("counts moved: %+v vs %+v", again, first)
+	}
+	run(t, Options{Root: root, DBPath: fresh})
+	if a, b := dumpArchive(t, db), dumpArchive(t, fresh); a != b {
+		t.Fatal("the upgraded archive differs from a fresh one")
+	}
+}
+
+// dumpV3Content is the archived content that exists in a version 3 archive.
+func dumpV3Content(t *testing.T, db string) string {
+	t.Helper()
+	d := openRaw(t, db)
+	var b strings.Builder
+	for _, q := range []string{
+		`select tenant_id, user_id, id, content_hash from conversations order by 1,2,3`,
+		`select tenant_id, user_id, conversation_id, id, content_hash from messages order by 1,2,3,4`,
+		`select tenant_id, user_id, id, content_hash from activity order by 1,2,3`,
+		`select source, database, store, key_json, value_json, content_hash, removed_at is null from records order by 1,2,3,4`,
+	} {
+		rows, err := d.Query(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(&b, "%q\n", vals)
+		}
+		_ = rows.Close()
+	}
+	return b.String()
+}
