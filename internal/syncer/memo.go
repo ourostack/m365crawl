@@ -45,12 +45,20 @@ const FullReadEnv = "TEAMSCRAWL_FULL_READ"
 type typedEffects struct {
 	rows   []store.RowRef
 	people []teamsdesktop.Person
+	// contended says another record of the same source produced a row this record produced, the
+	// last time the source was read. Such a record is never skipped: skipping it would vouch for a
+	// row its neighbour rewrites, and the conflict guard would then read the whole source twice on
+	// every sync. Read in full together, the records leave the row where a full read leaves it.
+	contended bool
 }
 
-const effectsVersion = 1
+const effectsVersion = 2
 
 func (e typedEffects) encode() []byte {
-	b := []byte{effectsVersion}
+	b := []byte{effectsVersion, 0}
+	if e.contended {
+		b[1] = 1
+	}
 	b = binary.AppendUvarint(b, uint64(len(e.rows)))
 	for _, r := range e.rows {
 		b = append(b, r.Kind)
@@ -76,10 +84,11 @@ var errBadEffects = errors.New("bad effects")
 // record is then read in full.
 func decodeEffects(b []byte) (typedEffects, error) {
 	var e typedEffects
-	if len(b) == 0 || b[0] != effectsVersion {
+	if len(b) < 2 || b[0] != effectsVersion || b[1] > 1 {
 		return e, errBadEffects
 	}
-	r := bytes.NewReader(b[1:])
+	e.contended = b[1] == 1
+	r := bytes.NewReader(b[2:])
 	n, err := binary.ReadUvarint(r)
 	if err != nil || n > uint64(len(b)) {
 		return e, errBadEffects
@@ -204,7 +213,7 @@ func (w *writer) skip(acct teamsdesktop.Account, _, database, keyJSON string, di
 		return false
 	}
 	if ok && !m.full && bytes.Equal(old.Digest, digest) {
-		if eff, err := decodeEffects(old.Effects); err == nil {
+		if eff, err := decodeEffects(old.Effects); err == nil && !eff.contended {
 			match, err := m.match(eff.rows)
 			if err != nil {
 				m.err = err
@@ -358,6 +367,37 @@ func (m *memo) conflict() bool {
 	return false
 }
 
+// markContended flags the records read in full that produced a row some other record of this read
+// also produced (read in full, or skipped and so vouching for it). See typedEffects.contended.
+func (m *memo) markContended() {
+	type row struct {
+		kind  byte
+		rowid int64
+	}
+	owners := map[row]int{}
+	for _, ref := range m.hits {
+		owners[row{ref.Kind, ref.Rowid}]++
+	}
+	for _, e := range m.entries {
+		seen := map[row]struct{}{}
+		for _, ref := range e.eff.rows {
+			k := row{ref.Kind, ref.Rowid}
+			if _, dup := seen[k]; !dup {
+				seen[k] = struct{}{}
+				owners[k]++
+			}
+		}
+	}
+	for _, e := range m.entries {
+		for _, ref := range e.eff.rows {
+			if owners[row{ref.Kind, ref.Rowid}] > 1 {
+				e.eff.contended = true
+				break
+			}
+		}
+	}
+}
+
 // writeMemo remembers the records that were read in full and mapped cleanly, and forgets the ones
 // that are no longer in the cache. A read of one account forgets only within the databases it
 // read; a read of every account also forgets the databases the cache no longer holds. The archive
@@ -365,6 +405,7 @@ func (m *memo) conflict() bool {
 func (w *writer) writeMemo() error {
 	m := w.memo
 	m.finishTyped()
+	m.markContended()
 	for _, e := range m.entries {
 		if e.unusable {
 			continue

@@ -1,15 +1,20 @@
 package syncer
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb/journal"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/store"
@@ -252,10 +257,19 @@ func TestEffectsRoundTrip(t *testing.T) {
 		t.Fatal("another version accepted")
 	}
 	// Counts larger than the data are refused before anything is allocated for them.
-	for _, huge := range [][]byte{{effectsVersion, 0xff, 0xff, 0xff, 0xff, 0x0f}, {effectsVersion, 0, 0xff, 0xff, 0xff, 0xff, 0x0f}} {
+	for _, huge := range [][]byte{{effectsVersion, 0, 0xff, 0xff, 0xff, 0xff, 0x0f}, {effectsVersion, 0, 0, 0xff, 0xff, 0xff, 0xff, 0x0f}} {
 		if _, err := decodeEffects(huge); err == nil {
 			t.Fatalf("%x accepted", huge)
 		}
+	}
+	// The contended flag round-trips, and any other flag byte is refused.
+	flagged := typedEffects{rows: in.rows, contended: true}.encode()
+	if e, err := decodeEffects(flagged); err != nil || !e.contended || len(e.rows) != 3 {
+		t.Fatalf("contended effects: %+v %v", e, err)
+	}
+	flagged[1] = 2
+	if _, err := decodeEffects(flagged); err == nil {
+		t.Fatal("an unknown flag byte accepted")
 	}
 	// A time that does not parse is refused.
 	bad := typedEffects{people: []teamsdesktop.Person{{TenantID: "t", ID: "i", SeenAt: time.Unix(1, 0)}}}.encode()
@@ -837,5 +851,146 @@ func TestRowHashesAreLoadedOnlyForRowsTheMemoryNames(t *testing.T) {
 	run(t, Options{Root: root, DBPath: db})
 	if asked[store.RowMessage] != fixtureMessages || asked[store.RowConversation] != fixtureConversations || asked[store.RowActivity] != fixtureActivity {
 		t.Fatalf("hashes asked for: %v; the memory names %d messages, %d conversations, %d activity items", asked, fixtureMessages, fixtureConversations, fixtureActivity)
+	}
+}
+
+// addDuplicateRecord appends to the cache's log a second reply chain record, under another key,
+// that carries the same message (same id, same version) with other text: two records of one
+// source that produce one typed row with different content. No hook is involved; it is bytes in a
+// cache. edit is applied to the copy of the record's value (same length).
+func addDuplicateRecord(t *testing.T, root string, edit func(val []byte) []byte) {
+	t.Helper()
+	path := logFile(t, root)
+	f, err := os.Open(path) //nolint:gosec // test fixture copy
+	if err != nil {
+		t.Fatal(err)
+	}
+	var batches [][]byte
+	var next uint64 // the sequence number the next batch takes
+	var dupKey, dupVal []byte
+	jr := journal.NewReader(f, nil, false, true)
+	for {
+		rr, err := jr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err := io.ReadAll(rr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batches = append(batches, rec)
+		seq, count := binary.LittleEndian.Uint64(rec), binary.LittleEndian.Uint32(rec[8:])
+		next = max(next, seq+uint64(count))
+		b := rec[12:]
+		for i := uint32(0); i < count; i++ {
+			typ := b[0]
+			kl, n := binary.Uvarint(b[1:])
+			key := b[1+n : 1+n+int(kl)]
+			b = b[1+n+int(kl):]
+			if typ != 1 {
+				continue
+			}
+			vl, n := binary.Uvarint(b)
+			val := b[n : n+int(vl)]
+			b = b[n+int(vl):]
+			if dupKey == nil && bytes.HasPrefix(key, []byte{0, 1, 1, 1}) && bytes.Contains(val, []byte("<p>Hello from Alex Fixture</p>")) {
+				dupKey, dupVal = append([]byte(nil), key...), edit(append([]byte(nil), val...))
+			}
+		}
+	}
+	_ = f.Close()
+	if dupKey == nil {
+		t.Fatal("the fixture has no reply chain record to duplicate")
+	}
+	dupKey[len(dupKey)-1] = '9' // the same key text with another last character: a different record
+	batch := binary.LittleEndian.AppendUint64(nil, next)
+	batch = binary.LittleEndian.AppendUint32(batch, 1)
+	batch = append(batch, 1)
+	batch = binary.AppendUvarint(batch, uint64(len(dupKey)))
+	batch = append(batch, dupKey...)
+	batch = binary.AppendUvarint(batch, uint64(len(dupVal)))
+	batch = append(batch, dupVal...)
+	batches = append(batches, batch)
+	out, err := os.Create(path) //nolint:gosec // test fixture copy
+	if err != nil {
+		t.Fatal(err)
+	}
+	jw := journal.NewWriter(out)
+	for _, rec := range batches {
+		w, err := jw.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := jw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two records of one source that produce one message row at the same version with different text
+// leave a skipping sync equal to a full read on every sync, and a sync costs one read of the
+// source, not two: the conflict is remembered, so the records that share the row are read in full
+// from the start, without first being skipped and rolled back.
+func TestTwoRecordsOneTypedRowCostOneReadAndMatchAFullRead(t *testing.T) {
+	isolateTmp(t)
+	root := fixtureCopy(t)
+	addDuplicateRecord(t, root, func(val []byte) []byte {
+		return bytes.Replace(val, []byte("<p>Hello from"), []byte("<p>Hxllo from"), 1)
+	})
+	reads := 0
+	old := beforeRead
+	beforeRead = func(*writer) { reads++ }
+	t.Cleanup(func() { beforeRead = old })
+	skipDB, fullDB := newDB(t), newDB(t)
+	for i := 1; i <= 6; i++ {
+		touchLog(t, root)
+		reads = 0
+		sr, sc, err1 := Run(context.Background(), Options{Root: root, DBPath: skipDB})
+		skipReads := reads
+		fr, fc, err2 := Run(context.Background(), Options{Root: root, DBPath: fullDB, FullRead: true})
+		if err1 != nil || err2 != nil {
+			t.Fatalf("sync %d: %v / %v", i, err1, err2)
+		}
+		if a, b := reportKey(t, sr, sc), reportKey(t, fr, fc); a != b {
+			t.Fatalf("sync %d: reports differ\nskip: %s\nfull: %s", i, a, b)
+		}
+		if a, b := dumpArchive(t, skipDB), dumpArchive(t, fullDB); a != b {
+			t.Fatalf("sync %d: archives differ", i)
+		}
+		if i >= 3 && skipReads != 1 {
+			t.Fatalf("sync %d read the source %d times; the conflict must be remembered, so one read is enough", i, skipReads)
+		}
+	}
+}
+
+// A record is contended when another record of the read produced one of its rows, whether that
+// record was read in full or skipped; a row a record names twice is not contention.
+func TestMarkContended(t *testing.T) {
+	ref := func(id int64) store.RowRef { return store.RowRef{Kind: store.RowMessage, Rowid: id} }
+	shared, alone, twice, vouched := &memoEntry{}, &memoEntry{}, &memoEntry{}, &memoEntry{}
+	m := &memo{entries: []*memoEntry{
+		shared, {eff: typedEffects{rows: []store.RowRef{ref(1)}}}, alone, twice, vouched,
+	}}
+	shared.eff.rows = []store.RowRef{ref(1), ref(2)}
+	alone.eff.rows = []store.RowRef{ref(3)}
+	twice.eff.rows = []store.RowRef{ref(4), ref(4)}
+	vouched.eff.rows = []store.RowRef{ref(5)}
+	m.hits = []store.RowRef{ref(5), {Kind: store.RowConversation, Rowid: 3}}
+	m.markContended()
+	got := []bool{shared.eff.contended, m.entries[1].eff.contended, alone.eff.contended, twice.eff.contended, vouched.eff.contended}
+	want := []bool{true, true, false, false, true}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("contended = %v, want %v", got, want)
+		}
 	}
 }
