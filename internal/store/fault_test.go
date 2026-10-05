@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -249,7 +248,7 @@ func injectFaults(t *testing.T, s *Store) *injector {
 			path = "/" + path
 		}
 	}
-	db := sql.OpenDB(faultConnector{dsn: (&url.URL{Scheme: "file", Path: path}).String() + "?_pragma=busy_timeout(5000)", inj: inj})
+	db := sql.OpenDB(faultConnector{dsn: sqliteFileURI(path, "_pragma=busy_timeout(5000)"), inj: inj})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	s.db = db

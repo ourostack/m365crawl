@@ -14,7 +14,7 @@ Ready checks
   ● full_disk_access   not applicable on Windows
   ● teams_origin       1 Teams origin(s) found
   ● database_writable  <db> is writable
-  ● schema_version     schema v2
+  ● schema_version     schema v3
   ● fts                full-text indexes present
   ● archive_newer      the archive was written by this or an older teamscrawl (derivation version 2)
   ● last_sync_status   the last sync was ok

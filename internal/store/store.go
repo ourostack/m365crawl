@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
@@ -79,7 +80,7 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	db, _ := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()) // lazy: it fails only on an unknown driver
+	db, _ := sql.Open("sqlite", sqliteFileURI(path, "mode=ro")) // lazy: it fails only on an unknown driver
 	defer func() { _ = db.Close() }()
 	var found int
 	if err := db.QueryRowContext(ctx, `select coalesce(max(version), 0) from schema_migrations`).Scan(&found); err != nil {
@@ -89,6 +90,14 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
 	}
 	return nil
+}
+
+func sqliteFileURI(path, rawQuery string) string {
+	slashPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath, RawQuery: rawQuery}).String()
 }
 
 // absPath returns path as an absolute path. The SQLite driver takes the path as a URI and reads a

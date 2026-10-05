@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -134,6 +135,9 @@ func synced(t *testing.T) (syncer.Report, string) {
 		if err != nil {
 			syncErr = err
 			return
+		}
+		if runtime.GOOS == "windows" {
+			setCurrentUserAndSystemOnly(t, dir)
 		}
 		archiveMu.Lock()
 		archive = dir
@@ -845,7 +849,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	}
 
 	// The generic records table: report hits by manager and store name only, never the value.
-	_, hits, truncated, err := st.SQL(context.Background(), "select source, database, store, value_json from records where value_json like '%eyJ%' or value_json like '%refresh_token%' or value_json like '%access_token%' or value_json like '%Bearer %'", acceptanceRowLimit)
+	_, hits, truncated, err := st.SQL(context.Background(), credentialLeakCandidateSQL(), acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,10 +862,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 		database, _ := row[1].(string)
 		store, _ := row[2].(string)
 		value, _ := row[3].(string)
-		n := 0
-		for _, p := range tokenPatterns {
-			n += len(p.FindAllStringIndex(value, -1))
-		}
+		n := credentialLeakCount(value)
 		if n == 0 {
 			continue
 		}
@@ -886,3 +887,4 @@ func TestRealNoAuthDecoded(t *testing.T) {
 		t.Errorf("%d credential-shaped strings in records outside message-content managers", outside)
 	}
 }
+

@@ -117,6 +117,13 @@ func (rt *runtime) archiveChecks() []check {
 		return append(cs, check{Name: "schema_version", Detail: "cannot read the archive: " + err.Error(), Fix: fix},
 			check{Name: "fts", Detail: "cannot read the archive", Fix: fix}, check{Name: "last_sync_age", Detail: "cannot read the archive", Fix: fix})
 	}
+	if row.SchemaVersion > store.SchemaVersion {
+		e := errs.ArchiveSchemaNewer(row.SchemaVersion, store.SchemaVersion)
+		return append(cs,
+			check{Name: "schema_version", Detail: e.Message, Fix: e.Fix},
+			check{Name: "fts", Detail: "cannot read an archive written by a newer teamscrawl", Fix: e.Fix},
+			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer teamscrawl", Fix: e.Fix})
+	}
 	if row.SchemaVersion == store.SchemaVersion {
 		cs = append(cs, check{Name: "schema_version", OK: true, Detail: fmt.Sprintf("schema v%d", row.SchemaVersion)})
 	} else { // older: a newer archive is refused when it is opened

@@ -920,7 +920,7 @@ func TestE2EFieldsAndMaxText(t *testing.T) {
 	}
 
 	// Bad keys and non-list commands are usage errors with a fix.
-	wantError(t, e.cmd("messages", "--fields", "id,text_truncated"), 2, "usage")
+	wantError(t, e.cmd("messages", "--fields", "id,nope"), 2, "usage")
 	wantError(t, e.cmd("whoami", "--fields", "id"), 2, "usage")
 	wantError(t, e.cmd("status", "--max-text", "5"), 2, "usage")
 	wantError(t, e.cmd("messages", "--max-text", "-1"), 2, "usage")
