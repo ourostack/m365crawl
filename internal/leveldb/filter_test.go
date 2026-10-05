@@ -56,14 +56,8 @@ func TestLoadWithKeepFilters(t *testing.T) {
 	put("b/y", "2")
 	_ = db.Close()
 
-	full, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := LoadWith(dir, LoadOptions{Keep: keepPrefix("a/")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	full := mustLoad(t, dir)
+	d := mustLoadWith(t, dir, LoadOptions{Keep: keepPrefix("a/")})
 
 	want := map[string]string{"a/over": "new", "a/back": "v2", "a/new": "fresh"}
 	for k, v := range want {
@@ -111,18 +105,15 @@ func TestLoadWithKeepFilters(t *testing.T) {
 func TestLoadWithKeepSeesUserKeys(t *testing.T) {
 	dir := compactedDir(t)
 	seen := map[string]bool{}
-	d, err := LoadWith(dir, LoadOptions{Keep: func(k []byte) bool { seen[string(k)] = true; return false }})
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoadWith(t, dir, LoadOptions{Keep: func(k []byte) bool { seen[string(k)] = true; return false }})
 	if len(seen) != 50 || !seen["k7"] {
 		t.Fatalf("Keep saw %d distinct keys", len(seen))
 	}
 	if d.Stats().Keys != 0 || d.Stats().Skipped != 50 {
 		t.Fatalf("stats %+v", d.Stats())
 	}
-	n, err := LoadWith(dir, LoadOptions{})
-	if err != nil || n.Stats().Keys != 50 {
-		t.Fatalf("nil Keep: %v %+v", err, n.Stats())
+	n := mustLoadWith(t, dir, LoadOptions{})
+	if n.Stats().Keys != 50 {
+		t.Fatalf("nil Keep: %+v", n.Stats())
 	}
 }

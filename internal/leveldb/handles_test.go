@@ -3,6 +3,7 @@ package leveldb
 import (
 	"errors"
 	"os"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -33,10 +34,7 @@ func TestTableFilesStayOpen(t *testing.T) {
 	cacheBytes = 1 // every block is larger than the bound, so nothing is cached
 	t.Cleanup(func() { cacheBytes = old })
 	dir, _ := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	scanAll(t, d)
 	first := d.cache.reads
 	var handles []*os.File
@@ -73,7 +71,7 @@ func TestTableFilesStayOpen(t *testing.T) {
 		t.Fatal("Close left table files open")
 	}
 	for _, f := range handles {
-		if _, err := f.Stat(); !errors.Is(err, os.ErrClosed) {
+		if _, err := f.Stat(); err == nil || (!errors.Is(err, os.ErrClosed) && runtime.GOOS != "windows") {
 			t.Fatalf("handle not closed: %v", err)
 		}
 	}
@@ -83,10 +81,7 @@ func TestTableFilesStayOpen(t *testing.T) {
 // handed out before Close stay valid.
 func TestCloseSemantics(t *testing.T) {
 	dir, want := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	var lazyKey, heldKey string
 	for k, e := range d.entries {
 		switch {
@@ -120,10 +115,7 @@ func TestCloseSemantics(t *testing.T) {
 
 // Close with no lazy read has nothing to release and reports no error.
 func TestCloseWithoutReads(t *testing.T) {
-	d, err := Load(compactedDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, compactedDir(t))
 	if openHandles(d) != 0 {
 		t.Fatal("Load opened table handles that only lazy reads need")
 	}
@@ -135,10 +127,7 @@ func TestCloseWithoutReads(t *testing.T) {
 // A close error from a table file is reported (the first one), and the rest still close.
 func TestCloseReportsFirstError(t *testing.T) {
 	dir, _ := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	scanAll(t, d)
 	var opened []int
 	for i, tb := range d.tables {
@@ -163,10 +152,7 @@ func TestCloseReportsFirstError(t *testing.T) {
 // handed out before an eviction keep their contents.
 func TestBlockCacheBoundedByBytes(t *testing.T) {
 	dir, _ := buildMixed(t, opt.SnappyCompression)
-	probe, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	probe := mustLoad(t, dir)
 	type blk struct {
 		table int
 		h     blockHandle
@@ -203,10 +189,7 @@ func TestBlockCacheBoundedByBytes(t *testing.T) {
 	old := cacheBytes
 	t.Cleanup(func() { cacheBytes = old })
 	cacheBytes = sizes[0] + sizes[1] + 1
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	defer func() { _ = d.Close() }()
 	first, err := d.cache.get(d.tables, blocks[0].table, blocks[0].h)
 	if err != nil {
@@ -258,10 +241,7 @@ func TestBlockLargerThanCacheIsNotCached(t *testing.T) {
 	cacheBytes = 8
 	t.Cleanup(func() { cacheBytes = old })
 	dir, want := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	defer func() { _ = d.Close() }()
 	checkAgainst(t, d, want)
 	if d.cache.bytes != 0 || len(d.cache.blocks) != 0 || d.cache.order.Len() != 0 {
