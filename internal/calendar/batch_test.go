@@ -405,13 +405,13 @@ func TestBatchReadErrors(t *testing.T) {
 	}
 }
 
-func TestCaptureReminderAloneMovesDetailClock(t *testing.T) {
+func TestCaptureReminderAloneKeepsDetailClock(t *testing.T) {
 	old := Capture(nil, thin(t, t1))
 	in := thin(t, t2)
 	five := 5
 	in.ReminderMinutes = &five
 	got := Capture(&old, in)
-	if got.ReminderMinutes == nil || got.DetailAsOf == nil || !got.DetailAsOf.Equal(mustTime(t, t2)) {
+	if got.ReminderMinutes == nil || *got.ReminderMinutes != 5 || got.DetailAsOf != nil {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -422,5 +422,25 @@ func TestLinkRecapsEventEarlierThanRecap(t *testing.T) {
 	batch(t, db, Batch{Window: tw(t), Recaps: []Recap{unlinked(t, "c1")}}, "2026-10-06T02:00:00Z")
 	if uid, _ := linkState(t, db, "c1"); uid != "uid-a" {
 		t.Fatalf("uid %q", uid)
+	}
+}
+
+func TestCoverageGapWhenOneAccountNeverLoadedTheDay(t *testing.T) {
+	db := openDB(t)
+	w1, w2 := tw(t), tw(t)
+	w2.AccountID = "tenant-2/user-2"
+	batch(t, db, Batch{Window: w1, CoveredDays: []string{"2026-10-05", "2026-10-06"}}, "2026-10-07T01:00:00Z")
+	batch(t, db, Batch{Window: w2, CoveredDays: []string{"2026-10-05"}}, "2026-10-08T01:00:00Z")
+	q := func(account, from, to string) AgendaResult {
+		return listed(t, db, AgendaQuery{AccountID: account, From: mustTime(t, from), To: mustTime(t, to)})
+	}
+	if r := q("", "2026-10-05T00:00:00Z", "2026-10-06T00:00:00Z"); r.Gap || !r.AsOf.Equal(mustTime(t, "2026-10-07T01:00:00Z")) {
+		t.Fatalf("both accounts loaded 10-05: %+v", r)
+	}
+	if r := q("", "2026-10-05T00:00:00Z", "2026-10-07T00:00:00Z"); !r.Gap {
+		t.Fatal("the second account never loaded 10-06: gap")
+	}
+	if r := q(acct, "2026-10-05T00:00:00Z", "2026-10-07T00:00:00Z"); r.Gap {
+		t.Fatal("scoped to the first account there is no gap")
 	}
 }

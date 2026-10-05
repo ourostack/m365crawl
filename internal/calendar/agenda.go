@@ -44,7 +44,9 @@ type AgendaItem struct {
 // out unless the query asks for them.
 func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error) {
 	var res AgendaResult
-	rows, err := loadEvents(ctx, db, q.AccountID)
+	fromDate := q.From.Format(dateLayout)
+	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
+	rows, err := loadEvents(ctx, db, q.AccountID, q.From, q.To, fromDate, toDate)
 	if err != nil {
 		return res, err
 	}
@@ -60,8 +62,6 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 		return res, nil
 	}
 	res.Gap, res.AsOf = coverage(windows, days, q.From, q.To)
-	fromDate := q.From.Format(dateLayout)
-	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
 	fresh := map[string]map[Source]time.Time{}
 	for _, w := range windows {
 		if fresh[w.AccountID] == nil {
@@ -150,35 +150,52 @@ type coveredDay struct {
 }
 
 // coverage reports whether any part of [from, to) is uncovered, and the oldest verification time
-// among what covers it. A source with covered-day rows covers exactly those days (dates in from's
-// zone); a source without any covers its whole window.
+// among what covers it. Coverage is keyed by (source, account) and judged per account. Within an
+// account, a source with covered-day rows covers exactly those days (dates in from's zone) and a
+// source without any covers its whole window; sources of one account complement each other. A day
+// is a gap when any account in scope does not cover it, so an all-accounts query never hides an
+// account that skipped the day. With nothing in scope every day is a gap.
 func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool, asOf time.Time) {
 	type srcKey struct {
 		source  Source
 		account string
 	}
+	type accountCover struct {
+		verified map[string]time.Time // date -> newest verification across the account's sources
+		spans    []Window             // windows of the account's sources that have no covered days
+	}
 	withDays := map[srcKey]bool{}
-	verified := map[string]time.Time{} // date -> newest verification across sources
+	accounts := map[string]*accountCover{}
+	of := func(account string) *accountCover {
+		if accounts[account] == nil {
+			accounts[account] = &accountCover{verified: map[string]time.Time{}}
+		}
+		return accounts[account]
+	}
 	for _, d := range days {
 		withDays[srcKey{d.Source, d.AccountID}] = true
-		if d.LastVerifiedAt.After(verified[d.Day]) {
-			verified[d.Day] = d.LastVerifiedAt
+		c := of(d.AccountID)
+		if d.LastVerifiedAt.After(c.verified[d.Day]) {
+			c.verified[d.Day] = d.LastVerifiedAt
 		}
 	}
-	var spans []Window
 	for _, w := range windows {
+		c := of(w.AccountID)
 		if !withDays[srcKey{w.Source, w.AccountID}] {
-			spans = append(spans, w)
+			c.spans = append(c.spans, w)
 		}
+	}
+	if len(accounts) == 0 {
+		return true, asOf
 	}
 	note := func(t time.Time) {
 		if asOf.IsZero() || t.Before(asOf) {
 			asOf = t
 		}
 	}
-	usedSpan := false
 	loc := from.Location()
 	y, m, d := from.Date()
+	usedSpan := map[string]bool{}
 	for start := time.Date(y, m, d, 0, 0, 0, 0, loc); start.Before(to); {
 		next := time.Date(start.Year(), start.Month(), start.Day()+1, 0, 0, 0, 0, loc)
 		pieceFrom, pieceTo := start, next
@@ -188,18 +205,20 @@ func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool
 		if pieceTo.After(to) {
 			pieceTo = to
 		}
-		switch t, ok := verified[start.Format(dateLayout)]; {
-		case ok:
-			note(t)
-		case coveredBySpans(spans, pieceFrom, pieceTo):
-			usedSpan = true
-		default:
-			gap = true
+		for name, c := range accounts {
+			switch t, ok := c.verified[start.Format(dateLayout)]; {
+			case ok:
+				note(t)
+			case coveredBySpans(c.spans, pieceFrom, pieceTo):
+				usedSpan[name] = true
+			default:
+				gap = true
+			}
 		}
 		start = next
 	}
-	if usedSpan {
-		for _, w := range spans {
+	for name := range usedSpan {
+		for _, w := range accounts[name].spans {
 			if w.Start.Before(to) && w.End.After(from) {
 				note(w.SyncedAt)
 			}
@@ -224,26 +243,78 @@ func coveredBySpans(windows []Window, from, to time.Time) bool {
 	return !cur.Before(to)
 }
 
-// accountFilter is the optional account condition of a query: with an empty account it matches
-// every row. It takes the account twice.
-const accountFilter = " AND (?='' OR account_id=?)"
+// eventQuery is one SELECT of loadEvents with its bound arguments.
+type eventQuery struct {
+	sql  string
+	args []any
+}
 
-func loadEvents(ctx context.Context, db *sql.DB, accountID string) ([]keyedEvent, error) {
-	cols := selectColumns(false)
-	rows, err := db.QueryContext(ctx, selectSQL(cols, "removed_at IS NULL"+accountFilter), accountID, accountID)
-	if err != nil {
-		return nil, err
+// eventQueries builds the SELECTs that read the live events that can overlap [from, to), so memory
+// does not grow with the archive. The predicates mirror overlaps with bound parameters; stored
+// instants have millisecond precision, so the instant bounds are widened to whole milliseconds
+// (from down, to up) and the caller's exact overlaps check decides the edge.
+//
+// Timed and all-day events are read by two queries, not one OR, so each can search its own index
+// (account_id, start_at) or (account_id, start_date); the account predicate is present only when an
+// account is given. A stored start that is not a time at all sorts after every digit, so each
+// timed query also selects start_at >= ':' and the scan then fails loudly on it: a corrupt stored
+// time is an error, never a silent omission.
+func eventQueries(cols []column, accountID string, from, to time.Time, fromDate, toDate string) []eventQuery {
+	fromText := formatTime(from.UTC().Truncate(time.Millisecond))
+	toText := formatTime(to.UTC().Truncate(time.Millisecond).Add(time.Millisecond))
+	account, args := "", []any(nil)
+	if accountID != "" {
+		account, args = " AND account_id=?", []any{accountID}
 	}
-	defer func() { _ = rows.Close() }()
+	with := func(more ...any) []any { return append(append([]any(nil), args...), more...) }
+	return []eventQuery{
+		{
+			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day<>1
+	  AND (start_at < ? OR start_at >= ':') AND (end_at > ? OR start_at >= ?)`),
+			args: with(toText, fromText, fromText),
+		},
+		{
+			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day=1
+	  AND start_date <= ? AND (end_date > ? OR start_date >= ?)`),
+			args: with(toDate, fromDate, fromDate),
+		},
+	}
+}
+
+// loadEvents runs eventQueries and returns every row they select.
+func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
+	cols := selectColumns(false)
 	var out []keyedEvent
-	for rows.Next() {
-		e, err := scanKeyed(rows, cols)
+	for _, q := range eventQueries(cols, accountID, from, to, fromDate, toDate) {
+		rows, err := db.QueryContext(ctx, q.sql, q.args...)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, e)
+		for rows.Next() {
+			e, err := scanKeyed(rows, cols)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out = append(out, e)
+		}
+		err = rowsErr(rows)
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out, rowsErr(rows)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		if a.AccountID != b.AccountID {
+			return a.AccountID < b.AccountID
+		}
+		return a.key < b.key
+	})
+	return out, nil
 }
 
 func loadWindows(ctx context.Context, db *sql.DB, accountID string) ([]Window, error) {

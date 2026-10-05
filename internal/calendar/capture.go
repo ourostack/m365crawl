@@ -68,10 +68,8 @@ var detailStrings = []detailString{
 	{field: func(e *Event) *string { return &e.LocationsJSON }, measure: listLen},
 	{field: func(e *Event) *string { return &e.BodyHTML }, measure: byteLen},
 	{field: func(e *Event) *string { return &e.BodyText }, measure: byteLen},
-	{field: func(e *Event) *string { return &e.BodyType }},
 	{field: func(e *Event) *string { return &e.BodyPreview }, measure: byteLen},
 	{field: func(e *Event) *string { return &e.AttachmentsJSON }, measure: listLen},
-	{field: func(e *Event) *string { return &e.CategoriesJSON }},
 	{field: func(e *Event) *string { return &e.RecurrenceJSON }},
 }
 
@@ -105,9 +103,16 @@ func pickString(old, in string, c clock, measure func(string) int) string {
 //     keep the larger list or text (so a removal that arrives without a newer time is not seen).
 //     The exception: a non-stale copy that says the event is not an online meeting clears the
 //     meeting links it does not itself carry.
-//   - DetailAsOf (and DetailRawJSON) move to the incoming copy's time when that copy changed a
-//     detail field and is not older than the stored detail. A stale copy that only fills empty
-//     fields leaves DetailAsOf alone, and a copy with no time cannot claim a clock.
+//   - A rich copy (one that states any substantive detail field) moves DetailAsOf, and
+//     DetailRawJSON when it has one, to its own time whenever that time is not older than the
+//     stored one, whether or not its content differs from what is stored. A thin copy, a copy
+//     that carries only small fields or only a body type, and a copy with no time never claim the
+//     detail clock; a stale rich copy only fills empty fields.
+//   - The small fields (reminder, categories) have a statement clock each (ReminderAsOf,
+//     CategoriesAsOf) that advances only when a copy states that field, so the newest copy that
+//     states it wins whatever the arrival order. See captureSmall.
+//   - BodyType has no meaning without a body: it travels with the body and is taken only from the
+//     copy that supplies the body.
 //   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 func Capture(old *Event, in Event) Event {
 	var base Event
@@ -148,8 +153,10 @@ func Capture(old *Event, in Event) Event {
 	// Detail.
 	dclock := compareClock(in.LastModified, base.DetailAsOf)
 	online := sched != stale && !in.IsOnlineMeeting
+	rich := false
 	for _, d := range detailStrings {
 		dst, src := d.field(&out), *d.field(&in)
+		rich = rich || src != ""
 		if d.online && online {
 			*dst = src
 			continue
@@ -157,25 +164,54 @@ func Capture(old *Event, in Event) Event {
 		*dst = pickString(*dst, src, dclock, d.measure)
 	}
 	out.HasAttachments = base.HasAttachments || in.HasAttachments
-	out.ReminderMinutes = pickReminder(base.ReminderMinutes, in.ReminderMinutes, dclock)
+	captureBodyType(&out, base, in)
+	captureSmall(&out, base, in)
 
-	if !detailEqual(base, out) && in.LastModified != nil && dclock != stale {
+	// Only a rich copy claims the detail clock, and it does whenever its time is not older than
+	// the stored one: whether its content differs is irrelevant, because a later arrival stamped
+	// between the two must not be able to replace newer content. The raw record moves with the
+	// clock and an empty one never replaces a stored one.
+	if rich && in.LastModified != nil && dclock != stale {
 		out.DetailAsOf = in.LastModified
-		out.DetailRawJSON = in.DetailRawJSON
+		if in.DetailRawJSON != "" {
+			out.DetailRawJSON = in.DetailRawJSON
+		}
 	}
 	out.RemovedAt = nil
 	return out
 }
 
-// pickReminder merges the nullable reminder by the detail clock.
-func pickReminder(old, in *int, c clock) *int {
-	switch {
-	case in == nil:
-		return old
-	case old == nil, c != stale:
-		return in
+// captureBodyType keeps the body type with the body. It is taken from the incoming copy only when
+// that copy supplies a body and the merge took a body from it (or the stored row had none).
+func captureBodyType(out *Event, base, in Event) {
+	supplies := in.BodyHTML != "" || in.BodyText != ""
+	changed := out.BodyHTML != base.BodyHTML || out.BodyText != base.BodyText
+	if supplies && in.BodyType != "" && (changed || (base.BodyHTML == "" && base.BodyText == "")) {
+		out.BodyType = in.BodyType
 	}
-	return old
+}
+
+// captureSmall merges the two small fields, each by its own statement clock. A copy states the
+// categories when CategoriesJSON is non-empty ("[]" is a statement of no categories, "" is not
+// stated). It states the reminder when ReminderMinutes is non-nil (zero minutes is a real value)
+// or ReminderStated is set, which is how a mapper says the source reported no reminder
+// (Teams isReminderSet false): then the reminder becomes nil. A statement replaces the stored
+// value unless a strictly newer statement is stored; the clock keeps the latest statement time. A
+// statement with no time cannot move the clock, and a missing clock on either side counts as
+// peers, so the incoming copy wins as it does for the other fields.
+func captureSmall(out *Event, base, in Event) {
+	if in.ReminderMinutes != nil || in.ReminderStated {
+		if compareClock(in.LastModified, base.ReminderAsOf) != stale {
+			out.ReminderMinutes = in.ReminderMinutes
+			out.ReminderAsOf = laterOf(base.ReminderAsOf, in.LastModified)
+		}
+	}
+	if in.CategoriesJSON != "" {
+		if compareClock(in.LastModified, base.CategoriesAsOf) != stale {
+			out.CategoriesJSON = in.CategoriesJSON
+			out.CategoriesAsOf = laterOf(base.CategoriesAsOf, in.LastModified)
+		}
+	}
 }
 
 // detailEqual reports whether two events hold the same detail values. The raw record is excluded,
@@ -186,6 +222,9 @@ func detailEqual(a, b Event) bool {
 		if *d.field(&a) != *d.field(&b) {
 			return false
 		}
+	}
+	if a.BodyType != b.BodyType || a.CategoriesJSON != b.CategoriesJSON {
+		return false
 	}
 	if (a.ReminderMinutes == nil) != (b.ReminderMinutes == nil) {
 		return false

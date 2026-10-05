@@ -1,7 +1,7 @@
-// Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model, the
-// keys that identify one occurrence across sources, the merge that picks the freshest copy, and
-// the per-source snapshot tables behind Agenda. It imports no source adapter and no archive code;
-// callers hand it a *sql.DB opened with SchemaDDL.
+// Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model,
+// the keys that identify one occurrence across sources, the merge that picks the freshest copy,
+// and the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no
+// source adapter and no archive code; callers hand it a *sql.DB opened with SchemaDDL.
 package calendar
 
 import (
@@ -88,17 +88,26 @@ type Event struct {
 	HasAttachments     bool
 	CategoriesJSON     string
 	RecurrenceJSON     string
-	ReminderMinutes    *int
+	// ReminderMinutes is the reminder lead time; zero minutes is a real value. nil means no
+	// reminder is set, or that the copy did not state one: see ReminderStated.
+	ReminderMinutes *int
+	// ReminderStated marks an incoming copy that states the reminder even when ReminderMinutes is
+	// nil, that is, the source said no reminder is set (Teams: isReminderSet false). A copy with a
+	// non-nil ReminderMinutes always states it. Input only: stored rows carry ReminderAsOf instead.
+	ReminderStated bool
 	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
 	DetailRawJSON string
 
 	// Bookkeeping. DetailAsOf is the LastModified of the copy that supplied the current detail; nil
 	// when detail was never captured.
-	DetailAsOf   *time.Time
-	DetailSeenAt *time.Time
-	FirstSeenAt  time.Time
-	SeenAt       time.Time
-	RemovedAt    *time.Time
+	DetailAsOf *time.Time
+	// ReminderAsOf and CategoriesAsOf are the LastModified of the newest copy that stated that
+	// field, each advancing only when a copy states it; nil when no timed copy ever did.
+	ReminderAsOf, CategoriesAsOf *time.Time
+	DetailSeenAt                 *time.Time
+	FirstSeenAt                  time.Time
+	SeenAt                       time.Time
+	RemovedAt                    *time.Time
 }
 
 // Window is the range one source covered in a snapshot, and how fresh that snapshot was.
