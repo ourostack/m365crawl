@@ -747,7 +747,7 @@ func TestPurgeUnscrubbedKeysFaultsSurface(t *testing.T) {
 // A v3 archive (a records table without the read-memory columns) gains them, keeping its rows.
 func TestSchemaMigratesV3ToV4(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	path := filepath.Join(t.TempDir(), "data", "teamscrawl.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -802,7 +802,7 @@ func TestMigrateRepairsAHalfAppliedV4(t *testing.T) {
 		{"redaction count present, digest missing", "raw_digest"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "teamscrawl.db")
+			path := filepath.Join(t.TempDir(), "data", "teamscrawl.db")
 			s, err := Open(ctx, path)
 			if err != nil {
 				t.Fatal(err)
