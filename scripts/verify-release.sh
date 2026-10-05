@@ -10,11 +10,11 @@
 #   APPLE_TEAM_ID    expected signing team
 #   GH_TOKEN         token for `gh release download`
 #
-# Checks, failing on the first mismatch: release flags (prerelease iff the tag has a
-# hyphen, and a prerelease is never "latest"), checksums, architecture of each
+# Checks, failing on the first mismatch: checksums, architecture of each
 # tarball, every sign-notarize.sh gate on each downloaded binary, Gatekeeper
 # acceptance after a quarantine attribute is added, and `teamscrawl --json version`
-# on the arm64 binary.
+# on the arm64 binary. Last, release flags (scripts/release-flags.sh settle): prerelease iff the
+# tag has a hyphen and never "latest"; a stable release that an earlier flake demoted is restored.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,16 +29,6 @@ for name in TAG REPO EXPECT_COMMIT APPLE_TEAM_ID; do
   [[ -n "${!name:-}" ]] || fail "$name is required"
 done
 version="${TAG#v}"
-
-echo "==> Release flags"
-prerelease_expected=false
-[[ "$TAG" == *-* ]] && prerelease_expected=true
-prerelease_actual="$(gh release view "$TAG" -R "$REPO" --json isPrerelease --jq .isPrerelease)"
-[[ "$prerelease_actual" == "$prerelease_expected" ]] || fail "isPrerelease is $prerelease_actual for $TAG, expected $prerelease_expected"
-if [[ "$prerelease_expected" == true ]]; then
-  latest="$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"
-  [[ "$latest" != "$TAG" ]] || fail "prerelease $TAG is marked latest"
-fi
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/verify-release.XXXXXX")"
 echo "==> Downloading $TAG from $REPO into $work"
@@ -76,4 +66,7 @@ got_version="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load
 got_commit="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
 [[ "$got_version" == "$version" ]] || fail "version is '$got_version', expected '$version'"
 [[ "$got_commit" == "$EXPECT_COMMIT" ]] || fail "commit is '$got_commit', expected '$EXPECT_COMMIT'"
+echo "==> Release flags"
+# Last, so a release that an earlier flake demoted is restored only after every artifact check passed.
+TAG="$TAG" REPO="$REPO" "$here/release-flags.sh" settle
 echo "verify-release: $TAG verified ($got_version, $got_commit)"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Checks that the tap deploy key still authenticates: git ls-remote against the tap
-# over SSH with the key. Run by credential-health.yml. It reads access only; it never
+# over SSH with the key, verifying the server against the host keys pinned in
+# scripts/github_known_hosts. Run by credential-health.yml. It reads access only; it never
 # pushes. The key is written to a private temporary file and never printed.
 #
 #   HOMEBREW_TAP_DEPLOY_KEY  private half of the tap's deploy key
@@ -18,11 +19,12 @@ fail() {
 
 check() {
   [[ -n "${HOMEBREW_TAP_DEPLOY_KEY:-}" ]] || fail "HOMEBREW_TAP_DEPLOY_KEY is required"
-  local tap="${TAP_URL:-git@github.com:ourostack/homebrew-tap.git}"
+  local tap="${TAP_URL:-git@github.com:ourostack/homebrew-tap.git}" here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   work="$(mktemp -d)"
   trap 'rm -r "${work:?}"' EXIT
   (umask 077 && printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$work/key")
-  export GIT_SSH_COMMAND="ssh -i $work/key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$work/known_hosts"
+  export GIT_SSH_COMMAND="ssh -i $work/key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=$here/github_known_hosts"
   git ls-remote --exit-code "$tap" HEAD > /dev/null || fail "the tap deploy key no longer authenticates to $tap (was it removed from the tap, or rotated without updating HOMEBREW_TAP_DEPLOY_KEY?)"
   echo "check-tap-key: the deploy key authenticates to $tap"
 }

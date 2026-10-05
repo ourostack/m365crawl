@@ -87,6 +87,8 @@ script-lint:
 	scripts/publish-cask.sh --selftest
 	scripts/check-tap-key.sh --selftest
 	scripts/report-failure.sh --selftest
+	scripts/release-flags.sh --selftest
+	scripts/automerge-eligible.sh --selftest
 
 tidy-check:
 	go mod verify

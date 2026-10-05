@@ -1,19 +1,25 @@
 name: Release
 
 on:
-  # Merging a release-notes file to main is the release. Nobody pushes a tag: the
-  # decide job derives the version from the file the push added, and the release job
-  # creates the tag. Pushing a tag by hand starts nothing.
+  # Merging a release-notes file to main is the release. Nobody pushes a tag: the decide
+  # job reads main, finds the notes files whose release is not done and releases the lowest
+  # version, and the release job creates the tag. Pushing a tag by hand starts nothing.
+  # A CHANGELOG.md change re-evaluates, so a changelog fix-up releases a version that was
+  # refused for lacking its section. workflow_dispatch (no inputs) is the manual retry, and
+  # how the workflow starts itself again for notes that were waiting.
   push:
     branches:
       - main
     paths:
       - "docs/releases/*.md"
+      - "CHANGELOG.md"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# One release at a time; a second push waits instead of cancelling a release in flight.
+# One release at a time. A run waiting behind a release in flight can be replaced by a newer
+# waiting run; that loses nothing, because decide reads the state of main, not the push.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -22,9 +28,9 @@ env:
   GOWORK: "off"
 
 jobs:
-  # Reads the push and decides: is this a release, and which version. It refuses a
-  # push that is ambiguous or wrong (scripts/release-decide.sh). Every later job reads
-  # the tag and commit from these outputs; none reads github.ref_name.
+  # Reads main and decides: is there a release to make, and which version (the lowest notes
+  # file without a finished release). It refuses what is wrong (scripts/release-decide.sh).
+  # Every later job reads the tag and commit from these outputs; none reads github.ref_name.
   decide:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -36,16 +42,18 @@ jobs:
       version: ${{ steps.decide.outputs.version }}
       sha: ${{ steps.decide.outputs.sha }}
       rehearsal: ${{ steps.decide.outputs.rehearsal }}
+      remaining: ${{ steps.decide.outputs.remaining }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Derive the release from the push
+          persist-credentials: false
+      - name: Decide what to release from the state of main
         id: decide
         env:
-          BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
+          REF: ${{ github.ref }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/release-decide.sh
@@ -60,6 +68,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.decide.outputs.sha }}
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -86,6 +95,21 @@ jobs:
         with:
           ref: ${{ needs.decide.outputs.sha }}
           fetch-depth: 0
+          # This job pushes the tag with the workflow token, so it keeps the checkout credentials.
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Before the tag exists: a missing secret must not leave a tag behind.
+      - name: Require every Apple signing secret
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/sign-notarize.sh --check-secrets
       - name: Create the tag at the released commit
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -102,19 +126,6 @@ jobs:
             echo "::error::the tag ${TAG} already points at ${existing}, not ${SHA}"
             exit 1
           fi
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Require every Apple signing secret
-        env:
-          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
-          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          APPLE_DEVELOPER_ID_CERTIFICATE_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: scripts/sign-notarize.sh --check-secrets
       - name: Pick release notes
         id: notes
         env:
@@ -168,6 +179,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.decide.outputs.sha }}
       - name: Verify the published darwin artifacts
         env:
@@ -193,6 +205,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.decide.outputs.sha }}
       - name: Push the cask to the tap
         env:
@@ -214,6 +227,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.decide.outputs.sha }}
       - name: Wait for the tap, install the cask and verify it
         env:
@@ -222,27 +236,58 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: scripts/verify-homebrew.sh
 
-  # Containment: a release whose downloaded artifacts failed verification must not stay
-  # "latest". Marking it a prerelease takes it out of what users and `brew` resolve as the newest.
+  # Containment. A release that failed after it may have been published must not stay
+  # "latest": it is marked as a prerelease (harmless when no release exists yet). If the
+  # install from the tap failed, the tap is also put back to the cask it served before, with a
+  # new commit. A later successful verify-release restores a release that a flake demoted.
   contain:
-    if: ${{ always() && needs.verify-release.result == 'failure' }}
-    needs: [decide, verify-release]
+    if: ${{ always() && (needs.release.result == 'failure' || needs.verify-release.result == 'failure' || needs.verify-homebrew.result == 'failure') }}
+    needs: [decide, release, verify-release, verify-homebrew]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
       - name: Mark the release as a prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.decide.outputs.tag }}
           REPO: ${{ github.repository }}
-        run: gh release edit "$TAG" -R "$REPO" --prerelease --latest=false
+        run: scripts/release-flags.sh demote
+      - name: Put the tap back to the previous cask
+        if: ${{ always() && needs.verify-homebrew.result == 'failure' }}
+        env:
+          TAG: ${{ needs.decide.outputs.tag }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: scripts/publish-cask.sh --restore-previous
 
-  # Reporting: any failed job opens an issue, or comments on the open one with the same title.
+  # Starts this workflow again when more notes files are waiting, after a release finished
+  # cleanly, so back-to-back notes all get released, one per run, lowest version first.
+  # workflow_dispatch is the one event a run started with the workflow token can start.
+  continue-release:
+    if: ${{ !failure() && !cancelled() && needs.decide.outputs.remaining == 'true' && needs.publish-homebrew.result == 'success' }}
+    needs: [decide, publish-homebrew, verify-homebrew]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start the next release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run release.yml -R "$REPO" --ref main
+
+  # Reporting: any failed or cancelled job opens an issue, or comments on the open one with the
+  # same title. A run cancelled before any job started cannot report; the next run releases it anyway.
   report-failure:
-    if: ${{ always() && contains(needs.*.result, 'failure') }}
-    needs: [decide, verify, release, verify-release, publish-homebrew, verify-homebrew, contain]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    needs: [decide, verify, release, verify-release, publish-homebrew, verify-homebrew, contain, continue-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -251,11 +296,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Open or update the failure issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           WORKFLOW: ${{ github.workflow }}
           VERSION: ${{ needs.decide.outputs.tag }}
+          OUTCOME: ${{ contains(needs.*.result, 'failure') && 'failed' || 'cancelled' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: scripts/report-failure.sh

@@ -7,6 +7,7 @@
 #   WORKFLOW   workflow name, e.g. Release
 #   VERSION    version being released, or empty when there is none
 #   RUN_URL    link to the failed run
+#   OUTCOME    failed (default) or cancelled
 #   REPO       owner/name (GITHUB_REPOSITORY)
 #   GH_TOKEN   token with issues: write
 #
@@ -26,7 +27,7 @@ report() {
   done
   local title="Workflow failed: $WORKFLOW" version="${VERSION:-}" body number
   [[ -n "$version" ]] || version="none (no version was derived)"
-  body="$(printf 'Workflow: %s\nVersion: %s\nRun: %s\n' "$WORKFLOW" "$version" "$RUN_URL")"
+  body="$(printf 'Workflow: %s\nOutcome: %s\nVersion: %s\nRun: %s\n' "$WORKFLOW" "${OUTCOME:-failed}" "$version" "$RUN_URL")"
   number="$(gh issue list -R "$REPO" --state open --search "\"$title\" in:title" --json number,title \
     --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
   if [[ -n "$number" ]]; then
@@ -68,6 +69,9 @@ STUB
   [[ "$status" -eq 0 ]] || fail "selftest: comment failed: $out"
   grep -Fq 'issue comment 7 -R o/r' "$log" || fail "selftest: no comment on the open issue: $(cat "$log")"
   ! grep -Fq 'issue create' "$log" || fail "selftest: opened a duplicate issue"
+  grep -Fq 'Outcome: failed' "$log" || fail "selftest: the outcome should default to failed"
+  run OUTCOME=cancelled
+  grep -Fq 'Outcome: cancelled' "$log" || fail "selftest: a cancelled run should be reported as cancelled: $(cat "$log")"
   run VERSION=
   grep -Fq 'none (no version was derived)' "$log" || fail "selftest: an empty version should be stated"
   run RUN_URL=
