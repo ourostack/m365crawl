@@ -340,7 +340,7 @@ func TestSnapshotOpensReadOnlyAndNeverTouchesTheLock(t *testing.T) {
 		mu.Lock()
 		opens = append(opens, open{name, flag, perm})
 		mu.Unlock()
-		return os.OpenFile(name, flag, perm)
+		return os.OpenFile(name, flag, perm) //nolint:gosec // test wrapper over the seam; the name comes from the code under test
 	})
 	swap(t, &statSource, func(name string) (fs.FileInfo, error) {
 		mu.Lock()
