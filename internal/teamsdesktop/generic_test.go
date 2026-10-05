@@ -187,6 +187,7 @@ type fakeGeneric struct {
 	opens    [][]string
 	prev     weak.Pointer[fakeGenericOrigin]
 	released []bool
+	closes   int // origins closed
 }
 
 type fakeGenericOrigin struct {
@@ -206,6 +207,7 @@ func (o *fakeGenericOrigin) Records(dbID, _ int64, fn func(indexeddb.Record) err
 	return nil
 }
 func (o *fakeGenericOrigin) Decode(_ int64, raw []byte) (any, error) { return o.f.decode(raw) }
+func (o *fakeGenericOrigin) Close() error                            { o.f.closes++; return nil }
 func (o *fakeGenericOrigin) Stats() leveldb.Stats                    { _ = len(o.buf); return o.f.stats }
 
 func (f *fakeGeneric) install(t *testing.T) {
@@ -707,6 +709,9 @@ func TestOpenBatchReal(t *testing.T) {
 	if err != nil || o == nil {
 		t.Fatalf("openBatch: %v", err)
 	}
+	if err := o.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := openBatch(t.TempDir(), func(int64, int64) bool { return false }); err == nil {
 		t.Fatal("empty directory opened")
 	}
@@ -737,5 +742,42 @@ func TestReadGenericScrubsKeysAndValues(t *testing.T) {
 	}
 	if g.res.Redacted != 4 {
 		t.Fatalf("redacted = %d", g.res.Redacted)
+	}
+}
+
+// Every batch's origin is closed, whichever way the batch ends: complete, unreadable, stopped
+// by a callback error, or cancelled.
+func TestReadGenericClosesEveryOrigin(t *testing.T) {
+	boom := errors.New("callback failed")
+	cases := map[string]func(f *fakeGeneric) (context.Context, func(GenericRecord) error){
+		"complete": func(*fakeGeneric) (context.Context, func(GenericRecord) error) {
+			return context.Background(), func(GenericRecord) error { return nil }
+		},
+		"unreadable": func(f *fakeGeneric) (context.Context, func(GenericRecord) error) {
+			f.recErr = errors.New("unreadable")
+			return context.Background(), func(GenericRecord) error { return nil }
+		},
+		"callback error": func(*fakeGeneric) (context.Context, func(GenericRecord) error) {
+			return context.Background(), func(GenericRecord) error { return boom }
+		},
+		"cancelled": func(*fakeGeneric) (context.Context, func(GenericRecord) error) {
+			ctx, cancel := context.WithCancel(context.Background())
+			return ctx, func(GenericRecord) error { cancel(); return errors.New("after cancel") }
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeGeneric{
+				dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+				held:    map[int64]int64{1: 1},
+				records: map[int64][]indexeddb.Record{1: {strRec("k", "v")}},
+			}
+			f.install(t)
+			ctx, fn := setup(f)
+			_, _ = ReadGeneric(ctx, "/snap", nil, 1, GenericOptions{}, fn)
+			if len(f.opens) != 1 || f.closes != 1 {
+				t.Fatalf("opens %d, closes %d", len(f.opens), f.closes)
+			}
+		})
 	}
 }

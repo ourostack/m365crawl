@@ -37,6 +37,7 @@ func run(dir string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = o.Close() }()
 	dbs, err := o.Databases()
 	if err != nil {
 		return err

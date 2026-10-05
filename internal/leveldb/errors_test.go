@@ -264,10 +264,7 @@ func TestOpenTableErrors(t *testing.T) {
 }
 
 func TestBlockCacheErrors(t *testing.T) {
-	d, err := Load(compactedDir(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, compactedDir(t))
 	if _, err := d.cache.get(d.tables, 5, blockHandle{}); err == nil || !strings.Contains(err.Error(), "out of range") {
 		t.Fatalf("bad table index err = %v", err)
 	}
@@ -281,10 +278,7 @@ func TestBlockCacheErrors(t *testing.T) {
 
 func TestValueDetectsChangedBlock(t *testing.T) {
 	dir, _ := buildMixed(t, 0)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	for _, e := range d.entries {
 		if !e.lazy {
 			continue

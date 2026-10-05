@@ -49,7 +49,8 @@ func LazyMin() int { return lazyMin }
 
 // DB is a read-only view of a LevelDB directory. Keys and small values are held in memory;
 // table values of lazyMin bytes or more are re-read from the table files on demand, so the
-// directory must stay in place and unchanged while the DB is used.
+// directory must stay in place and unchanged while the DB is used. Table files opened for those
+// re-reads stay open until Close, so call Close when done with the DB.
 type DB struct {
 	entries map[string]entry
 	keys    []string // live keys, bytewise ascending
@@ -58,7 +59,13 @@ type DB struct {
 	stats   Stats
 }
 
-type tableRef struct{ path, name string }
+// tableRef names a table file. f and size are set the first time a lazy value is read from the
+// table and kept until Close (guarded by the block cache's mutex).
+type tableRef struct {
+	path, name string
+	f          *os.File
+	size       int64
+}
 
 // Load reads dir (a copy; it is never written) and returns its live contents. Large table
 // values are re-read from dir on demand, so dir must stay in place and unchanged for as long as
@@ -221,6 +228,11 @@ func (d *DB) value(e entry) ([]byte, error) {
 	}
 	return b[e.loc.off : e.loc.off+e.loc.n : e.loc.off+e.loc.n], nil
 }
+
+// Close releases the table files that lazy value reads opened. It is safe to call more than
+// once. After Close, Get and Scan fail with ErrClosed for any lazy value; held values are still
+// served. Values already returned stay valid.
+func (d *DB) Close() error { return d.cache.close(d.tables) }
 
 // Stats reports counts describing the load.
 func (d *DB) Stats() Stats { return d.stats }

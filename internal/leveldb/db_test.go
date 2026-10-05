@@ -69,10 +69,7 @@ func TestManifestLiveSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	for k, v := range want {
 		got, ok, _ := d.Get([]byte(k))
 		if !ok || string(got) != v {
@@ -113,10 +110,7 @@ func TestScanPrefixOrdered(t *testing.T) {
 	}
 	_ = db.Close()
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	var got []string
 	if err := d.Scan([]byte("b"), func(k, v []byte) error {
 		got = append(got, string(k)+"="+string(v))
@@ -150,10 +144,7 @@ func TestDeletionNewestWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if v, ok, _ := d.Get([]byte("k")); ok {
 		t.Fatalf("deleted key visible: %q", v)
 	}
@@ -175,10 +166,7 @@ func TestHighestSequenceWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if v, ok, _ := d.Get([]byte("k")); !ok || string(v) != "new" {
 		t.Fatalf("got %q,%v", v, ok)
 	}
@@ -206,10 +194,7 @@ func TestTruncatedLogTail(t *testing.T) {
 	}
 	_ = f.Close()
 
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	if d.Stats().TruncatedLogTails != 1 {
 		t.Fatalf("TruncatedLogTails = %d", d.Stats().TruncatedLogTails)
 	}

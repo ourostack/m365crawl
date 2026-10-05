@@ -102,6 +102,7 @@ func TestFixtureNeverDecodesAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = real.Close() }()
 	dbs, _ := real.Databases()
 	rec := &recordingOrigin{origin: real, names: map[int64]string{}}
 	authSeen := 0

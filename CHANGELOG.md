@@ -6,6 +6,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ### Added
 
+- `watch --min-interval DURATION` (`TEAMSCRAWL_WATCH_MIN_INTERVAL`, default `60s`, `0` disables): the least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, and on a real one `watch` ran 28 full syncs in 10 minutes back to back at about 88% of a CPU core. File events that arrive during a sync or the pause now coalesce into one sync when the pause ends, and no sync runs if nothing changed. The first sync is still immediate. This replaces the fixed 5 second gap between sync starts. Changes reach the archive up to the interval plus a sync later; set `--min-interval 0` for the old latency.
 - `metadata`: prints the crawlkit app manifest (`control.Manifest`) as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. It needs no archive or Teams cache and never syncs. No schema or existing field changed.
 - `records` table (archive schema version 3): every Teams IndexedDB database that has no typed mapper and no credential-like name is mirrored into it, one row per record, with the key and the value as canonical JSON. Rows follow the archive rules: a record that leaves the cache gets a sticky `removed_at` and is never deleted; a value that fails to decode is counted and its key is still archived.
 - `stores`: lists every archived database and object store with `records`, `removed` and `last_updated_at`.
@@ -20,6 +21,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 - The archive schema version is 3. A version 2 archive gains the `records` table when it is next opened for writing, and its existing rows are untouched. The decoder version is 3, so the first sync after the upgrade re-reads an unchanged cache to fill `records`.
 - An archive written by a newer schema version is refused with the coded `archive_newer` error (exit 3). Builds of v0.1.0 and earlier cannot do this: on a version 3 archive they report a generic `db_error`. Do not point an old binary at an upgraded archive.
 - A sync reads the cache's LevelDB more than once now (once for the typed databases, then once to size the generic databases and once per batch), so a sync takes longer on a real cache. Real-cache timing, memory and record counts per manager are not measured yet; sync and watch cost on a large cache is gated on a run on a work machine before release.
+- A sync is faster and allocates less: LevelDB table files stay open for the life of a reader instead of being opened for every block re-read, and the block cache is bounded at 4 MiB instead of 16 blocks. The rows a sync produces are unchanged and the decoder version stays 3.
 
 ## [0.1.0] - 2026-10-01
 

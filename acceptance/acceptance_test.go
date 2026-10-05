@@ -163,6 +163,7 @@ func openSnapshot(t *testing.T, dir string) *indexeddb.Origin {
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}
+	t.Cleanup(func() { _ = o.Close() })
 	return o
 }
 
@@ -348,6 +349,9 @@ type refCounts struct {
 	Undecodable struct {
 		Conversations []string `json:"conversations"`
 		Chains        []string `json:"chains"`
+		// ConversationVersions counts the conversation record versions (not keys) the reference
+		// could not decode; it never yields them, so they are absent from RecordVersions.
+		ConversationVersions int `json:"conversation_versions"`
 	} `json:"undecodable"`
 	Hashes struct {
 		Conversations []string `json:"conversations"`
@@ -444,14 +448,16 @@ func readOurs(t *testing.T, snapDir string) ours {
 		}
 		{
 			prefix := []byte{0, byte(c.db), byte(c.store), 1} //nolint:gosec // both ids are below 256 here
-			if _, err := leveldb.LoadWith(filepath.Join(snapDir, "leveldb"), leveldb.LoadOptions{Keep: func(k []byte) bool {
+			db, err := leveldb.LoadWith(filepath.Join(snapDir, "leveldb"), leveldb.LoadOptions{Keep: func(k []byte) bool {
 				if bytes.HasPrefix(k, prefix) {
 					o.rawVersions++
 				}
 				return false
-			}}); err != nil {
+			}})
+			if err != nil {
 				t.Fatal(err)
 			}
+			_ = db.Close()
 		}
 	}
 	// Per-record attribution of messages, to explain differences with the reference.
@@ -530,40 +536,74 @@ func missing(want []string, have map[string]bool) int {
 // TestRealConversationAccounting accounts for every stored version of a conversation record:
 // each is superseded by a newer version of its key, a tombstone, undecodable, unmapped, mapped
 // under another id, or mapped. Nothing may be left over, and the reference decoder must see
-// exactly the keys teamscrawl maps.
+// exactly the keys teamscrawl maps, except for records only the reference fails to decode
+// (ccl_chromium_reader cannot decode a few values that teamscrawl reads; the volumes check allows
+// for the same records). Those are counted and reported, never silently ignored.
 func TestRealConversationAccounting(t *testing.T) {
 	for _, snap := range snapshots(t) {
 		rc := runCCL(t, snap.dir)
 		us := readOurs(t, snap.dir)
-		superseded := rc.Conversations.RecordVersions - rc.Conversations.DistinctKeys
-		undecodable := 0
-		for code, n := range us.omissions {
-			if code != "truncated_log_tail" {
-				undecodable += n
-			}
+		problems, notes := conversationAccounting(rc, us)
+		for _, n := range notes {
+			t.Log(n)
 		}
-		t.Logf("conversation record versions: reference=%d raw_leveldb=%d", rc.Conversations.RecordVersions, us.rawVersions)
-		t.Logf("  superseded by a newer version: %d", superseded)
-		t.Logf("  tombstoned (newest version is a deletion): %d", rc.Conversations.LatestTombstoned)
-		t.Logf("  omissions of every kind (conversations are the only kind that could drop a conversation): %d %v", undecodable, us.omissions)
-		t.Logf("  mapped under a different id than the record key: %d", us.keyMismatches)
-		t.Logf("  mapped as conversations: %d (reference newest live: %d)", len(us.convIDs), rc.Conversations.LatestLive)
-		droppedFromRef := missing(rc.Hashes.Conversations, us.convIDs)
-		t.Logf("  reference conversations teamscrawl does not map (genuinely dropped): %d", droppedFromRef)
-		if us.rawVersions != rc.Conversations.RecordVersions {
-			t.Errorf("LevelDB reader sees %d conversation record versions, reference %d", us.rawVersions, rc.Conversations.RecordVersions)
-		}
-		if droppedFromRef != 0 {
-			t.Errorf("%d reference conversations are not mapped", droppedFromRef)
-		}
-		if extra := len(us.convIDs) - (rc.Conversations.LatestLive - droppedFromRef); extra != 0 {
-			t.Errorf("teamscrawl maps %d conversations the reference does not have", extra)
-		}
-		accounted := superseded + rc.Conversations.LatestTombstoned + undecodable + us.keyMismatches + len(us.convIDs)
-		if accounted != rc.Conversations.RecordVersions {
-			t.Errorf("%d of %d conversation record versions are unaccounted for", rc.Conversations.RecordVersions-accounted, rc.Conversations.RecordVersions)
+		for _, p := range problems {
+			t.Error(p)
 		}
 	}
+}
+
+// conversationAccounting compares the reference's conversation counts with teamscrawl's for one
+// snapshot. It returns log lines and the problems found. Counts only; no record content.
+func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
+	superseded := rc.Conversations.RecordVersions - rc.Conversations.DistinctKeys
+	undecodable := 0
+	for code, n := range us.omissions {
+		if code != "truncated_log_tail" {
+			undecodable += n
+		}
+	}
+	refFailed := toSet(rc.Undecodable.Conversations)
+	notes = append(notes,
+		fmt.Sprintf("conversation record versions: reference=%d (+%d it could not decode) raw_leveldb=%d", rc.Conversations.RecordVersions, rc.Undecodable.ConversationVersions, us.rawVersions),
+		fmt.Sprintf("  superseded by a newer version: %d", superseded),
+		fmt.Sprintf("  tombstoned (newest version is a deletion): %d", rc.Conversations.LatestTombstoned),
+		fmt.Sprintf("  omissions of every kind (conversations are the only kind that could drop a conversation): %d %v", undecodable, us.omissions),
+		fmt.Sprintf("  mapped under a different id than the record key: %d", us.keyMismatches),
+		fmt.Sprintf("  mapped as conversations: %d (reference newest live: %d)", len(us.convIDs), rc.Conversations.LatestLive))
+	droppedFromRef := missing(rc.Hashes.Conversations, us.convIDs)
+	notes = append(notes, fmt.Sprintf("  reference conversations teamscrawl does not map (genuinely dropped): %d", droppedFromRef))
+
+	// Conversations teamscrawl maps that the reference lacks are justified only when the record
+	// is one the reference could not decode.
+	ref := toSet(rc.Hashes.Conversations)
+	extra, extraInRefFailed := 0, 0
+	for id := range us.convIDs {
+		if ref[id] {
+			continue
+		}
+		extra++
+		if refFailed[id] {
+			extraInRefFailed++
+		}
+	}
+	notes = append(notes, fmt.Sprintf("  teamscrawl-only conversations: %d, of which in %d records the reference could not decode: %d", extra, len(refFailed), extraInRefFailed))
+
+	if want := rc.Conversations.RecordVersions + rc.Undecodable.ConversationVersions; us.rawVersions != want {
+		problems = append(problems, fmt.Sprintf("LevelDB reader sees %d conversation record versions, reference %d plus %d it could not decode", us.rawVersions, rc.Conversations.RecordVersions, rc.Undecodable.ConversationVersions))
+	}
+	if droppedFromRef != 0 {
+		problems = append(problems, fmt.Sprintf("%d reference conversations are not mapped", droppedFromRef))
+	}
+	if extra != extraInRefFailed {
+		problems = append(problems, fmt.Sprintf("teamscrawl maps %d conversations the reference does not have and could not explain by records it failed to decode", extra-extraInRefFailed))
+	}
+	// The reference never sees a teamscrawl-only conversation, so it is outside this identity.
+	accounted := superseded + rc.Conversations.LatestTombstoned + undecodable + us.keyMismatches + len(us.convIDs) - extraInRefFailed
+	if accounted != rc.Conversations.RecordVersions {
+		problems = append(problems, fmt.Sprintf("%d of %d conversation record versions are unaccounted for", rc.Conversations.RecordVersions-accounted, rc.Conversations.RecordVersions))
+	}
+	return problems, notes
 }
 
 // TestRealVolumes compares teamscrawl's counts with the reference decoder's on the same
@@ -728,12 +768,26 @@ func TestRealBlobsResolve(t *testing.T) {
 var jwt = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
 
 // tokenPatterns are the credential shapes the archive scan looks for in records.value_json: a
-// bearer token (three base64url segments), the OAuth field names, and an Authorization scheme.
+// bearer token (three base64url segments), an OAuth field name followed by a token-shaped value,
+// and an Authorization scheme followed by one. The bare words are not credentials: public app
+// catalog text mentions access_token and Bearer in descriptions and claims requests. A word
+// counts only when a run of at least 20 token-alphabet characters follows it, after any quotes
+// (JSON string escaping such as a backslash-quote included), whitespace, ':' or '='. The jwt
+// pattern is unchanged. The message-content column scan uses jwt only, so it is not affected.
 var tokenPatterns = []*regexp.Regexp{
 	jwt,
-	regexp.MustCompile(`refresh_token`),
-	regexp.MustCompile(`access_token`),
-	regexp.MustCompile(`Bearer `),
+	regexp.MustCompile(`refresh_token[\\"'\s:=]*[A-Za-z0-9._~+/=-]{20,}`),
+	regexp.MustCompile(`access_token[\\"'\s:=]*[A-Za-z0-9._~+/=-]{20,}`),
+	regexp.MustCompile(`Bearer [A-Za-z0-9._~+/=-]{20,}`),
+}
+
+// credentialShapes counts the credential-shaped strings in one records.value_json value.
+func credentialShapes(value string) int {
+	n := 0
+	for _, p := range tokenPatterns {
+		n += len(p.FindAllStringIndex(value, -1))
+	}
+	return n
 }
 
 // messageContentManagers are the managers whose records legitimately carry message text, in which
@@ -849,7 +903,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	}
 
 	// The generic records table: report hits by manager and store name only, never the value.
-	_, hits, truncated, err := st.SQL(context.Background(), credentialLeakCandidateSQL(), acceptanceRowLimit)
+	_, hits, truncated, err := st.SQL(context.Background(), "select source, database, store, value_json from records", acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -862,7 +916,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 		database, _ := row[1].(string)
 		store, _ := row[2].(string)
 		value, _ := row[3].(string)
-		n := credentialLeakCount(value)
+		n := credentialShapes(value)
 		if n == 0 {
 			continue
 		}

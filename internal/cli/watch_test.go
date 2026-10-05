@@ -102,9 +102,9 @@ func copyTree(t *testing.T, src, dst string) {
 // fastWatch shrinks the debounce so tests run in milliseconds.
 func fastWatch(t *testing.T) {
 	t.Helper()
-	q, g, m, l := watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry
-	watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry = 20*time.Millisecond, 40*time.Millisecond, 10*time.Second, 30*time.Millisecond
-	t.Cleanup(func() { watchQuiet, watchMinGap, watchMaxWait, watchLockedRetry = q, g, m, l })
+	q, m, l := watchQuiet, watchMaxWait, watchLockedRetry
+	watchQuiet, watchMaxWait, watchLockedRetry = 20*time.Millisecond, 10*time.Second, 30*time.Millisecond
+	t.Cleanup(func() { watchQuiet, watchMaxWait, watchLockedRetry = q, m, l })
 }
 
 // noEvents makes watch poll only.
@@ -134,6 +134,9 @@ func (w *watchEnv) start(args ...string) {
 	full := append([]string{"--db", w.db, "--teams-root", w.root}, args...)
 	if !contains(args, "--format") {
 		full = append(full, "--json")
+	}
+	if !contains(args, "--min-interval") { // the 60 s default would stall every test that syncs twice
+		full = append(full, "--min-interval", "40ms")
 	}
 	go func() { w.done <- runCLI(ctx, full, w.out, w.errb); close(w.fin) }()
 	w.t.Cleanup(func() {
@@ -479,7 +482,7 @@ func TestWatchEnvironmentErrorExits3(t *testing.T) {
 
 func TestWatchUsage(t *testing.T) {
 	e := newEnv(t)
-	for _, args := range [][]string{{"watch", "--every", "0s"}, {"watch", "--every", "-5s"}, {"watch", "--fields", "nope"}} {
+	for _, args := range [][]string{{"watch", "--every", "0s"}, {"watch", "--every", "-5s"}, {"watch", "--min-interval", "-1s"}, {"watch", "--fields", "nope"}} {
 		code, _, stderr := e.run(args...)
 		if code != 2 {
 			t.Errorf("%v: exit %d, want 2 (%s)", args, code, stderr)
@@ -501,8 +504,8 @@ func TestWatchDebouncesBursts(t *testing.T) {
 		return oldSync(ctx, o)
 	}
 	t.Cleanup(func() { runSync = oldSync })
-	watchQuiet, watchMinGap = 150*time.Millisecond, 0
-	w.start("watch", "--every", "1h")
+	watchQuiet = 150 * time.Millisecond
+	w.start("watch", "--every", "1h", "--min-interval", "0")
 	w.baselineDone()
 	w.touch()
 	before := calls.Load()
@@ -604,9 +607,9 @@ func TestWatchDebounceMaxWait(t *testing.T) {
 		return oldSync(ctx, o)
 	}
 	t.Cleanup(func() { runSync = oldSync })
-	w.start("watch", "--every", "1h")
+	w.start("watch", "--every", "1h", "--min-interval", "0")
 	w.baselineDone()
-	watchQuiet, watchMinGap, watchMaxWait = 200*time.Millisecond, 0, 400*time.Millisecond
+	watchQuiet, watchMaxWait = 200*time.Millisecond, 400*time.Millisecond
 	w.touch()
 	before := calls.Load()
 	stop := make(chan struct{})
@@ -684,4 +687,118 @@ func TestWatchLateBaselineWarns(t *testing.T) {
 	w.start("watch", "--every", "30ms")
 	w.baselineDone()
 	w.waitFor("the late-baseline warning", func() bool { return strings.Contains(w.errb.String(), "baseline_delayed") })
+}
+
+// eventfulWatch makes watch take its events from the returned channel and counts the syncs.
+func eventfulWatch(t *testing.T) (ch chan struct{}, calls *atomic.Int32) {
+	t.Helper()
+	ch = make(chan struct{}, 64)
+	old := watchEvents
+	watchEvents = func(context.Context, []string) (<-chan struct{}, func(), error) { return ch, func() {}, nil }
+	t.Cleanup(func() { watchEvents = old })
+	calls = new(atomic.Int32)
+	oldSync := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		calls.Add(1)
+		return oldSync(ctx, o)
+	}
+	t.Cleanup(func() { runSync = oldSync })
+	return ch, calls
+}
+
+// The next sync starts no sooner than --min-interval after the previous one ended, however quiet
+// the cache is, and events that arrive during the sync and the wait become exactly one sync.
+func TestWatchMinIntervalCoalescesBusyCache(t *testing.T) {
+	w := newWatchEnv(t)
+	ch, calls := eventfulWatch(t)
+	var ended atomic.Int64 // when the second sync's predecessor ended, unix nanos
+	var gap atomic.Int64   // time from that end to the next sync's start
+	inner := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		if prev := ended.Load(); prev != 0 && gap.Load() == 0 {
+			gap.Store(time.Now().UnixNano() - prev)
+		}
+		if calls.Load() == 0 { // the baseline sync: a burst of events lands while it runs
+			for i := 0; i < 5; i++ {
+				ch <- struct{}{}
+			}
+		}
+		rep, c, err := inner(ctx, o)
+		if ended.Load() == 0 {
+			ended.Store(time.Now().UnixNano())
+		}
+		return rep, c, err
+	}
+	t.Cleanup(func() { runSync = inner })
+	const interval = 300 * time.Millisecond
+	w.start("watch", "--every", "1h", "--min-interval", interval.String())
+	w.baselineDone()
+	w.touch()                 // the cache really changed, so the sync after the wait has work to do
+	for i := 0; i < 20; i++ { // a busy cache keeps writing during the wait
+		ch <- struct{}{}
+	}
+	w.waitFor("the sync after the wait", func() bool { return calls.Load() >= 2 })
+	if g := time.Duration(gap.Load()); g < interval {
+		t.Fatalf("second sync started %v after the first ended, want at least %v", g, interval)
+	}
+	time.Sleep(2 * interval)
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("%d syncs for a burst of events, want 2 (baseline, then one coalesced)", n)
+	}
+}
+
+// Events during the wait with nothing actually changed run no sync at all.
+func TestWatchMinIntervalNoChangeNoSync(t *testing.T) {
+	w := newWatchEnv(t)
+	ch, calls := eventfulWatch(t)
+	w.start("watch", "--every", "1h", "--min-interval", "100ms")
+	w.baselineDone()
+	for i := 0; i < 5; i++ {
+		ch <- struct{}{}
+	}
+	time.Sleep(400 * time.Millisecond)
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("%d syncs, want only the baseline", n)
+	}
+}
+
+// A stop signal during the wait ends watch at once with exit 0.
+func TestWatchStopDuringMinIntervalWait(t *testing.T) {
+	w := newWatchEnv(t)
+	ch, calls := eventfulWatch(t)
+	w.start("watch", "--every", "1h", "--min-interval", "1h")
+	w.baselineDone()
+	w.touch()
+	ch <- struct{}{}
+	time.Sleep(100 * time.Millisecond) // now waiting out the hour
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("%d syncs, want only the baseline before the wait ends", n)
+	}
+	if code := w.stop(); code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+}
+
+// A held lock retries on its short backoff even under a long --min-interval: nothing was synced.
+func TestWatchLockedRetryIgnoresMinInterval(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	release, err := store.AcquireLock(w.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	w.start("watch", "--every", "1h", "--min-interval", "1h")
+	w.waitFor("the locked warning", func() bool { return strings.Contains(w.errb.String(), "locked") })
+	release()
+	w.baselineDone()
+}
+
+// The pause can be set from the environment, and the environment value is validated like the flag.
+func TestWatchMinIntervalFromEnvironment(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("TEAMSCRAWL_WATCH_MIN_INTERVAL", "-1s")
+	if code, _, stderr := e.run("watch"); code != 2 {
+		t.Fatalf("exit %d, want 2 (%s)", code, stderr)
+	}
 }

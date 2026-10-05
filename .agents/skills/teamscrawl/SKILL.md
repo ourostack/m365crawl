@@ -109,7 +109,9 @@ One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands
 
 ### watch
 
-`watch [--every 60s] [--emit-initial]` runs until interrupted (SIGINT or SIGTERM exit 0) and prints JSON Lines, the one exception to the one-document rule. It syncs once at start as a silent baseline (nothing is printed unless `--emit-initial`), then syncs whenever the Teams cache changes (file events, with a poll every `--every` as the safety net; bursts are debounced) and prints one line per change followed by one report line:
+`watch [--every 60s] [--min-interval 60s] [--emit-initial]` runs until interrupted (SIGINT or SIGTERM exit 0) and prints JSON Lines, the one exception to the one-document rule. It syncs once at start as a silent baseline (nothing is printed unless `--emit-initial`), then syncs whenever the Teams cache changes (file events, with a poll every `--every` as the safety net; bursts are debounced) and prints one line per change followed by one report line:
+
+Syncs are spaced at least `--min-interval` (`TEAMSCRAWL_WATCH_MIN_INTERVAL`, `0` disables) apart so a busy cache does not keep a CPU core busy: expect changes up to about a minute plus a sync after Teams wrote them, not instantly.
 
 Example lines: `{"kind":"message","change":"new","item":{...}}`, `{"kind":"activity","change":"edited","item":{...}}`, `{"kind":"sync","report":{...}}`.
 

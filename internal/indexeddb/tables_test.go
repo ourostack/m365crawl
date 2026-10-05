@@ -62,6 +62,7 @@ func TestTablesFilteredLazyMatchFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = src.Close() }()
 	kv := map[string][]byte{}
 	large, padded := 0, 0
 	_ = src.Scan(nil, func(k, v []byte) error {
@@ -86,6 +87,7 @@ func TestTablesFilteredLazyMatchFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = o.Close() })
 		dbs, err := ref.Databases()
 		if err != nil {
 			t.Fatal(err)
@@ -144,12 +146,19 @@ func TestUnreadableBlobEntryIsAnError(t *testing.T) {
 	if len(raws) != 1 || !bytes.Equal(raws[0], []byte{0xff, 0x11, 0x01, 10, 5}) {
 		t.Fatalf("resolved raw = %x, want blob number 5", raws)
 	}
+	if err := o.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Records(1, 1, func(Record) error { return nil }); !errors.Is(err, leveldb.ErrClosed) {
+		t.Fatalf("Records after Close = %v, want leveldb.ErrClosed", err)
+	}
 
 	// A fresh Origin, so the blob entry's block is not already cached; then its table goes away.
 	o, err = OpenWith(dir, "", OpenOptions{KeepDatabase: keepManagers})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = o.Close() }()
 	tabs, _ := filepath.Glob(filepath.Join(dir, "*.ldb"))
 	for _, p := range tabs {
 		if err := removeFile(p); err != nil {

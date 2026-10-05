@@ -22,6 +22,7 @@ import (
 type kv interface {
 	Get(key []byte) ([]byte, bool, error)
 	Scan(prefix []byte, fn func(key, value []byte) error) error
+	Close() error
 }
 
 // Origin is one origin's IndexedDB: a LevelDB directory plus its blob directory.
@@ -35,7 +36,7 @@ type Origin struct {
 // sibling .blob directory; it may be empty or absent, in which case blob-backed
 // values decode as blob_missing. Large values are re-read from the LevelDB
 // directory on demand, so it must stay in place and unchanged while the Origin
-// is used; a value that can no longer be read makes Records fail.
+// is used; a value that can no longer be read makes Records fail. Close the Origin when done.
 func Open(leveldbDir, blobDir string) (*Origin, error) {
 	return OpenWith(leveldbDir, blobDir, OpenOptions{})
 }
@@ -100,6 +101,7 @@ func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
 		return nil, err
 	}
 	names, err := databaseNames(meta)
+	_ = meta.Close() // the metadata pass holds only small values; nothing was opened for re-reads
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +130,11 @@ func OpenWith(leveldbDir, blobDir string, opts OpenOptions) (*Origin, error) {
 	}
 	return &Origin{kv: db, blobDir: blobDir, stats: db.Stats()}, nil
 }
+
+// Close releases the LevelDB table files the Origin keeps open for re-reading large values. Call
+// it when done with the Origin, on every path. It is safe to call more than once; Records of a
+// large value fails after Close.
+func (o *Origin) Close() error { return o.kv.Close() }
 
 // Stats reports what the LevelDB reader loaded.
 func (o *Origin) Stats() leveldb.Stats { return o.stats }
@@ -168,6 +175,7 @@ func Census(leveldbDir string) (held map[int64]int64, dbs []Database, err error)
 		return nil, nil, err
 	}
 	o := &Origin{kv: db, stats: db.Stats()}
+	defer func() { _ = o.Close() }()
 	dbs, err = o.Databases()
 	if err != nil {
 		return nil, nil, err
