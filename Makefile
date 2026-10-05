@@ -26,7 +26,7 @@ help:
 		'  fmt            Apply Go formatting.' \
 		'  fmt-check      Fail if any file needs formatting.' \
 		'  vet            Run go vet.' \
-		'  lint           Run golangci-lint, govulncheck, actionlint, shellcheck and the signing script selftest.' \
+		'  lint           Run golangci-lint, govulncheck, actionlint, shellcheck and the release script selftests.' \
 		'  tidy-check     Verify go.mod and go.sum are tidy.' \
 		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow).' \
 		'  check          Run every local gate enforced by CI.' \
@@ -83,6 +83,10 @@ script-lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck is required (brew install shellcheck)"; exit 1; }
 	shellcheck scripts/*.sh
 	scripts/sign-notarize.sh --selftest
+	scripts/release-decide.sh --selftest
+	scripts/publish-cask.sh --selftest
+	scripts/check-tap-key.sh --selftest
+	scripts/report-failure.sh --selftest
 
 tidy-check:
 	go mod verify

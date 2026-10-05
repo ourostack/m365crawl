@@ -6,6 +6,7 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ### Added
 
+- A weekly `Credential health` workflow checks that every release secret is set and that the tap deploy key still authenticates, and reports a failure as an issue.
 - `watch --min-interval DURATION` (`TEAMSCRAWL_WATCH_MIN_INTERVAL`, default `60s`, `0` disables): the least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, and on a real one `watch` ran 28 full syncs in 10 minutes back to back at about 88% of a CPU core. File events that arrive during a sync or the pause now coalesce into one sync when the pause ends, and no sync runs if nothing changed. The first sync is still immediate. This replaces the fixed 5 second gap between sync starts. Changes reach the archive up to the interval plus a sync later; set `--min-interval 0` for the old latency.
 - `metadata`: prints the crawlkit app manifest (`control.Manifest`) as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. It needs no archive or Teams cache and never syncs. No schema or existing field changed.
 - `records` table (archive schema version 3): every Teams IndexedDB database that has no typed mapper and no credential-like name is mirrored into it, one row per record, with the key and the value as canonical JSON. Rows follow the archive rules: a record that leaves the cache gets a sticky `removed_at` and is never deleted; a value that fails to decode is counted and its key is still archived.
@@ -16,6 +17,10 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 - Each sync clears the value of archived `records` rows whose database or store name the denylist now matches (the one case the archive removes content).
 
 ### Changed
+
+- Releases start from code state. Merging a release-notes file `docs/releases/vX.Y.Z.md` (or `vX.Y.Z-rc.N.md`) to `main` is the release: the pipeline derives the version from the file name, refuses an ambiguous or wrong push with a clear error, creates the tag itself and runs every job in the same workflow run. Pushing a tag by hand no longer releases anything. A rehearsal (`-rc.N`) now also pushes its cask to the tap's `rehearsal` branch (never `main`), `scripts/publish-cask.sh` and the other release scripts have a `--selftest` that runs in `make lint`, and a rehearsal release carries a cask asset like a stable one.
+- A failed `verify-release` marks its GitHub release as a prerelease so it is not "latest", and any failed job of the release or credential-health workflow opens (or comments on) an issue with the workflow, the version and the run link.
+- Dependabot keeps GitHub Actions and Go modules current (weekly, grouped) and its pull requests auto-merge (squash) when the required checks pass.
 
 - Releases publish their Homebrew cask themselves. A stable tag's release workflow now pushes `teamscrawl.rb` to the tap right after the published artifacts verify, instead of waiting for the tap to poll for it (the poll was scheduled hourly but really ran every three to nine hours).
 - The database allowlist is replaced by a credential denylist: teamscrawl mirrors everything Teams cached except sign-in credentials. A database or object store whose name starts with `Teams:auth`, contains `auth`, `token`, `credential`, `secret`, `cookie`, `msal`, `oneauth`, `key-store`, `keystore`, `keyval`, `session`, `key-value`, `keyring`, `crypto`, `encrypt`, `pkce`, `bearer`, `password`, `refresh` or `adal`, or has `aad`, `keys`, `jwt` or `e2ee` as a whole segment is never opened for values. The three typed databases' other object stores are mirrored too.

@@ -1,21 +1,18 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
-    cooldown:
-      default-days: 2
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-
   - package-ecosystem: github-actions
     directory: /
-    groups:
-      codeql:
-        patterns:
-          - github/codeql-action/*
-    cooldown:
-      default-days: 2
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    groups:
+      actions:
+        patterns:
+          - "*"
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns:
+          - "*"
