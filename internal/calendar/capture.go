@@ -45,6 +45,9 @@ type detailString struct {
 	field   func(*Event) *string
 	measure func(string) int
 	online  bool
+	// small marks a field a thin copy can carry without the rest of the detail (categories). It
+	// follows the schedule clock, not the detail clock.
+	small bool
 }
 
 func byteLen(s string) int { return len(s) }
@@ -71,7 +74,7 @@ var detailStrings = []detailString{
 	{field: func(e *Event) *string { return &e.BodyType }},
 	{field: func(e *Event) *string { return &e.BodyPreview }, measure: byteLen},
 	{field: func(e *Event) *string { return &e.AttachmentsJSON }, measure: listLen},
-	{field: func(e *Event) *string { return &e.CategoriesJSON }},
+	{field: func(e *Event) *string { return &e.CategoriesJSON }, small: true},
 	{field: func(e *Event) *string { return &e.RecurrenceJSON }},
 }
 
@@ -105,8 +108,10 @@ func pickString(old, in string, c clock, measure func(string) int) string {
 //     keep the larger list or text (so a removal that arrives without a newer time is not seen).
 //     The exception: a non-stale copy that says the event is not an online meeting clears the
 //     meeting links it does not itself carry.
-//   - DetailAsOf (and DetailRawJSON) move to the incoming copy's time when that copy changed a
-//     detail field and is not older than the stored detail. A stale copy that only fills empty
+//   - The small fields (ReminderMinutes, CategoriesJSON) follow the schedule clock (LastModified)
+//     so a newer thin copy keeps them without claiming the detail clock.
+//   - DetailAsOf (and DetailRawJSON, when the copy has one) move to the incoming copy's time when
+//     that copy changed a substantive detail field and is not older than the stored detail. A stale copy that only fills empty
 //     fields leaves DetailAsOf alone, and a copy with no time cannot claim a clock.
 //   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 func Capture(old *Event, in Event) Event {
@@ -154,14 +159,25 @@ func Capture(old *Event, in Event) Event {
 			*dst = src
 			continue
 		}
-		*dst = pickString(*dst, src, dclock, d.measure)
+		c := dclock
+		if d.small {
+			c = sched
+		}
+		*dst = pickString(*dst, src, c, d.measure)
 	}
 	out.HasAttachments = base.HasAttachments || in.HasAttachments
-	out.ReminderMinutes = pickReminder(base.ReminderMinutes, in.ReminderMinutes, dclock)
+	out.ReminderMinutes = pickReminder(base.ReminderMinutes, in.ReminderMinutes, sched)
 
-	if !detailEqual(base, out) && in.LastModified != nil && dclock != stale {
+	// Only a copy that changed the substantive detail claims the detail clock. The small fields
+	// (reminder, categories) are excluded: a thin copy carries them with the schedule, so they are
+	// kept by the schedule clock instead, and the newest copy that states them wins without
+	// taking over DetailAsOf. The raw record moves with the clock and an empty one never replaces
+	// a stored one.
+	if !substantiveEqual(base, out) && in.LastModified != nil && dclock != stale {
 		out.DetailAsOf = in.LastModified
-		out.DetailRawJSON = in.DetailRawJSON
+		if in.DetailRawJSON != "" {
+			out.DetailRawJSON = in.DetailRawJSON
+		}
 	}
 	out.RemovedAt = nil
 	return out
@@ -176,6 +192,16 @@ func pickReminder(old, in *int, c clock) *int {
 		return in
 	}
 	return old
+}
+
+// substantiveEqual is detailEqual without the small fields.
+func substantiveEqual(a, b Event) bool {
+	for _, d := range detailStrings {
+		if !d.small && *d.field(&a) != *d.field(&b) {
+			return false
+		}
+	}
+	return true
 }
 
 // detailEqual reports whether two events hold the same detail values. The raw record is excluded,

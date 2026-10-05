@@ -403,3 +403,53 @@ func TestCaptureReminderAndAttachmentsFollowDetailClock(t *testing.T) {
 		t.Fatalf("fill: %+v", got)
 	}
 }
+
+func TestCaptureThinCopyWithSmallFieldsDoesNotClaimDetailClock(t *testing.T) {
+	five := 5
+	variants := map[string]func(*Event){
+		"reminder":   func(e *Event) { e.ReminderMinutes = &five },
+		"categories": func(e *Event) { e.CategoriesJSON = `["Other"]` },
+		"both":       func(e *Event) { e.ReminderMinutes = &five; e.CategoriesJSON = `["Other"]` },
+	}
+	for name, mutate := range variants {
+		r1, tn3, r2 := rich(t, t1), thin(t, t3), rich(t, t2)
+		mutate(&tn3)
+		r2.AttendeesJSON, r2.BodyHTML = attendeesThree, "<p>new body</p>"
+		copies := map[string]Event{"r1": r1, "t3": tn3, "r2": r2}
+		for _, order := range [][]string{
+			{"r1", "t3", "r2"}, {"r1", "r2", "t3"}, {"t3", "r1", "r2"}, {"t3", "r2", "r1"}, {"r2", "r1", "t3"}, {"r2", "t3", "r1"},
+		} {
+			var stored *Event
+			for _, n := range order {
+				next := Capture(stored, copies[n])
+				stored = &next
+			}
+			if stored.AttendeesJSON != attendeesThree || stored.BodyHTML != "<p>new body</p>" {
+				t.Errorf("%s %v: detail is not T2's: %q %q", name, order, stored.AttendeesJSON, stored.BodyHTML)
+			}
+			if !stored.DetailAsOf.Equal(mustTime(t, t2)) || stored.DetailRawJSON != r2.DetailRawJSON {
+				t.Errorf("%s %v: detail clock %v raw %q", name, order, stored.DetailAsOf, stored.DetailRawJSON)
+			}
+			// The newest copy that carries a small field keeps it.
+			if tn3.ReminderMinutes != nil && (stored.ReminderMinutes == nil || *stored.ReminderMinutes != 5) {
+				t.Errorf("%s %v: reminder %v", name, order, stored.ReminderMinutes)
+			}
+			if tn3.CategoriesJSON != "" && stored.CategoriesJSON != tn3.CategoriesJSON {
+				t.Errorf("%s %v: categories %q", name, order, stored.CategoriesJSON)
+			}
+		}
+	}
+}
+
+func TestCaptureEmptyRawDetailNeverOverwrites(t *testing.T) {
+	old := Capture(nil, rich(t, t1))
+	in := rich(t, t2)
+	in.AttendeesJSON, in.DetailRawJSON = attendeesThree, ""
+	got := Capture(&old, in)
+	if got.AttendeesJSON != attendeesThree || !got.DetailAsOf.Equal(mustTime(t, t2)) {
+		t.Fatalf("substantive copy did not advance: %q %v", got.AttendeesJSON, got.DetailAsOf)
+	}
+	if got.DetailRawJSON != old.DetailRawJSON {
+		t.Fatalf("empty raw detail overwrote the stored one: %q", got.DetailRawJSON)
+	}
+}
