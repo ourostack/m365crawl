@@ -379,3 +379,47 @@ func TestReadGenericKnownIsAskedOncePerRow(t *testing.T) {
 		t.Fatalf("records = %+v; the second record must be read in full with its digest", recs)
 	}
 }
+
+// A record that is read in full is unwrapped (snappy, blob file) once, for the digest, and the
+// payload is handed on to be decoded; a record that is skipped is unwrapped once and no more.
+func TestTypedRecordIsUnwrappedOnce(t *testing.T) {
+	db := dbName("replychain-manager", tenant1, user1)
+	f := &fakeOrigin{
+		dbs:     []indexeddb.Database{{ID: 1, Name: db, Stores: []indexeddb.Store{{ID: 1, Name: "replychains-2"}}}},
+		records: map[int64][]indexeddb.Record{1: {{Key: "a", Raw: []byte("one")}, {Key: "b", Raw: []byte("two")}}},
+	}
+	f.decode = func(_ int64, raw []byte) (any, error) { return string(raw), nil }
+	var got []string
+	skipB := func(_ Account, _, _, keyJSON string, _ []byte) bool { return keyJSON == `"b"` }
+	if _, err := readOriginWith(context.Background(), f, nil, ReadOptions{Sig: []byte("s"), Skip: skipB}, func(_ Account, _ string, v any) error {
+		got = append(got, v.(string))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "one" {
+		t.Fatalf("read %v", got)
+	}
+	if f.unwraps != 2 {
+		t.Fatalf("%d unwraps for two records, one read in full and one skipped; want 2", f.unwraps)
+	}
+}
+
+// The generic read unwraps once too.
+func TestGenericRecordIsUnwrappedOnce(t *testing.T) {
+	f := &fakeGeneric{
+		dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+		held:    map[int64]int64{1: 1},
+		records: map[int64][]indexeddb.Record{1: {strRec("known", "k"), strRec("fresh", "f")}},
+	}
+	f.install(t)
+	_, err := ReadGeneric(context.Background(), "/snap", nil, DefaultGenericBudget, GenericOptions{Sig: []byte("s"), Known: func(_, _, key string, _ []byte) (int, bool) {
+		return 0, key == `"known"`
+	}}, func(GenericRecord) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.unwraps != 2 {
+		t.Fatalf("%d unwraps for two records, one read in full and one skipped; want 2", f.unwraps)
+	}
+}

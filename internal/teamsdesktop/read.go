@@ -33,6 +33,7 @@ type origin interface {
 	Decode(dbID int64, raw []byte) (any, error)
 	Stats() leveldb.Stats
 	Payload(dbID int64, raw []byte) ([]byte, error)
+	DecodePayload(payload []byte) (any, error)
 }
 
 // ReadOptions tunes ReadWith.
@@ -129,20 +130,26 @@ func readOriginWith(ctx context.Context, o origin, account *Account, opts ReadOp
 			if r.Err != nil {
 				return count(omissions, r.Err)
 			}
+			// The value is unwrapped (snappy, blob file) once: the payload that is digested is the
+			// one that is decoded.
+			var payload []byte
 			if opts.Skip != nil {
 				var keyJSON string
 				var digest []byte
 				if kj, err := v8.Canonical(canonKey(r.Key)); err == nil {
 					keyJSON = string(kj)
-					if payload, err := o.Payload(db.ID, r.Raw); err == nil {
+					var perr error
+					if payload, perr = o.Payload(db.ID, r.Raw); perr == nil {
 						digest = recordDigest(opts.Sig, db.Name, payload)
+					} else {
+						payload = nil
 					}
 				}
 				if opts.Skip(acct, spec.kind, db.Name, keyJSON, digest) {
 					return nil
 				}
 			}
-			v, err := o.Decode(db.ID, r.Raw)
+			v, err := decodeRecord(o, db.ID, r.Raw, payload)
 			if err != nil {
 				return count(omissions, err)
 			}
@@ -169,6 +176,18 @@ func readOriginWith(ctx context.Context, o origin, account *Account, opts ReadOp
 		omissions[omitTruncatedLogTail] += n
 	}
 	return omissions, nil
+}
+
+// decodeRecord decodes a record value, from its payload when the caller already unwrapped it
+// (payload is nil otherwise).
+func decodeRecord(o interface {
+	Decode(dbID int64, raw []byte) (any, error)
+	DecodePayload(payload []byte) (any, error)
+}, dbID int64, raw, payload []byte) (any, error) {
+	if payload != nil {
+		return o.DecodePayload(payload)
+	}
+	return o.Decode(dbID, raw)
 }
 
 // count records an omission. Any other error is fatal and returned.

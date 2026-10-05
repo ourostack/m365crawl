@@ -189,6 +189,7 @@ type fakeGeneric struct {
 	released   []bool
 	closes     int // origins closed
 	payloadErr error
+	unwraps    int // envelope unwraps: a Decode or a Payload call each unwraps the value once
 }
 
 type fakeGenericOrigin struct {
@@ -207,9 +208,14 @@ func (o *fakeGenericOrigin) Records(dbID, _ int64, fn func(indexeddb.Record) err
 	}
 	return nil
 }
-func (o *fakeGenericOrigin) Decode(_ int64, raw []byte) (any, error) { return o.f.decode(raw) }
-func (o *fakeGenericOrigin) Close() error                            { o.f.closes++; return nil }
+func (o *fakeGenericOrigin) Decode(_ int64, raw []byte) (any, error) {
+	o.f.unwraps++
+	return o.f.decode(raw)
+}
+func (o *fakeGenericOrigin) DecodePayload(payload []byte) (any, error) { return o.f.decode(payload) }
+func (o *fakeGenericOrigin) Close() error                              { o.f.closes++; return nil }
 func (o *fakeGenericOrigin) Payload(_ int64, raw []byte) ([]byte, error) {
+	o.f.unwraps++
 	return raw, o.f.payloadErr
 }
 func (o *fakeGenericOrigin) Stats() leveldb.Stats { _ = len(o.buf); return o.f.stats }

@@ -78,6 +78,7 @@ type genericOrigin interface {
 	Stats() leveldb.Stats
 	Close() error
 	Payload(dbID int64, raw []byte) ([]byte, error)
+	DecodePayload(payload []byte) (any, error)
 }
 
 // Seams: the census of the snapshot and the opening of one batch's origin, which keeps the
@@ -275,9 +276,12 @@ func readGenericDatabase(ctx context.Context, o genericOrigin, g genericDB, res 
 			// later one is read in full, in order, so the row ends where a full read leaves it.
 			_, shared := seen[string(keyJSON)]
 			seen[string(keyJSON)] = struct{}{}
-			var digest []byte
+			var digest, payload []byte
 			if opts.Known != nil {
-				if payload, perr := o.Payload(db.ID, r.Raw); perr == nil { // an unreadable value is read in full below, as an omission
+				var perr error
+				if payload, perr = o.Payload(db.ID, r.Raw); perr != nil { // an unreadable value is read in full below, as an omission
+					payload = nil
+				} else {
 					digest = recordDigest(opts.Sig, db.Name, payload)
 					if !shared {
 						if red, ok := opts.Known(db.Name, st.Name, string(keyJSON), digest); ok {
@@ -288,7 +292,7 @@ func readGenericDatabase(ctx context.Context, o genericOrigin, g genericDB, res 
 				}
 			}
 			rec := GenericRecord{Account: acct, Database: db.Name, Store: st.Name, KeyJSON: keyJSON}
-			if v, err := o.Decode(db.ID, r.Raw); err != nil {
+			if v, err := decodeRecord(o, db.ID, r.Raw, payload); err != nil {
 				if cerr := count(res.Omissions, err); cerr != nil {
 					return cerr
 				}

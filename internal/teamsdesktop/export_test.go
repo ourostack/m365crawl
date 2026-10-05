@@ -54,6 +54,7 @@ func (o scriptedOrigin) Records(dbID, _ int64, fn func(indexeddb.Record) error) 
 	return nil
 }
 func (scriptedOrigin) Decode(_ int64, raw []byte) (any, error)     { return string(raw), nil }
+func (scriptedOrigin) DecodePayload(payload []byte) (any, error)   { return string(payload), nil }
 func (scriptedOrigin) Payload(_ int64, raw []byte) ([]byte, error) { return raw, nil }
 func (scriptedOrigin) Stats() leveldb.Stats                        { return leveldb.Stats{} }
 func (scriptedOrigin) Close() error                                { return nil }
