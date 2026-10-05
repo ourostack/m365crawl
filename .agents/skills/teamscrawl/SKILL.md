@@ -1,16 +1,17 @@
 ---
 name: teamscrawl
-description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state or activity feed on this Mac, through the local `teamscrawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
+description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state or activity feed on this Mac or Windows PC, through the local `teamscrawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
 ---
 
 # teamscrawl
 
-Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db`) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
+Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
+Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 
 ## When to use
 
 - Use it to answer "what is unread", "what mentions me", "what happened in channel X", "what was said about Y", or to summarize a thread.
-- Do not use it to send or react (no write path exists), to fetch files or media (metadata only), or for anything outside macOS new Teams. It knows only what the desktop app cached, so very old history may be missing.
+- Do not use it to send or react (no write path exists), to fetch files or media (metadata only), or for anything outside macOS or Windows new Teams. It knows only what the desktop app cached, so very old history may be missing.
 
 ## 60-second workflow
 
@@ -28,9 +29,17 @@ No words to search for? `search` also works with filters alone (`search --mentio
 
 Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read commands sync first when the archive is older than `--max-age` (stderr gets one line first: plain text in text mode, `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}` in JSON mode; the result gains `synced: {seconds, status}`); pass `--max-age 15m` for fresh answers or `--max-age 0` to skip the sync.
 
+## Supported hosts and install
+
+- macOS: install with Homebrew (`brew install ourostack/tap/teamscrawl`) or the darwin release tarballs. Full Disk Access is required for the app that launches `teamscrawl`.
+- Windows: download the release zip (`teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windows_arm64.zip`), unzip it, and run `teamscrawl.exe`. Windows release binaries are intentionally unsigned. `teamscrawl doctor` still checks the environment, but `full_disk_access` is `ok: true` / `not applicable on Windows`.
+- Linux is not supported because there is no supported Teams desktop cache path to mirror.
+
 ## Global flags
 
-`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`.
+`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`). Platform defaults: macOS `--teams-root ~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`, Windows `--teams-root %LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`; macOS `--db ~/.teamscrawl/teamscrawl.db`, Windows `--db %LOCALAPPDATA%\teamscrawl\teamscrawl.db`.
+
+On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself; otherwise `sync`, `watch`, and any implicit sync fail with `db_error` before SQLite opens the database.
 
 List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds":N}`. `truncated: true` means more exist: raise `--limit` (default 50) or narrow the filters. When `truncated` is true the result also has `"total":N`, the exact number of matches ignoring `--limit` (so you can tell 51 from 5,000 before deciding to page); it is omitted when not truncated, because then `count` is the total. `sql` stops reading at `--limit`, so it sets `truncated` but never `total`. Times are RFC3339 UTC. Sort orders: `search` and `unread` are newest first, `messages` is chronological (oldest first; with `--limit` you get the newest matches), `conversations` is sorted by last activity, newest first. Every list stops at `--limit` (default 50), so check `truncated`. Filter time flags accept RFC3339, `YYYY-MM-DD` (local midnight) or relative `90m`, `24h`, `7d`, `2w`.
 
@@ -140,7 +149,7 @@ Exit 0 is success, including a `sync` with status `ok_with_omissions` or `unchan
 | --- | --- | --- |
 | 2 | `usage` | Bad flag, filter, `--fields` key, account or query. Fix the command; `--help` shows options. |
 | 3 | `teams_not_installed` | The new Teams data directory is missing. Ask the user to install new Teams and sign in. |
-| 3 | `no_full_disk_access` | macOS blocked the read. The `fix` names the app (your terminal or agent host) to grant in System Settings > Privacy & Security > Full Disk Access; it must be restarted. Ask the user. |
+| 3 | `no_full_disk_access` | macOS blocked the read. The `fix` names the app (your terminal or agent host) to grant in System Settings > Privacy & Security > Full Disk Access; it must be restarted. Ask the user. Windows should not return this on the default LocalCache path. |
 | 3 | `no_teams_origin` | Teams has no cache yet. Ask the user to open Teams and sign in, then retry. |
 | 3 | `doctor_failed` | A required `doctor` check failed. Run `teamscrawl doctor` and follow the failing check's `fix`. |
 | 3 | `archive_newer` | The archive was written by a newer teamscrawl, so this build refuses to write it (`sync`, `watch` and the implicit sync fail before any write; reads still work, and an implicit sync becomes a warning plus `sync_error`). Run the `fix`: upgrade teamscrawl, or use another `--db`. |
@@ -148,7 +157,7 @@ Exit 0 is success, including a `sync` with status `ok_with_omissions` or `unchan
 | 1 | `snapshot_inconsistent` | Teams was writing while the cache was copied. Retry once; if it persists, ask the user to quit Teams briefly. |
 | 1 | `unsupported_block_compression` | The cache uses a format this version cannot read. Update teamscrawl and report it with `doctor` output. |
 | 1 | `store_missing` | A Teams store vanished. Ask the user to open Teams until it loads, then retry; if it persists, update teamscrawl. |
-| 1 | `db_error` | The archive cannot be read or written. Check `--db` path, permissions and disk space. |
+| 1 | `db_error` | The archive cannot be read or written. Check `--db` path, permissions and disk space. On Windows, also check that a custom `--db` parent directory and any pre-existing archive file are already private to the current user and SYSTEM. |
 | 1 | `partial_sync` | Some Teams sources synced and others failed; the message names each failed source and its code. The synced sources are in the archive. Run `teamscrawl doctor`, fix the cause and sync again. |
 | 1 | `interrupted` | The command was stopped (Ctrl-C or a signal) before it finished; nothing was half-written. Run it again. A second Ctrl-C or SIGTERM during the stop quits at once with exit 130 and may leave a temporary snapshot, which a later sync removes once it is older than an hour. |
 | 1 | `internal` | A teamscrawl bug. Report the command you ran. |

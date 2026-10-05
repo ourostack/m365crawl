@@ -1,6 +1,15 @@
 # Command reference
 
-This reference reproduces the output of `teamscrawl --help` and `teamscrawl <command> --help` for v0.1.0: every flag and help text below is what the binary prints. The normative behavior is in [SPEC.md](../SPEC.md). Run any command with `--help` for the same text.
+This reference reproduces the output of `teamscrawl --help` and `teamscrawl <command> --help` for v0.2.0: every flag and help text below is what the binary prints. The normative behavior is in [SPEC.md](../SPEC.md). Run any command with `--help` for the same text.
+
+## Platform defaults
+
+| Host | Default `--teams-root` | Default `--db` |
+| --- | --- | --- |
+| macOS | `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` | `~/.teamscrawl/teamscrawl.db` |
+| Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` |
+
+On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself as a new private directory. If that direct parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite writes anything.
 
 ## Global flags
 
@@ -10,7 +19,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | --- | --- |
 | `--format=text\|json\|log` | Output format: text, json or log. Default: text on a terminal, json otherwise. |
 | `--json` | Alias for --format json. |
-| `--db=PATH` | Archive database path (default ~/.teamscrawl/teamscrawl.db) ($TEAMSCRAWL_DB). |
+| `--db=PATH` | Archive database path (default `~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) (`$TEAMSCRAWL_DB`). On Windows the default path is private by construction; a custom path must use a private existing parent, let teamscrawl create a new private parent, and any pre-existing archive file must already be private, or open fails with `db_error` before SQLite writes anything. |
 | `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($TEAMSCRAWL_TEAMS_ROOT). |
 | `--account=TENANT/USER` | Only this account, as &lt;tenantId&gt;/&lt;userId&gt;. Default: every account. |
 | `--no-color` | Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color. |
@@ -25,7 +34,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 
 | Command | What it does |
 | --- | --- |
-| [`doctor`](#doctor) | Check that Teams, Full Disk Access and the archive are ready. |
+| [`doctor`](#doctor) | Check that Teams, platform access prerequisites and the archive are ready. |
 | [`sync`](#sync) | Copy the Teams cache into the archive once and print what changed. |
 | [`status`](#status) | Show archive counts per account, the last sync and other Teams origins. |
 | [`search`](#search) | Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`). |
@@ -47,7 +56,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 
 ## doctor
 
-Check that Teams, Full Disk Access and the archive are ready.
+Check that Teams, platform access prerequisites and the archive are ready.
 
 ```
 teamscrawl doctor [flags]
@@ -55,7 +64,7 @@ teamscrawl doctor [flags]
 
 No flags beyond the global ones.
 
-Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade` and `last_sync_status` (warnings).
+Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade` and `last_sync_status` (warnings). On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
 
 Examples:
 

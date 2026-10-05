@@ -4,7 +4,7 @@ teamscrawl turns a folder of Chromium database files into a SQLite archive. This
 
 ## The cache
 
-The new Teams app is a Microsoft Edge WebView2 shell. Its web app stores messages, conversations and the activity feed in the browser's IndexedDB, in the app's user data directory (`~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`). Each profile (`WV2Profile_*`) has one directory per origin, `IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`, plus a sibling `.indexeddb.blob` directory for values too large to sit in the database.
+The new Teams app is a Microsoft Edge WebView2 shell. Its web app stores messages, conversations and the activity feed in the browser's IndexedDB, in the app's user data directory (`~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` on macOS, `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` on Windows). Each profile (`WV2Profile_*`) has one directory per origin, `IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`, plus a sibling `.indexeddb.blob` directory for values too large to sit in the database.
 
 Reading a value takes four format layers, from the bottom up:
 
@@ -27,7 +27,7 @@ A fingerprint says only that some file changed. On a busy account the cache chan
 
 ## Step 2: snapshot
 
-Teams keeps writing while teamscrawl reads, and LevelDB compacts files away. So teamscrawl copies the origin into a private temporary directory (mode 0700) and reads the copy.
+Teams keeps writing while teamscrawl reads, and LevelDB compacts files away. So teamscrawl copies the origin into a private temporary directory (mode 0700 on macOS, current-user + SYSTEM ACL on Windows) and reads the copy.
 
 - Data files are copied first, then the `MANIFEST`, then `CURRENT` (the file that names the live manifest), then the blob directory. Copying the manifest after the files it describes means the copied manifest rarely names a file the copy lacks; when it does (a compaction removed one mid-copy), the validation below catches it and the copy is retried.
 - After the copy it re-reads the source's `CURRENT`, compares the manifest's size, and reads every table and log of the copy to prove it is complete. If anything moved, it tries again, up to three times, then fails with `snapshot_inconsistent`.
@@ -83,7 +83,7 @@ A decoded record is a tree of values. The mappers in `internal/teamsdesktop` tur
 
 ## Step 8: the archive and full-text search
 
-Each source is applied in one SQLite transaction in batches of 2,000 records. An upsert changes a row only when the incoming version is newer or its content hash differs, so repeating a sync changes nothing. A message that disappears from Teams' cache is left alone, because Teams evicts old messages and the archive is meant to outlive that. A message Teams deletes gets a `deleted_at` timestamp that stays.
+Each source is applied in one SQLite transaction in batches of 2,000 records. An upsert changes a row only when the incoming version is newer or its content hash differs, so repeating a sync changes nothing. A message that disappears from Teams' cache is left alone, because Teams evicts old messages and the archive is meant to outlive that. A message Teams deletes gets a `deleted_at` timestamp that stays. By default the archive lives at `~/.teamscrawl/teamscrawl.db` on macOS and `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows; on Windows the archive directory boundary is made private before SQLite writes any real bytes.
 
 Full-text search uses SQLite FTS5 tables (`message_fts`, `conversation_fts`) whose rowids equal the rowids of the `messages` and `conversations` rows they index. The store updates them in the same transaction as the row. That design makes updating an index entry a primary-key lookup instead of a scan, and it has one consequence: those rowids must never change, so the archive must never be vacuumed (`VACUUM` may renumber rowids of tables without an explicit integer key). See SPEC.md section 3.3.
 

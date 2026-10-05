@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -272,7 +273,7 @@ func TestRecordsRollbackWithSource(t *testing.T) {
 
 func TestSchemaMigratesV2ToV3(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +309,7 @@ func TestSchemaMigratesV2ToV3(t *testing.T) {
 
 func TestArchiveNewerThanThisBuild(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +327,7 @@ func TestArchiveNewerThanThisBuild(t *testing.T) {
 
 func TestOpenReadOnlyRefusesANewerArchive(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "teamscrawl.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -345,6 +346,15 @@ func TestOpenReadOnlyRefusesANewerArchive(t *testing.T) {
 	}
 }
 
+func writableArchivePath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		setCurrentUserAndSystemOnly(t, dir)
+	}
+	return filepath.Join(dir, "teamscrawl.db")
+}
+
 func TestOpenIgnoresAFileWithoutAVersionTable(t *testing.T) {
 	// checkSchemaNotNewer leaves a file with no schema_migrations table to crawlkit's own open.
 	path := filepath.Join(t.TempDir(), "plain.db")
@@ -361,6 +371,37 @@ func TestOpenIgnoresAFileWithoutAVersionTable(t *testing.T) {
 	}
 	if err := checkSchemaNotNewer(context.Background(), filepath.Join(t.TempDir(), "missing.db")); err != nil {
 		t.Fatalf("missing file: %v", err)
+	}
+}
+
+func TestCheckSchemaNotNewerHandlesHashInPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hash#archive.db")
+	if runtime.GOOS == "windows" {
+		setCurrentUserAndSystemOnly(t, filepath.Dir(path))
+	}
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.db.Exec(`update schema_migrations set version=?`, SchemaVersion+1); err != nil {
+		t.Fatal(err)
+	}
+	var coded *errs.Coded
+	err = checkSchemaNotNewer(context.Background(), path)
+	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer {
+		t.Fatalf("checkSchemaNotNewer(%q) = %v, want archive_newer", path, err)
+	}
+}
+
+func TestSQLiteFileURI(t *testing.T) {
+	got := sqliteFileURI("C:/tmp/hash#archive.db", "mode=ro")
+	if got != "file:///C:/tmp/hash%23archive.db?mode=ro" {
+		t.Fatalf("sqliteFileURI(windows) = %q", got)
+	}
+	got = sqliteFileURI("/tmp/hash#archive.db", "")
+	if got != "file:///tmp/hash%23archive.db" {
+		t.Fatalf("sqliteFileURI(unix) = %q", got)
 	}
 }
 

@@ -320,7 +320,7 @@ func TestDoctorReportsAnArchiveFromANewerBuild(t *testing.T) {
 	e.exec(`update meta set value='99' where key='derivation_version'`)
 	code, stdout, _ := e.run("doctor", "--json")
 	c := checks(t, decode(t, stdout))["archive_newer"]
-	if code != 3 || c["ok"] != false || !strings.Contains(c["detail"].(string), "99") || !strings.Contains(c["fix"].(string), "brew upgrade") {
+	if code != 3 || c["ok"] != false || !strings.Contains(c["detail"].(string), "99") || !strings.Contains(c["fix"].(string), "Upgrade teamscrawl to a newer build") {
 		t.Fatalf("exit %d: %v", code, c)
 	}
 	e.exec(`update meta set value='1' where key='derivation_version'`)

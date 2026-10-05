@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -135,6 +136,9 @@ func synced(t *testing.T) (syncer.Report, string) {
 			syncErr = err
 			return
 		}
+		if runtime.GOOS == "windows" {
+			setCurrentUserAndSystemOnly(t, dir)
+		}
 		archiveMu.Lock()
 		archive = dir
 		archiveMu.Unlock()
@@ -209,6 +213,7 @@ func TestRealDifferential(t *testing.T) {
 	for _, snap := range snapshots {
 		o := openSnapshot(t, snap.dir)
 		cmd := exec.Command(node, "diff.mjs") //nolint:gosec // node comes from PATH; the script is this package's own
+		cmd.Dir = diffScriptDir(t)
 		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
 		var stderr bytes.Buffer
@@ -898,7 +903,7 @@ func TestRealNoAuthDecoded(t *testing.T) {
 	}
 
 	// The generic records table: report hits by manager and store name only, never the value.
-	_, hits, truncated, err := st.SQL(context.Background(), "select source, database, store, value_json from records where value_json like '%eyJ%' or value_json like '%refresh_token%' or value_json like '%access_token%' or value_json like '%Bearer %'", acceptanceRowLimit)
+	_, hits, truncated, err := st.SQL(context.Background(), "select source, database, store, value_json from records", acceptanceRowLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
