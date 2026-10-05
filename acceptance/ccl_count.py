@@ -60,6 +60,12 @@ def main():
     conv_latest, chain_latest = {}, {}
     conv_versions = 0
     undecodable = set()  # hashes of record keys the reference could not decode
+    undecodable_versions = {"conversation-manager": 0, "replychain-manager": 0}  # record versions it could not decode
+
+    def note_undecodable(m, k):
+        undecodable.add((m, h12(key_text(k))))
+        undecodable_versions[m] += 1
+
     kf = open(keys_out, "w") if keys_out else None
     for dbid in db.database_ids:
         parts = dbid.name.split(":")
@@ -67,7 +73,7 @@ def main():
             continue
         manager = parts[1]
         store = db[dbid.dbid_no][STORES[manager]]
-        for rec in store.iterate_records(bad_deserializer_data_handler=lambda k, v, m=manager: undecodable.add((m, h12(key_text(k))))):
+        for rec in store.iterate_records(bad_deserializer_data_handler=lambda k, v, m=manager: note_undecodable(m, k)):
             live = bool(rec.is_live)
             k = (dbid.name, key_id(rec.key))
             seq = rec.ldb_seq_no
@@ -105,6 +111,7 @@ def main():
         "undecodable": {
             "conversations": sorted(h for m, h in undecodable if m == "conversation-manager"),
             "chains": sorted(h for m, h in undecodable if m == "replychain-manager"),
+            "conversation_versions": undecodable_versions["conversation-manager"],
         },
         "hashes": {"conversations": live_convs, "messages": sorted(messages)},
     }

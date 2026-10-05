@@ -409,6 +409,7 @@ Flags:
 | Flag | Meaning |
 | --- | --- |
 | `--every=DURATION` | Poll interval: the safety net when file events are missed. Syncs run only when the cache changed. |
+| `--min-interval=DURATION` | Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause ($TEAMSCRAWL_WATCH_MIN_INTERVAL). |
 | `--emit-initial` | Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted). |
 
 Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 7). Exits 0 on SIGINT or SIGTERM.

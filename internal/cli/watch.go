@@ -21,10 +21,9 @@ import (
 
 // Test seams.
 var (
-	// watchQuiet is how long the cache must stay quiet before a sync starts, and watchMinGap the
-	// least time between the starts of two syncs. Teams writes in bursts.
-	watchQuiet  = 2 * time.Second
-	watchMinGap = 5 * time.Second
+	// watchQuiet is how long the cache must stay quiet before a sync starts. Teams writes in
+	// bursts. The least time between the end of one sync and the start of the next is --min-interval.
+	watchQuiet = 2 * time.Second
 	// watchMaxWait caps the debounce: a sync starts at most this long after a burst's first event.
 	watchMaxWait = 10 * time.Second
 	// watchLockedRetry is the wait before retrying a sync that found the archive locked.
@@ -40,6 +39,7 @@ var (
 
 type watchCmd struct {
 	Every       time.Duration `default:"60s" help:"Poll interval: the safety net when file events are missed. Syncs run only when the cache changed." placeholder:"DURATION"`
+	MinInterval time.Duration `name:"min-interval" env:"TEAMSCRAWL_WATCH_MIN_INTERVAL" default:"60s" help:"Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause." placeholder:"DURATION"`
 	EmitInitial bool          `name:"emit-initial" help:"Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted)."`
 }
 
@@ -72,10 +72,13 @@ func (c *watchCmd) Run(rt *runtime) error {
 	if c.Every <= 0 {
 		return errs.Usage("--every must be greater than 0")
 	}
+	if c.MinInterval < 0 {
+		return errs.Usage("--min-interval must not be negative (0 disables the pause)")
+	}
 	if err := checkWatchFields(rt); err != nil {
 		return err
 	}
-	w := &watcher{rt: rt, every: c.Every, emitInitial: c.EmitInitial}
+	w := &watcher{rt: rt, every: c.Every, minInterval: c.MinInterval, emitInitial: c.EmitInitial}
 	return w.run()
 }
 
@@ -109,6 +112,7 @@ func dedupe(ss []string) []string {
 type watcher struct {
 	rt          *runtime
 	every       time.Duration
+	minInterval time.Duration // least time from the end of a sync to the start of the next
 	emitInitial bool
 
 	fps            map[string]string // source -> fingerprint at the last successful sync
@@ -145,7 +149,7 @@ func (w *watcher) run() error {
 		want      = true // a sync is wanted; the first one is the baseline
 		lastEvent time.Time
 		burstFrom time.Time // the first event since the last sync started
-		lastStart time.Time
+		lastEnd   time.Time // when the last sync finished; zero until one has, so the first is immediate
 		retryAt   time.Time
 	)
 	arm := func() {
@@ -157,7 +161,7 @@ func (w *watcher) run() error {
 		if !burstFrom.IsZero() && burstFrom.Add(watchMaxWait).Before(settled) {
 			settled = burstFrom.Add(watchMaxWait) // events keep coming: stop waiting for quiet
 		}
-		due := latest(settled, lastStart.Add(watchMinGap), retryAt)
+		due := latest(settled, lastEnd.Add(w.minInterval), retryAt)
 		timer.Reset(max(time.Until(due), 0))
 	}
 	arm()
@@ -190,8 +194,11 @@ func (w *watcher) run() error {
 				arm()
 			}
 		case <-timer.C: // armed only while a sync is wanted
-			lastStart, burstFrom = time.Now(), time.Time{}
+			burstFrom = time.Time{}
 			done, err := w.sync()
+			if !isLocked(err) { // a held lock cost nothing, so it retries on its own short backoff
+				lastEnd = time.Now()
+			}
 			switch {
 			case ctx.Err() != nil:
 				return nil
@@ -346,11 +353,16 @@ func (w *watcher) migrated(m store.Migration) {
 
 // retryAfter is how long to wait before retrying after err: a held lock is usually brief.
 func (w *watcher) retryAfter(err error) time.Duration {
-	var coded *errs.Coded
-	if errors.As(err, &coded) && coded.Code == errs.CodeLocked {
+	if isLocked(err) {
 		return min(watchLockedRetry, w.every)
 	}
 	return w.every
+}
+
+// isLocked reports whether err is the coded "archive locked" failure.
+func isLocked(err error) bool {
+	var coded *errs.Coded
+	return errors.As(err, &coded) && coded.Code == errs.CodeLocked
 }
 
 // reportErr keeps a failure to read changes back from ending the watch.
