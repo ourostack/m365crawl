@@ -221,6 +221,38 @@ func TestDoctorReportsAnArchiveThatCannotBeOpened(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsNoArchiveYet(t *testing.T) {
+	e := newEnv(t)
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	for _, n := range []string{"schema_version", "fts"} {
+		if cs[n]["ok"] != true || cs[n]["detail"] != "no archive yet; the first sync creates it" {
+			t.Errorf("%s = %v", n, cs[n])
+		}
+	}
+	last := cs["last_sync_age"]
+	if last["ok"] != true || last["warn"] != true || last["detail"] != "never synced" {
+		t.Fatalf("last_sync_age = %v", last)
+	}
+}
+
+func TestDoctorReportsAHealthyArchive(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	code, cs, _ := doctorChecksFor(t, e)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	if cs["schema_version"]["ok"] != true || !strings.Contains(cs["schema_version"]["detail"].(string), "schema v") {
+		t.Fatalf("schema_version = %v", cs["schema_version"])
+	}
+	if cs["fts"]["ok"] != true || cs["fts"]["detail"] != "full-text indexes present" {
+		t.Fatalf("fts = %v", cs["fts"])
+	}
+}
+
 func TestDoctorReportsAnArchiveThatCannotBeRead(t *testing.T) {
 	e := newEnv(t)
 	e.sync()

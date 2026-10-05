@@ -394,6 +394,17 @@ func TestCheckSchemaNotNewerHandlesHashInPath(t *testing.T) {
 	}
 }
 
+func TestSQLiteFileURI(t *testing.T) {
+	got := sqliteFileURI(`C:\tmp\hash#archive.db`, "mode=ro")
+	if got != "file:///C:/tmp/hash%23archive.db?mode=ro" {
+		t.Fatalf("sqliteFileURI(windows) = %q", got)
+	}
+	got = sqliteFileURI("/tmp/hash#archive.db", "")
+	if got != "file:///tmp/hash%23archive.db" {
+		t.Fatalf("sqliteFileURI(unix) = %q", got)
+	}
+}
+
 func seedRecords(t *testing.T, s *Store) {
 	t.Helper()
 	dbB := "Teams:calendar-manager:react-web-client:" + acctB.UserID
