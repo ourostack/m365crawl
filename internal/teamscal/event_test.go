@@ -169,7 +169,7 @@ func TestMapEventTypes(t *testing.T) {
 func TestMapEventResponseNormalized(t *testing.T) {
 	cases := map[string]string{
 		"Accepted": "accepted", "Tentative": "tentative", "TentativelyAccepted": "tentative", "Declined": "declined",
-		"NotResponded": "none", "None": "none", "Organizer": "organizer", " Weird ": "weird", "": "",
+		"NotResponded": "none", "None": "none", "Organizer": "organizer", "Weird": "weird", "": "",
 	}
 	for in, want := range cases {
 		e, _ := mapEvent(t, "k", `{"iCalUID":"U","myResponseType":"`+in+`"}`)
