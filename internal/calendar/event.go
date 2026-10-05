@@ -18,38 +18,93 @@ const (
 	SourceOutlook Source = "outlook"
 )
 
-// Event is one occurrence of a calendar event as one source holds it.
+// Event types, as the sources report them.
+const (
+	EventSingle     = "single"
+	EventOccurrence = "occurrence"
+	EventException  = "exception"
+	EventMaster     = "master"
+)
+
+// Event is one occurrence of a calendar event as one source holds it. Its fields fall in three
+// groups that Capture treats differently: identity, schedule (compared against LastModified) and
+// detail (compared against DetailAsOf). The bookkeeping fields at the end belong to the archive:
+// adapters leave them zero, and Capture and the store maintain them.
 type Event struct {
-	Source   Source
-	SourceID string
+	// Identity.
+	Source Source
+	// AccountID partitions every calendar table, in the form "<tenantId>/<userId>"; empty only for a
+	// source that has no account.
+	AccountID string
+	SourceID  string
 	// GlobalID is the id shared across sources (iCalUId or equivalent); empty when the source has none.
 	GlobalID string
+	// ICalUID is the iCalendar uid the source knows. For Teams it equals GlobalID; it is the join
+	// column to recaps.
+	ICalUID string
+	// SeriesKey is shared by a recurring master and its occurrences.
+	SeriesKey string
+	// EventType is one of the Event* constants; empty when the source did not say.
+	EventType string
 	// OriginalStart is the occurrence's original start (iCalendar RECURRENCE-ID); nil for a single
 	// event. Moving an occurrence changes Start but not OriginalStart. For an all-day occurrence
 	// the adapter passes midnight of the occurrence's own date in the event's time zone (or UTC
 	// midnight of that date); Key takes the wall-clock date of the value as given.
 	OriginalStart *time.Time
-	Start, End    time.Time
+
+	// Schedule group: a copy older than the stored LastModified never changes it.
+	Start, End time.Time
 	// AllDay events carry dates, never instants: StartDate and EndDate are YYYY-MM-DD, and EndDate
 	// is exclusive (the iCalendar DTEND convention). An empty or non-later EndDate means one day.
-	AllDay             bool
-	StartDate, EndDate string
-	TimeZone           string
-	Subject, Organizer string
-	AttendeesJSON      string
-	Location           string
+	AllDay                 bool
+	StartDate, EndDate     string
+	TimeZone               string
+	TimeZoneIANA           string
+	UTCOffset              string
+	Subject                string
+	Organizer              string
+	OrganizerAddress       string
+	IsOrganizer, IsPrivate bool
+	Cancelled              bool
+	Response, ShowAs       string
+	IsOnlineMeeting        bool
+	Location               string
+	LastModified           *time.Time
+
+	// Detail group: sources fetch these only for events the user opened, so a later copy often
+	// lacks them. Capture compares them against DetailAsOf, not LastModified.
 	OnlineMeetingURL   string
+	ShortJoinURL       string
+	DialInConferenceID string
+	DialInTollNumber   string
 	TeamsThreadID      string
-	SeriesKey          string
-	Cancelled          bool
-	Response, ShowAs   string
+	AttendeesJSON      string
+	LocationsJSON      string
+	BodyHTML           string
+	BodyText           string
+	BodyType           string
 	BodyPreview        string
-	LastModified       *time.Time
+	AttachmentsJSON    string
+	HasAttachments     bool
+	CategoriesJSON     string
+	RecurrenceJSON     string
+	ReminderMinutes    *int
+	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
+	DetailRawJSON string
+
+	// Bookkeeping. DetailAsOf is the LastModified of the copy that supplied the current detail; nil
+	// when detail was never captured.
+	DetailAsOf   *time.Time
+	DetailSeenAt *time.Time
+	FirstSeenAt  time.Time
+	SeenAt       time.Time
+	RemovedAt    *time.Time
 }
 
 // Window is the range one source covered in a snapshot, and how fresh that snapshot was.
 type Window struct {
 	Source       Source
+	AccountID    string
 	Start, End   time.Time
 	SyncedAt     time.Time
 	CacheFreshAt time.Time

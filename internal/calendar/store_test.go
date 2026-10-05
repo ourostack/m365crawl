@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -36,13 +37,18 @@ func count(t testing.TB, db *sql.DB, query string, args ...any) int {
 	return n
 }
 
+func agendaRange(db *sql.DB, from, to time.Time) ([]AgendaItem, error) {
+	res, err := Agenda(ctx, db, AgendaQuery{From: from, To: to})
+	return res.Items, err
+}
+
 func agenda(t testing.TB, db *sql.DB, from, to string) ([]AgendaItem, bool) {
 	t.Helper()
-	items, gap, err := Agenda(ctx, db, mustTime(t, from), mustTime(t, to))
+	res, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, from), To: mustTime(t, to)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return items, gap
+	return res.Items, res.Gap
 }
 
 const (
@@ -272,7 +278,7 @@ func TestAgendaAllDayAcrossZones(t *testing.T) {
 	west, east := time.FixedZone("UTC-7", -7*3600), time.FixedZone("UTC+9", 9*3600)
 	for _, loc := range []*time.Location{west, east, time.UTC} {
 		from := time.Date(2026, 10, 5, 0, 0, 0, 0, loc)
-		items, _, err := Agenda(ctx, db, from, from.AddDate(0, 0, 1))
+		items, err := agendaRange(db, from, from.AddDate(0, 0, 1))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,21 +286,21 @@ func TestAgendaAllDayAcrossZones(t *testing.T) {
 			t.Fatalf("%s: want 3 events on 10-05, got %d", loc, len(items))
 		}
 		prev := time.Date(2026, 10, 4, 0, 0, 0, 0, loc)
-		if items, _, _ := Agenda(ctx, db, prev, prev.AddDate(0, 0, 1)); len(items) != 0 {
+		if items, _ := agendaRange(db, prev, prev.AddDate(0, 0, 1)); len(items) != 0 {
 			t.Fatalf("%s: all-day event shifted onto 10-04: %+v", loc, items)
 		}
 		next := time.Date(2026, 10, 6, 0, 0, 0, 0, loc)
-		items, _, _ = Agenda(ctx, db, next, next.AddDate(0, 0, 1))
+		items, _ = agendaRange(db, next, next.AddDate(0, 0, 1))
 		if len(items) != 1 || items[0].Subject != "Trip" {
 			t.Fatalf("%s: 10-06 should hold only the multi-day trip: %+v", loc, items)
 		}
-		if items, _, _ := Agenda(ctx, db, time.Date(2026, 10, 8, 0, 0, 0, 0, loc), time.Date(2026, 10, 9, 0, 0, 0, 0, loc)); len(items) != 0 {
+		if items, _ := agendaRange(db, time.Date(2026, 10, 8, 0, 0, 0, 0, loc), time.Date(2026, 10, 9, 0, 0, 0, 0, loc)); len(items) != 0 {
 			t.Fatalf("%s: exclusive end date included", loc)
 		}
 	}
 	// A range ending after midnight local picks up the next date.
 	from := time.Date(2026, 10, 4, 12, 0, 0, 0, west)
-	if items, _, _ := Agenda(ctx, db, from, from.Add(24*time.Hour)); len(items) != 3 {
+	if items, _ := agendaRange(db, from, from.Add(24*time.Hour)); len(items) != 3 {
 		t.Fatalf("got %d", len(items))
 	}
 }
@@ -533,24 +539,64 @@ func TestUpgradeBlockedByExistingKey(t *testing.T) {
 func TestEventRoundTrip(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
-	e := Event{
-		Source: SourceTeams, SourceID: "t1", GlobalID: "uid", OriginalStart: tp(t, "2026-10-05T16:00:00Z"),
-		Start: mustTime(t, "2026-10-06T16:00:00Z"), End: mustTime(t, "2026-10-06T17:00:00Z"), TimeZone: "Pacific Standard Time",
-		Subject: "S", Organizer: "o", AttendeesJSON: `["a"]`, Location: "L", OnlineMeetingURL: "u", TeamsThreadID: "th", SeriesKey: "sk",
-		Cancelled: true, Response: "accepted", ShowAs: "busy", BodyPreview: "bp", LastModified: tp(t, "2026-10-01T00:00:00Z"),
-	}
+	e := rich(t, "2026-10-01T00:00:00Z")
+	e.OriginalStart = tp(t, "2026-10-05T16:00:00Z")
+	e.AccountID = ""
+	e.TimeZoneIANA, e.UTCOffset = "America/Los_Angeles", "-07:00"
+	e.OrganizerAddress, e.IsOrganizer, e.IsPrivate, e.Cancelled = "alex@example.test", true, true, true
+	e.AllDay, e.StartDate, e.EndDate = false, "", ""
 	apply(t, db, w, "2026-10-02T01:00:00Z", e)
 	items, _ := agenda(t, db, octStart, octEnd)
-	if len(items) != 1 || items[0].Start != e.Start.UTC() || items[0].End != e.End.UTC() {
-		t.Fatalf("%+v", items)
+	if len(items) != 0 {
+		t.Fatal("a cancelled event is hidden by default")
 	}
-	got := items[0].Event
-	if !got.OriginalStart.Equal(*e.OriginalStart) || !got.LastModified.Equal(*e.LastModified) {
-		t.Fatalf("times: %+v", got)
+	res, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd), IncludeCancelled: true})
+	if err != nil || len(res.Items) != 1 {
+		t.Fatalf("%v %+v", err, res)
 	}
-	got.OriginalStart, got.LastModified, e.OriginalStart, e.LastModified = nil, nil, nil, nil
-	if got != e.withUTC() {
-		t.Fatalf("got  %+v\nwant %+v", got, e)
+	got := res.Items[0].Event
+	// Agenda leaves out the heavy columns; the full row is checked below.
+	if got.BodyHTML != "" || got.BodyText != "" || got.DetailRawJSON != "" {
+		t.Fatalf("agenda must not carry bodies: %+v", got)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := loadStored(ctx, tx, e, res.Items[0].Key)
+	_ = tx.Rollback()
+	if err != nil || full == nil {
+		t.Fatalf("%v %v", err, full)
+	}
+	at := mustTime(t, "2026-10-02T01:00:00Z")
+	want := Capture(nil, e)
+	want.FirstSeenAt, want.SeenAt, want.DetailSeenAt = at, at, &at
+	if !reflect.DeepEqual(*full, want.withUTC()) {
+		t.Fatalf("got  %+v\nwant %+v", *full, want.withUTC())
+	}
+	// And every column has a Go field behind it, and the other way round.
+	var cols []string
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('calendar_source_events')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, n)
+	}
+	_ = rows.Close()
+	var goCols []string
+	for _, c := range eventColumns {
+		goCols = append(goCols, c.name)
+	}
+	goCols = append(goCols, "event_key", "composite_key")
+	sort.Strings(cols)
+	sort.Strings(goCols)
+	if !reflect.DeepEqual(cols, goCols) {
+		t.Fatalf("schema columns and eventColumns differ:\n%v\n%v", cols, goCols)
 	}
 }
 
@@ -685,7 +731,7 @@ func TestAgendaErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := openDB(t)
 			tt.setup(t, db)
-			if _, _, err := Agenda(ctx, db, from, to); err == nil {
+			if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
 				t.Fatal("want an error")
 			}
 		})
@@ -699,7 +745,7 @@ func TestRowsErrInjected(t *testing.T) {
 	orig, origScan := rowsErr, scanRow
 	t.Cleanup(func() { rowsErr = orig })
 	rowsErr = func(*sql.Rows) error { return errBoom }
-	if _, _, err := Agenda(ctx, db, mustTime(t, octStart), mustTime(t, octEnd)); err == nil {
+	if _, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd)}); err == nil {
 		t.Fatal("agenda: want error")
 	}
 	if err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
@@ -726,7 +772,7 @@ func TestRowsErrInjected(t *testing.T) {
 		}
 		return orig(r)
 	}
-	if _, _, err := Agenda(ctx, db, mustTime(t, octStart), mustTime(t, octEnd)); err == nil {
+	if _, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd)}); err == nil {
 		t.Fatal("sources: want error")
 	}
 }
