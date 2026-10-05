@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +159,79 @@ func TestCollidingGenericKeysMatchAFullReadOnEverySync(t *testing.T) {
 	for i := range states {
 		cur = i
 		syncBothWays(t, root, skipDB, fullDB, fmt.Sprintf("sync %d", i+1))
+	}
+}
+
+// Values that Scrub redacts, a value that changes under the same key, and records that vanish and
+// come back: a skipping sync and a full read agree on the rows, the redaction counts and the
+// record counts, on every sync.
+func TestRedactedAndChangingGenericValuesMatchAFullRead(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := copyFixture(t)
+	bearer, signed := "Bearer secret-token-value-1", "https://x.test/f?a=1&sig=deadbeef&b=2"
+	states := [][]teamsdesktop.FakeRecord{
+		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: "Bearer another-secret-2"}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: "Bearer another-secret-2"}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: "not secret any more"}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: "not secret any more"}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: "not secret any more"}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k1", Value: bearer}, {Key: "k2", Value: signed}, {Key: "k3", Value: "plain"}},
+		{{Key: "k3", Value: "plain"}},
+	}
+	cur := 0
+	teamsdesktop.InstallFakeGeneric(t, func() map[string][]teamsdesktop.FakeRecord {
+		return map[string][]teamsdesktop.FakeRecord{genericDB: states[cur]}
+	})
+	skipDB, fullDB := newPaths(t)
+	for i := range states {
+		cur = i
+		syncBothWays(t, root, skipDB, fullDB, fmt.Sprintf("sync %d", i+1))
+	}
+}
+
+// A seeded random series of generic states drawn from a pool that holds colliding scrubbed keys,
+// redacted values and changing values, in random order, over two databases (two accounts): every
+// sync equals a full read. A failure names the seed; TEAMSCRAWL_TEST_SEED=<n> runs that one.
+func TestRandomGenericStatesSkipEqualsFull(t *testing.T) {
+	seeds := []int64{1, 2, 3}
+	if s := os.Getenv("TEAMSCRAWL_TEST_SEED"); s != "" {
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seeds = []int64{n}
+	}
+	other := "Teams:scripted-manager:react-web-client:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-0000000000a2:en-us"
+	pool := []teamsdesktop.FakeRecord{
+		{Key: "https://x.test/a?sig=AAA", Value: "one"}, {Key: "https://x.test/a?sig=BBB", Value: "two"},
+		{Key: "https://x.test/a?sig=CCC", Value: "one"}, {Key: "https://x.test/a?sig=BBB", Value: "three"},
+		{Key: "k1", Value: "Bearer secret-1"}, {Key: "k1", Value: "Bearer secret-2"}, {Key: "k1", Value: "plain"},
+		{Key: "k2", Value: "https://x.test/f?sig=deadbeef"}, {Key: "k2", Value: "https://x.test/f?sig=feedface"},
+		{Key: "k3", Value: "same"}, {Key: "k4", Value: "x"}, {Key: "k4", Value: "y"},
+	}
+	for _, seed := range seeds {
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			rng := rand.New(rand.NewSource(seed)) //nolint:gosec // a test series, not security
+			root := copyFixture(t)
+			var current map[string][]teamsdesktop.FakeRecord
+			teamsdesktop.InstallFakeGeneric(t, func() map[string][]teamsdesktop.FakeRecord { return current })
+			skipDB, fullDB := newPaths(t)
+			for step := 1; step <= 8; step++ {
+				current = map[string][]teamsdesktop.FakeRecord{genericDB: nil, other: nil}
+				for db := range current {
+					for _, i := range rng.Perm(len(pool))[:rng.Intn(len(pool))] {
+						current[db] = append(current[db], pool[i])
+					}
+				}
+				syncBothWays(t, root, skipDB, fullDB, fmt.Sprintf("seed %d step %d", seed, step))
+				if rng.Intn(2) == 0 { // the same state again
+					syncBothWays(t, root, skipDB, fullDB, fmt.Sprintf("seed %d step %d again", seed, step))
+				}
+			}
+		})
 	}
 }

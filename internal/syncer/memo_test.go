@@ -3,18 +3,14 @@ package syncer
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/syndtr/goleveldb/leveldb/journal"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/store"
@@ -861,79 +857,22 @@ func TestRowHashesAreLoadedOnlyForRowsTheMemoryNames(t *testing.T) {
 func addDuplicateRecord(t *testing.T, root string, edit func(val []byte) []byte) {
 	t.Helper()
 	path := logFile(t, root)
-	f, err := os.Open(path) //nolint:gosec // test fixture copy
-	if err != nil {
-		t.Fatal(err)
-	}
-	var batches [][]byte
-	var next uint64 // the sequence number the next batch takes
-	var dupKey, dupVal []byte
-	jr := journal.NewReader(f, nil, false, true)
-	for {
-		rr, err := jr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		rec, err := io.ReadAll(rr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		batches = append(batches, rec)
-		seq, count := binary.LittleEndian.Uint64(rec), binary.LittleEndian.Uint32(rec[8:])
-		next = max(next, seq+uint64(count))
-		b := rec[12:]
-		for i := uint32(0); i < count; i++ {
-			typ := b[0]
-			kl, n := binary.Uvarint(b[1:])
-			key := b[1+n : 1+n+int(kl)]
-			b = b[1+n+int(kl):]
-			if typ != 1 {
-				continue
-			}
-			vl, n := binary.Uvarint(b)
-			val := b[n : n+int(vl)]
-			b = b[n+int(vl):]
-			if dupKey == nil && bytes.HasPrefix(key, []byte{0, 1, 1, 1}) && bytes.Contains(val, []byte("<p>Hello from Alex Fixture</p>")) {
-				dupKey, dupVal = append([]byte(nil), key...), edit(append([]byte(nil), val...))
+	batches := readLogBatches(t, path)
+	var dup *logEntry
+	for _, b := range batches {
+		for _, e := range b.entries {
+			if dup == nil && e.typ == 1 && bytes.HasPrefix(e.key, []byte{0, 1, 1, 1}) && bytes.Contains(e.val, []byte("<p>Hello from Alex Fixture</p>")) {
+				c := logEntry{1, append([]byte(nil), e.key...), edit(append([]byte(nil), e.val...))}
+				dup = &c
 			}
 		}
 	}
-	_ = f.Close()
-	if dupKey == nil {
+	if dup == nil {
 		t.Fatal("the fixture has no reply chain record to duplicate")
 	}
-	dupKey[len(dupKey)-1] = '9' // the same key text with another last character: a different record
-	batch := binary.LittleEndian.AppendUint64(nil, next)
-	batch = binary.LittleEndian.AppendUint32(batch, 1)
-	batch = append(batch, 1)
-	batch = binary.AppendUvarint(batch, uint64(len(dupKey)))
-	batch = append(batch, dupKey...)
-	batch = binary.AppendUvarint(batch, uint64(len(dupVal)))
-	batch = append(batch, dupVal...)
-	batches = append(batches, batch)
-	out, err := os.Create(path) //nolint:gosec // test fixture copy
-	if err != nil {
-		t.Fatal(err)
-	}
-	jw := journal.NewWriter(out)
-	for _, rec := range batches {
-		w, err := jw.Next()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write(rec); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := jw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := out.Close(); err != nil {
-		t.Fatal(err)
-	}
+	dup.key[len(dup.key)-1] = '9' // the same key text with another last character: a different record
+	batches = append(batches, logBatch{seq: nextSeq(batches), entries: []logEntry{*dup}})
+	writeLogBatches(t, path, batches)
 }
 
 // Two records of one source that produce one message row at the same version with different text
