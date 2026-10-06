@@ -247,3 +247,18 @@ func TestEventIDIsUTF16HexText(t *testing.T) {
 		t.Fatalf("stored id %q, want %q", got, HexID(raw))
 	}
 }
+
+func TestNewEventExtraString(t *testing.T) {
+	base := EventSpec{ID: GlobalObjectID(0, 0, 0, "FIXTURE-X"), SubjectBare: "Bare"}
+	plain := NewEvent(base).Encode()
+	base.ExtraWord, base.ExtraString = 980, "Extra"
+	extra := NewEvent(base).Encode()
+	// The extra string follows the bare subject, so the list moves by its bytes, and its
+	// word and length are written.
+	if want := len(plain) + len(UTF16Z("Extra")); len(extra) != want {
+		t.Fatalf("%d bytes, want %d", len(extra), want)
+	}
+	if n := binary.LittleEndian.Uint32(extra[4+980+4:]); int(n) != len(UTF16Z("Extra")) {
+		t.Fatalf("length word %d", n)
+	}
+}

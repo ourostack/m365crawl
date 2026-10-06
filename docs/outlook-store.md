@@ -91,7 +91,7 @@ The fixed region is 1109 bytes. After it come two variable areas:
 - **Area one** starts at +1109.
 - **The string area**, called T below, starts at `T = 1109 + u32@104`. The word at +104 was 813 in 239 objects and took at least seven other values, so it must be read from each object and never assumed.
 
-The id word at +820 is relative to +1109 (area one). The subject, location, organizer, preview and the other text fields named "base T" are relative to T. The attendee list sits in the string area after the string at +876.
+The id word at +820 is relative to +1109 (area one). The subject, location, organizer, preview and the other text fields named "base T" are relative to T. The attendee list sits in the string area after the bare subject and an optional extra string (see Attendees).
 
 ### Field table
 
@@ -134,7 +134,7 @@ Id structure. All ids start with the same 16 bytes, the public iCal UID prefix `
 
 ### Attendees
 
-Inside the event, in the string area after the string at +876 (the research says "after"; the exact gap is not recorded), there is a `u32` count, then one record per attendee:
+Inside the event, in the string area after the bare subject (and the extra string, if any), there is a `u32` count, then one record per attendee:
 
 | Part | Width | Meaning |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ Inside the event, in the string area after the string at +876 (the research says
 | B | 4 | response: 0 accepted, 1 tentative, 2 declined, 4 none (established on 2,001 records) |
 | C | 4 | undetermined |
 
-The list ends at the object end. The count is capped at 8 or 9, so long lists are truncated. 3,206 of 3,366 distinct events (95.2%) parse cleanly with a count above 0. The organizer is not in the list. Outlook holds attendees for 78 events where Teams holds none.
+The list starts where the bare subject (+876) ends, except that another string can sit between them. The reader starts at the end of the +876 string and, while the string starting at that position is the target of the +980 or +772 word, skips it and continues from its end; it reads the count there. In a probe of 456 event copies whose count read as over 1,000 when taken right after +876, another string followed it (the string word was +980 in 452 copies and +772 in 4), and after skipping that one string the list parsed cleanly in all 456. +772 and +980 are unidentified string words: their content has not been looked at, and they are not mapped. A rule that starts the list after the furthest end among all the string words was tried and overshot on real data (663 unparsed lists, against 192 before), because a known string word (+700, +836, +884, +892 or +1024) often ends past the list; do not retry it. The list ends at the object end. The count is capped at 8 or 9, so long lists are truncated. 3,206 of 3,366 distinct events (95.2%) parse cleanly with a count above 0. The organizer is not in the list. Outlook holds attendees for 78 events where Teams holds none.
 
 ## Detail object (class 0x6c, tag 0x348)
 
@@ -185,7 +185,7 @@ The working rule, **likely and not established**: the current version is the cop
 | Private flag, reminder on/off | not found | toggle each on a test appointment, copy before and after, diff the fixed region |
 | Categories, separate room address, web link | not found | add a category to a test appointment, copy before and after |
 | Full-length attendee list | the count is capped at 8 or 9 | an appointment with more than nine invitees; see whether a second list or class holds the rest |
-| Meaning of +412, +432, +440, +1076 bit 4, attendee words A and C, +980 | not determined | change one setting at a time on a test appointment |
+| Meaning of +412, +432, +440, +1076 bit 4, attendee words A and C, the strings at +772 and +980 | not determined | change one setting at a time on a test appointment |
 | 729 id-less stubs | belong to 5 series keys; no strings, no detail link | whether another class links them to their series |
 | 953 object-less payloads and 9,615 long gaps | a different record form, 24.8 MB together; whether they hold more events is unknown | search them for event ids not found in walked objects |
 | Class 0x6e | 6,258 objects, 224-byte fixed part, the same ids (at +192, base 224 + u32@104), the series key, start and end ticks at +152 and +160 | not needed until a consumer wants it |

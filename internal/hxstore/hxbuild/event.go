@@ -131,6 +131,11 @@ type EventSpec struct {
 	OrganizerName, OrganizerAddr string
 	Preview                      string
 	Attendees                    []Attendee
+	// ExtraWord, when not zero, is the offset of a string word (980 or 772 in the real
+	// store) whose string is written after the bare subject and before the attendee list,
+	// so the list does not follow the string at +876. ExtraString is its text.
+	ExtraWord   int
+	ExtraString string
 	// AreaOneSize is the size of area one (the word at +104). Zero means as big
 	// as the id and the zone name need; a bigger value pads with zeros, which
 	// moves the string area and so its alignment.
@@ -200,6 +205,9 @@ func NewEvent(s EventSpec) *Object {
 	put(evOrgAddr, s.OrganizerAddr)
 	put(evPreview, s.Preview)
 	put(evSubjectBare, s.SubjectBare)
+	if s.ExtraWord != 0 {
+		put(s.ExtraWord, s.ExtraString)
+	}
 	o.Append(attendeeList(s.Attendees))
 	return o
 }
