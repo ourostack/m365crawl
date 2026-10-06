@@ -6,20 +6,36 @@
 #
 #   AFTER           the commit of main being evaluated (github.sha)
 #   REPO            owner/name (GITHUB_REPOSITORY)
+#   TAP_REPO        owner/name of the Homebrew tap (default ourostack/homebrew-tap)
 #   REF             the ref the run started on (github.ref); must be refs/heads/main when set
 #   GH_TOKEN        token that can read this repository's tags and releases
 #   GITHUB_OUTPUT   where the outputs go (set by Actions)
 #
 # The candidates are every docs/releases/v*.md in AFTER's tree whose release is not done:
 # its tag does not exist, or the tag exists at a commit of main that holds the notes file but
-# no GitHub release exists (a release that stopped half way: it resumes at the tag's commit).
+# no GitHub release exists (a release that stopped half way: it resumes at the tag's commit), or
+# the release exists but its cask is not published (see below).
+#
+# A version is finished only when its release exists AND its cask is published: the tap's main
+# serves a cask for that version or a later one (stable), or the tap's rehearsal branch does (a
+# rehearsal); and a stable release is not demoted to a prerelease (contain does that when the
+# install from the tap failed; settle restores it). decide reads the tap (a public repository) at
+# its current state, so the answer survives any re-run and needs no marker. A release whose cask
+# is missing resumes at publish: publish_only=true, at the tag's commit. The workflow then skips
+# the build and the signing (verify, release), reuses the published assets, re-verifies them,
+# settles the flags, publishes the cask and, for a stable release, installs it from the tap.
+# A release that a higher stable release has superseded is never resumed: its cask would move
+# the tap backwards. A release that a higher pending notes file supersedes (for example a stable
+# release demoted after a failed install, with the next patch version's notes merged) is left
+# alone too, so the next release is never blocked by an unfinished one.
 # No candidate: release=false and exit 0. Otherwise the lowest version in semantic-version
 # order is released, and remaining=true says more candidates wait (the workflow starts itself
 # again for them). Because the decision reads state, not the push, a run that was cancelled or
 # refused is retried by any later run: a fix-up merge, a changelog fix or a manual start.
 #
 # Outputs: release (true or false), tag, version, sha (the commit to release), rehearsal (true
-# for a version with a hyphen), resume (true when the tag already exists), remaining.
+# for a version with a hyphen), resume (true when the tag already exists), publish_only (true when
+# the release exists and only its cask is missing), remaining.
 #
 # Versions only move forward: a candidate whose version is not greater than the highest stable
 # version already released is refused (a late notes file for an old version, or a rehearsal for
@@ -103,11 +119,33 @@ tag_info() {
   fail "could not check whether the tag $1 exists: $out"
 }
 
-release_exists() {
+# release_state TAG prints "none" (no release), "prerelease" or "final". gh exits non-zero for both
+# "absent" and "could not ask"; only "not found" means absent.
+release_state() {
   local out
-  out="$(gh release view "$1" -R "$REPO" --json tagName 2>&1)" && return 0
-  grep -Eqi 'not found|404' <<<"$out" && return 1
+  if out="$(gh release view "$1" -R "$REPO" --json isPrerelease --jq .isPrerelease 2>&1)"; then
+    if [[ "$out" == true ]]; then echo prerelease; else echo final; fi
+    return 0
+  fi
+  grep -Eqi 'not found|404' <<<"$out" && { echo none; return 0; }
   fail "could not check whether the release $1 exists: $out"
+}
+
+# tap_version BRANCH prints the version of the cask on that branch of the tap, or nothing when the
+# branch or the cask is not there. The tap is public; an unreadable tap repository, and any other
+# failure, is a refusal, never "missing".
+tap_version() {
+  local out
+  # Check the tap itself first: a private or renamed tap answers 404 on the cask too, and that
+  # must not read as "cask missing".
+  out="$(gh api "repos/${TAP_REPO:-ourostack/homebrew-tap}" --jq .full_name 2>&1)" \
+    || fail "could not read the tap repository ${TAP_REPO:-ourostack/homebrew-tap}: $out"
+  if out="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${TAP_REPO:-ourostack/homebrew-tap}/contents/Casks/teamscrawl.rb?ref=$1" 2>&1)"; then
+    sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' <<<"$out" | head -n 1
+    return 0
+  fi
+  grep -Eqi 'not found|404' <<<"$out" && return 0
+  fail "could not read the cask on the tap's $1 branch: $out"
 }
 
 emit() {
@@ -122,7 +160,7 @@ decide() {
   [[ -z "${REF:-}" || "$REF" == refs/heads/main ]] || fail "releases run from main only; this run started on $REF"
   git cat-file -e "${AFTER}^{commit}" 2>/dev/null || fail "the commit $AFTER is not in the checkout (fetch full history)"
 
-  local path base tag version tsha info highest="" candidates="" line best="" bestline="" count=0 file sha resume
+  local path base tag version tsha info pending highest="" candidates="" line best="" bestline="" count=0 file sha resume mode state released="" tapv branch
   # -z: names come back raw, so a quoted or non-ASCII name is judged like any other.
   while IFS= read -r -d '' path; do
     [[ "$path" =~ ^docs/releases/v[^/]+\.md$ ]] || continue
@@ -131,10 +169,12 @@ decide() {
     version="${tag#v}"
     [[ "$version" =~ $semver_re ]] || fail "$path does not name a valid semantic version ($version); use docs/releases/vX.Y.Z.md or vX.Y.Z-rc.N.md"
     git check-ref-format "refs/tags/$tag" || fail "$path does not name a valid git tag ($tag)"
-    if release_exists "$tag"; then
+    state="$(release_state "$tag")"
+    if [[ "$state" != none ]]; then
       [[ -n "$(tag_info "$tag")" ]] || fail "a GitHub release for $tag exists but the tag does not; delete the release and run the Release workflow again"
-      # Released: skipped without looking at what kind of tag it is.
+      # Released: whether its cask is published is judged below, once the highest stable version is known.
       if [[ "$tag" != *-* && ( -z "$highest" || "$(semver_cmp "$version" "$highest")" == 1 ) ]]; then highest="$version"; fi
+      released+="$version|$tag|$path|$state"$'\n'
       continue
     fi
     info="$(tag_info "$tag")"
@@ -144,18 +184,48 @@ decide() {
       if [[ -n "$tsha" ]] \
         && git merge-base --is-ancestor "$tsha" "$AFTER" \
         && git cat-file -e "${tsha}:${path}" 2>/dev/null; then
-        candidates+="$version|$tag|$path|$tsha|true"$'\n'
+        candidates+="$version|$tag|$path|$tsha|true|tag"$'\n'
       else
         fail "the tag $tag exists at ${info#* }, which is not a commit of main that holds $path, and no GitHub release exists for it; delete the tag (git push origin :refs/tags/$tag) and run the Release workflow again, or release a newer version"
       fi
     else
-      candidates+="$version|$tag|$path|$AFTER|false"$'\n'
+      candidates+="$version|$tag|$path|$AFTER|false|new"$'\n'
     fi
   done < <(git ls-tree -r -z --name-only "$AFTER" -- docs/releases)
 
+  # The highest version whose notes file is pending (no release yet). A newer pending release supersedes
+  # an unfinished lower one (a demoted or unpublished release): the next release is a new patch version.
+  pending=""
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    if [[ -n "$highest" && "$(semver_cmp "${line%%|*}" "$highest")" != 1 ]]; then
+    if [[ -z "$pending" || "$(semver_cmp "${line%%|*}" "$pending")" == 1 ]]; then pending="${line%%|*}"; fi
+  done <<<"$candidates"
+
+  # A released version is finished only when its cask is published (and a stable release is not demoted).
+  while IFS='|' read -r version tag path state; do
+    [[ -n "$version" ]] || continue
+    # Superseded by a pending release with a higher version: left alone, so a demoted release cannot block it.
+    if [[ -n "$pending" && "$(semver_cmp "$version" "$pending")" == -1 ]]; then continue; fi
+    # Superseded by a higher stable release: its cask would move the tap backwards, so it is never resumed.
+    if [[ -n "$highest" && "$(semver_cmp "$version" "$highest")" == -1 ]]; then continue; fi
+    branch=main
+    [[ "$tag" != *-* ]] || branch=rehearsal
+    tapv="$(tap_version "$branch")"
+    if [[ -n "$tapv" && "$tapv" =~ $semver_re && "$(semver_cmp "$tapv" "$version")" != -1 && ( "$tag" == *-* || "$state" == final ) ]]; then continue; fi
+    info="$(tag_info "$tag")"
+    tsha="$(git rev-parse --verify --quiet "${info#* }^{commit}" 2>/dev/null || true)"
+    if [[ -n "$tsha" ]] \
+      && git merge-base --is-ancestor "$tsha" "$AFTER" \
+      && git cat-file -e "${tsha}:${path}" 2>/dev/null; then
+      candidates+="$version|$tag|$path|$tsha|true|publish"$'\n'
+    else
+      fail "the release $tag exists but the tap's $branch branch does not serve its cask, and the tag is at ${info#* }, which is not a commit of main that holds $path, so the release cannot resume at publish; publish the cask from the release by hand or release a newer version"
+    fi
+  done <<<"$released"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ "${line##*|}" != publish && -n "$highest" && "$(semver_cmp "${line%%|*}" "$highest")" != 1 ]]; then
       fail "${line%%|*} (docs/releases/v${line%%|*}.md) is not greater than $highest, the highest stable version already released; versions only move forward. Delete that notes file, or release a version above $highest"
     fi
     count=$((count + 1))
@@ -166,23 +236,24 @@ decide() {
   done <<<"$candidates"
 
   if [[ "$count" -eq 0 ]]; then
-    echo "Every release-notes file on main already has its release: nothing to release."
+    echo "Every release-notes file on main already has its release and its cask on the tap: nothing to release."
     emit release false
     return 0
   fi
 
-  IFS='|' read -r version tag file sha resume <<<"$bestline"
+  IFS='|' read -r version tag file sha resume mode <<<"$bestline"
   if [[ "$tag" != *-* && "$resume" == false ]]; then
     git show "${sha}:CHANGELOG.md" 2>/dev/null | awk -v h="## [$version]" 'index($0, h) == 1 { found = 1 } END { exit !found }' \
       || fail "CHANGELOG.md has no section for $version (expected a line starting '## [$version]'); add it and merge again"
   fi
 
-  echo "Release $tag from $sha (notes: $file; resume: $resume; $((count - 1)) more waiting)"
+  echo "Release $tag from $sha (notes: $file; resume: $resume; mode: $mode; $((count - 1)) more waiting)"
   emit release true
   emit tag "$tag"
   emit version "$version"
   emit sha "$sha"
   emit resume "$resume"
+  if [[ "$mode" == publish ]]; then emit publish_only true; else emit publish_only false; fi
   if [[ "$tag" == *-* ]]; then emit rehearsal true; else emit rehearsal false; fi
   if [[ "$count" -gt 1 ]]; then emit remaining true; else emit remaining false; fi
 }
@@ -198,10 +269,30 @@ selftest() {
   mkdir -p "$stub" "$repo/docs/releases"
   cat > "$stub/gh" <<'STUB'
 #!/usr/bin/env bash
-# Stand-in for gh api repos/R/git/ref/tags/TAG --jq ... and gh release view TAG. STUB_TAGS lists
-# name:object[:type] triples (type commit by default) and STUB_RELEASES lists names that exist.
+# Stand-in for gh api repos/R/git/ref/tags/TAG --jq ..., gh api repos/T/contents/Casks/teamscrawl.rb?ref=BRANCH
+# and gh release view TAG. STUB_TAGS lists name:object[:type] triples (type commit by default),
+# STUB_RELEASES the releases that exist, STUB_DEMOTED those of them that are prereleases, STUB_TAP
+# branch:version pairs for the cask on the tap.
 case "$1" in
   api)
+    if [[ "$2" == "repos/${TAP_REPO:-ourostack/homebrew-tap}" ]]; then
+      if [[ -n "${STUB_TAP_PRIVATE:-}" ]]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+      echo "${2#repos/}"
+      exit 0
+    fi
+    if [[ "$*" == */contents/Casks/teamscrawl.rb\?ref=* ]]; then
+      if [[ -n "${STUB_TAP_ERROR:-}" ]]; then echo "gh: HTTP 502" >&2; exit 1; fi
+      args="$*"
+      ref="${args##*ref=}"
+      for pair in ${STUB_TAP:-}; do
+        if [[ "${pair%%:*}" == "$ref" ]]; then
+          printf 'cask "teamscrawl" do\n  version "%s"\nend\n' "${pair#*:}"
+          exit 0
+        fi
+      done
+      echo "gh: Not Found (HTTP 404)" >&2
+      exit 1
+    fi
     name="${2##*/}"
     for pair in ${STUB_TAGS:-}; do
       if [[ "${pair%%:*}" == "$name" ]]; then
@@ -215,7 +306,13 @@ case "$1" in
     ;;
   release)
     for name in ${STUB_RELEASES:-}; do
-      if [[ "$name" == "$3" ]]; then echo '{}'; exit 0; fi
+      if [[ "$name" == "$3" ]]; then
+        for demoted in ${STUB_DEMOTED:-}; do
+          if [[ "$demoted" == "$3" ]]; then echo true; exit 0; fi
+        done
+        echo false
+        exit 0
+      fi
     done
     ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 64 ;;
@@ -243,12 +340,12 @@ STUB
   printf '# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-10-05\n\n## [0.10.0] - 2026-10-06\n' > "$repo/CHANGELOG.md"
   c0="$(commit base README.md)"
 
-  decide_run() { # decide_run AFTER [VAR=value ...]; sets out, status
+  decide_run() { # decide_run AFTER [VAR=value ...]; sets out, status. The tap serves a far-future cask unless a case says otherwise.
     local a="$1"
     shift
     : > "$outputs"
     status=0
-    out="$(cd "$repo" && env PATH="$stub:$PATH" HOME="$tmp" AFTER="$a" REPO=o/r GH_TOKEN=t GITHUB_OUTPUT="$outputs" "$@" "$self" 2>&1)" || status=$?
+    out="$(cd "$repo" && env PATH="$stub:$PATH" HOME="$tmp" AFTER="$a" REPO=o/r GH_TOKEN=t GITHUB_OUTPUT="$outputs" STUB_TAP="main:99.0.0 rehearsal:99.0.0-rc.1" "$@" "$self" 2>&1)" || status=$?
   }
   expect_ok() { # expect_ok DESCRIPTION OUTPUT-LINE...
     local what="$1" line
@@ -317,6 +414,28 @@ STUB
   decide_run "$c4" STUB_TAGS="v0.2.0:$c1 v0.3.0-rc.2:$c1" STUB_RELEASES="v0.2.0 v0.3.0-rc.2"
   expect_fail "stable without a changelog section" "CHANGELOG.md has no section for 0.3.0"
 
+
+  # A release whose cask is not on the tap resumes at publish (no rebuild): stable, then rehearsal.
+  local tagsx relx
+  tagsx="v0.2.0:$c1"
+  relx="v0.2.0"
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_TAP=""
+  expect_ok "stable release, cask missing" release=true tag=v0.2.0 version=0.2.0 "sha=$c1" rehearsal=false resume=true publish_only=true remaining=false
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_TAP="main:0.1.0"
+  expect_ok "stable release, tap serves an older cask" release=true tag=v0.2.0 publish_only=true
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_TAP="rehearsal:0.2.0"
+  expect_ok "stable release, cask only on the rehearsal branch" release=true tag=v0.2.0 publish_only=true
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_TAP="main:0.2.0"
+  expect_ok "stable release, cask present" release=false
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_TAP="main:0.3.0"
+  expect_ok "stable release, tap already serves a later cask" release=false
+  # Contain demoted the release after the install failed; the tap was put back (or not): resume either way.
+  decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_DEMOTED="v0.2.0" STUB_TAP="main:0.2.0"
+  expect_ok "demoted stable release, cask present" release=true tag=v0.2.0 publish_only=true
+  # A demoted v0.2.0 does not block a newer pending notes file: v0.3.0-rc.2 (above it) goes first and
+  # the unfinished v0.2.0 is left alone; and a demoted stable release with a pending higher stable one.
+  decide_run "$c3" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_DEMOTED="v0.2.0" STUB_TAP="main:0.2.0"
+  expect_ok "demoted stable release, higher notes pending" release=true tag=v0.3.0-rc.2 publish_only=false resume=false remaining=false
   # Only main releases.
   decide_run "$c4" REF=refs/heads/other
   expect_fail "other branch" "main only"
@@ -373,6 +492,13 @@ STUB
   grep -Fq "nothing to release" <<<"$out" || fail "selftest: the present state should say there is nothing to release: $out"
   [[ "$(wc -l < "$outputs" | tr -d ' ')" == 1 ]] || fail "selftest: the present state should output only release=false: $(tr '\n' ' ' < "$outputs")"
 
+  # A higher stable release exists: older releases whose cask is missing are superseded, never
+  # resumed (their cask would move the tap backwards). Only the highest stable version resumes.
+  decide_run "$present" REF=refs/heads/main STUB_TAGS="$tags" STUB_RELEASES="$released" STUB_TAP="main:0.2.0"
+  expect_ok "older releases, newer stable published" release=false
+  decide_run "$present" REF=refs/heads/main STUB_TAGS="$tags" STUB_RELEASES="$released" STUB_TAP=""
+  expect_ok "only the highest stable release resumes at publish" release=true tag=v0.2.0 "sha=$present" publish_only=true remaining=false
+
   # Versions only move forward.
   local late
   late="$(commit "late" docs/releases/v0.1.5.md)"
@@ -386,6 +512,50 @@ STUB
   late="$(commit "next rc" docs/releases/v0.3.0-rc.1.md)"
   decide_run "$late" STUB_TAGS="$tags" STUB_RELEASES="$released"
   expect_ok "a rehearsal above the latest stable" release=true tag=v0.3.0-rc.1 rehearsal=true
+  # Rehearsal: release exists, cask on the rehearsal branch missing or older. rc.1 is released; rc.2 is added later.
+  local rtags="$tags v0.3.0-rc.1:$late" rrel="$released v0.3.0-rc.1"
+  decide_run "$late" STUB_TAGS="$rtags" STUB_RELEASES="$rrel" STUB_TAP="main:0.2.0"
+  expect_ok "rehearsal, cask missing" release=true tag=v0.3.0-rc.1 "sha=$late" rehearsal=true resume=true publish_only=true remaining=false
+  decide_run "$late" STUB_TAGS="$rtags" STUB_RELEASES="$rrel" STUB_TAP="main:0.2.0 rehearsal:0.3.0-rc.1"
+  expect_ok "rehearsal, cask present" release=false
+  # The cask on main does not count for a rehearsal, and an older cask on its branch does not either.
+  decide_run "$late" STUB_TAGS="$rtags" STUB_RELEASES="$rrel" STUB_TAP="main:0.3.0-rc.1"
+  expect_ok "rehearsal, cask only on main" release=true tag=v0.3.0-rc.1 publish_only=true
+  decide_run "$late" STUB_TAGS="$rtags" STUB_RELEASES="$rrel" STUB_TAP="main:0.2.0 rehearsal:0.3.0-alpha.1"
+  expect_ok "rehearsal, older cask on its branch" release=true tag=v0.3.0-rc.1 publish_only=true
+  late="$(commit "second rc" docs/releases/v0.3.0-rc.2.md)"
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0 rehearsal:0.3.0-rc.1"
+  expect_ok "rehearsal, rc.1 published, rc.2 missing" release=true tag=v0.3.0-rc.2 "sha=$late" rehearsal=true publish_only=true remaining=false
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0 rehearsal:0.3.0-rc.2"
+  expect_ok "rehearsal, a later rehearsal cask covers the earlier" release=false
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0"
+  expect_ok "rehearsals, both casks missing: lowest first" release=true tag=v0.3.0-rc.1 publish_only=true remaining=true
+  # A tap that cannot be read (not "not found") is a refusal, never "missing".
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0" STUB_TAP_ERROR=1
+  expect_fail "unreadable tap" "could not read the cask on the tap's"
+  # A tap that is private or renamed answers 404 for its cask too: refused, never "missing".
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0" STUB_TAP_PRIVATE=1
+  expect_fail "private or missing tap repository" "could not read the tap repository"
+  # A cask is missing and the tag is not a commit of main that holds the notes: refused with the reason.
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0 rehearsal:0.3.0-rc.1"
+  expect_fail "cask missing, tag at an unknown commit" "cannot resume at publish"
+
+  # A stable release demoted after a failed install (v0.4.0, released, tap back on 0.3.0) must not block the
+  # next patch version: v0.4.1's pending notes supersede it, and v0.4.0 is left alone.
+  repo="$tmp/repo3"
+  mkdir -p "$repo/docs/releases"
+  git -C "$repo" init --quiet --initial-branch=main
+  git -C "$repo" config user.name t
+  git -C "$repo" config user.email t@example.com
+  printf '# Changelog\n\n## [Unreleased]\n\n## [0.4.1] - 2026-10-08\n\n## [0.4.0] - 2026-10-07\n' > "$repo/CHANGELOG.md"
+  c0="$(commit "demoted" docs/releases/v0.4.0.md)"
+  decide_run "$c0" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.3.0"
+  expect_ok "demoted stable release alone resumes at publish" release=true tag=v0.4.0 publish_only=true remaining=false
+  c1="$(commit "next patch" docs/releases/v0.4.1.md)"
+  decide_run "$c1" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.3.0"
+  expect_ok "demoted v0.4.0 with a pending v0.4.1 notes file" release=true tag=v0.4.1 version=0.4.1 "sha=$c1" publish_only=false resume=false remaining=false
+  decide_run "$c1" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.4.0"
+  expect_ok "v0.4.0 unpublished (cask on tap, demoted) with a pending v0.4.1" release=true tag=v0.4.1 publish_only=false
   repo="$tmp/repo"
 
   # Semantic-version order.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ type runtime struct {
 	fields         []string
 	dbPath         string
 	root           string
+	outlookRoot    string // the Outlook profiles directory; empty means the default
+	outlookOn      bool
 	account        *teamsdesktop.Account
 	now            func() time.Time
 	exitErr        error       // a failure while printing for a flag that ends the run (--version)
@@ -76,6 +79,7 @@ func (rt *runtime) setup() error {
 		}
 	}
 	rt.root = g.TeamsRoot
+	rt.outlookRoot, rt.outlookOn = outlookChoice(g.OutlookRoot, g.TeamsRoot, os.Getenv(outlookEnv))
 	if g.Account != "" {
 		if rt.account, err = parseAccount(g.Account); err != nil {
 			return err
@@ -122,7 +126,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	rt.printSyncNotice(age) // stderr only; stdout stays the result
 	began := rt.now()
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
-	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})
+	rep, _, err := runSync(rt.ctx, rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()}))
 	rt.synced = &syncedInfo{Seconds: math.Round(rt.now().Sub(began).Seconds()*10) / 10, Status: rep.Status}
 	if err == nil {
 		return nil, nil
@@ -316,4 +320,27 @@ func (rt *runtime) printSyncNotice(age time.Duration) {
 		doc.Reason, doc.ArchiveAgeSeconds = "stale", &secs
 	}
 	rt.writeJSONLine(doc)
+}
+
+// outlookEnv turns the Outlook source on with the default profiles directory when set to 1.
+const outlookEnv = "TEAMSCRAWL_OUTLOOK"
+
+// outlookChoice says whether the Outlook source runs and where it reads. An explicit root turns it
+// on, and "none" turns it off. Otherwise TEAMSCRAWL_OUTLOOK=1 turns it on with the default
+// directory, unless a Teams root is set: a run pointed at a Teams fixture never reads a real
+// Outlook profile.
+func outlookChoice(root, teamsRoot, env string) (dir string, on bool) {
+	switch {
+	case root == "none":
+		return "", false
+	case root != "":
+		return root, true
+	}
+	return "", env == "1" && teamsRoot == ""
+}
+
+// syncOptions adds the Outlook choice to a run's options.
+func (rt *runtime) syncOptions(o syncer.Options) syncer.Options {
+	o.OutlookEnabled, o.OutlookRoot = rt.outlookOn, rt.outlookRoot
+	return o
 }

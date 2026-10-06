@@ -42,6 +42,9 @@ type Report struct {
 	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
 	Redacted     int      `json:"redacted"`
 	OtherOrigins []string `json:"other_origins"`
+	// OutlookClassicOnly names Outlook profile directories that hold only the classic Outlook's
+	// database, which is not read. It is a note, not a loss.
+	OutlookClassicOnly []string `json:"outlook_classic_only,omitempty"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
 	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
 	Migrated   *store.Migration `json:"migrated,omitempty"`
@@ -60,6 +63,8 @@ type SourceReport struct {
 	Accounts []string      `json:"accounts,omitempty"` // "<tenantId>/<userId>"
 	Counts   *SourceCounts `json:"counts,omitempty"`
 	Error    *SourceError  `json:"error,omitempty"`
+	// NextReadAfter is set on an Outlook source that was skipped_interval: the earliest time it is read again.
+	NextReadAfter *time.Time `json:"next_read_after,omitempty"`
 }
 
 // SourceCounts is what one source's commit did.
@@ -77,6 +82,8 @@ type SourceCounts struct {
 type SourceError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Fix is the remedy the coded error carries, as other errors of the output contract do.
+	Fix string `json:"fix,omitempty"`
 }
 
 // Change is one message or activity item the sync added, edited or deleted, taken from what the
