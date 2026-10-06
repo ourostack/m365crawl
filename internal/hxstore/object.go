@@ -39,6 +39,17 @@ type Object struct {
 	// is exactly the length the envelope declares. All accessor offsets count
 	// from the first byte of Raw.
 	Raw []byte
+	// Resynced is true if bytes were skipped between the end of the previous
+	// object in this payload (or the payload start) and this object. Such an
+	// object may be an envelope found inside a malformed one. See Walk.
+	Resynced bool
+}
+
+// Clone returns a copy of the object whose Raw is independent of the reader's
+// buffer, safe to keep after the callback returns.
+func (o Object) Clone() Object {
+	o.Raw = append([]byte(nil), o.Raw...)
+	return o
 }
 
 // Len is the object's length in bytes, envelope included.
@@ -166,11 +177,12 @@ func (o Object) Ticks(off int) (time.Time, bool) {
 // At every position it checks a u32 length L, then the envelope (u16 5, tag, the
 // same L, u16 0, class), then that 12 <= L, tag <= L and the object lies inside
 // the payload. A hit is reported and the scan continues after it; a miss moves
-// on one byte. It returns the number of payload bytes the objects cover (each
+// on one byte. It returns the number of payload bytes the objects cover; resynced tells the callback whether bytes were skipped before the object (each
 // object plus its length word) and the first error fn returned.
-func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte) error) (int, error) {
+func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte, resynced bool) error) (int, error) {
 	covered := 0
 	i := 0
+	prevEnd := 0 // end of the previous object, or the payload start
 	for i+lenPrefix+EnvelopeSize <= len(p) {
 		env := p[i+lenPrefix:]
 		if binary.LittleEndian.Uint16(env) != envMarker {
@@ -189,12 +201,13 @@ func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte) er
 			continue
 		}
 		raw := env[:l]
-		if err := visit(i, binary.LittleEndian.Uint16(env[offEnvCls:]), tag, raw); err != nil {
+		if err := visit(i, binary.LittleEndian.Uint16(env[offEnvCls:]), tag, raw, i != prevEnd); err != nil {
 			return covered, err
 		}
 		step := lenPrefix + len(raw)
 		covered += step
 		i += step
+		prevEnd = i
 	}
 	return covered, nil
 }

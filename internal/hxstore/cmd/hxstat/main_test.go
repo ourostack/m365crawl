@@ -49,9 +49,31 @@ func TestRunPrintsOnlyCounts(t *testing.T) {
 		r.Rejected["header_crc"] != 1 || r.Objects != 4 || r.UnwalkedBytes != 0 || r.PairsOverflow != 0 || r.FileSize != int64(b.Len()) {
 		t.Fatalf("%+v", r)
 	}
-	want := []pairCount{{1, 12, 1}, {0x6b, 40, 2}, {0x71, 20, 1}}
+	want := []pairCount{{1, 12, 1, 0}, {0x6b, 40, 2, 0}, {0x71, 20, 1, 0}}
 	if len(r.Pairs) != 3 || r.Pairs[0] != want[0] || r.Pairs[1] != want[1] || r.Pairs[2] != want[2] {
 		t.Fatalf("%+v", r.Pairs)
+	}
+}
+
+func TestRunReportsResync(t *testing.T) {
+	b := hxbuild.New(hxbuild.Options{})
+	p := hxbuild.Payload(hxbuild.NewObject(1, 12, 12))
+	p = append(p, 0xff)
+	p = append(p, hxbuild.Payload(hxbuild.NewObject(1, 12, 12))...)
+	b.Block(p)
+	var out bytes.Buffer
+	run([]string{writeStore(t, b)}, &out, &bytes.Buffer{})
+	var r report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Objects != 2 || r.ObjectsResynced != 1 || len(r.Pairs) != 1 || r.Pairs[0].Resynced != 1 || r.UnwalkedBytes != 1 {
+		t.Fatalf("%+v", r)
+	}
+	for _, key := range []string{`"objects_resynced": 1`, `"resynced": 1`} {
+		if !strings.Contains(out.String(), key) {
+			t.Fatalf("missing %s", key)
+		}
 	}
 }
 
@@ -78,7 +100,7 @@ func TestPairOrdering(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
 		t.Fatal(err)
 	}
-	want := []pairCount{{2, 12, 1}, {9, 12, 1}, {9, 13, 1}}
+	want := []pairCount{{2, 12, 1, 0}, {9, 12, 1, 0}, {9, 13, 1, 0}}
 	for i := range want {
 		if r.Pairs[i] != want[i] {
 			t.Fatalf("%+v", r.Pairs)

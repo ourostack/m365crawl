@@ -15,6 +15,7 @@ type Pair struct {
 
 // Block rejection reasons, as they appear in Stats.Rejected.
 const (
+	RejectMagic         = "magic"          // the magic was not where the scan found it (the file changed under the reader)
 	RejectTruncated     = "truncated"      // the header or payload runs past the end of the file
 	RejectHeaderUnknown = "header_unknown" // the constant at +0x1c is not 4
 	RejectTypeOther     = "type_other"     // a block type other than 8
@@ -41,6 +42,11 @@ type Stats struct {
 	Objects int
 	// Pairs counts objects per (class, tag), up to a cap of 4,096 distinct pairs.
 	Pairs map[Pair]int
+	// ObjectsResynced counts objects reached after skipped bytes (see Walk).
+	ObjectsResynced int
+	// PairsResynced counts, per (class, tag), how many of the Pairs objects were
+	// resynced. It has an entry only for pairs that are in Pairs.
+	PairsResynced map[Pair]int
 	// PairsOverflow counts objects whose pair was new after the cap was reached.
 	PairsOverflow int
 }
@@ -61,8 +67,11 @@ func (s *Stats) reject(reason string) {
 	s.Rejected[reason]++
 }
 
-func (s *Stats) countPair(p Pair) {
+func (s *Stats) countPair(p Pair, resynced bool) {
 	s.Objects++
+	if resynced {
+		s.ObjectsResynced++
+	}
 	if s.Pairs == nil {
 		s.Pairs = map[Pair]int{}
 	}
@@ -71,4 +80,10 @@ func (s *Stats) countPair(p Pair) {
 		return
 	}
 	s.Pairs[p]++
+	if resynced {
+		if s.PairsResynced == nil {
+			s.PairsResynced = map[Pair]int{}
+		}
+		s.PairsResynced[p]++
+	}
 }

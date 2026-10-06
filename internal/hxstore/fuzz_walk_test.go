@@ -24,7 +24,7 @@ func FuzzWalkObjects(f *testing.F) {
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, p []byte) {
 		next, covered := 0, 0
-		cov, err := walkObjects(p, func(pos int, class, tag uint16, raw []byte) error {
+		cov, err := walkObjects(p, func(pos int, class, tag uint16, raw []byte, _ bool) error {
 			end := pos + lenPrefix + len(raw)
 			if pos < next || end > len(p) || len(raw) < EnvelopeSize || int(tag) > len(raw) {
 				t.Fatalf("object at %d len %d tag %d, previous end %d, payload %d", pos, len(raw), tag, next, len(p))

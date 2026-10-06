@@ -4,7 +4,7 @@
 // Usage: hxstat PATH
 //
 // The output holds counts and format numbers only (blocks seen, valid and
-// rejected by reason, objects per class and tag, bytes no object covers, the
+// rejected by reason, objects per class and tag, how many of them were reached by resync, bytes no object covers, the
 // header's version byte and page size). It never prints an object's bytes, a
 // string, or the path. On failure it prints a coded error as JSON and exits 1.
 package main
@@ -37,21 +37,24 @@ type pairCount struct {
 	Class uint16 `json:"class"`
 	Tag   uint16 `json:"tag"`
 	Count int    `json:"count"`
+	// Resynced is how many of Count were reached after skipped bytes.
+	Resynced int `json:"resynced"`
 }
 
 type report struct {
-	VersionByte    byte           `json:"version_byte"`
-	PageSize       uint64         `json:"page_size"`
-	FileSize       int64          `json:"file_size"`
-	BlocksFound    int            `json:"blocks_found"`
-	BlocksValid    int            `json:"blocks_valid"`
-	BlocksRejected int            `json:"blocks_rejected"`
-	Rejected       map[string]int `json:"rejected_by_reason"`
-	PayloadBytes   int64          `json:"payload_bytes"`
-	UnwalkedBytes  int64          `json:"unwalked_bytes"`
-	Objects        int            `json:"objects"`
-	Pairs          []pairCount    `json:"objects_by_class_tag"`
-	PairsOverflow  int            `json:"pairs_overflow"`
+	VersionByte     byte           `json:"version_byte"`
+	PageSize        uint64         `json:"page_size"`
+	FileSize        int64          `json:"file_size"`
+	BlocksFound     int            `json:"blocks_found"`
+	BlocksValid     int            `json:"blocks_valid"`
+	BlocksRejected  int            `json:"blocks_rejected"`
+	Rejected        map[string]int `json:"rejected_by_reason"`
+	PayloadBytes    int64          `json:"payload_bytes"`
+	UnwalkedBytes   int64          `json:"unwalked_bytes"`
+	Objects         int            `json:"objects"`
+	ObjectsResynced int            `json:"objects_resynced"`
+	Pairs           []pairCount    `json:"objects_by_class_tag"`
+	PairsOverflow   int            `json:"pairs_overflow"`
 }
 
 type failure struct {
@@ -78,13 +81,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		VersionByte: s.Version, PageSize: s.PageSize, FileSize: s.Size(),
 		BlocksFound: st.BlocksFound, BlocksValid: st.BlocksValid, BlocksRejected: st.BlocksRejected(),
 		Rejected: st.Rejected, PayloadBytes: st.PayloadBytes, UnwalkedBytes: st.UnwalkedBytes,
-		Objects: st.Objects, Pairs: []pairCount{}, PairsOverflow: st.PairsOverflow,
+		Objects: st.Objects, ObjectsResynced: st.ObjectsResynced, Pairs: []pairCount{}, PairsOverflow: st.PairsOverflow,
 	}
 	if r.Rejected == nil {
 		r.Rejected = map[string]int{}
 	}
 	for p, n := range st.Pairs {
-		r.Pairs = append(r.Pairs, pairCount{Class: p.Class, Tag: p.Tag, Count: n})
+		r.Pairs = append(r.Pairs, pairCount{Class: p.Class, Tag: p.Tag, Count: n, Resynced: st.PairsResynced[p]})
 	}
 	sort.Slice(r.Pairs, func(i, j int) bool {
 		if r.Pairs[i].Class != r.Pairs[j].Class {

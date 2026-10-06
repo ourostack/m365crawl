@@ -11,8 +11,8 @@ import (
 	"os"
 )
 
-// File header layout. The magic and the version byte at +0x08 are confirmed on a
-// real store; the page size at +0x38 is reference-derived and unconfirmed.
+// File header layout. The magic, the version byte at +0x08 and the page size at
+// +0x38 are confirmed on a real store (2026-10-05: version 'i', page size 4096).
 const (
 	// FileHeaderSize is the size of the file header Open reads.
 	FileHeaderSize = 0x40
@@ -102,20 +102,48 @@ func Open(r io.ReaderAt, size int64) (*Store, error) {
 	return s, nil
 }
 
-// statFile is a seam so the stat failure path can be tested.
-var statFile = (*os.File).Stat
+// Seams for tests.
+var (
+	statPath = os.Stat
+	statFile = (*os.File).Stat
+	sameFile = os.SameFile
+)
 
-// OpenFile opens the store at path read-only and checks its header. The caller
-// passes a private copy; this package never looks for Outlook's own files.
-// Close the Store when done.
+// ErrFileChanged reports that the path was swapped for a different file between
+// the check and the open.
+var ErrFileChanged = errors.New("hxstore: file changed between stat and open")
+
+// OpenFile opens the store at path read-only and checks its header.
+//
+// It is meant for a private copy of the store, not for a file another program is
+// writing: the copy is read in many separate reads, so a file that changes
+// underneath gives torn blocks (which Walk counts and skips), and on Windows an
+// open handle can block that program from renaming or deleting the file. The
+// caller passes the copy; this package never looks for Outlook's own files.
+//
+// The path is checked before it is opened, so a named pipe or device is refused
+// (ErrNotRegular) instead of blocking the open. The file is then opened
+// read-only (and non-blocking on Unix), and the opened handle must be a regular
+// file and the same file that was checked. Close the Store when done.
 func OpenFile(path string) (*Store, error) {
-	f, err := os.Open(path) //nolint:gosec // the caller chooses the path; read-only
+	before, err := statPath(path)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, ErrNotRegular
+	}
+	f, err := os.OpenFile(path, openFlags, 0) //nolint:gosec // the caller chooses the path; read-only
 	if err != nil {
 		return nil, err
 	}
 	fi, err := statFile(f)
-	if err == nil && !fi.Mode().IsRegular() {
+	switch {
+	case err != nil:
+	case !fi.Mode().IsRegular():
 		err = ErrNotRegular
+	case !sameFile(before, fi):
+		err = ErrFileChanged
 	}
 	if err != nil {
 		_ = f.Close()
@@ -212,8 +240,27 @@ func (sc *scanner) fill(ctx context.Context, at int64) error {
 // skipped; they are never an error by themselves. After a valid block the scan
 // resumes at its end, after a rejected one just past its magic, so a corrupt
 // block never hides its neighbours. The Object passed to fn aliases the reused
-// buffer (see Object). If fn returns an error Walk stops and returns it with the
-// stats so far. A nil fn only counts. Walk checks ctx once per block and once per
+// buffer: the Raw slice of the Object passed to fn is valid only until fn
+// returns, and its bytes change when the next block is read. Copy with
+// Object.Clone to keep one. If fn returns an error Walk stops and returns it. A
+// nil fn only counts.
+//
+// Resync policy. Inside a payload the walk looks for an object at every byte. At
+// a position that is not a valid object it moves on one byte and tries again, so
+// a corrupt object does not hide the ones after it, but the same rule can report
+// an envelope that sits inside a malformed object, or a stale one, as if it were
+// top level. Such an object is reported with Object.Resynced true and counted in
+// Stats.ObjectsResynced and Stats.PairsResynced. An object is Resynced exactly
+// when at least one byte was skipped between the end of the previous object (or
+// the start of the payload) and its start; an object that begins exactly where
+// the previous one ended is not, so the flag is true for the first object after
+// skipped bytes and false again from the next contiguous object on.
+//
+// Partial stats on error. When Walk returns a non-nil error (a read failure, a
+// cancelled context, or an error from fn) the Stats are those counted so far: a
+// block whose read failed was counted in BlocksFound but is in neither
+// BlocksValid nor Rejected, so BlocksFound can exceed their sum. Only a nil
+// error means the counts describe the whole file. Walk checks ctx once per block and once per
 // scan window. The returned error is non-nil only for a read error, a cancelled
 // context or an error from fn.
 func (s *Store) Walk(ctx context.Context, opts WalkOptions, fn func(Object) error) (Stats, error) {
@@ -254,12 +301,12 @@ func (s *Store) Walk(ctx context.Context, opts WalkOptions, fn func(Object) erro
 		}
 		st.BlocksValid++
 		st.PayloadBytes += int64(len(out))
-		covered, err := walkObjects(out, func(pos int, class, tag uint16, raw []byte) error {
-			st.countPair(Pair{Class: class, Tag: tag})
+		covered, err := walkObjects(out, func(pos int, class, tag uint16, raw []byte, resynced bool) error {
+			st.countPair(Pair{Class: class, Tag: tag}, resynced)
 			if fn == nil {
 				return nil
 			}
-			return fn(Object{BlockOffset: start, PayloadPos: pos, Class: class, Tag: tag, Raw: raw})
+			return fn(Object{BlockOffset: start, PayloadPos: pos, Class: class, Tag: tag, Raw: raw, Resynced: resynced})
 		})
 		st.UnwalkedBytes += int64(len(out) - covered)
 		if err != nil {
@@ -273,6 +320,10 @@ func (s *Store) Walk(ctx context.Context, opts WalkOptions, fn func(Object) erro
 // that are not about the block's content (a read failure).
 func classify(err error) (reason string, soft bool) {
 	switch {
+	case errors.Is(err, ErrBlockMagic):
+		// The scan only stops where the magic is, so this means the file
+		// changed between the scan and the read.
+		return RejectMagic, true
 	case errors.Is(err, ErrBlockTruncated):
 		return RejectTruncated, true
 	case errors.Is(err, ErrBlockHeaderUnknown):
