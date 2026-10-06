@@ -68,6 +68,7 @@ type report struct {
 	TailBytes              int64          `json:"tail_bytes"`
 	TailsStartWithTrailer  int            `json:"tails_start_with_trailer"`
 	HeadsTrailerForm       int            `json:"heads_trailer_form"`
+	TrailerHeadLengths     map[int]int    `json:"trailer_head_lengths"`
 	Gap1Values             map[int]int    `json:"gap1_values"`
 	Gap11OneByteDiff       map[int]int    `json:"gap11_one_byte_diff_by_index"`
 	Gap11ManyDiff          int            `json:"gap11_many_diff"`
@@ -105,7 +106,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		NoObjectFirst4: nz(st.NoObjectFirst4), HeadLengths: nz(st.HeadLens), HeadEndsInTrailer: st.HeadEndsInTrailer,
 		HeadFirst4: nz(st.HeadFirst4), GapLengths: nz(st.GapLens), GapsEqualTrailer: st.GapsTrailer,
 		GapFirst4: nz(st.GapFirst4), Tails: st.Tails, TailBytes: st.TailBytes, TailsStartWithTrailer: st.TailsStartWithTrailer,
-		HeadsTrailerForm: st.HeadsTrailerForm, Gap1Values: nz(st.Gap1Values), Gap11OneByteDiff: nz(st.Gap11OneByteDiff), Gap11ManyDiff: st.Gap11ManyDiff,
+		HeadsTrailerForm: st.HeadsTrailerForm, TrailerHeadLengths: nz(st.TrailerHeadLens), Gap1Values: nz(st.Gap1Values), Gap11OneByteDiff: nz(st.Gap11OneByteDiff), Gap11ManyDiff: st.Gap11ManyDiff,
 		Objects: st.Objects, ObjectsResynced: st.ObjectsResynced, Pairs: []pairCount{}, PairsOverflow: st.PairsOverflow,
 	}
 	if r.Rejected == nil {

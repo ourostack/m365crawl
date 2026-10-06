@@ -24,7 +24,8 @@ func FuzzWalkObjects(f *testing.F) {
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, p []byte) {
 		next, covered := 0, 0
-		cov, err := walkObjects(p, &Stats{}, func(pos int, class, tag uint16, raw []byte, _ bool) error {
+		st := &Stats{}
+		cov, err := walkObjects(p, st, func(pos int, class, tag uint16, raw []byte, _ bool) error {
 			end := pos + lenPrefix + len(raw)
 			if pos < next || end > len(p) || len(raw) < EnvelopeSize || int(tag) > len(raw) {
 				t.Fatalf("object at %d len %d tag %d, previous end %d, payload %d", pos, len(raw), tag, next, len(p))
@@ -38,6 +39,9 @@ func FuzzWalkObjects(f *testing.F) {
 			covered += lenPrefix + len(raw)
 			return nil
 		})
+		if st.FramingBytes < 0 || cov+int(st.FramingBytes) > len(p) {
+			t.Fatalf("object bytes %d + framing %d exceed payload %d", cov, st.FramingBytes, len(p))
+		}
 		if err != nil || cov != covered || cov > len(p) {
 			t.Fatalf("covered %d, summed %d, payload %d, err %v", cov, covered, len(p), err)
 		}
@@ -102,7 +106,9 @@ func FuzzWalk(f *testing.F) {
 		if err != nil {
 			return
 		}
+		var objectBytes int64
 		st, err := s.Walk(context.Background(), WalkOptions{MaxInflated: fuzzLimit}, func(o Object) error {
+			objectBytes += int64(lenPrefix + len(o.Raw))
 			if len(o.Raw) > fuzzLimit || o.BlockOffset < 0 || o.BlockOffset >= int64(len(data)) {
 				t.Fatalf("object %d bytes at block %d", len(o.Raw), o.BlockOffset)
 			}
@@ -110,6 +116,9 @@ func FuzzWalk(f *testing.F) {
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if objectBytes+st.FramingBytes+st.UnwalkedBytes != st.PayloadBytes {
+			t.Fatalf("accounting: objects %d + framing %d + unwalked %d != payload %d", objectBytes, st.FramingBytes, st.UnwalkedBytes, st.PayloadBytes)
 		}
 		if st.BlocksFound != st.BlocksValid+st.BlocksRejected() || st.UnwalkedBytes+st.FramingBytes > st.PayloadBytes || st.UnwalkedBytes < 0 || st.FramingBytes < 0 {
 			t.Fatalf("inconsistent stats %+v", st)

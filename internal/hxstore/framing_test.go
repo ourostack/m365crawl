@@ -192,3 +192,24 @@ func TestResyncedLong(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestTrailerHeadBound(t *testing.T) {
+	obj := hxbuild.Payload(objs(1)...)
+	head := func(n int) []byte { return append(make([]byte, n-TrailerSize), hxbuild.Trailer...) }
+	// 15+4k at the bound is accepted; one step past it, a length that is not
+	// 15+4k, and a 5,000-byte head are all left resynced.
+	for n, accepted := range map[int]bool{MaxTrailerHead - (MaxTrailerHead-HeadSize)%4: true, 19 + 4*12: false, 32: false, 5003: false, 4111: false} {
+		st, flags := walkPayload(t, append(head(n), obj...))
+		if flags[0] == accepted || st.HeadsTrailerForm != map[bool]int{true: 1, false: 0}[accepted] {
+			t.Fatalf("head %d: resynced %v, %+v", n, flags[0], st.HeadsTrailerForm)
+		}
+	}
+	st, _ := walkPayload(t, append(head(5003), obj...))
+	if st.TrailerHeadLens[trailerHeadCap+1] != 1 || st.UnwalkedBytes != 5003 || st.FramingBytes != 0 {
+		t.Fatalf("%+v", st)
+	}
+	st, _ = walkPayload(t, append(head(31), obj...))
+	if st.TrailerHeadLens[31] != 1 {
+		t.Fatalf("%v", st.TrailerHeadLens)
+	}
+}

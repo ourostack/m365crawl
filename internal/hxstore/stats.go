@@ -79,6 +79,10 @@ type Stats struct {
 	Tails                 int
 	TailBytes             int64
 	TailsStartWithTrailer int
+	// TrailerHeadLens is an exact histogram of the lengths of heads longer than
+	// HeadSize that end in the Trailer, whether or not they were accepted;
+	// lengths above 4,096 share the key 4,097.
+	TrailerHeadLens map[int]int
 	// HeadsTrailerForm counts heads longer than HeadSize that end in the
 	// Trailer and were accepted as framing.
 	HeadsTrailerForm int
@@ -111,6 +115,13 @@ func (s *Stats) reject(reason string) {
 	}
 	s.Rejected[reason]++
 }
+
+// MaxTrailerHead is the longest trailer-form head accepted as framing. It is a
+// guess to be corrected from TrailerHeadLens on the real store.
+const MaxTrailerHead = 64
+
+// trailerHeadCap is the largest head length with its own TrailerHeadLens key.
+const trailerHeadCap = 4096
 
 // LongObject is the length from which PairsResyncedLong counts an object.
 const LongObject = 824
@@ -162,10 +173,17 @@ func (s *Stats) noteGap(p []byte, prevEnd, i int) bool {
 				s.HeadEndsInTrailer++
 			}
 		}
-		// A head is framing if it is HeadSize bytes, or longer and ends in the
-		// Trailer (measured: heads of 31, 35, 39, 43, 51 and 59 bytes are 15 plus
-		// a multiple of 4; 3,802 heads end in the constant).
-		if i == HeadSize || (i > HeadSize && hasTrailerAt(p, i-TrailerSize)) {
+		// A head is framing if it is HeadSize bytes (a length-only rule: on the
+		// real store no 15-byte head ends in the Trailer), or if it is HeadSize
+		// plus a multiple of 4, at most MaxTrailerHead, and ends in the Trailer
+		// (measured: heads of 31, 35, 39, 43, 51 and 59 bytes; 3,802 heads end
+		// in the constant). The bound stops a long run of unknown bytes that
+		// happens to end in the constant from hiding a corrupt object.
+		trailerForm := i > HeadSize && hasTrailerAt(p, i-TrailerSize)
+		if trailerForm {
+			bump(&s.TrailerHeadLens, min(i, trailerHeadCap+1))
+		}
+		if i == HeadSize || (trailerForm && (i-HeadSize)%4 == 0 && i <= MaxTrailerHead) {
 			s.FramingBytes += int64(i)
 			if i > HeadSize {
 				s.HeadsTrailerForm++
