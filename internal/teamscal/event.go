@@ -76,6 +76,7 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		DetailRawJSON:      string(valueJSON),
 	}
 	e.EventType, notes.EventTypeAbsent = normalizeEventType(str(m["eventType"]))
+	_, e.OnlineStated = flag(m, "isOnlineMeeting")
 	e.ReminderMinutes, e.ReminderStated, notes.ReminderOutOfRange = mapReminder(m)
 
 	e.TeamsThreadID = threadID(m, e.OnlineMeetingURL)
@@ -103,6 +104,9 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		} else {
 			notes.AllDayUnaligned = true
 		}
+	}
+	if err := calendar.ValidateEvent(e); err != nil {
+		return calendar.Event{}, notes, &UnmappedError{Reason: err.Error()}
 	}
 	return e, notes, nil
 }

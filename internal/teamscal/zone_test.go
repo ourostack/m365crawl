@@ -62,3 +62,19 @@ func TestTimeZoneUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalZoneListLoads(t *testing.T) {
+	if len(canonicalZones) < 300 {
+		t.Fatalf("zone list has %d entries", len(canonicalZones))
+	}
+	for name := range canonicalZones {
+		if _, err := time.LoadLocation(name); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, bad := range []string{"america/new_york", "AMERICA/NEW_YORK", "Europe/Nowhere"} {
+		if _, ok := TimeZoneIANA(bad); ok {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}

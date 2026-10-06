@@ -492,3 +492,44 @@ func TestMapCatchUpRecordingFieldsTravelTogether(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestMapEventOnlineStated(t *testing.T) {
+	for js, want := range map[string]bool{`"isOnlineMeeting":true`: true, `"isOnlineMeeting":false`: true, `"subject":"thin"`: false, `"isOnlineMeeting":null`: false} {
+		e, _ := mapEvent(t, "k", `{"iCalUID":"U",`+js+`}`)
+		if e.OnlineStated != want {
+			t.Errorf("%s: OnlineStated %v", js, e.OnlineStated)
+		}
+	}
+}
+
+func TestMappedEventsPassValidateEvent(t *testing.T) {
+	for _, js := range []string{richEvent, `{"iCalUID":"U"}`,
+		`{"iCalUID":"U","isAllDayEvent":true,"startTime":"2026-03-10T00:00:00Z","endTime":"2026-03-11T00:00:00Z"}`} {
+		e, _ := mapEvent(t, "k", js)
+		if err := calendar.ValidateEvent(e); err != nil {
+			t.Errorf("%v", err)
+		}
+	}
+}
+
+func TestMapEventTimeOutsideSupportedYearsIsUnmapped(t *testing.T) {
+	_, _, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","startTime":"2026-03-10T17:00:00Z","endTime":9999999999999999}`), time.UTC)
+	var um *UnmappedError
+	if !errors.As(err, &um) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestMapEventLocationTextLeavesStructuredEmpty(t *testing.T) {
+	e, _ := mapEvent(t, "k", `{"iCalUID":"U","location":"Fixture Room Alpha"}`)
+	if e.LocationsJSON != "" {
+		t.Errorf("LocationsJSON synthesized: %q", e.LocationsJSON)
+	}
+}
+
+func TestMapEventMeetingLinksComeFromOneRecord(t *testing.T) {
+	e, _ := mapEvent(t, "k", richEvent)
+	if e.OnlineMeetingURL == "" || e.ShortJoinURL == "" || e.DialInConferenceID == "" || e.DialInTollNumber == "" || e.TeamsThreadID == "" || !e.OnlineStated {
+		t.Errorf("%+v", e)
+	}
+}

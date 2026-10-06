@@ -1,7 +1,6 @@
 package teamscal
 
 import (
-	"strings"
 	"time"
 	// Embed the zone database so resolution does not depend on the host having one (Windows hosts
 	// often do not).
@@ -64,24 +63,10 @@ func resolveZone(name string) (string, *time.Location, bool) {
 	if name != "UTC" && !canonicalIANA(name) {
 		return "", nil, false
 	}
-	loc, err := time.LoadLocation(name)
-	if err != nil {
-		return "", nil, false
-	}
+	// Every listed id loads: the list comes from the zone data embedded above, and a test checks it.
+	loc, _ := time.LoadLocation(name)
 	return name, loc, true
 }
 
-// canonicalIANA reports whether name has the shape of a canonical IANA id: two or more
-// slash-separated segments, each starting with an upper-case letter and with no empty segment.
-func canonicalIANA(name string) bool {
-	segments := strings.Split(name, "/")
-	if len(segments) < 2 {
-		return false
-	}
-	for _, s := range segments {
-		if s == "" || s[0] < 'A' || s[0] > 'Z' {
-			return false
-		}
-	}
-	return true
-}
+// canonicalIANA reports whether name is an "Area/Location" id in canonicalZones.
+func canonicalIANA(name string) bool { return canonicalZones[name] }
