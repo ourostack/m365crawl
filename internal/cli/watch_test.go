@@ -108,7 +108,11 @@ func fastWatch(t *testing.T) {
 	t.Cleanup(func() { watchQuiet, watchMaxWait, watchLockedRetry = q, m, l })
 }
 
-const watchTestWaitTimeout = 30 * time.Second
+// watchTestWaitTimeout is how long a test waits for the watch before it calls that a hang. Tests
+// wait on what the watch prints or writes, never on a timer inside the watch, so a longer budget
+// only costs time when something is really stuck. One sync takes about 3 s under -race on an idle
+// machine and over 30 s when the machine is badly oversubscribed.
+const watchTestWaitTimeout = 2 * time.Minute
 
 // noEvents makes watch poll only.
 func noEvents(t *testing.T) {
@@ -146,7 +150,7 @@ func (w *watchEnv) start(args ...string) {
 		cancel()
 		select {
 		case <-w.fin:
-		case <-time.After(10 * time.Second):
+		case <-time.After(watchTestWaitTimeout):
 		}
 	})
 }
@@ -158,7 +162,7 @@ func (w *watchEnv) stop() int {
 	select {
 	case code := <-w.done:
 		return code
-	case <-time.After(10 * time.Second):
+	case <-time.After(watchTestWaitTimeout):
 		w.t.Fatal("watch did not stop")
 		return -1
 	}
@@ -186,10 +190,15 @@ func (w *watchEnv) waitFor(what string, cond func() bool) {
 	w.t.Fatalf("timed out waiting for %s\nstdout: %s\nstderr: %s", what, w.out.String(), w.errb.String())
 }
 
-// baselineDone waits until the first sync has filled the archive.
+// baselineDone waits until the first sync has finished: the archive holds messages and the sync
+// recorded its run-level row, which Run writes last, after every source committed. Messages alone
+// appear while the sync is still running, and a test that then edits the archive or touches the
+// cache races that sync.
 func (w *watchEnv) baselineDone() {
 	w.t.Helper()
-	w.waitFor("the baseline sync", func() bool { return w.archiveCount("select count(*) from messages") > 0 })
+	w.waitFor("the baseline sync", func() bool {
+		return w.archiveCount("select count(*) from messages") > 0 && w.archiveCount("select count(*) from sync_runs where source=''") > 0
+	})
 }
 
 func (w *watchEnv) archiveCount(q string) int {
