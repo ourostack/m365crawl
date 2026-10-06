@@ -45,7 +45,7 @@ jobs:
             test-command: make test COVERPROFILE=coverage.out
             coverprofile: coverage.out
           - os: windows-latest
-            test-command: go test -race -count=1 -timeout 18m -coverprofile=coverage-windows.out ./...
+            test-command: go test -race -count=1 -timeout 12m -coverprofile=coverage-windows.out ./...
             coverprofile: coverage-windows.out
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
