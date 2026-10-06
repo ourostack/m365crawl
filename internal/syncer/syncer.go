@@ -184,7 +184,7 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 			}
 			coded := codedOf(err)
 			failures = append(failures, sourceFailure{key, err, coded})
-			rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded)}})
+			rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
 			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
 			r.progress("%s: failed (%s)", key, coded.Code)
 			return

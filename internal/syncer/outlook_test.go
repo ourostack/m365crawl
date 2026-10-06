@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -396,14 +397,21 @@ func TestSyncOutlookNoProfiles(t *testing.T) {
 	if e := fail(empty); e.Code != CodeNoOutlookProfiles || !strings.Contains(e.Message, empty) {
 		t.Fatal(e)
 	}
-	// The store file directly in the root.
+	if e := fail(empty); !strings.Contains(e.Fix, "<root>/<profile>/HxStore.hxd") {
+		t.Fatalf("fix: %q", e.Fix)
+	}
+	// The store file directly in the root: the fix says to pass the parent directory.
 	direct := t.TempDir()
 	putStoreAt(t, filepath.Join(direct, "HxStore.hxd"))
-	if err := (noProfilesError(direct, nil)); !strings.Contains(err.Fix, "parent") {
-		t.Fatal(err.Fix)
+	if e := fail(direct); e.Code != CodeNoOutlookProfiles || !strings.Contains(e.Fix, "directly in "+direct) || !strings.Contains(e.Fix, "parent") {
+		t.Fatalf("fix: %q", e.Fix)
 	}
-	if err := noProfilesError(empty, nil); !strings.Contains(err.Fix, "<root>/<profile>/HxStore.hxd") {
-		t.Fatal(err.Fix)
+	// The JSON of the report carries the fix on the source's error, as the CLI prints it.
+	for root, want := range map[string]string{empty: "<root>/<profile>/HxStore.hxd", direct: "parent"} {
+		got := sourceErrorJSON(t, root)
+		if got["code"] != CodeNoOutlookProfiles || got["message"] == "" || !strings.Contains(got["fix"], want) || len(got) != 3 {
+			t.Fatalf("error object: %v", got)
+		}
 	}
 	// A classic-only profile is a note and not a profile.
 	classic := t.TempDir()
@@ -451,4 +459,31 @@ func TestSyncOutlookSkippedProfiles(t *testing.T) {
 		sourceKeyed(t, rep, "outlook|Main").Status != StatusOK {
 		t.Fatalf("%+v", rep.Sources)
 	}
+}
+
+// sourceErrorJSON runs a sync with Outlook at root and returns the JSON object of the "outlook"
+// source's error, the way the report prints it.
+func sourceErrorJSON(t *testing.T, root string) map[string]string {
+	t.Helper()
+	rep, _, _ := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t), OutlookEnabled: true, OutlookRoot: root})
+	raw, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shape struct {
+		Sources []struct {
+			Source string
+			Error  map[string]string
+		}
+	}
+	if err := json.Unmarshal(raw, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range shape.Sources {
+		if src.Source == "outlook" {
+			return src.Error
+		}
+	}
+	t.Fatal("no outlook source")
+	return nil
 }

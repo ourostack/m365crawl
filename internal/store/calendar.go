@@ -783,8 +783,9 @@ func blankCalendar(ctx context.Context, tx *sql.Tx, at time.Time) error {
 			sets = append(sets, "superseded_at=coalesce(superseded_at, '"+stamp+"')")
 		}
 		// The rebuild is the Teams one: an Outlook row has no record to be rebuilt from. The recap
-		// tables have no source column, and only Teams writes them.
-		where, args := "", []any(nil)
+		// tables have no source column; an Outlook account is "outlook/<profile>", so they are
+		// scoped by account. Outlook writes no recap today (TestOutlookWritesNoRecaps).
+		where, args := ` where account_id not like 'outlook/%'`, []any(nil)
 		if t.table == "calendar_source_events" {
 			where, args = ` where source=?`, []any{string(calendar.SourceTeams)}
 		}

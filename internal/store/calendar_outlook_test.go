@@ -227,3 +227,41 @@ func TestOutlookFailureIsRemembered(t *testing.T) {
 		t.Fatal("a damaged failure row is an error")
 	}
 }
+
+// Outlook writes no recap row. The recap tables have no source column, so the Teams blank is
+// scoped to Teams accounts by the "outlook/" prefix; if Outlook ever writes recaps, this fails and
+// the scoping must be revisited.
+func TestOutlookWritesNoRecaps(t *testing.T) {
+	s := newStore(t)
+	applyOutlookBatch(t, s, OutlookStamp(3, time.UTC), outlookEvent(calendar.TriFalse, base))
+	var n int
+	if err := s.db.QueryRow(`select (select count(*) from calendar_recaps) + (select count(*) from calendar_recap_items)`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("Outlook wrote %d recap rows: %v", n, err)
+	}
+}
+
+// The Teams blank leaves a recap row of an Outlook account alone.
+func TestTeamsBlankSparesOutlookAccountRecaps(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	for _, a := range []string{"outlook/Main", "tenant/user"} {
+		if _, err := s.db.Exec(`insert into calendar_recaps(account_id, call_id, ical_uid, first_seen_at, updated_at) values(?, 'c1', 'UID', '2031-01-01T00:00:00Z', '2031-01-01T00:00:00Z')`, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.EnsureCalendar(ctx, time.UTC, base); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`update meta set value=? where key='calendar_derivation'`, calendarDerivation(teamscal.MapperVersion, zoneStamp(time.UTC), "0.old")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureCalendar(ctx, time.UTC, base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var out, teams string
+	_ = s.db.QueryRow(`select ical_uid from calendar_recaps where account_id='outlook/Main'`).Scan(&out)
+	_ = s.db.QueryRow(`select ical_uid from calendar_recaps where account_id='tenant/user'`).Scan(&teams)
+	if out != "UID" || teams != "" {
+		t.Fatalf("outlook %q teams %q", out, teams)
+	}
+}

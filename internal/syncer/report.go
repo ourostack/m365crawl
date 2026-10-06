@@ -82,6 +82,8 @@ type SourceCounts struct {
 type SourceError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Fix is the remedy the coded error carries, as other errors of the output contract do.
+	Fix string `json:"fix,omitempty"`
 }
 
 // Change is one message or activity item the sync added, edited or deleted, taken from what the
