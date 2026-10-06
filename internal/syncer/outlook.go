@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
@@ -56,7 +57,10 @@ type outlookOutcome struct {
 }
 
 // outlookSources runs after the Teams sources have finished (memory: the two never hold their
-// copies at once). Every profile is its own source and fails alone.
+// copies at once). Every profile is its own source and fails alone. Outlook is on because the
+// caller asked for it, so having nothing to read is a failure, not silence: no profile at all is
+// one failed source "outlook", and each profile that could not be examined is one failed source.
+// Profiles of the old Outlook are a note, not a loss.
 func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutcome {
 	root := r.o.OutlookRoot
 	if root == "" {
@@ -65,17 +69,56 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 			return []outlookOutcome{{key: "outlook", err: err}}
 		}
 	}
-	profiles, _, _, err := outlookDiscover(root)
+	profiles, classic, skipped, err := outlookDiscover(root)
 	if err != nil {
 		return []outlookOutcome{{key: "outlook", err: err}}
 	}
+	rep.OutlookClassicOnly = classic
 	var out []outlookOutcome
+	for _, sp := range skipped {
+		out = append(out, outlookOutcome{key: outlookKey(sp.Name), err: skippedProfileError(sp)})
+	}
+	if len(profiles) == 0 && len(skipped) == 0 {
+		out = append(out, outlookOutcome{key: "outlook", err: noProfilesError(root, classic)})
+	}
 	for _, p := range profiles {
 		o := outlookOutcome{key: outlookKey(p.Name)}
 		o.report, o.decoded, o.err = r.safeOutlook(ctx, p, rep)
+		if o.err != nil && ctx.Err() == nil {
+			// Remembered, so a skipped read reports it instead of reading as a success.
+			c := codedOf(o.err)
+			_ = r.st.SetOutlookFailure(ctx, outlookAccount(p.Name), &store.OutlookFailure{Code: c.Code, Message: bodyMessage(c), Fix: c.Fix, Exit: c.Exit})
+		}
 		out = append(out, o)
 	}
 	return out
+}
+
+// CodeNoOutlookProfiles and CodeOutlookProfileUnreadable are the failures of an Outlook source
+// that has nothing to read or whose profile could not be examined.
+const (
+	CodeNoOutlookProfiles        = "no_outlook_profiles"
+	CodeOutlookProfileUnreadable = "outlook_profile_unreadable"
+)
+
+func noProfilesError(root string, classic []string) *errs.Coded {
+	fix := "--outlook-root is the directory of Outlook profiles: one directory per profile, each holding HxStore.hxd (<root>/<profile>/HxStore.hxd)."
+	if info, err := os.Stat(filepath.Join(root, outlookdesktop.StoreFileName)); err == nil && info.Mode().IsRegular() {
+		fix = "HxStore.hxd is directly in " + root + ", which is a profile directory: point --outlook-root at its parent (<root>/<profile>/HxStore.hxd)."
+	}
+	msg := "no Outlook profile found under " + root
+	if len(classic) > 0 {
+		msg += fmt.Sprintf(" (%d profile(s) of the classic Outlook are not read)", len(classic))
+	}
+	return &errs.Coded{Code: CodeNoOutlookProfiles, Exit: errs.ExitEnvironment, Message: msg, Fix: fix}
+}
+
+func skippedProfileError(sp outlookdesktop.SkippedProfile) *errs.Coded {
+	if sp.Reason == "no_full_disk_access" {
+		return errs.NoFullDiskAccess(sp.Dir, sp.Err)
+	}
+	return &errs.Coded{Code: CodeOutlookProfileUnreadable, Exit: errs.ExitEnvironment, Message: "the Outlook profile " + sp.Name + " could not be examined",
+		Fix: "Check that the profile directory is readable, then run again."}
 }
 
 func (r *runner) safeOutlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (sr SourceReport, decoded bool, err error) {
@@ -100,9 +143,14 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 		if gap == 0 {
 			gap = OutlookMinReadInterval
 		}
-		if next := prior.LastAttempt.Add(gap); begun.Before(next) {
+		// A last attempt later than this run's start is a clock that moved back: it is stale.
+		if next := prior.LastAttempt.Add(gap); begun.Before(next) && !prior.LastAttempt.After(begun) {
+			if f := prior.Failure; f != nil {
+				// A skip after a failed read is still that failure, not a success.
+				return SourceReport{}, false, &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
+			}
 			r.progress("%s: %s", key, StatusSkippedInterval)
-			return SourceReport{Source: key, Status: StatusSkippedInterval, NextReadAfter: &next}, false, nil
+			return SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}, false, nil
 		}
 	}
 	fp, err := outlookdesktop.FingerprintOf(p.StorePath, outlookVersions())
@@ -117,6 +165,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 		if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: outlookNow(), Source: key, Fingerprint: fp, Status: status, Omissions: prior.Omissions}); err != nil {
 			return SourceReport{}, false, errs.DBError(err)
 		}
+		_ = r.st.SetOutlookFailure(ctx, account, nil) // the store is what the last good read saw
 		r.progress("%s: %s", key, status)
 		return SourceReport{Source: key, Status: status, Omissions: prior.Omissions}, false, nil
 	}

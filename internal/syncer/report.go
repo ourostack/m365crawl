@@ -42,6 +42,9 @@ type Report struct {
 	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
 	Redacted     int      `json:"redacted"`
 	OtherOrigins []string `json:"other_origins"`
+	// OutlookClassicOnly names Outlook profile directories that hold only the classic Outlook's
+	// database, which is not read. It is a note, not a loss.
+	OutlookClassicOnly []string `json:"outlook_classic_only,omitempty"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
 	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
 	Migrated   *store.Migration `json:"migrated,omitempty"`

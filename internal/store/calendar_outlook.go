@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	outlookFailureKey = "outlook_failure:"
 	outlookStampKey   = "outlook_derivation:"
 	outlookAttemptKey = "outlook_last_attempt:"
 )
@@ -56,6 +57,9 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		}
 		if aerr != nil {
 			return aerr
+		}
+		if _, err := tx.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+b.Account); err != nil {
+			return err
 		}
 		return recordRun(ctx, tx, run(res))
 	})
@@ -149,7 +153,8 @@ func coveredDays(events []calendar.Event, zone *time.Location) []string {
 }
 
 // blankEvents empties the content of the stored rows of the batch's events (by source id),
-// keeping their keys and first sighting, so the batch is captured over nothing.
+// keeping their keys and first sighting, so the batch is captured over nothing. An event the
+// core will refuse is not blanked: nothing is written for it, so blanking would erase its row.
 func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calendar.Event) error {
 	sets, err := blankSets(ctx, tx, blankTables[0].table, blankTables[0].keep)
 	if err != nil {
@@ -161,6 +166,9 @@ func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calen
 	}
 	defer func() { _ = stmt.Close() }()
 	for _, e := range events {
+		if calendar.ValidateEvent(e) != nil {
+			continue // the core refuses it and writes nothing: its stored copy keeps its content
+		}
 		if _, err := stmt.ExecContext(ctx, string(calendar.SourceOutlook), account, e.SourceID); err != nil {
 			return err
 		}
@@ -174,19 +182,46 @@ type OutlookState struct {
 	Fingerprint string         // of the last successful read
 	Omissions   map[string]int // of the last successful read, so a run that reads nothing still reports them
 	HoldsEvents bool           // the archive holds events of the account
+	// Failure is why the last read failed, until a read succeeds; nil when it did not.
+	Failure *OutlookFailure
+}
+
+// OutlookFailure is a failed read's coded error, kept so a skipped read can report it.
+type OutlookFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+	Exit    int    `json:"exit"`
+}
+
+// SetOutlookFailure remembers why the account's last read failed; nil forgets it.
+func (s *Store) SetOutlookFailure(ctx context.Context, account string, f *OutlookFailure) error {
+	if f == nil {
+		_, err := s.db.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+account)
+		return err
+	}
+	b, _ := json.Marshal(f) // plain strings and an int
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookFailureKey+account, string(b))
+	return err
 }
 
 // OutlookState reads it. The last attempt is recorded whether the copy worked or not, so a
 // failing store is not retried in a loop.
 func (s *Store) OutlookState(ctx context.Context, profile, source, account string) (OutlookState, error) {
 	var st OutlookState
-	var attempt sql.NullString
-	err := s.db.QueryRowContext(ctx, `select (select value from meta where key=?), exists(select 1 from calendar_source_events where source=? and account_id=?)`,
-		outlookAttemptKey+profile, string(calendar.SourceOutlook), account).Scan(&attempt, &st.HoldsEvents)
+	var attempt, failure sql.NullString
+	err := s.db.QueryRowContext(ctx, `select (select value from meta where key=?), (select value from meta where key=?), exists(select 1 from calendar_source_events where source=? and account_id=?)`,
+		outlookAttemptKey+profile, outlookFailureKey+account, string(calendar.SourceOutlook), account).Scan(&attempt, &failure, &st.HoldsEvents)
 	if err != nil {
 		return st, err
 	}
 	st.LastAttempt, _ = time.Parse(timeLayout, attempt.String)
+	if failure.Valid {
+		st.Failure = new(OutlookFailure)
+		if err = json.Unmarshal([]byte(failure.String), st.Failure); err != nil {
+			return st, err
+		}
+	}
 	if st.Fingerprint, err = s.LastFingerprint(ctx, source); err != nil {
 		return st, err
 	}

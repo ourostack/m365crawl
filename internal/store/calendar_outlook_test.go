@@ -7,6 +7,7 @@ import (
 
 	"github.com/ourostack/teamscrawl/internal/calendar"
 	"github.com/ourostack/teamscrawl/internal/outlookcal"
+	"github.com/ourostack/teamscrawl/internal/teamscal"
 )
 
 func outlookEvent(allDay calendar.Tri, lm time.Time) calendar.Event {
@@ -149,4 +150,80 @@ func TestOutlookFailuresRollBack(t *testing.T) {
 			return err
 		}, 3)
 	})
+}
+
+func storedSubject(t *testing.T, s *Store) string {
+	t.Helper()
+	var subj string
+	if err := s.db.QueryRow(`select subject from calendar_source_events where source='outlook' and source_id='AA11'`).Scan(&subj); err != nil {
+		t.Fatal(err)
+	}
+	return subj
+}
+
+// A mapper change that newly refuses an event keeps the stored copy: the core writes nothing for a
+// refused event, so blanking it first would erase the row.
+func TestOutlookBlankSparesRefusedEvents(t *testing.T) {
+	s := newStore(t)
+	applyOutlookBatch(t, s, OutlookStamp(1, time.UTC), outlookEvent(calendar.TriFalse, base))
+	bad := outlookEvent(calendar.TriFalse, base)
+	bad.UnknownDeclared = false // the core refuses it
+	res := applyOutlookBatch(t, s, OutlookStamp(3, time.UTC), bad)
+	if res.Counts.Refused != 1 || res.Omissions[OmitCalendarRefused] != 1 {
+		t.Fatalf("%+v %v", res.Counts, res.Omissions)
+	}
+	if got := storedSubject(t, s); got != "Fixture" {
+		t.Fatalf("the refused event's stored subject is %q", got)
+	}
+}
+
+// A Teams rebuild under new scrub rules blanks Teams rows only; Outlook has no records to rebuild from.
+func TestTeamsRebuildLeavesOutlookRows(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	applyOutlookBatch(t, s, OutlookStamp(3, time.UTC), outlookEvent(calendar.TriFalse, base))
+	if _, err := s.EnsureCalendar(ctx, time.UTC, base); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`update meta set value=? where key='calendar_derivation'`, calendarDerivation(teamscal.MapperVersion, zoneStamp(time.UTC), "0.old")); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.EnsureCalendar(ctx, time.UTC, base.Add(time.Hour)); err != nil || res == nil {
+		t.Fatal(res, err)
+	}
+	if got := storedSubject(t, s); got != "Fixture" {
+		t.Fatalf("a Teams rebuild blanked an Outlook row: %q", got)
+	}
+}
+
+func TestOutlookFailureIsRemembered(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	f := &OutlookFailure{Code: "outlook_store_version", Message: "m", Fix: "f", Exit: 3}
+	if err := s.SetOutlookFailure(ctx, "outlook/Main", f); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := s.OutlookState(ctx, "Main", "outlook|Main", "outlook/Main"); err != nil || st.Failure == nil || *st.Failure != *f {
+		t.Fatalf("%+v %v", st.Failure, err)
+	}
+	// A successful commit forgets it.
+	applyOutlookBatch(t, s, OutlookStamp(3, time.UTC), outlookEvent(calendar.TriFalse, base))
+	if st, _ := s.OutlookState(ctx, "Main", "outlook|Main", "outlook/Main"); st.Failure != nil {
+		t.Fatal("the failure outlived a good read")
+	}
+	if err := s.SetOutlookFailure(ctx, "outlook/Main", f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOutlookFailure(ctx, "outlook/Main", nil); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.OutlookState(ctx, "Main", "outlook|Main", "outlook/Main"); st.Failure != nil {
+		t.Fatal("not forgotten")
+	}
+	if _, err := s.db.Exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OutlookState(ctx, "Main", "outlook|Main", "outlook/Main"); err == nil {
+		t.Fatal("a damaged failure row is an error")
+	}
 }

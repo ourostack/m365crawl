@@ -782,7 +782,13 @@ func blankCalendar(ctx context.Context, tx *sql.Tx, at time.Time) error {
 		if t.table == "calendar_recap_items" {
 			sets = append(sets, "superseded_at=coalesce(superseded_at, '"+stamp+"')")
 		}
-		if _, err := tx.ExecContext(ctx, `update `+t.table+` set `+strings.Join(sets, ", ")); err != nil { //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
+		// The rebuild is the Teams one: an Outlook row has no record to be rebuilt from. The recap
+		// tables have no source column, and only Teams writes them.
+		where, args := "", []any(nil)
+		if t.table == "calendar_source_events" {
+			where, args = ` where source=?`, []any{string(calendar.SourceTeams)}
+		}
+		if _, err := tx.ExecContext(ctx, `update `+t.table+` set `+strings.Join(sets, ", ")+where, args...); err != nil { //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
 			return err
 		}
 	}

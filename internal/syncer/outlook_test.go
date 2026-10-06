@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,5 +307,148 @@ func TestSyncOutlookDamagedBlocksAreALoss(t *testing.T) {
 	r, _ := run(t, outlookOpts(db, outlookRoot(t, "store-damaged-blocks.hxd")))
 	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusOmissions || s.Omissions[outlookcal.CodeBlocksDamaged] == 0 {
 		t.Fatalf("%+v", s)
+	}
+}
+
+func fakeClock(t *testing.T, at time.Time) *time.Time {
+	t.Helper()
+	now := at
+	old := outlookNow
+	outlookNow = func() time.Time { return now }
+	t.Cleanup(func() { outlookNow = old })
+	return &now
+}
+
+func defaultInterval(db, root string) Options {
+	o := outlookOpts(db, root)
+	o.OutlookMinReadInterval = 0
+	return o
+}
+
+// A skip after a failed read is that failure: the source stays failed and the run partial, until
+// a read succeeds.
+func TestSyncOutlookSkipAfterFailureReportsIt(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "store-version-j.hxd")
+	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
+	for i := 0; i < 2; i++ {
+		rep, _, err := Run(context.Background(), defaultInterval(db, root))
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != errs.CodePartialSync || rep.Status != StatusPartial {
+			t.Fatalf("run %d: %v %s", i, err, rep.Status)
+		}
+		if s := sourceKeyed(t, rep, "outlook|Main"); s.Status != StatusFailed || s.Error.Code != "outlook_store_version" {
+			t.Fatalf("run %d: %+v", i, s)
+		}
+		*now = now.Add(time.Minute) // the second run is a skip, and still the failure
+	}
+	putOutlookStore(t, root, "HxStore.hxd")
+	*now = now.Add(OutlookMinReadInterval)
+	if r, _ := run(t, defaultInterval(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
+		t.Fatalf("%+v", r.Sources)
+	}
+	*now = now.Add(time.Minute)
+	if r, _ := run(t, defaultInterval(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusSkippedInterval {
+		t.Fatalf("a good read ends the failure: %+v", r.Sources)
+	}
+}
+
+// A skip reports the losses of the last read, as an unchanged run does.
+func TestSyncOutlookSkipKeepsOmissions(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "store-damaged-blocks.hxd")
+	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
+	run(t, defaultInterval(db, root))
+	*now = now.Add(time.Minute)
+	r, _ := run(t, defaultInterval(db, root))
+	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusSkippedInterval || s.Omissions[outlookcal.CodeBlocksDamaged] == 0 || r.Status != StatusOmissions {
+		t.Fatalf("%+v %s", s, r.Status)
+	}
+}
+
+// A last attempt in the future is a clock that moved back: it does not hold the source off.
+func TestSyncOutlookClockMovedBack(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
+	run(t, defaultInterval(db, root))
+	*now = now.AddDate(-1, 0, 0)
+	if r, _ := run(t, defaultInterval(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusUnchanged {
+		t.Fatalf("%+v", r.Sources)
+	}
+}
+
+// Nothing to read is a failure that says where profiles are looked for.
+func TestSyncOutlookNoProfiles(t *testing.T) {
+	isolateTmp(t)
+	fail := func(root string) *SourceError {
+		rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t), OutlookEnabled: true, OutlookRoot: root})
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != errs.CodePartialSync || rep.Status != StatusPartial {
+			t.Fatalf("%v %s", err, rep.Status)
+		}
+		return sourceKeyed(t, rep, "outlook").Error
+	}
+	empty := t.TempDir()
+	if e := fail(empty); e.Code != CodeNoOutlookProfiles || !strings.Contains(e.Message, empty) {
+		t.Fatal(e)
+	}
+	// The store file directly in the root.
+	direct := t.TempDir()
+	putStoreAt(t, filepath.Join(direct, "HxStore.hxd"))
+	if err := (noProfilesError(direct, nil)); !strings.Contains(err.Fix, "parent") {
+		t.Fatal(err.Fix)
+	}
+	if err := noProfilesError(empty, nil); !strings.Contains(err.Fix, "<root>/<profile>/HxStore.hxd") {
+		t.Fatal(err.Fix)
+	}
+	// A classic-only profile is a note and not a profile.
+	classic := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(classic, "Old", "Data"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(classic, "Old", "Data", "Outlook.sqlite"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, _ := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t), OutlookEnabled: true, OutlookRoot: classic})
+	if len(rep.OutlookClassicOnly) != 1 || rep.OutlookClassicOnly[0] != "Old" || sourceKeyed(t, rep, "outlook").Error.Code != CodeNoOutlookProfiles {
+		t.Fatalf("%+v %+v", rep.OutlookClassicOnly, rep.Sources)
+	}
+}
+
+func putStoreAt(t *testing.T, path string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(outlookFixture, "HxStore.hxd")) //nolint:gosec // a committed fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+}
+
+// A profile that cannot be examined is its own failed source; the others still read.
+func TestSyncOutlookSkippedProfiles(t *testing.T) {
+	isolateTmp(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	old := outlookDiscover
+	t.Cleanup(func() { outlookDiscover = old })
+	outlookDiscover = func(r string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+		ps, c, _, err := old(r)
+		return ps, c, []outlookdesktop.SkippedProfile{
+			{Name: "Locked", Dir: "/x/Locked", Reason: "no_full_disk_access", Err: os.ErrPermission},
+			{Name: "Odd", Dir: "/x/Odd", Reason: "unreadable", Err: os.ErrInvalid},
+		}, err
+	}
+	rep, _, err := Run(context.Background(), outlookOpts(newDB(t), root))
+	if err == nil || rep.Status != StatusPartial {
+		t.Fatalf("%v %s", err, rep.Status)
+	}
+	if sourceKeyed(t, rep, "outlook|Locked").Error.Code != errs.CodeNoFullDiskAccess || sourceKeyed(t, rep, "outlook|Odd").Error.Code != CodeOutlookProfileUnreadable ||
+		sourceKeyed(t, rep, "outlook|Main").Status != StatusOK {
+		t.Fatalf("%+v", rep.Sources)
 	}
 }
