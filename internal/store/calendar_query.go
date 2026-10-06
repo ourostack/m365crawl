@@ -396,12 +396,16 @@ func (s *Store) matchRef(ctx context.Context, p calendar.Principals, account, re
 		scope := p.Resolve(account)
 		where, args = "account_id in "+inList(len(scope)), stringArgs(scope)
 	}
+	history, err := s.linkHistory(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.query(ctx, `select distinct account_id, event_key from calendar_source_events where `+where, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var exact, prefix []refCandidate
+	var exact, past, prefix []refCandidate
 	seen := map[refCandidate]bool{}
 	for rows.Next() {
 		var acct, key string
@@ -417,9 +421,17 @@ func (s *Store) matchRef(ctx context.Context, p calendar.Principals, account, re
 		for _, a := range p.Accounts(c.principal) {
 			ids = append(ids, eventIDOf(a+"|"+key))
 		}
+		var before []string // ids printed while an account was linked to a principal it no longer is
+		for _, a := range p.Accounts(c.principal) {
+			for _, hp := range history[a] {
+				before = append(before, eventIDOf(hp+"|"+key))
+			}
+		}
 		switch {
 		case ref == key || contains(ids, ref):
 			exact = append(exact, c)
+		case contains(before, ref):
+			past = append(past, c)
 		case strings.HasPrefix(key, ref) || (strings.HasPrefix(ref, "ev_") && hasPrefixIn(ids, ref)):
 			prefix = append(prefix, c)
 		}
@@ -430,7 +442,30 @@ func (s *Store) matchRef(ctx context.Context, p calendar.Principals, account, re
 	if len(exact) > 0 {
 		return exact, nil
 	}
+	if len(past) > 0 { // an id of an earlier link names its event only when no event has it today
+		return past, nil
+	}
 	return prefix, nil
+}
+
+// linkHistory maps each account of a source other than Teams to every principal it was ever linked
+// to, ended links included, so an id printed while it was linked still resolves after the link
+// ends.
+func (s *Store) linkHistory(ctx context.Context) (map[string][]string, error) {
+	rows, err := s.query(ctx, `select account_id, principal_id from calendar_account_links where source<>? order by account_id, principal_id`, string(calendar.SourceTeams))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]string{}
+	for rows.Next() {
+		var account, principal string
+		if err := rows.Scan(&account, &principal); err != nil {
+			return nil, err
+		}
+		out[account] = append(out[account], principal)
+	}
+	return out, rows.Err()
 }
 
 func contains(list []string, s string) bool {

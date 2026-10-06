@@ -566,10 +566,19 @@ type syncCmd struct {
 }
 
 func (c syncCmd) Run(rt *runtime) error {
-	rep, _, err := runSync(rt.ctx, rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress(), FullRead: c.FullRead}))
+	if err := rt.checkLink(); err != nil {
+		return err
+	}
+	if rt.account != nil && rt.outlookLink != "" {
+		e := errs.Usage("--outlook-account cannot be combined with --account on sync: a Teams account filter leaves Outlook out of the run")
+		e.Fix = "Drop --account, or run the link on its own."
+		return e
+	}
+	rep, _, err := runSync(rt.ctx, rt.linkOptions(rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress(), FullRead: c.FullRead})))
 	var coded *errs.Coded
-	if errors.As(err, &coded) && coded.Code == errs.CodePartialSync && rt.ctx.Err() == nil {
+	if errors.As(err, &coded) && (coded.Code == errs.CodePartialSync || coded.Code == errs.CodeUsage && rep.Status != "") && rt.ctx.Err() == nil {
 		// Some sources committed: the report says which, and the error makes the exit status nonzero.
+		// A refused link is the same: the sources are in the archive, the link is not.
 		if werr := rt.write("sync", rep); werr != nil {
 			return werr
 		}

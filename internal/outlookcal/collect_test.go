@@ -34,7 +34,7 @@ func fixtureStore(t *testing.T, name string) *hxstore.Store { return open(t, fix
 func expectAgainst(t *testing.T, e calendar.Event, c hxfixture.Case) {
 	t.Helper()
 	s := c.Spec
-	id := hxbuild.HexID(s.ID)
+	id := strings.ToLower(hxbuild.HexID(s.ID))
 	eq := func(name string, got, want any) {
 		t.Helper()
 		if got != want {
@@ -105,7 +105,7 @@ func TestCollectFixtureReadsEveryFieldOfEveryEvent(t *testing.T) {
 			continue
 		}
 		copies++
-		id := hxbuild.HexID(c.Spec.ID)
+		id := strings.ToLower(hxbuild.HexID(c.Spec.ID))
 		if old, ok := current[id]; !ok || c.Spec.LastModified.After(old.Spec.LastModified) {
 			current[id] = c
 		}
@@ -188,7 +188,14 @@ func TestMapEventIDEqualsTeamsKey(t *testing.T) {
 	for _, e := range res.Events {
 		byID[e.ICalUID] = e
 	}
-	for id := range twins {
+	for upper := range twins {
+		// The fixture holds the id in upper case, as the real store does, and the Teams fixture holds
+		// it in lower case, as a real Teams cache does: the twin is found only through the mapper's
+		// case. A test whose two fixtures shared a case would pass without it.
+		id := strings.ToLower(upper)
+		if id == upper || inTeams(upper) {
+			t.Fatalf("the twin id must differ in case between the stores: %s", upper[len(upper)-20:])
+		}
 		e, ok := byID[id]
 		if !ok || !inTeams(e.ICalUID) || e.GlobalID != id {
 			t.Errorf("twin %s: event %v, in the Teams fixture %v", id[len(id)-20:], ok, ok && inTeams(e.ICalUID))
@@ -202,13 +209,13 @@ func TestMapEventIDEqualsTeamsKey(t *testing.T) {
 	// Teams record's cleanGlobalObjectId holds.
 	var master calendar.Event
 	for _, e := range byID {
-		if e.EventType == calendar.EventMaster && twins[e.ICalUID] {
+		if e.EventType == calendar.EventMaster && twins[strings.ToUpper(e.ICalUID)] {
 			master = e
 		}
 	}
 	n := 0
 	for _, e := range byID {
-		if (e.EventType == calendar.EventOccurrence || e.EventType == calendar.EventException) && twins[e.ICalUID] {
+		if (e.EventType == calendar.EventOccurrence || e.EventType == calendar.EventException) && twins[strings.ToUpper(e.ICalUID)] {
 			n++
 			if e.SeriesKey != master.ICalUID || e.SeriesKey == e.ICalUID {
 				t.Errorf("series key of %s", e.EventType)
@@ -388,7 +395,7 @@ func TestOneHundredByteIDAndFalseMagic(t *testing.T) {
 	}
 	// 100 bytes: the series id has the date bytes zeroed, and the occurrence is its own id.
 	series, date, ok := calendar.SplitOccurrenceID(e.ICalUID)
-	if e.ICalUID != hxbuild.HexID(long.ID) || !ok || date != "2031-03-05" || e.SeriesKey != series {
+	if e.ICalUID != strings.ToLower(hxbuild.HexID(long.ID)) || !ok || date != "2031-03-05" || e.SeriesKey != strings.ToLower(series) {
 		t.Fatalf("%q %v", e.SeriesKey, ok)
 	}
 }

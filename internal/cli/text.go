@@ -58,6 +58,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		if len(r.UnlinkedAccounts) > 0 {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("events of these outlook accounts are not merged with a Teams account: "+strings.Join(r.UnlinkedAccounts, ", "), color))
+			for _, fix := range r.UnlinkedFix {
+				_, _ = fmt.Fprintf(w, "%s\n", render.Dim("  to link: "+fix, color))
+			}
 		}
 		if len(r.UnlinkedRecaps) > 0 {
 			rt.unlinkedRecapTable(r)
@@ -392,6 +395,24 @@ func calendarWhere(x calendarItem) string {
 	return ""
 }
 
+// outlookOnlyNote is the line an event that only Outlook holds gets: Outlook has the schedule, and
+// the note names what a Teams copy would have added and is missing. Empty for any other event.
+func outlookOnlyNote(sources, unknown []string) string {
+	if len(sources) != 1 || sources[0] != "outlook" {
+		return ""
+	}
+	var missing []string
+	for _, m := range []struct{ label, field string }{{"attendees", "attendees"}, {"join link", "short_join_url"}, {"join link", "join_url"}, {"body", "body"}} {
+		if contains(unknown, m.field) && !contains(missing, m.label) {
+			missing = append(missing, m.label)
+		}
+	}
+	if len(missing) == 0 {
+		return "outlook is the only source of this event"
+	}
+	return "outlook is the only source of this event; not known: " + strings.Join(missing, ", ")
+}
+
 // eventBlock prints one event for a person: the headline fields, then attendees, action items and
 // the recap text.
 func (rt *runtime) eventBlock(r *eventResult) {
@@ -429,6 +450,9 @@ func (rt *runtime) eventBlock(r *eventResult) {
 	render.Block(w, oneLine(ev.Subject), head, color)
 	if len(ev.UnknownFields) > 0 {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("unknown: "+strings.Join(ev.UnknownFields, ", "), color))
+	}
+	if note := outlookOnlyNote(ev.Sources, ev.UnknownFields); note != "" {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(note, color))
 	}
 	if ev.DetailLevel == "stale" {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("attendees as of "+stamp(ev.DetailAsOf)+"; the event changed since", color))

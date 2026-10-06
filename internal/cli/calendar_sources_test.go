@@ -16,8 +16,6 @@ import (
 	"github.com/ourostack/teamscrawl/internal/store"
 )
 
-const teamsAccount = tenantA + "/" + userA
-
 // outlookStoreRoot is a profiles directory holding one profile, Main, whose store is the named
 // fixture file.
 func outlookStoreRoot(t *testing.T, file string) string {
@@ -213,6 +211,30 @@ func TestCalendarSourcesShowsEachGuardCode(t *testing.T) {
 				t.Errorf("a refused store applied events: %v", o)
 			}
 		})
+	}
+}
+
+// The link made by the real flag shows on the Outlook row, which then belongs to the Teams principal,
+// and the Teams row keeps its own counts.
+func TestCalendarSourcesShowsTheLinkMadeByTheFlag(t *testing.T) {
+	e := calEnv(t)
+	teams := sourceRows(t, e)[teamsAccount]
+	root := outlookStoreRoot(t, "HxStore.hxd")
+	if code, _, stderr := e.run("--outlook-root", root, "--outlook-account", teamsAccount, "sync"); code != 0 {
+		t.Fatalf("sync exit %d: %s", code, stderr)
+	}
+	rows := sourceRows(t, e)
+	if o := rows["outlook/Main"]; o["link"] != "config" || o["principal"] != teamsAccount {
+		t.Fatalf("linked row %v", o)
+	}
+	if rows[teamsAccount]["link"] != "none" || num(t, rows[teamsAccount], "events_live") != num(t, teams, "events_live") {
+		t.Fatalf("the Teams row changed: %v", rows[teamsAccount])
+	}
+	if code, _, stderr := e.run("--outlook-root", root, "--outlook-account", "none", "sync"); code != 0 {
+		t.Fatalf("unlink exit %d: %s", code, stderr)
+	}
+	if o := sourceRows(t, e)["outlook/Main"]; o["link"] != "none" || o["principal"] != "outlook/Main" {
+		t.Fatalf("after none: %v", o)
 	}
 }
 

@@ -538,14 +538,14 @@ func TestSyncOutlookMarkerLifecycle(t *testing.T) {
 	db := newDB(t)
 	root := outlookRoot(t, "store-version-j.hxd")
 	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
-	Run(context.Background(), defaultInterval(db, root))
+	_, _, _ = Run(context.Background(), defaultInterval(db, root))
 	if marker(t, db, "outlook_failure:outlook/Main") != 1 || marker(t, db, "outlook_checked:Main") != 1 {
 		t.Fatal("a failed read is remembered, and the store was looked at")
 	}
 	// A good store inside the interval is not read: the failure stays, and no skip is recorded.
 	putOutlookStore(t, root, "HxStore.hxd")
 	*now = now.Add(time.Minute)
-	Run(context.Background(), defaultInterval(db, root))
+	_, _, _ = Run(context.Background(), defaultInterval(db, root))
 	if marker(t, db, "outlook_failure:outlook/Main") != 1 || marker(t, db, "outlook_skipped:Main") != 0 {
 		t.Fatal("a skip after a failure keeps the failure and is not a plain skip")
 	}
