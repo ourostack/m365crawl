@@ -2,7 +2,7 @@
   "schema_version": "crawlkit.control.v1",
   "id": "teamscrawl",
   "display_name": "teamscrawl",
-  "description": "Mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only.",
+  "description": "Mirrors the Microsoft Teams desktop app's local cache, and optionally the new Outlook for Mac's calendar, into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and a calendar with meeting recaps, so an AI agent can read your Teams history and agenda in milliseconds, offline and read-only.",
   "binary": {
     "name": "teamscrawl"
   },
@@ -67,7 +67,8 @@
     "contains_private_messages": true,
     "exports_secrets": false,
     "local_only_scopes": [
-      "teams_cache"
+      "teams_cache",
+      "outlook_store"
     ]
   }
 }
