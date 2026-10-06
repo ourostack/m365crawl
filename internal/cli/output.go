@@ -29,6 +29,9 @@ type meta struct {
 	// result means "no data yet", not "nothing matched". Omitted once a sync has succeeded.
 	NeedsSync bool   `json:"needs_sync,omitempty"`
 	Hint      string `json:"hint,omitempty"`
+	// Notices are short plain sentences about the result that an agent should know before it
+	// trusts it, such as archived Outlook events that this run did not refresh. Omitted when empty.
+	Notices []string `json:"notices,omitempty"`
 }
 
 // syncError is the implicit sync's failure, reported beside a result that was still served.
@@ -47,12 +50,15 @@ func (m *meta) setSynced(si *syncedInfo) { m.Synced = si }
 
 func (m *meta) setMeta(age *int64, se *syncError) { m.ArchiveAgeSeconds, m.SyncError = age, se }
 
+func (m *meta) addNotice(s string) { m.Notices = append(m.Notices, s) }
+
 func (m *meta) setNeedsSync(hint string) { m.NeedsSync, m.Hint = true, hint }
 
 type result interface {
 	setMeta(*int64, *syncError)
 	setSynced(*syncedInfo)
 	setNeedsSync(hint string)
+	addNotice(string)
 }
 
 // listResult is the shape of every list command.

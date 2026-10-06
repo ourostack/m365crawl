@@ -370,3 +370,22 @@ func (s *Store) OutlookLinkedAccounts(ctx context.Context) ([]string, error) {
 	}
 	return strings.Split(joined, "\n"), err
 }
+
+// OutlookReadTimes is, for each Outlook account the archive has read, when its last good read
+// happened. An account whose census cannot be read is left out.
+func (s *Store) OutlookReadTimes(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, `select key, value from meta where key like ?`, outlookReadKey+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var key, raw string
+		var read OutlookRead
+		if rows.Scan(&key, &raw) == nil && json.Unmarshal([]byte(raw), &read) == nil && !read.At.IsZero() {
+			out[strings.TrimPrefix(key, outlookReadKey)] = read.At
+		}
+	}
+	return out, rows.Err()
+}

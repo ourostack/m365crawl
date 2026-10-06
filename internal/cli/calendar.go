@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -307,8 +308,10 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			return out, nil
 		}
 		items := make([]calendarItem, len(agenda.Rows))
+		hasOutlook := false
 		for i, r := range agenda.Rows {
 			items[i] = itemOf(r)
+			hasOutlook = hasOutlook || slices.Contains(items[i].Sources, string(calendar.SourceOutlook))
 		}
 		list := newList(shape(rt, items), agenda.Truncated).withTotal(agenda.Total)
 		list.CoverageGap, list.Range, list.UnlinkedAccounts = &agenda.Gap, out.Range, agenda.Unlinked
@@ -317,6 +320,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		}
 		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.setCoverage(agenda.UncoveredDays, agenda.Accounts, agenda.AsOf)
+		rt.noteOutlookOff(st, list, hasOutlook)
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
@@ -366,6 +370,15 @@ func (l *listResult) setCoverage(uncovered []string, accounts []calendar.Account
 	}
 	for _, a := range accounts {
 		ac := accountCoverage{AccountID: a.AccountID, SyncedAt: a.SyncedAt.UTC()}
+		switch n := len(a.Uncovered); {
+		case n == 0:
+		case n == len(uncovered):
+			ac.UncoveredAll = len(accounts) > 1 // the same days as the top-level list: not listed twice
+		case n > maxUncoveredDays:
+			ac.UncoveredDays, ac.UncoveredDaysTotal = a.Uncovered[:maxUncoveredDays], n
+		default:
+			ac.UncoveredDays = a.Uncovered
+		}
 		if !a.AsOf.IsZero() {
 			t := a.AsOf.UTC()
 			ac.CoverageAsOf = &t
@@ -386,6 +399,13 @@ type accountCoverage struct {
 	AccountID    string     `json:"account_id"`
 	SyncedAt     time.Time  `json:"synced_at,omitzero"`
 	CoverageAsOf *time.Time `json:"coverage_as_of,omitempty"`
+	// UncoveredAll says this account lacks every day of the top-level uncovered_days. Otherwise
+	// UncoveredDays lists the days this account lacks when that is fewer than the top-level list
+	// (capped, with the full count in UncoveredDaysTotal). Both are absent when the account covers
+	// the whole range, and when it is the only account, whose days are the top-level list.
+	UncoveredAll       bool     `json:"uncovered_all,omitempty"`
+	UncoveredDays      []string `json:"uncovered_days,omitempty"`
+	UncoveredDaysTotal int      `json:"uncovered_days_total,omitempty"`
 }
 
 func rangeOf(from, to time.Time) *rangeInfo {
@@ -606,7 +626,9 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 		if rt.g.MaxText > 0 {
 			ev.truncate(rt.g.MaxText)
 		}
-		return rt.eventResult(ev)
+		res, _ := rt.eventResult(ev) // never fails
+		rt.noteOutlookOff(st, res, slices.Contains(ev.Sources, string(calendar.SourceOutlook)))
+		return res, nil
 	})
 }
 
@@ -949,6 +971,8 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		list.CoverageGap, list.Range, list.UnlinkedAccounts = &res.Gap, out.Range, res.Unlinked
 		list.setCoverage(res.UncoveredDays, res.Accounts, res.AsOf)
 		list.MineAmbiguousOmitted, list.MineUnknownAccounts = res.MineAmbiguous, res.MineUnknownAccounts
+		hasOutlook := slices.ContainsFunc(res.Items, func(a store.CalendarAction) bool { return a.Outlook })
+		rt.noteOutlookOff(st, list, hasOutlook)
 		return list, nil
 	})
 }
