@@ -139,7 +139,7 @@ func TestDeriveFillsTheCalendarTables(t *testing.T) {
 		calEv(acctA, "e2", "2026-09-11T09:00:00Z", map[string]any{"iCalUID": "uid-shared"}),
 		calRec(acctA, "calendar", "calendar-internal-data", "lastSuccesfulSyncTimestamp", []byte(`{"key":"lastSuccesfulSyncTimestamp","value":{"$date":"2026-09-01T09:30:00Z"}}`)),
 		calRec(acctA, "meetforwork-manager", "meetforwork-meeting-catch-up", "uid-shared", []byte(`{"iCalUid":"uid-shared","meetingEndTime":{"$date":"2026-09-11T10:00:00Z"},"data":[{"callId":"call-1","url":"https://example.invalid/rec","tasks":[{"headline":"Do it","text":"Do it now","ownerDisplayName":"Alex Fixture"}]}]}`)),
-		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "recap-1", []byte(`{"callId":"call-1","shortSummary":"Short","actionItems":[{"actionItemTitle":"T","ownerName":"Alex Fixture"}]}`)),
+		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "recap-1", []byte(`{"data":{"callId":"call-1","shortSummary":"Short","actionItems":[{"actionItemTitle":"T","ownerName":"Alex Fixture"}]}}`)),
 		calRec(acctA, "calendar-manager", "events", "decoy", []byte(`{"objectId":"decoy"}`)),
 	)
 	res := derive(t, s, t0)
@@ -306,8 +306,8 @@ func TestDeriveCountsOmissionsByCode(t *testing.T) {
 		calRec(acctA, "calendar", "calendar", "garbage", []byte(`[1,2]`)),
 		calRec(acctA, "meetforwork-manager", "meetforwork-meeting-catch-up", "uid-x", []byte(`{"iCalUid":"uid-x","data":[{"url":"no call id"},{"callId":"c","tasks":["not an object"]}]}`)),
 		calRec(acctA, "meetforwork-manager", "meetforwork-meeting-catch-up", "uid-y", []byte(`"scalar"`)),
-		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"shortSummary":"no call id"}`)),
-		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r2", []byte(`{"callId":"c2","shortSummary":"ok"}`)),
+		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"data":{"shortSummary":"no call id"}}`)),
+		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r2", []byte(`{"data":{"callId":"c2","shortSummary":"ok"}}`)),
 	)
 	res := derive(t, s, t0)
 	want := map[string]int{OmitCalendarUnknownZone: 1, OmitCalendarAllDayUnaligned: 1, OmitCalendarUnmapped: 6}
@@ -376,7 +376,7 @@ func TestDeriveFreshnessFallbacks(t *testing.T) {
 	// acctB has only a recap database: no calendar, so no freshness at all.
 	putRecords(t, s, t0,
 		calEv(acctA, "e1", "2026-09-10T09:00:00Z", map[string]any{"lastModifiedTime": map[string]any{"$date": "2026-08-05T00:00:00Z"}}),
-		calRec(other, "meeting-recap-manager", "meeting-recap-catchup", "r2", []byte(`{"callId":"c2","shortSummary":"ok"}`)))
+		calRec(other, "meeting-recap-manager", "meeting-recap-catchup", "r2", []byte(`{"data":{"callId":"c2","shortSummary":"ok"}}`)))
 	derive(t, s, t0)
 	if got := scalar(t, s, `select cache_fresh_at from calendar_sources where account_id=?`, "tenant-1/"+acctA.UserID); got != "2026-08-05T00:00:00.000Z" {
 		t.Fatalf("fresh %q", got)
@@ -425,7 +425,7 @@ func TestCalendarCountsAdd(t *testing.T) {
 func TestBackfillFromRecordsNeedsNoCache(t *testing.T) {
 	s := newStore(t)
 	putRecords(t, s, t0, calEv(acctA, "e1", "2026-09-10T09:00:00Z", nil), calEv(acctA, "e2", "2026-09-10T11:00:00Z", nil),
-		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"callId":"c1","shortSummary":"S","actionItems":[{"actionItemTitle":"T"}]}`)))
+		calRec(acctA, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"data":{"callId":"c1","shortSummary":"S","actionItems":[{"actionItemTitle":"T"}]}}`)))
 	// A record that was evicted from the cache keeps its event, live: its day is not loaded now.
 	putRecords(t, s, t0, calEv(acctA, "old", "2026-08-01T09:00:00Z", nil))
 	removeRecord(t, s, t0, "old")
@@ -496,7 +496,7 @@ func markerRecords(a teamsdesktop.Account) []teamsdesktop.GenericRecord {
 			"attendees": []any{map[string]any{"name": marker, "address": "x@example.invalid"}},
 		}),
 		calRec(a, "meetforwork-manager", "meetforwork-meeting-catch-up", "uid-e1", []byte(`{"iCalUid":"uid-e1","data":[{"callId":"c1","headline":"`+marker+`","tasks":[{"headline":"`+marker+`","text":"`+marker+`"}]}]}`)),
-		calRec(a, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"callId":"c1","shortSummary":"`+marker+` summary"}`)),
+		calRec(a, "meeting-recap-manager", "meeting-recap-catchup", "r1", []byte(`{"data":{"callId":"c1","shortSummary":"`+marker+` summary"}}`)),
 	}
 }
 

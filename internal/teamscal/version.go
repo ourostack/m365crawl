@@ -8,7 +8,7 @@ import "time"
 
 // MapperVersion is raised whenever a mapping change alters derived calendar data. The archive
 // stores it, and a different stored value makes the next sync re-map every claimed record.
-const MapperVersion = 1
+const MapperVersion = 2
 
 // RecapTimeTolerance is how far a store 2 recap's meeting start and end may differ from an
 // event's and still link by time. It is a guess until the real-cache acceptance reports the

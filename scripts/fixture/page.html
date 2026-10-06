@@ -172,8 +172,10 @@ async function buildCalendar(acct, suffix, meetingConv) {
   const rtx = rdb2.transaction('meeting-recap-catchup', 'readwrite');
   const rs = rtx.objectStore('meeting-recap-catchup');
   // Joined to the catch-up item by callId: action items, a mention event, speakers, topics.
-  rs.put({
-    recapId: recapId('joined'), callId: richCall, organizerId: '00000000-0000-4000-8000-0000000000ee',
+  // The real record is {data, recapId, syncTimeUtc}: the content sits under data (measured on a real cache).
+  const wrapRecap = (id, data) => ({ recapId: id, syncTimeUtc: D(24, 8), data: Object.assign({ callId: null, error: null, isPremium: true, traceId: 'fixture-trace-' + acct.seed, organizerTenantId: acct.tenant }, data) });
+  rs.put(wrapRecap(recapId('joined'), {
+    callId: richCall, organizerId: '00000000-0000-4000-8000-0000000000ee',
     shortSummary: 'Fixture summary: the plan was reviewed.', adaptiveRecap: '',
     meetingSummary: [{ title: 'Fixture decisions', text: 'The plan was approved.' }],
     actionItems: [
@@ -185,11 +187,11 @@ async function buildCalendar(acct, suffix, meetingConv) {
     topicSegmentations: [{ topic: 'Fixture plan', startOffset: '00:00:00', endOffset: '00:30:00' }],
     meetingStartTime: D(20, 17), meetingEndTime: D(20, 18), recordingStartTime: D(20, 17, 2), recordingEndTime: D(20, 17, 57),
     attendeesCount: 6, userAttendanceStatus: 'Attended', hasConfRoomConnected: false,
-  });
+  }));
   // Only here (no catch-up partner): its meeting times equal exactly one event (the Central Europe
   // sync), so it links by time.
-  rs.put({
-    recapId: recapId('time-only'), callId: 'fixture-call-' + acct.seed + '-cet', organizerId: '00000000-0000-4000-8000-0000000000dd',
+  rs.put(wrapRecap(recapId('time-only'), {
+    callId: 'fixture-call-' + acct.seed + '-cet', organizerId: '00000000-0000-4000-8000-0000000000dd',
     shortSummary: 'Fixture summary of a meeting that only the recap store holds.',
     meetingSummary: [{ title: 'Fixture notes', text: 'Nothing was decided.' }],
     actionItems: [{ actionItemTitle: 'Follow up', displayCleanContent: 'Sam Example will follow up.', ownerName: 'Sam Example', speakerName: 'Sam Example' }],
@@ -198,7 +200,7 @@ async function buildCalendar(acct, suffix, meetingConv) {
     topicSegmentations: [],
     meetingStartTime: D(23, 9), meetingEndTime: D(23, 10), recordingStartTime: D(23, 9, 1), recordingEndTime: D(23, 9, 26),
     attendeesCount: 3, userAttendanceStatus: 'Attended',
-  });
+  }));
   await done(rtx);
   rdb2.close();
 }
