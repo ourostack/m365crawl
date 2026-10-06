@@ -33,7 +33,9 @@ $version = $tag.TrimStart('v')
 Write-Host '==> Release flags'
 $prereleaseExpected = $tag.Contains('-')
 $prereleaseActual = gh release view $tag -R $repo --json isPrerelease --jq .isPrerelease
-if ([System.Convert]::ToBoolean($prereleaseActual) -ne $prereleaseExpected) {
+# A stable release is not required to be a stable flag here: the settle job settles it after every verification job
+# (scripts/release-flags.sh restores a stable release that an earlier flake demoted).
+if ($prereleaseExpected -and -not [System.Convert]::ToBoolean($prereleaseActual)) {
     throw "isPrerelease is $prereleaseActual for $tag, expected $prereleaseExpected"
 }
 if ($prereleaseExpected) {
