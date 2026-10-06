@@ -1,7 +1,7 @@
-// Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model, the
-// keys that identify one occurrence across sources, the merge that picks the freshest copy, and
-// the per-source snapshot tables behind Agenda. It imports no source adapter and no archive code;
-// callers hand it a *sql.DB opened with SchemaDDL.
+// Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model,
+// the keys that identify one occurrence across sources, the merge that picks the freshest copy,
+// and the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no
+// source adapter and no archive code; callers hand it a *sql.DB opened with SchemaDDL.
 package calendar
 
 import (
@@ -18,38 +18,110 @@ const (
 	SourceOutlook Source = "outlook"
 )
 
-// Event is one occurrence of a calendar event as one source holds it.
+// Event types, as the sources report them.
+const (
+	EventSingle     = "single"
+	EventOccurrence = "occurrence"
+	EventException  = "exception"
+	EventMaster     = "master"
+)
+
+// Event is one occurrence of a calendar event as one source holds it. Its fields fall in three
+// groups that Capture treats differently: identity, schedule (compared against LastModified) and
+// detail and small fields (each unit compared against its own clock in
+// FieldClocksJSON). The bookkeeping fields at the end belong to the archive:
+// adapters leave them zero, and Capture and the store maintain them.
 type Event struct {
-	Source   Source
-	SourceID string
+	// Identity.
+	Source Source
+	// AccountID partitions every calendar table, in the form "<tenantId>/<userId>"; empty only for a
+	// source that has no account.
+	AccountID string
+	SourceID  string
 	// GlobalID is the id shared across sources (iCalUId or equivalent); empty when the source has none.
 	GlobalID string
+	// ICalUID is the iCalendar uid the source knows. For Teams it equals GlobalID; it is the join
+	// column to recaps.
+	ICalUID string
+	// SeriesKey is shared by a recurring master and its occurrences.
+	SeriesKey string
+	// EventType is one of the Event* constants; empty when the source did not say.
+	EventType string
 	// OriginalStart is the occurrence's original start (iCalendar RECURRENCE-ID); nil for a single
 	// event. Moving an occurrence changes Start but not OriginalStart. For an all-day occurrence
 	// the adapter passes midnight of the occurrence's own date in the event's time zone (or UTC
 	// midnight of that date); Key takes the wall-clock date of the value as given.
 	OriginalStart *time.Time
-	Start, End    time.Time
+
+	// Schedule group: a copy older than the stored LastModified never changes it.
+	Start, End time.Time
 	// AllDay events carry dates, never instants: StartDate and EndDate are YYYY-MM-DD, and EndDate
 	// is exclusive (the iCalendar DTEND convention). An empty or non-later EndDate means one day.
-	AllDay             bool
-	StartDate, EndDate string
-	TimeZone           string
-	Subject, Organizer string
-	AttendeesJSON      string
-	Location           string
+	AllDay                 bool
+	StartDate, EndDate     string
+	TimeZone               string
+	TimeZoneIANA           string
+	UTCOffset              string
+	Subject                string
+	Organizer              string
+	OrganizerAddress       string
+	IsOrganizer, IsPrivate bool
+	Cancelled              bool
+	Response, ShowAs       string
+	IsOnlineMeeting        bool
+	Location               string
+	LastModified           *time.Time
+
+	// Detail group: sources fetch these only for events the user opened, so a later copy often
+	// lacks them. Capture compares each unit against its own clock, not LastModified.
 	OnlineMeetingURL   string
+	ShortJoinURL       string
+	DialInConferenceID string
+	DialInTollNumber   string
 	TeamsThreadID      string
-	SeriesKey          string
-	Cancelled          bool
-	Response, ShowAs   string
+	AttendeesJSON      string
+	LocationsJSON      string
+	BodyHTML           string
+	BodyText           string
+	BodyType           string
 	BodyPreview        string
-	LastModified       *time.Time
+	AttachmentsJSON    string
+	HasAttachments     bool
+	CategoriesJSON     string
+	RecurrenceJSON     string
+	// ReminderMinutes is the reminder lead time; zero minutes is a real value. nil means no
+	// reminder is set, or that the copy did not state one: see ReminderStated.
+	ReminderMinutes *int
+	// ReminderStated marks an incoming copy that states the reminder even when ReminderMinutes is
+	// nil, that is, the source said no reminder is set (Teams: isReminderSet false). A copy with a
+	// non-nil ReminderMinutes always states it. Input only: Capture clears it, and stored rows carry
+	// the reminder clock in FieldClocksJSON instead.
+	ReminderStated bool
+	// OnlineStated marks an incoming copy that states whether the event is an online meeting, so
+	// IsOnlineMeeting false means "not online" and not merely "not said". Only such a copy outdates
+	// older meeting links. Input only: Capture clears it in the stored row.
+	OnlineStated bool
+	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
+	DetailRawJSON string
+
+	// Bookkeeping. DetailAsOf is the newest LastModified of a copy that stated attendees or a body;
+	// nil when no such copy was captured.
+	DetailAsOf *time.Time
+	// FieldClocksJSON holds one statement clock per unit of fields (see Capture): a JSON object
+	// from unit name to the LastModified (stored time layout) of the newest copy that stated that
+	// unit; "" when none. A string rather than a map keeps Event comparable. Mappers leave it
+	// empty; ParseFieldClocks reads it.
+	FieldClocksJSON string
+	DetailSeenAt    *time.Time
+	FirstSeenAt     time.Time
+	SeenAt          time.Time
+	RemovedAt       *time.Time
 }
 
 // Window is the range one source covered in a snapshot, and how fresh that snapshot was.
 type Window struct {
 	Source       Source
+	AccountID    string
 	Start, End   time.Time
 	SyncedAt     time.Time
 	CacheFreshAt time.Time
