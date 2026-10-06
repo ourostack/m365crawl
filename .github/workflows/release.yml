@@ -31,6 +31,9 @@ jobs:
   # Reads main and decides: is there a release to make, and which version (the lowest notes
   # file without a finished release). It refuses what is wrong (scripts/release-decide.sh).
   # Every later job reads the tag and commit from these outputs; none reads github.ref_name.
+  # publish_only=true means the release exists and only its cask is missing from the tap: verify
+  # and release (the build and the signing) are skipped, and the run resumes with the published
+  # assets: verify-release-*, settle, publish-homebrew and, for a stable release, verify-homebrew.
   decide:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,6 +45,7 @@ jobs:
       version: ${{ steps.decide.outputs.version }}
       sha: ${{ steps.decide.outputs.sha }}
       rehearsal: ${{ steps.decide.outputs.rehearsal }}
+      publish_only: ${{ steps.decide.outputs.publish_only }}
       remaining: ${{ steps.decide.outputs.remaining }}
     steps:
       - name: Checkout
@@ -63,7 +67,7 @@ jobs:
   # artifacts are verified below before the cask is pushed.
   verify:
     needs: decide
-    if: ${{ needs.decide.outputs.release == 'true' }}
+    if: ${{ needs.decide.outputs.release == 'true' && needs.decide.outputs.publish_only != 'true' }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -180,9 +184,11 @@ jobs:
           fi
           gh release upload "$TAG" "$cask" --clobber
 
-  # Verifies the published darwin artifacts exactly as a user downloads them.
+  # Verifies the published darwin artifacts exactly as a user downloads them. A publish-only
+  # resume has no release job (it ran before), so it runs when release was skipped on purpose.
   verify-release-darwin:
     needs: [decide, release]
+    if: ${{ !cancelled() && needs.decide.outputs.release == 'true' && (needs.release.result == 'success' || (needs.release.result == 'skipped' && needs.decide.outputs.publish_only == 'true')) }}
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -205,6 +211,7 @@ jobs:
   # Verifies the published Windows zip files on native Windows runners.
   verify-release-windows:
     needs: [decide, release]
+    if: ${{ !cancelled() && needs.decide.outputs.release == 'true' && (needs.release.result == 'success' || (needs.release.result == 'skipped' && needs.decide.outputs.publish_only == 'true')) }}
     strategy:
       fail-fast: false
       matrix:

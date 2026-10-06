@@ -16,7 +16,7 @@
 #
 # It downloads teamscrawl.rb from the release, commits it to the tap as
 # "teamscrawl <version>" and pushes. Running it again for the same tag changes
-# nothing. The key is written to a private temporary file and never printed.
+# nothing. A stable release is refused when the tap's main already serves a later one. The key is written to a private temporary file and never printed.
 #
 #   scripts/publish-cask.sh --restore-previous
 #                            containment for a stable release whose install failed to verify
@@ -97,6 +97,11 @@ STUB
   run v0.3.0 0.2.0
   expect_fail "cask for another version" "is not for version 0.3.0"
   [[ "$(git --git-dir="$bare" rev-parse main)" == "$after" ]] || fail "selftest: wrong-version cask changed the tap"
+
+  # An older stable release never replaces a later one on main.
+  run v0.1.0 0.1.0
+  expect_fail "older stable release over a later one" "would move the tap backwards"
+  [[ "$(git --git-dir="$bare" rev-parse main)" == "$after" ]] || fail "selftest: an older release changed the tap"
 
   # A prerelease is refused on main.
   run v0.3.0-rc.1 0.3.0-rc.1
@@ -221,6 +226,14 @@ for attempt in 1 2 3; do
     git -C "$work/tap" checkout --quiet -b "$branch"
   fi
   mkdir -p "$work/tap/Casks"
+  # Versions only move forward on the tap's main: a stable release never replaces the cask of a later stable release
+  # (a resumed older release must not move the tap backwards). Only --restore-previous goes back, on purpose.
+  if [[ "$TAG" != *-* && -f "$work/tap/Casks/teamscrawl.rb" ]]; then
+    current="$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "$work/tap/Casks/teamscrawl.rb" | head -n 1)"
+    if [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$current" != "$version" && "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n 1)" == "$current" ]]; then
+      fail "the tap's main serves teamscrawl $current, which is later than $version; publishing $version would move the tap backwards"
+    fi
+  fi
   if cmp -s "$work/asset/teamscrawl.rb" "$work/tap/Casks/teamscrawl.rb"; then
     echo "publish-cask: the tap ($branch) already serves teamscrawl $version"
     exit 0
