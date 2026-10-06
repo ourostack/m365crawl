@@ -560,7 +560,7 @@ type syncCmd struct {
 }
 
 func (c syncCmd) Run(rt *runtime) error {
-	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress(), FullRead: c.FullRead})
+	rep, _, err := runSync(rt.ctx, rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress(), FullRead: c.FullRead}))
 	var coded *errs.Coded
 	if errors.As(err, &coded) && coded.Code == errs.CodePartialSync && rt.ctx.Err() == nil {
 		// Some sources committed: the report says which, and the error makes the exit status nonzero.

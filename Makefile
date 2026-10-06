@@ -91,6 +91,7 @@ script-lint:
 	scripts/release-flags.sh --selftest
 	scripts/automerge-eligible.sh --selftest
 	scripts/retry.sh --selftest
+	scripts/check-release-wiring.sh --selftest
 
 tidy-check:
 	go mod verify

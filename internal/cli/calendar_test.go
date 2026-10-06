@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +231,14 @@ func TestCalendarEventDetail(t *testing.T) {
 	recaps := d["recaps"].([]any)
 	if len(recaps) == 0 || len(recaps[0].(map[string]any)["action_items"].([]any)) == 0 {
 		t.Errorf("recaps %v", recaps)
+	}
+	// An agent weighs a link by its method: a recap says how it reached its event.
+	if recaps[0].(map[string]any)["link_method"] == nil {
+		t.Errorf("a recap does not say how it was linked: %v", recaps[0])
+	}
+	e.exec(`update calendar_recaps set link_method='start_time' where link_method='ical_uid'`)
+	if got := eventDoc(t, e, id)["recaps"].([]any)[0].(map[string]any)["link_method"]; got != "start_time" {
+		t.Errorf("link_method %v", got)
 	}
 	// The key, a unique prefix of the id, and the same event printed twice by the agenda all name it.
 	for _, ref := range []string{review["event_key"].(string), id[:len(id)-2]} {
@@ -528,6 +539,17 @@ func TestCalendarListsRecapsWithNoEvent(t *testing.T) {
 	if _, has := m["unlinked_recaps_total"]; has {
 		t.Error("the total is printed only when the limit cut the list")
 	}
+	// The fixture's orphan has no meeting start: it is placed by its recording start, and says so.
+	if _, has := r["meeting_start"]; has || r["placed_by"] != "recording_start" || r["placed_at"] == nil {
+		t.Errorf("placement %v", r)
+	}
+	// With a meeting start it is placed by that.
+	e.exec(`update calendar_recaps set meeting_start_at=recording_start_at where call_id like '%orphan%'`)
+	again := agenda(t, e, "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)["unlinked_recaps"].([]any)[0].(map[string]any)
+	if again["placed_by"] != "meeting_start" || again["meeting_start"] != again["placed_at"] {
+		t.Errorf("placement %v", again)
+	}
+	e.exec(`update calendar_recaps set meeting_start_at=null where call_id like '%orphan%'`)
 	text := e
 	code, out, errOut := text.run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
 	if code != 0 || !strings.Contains(out, "recaps with no event in the archive") || !strings.Contains(out, "Orphan task") {
@@ -548,10 +570,10 @@ func TestCalendarListsRecapsWithNoEvent(t *testing.T) {
 
 func TestUnlinkedRecapTableSaysWhenTheLimitCutIt(t *testing.T) {
 	l := newList(nil, false)
-	l.UnlinkedRecaps = []unlinkedRecap{{AccountID: "a", calendarRecap: calendarRecap{CallID: "c", ShortSummary: "S"}}}
+	l.UnlinkedRecaps = []unlinkedRecap{{AccountID: "a", calendarRecap: calendarRecap{CallID: "c", ShortSummary: "S"}}, {AccountID: "a", PlacedBy: "recording_start", calendarRecap: calendarRecap{CallID: "d"}}}
 	l.UnlinkedRecapsTotal = 3
 	got := renderToString(t, "calendar", l)
-	if !strings.Contains(got, "1 of 3 recaps shown; raise --limit") {
+	if !strings.Contains(got, "2 of 3 recaps shown; raise --limit") || !strings.Contains(got, "(recording start; meeting start unknown)") || !strings.Contains(got, "(no summary text)") {
 		t.Errorf("%s", got)
 	}
 }
@@ -646,5 +668,55 @@ func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
 		checkGolden(t, "calendar_unlinked_recap."+suffix, e.scrub(out))
+	}
+}
+
+// With Outlook on, its events sit in the agenda beside the Teams ones, as their own principal: an
+// unlinked profile is named in the envelope, and an Outlook-only event says what it does not know.
+func TestCalendarShowsOutlookEvents(t *testing.T) {
+	e := textEnv(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile("../../testdata/outlook-fixture/HxStore.hxd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
+		t.Fatalf("sync exit %d: %s", code, stderr)
+	}
+	m := agenda(t, e, "--from", "2023-11-20", "--to", "2023-11-25", "--limit", "200")
+	if got := asStrings(m["unlinked_accounts"]); len(got) != 1 || got[0] != "outlook/Main" {
+		t.Fatalf("unlinked_accounts %v", got)
+	}
+	plain := itemBySubject(t, m, "Fixture plain event")
+	if src := asStrings(plain["sources"]); len(src) != 1 || src[0] != "outlook" {
+		t.Fatalf("sources %v", src)
+	}
+	if !slices.Contains(asStrings(plain["unknown_fields"]), "rooms") {
+		t.Fatalf("an Outlook event must say what it does not know: %v", plain["unknown_fields"])
+	}
+	// The Teams events are still there, and no item claims both sources while the profile is unlinked.
+	teams := 0
+	for _, it := range items(t, m) {
+		src := asStrings(it["sources"])
+		if len(src) > 1 {
+			t.Fatalf("an unlinked Outlook event merged: %v", src)
+		}
+		if len(src) == 1 && src[0] == "teams" {
+			teams++
+		}
+	}
+	if teams == 0 {
+		t.Fatal("no Teams events")
+	}
+	// `calendar event` opens the Outlook event by its id.
+	ev := eventDoc(t, e, plain["event_id"].(string))
+	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture plain event" {
+		t.Fatalf("%v", ev)
 	}
 }
