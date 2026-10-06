@@ -140,7 +140,7 @@ func TestMapCatchUpDurationForms(t *testing.T) {
 	}
 }
 
-const recapRecord = `{
+const recapRecord = `{"recapId":"recap-key-1","syncTimeUtc":{"$date":"2026-03-10T18:30:00.000Z"},"data":{
  "callId":"call-1","shortSummary":"A short summary.","adaptiveRecap":"",
  "meetingSummary":[{"title":"Scope","text":"We agreed on scope."}],
  "actionItems":[{"actionItemTitle":"Send notes","displayCleanContent":"Alex sends the notes","ownerName":"Alex Fixture","speakerName":"Blake Fixture"},
@@ -150,7 +150,7 @@ const recapRecord = `{
  "meetingStartTime":{"$date":"2026-03-10T17:00:00.000Z"},"meetingEndTime":{"$date":"2026-03-10T18:00:00.000Z"},
  "recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"},"recordingEndTime":{"$date":"2026-03-10T17:59:30.000Z"},
  "organizerId":"org-1","attendeesCount":6,"userAttendanceStatus":"Attended","hasConfRoomConnected":true
-}`
+}}`
 
 func TestMapRecapRecord(t *testing.T) {
 	r, items, notes, err := MapRecapRecord(testAcct, "recap-key-1", []byte(recapRecord))
@@ -195,7 +195,7 @@ func TestMapRecapRecord(t *testing.T) {
 }
 
 func TestMapRecapNumericForms(t *testing.T) {
-	r, items, _, err := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","attendeesCount":"7","userAttendanceStatus":2,"recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"}}`))
+	r, items, _, err := MapRecapRecord(testAcct, "k", []byte(`{"data":{"callId":"c","attendeesCount":"7","userAttendanceStatus":2,"recordingStartTime":{"$date":"2026-03-10T17:00:30.000Z"}}}`))
 	if err != nil || r.AttendeesCount != 0 || r.AttendanceStatus != "2" || r.DurationSeconds != 0 || len(items) != 0 {
 		t.Fatalf("recap %+v items %v err %v", r, items, err)
 	}
@@ -203,9 +203,12 @@ func TestMapRecapNumericForms(t *testing.T) {
 
 func TestMapRecapUnmapped(t *testing.T) {
 	for name, c := range map[string]struct{ key, js string }{
-		"no call id": {"k", `{"shortSummary":"x"}`},
-		"no key":     {"", `{"callId":"c"}`},
-		"not object": {"k", `"x"`},
+		"no call id":         {"k", `{"data":{"shortSummary":"x"}}`},
+		"no key":             {"", `{"data":{"callId":"c"}}`},
+		"no data":            {"k", `{"recapId":"k"}`},
+		"flat shape":         {"k", `{"callId":"c","shortSummary":"x"}`},
+		"data not an object": {"k", `{"data":"x"}`},
+		"not object":         {"k", `"x"`},
 	} {
 		_, _, _, err := MapRecapRecord(testAcct, c.key, []byte(c.js))
 		var um *UnmappedError
@@ -269,11 +272,11 @@ func TestMapCatchUpDurationOutOfRange(t *testing.T) {
 }
 
 func TestMapRecapDurationOutOfRange(t *testing.T) {
-	r, _, _, _ := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-12T17:00:00Z"}`))
+	r, _, _, _ := MapRecapRecord(testAcct, "k", []byte(`{"data":{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-12T17:00:00Z"}}`))
 	if r.DurationSeconds != 0 || r.RecordingEndAt == nil {
 		t.Errorf("two-day recording: %+v", r)
 	}
-	r, _, _, _ = MapRecapRecord(testAcct, "k", []byte(`{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-10T16:00:00Z"}`))
+	r, _, _, _ = MapRecapRecord(testAcct, "k", []byte(`{"data":{"callId":"c","recordingStartTime":"2026-03-10T17:00:00Z","recordingEndTime":"2026-03-10T16:00:00Z"}}`))
 	if r.DurationSeconds != 0 {
 		t.Errorf("negative recording: %+v", r)
 	}
@@ -303,7 +306,7 @@ func TestMapRecapAdaptiveRecapIsNotMappedButNoticed(t *testing.T) {
 	// adaptiveRecap is a string; measured empty in 17 of 18 records and absent in the other, so
 	// there is nothing to map yet. A non-empty value is counted so its first appearance is visible.
 	for js, seen := range map[string]bool{`"adaptiveRecap":"Some text."`: true, `"adaptiveRecap":""`: false, `"adaptiveRecap":null`: false, `"x":1`: false} {
-		r, _, notes, err := MapRecapRecord(testAcct, "k", []byte(`{"callId":"c",`+js+`}`))
+		r, _, notes, err := MapRecapRecord(testAcct, "k", []byte(`{"data":{"callId":"c",`+js+`}}`))
 		if err != nil || notes.AdaptiveRecapSeen != seen || r.Outline != "" || r.ShortSummary != "" {
 			t.Errorf("%s: %+v %+v %v", js, r, notes, err)
 		}
