@@ -154,8 +154,9 @@ func TestSyncFixture(t *testing.T) {
 	if len(r.Sources) != 1 || r.Sources[0].Status != "ok" || !strings.Contains(r.Sources[0].Source, "https_teams.microsoft.com_0") {
 		t.Fatalf("sources: %+v", r.Sources)
 	}
-	// The credential decoys are denied by name: counted, never a loss, so the status stays ok.
-	if len(r.Omissions) != 2 || r.Omissions["denied_database"] != 3 || r.Omissions["denied_store"] != 1 {
+	// The credential decoys are denied by name, and the fixture's calendar has one event per
+	// account in a deliberately unknown zone: counted, never a loss, so the status stays ok.
+	if len(r.Omissions) != 3 || r.Omissions["denied_database"] != 3 || r.Omissions["denied_store"] != 1 || r.Omissions["calendar_unknown_time_zone"] != 2 {
 		t.Fatalf("omissions: %v", r.Omissions)
 	}
 	if r.Records.Inserted != fixtureRecords || r.Records.Seen != fixtureRecords || r.Sources[0].Counts.Records != r.Records {

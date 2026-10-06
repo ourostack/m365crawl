@@ -260,7 +260,7 @@ func injectFaults(t *testing.T, s *Store) *injector {
 func dump(t *testing.T, s *Store) string {
 	t.Helper()
 	var b strings.Builder
-	for _, tbl := range []string{"accounts", "conversations", "messages", "people", "activity", "records", "sync_runs", "meta", "message_fts", "conversation_fts"} {
+	for _, tbl := range []string{"accounts", "conversations", "messages", "people", "activity", "records", "sync_runs", "meta", "message_fts", "conversation_fts", "calendar_source_events", "calendar_sources", "calendar_covered_days", "calendar_recaps", "calendar_recap_items"} {
 		rows, err := s.cs.DB().Query(`select rowid, * from ` + tbl + ` order by rowid`)
 		if err != nil {
 			t.Fatalf("dump %s: %v", tbl, err)

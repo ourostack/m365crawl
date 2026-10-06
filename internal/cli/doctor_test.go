@@ -28,7 +28,7 @@ func checks(t *testing.T, m map[string]any) map[string]map[string]any {
 	return out
 }
 
-var doctorNames = []string{"teams_installed", "full_disk_access", "teams_origin", "database_writable", "schema_version", "fts", "last_sync_age"}
+var doctorNames = []string{"teams_installed", "full_disk_access", "teams_origin", "database_writable", "schema_version", "fts", "last_sync_age", "calendar_cache"}
 
 func TestDoctorAllPass(t *testing.T) {
 	e := newEnv(t)
