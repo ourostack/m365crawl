@@ -227,3 +227,19 @@ func UTF16Z(s string) []byte {
 	}
 	return binary.LittleEndian.AppendUint16(out, 0)
 }
+
+// Trailer is the constant 11 bytes that follow an object in a well-formed
+// payload (measured on a real store, counts only; the bytes are structure, not
+// content).
+var Trailer = []byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+
+// FramedPayload writes head, then each object followed by the Trailer, the shape
+// of a well-formed payload. A nil head writes none.
+func FramedPayload(head []byte, objs ...*Object) []byte {
+	out := append([]byte(nil), head...)
+	for _, o := range objs {
+		out = append(out, o.Encode()...)
+		out = append(out, Trailer...)
+	}
+	return out
+}
