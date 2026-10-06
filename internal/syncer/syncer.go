@@ -25,6 +25,13 @@ type Options struct {
 	Account *teamsdesktop.Account // only this account's databases; nil means every account
 	// Progress receives one human-readable line per source; nil discards them.
 	Progress io.Writer
+	// FullRead reads every record of every source in full, instead of skipping the records whose
+	// bytes are unchanged since the last committed sync (also: TEAMSCRAWL_FULL_READ=1). It does
+	// not stop at the fingerprint shortcut either: a source whose files have not changed since
+	// the last sync is read in full too, so the check works exactly when the cache is stable.
+	// The archive comes out the same either way; this is the check, not a repair. The read
+	// memory is refreshed by it.
+	FullRead bool
 }
 
 // Run syncs every Teams origin under o.Root into the archive at o.DBPath while holding the
@@ -36,8 +43,8 @@ type Options struct {
 // sync_runs, and only a run in which every source succeeded counts as a fresh sync (for every
 // account, or for the filtered account). Only runs without an account filter record a fingerprint,
 // and a source is skipped ("unchanged") only when an unfiltered run's stored fingerprint for it
-// equals the current one, so a filtered run can never hide another account's data from a later
-// run. changes lists the messages and activity items the store inserted or updated.
+// equals the current one (and FullRead is not set), so a filtered run can never hide another
+// account's data from a later run. changes lists the messages and activity items the store inserted or updated.
 func Run(ctx context.Context, o Options) (rep Report, changes []Change, err error) {
 	started := time.Now().UTC()
 	release, err := store.AcquireLock(o.DBPath)
@@ -53,7 +60,8 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	}
 	defer func() { _ = st.Close() }()
 
-	r := &runner{o: o, st: st}
+	o.FullRead = o.FullRead || os.Getenv(FullReadEnv) == "1"
+	r := &runner{o: o, st: st, sig: memoSignature(store.DerivationVersion)}
 	// The attempt is recorded even when ctx is cancelled.
 	record := func(status string) error {
 		return st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: started, FinishedAt: time.Now().UTC(), Status: status, Accounts: r.scope()})
@@ -84,8 +92,9 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 }
 
 type runner struct {
-	o  Options
-	st *store.Store
+	o   Options
+	st  *store.Store
+	sig []byte // teamsdesktop.MemoSignature: what record digests are taken under
 }
 
 // scope is the accounts a run-level sync_runs row covers: every account, or the filtered one.
@@ -251,7 +260,7 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 		if err != nil {
 			return SourceReport{}, false, errs.DBError(err)
 		}
-		if last == fp {
+		if last == fp && !r.o.FullRead { // a forced full read reads a source whose fingerprint has not changed too
 			if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: src.Key(), Fingerprint: fp, Status: StatusUnchanged}); err != nil {
 				return SourceReport{}, false, errs.DBError(err)
 			}
@@ -282,36 +291,18 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 
 	afterSnapshot()
 
-	sess, err := r.st.Begin(ctx)
-	if err != nil {
-		return SourceReport{}, false, errs.DBError(err)
+	w, omissions, redacted, err := r.apply(ctx, src.Key(), snap, begun, fp, r.o.FullRead)
+	if errors.Is(err, errMemoConflict) {
+		// A record rewrote a row a skipped record vouched for. The read was rolled back; read the
+		// whole source in full, which needs no vouching.
+		w, omissions, redacted, err = r.apply(ctx, src.Key(), snap, begun, fp, true)
 	}
-	defer sess.Rollback() // a no-op after Commit; on any failure nothing of this source is kept
-	w := &writer{ctx: ctx, sess: sess, seenAcct: map[[2]string]bool{}, people: map[[2]string]teamsdesktop.Person{}}
-	omissions, err := teamsdesktop.Read(ctx, snap, r.o.Account, w.add)
-	if err != nil {
-		return SourceReport{}, false, err
-	}
-	generic, redacted, err := w.readGeneric(ctx, snap, src.Key(), r.o.Account, begun)
 	if err != nil {
 		return SourceReport{}, false, err
 	}
-	if err := w.finish(); err != nil {
-		return SourceReport{}, false, err
-	}
-	mergeOmissions(&omissions, generic)
 	status := StatusOK
 	if lost(omissions) > 0 {
 		status = StatusOmissions
-	}
-	if len(omissions) == 0 {
-		omissions = nil
-	}
-	if err := sess.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: src.Key(), Fingerprint: fp, Status: status, Counts: w.counts, Omissions: omissions}); err != nil {
-		return SourceReport{}, false, errs.DBError(err)
-	}
-	if err := sess.Commit(); err != nil {
-		return SourceReport{}, false, errs.DBError(err)
 	}
 	add(&rep.Conversations, w.counts.Conversations)
 	add(&rep.Messages, w.counts.Messages)
@@ -323,6 +314,61 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	r.progress("%s: %s (%d messages, %d conversations, %d activity items, %d records)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen, w.counts.Records.Seen)
 	counts := SourceCounts(w.counts)
 	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions, Redacted: redacted, Accounts: w.accounts(), Counts: &counts}, true, nil
+}
+
+// apply reads the snapshot into one transaction and commits it. With full set no record is
+// skipped. Nothing is kept unless it returns nil.
+func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time, fp string, full bool) (*writer, map[string]int, int, error) {
+	sess, err := r.st.Begin(ctx)
+	if err != nil {
+		return nil, nil, 0, errs.DBError(err)
+	}
+	defer sess.Rollback() // a no-op after Commit; on any failure nothing of this source is kept
+	w := &writer{ctx: ctx, sess: sess, seenAcct: map[[2]string]bool{}, people: map[[2]string]teamsdesktop.Person{}}
+	w.memo = &memo{source: source, full: full, filtered: r.o.Account != nil, changed: map[byte]map[int64]struct{}{}, hashes: map[byte]map[int64][store.DigestLen]byte{},
+		loadTyped: sess.LoadTypedMemo, rowHashes: sess.RowHashesOf, putTyped: sess.PutTypedMemo, loadRecords: sess.LoadRecordMemos,
+		deleteKeys: sess.DeleteTypedMemoKeys, deleteDBs: sess.DeleteTypedMemoOutside}
+	beforeRead(w)
+	omissions, err := teamsdesktop.ReadWith(ctx, snap, r.o.Account, teamsdesktop.ReadOptions{Sig: r.sig, Skip: w.skip}, w.add)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if w.memo.err != nil {
+		return nil, nil, 0, errs.DBError(w.memo.err)
+	}
+	w.memo.finishTyped()
+	generic, redacted, err := w.readGeneric(ctx, snap, source, r.o.Account, r.sig, begun)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if w.memo.err != nil {
+		return nil, nil, 0, errs.DBError(w.memo.err)
+	}
+	if err := w.finish(); err != nil {
+		return nil, nil, 0, err
+	}
+	if conflictFn(w.memo) {
+		return nil, nil, 0, errMemoConflict
+	}
+	if err := w.writeMemo(); err != nil {
+		return nil, nil, 0, errs.DBError(err)
+	}
+	mergeOmissions(&omissions, generic)
+	status := StatusOK
+	if lost(omissions) > 0 {
+		status = StatusOmissions
+	}
+	if len(omissions) == 0 {
+		omissions = nil
+	}
+	if err := sess.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: source, Fingerprint: fp, Status: status, Counts: w.counts, Omissions: omissions}); err != nil {
+		return nil, nil, 0, errs.DBError(err)
+	}
+	if err := sess.Commit(); err != nil {
+		return nil, nil, 0, errs.DBError(err)
+	}
+	afterApply(w)
+	return w, omissions, redacted, nil
 }
 
 // writer maps records as Read decodes them and hands them to the source's transaction in batches
@@ -342,14 +388,27 @@ type writer struct {
 	people   map[[2]string]teamsdesktop.Person
 	counts   runCounts
 	changes  []Change // held until the source commits
+
+	memo *memo
+	// Who produced each pending row, parallel to convs, msgs and acts; nil when the record is not
+	// remembered.
+	convOwners, msgOwners, actOwners []*memoEntry
 }
 
-func (w *writer) add(acct teamsdesktop.Account, kind string, v any) error {
+// ensureAccount applies the account row before the first record of that account.
+func (w *writer) ensureAccount(acct teamsdesktop.Account) error {
 	if k := [2]string{acct.TenantID, acct.UserID}; !w.seenAcct[k] {
 		if err := w.sess.ApplyAccount(w.ctx, acct); err != nil {
 			return asCoded(err)
 		}
 		w.seenAcct[k] = true
+	}
+	return nil
+}
+
+func (w *writer) add(acct teamsdesktop.Account, kind string, v any) error {
+	if err := w.ensureAccount(acct); err != nil {
+		return err
 	}
 	switch kind {
 	case teamsdesktop.KindReplyChain:
@@ -358,8 +417,10 @@ func (w *writer) add(acct teamsdesktop.Account, kind string, v any) error {
 			return err
 		}
 		w.addPeople(ps)
+		owner := w.register(ps)
 		for _, m := range ms {
 			w.msgs = append(w.msgs, m)
+			w.msgOwners = append(w.msgOwners, owner)
 			if len(w.msgs) >= batchSize {
 				if err := w.flushMessages(); err != nil {
 					return err
@@ -372,6 +433,7 @@ func (w *writer) add(acct teamsdesktop.Account, kind string, v any) error {
 			return err
 		}
 		w.addPeople(ps)
+		w.convOwners = append(w.convOwners, w.register(ps))
 		if w.convs = append(w.convs, c); len(w.convs) >= batchSize {
 			return w.flushConversations()
 		}
@@ -380,6 +442,7 @@ func (w *writer) add(acct teamsdesktop.Account, kind string, v any) error {
 		if err != nil {
 			return err
 		}
+		w.actOwners = append(w.actOwners, w.register(nil))
 		if w.acts = append(w.acts, a); len(w.acts) >= batchSize {
 			return w.flushActivity()
 		}
@@ -394,12 +457,13 @@ func (w *writer) flushConversations() error {
 	if err := beforeFlush("conversation", len(w.convs)); err != nil {
 		return err
 	}
-	n, err := w.sess.ApplyConversations(w.ctx, w.convs)
+	n, rows, err := w.sess.ApplyConversationsRows(w.ctx, w.convs)
 	if err != nil {
 		return asCoded(err)
 	}
 	add(&w.counts.Conversations, n)
-	w.convs = nil
+	w.memo.applied(store.RowConversation, rows, w.convOwners)
+	w.convs, w.convOwners = nil, nil
 	return nil
 }
 
@@ -410,7 +474,7 @@ func (w *writer) flushMessages() error {
 	if err := beforeFlush("message", len(w.msgs)); err != nil {
 		return err
 	}
-	n, ch, err := w.sess.ApplyMessagesChanges(w.ctx, w.msgs)
+	n, ch, rows, err := w.sess.ApplyMessagesRows(w.ctx, w.msgs)
 	if err != nil {
 		return asCoded(err)
 	}
@@ -418,7 +482,8 @@ func (w *writer) flushMessages() error {
 	for _, x := range ch {
 		w.changes = append(w.changes, Change{Kind: kindMessage, Change: x.Change, Key: x.Key})
 	}
-	w.msgs = nil
+	w.memo.applied(store.RowMessage, rows, w.msgOwners)
+	w.msgs, w.msgOwners = nil, nil
 	return nil
 }
 
@@ -429,7 +494,7 @@ func (w *writer) flushActivity() error {
 	if err := beforeFlush("activity", len(w.acts)); err != nil {
 		return err
 	}
-	n, ch, err := w.sess.ApplyActivityChanges(w.ctx, w.acts)
+	n, ch, rows, err := w.sess.ApplyActivityRows(w.ctx, w.acts)
 	if err != nil {
 		return asCoded(err)
 	}
@@ -437,7 +502,8 @@ func (w *writer) flushActivity() error {
 	for _, x := range ch {
 		w.changes = append(w.changes, Change{Kind: kindActivity, Change: x.Change, Key: x.Key})
 	}
-	w.acts = nil
+	w.memo.applied(store.RowActivity, rows, w.actOwners)
+	w.acts, w.actOwners = nil, nil
 	return nil
 }
 
@@ -453,8 +519,9 @@ var recordBatchBytes = 4 << 20
 // cleared, not kept). Marking is skipped for an incomplete or unreadable database, and entirely
 // when ReadGeneric fails (the source then fails and nothing of it is kept). It returns the
 // omissions the generic read counted and how many values it redacted.
-func (w *writer) readGeneric(ctx context.Context, snap, source string, account *teamsdesktop.Account, at time.Time) (map[string]int, int, error) {
-	opts := teamsdesktop.GenericOptions{OnDatabase: func(db string, complete bool, seen map[string]map[string]struct{}) error {
+func (w *writer) readGeneric(ctx context.Context, snap, source string, account *teamsdesktop.Account, sig []byte, at time.Time) (map[string]int, int, error) {
+	opts := teamsdesktop.GenericOptions{Sig: sig, Known: w.known, OnDatabase: func(db string, complete bool, seen map[string]map[string]struct{}) error {
+		w.memo.gen, w.memo.genDB = nil, "" // the next database loads its own
 		if !complete {
 			return nil
 		}
@@ -604,4 +671,8 @@ var (
 	batchSize       = 2000
 	beforeFlush     = func(kind string, n int) error { return nil }
 	afterSnapshot   = func() {}
+	afterApply      = func(*writer) {}
+	beforeRead      = func(*writer) {}
+	memoSignature   = teamsdesktop.MemoSignature
+	conflictFn      = (*memo).conflict
 )

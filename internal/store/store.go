@@ -119,27 +119,60 @@ var chmodFile = os.Chmod
 // migrate upgrades an archive made by an older build. Version 2 renamed
 // conversations.read_horizon_message_id to read_horizon_client_message_id, and added
 // sync_runs.accounts_json (which run-level rows use to say which accounts they refreshed).
+// Version 4 added records.raw_digest and records.value_redacted; typed_memo is created by the
+// schema itself. Existing rows get no digest, so the first sync after the upgrade reads them all.
+//
+// The schema version is recorded before migrate runs, so migrate never trusts it: it looks at the
+// columns themselves and adds each missing one on its own, so an archive that a crash left with
+// only one of the two version 4 columns repairs itself on the next open. All of its statements run
+// in one transaction (SQLite's ALTER TABLE is transactional), so a failure keeps none of them.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has int
+	var old, has, digest, redacted int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
-  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json')`).Scan(&old, &has); err != nil {
+  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
+  (select count(*) from pragma_table_info('records') where name='raw_digest'),
+  (select count(*) from pragma_table_info('records') where name='value_redacted')`).Scan(&old, &has, &digest, &redacted); err != nil {
 		return err
+	}
+	var stmts []string
+	if digest == 0 {
+		stmts = append(stmts, `alter table records add column raw_digest blob`)
+	}
+	if redacted == 0 {
+		stmts = append(stmts, `alter table records add column value_redacted integer not null default 0`)
 	}
 	if old != 0 {
-		if _, err := s.db.ExecContext(ctx, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`); err != nil {
-			return err
-		}
+		stmts = append(stmts, `alter table conversations rename column read_horizon_message_id to read_horizon_client_message_id`)
 	}
 	if has == 0 {
-		if _, err := s.db.ExecContext(ctx, `alter table sync_runs add column accounts_json text`); err != nil {
-			return err
-		}
-		// Runs recorded before run-level rows existed counted for every account; keep them that way.
-		_, err := s.db.ExecContext(ctx, `update sync_runs set accounts_json = '["*"]' where status in `+successStatuses)
-		return err
+		stmts = append(stmts, `alter table sync_runs add column accounts_json text`,
+			// Runs recorded before run-level rows existed counted for every account; keep them that way.
+			`update sync_runs set accounts_json = '["*"]' where status in `+successStatuses)
 	}
-	return nil
+	if len(stmts) == 0 {
+		return nil
+	}
+	return s.runInTx(ctx, stmts)
+}
+
+// runInTx runs the statements in one transaction: all of them are applied, or none.
+func (s *Store) runInTx(ctx context.Context, stmts []string) (err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err == nil {
+		defer func() {
+			if err != nil {
+				_ = tx.Rollback()
+			}
+		}()
+		for _, q := range stmts {
+			if _, err = tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+		err = tx.Commit()
+	}
+	return err
 }
 
 // NeedsUpgrade reports an archive written before run-level sync_runs rows existed: it has no

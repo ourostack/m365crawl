@@ -137,11 +137,13 @@ func TestFixtureNeverDecodesAuth(t *testing.T) {
 
 // fakeOrigin is a scripted origin for error paths the fixture cannot produce.
 type fakeOrigin struct {
-	dbs     []indexeddb.Database
-	records map[int64][]indexeddb.Record
-	decode  func(dbID int64, raw []byte) (any, error)
-	recErr  error
-	stats   leveldb.Stats
+	dbs        []indexeddb.Database
+	records    map[int64][]indexeddb.Record
+	decode     func(dbID int64, raw []byte) (any, error)
+	recErr     error
+	stats      leveldb.Stats
+	payloadErr error
+	unwraps    int // envelope unwraps: a Decode or a Payload call each unwraps the value once
 }
 
 func (f *fakeOrigin) Databases() ([]indexeddb.Database, error) { return f.dbs, nil }
@@ -156,8 +158,16 @@ func (f *fakeOrigin) Records(dbID, _ int64, fn func(indexeddb.Record) error) err
 	}
 	return nil
 }
-func (f *fakeOrigin) Decode(dbID int64, raw []byte) (any, error) { return f.decode(dbID, raw) }
-func (f *fakeOrigin) Stats() leveldb.Stats                       { return f.stats }
+func (f *fakeOrigin) Decode(dbID int64, raw []byte) (any, error) {
+	f.unwraps++
+	return f.decode(dbID, raw)
+}
+func (f *fakeOrigin) DecodePayload(payload []byte) (any, error) { return f.decode(0, payload) }
+func (f *fakeOrigin) Stats() leveldb.Stats                      { return f.stats }
+func (f *fakeOrigin) Payload(_ int64, raw []byte) ([]byte, error) {
+	f.unwraps++
+	return raw, f.payloadErr
+}
 
 func TestReadStoreMissing(t *testing.T) {
 	f := &fakeOrigin{dbs: []indexeddb.Database{
