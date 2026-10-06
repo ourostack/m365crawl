@@ -238,7 +238,7 @@ func TestRoundTrip(t *testing.T) {
 				o.AppendString("Alex Fixture")
 			}
 			objs = append(objs, o)
-			wants = append(wants, want{uint16(0x40 + blk*8 + i), uint16(size&0xffff), o.Encode()[4:]})
+			wants = append(wants, want{uint16(0x40 + blk*8 + i), uint16(size & 0xffff), o.Encode()[4:]})
 		}
 		b.Pad(blk * 3)
 		b.Block(hxbuild.Payload(objs...))
