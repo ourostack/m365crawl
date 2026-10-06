@@ -1,0 +1,9 @@
+start             end               status     subject                      where   response
+----------------  ----------------  ---------  ---------------------------  ------  --------
+2023-11-22        all day           confirmed  Fixture holiday              -       accepted
+2023-11-22 18:00  2023-11-22 18:30  confirmed  Fixture standup              online  accepted
+2023-11-23 09:00  2023-11-23 10:00  confirmed  Fixture central europe sync  -       accepted
+2023-11-23 18:00  2023-11-23 18:30  confirmed  Fixture standup              online  accepted
+
+4 items
+archive age: <age>
