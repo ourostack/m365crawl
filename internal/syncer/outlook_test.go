@@ -120,9 +120,37 @@ func TestSyncOutlookMinReadInterval(t *testing.T) {
 	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusSkippedInterval || s.NextReadAfter == nil || !s.NextReadAfter.Equal(now.Add(4*time.Minute)) || r.Status != StatusUnchanged {
 		t.Fatalf("%+v %s", s, r.Status)
 	}
+	// The skip is remembered for `calendar sources`, and the next sync that looks at the store forgets it.
+	if count(t, db, `select count(*) from meta where key='outlook_skipped:Main'`) != 1 {
+		t.Fatal("the skip was not recorded")
+	}
 	now = now.Add(OutlookMinReadInterval)
 	if r, _ = run(t, o); sourceKeyed(t, r, "outlook|Main").Status != StatusUnchanged {
 		t.Fatalf("%+v", r.Sources)
+	}
+	if count(t, db, `select count(*) from meta where key='outlook_skipped:Main'`) != 0 {
+		t.Fatal("the skip was not cleared")
+	}
+}
+
+// What a read saw beyond the events is kept with it: the census of the store, numbers only.
+func TestOutlookReadCensus(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	run(t, outlookOpts(db, outlookRoot(t, "HxStore.hxd")))
+	if count(t, db, `select count(*) from meta where key='outlook_read:outlook/Main'`) != 1 {
+		t.Fatal("the census was not kept")
+	}
+	res := outlookcal.Result{UnknownLayouts: []outlookcal.PairCount{{Class: 0x6b, Tag: 0x456, Count: 2}}}
+	res.Stats.BlocksFound, res.Stats.Rejected = 10, map[string]int{"crc": 1, "len": 2}
+	res.Notes.ShowAsUnmapped, res.Notes.ResponseUnmapped, res.Notes.EventTypeUnknown = 4, 5, 6
+	got := outlookRead(res)
+	if got.BlocksFound != 10 || got.BlocksInvalid != 3 || len(got.UnknownLayouts) != 1 || got.UnknownLayouts[0].Tag != 0x456 ||
+		got.UnmappedValues["show_as"] != 4 || got.UnmappedValues["response"] != 5 || got.UnmappedValues["event_type"] != 6 {
+		t.Fatalf("%+v", got)
+	}
+	if got := outlookRead(outlookcal.Result{}); got.UnmappedValues != nil || got.UnknownLayouts != nil {
+		t.Fatalf("%+v", got)
 	}
 }
 

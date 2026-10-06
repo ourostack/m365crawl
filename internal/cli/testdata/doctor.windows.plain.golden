@@ -21,6 +21,7 @@ Ready checks
   ● last_sync_age      last successful sync <age> ago
   ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
                        fix: Open the Teams calendar once so Teams caches it, then run `teamscrawl sync`.
+  ● outlook_store      the Outlook source is off; TEAMSCRAWL_OUTLOOK=1 or --outlook-root DIR turns it on
 
 Snapshot
 --------

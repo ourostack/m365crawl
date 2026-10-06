@@ -152,7 +152,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar sources"}
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 

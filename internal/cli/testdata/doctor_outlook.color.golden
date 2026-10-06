@@ -21,7 +21,8 @@
   [32m●[0m [2mlast_sync_age    [0m  last successful sync <age> ago
   [33m▲[0m [2mcalendar_cache   [0m  the Teams calendar cache was last fresh <age> ago
                        [33mfix: Open the Teams calendar once so Teams caches it, then run `teamscrawl sync`.[0m
-  [32m●[0m [2moutlook_store    [0m  the Outlook source is off; TEAMSCRAWL_OUTLOOK=1 or --outlook-root DIR turns it on
+  [33m▲[0m [2moutlook_store    [0m  profile Main: store version readable; the last read failed (unsupported_layout): outlook_layout_unsupported: the Outlook store cannot be read by this version of teamscrawl: class 0x6b tag 0x456 x3, known 0x455
+                       [33mfix: Update teamscrawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.[0m
 
 [36mSnapshot[0m
 [2m--------[0m

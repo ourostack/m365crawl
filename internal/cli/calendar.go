@@ -13,6 +13,7 @@ import (
 	"github.com/ourostack/teamscrawl/internal/calendar"
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/syncer"
 )
 
 // rangeFix is the usage fix for an unsigned duration given as a calendar bound.
@@ -240,8 +241,9 @@ type rangeInfo struct {
 
 // calendarGroup is the calendar command: with no subcommand it is the agenda.
 type calendarGroup struct {
-	Agenda calendarCmd      `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
-	Event  calendarEventCmd `cmd:"" help:"One event with everything the archive holds about it: attendees, body, recaps, action items and the recordings that belong to this occurrence."`
+	Agenda  calendarCmd        `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
+	Sources calendarSourcesCmd `cmd:"" help:"Per account and source: the days the archive holds, when each was last verified, event and recap counts, and for Outlook the read status, the read interval and the layouts this version does not know."`
+	Event   calendarEventCmd   `cmd:"" help:"One event with everything the archive holds about it: attendees, body, recaps, action items and the recordings that belong to this occurrence."`
 }
 
 type calendarCmd struct {
@@ -697,4 +699,109 @@ func joinJSON(a, b any) ([]byte, error) {
 		return y, nil
 	}
 	return []byte(string(x[:len(x)-1]) + "," + string(y[1:])), nil
+}
+
+// sourceError is why a source is not being read, as a sync reports it.
+type sourceError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix,omitempty"`
+}
+
+// outlookLayout is one (class, tag) pair of the Outlook store this version does not know.
+type outlookLayout struct {
+	Class string `json:"class"`
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
+// calendarSourceItem is one account of one source. The keys from status on are an Outlook row's
+// only. A Teams account's counts are not changed by an Outlook account linked to it: each row
+// counts its own account.
+type calendarSourceItem struct {
+	Source            string          `json:"source"`
+	AccountID         string          `json:"account_id"`
+	Principal         string          `json:"principal"`
+	Link              string          `json:"link"`
+	TenantID          string          `json:"tenant_id,omitempty"`
+	UserID            string          `json:"user_id,omitempty"`
+	WindowStart       time.Time       `json:"window_start,omitzero"`
+	WindowEnd         time.Time       `json:"window_end,omitzero"`
+	CoveredDays       int             `json:"covered_days"`
+	LastVerifiedAt    time.Time       `json:"last_verified_at,omitzero"`
+	SyncedAt          time.Time       `json:"synced_at,omitzero"`
+	CacheFreshAt      time.Time       `json:"cache_fresh_at,omitzero"`
+	EventsLive        int             `json:"events_live"`
+	EventsRemoved     int             `json:"events_removed"`
+	EventsWithDetail  int             `json:"events_with_detail"`
+	EventsAttendees   int             `json:"events_with_attendees"`
+	EventsWithBody    int             `json:"events_with_body"`
+	EventsOnline      int             `json:"events_online"`
+	RecapsWithContent int             `json:"recaps_with_content"`
+	RecapsLinked      int             `json:"recaps_linked"`
+	RecapActionItems  int             `json:"recap_action_items"`
+	UnknownTimeZones  []string        `json:"unknown_time_zones"`
+	Status            string          `json:"status,omitempty"`
+	LastReadAt        time.Time       `json:"last_read_at,omitzero"`
+	LastAttemptAt     time.Time       `json:"last_attempt_at,omitzero"`
+	NextReadAfter     time.Time       `json:"next_read_after,omitzero"`
+	ReadIntervalSecs  int             `json:"read_interval_seconds,omitempty"`
+	UnknownLayouts    []outlookLayout `json:"unknown_layouts,omitempty"`
+	BlocksInvalid     *float64        `json:"blocks_invalid_ratio,omitempty"`
+	UnmappedValues    map[string]int  `json:"unmapped_values,omitempty"`
+	Deletions         string          `json:"deletions,omitempty"`
+	Error             *sourceError    `json:"error,omitempty"`
+}
+
+func sourceItemOf(r store.CalendarSource) calendarSourceItem {
+	it := calendarSourceItem{
+		Source: r.Source, AccountID: r.AccountID, Principal: r.Principal, Link: r.Link,
+		WindowStart: r.WindowStart, WindowEnd: r.WindowEnd, CoveredDays: r.CoveredDays, LastVerifiedAt: r.LastVerifiedAt,
+		SyncedAt: r.SyncedAt, CacheFreshAt: r.CacheFreshAt, EventsLive: r.EventsLive, EventsRemoved: r.EventsRemoved,
+		EventsWithDetail: r.WithDetail, EventsAttendees: r.WithAttendees, EventsWithBody: r.WithBody, EventsOnline: r.Online,
+		RecapsWithContent: r.RecapsContent, RecapsLinked: r.RecapsLinked, RecapActionItems: r.RecapActions,
+		UnknownTimeZones: append([]string{}, r.UnknownZones...),
+	}
+	if r.Source == string(calendar.SourceTeams) {
+		it.TenantID, it.UserID, _ = strings.Cut(r.AccountID, "/")
+	}
+	if o := r.Outlook; o != nil {
+		it.Status, it.LastReadAt, it.LastAttemptAt, it.NextReadAfter = o.Status, o.LastReadAt, o.LastAttemptAt, o.NextReadAfter
+		it.ReadIntervalSecs, it.UnmappedValues, it.Deletions = o.IntervalSecond, o.UnmappedValues, "unverified"
+		it.BlocksInvalid = &o.BlocksRatio
+		for _, l := range o.UnknownLayouts {
+			it.UnknownLayouts = append(it.UnknownLayouts, outlookLayout{Class: fmt.Sprintf("0x%x", l.Class), Tag: fmt.Sprintf("0x%x", l.Tag), Count: l.Count})
+		}
+		if f := o.Failure; f != nil {
+			it.Error = &sourceError{Code: f.Code, Message: f.Message, Fix: f.Fix}
+		}
+	}
+	return it
+}
+
+type calendarSourcesCmd struct{}
+
+func (calendarSourcesCmd) Run(rt *runtime) error {
+	if err := checkFields[calendarSourceItem](rt); err != nil {
+		return err
+	}
+	return rt.read("calendar sources", func(st *store.Store) (result, error) {
+		out := newList(nil, false)
+		if st == nil {
+			return out, nil
+		}
+		res, err := st.CalendarSources(rt.ctx, store.CalendarSourcesFilter{Account: rt.account, Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
+		if err != nil {
+			return nil, err
+		}
+		if res.NoTables {
+			out.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			return out, nil
+		}
+		items := make([]calendarSourceItem, len(res.Rows))
+		for i, r := range res.Rows {
+			items[i] = sourceItemOf(r)
+		}
+		return newList(shape(rt, items), false), nil
+	})
 }

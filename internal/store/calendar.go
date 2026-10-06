@@ -856,7 +856,7 @@ func (s *Store) CalendarCache(ctx context.Context) (CalendarCache, error) {
 	}
 	var newest sql.NullString
 	var rows int
-	if err := s.db.QueryRowContext(ctx, `select max(cache_fresh_at), count(*) from calendar_sources where cache_fresh_at<>''`).Scan(&newest, &rows); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select max(cache_fresh_at), count(*) from calendar_sources where source='teams' and cache_fresh_at<>''`).Scan(&newest, &rows); err != nil {
 		return c, err
 	}
 	c.FreshAt = parseTime(newest)
