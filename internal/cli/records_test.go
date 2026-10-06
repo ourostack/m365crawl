@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,10 +14,13 @@ func TestStoresListsEveryArchivedStore(t *testing.T) {
 	_, stdout, _ := e.run("--max-age", "0", "stores")
 	m := decode(t, stdout)
 	rows := items(t, m)
-	if len(rows) != 4 || m["truncated"] != false {
+	if len(rows) != 12 || m["truncated"] != false {
 		t.Fatalf("stores = %v", m)
 	}
 	var live float64
+	// The calendar, its bookkeeping, the meeting catch-up and the meeting recap stores are listed
+	// next to the decoy and the pins, two accounts each, and carry their records generically.
+	perStore := map[string]float64{}
 	for i, r := range rows {
 		for _, k := range []string{"database", "store", "records", "removed", "last_updated_at"} {
 			if _, ok := r[k]; !ok {
@@ -27,13 +31,18 @@ func TestStoresListsEveryArchivedStore(t *testing.T) {
 			t.Errorf("not sorted by database: %v", rows)
 		}
 		live += r["records"].(float64)
+		perStore[r["store"].(string)] += r["records"].(float64)
 	}
-	if live != 12 {
-		t.Fatalf("records across stores = %v, want 12", live)
+	if live != 60 {
+		t.Fatalf("records across stores = %v, want 60", live)
+	}
+	want := map[string]float64{"events": 4, "pins": 8, "calendar": 28, "calendar-internal-data": 6, "meetforwork-meeting-catch-up": 10, "meeting-recap-catchup": 4}
+	if fmt.Sprint(perStore) != fmt.Sprint(want) {
+		t.Fatalf("records per store = %v, want %v", perStore, want)
 	}
 	_, stdout, _ = e.run("--max-age", "0", "--account", tenantA+"/"+userA, "--fields", "store,records", "stores")
 	rows = items(t, decode(t, stdout))
-	if len(rows) != 2 || len(rows[0]) != 2 || rows[0]["store"] == nil {
+	if len(rows) != 6 || len(rows[0]) != 2 || rows[0]["store"] == nil {
 		t.Fatalf("account and fields: %v", rows)
 	}
 	code, _, stderr := e.run("--max-age", "0", "--fields", "nope", "stores")
@@ -113,7 +122,7 @@ func TestRecordsLimitMaxTextFieldsAndFilters(t *testing.T) {
 		t.Fatalf("--since in the future: %d", n)
 	}
 	_, stdout, _ = e.run("--max-age", "0", "--account", tenantA+"/"+userA, "records", "--database", "Teams:")
-	if n := len(items(t, decode(t, stdout))); n != 6 {
+	if n := len(items(t, decode(t, stdout))); n != 30 {
 		t.Fatalf("one account's records: %d", n)
 	}
 	// A removed record is hidden until --include-removed.
@@ -158,11 +167,11 @@ func TestRecordsTextIsOneLinePerRecord(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
 	e.exec(`update records set removed_at = updated_at where key_json = '"fixture-event-1-1"'`)
-	_, out, _ := e.run("--format", "text", "--max-age", "0", "records", "--database", "Teams:calendar", "--include-removed")
+	_, out, _ := e.run("--format", "text", "--max-age", "0", "records", "--database", "Teams:calendar-manager", "--include-removed")
 	if strings.Count(out, "(removed)") != 1 || !strings.Contains(out, `"fixture-event-1-2"`) {
 		t.Fatalf("text:\n%s", out)
 	}
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "--fields", "store,key_json", "records", "--database", "Teams:calendar")
+	_, out, _ = e.run("--format", "text", "--max-age", "0", "--fields", "store,key_json", "records", "--database", "Teams:calendar-manager")
 	if !strings.Contains(out, "events") {
 		t.Fatalf("projected text:\n%s", out)
 	}

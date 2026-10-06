@@ -29,6 +29,180 @@ function chain(convId, m) {
   return { conversationId: convId, replyChainId: m.id, messageMap: { [m.id]: m }, latestDeliveryTime: m.originalArrivalTime };
 }
 
+// Calendar, meeting catch-up and meeting recap databases (synthetic, Teams-shaped). Record shapes
+// follow the real cache: dates are JS Dates, the catch-up duration is in milliseconds, and the
+// optional flag keys (isAllDayEvent, isCancelled, isPrivate, isOrganizer, hasAttachments) are
+// present on most records and absent on thin ones.
+async function buildCalendar(acct, suffix, meetingConv) {
+  const D = (d, h, mi) => new Date(Date.UTC(2023, 10, d, h, mi || 0));
+  const hex = (t) => Array.from(t).map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
+  const pad = (n, w) => String(n).padStart(w, '0');
+  // An Exchange-style global object id as uppercase hex: 16-byte class id, then YYYY MM DD (zero
+  // for a series id), then label bytes padded to 56 bytes (112 characters). The same encoding the
+  // calendar core uses for per-occurrence ids.
+  const gid = (label, date) => '040000008200E00074C5B7101A82E008'
+    + (date ? pad(date[0].toString(16).toUpperCase(), 4) + pad(date[1].toString(16).toUpperCase(), 2) + pad(date[2].toString(16).toUpperCase(), 2) : '00000000')
+    + hex('FIXTURE-' + label).padEnd(72, '0');
+  const dayOf = (d) => [2023, 11, d];
+  const who = { name: 'Pat Example', address: 'pat@example.invalid' };
+  const joinURL = (conv) => 'https://teams.example.invalid/l/meetup-join/' + encodeURIComponent(conv) + '/0?context=' + encodeURIComponent(JSON.stringify({ Tid: acct.tenant, Oid: acct.user }));
+  const modified = D(14, 9);
+
+  // Fields present on every real record.
+  const base = (label, over) => Object.assign({
+    objectId: 'FixtureEvent-' + acct.seed + '-' + label, lastModifiedTime: modified, isOnlineMeeting: false,
+    myResponseType: 'Accepted', organizerName: who.name, organizerAddress: who.address, showAs: 'Busy',
+    location: '', eventTimeZone: 'PacificSt',
+  }, over);
+  // Optional keys the real cache carries on most records; a thin record omits them.
+  const std = (over) => Object.assign({
+    eventType: 'Single', isAllDayEvent: false, isCancelled: false, isPrivate: false, isOrganizer: false,
+    isAppointment: false, hasAttachments: false,
+  }, over);
+  const online = (conv) => ({
+    isOnlineMeeting: true, skypeTeamsMeetingUrl: joinURL(conv),
+    skypeTeamsDataObject: { cid: conv },
+  });
+
+  const richUID = gid('RICH-MEETING'); // the same in both accounts, to prove the account partition
+  const seriesID = gid('STANDUP-' + acct.seed);
+  const events = [];
+  // (a) The rich single meeting: join URL, thread id of the account's Meeting conversation, dial-in,
+  // six attendees (Organizer, Optional, a Resource room mailbox), two rooms in location, one
+  // structured room with address and coordinates, body, one attachment. It states explicit false
+  // for flags the thin events leave out.
+  events.push(base('rich', std(Object.assign(online(meetingConv), {
+    startTime: D(20, 17), endTime: D(20, 18), subject: 'Fixture planning review',
+    iCalUID: richUID, cleanGlobalObjectId: richUID, utcOffset: '-08:00:00',
+    isOrganizer: false, hasAttachments: true,
+    schedulingServiceUpdateUrl: 'https://scheduling.example.invalid/update/rich',
+    skypeTeamsData: JSON.stringify({ cid: meetingConv }),
+    shortOnlineMeetingJoinUrl: 'https://teams.example.invalid/meet/fixture-rich',
+    onlineMeetingConferenceId: '000000001', onlineMeetingTollNumber: '+1 555 0100',
+    location: 'Fixture Room Alpha; Fixture Room Beta',
+    meetingLocations: [{ displayName: 'Fixture Room Alpha', locationType: 'ConferenceRoom', address: { street: '1 Fixture Way', city: 'Fixtureville', state: 'ZZ', postalCode: '00000', countryOrRegion: 'Nowhere' }, coordinates: { latitude: 12.3456, longitude: 65.4321 } }],
+    attendees: [
+      { name: who.name, address: who.address, type: 'Organizer', role: 'Chair', status: { response: 'Organizer' } },
+      { name: acct.name, address: 'me' + acct.seed + '@example.invalid', type: 'Required', role: 'Attendee', status: { response: 'Accepted' } },
+      { name: 'Sam Example', address: 'sam@example.invalid', type: 'Optional', role: 'Attendee', status: { response: 'NotResponded' } },
+      { name: 'Jordan Fixture', address: 'jordan@example.invalid', type: 'Required', role: 'Attendee', status: { response: 'TentativelyAccepted' } },
+      { name: 'Casey Fixture', address: 'casey@example.invalid', type: 'Required', role: 'Attendee', status: { response: 'Declined' } },
+      { name: 'Fixture Room Alpha', address: 'room-alpha@example.invalid', type: 'Resource', role: 'Attendee', status: { response: 'Accepted' } },
+    ],
+    bodyPreview: 'Fixture agenda: review the plan.',
+    bodyContentType: 'HTML', bodyContent: '<html><body><p>Fixture agenda: <b>review the plan</b>.</p><p>Join: https://teams.example.invalid/meet/fixture-rich</p></body></html>',
+    attachments: [{ id: 'fixture-attachment-' + acct.seed, name: 'Agenda.docx', fileName: 'Agenda.docx', size: 12345, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', contentId: '', isInline: false, attachmentType: 'File' }],
+    isReminderSet: true, reminderMinutesBeforeStart: 15, categories: ['Fixture category'],
+  }))));
+  // (b) Thin events: basic fields only. The first keeps hasAttachments, the second also omits it
+  // and eventType, as 6 and 4 of the 148 real records do. Neither has the five optional flags.
+  events.push(base('thin', { startTime: D(21, 15), endTime: D(21, 15, 30), subject: 'Fixture thin event', iCalUID: gid('THIN-' + acct.seed), cleanGlobalObjectId: gid('THIN-' + acct.seed), hasAttachments: true, eventType: 'Single' }));
+  events.push(base('thin-bare', { startTime: D(21, 16), endTime: D(21, 16, 45), subject: 'Fixture thinnest event', eventTimeZone: 'Utc', iCalUID: gid('THINBARE-' + acct.seed), cleanGlobalObjectId: gid('THINBARE-' + acct.seed) }));
+  // (c) A recurring series: the master (its id embeds no date), two occurrences and one exception
+  // moved by an hour whose id still embeds its original date (the 24th).
+  const series = (label, over) => base(label, std(Object.assign(online(meetingConv), { subject: 'Fixture standup', cleanGlobalObjectId: seriesID, isOrganizer: true, utcOffset: '-08:00:00' }, over)));
+  events.push(series('standup-master', {
+    eventType: 'RecurringMaster', iCalUID: seriesID, startTime: D(22, 18), endTime: D(22, 18, 30),
+    recurrencePattern: 'Weekly', eventRecurrencePattern: { type: 'weekly', interval: 1, daysOfWeek: ['wednesday', 'thursday', 'friday'] },
+    eventRecurrenceRange: { type: 'endDate', startDate: '2023-11-22', endDate: '2023-12-29' }, recurrenceEnd: D(29, 18),
+  }));
+  events.push(series('standup-occ-22', { eventType: 'Occurrence', iCalUID: gid('STANDUP-' + acct.seed, dayOf(22)), startTime: D(22, 18), endTime: D(22, 18, 30) }));
+  events.push(series('standup-occ-23', { eventType: 'Occurrence', iCalUID: gid('STANDUP-' + acct.seed, dayOf(23)), startTime: D(23, 18), endTime: D(23, 18, 30) }));
+  events.push(series('standup-exc-24', { eventType: 'Exception', iCalUID: gid('STANDUP-' + acct.seed, dayOf(24)), startTime: D(24, 19), endTime: D(24, 19, 30) }));
+  // (d) Time zones: PacificSt (also above), CentralEuropeSt, and a name the seed table lacks.
+  events.push(base('pacific', std({ startTime: D(21, 18), endTime: D(21, 19), subject: 'Fixture pacific sync', iCalUID: gid('PACIFIC-' + acct.seed), cleanGlobalObjectId: gid('PACIFIC-' + acct.seed), location: 'Fixture Room Gamma', isOrganizer: true })));
+  events.push(base('cet', std({ startTime: D(23, 9), endTime: D(23, 10), eventTimeZone: 'CentralEuropeSt', subject: 'Fixture central europe sync', iCalUID: gid('CET-' + acct.seed), cleanGlobalObjectId: gid('CET-' + acct.seed), utcOffset: '01:00:00' })));
+  events.push(base('unknown-zone', std({ startTime: D(24, 12), endTime: D(24, 13), eventTimeZone: 'FixtureUnknownSt', subject: 'Fixture unknown zone event', iCalUID: gid('UNKNOWNZONE-' + acct.seed), cleanGlobalObjectId: gid('UNKNOWNZONE-' + acct.seed) })));
+  // (e) All-day: ASSUMED shape (no all-day event has been seen in a real cache). Start and end are
+  // the instants of local midnight in the event's zone (PacificSt is UTC-8 in November).
+  events.push(base('all-day', std({ isAllDayEvent: true, startTime: D(22, 8), endTime: D(23, 8), subject: 'Fixture holiday', showAs: 'Free', iCalUID: gid('ALLDAY-' + acct.seed), cleanGlobalObjectId: gid('ALLDAY-' + acct.seed) })));
+  // (f) Cancelled and declined: ASSUMED shapes (neither has been seen in a real cache).
+  events.push(base('cancelled', std({ isCancelled: true, startTime: D(27, 17), endTime: D(27, 18), subject: 'Canceled: Fixture offsite', showAs: 'Free', iCalUID: gid('CANCELLED-' + acct.seed), cleanGlobalObjectId: gid('CANCELLED-' + acct.seed) })));
+  events.push(base('declined', std({ myResponseType: 'Declined', startTime: D(27, 19), endTime: D(27, 19, 30), subject: 'Fixture declined meeting', showAs: 'Free', iCalUID: gid('DECLINED-' + acct.seed), cleanGlobalObjectId: gid('DECLINED-' + acct.seed) })));
+  // (g) A private event.
+  events.push(base('private', std({ isPrivate: true, isOrganizer: true, startTime: D(28, 20), endTime: D(28, 21), subject: 'Fixture private appointment', myResponseType: 'Organizer', iCalUID: gid('PRIVATE-' + acct.seed), cleanGlobalObjectId: gid('PRIVATE-' + acct.seed) })));
+
+  const cal = await open('Teams:calendar:react-web-client:' + suffix, [['calendar', 'objectId'], ['calendar-internal-data', 'key']]);
+  const ctx = cal.transaction(['calendar', 'calendar-internal-data'], 'readwrite');
+  for (const e of events) ctx.objectStore('calendar').put(e);
+  const internal = ctx.objectStore('calendar-internal-data');
+  internal.put({ key: 'syncState', state: 'idle', pageCount: 3, lastRange: { from: D(13, 0), to: D(30, 0) } });
+  internal.put({ key: 'calendarSettings', id: 'calendarSettings', enableM365Calendar: true, currentCalendarForceEnableVersion: 3, lastUpdateM365CalendarTimestamp: D(14, 8) });
+  internal.put({ key: 'lastSuccesfulSyncTimestamp', value: D(14, 9, 30) });
+  await done(ctx);
+  cal.close();
+
+  // Meeting catch-up (store 1), keyed by iCalUid. Durations are milliseconds.
+  const call = (id, over) => Object.assign({
+    callId: id, isMissed: false, url: 'https://fixture.sharepoint.example/recordings/' + id, duration: 600000,
+    recordingStartTime: D(20, 17, 1), speakers: [{ id: '00000000-0000-4000-8000-0000000000ee', displayName: 'Pat Example' }],
+    mentions: [], tasks: [], headline: null, outline: null,
+  }, over);
+  const catchUp = (uid, end, data) => ({ iCalUid: uid, meetingEndTime: end, expiration: new Date(end.getTime() + 30 * 86400000), data });
+  const richCall = 'fixture-call-' + acct.seed + '-rich-1';
+  const cdb = await open('Teams:meetforwork-manager:react-web-client:' + suffix, [['meetforwork-meeting-catch-up', 'iCalUid']]);
+  const cutx = cdb.transaction('meetforwork-meeting-catch-up', 'readwrite');
+  const cu = cutx.objectStore('meetforwork-meeting-catch-up');
+  // The rich event: two calls, the first with tasks and mentions.
+  cu.put(catchUp(richUID, D(20, 18), [
+    call(richCall, {
+      duration: 3300000, recordingStartTime: D(20, 17, 2),
+      speakers: [{ id: '00000000-0000-4000-8000-0000000000ee', displayName: 'Pat Example' }, { id: '00000000-0000-4000-8000-0000000000dd', displayName: 'Sam Example' }],
+      mentions: [{ speaker: 'Pat Example', time: '00:12:05', absoluteTime: D(20, 17, 14), text: 'Fixture mention of ' + acct.name, highlights: ['Fixture mention'] }],
+      tasks: [
+        { headline: 'Send the fixture plan', text: 'Pat Example will send the fixture plan.', ownerDisplayName: 'Pat Example', speaker: 'Pat Example', time: D(20, 17, 20) },
+        { headline: 'Book Fixture Room Beta', text: acct.name + ' will book the room.', ownerDisplayName: acct.name, speaker: 'Sam Example', time: D(20, 17, 40) },
+      ],
+    }),
+    call('fixture-call-' + acct.seed + '-rich-2', { duration: 420000, recordingStartTime: D(20, 17, 50) }),
+  ]));
+  // One call, no tasks, for the first standup occurrence.
+  cu.put(catchUp(gid('STANDUP-' + acct.seed, dayOf(22)), D(22, 18, 30), [call('fixture-call-' + acct.seed + '-standup-22', { duration: 1500000, recordingStartTime: D(22, 18, 2) })]));
+  // Placeholders: the event was checked and had no recap (empty data). One matches an event, one none.
+  cu.put(catchUp(gid('THIN-' + acct.seed), D(21, 15, 30), []));
+  cu.put(catchUp(gid('NOEVENT-EMPTY-' + acct.seed), D(21, 10), []));
+  // A record whose iCalUid matches no event but whose data has content.
+  cu.put(catchUp(gid('NOEVENT-CONTENT-' + acct.seed), D(15, 12), [call('fixture-call-' + acct.seed + '-orphan', { duration: 900000, recordingStartTime: D(15, 11, 50), tasks: [{ headline: 'Orphan task', text: 'A task on a meeting with no event.', ownerDisplayName: 'Sam Example', speaker: 'Sam Example', time: D(15, 11, 55) }] })]));
+  await done(cutx);
+  cdb.close();
+
+  // Meeting recaps (store 2), keyed by a 186-character recapId.
+  const recapId = (label) => ('FixtureRecapId-' + acct.seed + '-' + label + '-').padEnd(186, 'x');
+  const rdb2 = await open('Teams:meeting-recap-manager:react-web-client:' + suffix, [['meeting-recap-catchup', 'recapId']]);
+  const rtx = rdb2.transaction('meeting-recap-catchup', 'readwrite');
+  const rs = rtx.objectStore('meeting-recap-catchup');
+  // Joined to the catch-up item by callId: action items, a mention event, speakers, topics.
+  rs.put({
+    recapId: recapId('joined'), callId: richCall, organizerId: '00000000-0000-4000-8000-0000000000ee',
+    shortSummary: 'Fixture summary: the plan was reviewed.', adaptiveRecap: '',
+    meetingSummary: [{ title: 'Fixture decisions', text: 'The plan was approved.' }],
+    actionItems: [
+      { actionItemTitle: 'Send the fixture plan', displayCleanContent: 'Pat Example will send the fixture plan by Friday.', ownerName: 'Pat Example', speakerName: 'Pat Example' },
+      { actionItemTitle: 'Book Fixture Room Beta', displayCleanContent: acct.name + ' will book the room.', ownerName: acct.name, speakerName: 'Sam Example' },
+    ],
+    atMentionEvents: [{ utteranceContainingTheMention: 'Fixture utterance mentioning ' + acct.name, mentionedByUserDisplayName: 'Pat Example', dateTimeUtc: D(20, 17, 14) }],
+    speakersSegmentations: [{ speakerName: 'Pat Example', segments: [{ startOffset: '00:00:05', endOffset: '00:10:00' }] }, { speakerName: 'Sam Example', segments: [{ startOffset: '00:10:00', endOffset: '00:20:00' }] }],
+    topicSegmentations: [{ topic: 'Fixture plan', startOffset: '00:00:00', endOffset: '00:30:00' }],
+    meetingStartTime: D(20, 17), meetingEndTime: D(20, 18), recordingStartTime: D(20, 17, 2), recordingEndTime: D(20, 17, 57),
+    attendeesCount: 6, userAttendanceStatus: 'Attended', hasConfRoomConnected: false,
+  });
+  // Only here (no catch-up partner): its meeting times equal exactly one event (the Central Europe
+  // sync), so it links by time.
+  rs.put({
+    recapId: recapId('time-only'), callId: 'fixture-call-' + acct.seed + '-cet', organizerId: '00000000-0000-4000-8000-0000000000dd',
+    shortSummary: 'Fixture summary of a meeting that only the recap store holds.',
+    meetingSummary: [{ title: 'Fixture notes', text: 'Nothing was decided.' }],
+    actionItems: [{ actionItemTitle: 'Follow up', displayCleanContent: 'Sam Example will follow up.', ownerName: 'Sam Example', speakerName: 'Sam Example' }],
+    atMentionEvents: [],
+    speakersSegmentations: [{ speakerName: 'Sam Example', segments: [{ startOffset: '00:00:00', endOffset: '00:25:00' }] }],
+    topicSegmentations: [],
+    meetingStartTime: D(23, 9), meetingEndTime: D(23, 10), recordingStartTime: D(23, 9, 1), recordingEndTime: D(23, 9, 26),
+    attendeesCount: 3, userAttendanceStatus: 'Attended',
+  });
+  await done(rtx);
+  rdb2.close();
+}
+
 window.buildAccount = async function (acct) {
   const suffix = acct.tenant + ':' + acct.user + ':en-us';
   const r = rng(acct.seed);
@@ -152,6 +326,23 @@ window.buildAccount = async function (acct) {
     broadcast[kind] = m;
   }
   await put(c3);
+
+  // Meeting conversation: call recordings, a transcript and a call event for the calendar series.
+  // Their sent times fall just after the two standup occurrences below; one recording matches no
+  // occurrence. They are the account's own messages, so they add nothing to the unread counts.
+  const c4 = [];
+  const meetMsg = (type, at, content) => {
+    const m = msg(acct, convs.meeting, ++n, { messageType: type, content, originalArrivalTime: at, clientArrivalTime: at + 5 });
+    c4.push(chain(convs.meeting, m));
+    return m;
+  };
+  const recording = (k) => '<URIObject type="Video.1/Message.1" uri="https://fixture.sharepoint.example/recordings/standup-' + k + '"><Title>Fixture standup recording ' + k + '</Title><a href="https://fixture.sharepoint.example/recordings/standup-' + k + '">Recording ' + k + '</a></URIObject>';
+  meetMsg('Event/Call', Date.UTC(2023, 10, 22, 18, 0, 30), '<ended/><partlist type="ended" alt=""><part identity="' + acct.user + '"><name>' + acct.name + '</name></part></partlist>');
+  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 10, 22, 18, 31), recording(1));
+  meetMsg('RichText/Media_CallTranscript', Date.UTC(2023, 10, 22, 18, 32), '<URIObject type="Video.1/Message.1" uri="https://fixture.sharepoint.example/transcripts/standup-1"><Title>Fixture standup transcript</Title></URIObject>');
+  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 10, 23, 18, 31), recording(2));
+  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 11, 5, 18, 31), recording(3));
+  await put(c4);
   rdb.close();
 
   const cdb = await open('Teams:conversation-manager:react-web-client:' + suffix, [['conversations', 'id']]);
@@ -218,6 +409,8 @@ window.buildAccount = async function (acct) {
   ptx.objectStore('pins').put({ pinKey: ['fixture', acct.seed, 'array'], label: 'Array-keyed pin' });
   await done(ptx);
   pdb.close();
+
+  await buildCalendar(acct, suffix, convs.meeting);
 
   // Decoy credential databases that must never be decoded. The first account only, so the fixture
   // holds three of them: Teams:auth, a token cache under another manager, and a bare keyval store.
