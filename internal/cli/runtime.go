@@ -82,10 +82,6 @@ func (rt *runtime) setup() error {
 	}
 	rt.root = g.TeamsRoot
 	rt.outlookRoot, rt.outlookOn = outlookChoice(g.OutlookRoot, g.TeamsRoot, os.Getenv(outlookEnv))
-	if rt.outlookLink, err = outlookLinkChoice(g.OutlookAccount, g.OutlookProfile, rt.outlookOn); err != nil {
-		return err
-	}
-	rt.outlookProfile = g.OutlookProfile
 	if g.Account != "" {
 		if rt.account, err = parseAccount(g.Account); err != nil {
 			return err
@@ -115,12 +111,20 @@ func (rt *runtime) progress() io.Writer {
 // older than --max-age. A failed sync does not stop the read: it comes back as a warning. Only
 // cancellation is returned as an error.
 func (rt *runtime) ensureFresh() (*syncError, error) {
-	if rt.maxAge <= 0 {
+	if rt.maxAge <= 0 && rt.outlookLink == "" {
 		return nil, nil
 	}
 	last, pending, err := rt.lastSuccess()
 	if err != nil {
 		return nil, err
+	}
+	if rt.maxAge <= 0 {
+		if !pending {
+			return nil, nil
+		}
+		c := errs.Usage("--outlook-account is not applied while --max-age is 0, which turns the implicit sync off")
+		c.Fix = "Run `teamscrawl sync " + rt.linkFlags() + "` to apply it."
+		return nil, c
 	}
 	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge && !pending {
 		return nil, nil
@@ -351,29 +355,51 @@ func outlookChoice(root, teamsRoot, env string) (dir string, on bool) {
 	return "", env == "1" && teamsRoot == ""
 }
 
-// outlookLinkChoice validates --outlook-account and --outlook-profile. The account is a Teams
-// account in the form of --account, or "none". A link needs the Outlook source on, and a profile
-// name means nothing without a link to apply it to.
-func outlookLinkChoice(account, profile string, outlookOn bool) (string, error) {
+// outlookAccountEnv is the environment variable of --outlook-account.
+const outlookAccountEnv = "TEAMSCRAWL_OUTLOOK_ACCOUNT"
+
+// checkLink validates --outlook-account and --outlook-profile and, when they are good, turns the
+// link on for this run. Only a command that syncs or reads the calendar calls it, so a stray
+// variable never breaks whoami, status or version. The account is a Teams account in the form of
+// --account, or "none". A link needs the Outlook source on: with the source off, a value that came
+// from the environment alone is a warning (it is the ambient setting of a machine that sometimes
+// runs without Outlook) and a flag is a usage error. A profile name means nothing without a link.
+func (rt *runtime) checkLink() error {
+	account, profile := rt.g.OutlookAccount, rt.g.OutlookProfile
 	switch {
 	case account == "" && profile == "":
-		return "", nil
+		return nil
 	case account == "":
-		return "", errs.Usage("--outlook-profile names the profile --outlook-account applies to; give --outlook-account too")
-	case !outlookOn:
+		return errs.Usage("--outlook-profile names the profile --outlook-account applies to; give --outlook-account too")
+	case !rt.outlookOn:
 		c := errs.Usage("--outlook-account needs the Outlook source, which is off")
 		c.Fix = "Add --outlook-root DIR, or set TEAMSCRAWL_OUTLOOK=1 (which is ignored when --teams-root is set)."
-		return "", c
+		if os.Getenv(outlookAccountEnv) == account {
+			rt.printWarning(c) // from the environment only: ignored
+			return nil
+		}
+		return c
 	case account == syncer.OutlookLinkNone:
-		return account, nil
+		rt.outlookLink, rt.outlookProfile = account, profile
+		return nil
 	}
 	a, err := parseAccount(account)
 	if err != nil {
 		c := errs.Usage("--outlook-account must be <tenantId>/<userId> of a Teams account, or none")
 		c.Fix = "`teamscrawl whoami` lists the Teams accounts."
-		return "", c
+		return c
 	}
-	return a.TenantID + "/" + a.UserID, nil
+	rt.outlookLink, rt.outlookProfile = a.TenantID+"/"+a.UserID, profile
+	return nil
+}
+
+// linkFlags is the --outlook-account (and --outlook-profile) of this run, as one would type them.
+func (rt *runtime) linkFlags() string {
+	out := "--outlook-account " + rt.outlookLink
+	if rt.outlookProfile != "" {
+		out = "--outlook-profile " + shellWord(rt.outlookProfile) + " " + out
+	}
+	return out
 }
 
 // linkOptions adds the explicit Outlook link to the options of a sync that applies it.

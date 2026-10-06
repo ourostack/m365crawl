@@ -25,7 +25,7 @@ func TestMapEventFieldByField(t *testing.T) {
 	spec.EventType, spec.ShowAs, spec.Response = 3, 1, 1
 	spec.Online, spec.Cancelled = true, true
 	e, notes := mapOK(t, ev(spec), det(baseDetail(1)))
-	id := hxbuild.HexID(spec.ID)
+	id := strings.ToLower(hxbuild.HexID(spec.ID)) // the store's upper-case id, in Teams' lower case
 	lm := at(1, 8)
 	for name, ok := range map[string]bool{
 		"source":    e.Source == calendar.SourceOutlook && e.AccountID == "outlook/Test",
@@ -385,12 +385,14 @@ func TestIDIsUTF16HexText(t *testing.T) {
 	}
 	e, _ := mapOK(t, ev(spec), nil)
 	// The Teams fixture writes the same UID as: prefix, date, hex of FIXTURE-label padded to 72.
-	const want = "040000008200E00074C5B7101A82E008" + "00000000" + "0000000000000000" + "0000000000000000" + "10000000" +
+	// The store holds it in upper case; the event has it in lower case, the case of Teams' iCalUID.
+	const upperID = "040000008200E00074C5B7101A82E008" + "00000000" + "0000000000000000" + "0000000000000000" + "10000000" +
 		"46495854555245" + "2D544553542D303031" // FIXTURE-TEST-001
-	if e.ICalUID != want || e.SourceID != want || e.GlobalID != want || len(e.ICalUID) != 112 {
+	want := strings.ToLower(upperID)
+	if e.ICalUID != want || e.SourceID != want || e.GlobalID != want || len(e.ICalUID) != 112 || e.ICalUID == upperID {
 		t.Fatalf("%s", e.ICalUID)
 	}
-	// Lower-case digits in the store are upper-cased.
+	// Digits in either case in the store give the same lower-case id.
 	o := hxbuild.NewEvent(spec)
 	lower := hxbuild.UTF16Z(strings.ToLower(want))
 	o.PutU32(824, uint32(len(lower))) //nolint:gosec // small

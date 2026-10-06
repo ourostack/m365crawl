@@ -253,7 +253,7 @@ const OutlookLinkNone = "none"
 
 // linkOutlook applies Options.OutlookLink. A mistake is a usage-class error, and nothing changes.
 func (r *runner) linkOutlook(ctx context.Context) error {
-	profiles, err := r.linkProfiles()
+	profiles, err := r.linkProfiles(ctx)
 	if err != nil {
 		return err
 	}
@@ -272,22 +272,38 @@ func (r *runner) linkOutlook(ctx context.Context) error {
 
 // linkProfiles picks the profiles a link applies to: the one named, the only one there is, or (to
 // end links only) all of them. A link of two profiles to one Teams account is refused by the core,
-// so a choice among several is the operator's.
-func (r *runner) linkProfiles() ([]string, error) {
+// so a choice among several is the operator's. Ending a link also knows the profiles the archive
+// holds an active link for, so a link whose profile directory is gone can still be ended.
+func (r *runner) linkProfiles(ctx context.Context) ([]string, error) {
+	none := r.o.OutlookLink == OutlookLinkNone
 	root := r.o.OutlookRoot
+	var names []string
+	var err error
 	if root == "" {
-		var err error
-		if root, err = outlookDefaultRoot(); err != nil {
-			return nil, err
+		root, err = outlookDefaultRoot()
+	}
+	if err == nil {
+		var found []outlookdesktop.Profile
+		if found, _, _, err = outlookDiscover(root); err == nil {
+			for _, p := range found {
+				names = append(names, p.Name)
+			}
 		}
 	}
-	found, _, _, err := outlookDiscover(root)
-	if err != nil {
+	if err != nil && !none {
 		return nil, err
 	}
-	names := make([]string, len(found))
-	for i, p := range found {
-		names[i] = p.Name
+	if none { // a missing directory is no reason to keep a link
+		linked, lerr := r.st.OutlookLinkedAccounts(ctx)
+		if lerr != nil {
+			return nil, asCoded(lerr)
+		}
+		for _, a := range linked {
+			if n := strings.TrimPrefix(a, "outlook/"); !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
+		slices.Sort(names)
 	}
 	switch want := r.o.OutlookLinkProfile; {
 	case want != "":
@@ -295,9 +311,9 @@ func (r *runner) linkProfiles() ([]string, error) {
 			return nil, linkProfileUsage("no Outlook profile named "+want+" under "+root, names)
 		}
 		return []string{want}, nil
-	case len(names) == 0:
+	case len(names) == 0 && !none:
 		return nil, linkProfileUsage("no Outlook profile found under "+root+" to link", names)
-	case len(names) > 1 && r.o.OutlookLink != OutlookLinkNone:
+	case len(names) > 1 && !none:
 		return nil, linkProfileUsage("more than one Outlook profile is under "+root+": say which one to link", names)
 	}
 	return names, nil

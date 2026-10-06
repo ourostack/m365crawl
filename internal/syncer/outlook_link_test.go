@@ -197,3 +197,63 @@ func TestSyncOutlookLinkNotAppliedWithoutOutlook(t *testing.T) {
 		t.Fatalf("links %q", got)
 	}
 }
+
+// A link whose profile directory is gone can still be ended, by name or without one, and an
+// unknown name is still a usage error.
+func TestSyncOutlookLinkNoneForAVanishedProfile(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	addSecondProfile(t, root)
+	o := outlookOpts(db, root)
+	o.OutlookLink, o.OutlookLinkProfile = linkTeams, "Main"
+	run(t, o)
+	if err := os.RemoveAll(filepath.Join(root, "Main")); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+
+	o.OutlookLink, o.OutlookLinkProfile = OutlookLinkNone, "Ghost"
+	_, _, err := Run(context.Background(), o)
+	if msg, fix := usageFix(t, err); !strings.Contains(msg, "no Outlook profile named Ghost") || !strings.Contains(fix, "Main, Second") {
+		t.Fatalf("%q %q", msg, fix)
+	}
+	if activeLinks(t, db) == "" {
+		t.Fatal("a refused unlink ended the link")
+	}
+	o.OutlookLinkProfile = "Main" // known to the archive, not to the disk
+	run(t, o)
+	if got := activeLinks(t, db); got != "" {
+		t.Fatalf("the link of a vanished profile stayed: %q", got)
+	}
+
+	// Without a name, every link goes, even when no profile directory is left at all.
+	o.OutlookLink, o.OutlookLinkProfile = linkTeams, "Second"
+	run(t, o)
+	o.OutlookRoot = filepath.Join(root, "gone")
+	o.OutlookLink, o.OutlookLinkProfile = OutlookLinkNone, ""
+	if _, _, err := Run(context.Background(), o); err == nil {
+		t.Fatal("a missing Outlook root is the source's failure")
+	}
+	if got := activeLinks(t, db); got != "" {
+		t.Fatalf("the link stayed with the root gone: %q", got)
+	}
+	// Nothing linked and nothing on disk is nothing to end.
+	if _, _, err := Run(context.Background(), o); err == nil || strings.Contains(err.Error(), "usage") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSyncOutlookLinkNoneSeesABrokenArchive(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	o := outlookOpts(db, outlookRoot(t, "HxStore.hxd"))
+	run(t, o)
+	if _, err := openRaw(t, db).Exec(`alter table calendar_account_links rename column unlinked_at to ended_at`); err != nil {
+		t.Fatal(err)
+	}
+	o.OutlookLink = OutlookLinkNone
+	if _, _, err := Run(context.Background(), o); err == nil {
+		t.Fatal("no error")
+	}
+}

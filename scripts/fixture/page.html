@@ -37,12 +37,13 @@ async function buildCalendar(acct, suffix, meetingConv) {
   const D = (d, h, mi) => new Date(Date.UTC(2023, 10, d, h, mi || 0));
   const hex = (t) => Array.from(t).map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
   const pad = (n, w) => String(n).padStart(w, '0');
-  // An Exchange-style global object id as uppercase hex: 16-byte class id, then YYYY MM DD (zero
+  // An Exchange-style global object id as lower-case hex, the way Teams' iCalUID has it (Outlook's
+  // store holds the same id in upper case, and the Outlook mapper lower-cases it): 16-byte class id, then YYYY MM DD (zero
   // for a series id), then label bytes padded to 56 bytes (112 characters). The same encoding the
   // calendar core uses for per-occurrence ids.
-  const gid = (label, date) => '040000008200E00074C5B7101A82E008'
+  const gid = (label, date) => ('040000008200E00074C5B7101A82E008'
     + (date ? pad(date[0].toString(16).toUpperCase(), 4) + pad(date[1].toString(16).toUpperCase(), 2) + pad(date[2].toString(16).toUpperCase(), 2) : '00000000')
-    + hex('FIXTURE-' + label).padEnd(72, '0');
+    + hex('FIXTURE-' + label).padEnd(72, '0')).toLowerCase();
   const dayOf = (d) => [2023, 11, d];
   const who = { name: 'Pat Example', address: 'pat@example.invalid' };
   const joinURL = (conv) => 'https://teams.example.invalid/l/meetup-join/' + encodeURIComponent(conv) + '/0?context=' + encodeURIComponent(JSON.stringify({ Tid: acct.tenant, Oid: acct.user }));

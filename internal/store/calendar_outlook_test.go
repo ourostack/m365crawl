@@ -349,3 +349,54 @@ func TestOutlookLinkFailuresOnABrokenArchive(t *testing.T) {
 		t.Fatal("no error")
 	}
 }
+
+// An id printed while an Outlook account was linked still names its event after the link ends, and
+// loses to an event that has that id today (the Teams twin).
+func TestEventIDPrintedWhileLinkedResolvesAfterUnlink(t *testing.T) {
+	ctx, s := context.Background(), newStore(t)
+	only := qEvent("only", 12, func(e *calendar.Event) {
+		e.Source, e.AccountID = calendar.SourceOutlook, qOutlook
+		e.TeamsThreadID = ""
+	})
+	twin := qEvent("twin", 13)
+	twinOutlook := twin
+	twinOutlook.Source, twinOutlook.AccountID, twinOutlook.TeamsThreadID = calendar.SourceOutlook, qOutlook, ""
+	s.qApply(t, calendar.SourceTeams, qTeams, twin)
+	s.qApply(t, calendar.SourceOutlook, qOutlook, only, twinOutlook)
+	if err := s.SetOutlookLink(ctx, qOutlook, qTeams, qt("2026-11-02T10:00:00Z")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.OutlookLinkedAccounts(ctx); err != nil || len(got) != 1 || got[0] != qOutlook {
+		t.Fatalf("%v %v", got, err)
+	}
+	linkedID := EventID(qTeams, calendar.Key(only))
+	if d, err := s.CalendarEvent(ctx, nil, linkedID); err != nil || d.Principal != qTeams {
+		t.Fatalf("while linked: %v", err)
+	}
+	if err := s.SetOutlookLink(ctx, qOutlook, "", qt("2026-11-03T10:00:00Z")); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.CalendarEvent(ctx, nil, linkedID)
+	if err != nil || d.Principal != qOutlook || d.EventID != EventID(qOutlook, calendar.Key(only)) {
+		t.Fatalf("after the unlink: %v %+v", err, d.CalendarRow)
+	}
+	// The twin's id from the linked time names the Teams event, which has that id today, and is not
+	// ambiguous with the Outlook copy it once merged with.
+	d, err = s.CalendarEvent(ctx, nil, EventID(qTeams, calendar.Key(twin)))
+	if err != nil || d.Principal != qTeams {
+		t.Fatalf("the twin: %v", err)
+	}
+}
+
+func TestLinkHistoryOnABrokenArchive(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.db.Exec(`drop table calendar_account_links`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OutlookLinkedAccounts(context.Background()); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := s.linkHistory(context.Background()); err == nil {
+		t.Fatal("no error")
+	}
+}

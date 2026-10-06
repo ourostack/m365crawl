@@ -292,3 +292,14 @@ func (s *Store) OutlookLinkInEffect(ctx context.Context, account, principal stri
 	err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where unlinked_at is null and source=?`, string(calendar.SourceOutlook)).Scan(&active)
 	return active == 0, err
 }
+
+// OutlookLinkedAccounts lists the Outlook accounts that have an active link, sorted.
+func (s *Store) OutlookLinkedAccounts(ctx context.Context) ([]string, error) {
+	var joined string
+	err := s.db.QueryRowContext(ctx, `select coalesce(group_concat(account_id, char(10)), '') from (select account_id from calendar_account_links where unlinked_at is null and source=? order by account_id)`,
+		string(calendar.SourceOutlook)).Scan(&joined)
+	if joined == "" {
+		return nil, err
+	}
+	return strings.Split(joined, "\n"), err
+}

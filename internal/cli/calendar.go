@@ -272,6 +272,9 @@ func checkCalendarFields(rt *runtime) error {
 }
 
 func (c *calendarCmd) Run(rt *runtime) error {
+	if err := rt.checkLink(); err != nil {
+		return err
+	}
 	if err := checkCalendarFields(rt); err != nil {
 		return err
 	}
@@ -307,7 +310,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		list := newList(shape(rt, items), agenda.Truncated).withTotal(agenda.Total)
 		list.CoverageGap, list.Range, list.UnlinkedAccounts = &agenda.Gap, out.Range, agenda.Unlinked
 		for _, u := range agenda.UnlinkedRecaps {
-			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecap{AccountID: u.Principal, calendarRecap: recapOf(u.CalendarRecap)})
+			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}
 		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.UncoveredDays = agenda.UncoveredDays
@@ -510,7 +513,21 @@ type calendarRecording struct {
 // unlinkedRecap is a recap with no event: the recap's own keys and the account it belongs to.
 type unlinkedRecap struct {
 	AccountID string `json:"account_id"`
+	// PlacedAt is the time the recap was filed under in this range, and PlacedBy says where it came
+	// from: "meeting_start" (the recap's own start), or "recording_start" when the recap carries no
+	// meeting start and the recording's start stands in for it. meeting_start is absent in that case.
+	PlacedAt time.Time `json:"placed_at"`
+	PlacedBy string    `json:"placed_by"`
 	calendarRecap
+}
+
+// unlinkedRecapOf renders a recap that no event holds, with the time it was placed by.
+func unlinkedRecapOf(account string, r store.CalendarRecap) unlinkedRecap {
+	u := unlinkedRecap{AccountID: account, calendarRecap: recapOf(r), PlacedAt: r.MeetingStart.UTC(), PlacedBy: "meeting_start"}
+	if r.MeetingStart.IsZero() {
+		u.PlacedAt, u.PlacedBy = r.RecordingStart.UTC(), "recording_start"
+	}
+	return u
 }
 
 // calendarExtras are the keys calendar event adds to the agenda item's.
@@ -550,6 +567,9 @@ type calendarEventCmd struct {
 }
 
 func (c *calendarEventCmd) Run(rt *runtime) error {
+	if err := rt.checkLink(); err != nil {
+		return err
+	}
 	for _, f := range rt.fields {
 		if !contains(eventKeys(), f) {
 			u := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(eventKeys(), ", ")))

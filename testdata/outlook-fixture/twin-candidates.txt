@@ -1,5 +1,5 @@
 # iCal UIDs (hex) of fixture events that are the same meetings as events in the Teams fixture.
-# They equal the iCalUID values in testdata/teams-fixture (account seed 1).
+# They equal the iCalUID values in testdata/teams-fixture (account seed 1) once lower-cased: the store holds ids in upper case, as the real one does, and Teams holds them in lower case.
 040000008200E00074C5B7101A82E00800000000464958545552452D524943482D4D454554494E4700000000000000000000000000000000
 040000008200E00074C5B7101A82E00800000000464958545552452D504143494649432D3100000000000000000000000000000000000000
 040000008200E00074C5B7101A82E00800000000464958545552452D5354414E4455502D3100000000000000000000000000000000000000

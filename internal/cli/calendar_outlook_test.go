@@ -15,6 +15,13 @@ const teamsAccount = tenantA + "/" + userA
 
 // outlookProfiles is a profiles directory holding the named fixture profiles: Main is the fixture
 // store, Second the second profile's.
+// outlookRoots remembers the profiles directory of each test that built one.
+var outlookRoots = map[string]string{}
+
+func outlookRootOf(t *testing.T, _ func(args ...string) (int, string, string)) string {
+	return outlookRoots[t.Name()]
+}
+
 func outlookProfiles(t *testing.T, names ...string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -46,6 +53,7 @@ func syncedWithOutlook(t *testing.T, names ...string) (*env, func(args ...string
 	run := func(args ...string) (int, string, string) {
 		return e.run(append([]string{"--outlook-root", root}, args...)...)
 	}
+	outlookRoots[t.Name()] = root
 	if code, _, stderr := run("sync"); code != 0 {
 		t.Fatalf("sync exit %d: %s", code, stderr)
 	}
@@ -496,7 +504,7 @@ func TestOutlookLinkTeamsRemovedTwinHidden(t *testing.T) {
 		t.Fatal("the twin is not listed before the removal")
 	}
 	remove := func(at string) {
-		e.exec(`update calendar_source_events set removed_at='` + at + `' where source='teams' and account_id='` + teamsAccount + `' and ical_uid like '%07E70B16%' and start_at like '2023-11-22T18:00:00%'`)
+		e.exec(`update calendar_source_events set removed_at='` + at + `' where source='teams' and account_id='` + teamsAccount + `' and ical_uid like '%07e70b16%' and start_at like '2023-11-22T18:00:00%'`)
 	}
 	// Outlook's copy was last edited in 2031: a removal before that does not hide it.
 	remove("2030-01-01T00:00:00.000Z")
@@ -510,5 +518,107 @@ func TestOutlookLinkTeamsRemovedTwinHidden(t *testing.T) {
 	it := has(agendaVia(t, run, append(window, "--include-removed")...), start)
 	if it == nil || it["removed"] != true || strings.Join(asStrings(it["removed_by"]), ",") != "teams" {
 		t.Fatalf("--include-removed: %v", it)
+	}
+}
+
+// An id printed while the profile was linked still opens its event after the link ends.
+func TestOutlookIDsSurviveAnUnlink(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main")
+	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
+		t.Fatal(errOut)
+	}
+	linked := agendaVia(t, run, "--from", "2031-03-05", "--days", "1", "--account", teamsAccount)
+	linkedID := itemBySubject(t, linked, "Fixture all-day event")["event_id"].(string)
+	if code, _, errOut := run("sync", "--outlook-account", "none"); code != 0 {
+		t.Fatal(errOut)
+	}
+	ev := eventVia(t, run, linkedID)
+	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture all-day event" || ev["event_id"] == linkedID {
+		t.Fatalf("%v", ev)
+	}
+	// A twin's id from the linked time is still the Teams event's own id.
+	twin := itemBySubject(t, agendaVia(t, run, "--from", "2023-11-20", "--days", "1", "--account", teamsAccount), "Fixture planning review")
+	if got := eventVia(t, run, twin["event_id"].(string)); got["account_id"] != teamsAccount {
+		t.Fatalf("%v", got)
+	}
+}
+
+// A link whose profile directory is gone is ended by name, and the reads after that do not sync
+// again for it.
+func TestOutlookUnlinkOfAVanishedProfile(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main", "Second")
+	if code, _, errOut := run("sync", "--outlook-profile", "Main", "--outlook-account", teamsAccount); code != 0 {
+		t.Fatal(errOut)
+	}
+	// run() fixes the root, so the profile is removed through the same directory.
+	root := outlookRootOf(t, run)
+	if err := os.RemoveAll(filepath.Join(root, "Main")); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+	args := []string{"--outlook-account", "none", "--outlook-profile", "Main"}
+	if code, _, errOut := run(append([]string{"--max-age", "1h"}, append(args, "calendar", "--days", "1")...)...); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	_, out, _ := run(append([]string{"--max-age", "1h"}, append(args, "calendar", "--days", "1")...)...)
+	if decode(t, out)["synced"] != nil {
+		t.Fatalf("a read synced again for a link that is gone: %s", out)
+	}
+	// Main's events stay in the archive, so it is listed again as an unlinked account.
+	m := agendaVia(t, run, "--from", "2023-11-20", "--days", "1")
+	if got := asStrings(m["unlinked_accounts"]); len(got) != 2 {
+		t.Fatalf("%v", got)
+	}
+	m = agendaVia(t, run, "--from", "2023-11-20", "--days", "1", "--account", teamsAccount)
+	if m["unlinked_accounts"] != nil {
+		t.Fatalf("%v", m["unlinked_accounts"])
+	}
+}
+
+// --max-age 0 turns the implicit sync off, so a link that still has to be applied cannot be, and
+// the error says how to apply it.
+func TestOutlookLinkWithMaxAgeZero(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main")
+	code, _, stderr := run("--max-age", "0", "--outlook-profile", "Main", "--outlook-account", teamsAccount, "calendar", "--days", "1")
+	body := usageBody(t, stderr)
+	if code != 2 || !strings.Contains(body["fix"].(string), "teamscrawl sync --outlook-profile Main --outlook-account "+teamsAccount) {
+		t.Fatalf("%d %v", code, body)
+	}
+	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
+		t.Fatal(errOut)
+	}
+	if code, _, errOut := run("--max-age", "0", "--outlook-account", teamsAccount, "calendar", "--days", "1"); code != 0 {
+		t.Fatalf("a link already in place: exit %d: %s", code, errOut)
+	}
+	// With no archive at all there is nothing pending to refuse.
+	fresh := textEnv(t)
+	if code, _, errOut := fresh.run("--max-age", "0", "--outlook-root", "none", "calendar", "--days", "1"); code != 0 {
+		t.Fatal(errOut)
+	}
+}
+
+// An ambient TEAMSCRAWL_OUTLOOK_ACCOUNT never breaks a command that neither syncs nor reads the
+// calendar, and with the Outlook source off it is a warning where a flag would be an error.
+func TestOutlookAccountEnvironment(t *testing.T) {
+	e := textEnv(t)
+	e.sync()
+	t.Setenv("TEAMSCRAWL_OUTLOOK_ACCOUNT", "not-an-account")
+	for _, cmd := range [][]string{{"whoami"}, {"status"}, {"--version"}} {
+		if code, _, errOut := e.run(append([]string{"--max-age", "0"}, cmd...)...); code != 0 {
+			t.Fatalf("%v: exit %d: %s", cmd, code, errOut)
+		}
+	}
+	code, out, errOut := e.run("--max-age", "0", "calendar", "--days", "1")
+	if code != 0 || !strings.Contains(errOut, "needs the Outlook source") || decode(t, out)["items"] == nil {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if code, _, _ = e.run("--max-age", "0", "calendar", "event", "ev_x", "--outlook-account", "a-flag"); code != 2 {
+		t.Fatalf("calendar event: exit %d", code)
+	}
+	// The same value as a flag is a mistake, and with Outlook on a bad value is one either way.
+	if code, _, _ = e.run("--max-age", "0", "--outlook-account", "a-flag", "calendar"); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if code, _, _ = e.run("--max-age", "0", "--outlook-root", outlookProfiles(t, "Main"), "calendar"); code != 2 {
+		t.Fatalf("exit %d", code)
 	}
 }
