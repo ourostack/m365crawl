@@ -36,14 +36,14 @@ func TestKeySingleEvent(t *testing.T) {
 
 func TestKeyAllDayRecurringUsesDate(t *testing.T) {
 	// The same all-day occurrence handed over as UTC midnight or as local midnight keeps its date.
-	utc := Event{GlobalID: "uid-3", AllDay: true, OriginalStart: tp(t, "2026-10-05T00:00:00Z")}
-	local := Event{GlobalID: "uid-3", AllDay: true, OriginalStart: tp(t, "2026-10-05T00:00:00+09:00")}
+	utc := Event{GlobalID: "uid-3", AllDay: TriTrue, OriginalStart: tp(t, "2026-10-05T00:00:00Z")}
+	local := Event{GlobalID: "uid-3", AllDay: TriTrue, OriginalStart: tp(t, "2026-10-05T00:00:00+09:00")}
 	for _, e := range []Event{utc, local} {
 		if got, want := Key(e), "uid-3|2026-10-05"; got != want {
 			t.Fatalf("Key = %q, want %q", got, want)
 		}
 	}
-	single := Event{GlobalID: "uid-3", AllDay: true, StartDate: "2026-10-05"}
+	single := Event{GlobalID: "uid-3", AllDay: TriTrue, StartDate: "2026-10-05"}
 	if got, want := Key(single), "uid-3|"; got != want {
 		t.Fatalf("single all-day Key = %q, want %q", got, want)
 	}
@@ -59,7 +59,7 @@ func TestKeyComposite(t *testing.T) {
 		t.Fatalf("composite key shape: %q", key)
 	}
 	// Order independent and normalized: the other tool mints the same key from the same data.
-	twin := Event{Source: SourceOutlook, Organizer: "ada@example.com", Subject: "weekly sync meeting", Start: mustTime(t, "2026-10-05T09:00:00-07:00")}
+	twin := Event{UnknownDeclared: true, Source: SourceOutlook, Organizer: "ada@example.com", Subject: "weekly sync meeting", Start: mustTime(t, "2026-10-05T09:00:00-07:00")}
 	if Key(twin) != key {
 		t.Fatalf("twin key %q != %q", Key(twin), key)
 	}
@@ -74,12 +74,12 @@ func TestKeyComposite(t *testing.T) {
 		t.Fatalf("moved composite key %q != %q", Key(moved), key)
 	}
 	// All-day events use dates: the original date, else the start date.
-	d1 := Event{Organizer: "a", Subject: "off", AllDay: true, StartDate: "2026-10-05"}
-	d2 := Event{Organizer: "a", Subject: "off", AllDay: true, StartDate: "2026-10-09", OriginalStart: tp(t, "2026-10-05T00:00:00Z")}
+	d1 := Event{Organizer: "a", Subject: "off", AllDay: TriTrue, StartDate: "2026-10-05"}
+	d2 := Event{Organizer: "a", Subject: "off", AllDay: TriTrue, StartDate: "2026-10-09", OriginalStart: tp(t, "2026-10-05T00:00:00Z")}
 	if Key(d1) != Key(d2) {
 		t.Fatalf("all-day composite keys differ: %q %q", Key(d1), Key(d2))
 	}
-	if Key(d1) == Key(Event{Organizer: "a", Subject: "off", AllDay: true, StartDate: "2026-10-06"}) {
+	if Key(d1) == Key(Event{Organizer: "a", Subject: "off", AllDay: TriTrue, StartDate: "2026-10-06"}) {
 		t.Fatal("different all-day date must change the key")
 	}
 	if compositeKey(base) != key {
