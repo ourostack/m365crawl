@@ -31,6 +31,9 @@ jobs:
   # Reads main and decides: is there a release to make, and which version (the lowest notes
   # file without a finished release). It refuses what is wrong (scripts/release-decide.sh).
   # Every later job reads the tag and commit from these outputs; none reads github.ref_name.
+  # publish_only=true means the release exists and only its cask is missing from the tap: verify
+  # and release (the build and the signing) are skipped, and the run resumes with the published
+  # assets: verify-release-*, settle, publish-homebrew and, for a stable release, verify-homebrew.
   decide:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,6 +45,7 @@ jobs:
       version: ${{ steps.decide.outputs.version }}
       sha: ${{ steps.decide.outputs.sha }}
       rehearsal: ${{ steps.decide.outputs.rehearsal }}
+      publish_only: ${{ steps.decide.outputs.publish_only }}
       remaining: ${{ steps.decide.outputs.remaining }}
     steps:
       - name: Checkout
@@ -63,7 +67,7 @@ jobs:
   # artifacts are verified below before the cask is pushed.
   verify:
     needs: decide
-    if: ${{ needs.decide.outputs.release == 'true' }}
+    if: ${{ needs.decide.outputs.release == 'true' && needs.decide.outputs.publish_only != 'true' }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -180,9 +184,11 @@ jobs:
           fi
           gh release upload "$TAG" "$cask" --clobber
 
-  # Verifies the published darwin artifacts exactly as a user downloads them.
+  # Verifies the published darwin artifacts exactly as a user downloads them. A publish-only
+  # resume has no release job (it ran before), so it runs when release was skipped on purpose.
   verify-release-darwin:
     needs: [decide, release]
+    if: ${{ !cancelled() && needs.decide.outputs.release == 'true' && (needs.release.result == 'success' || (needs.release.result == 'skipped' && needs.decide.outputs.publish_only == 'true')) }}
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -192,7 +198,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Verify the published darwin artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -205,6 +213,7 @@ jobs:
   # Verifies the published Windows zip files on native Windows runners.
   verify-release-windows:
     needs: [decide, release]
+    if: ${{ !cancelled() && needs.decide.outputs.release == 'true' && (needs.release.result == 'success' || (needs.release.result == 'skipped' && needs.decide.outputs.publish_only == 'true')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -223,7 +232,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Verify the published Windows artifacts
         shell: pwsh
         env:
@@ -250,7 +261,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Settle the release flags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -274,7 +287,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Push the cask to the tap
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -296,7 +311,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Wait for the tap, install the cask and verify it
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -321,7 +338,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Mark the release as a prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
