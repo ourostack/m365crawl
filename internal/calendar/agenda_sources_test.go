@@ -447,7 +447,7 @@ func TestCoverageNamesUncoveredDaysAndEachAccount(t *testing.T) {
 	if !reflect.DeepEqual(res.UncoveredDays, []string{"2026-11-02", "2026-11-04"}) || !res.Gap {
 		t.Fatalf("uncovered %v gap %v", res.UncoveredDays, res.Gap)
 	}
-	want := []AccountCoverage{{AccountID: acctTeams, SyncedAt: from.Add(time.Hour), AsOf: mustTime(t, "2026-11-03T05:00:00Z")}}
+	want := []AccountCoverage{{AccountID: acctTeams, SyncedAt: from.Add(time.Hour), AsOf: mustTime(t, "2026-11-03T05:00:00Z"), Uncovered: []string{"2026-11-02", "2026-11-04"}}}
 	if !reflect.DeepEqual(res.Accounts, want) {
 		t.Fatalf("%+v, want %+v", res.Accounts, want)
 	}
@@ -455,5 +455,38 @@ func TestCoverageNamesUncoveredDaysAndEachAccount(t *testing.T) {
 	empty := day(t, openDB(t), AgendaQuery{From: from, To: to})
 	if len(empty.UncoveredDays) != 3 || len(empty.Accounts) != 0 || !empty.Gap {
 		t.Fatalf("%+v", empty)
+	}
+}
+
+func TestCoverageAttributesGapsToTheAccountThatLacksThem(t *testing.T) {
+	from, to := mustTime(t, "2026-11-02T00:00:00Z"), mustTime(t, "2026-11-05T00:00:00Z")
+	db := openDB(t) // no link: the Outlook account is a principal of its own
+	for _, a := range []struct {
+		source  Source
+		account string
+	}{{SourceTeams, acctTeams}, {SourceOutlook, acctOutlook}} {
+		w := Window{Source: a.source, AccountID: a.account, Start: from, End: to, SyncedAt: from.Add(time.Hour), CacheFreshAt: from}
+		if _, err := ApplySnapshot(ctx, db, w, nil, from); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(t, db, `DELETE FROM calendar_covered_days`)
+	for _, d := range []struct{ source, account, day string }{
+		{"teams", acctTeams, "2026-11-02"}, {"teams", acctTeams, "2026-11-03"}, {"teams", acctTeams, "2026-11-04"},
+		{"outlook", acctOutlook, "2026-11-03"},
+	} {
+		exec(t, db, `INSERT INTO calendar_covered_days VALUES (?,?,?,'2026-11-03T00:00:00.000Z','2026-11-03T05:00:00.000Z')`, d.source, d.account, d.day)
+	}
+	res := day(t, db, AgendaQuery{From: from, To: to})
+	if !reflect.DeepEqual(res.UncoveredDays, []string{"2026-11-02", "2026-11-04"}) || !res.Gap {
+		t.Fatalf("uncovered %v gap %v", res.UncoveredDays, res.Gap)
+	}
+	got := map[string][]string{}
+	for _, a := range res.Accounts {
+		got[a.AccountID] = a.Uncovered
+	}
+	want := map[string][]string{acctTeams: nil, acctOutlook: {"2026-11-02", "2026-11-04"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v, want %v", got, want)
 	}
 }

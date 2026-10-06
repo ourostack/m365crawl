@@ -81,6 +81,7 @@ func TestMain(m *testing.M) {
 	for _, s := range snaps {
 		s.cleanup()
 	}
+	cleanupCalendar()
 	// The archive directory is flat: remove its files, then the directory, never recursively.
 	if archive != "" {
 		ents, _ := os.ReadDir(archive)

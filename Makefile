@@ -12,7 +12,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e acceptance v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint script-lint tidy-check check coverage snapshot screenshot clean
+.PHONY: help build test e2e acceptance acceptance-calendar v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint script-lint tidy-check check coverage snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -22,6 +22,7 @@ help:
 		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
 		'  e2e            Run end-to-end tests (build tag e2e).' \
 		'  acceptance     Run the real-cache acceptance tests (build tag acceptance; needs TEAMSCRAWL_REAL_CACHE=1, Full Disk Access, node, python3).' \
+		'  acceptance-calendar  Run only the calendar and Outlook real-cache checks (TEAMSCRAWL_REAL_CACHE=1; TEAMSCRAWL_OUTLOOK_ROOT enables the Outlook ones).' \
 		'  v8vectors      Regenerate testdata/v8 with Node 22 (scripts/v8vectors/gen.mjs).' \
 		'  fixture        Regenerate testdata/teams-fixture with Edge via Playwright (scripts/fixture).' \
 		'  fmt            Apply Go formatting.' \
@@ -46,6 +47,9 @@ e2e:
 
 acceptance:
 	go test -count=1 -tags acceptance -timeout 30m -v ./acceptance/...
+
+acceptance-calendar:
+	go test -count=1 -tags acceptance -timeout 30m -v -run 'TestRealCalendar|TestRealOutlook' ./acceptance/...
 
 v8vectors:
 	node scripts/v8vectors/gen.mjs

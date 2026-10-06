@@ -880,7 +880,7 @@ func TestCalendarShowsOutlookEvents(t *testing.T) {
 	if got := asStrings(m["unlinked_accounts"]); len(got) != 1 || got[0] != "outlook/Main" {
 		t.Fatalf("unlinked_accounts %v", got)
 	}
-	plain := itemBySubject(t, m, "Fixture plain event")
+	plain := itemBySubjectFrom(t, m, "Fixture planning review", "outlook")
 	if src := asStrings(plain["sources"]); len(src) != 1 || src[0] != "outlook" {
 		t.Fatalf("sources %v", src)
 	}
@@ -903,7 +903,7 @@ func TestCalendarShowsOutlookEvents(t *testing.T) {
 	}
 	// `calendar event` opens the Outlook event by its id.
 	ev := eventDoc(t, e, plain["event_id"].(string))
-	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture plain event" {
+	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture planning review" {
 		t.Fatalf("%v", ev)
 	}
 }

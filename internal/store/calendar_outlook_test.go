@@ -437,3 +437,26 @@ func TestOutlookStampChangeReplacesCaseVariantKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestOutlookReadTimes(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	if got, err := s.OutlookReadTimes(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("an archive that never read Outlook: %v %v", got, err)
+	}
+	commitOutlook(t, s, time.UTC, OutlookStamp(3, time.UTC), outlookEvent(calendar.TriUnknown, base))
+	// A census that cannot be read, or has no time, is left out.
+	for k, v := range map[string]string{"outlook_read:outlook/Bad": "{", "outlook_read:outlook/NoTime": `{"blocks_found":1}`} {
+		if _, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?)`, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.OutlookReadTimes(ctx)
+	if err != nil || len(got) != 1 || !got["outlook/Main"].Equal(base) {
+		t.Fatalf("%v %v", got, err)
+	}
+	_ = s.Close()
+	if _, err := s.OutlookReadTimes(ctx); err == nil {
+		t.Fatal("a closed archive must fail")
+	}
+}

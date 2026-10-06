@@ -4,8 +4,8 @@ start             end               status     subject                 where   r
 2023-11-21 15:00  2023-11-21 15:30  confirmed  Fixture thin event      -       accepted
 2023-11-21 16:00  2023-11-21 16:45  confirmed  Fixture thinnest event  -       accepted
 2023-11-21 16:00  2023-11-21 16:45  confirmed  Fixture thinnest event  -       accepted
-2023-11-21 18:00  2023-11-21 19:00  confirmed  Fixture online meeting  online  tentative
 2023-11-21 18:00  2023-11-21 19:00  confirmed  Fixture pacific sync    -       accepted
+2023-11-21 18:00  2023-11-21 19:00  confirmed  Fixture pacific sync    online  tentative
 2023-11-21 18:00  2023-11-21 19:00  confirmed  Fixture pacific sync    -       accepted
 2023-11-22        all day           confirmed  Fixture holiday         -       accepted
 2023-11-22        all day           confirmed  Fixture holiday         -       accepted

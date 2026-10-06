@@ -318,11 +318,12 @@ func mappedDigest(t *testing.T) string {
 
 // pinnedMapping ties MapperVersion to the output it describes. A mapping change alters
 // the digest, which fails this test until MapperVersion is raised (so a stored event is
-// derived again) and the pair below is updated together.
+// derived again) and the pair below is updated together. A change of the fixture alone moves the
+// digest and not the version: the mapper is the same.
 var pinnedMapping = struct {
 	version int
 	digest  string
-}{version: 4, digest: "7f79a67c431b543eac39dd4f56a99fbfdec564baf70bbf808b2464741cbf1758"}
+}{version: 4, digest: "e186d0ae37e7fa0946d1bccd41e414526bd240fec1e8ef1e0b6aa87bb27f65e1"}
 
 func TestMapperVersionIsPinnedToTheMappedOutput(t *testing.T) {
 	got := mappedDigest(t)
