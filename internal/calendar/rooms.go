@@ -161,3 +161,23 @@ func Rooms(e Event) []Room {
 	}
 	return rooms
 }
+
+// MergedRooms is Rooms for a merged event: the rooms of the merged event, then each place any
+// copy's location text names that the merged event lacks, as a text room. The merged Location text
+// is one copy's, but a room only one copy names is never dropped (the lists are already unions).
+func MergedRooms(m Merged) []Room {
+	rooms := Rooms(m.Event)
+	have := map[string]bool{}
+	for _, r := range rooms {
+		have[strings.ToLower(r.Name)] = true
+	}
+	for _, text := range m.LocationTexts {
+		for _, r := range Rooms(Event{Location: text}) {
+			if k := strings.ToLower(r.Name); !have[k] {
+				have[k] = true
+				rooms = append(rooms, r)
+			}
+		}
+	}
+	return rooms
+}
