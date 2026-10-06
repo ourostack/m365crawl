@@ -12,6 +12,14 @@
     "default_database": "~/.teamscrawl/teamscrawl.db"
   },
   "commands": {
+    "calendar": {
+      "argv": [
+        "teamscrawl",
+        "--json",
+        "calendar"
+      ],
+      "json": true
+    },
     "doctor": {
       "argv": [
         "teamscrawl",
@@ -52,7 +60,8 @@
     "sync",
     "watch",
     "search",
-    "sql"
+    "sql",
+    "calendar"
   ],
   "privacy": {
     "contains_private_messages": true,
