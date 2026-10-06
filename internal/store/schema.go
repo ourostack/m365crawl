@@ -1,9 +1,13 @@
 package store
 
+import "github.com/ourostack/teamscrawl/internal/calendar"
+
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
 // Version 3 added the records table. Version 4 added read memory: records.raw_digest and
-// records.value_redacted, and the typed_memo table (see memo.go).
-const SchemaVersion = 4
+// records.value_redacted, and the typed_memo table (see memo.go). Version 5 added the calendar
+// tables (internal/calendar's SchemaDDL), which a sync fills from the calendar and meeting-recap
+// records (see calendar.go); an archive at version 4 gains them, empty, on its next writable open.
+const SchemaVersion = 5
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -17,7 +21,7 @@ const DerivationVersion = 2
 // timeLayout so they sort and compare as strings. Messages and conversations are rowid tables
 // because the FTS tables reuse the owning row's rowid, which makes index maintenance a primary
 // key lookup instead of a scan.
-const schemaDDL = `
+const teamsSchemaDDL = `
 create table if not exists accounts(
   tenant_id text not null,
   user_id text not null,
@@ -157,3 +161,6 @@ create table if not exists typed_memo(
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);
 `
+
+// schemaDDL is every table the archive has: the Teams tables above and the calendar tables.
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL

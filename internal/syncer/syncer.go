@@ -78,6 +78,14 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		_ = record(StatusFailed)
 		return Report{}, nil, errs.DBError(err)
 	}
+	// An archive whose calendar tables were derived by another mapper, or under other scrub rules
+	// (or never: it is from before the calendar), gets them rebuilt from the records it already
+	// holds. This needs nothing from the Teams cache.
+	err = contained(func() (e error) { r.calendar, e = ensureCalendar(ctx, st, started); return })
+	if err != nil {
+		_ = record(StatusFailed)
+		return Report{}, nil, errs.DBError(err)
+	}
 	rep, changes, err = r.run(ctx, started)
 	if rep.Status == "" { // failed before any source ran
 		_ = record(StatusFailed)
@@ -95,6 +103,8 @@ type runner struct {
 	o   Options
 	st  *store.Store
 	sig []byte // teamsdesktop.MemoSignature: what record digests are taken under
+	// calendar is what the calendar rebuild at the start of the run did, nil when none was due.
+	calendar *store.CalendarResult
 }
 
 // scope is the accounts a run-level sync_runs row covers: every account, or the filtered one.
@@ -127,6 +137,12 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	rep := Report{Omissions: map[string]int{}, OtherOrigins: other, StartedAt: started}
 	if rep.OtherOrigins == nil {
 		rep.OtherOrigins = []string{}
+	}
+	if c := r.calendar; c != nil {
+		rep.Calendar.Add(c.Counts)
+		for k, v := range c.Omissions {
+			rep.Omissions[k] += v
+		}
 	}
 	var (
 		changes   []Change
@@ -247,6 +263,8 @@ type runCounts struct {
 	People        store.Counts `json:"people"`
 	Activity      store.Counts `json:"activity"`
 	Records       store.Counts `json:"records"`
+	// Calendar is what the derivation of the calendar tables did in this source's transaction.
+	Calendar store.CalendarCounts `json:"calendar"`
 }
 
 func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Report, changes *[]Change) (SourceReport, bool, error) {
@@ -309,6 +327,7 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	add(&rep.People, w.counts.People)
 	add(&rep.Activity, w.counts.Activity)
 	add(&rep.Records, w.counts.Records)
+	rep.Calendar.Add(w.counts.Calendar)
 	rep.Redacted += redacted
 	*changes = append(*changes, w.changes...)
 	r.progress("%s: %s (%d messages, %d conversations, %d activity items, %d records)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen, w.counts.Records.Seen)
@@ -344,6 +363,11 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if w.memo.err != nil {
 		return nil, nil, 0, errs.DBError(w.memo.err)
 	}
+	cal, err := sess.DeriveCalendar(ctx, source, begun, calendarZone())
+	if err != nil {
+		return nil, nil, 0, asCoded(err)
+	}
+	w.counts.Calendar = cal.Counts
 	if err := w.finish(); err != nil {
 		return nil, nil, 0, err
 	}
@@ -354,6 +378,7 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 		return nil, nil, 0, errs.DBError(err)
 	}
 	mergeOmissions(&omissions, generic)
+	mergeOmissions(&omissions, cal.Omissions)
 	status := StatusOK
 	if lost(omissions) > 0 {
 		status = StatusOmissions
@@ -667,6 +692,10 @@ var (
 	genericBudget   = teamsdesktop.DefaultGenericBudget
 	deniedFn        = teamsdesktop.Denied
 	readGenericFn   = teamsdesktop.ReadGeneric
+	ensureCalendar  = func(ctx context.Context, st *store.Store, at time.Time) (*store.CalendarResult, error) {
+		return st.EnsureCalendar(ctx, calendarZone(), at)
+	}
+	calendarZone    = func() *time.Location { return time.Local }
 	rederiveArchive = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
 	batchSize       = 2000
 	beforeFlush     = func(kind string, n int) error { return nil }
