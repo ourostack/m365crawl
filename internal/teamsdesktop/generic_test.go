@@ -176,18 +176,20 @@ func TestReadGenericKeysCanonical(t *testing.T) {
 
 // fakeGeneric scripts a snapshot for ReadGeneric: the census and the origin of each batch.
 type fakeGeneric struct {
-	dbs      []indexeddb.Database
-	held     map[int64]int64
-	records  map[int64][]indexeddb.Record
-	decode   func(raw []byte) (any, error)
-	recErr   error
-	stats    leveldb.Stats
-	openErr  error
-	censusEr error
-	opens    [][]string
-	prev     weak.Pointer[fakeGenericOrigin]
-	released []bool
-	closes   int // origins closed
+	dbs        []indexeddb.Database
+	held       map[int64]int64
+	records    map[int64][]indexeddb.Record
+	decode     func(raw []byte) (any, error)
+	recErr     error
+	stats      leveldb.Stats
+	openErr    error
+	censusEr   error
+	opens      [][]string
+	prev       weak.Pointer[fakeGenericOrigin]
+	released   []bool
+	closes     int // origins closed
+	payloadErr error
+	unwraps    int // envelope unwraps: a Decode or a Payload call each unwraps the value once
 }
 
 type fakeGenericOrigin struct {
@@ -206,9 +208,17 @@ func (o *fakeGenericOrigin) Records(dbID, _ int64, fn func(indexeddb.Record) err
 	}
 	return nil
 }
-func (o *fakeGenericOrigin) Decode(_ int64, raw []byte) (any, error) { return o.f.decode(raw) }
-func (o *fakeGenericOrigin) Close() error                            { o.f.closes++; return nil }
-func (o *fakeGenericOrigin) Stats() leveldb.Stats                    { _ = len(o.buf); return o.f.stats }
+func (o *fakeGenericOrigin) Decode(_ int64, raw []byte) (any, error) {
+	o.f.unwraps++
+	return o.f.decode(raw)
+}
+func (o *fakeGenericOrigin) DecodePayload(payload []byte) (any, error) { return o.f.decode(payload) }
+func (o *fakeGenericOrigin) Close() error                              { o.f.closes++; return nil }
+func (o *fakeGenericOrigin) Payload(_ int64, raw []byte) ([]byte, error) {
+	o.f.unwraps++
+	return raw, o.f.payloadErr
+}
+func (o *fakeGenericOrigin) Stats() leveldb.Stats { _ = len(o.buf); return o.f.stats }
 
 func (f *fakeGeneric) install(t *testing.T) {
 	t.Helper()
