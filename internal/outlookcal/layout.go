@@ -14,7 +14,7 @@ import "github.com/ourostack/teamscrawl/internal/calendar"
 
 // MapperVersion is raised whenever a mapping change alters derived calendar data, so
 // the archive can re-read the store.
-const MapperVersion = 1
+const MapperVersion = 2
 
 // Layout names an object layout the reader knows: the class, the envelope tag (the
 // size of the fixed region) and what the object is.
