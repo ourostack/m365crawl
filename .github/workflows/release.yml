@@ -163,16 +163,24 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       # publish-homebrew pushes this cask to the tap once the release verifies. Every
       # release carries one, a rehearsal included: goreleaser renders it for the rc tag
-      # (version and URLs of the rc), and publish-homebrew puts a rehearsal's cask on the
-      # tap's rehearsal branch, never on main.
+      # (version and URLs of the rc) even with skip_upload: true, which only skips pushing it
+      # to the tap (checked with a local snapshot build of a prerelease version), and
+      # publish-homebrew puts a rehearsal's cask on the tap's rehearsal branch, never on main.
+      # If goreleaser ever stops rendering it, this step fails here with the reason, not later in
+      # publish-homebrew with a missing asset.
       - name: Attach Homebrew cask to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.decide.outputs.tag }}
-        run: gh release upload "$TAG" dist/homebrew/Casks/teamscrawl.rb --clobber
+        run: |
+          cask="dist/homebrew/Casks/teamscrawl.rb"
+          if [ ! -f "$cask" ]; then
+            echo "::error::goreleaser did not render ${cask} for ${TAG}; the release has no cask to publish"
+            exit 1
+          fi
+          gh release upload "$TAG" "$cask" --clobber
 
-  # Verifies the published darwin artifacts exactly as a user downloads them. Last, it settles the
-  # release flags (scripts/release-flags.sh), restoring a stable release that an earlier flake demoted.
+  # Verifies the published darwin artifacts exactly as a user downloads them.
   verify-release-darwin:
     needs: [decide, release]
     runs-on: macos-latest
@@ -226,13 +234,37 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
         run: scripts/verify-release.ps1
 
+  # Settles the release flags after every verification job passed (scripts/release-flags.sh): a
+  # rehearsal must be a prerelease and not latest; a stable release that an earlier flake demoted
+  # (contain) is restored (not prerelease, latest unless a higher stable release exists). It is its
+  # own job, and publish-homebrew needs it, so "Re-run failed jobs" after any single verification
+  # flake always passes through it before the cask is published.
+  settle:
+    needs: [decide, verify-release-darwin, verify-release-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
+      - name: Settle the release flags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: scripts/release-flags.sh settle
+
   # Pushes the cask to ourostack/homebrew-tap with a deploy key that can write to that
   # one repository, and only after the published darwin and Windows artifacts verify. A stable release
   # goes to the tap's main, which is what users install. A rehearsal goes to the
   # branch "rehearsal", so the real key and the real push are exercised without
   # changing what users install.
   publish-homebrew:
-    needs: [decide, verify-release-darwin, verify-release-windows]
+    needs: [decide, settle]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -276,10 +308,10 @@ jobs:
   # Containment. A release that failed after it may have been published must not stay
   # "latest": it is marked as a prerelease (harmless when no release exists yet). If the
   # install from the tap failed, the tap is also put back to the cask it served before, with a
-  # new commit. A later successful verify-release-darwin restores a release that a flake demoted.
+  # new commit. A later successful settle restores a release that a flake demoted.
   contain:
-    if: ${{ always() && (needs.release.result == 'failure' || needs.verify-release-darwin.result == 'failure' || needs.verify-release-windows.result == 'failure' || needs.verify-homebrew.result == 'failure') }}
-    needs: [decide, release, verify-release-darwin, verify-release-windows, verify-homebrew]
+    if: ${{ always() && (needs.release.result == 'failure' || needs.verify-release-darwin.result == 'failure' || needs.verify-release-windows.result == 'failure' || needs.settle.result == 'failure' || needs.verify-homebrew.result == 'failure') }}
+    needs: [decide, release, verify-release-darwin, verify-release-windows, settle, verify-homebrew]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -324,7 +356,7 @@ jobs:
   # same title. A run cancelled before any job started cannot report; the next run releases it anyway.
   report-failure:
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
-    needs: [decide, verify, release, verify-release-darwin, verify-release-windows, publish-homebrew, verify-homebrew, contain, continue-release]
+    needs: [decide, verify, release, verify-release-darwin, verify-release-windows, settle, publish-homebrew, verify-homebrew, contain, continue-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
