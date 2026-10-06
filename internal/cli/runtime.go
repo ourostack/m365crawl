@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"os"
 	"sort"
@@ -385,13 +384,9 @@ func (rt *runtime) checkOutlookRoot() error {
 		return nil
 	}
 	c := &errs.Coded{Code: CodeOutlookRootMissing, Exit: errs.ExitEnvironment}
-	switch {
-	case err == nil:
-		c.Message = how + root + " is not a directory"
-	case errors.Is(err, fs.ErrNotExist):
-		c.Message = how + root + " does not exist"
-	default:
-		c.Message = how + root + " cannot be read: " + err.Error()
+	c.Message = how + root + " is not a directory"
+	if err != nil {
+		c.Message = how + root + " cannot be read: " + oneLine(err.Error())
 	}
 	c.Fix = "Point --outlook-root at the directory of Outlook profiles (one directory per profile, each holding HxStore.hxd), or turn the Outlook source off with --outlook-root none."
 	if rt.outlookRoot == "" {
