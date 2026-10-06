@@ -284,18 +284,18 @@ func TestCalendarEventErrors(t *testing.T) {
 func TestCalendarOldArchiveAndNoArchive(t *testing.T) {
 	e := calEnv(t)
 	e.exec(`drop table calendar_recaps`)
-	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}} {
+	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions"}} {
 		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
 		m := decode(t, out)
 		if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run teamscrawl sync") {
 			t.Errorf("%v on an old archive: %d %s %s", args, code, out, errOut)
 		}
-		if _, has := m["items"]; args[len(args)-1] == "calendar" && !has {
+		if _, has := m["items"]; args[len(args)-1] != "ev_x" && !has {
 			t.Errorf("an empty agenda still has items: %s", out)
 		}
 	}
 	empty := newEnv(t)
-	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}} {
+	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions", "--mine"}} {
 		code, out, errOut := empty.run(append([]string{"--max-age", "0"}, args...)...)
 		if code != 0 || decode(t, out)["needs_sync"] != true {
 			t.Errorf("%v with no archive: %d %s %s", args, code, out, errOut)
@@ -665,5 +665,184 @@ func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
 		checkGolden(t, "calendar_unlinked_recap."+suffix, e.scrub(out))
+	}
+}
+
+func actionsDoc(t *testing.T, e *env, args ...string) map[string]any {
+	t.Helper()
+	code, out, errOut := e.run(append([]string{"--max-age", "0", "calendar", "actions"}, args...)...)
+	if code != 0 {
+		t.Fatalf("calendar actions %v: exit %d: %s", args, code, errOut)
+	}
+	return decode(t, out)
+}
+
+func TestCalendarActions(t *testing.T) {
+	e := calEnv(t)
+	acct := tenantA + "/" + userA
+	// The fixture meeting's recap has two action items; --mine keeps the one owned by this account's own name.
+	m := actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--account", acct, "--mine")
+	got := items(t, m)
+	if len(got) != 1 || got[0]["owner"] != "Alex Fixture" || got[0]["mine"] != true || got[0]["subject"] != "Fixture planning review" || got[0]["title"] != "Book Fixture Room Beta" {
+		t.Fatalf("mine: %v", got)
+	}
+	for _, k := range []string{"event_id", "event_key", "subject", "event_start", "call_id", "title", "text", "owner", "speaker", "origin", "mine", "expires_at"} {
+		if _, ok := got[0][k]; !ok {
+			t.Errorf("an action has no %q: %v", k, keysOf(got[0]))
+		}
+	}
+	for _, k := range []string{"coverage_gap", "range", "accounts", "archive_age_seconds"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("the list has no %q: %v", k, keysOf(m))
+		}
+	}
+	// Without --mine every owner is listed and mine says which are this account's.
+	all := items(t, actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--account", acct))
+	if len(all) != 2 || all[0]["mine"] != false || all[0]["owner"] != "Pat Example" || all[1]["mine"] != true {
+		t.Fatalf("all: %v", all)
+	}
+	if o := items(t, actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--account", acct, "--owner", "PAT")); len(o) != 1 || o[0]["owner"] != "Pat Example" {
+		t.Fatalf("owner: %v", o)
+	}
+	// With no account both accounts' recaps are read, each against its own name.
+	both := items(t, actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--mine"))
+	if len(both) != 2 || both[0]["owner"] == both[1]["owner"] {
+		t.Fatalf("both accounts: %v", both)
+	}
+	// A day with no meeting has no items and no error; --fields keeps the keys asked for.
+	if none := items(t, actionsDoc(t, e, "--from", "2023-11-21", "--days", "1", "--account", acct)); len(none) != 0 {
+		t.Fatalf("none: %v", none)
+	}
+	f := items(t, actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--account", acct, "--mine", "--fields", "owner,mine"))
+	if len(f) != 1 || len(f[0]) != 2 {
+		t.Fatalf("fields: %v", f)
+	}
+	// The limit cuts and total says how many there were.
+	lim := actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--account", acct, "--limit", "1")
+	if lim["truncated"] != true || lim["total"] != float64(2) {
+		t.Fatalf("limit: %v", lim)
+	}
+}
+
+func TestCalendarActionsUsageErrors(t *testing.T) {
+	e := calEnv(t)
+	e.exec(`delete from people`)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--mine"}, "--mine needs your own name"},
+		{[]string{"--days", "-1"}, "--days"},
+		{[]string{"--from", "banana"}, "cannot read"},
+		{[]string{"--limit", "0"}, "limit"},
+		{[]string{"--fields", "nope"}, "nope"},
+	} {
+		code, _, errOut := e.run(append([]string{"--max-age", "0", "calendar", "actions"}, c.args...)...)
+		if code != 2 || !strings.Contains(errOut, c.want) {
+			t.Errorf("%v: exit %d: %s", c.args, code, errOut)
+		}
+	}
+	// Without --mine an unknown name is no problem: nothing needs it.
+	if code, _, errOut := e.run("--max-age", "0", "calendar", "actions", "--from", "2023-11-20"); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+}
+
+// A recap linked by start time to the id a series shares is listed on the one occurrence its meeting
+// start matches, and the agenda, the event and the actions all agree.
+func TestCalendarSeriesRecapIsOnOneOccurrence(t *testing.T) {
+	e := calEnv(t)
+	acct := tenantA + "/" + userA
+	e.exec(`update calendar_source_events set ical_uid='SHARED' where subject='Fixture standup' and account_id='` + acct + `'`)
+	e.exec(`update calendar_recaps set ical_uid='SHARED', link_method='start_time', meeting_start_at='2023-11-23T18:01:00.000Z' where call_id='fixture-call-1-standup-22'`)
+	m := agenda(t, e, "--from", "2023-11-22", "--days", "3", "--account", acct)
+	var with []string
+	for _, it := range items(t, m) {
+		if it["subject"] == "Fixture standup" && it["has_recap"] == true {
+			with = append(with, it["start"].(string))
+		}
+	}
+	if len(with) != 1 || with[0] != "2023-11-23T18:00:00Z" {
+		t.Fatalf("recap on %v", with)
+	}
+	// Move the meeting start off every occurrence: the recap is a series-level link on all of them.
+	e.exec(`update calendar_recaps set meeting_start_at='2023-11-25T18:01:00.000Z' where call_id='fixture-call-1-standup-22'`)
+	n := 0
+	for _, it := range items(t, agenda(t, e, "--from", "2023-11-22", "--days", "3", "--account", acct)) {
+		if it["subject"] == "Fixture standup" && it["has_recap"] == true {
+			n++
+			r := eventDoc(t, e, it["event_id"].(string))["recaps"].([]any)[0].(map[string]any)
+			if r["series_level"] != true {
+				t.Errorf("recap %v does not say it is series-level", r)
+			}
+		}
+	}
+	if n < 2 {
+		t.Fatalf("a series-level recap is on %d occurrences", n)
+	}
+}
+
+func TestRecapOfSaysSeriesLevel(t *testing.T) {
+	if !recapOf(store.CalendarRecap{SeriesLevel: true}).SeriesLevel || recapOf(store.CalendarRecap{}).SeriesLevel {
+		t.Fatal("series_level is not carried")
+	}
+}
+
+func TestActionTextTable(t *testing.T) {
+	e := calEnv(t)
+	for _, color := range []bool{false, true} {
+		t.Setenv("CLICOLOR_FORCE", "")
+		suffix := "plain"
+		if color {
+			suffix = "color"
+			t.Setenv("CLICOLOR_FORCE", "1")
+		}
+		code, out, errOut := e.run("--format", "text", "--max-age", "0", "calendar", "actions", "--from", "2023-11-20", "--days", "1", "--account", tenantA+"/"+userA)
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errOut)
+		}
+		checkGolden(t, "calendar_actions."+suffix, e.scrub(out))
+	}
+	// A series-level item says so, and an item with no title shows its text.
+	got := renderToString(t, "calendar actions", newList([]any{actionItem{Subject: "S", Text: "Do the thing", Owner: "Ada", SeriesLevel: true}}, false))
+	if !strings.Contains(got, "Do the thing (series level)") {
+		t.Fatalf("%q", got)
+	}
+}
+
+// fixtureStandupSeries is the series key of the fixture standup of the first account.
+const fixtureStandupSeries = "040000008200E00074C5B7101A82E00800000000464958545552452D5354414E4455502D3100000000000000000000000000000000000000"
+
+// A Meeting conversation that events name as their chat carries the series and the occurrence count;
+// a conversation no event names carries neither key.
+func TestConversationsCarryTheCalendarSeries(t *testing.T) {
+	e := calEnv(t)
+	code, out, errOut := e.run("--max-age", "0", "conversations", "--account", tenantA+"/"+userA)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	linked := 0
+	for _, c := range items(t, decode(t, out)) {
+		_, hasKey := c["calendar_series_key"]
+		_, hasCount := c["calendar_event_count"]
+		if c["kind"] != "Meeting" {
+			if hasKey || hasCount {
+				t.Errorf("%v is not a meeting but carries a calendar link", c["display_name"])
+			}
+			continue
+		}
+		linked++
+		if c["calendar_series_key"] != fixtureStandupSeries || c["calendar_event_count"] != float64(4) {
+			t.Errorf("meeting chat: %v", c)
+		}
+	}
+	if linked != 1 {
+		t.Fatalf("%d meetings", linked)
+	}
+	// An archive from before the calendar tables lists conversations as it always did.
+	e.exec(`drop table calendar_recaps`)
+	code, out, errOut = e.run("--max-age", "0", "conversations")
+	if code != 0 || strings.Contains(out, "calendar_event_count") {
+		t.Fatalf("old archive: %d %s %s", code, out, errOut)
 	}
 }

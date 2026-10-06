@@ -240,8 +240,9 @@ type rangeInfo struct {
 
 // calendarGroup is the calendar command: with no subcommand it is the agenda.
 type calendarGroup struct {
-	Agenda calendarCmd      `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
-	Event  calendarEventCmd `cmd:"" help:"One event with everything the archive holds about it: attendees, body, recaps, action items and the recordings that belong to this occurrence."`
+	Agenda  calendarCmd        `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
+	Actions calendarActionsCmd `cmd:"" help:"Action items of the meeting recaps held by the events of a range, with owners; --mine keeps yours."`
+	Event   calendarEventCmd   `cmd:"" help:"One event with everything the archive holds about it: attendees, body, recaps, action items and the recordings that belong to this occurrence."`
 }
 
 type calendarCmd struct {
@@ -309,27 +310,32 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}
-		list.UncoveredDays = agenda.UncoveredDays
-		if len(list.UncoveredDays) > maxUncoveredDays {
-			list.UncoveredDays, list.UncoveredDaysTotal = list.UncoveredDays[:maxUncoveredDays], len(agenda.UncoveredDays)
-		}
-		for _, a := range agenda.Accounts {
-			ac := accountCoverage{AccountID: a.AccountID, SyncedAt: a.SyncedAt.UTC()}
-			if !a.AsOf.IsZero() {
-				t := a.AsOf.UTC()
-				ac.CoverageAsOf = &t
-			}
-			list.Accounts = append(list.Accounts, ac)
-		}
+		list.setCoverage(agenda.UncoveredDays, agenda.Accounts, agenda.AsOf)
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
-		if !agenda.AsOf.IsZero() {
-			t := agenda.AsOf.UTC()
-			list.CoverageAsOf = &t
-		}
 		return list, nil
 	})
+}
+
+// setCoverage fills the per-day and per-account coverage keys of a calendar list.
+func (l *listResult) setCoverage(uncovered []string, accounts []calendar.AccountCoverage, asOf time.Time) {
+	l.UncoveredDays = uncovered
+	if len(l.UncoveredDays) > maxUncoveredDays {
+		l.UncoveredDays, l.UncoveredDaysTotal = l.UncoveredDays[:maxUncoveredDays], len(uncovered)
+	}
+	for _, a := range accounts {
+		ac := accountCoverage{AccountID: a.AccountID, SyncedAt: a.SyncedAt.UTC()}
+		if !a.AsOf.IsZero() {
+			t := a.AsOf.UTC()
+			ac.CoverageAsOf = &t
+		}
+		l.Accounts = append(l.Accounts, ac)
+	}
+	if !asOf.IsZero() {
+		t := asOf.UTC()
+		l.CoverageAsOf = &t
+	}
 }
 
 // maxUncoveredDays caps uncovered_days; uncovered_days_total gives the full count when it is cut.
@@ -455,6 +461,10 @@ type calendarRecap struct {
 	HasConfRoomConnected bool            `json:"has_conf_room_connected,omitempty"`
 	HasCatchup           bool            `json:"has_catchup,omitempty"`
 	HasRecap             bool            `json:"has_recap,omitempty"`
+	// SeriesLevel is true when the recap is linked to the series id several occurrences share and
+	// no occurrence's start matches its meeting start, so every occurrence lists it: meeting_start
+	// is the only hint to which one it belongs to.
+	SeriesLevel bool `json:"series_level,omitempty"`
 }
 
 type calendarChat struct {
@@ -627,7 +637,7 @@ func recapOf(r store.CalendarRecap) calendarRecap {
 	out := calendarRecap{CallID: r.CallID, RecapID: r.RecapID, LinkMethod: r.LinkMethod, Headline: r.Headline, ShortSummary: r.ShortSummary, Outline: r.Outline,
 		SummarySections: r.SummarySections, ActionItems: itemsOut(r.ActionItems), Mentions: itemsOut(r.Mentions), Speakers: r.Speakers, Topics: r.Topics,
 		MeetingStart: r.MeetingStart.UTC(), MeetingEnd: r.MeetingEnd.UTC(), ExpiresAt: r.ExpiresAt.UTC(), AttendanceStatus: r.AttendanceStatus,
-		AttendeesCount: r.AttendeesCount, HasConfRoomConnected: r.HasConfRoomConnected, HasCatchup: r.HasCatchUp, HasRecap: r.HasRecap}
+		AttendeesCount: r.AttendeesCount, HasConfRoomConnected: r.HasConfRoomConnected, HasCatchup: r.HasCatchUp, HasRecap: r.HasRecap, SeriesLevel: r.SeriesLevel}
 	if r.RecordingURL != "" || !r.RecordingStart.IsZero() {
 		out.Recording = &recapRecording{URL: r.RecordingURL, Start: r.RecordingStart.UTC(), End: r.RecordingEnd.UTC(), DurationSeconds: r.DurationSeconds, IsMissed: r.IsMissed}
 	}
@@ -711,4 +721,73 @@ func joinJSON(a, b any) ([]byte, error) {
 		return y, nil
 	}
 	return []byte(string(x[:len(x)-1]) + "," + string(y[1:])), nil
+}
+
+// actionItem is one recap action item with the event it was held on.
+type actionItem struct {
+	EventID    string    `json:"event_id"`
+	EventKey   string    `json:"event_key"`
+	Subject    string    `json:"subject,omitempty"`
+	EventStart time.Time `json:"event_start"`
+	CallID     string    `json:"call_id"`
+	Title      string    `json:"title,omitempty"`
+	Text       string    `json:"text,omitempty"`
+	Owner      string    `json:"owner,omitempty"`
+	Speaker    string    `json:"speaker,omitempty"`
+	At         time.Time `json:"at,omitzero"`
+	Origin     string    `json:"origin"`
+	// Mine is true when the owner is the account's own display name (the name whoami prints).
+	Mine bool `json:"mine"`
+	// ExpiresAt is when Teams stops serving the recap; the item stays in the archive.
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+	// SeriesLevel: the recap is linked to the series, not to this occurrence, and is listed once
+	// under the first occurrence of the range that holds it; see calendar event.
+	SeriesLevel bool `json:"series_level,omitempty"`
+}
+
+type calendarActionsCmd struct {
+	From  string `help:"Start of the range, applied to the event's start: today, yesterday, tomorrow, YYYY-MM-DD, RFC3339, or a signed offset (+3d, -1d). Default: today." placeholder:"WHEN"`
+	To    string `help:"End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days." placeholder:"WHEN"`
+	Days  int    `help:"Range length in days from --from (instead of --to)."`
+	Owner string `help:"Only items whose owner's name contains this text, ignoring case."`
+	Mine  bool   `help:"Only items owned by you: the owner equals your own display name (as whoami shows), ignoring case."`
+	Limit int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
+}
+
+func (c *calendarActionsCmd) Run(rt *runtime) error {
+	if err := checkFields[actionItem](rt); err != nil {
+		return err
+	}
+	if err := checkLimit(c.Limit); err != nil {
+		return err
+	}
+	from, to, err := (&calendarCmd{From: c.From, To: c.To, Days: c.Days}).bounds(rt)
+	if err != nil {
+		return err
+	}
+	return rt.read("calendar actions", func(st *store.Store) (result, error) {
+		gap := true
+		out := newList(nil, false)
+		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
+		if st == nil {
+			return out, nil
+		}
+		res, err := st.CalendarActions(rt.ctx, store.CalendarActionFilter{Account: rt.account, From: from, To: to, Owner: c.Owner, Mine: c.Mine, Limit: c.Limit})
+		if err != nil {
+			return nil, err
+		}
+		if res.NoTables {
+			out.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			return out, nil
+		}
+		items := make([]actionItem, len(res.Items))
+		for i, a := range res.Items {
+			items[i] = actionItem{EventID: a.EventID, EventKey: a.EventKey, Subject: a.Subject, EventStart: a.EventStart.UTC(), CallID: a.CallID, Title: a.Title, Text: a.Text,
+				Owner: a.Owner, Speaker: a.Speaker, At: a.At.UTC(), Origin: a.Origin, Mine: a.Mine, ExpiresAt: a.ExpiresAt.UTC(), SeriesLevel: a.SeriesLevel}
+		}
+		list := newList(shape(rt, items), res.Truncated).withTotal(res.Total)
+		list.CoverageGap, list.Range, list.UnlinkedAccounts = &res.Gap, out.Range, res.Unlinked
+		list.setCoverage(res.UncoveredDays, res.Accounts, res.AsOf)
+		return list, nil
+	})
 }
