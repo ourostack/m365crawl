@@ -218,79 +218,46 @@ func TestAttendeeFailureCauses(t *testing.T) {
 	}
 }
 
-func TestGreedyAttendeesWhenCountExceedsStored(t *testing.T) {
-	// The count word says 20 and the store holds the records of a capped list: the records
-	// are accepted, the note says the list may be short, and Collect buckets them.
-	mk := func(label string, records int) *hxbuild.Object {
-		s := baseSpec(1)
-		s.ID = hxbuild.GlobalObjectID(0, 0, 0, label)
-		s.Attendees = nil
-		for i := 0; i < records; i++ {
-			s.Attendees = append(s.Attendees, hxbuild.Attendee{Name: "Fixture Person", Address: "p@example.invalid", B: 0})
+func TestAttendeeListFollowsTheLastString(t *testing.T) {
+	// Another string (+980, or +772) sits after the bare subject: the list starts after
+	// the furthest string, and that string's text is not mapped.
+	for _, word := range []int{980, 772} {
+		for _, extra := range []string{"", "Fixture extra text", "x"} {
+			s := baseSpec(1)
+			s.ExtraWord, s.ExtraString = word, extra
+			e, n := mapOK(t, ev(s), nil)
+			if n.AttendeesUnparsed || n.AttendeeFailure != "" || strings.Count(e.AttendeesJSON, `"name"`) != 2 {
+				t.Errorf("%d %q: %+v %s", word, extra, n, e.AttendeesJSON)
+			}
+			if len(extra) > 1 && strings.Contains(fmt.Sprintf("%+v", e), extra) {
+				t.Errorf("%d: the unidentified string is mapped", word)
+			}
 		}
-		o := hxbuild.NewEvent(s)
-		o.PutU32(oEnd(o, 876), 20)
-		return o
 	}
-	e, n := mapOK(t, obj(mk("FIXTURE-G", 3)), nil)
-	var note map[string]any
-	_ = json.Unmarshal([]byte(e.DetailRawJSON), &note)
-	if !n.AttendeesCountExceedsStored || n.AttendeesStored != 3 || n.AttendeesUnparsed || note["attendees_stored"] != float64(3) || note["attendees_maybe_truncated"] != true {
-		t.Fatalf("%+v %s", n, e.DetailRawJSON)
+	// Without the furthest-string rule this list would start inside the extra string. An
+	// extra string word that points outside the object is ignored, a known one is not.
+	s := baseSpec(1)
+	o := hxbuild.NewEvent(s)
+	o.PutU32(980, 1<<30)
+	if e, _ := mapOK(t, obj(o), nil); strings.Count(e.AttendeesJSON, `"name"`) != 2 {
+		t.Error("a bad unidentified word must not hide the list")
 	}
-	if strings.Count(e.AttendeesJSON, `"accepted"`) != 3 {
-		t.Fatal(e.AttendeesJSON)
-	}
-	var objs []*hxbuild.Object
-	for i, c := range []int{3, 7, 8, 9, 10, 12} {
-		objs = append(objs, mk("FIXTURE-G"+string(rune('A'+i)), c))
-	}
-	r := collect(t, storeOf(t, framed(objs...)), Options{})
-	want := map[string]int{"1-7": 2, "8": 1, "9": 1, "10+": 2}
-	if r.Notes.AttendeesCountExceedsStored != 6 || r.Notes.AttendeesUnparsed != 0 || len(r.Notes.ExceedsStoredRecords) != 4 {
-		t.Fatalf("%+v", r.Notes)
-	}
-	for k, v := range want {
-		if r.Notes.ExceedsStoredRecords[k] != v {
-			t.Errorf("%s: %+v", k, r.Notes.ExceedsStoredRecords)
-		}
+	o = hxbuild.NewEvent(s)
+	o.PutU32(876, 1<<30)
+	if _, n := mapOK(t, obj(o), nil); n.AttendeeFailure != "bare_string_end" {
+		t.Errorf("%+v", n)
 	}
 }
 
-func TestOddLengthDiagnostic(t *testing.T) {
-	// A list whose lengths count characters: odd lengths fail the byte reading, and the
-	// diagnostic says it would parse as characters. The mapping stays unknown.
-	build := func(chars bool) hxstore.Object {
-		o := hxbuild.NewEvent(baseSpec(1))
-		end := oEnd(o, 876)
-		raw := obj(o).Raw[:end]
-		out := append([]byte{}, raw...)
-		out = append(out, 1, 0, 0, 0) // one record
-		put := func(text string) {
-			u := hxbuild.UTF16Z(text)
-			u = u[:len(u)-2]
-			n := len(u)
-			if chars {
-				n = len(text)
-			}
-			out = append(out, byte(n)) //nolint:gosec // short test strings
-			out = append(out, u...)
-		}
-		put("Fixture")
-		put("a@example.invalid")
-		out = append(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-		e := obj(o)
-		e.Raw = out
-		return e
-	}
-	_, n := mapOK(t, build(true), nil)
-	if !n.AttendeesUnparsed || n.AttendeeFailure != "length_odd" || !n.AttendeesOddLengthCharsParse {
-		t.Fatalf("%+v", n)
-	}
-	// Odd and still wrong as characters: not counted.
-	o := build(true)
-	o.Raw = append(o.Raw, 9)
-	if _, n = mapOK(t, o, nil); !n.AttendeesUnparsed || n.AttendeesOddLengthCharsParse {
+func TestOddLengthStaysUnparsed(t *testing.T) {
+	// A list whose lengths count characters is not read as one: it stays unknown.
+	o := hxbuild.NewEvent(baseSpec(1))
+	e := obj(o)
+	out := append([]byte{}, e.Raw[:oEnd(o, 876)]...)
+	out = append(out, 1, 0, 0, 0, 7) // one record, a name length of 7
+	out = append(out, hxbuild.UTF16Z("Fixture")...)
+	e.Raw = out
+	if _, n := mapOK(t, e, nil); n.AttendeeFailure != "length_odd" || !n.AttendeesUnparsed {
 		t.Fatalf("%+v", n)
 	}
 }

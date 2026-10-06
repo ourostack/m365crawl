@@ -64,12 +64,6 @@ type MapNotes struct {
 	// AttendeeFailure names the one cause (a key of Notes.AttendeeFailures) when the list
 	// did not parse, else it is empty.
 	AttendeeFailure string
-	// AttendeesCountExceedsStored is set on an accepted list whose count word is larger
-	// than the records stored; AttendeesStored is the number of records read from any
-	// accepted list. AttendeesOddLengthCharsParse is a diagnostic only: the list failed on
-	// an odd length and would parse if lengths counted characters.
-	AttendeesCountExceedsStored, AttendeesOddLengthCharsParse bool
-	AttendeesStored                                           int
 	// AttendeeResponsesUnmapped counts attendee records whose response code is not one
 	// the layout lists.
 	AttendeeResponsesUnmapped int
@@ -190,14 +184,11 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		}
 	}
 
-	list, count, cause, exceeds := attendees(ev, base, &r)
+	list, count, cause := attendees(ev, base, &r)
 	if cause == attOK && count > 0 {
 		e.AttendeesJSON = list
 		notes.AttendeesAtCap = count >= AttendeeCap
-		if exceeds {
-			notes.AttendeesCountExceedsStored, notes.AttendeesStored = true, count
-		}
-		e.DetailRawJSON = attendeeNote(count, exceeds)
+		e.DetailRawJSON = attendeeNote(count)
 	} else {
 		unknown = append(unknown, calendar.FieldAttendees)
 		notes.AttendeesUnparsed = cause != attOK
@@ -369,78 +360,77 @@ var attNames = map[attCause]string{
 	attLengthOdd: "length_odd", attTextOutside: "text_outside", attWordsCut: "words_cut",
 }
 
-// attendees reads the list that follows the string at +876: a u32 count, then records of
-// a one-byte name length, the name, a one-byte address length, the address and three u32
-// words A, B and C, up to the end of the object. B is the response; A is 1 where Teams
-// says optional (likely).
-//
-// When the count is larger than the records the object holds, the records are still read
-// greedily from the start; if they end exactly at the object's end the list is accepted
-// as a capped one (exceeds is true: the store keeps only the capped records, likely
-// while the count word holds the real total). Anything else that does not parse exactly
-// to the object's end gives a cause, and says why.
-func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause, exceeds bool) {
-	w, _ := o.U32(evSubjectBare)
-	pos, ok := stringEnd(o, base+int(w))
+// attendees reads the list that follows the last string of the string area: a u32 count,
+// then records of a one-byte name length, the name, a one-byte address length, the address
+// and three u32 words A, B and C, up to the end of the object. B is the response; A is 1
+// where Teams says optional (likely). The last string is usually the bare subject (+876)
+// but not always: another string (+980, or +772) can follow it, so the list starts after
+// the furthest end among the string words. ok is false, with a cause, when the list does
+// not parse exactly to the object's end.
+func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause) {
+	pos, ok := listStart(o, base)
 	if !ok {
-		return "", 0, attBareStringEnd, false
+		return "", 0, attBareStringEnd
 	}
 	n, ok := o.U32(pos)
 	if !ok {
-		return "", 0, attCountOutside, false
+		return "", 0, attCountOutside
 	}
 	pos += 4
 	if n == 0 {
 		if pos != o.Len() {
-			return "", 0, attCountZero, false
+			return "", 0, attCountZero
 		}
-		return "", 0, attOK, false
+		return "", 0, attOK
 	}
-	tooBig := int64(n)*minRecord > int64(o.Len()-pos)
-	out, exceeds, cause := parseRecords(o, pos, n, 1, r)
-	if cause == attLengthOdd {
-		// Diagnostic only: would the list parse if the lengths counted characters?
-		scratch := reader{o: o, notes: &MapNotes{}}
-		_, _, c := parseRecords(o, pos, n, 2, &scratch)
-		r.notes.AttendeesOddLengthCharsParse = c == attOK
-	}
+	out, cause := parseRecords(o, pos, n, r)
 	if cause != attOK {
-		if tooBig {
+		if int64(n)*minRecord > int64(o.Len()-pos) {
 			cause = attCountTooBig
 		}
-		return "", 0, cause, false
+		return "", 0, cause
 	}
 	data, _ := json.Marshal(out) // plain strings marshal
-	return string(data), len(out), attOK, exceeds
+	return string(data), len(out), attOK
+}
+
+// listStart is the offset just past the furthest string of the string area. The known
+// string words must each end in a terminator; the two unidentified words (+980, +772) are
+// counted only when they do.
+func listStart(o hxstore.Object, base int) (int, bool) {
+	furthest := 0
+	for _, w := range stringWords {
+		off, _ := o.U32(w)
+		end, ok := stringEnd(o, base+int(off))
+		if ok {
+			furthest = max(furthest, end)
+		} else if w != evExtraA && w != evExtraB {
+			return 0, false
+		}
+	}
+	return furthest, true
 }
 
 // minRecord is the size of the smallest attendee record: two length bytes and three words.
 const minRecord = 14
 
-// parseRecords reads up to n records from pos, each length counted in unit bytes (1 for
-// the layout, 2 for the diagnostic that counts characters). It succeeds when the records
-// end exactly at the object's end; with fewer than n records that is exceeds.
-func parseRecords(o hxstore.Object, pos int, n uint32, unit int, r *reader) (out []attendee, exceeds bool, cause attCause) {
+// parseRecords reads n records from pos; the list is good when they end exactly at the
+// object's end.
+func parseRecords(o hxstore.Object, pos int, n uint32, r *reader) (out []attendee, cause attCause) {
 	for i := uint32(0); i < n; i++ {
-		if pos >= o.Len() {
-			if i == 0 {
-				return nil, false, attCountTooBig
-			}
-			return out, true, attOK // fewer records than the count says, ending cleanly
-		}
 		var a attendee
 		for k := 0; k < 2; k++ {
 			l, ok := o.U8(pos)
 			if !ok {
-				return nil, false, attLengthMissing
+				return nil, attLengthMissing
 			}
-			if unit == 1 && l%2 != 0 {
-				return nil, false, attLengthOdd
+			if l%2 != 0 {
+				return nil, attLengthOdd
 			}
-			size := int(l) * unit
+			size := int(l)
 			b, ok := o.Bytes(pos+1, size)
 			if !ok {
-				return nil, false, attTextOutside
+				return nil, attTextOutside
 			}
 			pos += 1 + size
 			text := r.scrub(utf16Text(b))
@@ -454,7 +444,7 @@ func parseRecords(o hxstore.Object, pos int, n uint32, unit int, r *reader) (out
 		bv, ok1 := o.U32(pos + 4)
 		_, ok2 := o.U32(pos + 8)
 		if !ok1 || !ok2 {
-			return nil, false, attWordsCut
+			return nil, attWordsCut
 		}
 		pos += 12
 		if av == 1 {
@@ -475,9 +465,9 @@ func parseRecords(o hxstore.Object, pos int, n uint32, unit int, r *reader) (out
 		out = append(out, a)
 	}
 	if pos != o.Len() {
-		return nil, false, attEndMismatch
+		return nil, attEndMismatch
 	}
-	return out, false, attOK
+	return out, attOK
 }
 
 // stringEnd returns the offset just past the NUL terminator of the UTF-16 string at off,
@@ -502,13 +492,13 @@ func utf16Text(b []byte) string {
 // attendeeNote is the statement that the attendee list is what the store holds, which may
 // be capped: the stored count, and whether the list is as long as the cap. It invents no
 // total.
-func attendeeNote(stored int, exceeds bool) string {
+func attendeeNote(stored int) string {
 	data, _ := json.Marshal(struct {
 		Source              string `json:"source"`
 		AttendeesStored     int    `json:"attendees_stored"`
 		AttendeeCap         int    `json:"capped_from"`
 		AttendeesMaybeShort bool   `json:"attendees_maybe_truncated"`
-	}{"outlook", stored, AttendeeCap, stored >= AttendeeCap || exceeds})
+	}{"outlook", stored, AttendeeCap, stored >= AttendeeCap})
 	return string(data)
 }
 

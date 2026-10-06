@@ -55,6 +55,8 @@ const (
 	evID          = 820  // word (base evFixed), byte length at evID+4
 	evLocation    = 836  // string word, base T
 	evSubjectBare = 876  // string word, base T; the attendee list follows its terminator
+	evExtraA      = 980  // string word, base T; unidentified, never mapped (an attendee list can follow it)
+	evExtraB      = 772  // string word, base T; unidentified, never mapped
 	evOrgName     = 884  // string word, base T
 	evOrgAddr     = 892  // string word, base T
 	evType        = 904  // u32
@@ -76,6 +78,11 @@ const (
 
 	lengthFlag = 1 << 31
 )
+
+// stringWords are the string words of the string area (base T). The attendee list starts
+// after the furthest of their ends; the last two are unidentified and are used for that
+// only.
+var stringWords = []int{evPreview, evLocation, evSubjectBare, evOrgName, evOrgAddr, evSubject, evExtraA, evExtraB}
 
 // UnlocatedFields lists the event fields the layout document does not pin. The mapper
 // leaves each unknown on every event; TestUnlocatedFieldsStayUnknown asserts it.
