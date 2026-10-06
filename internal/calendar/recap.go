@@ -27,7 +27,14 @@ const DefaultRecapTolerance = 60 * time.Second
 const (
 	LinkICalUID = "ical_uid"
 	LinkTime    = "time"
+	// LinkStartTime links by the meeting start alone (see LinkRecapsByStart).
+	LinkStartTime = "start_time"
 )
+
+// RecapStartTolerance is how far a recap's meeting start may be from an event's start for
+// LinkRecapsByStart. Teams reports a recap's end by when the call ended, which rarely equals the
+// scheduled end, so the start is the only time the two share.
+const RecapStartTolerance = 5 * time.Minute
 
 // Recap item kinds and origins.
 const (
@@ -393,6 +400,79 @@ func LinkRecaps(ctx context.Context, tx *sql.Tx, accountID string, tolerance tim
 		linked++
 	}
 	return linked, nil
+}
+
+// StartLinks is what LinkRecapsByStart did: recaps it linked, and recaps it left unlinked because
+// no event started near the meeting start (NoEvent) or several did (Ambiguous).
+type StartLinks struct {
+	Linked, NoEvent, Ambiguous int
+}
+
+// LinkRecapsByStart links the recaps of accountID that still have no iCalUID (and a meeting start)
+// to the event that starts within RecapStartTolerance of the meeting start, taking that event's
+// iCalUID with link method "start_time". It looks at the same events as LinkRecaps and counts an
+// event held by two sources once. Exactly one candidate links; zero or several leave the recap
+// unlinked and are counted, never guessed. A recap links later, when its event appears.
+func LinkRecapsByStart(ctx context.Context, tx *sql.Tx, accountID string, at time.Time) (out StartLinks, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT call_id, meeting_start_at FROM calendar_recaps
+	  WHERE account_id=? AND ical_uid='' AND meeting_start_at IS NOT NULL ORDER BY call_id`, accountID)
+	if err != nil {
+		return out, err
+	}
+	type pending struct {
+		call  string
+		start time.Time
+	}
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		var s timeText
+		if err := scanRow(rows, &p.call, &s); err != nil {
+			_ = rows.Close()
+			return out, err
+		}
+		p.start = s.t
+		todo = append(todo, p)
+	}
+	if err := rowsErr(rows); err != nil {
+		_ = rows.Close()
+		return out, err
+	}
+	_ = rows.Close()
+	if len(todo) == 0 {
+		return out, nil
+	}
+	principals, err := LoadPrincipals(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	cands, err := timedEvents(ctx, tx, principals.Accounts(principals.Of(accountID)))
+	if err != nil {
+		return out, err
+	}
+	for _, p := range todo {
+		var match []string
+		for _, c := range cands {
+			if within(c.start, p.start, RecapStartTolerance) {
+				match = append(match, c.uid)
+			}
+		}
+		match = distinct(match)
+		switch {
+		case len(match) == 0:
+			out.NoEvent++
+		case len(match) > 1 || match[0] == "":
+			out.Ambiguous++
+		default:
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE calendar_recaps SET ical_uid=?, link_method=?, updated_at=? WHERE account_id=? AND call_id=? AND ical_uid=''`,
+				match[0], LinkStartTime, formatTime(at), accountID, p.call); err != nil {
+				return out, err
+			}
+			out.Linked++
+		}
+	}
+	return out, nil
 }
 
 // distinct de-duplicates uids: one event held by two sources is still one event. An event with no
