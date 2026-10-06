@@ -402,8 +402,18 @@ func LinkRecaps(ctx context.Context, tx *sql.Tx, accountID string, tolerance tim
 	return linked, nil
 }
 
-// StartLinks is what LinkRecapsByStart did: recaps it linked, and recaps it left unlinked because
-// no event started near the meeting start (NoEvent) or several did (Ambiguous).
+// ClearStartLinks unlinks every recap of accountID that was linked by meeting start, so the next
+// LinkRecapsByStart decides again from the events as they are now: a start link is a function of
+// the archive, not of the order its rows arrived in. A link made by id or by both times is kept.
+func ClearStartLinks(ctx context.Context, tx *sql.Tx, accountID string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE calendar_recaps SET ical_uid='', link_method='' WHERE account_id=? AND link_method=?`, accountID, LinkStartTime)
+	return err
+}
+
+// StartLinks is a census of the recaps of one account after LinkRecapsByStart: the recaps linked by
+// meeting start (Linked), and the recaps with no iCalUID and a meeting start that stay unlinked
+// because no event started near it (NoEvent) or several did (Ambiguous). It counts every such recap
+// of the account, not only those the batch touched.
 type StartLinks struct {
 	Linked, NoEvent, Ambiguous int
 }
@@ -502,7 +512,7 @@ type timedEvent struct {
 	start, end time.Time
 }
 
-// timedEvents lists the live, non-master, timed events of the accounts, one entry per event key:
+// timedEvents lists the live, non-master, timed events that are neither cancelled nor declined of the accounts, one entry per event key:
 // the same event held by two sources is one event. Its uid is the first non-empty one among its
 // rows, in source order, and its times are those row's.
 func timedEvents(ctx context.Context, tx *sql.Tx, accounts []string) ([]timedEvent, error) {
@@ -510,9 +520,9 @@ func timedEvents(ctx context.Context, tx *sql.Tx, accounts []string) ([]timedEve
 	for _, a := range accounts {
 		args = append(args, a)
 	}
-	args = append(args, EventMaster)
+	args = append(args, EventMaster, triArg(TriTrue))
 	rows, err := tx.QueryContext(ctx, strings.Replace(`SELECT event_key, ical_uid, start_at, end_at FROM calendar_source_events
-	  WHERE account_id IN (@accounts) AND removed_at IS NULL AND COALESCE(all_day,0)=0 AND event_type<>? AND start_at<>''
+	  WHERE account_id IN (@accounts) AND removed_at IS NULL AND COALESCE(all_day,0)=0 AND event_type<>? AND COALESCE(cancelled,0)<>? AND response<>'declined' AND start_at<>''
 	  ORDER BY event_key, source, account_id`, "@accounts", placeholders(len(accounts)), 1), args...)
 	if err != nil {
 		return nil, err

@@ -52,8 +52,8 @@ func (c *Counts) add(o outcome) {
 type BatchCounts struct {
 	Events, Recaps, RecapItems Counts
 	Gone, Linked               int
-	// LinkedByStart counts recaps linked by meeting start alone; NoStartMatch and AmbiguousStart
-	// count the recaps that stay unlinked because no event, or several, started near theirs.
+	// LinkedByStart, NoStartMatch and AmbiguousStart are a census of the account after the batch (see
+	// StartLinks), not a count of what the batch changed: start links are recomputed each time.
 	LinkedByStart, NoStartMatch, AmbiguousStart int
 	// Refused lists the events that could not be stored (see ValidateEvent). Nothing was stored for
 	// them and the rest of the batch was applied.
@@ -218,7 +218,10 @@ func ApplyBatch(ctx context.Context, tx *sql.Tx, b Batch, opts ApplyOptions, at 
 		tol = DefaultRecapTolerance
 	}
 	var sl StartLinks
-	counts.Linked, err = LinkRecaps(ctx, tx, w.AccountID, tol, at)
+	err = ClearStartLinks(ctx, tx, w.AccountID)
+	if err == nil {
+		counts.Linked, err = LinkRecaps(ctx, tx, w.AccountID, tol, at)
+	}
 	if err == nil {
 		sl, err = LinkRecapsByStart(ctx, tx, w.AccountID, at)
 	}

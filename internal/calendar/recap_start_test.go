@@ -21,10 +21,83 @@ func TestLinkRecapsByStartLinksTheOneEventThatStartsNearby(t *testing.T) {
 	if uid, m := linkState(t, db, "c1"); uid != "uid-a" || m != LinkStartTime || c.Linked != 0 || c.LinkedByStart != 1 || c.NoStartMatch != 0 || c.AmbiguousStart != 0 {
 		t.Fatalf("%s %s %+v", uid, m, c)
 	}
-	// Never relinked: a later event that starts closer does not move it.
-	batch(t, db, Batch{Window: tw(t), Events: []Event{evAt(t, "e3", "uid-c", "2026-10-05T16:00:00Z", "2026-10-05T16:20:00Z")}}, "2026-10-06T03:00:00Z")
-	if uid, _ := linkState(t, db, "c1"); uid != "uid-a" {
-		t.Fatalf("relinked to %s", uid)
+	// The link is a function of the archive: a second event that also starts nearby makes the
+	// recap ambiguous, whatever arrived first, and it is counted as such.
+	c = batch(t, db, Batch{Window: tw(t), Events: []Event{evAt(t, "e3", "uid-c", "2026-10-05T16:00:00Z", "2026-10-05T16:20:00Z")}}, "2026-10-06T03:00:00Z")
+	if uid, m := linkState(t, db, "c1"); uid != "" || m != "" || c.LinkedByStart != 0 || c.AmbiguousStart != 1 {
+		t.Fatalf("%s %s %+v", uid, m, c)
+	}
+}
+
+// Event, recap, second event and recap, event, second event reach the same state.
+func TestLinkRecapsByStartDoesNotDependOnArrivalOrder(t *testing.T) {
+	e1 := evAt(t, "e1", "uid-a", "2026-10-05T16:01:00Z", "2026-10-05T16:30:00Z")
+	e2 := evAt(t, "e2", "uid-b", "2026-10-05T16:02:00Z", "2026-10-05T16:30:00Z")
+	r := startRecap(t, "c1", "2026-10-05T16:00:00Z")
+	orders := [][]Batch{
+		{{Window: tw(t), Events: []Event{e1}}, {Window: tw(t), Recaps: []Recap{r}}, {Window: tw(t), Events: []Event{e2}}},
+		{{Window: tw(t), Recaps: []Recap{r}}, {Window: tw(t), Events: []Event{e1}}, {Window: tw(t), Events: []Event{e2}}},
+		{{Window: tw(t), Events: []Event{e1, e2}}, {Window: tw(t), Recaps: []Recap{r}}},
+	}
+	for i, order := range orders {
+		db := openDB(t)
+		var c BatchCounts
+		for _, b := range order {
+			c = batch(t, db, b, "2026-10-06T02:00:00Z")
+		}
+		if uid, m := linkState(t, db, "c1"); uid != "" || m != "" || c.AmbiguousStart != 1 {
+			t.Errorf("order %d: %q %q %+v", i, uid, m, c)
+		}
+	}
+}
+
+// A cancelled or declined event is not a candidate: it neither links a recap nor makes one ambiguous.
+func TestLinkRecapsByStartSkipsCancelledAndDeclinedEvents(t *testing.T) {
+	cancelled := evAt(t, "x", "uid-x", "2026-10-05T16:00:00Z", "2026-10-05T16:30:00Z")
+	cancelled.Cancelled = TriTrue
+	declined := evAt(t, "d", "uid-d", "2026-10-05T16:01:00Z", "2026-10-05T16:30:00Z")
+	declined.Response = "declined"
+	live := evAt(t, "l", "uid-live", "2026-10-05T16:02:00Z", "2026-10-05T16:30:00Z")
+	db := openDB(t)
+	seedLinkable(t, db, cancelled, declined)
+	c := batch(t, db, Batch{Window: tw(t), Recaps: []Recap{startRecap(t, "c1", "2026-10-05T16:00:00Z")}}, "2026-10-06T02:00:00Z")
+	if uid, _ := linkState(t, db, "c1"); uid != "" || c.NoStartMatch != 1 || c.AmbiguousStart != 0 {
+		t.Fatalf("a cancelled or declined event linked: %q %+v", uid, c)
+	}
+	// The rescheduled meeting in the same slot is the one candidate.
+	c = batch(t, db, Batch{Window: tw(t), Events: []Event{live}}, "2026-10-06T03:00:00Z")
+	if uid, m := linkState(t, db, "c1"); uid != "uid-live" || m != LinkStartTime || c.LinkedByStart != 1 {
+		t.Fatalf("%q %q %+v", uid, m, c)
+	}
+}
+
+// An id that arrives after a start link replaces it, and later derivations leave it alone.
+func TestLinkRecapsByStartYieldsToAnId(t *testing.T) {
+	db := openDB(t)
+	seedLinkable(t, db, evAt(t, "e1", "uid-a", "2026-10-05T16:01:00Z", "2026-10-05T16:30:00Z"))
+	batch(t, db, Batch{Window: tw(t), Recaps: []Recap{startRecap(t, "c1", "2026-10-05T16:00:00Z")}}, "2026-10-06T02:00:00Z")
+	withID := startRecap(t, "c1", "2026-10-05T16:00:00Z")
+	withID.ICalUID, withID.LinkMethod = "uid-other", LinkICalUID
+	c := batch(t, db, Batch{Window: tw(t), Recaps: []Recap{withID}}, "2026-10-06T03:00:00Z")
+	if uid, m := linkState(t, db, "c1"); uid != "uid-other" || m != LinkICalUID || c.LinkedByStart != 0 {
+		t.Fatalf("%q %q %+v", uid, m, c)
+	}
+	if c = batch(t, db, Batch{Window: tw(t)}, "2026-10-06T04:00:00Z"); c.LinkedByStart != 0 {
+		t.Fatalf("%+v", c)
+	}
+	if uid, m := linkState(t, db, "c1"); uid != "uid-other" || m != LinkICalUID {
+		t.Fatalf("an id link was touched: %q %q", uid, m)
+	}
+}
+
+// An event that is removed after a link takes the link with it at the next derivation.
+func TestLinkRecapsByStartIsClearedWhenTheEventGoes(t *testing.T) {
+	db := openDB(t)
+	seedLinkable(t, db, evAt(t, "e1", "uid-a", "2026-10-05T16:01:00Z", "2026-10-05T16:30:00Z"))
+	batch(t, db, Batch{Window: tw(t), Recaps: []Recap{startRecap(t, "c1", "2026-10-05T16:00:00Z")}}, "2026-10-06T02:00:00Z")
+	c := batch(t, db, Batch{Window: tw(t), GoneSourceIDs: []string{"e1"}}, "2026-10-06T03:00:00Z")
+	if uid, m := linkState(t, db, "c1"); uid != "" || m != "" || c.LinkedByStart != 0 || c.NoStartMatch != 1 {
+		t.Fatalf("%q %q %+v", uid, m, c)
 	}
 }
 
