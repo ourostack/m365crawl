@@ -17,6 +17,9 @@ const (
 	outlookFailureKey = "outlook_failure:"
 	outlookStampKey   = "outlook_derivation:"
 	outlookAttemptKey = "outlook_last_attempt:"
+	outlookReadKey    = "outlook_read:"
+	outlookSkippedKey = "outlook_skipped:"
+	outlookCheckedKey = "outlook_checked:"
 )
 
 // OutlookBatch is one Outlook profile's events, read whole from its store copy.
@@ -28,6 +31,27 @@ type OutlookBatch struct {
 	Zone    *time.Location // days are taken in this zone
 	// Stamp is what this build derives under (see OutlookStamp); it is kept per account.
 	Stamp string
+	// Read is what the read saw beyond the events, kept for `calendar sources`.
+	Read OutlookRead
+}
+
+// OutlookLayout is one (class, tag) pair the reader does not know, with how many objects of it the
+// store holds. It is shown so a layout change reads as "tag 0x456 appeared for class 0x6b".
+type OutlookLayout struct {
+	Class uint16 `json:"class"`
+	Tag   uint16 `json:"tag"`
+	Count int    `json:"count"`
+}
+
+// OutlookRead is the last good read's census of one profile's store: numbers only.
+type OutlookRead struct {
+	// At is when the read happened; `calendar sources` shows it as census_as_of.
+	At             time.Time       `json:"at,omitzero"`
+	UnknownLayouts []OutlookLayout `json:"unknown_layouts,omitempty"`
+	BlocksFound    int             `json:"blocks_found"`
+	BlocksInvalid  int             `json:"blocks_invalid"`
+	// UnmappedValues counts events whose event type, show-as or response value is outside the mapped set.
+	UnmappedValues map[string]int `json:"unmapped_values,omitempty"`
 }
 
 // OutlookStamp is the stamp of what an Outlook derivation was made under: the Outlook mapper
@@ -59,6 +83,11 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 			return aerr
 		}
 		if _, err := tx.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+b.Account); err != nil {
+			return err
+		}
+		b.Read.At = b.At
+		raw, _ := json.Marshal(b.Read) // plain numbers and a time
+		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookReadKey+b.Account, string(raw)); err != nil {
 			return err
 		}
 		return recordRun(ctx, tx, run(res))
@@ -266,6 +295,21 @@ func (s *Store) OutlookState(ctx context.Context, profile, source, account strin
 func (s *Store) SetOutlookLastAttempt(ctx context.Context, profile string, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookAttemptKey+profile, at.UTC().Format(timeLayout))
 	return err
+}
+
+// SetOutlookSkipped records that the last sync did not read the profile because its minimum read
+// interval had not passed. SetOutlookChecked forgets it.
+func (s *Store) SetOutlookSkipped(ctx context.Context, profile string) error {
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, '1') on conflict(key) do update set value=excluded.value`, outlookSkippedKey+profile)
+	return err
+}
+
+// SetOutlookChecked records that a sync looked at the profile's store (a read, or the fingerprint
+// check that found it unchanged) and forgets a skip.
+func (s *Store) SetOutlookChecked(ctx context.Context, profile string, at time.Time) error {
+	_, forget := s.db.ExecContext(ctx, `delete from meta where key=?`, outlookSkippedKey+profile)
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookCheckedKey+profile, at.UTC().Format(timeLayout))
+	return errors.Join(forget, err)
 }
 
 // OutlookLinkMethod is how an operator's explicit link is recorded in calendar_account_links.

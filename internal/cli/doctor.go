@@ -12,8 +12,11 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/hxstore"
+	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
 	"github.com/ourostack/teamscrawl/internal/render"
 	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/syncer"
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
@@ -23,6 +26,12 @@ var (
 	openArchiveReadOnly = store.OpenReadOnly
 	readArchiveStatus   = func(st *store.Store, ctx context.Context) (store.StatusRow, error) { return st.Status(ctx) }
 	readCalendarCache   = func(st *store.Store, ctx context.Context) (store.CalendarCache, error) { return st.CalendarCache(ctx) }
+	readCalendarSources = func(st *store.Store, ctx context.Context, f store.CalendarSourcesFilter) (store.CalendarSources, error) {
+		return st.CalendarSources(ctx, f)
+	}
+	outlookDefaultRoot  = outlookdesktop.DefaultRoot
+	outlookDiscover     = outlookdesktop.Discover
+	outlookOpenStore    = hxstore.OpenFile
 	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
 )
 
@@ -103,7 +112,8 @@ func (rt *runtime) archiveChecks() []check {
 			check{Name: "schema_version", OK: true, Detail: d},
 			check{Name: "fts", OK: true, Detail: d},
 			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `teamscrawl sync`."},
-			check{Name: "calendar_cache", OK: true, Detail: d})
+			check{Name: "calendar_cache", OK: true, Detail: d},
+			rt.outlookStoreCheck(nil))
 	case isArchiveNewer(err):
 		// A newer schema is refused at open, so no other check can read the archive.
 		var coded *errs.Coded
@@ -162,7 +172,7 @@ func (rt *runtime) archiveChecks() []check {
 	default:
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
-	return append(cs, rt.calendarCacheCheck(st))
+	return append(cs, rt.calendarCacheCheck(st), rt.outlookStoreCheck(st))
 }
 
 // staleCalendarAfter is how old the Teams calendar cache may be before doctor warns: Teams
@@ -266,4 +276,84 @@ func (rt *runtime) writableCheck() check {
 		return check{Name: "database_writable", OK: true, Detail: rt.dbPath + " is writable"}
 	}
 	return check{Name: "database_writable", OK: true, Detail: rt.dbPath + " does not exist yet; " + dir + " is writable"}
+}
+
+// outlookStoreCheck reports the Outlook source: off, or on with the profiles it finds, whether each
+// store's header (a 64-byte read of the live file, never a copy) is a version this build reads, and
+// what the archive remembers of the last read. It warns and never fails, because Outlook is optional
+// and fails alone. Its detail holds no event content.
+func (rt *runtime) outlookStoreCheck(st *store.Store) check {
+	const name = "outlook_store"
+	if !rt.outlookOn {
+		return check{Name: name, OK: true, Detail: "the Outlook source is off; TEAMSCRAWL_OUTLOOK=1 or --outlook-root DIR turns it on"}
+	}
+	root := rt.outlookRoot
+	if root == "" {
+		var err error
+		if root, err = outlookDefaultRoot(); err != nil {
+			return check{Name: name, OK: true, Warn: true, Detail: "the Outlook source is on but there is no profiles directory to read: " + err.Error(), Fix: "Pass --outlook-root DIR, or turn the Outlook source off with --outlook-root none."}
+		}
+	}
+	profiles, classic, skipped, err := outlookDiscover(root)
+	var coded *errs.Coded
+	switch {
+	case errors.As(err, &coded):
+		return check{Name: name, OK: true, Warn: true, Detail: coded.Message, Fix: coded.Fix}
+	case err != nil, len(profiles) == 0 && len(skipped) == 0:
+		e := syncer.NoOutlookProfilesError(root, classic)
+		return check{Name: name, OK: true, Warn: true, Detail: e.Message, Fix: e.Fix}
+	}
+	var state map[string]store.CalendarSource
+	var details, fixes []string
+	if st != nil {
+		res, err := readCalendarSources(st, rt.ctx, store.CalendarSourcesFilter{Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
+		if err != nil {
+			details, fixes = append(details, "cannot read the Outlook state: "+err.Error()), append(fixes, "Run `teamscrawl sync`.")
+		}
+		state = map[string]store.CalendarSource{}
+		for _, r := range res.Rows {
+			state[r.AccountID] = r
+		}
+	}
+	for _, sp := range skipped {
+		details, fixes = append(details, "profile "+sp.Name+" cannot be examined ("+sp.Reason+")"), append(fixes, "Give teamscrawl access to the profile directory "+sp.Dir+" (Full Disk Access on macOS).")
+	}
+	for _, p := range profiles {
+		d, fix := outlookProfileState(p, state["outlook/"+p.Name], rt.now())
+		details, fixes = append(details, d), append(fixes, fix)
+	}
+	c := check{Name: name, OK: true, Detail: strings.Join(details, "; ")}
+	for _, f := range fixes {
+		if f != "" {
+			c.Warn, c.Fix = true, f
+			break
+		}
+	}
+	return c
+}
+
+// outlookProfileState is one profile's line of the check, and the fix when it is a problem.
+func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, now time.Time) (detail, fix string) {
+	detail = "profile " + p.Name + ": "
+	hdr, err := outlookOpenStore(p.StorePath)
+	if err == nil {
+		_ = hdr.Close()
+	}
+	var version hxstore.ErrStoreVersion
+	switch {
+	case errors.As(err, &version):
+		return detail + fmt.Sprintf("the store is version %q and this teamscrawl reads %q (unsupported_version)", rune(version.Found), rune(hxstore.KnownStoreVersions[0])), "Update teamscrawl: this version cannot read the store."
+	case err != nil:
+		return detail + "the store cannot be read (unreadable): " + err.Error(), "Check that " + p.StorePath + " exists and is readable; on macOS give teamscrawl Full Disk Access."
+	}
+	detail += "store version readable"
+	if o := row.Outlook; o != nil {
+		if f := o.Failure; f != nil {
+			return detail + "; the last read failed (" + o.Status + "): " + f.Code + ": " + f.Message, firstOf(f.Fix, "Run `teamscrawl sync` and read its error.")
+		}
+		if !o.LastReadAt.IsZero() {
+			return detail + "; last read " + oneUnit(now.Sub(o.LastReadAt)) + " ago, " + o.Status, ""
+		}
+	}
+	return detail + "; not read yet", ""
 }
