@@ -4,6 +4,10 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Release: notarization waits at most `NOTARY_TIMEOUT` (default 20 minutes) per binary and then fails with the reason. Before, `notarytool submit --wait` had no bound, so a slow Apple notary queue ran the release job into its 60-minute timeout with no explanation (the first v0.3.0 run). A failed run leaves the tag and no release, and the next run of the Release workflow resumes from the tag.
+
 ## [0.3.0] - 2026-10-06
 
 ### Added

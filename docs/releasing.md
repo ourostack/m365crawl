@@ -39,6 +39,10 @@ The state-based pipeline has not run for real yet (v0.2.0 was released through t
 3. Merge two rc notes files together (for example `v0.3.0-rc.2.md` and `v0.4.0-rc.1.md` in one merge). The lowest, `v0.3.0-rc.2`, must release first, then `continue-release` must start the workflow again and release `v0.4.0-rc.1` in its own run.
 4. Last, deliberately fail one rc to watch containment and reporting work: merge another rc notes file after temporarily removing the tap deploy key from the tap, which fails `publish-homebrew` and must open the issue "Workflow failed: Release"; restore the key, run the workflow again from `main` (not "Re-run failed jobs") and watch it resume at the publish step: `decide` must report `publish_only`, `verify` and `release` must be skipped, the darwin and Windows verification and `settle` run against the published assets, `publish-homebrew` puts the cask on the `rehearsal` branch, and nothing is rebuilt or signed again. Never do this with a stable version.
 
+## When notarization is slow
+
+Each darwin binary is notarized with `notarytool submit --wait`, bounded by `NOTARY_TIMEOUT` (default 20 minutes). When Apple's notary queue is slow, the `release` job fails with that reason before anything is published: the tag exists and no GitHub release does. Run the Release workflow again ("Run workflow") once the queue recovers; `decide` resumes from the tag.
+
 ## Resuming a publish
 
 `decide` reads the tap itself (`ourostack/homebrew-tap` is public; it first checks that the tap repository itself is readable and refuses when it is not, so a private or renamed tap never looks like a missing cask, then reads `Casks/teamscrawl.rb` through the API with the workflow token) rather than keeping a marker: the tap is the fact that matters, it survives any re-run, and a marker could say "published" while the tap says otherwise. A version is finished when its release exists and the cask on the tap's `main` (stable) or `rehearsal` branch (rehearsal) is for that version or a later one, and a stable release is not demoted to a prerelease. Otherwise the run resumes at the tag's commit with `publish_only=true`:
