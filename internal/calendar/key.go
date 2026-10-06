@@ -29,7 +29,7 @@ func originalSuffix(e Event) string {
 	if e.OriginalStart == nil {
 		return ""
 	}
-	if e.AllDay {
+	if e.AllDay.Is(true) {
 		// The date as the source stated it, in the zone it came in, so UTC and local midnight agree.
 		return e.OriginalStart.Format(dateLayout)
 	}
@@ -41,7 +41,7 @@ func originalSuffix(e Event) string {
 func compositeKey(e Event) string {
 	suffix := originalSuffix(e)
 	if suffix == "" {
-		if e.AllDay {
+		if e.AllDay.Is(true) {
 			suffix = e.StartDate
 		} else {
 			suffix = e.Start.UTC().Format(time.RFC3339)

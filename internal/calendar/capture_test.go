@@ -19,15 +19,25 @@ const (
 	roomJSON       = `[{"name":"Fixture Room Alpha","kind":"room","address":"alpha@example.test"}]`
 )
 
+// thinUnknown is what a thin copy does not say: the whole detail group, which the Teams list view
+// leaves out. A field in it is read as known when the copy carries a value for it.
+var thinUnknown = []Field{
+	FieldJoinURL, FieldShortJoinURL, FieldDialIn, FieldMeetingChatID, FieldAttendees, FieldRooms, FieldBody,
+	FieldBodyPreview, FieldAttachments, FieldCategories, FieldRecurrence, FieldReminder,
+}
+
 // thin is a copy that carries the schedule and identity only, as Teams caches for an event the
-// user has not opened.
+// user has not opened. It states every flag but HasAttachments and every schedule field, and says
+// the detail group is unknown.
 func thin(t testing.TB, lm string) Event {
 	return Event{
 		Source: SourceTeams, AccountID: "tenant-1/user-1", SourceID: "ev1", GlobalID: "uid-1", ICalUID: "uid-1",
 		SeriesKey: "series-1", EventType: EventOccurrence,
 		Start: mustTime(t, "2026-10-05T16:00:00Z"), End: mustTime(t, "2026-10-05T17:00:00Z"),
 		TimeZone: "PacificSt", Subject: "Fixture Sync", Organizer: "Alex Fixture", Response: "accepted", ShowAs: "busy",
-		Location: "Fixture Room Alpha", IsOnlineMeeting: true, LastModified: tp(t, lm),
+		Location: "Fixture Room Alpha", LastModified: tp(t, lm),
+		AllDay: TriFalse, IsOrganizer: TriFalse, IsPrivate: TriFalse, Cancelled: TriFalse, IsOnlineMeeting: TriTrue,
+		Unknown: append([]Field{FieldTimeZoneIANA, FieldUTCOffset, FieldOrganizerAddress}, thinUnknown...),
 	}
 }
 
@@ -41,7 +51,7 @@ func rich(t testing.TB, lm string) Event {
 	e.AttendeesJSON = attendeesTwo
 	e.LocationsJSON = roomJSON
 	e.BodyHTML, e.BodyText, e.BodyType, e.BodyPreview = "<p>Agenda body</p>", "Agenda body", "html", "Agenda"
-	e.AttachmentsJSON, e.HasAttachments = `[{"name":"notes.txt"}]`, true
+	e.AttachmentsJSON, e.HasAttachments = `[{"name":"notes.txt"}]`, TriTrue
 	e.CategoriesJSON = `["Fixture"]`
 	e.RecurrenceJSON = `{"pattern":"weekly"}`
 	reminder := 15
@@ -57,9 +67,13 @@ func TestCaptureNewEventTakesIncoming(t *testing.T) {
 	got := mustCapture(t, nil, in)
 	want := in
 	want.DetailAsOf = at(t, t1)
+	want.Unknown = []Field{FieldOrganizerAddress, FieldTimeZoneIANA, FieldUTCOffset}
+	// A schedule unit stated at the row's LastModified stores no clock; every other unit does.
 	clocks := map[string]time.Time{"raw": *at(t, t1)}
 	for _, u := range units {
-		clocks[u.name] = *at(t, t1)
+		if !u.schedule {
+			clocks[u.name] = *at(t, t1)
+		}
 	}
 	want.FieldClocksJSON = formatClocks(clocks)
 	if !reflect.DeepEqual(got, want) {
@@ -74,7 +88,7 @@ func TestCaptureThinnerLaterCopyKeepsDetail(t *testing.T) {
 	old := mustCapture(t, nil, rich(t, t1))
 	got := mustCapture(t, &old, thin(t, t3))
 	if got.AttendeesJSON != attendeesTwo || got.BodyHTML != "<p>Agenda body</p>" || got.LocationsJSON != roomJSON ||
-		got.OnlineMeetingURL == "" || got.TeamsThreadID == "" || got.HasAttachments != true || got.ReminderMinutes == nil {
+		got.OnlineMeetingURL == "" || got.TeamsThreadID == "" || got.HasAttachments != TriTrue || got.ReminderMinutes == nil {
 		t.Fatalf("thin copy erased detail: %+v", got)
 	}
 	if !got.DetailAsOf.Equal(mustTime(t, t1)) || got.DetailRawJSON != old.DetailRawJSON {
@@ -158,8 +172,8 @@ func TestCaptureStaleRichCopyFillsOnlyEmptyDetail(t *testing.T) {
 func TestCaptureCancelledNewerWins(t *testing.T) {
 	old := mustCapture(t, nil, rich(t, t1))
 	c := thin(t, t3)
-	c.Cancelled = true
-	if got := mustCapture(t, &old, c); !got.Cancelled {
+	c.Cancelled = TriTrue
+	if got := mustCapture(t, &old, c); !got.Cancelled.Is(true) {
 		t.Fatal("a newer cancellation must win")
 	}
 }
@@ -167,17 +181,17 @@ func TestCaptureCancelledNewerWins(t *testing.T) {
 func TestCaptureStaleCancelledIgnored(t *testing.T) {
 	old := mustCapture(t, nil, rich(t, t3))
 	c := thin(t, t1)
-	c.Cancelled = true
-	if got := mustCapture(t, &old, c); got.Cancelled {
+	c.Cancelled = TriTrue
+	if got := mustCapture(t, &old, c); got.Cancelled.Is(true) {
 		t.Fatal("a stale cancellation must be ignored")
 	}
 }
 
 func TestCaptureUncancelNewerWins(t *testing.T) {
 	first := rich(t, t1)
-	first.Cancelled = true
+	first.Cancelled = TriTrue
 	old := mustCapture(t, nil, first)
-	if got := mustCapture(t, &old, thin(t, t3)); got.Cancelled {
+	if got := mustCapture(t, &old, thin(t, t3)); got.Cancelled.Is(true) {
 		t.Fatal("a newer un-cancel must win")
 	}
 }
@@ -279,7 +293,7 @@ func TestCaptureRoomChangeMarksStructuredRoomStale(t *testing.T) {
 func TestCaptureOnlineMeetingRemoved(t *testing.T) {
 	old := mustCapture(t, nil, rich(t, t1))
 	off := thin(t, t3)
-	off.IsOnlineMeeting, off.OnlineStated = false, true
+	off.IsOnlineMeeting = TriFalse
 	got := mustCapture(t, &old, off)
 	if got.OnlineMeetingURL != "" || got.ShortJoinURL != "" || got.DialInConferenceID != "" || got.DialInTollNumber != "" || got.TeamsThreadID != "" {
 		t.Fatalf("meeting links survived removal: %+v", got)
@@ -290,13 +304,13 @@ func TestCaptureOnlineMeetingRemoved(t *testing.T) {
 	// A stale copy that says it is not online does not clear anything.
 	cur := mustCapture(t, nil, rich(t, t3))
 	staleOff := thin(t, t1)
-	staleOff.IsOnlineMeeting = false
+	staleOff.IsOnlineMeeting = TriFalse
 	if got := mustCapture(t, &cur, staleOff); got.OnlineMeetingURL == "" {
 		t.Fatal("a stale copy cleared the join link")
 	}
 	// A newer copy that still carries the link keeps it even if it says not online.
 	both := rich(t, t3)
-	both.IsOnlineMeeting = false
+	both.IsOnlineMeeting = TriFalse
 	if got := mustCapture(t, &old, both); got.OnlineMeetingURL == "" {
 		t.Fatal("the incoming copy's own link was cleared")
 	}
@@ -383,7 +397,7 @@ func TestCaptureReminderAndAttachmentsFollowDetailClock(t *testing.T) {
 	first := rich(t, t1)
 	old := mustCapture(t, nil, first)
 	// Incoming empty keeps.
-	if got := mustCapture(t, &old, thin(t, t2)); got.ReminderMinutes == nil || *got.ReminderMinutes != 15 || !got.HasAttachments {
+	if got := mustCapture(t, &old, thin(t, t2)); got.ReminderMinutes == nil || *got.ReminderMinutes != 15 || got.HasAttachments != TriTrue {
 		t.Fatalf("empty incoming erased: %+v", got)
 	}
 	// Newer both-set takes incoming; stale keeps old; peers take incoming.
@@ -411,7 +425,7 @@ func TestCaptureReminderAndAttachmentsFollowDetailClock(t *testing.T) {
 	}
 	// Filling an empty reminder.
 	bare := mustCapture(t, nil, thin(t, t1))
-	if got := mustCapture(t, &bare, rich(t, t2)); got.ReminderMinutes == nil || !got.HasAttachments {
+	if got := mustCapture(t, &bare, rich(t, t2)); got.ReminderMinutes == nil || got.HasAttachments != TriTrue {
 		t.Fatalf("fill: %+v", got)
 	}
 }

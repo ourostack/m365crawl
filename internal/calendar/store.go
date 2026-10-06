@@ -546,7 +546,7 @@ func markRemoved(ctx context.Context, tx *sql.Tx, w Window, seen map[string]bool
 	lastDate := w.End.UTC().Add(-time.Nanosecond).Format(dateLayout)
 	rows, err := tx.QueryContext(ctx,
 		`SELECT event_key FROM calendar_source_events WHERE source=? AND account_id=? AND removed_at IS NULL AND event_type<>? AND (
-		   (all_day=0 AND start_at >= ? AND start_at < ?) OR (all_day=1 AND start_date >= ? AND start_date <= ?))`,
+		   (COALESCE(all_day,0)=0 AND start_at >= ? AND start_at < ?) OR (all_day=1 AND start_date >= ? AND start_date <= ?))`,
 		string(w.Source), w.AccountID, EventMaster, formatTime(w.Start), formatTime(w.End), firstDate, lastDate)
 	if err != nil {
 		return err

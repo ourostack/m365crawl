@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -60,11 +60,14 @@ func listLen(s string) int {
 // fails for a field that is missing here), and each group is merged by its own rule:
 //
 //   - identity: a non-empty incoming value replaces.
-//   - schedule: one unit, clocked by LastModified.
+//   - schedule: when the event happens and what it is called. Each schedule unit (see units) is
+//     clocked per unit, against the LastModified of the newest copy that stated it; because every
+//     copy states every schedule field it knows, the newest copy replaces all of them, and a field
+//     a newer copy does not know keeps its older known value.
 //   - detail: attendees, body (HTML, text and body type together) and the raw record; clocked
 //     per unit, see units. A copy is rich only if it states attendees or a body.
 //   - small: every other field a thin copy can carry on its own; clocked per unit.
-//   - sticky: HasAttachments, true once any copy says so.
+//   - sticky: HasAttachments, the larger of the stored and incoming value (unknown, false, true).
 //   - core: maintained by Capture and the store, never taken from a copy.
 const (
 	groupIdentity = "identity"
@@ -95,32 +98,25 @@ var fieldGroups = map[string]string{
 
 	"HasAttachments": groupSticky,
 
-	"ReminderStated": groupCore, "OnlineStated": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
+	"Unknown": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
 	"FirstSeenAt": groupCore, "SeenAt": groupCore, "RemovedAt": groupCore,
 }
 
-// scheduleFields lists the schedule group except LastModified, which is its clock.
-func scheduleFields() []string {
-	var out []string
-	for name, g := range fieldGroups {
-		if g == groupSchedule && name != "LastModified" {
-			out = append(out, name)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // unit is a set of fields that travel together and have one statement clock, stored in
-// Event.FieldClocks under name.
+// Event.FieldClocksJSON under name.
 type unit struct {
 	name  string
 	group string
 	// family names the things that describe one subject and are listed together; it is the unit
 	// name unless a unit needs two clocks (location).
 	family string
+	// names are the Unknown names of the fields the unit holds; a flag unit has none (its Tri says).
+	names []Field
+	// schedule marks a unit of the schedule group. Its clock is stored only when it differs from the
+	// row's LastModified (see expandClocks), so a row whose copies all state everything carries none.
+	schedule bool
 	// states reports whether a copy states this unit (a reminder of zero minutes is stated; an
-	// empty text is not).
+	// empty text is not; a known flag is; an unknown one is not).
 	states func(Event) bool
 	// measure sizes the stated value for the tie rule; larger wins.
 	measure func(Event) int
@@ -132,11 +128,12 @@ type unit struct {
 	links bool
 }
 
-// fieldsUnit builds a unit over string fields of Event, named by field.
-func fieldsUnit(name, group string, measure func(Event) int, fields ...string) unit {
+// fieldsUnit builds a unit over string fields of Event, named by field. It states itself when any
+// field is non-empty, so an empty value never erases.
+func fieldsUnit(name, group string, measure func(Event) int, names []Field, fields ...string) unit {
 	get := func(e *Event, f string) reflect.Value { return reflect.ValueOf(e).Elem().FieldByName(f) }
 	return unit{
-		name: name, family: name, group: group, measure: measure,
+		name: name, family: name, group: group, measure: measure, names: names,
 		states: func(e Event) bool {
 			for _, f := range fields {
 				if get(&e, f).String() != "" {
@@ -160,6 +157,25 @@ func fieldsUnit(name, group string, measure func(Event) int, fields ...string) u
 	}
 }
 
+// statedTextUnit is a text field of the schedule group: a copy states it unless its source left it
+// unknown, so a known empty value is a statement ("no organizer") that replaces an older one.
+func statedTextUnit(name string, field string, known Field) unit {
+	u := fieldsUnit(name, groupSchedule, nil, []Field{known}, field)
+	u.schedule = true
+	u.states = func(e Event) bool { return !e.unknown(known) }
+	return u
+}
+
+// flagUnit is a flag of the schedule group, stated by a copy that knows it.
+func flagUnit(name string, get func(*Event) *Tri) unit {
+	return unit{
+		name: name, family: name, group: groupSchedule, schedule: true,
+		states: func(e Event) bool { return get(&e).Known() },
+		key:    func(e Event) string { return strconv.Itoa(int(*get(&e))) },
+		assign: func(dst *Event, src Event) { *get(dst) = *get(&src) },
+	}
+}
+
 func fieldMeasure(f func(string) int, field string) func(Event) int {
 	return func(e Event) int { return f(reflect.ValueOf(e).FieldByName(field).String()) }
 }
@@ -169,55 +185,108 @@ func fieldMeasure(f func(string) int, field string) func(Event) int {
 //
 // Reminder rule: ReminderMinutes is a nullable number and zero minutes is a real value, so "not
 // stated" cannot be nil. A copy states the reminder when ReminderMinutes is non-nil or when
-// ReminderStated is set, which is how a mapper says the source reported no reminder (Teams
-// isReminderSet false, reminderMinutesBeforeStart null). A statement of "none" sets the reminder to
-// nil and moves its clock like any other value.
+// "reminder" is not in its Unknown: a mapper says the source reported no reminder (Teams
+// isReminderSet false, reminderMinutesBeforeStart null) by leaving nil and not listing it. A
+// statement of "none" sets the reminder to nil and moves its clock like any other value.
 //
 // Fields that describe one thing share one unit, so a stored row never mixes two copies' versions
 // of it: the five meeting links (a new join URL replaces the old conference id, toll number and
-// thread id with it) and the location text with its structured form. Body preview stays apart
-// from the body, and recurrence apart from the schedule, because thin and rich copies
-// legitimately state them at different times (the Teams list view carries a preview and a
-// recurrence without attendees or body).
+// thread id with it), the location text with its structured form (two clocks, one family), the
+// all-day flag with its dates, and the start with the end. Body preview stays apart from the body,
+// and recurrence apart from the schedule, because thin and rich copies legitimately state them at
+// different times (the Teams list view carries a preview and a recurrence without attendees or
+// body).
 var units = []unit{
-	fieldsUnit("attendees", groupDetail, fieldMeasure(listLen, "AttendeesJSON"), "AttendeesJSON"),
+	// Schedule group.
+	whenUnit(),
+	allDayUnit(),
+	statedTextUnit("time_zone", "TimeZone", FieldTimeZone),
+	statedTextUnit("time_zone_iana", "TimeZoneIANA", FieldTimeZoneIANA),
+	statedTextUnit("utc_offset", "UTCOffset", FieldUTCOffset),
+	statedTextUnit("subject", "Subject", FieldSubject),
+	statedTextUnit("organizer", "Organizer", FieldOrganizer),
+	statedTextUnit("organizer_address", "OrganizerAddress", FieldOrganizerAddress),
+	statedTextUnit("response", "Response", FieldResponse),
+	statedTextUnit("show_as", "ShowAs", FieldShowAs),
+	flagUnit("is_organizer", func(e *Event) *Tri { return &e.IsOrganizer }),
+	flagUnit("is_private", func(e *Event) *Tri { return &e.IsPrivate }),
+	flagUnit("cancelled", func(e *Event) *Tri { return &e.Cancelled }),
+	flagUnit("is_online_meeting", func(e *Event) *Tri { return &e.IsOnlineMeeting }),
+	// Detail and small groups.
+	fieldsUnit("attendees", groupDetail, fieldMeasure(listLen, "AttendeesJSON"), []Field{FieldAttendees}, "AttendeesJSON"),
 	bodyUnit(),
 	linksUnit(),
 	locationUnit(),
 	locationListUnit(),
-	fieldsUnit("body_preview", groupSmall, fieldMeasure(byteLen, "BodyPreview"), "BodyPreview"),
-	fieldsUnit("attachments", groupSmall, fieldMeasure(listLen, "AttachmentsJSON"), "AttachmentsJSON"),
-	fieldsUnit("categories", groupSmall, nil, "CategoriesJSON"),
-	fieldsUnit("recurrence", groupSmall, nil, "RecurrenceJSON"),
+	fieldsUnit("body_preview", groupSmall, fieldMeasure(byteLen, "BodyPreview"), []Field{FieldBodyPreview}, "BodyPreview"),
+	fieldsUnit("attachments", groupSmall, fieldMeasure(listLen, "AttachmentsJSON"), []Field{FieldAttachments}, "AttachmentsJSON"),
+	fieldsUnit("categories", groupSmall, nil, []Field{FieldCategories}, "CategoriesJSON"),
+	fieldsUnit("recurrence", groupSmall, nil, []Field{FieldRecurrence}, "RecurrenceJSON"),
 	reminderUnit(),
+}
+
+// unitOfName maps each Unknown name to the unit that holds the field.
+var unitOfName = func() map[Field]unit {
+	m := map[Field]unit{}
+	for _, u := range units {
+		for _, n := range u.names {
+			m[n] = u
+		}
+	}
+	return m
+}()
+
+// whenUnit is the start and end instants, which a copy always states.
+func whenUnit() unit {
+	return unit{
+		name: "when", family: "when", group: groupSchedule, schedule: true,
+		states: func(Event) bool { return true },
+		key:    func(e Event) string { return formatTime(e.Start) + "|" + formatTime(e.End) },
+		assign: func(dst *Event, src Event) { dst.Start, dst.End = src.Start, src.End },
+	}
+}
+
+// allDayUnit is the all-day block: the flag and its dates move as one, stated by a copy that knows
+// the flag. A copy that does not know it leaves the stored block alone, instants aside.
+func allDayUnit() unit {
+	return unit{
+		name: "all_day", family: "all_day", group: groupSchedule, schedule: true,
+		states: func(e Event) bool { return e.AllDay.Known() },
+		key:    func(e Event) string { return strconv.Itoa(int(e.AllDay)) + "|" + e.StartDate + "|" + e.EndDate },
+		assign: func(dst *Event, src Event) {
+			dst.AllDay, dst.StartDate, dst.EndDate = src.AllDay, src.StartDate, src.EndDate
+		},
+	}
 }
 
 // linksUnit is the five meeting link fields, replaced together by the newest copy that states any
 // of them. The organizer removes all of them when the meeting stops being online (captureLinks).
 func linksUnit() unit {
 	u := fieldsUnit("meeting_links", groupSmall, nil,
+		[]Field{FieldJoinURL, FieldShortJoinURL, FieldDialIn, FieldMeetingChatID},
 		"OnlineMeetingURL", "ShortJoinURL", "DialInConferenceID", "DialInTollNumber", "TeamsThreadID")
 	u.links = true
 	return u
 }
 
 // locationUnit and locationListUnit are the location text and its structured form: one family
-// (they describe one place) with two clocks. Every copy states the text (an empty one means no
-// location, as for the rest of the schedule). Only a copy that has one states the structured
-// list. They cannot share a clock: a newer thin copy must replace the text yet keep the older
-// structured rooms (Rooms marks them stale), and an older rich copy arriving later must still be
-// able to supply them. Fusing the two would make the thin copy erase the rooms.
+// (they describe one place) with two clocks. Every copy states the text unless its source left it
+// unknown (an empty one means no location, as for the rest of the schedule). Only a copy that has
+// a list states the structured list. They cannot share a clock: a newer thin copy must replace the
+// text yet keep the older structured rooms (Rooms marks them stale), and an older rich copy
+// arriving later must still be able to supply them. Fusing the two would make the thin copy erase
+// the rooms.
 func locationUnit() unit {
 	return unit{
-		name: "location", family: "location", group: groupSmall,
-		states: func(Event) bool { return true },
+		name: "location", family: "location", group: groupSmall, names: []Field{FieldLocation},
+		states: func(e Event) bool { return !e.unknown(FieldLocation) },
 		key:    func(e Event) string { return e.Location },
 		assign: func(dst *Event, src Event) { dst.Location = src.Location },
 	}
 }
 
 func locationListUnit() unit {
-	u := fieldsUnit("location_list", groupSmall, fieldMeasure(listLen, "LocationsJSON"), "LocationsJSON")
+	u := fieldsUnit("location_list", groupSmall, fieldMeasure(listLen, "LocationsJSON"), []Field{FieldRooms}, "LocationsJSON")
 	u.family = "location"
 	return u
 }
@@ -227,23 +296,20 @@ func locationListUnit() unit {
 // states nothing.
 func bodyUnit() unit {
 	u := fieldsUnit("body", groupDetail, func(e Event) int { return len(e.BodyHTML) + len(e.BodyText) },
-		"BodyHTML", "BodyText", "BodyType")
+		[]Field{FieldBody}, "BodyHTML", "BodyText", "BodyType")
 	u.states = func(e Event) bool { return e.BodyHTML != "" || e.BodyText != "" }
 	return u
 }
 
 func reminderUnit() unit {
 	return unit{
-		name: "reminder", family: "reminder", group: groupSmall,
-		states: func(e Event) bool { return e.ReminderMinutes != nil || e.ReminderStated },
+		name: "reminder", family: "reminder", group: groupSmall, names: []Field{FieldReminder},
+		states: func(e Event) bool { return e.ReminderMinutes != nil || !e.unknown(FieldReminder) },
 		key: func(e Event) string {
-			switch {
-			case e.ReminderMinutes != nil:
+			if e.ReminderMinutes != nil {
 				return fmt.Sprintf("1%012d", *e.ReminderMinutes)
-			case e.ReminderStated:
-				return "0"
 			}
-			return ""
+			return "0"
 		},
 		assign: func(dst *Event, src Event) {
 			dst.ReminderMinutes = nil
@@ -275,31 +341,99 @@ func (u unit) prefers(base, in Event, c clock) bool {
 	return true
 }
 
+// expandClocks gives every schedule unit the row stores no clock for, and that the row knows, the
+// row's LastModified: that is what an absent clock means (see unit.schedule).
+func expandClocks(base Event, clocks map[string]time.Time) {
+	if base.LastModified == nil {
+		return
+	}
+	for _, u := range units {
+		if _, has := clocks[u.name]; u.schedule && !has && u.states(base) {
+			clocks[u.name] = *base.LastModified
+		}
+	}
+}
+
+// compactClocks drops the schedule clocks that equal the row's LastModified, the inverse of
+// expandClocks.
+func compactClocks(out Event, clocks map[string]time.Time) {
+	if out.LastModified == nil {
+		return
+	}
+	for _, u := range units {
+		if t, has := clocks[u.name]; u.schedule && has && t.Equal(*out.LastModified) {
+			delete(clocks, u.name)
+		}
+	}
+}
+
+// valued reports, for each Unknown name, whether e carries a value for it. A value is a
+// statement: a copy that lists a field as unknown and also carries a value for it is read as
+// knowing it, so a stray name never hides data.
+var valued = map[Field]func(Event) bool{
+	FieldSubject:          func(e Event) bool { return e.Subject != "" },
+	FieldLocation:         func(e Event) bool { return e.Location != "" },
+	FieldOrganizer:        func(e Event) bool { return e.Organizer != "" },
+	FieldOrganizerAddress: func(e Event) bool { return e.OrganizerAddress != "" },
+	FieldResponse:         func(e Event) bool { return e.Response != "" },
+	FieldShowAs:           func(e Event) bool { return e.ShowAs != "" },
+	FieldTimeZone:         func(e Event) bool { return e.TimeZone != "" },
+	FieldTimeZoneIANA:     func(e Event) bool { return e.TimeZoneIANA != "" },
+	FieldUTCOffset:        func(e Event) bool { return e.UTCOffset != "" },
+	FieldJoinURL:          func(e Event) bool { return e.OnlineMeetingURL != "" },
+	FieldShortJoinURL:     func(e Event) bool { return e.ShortJoinURL != "" },
+	FieldDialIn:           func(e Event) bool { return e.DialInConferenceID != "" || e.DialInTollNumber != "" },
+	FieldMeetingChatID:    func(e Event) bool { return e.TeamsThreadID != "" },
+	FieldAttendees:        func(e Event) bool { return e.AttendeesJSON != "" },
+	FieldRooms:            func(e Event) bool { return e.LocationsJSON != "" },
+	FieldBody:             func(e Event) bool { return e.BodyHTML != "" || e.BodyText != "" },
+	FieldBodyPreview:      func(e Event) bool { return e.BodyPreview != "" },
+	FieldAttachments:      func(e Event) bool { return e.AttachmentsJSON != "" },
+	FieldCategories:       func(e Event) bool { return e.CategoriesJSON != "" },
+	FieldRecurrence:       func(e Event) bool { return e.RecurrenceJSON != "" },
+	FieldReminder:         func(e Event) bool { return e.ReminderMinutes != nil },
+}
+
+// normalizeUnknown sorts e.Unknown and drops every name the copy carries a value for.
+func normalizeUnknown(e *Event) {
+	var keep []Field
+	for _, f := range e.Unknown {
+		if !valued[f](*e) {
+			keep = append(keep, f)
+		}
+	}
+	e.Unknown = NormalizeUnknown(keep)
+}
+
 // Capture is the append-only capture rule: it returns the row to store when in is seen and old is
 // what the archive holds (nil for a first sighting). The archive keeps the richest version it has
 // seen while a real change still wins.
 //
 //   - Identity fields take the incoming value when it is non-empty.
-//   - The schedule group is compared by LastModified: a stale copy changes nothing, any other
-//     copy replaces every schedule value, including an empty location and a cancelled flag.
 //   - Every other field belongs to a unit (see units) with its own statement clock in
-//     FieldClocks. A copy that states a unit competes for it: a newer copy replaces, an older
-//     copy only fills a unit nothing has stated, and an empty incoming value never erases. So
-//     each unit is decided by the newest copy that states it, whatever the arrival order.
+//     FieldClocksJSON. A copy that states a unit competes for it: a newer copy replaces, an older
+//     copy only fills a unit nothing has stated, and an empty incoming value never erases a detail
+//     or small field. A schedule unit (start and end, the all-day block, each schedule text and
+//     flag) is stated whenever the copy knows it, so a newer copy replaces it even with an empty
+//     text or a false flag. So each unit is decided by the newest copy that states it, whatever
+//     the arrival order.
+//   - Unknown never replaces known and never clears: a copy does not state a flag it has as
+//     TriUnknown or a field named in its Unknown (unless it also carries a value for it, which
+//     counts as knowing it). A row's Unknown after capture is what no copy has stated.
 //   - Ties are deterministic. At equal times the statement that says more wins (more list
 //     elements, more text), then the greater canonical bytes of the stated value, so the same
-//     copies in any order store one row. For the schedule group the greater canonical bytes of
-//     its values decide. A copy with no time cannot be ordered: it competes as a peer, the
-//     incoming copy wins an otherwise equal contest, and it cannot move a clock.
-//   - "Not an online meeting" is a statement, not a default: a copy says it only by setting
-//     OnlineStated with IsOnlineMeeting false, at its own time. That outdates every older meeting
-//     link (clock no_links) and loses to a newer link, whether or not its schedule won. A copy
-//     that does not set OnlineStated leaves the links alone.
+//     copies in any order store one row. A copy with no time cannot be ordered: it competes as a
+//     peer, the incoming copy wins an otherwise equal contest, and it cannot move a clock.
+//   - "Not an online meeting" is a statement, not a default: a copy says it only by knowing
+//     IsOnlineMeeting is false, at its own time. That outdates every older meeting link (clock
+//     no_links) and loses to a newer link, whether or not its schedule won. A copy that does not
+//     know the flag leaves the links alone.
 //   - DetailAsOf is the newest time of a rich copy (one that states attendees or a body); a
 //     thin copy, or one carrying only small fields or only a body type, never moves it.
 //     DetailRawJSON follows the rich copies by its own clock and an empty one never replaces a
 //     stored one.
-//   - HasAttachments is true once any copy says so.
+//   - HasAttachments is the larger of the stored and the incoming value: true once any copy says
+//     so, then false, then unknown.
 //   - An event that cannot be stored is refused (ValidateEvent) and nothing is captured.
 //   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 //
@@ -310,13 +444,14 @@ func Capture(old *Event, in Event) (Event, error) {
 	if err := ValidateEvent(in); err != nil {
 		return Event{}, err
 	}
+	normalizeUnknown(&in)
 	var base Event
 	if old != nil {
 		base = *old
 	}
 	out := base
-	out.ReminderStated, out.OnlineStated = false, false
 	clocks := ParseFieldClocks(base.FieldClocksJSON)
+	expandClocks(base, clocks)
 
 	// Identity.
 	for _, f := range []struct{ dst, src *string }{
@@ -333,19 +468,10 @@ func Capture(old *Event, in Event) (Event, error) {
 	if in.OriginalStart != nil {
 		out.OriginalStart = in.OriginalStart
 	}
-
-	// Schedule.
-	sched := compareClock(in.LastModified, base.LastModified)
-	applied := sched != stale && (sched != tied || scheduleKey(in) >= scheduleKey(base))
-	if applied {
-		src, dst := reflect.ValueOf(in), reflect.ValueOf(&out).Elem()
-		for _, f := range scheduleFields() {
-			dst.FieldByName(f).Set(src.FieldByName(f))
-		}
-		out.LastModified = laterOf(base.LastModified, in.LastModified)
-	}
+	out.LastModified = laterOf(base.LastModified, in.LastModified)
 
 	// Units.
+	taken := map[string]bool{}
 	for _, u := range units {
 		if !u.states(in) {
 			continue
@@ -357,7 +483,7 @@ func Capture(old *Event, in Event) (Event, error) {
 		}
 		var take bool
 		switch c := compareClock(in.LastModified, refp); {
-		case !has && !u.states(base):
+		case !has && (old == nil || !u.states(base)):
 			take = true
 		case c == newer:
 			take = true
@@ -368,30 +494,60 @@ func Capture(old *Event, in Event) (Event, error) {
 		}
 		if take {
 			u.assign(&out, in)
+			taken[u.name] = true
 			if t := laterOf(refp, in.LastModified); t != nil {
 				clocks[u.name] = *t
 			}
 		}
 	}
+	out.Unknown = capturedUnknown(old, base, in, taken)
 	captureRaw(&out, base, in, clocks)
 	captureLinks(&out, in, clocks)
-	out.HasAttachments = base.HasAttachments || in.HasAttachments
+	if in.HasAttachments > out.HasAttachments {
+		out.HasAttachments = in.HasAttachments
+	}
 
 	if statesDetail(in) && in.LastModified != nil {
 		out.DetailAsOf = laterOf(base.DetailAsOf, in.LastModified)
 	}
+	compactClocks(out, clocks)
 	out.FieldClocksJSON = formatClocks(clocks)
 	out.RemovedAt = nil
 	return out, nil
 }
 
+// capturedUnknown is the stored row's Unknown after in was captured over base. A field is known
+// once any copy has stated it. A unit the incoming copy states carries the copy's own statuses when
+// it took the unit (its fields came from that copy) and keeps the stored ones when it did not. A
+// copy that does not state a unit can still say a field is known and empty, which is known.
+func capturedUnknown(old *Event, base, in Event, taken map[string]bool) []Field {
+	set := unknownSet{}
+	for _, n := range unknownVocabulary {
+		u := unitOfName[n]
+		stored := old == nil || base.unknown(n)
+		switch {
+		case u.states(in) && taken[u.name]:
+			set[n] = in.unknown(n)
+		case u.states(in):
+			set[n] = stored
+		default:
+			set[n] = stored && in.unknown(n)
+		}
+	}
+	for n, unknown := range set {
+		if !unknown {
+			delete(set, n)
+		}
+	}
+	return set.list()
+}
+
 // noLinks is the clock key of the newest copy that said the event is not an online meeting.
 const noLinks = "no_links"
 
-// captureLinks applies "the event is not an online meeting". The core cannot tell an absent flag
-// from false, so only a copy that sets OnlineStated and has IsOnlineMeeting false says it; any
-// other copy leaves the links alone. The organizer removes the meeting links when they turn the
-// meeting off, so a copy that says so, at its time,
+// captureLinks applies "the event is not an online meeting". Only a copy that knows
+// IsOnlineMeeting is false says it; an unknown flag leaves the links alone. The organizer removes
+// the meeting links when they turn the meeting off, so a copy that says so, at its time,
 // outdates every link stated before that time: a link whose clock is older than the newest such
 // copy reads as none, in any arrival order, and a link stated later comes back. A copy with no time
 // cannot be ordered, so its "not online" clears the stored links at once, as it always has.
@@ -400,7 +556,7 @@ func captureLinks(out *Event, in Event, clocks map[string]time.Time) {
 	if t, ok := clocks[noLinks]; ok {
 		cleared = &t
 	}
-	says := in.OnlineStated && !in.IsOnlineMeeting
+	says := in.IsOnlineMeeting.Is(false)
 	if says && in.LastModified != nil {
 		cleared = laterOf(cleared, in.LastModified)
 		clocks[noLinks] = *cleared
@@ -412,8 +568,25 @@ func captureLinks(out *Event, in Event, clocks map[string]time.Time) {
 		stated, has := clocks[u.name]
 		if (says && in.LastModified == nil) || (cleared != nil && (!has || stated.Before(*cleared))) {
 			u.assign(out, Event{})
+			// Cleared links are a statement, "none", not a gap: the organizer removed them.
+			out.Unknown = without(out.Unknown, u.names...)
 		}
 	}
+}
+
+// without returns fields minus drop.
+func without(fields []Field, drop ...Field) []Field {
+	var out []Field
+	for _, f := range fields {
+		keep := true
+		for _, d := range drop {
+			keep = keep && f != d
+		}
+		if keep {
+			out = append(out, f)
+		}
+	}
+	return NormalizeUnknown(out)
 }
 
 // captureRaw merges the raw detail record. A rich copy that carries one states it; the record has
@@ -455,23 +628,6 @@ func ParseFieldClocks(s string) map[string]time.Time {
 	return c.m
 }
 
-// scheduleKey is the canonical bytes of the schedule group, for the tie rule.
-func scheduleKey(e Event) string {
-	v := reflect.ValueOf(e)
-	var b strings.Builder
-	for _, f := range scheduleFields() {
-		fmt.Fprintf(&b, "%s=", f)
-		switch x := v.FieldByName(f).Interface().(type) {
-		case time.Time:
-			b.WriteString(formatTime(x))
-		default:
-			fmt.Fprintf(&b, "%v", x)
-		}
-		b.WriteByte(0)
-	}
-	return b.String()
-}
-
 // detailEqual reports whether two events hold the same detail and small-field values. The raw
 // record is excluded, and so is HasAttachments: thin copies carry it as true without a list, so a
 // change in it alone must not claim that detail was captured.
@@ -503,7 +659,12 @@ func ValidateEvent(e Event) error {
 	refuse := func(reason string) error {
 		return &InvalidEventError{Source: e.Source, SourceID: e.SourceID, Reason: reason}
 	}
-	if e.AllDay {
+	for _, f := range e.Unknown {
+		if !validField(f) {
+			return refuse(fmt.Sprintf("unknown field name %q is not in the vocabulary", f))
+		}
+	}
+	if e.AllDay.Is(true) {
 		if e.StartDate == "" {
 			return refuse("all-day event without a start date")
 		}
