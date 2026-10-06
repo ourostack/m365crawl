@@ -395,9 +395,9 @@ func TestDecodedTypes(t *testing.T) {
 		}},
 		{"array_empty_cycle_through_property", func(t *testing.T, v any) {
 			a := v.(*ArrayWithProps)
-			inner, ok := a.Props.Values[0].([]any)
+			inner, ok := a.Props.Values[0].(*ArrayWithProps)
 			mustEq(t, ok, true)
-			mustEq(t, len(inner), 0)
+			mustEq(t, inner == a, true)
 		}},
 		{"date_invalid_nan", func(t *testing.T, v any) { _ = v.(InvalidDate) }},
 		{"date_max_js_date", func(t *testing.T, v any) { mustEq(t, v.(time.Time).UnixMilli(), int64(8.64e15)) }},
@@ -555,4 +555,86 @@ func nodeGate(ci bool, lookErr error, major string) (skip, fail string) {
 		return "", problem + " (CI requires Node 22; the ci.yml test job sets it up)"
 	}
 	return problem, ""
+}
+
+// A back-reference to an array that carries named properties must decode to the same value as
+// the first occurrence: [a, a] where a = [] and a.x = 1.
+func TestBackReferenceKeepsArrayProperties(t *testing.T) {
+	in := []byte{0xff, 15,
+		'A', 2,
+		'A', 0, '"', 1, 'x', 'I', 2, '$', 1, 0, // a: dense, length 0, property x = 1
+		'^', 1, // a again
+		'$', 0, 2}
+	v, err := Deserialize(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Canonical(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"$array":[],"$props":{"x":1}},{"$array":[],"$props":{"x":1}}]`
+	if string(got) != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+	// The sparse form takes the same path.
+	sparse := []byte{0xff, 15, 'A', 2,
+		'a', 0, '"', 1, 'x', 'I', 2, '@', 1, 0,
+		'^', 1, '$', 0, 2}
+	v, err = Deserialize(sparse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Canonical(v); string(got) != want {
+		t.Fatalf("sparse: got %s, want %s", got, want)
+	}
+}
+
+// A reference to an array taken while the array is still being read (a cycle through its own
+// named property) must also be the wrapper, so it carries the properties.
+func TestSelfReferenceKeepsArrayProperties(t *testing.T) {
+	in := []byte{0xff, 15,
+		'A', 0, '"', 4, 's', 'e', 'l', 'f', '^', 0, '$', 1, 0}
+	v, err := Deserialize(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := v.(*ArrayWithProps)
+	if !ok {
+		t.Fatalf("got %T", v)
+	}
+	if a.Props.Values[0] != any(a) {
+		t.Fatalf("self reference is %T, want the wrapper", a.Props.Values[0])
+	}
+}
+
+// walk reaches every container kind that can hold a reference taken during a cycle.
+func TestArrayRefsWalk(t *testing.T) {
+	items := make([]any, 1, 2)
+	w := &ArrayWithProps{Items: items}
+	r := &arrayRefs{slice: &items[:1][0], length: 1, w: w, seen: map[any]bool{}}
+	self := items // the bare slice of the array being finished
+	other := make([]any, 1)
+	var nilObj *Object
+	obj := &Object{Keys: []string{"a", "b"}, Values: []any{self, "x"}}
+	m := &Map{Entries: [][2]any{{self, self}}}
+	set := &Set{Items: []any{self, int64(1)}}
+	errv := &Error{HasCause: true, Cause: self}
+	inner := &ArrayWithProps{Items: []any{self}, Props: obj}
+	nested := []any{self, other, make([]any, 0), obj, m, set, errv, inner, nilObj, "s"}
+	r.walk(nested)
+	r.walk(nested) // already visited
+	r.walk(obj)    // already visited
+	r.walk(m)
+	r.walk(set)
+	r.walk(errv)
+	r.walk(inner)
+	r.walk(int64(3))
+	if nested[0] != any(w) || obj.Values[0] != any(w) || m.Entries[0][0] != any(w) || m.Entries[0][1] != any(w) ||
+		set.Items[0] != any(w) || errv.Cause != any(w) || inner.Items[0] != any(w) {
+		t.Fatalf("a self reference was not replaced: %v %v %v %v %v", nested[0], obj.Values[0], m.Entries[0], set.Items[0], errv.Cause)
+	}
+	if _, ok := nested[1].([]any); !ok {
+		t.Fatalf("an unrelated array was replaced")
+	}
 }

@@ -137,6 +137,7 @@ A sync of a changed cache does work in proportion to what changed, plus one chea
 | --- | --- |
 | `empty_value` | The record has no value (Teams leaves some records empty). |
 | `unknown_envelope` | The record's Blink envelope is not recognized. The detail ends with the first 16 bytes in hex. |
+| `snappy_too_large` | A snappy envelope declares a decoded length above 32 times its compressed length (the densest valid Snappy is about 21:1), so the header is forged or damaged. It is refused before anything is allocated. The detail ends with the first 16 bytes in hex. |
 | `blob_missing` | The record's value is stored in an external blob file and the blob entry or file is absent. |
 | `bad_key` | The record's IndexedDB key could not be decoded. |
 | `v8_version` | The V8 serialization wire version is not supported (13 to 16 are). |

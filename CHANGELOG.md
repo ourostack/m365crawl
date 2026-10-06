@@ -6,7 +6,10 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ### Fixed
 
+- V8 decoder: an array with named properties is stored in the reference table as the final value, so a later back-reference to it keeps the properties. Before, `[a, a]` with `a = []` and `a.x = 1` decoded the second element as a bare array and lost `x`. A reference made while the array is still being read (a cycle) still holds the bare slice, which the canonical form already identifies with the array.
+- IndexedDB decoder: a snappy envelope that declares more than 32 times its compressed length is refused before it is decoded, as the new omission `snappy_too_large` (listed in SPEC.md). Before, `ff 11 02 ff ff ff ff 0f` made the decoder allocate 4 GiB.
 - Release: notarization waits at most `NOTARY_TIMEOUT` (default 20 minutes) per binary and then fails with the reason. Before, `notarytool submit --wait` had no bound, so a slow Apple notary queue ran the release job into its 60-minute timeout with no explanation (the first v0.3.0 run). A failed run leaves the tag and no release, and the next run of the Release workflow resumes from the tag.
+- Skill guide: says that `--to` is exclusive and that a signed offset such as `--from=-14d` counts from now, not from local midnight; that `recordings` and `recording_count` cover recordings, transcripts and call events (`kind`), not recorded meetings; what `matched_by` `recap` and `window` mean for trust; and when `mine_basis` (with `mine: true`, or `ambiguous` with `mine` absent) and `mine_ambiguous_omitted` (omitted when zero) appear.
 
 ## [0.3.0] - 2026-10-06
 

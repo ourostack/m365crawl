@@ -184,12 +184,95 @@ func newArray(length uint32) []any {
 	return make([]any, length)
 }
 
-// finishArray returns arr, or an *ArrayWithProps when it carries named properties.
-func finishArray(arr []any, props *Object) any {
+// finishArray returns arr, or an *ArrayWithProps when it carries named properties. In that case
+// the wrapper replaces the bare slice everywhere the array is held: the reference table (so a
+// later back-reference decodes to the same value as the first occurrence) and any reference
+// taken while the array was still being read (a cycle), which replaceArrayRefs swaps.
+func (d *decoder) finishArray(id int, arr []any, props *Object) any {
 	if props == nil {
 		return arr
 	}
-	return &ArrayWithProps{Items: arr, Props: props}
+	w := &ArrayWithProps{Items: arr, Props: props}
+	d.setID(id, w, false)
+	if cap(arr) > 0 {
+		r := &arrayRefs{slice: &arr[:1][0], length: len(arr), w: w, seen: map[any]bool{}}
+		r.walk(w.Items)
+		r.walk(w.Props)
+	}
+	return w
+}
+
+// arrayRefs swaps references to one array's bare slice (same storage and length) for its wrapper.
+type arrayRefs struct {
+	slice  *any
+	length int
+	w      *ArrayWithProps
+	seen   map[any]bool
+}
+
+func (r *arrayRefs) is(s []any) bool {
+	return len(s) == r.length && cap(s) > 0 && &s[:1][0] == r.slice
+}
+
+// fix returns the wrapper for the array's own slice and otherwise v after walking into it.
+func (r *arrayRefs) fix(v any) any {
+	if s, ok := v.([]any); ok && r.is(s) {
+		return r.w
+	}
+	r.walk(v)
+	return v
+}
+
+// walk visits each container once and replaces the references it holds.
+func (r *arrayRefs) walk(v any) {
+	switch x := v.(type) {
+	case []any:
+		if cap(x) == 0 || r.seen[&x[:1][0]] {
+			return
+		}
+		r.seen[&x[:1][0]] = true
+		for i := range x {
+			x[i] = r.fix(x[i])
+		}
+	case *ArrayWithProps:
+		if r.seen[x] {
+			return
+		}
+		r.seen[x] = true
+		r.walk(x.Items)
+		r.walk(x.Props)
+	case *Object:
+		if x == nil || r.seen[x] {
+			return
+		}
+		r.seen[x] = true
+		for i := range x.Values {
+			x.Values[i] = r.fix(x.Values[i])
+		}
+	case *Map:
+		if r.seen[x] {
+			return
+		}
+		r.seen[x] = true
+		for i := range x.Entries {
+			x.Entries[i][0] = r.fix(x.Entries[i][0])
+			x.Entries[i][1] = r.fix(x.Entries[i][1])
+		}
+	case *Set:
+		if r.seen[x] {
+			return
+		}
+		r.seen[x] = true
+		for i := range x.Items {
+			x.Items[i] = r.fix(x.Items[i])
+		}
+	case *Error:
+		if r.seen[x] {
+			return
+		}
+		r.seen[x] = true
+		x.Cause = r.fix(x.Cause)
+	}
 }
 
 func (d *decoder) readSparseArray() (any, error) {
@@ -204,7 +287,8 @@ func (d *decoder) readSparseArray() (any, error) {
 	for i := range arr {
 		arr[i] = Hole{}
 	}
-	d.register(arr, false)
+	id := d.newID()
+	d.setID(id, arr, false)
 	props, n, err := d.arrayProperties(arr, tagEndSparse)
 	if err != nil {
 		return nil, err
@@ -215,7 +299,7 @@ func (d *decoder) readSparseArray() (any, error) {
 	if err := d.expectCount("array length", uint64(length)); err != nil {
 		return nil, err
 	}
-	return finishArray(arr, props), nil
+	return d.finishArray(id, arr, props), nil
 }
 
 func (d *decoder) readDenseArray() (any, error) {
@@ -228,7 +312,8 @@ func (d *decoder) readDenseArray() (any, error) {
 		return nil, d.errorf("dense array length %d exceeds remaining data", length)
 	}
 	arr := newArray(length)
-	d.register(arr, false)
+	id := d.newID()
+	d.setID(id, arr, false)
 	for i := range arr {
 		if t, ok := d.peekTag(); ok && t == tagTheHole {
 			d.pos++
@@ -251,7 +336,7 @@ func (d *decoder) readDenseArray() (any, error) {
 	if err := d.expectCount("array length", uint64(length)); err != nil {
 		return nil, err
 	}
-	return finishArray(arr, props), nil
+	return d.finishArray(id, arr, props), nil
 }
 
 func (d *decoder) readMap() (any, error) {
