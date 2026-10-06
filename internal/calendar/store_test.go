@@ -27,7 +27,7 @@ func apply(t testing.TB, db *sql.DB, w Window, at string, events ...Event) {
 
 func timed(t testing.TB, src Source, id, subject, start string) Event {
 	s := mustTime(t, start)
-	return Event{Source: src, SourceID: id, Subject: subject, Organizer: "ada@example.com", Start: s, End: s.Add(time.Hour), LastModified: tp(t, "2026-10-01T00:00:00Z")}
+	return Event{UnknownDeclared: true, Source: src, SourceID: id, Subject: subject, Organizer: "ada@example.com", Start: s, End: s.Add(time.Hour), LastModified: tp(t, "2026-10-01T00:00:00Z")}
 }
 
 func count(t testing.TB, db *sql.DB, query string, args ...any) int {
@@ -63,7 +63,7 @@ func TestApplySnapshotRemovesUnseenInWindow(t *testing.T) {
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
 	a := timed(t, SourceTeams, "a", "A", "2026-10-05T16:00:00Z")
 	b := timed(t, SourceTeams, "b", "B", "2026-10-06T16:00:00Z")
-	day := Event{Source: SourceTeams, SourceID: "d", Subject: "Day", AllDay: TriTrue, StartDate: "2026-10-07", EndDate: "2026-10-08"}
+	day := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "d", Subject: "Day", AllDay: TriTrue, StartDate: "2026-10-07", EndDate: "2026-10-08"})
 	apply(t, db, w, "2026-10-02T01:00:00Z", a, b, day)
 	if n := count(t, db, `SELECT count(*) FROM calendar_source_events WHERE removed_at IS NULL`); n != 3 {
 		t.Fatalf("live rows = %d", n)
@@ -92,8 +92,8 @@ func TestApplySnapshotKeepsOutsideWindow(t *testing.T) {
 	early := timed(t, SourceTeams, "early", "Early", "2026-10-02T09:00:00Z")
 	late := timed(t, SourceTeams, "late", "Late", "2026-10-20T09:00:00Z")
 	edge := timed(t, SourceTeams, "edge", "Edge", "2026-10-10T00:00:00Z")
-	dayIn := Event{Source: SourceTeams, SourceID: "din", AllDay: TriTrue, StartDate: "2026-10-10", EndDate: "2026-10-11"}
-	dayOut := Event{Source: SourceTeams, SourceID: "dout", AllDay: TriTrue, StartDate: "2026-10-20", EndDate: "2026-10-21"}
+	dayIn := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "din", AllDay: TriTrue, StartDate: "2026-10-10", EndDate: "2026-10-11"})
+	dayOut := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "dout", AllDay: TriTrue, StartDate: "2026-10-20", EndDate: "2026-10-21"})
 	apply(t, db, wide, "2026-10-02T01:00:00Z", early, late, edge, dayIn, dayOut)
 	// A narrower snapshot [10-03, 10-10) sees nothing: early and late are outside and survive, and
 	// an event starting exactly at the exclusive end survives too; the all-day inside is removed.
@@ -273,9 +273,9 @@ func TestApplySnapshotRejectsForeignSource(t *testing.T) {
 func TestAgendaAllDayAcrossZones(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceOutlook, "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z", "2026-10-02T00:00:00Z")
-	day := Event{Source: SourceOutlook, SourceID: "d", Subject: "Offsite", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-06"}
-	multi := Event{Source: SourceOutlook, SourceID: "m", Subject: "Trip", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-08"}
-	bare := Event{Source: SourceOutlook, SourceID: "b", Subject: "Bare", AllDay: TriTrue, StartDate: "2026-10-05"}
+	day := dayOf(Event{UnknownDeclared: true, Source: SourceOutlook, SourceID: "d", Subject: "Offsite", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-06"})
+	multi := dayOf(Event{UnknownDeclared: true, Source: SourceOutlook, SourceID: "m", Subject: "Trip", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-08"})
+	bare := dayOf(Event{UnknownDeclared: true, Source: SourceOutlook, SourceID: "b", Subject: "Bare", AllDay: TriTrue, StartDate: "2026-10-05"})
 	apply(t, db, w, "2026-10-02T01:00:00Z", day, multi, bare)
 	west, east := time.FixedZone("UTC-7", -7*3600), time.FixedZone("UTC+9", 9*3600)
 	for _, loc := range []*time.Location{west, east, time.UTC} {
@@ -338,7 +338,7 @@ func TestAgendaTimedOverlap(t *testing.T) {
 func TestAgendaSortsAllDayFirstThenKey(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
-	day := Event{Source: SourceTeams, SourceID: "d", Subject: "Z day", AllDay: TriTrue, StartDate: "2026-10-05"}
+	day := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "d", Subject: "Z day", AllDay: TriTrue, StartDate: "2026-10-05"})
 	early := timed(t, SourceTeams, "e", "Early", "2026-10-05T00:00:00Z")
 	same1 := timed(t, SourceTeams, "s1", "Same", "2026-10-05T01:00:00Z")
 	same1.Organizer = "b"
@@ -398,7 +398,7 @@ func TestAgendaSameSnapshotsSameResult(t *testing.T) {
 	oe.LastModified = tp(t, "2026-10-01T00:00:00Z")
 	tOnly := timed(t, SourceTeams, "t2", "Teams only", "2026-10-06T16:00:00Z")
 	oOnly := timed(t, SourceOutlook, "o2", "Outlook only", "2026-10-06T16:00:00Z")
-	day := Event{Source: SourceOutlook, SourceID: "d", GlobalID: "uid-d", Subject: "Day", AllDay: TriTrue, StartDate: "2026-10-07"}
+	day := dayOf(Event{UnknownDeclared: true, Source: SourceOutlook, SourceID: "d", GlobalID: "uid-d", Subject: "Day", AllDay: TriTrue, StartDate: "2026-10-07"})
 
 	a, b := openDB(t), openDB(t)
 	apply(t, a, tw, "2026-10-02T06:00:00Z", te, tOnly)
@@ -791,8 +791,8 @@ func TestLoadEventsFiltersByDateInSQL(t *testing.T) {
 	before := timed(t, SourceTeams, "before", "Before", "2026-10-01T10:00:00Z")
 	inside := timed(t, SourceTeams, "inside", "Inside", "2026-10-05T10:00:00Z")
 	after := timed(t, SourceTeams, "after", "After", "2026-10-20T10:00:00Z")
-	dayIn := Event{Source: SourceTeams, SourceID: "dayin", Subject: "Day in", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-06"}
-	dayOut := Event{Source: SourceTeams, SourceID: "dayout", Subject: "Day out", AllDay: TriTrue, StartDate: "2026-10-12", EndDate: "2026-10-13"}
+	dayIn := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "dayin", Subject: "Day in", AllDay: TriTrue, StartDate: "2026-10-05", EndDate: "2026-10-06"})
+	dayOut := dayOf(Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "dayout", Subject: "Day out", AllDay: TriTrue, StartDate: "2026-10-12", EndDate: "2026-10-13"})
 	apply(t, db, w, "2026-10-02T01:00:00Z", before, inside, after, dayIn, dayOut)
 	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
 	groups, err := loadGroups(ctx, db, Principals{}, nil, from, to, "2026-10-05", "2026-10-05")
@@ -822,7 +822,7 @@ func seedForPlans(t *testing.T, analyze bool) *sql.DB {
 		e := timed(t, SourceTeams, fmt.Sprintf("t%02d", i), "S", day.Format("2006-01-02T15:04:05Z"))
 		e.AccountID = "tenant-1/user-1"
 		if i%2 == 1 {
-			e.AllDay, e.StartDate, e.EndDate = TriTrue, day.Format(dateLayout), day.AddDate(0, 0, 1).Format(dateLayout)
+			setAllDay(&e, day.Format(dateLayout), day.AddDate(0, 0, 1).Format(dateLayout))
 		}
 		events = append(events, e)
 	}
@@ -964,7 +964,7 @@ func TestApplySnapshotRefusesBadEventsAndAppliesTheRest(t *testing.T) {
 	noDate := timed(t, SourceTeams, "nodate", "No date", "2026-10-05T16:00:00Z")
 	noDate.AllDay = TriTrue
 	badDate := timed(t, SourceTeams, "baddate", "Bad date", "2026-10-05T16:00:00Z")
-	badDate.AllDay, badDate.StartDate = TriTrue, "2026-13-45"
+	setAllDay(&badDate, "2026-13-45", "")
 	counts, err := ApplySnapshot(ctx, db, w, []Event{zero, good, far, noDate, badDate}, mustTime(t, "2026-10-02T01:00:00Z"))
 	if err != nil {
 		t.Fatalf("a stored snapshot is not a failure: %v", err)
@@ -1071,4 +1071,25 @@ func TestSpareReportsStorageErrors(t *testing.T) {
 	}); err == nil {
 		t.Error("scan failure: want an error")
 	}
+}
+
+// setAllDay makes e a known all-day event over the dates, with the instants a source gives it.
+func setAllDay(e *Event, start, end string) {
+	e.AllDay, e.StartDate, e.EndDate = TriTrue, start, end
+	*e = dayOf(*e)
+}
+
+// dayOf gives an all-day event the instants a source states for it: midnight UTC at the start
+// date and at the end date (a day later when there is none). Dates that do not parse keep a day of
+// dummy instants, for tests of corrupt dates.
+func dayOf(e Event) Event {
+	s, err := time.Parse(dateLayout, e.StartDate)
+	if err != nil {
+		s = time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	}
+	e.Start, e.End = s, s.Add(24*time.Hour)
+	if end, err := time.Parse(dateLayout, e.EndDate); err == nil && end.After(s) {
+		e.End = end
+	}
+	return e
 }

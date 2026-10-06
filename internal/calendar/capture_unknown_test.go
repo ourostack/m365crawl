@@ -68,15 +68,31 @@ func TestCaptureKnownEmptyLocationNewerClears(t *testing.T) {
 
 func TestCaptureAllDayBlockMovesTogether(t *testing.T) {
 	first := thin(t, t1)
-	first.AllDay, first.StartDate, first.EndDate = TriTrue, "2026-10-05", "2026-10-06"
+	setAllDay(&first, "2026-10-05", "2026-10-06")
 	old := mustCapture(t, nil, first)
-	// A newer copy that does not know the flag moves the instants but keeps the block.
+	// A newer copy that does not know the flag and still gives the same days keeps the block.
+	same := thin(t, t3)
+	same.AllDay = TriUnknown
+	same.Start, same.End = mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	if got := mustCapture(t, &old, same); !got.AllDay.Is(true) || got.StartDate != "2026-10-05" || got.EndDate != "2026-10-06" {
+		t.Fatalf("%+v", got)
+	}
+	// A newer copy that does not know the flag and moves the instants to other times takes them.
+	// The old block would leave the event on its old days with new instants, so the flag turns
+	// unknown and the dates clear: the event shows on its new day.
 	unknown := thin(t, t3)
 	unknown.AllDay, unknown.StartDate, unknown.EndDate = TriUnknown, "2026-12-01", "2026-12-02" // dates of an unknown flag are ignored
 	unknown.Start, unknown.End = mustTime(t, "2026-10-06T16:00:00Z"), mustTime(t, "2026-10-06T17:00:00Z")
 	got := mustCapture(t, &old, unknown)
-	if !got.AllDay.Is(true) || got.StartDate != "2026-10-05" || got.EndDate != "2026-10-06" || !got.Start.Equal(unknown.Start) {
+	if got.AllDay.Known() || got.StartDate != "" || got.EndDate != "" || !got.Start.Equal(unknown.Start) {
 		t.Fatalf("%+v", got)
+	}
+	// An all-day copy at a still-newer time that agrees with the block is not contradicted.
+	back := thin(t, "2026-10-04T10:00:00Z")
+	back.AllDay = TriUnknown
+	back.Start, back.End = mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	if again := mustCapture(t, &got, back); !again.AllDay.Is(true) || again.StartDate != "2026-10-05" {
+		t.Fatalf("a later copy that agrees with the stated block shows it again: %+v", again)
 	}
 	// A newer copy that knows it takes the whole block, including a known false with no dates.
 	timedAgain := thin(t, t3)
@@ -85,7 +101,7 @@ func TestCaptureAllDayBlockMovesTogether(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	moved := thin(t, t3)
-	moved.AllDay, moved.StartDate, moved.EndDate = TriTrue, "2026-10-08", "2026-10-09"
+	setAllDay(&moved, "2026-10-08", "2026-10-09")
 	got = mustCapture(t, &old, moved)
 	if got.StartDate != "2026-10-08" || got.EndDate != "2026-10-09" {
 		t.Fatalf("%+v", got)
@@ -129,11 +145,12 @@ func TestCaptureUnknownSetShrinksWhenFieldArrives(t *testing.T) {
 	if !reflect.DeepEqual(back.Unknown, got.Unknown) || back.AttendeesJSON != attendeesTwo {
 		t.Fatalf("%v", back.Unknown)
 	}
-	// A known empty detail value is known even though it states nothing.
+	// A copy that says "no attendees" states nothing for the unit, so it cannot mark it known: only
+	// a copy whose unit won can, and that keeps Unknown independent of arrival order.
 	emptyAttendees := thin(t, t3)
 	emptyAttendees.Unknown = without(emptyAttendees.Unknown, FieldAttendees)
-	if got := mustCapture(t, &old, emptyAttendees); got.unknown(FieldAttendees) || got.AttendeesJSON != "" {
-		t.Fatalf("known-empty attendees: %v %q", got.Unknown, got.AttendeesJSON)
+	if got := mustCapture(t, &old, emptyAttendees); !got.unknown(FieldAttendees) || got.AttendeesJSON != "" {
+		t.Fatalf("an empty list is not a statement: %v %q", got.Unknown, got.AttendeesJSON)
 	}
 	// A name listed unknown next to a value is read as known: the value wins.
 	contradictory := rich(t, t2)

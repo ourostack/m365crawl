@@ -13,7 +13,8 @@ func twin(t testing.TB, src Source, lm string, mods ...func(*Event)) Event {
 		account = acctOutlook
 	}
 	e := Event{
-		Source: src, AccountID: account, SourceID: string(src) + "-1", GlobalID: "uid-1", Subject: "Fixture Weekly Sync",
+		UnknownDeclared: true,
+		Source:          src, AccountID: account, SourceID: string(src) + "-1", GlobalID: "uid-1", Subject: "Fixture Weekly Sync",
 		Start: mustTime(t, "2026-11-02T13:00:00Z"), End: mustTime(t, "2026-11-02T14:00:00Z"), LastModified: tp(t, lm),
 		AllDay: TriFalse, IsOrganizer: TriFalse, IsPrivate: TriFalse, Cancelled: TriFalse,
 	}
@@ -183,7 +184,7 @@ func TestFreshByPrincipalAndSource(t *testing.T) {
 func TestAgendaTwinRowsOnDifferentSidesOfRange(t *testing.T) {
 	db := linked(t)
 	teams := twin(t, SourceTeams, "2026-11-02T12:00:00Z", func(e *Event) {
-		e.AllDay, e.StartDate, e.EndDate = TriTrue, "2026-11-03", "2026-11-04"
+		setAllDay(e, "2026-11-03", "2026-11-04")
 		e.Start, e.End = mustTime(t, "2026-11-03T08:00:00Z"), mustTime(t, "2026-11-04T08:00:00Z")
 	})
 	outlook := twin(t, SourceOutlook, "2026-11-02T12:00:30Z", func(e *Event) {
@@ -288,7 +289,7 @@ func TestRemovalBoundary(t *testing.T) {
 	}
 	// To the nanosecond, on rows.
 	at := tp(t, "2026-11-02T15:00:00Z")
-	gone := Event{Source: SourceTeams, RemovedAt: at, LastModified: tp(t, "2026-11-02T09:00:00Z")}
+	gone := Event{UnknownDeclared: true, Source: SourceTeams, RemovedAt: at, LastModified: tp(t, "2026-11-02T09:00:00Z")}
 	for lm, want := range map[string]bool{"2026-11-02T15:00:05Z": true, "2026-11-02T15:00:05.000000001Z": false} {
 		m := Merge([]Event{gone, {Source: SourceOutlook, LastModified: tp(t, lm)}}, nil)
 		if m.Removed != want {
@@ -302,8 +303,8 @@ func TestRemovalBoundary(t *testing.T) {
 }
 
 func TestRemovalAllRowsRemoved(t *testing.T) {
-	gone := Event{Source: SourceTeams, RemovedAt: tp(t, "2026-11-02T15:00:00Z"), LastModified: tp(t, "2026-11-02T09:00:00Z"), Location: "x"}
-	goneToo := Event{Source: SourceOutlook, Unknown: []Field{FieldLocation}, RemovedAt: tp(t, "2026-11-02T16:00:00Z"), LastModified: tp(t, "2026-11-02T09:00:00Z")}
+	gone := Event{UnknownDeclared: true, Source: SourceTeams, RemovedAt: tp(t, "2026-11-02T15:00:00Z"), LastModified: tp(t, "2026-11-02T09:00:00Z"), Location: "x"}
+	goneToo := Event{UnknownDeclared: true, Source: SourceOutlook, Unknown: []Field{FieldLocation}, RemovedAt: tp(t, "2026-11-02T16:00:00Z"), LastModified: tp(t, "2026-11-02T09:00:00Z")}
 	m := Merge([]Event{gone, goneToo}, nil)
 	if !m.Removed || !reflect.DeepEqual(m.RemovedBy, []Source{SourceTeams, SourceOutlook}) || !m.RemovedAt.Equal(*goneToo.RemovedAt) {
 		t.Fatalf("%+v", m)

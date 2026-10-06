@@ -528,6 +528,13 @@ func TestMapEventAbsentKeysAreUnknown(t *testing.T) {
 	if got := calendar.UnknownFields(e); !containsString(got, "detail") {
 		t.Errorf("%v", got)
 	}
+	calendar.AssertEveryFieldClassified(t, e)
+}
+
+func TestMapEventClassifiesEveryField(t *testing.T) {
+	// A full record states most fields; the rest are listed unknown, and the mapper declares it.
+	e, _ := mapEvent(t, "k", `{"iCalUID":"U","subject":"S","startTime":1773162000000,"endTime":1773165600000,"isAllDayEvent":false,"location":"","organizer":{"name":"O"},"attendees":[],"isOnlineMeeting":false}`)
+	calendar.AssertEveryFieldClassified(t, e, calendar.FieldLocation, calendar.FieldAttendees)
 }
 
 func containsString(list []string, s string) bool {

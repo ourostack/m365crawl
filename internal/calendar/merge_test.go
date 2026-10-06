@@ -27,7 +27,8 @@ func row(t testing.TB, src Source, lm string, mods ...func(*Event)) Event {
 		acct = acctOutlook
 	}
 	e := Event{
-		Source: src, AccountID: acct, SourceID: string(src) + "-1", GlobalID: "uid-1", ICalUID: "uid-1",
+		UnknownDeclared: true,
+		Source:          src, AccountID: acct, SourceID: string(src) + "-1", GlobalID: "uid-1", ICalUID: "uid-1",
 		Subject: "Fixture Weekly Sync", Start: mustTime(t, "2026-11-02T13:00:00Z"), End: mustTime(t, "2026-11-02T14:00:00Z"),
 	}
 	if lm != "" {
@@ -143,7 +144,7 @@ func TestMergeExampleB(t *testing.T) {
 // Example C: an all-day event whose flag Outlook has not located.
 func TestMergeExampleC(t *testing.T) {
 	teams := row(t, SourceTeams, "12:00:00", func(e *Event) {
-		e.AllDay, e.StartDate, e.EndDate = TriTrue, "2026-11-03", "2026-11-04"
+		setAllDay(e, "2026-11-03", "2026-11-04")
 		e.Start, e.End = mustTime(t, "2026-11-03T08:00:00Z"), mustTime(t, "2026-11-04T08:00:00Z")
 	})
 	outlook := row(t, SourceOutlook, "12:00:30", func(e *Event) {
@@ -350,7 +351,7 @@ func TestMergeAllDayFromTeamsWhenOutlookUnknownAndLooksAllDay(t *testing.T) {
 		{"no end", "2026-11-03T00:00:00Z", "0001-01-01T00:00:00Z", false},
 	} {
 		teams := row(t, SourceTeams, "12:00:00", func(e *Event) {
-			e.AllDay, e.StartDate, e.EndDate = TriTrue, "2026-11-03", "2026-11-04"
+			setAllDay(e, "2026-11-03", "2026-11-04")
 			e.Start, e.End = mustTime(t, "2026-11-03T08:00:00Z"), mustTime(t, "2026-11-04T08:00:00Z")
 		})
 		outlook := row(t, SourceOutlook, "12:01:00", func(e *Event) { e.Start, e.End = mustTime(t, tc.start), mustTime(t, tc.end) })
@@ -360,7 +361,7 @@ func TestMergeAllDayFromTeamsWhenOutlookUnknownAndLooksAllDay(t *testing.T) {
 	}
 	// The start must be within 14 hours of the other row's.
 	teams := row(t, SourceTeams, "12:00:00", func(e *Event) {
-		e.AllDay, e.StartDate, e.EndDate = TriTrue, "2026-11-03", "2026-11-04"
+		setAllDay(e, "2026-11-03", "2026-11-04")
 		e.Start, e.End = mustTime(t, "2026-11-03T08:00:00Z"), mustTime(t, "2026-11-04T08:00:00Z")
 	})
 	for start, want := range map[string]bool{"2026-11-02T18:00:00Z": true, "2026-11-02T17:59:00Z": false, "2026-11-03T22:00:00Z": true, "2026-11-03T22:01:00Z": false} {
@@ -374,7 +375,7 @@ func TestMergeAllDayFromTeamsWhenOutlookUnknownAndLooksAllDay(t *testing.T) {
 
 func TestMergeAllDayNotFilledWhenOutlookMovedToTimedSlot(t *testing.T) {
 	teams := row(t, SourceTeams, "12:00:00", func(e *Event) {
-		e.AllDay, e.StartDate, e.EndDate = TriTrue, "2026-11-03", "2026-11-04"
+		setAllDay(e, "2026-11-03", "2026-11-04")
 		e.Start, e.End = mustTime(t, "2026-11-03T08:00:00Z"), mustTime(t, "2026-11-04T08:00:00Z")
 	})
 	outlook := row(t, SourceOutlook, "12:01:00", func(e *Event) {

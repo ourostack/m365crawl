@@ -98,7 +98,7 @@ var fieldGroups = map[string]string{
 
 	"HasAttachments": groupSticky,
 
-	"Unknown": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
+	"Unknown": groupCore, "UnknownDeclared": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
 	"FirstSeenAt": groupCore, "SeenAt": groupCore, "RemovedAt": groupCore,
 }
 
@@ -437,9 +437,22 @@ func normalizeUnknown(e *Event) {
 //   - An event that cannot be stored is refused (ValidateEvent) and nothing is captured.
 //   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 //
+// The all-day block (the flag and its dates) and the instants must agree. A copy that does not know
+// the flag takes its instants and keeps the stored block only while the instants still look all-day
+// and give the same days; otherwise the stored columns show the flag unknown and no dates, so the
+// event sits on the days its instants give. The contradicted block is not lost: it rides in the
+// clocks (blockStash) and shows again when the instants agree with it, whatever the arrival order.
+//
+// An event is refused unless its mapper set UnknownDeclared: it states that Unknown was computed,
+// so an empty Unknown means "every field was read", never "the mapper forgot". The flag is input
+// only and is cleared in the stored row. A known all-day event needs instants (at least one).
+//
 // Known limits. At an equal timestamp the fuller statement wins even when the shorter one is the
 // truth, because equal times cannot say which was written last. A copy with no time cannot be
-// ordered, so the result then depends on arrival order; mappers must always supply a time.
+// ordered, so the result then depends on arrival order; mappers must always supply a time. A copy
+// with no instants at all (a timeless copy) is refused only when it claims a known all-day event;
+// UnknownDeclared says the mapper computed Unknown, not that it computed it correctly: a mapper test
+// proves that with AssertEveryFieldClassified.
 func Capture(old *Event, in Event) (Event, error) {
 	if err := ValidateEvent(in); err != nil {
 		return Event{}, err
@@ -449,8 +462,9 @@ func Capture(old *Event, in Event) (Event, error) {
 	if old != nil {
 		base = *old
 	}
-	out := base
 	clocks := ParseFieldClocks(base.FieldClocksJSON)
+	unstashBlock(&base, clocks)
+	out := base
 	expandClocks(base, clocks)
 
 	// Identity.
@@ -501,6 +515,7 @@ func Capture(old *Event, in Event) (Event, error) {
 		}
 	}
 	out.Unknown = capturedUnknown(old, base, in, taken)
+	stashBlock(&out, clocks)
 	captureRaw(&out, base, in, clocks)
 	captureLinks(&out, in, clocks)
 	if in.HasAttachments > out.HasAttachments {
@@ -513,25 +528,22 @@ func Capture(old *Event, in Event) (Event, error) {
 	compactClocks(out, clocks)
 	out.FieldClocksJSON = formatClocks(clocks)
 	out.RemovedAt = nil
+	out.UnknownDeclared = false
 	return out, nil
 }
 
-// capturedUnknown is the stored row's Unknown after in was captured over base. A field is known
-// once any copy has stated it. A unit the incoming copy states carries the copy's own statuses when
-// it took the unit (its fields came from that copy) and keeps the stored ones when it did not. A
-// copy that does not state a unit can still say a field is known and empty, which is known.
+// capturedUnknown is the stored row's Unknown after in was captured over base. A field is unknown
+// exactly when no copy whose unit won stated it: a unit the incoming copy took carries that copy's
+// own statuses (its fields came from it), every other unit keeps the stored statuses, and a first
+// copy that did not take a unit leaves its fields unknown. A copy that does not state a unit, such
+// as a known-empty attendee list, cannot mark the unit's fields known.
 func capturedUnknown(old *Event, base, in Event, taken map[string]bool) []Field {
 	set := unknownSet{}
 	for _, n := range unknownVocabulary {
-		u := unitOfName[n]
-		stored := old == nil || base.unknown(n)
-		switch {
-		case u.states(in) && taken[u.name]:
+		if taken[unitOfName[n].name] {
 			set[n] = in.unknown(n)
-		case u.states(in):
-			set[n] = stored
-		default:
-			set[n] = stored && in.unknown(n)
+		} else {
+			set[n] = old == nil || base.unknown(n)
 		}
 	}
 	for n, unknown := range set {
@@ -659,6 +671,9 @@ func ValidateEvent(e Event) error {
 	refuse := func(reason string) error {
 		return &InvalidEventError{Source: e.Source, SourceID: e.SourceID, Reason: reason}
 	}
+	if !e.UnknownDeclared {
+		return refuse("the mapper did not declare Unknown (UnknownDeclared is false)")
+	}
 	for _, f := range e.Unknown {
 		if !validField(f) {
 			return refuse(fmt.Sprintf("unknown field name %q is not in the vocabulary", f))
@@ -667,6 +682,9 @@ func ValidateEvent(e Event) error {
 	if e.AllDay.Is(true) {
 		if e.StartDate == "" {
 			return refuse("all-day event without a start date")
+		}
+		if e.Start.IsZero() && e.End.IsZero() {
+			return refuse("all-day event without instants")
 		}
 		if d, err := time.Parse(dateLayout, e.StartDate); err != nil || d.Format(dateLayout) != e.StartDate {
 			return refuse("all-day start date is not a calendar date in YYYY-MM-DD form")
@@ -684,4 +702,56 @@ func ValidateEvent(e Event) error {
 		}
 	}
 	return nil
+}
+
+// blockMatches reports whether an all-day block and the instants describe the same days: the
+// instants look all-day, the start is within AllDayConsistencyWindow of midnight of the start date
+// (zones differ), and the instants span as many whole days as the dates do. An empty or non-later
+// end date means one day.
+func blockMatches(e Event) bool {
+	start, err := time.Parse(dateLayout, e.StartDate)
+	if err != nil || !looksAllDay(e) || e.Start.Sub(start).Abs() > AllDayConsistencyWindow {
+		return false
+	}
+	days := 1
+	if end, err := time.Parse(dateLayout, e.EndDate); err == nil && end.After(start) {
+		days = int((end.Sub(start) + 12*time.Hour) / (24 * time.Hour))
+	}
+	return days == int((e.End.Sub(e.Start)+12*time.Hour)/(24*time.Hour))
+}
+
+// blockStash is the prefix of the clock key that holds an all-day block the instants contradict.
+// The stored columns show only a coherent block (the event must sit on the days its instants
+// give), but the block a copy stated is still a statement: a later copy whose instants agree
+// with it again, or arriving in another order, must see the same state. So the contradicted block
+// rides in the clocks as "all_day_stash|<flag>|<start date>|<end date>", valued with the block's
+// own clock, and Capture restores it before it decides anything.
+const blockStash = "all_day_stash|"
+
+// unstashBlock restores a stashed block over the coherent columns of base, and its clock.
+func unstashBlock(base *Event, clocks map[string]time.Time) {
+	for k, at := range clocks {
+		rest, ok := strings.CutPrefix(k, blockStash)
+		if !ok {
+			continue
+		}
+		delete(clocks, k)
+		parts := strings.SplitN(rest, "|", 3)
+		if len(parts) == 3 {
+			flag, _ := strconv.Atoi(parts[0])
+			base.AllDay, base.StartDate, base.EndDate = Tri(flag), parts[1], parts[2] //nolint:gosec // a stash holds 0 to 2
+			clocks["all_day"] = at
+		}
+	}
+}
+
+// stashBlock shows a coherent block: one the instants contradict is hidden (flag unknown, no
+// dates) and stashed.
+func stashBlock(out *Event, clocks map[string]time.Time) {
+	if !out.AllDay.Is(true) || blockMatches(*out) {
+		return
+	}
+	at := clocks["all_day"]
+	clocks[blockStash+strconv.Itoa(int(out.AllDay))+"|"+out.StartDate+"|"+out.EndDate] = at
+	out.AllDay, out.StartDate, out.EndDate = TriUnknown, "", ""
 }

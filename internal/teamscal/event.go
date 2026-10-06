@@ -109,6 +109,7 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		}
 	}
 	e.Unknown = unknownFields(m, reminderKnown)
+	e.UnknownDeclared = true // every vocabulary field is stated or listed above
 	if err := calendar.ValidateEvent(e); err != nil {
 		return calendar.Event{}, notes, &UnmappedError{Reason: err.Error()}
 	}

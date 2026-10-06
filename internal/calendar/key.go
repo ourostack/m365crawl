@@ -23,13 +23,20 @@ func Key(e Event) string {
 	return e.GlobalID + "|" + originalSuffix(e)
 }
 
+// dateForm reports whether an occurrence is keyed by date: its all-day flag is known true, or it
+// is unknown and the instants look all-day (the test Merge uses), so a source that has not located
+// the flag still mints the key its all-day twin does. A known false is keyed by instant.
+func dateForm(e Event) bool {
+	return e.AllDay.Is(true) || (!e.AllDay.Known() && looksAllDay(e))
+}
+
 // originalSuffix is the occurrence part of a global key: the original date of an all-day
 // occurrence, the original instant of a timed one, empty for a single event.
 func originalSuffix(e Event) string {
 	if e.OriginalStart == nil {
 		return ""
 	}
-	if e.AllDay.Is(true) {
+	if dateForm(e) {
 		// The date as the source stated it, in the zone it came in, so UTC and local midnight agree.
 		return e.OriginalStart.Format(dateLayout)
 	}

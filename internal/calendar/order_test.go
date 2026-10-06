@@ -275,10 +275,16 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	e.IsOrganizer, e.IsPrivate = randomTri(r), randomTri(r)
 	// The all-day block: known true carries dates, known false and unknown carry none.
 	e.AllDay = randomTri(r)
-	if e.AllDay == TriTrue {
+	midnight := func(d string) time.Time { return mustTime(t, d+"T00:00:00Z") }
+	switch {
+	case e.AllDay == TriTrue:
+		// A known all-day copy carries instants that agree with its dates.
 		e.StartDate, e.EndDate = pick("2026-10-05", "2026-10-06"), pick("", "2026-10-07", "2026-10-08")
-	}
-	if r.Intn(3) == 0 {
+		e.Start, e.End = midnight(e.StartDate), midnight(e.StartDate).Add(24*time.Hour)
+		if e.EndDate != "" {
+			e.End = midnight(e.EndDate)
+		}
+	case r.Intn(3) == 0:
 		e.Start, e.End = e.Start.Add(time.Hour), e.End.Add(2*time.Hour)
 	}
 	e.TimeZone, e.UTCOffset = pick("PacificSt", "UTC", ""), pick("", "-07:00", "+01:00")
@@ -476,7 +482,7 @@ func TestCaptureRefusesUnstorableEvents(t *testing.T) {
 	// A valid all-day event and an unset End are fine.
 	ok := thin(t, t1)
 	ok.End = time.Time{}
-	ok.AllDay, ok.StartDate = TriTrue, "2026-10-05"
+	setAllDay(&ok, "2026-10-05", "")
 	if _, err := Capture(nil, ok); err != nil {
 		t.Fatal(err)
 	}

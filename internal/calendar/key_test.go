@@ -59,7 +59,7 @@ func TestKeyComposite(t *testing.T) {
 		t.Fatalf("composite key shape: %q", key)
 	}
 	// Order independent and normalized: the other tool mints the same key from the same data.
-	twin := Event{Source: SourceOutlook, Organizer: "ada@example.com", Subject: "weekly sync meeting", Start: mustTime(t, "2026-10-05T09:00:00-07:00")}
+	twin := Event{UnknownDeclared: true, Source: SourceOutlook, Organizer: "ada@example.com", Subject: "weekly sync meeting", Start: mustTime(t, "2026-10-05T09:00:00-07:00")}
 	if Key(twin) != key {
 		t.Fatalf("twin key %q != %q", Key(twin), key)
 	}

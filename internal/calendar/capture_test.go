@@ -31,7 +31,8 @@ var thinUnknown = []Field{
 // the detail group is unknown.
 func thin(t testing.TB, lm string) Event {
 	return Event{
-		Source: SourceTeams, AccountID: "tenant-1/user-1", SourceID: "ev1", GlobalID: "uid-1", ICalUID: "uid-1",
+		UnknownDeclared: true,
+		Source:          SourceTeams, AccountID: "tenant-1/user-1", SourceID: "ev1", GlobalID: "uid-1", ICalUID: "uid-1",
 		SeriesKey: "series-1", EventType: EventOccurrence,
 		Start: mustTime(t, "2026-10-05T16:00:00Z"), End: mustTime(t, "2026-10-05T17:00:00Z"),
 		TimeZone: "PacificSt", Subject: "Fixture Sync", Organizer: "Alex Fixture", Response: "accepted", ShowAs: "busy",
@@ -68,6 +69,7 @@ func TestCaptureNewEventTakesIncoming(t *testing.T) {
 	want := in
 	want.DetailAsOf = at(t, t1)
 	want.Unknown = []Field{FieldOrganizerAddress, FieldTimeZoneIANA, FieldUTCOffset}
+	want.UnknownDeclared = false // input only
 	// A schedule unit stated at the row's LastModified stores no clock; every other unit does.
 	clocks := map[string]time.Time{"raw": *at(t, t1)}
 	for _, u := range units {

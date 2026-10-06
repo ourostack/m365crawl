@@ -162,7 +162,12 @@ func ApplyBatch(ctx context.Context, tx *sql.Tx, b Batch, opts ApplyOptions, at 
 	snap := newSnapshot(events)
 	for _, e := range events {
 		key := Key(e)
-		if !opts.SkipMatches {
+		if opts.SkipMatches {
+			// A row that exists for this source id keeps its key, whatever the copy now looks like.
+			if key, err = storedKey(ctx, tx, e, key); err != nil {
+				return counts, err
+			}
+		} else {
 			if key, err = resolveKey(ctx, tx, e, snap); err != nil {
 				return counts, err
 			}
@@ -257,6 +262,22 @@ func RecordCoveredDays(ctx context.Context, tx *sql.Tx, source Source, accountID
 		}
 	}
 	return nil
+}
+
+// storedKey is the key the source's row for e.SourceID is stored under, or fallback when there is
+// none. Keys never move: a copy that changes how its key would be minted (its all-day flag went
+// absent) still updates the row it belongs to.
+func storedKey(ctx context.Context, tx *sql.Tx, e Event, fallback string) (string, error) {
+	var key string
+	err := tx.QueryRowContext(ctx, `SELECT event_key FROM calendar_source_events WHERE source=? AND account_id=? AND source_id=?
+	  ORDER BY first_seen_at, event_key LIMIT 1`, string(e.Source), e.AccountID, e.SourceID).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fallback, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 // snapshot indexes a snapshot's events so resolveKey can count same-hash events in the snapshot

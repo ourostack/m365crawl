@@ -2,6 +2,15 @@
 // the keys that identify one occurrence across sources, the merge that picks the freshest copy,
 // and the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no
 // source adapter and no archive code; callers hand it a *sql.DB opened with SchemaDDL.
+//
+// Contract for mappers. Every Event a mapper hands in must list in Unknown each vocabulary field
+// the source did not state, then set UnknownDeclared; ValidateEvent refuses an event without it,
+// so forgetting Unknown cannot silently mean "everything is known". A mapper test calls
+// AssertEveryFieldClassified to prove each field is stated, listed unknown, or deliberately empty.
+// A known all-day event carries instants that agree with its dates. Keys never move: the date form
+// is used for a known all-day flag, or an unknown one whose instants look all-day, and a source
+// row keeps the key it was first stored under. Limits of Capture (equal-time ties, copies with no
+// time, the block stash) are on Capture.
 package calendar
 
 import (
@@ -102,6 +111,11 @@ type Event struct {
 	// never lets an unknown field replace or clear a known one, and a stored row's Unknown is what no
 	// copy has stated. start, end, last_modified and the identity fields are never unknown.
 	Unknown []Field
+	// UnknownDeclared is set by a mapper after it has computed Unknown, to say that every
+	// vocabulary field is either stated or listed in Unknown. An empty Unknown means "everything
+	// known", the unsafe default for a mapper that forgot it, so ValidateEvent refuses an event
+	// without the declaration. Input only: Capture clears it in the stored row.
+	UnknownDeclared bool
 
 	// Bookkeeping. DetailAsOf is the newest LastModified of a copy that stated attendees or a body;
 	// nil when no such copy was captured.
