@@ -83,11 +83,14 @@ func TestOutlookZoneChangeTakesCoveredDaysAgain(t *testing.T) {
 	s := newStore(t)
 	applyOutlookBatch(t, s, OutlookStamp(3, time.UTC), outlookEvent(calendar.TriFalse, base))
 	east := time.FixedZone("east", 15*3600) // 09:30 UTC is already the next day
-	commitOutlook(t, s, east, OutlookStamp(3, east), outlookEvent(calendar.TriFalse, base))
-	var day string
-	var n int
-	if err := s.db.QueryRow(`select min(day), count(*) from calendar_covered_days where source='outlook'`).Scan(&day, &n); err != nil || day != "2031-03-06" || n != 1 {
-		t.Fatalf("%q %d %v", day, n, err)
+	// The store no longer holds the first event: its day is taken again from the archive, in the new zone.
+	other := outlookEvent(calendar.TriFalse, base)
+	other.SourceID, other.GlobalID, other.ICalUID, other.SeriesKey = "DD44", "DD44", "DD44", "DD44"
+	other.Start, other.End = time.Date(2031, 3, 10, 9, 30, 0, 0, time.UTC), time.Date(2031, 3, 10, 10, 0, 0, 0, time.UTC)
+	commitOutlook(t, s, east, OutlookStamp(3, east), other)
+	var days string
+	if err := s.db.QueryRow(`select group_concat(day) from (select day from calendar_covered_days where source='outlook' order by day)`).Scan(&days); err != nil || days != "2031-03-06,2031-03-11" {
+		t.Fatalf("%q %v", days, err)
 	}
 }
 

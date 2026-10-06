@@ -68,8 +68,9 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 	if err := tx.QueryRowContext(ctx, `select value from meta where key=?`, outlookStampKey+b.Account).Scan(&stored); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return res, err
 	}
+	zoneChanged := stored != "" && !strings.Contains(stored, ";"+calendarZone(zoneStamp(b.Zone))+";")
 	if stored != b.Stamp {
-		if stored != "" && !strings.Contains(stored, ";"+calendarZone(zoneStamp(b.Zone))+";") {
+		if zoneChanged {
 			if _, err := tx.ExecContext(ctx, `delete from calendar_covered_days where source=? and account_id=?`, string(calendar.SourceOutlook), b.Account); err != nil {
 				return res, err
 			}
@@ -89,12 +90,41 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 	if err != nil {
 		return res, err
 	}
+	if zoneChanged {
+		// The days of events the store no longer holds were forgotten with the rest: take them
+		// again from the archived rows, in the new zone, so a covered day never uncovers.
+		if err := retakeOutlookDays(ctx, tx, b); err != nil {
+			return res, err
+		}
+	}
 	res.Counts = CalendarCounts{Events: toCounts(bc.Events), Refused: len(bc.Refused)}
 	res.omit(OmitCalendarRefused, len(bc.Refused))
 	if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookStampKey+b.Account, b.Stamp); err != nil {
 		return res, err
 	}
 	return res, nil
+}
+
+// retakeOutlookDays records the days, in the batch's zone, of every live archived event of the
+// account, including events the batch no longer holds.
+func retakeOutlookDays(ctx context.Context, tx *sql.Tx, b OutlookBatch) error {
+	var stored []calendar.Event
+	if err := eachRow(ctx, tx, `select start_at, coalesce(all_day,0), start_date, event_type from calendar_source_events where source=? and account_id=?`,
+		[]any{string(calendar.SourceOutlook), b.Account}, func(r *sql.Rows) error {
+			var start string
+			var allDay int
+			var e calendar.Event
+			if err := r.Scan(&start, &allDay, &e.StartDate, &e.EventType); err != nil {
+				return err
+			}
+			e.Start, _ = time.Parse(timeLayout, start)
+			e.AllDay = calendar.TriOf(allDay == 1)
+			stored = append(stored, e)
+			return nil
+		}); err != nil {
+		return err
+	}
+	return calendar.RecordCoveredDays(ctx, tx, calendar.SourceOutlook, b.Account, coveredDays(stored, b.Zone), b.At)
 }
 
 // coveredDays are the days, in zone, on which the batch holds at least one event that is not a
