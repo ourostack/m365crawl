@@ -7,7 +7,7 @@ import (
 )
 
 // manifestDescription is the README's pitch sentence.
-const manifestDescription = "Mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only."
+const manifestDescription = "Mirrors the Microsoft Teams desktop app's local cache, and optionally the new Outlook for Mac's calendar, into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and a calendar with meeting recaps, so an AI agent can read your Teams history and agenda in milliseconds, offline and read-only."
 
 // manifest is the crawlkit app manifest that `crawlctl discover` reads from `teamscrawl metadata --json`.
 func manifest() control.Manifest {
@@ -20,7 +20,7 @@ func manifest() control.Manifest {
 	}
 	m.Commands["calendar"] = control.Command{Argv: []string{"teamscrawl", "--json", "calendar"}, JSON: true}
 	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache"}}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}
 	return m
 }
 

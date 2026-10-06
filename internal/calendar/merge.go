@@ -2,6 +2,8 @@ package calendar
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,17 @@ type Fill struct {
 	AsOf   *time.Time
 }
 
+// Override records a field both copies stated with different values, and where the merged value
+// came from: the source whose value stands, or "union" when the merged list holds entries of both.
+type Override struct {
+	Field Field
+	From  string
+	AsOf  *time.Time
+}
+
+// OverrideUnion is the From of an Override whose merged list is the union of both copies' lists.
+const OverrideUnion = "union"
+
 // Merged is the one event the rows of a (principal, key) group make.
 type Merged struct {
 	Event
@@ -29,6 +42,12 @@ type Merged struct {
 	Sources []Source
 	// Filled lists the schedule fields taken from a row other than the schedule base.
 	Filled []Fill
+	// Overridden lists the fields both copies stated with different values, with the source the
+	// merged value came from. A field only one copy stated is a Fill or nothing, never listed here.
+	Overridden []Override
+	// LocationTexts are the location texts of the rows that took part, in schedule order. Rooms
+	// reads them so a place only one copy names stays in the room list.
+	LocationTexts []string
 	// Removed is true when the event is gone; RemovedBy names the sources that saw it go and
 	// RemovedAt is the latest such removal.
 	Removed   bool
@@ -60,12 +79,22 @@ type Merged struct {
 //     and the other multi-field units fill as wholes. When the merged event is known not to be an
 //     online meeting and the schedule base is later than the detail base's DetailAsOf by more than
 //     the skew, the join fields are not filled from another row.
+//     The meeting-link unit (join URL, short join URL, dial-in, meeting chat id) belongs to the
+//     Teams meeting: a Teams row that states it supplies it whole, whichever row is the detail
+//     base, and another row fills it only when no Teams row states it. The noJoin rule above still
+//     wins over this. Recordings and recaps attach by the meeting chat id and the event key, never by
+//     which copy won, so keeping the Teams unit keeps them. An event that a Teams row
+//     says is an online meeting stays one while its join link is kept (M5 does not turn it false).
 //   - M7 Unknown is what every taking-part row leaves unknown.
 //   - M8 Lists. The attendee list and the structured location list are unions of the copies'
 //     lists, by lower-case address (display name when an attendee has none) and by lower-case
 //     name. An entry both copies hold takes the values of the copy whose list clock is newer; an
 //     entry only one copy holds is kept. A list the union enlarged beyond the one M6 chose is
-//     recorded as a Fill.
+//     recorded as a Fill. The room list read from the merged event is also the union of every
+//     copy's location text pieces (see MergedRooms); the Location text itself stays the base's.
+//   - M9 Overrides. A field both copies state with different values is recorded in Overridden
+//     with the source whose value stands ("union" for a merged list), so a replaced value is as
+//     visible as a filled one.
 func Merge(rows []Event, fresh map[Source]time.Time) Merged {
 	var m Merged
 	if len(rows) == 0 {
@@ -84,6 +113,7 @@ func Merge(rows []Event, fresh map[Source]time.Time) Merged {
 	fillAllDay(&out, base, others, &fills)
 	fillFlags(&out, base, others, &fills)
 	mergeDetail(&out, base, ordered)
+	keepOnline(&out, ordered)
 	mergeLists(&out, ordered, &fills)
 	out.Unknown = mergedUnknown(ordered)
 	out.RemovedAt = m.RemovedAt
@@ -101,6 +131,10 @@ func Merge(rows []Event, fresh map[Source]time.Time) Merged {
 		}
 	}
 	m.Event, m.Filled = out, fills.list
+	m.Overridden = overrides(out, ordered)
+	for _, o := range ordered {
+		m.LocationTexts = append(m.LocationTexts, o.Location)
+	}
 	m.Sources = sourcesOf(ordered)
 	return m
 }
@@ -293,9 +327,16 @@ func mergeDetail(out *Event, base Event, ordered []Event) {
 		if u.group == groupSchedule || u.name == "location" {
 			continue
 		}
-		if noJoin && u.links {
+		switch {
+		case noJoin && u.links:
 			u.assign(out, base)
-		} else {
+		case u.links:
+			if t := teamsStating(ordered, u); t != nil {
+				u.assign(out, *t)
+			} else {
+				u.assign(out, detail)
+			}
+		default:
 			u.assign(out, detail)
 		}
 	}
@@ -312,6 +353,135 @@ func mergeDetail(out *Event, base Event, ordered []Event) {
 			out.DetailRawJSON = r.DetailRawJSON
 		}
 	}
+}
+
+// teamsStating is the first Teams row that states unit u, or nil.
+func teamsStating(rows []Event, u unit) *Event {
+	for i := range rows {
+		if rows[i].Source == SourceTeams && u.states(rows[i]) {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// keepOnline keeps an event online when a Teams row says it is and the join link is kept: the
+// other copy's false is the absence of a Teams meeting in its store, not the end of the meeting.
+func keepOnline(out *Event, rows []Event) {
+	if !out.IsOnlineMeeting.Is(false) || out.OnlineMeetingURL == "" {
+		return
+	}
+	for _, r := range rows {
+		if r.Source == SourceTeams && r.IsOnlineMeeting.Is(true) {
+			out.IsOnlineMeeting = TriTrue
+			return
+		}
+	}
+}
+
+// comparable is a field both copies can state, for M9.
+type comparable struct {
+	field  Field
+	states func(Event) bool
+	val    func(Event) string
+	list   bool
+}
+
+func comparables() []comparable {
+	var out []comparable
+	for i, f := range textFields(&Event{}) {
+		name := f.name
+		i := i
+		out = append(out, comparable{field: name, states: func(e Event) bool { return !e.unknown(name) },
+			val: func(e Event) string { return comparedText(name, e, strings.TrimSpace(*textFields(&e)[i].ptr)) }})
+	}
+	for i, f := range flagFields(&Event{}) {
+		i := i
+		out = append(out, comparable{field: f.name, states: func(e Event) bool { return flagFields(&e)[i].tri.Known() },
+			val: func(e Event) string { return strconv.Itoa(int(*flagFields(&e)[i].tri)) }})
+	}
+	str := func(f Field, get func(Event) string, list bool) {
+		out = append(out, comparable{field: f, states: func(e Event) bool { return get(e) != "" }, val: get, list: list})
+	}
+	str(FieldJoinURL, func(e Event) string { return e.OnlineMeetingURL }, false)
+	str(FieldShortJoinURL, func(e Event) string { return e.ShortJoinURL }, false)
+	str(FieldDialIn, func(e Event) string {
+		if e.DialInConferenceID == "" && e.DialInTollNumber == "" {
+			return ""
+		}
+		return e.DialInConferenceID + "|" + e.DialInTollNumber
+	}, false)
+	str(FieldMeetingChatID, func(e Event) string { return e.TeamsThreadID }, false)
+	str(FieldAttendees, func(e Event) string { return e.AttendeesJSON }, true)
+	str(FieldRooms, func(e Event) string { return e.LocationsJSON }, true)
+	str(FieldBody, func(e Event) string {
+		if e.BodyHTML == "" && e.BodyText == "" {
+			return ""
+		}
+		return e.BodyHTML + "\x00" + e.BodyText
+	}, false)
+	str(FieldBodyPreview, func(e Event) string { return e.BodyPreview }, false)
+	str(FieldAttachments, func(e Event) string { return e.AttachmentsJSON }, false)
+	str(FieldCategories, func(e Event) string { return e.CategoriesJSON }, false)
+	str(FieldRecurrence, func(e Event) string { return e.RecurrenceJSON }, false)
+	return out
+}
+
+// comparedText is the value M9 compares for a text field, so a difference of spelling alone is no
+// override: a time zone is its resolved IANA zone (Teams says "PacificSt", Outlook "Pacific Standard
+// Time"; a zone that did not resolve on either side compares by its raw value), and an address
+// compares without case.
+func comparedText(f Field, e Event, raw string) string {
+	switch f {
+	case FieldTimeZone:
+		if iana := strings.TrimSpace(e.TimeZoneIANA); iana != "" && !e.unknown(FieldTimeZoneIANA) {
+			return iana
+		}
+	case FieldOrganizerAddress:
+		return strings.ToLower(raw)
+	}
+	return raw
+}
+
+// overrides is M9. A row "states" a field as Fill and unknown handling do; two rows that both state
+// it with different values make an override whose From is the row the merged value equals.
+func overrides(out Event, rows []Event) []Override {
+	if len(rows) < 2 {
+		return nil
+	}
+	var res []Override
+	for _, c := range comparables() {
+		var stated []Event
+		for _, r := range rows {
+			if c.states(r) {
+				stated = append(stated, r)
+			}
+		}
+		differ := false
+		for _, r := range stated[min(1, len(stated)):] {
+			if c.val(r) != c.val(stated[0]) {
+				differ = true
+			}
+		}
+		if !differ {
+			continue
+		}
+		merged := c.val(out)
+		matched := -1
+		for i, r := range stated {
+			if c.val(r) == merged {
+				matched = i
+				break
+			}
+		}
+		switch {
+		case matched >= 0:
+			res = append(res, Override{Field: c.field, From: string(stated[matched].Source), AsOf: stated[matched].LastModified})
+		case c.list:
+			res = append(res, Override{Field: c.field, From: OverrideUnion})
+		}
+	}
+	return res
 }
 
 // mergedUnknown is M7: a name is unknown only if it is unknown in every row that took part.
