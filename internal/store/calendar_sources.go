@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ type CalendarSource struct {
 	WithAttendees  int
 	WithBody       int
 	Online         int
+	RecapsTotal    int
 	RecapsContent  int
 	RecapsLinked   int
 	RecapActions   int
@@ -66,10 +68,12 @@ type OutlookSource struct {
 	Status         string
 	LastReadAt     time.Time
 	LastAttemptAt  time.Time
+	LastCheckedAt  time.Time // the latest sync that looked at the store at all
+	CensusAsOf     time.Time // when the read the census below comes from happened
 	NextReadAfter  time.Time // zero when the next sync may read
 	IntervalSecond int
 	UnknownLayouts []OutlookLayout
-	BlocksRatio    float64
+	BlocksRatio    *float64 // nil until a read has succeeded
 	UnmappedValues map[string]int
 	Failure        *OutlookFailure
 }
@@ -231,18 +235,18 @@ func (s *Store) sourceZones(ctx context.Context, set *sourceSet) error {
 // sourceRecaps counts a Teams account's recaps. A placeholder (a call with no recap) creates no
 // recap row, and a row with neither text nor a live item does not count as content.
 func (s *Store) sourceRecaps(ctx context.Context, set *sourceSet) error {
-	err := s.each(ctx, `select account_id,
+	err := s.each(ctx, `select account_id, count(*),
 	    coalesce(sum(headline <> '' or short_summary <> '' or outline <> '' or summary_sections_json <> '' or exists (
 	      select 1 from calendar_recap_items i where i.account_id=r.account_id and i.call_id=r.call_id and i.superseded_at is null)), 0),
 	    coalesce(sum(ical_uid <> ''), 0)
 	  from calendar_recaps r group by account_id`, func(rs *sql.Rows) error {
 		var acct string
-		var content, linked int
-		if err := rs.Scan(&acct, &content, &linked); err != nil {
+		var total, content, linked int
+		if err := rs.Scan(&acct, &total, &content, &linked); err != nil {
 			return err
 		}
 		r := set.row(string(calendar.SourceTeams), acct)
-		r.RecapsContent, r.RecapsLinked = content, linked
+		r.RecapsTotal, r.RecapsContent, r.RecapsLinked = total, content, linked
 		return nil
 	})
 	if err != nil {
@@ -284,8 +288,8 @@ func (s *Store) sourceOutlook(ctx context.Context, f CalendarSourcesFilter, set 
 		}
 		kind, name, _ := strings.Cut(key, ":")
 		account := name
-		if kind == strings.TrimSuffix(outlookAttemptKey, ":") || kind == strings.TrimSuffix(outlookSkippedKey, ":") {
-			account = "outlook/" + name // these two are kept by profile name
+		if slices.Contains([]string{outlookAttemptKey, outlookSkippedKey, outlookCheckedKey}, kind+":") {
+			account = "outlook/" + name // these are kept by profile name
 		}
 		if meta[account] == nil {
 			meta[account] = map[string]string{}
@@ -327,12 +331,18 @@ func outlookOf(r *CalendarSource, m map[string]string, f CalendarSourcesFilter) 
 	} else if m[strings.TrimSuffix(outlookSkippedKey, ":")] != "" && !o.NextReadAfter.IsZero() {
 		o.Status = SourceSkippedInterval
 	}
+	if t, err := time.Parse(timeLayout, m[strings.TrimSuffix(outlookCheckedKey, ":")]); err == nil {
+		o.LastCheckedAt = t
+	}
+	// The census is the last good read's, also on a row that shows a failure.
 	var read OutlookRead
 	if json.Unmarshal([]byte(m[strings.TrimSuffix(outlookReadKey, ":")]), &read) == nil {
-		o.UnknownLayouts, o.UnmappedValues = read.UnknownLayouts, read.UnmappedValues
+		o.UnknownLayouts, o.UnmappedValues, o.CensusAsOf = read.UnknownLayouts, read.UnmappedValues, read.At
+		ratio := 0.0
 		if read.BlocksFound > 0 {
-			o.BlocksRatio = float64(read.BlocksInvalid) / float64(read.BlocksFound)
+			ratio = float64(read.BlocksInvalid) / float64(read.BlocksFound)
 		}
+		o.BlocksRatio = &ratio
 	}
 	return o
 }

@@ -68,7 +68,7 @@ func TestCalendarSourcesOnTheFixtureArchive(t *testing.T) {
 	}
 	r := rows[teamsAccount]
 	want := map[string]int{"covered_days": 7, "events_live": 14, "events_removed": 0, "events_with_detail": 1, "events_with_attendees": 1,
-		"events_with_body": 1, "events_online": 5, "recaps_with_content": 3, "recaps_linked": 5, "recap_action_items": 4}
+		"events_with_body": 1, "events_online": 5, "recaps_total": 5, "recaps_with_content": 3, "recaps_linked": 5, "recap_action_items": 4}
 	for k, v := range want {
 		if got := num(t, r, k); got != v {
 			t.Errorf("%s = %d, want %d", k, got, v)
@@ -140,11 +140,32 @@ func TestCalendarSourcesShowsOutlook(t *testing.T) {
 			t.Errorf("no %s in %v", k, o)
 		}
 	}
+	// The store holds many objects of classes that are not calendar; none of them is an unknown layout.
+	if _, has := o["unknown_layouts"]; has {
+		t.Errorf("a healthy store reports unknown layouts: %v", o["unknown_layouts"])
+	}
 	if o["unknown_time_zones"] == nil {
 		t.Errorf("an Outlook row says which zone codes it could not map, even when none: %v", o)
 	}
 	if got := rows[teamsAccount]; num(t, got, "events_live") != num(t, teams, "events_live") || num(t, got, "covered_days") != num(t, teams, "covered_days") {
 		t.Errorf("the Outlook account changed a Teams row: %v vs %v", got, teams)
+	}
+	// An idle store and a stalled sync differ: last_checked_at moves when the store was looked at.
+	for _, k := range []string{"last_checked_at", "census_as_of"} {
+		if _, has := o[k]; !has {
+			t.Errorf("no %s in %v", k, o)
+		}
+	}
+	// A failure row still holds the last good read's census, and says how old it is.
+	e.exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{"code":"outlook_store_version","message":"m","fix":"f","exit":3}')`)
+	if f := sourceRows(t, e)["outlook/Main"]; f["status"] != "unsupported_version" || f["error"] == nil || f["census_as_of"] != o["census_as_of"] || f["blocks_invalid_ratio"] == nil {
+		t.Errorf("a failure row: %v", f)
+	}
+	e.exec(`delete from meta where key='outlook_failure:outlook/Main'`)
+	// A layout of the event class this build does not know is listed with its class and tag in hex.
+	e.exec(`update meta set value='{"at":"2026-10-06T00:00:00.000Z","unknown_layouts":[{"class":107,"tag":1110,"count":3}],"blocks_found":10,"blocks_invalid":1}' where key='outlook_read:outlook/Main'`)
+	if l, _ := sourceRows(t, e)["outlook/Main"]["unknown_layouts"].([]any); len(l) != 1 || l[0].(map[string]any)["class"] != "0x6b" || l[0].(map[string]any)["tag"] != "0x456" || l[0].(map[string]any)["count"] != float64(3) {
+		t.Errorf("unknown_layouts %v", l)
 	}
 	// A second sync inside the interval reads nothing and says so.
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {

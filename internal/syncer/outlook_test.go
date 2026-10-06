@@ -515,3 +515,58 @@ func sourceErrorJSON(t *testing.T, root string) map[string]string {
 	t.Fatal("no outlook source")
 	return nil
 }
+
+// A store of valid events holds many objects of classes that are not calendar; none of them is an
+// unknown layout.
+func TestSyncOutlookHealthyStoreHasNoUnknownLayouts(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	run(t, outlookOpts(db, outlookRoot(t, "HxStore.hxd")))
+	if n := count(t, db, `select count(*) from meta where key='outlook_read:outlook/Main' and value like '%unknown_layouts%'`); n != 0 {
+		t.Fatal("a healthy store lists unknown layouts")
+	}
+}
+
+func marker(t *testing.T, db, key string) int {
+	t.Helper()
+	return count(t, db, `select count(*) from meta where key='`+key+`'`)
+}
+
+// The skip marker lives until a sync looks at the store, and the failure until a read succeeds.
+func TestSyncOutlookMarkerLifecycle(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "store-version-j.hxd")
+	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
+	Run(context.Background(), defaultInterval(db, root))
+	if marker(t, db, "outlook_failure:outlook/Main") != 1 || marker(t, db, "outlook_checked:Main") != 1 {
+		t.Fatal("a failed read is remembered, and the store was looked at")
+	}
+	// A good store inside the interval is not read: the failure stays, and no skip is recorded.
+	putOutlookStore(t, root, "HxStore.hxd")
+	*now = now.Add(time.Minute)
+	Run(context.Background(), defaultInterval(db, root))
+	if marker(t, db, "outlook_failure:outlook/Main") != 1 || marker(t, db, "outlook_skipped:Main") != 0 {
+		t.Fatal("a skip after a failure keeps the failure and is not a plain skip")
+	}
+	// After the interval the good store is read: the failure goes.
+	*now = now.Add(OutlookMinReadInterval)
+	run(t, defaultInterval(db, root))
+	if marker(t, db, "outlook_failure:outlook/Main") != 0 {
+		t.Fatal("a good read must clear the failure")
+	}
+	// Now a skip is recorded, and a full read inside the interval is still a skip.
+	*now = now.Add(time.Minute)
+	o := defaultInterval(db, root)
+	o.FullRead = true
+	run(t, o)
+	if marker(t, db, "outlook_skipped:Main") != 1 {
+		t.Fatal("a full read inside the interval is skipped and says so")
+	}
+	// A full read after the interval looks at the store and reads it again: the skip is forgotten.
+	*now = now.Add(OutlookMinReadInterval)
+	r, _ := run(t, o)
+	if marker(t, db, "outlook_skipped:Main") != 0 || sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
+		t.Fatalf("%+v", r.Sources)
+	}
+}

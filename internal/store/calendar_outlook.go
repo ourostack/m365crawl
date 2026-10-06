@@ -19,6 +19,7 @@ const (
 	outlookAttemptKey = "outlook_last_attempt:"
 	outlookReadKey    = "outlook_read:"
 	outlookSkippedKey = "outlook_skipped:"
+	outlookCheckedKey = "outlook_checked:"
 )
 
 // OutlookBatch is one Outlook profile's events, read whole from its store copy.
@@ -44,6 +45,8 @@ type OutlookLayout struct {
 
 // OutlookRead is the last good read's census of one profile's store: numbers only.
 type OutlookRead struct {
+	// At is when the read happened; `calendar sources` shows it as census_as_of.
+	At             time.Time       `json:"at,omitzero"`
 	UnknownLayouts []OutlookLayout `json:"unknown_layouts,omitempty"`
 	BlocksFound    int             `json:"blocks_found"`
 	BlocksInvalid  int             `json:"blocks_invalid"`
@@ -82,7 +85,8 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		if _, err := tx.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+b.Account); err != nil {
 			return err
 		}
-		raw, _ := json.Marshal(b.Read) // plain numbers
+		b.Read.At = b.At
+		raw, _ := json.Marshal(b.Read) // plain numbers and a time
 		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookReadKey+b.Account, string(raw)); err != nil {
 			return err
 		}
@@ -271,12 +275,16 @@ func (s *Store) SetOutlookLastAttempt(ctx context.Context, profile string, at ti
 }
 
 // SetOutlookSkipped records that the last sync did not read the profile because its minimum read
-// interval had not passed; false forgets it, because a read or a fingerprint check happened.
-func (s *Store) SetOutlookSkipped(ctx context.Context, profile string, skipped bool) error {
-	if !skipped {
-		_, err := s.db.ExecContext(ctx, `delete from meta where key=?`, outlookSkippedKey+profile)
-		return err
-	}
+// interval had not passed. SetOutlookChecked forgets it.
+func (s *Store) SetOutlookSkipped(ctx context.Context, profile string) error {
 	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, '1') on conflict(key) do update set value=excluded.value`, outlookSkippedKey+profile)
 	return err
+}
+
+// SetOutlookChecked records that a sync looked at the profile's store (a read, or the fingerprint
+// check that found it unchanged) and forgets a skip.
+func (s *Store) SetOutlookChecked(ctx context.Context, profile string, at time.Time) error {
+	_, forget := s.db.ExecContext(ctx, `delete from meta where key=?`, outlookSkippedKey+profile)
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookCheckedKey+profile, at.UTC().Format(timeLayout))
+	return errors.Join(forget, err)
 }

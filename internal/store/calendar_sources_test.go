@@ -52,7 +52,7 @@ func TestCalendarSourcesCountsATeamsAccount(t *testing.T) {
 	if r.EventsLive != 3 || r.EventsRemoved != 1 || r.WithDetail != 1 || r.WithAttendees != 1 || r.WithBody != 1 || r.Online != 3 {
 		t.Fatalf("event counts %+v", r)
 	}
-	if r.RecapsContent != 1 || r.RecapsLinked != 1 || r.RecapActions != 1 {
+	if r.RecapsTotal != 2 || r.RecapsContent != 1 || r.RecapsLinked != 1 || r.RecapActions != 1 {
 		t.Fatalf("recap counts content %d linked %d actions %d", r.RecapsContent, r.RecapsLinked, r.RecapActions)
 	}
 	if len(r.UnknownZones) != 1 || r.UnknownZones[0] != "QFixtureSt" {
@@ -119,7 +119,7 @@ func TestCalendarSourcesOutlookRows(t *testing.T) {
 	if x.Status != SourceOK || !x.NextReadAfter.Equal(at.Add(interval)) || !x.LastAttemptAt.Equal(at) || x.IntervalSecond != 300 || x.Failure != nil {
 		t.Fatalf("outlook %+v", x)
 	}
-	if x.BlocksRatio != 0.05 || len(x.UnknownLayouts) != 1 || x.UnknownLayouts[0] != (OutlookLayout{0x6b, 0x456, 3}) || x.UnmappedValues["response"] != 2 {
+	if x.BlocksRatio == nil || *x.BlocksRatio != 0.05 || !x.CensusAsOf.Equal(at) || len(x.UnknownLayouts) != 1 || x.UnknownLayouts[0] != (OutlookLayout{0x6b, 0x456, 3}) || x.UnmappedValues["response"] != 2 {
 		t.Fatalf("census %+v", x)
 	}
 	if o.EventsLive != 1 || o.CoveredDays == 0 {
@@ -128,7 +128,7 @@ func TestCalendarSourcesOutlookRows(t *testing.T) {
 
 	// Skipped by the interval: the status says so while the next read is still ahead, and stops saying
 	// so when the interval has passed.
-	if err := s.SetOutlookSkipped(ctx, "Main", true); err != nil {
+	if err := s.SetOutlookSkipped(ctx, "Main"); err != nil {
 		t.Fatal(err)
 	}
 	if got := sourcesOf(t, s, f)["outlook/Main"].Outlook; got.Status != SourceSkippedInterval {
@@ -138,7 +138,22 @@ func TestCalendarSourcesOutlookRows(t *testing.T) {
 	if got := sourcesOf(t, s, f)["outlook/Main"].Outlook; got.Status != SourceOK || !got.NextReadAfter.IsZero() {
 		t.Fatalf("status %q next %v", got.Status, got.NextReadAfter)
 	}
-	if err := s.SetOutlookSkipped(ctx, "Main", false); err != nil {
+	// Looking at the store forgets the skip and says when it happened.
+	if err := s.SetOutlookChecked(ctx, "Main", at.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	f.Now = now
+	if got := sourcesOf(t, s, f)["outlook/Main"].Outlook; got.Status != SourceOK || !got.LastCheckedAt.Equal(at.Add(2*time.Hour)) {
+		t.Fatalf("%+v", got)
+	}
+	// A failure keeps the census of the last good read, and says how old it is.
+	if err := s.SetOutlookFailure(ctx, "outlook/Main", &OutlookFailure{Code: "outlook_layout_unsupported", Message: "m", Fix: "f"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sourcesOf(t, s, f)["outlook/Main"].Outlook; got.Status != SourceUnsupportedLayout || got.Failure == nil || len(got.UnknownLayouts) != 1 || got.BlocksRatio == nil || !got.CensusAsOf.Equal(at) {
+		t.Fatalf("a failure row keeps the last good census: %+v", got)
+	}
+	if err := s.SetOutlookFailure(ctx, "outlook/Main", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +163,7 @@ func TestCalendarSourcesOutlookRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		two := sourcesOf(t, s, f)["outlook/Two"]
-		if two.Outlook == nil || two.Outlook.Status != want || two.Outlook.Failure.Code != code || two.Outlook.Failure.Fix != "f" || two.EventsLive != 0 || !two.Outlook.LastReadAt.IsZero() {
+		if two.Outlook == nil || two.Outlook.Status != want || two.Outlook.Failure.Code != code || two.Outlook.Failure.Fix != "f" || two.EventsLive != 0 || !two.Outlook.LastReadAt.IsZero() || two.Outlook.BlocksRatio != nil || !two.Outlook.CensusAsOf.IsZero() {
 			t.Fatalf("%s: %+v", code, two)
 		}
 	}

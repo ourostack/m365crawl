@@ -151,12 +151,12 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 				// A skip after a failed read is still that failure, not a success.
 				return SourceReport{}, false, &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
 			}
-			_ = r.st.SetOutlookSkipped(ctx, p.Name, true)
+			_ = r.st.SetOutlookSkipped(ctx, p.Name)
 			r.progress("%s: %s", key, StatusSkippedInterval)
 			return SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}, false, nil
 		}
 	}
-	_ = r.st.SetOutlookSkipped(ctx, p.Name, false)
+	_ = r.st.SetOutlookChecked(ctx, p.Name, begun) // the store is looked at from here on; a skip never gets here
 	fp, err := outlookdesktop.FingerprintOf(p.StorePath, outlookVersions())
 	if err != nil {
 		return SourceReport{}, false, err
@@ -211,9 +211,9 @@ func collectOutlook(ctx context.Context, info outlookdesktop.Info, account strin
 		return outlookcal.Result{}, errs.Internal(err)
 	}
 	defer func() { _ = f.Close() }()
+	var res outlookcal.Result
 	s, err := outlookcal.OpenStore(f, info.Size)
 	if err == nil {
-		var res outlookcal.Result
 		if res, err = outlookcal.Collect(ctx, s, account, outlookcal.Options{ExpectEvents: had}); err == nil {
 			return res, nil
 		}

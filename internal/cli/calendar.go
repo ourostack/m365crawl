@@ -751,6 +751,7 @@ type calendarSourceItem struct {
 	EventsAttendees   int             `json:"events_with_attendees"`
 	EventsWithBody    int             `json:"events_with_body"`
 	EventsOnline      int             `json:"events_online"`
+	RecapsTotal       int             `json:"recaps_total"`
 	RecapsWithContent int             `json:"recaps_with_content"`
 	RecapsLinked      int             `json:"recaps_linked"`
 	RecapActionItems  int             `json:"recap_action_items"`
@@ -758,6 +759,8 @@ type calendarSourceItem struct {
 	Status            string          `json:"status,omitempty"`
 	LastReadAt        time.Time       `json:"last_read_at,omitzero"`
 	LastAttemptAt     time.Time       `json:"last_attempt_at,omitzero"`
+	LastCheckedAt     time.Time       `json:"last_checked_at,omitzero"`
+	CensusAsOf        time.Time       `json:"census_as_of,omitzero"`
 	NextReadAfter     time.Time       `json:"next_read_after,omitzero"`
 	ReadIntervalSecs  int             `json:"read_interval_seconds,omitempty"`
 	UnknownLayouts    []outlookLayout `json:"unknown_layouts,omitempty"`
@@ -773,7 +776,7 @@ func sourceItemOf(r store.CalendarSource) calendarSourceItem {
 		WindowStart: r.WindowStart, WindowEnd: r.WindowEnd, CoveredDays: r.CoveredDays, LastVerifiedAt: r.LastVerifiedAt,
 		SyncedAt: r.SyncedAt, CacheFreshAt: r.CacheFreshAt, EventsLive: r.EventsLive, EventsRemoved: r.EventsRemoved,
 		EventsWithDetail: r.WithDetail, EventsAttendees: r.WithAttendees, EventsWithBody: r.WithBody, EventsOnline: r.Online,
-		RecapsWithContent: r.RecapsContent, RecapsLinked: r.RecapsLinked, RecapActionItems: r.RecapActions,
+		RecapsTotal: r.RecapsTotal, RecapsWithContent: r.RecapsContent, RecapsLinked: r.RecapsLinked, RecapActionItems: r.RecapActions,
 		UnknownTimeZones: append([]string{}, r.UnknownZones...),
 	}
 	if r.Source == string(calendar.SourceTeams) {
@@ -781,8 +784,9 @@ func sourceItemOf(r store.CalendarSource) calendarSourceItem {
 	}
 	if o := r.Outlook; o != nil {
 		it.Status, it.LastReadAt, it.LastAttemptAt, it.NextReadAfter = o.Status, o.LastReadAt, o.LastAttemptAt, o.NextReadAfter
+		it.LastCheckedAt, it.CensusAsOf = o.LastCheckedAt, o.CensusAsOf
 		it.ReadIntervalSecs, it.UnmappedValues, it.Deletions = o.IntervalSecond, o.UnmappedValues, "unverified"
-		it.BlocksInvalid = &o.BlocksRatio
+		it.BlocksInvalid = o.BlocksRatio
 		for _, l := range o.UnknownLayouts {
 			it.UnknownLayouts = append(it.UnknownLayouts, outlookLayout{Class: fmt.Sprintf("0x%x", l.Class), Tag: fmt.Sprintf("0x%x", l.Tag), Count: l.Count})
 		}

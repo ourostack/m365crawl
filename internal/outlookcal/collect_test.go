@@ -127,13 +127,13 @@ func TestCollectFixtureReadsEveryFieldOfEveryEvent(t *testing.T) {
 	if len(current) != 0 {
 		t.Fatalf("events missing from the result: %d", len(current))
 	}
-	// Events are sorted by id, and the census lists the three unknown classes.
+	// Events are sorted by id. The store's other classes are not calendar objects: none is unknown.
 	for i := 1; i < len(res.Events); i++ {
 		if res.Events[i-1].SourceID >= res.Events[i].SourceID {
 			t.Fatal("events not sorted")
 		}
 	}
-	if len(res.UnknownLayouts) != 3 || res.UnknownLayouts[0] != (PairCount{0x55, 32, 2}) || res.UnknownLayouts[2] != (PairCount{0xd7, 40, 1}) {
+	if len(res.UnknownLayouts) != 0 {
 		t.Fatalf("%+v", res.UnknownLayouts)
 	}
 	if len(n.UnknownZones) != 4 || n.ResponseUnmapped != 1 || n.AttendeesAtCap != 1 || n.AllDayUnaligned != 0 {
@@ -435,6 +435,11 @@ func TestGuardNewTagMixedAppliesNothing(t *testing.T) {
 	if g == nil || g.Code != CodeLayoutUnsupported || !strings.Contains(g.Detail, "tag 0x456 x1") || len(r.Events) != 0 {
 		t.Fatalf("%v %d events", g, len(r.Events))
 	}
+	// Both directions: the event of the new tag is the one unknown layout, and the store's several
+	// other classes are not reported.
+	if len(r.UnknownLayouts) != 1 || r.UnknownLayouts[0] != (PairCount{0x6b, 0x456, 1}) {
+		t.Fatalf("%+v", r.UnknownLayouts)
+	}
 }
 
 func TestGuardNoEventObjects(t *testing.T) {
@@ -443,7 +448,7 @@ func TestGuardNoEventObjects(t *testing.T) {
 	}
 	// A store that never had events is merely empty.
 	r, g := guardOf(t, "store-unknown-classes-only.hxd", Options{})
-	if g != nil || len(r.Events) != 0 || len(r.UnknownLayouts) != 3 {
+	if g != nil || len(r.Events) != 0 || len(r.UnknownLayouts) != 0 {
 		t.Fatalf("%v %+v", g, r.UnknownLayouts)
 	}
 	if _, g := guardOf(t, "store-empty.hxd", Options{ExpectEvents: true}); g == nil {
@@ -504,9 +509,9 @@ func TestKnownLayouts(t *testing.T) {
 }
 
 func TestUnknownLayoutsSorted(t *testing.T) {
-	r := collect(t, storeOf(t, framed(hxbuild.NewObject(0x71, 21, 21), hxbuild.NewObject(0x71, 20, 20), hxbuild.NewObject(0x55, 32, 32), hxbuild.NewEvent(baseSpec(1)))), Options{})
-	want := []PairCount{{0x55, 32, 1}, {0x71, 20, 1}, {0x71, 21, 1}}
-	if len(r.UnknownLayouts) != 3 || r.UnknownLayouts[0] != want[0] || r.UnknownLayouts[1] != want[1] || r.UnknownLayouts[2] != want[2] {
+	r := collect(t, storeOf(t, framed(hxbuild.NewObject(0x6c, 21, 21), hxbuild.NewObject(0x6c, 20, 20), hxbuild.NewObject(0x55, 32, 32), hxbuild.NewEvent(baseSpec(1)))), Options{})
+	want := []PairCount{{0x6c, 20, 1}, {0x6c, 21, 1}}
+	if len(r.UnknownLayouts) != 2 || r.UnknownLayouts[0] != want[0] || r.UnknownLayouts[1] != want[1] {
 		t.Fatalf("%+v", r.UnknownLayouts)
 	}
 }
@@ -518,5 +523,15 @@ func TestGuardNamesEveryUnknownTagInOrder(t *testing.T) {
 	var g *GuardError
 	if !errors.As(err, &g) || !strings.Contains(g.Detail, "tag 0x456 x1, known 0x455; class 0x6b tag 0x457 x1") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestUnknownLayoutsOfMappedClassesOnly(t *testing.T) {
+	st := hxstore.Stats{Pairs: map[hxstore.Pair]int{
+		{Class: 0x6c, Tag: 7}: 2, {Class: 0x6b, Tag: 0x456}: 1, {Class: 0x6b, Tag: 0x455}: 9, {Class: 0x6c, Tag: 0x348}: 4, {Class: 0x43, Tag: 5}: 80, {Class: 0, Tag: 0}: 17,
+	}}
+	got := unknownLayouts(st)
+	if len(got) != 2 || got[0] != (PairCount{0x6b, 0x456, 1}) || got[1] != (PairCount{0x6c, 7, 2}) {
+		t.Fatalf("%+v", got)
 	}
 }
