@@ -35,7 +35,9 @@ type Report struct {
 	People        store.Counts   `json:"people"`
 	Activity      store.Counts   `json:"activity"`
 	Records       store.Counts   `json:"records"`
-	Omissions     map[string]int `json:"omissions"`
+	// Calendar is what filling the calendar tables from the calendar and recap records did.
+	Calendar  store.CalendarCounts `json:"calendar"`
+	Omissions map[string]int       `json:"omissions"`
 	// Redacted counts the credential-looking fragments removed from generic records before they
 	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
 	Redacted     int      `json:"redacted"`
@@ -67,6 +69,8 @@ type SourceCounts struct {
 	People        store.Counts `json:"people"`
 	Activity      store.Counts `json:"activity"`
 	Records       store.Counts `json:"records"`
+	// Calendar is what the calendar derivation did in the source's transaction.
+	Calendar store.CalendarCounts `json:"calendar"`
 }
 
 // SourceError is why a source failed: an error code from the output contract and its message.
@@ -93,13 +97,16 @@ func add(a *store.Counts, b store.Counts) {
 
 // lost is how many records a sync could not read: the omissions that mean data was missed. The
 // denied_database and denied_store counts are the credential denylist working as designed, not
-// loss, so they never make a sync ok_with_omissions.
+// loss, and an event in an unknown time zone or an all-day event that fits no whole-day shape is
+// stored and shown, only less precisely, so none of these makes a sync ok_with_omissions.
 func lost(m map[string]int) int {
 	n := 0
 	for k, v := range m {
-		if k != "denied_database" && k != "denied_store" {
-			n += v
+		switch k {
+		case "denied_database", "denied_store", store.OmitCalendarUnknownZone, store.OmitCalendarAllDayUnaligned:
+			continue
 		}
+		n += v
 	}
 	return n
 }

@@ -28,18 +28,42 @@ type MapNotes struct {
 	// UnknownZone is the event's zone name when it resolves to no IANA id. A zone name is
 	// a public Windows id, not mail or calendar content.
 	UnknownZone string
+	// UnknownZoneRejected is set when the zone name resolves to no IANA id and is not a
+	// printable-ASCII name of at most MaxZoneNameLen characters; it is counted, not kept.
+	UnknownZoneRejected bool
 	// AllDayUnaligned is set when the all-day flag was set but the instants are not
-	// whole days from midnight UTC, so the event is stored as timed.
+	// whole days from midnight UTC, so the all-day flag is left unknown.
 	AllDayUnaligned bool
+	// CancelledSubjectsDiffer and CancelledSubjectsMatch are set on a cancelled event
+	// (+1082 bit 4, whose numbering is unverified) by whether the bare subject (+876)
+	// and the subject (+1024) differ; a real-store pass can check the bit against them.
+	CancelledSubjectsDiffer, CancelledSubjectsMatch bool
+	// OccurrenceNoDate is set on an occurrence or exception whose id embeds no date.
+	OccurrenceNoDate bool
+	// SeriesWord is the series key at +20 and SeriesID the series the id splits to;
+	// Collect compares them across events.
+	SeriesWord uint64
+	SeriesID   string
+	// BodyNULTrimmed is set when the event's detail body ended in a NUL that was removed;
+	// Collect counts it once per detail object.
+	BodyNULTrimmed bool
 	// EventTypeUnknown, ShowAsUnmapped and ResponseUnmapped are set when the stored code
 	// is outside the values the layout lists; the field is then left unknown.
 	EventTypeUnknown, ShowAsUnmapped, ResponseUnmapped bool
 	// DetailMissing is set when no detail object was given; DetailUnreadable when one
 	// was but a field in it did not decode.
 	DetailMissing, DetailUnreadable bool
-	// AttendeesUnparsed is set when the attendee list did not parse; AttendeesAtCap when
-	// the list holds as many as the store's cap, so it may be truncated.
+	// AttendeesUnparsed is set when the attendee list did not parse; exactly one of the
+	// three cause flags is then set too. AttendeesAtCap is set when the list holds as
+	// many as the store's cap, so it may be truncated.
 	AttendeesUnparsed, AttendeesAtCap bool
+	// AttendeesEndMismatch: records parsed but did not end at the object's end.
+	// AttendeesCountZero: the count is zero and bytes follow it. AttendeesOtherUnparsed:
+	// any other failure.
+	AttendeesEndMismatch, AttendeesCountZero, AttendeesOtherUnparsed bool
+	// AttendeeFailure names the one cause (a key of Notes.AttendeeFailures) when the list
+	// did not parse, else it is empty.
+	AttendeeFailure string
 	// AttendeeResponsesUnmapped counts attendee records whose response code is not one
 	// the layout lists.
 	AttendeeResponsesUnmapped int
@@ -87,9 +111,12 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		return calendar.Event{}, notes, &UnmappedError{Reason: "last modified is not a time"}
 	}
 	series := uid
-	if s, _, split := calendar.SplitOccurrenceID(uid); split {
+	s, _, split := calendar.SplitOccurrenceID(uid)
+	if split {
 		series = s
 	}
+	notes.SeriesID = series
+	notes.SeriesWord, _ = ev.U64(evSeriesKey)
 	e := calendar.Event{
 		Source: calendar.SourceOutlook, AccountID: account,
 		SourceID: uid, GlobalID: uid, ICalUID: uid, SeriesKey: series,
@@ -113,7 +140,13 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		return calendar.Event{}, notes, &UnmappedError{Reason: "a string is out of range"}
 	}
 
+	if bare, ok := ev.StringUnaligned(evSubjectBare, base); ok && e.Cancelled.Is(true) {
+		raw, _ := ev.StringUnaligned(evSubject, base) // read above, so in range
+		notes.CancelledSubjectsDiffer, notes.CancelledSubjectsMatch = bare != raw, bare == raw
+	}
+
 	e.EventType, notes.EventTypeUnknown = eventType(ev)
+	notes.OccurrenceNoDate = !split && (e.EventType == calendar.EventOccurrence || e.EventType == calendar.EventException)
 	e.ShowAs, notes.ShowAsUnmapped = showAs(ev)
 	e.Response, notes.ResponseUnmapped = response(ev)
 	if notes.ShowAsUnmapped {
@@ -132,7 +165,11 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		if iana, _, ok := ZoneIANA(zone); ok {
 			e.TimeZoneIANA = iana
 		} else {
-			notes.UnknownZone = zone
+			if zoneNameOK(zone) {
+				notes.UnknownZone = zone
+			} else {
+				notes.UnknownZoneRejected = true
+			}
 			unknown = append(unknown, calendar.FieldTimeZoneIANA)
 		}
 	}
@@ -141,18 +178,24 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		if s, en, ok := allDayDates(start, end); ok {
 			e.StartDate, e.EndDate = s, en
 		} else {
-			e.AllDay = calendar.TriFalse // stored as timed, as the Teams mapper does
+			// The flag says all-day but the instants do not: neither is trusted.
+			e.AllDay = calendar.TriUnknown
 			notes.AllDayUnaligned = true
 		}
 	}
 
-	if list, count, ok := attendees(ev, base, &r); ok && count > 0 {
+	list, count, cause := attendees(ev, base, &r)
+	if cause == attOK && count > 0 {
 		e.AttendeesJSON = list
 		notes.AttendeesAtCap = count >= AttendeeCap
 		e.DetailRawJSON = attendeeNote(count)
 	} else {
 		unknown = append(unknown, calendar.FieldAttendees)
-		notes.AttendeesUnparsed = !ok
+		notes.AttendeesUnparsed = cause != attOK
+		notes.AttendeesEndMismatch = cause == attEndMismatch
+		notes.AttendeesCountZero = cause == attCountZero
+		notes.AttendeesOtherUnparsed = cause != attOK && cause != attEndMismatch && cause != attCountZero
+		notes.AttendeeFailure = attNames[cause]
 	}
 
 	unknown = r.detail(&e, detail, unknown)
@@ -293,36 +336,113 @@ type attendee struct {
 	Response string `json:"response"`
 }
 
-// attendees reads the list that follows the string at +876: a u32 count, then records of
-// a one-byte name length, the name, a one-byte address length, the address and three u32
-// words A, B and C, up to the end of the object. ok is false when the list does not parse
-// exactly to the object's end. B is the response; A is 1 where Teams says optional
-// (likely).
-func attendees(o hxstore.Object, base int, r *reader) (list string, count int, ok bool) {
+// attCause says why an attendee list did not parse.
+type attCause int
+
+const (
+	attOK attCause = iota
+	attEndMismatch
+	attCountZero
+	attBareStringEnd // no terminator after the bare subject, so no list start
+	attCountOutside  // the count word is outside the object
+	attCountTooBig   // the count is more than the bytes left can hold
+	attLengthMissing // a name or address length byte is outside the object
+	attLengthOdd     // a name or address byte length is odd, so not UTF-16
+	attTextOutside   // a name or address runs past the end of the object
+	attWordsCut      // the three words after a record are cut off by the object end
+)
+
+// attNames are the fixed counter names, one per cause, used as keys in
+// Notes.AttendeeFailures. They carry no store content.
+var attNames = map[attCause]string{
+	attEndMismatch: "end_mismatch", attCountZero: "count_zero", attBareStringEnd: "bare_string_end",
+	attCountOutside: "count_outside", attCountTooBig: "count_too_big", attLengthMissing: "length_missing",
+	attLengthOdd: "length_odd", attTextOutside: "text_outside", attWordsCut: "words_cut",
+}
+
+// attendees reads the list that follows the bare subject (+876) and any +980 or +772 string
+// after it (see listStart): a u32 count, then records of a one-byte name length, the name,
+// a one-byte address length, the address and three u32 words A, B and C, up to the end of
+// the object. B is the response; A is 1 where Teams says optional (likely). The cause says
+// why when the list does not parse exactly to the object's end.
+func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause) {
+	pos, ok := listStart(o, base)
+	if !ok {
+		return "", 0, attBareStringEnd
+	}
+	n, ok := o.U32(pos)
+	if !ok {
+		return "", 0, attCountOutside
+	}
+	pos += 4
+	if n == 0 {
+		if pos != o.Len() {
+			return "", 0, attCountZero
+		}
+		return "", 0, attOK
+	}
+	out, cause := parseRecords(o, pos, n, r)
+	if cause != attOK {
+		if int64(n)*minRecord > int64(o.Len()-pos) {
+			cause = attCountTooBig
+		}
+		return "", 0, cause
+	}
+	data, _ := json.Marshal(out) // plain strings marshal
+	return string(data), len(out), attOK
+}
+
+// listStart is where the attendee list begins: just past the bare subject (+876), and past
+// each further string that starts there and is the target of the +980 or +772 word. A
+// maximum over all the string words was tried and overshot on real data, so it is not used.
+func listStart(o hxstore.Object, base int) (int, bool) {
 	w, _ := o.U32(evSubjectBare)
 	pos, ok := stringEnd(o, base+int(w))
 	if !ok {
-		return "", 0, false
+		return 0, false
 	}
-	n, ok := o.U32(pos)
-	// Each record is at least 14 bytes; a count the object cannot hold is damage.
-	if !ok || int64(n)*14 > int64(o.Len()-pos-4) {
-		return "", 0, false
+	for {
+		skipped := false
+		for _, extra := range []int{evExtraA, evExtraB} {
+			off, _ := o.U32(extra)
+			if base+int(off) != pos {
+				continue
+			}
+			end, ok := stringEnd(o, pos)
+			if !ok {
+				return 0, false
+			}
+			pos, skipped = end, true
+			break
+		}
+		if !skipped {
+			return pos, true
+		}
 	}
-	pos += 4
-	var out []attendee
-	for i := 0; i < int(n); i++ {
+}
+
+// minRecord is the size of the smallest attendee record: two length bytes and three words.
+const minRecord = 14
+
+// parseRecords reads n records from pos; the list is good when they end exactly at the
+// object's end.
+func parseRecords(o hxstore.Object, pos int, n uint32, r *reader) (out []attendee, cause attCause) {
+	for i := uint32(0); i < n; i++ {
 		var a attendee
 		for k := 0; k < 2; k++ {
 			l, ok := o.U8(pos)
-			if !ok || l%2 != 0 {
-				return "", 0, false
-			}
-			b, ok := o.Bytes(pos+1, int(l))
 			if !ok {
-				return "", 0, false
+				return nil, attLengthMissing
 			}
-			pos += 1 + int(l)
+			if l%2 != 0 {
+				return nil, attLengthOdd
+			}
+			size := int(l)
+			b, ok := o.Bytes(pos+1, size)
+			if !ok {
+				return nil, attTextOutside
+			}
+			pos += 1 + size
 			text := r.scrub(utf16Text(b))
 			if k == 0 {
 				a.Name = text
@@ -334,7 +454,7 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, o
 		bv, ok1 := o.U32(pos + 4)
 		_, ok2 := o.U32(pos + 8)
 		if !ok1 || !ok2 {
-			return "", 0, false
+			return nil, attWordsCut
 		}
 		pos += 12
 		if av == 1 {
@@ -355,13 +475,9 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, o
 		out = append(out, a)
 	}
 	if pos != o.Len() {
-		return "", 0, false
+		return nil, attEndMismatch
 	}
-	if len(out) == 0 {
-		return "", 0, true
-	}
-	data, _ := json.Marshal(out) // plain strings marshal
-	return string(data), len(out), true
+	return out, attOK
 }
 
 // stringEnd returns the offset just past the NUL terminator of the UTF-16 string at off,
@@ -405,7 +521,7 @@ func (r reader) detail(e *calendar.Event, d *hxstore.Object, unknown []calendar.
 		r.notes.DetailMissing = true
 		return append(unknown, detailFields...)
 	}
-	link, dial, body, ok := readDetail(*d)
+	link, dial, body, nul, ok := readDetail(*d)
 	if !ok {
 		r.notes.DetailUnreadable = true
 		return append(unknown, detailFields...)
@@ -417,6 +533,7 @@ func (r reader) detail(e *calendar.Event, d *hxstore.Object, unknown []calendar.
 		// The conference id is not located, so an empty toll number does not say there is no dial-in.
 		unknown = append(unknown, calendar.FieldDialIn)
 	}
+	r.notes.BodyNULTrimmed = nul
 	e.BodyHTML, e.BodyType = r.scrub(body), "html"
 	e.BodyText = teamsdesktop.HTMLToText(e.BodyHTML)
 	return unknown
@@ -425,11 +542,11 @@ func (r reader) detail(e *calendar.Event, d *hxstore.Object, unknown []calendar.
 // readDetail reads the join link, the toll number and the HTML body of a class 0x6c
 // object. A length word of zero is an empty field. ok is false when a field is outside the
 // object or the body is not UTF-8.
-func readDetail(d hxstore.Object) (link, dial, body string, ok bool) {
+func readDetail(d hxstore.Object) (link, dial, body string, nulTrimmed, ok bool) {
 	area, _ := d.U32(dtAreaOne)
 	base := tagDetail + int(area)
 	if d.Class != classDetail || d.Tag != tagDetail || d.Len() < tagDetail || base > d.Len() {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	str := func(wordOff int) (string, bool) {
 		n, _ := d.U32(wordOff + 4) // inside the fixed region, checked above
@@ -446,9 +563,29 @@ func readDetail(d hxstore.Object) (link, dial, body string, ok bool) {
 	n &^= lengthFlag
 	b, okB := d.Bytes(base+int(off), int(n))
 	if !okL || !okD || !okB || !utf8.Valid(b) {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
-	return link, dial, string(b), true
+	if n := len(b); n > 0 && b[n-1] == 0 {
+		b, nulTrimmed = b[:n-1], true // the length may count a terminator
+	}
+	return link, dial, string(b), nulTrimmed, true
+}
+
+// MaxZoneNameLen is the longest unresolved zone name Collect keeps.
+const MaxZoneNameLen = 64
+
+// zoneNameOK reports whether an unresolved zone name may be kept in the notes: printable
+// ASCII, at most MaxZoneNameLen characters.
+func zoneNameOK(z string) bool {
+	if len(z) > MaxZoneNameLen {
+		return false
+	}
+	for i := 0; i < len(z); i++ {
+		if z[i] < 0x20 || z[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // DetailKey is the word at +20 of a detail object, which an event's +180 word equals.
