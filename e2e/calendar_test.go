@@ -36,6 +36,64 @@ func TestE2ECalendar(t *testing.T) {
 	mustExit(t, res, 2)
 }
 
+// `calendar sources` on the fixture archive reports each Teams account's covered days, detail
+// counts, recap counts and the zone name no IANA id exists for; with the Outlook fixture synced it
+// adds the Outlook row, and `doctor` reports the Outlook source without failing.
+func TestE2ECalendarSources(t *testing.T) {
+	e := newEnv(t)
+	before := mustJSON(t, e.cmd("calendar", "sources", "--max-age", "0").stdout)
+	if before["needs_sync"] != true {
+		t.Fatalf("before a sync: %v", before)
+	}
+	e.sync()
+	res := ok(t, e.cmd("calendar", "sources", "--account", account1))
+	rows, _ := res["items"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("rows: %v", res)
+	}
+	r := rows[0].(map[string]any)
+	if r["source"] != "teams" || r["covered_days"] != float64(7) || r["events_live"] != float64(14) || r["events_with_detail"] != float64(1) ||
+		r["recaps_with_content"] != float64(3) || r["link"] != "none" || r["last_verified_at"] == nil {
+		t.Fatalf("row: %v", r)
+	}
+	if z, _ := r["unknown_time_zones"].([]any); len(z) != 1 || z[0] != "FixtureUnknownSt" {
+		t.Fatalf("zones: %v", r["unknown_time_zones"])
+	}
+
+	root := filepath.Join(t.TempDir(), "profiles")
+	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile("../testdata/outlook-fixture/HxStore.hxd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), b, 0o600); err != nil { //nolint:gosec // G703: a path under the test temp dir
+		t.Fatal(err)
+	}
+	mustExit(t, e.cmd("--outlook-root", root, "sync"), 0)
+	all := ok(t, e.cmd("--outlook-root", root, "calendar", "sources", "--max-age", "0"))
+	var outlook map[string]any
+	for _, it := range all["items"].([]any) {
+		if m := it.(map[string]any); m["source"] == "outlook" {
+			outlook = m
+		}
+	}
+	if outlook == nil || outlook["status"] == nil || outlook["deletions"] != "unverified" || outlook["read_interval_seconds"] != float64(300) || outlook["covered_days"] == float64(0) {
+		t.Fatalf("outlook row: %v", all)
+	}
+	doc := ok(t, e.cmd("--outlook-root", root, "doctor"))
+	var found bool
+	for _, c := range doc["checks"].([]any) {
+		if m := c.(map[string]any); m["name"] == "outlook_store" {
+			found = m["ok"] == true
+		}
+	}
+	if !found {
+		t.Fatalf("doctor: %v", doc)
+	}
+}
+
 // outlookRoot is a profiles directory with the fixture's two Outlook profiles, Main and Second.
 func outlookRoot(t *testing.T) string {
 	t.Helper()

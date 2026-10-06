@@ -520,7 +520,8 @@ func TestCalendarTextEdgeCases(t *testing.T) {
 func TestCalendarReadFailuresAreReported(t *testing.T) {
 	e := calEnv(t)
 	e.exec(`alter table calendar_source_events rename column event_type to et`)
-	for _, args := range [][]string{{"calendar", "--from", "2023-11-22", "--days", "1"}, {"calendar", "event", "ev_x"}} {
+	e.exec(`alter table calendar_source_events rename column time_zone to tz`)
+	for _, args := range [][]string{{"calendar", "--from", "2023-11-22", "--days", "1"}, {"calendar", "event", "ev_x"}, {"calendar", "sources"}} {
 		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
 		if code == 0 || out != "" || !strings.Contains(errOut, `"error"`) {
 			t.Errorf("%v: exit %d %q %q", args, code, out, errOut)
