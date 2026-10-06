@@ -444,12 +444,14 @@ func TestJoinedKeysCountTheirRecordings(t *testing.T) {
 	})
 	s.qApply(t, calendar.SourceOutlook, qOutlook, outlook)
 	s.qMessage(t, "jr", "RichText/Media_CallRecording", "2026-11-03T09:00:00.000Z", "rec")
+	// The joined keys are one event for its recaps too.
+	s.sRecap(t, "jr-call", timed.ICalUID, "2026-11-03T08:01:00.000Z", "Ada")
 	a, err := s.CalendarAgenda(ctx, CalendarFilter{From: qt("2026-11-03T00:00:00Z"), To: qt("2026-11-04T00:00:00Z")})
-	if err != nil || len(a.Rows) != 1 || a.Rows[0].Recordings != 1 {
+	if err != nil || len(a.Rows) != 1 || a.Rows[0].Recordings != 1 || !a.Rows[0].HasRecap {
 		t.Fatalf("%+v %v", a.Rows, err)
 	}
 	d, err := s.CalendarEvent(ctx, nil, a.Rows[0].EventID)
-	if err != nil || len(d.Recordings) != 1 {
+	if err != nil || len(d.Recordings) != 1 || len(d.Recaps) != 1 {
 		t.Fatalf("%+v %v", d.Recordings, err)
 	}
 }

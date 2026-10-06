@@ -125,6 +125,12 @@ type ConversationRow struct {
 	LastMessageAt time.Time `json:"last_message_at,omitzero"`
 	ReadHorizonAt time.Time `json:"read_horizon_at,omitzero"`
 	Favorite      bool      `json:"favorite"`
+	// CalendarSeriesKey and CalendarEventCount place a Meeting conversation in the calendar: the
+	// series its events share and how many live, non-cancelled occurrences the archive holds (a declined
+	// one counts: the meeting happened). Both are empty for
+	// a chat no event names. See Store.linkCalendar.
+	CalendarSeriesKey  string `json:"calendar_series_key,omitempty"`
+	CalendarEventCount int    `json:"calendar_event_count,omitempty"`
 }
 
 // PersonRow is someone seen as a sender or member.
@@ -695,6 +701,9 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	if err := nameUntitled(ctx, s, out, func(r *ConversationRow) (convRef, *string) {
 		return convRef{r.TenantID, r.UserID, r.ID}, &r.DisplayName
 	}); err != nil {
+		return nil, false, err
+	}
+	if err := s.linkCalendar(ctx, out); err != nil {
 		return nil, false, err
 	}
 	return out, trunc, nil

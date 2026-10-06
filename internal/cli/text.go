@@ -237,6 +237,16 @@ func (rt *runtime) listTable(r *listResult) {
 		case calendarSourceItem:
 			cols, textCol = []string{"source", "account", "status", "window", "covered_days", "events", "with_detail", "recaps"}, -1
 			rows = append(rows, []string{x.Source, shortAccount(x.AccountID), x.Status, sourceWindow(x), strconv.Itoa(x.CoveredDays), strconv.Itoa(x.EventsLive), strconv.Itoa(x.EventsWithDetail), strconv.Itoa(x.RecapsWithContent)})
+		case actionItem:
+			cols, textCol = []string{"event_start", "subject", "owner", "title"}, 3
+			title := oneLine(x.Title)
+			if title == "" {
+				title = oneLine(x.Text)
+			}
+			if x.SeriesLevel {
+				title += " (series level)"
+			}
+			rows = append(rows, []string{stamp(x.EventStart), oneLine(x.Subject), x.Owner, title})
 		case storeItem:
 			label, acct := databaseLabel(x.Database)
 			cols, textCol = []string{"database", "account", "store", "records", "removed", "last_updated_at"}, -1
