@@ -49,7 +49,7 @@ func TestRunPrintsOnlyCounts(t *testing.T) {
 		r.Rejected["header_crc"] != 1 || r.Objects != 4 || r.UnwalkedBytes != 0 || r.PairsOverflow != 0 || r.FileSize != int64(b.Len()) {
 		t.Fatalf("%+v", r)
 	}
-	want := []pairCount{{1, 12, 1, 0}, {0x6b, 40, 2, 0}, {0x71, 20, 1, 0}}
+	want := []pairCount{{1, 12, 1, 0, 0}, {0x6b, 40, 2, 0, 0}, {0x71, 20, 1, 0, 0}}
 	if len(r.Pairs) != 3 || r.Pairs[0] != want[0] || r.Pairs[1] != want[1] || r.Pairs[2] != want[2] {
 		t.Fatalf("%+v", r.Pairs)
 	}
@@ -100,7 +100,7 @@ func TestPairOrdering(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
 		t.Fatal(err)
 	}
-	want := []pairCount{{2, 12, 1, 0}, {9, 12, 1, 0}, {9, 13, 1, 0}}
+	want := []pairCount{{2, 12, 1, 0, 0}, {9, 12, 1, 0, 0}, {9, 13, 1, 0, 0}}
 	for i := range want {
 		if r.Pairs[i] != want[i] {
 			t.Fatalf("%+v", r.Pairs)
@@ -195,5 +195,52 @@ func TestMainRunsRun(t *testing.T) {
 	main()
 	if got != 0 {
 		t.Fatal(got)
+	}
+}
+
+func TestRunReportsFraming(t *testing.T) {
+	b := hxbuild.New(hxbuild.Options{})
+	head := append([]byte{1, 0, 0, 0}, hxbuild.Trailer...)
+	b.Block(hxbuild.FramedPayload(head, hxbuild.NewObject(1, 12, 12), hxbuild.NewObject(2, 12, 12)))
+	b.Block([]byte{0, 0, 0, 0, 9, 9})
+	var out bytes.Buffer
+	run([]string{writeStore(t, b)}, &out, &bytes.Buffer{})
+	var r report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.FramingBytes != 15+22 || r.UnwalkedBytes != 6 || r.ObjectsResynced != 0 || r.PayloadsWithoutObjects != 1 || r.NoObjectBytes != 6 ||
+		r.NoObjectFirst4["zero"] != 1 || r.HeadLengths[15] != 1 || r.HeadEndsInTrailer != 1 || r.HeadFirst4["small"] != 1 ||
+		r.GapLengths[11] != 1 || r.GapsEqualTrailer != 1 || r.Tails != 1 || r.TailBytes != 11 || r.TailsStartWithTrailer != 1 {
+		t.Fatalf("%+v", r)
+	}
+	for _, key := range []string{`"framing_bytes"`, `"head_lengths"`, `"gap_lengths"`, `"gap_first4"`, `"payloads_without_objects"`, `"tails_start_with_trailer"`} {
+		if !strings.Contains(out.String(), key) {
+			t.Fatalf("missing %s", key)
+		}
+	}
+}
+
+func TestRunReportsNearTrailerAndLong(t *testing.T) {
+	b := hxbuild.New(hxbuild.Options{})
+	near := append([]byte(nil), hxbuild.Trailer...)
+	near[3] = 5
+	p := hxbuild.Payload(hxbuild.NewObject(1, 12, 12))
+	p = append(p, near...)
+	p = append(p, hxbuild.Payload(hxbuild.NewObject(2, 12, 900))...)
+	p = append(p, 4)
+	p = append(p, hxbuild.Payload(hxbuild.NewObject(3, 12, 12))...)
+	b.Block(p)
+	var out bytes.Buffer
+	run([]string{writeStore(t, b)}, &out, &bytes.Buffer{})
+	var r report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Gap11OneByteDiff[3] != 1 || r.Gap1Values[4] != 1 || r.Gap11ManyDiff != 0 || r.HeadsTrailerForm != 0 || r.Pairs[1].ResyncedLong != 1 || r.Pairs[0].ResyncedLong != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if !strings.Contains(out.String(), "resynced_len_ge_824") {
+		t.Fatal("missing key")
 	}
 }

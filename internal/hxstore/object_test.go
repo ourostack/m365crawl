@@ -208,7 +208,7 @@ type found struct {
 
 func collect(p []byte) ([]found, int) {
 	var got []found
-	cov, _ := walkObjects(p, func(pos int, class, tag uint16, raw []byte, _ bool) error {
+	cov, _ := walkObjects(p, &Stats{}, func(pos int, class, tag uint16, raw []byte, _ bool) error {
 		got = append(got, found{pos, class, tag, len(raw)})
 		return nil
 	})
@@ -282,7 +282,7 @@ func TestWalkObjectsCallbackError(t *testing.T) {
 	boom := errors.New("boom")
 	p := hxbuild.Payload(hxbuild.NewObject(1, 12, 12), hxbuild.NewObject(2, 12, 12))
 	calls := 0
-	cov, err := walkObjects(p, func(int, uint16, uint16, []byte, bool) error { calls++; return boom })
+	cov, err := walkObjects(p, &Stats{}, func(int, uint16, uint16, []byte, bool) error { calls++; return boom })
 	if !errors.Is(err, boom) || calls != 1 || cov != 0 {
 		t.Fatal(err, calls, cov)
 	}
