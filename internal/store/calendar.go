@@ -92,6 +92,9 @@ type calendarMode struct {
 	// a fresh window and fresh covered days; nil means every account (a rebuild from the records
 	// reads no cache, and stamps nothing it did not see).
 	read map[[2]string]bool
+	// retake takes the days of removed records too (not only live ones) as covered days: a zone
+	// change forgets the covered days, and a day whose events were evicted must stay covered.
+	retake bool
 }
 
 // calGroup is one source's rows for one account.
@@ -100,6 +103,7 @@ type calGroup struct {
 	acct        teamsdesktop.Account
 	hasCalendar bool
 	days        map[string]struct{} // days the cache holds now
+	retaken     map[string]struct{} // days of removed records, taken again after a zone change
 	gone        []string
 	events      []calendar.Event
 	recaps      []calendar.Recap
@@ -303,7 +307,7 @@ func (s *Store) EnsureCalendar(ctx context.Context, zone *time.Location, at time
 					return CalendarResult{}, err
 				}
 			}
-			return deriveCalendar(ctx, tx, calendarMode{replace: rulesChanged, zone: zone, at: at})
+			return deriveCalendar(ctx, tx, calendarMode{replace: rulesChanged, zone: zone, at: at, retake: zoneChanged})
 		})
 		if err != nil {
 			return err
@@ -458,6 +462,12 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 		g, manager, ok := group(source, database)
 		if day, has := teamscal.EventDay(start.String, typ.String, m.zone); ok && manager == "calendar" && has {
 			removed = append(removed, removedRow{g, recordKey(key), day})
+			if m.retake {
+				if g.retaken == nil {
+					g.retaken = map[string]struct{}{}
+				}
+				g.retaken[day] = struct{}{}
+			}
 		}
 		return nil
 	}); err != nil {
@@ -635,9 +645,14 @@ func unmappedReason(err error) string {
 func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarCounts, []*calendar.InvalidEventError, error) {
 	var counts CalendarCounts
 	account := teamscal.AccountID(g.acct)
-	days := make([]string, 0, len(g.days))
+	days := make([]string, 0, len(g.days)+len(g.retaken))
 	for d := range g.days {
 		days = append(days, d)
+	}
+	for d := range g.retaken {
+		if _, live := g.days[d]; !live {
+			days = append(days, d)
+		}
 	}
 	sort.Strings(days)
 	var first, last sql.NullString
