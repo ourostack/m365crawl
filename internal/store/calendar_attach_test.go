@@ -176,7 +176,7 @@ func TestCalendarActionsFilters(t *testing.T) {
 	}
 	a := got.Items[0]
 	if a.EventID != EventID(qTeams, a.EventKey) || a.Subject != "Q sync o1" || !a.EventStart.Equal(qt("2026-11-03T10:00:00Z")) || a.CallID != "call-1" ||
-		a.Owner != "Ada" || a.Origin != "recap" || a.Mine || !a.ExpiresAt.Equal(qt("2026-12-03T00:00:00Z")) || a.SeriesLevel {
+		a.Owner != "Ada" || a.Origin != "recap" || *a.Mine || !a.ExpiresAt.Equal(qt("2026-12-03T00:00:00Z")) || a.SeriesLevel {
 		t.Fatalf("%+v", a)
 	}
 	// --mine needs a known name.
@@ -189,7 +189,7 @@ func TestCalendarActionsFilters(t *testing.T) {
 	if _, err := s.ApplyPeople(ctx, []teamsdesktop.Person{{TenantID: acctA.TenantID, ID: selfMRI(acctA), DisplayName: "ada", SeenAt: base}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err = s.CalendarActions(ctx, f); err != nil || len(got.Items) != 1 || !got.Items[0].Mine {
+	if got, err = s.CalendarActions(ctx, f); err != nil || len(got.Items) != 1 || !*got.Items[0].Mine || got.Items[0].MineBasis != MineFullName {
 		t.Fatalf("mine: %+v %v", got.Items, err)
 	}
 	// Another account's own name makes none of this account's items mine.
@@ -237,7 +237,7 @@ func TestCalendarActionsListASeriesLevelRecapOnce(t *testing.T) {
 	}
 	// Sorted by event start: the floating recap sits on the first occurrence, the placed one on the second.
 	if got.Items[0].CallID != "floating" || !got.Items[0].SeriesLevel || !got.Items[0].EventStart.Equal(qt("2026-11-03T10:00:00Z")) ||
-		got.Items[1].CallID != "placed" || got.Items[1].SeriesLevel || !got.Items[1].EventStart.Equal(qt("2026-11-10T10:00:00Z")) || !got.Items[1].Mine {
+		got.Items[1].CallID != "placed" || got.Items[1].SeriesLevel || !got.Items[1].EventStart.Equal(qt("2026-11-10T10:00:00Z")) || !*got.Items[1].Mine {
 		t.Fatalf("%+v", got.Items)
 	}
 	// A range that holds only a later occurrence lists the floating recap under it.
@@ -354,5 +354,86 @@ func TestSeriesRecapWithAnOccurrenceHeldByTwoSources(t *testing.T) {
 	}
 	if d := eventOn(t, s, "s1", 3); len(d.Recaps) != 0 {
 		t.Fatalf("%+v", d.Recaps)
+	}
+}
+
+func TestOwnerIsMe(t *testing.T) {
+	cases := []struct {
+		own, owner string
+		people     []string
+		mine       string // "true", "false" or "nil"
+		basis      string
+	}{
+		{"Ada Fixture", "ada fixture", nil, "true", MineFullName},
+		{"Ada Fixture", " Ada ", []string{"Ada Fixture", "Bo Example"}, "true", MineFirstName},
+		{"Ada Fixture", "Ada", []string{"Ada Fixture", "Ada Other"}, "nil", MineAmbiguous},
+		{"Ada Fixture", "ada", []string{"ADA Third"}, "nil", MineAmbiguous},
+		{"Ada Fixture", "Ada Other", nil, "false", ""},
+		{"Ada Fixture", "Bo", nil, "false", ""},
+		{"Ada Fixture", "", nil, "false", ""},
+		{"", "Ada", nil, "false", ""},
+	}
+	for _, c := range cases {
+		mine, basis := ownerIsMe(c.own, c.owner, func() []string { return c.people })
+		got := "nil"
+		if mine != nil {
+			got = map[bool]string{true: "true", false: "false"}[*mine]
+		}
+		if got != c.mine || basis != c.basis {
+			t.Errorf("%+v: %s %q", c, got, basis)
+		}
+	}
+}
+
+func TestMeetingNames(t *testing.T) {
+	r := CalendarRecap{Speakers: rawJSON(`[{"name":"Sp One"},{"displayName":"Sp Two"},{"speakerName":"Sp Three"},{"id":"x"}]`),
+		ActionItems: []CalendarRecapItem{{Speaker: "Item Sp"}}, Mentions: []CalendarRecapItem{{Speaker: "Men Sp"}}}
+	if got := strings.Join(meetingNames(`[{"name":"Att One"}]`, r), ","); got != "Att One" {
+		t.Fatalf("attendees win: %s", got)
+	}
+	if got := strings.Join(meetingNames("", r), ","); got != "Sp One,Sp Two,Sp Three,Item Sp,Men Sp" {
+		t.Fatalf("speakers: %s", got)
+	}
+	if got := meetingNames("", CalendarRecap{Speakers: rawJSON(`{"not":"a list"}`)}); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+}
+
+// A one-word owner is the user when nobody else in the meeting shares the first name; it is unknown
+// (not guessed) when someone does; --mine keeps the first and counts the second.
+func TestCalendarActionsMatchFirstNames(t *testing.T) {
+	ctx := context.Background()
+	s := sSeriesArchive(t)
+	s.qExec(t, `delete from calendar_recaps where call_id='no-uid'`)
+	s.sRecap(t, "full", sharedUID, "2026-11-03T10:00:00.000Z", "Ada Fixture")
+	s.sRecap(t, "first", sharedUID, "2026-11-10T10:00:00.000Z", "ada")
+	s.sRecap(t, "other", sharedUID, "2026-11-17T10:00:00.000Z", "Bo")
+	s.qExec(t, `update calendar_source_events set attendees_json='[{"name":"Ada Fixture"},{"name":"Bo Example"}]' where source_id in ('s1','s2')`)
+	s.qExec(t, `update calendar_source_events set attendees_json='[{"name":"Ada Fixture"},{"name":"Ada Other"}]' where source_id='s3'`)
+	s.sRecap(t, "amb", "uid-s3-only", "2026-11-17T11:00:00.000Z", "Ada")
+	s.qExec(t, `update calendar_source_events set ical_uid='uid-s3-only' where source_id='s3'`)
+	s.qExec(t, `update calendar_recaps set ical_uid='uid-s3-only' where call_id='amb'`)
+	f := CalendarActionFilter{From: qt("2026-11-01T00:00:00Z"), To: qt("2026-11-30T00:00:00Z")}
+	got, err := s.CalendarActions(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	basis := map[string]string{}
+	state := map[string]string{}
+	for _, a := range got.Items {
+		basis[a.CallID] = a.MineBasis
+		state[a.CallID] = "nil"
+		if a.Mine != nil {
+			state[a.CallID] = map[bool]string{true: "true", false: "false"}[*a.Mine]
+		}
+	}
+	if basis["full"] != MineFullName || basis["first"] != MineFirstName || basis["other"] != "" || basis["amb"] != MineAmbiguous ||
+		state["full"] != "true" || state["first"] != "true" || state["other"] != "false" || state["amb"] != "nil" {
+		t.Fatalf("%v %v", basis, state)
+	}
+	f.Mine = true
+	got, err = s.CalendarActions(ctx, f)
+	if err != nil || len(got.Items) != 2 || got.MineAmbiguous != 1 || got.Total != 2 {
+		t.Fatalf("mine: %d items, %d ambiguous, %v", len(got.Items), got.MineAmbiguous, err)
 	}
 }

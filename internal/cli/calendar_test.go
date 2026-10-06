@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -897,5 +898,40 @@ func TestCalendarShowsOutlookEvents(t *testing.T) {
 	ev := eventDoc(t, e, plain["event_id"].(string))
 	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture plain event" {
 		t.Fatalf("%v", ev)
+	}
+}
+
+// A recap owner is mostly a first name: it is the user when no one else in the meeting has it, and
+// unknown (named in unknown_fields, counted by --mine) when someone does.
+func TestCalendarActionsMineBasis(t *testing.T) {
+	e := calEnv(t)
+	acct := tenantA + "/" + userA
+	e.exec(`update calendar_recap_items set owner_name='alex' where item_key in (select item_key from calendar_recap_items where owner_name='Pat Example' and account_id='` + acct + `')`)
+	byOwner := func(m map[string]any) map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, it := range items(t, m) {
+			out[it["owner"].(string)] = it
+		}
+		return out
+	}
+	args := []string{"--from", "2023-11-20", "--days", "1", "--account", acct}
+	got := byOwner(actionsDoc(t, e, args...))
+	if got["alex"]["mine"] != true || got["alex"]["mine_basis"] != "first_name" || got["Alex Fixture"]["mine_basis"] != "full_name" {
+		t.Fatalf("first name: %v", got)
+	}
+	// Someone else named Alex in the meeting: the answer is not guessed.
+	e.exec(`update calendar_source_events set attendees_json='[{"name":"Alex Fixture"},{"name":"Alex Other"}]' where subject='Fixture planning review'`)
+	m := actionsDoc(t, e, args...)
+	got = byOwner(m)
+	if _, has := got["alex"]["mine"]; has || got["alex"]["mine_basis"] != "ambiguous" || fmt.Sprint(got["alex"]["unknown_fields"]) != "[mine]" || got["Alex Fixture"]["mine"] != true {
+		t.Fatalf("ambiguous: %v", got)
+	}
+	if _, has := m["mine_ambiguous_omitted"]; has {
+		t.Fatalf("a list without --mine counts omissions: %v", m)
+	}
+	// --mine keeps the sure matches and says how many it left out.
+	mine := actionsDoc(t, e, append(args, "--mine")...)
+	if n := len(items(t, mine)); n != 1 || mine["mine_ambiguous_omitted"] != float64(1) {
+		t.Fatalf("mine: %v", mine)
 	}
 }

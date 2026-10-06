@@ -86,6 +86,9 @@ type listResult struct {
 	// here instead of being hidden. UnlinkedRecapsTotal is printed only when the limit cut the list.
 	UnlinkedRecaps      []unlinkedRecap `json:"unlinked_recaps,omitempty"`
 	UnlinkedRecapsTotal int             `json:"unlinked_recaps_total,omitempty"`
+	// MineAmbiguousOmitted is calendar actions --mine's count of items it left out because their
+	// owner is a first name another person of the meeting shares.
+	MineAmbiguousOmitted int `json:"mine_ambiguous_omitted,omitempty"`
 	meta
 }
 

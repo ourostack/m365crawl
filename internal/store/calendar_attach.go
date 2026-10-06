@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -192,8 +193,13 @@ type CalendarAction struct {
 	EventStart                 time.Time
 	CallID                     string
 	CalendarRecapItem
-	// Mine is true when the owner is the display name of the account the event belongs to.
-	Mine bool
+	// Mine says whether the owner is the account's own user: true or false when known, nil when
+	// the owner is a first name that another person of the meeting shares (MineBasis is then
+	// MineAmbiguous). MineBasis says how sure a true answer is: MineFullName, or MineFirstName for
+	// a one-word owner equal to the user's first name that nobody else in the meeting has. It is
+	// empty when Mine is false.
+	Mine      *bool
+	MineBasis string
 	// ExpiresAt is when Teams stops serving the recap; the items stay in the archive.
 	ExpiresAt time.Time
 	// SeriesLevel says the recap is linked to the series, not this occurrence, and appears once,
@@ -201,11 +207,21 @@ type CalendarAction struct {
 	SeriesLevel bool
 }
 
+// How CalendarAction.Mine was decided.
+const (
+	MineFullName  = "full_name"
+	MineFirstName = "first_name"
+	MineAmbiguous = "ambiguous"
+)
+
 // CalendarActions is the result of CalendarActions.
 type CalendarActions struct {
-	Items     []CalendarAction
-	Total     int
-	Truncated bool
+	Items []CalendarAction
+	// MineAmbiguous counts the items --mine left out because their owner is a first name another
+	// person of the meeting shares.
+	MineAmbiguous int
+	Total         int
+	Truncated     bool
 	// The coverage fields are CalendarAgenda's: they say how far an absent item is evidence.
 	Gap           bool
 	AsOf          time.Time
@@ -283,14 +299,19 @@ func (s *Store) CalendarActions(ctx context.Context, f CalendarActionFilter) (Ca
 			}
 			listed[id] = true
 			for _, a := range r.ActionItems {
-				own := names[it.Principal]
-				mine := own != "" && strings.EqualFold(a.Owner, own)
-				if f.Mine && !mine || f.Owner != "" && !strings.Contains(strings.ToLower(a.Owner), strings.ToLower(f.Owner)) {
+				if f.Owner != "" && !strings.Contains(strings.ToLower(a.Owner), strings.ToLower(f.Owner)) {
+					continue
+				}
+				mine, basis := ownerIsMe(names[it.Principal], a.Owner, func() []string { return meetingNames(it.AttendeesJSON, r) })
+				if f.Mine && (mine == nil || !*mine) {
+					if basis == MineAmbiguous {
+						out.MineAmbiguous++
+					}
 					continue
 				}
 				all = append(all, CalendarAction{
 					EventID: EventID(it.Principal, it.Key), EventKey: it.Key, Subject: it.Subject, EventStart: it.Start, CallID: r.CallID,
-					CalendarRecapItem: a, Mine: mine, ExpiresAt: r.ExpiresAt, SeriesLevel: h.SeriesLevel,
+					CalendarRecapItem: a, Mine: mine, MineBasis: basis, ExpiresAt: r.ExpiresAt, SeriesLevel: h.SeriesLevel,
 				})
 			}
 		}
@@ -366,4 +387,60 @@ func (s *Store) linkCalendar(ctx context.Context, rows []ConversationRow) error 
 		}
 	}
 	return nil
+}
+
+// ownerIsMe decides whether an action item's owner is the account's own user, whose display name
+// is own. Recap owners are mostly a first name only, so a one-word owner equal to the first word
+// of own counts, unless another person of the meeting (people returns their names) has that first
+// word: then the answer is unknown (nil, MineAmbiguous) and is never guessed. An owner that is
+// empty, or that matches neither way, is not me; an account with no known name is false too.
+func ownerIsMe(own, owner string, people func() []string) (mine *bool, basis string) {
+	yes, no := true, false
+	owner = strings.TrimSpace(owner)
+	switch {
+	case own == "" || owner == "":
+		return &no, ""
+	case strings.EqualFold(owner, own):
+		return &yes, MineFullName
+	}
+	first := strings.Fields(own)[0]
+	if len(strings.Fields(owner)) != 1 || !strings.EqualFold(owner, first) {
+		return &no, ""
+	}
+	for _, n := range people() {
+		if f := strings.Fields(n); len(f) > 0 && strings.EqualFold(f[0], first) && !strings.EqualFold(strings.Join(f, " "), own) {
+			return nil, MineAmbiguous
+		}
+	}
+	return &yes, MineFirstName
+}
+
+// meetingNames lists the people of a meeting: the event's attendees when it has an attendee list,
+// otherwise the recap's speakers (and the speakers of its items).
+func meetingNames(attendeesJSON string, r CalendarRecap) []string {
+	var out []string
+	for _, a := range parseAttendees(attendeesJSON) {
+		out = append(out, a.Name)
+	}
+	if len(out) > 0 {
+		return out
+	}
+	var speakers []map[string]any
+	if json.Unmarshal(r.Speakers, &speakers) == nil {
+		for _, sp := range speakers {
+			for _, k := range []string{"name", "displayName", "speakerName"} {
+				if n, ok := sp[k].(string); ok && n != "" {
+					out = append(out, n)
+					break
+				}
+			}
+		}
+	}
+	for _, a := range r.ActionItems {
+		out = append(out, a.Speaker)
+	}
+	for _, a := range r.Mentions {
+		out = append(out, a.Speaker)
+	}
+	return out
 }

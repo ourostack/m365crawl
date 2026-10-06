@@ -736,8 +736,13 @@ type actionItem struct {
 	Speaker    string    `json:"speaker,omitempty"`
 	At         time.Time `json:"at,omitzero"`
 	Origin     string    `json:"origin"`
-	// Mine is true when the owner is the account's own display name (the name whoami prints).
-	Mine bool `json:"mine"`
+	// Mine is true when the owner is the account's own user and false when not. It is absent, and
+	// named in unknown_fields, when the owner is a first name another person of the meeting shares.
+	// MineBasis says how sure: full_name (the owner is the display name), first_name (a one-word
+	// owner equal to the user's first name that nobody else in the meeting has) or ambiguous.
+	Mine          *bool    `json:"mine,omitempty"`
+	MineBasis     string   `json:"mine_basis,omitempty"`
+	UnknownFields []string `json:"unknown_fields,omitempty"`
 	// ExpiresAt is when Teams stops serving the recap; the item stays in the archive.
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 	// SeriesLevel: the recap is linked to the series, not to this occurrence, and is listed once
@@ -750,7 +755,7 @@ type calendarActionsCmd struct {
 	To    string `help:"End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days." placeholder:"WHEN"`
 	Days  int    `help:"Range length in days from --from (instead of --to)."`
 	Owner string `help:"Only items whose owner's name contains this text, ignoring case."`
-	Mine  bool   `help:"Only items owned by you: the owner equals your own display name (as whoami shows), ignoring case."`
+	Mine  bool   `help:"Only items owned by you: the owner equals your own display name (as whoami shows), ignoring case, or is your first name alone when nobody else in the meeting has it. Items whose first name another person shares are left out and counted in mine_ambiguous_omitted."`
 	Limit int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 }
 
@@ -783,11 +788,15 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		items := make([]actionItem, len(res.Items))
 		for i, a := range res.Items {
 			items[i] = actionItem{EventID: a.EventID, EventKey: a.EventKey, Subject: a.Subject, EventStart: a.EventStart.UTC(), CallID: a.CallID, Title: a.Title, Text: a.Text,
-				Owner: a.Owner, Speaker: a.Speaker, At: a.At.UTC(), Origin: a.Origin, Mine: a.Mine, ExpiresAt: a.ExpiresAt.UTC(), SeriesLevel: a.SeriesLevel}
+				Owner: a.Owner, Speaker: a.Speaker, At: a.At.UTC(), Origin: a.Origin, Mine: a.Mine, MineBasis: a.MineBasis, ExpiresAt: a.ExpiresAt.UTC(), SeriesLevel: a.SeriesLevel}
+			if a.Mine == nil {
+				items[i].UnknownFields = []string{"mine"}
+			}
 		}
 		list := newList(shape(rt, items), res.Truncated).withTotal(res.Total)
 		list.CoverageGap, list.Range, list.UnlinkedAccounts = &res.Gap, out.Range, res.Unlinked
 		list.setCoverage(res.UncoveredDays, res.Accounts, res.AsOf)
+		list.MineAmbiguousOmitted = res.MineAmbiguous
 		return list, nil
 	})
 }
