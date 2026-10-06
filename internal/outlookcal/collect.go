@@ -1,6 +1,7 @@
 package outlookcal
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -104,13 +105,24 @@ type Notes struct {
 	DetailUnreadable  int
 	AttendeesUnparsed int
 	AttendeesAtCap    int
-	AllDayUnaligned   int
-	EventTypeUnknown  int
-	ShowAsUnmapped    int
-	ResponseUnmapped  int
-	Redacted          int
-	UnmappedReasons   map[string]int
-	UnknownZones      []string // sorted, distinct
+	AllDayUnaligned   int // all-day flag set but not whole days: the flag is left unknown
+	// Cancelled-flag events (+1082 bit 4, numbering unverified) by whether the bare
+	// subject (+876) and the subject (+1024) differ or match.
+	CancelledSubjectsDiffer, CancelledSubjectsMatch int
+	OccurrenceNoDate                                int // occurrence or exception events whose id embeds no date
+	SeriesKeySplits                                 int // series keys (+20) whose events split into more than one series by id
+	SeriesGroupSplits                               int // series by id whose events carry more than one series key (+20)
+	DetailCopiesDiffer                              int // detail keys with more than one differing copy
+	BodyNULTrimmed                                  int // bodies that ended in a NUL, removed
+	UnknownZonesRejected                            int // events whose unresolved zone name is not printable ASCII of at most MaxZoneNameLen
+	// Unparsed attendee lists by cause; they sum to AttendeesUnparsed.
+	AttendeesEndMismatch, AttendeesCountZero, AttendeesOtherUnparsed int
+	EventTypeUnknown                                                 int
+	ShowAsUnmapped                                                   int
+	ResponseUnmapped                                                 int
+	Redacted                                                         int
+	UnmappedReasons                                                  map[string]int
+	UnknownZones                                                     []string // sorted, distinct
 }
 
 // Result is what Collect read.
@@ -140,6 +152,7 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	var res Result
 	winners := map[string]winner{}
 	details := map[uint32]hxstore.Object{}
+	differing := map[uint32]bool{}
 	badTags := map[uint16]int{}
 	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
 		switch {
@@ -159,6 +172,9 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 				res.Notes.ResyncedSkipped++
 			} else if k, ok := DetailKey(o); ok {
 				res.Notes.DetailObjects++
+				if old, held := details[k]; held && !bytes.Equal(old.Raw, o.Raw) {
+					differing[k] = true
+				}
 				details[k] = o.Clone() // the last copy in file order
 			}
 		}
@@ -171,6 +187,7 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	if g := guard(stats, badTags, len(winners)+res.Notes.EventNoID, opt); g != nil {
 		return res, g
 	}
+	res.Notes.DetailCopiesDiffer = len(differing)
 	res.Notes.DistinctEvents = len(winners)
 	res.Notes.SupersededCopies = res.Notes.EventObjects - len(winners)
 	res.UnknownLayouts = unknownLayouts(stats)
@@ -253,6 +270,8 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 	sort.Strings(ids)
 	n := &res.Notes
 	zones := map[string]bool{}
+	keySeries := map[uint64]map[string]bool{}
+	seriesKeys := map[string]map[uint64]bool{}
 	unmapped := 0
 	for _, id := range ids {
 		ev := winners[id].obj
@@ -275,7 +294,10 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 		}
 		res.Events = append(res.Events, e)
 		n.add(mn, zones)
+		link2(keySeries, mn.SeriesWord, mn.SeriesID)
+		link2(seriesKeys, mn.SeriesID, mn.SeriesWord)
 	}
+	n.SeriesKeySplits, n.SeriesGroupSplits = multi(keySeries), multi(seriesKeys)
 	if unmapped > 0 {
 		res.Losses = append(res.Losses, Loss{CodeEventUnmapped, unmapped})
 	}
@@ -283,6 +305,25 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 		n.UnknownZones = append(n.UnknownZones, z)
 	}
 	sort.Strings(n.UnknownZones)
+}
+
+// link2 records that a belongs with b.
+func link2[A, B comparable](m map[A]map[B]bool, a A, b B) {
+	if m[a] == nil {
+		m[a] = map[B]bool{}
+	}
+	m[a][b] = true
+}
+
+// multi counts the entries that hold more than one value.
+func multi[A, B comparable](m map[A]map[B]bool) int {
+	n := 0
+	for _, v := range m {
+		if len(v) > 1 {
+			n++
+		}
+	}
+	return n
 }
 
 func (n *Notes) add(m MapNotes, zones map[string]bool) {
@@ -296,6 +337,14 @@ func (n *Notes) add(m MapNotes, zones map[string]bool) {
 	count(&n.AttendeesUnparsed, m.AttendeesUnparsed)
 	count(&n.AttendeesAtCap, m.AttendeesAtCap)
 	count(&n.AllDayUnaligned, m.AllDayUnaligned)
+	count(&n.CancelledSubjectsDiffer, m.CancelledSubjectsDiffer)
+	count(&n.CancelledSubjectsMatch, m.CancelledSubjectsMatch)
+	count(&n.OccurrenceNoDate, m.OccurrenceNoDate)
+	count(&n.BodyNULTrimmed, m.BodyNULTrimmed)
+	count(&n.UnknownZonesRejected, m.UnknownZoneRejected)
+	count(&n.AttendeesEndMismatch, m.AttendeesEndMismatch)
+	count(&n.AttendeesCountZero, m.AttendeesCountZero)
+	count(&n.AttendeesOtherUnparsed, m.AttendeesOtherUnparsed)
 	count(&n.EventTypeUnknown, m.EventTypeUnknown)
 	count(&n.ShowAsUnmapped, m.ShowAsUnmapped)
 	count(&n.ResponseUnmapped, m.ResponseUnmapped)

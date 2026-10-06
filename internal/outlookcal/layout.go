@@ -43,6 +43,7 @@ const (
 
 	// Event fixed region (docs/outlook-store.md).
 	evFixed       = 1109 // the fixed size, equal to the tag
+	evSeriesKey   = 20   // u64: the series key (established)
 	evAreaOne     = 104  // u32: size of area one; the string area starts at evFixed + this
 	evDetailLink  = 180  // u32: equals the word at dtKey of the event's detail object
 	evLastMod     = 288  // ticks

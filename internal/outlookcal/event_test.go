@@ -39,7 +39,7 @@ func TestMapEventFieldByField(t *testing.T) {
 		"detail":    e.OnlineMeetingURL == "https://example.invalid/fixture/join/1" && e.DialInTollNumber == "Fixture dial-in" && e.BodyHTML == "<p>Fixture body</p>" && e.BodyType == "html" && strings.Contains(e.BodyText, "Fixture body"),
 		"not set":   e.IsOrganizer == calendar.TriUnknown && e.IsPrivate == calendar.TriUnknown && e.HasAttachments == calendar.TriUnknown && e.OriginalStart == nil && e.UTCOffset == "",
 		"declared":  e.UnknownDeclared,
-		"no notes":  notes == MapNotes{},
+		"notes":     notes == MapNotes{CancelledSubjectsMatch: true, SeriesID: id, SeriesWord: spec.SeriesKey},
 		"key":       calendar.Key(e) == id+"|",
 	} {
 		if !ok {
@@ -187,7 +187,7 @@ func TestMapEventAllDay(t *testing.T) {
 	// Not midnight UTC: stored as timed, and counted.
 	s.Start, s.End = at(6, 5), at(7, 5)
 	e, n = mapOK(t, ev(s), nil)
-	if !e.AllDay.Is(false) || !n.AllDayUnaligned || e.StartDate != "" {
+	if e.AllDay.Known() || !n.AllDayUnaligned || e.StartDate != "" {
 		t.Fatalf("%+v", e)
 	}
 }
