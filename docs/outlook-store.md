@@ -99,7 +99,7 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 
 | Field | Offset | Width | Coding | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Id (iCal UID) | word +820, length +824 | 4 + 4 | base +1109; binary global object id, length in bytes (see below) | established | equals the Teams `iCalUID` (as hex of the binary id) in 460 of 460 matched objects (148 events) |
+| Id (iCal UID) | word +820, length +824 | 4 + 4 | base +1109; the global object id as upper-case hex in UTF-16LE text, length in bytes with the terminator (see below) | established | equals the Teams `iCalUID` in 460 of 460 matched objects (148 events); on the whole store, 148 of 149 distinct Teams iCal UIDs |
 | Series key | +20 (repeated at +40) | 8 | opaque | established | 222 values over 3,366 ids; no value spans two series |
 | Change stamp | +112 | 8 | opaque, rises with every write | likely | takes only 4 values in class 0x6b and is 0 in 7,094 objects; established on class 0x4f by a before-and-after experiment |
 | Detail link | +180 (repeated at +200 and +208; +184 is 0) | 4 | equals the word at +20 of one detail object | established | 7,860 of 7,860 id-carrying events; all 3,366 distinct ids resolve (3,364 to one key, 2 to two across versions) |
@@ -128,9 +128,9 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 
 Bit numbers count from the least significant bit (mask `1 << n`); the research does not state its numbering, so this reading is unverified.
 
-The id is binary. The word at +820 points into area one (base +1109) and the length word at +824 counts bytes, with no terminator: 3,350 ids are 56 bytes and 16 are 100 bytes. It is the iCal UID as a binary global object id. Teams writes the same bytes as upper-case hexadecimal text (112 characters for 56 bytes) in its `iCalUID`, so a reader hex-encodes the id to get the Teams key.
+The id is text. The word at +820 points into area one (base +1109) and the length word at +824 counts bytes, including a 2-byte terminator. The text is the iCal UID's global object id written as upper-case hexadecimal in UTF-16LE: 3,350 ids are 226 bytes (112 characters, a 56-byte global object id) and 16 are 402 bytes (200 characters, 100 bytes). Every one is valid hexadecimal with the standard prefix. Teams writes the same characters in its `iCalUID`, so a reader decodes the UTF-16 text and upper-cases it to get the Teams key; it must not hex-encode the stored bytes. An earlier version of this page called the id binary; it was corrected on 2026-10-05 after a reader built that way matched none of the Teams ids on a real store.
 
-Id structure. All ids start with the same 16 bytes, the public iCal UID prefix `04 00 00 00 82 00 E0 00 74 C5 B7 10 1A 82 E0 08`. For occurrences and exceptions, bytes 16 to 19 of the UID carry the occurrence date (3,145 of 3,366 ids); the series id is the id with those 4 bytes zeroed. The research gives the position of the date and not its coding. The test builder writes year (two bytes, big-endian), month and day, which follows the public format and is unverified here.
+Id structure. All ids start with the same 16 bytes, the public iCal UID prefix `04 00 00 00 82 00 E0 00 74 C5 B7 10 1A 82 E0 08`. Byte positions below are in the decoded global object id (hex characters 32 to 39 for bytes 16 to 19). For occurrences and exceptions, bytes 16 to 19 of the UID carry the occurrence date (3,145 of 3,366 ids); the series id is the id with those 4 bytes zeroed. The research gives the position of the date and not its coding. The test builder writes year (two bytes, big-endian), month and day, which follows the public format and is unverified here.
 
 ### Attendees
 
