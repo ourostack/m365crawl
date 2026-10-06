@@ -390,3 +390,27 @@ func TestPayloadUnwrapsEveryEnvelope(t *testing.T) {
 		t.Errorf("unknown envelope: %v", err)
 	}
 }
+
+// Decode is Payload followed by DecodePayload: a caller that already holds the payload decodes it
+// to the same value without unwrapping again, and a bad payload fails as Decode would.
+func TestDecodePayloadMatchesDecode(t *testing.T) {
+	o := newTestOrigin(fakeKV{}, "")
+	raw := append([]byte{0xff, 0x11, 0x02}, snappy.Encode(nil, append([]byte{0xff, 0x10}, v8Hi...))...)
+	want, err := o.Decode(1, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := o.Payload(1, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := o.DecodePayload(payload)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("DecodePayload = %v, %v; Decode = %v", got, err, want)
+	}
+	_, err = o.DecodePayload([]byte{0xff, 0x7f})
+	_, derr := o.Decode(1, []byte{0xff, 0x10, 0xff, 0x7f})
+	if err == nil || derr == nil || omissionCode(t, err) != omissionCode(t, derr) {
+		t.Fatalf("a bad payload: %v vs %v", err, derr)
+	}
+}

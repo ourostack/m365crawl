@@ -34,6 +34,13 @@ func (x *Session) ApplyAccount(ctx context.Context, a teamsdesktop.Account) erro
 
 // ApplyConversations is Store.ApplyConversations inside the session.
 func (x *Session) ApplyConversations(ctx context.Context, cs []teamsdesktop.Conversation) (Counts, error) {
+	n, _, err := applyConversations(ctx, x.tx, cs)
+	return n, err
+}
+
+// ApplyConversationsRows is ApplyConversations that also reports, for each conversation in order,
+// the row it ended up in.
+func (x *Session) ApplyConversationsRows(ctx context.Context, cs []teamsdesktop.Conversation) (Counts, []RowState, error) {
 	return applyConversations(ctx, x.tx, cs)
 }
 
@@ -44,17 +51,31 @@ func (x *Session) ApplyPeople(ctx context.Context, ps []teamsdesktop.Person) (Co
 
 // ApplyMessages is Store.ApplyMessages inside the session.
 func (x *Session) ApplyMessages(ctx context.Context, ms []teamsdesktop.Message) (Counts, error) {
-	n, _, err := applyMessages(ctx, x.tx, ms)
+	n, _, _, err := applyMessages(ctx, x.tx, ms)
 	return n, err
 }
 
 // ApplyMessagesChanges is Store.ApplyMessagesChanges inside the session.
 func (x *Session) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Message) (Counts, []Change, error) {
+	n, ch, _, err := applyMessages(ctx, x.tx, ms)
+	return n, ch, err
+}
+
+// ApplyMessagesRows is ApplyMessagesChanges that also reports, for each message in order, the row
+// it ended up in.
+func (x *Session) ApplyMessagesRows(ctx context.Context, ms []teamsdesktop.Message) (Counts, []Change, []RowState, error) {
 	return applyMessages(ctx, x.tx, ms)
 }
 
 // ApplyActivityChanges is Store.ApplyActivityChanges inside the session.
 func (x *Session) ApplyActivityChanges(ctx context.Context, as []teamsdesktop.Activity) (Counts, []Change, error) {
+	n, ch, _, err := applyActivity(ctx, x.tx, as)
+	return n, ch, err
+}
+
+// ApplyActivityRows is ApplyActivityChanges that also reports, for each item in order, the row it
+// ended up in.
+func (x *Session) ApplyActivityRows(ctx context.Context, as []teamsdesktop.Activity) (Counts, []Change, []RowState, error) {
 	return applyActivity(ctx, x.tx, as)
 }
 

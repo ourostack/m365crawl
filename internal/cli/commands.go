@@ -555,10 +555,12 @@ func (c *activityCmd) Run(rt *runtime) error {
 
 // --- sync, status, whoami, sql ---
 
-type syncCmd struct{}
+type syncCmd struct {
+	FullRead bool `name:"full-read" env:"TEAMSCRAWL_FULL_READ" help:"Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair."`
+}
 
-func (syncCmd) Run(rt *runtime) error {
-	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress()})
+func (c syncCmd) Run(rt *runtime) error {
+	rep, _, err := runSync(rt.ctx, syncer.Options{Root: rt.root, DBPath: rt.dbPath, Account: rt.account, Progress: rt.progress(), FullRead: c.FullRead})
 	var coded *errs.Coded
 	if errors.As(err, &coded) && coded.Code == errs.CodePartialSync && rt.ctx.Err() == nil {
 		// Some sources committed: the report says which, and the error makes the exit status nonzero.
