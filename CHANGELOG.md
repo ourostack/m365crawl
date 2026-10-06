@@ -4,6 +4,10 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- The Outlook read uses less memory. Detail objects no event links are dropped, and each detail object and event copy is freed as soon as its event is mapped, so the reader never holds all of them and all the mapped strings together (the peak live heap on the benchmark store falls from 39.8 to 25.3 MB). A string the scrubber leaves unchanged is no longer decoded into a second copy. The sync hands back freed memory before the read, collects at a 25% heap target during it and hands back its garbage after. The stored data and `MapperVersion` are unchanged.
+
 ### Added
 
 - `calendar sources`: one row per account and source with `principal`, `link` (`config` or `none`), covered days and `last_verified_at`, event counts (live, removed, with detail, attendees, body, online), recap counts (rows with content, linked, action items) and `unknown_time_zones`. An Outlook row adds `status` (`ok`, `skipped_interval`, `unsupported_version`, `unsupported_layout`, `unreadable`), `error`, `last_read_at`, `last_attempt_at`, `next_read_after`, `read_interval_seconds`, `unknown_layouts` (only event and detail objects of an unknown tag; the reader no longer reports every other class of the store as unknown), `blocks_invalid_ratio`, `unmapped_values` and `deletions: "unverified"`. A sync keeps the census of each good Outlook read and whether it skipped the read (`meta.outlook_read:<account>`, `meta.outlook_skipped:<profile>`). `doctor` gains the `outlook_store` check (a warning, never a failure): the source is off, or each profile's store version and last read, the missing-profiles hint and the last failure. `calendar_cache` now judges the Teams calendar only.

@@ -77,3 +77,5 @@ func collect(t *testing.T, s *hxstore.Store, o Options) Result {
 	}
 	return r
 }
+
+func bytesReaderAt(b []byte) *bytes.Reader { return bytes.NewReader(b) }
