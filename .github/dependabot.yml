@@ -2,6 +2,10 @@ version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
+    groups:
+      go-modules:
+        patterns:
+          - "*"
     cooldown:
       default-days: 2
     schedule:
@@ -11,9 +15,9 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     groups:
-      codeql:
+      actions:
         patterns:
-          - github/codeql-action/*
+          - "*"
     cooldown:
       default-days: 2
     schedule:
