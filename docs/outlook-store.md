@@ -35,7 +35,7 @@ A block is a 40-byte (0x28) header followed by an LZ4 block payload. Blocks are 
 | Offset | Width | Meaning |
 | --- | --- | --- |
 | +0x00 | 4 | header checksum: CRC-32 (IEEE) over bytes 0x04 up to but not including 0x20 |
-| +0x04 | 4 | payload checksum: CRC-32 (IEEE) over bytes 0x08 up to 0x28 plus the compressed length |
+| +0x04 | 4 | payload checksum: CRC-32 (IEEE) over the byte range `[0x08, 0x28 + compressed length)`, that is from the magic through the end of the payload |
 | +0x08 | 8 | block magic `05 6a 70 3b 64 45 02 5d` |
 | +0x10 | 4 | block type; 8 on every block the reader parses |
 | +0x14 | 4 | compressed (payload) length |
@@ -43,7 +43,7 @@ A block is a 40-byte (0x28) header followed by an LZ4 block payload. Blocks are 
 | +0x1c | 4 | constant 4 |
 | +0x20 | 8 | not interpreted |
 
-A block is valid when the header fits, the constant is 4, the type is 8, the inflated length is between 1 and 32 MiB, the payload fits in the file, both checksums match and the payload decodes to exactly the inflated length. On a store copied while Outlook was running, 16,884 of 16,915 blocks found were valid; the other 31 failed a checksum, which is what a store being rewritten looks like. Both checksum ranges were confirmed on that copy: the reader verified and inflated all 16,884 blocks identically to an independent decoder.
+A block is valid when the header fits, the constant is 4, the type is 8, the inflated length is between 1 and 32 MiB, the payload fits in the file, both checksums match and the payload decodes to exactly the inflated length. On a store copied while Outlook was running, 16,884 of 16,915 blocks found were valid; the other 31 were rejected: 9 for a header checksum mismatch and 22 for a block type other than 8. Both checksum ranges were confirmed on that copy: the reader verified and inflated all 16,884 blocks identically to an independent decoder.
 
 ### LZ4
 
@@ -76,7 +76,7 @@ Pinned pairs: class 0x6b with tag 0x455 (1109 bytes, the event) and class 0x6c w
 
 ### Strings and times
 
-- A string field is a 4-byte offset word, relative to a base that depends on the field, and (by the convention of the second research pass) a 4-byte length word right after it: the byte length including the terminator, often with bit 31 set. The earlier pass found no length word after the string-area offsets; the length words were confirmed where named below and are assumed at the same distance for the others.
+- A string field is a 4-byte offset word, relative to a base that depends on the field, and (by the convention of the second research pass) a 4-byte length word right after it: the byte length including the terminator, often with bit 31 set. The earlier pass found no length word after the string-area offsets; length words were recorded by the research only at +824, +1028 and +784 in the event and +604 and +704 in the detail object; every other length word in the tables below is inferred at the same distance and marked with a dagger (†).
 - Text is NUL-terminated UTF-16LE. Strings are not 2-byte aligned: 163 of 546 join links start at an odd offset. A reader scans bytes, and bounds the scan by the object length.
 - Times are 8-byte .NET ticks (100 ns since 0001-01-01), UTC.
 
@@ -95,7 +95,7 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 
 ### Field table
 
-"Base" names what the offset word is added to. A dagger (†) on a width means the research recorded the value but not the width; the builder writes that width and nothing contradicts it.
+"Base" names what the offset word is added to. A dagger (†) on a width or a length word means the research recorded the value but not that width or word; the builder writes it and nothing contradicts it.
 
 | Field | Offset | Width | Coding | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -104,27 +104,27 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 | Change stamp | +112 | 8 | opaque, rises with every write | likely | takes only 4 values in class 0x6b and is 0 in 7,094 objects; established on class 0x4f by a before-and-after experiment |
 | Detail link | +180 (repeated at +200 and +208; +184 is 0) | 4 | equals the word at +20 of one detail object | established | 7,860 of 7,860 id-carrying events; all 3,366 distinct ids resolve (3,364 to one key, 2 to two across versions) |
 | Second detail reference | +412, +432, +440 | not recorded | not interpreted | not found | present in 1,472 events; meaning undetermined |
-| Last modified | +288 | 8 | ticks, UTC | established | within 5 seconds of Teams on 449 of 460; exact match of the tick coding against Teams, 460 of 460 |
+| Last modified | +288 | 8 | ticks, UTC | established | within 5 seconds of Teams' last-modified on 449 of 460 matched objects; the tick coding (UTC .NET ticks) is the one established for start and end |
 | Reminder lead | +448 | 8 | ticks; 600,000,000 per minute | likely | 12 of 12 vs Teams; present even with no reminder, so not the on/off flag |
 | Start | +584 | 8 | ticks, UTC | established | 460 of 460 vs Teams |
 | End | +592 | 8 | ticks, UTC | established | 460 of 460 vs Teams |
-| Body preview | word +700 (length +704) | 4 + 4 | base T; at most 255 characters | established | exact match in all 106 objects where Teams has a preview; Outlook holds one in the other 354 as well |
+| Body preview | word +700 (length +704 †) | 4 + 4 | base T; at most 255 characters | established | exact match in all 106 objects where Teams has a preview; Outlook holds one in the other 354 as well |
 | Zone id | +776 (repeated at +1012) | 4 † | numeric | established | 12 values; present in all 3,366 distinct events |
 | Zone name | word +780 (length +784); again at +1016 | 4 + 4 | base +1109 for +780; the base of the copy at +1016 is not recorded; Windows zone-name text | established | present in all 3,366 distinct events |
 | Show-as | +816 | 4 | 0 free, 1 tentative, 2 busy (only these three observed) | established | 148 of 148 vs Teams |
-| Location | word +836 (length +840) | 4 + 4 | base T | established | exact match in 397 of the 399 objects where Teams has one, and 20 of 20 against Teams' structured meeting locations; Outlook holds text in 61 objects where Teams has none |
-| Subject without cancelled prefix | word +876 (length +880) | 4 + 4 | base T | likely | not compared with an independent value |
-| Organizer name | word +884 (length +888) | 4 + 4 | base T | established | 460 of 460 |
-| Organizer address | word +892 (length +896) | 4 + 4 | base T | established | 460 of 460 |
+| Location | word +836 (length +840 †) | 4 + 4 | base T | established | exact match in 397 of the 399 objects where Teams has one, and 20 of 20 against Teams' structured meeting locations; Outlook holds text in 61 objects where Teams has none |
+| Subject without cancelled prefix | word +876 (length +880 †) | 4 + 4 | base T | likely | not compared with an independent value |
+| Organizer name | word +884 (length +888 †) | 4 + 4 | base T | established | 460 of 460 |
+| Organizer address | word +892 (length +896 †) | 4 + 4 | base T | established | 460 of 460 |
 | Event type | +904 | 4 † | 0 single, 1 occurrence, 2 exception, 3 master | established | 148 of 148 vs Teams; store-wide 144, 2,785, 360 and 77 |
 | Meeting provider label | +980 | not recorded | one constant label on online events | likely | |
 | My response | +992 | 4 † | 0 accepted, 1 tentative, 4 not responded; 3 on 6 events undetermined; declined not seen | established | 148 of 148 vs Teams |
 | Second copy of the UID | +996 | not recorded | text | likely | |
 | Subject | word +1024 (length +1028) | 4 + 4 | base T | established | exact full-text match 460 of 460 |
 | Flag word | +1076 | 4 † | bit 4 meaning unknown | not found | differs between versions of one event in 54 pairs |
-| All-day | +1082 bit 3 | 1 byte | bit set | likely | set in 174 of 177 whole-day objects and in 0 of the other 8,412; all-day events sit at midnight UTC; Teams has none to test |
-| Cancelled | +1082 bit 4 | 1 byte | bit set | likely | set in 1,964 of 1,964 objects whose subject carries the cancelled prefix, and in 3 others; 850 distinct events |
-| Online meeting | +1083 bit 4 | 1 byte | bit set | established | set in 2,931 objects and clear in 435; agrees with "the detail object has a join link" with 0 disagreements |
+| All-day | +1082 bit 3 | 1 byte † | bit set | likely | set in 174 of 177 whole-day objects and in 0 of the other 8,412; all-day events sit at midnight UTC; Teams has none to test |
+| Cancelled | +1082 bit 4 | 1 byte † | bit set | likely | set in 1,964 of 1,964 objects whose subject carries the cancelled prefix, and in 3 others; 850 distinct events |
+| Online meeting | +1083 bit 4 | 1 byte † | bit set | established | set in 2,931 distinct events and clear in 435 (of 3,366); agrees with "the detail object has a join link" with 0 disagreements |
 
 Bit numbers count from the least significant bit (mask `1 << n`); the research does not state its numbering, so this reading is unverified.
 
@@ -134,7 +134,7 @@ Id structure. All ids start with the same 16 bytes, the public iCal UID prefix `
 
 ### Attendees
 
-Inside the event, in the string area directly after the string at +876, there is a `u32` count, then one record per attendee:
+Inside the event, in the string area after the string at +876 (the research says "after"; the exact gap is not recorded), there is a `u32` count, then one record per attendee:
 
 | Part | Width | Meaning |
 | --- | --- | --- |
