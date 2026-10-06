@@ -108,6 +108,8 @@ func fastWatch(t *testing.T) {
 	t.Cleanup(func() { watchQuiet, watchMaxWait, watchLockedRetry = q, m, l })
 }
 
+const watchTestWaitTimeout = 30 * time.Second
+
 // noEvents makes watch poll only.
 func noEvents(t *testing.T) {
 	t.Helper()
@@ -164,7 +166,13 @@ func (w *watchEnv) stop() int {
 
 func (w *watchEnv) waitFor(what string, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(watchTestWaitTimeout)
+	if testDeadline, ok := w.t.Deadline(); ok {
+		latest := testDeadline.Add(-time.Second)
+		if latest.Before(deadline) {
+			deadline = latest
+		}
+	}
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -348,6 +356,30 @@ func TestWatchFieldsExplicitTextTruncated(t *testing.T) {
 	it := l["item"].(map[string]any)
 	if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
 		t.Fatalf("explicit text_truncated field: %v", it)
+	}
+}
+
+func TestWatchFieldsExplicitTextTruncatedWaitsForDelayedSync(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	var calls atomic.Int32
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		if calls.Add(1) == 2 {
+			time.Sleep(11 * time.Second)
+		}
+		return old(ctx, o)
+	}
+	t.Cleanup(func() { runSync = old })
+	w.start("watch", "--every", "30ms", "--fields", "id,text_truncated", "--max-text", "5")
+	w.baselineDone()
+	w.forget(`content_text<>''`)
+	w.touch()
+	w.waitFor("a delayed change", func() bool { return len(kinds(w.out.lines(t), "message")) > 0 })
+	l := kinds(w.out.lines(t), "message")[0]
+	it := l["item"].(map[string]any)
+	if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
+		t.Fatalf("explicit text_truncated field after delayed sync: %v", it)
 	}
 }
 
