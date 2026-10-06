@@ -738,8 +738,16 @@ func unstashBlock(base *Event, clocks map[string]time.Time) {
 		delete(clocks, k)
 		parts := strings.SplitN(rest, "|", 3)
 		if len(parts) == 3 {
-			flag, _ := strconv.Atoi(parts[0])
-			base.AllDay, base.StartDate, base.EndDate = Tri(flag), parts[1], parts[2] //nolint:gosec // a stash holds 0 to 2
+			// A stash holds the flag as it was written; anything but "2" reads as false-or-unknown by
+			// the same rule as the column (1 false, 2 true).
+			flag := TriUnknown
+			switch parts[0] {
+			case "1":
+				flag = TriFalse
+			case "2":
+				flag = TriTrue
+			}
+			base.AllDay, base.StartDate, base.EndDate = flag, parts[1], parts[2]
 			clocks["all_day"] = at
 		}
 	}

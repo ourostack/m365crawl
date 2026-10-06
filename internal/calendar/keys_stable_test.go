@@ -89,3 +89,22 @@ func TestLoadStoredReportsQueryError(t *testing.T) {
 		t.Fatal("a missing table is an error")
 	}
 }
+
+func TestUnstashBlockReadsEveryFlagAndIgnoresDamage(t *testing.T) {
+	at := mustTime(t, "2026-11-02T09:00:00Z")
+	for stash, want := range map[string]Tri{"1||": TriFalse, "2|2026-11-03|2026-11-04": TriTrue, "9|x|y": TriUnknown} {
+		var base Event
+		clocks := map[string]time.Time{blockStash + stash: at}
+		unstashBlock(&base, clocks)
+		if base.AllDay != want || len(clocks) != 1 || !clocks["all_day"].Equal(at) {
+			t.Fatalf("%q: %+v %v", stash, base, clocks)
+		}
+	}
+	// A damaged stash is dropped and changes nothing.
+	var base Event
+	clocks := map[string]time.Time{blockStash + "2": at}
+	unstashBlock(&base, clocks)
+	if base.AllDay.Known() || len(clocks) != 0 {
+		t.Fatalf("%+v %v", base, clocks)
+	}
+}
