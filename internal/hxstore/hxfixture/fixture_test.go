@@ -288,6 +288,9 @@ func realLooking(s string) string {
 	if exampleAddress.MatchString(s) {
 		return "" // an address the Teams fixture also holds, so the two stores' twins can match by address
 	}
+	if s == "Pat Example" {
+		return "" // the organizer the Teams fixture gives its events, so twins agree on the organizer
+	}
 	if !strings.Contains(strings.ToLower(s), "fixture") {
 		return "text that does not say it is a fixture"
 	}

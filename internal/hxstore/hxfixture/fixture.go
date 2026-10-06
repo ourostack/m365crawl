@@ -1,7 +1,7 @@
 // Package hxfixture builds the committed synthetic Outlook store fixture under
 // testdata/outlook-fixture. Everything in it is invented: the names start with
 // "Fixture", the addresses end in example.invalid, the ids are hex of the ASCII
-// word FIXTURE plus a counter, and the dates are in 2031 (the five events shared with the Teams fixture use its November 2023 dates). Nothing here reads a
+// word FIXTURE plus a counter, and the dates are in 2031 (the five events shared with the Teams fixture use its November 2023 dates, and their organizer). Nothing here reads a
 // real store, a clock or a random source, so the output is the same bytes every
 // time. scripts/hxfixture writes it; the tests here check that the committed
 // copy is what this code makes.
@@ -199,9 +199,21 @@ func teamsAt(day, hour, min int) time.Time {
 	return time.Date(2023, 11, day, hour, min, 0, 0, time.UTC)
 }
 
+// twinOf makes s agree with the Teams fixture where real twins agree: the same organizer, and a
+// last-modified time on the Teams fixture's calendar, an hour after the Teams copy (Outlook is the
+// newer copy in 146 of 148 real twins). Disagreements the tests need are set by the caller.
+func twinOf(s *hxbuild.EventSpec) {
+	s.OrganizerName, s.OrganizerAddr = "Pat Example", "pat@example.invalid"
+	s.LastModified = time.Date(2023, 11, 14, 10, 0, 0, 0, time.UTC)
+}
+
 func (g *gen) plain() event {
 	s := base(1)
 	s.ID = teamsID("RICH-MEETING", 0, 0, 0)
+	twinOf(&s)
+	// Deliberate disagreements, which tests rely on: Outlook names one of the Teams copy's two
+	// rooms, and does not flag the event as an online meeting.
+	s.Location = "Fixture Room Alpha"
 	s.Start, s.End = teamsAt(20, 17, 0), teamsAt(20, 18, 0)
 	s.Subject, s.SubjectBare = "Fixture planning review", "Fixture planning review"
 	// Three of the six attendees the Teams copy of this meeting lists (scripts/fixture/page.html),
@@ -218,6 +230,8 @@ func (g *gen) plain() event {
 func (g *gen) online() event {
 	s := base(2)
 	s.ID = teamsID("PACIFIC-1", 0, 0, 0)
+	twinOf(&s)
+	s.Location = "Fixture Room Gamma"
 	s.Start, s.End = teamsAt(21, 18, 0), teamsAt(21, 19, 0)
 	s.Subject, s.SubjectBare = "Fixture pacific sync", "Fixture pacific sync"
 	s.Online, s.ShowAs, s.Response, s.ReminderMinutes, s.ZoneID = true, 1, 1, 15, 3
@@ -253,6 +267,8 @@ func (g *gen) series() (master, occurrence, exception event) {
 	mk := func(typ uint32, y, m, d int, subject string) event {
 		s := base(5)
 		s.ID = teamsID("STANDUP-1", y, m, d)
+		twinOf(&s)
+		// Deliberate disagreement: Outlook's own join link is not Teams' (see join/0005 below).
 		s.EventType, s.Subject, s.SubjectBare = typ, subject, subject
 		day := d
 		if d == 0 {

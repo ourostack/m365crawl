@@ -538,8 +538,8 @@ func TestOutlookLinkTeamsRemovedTwinHidden(t *testing.T) {
 	remove := func(at string) {
 		e.exec(`update calendar_source_events set removed_at='` + at + `' where source='teams' and account_id='` + teamsAccount + `' and ical_uid like '%07e70b16%' and start_at like '2023-11-22T18:00:00%'`)
 	}
-	// Outlook's copy was last edited in 2031: a removal before that does not hide it.
-	remove("2030-01-01T00:00:00.000Z")
+	// Outlook's copy was last edited on 2023-11-14 10:00: a removal before that does not hide it.
+	remove("2023-11-14T09:30:00.000Z")
 	if has(agendaVia(t, run, window...), start) == nil {
 		t.Fatal("a removal older than Outlook's copy hid the event")
 	}
@@ -652,5 +652,102 @@ func TestOutlookAccountEnvironment(t *testing.T) {
 	}
 	if code, _, _ = e.run("--max-age", "0", "--outlook-root", outlookProfiles(t, "Main"), "calendar"); code != 2 {
 		t.Fatalf("exit %d", code)
+	}
+}
+
+// A linked twin keeps what only Teams knows about its meeting: the join link, the chat id (and with
+// it the recordings), the online flag and every room, and says which fields the Outlook copy replaced.
+// The Outlook fixture's twins deliberately disagree on three things: the rich meeting names one room
+// and carries no online flag, and the standups carry an Outlook join link of their own.
+func TestOutlookLinkKeepsTheTeamsMeeting(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main")
+	window := []string{"--from", "2023-11-20", "--to", "2023-11-26", "--account", teamsAccount}
+	teamsOnly := agendaVia(t, run, window...)
+	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
+		t.Fatalf("link: exit %d: %s", code, errOut)
+	}
+	linked := agendaVia(t, run, window...)
+	roomNames := func(it map[string]any) []string {
+		var out []string
+		for _, r := range it["rooms"].([]any) {
+			out = append(out, r.(map[string]any)["name"].(string))
+		}
+		slices.Sort(out)
+		return out
+	}
+	compared := 0
+	for _, it := range items(t, linked) {
+		if sourcesOf(it) != "teams,outlook" {
+			continue
+		}
+		compared++
+		var before map[string]any
+		for _, b := range items(t, teamsOnly) {
+			if b["subject"] == it["subject"] && b["start"] == it["start"] && sourcesOf(b) == "teams" {
+				before = b
+			}
+		}
+		if before == nil {
+			t.Fatalf("no Teams-only copy of %v", it["subject"])
+		}
+		if before["join_url"] != nil { // Teams states the meeting: the Outlook copy may not change it
+			for _, k := range []string{"join_url", "short_join_url", "meeting_chat_id", "is_online_meeting", "recording_count"} {
+				if before[k] != it[k] {
+					t.Errorf("%v %s: Teams-only %v, linked %v", it["subject"], k, before[k], it[k])
+				}
+			}
+			if before["meeting_chat_id"] == nil {
+				t.Errorf("%v: the Teams fixture has no chat id to keep", it["subject"])
+			}
+		}
+		if before["rooms"] != nil {
+			if want, got := roomNames(before), roomNames(it); !slices.Equal(want, got) {
+				t.Errorf("%v rooms: Teams-only %v, linked %v", it["subject"], want, got)
+			}
+		}
+	}
+	if compared != 4 {
+		t.Fatalf("%d twins compared, want 4", compared)
+	}
+	review := itemBySubjectFrom(t, linked, "Fixture planning review", "teams,outlook")
+	if got := roomNames(review); !slices.Equal(got, []string{"Fixture Room Alpha", "Fixture Room Beta"}) {
+		t.Fatalf("rooms: %v", got)
+	}
+	standups := 0
+	for _, it := range items(t, linked) {
+		if it["subject"] == "Fixture standup" && sourcesOf(it) == "teams,outlook" {
+			standups++
+			if strings.Contains(it["join_url"].(string), "/fixture/join/0005") {
+				t.Errorf("the Outlook join link replaced Teams': %v", it["join_url"])
+			}
+		}
+	}
+	if standups == 0 {
+		t.Fatal("no linked standups")
+	}
+	recordings := 0
+	for _, it := range items(t, linked) {
+		if n, ok := it["recording_count"].(float64); ok {
+			recordings += int(n)
+		}
+	}
+	if recordings == 0 {
+		t.Fatal("the fixture holds recordings for the standups; none attached")
+	}
+	// The replaced fields are said, with the source whose value stands.
+	over := map[string]string{}
+	for _, o := range review["overridden_fields"].([]any) {
+		o := o.(map[string]any)
+		over[o["field"].(string)] = o["from"].(string)
+	}
+	if _, ok := over["organizer"]; ok || over["location"] != "outlook" || over["is_online_meeting"] != "teams" {
+		t.Fatalf("overridden_fields: %v", over)
+	}
+	if _, ok := over["join_url"]; ok {
+		t.Fatalf("the rich meeting's Outlook copy has no join link, so none was replaced: %v", over)
+	}
+	ev := eventVia(t, run, review["event_id"].(string))
+	if ev["overridden_fields"] == nil {
+		t.Fatal("calendar event lacks overridden_fields")
 	}
 }
