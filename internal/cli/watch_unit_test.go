@@ -43,7 +43,7 @@ func TestFileEventsNeedAtLeastOneWatchableDirectory(t *testing.T) {
 	}
 	select {
 	case <-events:
-	case <-time.After(10 * time.Second):
+	case <-time.After(watchTestWaitTimeout):
 		t.Fatal("a write in the watched directory produced no event")
 	}
 }
@@ -355,7 +355,7 @@ func runWatcher(t *testing.T, w *watcher) (stop func() error) {
 		select {
 		case err := <-res:
 			return err
-		case <-time.After(10 * time.Second):
+		case <-time.After(watchTestWaitTimeout):
 			t.Fatal("watcher did not stop")
 			return nil
 		}
@@ -372,7 +372,7 @@ func TestWatchWarnsAndPollsWhenFileEventsAreUnavailable(t *testing.T) {
 	e := newEnv(t)
 	w, _, errb := jsonWatcher(t, e.root, e.db)
 	stop := runWatcher(t, w)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(watchTestWaitTimeout)
 	for !strings.Contains(errb.String(), "file events unavailable, polling every 30ms") {
 		if time.Now().After(deadline) {
 			t.Fatalf("no polling warning: %q", errb.String())
@@ -436,7 +436,7 @@ func TestWatchKeepsPollingAfterATransientPollFailure(t *testing.T) {
 	w, out, _ := jsonWatcher(t, e.root, e.db)
 	brokenAfterBaseline(t, w, errors.New("transient read failure"))
 	stop := runWatcher(t, w)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(watchTestWaitTimeout)
 	for len(kinds(out.lines(t), "error")) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("no error line: %q", out.String())
