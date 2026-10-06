@@ -30,3 +30,30 @@ func TestE2ECalendar(t *testing.T) {
 	res := e.cmd("calendar", "event", "ev_nothing", "--max-age", "0")
 	mustExit(t, res, 2)
 }
+
+// The binary lists the action items of the fixture meeting and links its chat to the calendar.
+func TestE2ECalendarActionsAndConversations(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	acct := "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1"
+	mine := ok(t, e.cmd("calendar", "actions", "--from", "2023-11-20", "--days", "1", "--mine", "--account", acct))
+	items, _ := mine["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("actions: %v", mine)
+	}
+	first := items[0].(map[string]any)
+	if first["owner"] != "Alex Fixture" || first["mine"] != true {
+		t.Fatalf("action: %v", first)
+	}
+	convs := ok(t, e.cmd("conversations", "--kind", "Meeting", "--account", acct))
+	list, _ := convs["items"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["calendar_event_count"] != float64(4) || list[0].(map[string]any)["calendar_series_key"] == nil {
+		t.Fatalf("conversations: %v", convs)
+	}
+	plain := ok(t, e.cmd("conversations", "--kind", "Chat", "--account", acct))
+	for _, c := range plain["items"].([]any) {
+		if _, has := c.(map[string]any)["calendar_event_count"]; has {
+			t.Fatalf("a chat with no event has a calendar link: %v", c)
+		}
+	}
+}

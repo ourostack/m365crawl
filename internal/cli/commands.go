@@ -81,6 +81,11 @@ type conversationItem struct {
 	LastMessageAt time.Time `json:"last_message_at,omitzero"`
 	ReadHorizonAt time.Time `json:"read_horizon_at,omitzero"`
 	Favorite      bool      `json:"favorite"`
+	// CalendarSeriesKey and CalendarEventCount are on a Meeting conversation that calendar events
+	// name as their chat: the series key they share (absent when they belong to several) and the
+	// number of live occurrences. A chat with no event has neither key.
+	CalendarSeriesKey  string `json:"calendar_series_key,omitempty"`
+	CalendarEventCount int    `json:"calendar_event_count,omitempty"`
 }
 
 type personItem struct {
@@ -444,7 +449,8 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 		items := make([]conversationItem, len(rows))
 		for i, r := range rows {
 			items[i] = conversationItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Kind: r.Kind, Title: r.Title, DisplayName: r.DisplayName,
-				TeamID: r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite}
+				TeamID: r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite,
+				CalendarSeriesKey: r.CalendarSeriesKey, CalendarEventCount: r.CalendarEventCount}
 		}
 		return newList(shape(rt, items), trunc).withTotal(total), nil
 	})
