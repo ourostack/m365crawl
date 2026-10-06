@@ -120,7 +120,8 @@ func requireOutlook(t *testing.T) string {
 	if root == "" {
 		t.Skip("set " + outlookRootEnv + " to a directory laid out as <root>/<profile>/HxStore.hxd to run the Outlook checks")
 	}
-	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+	fi, err := os.Stat(root) //nolint:gosec // the root is the operator's own environment variable, read only
+	if err != nil || !fi.IsDir() {
 		t.Fatalf("%s is not a readable directory", outlookRootEnv)
 	}
 	return root

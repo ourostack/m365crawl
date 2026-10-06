@@ -319,7 +319,7 @@ const (
 
 func hexText(b []byte) bool {
 	for _, c := range b {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return false
 		}
 	}
@@ -362,7 +362,7 @@ func utf16Of(s string) []byte {
 // scanning for the block magic with a sliding window: the same blocks Walk reads, but all of their
 // bytes, including the ones no object covers.
 func payloadsOf(path string, fn func(payload []byte)) (blocks int, err error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is the private copy this run made
 	if err != nil {
 		return 0, err
 	}
