@@ -90,7 +90,7 @@ teamscrawl sync [flags]
 
 Result: The sync report (see SPEC.md sections 4 and 5). It carries `calendar` counts (`events`, `recaps`, `recap_items`, `gone`, `linked`, `linked_by_start`, `unlinked_no_event`, `unlinked_ambiguous`, `refused`) for the calendar tables the sync filled from the calendar and recap records; there is no calendar command yet, so read them with `teamscrawl sql "select count(*) from calendar_source_events"`. Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
-`--outlook-account` and `--outlook-profile` link an Outlook profile to a Teams account (SPEC.md section 4.2): the link is applied after the sources, a refused link exits 2 with the report on stdout, and `--account` cannot be combined with it.
+`--outlook-account` and `--outlook-profile` link an Outlook profile to a Teams account (SPEC.md section 4.2): the link is applied after the sources, a refused link exits 2 with the report on stdout, and `--account` cannot be combined with it. Nothing in the output identifies which Teams account owns an Outlook profile (an Outlook account is `outlook/<profile name>`, and `whoami` has no email), so the caller must know it or ask. The link is applied after the sources are read, so the report can show the Outlook source as `skipped_interval` (a read under 5 minutes old was reused) and `linked: 0` while the link took effect: confirm with `calendar sources`, whose Outlook row then has `link: "config"` and the Teams account as `principal`.
 
 Examples:
 
@@ -311,7 +311,7 @@ Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
 
 | Flag | Meaning |
 | --- | --- |
-| `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error, because `--since` reads it as "back". |
+| `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error, because `--since` reads it as "back". Write a negative offset with an equals sign, `--from=-7d`: `--from -7d` is a usage error. |
 | `--to=WHEN` | End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days. |
 | `--days=INT` | Range length in days from --from (instead of --to). |
 | `--query=STRING` | Only events whose subject, organizer or location contains this text, ignoring case. |
@@ -358,6 +358,7 @@ Examples:
 
 ```sh
 teamscrawl calendar --days 7
+teamscrawl calendar --from=-7d --to=tomorrow --query planning
 teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
 teamscrawl calendar event ev_2da7280856 --max-text 400
 teamscrawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1

@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/ourostack/teamscrawl?style=flat-square)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
-`teamscrawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions and the activity feed, so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
+`teamscrawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and the meeting calendar (with recaps and action items), so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
 
 <p align="center"><img src="screenshot.png" alt="teamscrawl doctor output" width="801"></p>
 
@@ -47,7 +47,6 @@ Download `teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windo
 
 crawlkit's `crawlctl discover --app teamscrawl` finds it.
 
-### Grant Full Disk Access
 ### macOS: Grant Full Disk Access
 
 macOS protects Teams' container, so the app that runs teamscrawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches teamscrawl), then quit and reopen that app. Verify with:
@@ -136,7 +135,7 @@ Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscr
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
 - Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
 - Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
-- Every item carries a `link` (a Teams deep link) for citing, and every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts the read covers (a partial or failed sync refreshes nobody).
+- Every message and activity item carries a `link` (a Teams deep link) for citing (a calendar event has its `join_url` instead), and every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts the read covers (a partial or failed sync refreshes nobody).
 - Nothing ever writes to Teams.
 
 Flags that matter for agents:
@@ -146,6 +145,19 @@ Flags that matter for agents:
 - `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
 - `archive_age_seconds` tells you how stale the answer can be. An archive with no complete sync yet (never synced, only partial or failed syncs, or written by an older teamscrawl) adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
 - System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned; `--direct-mentions` keeps only `person` mentions. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
+
+## Calendar and Outlook
+
+`teamscrawl calendar` reads the meetings Teams cached, with their recaps and action items. Teams caches the days you looked at, not a range, so every calendar result says whether the range is covered (`coverage_gap`, `uncovered_days`, `coverage_as_of`) and how fresh it is; an event missing from an uncovered day is not evidence that it does not exist. Teams fetches attendees, body and rooms only for meetings you opened, so a field the source never stated has no key and its name is in `unknown_fields`: not known is not the same as empty. `teamscrawl calendar sources` shows what the archive holds per account and source, and `teamscrawl doctor` warns when the Teams calendar cache is old or the Outlook store cannot be read.
+
+```sh
+teamscrawl calendar --from tomorrow --days 7
+teamscrawl calendar event <event_id> --max-text 400
+teamscrawl calendar actions --from=-7d --to=tomorrow --mine
+teamscrawl calendar sources
+```
+
+The new Outlook for Mac store is a second calendar source, read-only and off by default. Turn it on with `--outlook-root DIR`, `TEAMSCRAWL_OUTLOOK_ROOT=DIR` or `TEAMSCRAWL_OUTLOOK=1` (the default directory under `~/Library/Group Containers`). An Outlook profile stays its own account until you link it, because two people invited to the same meeting hold the same events and teamscrawl never guesses which account is yours: the agenda lists unlinked profiles with the command that links each one, for example `teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>` (`teamscrawl whoami` lists the Teams accounts by name and id; nothing the tool prints says which one owns an Outlook profile, which is only `outlook/<profile name>`, so ask whoever owns the Mac). The linking `sync` may print `skipped_interval` and `linked: 0` for Outlook: that is not a failure, and `teamscrawl calendar sources` shows `link: config` once the link is in place. Linked, the two copies of a meeting merge into one item with `sources: ["teams","outlook"]`. The flags are in [`docs/commands.md`](docs/commands.md) and the rules in [`SPEC.md`](SPEC.md) section 4.2.
 
 ## Commands
 
@@ -163,6 +175,10 @@ Flags that matter for agents:
 | `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query` (best match first: exact name, then prefix, then substring), `--team`, `--include-system`. Untitled group chats are named after their members (`Ana, Ben, Chao +2`). |
 | `teams` | Lists teams with `channel_count`, `last_activity_at` and `unread_count`; a team's `team_id` or `display_name` is what `--team` takes. |
 | `people` | Lists people seen as senders or members; use it to resolve `--from`. |
+| `calendar` | The agenda for a range (default today): `--from`, `--to`, `--days`, `--query`, `--include-cancelled`, `--include-declined`, `--include-masters`, `--include-removed`. Each item says which sources hold it, how complete it is (`detail_level`, `unknown_fields`, `filled_fields`) and whether it has a recap; the result says whether the range is covered (`coverage_gap`, `uncovered_days`). |
+| `calendar event <event>` | One event with attendees, body, recaps and their action items, the meeting chat, and the recordings and transcripts that belong to this occurrence. |
+| `calendar actions` | Action items from the recaps of the events in a range, with owners. `--mine` keeps yours (`mine_basis` says how the owner was matched), `--owner NAME` filters by name. |
+| `calendar sources` | What the archive holds per account and source (Teams, Outlook), how many days are covered, when each was last verified and read, and what could not be read. |
 | `stores` | Lists every database and object store mirrored into the generic `records` table (calendar, pinned messages, contacts, call history and the rest) with record counts. |
 | `records --database <name or prefix>` | Lists the archived records of one database, newest change first. Flags: `--store`, `--since`, `--include-removed`, `--limit`. `key_json` and `value_json` come back as parsed JSON. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
@@ -179,8 +195,6 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 - [`SPEC.md`](SPEC.md): the normative specification (data model, sync, output contract, every error code, `watch`, privacy, known limits).
 - [`docs/commands.md`](docs/commands.md): every command and flag, as `--help` prints them.
-- [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the allowlist, full-text search).
-- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, and why Windows does not need that step.
 - [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the credential denylist, full-text search).
 - [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, how `doctor` checks it, and why Windows does not need that step.
 - [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
@@ -205,7 +219,8 @@ The archive holds your real Teams conversations. It stays on your machine in a p
 - macOS and Windows with the new Teams app are supported. Classic Teams and Linux are not.
 - Full Disk Access is required only for the app that runs it on macOS. Windows uses the LocalCache path and does not require that step.
 - Read-only: no sending, reacting or marking read.
-- Contact stores, calendar, call history and pinned-message lists have no typed commands yet: they are mirrored as raw records, readable with `stores` and `records` until typed mappers exist.
+- Contact stores, call history and pinned-message lists have no typed commands yet: they are mirrored as raw records, readable with `stores` and `records` until typed mappers exist.
+- The calendar holds only the days Teams cached (`coverage_gap` says when a range is not covered), and attendees, body and rooms only for meetings the user opened. A field the source never stated is listed in `unknown_fields`, which is not the same as empty. The new Outlook for Mac source is opt-in and read-only, and merges with Teams only through an explicit link.
 - Attachments and media are not downloaded; files and links are recorded as metadata.
 - Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
 - Published macOS release binaries are always signed and notarized; Windows release binaries are intentionally unsigned.
