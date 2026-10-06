@@ -1421,7 +1421,8 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 		if m["ok"] != true {
 			t.Fatalf("a failing check on an alpha.1 archive: %s", res.stdout)
 		}
-		if m["warn"] == true {
+		// The fixture's calendar cache dates from 2023, so calendar_cache always warns on it.
+		if m["warn"] == true && m["name"] != "calendar_cache" {
 			warns = append(warns, m["name"].(string))
 		}
 	}
@@ -1431,7 +1432,12 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 	e.sync()
 	res = e.cmd("doctor")
 	mustExit(t, res, 0)
-	if strings.Contains(res.stdout, `"warn":true`) || strings.Contains(res.stdout, "archive_upgrade") {
+	for _, ch := range mustJSON(t, res.stdout)["checks"].([]any) {
+		if m := ch.(map[string]any); m["warn"] == true && m["name"] != "calendar_cache" {
+			t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
+		}
+	}
+	if strings.Contains(res.stdout, "archive_upgrade") {
 		t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 	}
 }
