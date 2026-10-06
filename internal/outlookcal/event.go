@@ -63,6 +63,12 @@ type MapNotes struct {
 	// AttendeeFailure names the one cause (a key of Notes.AttendeeFailures) when the list
 	// did not parse, else it is empty.
 	AttendeeFailure string
+	// AttendeesCountExceedsStored is set on an accepted list whose count word is larger
+	// than the records stored; AttendeesStored is the number of records read from any
+	// accepted list. AttendeesOddLengthCharsParse is a diagnostic only: the list failed on
+	// an odd length and would parse if lengths counted characters.
+	AttendeesCountExceedsStored, AttendeesOddLengthCharsParse bool
+	AttendeesStored                                           int
 	// AttendeeResponsesUnmapped counts attendee records whose response code is not one
 	// the layout lists.
 	AttendeeResponsesUnmapped int
@@ -183,11 +189,14 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		}
 	}
 
-	list, count, cause := attendees(ev, base, &r)
+	list, count, cause, exceeds := attendees(ev, base, &r)
 	if cause == attOK && count > 0 {
 		e.AttendeesJSON = list
 		notes.AttendeesAtCap = count >= AttendeeCap
-		e.DetailRawJSON = attendeeNote(count)
+		if exceeds {
+			notes.AttendeesCountExceedsStored, notes.AttendeesStored = true, count
+		}
+		e.DetailRawJSON = attendeeNote(count, exceeds)
 	} else {
 		unknown = append(unknown, calendar.FieldAttendees)
 		notes.AttendeesUnparsed = cause != attOK
@@ -361,43 +370,78 @@ var attNames = map[attCause]string{
 
 // attendees reads the list that follows the string at +876: a u32 count, then records of
 // a one-byte name length, the name, a one-byte address length, the address and three u32
-// words A, B and C, up to the end of the object. ok is false when the list does not parse
-// exactly to the object's end. B is the response; A is 1 where Teams says optional
-// (likely).
-func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause) {
+// words A, B and C, up to the end of the object. B is the response; A is 1 where Teams
+// says optional (likely).
+//
+// When the count is larger than the records the object holds, the records are still read
+// greedily from the start; if they end exactly at the object's end the list is accepted
+// as a capped one (exceeds is true: the store keeps only the capped records, likely
+// while the count word holds the real total). Anything else that does not parse exactly
+// to the object's end gives a cause, and says why.
+func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause, exceeds bool) {
 	w, _ := o.U32(evSubjectBare)
 	pos, ok := stringEnd(o, base+int(w))
 	if !ok {
-		return "", 0, attBareStringEnd
+		return "", 0, attBareStringEnd, false
 	}
 	n, ok := o.U32(pos)
 	if !ok {
-		return "", 0, attCountOutside
-	}
-	// Each record is at least 14 bytes; a count the object cannot hold is damage.
-	if int64(n)*14 > int64(o.Len()-pos-4) {
-		return "", 0, attCountTooBig
+		return "", 0, attCountOutside, false
 	}
 	pos += 4
-	if n == 0 && pos != o.Len() {
-		return "", 0, attCountZero
+	if n == 0 {
+		if pos != o.Len() {
+			return "", 0, attCountZero, false
+		}
+		return "", 0, attOK, false
 	}
-	var out []attendee
-	for i := 0; i < int(n); i++ {
+	tooBig := int64(n)*minRecord > int64(o.Len()-pos)
+	out, exceeds, cause := parseRecords(o, pos, n, 1, r)
+	if cause == attLengthOdd {
+		// Diagnostic only: would the list parse if the lengths counted characters?
+		scratch := reader{o: o, notes: &MapNotes{}}
+		_, _, c := parseRecords(o, pos, n, 2, &scratch)
+		r.notes.AttendeesOddLengthCharsParse = c == attOK
+	}
+	if cause != attOK {
+		if tooBig {
+			cause = attCountTooBig
+		}
+		return "", 0, cause, false
+	}
+	data, _ := json.Marshal(out) // plain strings marshal
+	return string(data), len(out), attOK, exceeds
+}
+
+// minRecord is the size of the smallest attendee record: two length bytes and three words.
+const minRecord = 14
+
+// parseRecords reads up to n records from pos, each length counted in unit bytes (1 for
+// the layout, 2 for the diagnostic that counts characters). It succeeds when the records
+// end exactly at the object's end; with fewer than n records that is exceeds.
+func parseRecords(o hxstore.Object, pos int, n uint32, unit int, r *reader) (out []attendee, exceeds bool, cause attCause) {
+	for i := uint32(0); i < n; i++ {
+		if pos >= o.Len() {
+			if i == 0 {
+				return nil, false, attCountTooBig
+			}
+			return out, true, attOK // fewer records than the count says, ending cleanly
+		}
 		var a attendee
 		for k := 0; k < 2; k++ {
 			l, ok := o.U8(pos)
 			if !ok {
-				return "", 0, attLengthMissing
+				return nil, false, attLengthMissing
 			}
-			if l%2 != 0 {
-				return "", 0, attLengthOdd
+			if unit == 1 && l%2 != 0 {
+				return nil, false, attLengthOdd
 			}
-			b, ok := o.Bytes(pos+1, int(l))
+			size := int(l) * unit
+			b, ok := o.Bytes(pos+1, size)
 			if !ok {
-				return "", 0, attTextOutside
+				return nil, false, attTextOutside
 			}
-			pos += 1 + int(l)
+			pos += 1 + size
 			text := r.scrub(utf16Text(b))
 			if k == 0 {
 				a.Name = text
@@ -409,7 +453,7 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 		bv, ok1 := o.U32(pos + 4)
 		_, ok2 := o.U32(pos + 8)
 		if !ok1 || !ok2 {
-			return "", 0, attWordsCut
+			return nil, false, attWordsCut
 		}
 		pos += 12
 		if av == 1 {
@@ -430,13 +474,9 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 		out = append(out, a)
 	}
 	if pos != o.Len() {
-		return "", 0, attEndMismatch
+		return nil, false, attEndMismatch
 	}
-	if len(out) == 0 {
-		return "", 0, attOK
-	}
-	data, _ := json.Marshal(out) // plain strings marshal
-	return string(data), len(out), attOK
+	return out, false, attOK
 }
 
 // stringEnd returns the offset just past the NUL terminator of the UTF-16 string at off,
@@ -461,13 +501,13 @@ func utf16Text(b []byte) string {
 // attendeeNote is the statement that the attendee list is what the store holds, which may
 // be capped: the stored count, and whether the list is as long as the cap. It invents no
 // total.
-func attendeeNote(stored int) string {
+func attendeeNote(stored int, exceeds bool) string {
 	data, _ := json.Marshal(struct {
 		Source              string `json:"source"`
 		AttendeesStored     int    `json:"attendees_stored"`
 		AttendeeCap         int    `json:"capped_from"`
 		AttendeesMaybeShort bool   `json:"attendees_maybe_truncated"`
-	}{"outlook", stored, AttendeeCap, stored >= AttendeeCap})
+	}{"outlook", stored, AttendeeCap, stored >= AttendeeCap || exceeds})
 	return string(data)
 }
 

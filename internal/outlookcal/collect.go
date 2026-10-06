@@ -121,12 +121,21 @@ type Notes struct {
 	// count_zero, bare_string_end, count_outside, count_too_big, length_missing,
 	// length_odd, text_outside, words_cut. The values sum to AttendeesUnparsed.
 	AttendeeFailures map[string]int
-	EventTypeUnknown int
-	ShowAsUnmapped   int
-	ResponseUnmapped int
-	Redacted         int
-	UnmappedReasons  map[string]int
-	UnknownZones     []string // sorted, distinct
+	// AttendeesCountExceedsStored counts accepted lists whose count word is larger than
+	// the records stored (read greedily, ending at the object's end; the note on the event
+	// says the list may be truncated). ExceedsStoredRecords buckets them by the number of
+	// records found: "1-7", "8", "9", "10+".
+	AttendeesCountExceedsStored int
+	ExceedsStoredRecords        map[string]int
+	// AttendeesOddLengthCharsParse counts the odd-length failures that would parse if the
+	// lengths counted characters; the mapping is unchanged.
+	AttendeesOddLengthCharsParse int
+	EventTypeUnknown             int
+	ShowAsUnmapped               int
+	ResponseUnmapped             int
+	Redacted                     int
+	UnmappedReasons              map[string]int
+	UnknownZones                 []string // sorted, distinct
 }
 
 // Result is what Collect read.
@@ -330,6 +339,19 @@ func multi[A, B comparable](m map[A]map[B]bool) int {
 	return n
 }
 
+// storedBucket names the size class of an accepted list's record count.
+func storedBucket(n int) string {
+	switch {
+	case n < 8:
+		return "1-7"
+	case n == 8:
+		return "8"
+	case n == 9:
+		return "9"
+	}
+	return "10+"
+}
+
 func (n *Notes) add(m MapNotes, zones map[string]bool) {
 	count := func(c *int, on bool) {
 		if on {
@@ -349,6 +371,14 @@ func (n *Notes) add(m MapNotes, zones map[string]bool) {
 	count(&n.AttendeesEndMismatch, m.AttendeesEndMismatch)
 	count(&n.AttendeesCountZero, m.AttendeesCountZero)
 	count(&n.AttendeesOtherUnparsed, m.AttendeesOtherUnparsed)
+	count(&n.AttendeesOddLengthCharsParse, m.AttendeesOddLengthCharsParse)
+	if m.AttendeesCountExceedsStored {
+		n.AttendeesCountExceedsStored++
+		if n.ExceedsStoredRecords == nil {
+			n.ExceedsStoredRecords = map[string]int{}
+		}
+		n.ExceedsStoredRecords[storedBucket(m.AttendeesStored)]++
+	}
 	if m.AttendeeFailure != "" {
 		if n.AttendeeFailures == nil {
 			n.AttendeeFailures = map[string]int{}

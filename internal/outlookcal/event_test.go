@@ -251,7 +251,7 @@ func TestMapEventAttendees(t *testing.T) {
 	base := func() *hxbuild.Object { return hxbuild.NewEvent(baseSpec(1)) }
 	damaged := map[string]func(*hxbuild.Object){
 		"bare string": func(o *hxbuild.Object) { o.PutU32(876, 1<<30) },
-		"count":       func(o *hxbuild.Object) { o.PutU32(oEnd(o, 876), 1<<30) },
+		"count":       func(o *hxbuild.Object) { o.PutU32(oEnd(o, 876), 1<<30); o.Append([]byte{1, 2}) },
 		"trailing":    func(o *hxbuild.Object) { o.Append([]byte{1, 2}) },
 		"odd length":  func(o *hxbuild.Object) { o.PutU8(oEnd(o, 876)+4, 3) },
 		"name out":    func(o *hxbuild.Object) { o.PutU8(oEnd(o, 876)+4, 250) },

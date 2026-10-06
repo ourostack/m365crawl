@@ -1,6 +1,7 @@
 package outlookcal
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -149,9 +150,15 @@ func TestAttendeeFailureCauses(t *testing.T) {
 		"zero":    {obj(func() *hxbuild.Object { o := base(false); o.Append([]byte{1, 2}); return o }()), "count_zero"},
 		"bare":    {obj(func() *hxbuild.Object { o := base(true); o.PutU32(876, 1<<30); return o }()), "bare_string_end"},
 		"outside": {cut(base(true), func(end int) int { return end + 2 }), "count_outside"},
-		"big":     {obj(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 1<<30); return o }()), "count_too_big"},
-		// A count of three over two records: the third record's length byte is past the end.
-		"records": {obj(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 3); return o }()), "length_missing"},
+		"big": {obj(func() *hxbuild.Object {
+			o := base(true)
+			o.PutU32(oEnd(o, 876), 1<<30)
+			o.Append([]byte{1, 2})
+			return o
+		}()), "count_too_big"},
+		// A count of one over a record cut after its name: the address length is past the end.
+		"missing": {cut(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 1); return o }(), func(end int) int { return end + 4 + 1 + 22 }), "length_missing"},
+		"nobytes": {cut(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 1<<30); return o }(), func(end int) int { return end + 4 }), "count_too_big"},
 		"odd":     {obj(func() *hxbuild.Object { o := base(true); o.PutU8(oEnd(o, 876)+4, 3); return o }()), "length_odd"},
 		"text":    {obj(func() *hxbuild.Object { o := base(true); o.PutU8(oEnd(o, 876)+4, 250); return o }()), "text_outside"},
 		"words":   {cut(base(true), func(int) int { return len(obj(base(true)).Raw) - 6 }), "words_cut"},
@@ -184,6 +191,7 @@ func TestAttendeeFailureCauses(t *testing.T) {
 	bigSpec.ID = hxbuild.GlobalObjectID(0, 0, 0, "FIXTURE-BIG")
 	bigO2 := hxbuild.NewEvent(bigSpec)
 	bigO2.PutU32(oEnd(bigO2, 876), 1<<30)
+	bigO2.Append([]byte{1, 2})
 	s := collect(t, storeOf(t, framed(endO, bigO2)), Options{})
 	if s.Notes.AttendeesUnparsed != 2 || s.Notes.AttendeesEndMismatch != 1 || s.Notes.AttendeesOtherUnparsed != 1 ||
 		s.Notes.AttendeeFailures["end_mismatch"] != 1 || s.Notes.AttendeeFailures["count_too_big"] != 1 || len(s.Notes.AttendeeFailures) != 2 {
@@ -202,5 +210,82 @@ func TestAttendeeFailureCauses(t *testing.T) {
 	os.EventType = 1
 	if r = collect(t, storeOf(t, framed(hxbuild.NewEvent(os))), Options{}); r.Notes.OccurrenceNoDate != 1 || r.Notes.CancelledSubjectsMatch != 0 {
 		t.Fatalf("%+v", r.Notes)
+	}
+}
+
+func TestGreedyAttendeesWhenCountExceedsStored(t *testing.T) {
+	// The count word says 20 and the store holds the records of a capped list: the records
+	// are accepted, the note says the list may be short, and Collect buckets them.
+	mk := func(label string, records int) *hxbuild.Object {
+		s := baseSpec(1)
+		s.ID = hxbuild.GlobalObjectID(0, 0, 0, label)
+		s.Attendees = nil
+		for i := 0; i < records; i++ {
+			s.Attendees = append(s.Attendees, hxbuild.Attendee{Name: "Fixture Person", Address: "p@example.invalid", B: 0})
+		}
+		o := hxbuild.NewEvent(s)
+		o.PutU32(oEnd(o, 876), 20)
+		return o
+	}
+	e, n := mapOK(t, obj(mk("FIXTURE-G", 3)), nil)
+	var note map[string]any
+	_ = json.Unmarshal([]byte(e.DetailRawJSON), &note)
+	if !n.AttendeesCountExceedsStored || n.AttendeesStored != 3 || n.AttendeesUnparsed || note["attendees_stored"] != float64(3) || note["attendees_maybe_truncated"] != true {
+		t.Fatalf("%+v %s", n, e.DetailRawJSON)
+	}
+	if strings.Count(e.AttendeesJSON, `"accepted"`) != 3 {
+		t.Fatal(e.AttendeesJSON)
+	}
+	var objs []*hxbuild.Object
+	for i, c := range []int{3, 7, 8, 9, 10, 12} {
+		objs = append(objs, mk("FIXTURE-G"+string(rune('A'+i)), c))
+	}
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	want := map[string]int{"1-7": 2, "8": 1, "9": 1, "10+": 2}
+	if r.Notes.AttendeesCountExceedsStored != 6 || r.Notes.AttendeesUnparsed != 0 || len(r.Notes.ExceedsStoredRecords) != 4 {
+		t.Fatalf("%+v", r.Notes)
+	}
+	for k, v := range want {
+		if r.Notes.ExceedsStoredRecords[k] != v {
+			t.Errorf("%s: %+v", k, r.Notes.ExceedsStoredRecords)
+		}
+	}
+}
+
+func TestOddLengthDiagnostic(t *testing.T) {
+	// A list whose lengths count characters: odd lengths fail the byte reading, and the
+	// diagnostic says it would parse as characters. The mapping stays unknown.
+	build := func(chars bool) hxstore.Object {
+		o := hxbuild.NewEvent(baseSpec(1))
+		end := oEnd(o, 876)
+		raw := obj(o).Raw[:end]
+		out := append([]byte{}, raw...)
+		out = append(out, 1, 0, 0, 0) // one record
+		put := func(text string) {
+			u := hxbuild.UTF16Z(text)
+			u = u[:len(u)-2]
+			if chars {
+				out = append(out, byte(len(text)))
+			} else {
+				out = append(out, byte(len(u)))
+			}
+			out = append(out, u...)
+		}
+		put("Fixture")
+		put("a@example.invalid")
+		out = append(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+		e := obj(o)
+		e.Raw = out
+		return e
+	}
+	_, n := mapOK(t, build(true), nil)
+	if !n.AttendeesUnparsed || n.AttendeeFailure != "length_odd" || !n.AttendeesOddLengthCharsParse {
+		t.Fatalf("%+v", n)
+	}
+	// Odd and still wrong as characters: not counted.
+	o := build(true)
+	o.Raw = append(o.Raw, 9)
+	if _, n = mapOK(t, o, nil); !n.AttendeesUnparsed || n.AttendeesOddLengthCharsParse {
+		t.Fatalf("%+v", n)
 	}
 }
