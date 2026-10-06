@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS calendar_source_events_ical ON calendar_source_events
 CREATE INDEX IF NOT EXISTS calendar_source_events_composite ON calendar_source_events(composite_key);
 CREATE INDEX IF NOT EXISTS calendar_source_events_thread ON calendar_source_events(teams_thread_id);
 CREATE INDEX IF NOT EXISTS calendar_source_events_series ON calendar_source_events(series_key);
+CREATE INDEX IF NOT EXISTS calendar_source_events_source_id ON calendar_source_events(source, account_id, source_id);
 CREATE TABLE IF NOT EXISTS calendar_sources (
   source TEXT NOT NULL,
   account_id TEXT NOT NULL DEFAULT '',

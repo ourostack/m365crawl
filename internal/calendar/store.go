@@ -228,15 +228,21 @@ func checkRecapRow(w Window, account, call string) error {
 	return nil
 }
 
+// markGoneSQL and storedKeySQL look rows up by source id; calendar_source_events_source_id serves
+// both, which keeps applying a batch linear in its events (TestSourceIDLookupsUseTheIndex).
+const (
+	markGoneSQL = `UPDATE calendar_source_events SET removed_at=? WHERE source=? AND account_id=? AND source_id=? AND removed_at IS NULL AND event_type<>?
+			 RETURNING event_key`
+	storedKeySQL = `SELECT event_key FROM calendar_source_events WHERE source=? AND account_id=? AND source_id=?
+	  ORDER BY first_seen_at, event_key LIMIT 1`
+)
+
 // markGone sets removed_at on the live, non-master rows of the window's source and account whose
 // source id is listed. The rows keep all their data.
 func markGone(ctx context.Context, tx *sql.Tx, w Window, ids []string, at time.Time) (int, error) {
 	n := 0
 	for _, id := range ids {
-		rows, err := tx.QueryContext(ctx,
-			`UPDATE calendar_source_events SET removed_at=? WHERE source=? AND account_id=? AND source_id=? AND removed_at IS NULL AND event_type<>?
-			 RETURNING event_key`,
-			formatTime(at), string(w.Source), w.AccountID, id, EventMaster)
+		rows, err := tx.QueryContext(ctx, markGoneSQL, formatTime(at), string(w.Source), w.AccountID, id, EventMaster)
 		if err != nil {
 			return n, err
 		}
@@ -269,8 +275,7 @@ func RecordCoveredDays(ctx context.Context, tx *sql.Tx, source Source, accountID
 // absent) still updates the row it belongs to.
 func storedKey(ctx context.Context, tx *sql.Tx, e Event, fallback string) (string, error) {
 	var key string
-	err := tx.QueryRowContext(ctx, `SELECT event_key FROM calendar_source_events WHERE source=? AND account_id=? AND source_id=?
-	  ORDER BY first_seen_at, event_key LIMIT 1`, string(e.Source), e.AccountID, e.SourceID).Scan(&key)
+	err := tx.QueryRowContext(ctx, storedKeySQL, string(e.Source), e.AccountID, e.SourceID).Scan(&key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fallback, nil
 	}

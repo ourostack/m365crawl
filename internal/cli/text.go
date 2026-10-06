@@ -72,6 +72,12 @@ func (rt *runtime) renderText(label string, v any) error {
 		}{{"conversations", r.Conversations}, {"messages", r.Messages}, {"people", r.People}, {"activity", r.Activity}} {
 			rows = append(rows, []string{p.n, strconv.Itoa(p.c.Seen), strconv.Itoa(p.c.Inserted), strconv.Itoa(p.c.Updated), strconv.Itoa(p.c.Unchanged)})
 		}
+		for _, p := range []struct {
+			n string
+			c store.Counts
+		}{{"calendar events", r.Calendar.Events}, {"calendar recaps", r.Calendar.Recaps}, {"calendar recap items", r.Calendar.RecapItems}} {
+			rows = append(rows, []string{p.n, strconv.Itoa(p.c.Seen), strconv.Itoa(p.c.Inserted), strconv.Itoa(p.c.Updated), strconv.Itoa(p.c.Unchanged)})
+		}
 		render.Table(w, []string{"kind", "seen", "inserted", "updated", "unchanged"}, rows, color)
 		if m := r.Migrated; m != nil {
 			_, _ = fmt.Fprintf(w, "migrated: %d rows re-derived from stored records (derivation %d to %d); not counted as updates\n", m.Rows, m.From, m.To)

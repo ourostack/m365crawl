@@ -22,6 +22,7 @@ const staleSyncAfter = 24 * time.Hour
 var (
 	openArchiveReadOnly = store.OpenReadOnly
 	readArchiveStatus   = func(st *store.Store, ctx context.Context) (store.StatusRow, error) { return st.Status(ctx) }
+	readCalendarCache   = func(st *store.Store, ctx context.Context) (store.CalendarCache, error) { return st.CalendarCache(ctx) }
 	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
 )
 
@@ -101,7 +102,8 @@ func (rt *runtime) archiveChecks() []check {
 		return append(cs,
 			check{Name: "schema_version", OK: true, Detail: d},
 			check{Name: "fts", OK: true, Detail: d},
-			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `teamscrawl sync`."})
+			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `teamscrawl sync`."},
+			check{Name: "calendar_cache", OK: true, Detail: d})
 	case isArchiveNewer(err):
 		// A newer schema is refused at open, so no other check can read the archive.
 		var coded *errs.Coded
@@ -160,7 +162,44 @@ func (rt *runtime) archiveChecks() []check {
 	default:
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
-	return cs
+	return append(cs, rt.calendarCacheCheck(st))
+}
+
+// staleCalendarAfter is how old the Teams calendar cache may be before doctor warns: Teams
+// refreshes it when its calendar view is open, so a week without one means the data is going stale.
+const staleCalendarAfter = 7 * 24 * time.Hour
+
+// oneUnit is d in whole hours, minutes or seconds (the largest unit that fits), as in "26h".
+func oneUnit(d time.Duration) string {
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return fmt.Sprintf("%ds", int(d/time.Second))
+}
+
+// calendarCacheCheck warns, never fails, when the archive's calendar is missing or old. Its detail
+// says nothing about event content.
+func (rt *runtime) calendarCacheCheck(st *store.Store) check {
+	open := "Open the Teams calendar once so Teams caches it, then run `teamscrawl sync`."
+	c, err := readCalendarCache(st, rt.ctx)
+	switch {
+	case err != nil:
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "cannot read the calendar state: " + err.Error(), Fix: "Run `teamscrawl sync`."}
+	case c.Accounts == 0:
+		return check{Name: "calendar_cache", OK: true, Detail: "no accounts archived yet"}
+	case c.WithoutDatabase > 0:
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: fmt.Sprintf("%d of %d accounts have no Teams calendar database in the archive", c.WithoutDatabase, c.Accounts), Fix: open}
+	case !c.HasTables:
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "the archive has no calendar tables yet", Fix: "Run `teamscrawl sync`."}
+	case c.FreshAt.IsZero():
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "no calendar has been derived yet", Fix: open}
+	case rt.now().Sub(c.FreshAt) > staleCalendarAfter:
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "the Teams calendar cache was last fresh " + oneUnit(rt.now().Sub(c.FreshAt)) + " ago", Fix: open}
+	}
+	return check{Name: "calendar_cache", OK: true, Detail: "the Teams calendar cache was fresh " + oneUnit(rt.now().Sub(c.FreshAt)) + " ago"}
 }
 
 // isArchiveNewer reports the coded archive_newer error that opening a newer archive returns.

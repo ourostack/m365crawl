@@ -14,11 +14,13 @@ Ready checks
   ● full_disk_access   the Teams container is readable
   ● teams_origin       1 Teams origin(s) found
   ● database_writable  <db> is writable
-  ● schema_version     schema v4
+  ● schema_version     schema v5
   ● fts                full-text indexes present
   ● archive_newer      the archive was written by this or an older teamscrawl (derivation version 2)
   ● last_sync_status   the last sync was ok
   ● last_sync_age      last successful sync <age> ago
+  ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
+                       fix: Open the Teams calendar once so Teams caches it, then run `teamscrawl sync`.
 
 Snapshot
 --------
