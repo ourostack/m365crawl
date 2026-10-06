@@ -189,6 +189,7 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	if err != nil {
 		return res, err
 	}
+	progress(0)
 	res.UnknownLayouts = unknownLayouts(stats) // before the guard, so a refused read still says which layout it met
 	if g := guard(stats, badTags, len(winners)+res.Notes.EventNoID, opt); g != nil {
 		return res, g
@@ -202,6 +203,10 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	mapAll(&res, winners, details, account)
 	return res, nil
 }
+
+// progress is called with 0 once the walk has finished and with the count of events handled
+// after each event is mapped. It is a seam for a test that measures the live heap.
+var progress = func(int) {}
 
 // keepEvent records o if it is the first copy of its id or beats the copy held.
 func keepEvent(winners map[string]winner, o hxstore.Object, rule VersionRule, n *Notes) {
@@ -278,13 +283,27 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 	}
 	sort.Strings(ids)
 	n := &res.Notes
+	// Count the winners that link each detail object, and drop the detail objects no winner
+	// links, so each detail's bytes can be freed with the last event that reads it.
+	refs := map[uint32]int{}
+	for _, w := range winners {
+		if link, ok := detailLink(w.obj); ok {
+			refs[link]++
+		}
+	}
+	for k := range details {
+		if refs[k] == 0 {
+			delete(details, k)
+		}
+	}
 	zones := map[string]bool{}
 	nulKeys := map[uint32]bool{}
 	keySeries := map[uint64]map[string]bool{}
 	seriesKeys := map[string]map[uint64]bool{}
 	unmapped := 0
-	for _, id := range ids {
+	for i, id := range ids {
 		ev := winners[id].obj
+		delete(winners, id) // ev holds the bytes now; the map must not keep them past this event
 		var d *hxstore.Object
 		link, hasLink := detailLink(ev)
 		if hasLink {
@@ -293,6 +312,12 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 			}
 		}
 		e, mn, err := MapEvent(account, ev, d)
+		if hasLink {
+			if refs[link]--; refs[link] == 0 {
+				delete(details, link) // the last event that reads this detail object
+			}
+		}
+		progress(i + 1)
 		if err != nil {
 			unmapped++
 			if n.UnmappedReasons == nil {
