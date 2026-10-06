@@ -53,6 +53,9 @@ type AccountCoverage struct {
 	// AsOf is the oldest verification time behind the principal's coverage of the range; zero when
 	// it covers none of it.
 	AsOf time.Time
+	// Uncovered are the dates of the range this principal does not cover: a subset of the
+	// result's UncoveredDays. Empty when it covers the whole range.
+	Uncovered []string
 }
 
 // AgendaItem is one merged event and the key it is stored under.
@@ -242,6 +245,7 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		spans    []Window             // windows of the principal's sources that have no covered days
 		synced   time.Time
 		asOf     time.Time
+		lacks    []string // dates this principal does not cover
 	}
 	withDays := map[srcKey]bool{}
 	accounts := map[string]*accountCover{}
@@ -290,13 +294,15 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		}
 		uncovered := len(accounts) == 0
 		for name, c := range accounts {
-			switch t, ok := c.verified[start.Format(dateLayout)]; {
+			day := start.Format(dateLayout)
+			switch t, ok := c.verified[day]; {
 			case ok:
 				note(c, t)
 			case coveredBySpans(c.spans, pieceFrom, pieceTo):
 				usedSpan[name] = true
 			default:
 				uncovered = true
+				c.lacks = append(c.lacks, day)
 			}
 		}
 		if uncovered {
@@ -312,7 +318,7 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		}
 	}
 	for name, c := range accounts {
-		out.accounts = append(out.accounts, AccountCoverage{AccountID: name, SyncedAt: c.synced, AsOf: c.asOf})
+		out.accounts = append(out.accounts, AccountCoverage{AccountID: name, SyncedAt: c.synced, AsOf: c.asOf, Uncovered: c.lacks})
 	}
 	sort.Slice(out.accounts, func(i, j int) bool { return out.accounts[i].AccountID < out.accounts[j].AccountID })
 	return out
