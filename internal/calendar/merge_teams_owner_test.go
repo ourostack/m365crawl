@@ -148,3 +148,38 @@ func TestMergeOverriddenFields(t *testing.T) {
 		t.Fatalf("one copy overrides nothing: %v", m.Overridden)
 	}
 }
+
+// Two spellings of one time zone are no override; two different zones are, and a zone that did not
+// resolve on either side compares by its raw value. An address differing only in case is none.
+func TestMergeOverriddenIgnoresSpelling(t *testing.T) {
+	zone := func(raw, iana string) func(*Event) {
+		return func(e *Event) { e.TimeZone, e.TimeZoneIANA = raw, iana }
+	}
+	has := func(m Merged, f Field) bool {
+		for _, o := range m.Overridden {
+			if o.Field == f {
+				return true
+			}
+		}
+		return false
+	}
+	a := row(t, SourceTeams, "09:00:00", zone("PacificSt", "America/Los_Angeles"), func(e *Event) { e.OrganizerAddress = "Pat@example.test" })
+	b := row(t, SourceOutlook, "10:00:00", zone("Pacific Standard Time", "America/Los_Angeles"), func(e *Event) { e.OrganizerAddress = "pat@example.test" })
+	m := Merge([]Event{a, b}, nil)
+	if has(m, FieldTimeZone) || has(m, FieldOrganizerAddress) {
+		t.Fatalf("spelling only: %v", m.Overridden)
+	}
+	c := row(t, SourceOutlook, "10:00:00", zone("GMT Standard Time", "Europe/London"))
+	if !has(Merge([]Event{a, c}, nil), FieldTimeZone) {
+		t.Fatal("different zones are an override")
+	}
+	u1 := row(t, SourceTeams, "09:00:00", zone("FixtureUnknownSt", ""))
+	u2 := row(t, SourceOutlook, "10:00:00", zone("Fixture Other Time", ""))
+	if !has(Merge([]Event{u1, u2}, nil), FieldTimeZone) {
+		t.Fatal("unresolved zones compare by raw value")
+	}
+	u3 := row(t, SourceOutlook, "10:00:00", zone("FixtureUnknownSt", ""))
+	if has(Merge([]Event{u1, u3}, nil), FieldTimeZone) {
+		t.Fatal("equal raw unresolved zones are no override")
+	}
+}

@@ -743,6 +743,9 @@ func TestOutlookLinkKeepsTheTeamsMeeting(t *testing.T) {
 	if _, ok := over["organizer"]; ok || over["location"] != "outlook" || over["is_online_meeting"] != "teams" {
 		t.Fatalf("overridden_fields: %v", over)
 	}
+	if _, ok := over["time_zone"]; ok {
+		t.Fatalf("Teams' PacificSt and Outlook's Pacific Standard Time are one zone, not an override: %v", over)
+	}
 	if _, ok := over["join_url"]; ok {
 		t.Fatalf("the rich meeting's Outlook copy has no join link, so none was replaced: %v", over)
 	}

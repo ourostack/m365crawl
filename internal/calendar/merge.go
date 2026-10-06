@@ -393,7 +393,7 @@ func comparables() []comparable {
 		name := f.name
 		i := i
 		out = append(out, comparable{field: name, states: func(e Event) bool { return !e.unknown(name) },
-			val: func(e Event) string { return strings.TrimSpace(*textFields(&e)[i].ptr) }})
+			val: func(e Event) string { return comparedText(name, e, strings.TrimSpace(*textFields(&e)[i].ptr)) }})
 	}
 	for i, f := range flagFields(&Event{}) {
 		i := i
@@ -425,6 +425,22 @@ func comparables() []comparable {
 	str(FieldCategories, func(e Event) string { return e.CategoriesJSON }, false)
 	str(FieldRecurrence, func(e Event) string { return e.RecurrenceJSON }, false)
 	return out
+}
+
+// comparedText is the value M9 compares for a text field, so a difference of spelling alone is no
+// override: a time zone is its resolved IANA zone (Teams says "PacificSt", Outlook "Pacific Standard
+// Time"; a zone that did not resolve on either side compares by its raw value), and an address
+// compares without case.
+func comparedText(f Field, e Event, raw string) string {
+	switch f {
+	case FieldTimeZone:
+		if iana := strings.TrimSpace(e.TimeZoneIANA); iana != "" && !e.unknown(FieldTimeZoneIANA) {
+			return iana
+		}
+	case FieldOrganizerAddress:
+		return strings.ToLower(raw)
+	}
+	return raw
 }
 
 // overrides is M9. A row "states" a field as Fill and unknown handling do; two rows that both state

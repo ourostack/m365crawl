@@ -204,6 +204,7 @@ func teamsAt(day, hour, min int) time.Time {
 // newer copy in 146 of 148 real twins). Disagreements the tests need are set by the caller.
 func twinOf(s *hxbuild.EventSpec) {
 	s.OrganizerName, s.OrganizerAddr = "Pat Example", "pat@example.invalid"
+	s.ZoneName = "Pacific Standard Time" // the Teams fixture's PacificSt, as Outlook spells it
 	s.LastModified = time.Date(2023, 11, 14, 10, 0, 0, 0, time.UTC)
 }
 
@@ -235,7 +236,6 @@ func (g *gen) online() event {
 	s.Start, s.End = teamsAt(21, 18, 0), teamsAt(21, 19, 0)
 	s.Subject, s.SubjectBare = "Fixture pacific sync", "Fixture pacific sync"
 	s.Online, s.ShowAs, s.Response, s.ReminderMinutes, s.ZoneID = true, 1, 1, 15, 3
-	s.ZoneName = "Fixture Mountain Time"
 	s.AreaOneSize = 812 // an even area one puts the strings at odd offsets
 	s.Attendees = attendees(4, 3)
 	return event{s, hxbuild.DetailSpec{

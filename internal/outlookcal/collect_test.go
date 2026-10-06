@@ -58,7 +58,11 @@ func expectAgainst(t *testing.T, e calendar.Event, c hxfixture.Case) {
 	eq("Cancelled", e.Cancelled, calendar.TriOf(s.Cancelled))
 	eq("IsOnlineMeeting", e.IsOnlineMeeting, calendar.TriOf(s.Online))
 	eq("TimeZone", e.TimeZone, s.ZoneName)
-	eq("TimeZoneIANA", e.TimeZoneIANA, "") // the fixture's zone names are invented
+	wantIANA := "" // the fixture's zone names are invented, except the twins' Windows zone name
+	if s.ZoneName == "Pacific Standard Time" {
+		wantIANA = "America/Los_Angeles"
+	}
+	eq("TimeZoneIANA", e.TimeZoneIANA, wantIANA)
 	if s.AllDay {
 		eq("AllDay", e.AllDay, calendar.TriTrue)
 		eq("StartDate", e.StartDate, s.Start.Format("2006-01-02"))
@@ -136,7 +140,7 @@ func TestCollectFixtureReadsEveryFieldOfEveryEvent(t *testing.T) {
 	if len(res.UnknownLayouts) != 0 {
 		t.Fatalf("%+v", res.UnknownLayouts)
 	}
-	if len(n.UnknownZones) != 4 || n.ResponseUnmapped != 1 || n.AttendeesAtCap != 1 || n.AllDayUnaligned != 0 {
+	if len(n.UnknownZones) != 3 || n.ResponseUnmapped != 1 || n.AttendeesAtCap != 1 || n.AllDayUnaligned != 0 {
 		t.Fatalf("%+v", n)
 	}
 }
