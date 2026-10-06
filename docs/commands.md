@@ -310,7 +310,7 @@ Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
 
 | Flag | Meaning |
 | --- | --- |
-| `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error, because `--since` reads it as "back". |
+| `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error, because `--since` reads it as "back". Write a negative offset with an equals sign, `--from=-7d`: `--from -7d` is a usage error. |
 | `--to=WHEN` | End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days. |
 | `--days=INT` | Range length in days from --from (instead of --to). |
 | `--query=STRING` | Only events whose subject, organizer or location contains this text, ignoring case. |
@@ -353,6 +353,7 @@ Examples:
 
 ```sh
 teamscrawl calendar --days 7
+teamscrawl calendar --from=-7d --to=tomorrow --query planning
 teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
 teamscrawl calendar event ev_2da7280856 --max-text 400
 ```

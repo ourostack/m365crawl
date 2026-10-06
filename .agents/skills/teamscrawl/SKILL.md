@@ -1,16 +1,15 @@
 ---
 name: teamscrawl
-description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state or activity feed on this Mac or Windows PC, through the local `teamscrawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
+description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state, activity feed, meetings or calendar on this Mac or Windows PC, through the local `teamscrawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
 ---
 
 # teamscrawl
 
-Read-only, offline access to the user's Teams history. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 
 ## When to use
 
-- Use it to answer "what is unread", "what mentions me", "what happened in channel X", "what was said about Y", or to summarize a thread.
+- Use it to answer "what is unread", "what mentions me", "what happened in channel X", "what was said about Y", "what meetings do I have", "what was decided in meeting Z" or "what action items are mine", or to summarize a thread.
 - Do not use it to send or react (no write path exists), to fetch files or media (metadata only), or for anything outside macOS or Windows new Teams. It knows only what the desktop app cached, so very old history may be missing.
 
 ## 60-second workflow
@@ -101,7 +100,7 @@ With `--query`, an exact name ranks first, then prefix, then substring, then all
 
 ### stores and records
 
-Besides messages, conversations and activity, teamscrawl mirrors every other Teams database the app cached (calendar, pinned messages, contacts, call history and more) into a generic `records` table, with no typed command yet. Credential-like databases are never read, and token-shaped values inside other records (JWTs, `access_token`-style fields of any type, `Bearer ` strings, `sig=` URL signatures, credentials inside JSON stored as a string) appear as `[redacted]`. Run `teamscrawl stores` to see what exists: items `{database, store, records, removed, last_updated_at}`, one per database and object store (an account's databases carry its tenant and user ids in the name). Then read one with `teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300`: `--database` takes the full name or any prefix (required), plus `--store`, `--since`, `--include-removed` and `--limit`. Items are `{source, database, store, key_json, value_json, first_seen_at, updated_at, removed_at?}`, newest change first; `key_json` and `value_json` are parsed JSON, and `value_json` is absent when the value could not be decoded. A record Teams' cache no longer holds keeps its last value and gets `removed_at`, hidden unless `--include-removed`. `--database` prefix matching spans every signed-in account; `--account <tenantId>/<userId>` narrows it (a database whose name carries no account is hidden by `--account`). The `pinned-manager` store holds Teams' own pin records, while `messages` carries a `pinned` flag per message: use whichever answers the question. The shape of each value is Teams' own and can change without notice, so look at one record before filtering on its fields, and keep `--max-text` low.
+Besides messages, conversations and activity, teamscrawl mirrors every other Teams database the app cached (pinned messages, contacts, call history, the raw calendar stores and more) into a generic `records` table. The calendar has its own commands (see Calendar); the rest have no typed command yet. Credential-like databases are never read, and token-shaped values inside other records (JWTs, `access_token`-style fields of any type, `Bearer ` strings, `sig=` URL signatures, credentials inside JSON stored as a string) appear as `[redacted]`. Run `teamscrawl stores` to see what exists: items `{database, store, records, removed, last_updated_at}`, one per database and object store (an account's databases carry its tenant and user ids in the name). Then read one with `teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300`: `--database` takes the full name or any prefix (required), plus `--store`, `--since`, `--include-removed` and `--limit`. Items are `{source, database, store, key_json, value_json, first_seen_at, updated_at, removed_at?}`, newest change first; `key_json` and `value_json` are parsed JSON, and `value_json` is absent when the value could not be decoded. A record Teams' cache no longer holds keeps its last value and gets `removed_at`, hidden unless `--include-removed`. `--database` prefix matching spans every signed-in account; `--account <tenantId>/<userId>` narrows it (a database whose name carries no account is hidden by `--account`). The `pinned-manager` store holds Teams' own pin records, while `messages` carries a `pinned` flag per message: use whichever answers the question. The shape of each value is Teams' own and can change without notice, so look at one record before filtering on its fields, and keep `--max-text` low.
 
 ### sql
 
@@ -124,6 +123,56 @@ When the first sync after an upgrade re-derives an older archive, watch prints o
 - `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced", or `last_sync_status` after a partial or failed sync) does not fail it; `archive_newer` fails it when a newer teamscrawl wrote the archive. Follow each failing check's `fix`.
 - `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity (including `records`), `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged` (exit 0), or `partial` when some Teams sources committed and others failed (exit 1: the report, with each source's `status` and `error`, is on stdout and a `partial_sync` error is on stderr; run `teamscrawl doctor`, fix the cause, sync again, since the sources that did sync are already in the archive). The first `sync` after upgrading from alpha.1 re-derives older rows and reports `migrated`; read-only commands never migrate (SPEC.md section 3.2). A sync skips records whose stored bytes did not change since the last sync and reports the same counts a full read would; `sync --full-read` (or `TEAMSCRAWL_FULL_READ=1`) reads every record in full, with the same result (SPEC.md section 4.1).
 - `status` shows per-account counts, the last run and other Teams origins seen.
+
+## Calendar
+
+`teamscrawl calendar` answers questions about the user's meetings from the Teams cache and, when it is turned on, the new Outlook for Mac store. Run the commands with `--json`, and read `coverage_gap` and `unknown_fields` before you trust an empty answer.
+
+| Question | Command |
+| --- | --- |
+| What is on my calendar (default: today)? | `calendar --from tomorrow --days 7`, `calendar --from 2026-10-12 --to 2026-10-19`, `calendar --query planning`. `--from` and `--to` take `today`, `yesterday`, `tomorrow`, `YYYY-MM-DD`, RFC3339 or a signed offset (`+3d`, `-1d`). Write a negative offset with an equals sign (`--from=-7d`); `--from -7d` is a usage error. An unsigned `7d` is a usage error too. |
+| Who is in it, what is the agenda, the recap, the recording? | `calendar event <event_id>`: take the `event_id` (or `event_key`, or a unique prefix) from the agenda. Add `--max-text 400` to cut long bodies and summaries. |
+| What did I agree to do? | `calendar actions --from=-7d --to=tomorrow --mine`. Without `--mine` it lists everyone's items (`--owner pat` filters by name). |
+| What does the archive hold, and how fresh is it? | `calendar sources` (one row per account and source). Run it when an answer looks too thin or too old. |
+| Why is Outlook missing or stale? | `doctor`: the `outlook_store` check says whether the source is on, which profiles it found, whether the store version is readable and when the last read ran. It only warns. |
+
+Agenda items are chronological. Cancelled events, events you declined and recurring masters are hidden unless you add `--include-cancelled`, `--include-declined` or `--include-masters`; `--include-removed` adds events a source saw go (`removed: true`, `removed_by` names the sources). Default `--limit` is 50: check `truncated`. To read a meeting's chat, pass the event's `meeting_chat_id` as `-c` to `messages`.
+
+### "Not known" is not "none"
+
+Teams caches an event's attendees, body and rooms only for meetings the user opened, and Outlook does not state every flag. So a missing key can mean "the source never said". The rule:
+
+- A flag the source stated is printed `true` or `false` (`cancelled`, `is_organizer`, `is_private`, `all_day`, `has_attachments`). A flag it did not state has no key and its name is in `unknown_fields`. A missing `cancelled` is "not known", never "no".
+- A list or text field (`attendees`, `body`, `rooms`, `attachments`, `categories`) named in `unknown_fields` was never fetched. The same field absent and not named was stated empty.
+- `detail_level` is `basic` (schedule only), `full` (attendees, body and rooms from a copy as new as the schedule) or `stale` (the detail is older than the schedule, so the attendee list may be out of date). `detail_as_of` says how old.
+- `filled_fields` lists schedule fields taken from the other source or an older copy, each `{field, from, as_of}`. Treat them as true as of `as_of`.
+- `sources` says who holds the event: `["teams"]`, `["outlook"]` or both.
+
+### How fresh, and what is missing
+
+- `archive_age_seconds` is the age of the last full sync. Pass `--max-age 15m` for a current answer. Teams changes reach the archive only when a sync reads the cache, and Outlook is read at most once every 5 minutes (a skipped read is `skipped_interval`).
+- Teams caches the days the user looked at, not a range. `coverage_gap: true` means some day of the range is not covered, so an absent event is not evidence that there was none; `uncovered_days` names the days (at most 31). `coverage_as_of` is the oldest verification of a covered day, and `accounts[]` gives each account's own `synced_at` and `coverage_as_of`. With several accounts the gap is true when any account lacks a day, so add `--account <tenantId>/<userId>` to judge one.
+- A day on which every event was deleted vanishes from the cache and reads as a gap, not as "empty".
+- Recaps expire in Teams (`expires_at`); the archive keeps what it saw. A recording or transcript is listed only when its message reached the meeting chat, and the files are never downloaded.
+
+### Outlook
+
+Outlook is off by default. Turn it on for `sync` and the read commands with `--outlook-root DIR` (`TEAMSCRAWL_OUTLOOK_ROOT`) or `TEAMSCRAWL_OUTLOOK=1` (the default macOS directory). Events already archived stay readable without the flag, but only a run with it on refreshes them. An unlinked Outlook profile is its own account: its events are not merged with Teams, and the agenda lists it in `unlinked_accounts` with the exact command to link it in `unlinked_fix`. Linking is explicit and never guessed, because two people invited to one meeting hold the same events:
+
+```sh
+teamscrawl whoami --json     # find <tenantId>/<userId> of the Teams account that owns this Outlook profile
+teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>
+```
+
+`--outlook-profile` is needed only when the root holds several profiles. The link is kept in the archive; `--outlook-account none` ends it. Linked, twins merge into one item with `sources: ["teams","outlook"]` and `filled_fields`. A linked Outlook-only event gets a new `event_id`; the old one still resolves. A meeting Teams marked gone stays hidden unless the Outlook copy was edited after the removal. teamscrawl does not detect deletions in Outlook, so a meeting deleted only in Outlook stays listed. Ask the user which Teams account a profile belongs to if `whoami` shows more than one.
+
+### What "mine" means
+
+Everything in the agenda is on the signed-in user's calendar, as organizer or invitee (`is_organizer`, `response`). The agenda has no `--mine`. For action items, `--mine` keeps items whose `owner` is the user's display name from `whoami` (`mine_basis: full_name`), or a first name alone that no other attendee of that meeting shares (`first_name`). When someone else in the meeting shares the first name, the item is `ambiguous`: `mine` is absent, `--mine` leaves it out and counts it in `mine_ambiguous_omitted`, so run without `--mine` and read those. Owners written "Last, First" never match. `mine_unknown_accounts` names accounts whose own name is not archived; with no name at all `--mine` is a usage error (sync, or use `--owner`).
+
+### Recaps and action items
+
+A recap is Teams' own meeting summary for a call: `headline`, `short_summary`, `outline`, `action_items` (with `owner`), `mentions`, `speakers`, `topics` and the `recording`. `has_recap` and `action_item_count` on an agenda item say whether `calendar event` has one. Its `link_method` says how it reached the event: `ical_uid` (certain), `time` (start and end within a minute: very likely) or `start_time` (the only event starting within five minutes of the meeting start: weigh it). A recap that no event holds is under `unlinked_recaps` in the agenda, with `placed_by` saying which time placed it. In a recurring series, a recap that cannot be tied to one occurrence has `series_level: true` and appears on each occurrence; `meeting_start` says which one it belongs to. Recordings and transcripts of the meeting chat are in `recordings` (`matched_by` is `recap` or `window`); those that match no occurrence are in `series_recordings`.
 
 ## Freshness
 

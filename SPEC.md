@@ -14,8 +14,9 @@ In scope for v0.2.0:
 
 - macOS and Windows with the new Teams app (`com.microsoft.teams2` / `MSTeams_8wekyb3d8bbwe`), every WebView2 profile, every Teams origin and every signed-in account found in them.
 - Conversations (chats, channels, teams, meetings), messages (channel posts, replies, chat and meeting messages), the activity feed, read state, and people derived from message senders and conversation members.
-- Every other Teams IndexedDB database that does not look like credential material (calendar, pinned messages, contacts, call history and the rest of what the app caches), mirrored generically into the `records` table until a typed mapper exists for it.
-- Commands: `doctor`, `whoami`, `sync`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `teams`, `people`, `stores`, `records`, `sql`, `watch`, `skill`, `version`.
+- Every other Teams IndexedDB database that does not look like credential material (pinned messages, contacts, call history, the calendar stores and the rest of what the app caches), mirrored generically into the `records` table; the calendar stores also feed the typed calendar tables.
+- The Teams calendar (events, meeting recaps and action items), derived from the generic records, and the new Outlook for Mac calendar as an opt-in second source (section 4.2).
+- Commands: `doctor`, `whoami`, `sync`, `status`, `search`, `messages`, `unread`, `activity`, `thread`, `conversations`, `teams`, `people`, `calendar`, `calendar event`, `calendar actions`, `stores`, `records`, `sql`, `watch`, `skill`, `version`, `metadata`.
 
 Out of scope: sending, reacting, marking read or any other write to Teams; using Teams tokens; classic Teams; Linux hosts (CI runs on Linux, but there is no Teams desktop cache to read there); downloading attachments or media (files and links are stored as metadata); a terminal UI.
 
