@@ -14,7 +14,7 @@ import "github.com/ourostack/teamscrawl/internal/calendar"
 
 // MapperVersion is raised whenever a mapping change alters derived calendar data, so
 // the archive can re-read the store.
-const MapperVersion = 1
+const MapperVersion = 3
 
 // Layout names an object layout the reader knows: the class, the envelope tag (the
 // size of the fixed region) and what the object is.
@@ -43,6 +43,7 @@ const (
 
 	// Event fixed region (docs/outlook-store.md).
 	evFixed       = 1109 // the fixed size, equal to the tag
+	evSeriesKey   = 20   // u64: the series key (established)
 	evAreaOne     = 104  // u32: size of area one; the string area starts at evFixed + this
 	evDetailLink  = 180  // u32: equals the word at dtKey of the event's detail object
 	evLastMod     = 288  // ticks
@@ -54,6 +55,8 @@ const (
 	evID          = 820  // word (base evFixed), byte length at evID+4
 	evLocation    = 836  // string word, base T
 	evSubjectBare = 876  // string word, base T; the attendee list follows its terminator
+	evExtraA      = 980  // string word, base T; unidentified, never mapped (an attendee list can follow it)
+	evExtraB      = 772  // string word, base T; unidentified, never mapped
 	evOrgName     = 884  // string word, base T
 	evOrgAddr     = 892  // string word, base T
 	evType        = 904  // u32

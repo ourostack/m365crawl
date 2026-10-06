@@ -1112,3 +1112,31 @@ func TestDerivationFailureIsolatedInASavepoint(t *testing.T) {
 		t.Fatalf("%+v %v", res2, err)
 	}
 }
+
+// A zone change takes the covered days again, and a day whose events were evicted stays covered:
+// coverage keeps its span across the change.
+func TestZoneChangeKeepsDaysOfEvictedEvents(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	putRecords(t, s, t0, calEv(acctA, "e1", "2026-09-10T09:00:00Z", nil), calEv(acctA, "e2", "2026-09-20T09:00:00Z", nil))
+	if _, err := s.EnsureCalendar(ctx, time.UTC, t0); err != nil {
+		t.Fatal(err)
+	}
+	// The cache evicts the whole of 09-10: its record is gone and the day is no longer held.
+	removeRecord(t, s, t1, "e1")
+	derive(t, s, t1)
+	kolkata := time.FixedZone("IST", 5*3600+1800)
+	if res, err := s.EnsureCalendar(ctx, kolkata, t2); err != nil || res == nil {
+		t.Fatalf("%v %v", res, err)
+	}
+	if got := scalar(t, s, `select group_concat(day) from (select day from calendar_covered_days order by day)`); got != "2026-09-10,2026-09-20" {
+		t.Fatalf("covered days %q", got)
+	}
+	if got := scalar(t, s, `select window_start || ' ' || window_end from calendar_sources`); got != "2026-09-09T18:30:00.000Z 2026-09-20T18:30:00.000Z" { // 09-10 to 09-20 inclusive, as Kolkata midnights
+		t.Fatalf("the window shrank: %q", got)
+	}
+	// The evicted event stays live: retaking its day as covered does not make it gone.
+	if got := scalar(t, s, `select removed_at is null from calendar_source_events where source_id='e1'`); got != "1" {
+		t.Fatal("an evicted event became gone")
+	}
+}
