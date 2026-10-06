@@ -40,6 +40,14 @@ type Options struct {
 	OutlookEnabled         bool
 	OutlookRoot            string
 	OutlookMinReadInterval time.Duration
+	// OutlookLink is the operator's explicit link of an Outlook profile to a Teams account: a
+	// Teams account as <tenantId>/<userId>, or OutlookLinkNone to end the link. Empty leaves the
+	// links as they are. OutlookLinkProfile names the profile it applies to; it may be empty when
+	// there is one profile (or, for OutlookLinkNone, to end every link). The link is applied at
+	// the end of a run, after the Teams sources, so a first sync can create the Teams account it
+	// names. It needs OutlookEnabled and no Account filter.
+	OutlookLink        string
+	OutlookLinkProfile string
 }
 
 // Run syncs every Teams origin under o.Root into the archive at o.DBPath while holding the
@@ -210,6 +218,10 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 			settle(o.key, o.report, o.decoded, o.err)
 		}
 	}
+	var linkErr error
+	if stopped == nil && r.o.OutlookLink != "" && r.outlookOn() {
+		linkErr = r.linkOutlook(ctx)
+	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {
 	case stopped != nil && committed > 0:
@@ -228,6 +240,8 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	switch {
 	case stopped != nil:
 		return rep, changes, stopped
+	case linkErr != nil:
+		return rep, changes, linkErr // the operator's mistake comes first; the sources are committed
 	case len(failures) == 0:
 		return rep, changes, nil
 	case committed == 0:

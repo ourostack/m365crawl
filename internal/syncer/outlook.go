@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
@@ -244,4 +246,68 @@ func outlookOmissions(res outlookcal.Result, cal store.CalendarResult) map[strin
 		return nil
 	}
 	return out
+}
+
+// OutlookLinkNone, as Options.OutlookLink, ends the link of an Outlook profile.
+const OutlookLinkNone = "none"
+
+// linkOutlook applies Options.OutlookLink. A mistake is a usage-class error, and nothing changes.
+func (r *runner) linkOutlook(ctx context.Context) error {
+	profiles, err := r.linkProfiles()
+	if err != nil {
+		return err
+	}
+	principal := r.o.OutlookLink
+	if principal == OutlookLinkNone {
+		principal = ""
+	}
+	at := outlookNow()
+	for _, name := range profiles {
+		if err := r.st.SetOutlookLink(ctx, outlookAccount(name), principal, at); err != nil {
+			return asCoded(err)
+		}
+	}
+	return nil
+}
+
+// linkProfiles picks the profiles a link applies to: the one named, the only one there is, or (to
+// end links only) all of them. A link of two profiles to one Teams account is refused by the core,
+// so a choice among several is the operator's.
+func (r *runner) linkProfiles() ([]string, error) {
+	root := r.o.OutlookRoot
+	if root == "" {
+		var err error
+		if root, err = outlookDefaultRoot(); err != nil {
+			return nil, err
+		}
+	}
+	found, _, _, err := outlookDiscover(root)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(found))
+	for i, p := range found {
+		names[i] = p.Name
+	}
+	switch want := r.o.OutlookLinkProfile; {
+	case want != "":
+		if !slices.Contains(names, want) {
+			return nil, linkProfileUsage("no Outlook profile named "+want+" under "+root, names)
+		}
+		return []string{want}, nil
+	case len(names) == 0:
+		return nil, linkProfileUsage("no Outlook profile found under "+root+" to link", names)
+	case len(names) > 1 && r.o.OutlookLink != OutlookLinkNone:
+		return nil, linkProfileUsage("more than one Outlook profile is under "+root+": say which one to link", names)
+	}
+	return names, nil
+}
+
+func linkProfileUsage(msg string, names []string) error {
+	c := errs.Usage(msg)
+	c.Fix = "Add --outlook-profile NAME."
+	if len(names) > 0 {
+		c.Fix = "Add --outlook-profile NAME, one of: " + strings.Join(names, ", ") + "."
+	}
+	return c
 }

@@ -389,11 +389,17 @@ func TestItemOfFilledRoomsAndSources(t *testing.T) {
 		t.Errorf("rooms next to unknown rooms: %+v", it)
 	}
 	row.Unknown = nil
-	// A basic copy counts no attendees, and an outlook-only event has no tenant.
+	// A basic copy counts no attendees. An outlook-only event has the tenant and user of the Teams
+	// account it is linked to, and none while its account is unlinked.
 	row.DetailLevel, row.Sources = calendar.DetailBasic, []calendar.Source{calendar.SourceOutlook}
-	if it = itemOf(row); it.AttendeeCount != nil || it.TenantID != "" {
+	if it = itemOf(row); it.AttendeeCount != nil || it.TenantID != "tenant" || it.UserID != "user" {
 		t.Errorf("%+v", it)
 	}
+	row.Principal = "outlook/Main"
+	if it = itemOf(row); it.TenantID != "" || it.UserID != "" {
+		t.Errorf("an unlinked Outlook account has no tenant: %+v", it)
+	}
+	row.Principal = "tenant/user"
 	row.DetailLevel, row.AttendeesJSON = calendar.DetailFull, "not json"
 	if it = itemOf(row); it.AttendeeCount != nil {
 		t.Errorf("%+v", it)

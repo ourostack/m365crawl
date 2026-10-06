@@ -194,10 +194,10 @@ func itemOf(r store.CalendarRow) calendarItem {
 	if e.LastModified != nil {
 		it.LastModified = e.LastModified.UTC()
 	}
-	for _, s := range r.Sources {
-		if s == calendar.SourceTeams {
-			it.TenantID, it.UserID, _ = strings.Cut(r.Principal, "/")
-		}
+	// The tenant and user are the principal's: a Teams account's, which an Outlook-only event has
+	// once its profile is linked. An unlinked Outlook account has no tenant or user to name.
+	if !strings.HasPrefix(r.Principal, outlookAccountPrefix) {
+		it.TenantID, it.UserID, _ = strings.Cut(r.Principal, "/")
 	}
 	// A room list nobody stated is not printed: calendar.Rooms still builds text rooms from the
 	// location, which location already carries, and rooms must never sit next to "rooms" in
@@ -309,6 +309,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecap{AccountID: u.Principal, calendarRecap: recapOf(u.CalendarRecap)})
 		}
+		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.UncoveredDays = agenda.UncoveredDays
 		if len(list.UncoveredDays) > maxUncoveredDays {
 			list.UncoveredDays, list.UncoveredDaysTotal = list.UncoveredDays[:maxUncoveredDays], len(agenda.UncoveredDays)
@@ -330,6 +331,40 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		}
 		return list, nil
 	})
+}
+
+// outlookAccountPrefix starts the account id of an Outlook profile.
+const outlookAccountPrefix = "outlook/"
+
+// linkFixes is, for each unlinked Outlook account, the command that links it. The Teams account is
+// named when the agenda knows exactly one; with several it is a placeholder, and whoami lists them.
+func linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
+	if len(unlinked) == 0 {
+		return nil
+	}
+	teams := "<tenantId>/<userId>"
+	var only []string
+	for _, a := range known {
+		if !strings.HasPrefix(a.AccountID, outlookAccountPrefix) {
+			only = append(only, a.AccountID)
+		}
+	}
+	if len(only) == 1 {
+		teams = only[0]
+	}
+	out := make([]string, len(unlinked))
+	for i, u := range unlinked {
+		out[i] = "teamscrawl sync --outlook-profile " + shellWord(strings.TrimPrefix(u, outlookAccountPrefix)) + " --outlook-account " + teams
+	}
+	return out
+}
+
+// shellWord quotes s for a POSIX shell when it holds anything but plain characters.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // maxUncoveredDays caps uncovered_days; uncovered_days_total gives the full count when it is cut.

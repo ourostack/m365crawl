@@ -1,0 +1,43 @@
+{
+  "account_id": "outlook/Main",
+  "all_day": true,
+  "body_preview": "Fixture preview text.",
+  "cancelled": false,
+  "detail_level": "basic",
+  "end": "2031-03-06T00:00:00Z",
+  "end_date": "2031-03-06",
+  "event_id": "ev_d122fb0038",
+  "event_key": "040000008200E00074C5B7101A82E008000000000000000000000000000000000000000010000000464958545552452D4556542D30303033|",
+  "event_type": "single",
+  "ical_uid": "040000008200E00074C5B7101A82E008000000000000000000000000000000000000000010000000464958545552452D4556542D30303033",
+  "is_online_meeting": false,
+  "last_modified": "2031-03-01T12:00:00Z",
+  "location": "Fixture Room 1",
+  "organizer_address": "fixture.organizer@example.invalid",
+  "organizer_name": "Fixture Organizer",
+  "response": "none",
+  "series_key": "040000008200E00074C5B7101A82E008000000000000000000000000000000000000000010000000464958545552452D4556542D30303033",
+  "show_as": "free",
+  "sources": [
+    "outlook"
+  ],
+  "start": "2031-03-05T00:00:00Z",
+  "start_date": "2031-03-05",
+  "status": "confirmed",
+  "subject": "Fixture all-day event",
+  "time_zone": "Fixture Eastern Time",
+  "unknown_fields": [
+    "attachments",
+    "attendees",
+    "body",
+    "categories",
+    "has_attachments",
+    "is_organizer",
+    "is_private",
+    "recurrence",
+    "reminder",
+    "rooms",
+    "time_zone_iana",
+    "utc_offset"
+  ]
+}

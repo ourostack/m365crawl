@@ -265,3 +265,87 @@ func TestTeamsBlankSparesOutlookAccountRecaps(t *testing.T) {
 		t.Fatalf("outlook %q teams %q", out, teams)
 	}
 }
+
+func addTeamsAccount(t *testing.T, s *Store, account string) {
+	t.Helper()
+	if _, err := s.db.Exec(`insert into calendar_sources(source, account_id, window_start, window_end, synced_at, cache_fresh_at) values('teams', ?, ?, ?, ?, ?)`,
+		account, "2026-11-01T00:00:00.000Z", "2026-12-01T00:00:00.000Z", "2026-11-02T00:00:00.000Z", "2026-11-02T00:00:00.000Z"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func inEffect(t *testing.T, s *Store, account, principal string) bool {
+	t.Helper()
+	ok, err := s.OutlookLinkInEffect(context.Background(), account, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+// An explicit link is idempotent, its rules come back as usage errors, and OutlookLinkInEffect
+// follows it through every form of the question.
+func TestSetOutlookLink(t *testing.T) {
+	ctx, s := context.Background(), newStore(t)
+	const teams, other = "t1/u1", "t2/u2"
+	at := base
+
+	if err := s.SetOutlookLink(ctx, "outlook/Main", teams, at); err == nil {
+		t.Fatal("a link to a Teams account the archive has not seen was accepted")
+	}
+	addTeamsAccount(t, s, teams)
+	addTeamsAccount(t, s, other)
+	if !inEffect(t, s, "", "") || !inEffect(t, s, "outlook/Main", "") || inEffect(t, s, "", teams) || inEffect(t, s, "outlook/Main", teams) {
+		t.Fatal("nothing is linked yet")
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Main", "", at); err != nil {
+		t.Fatalf("an unlink of an account with no link is not an error: %v", err)
+	}
+
+	if err := s.SetOutlookLink(ctx, "outlook/Main", teams, at); err != nil {
+		t.Fatal(err)
+	}
+	if !inEffect(t, s, "", teams) || !inEffect(t, s, "outlook/Main", teams) || inEffect(t, s, "outlook/Main", other) || inEffect(t, s, "outlook/Second", teams) {
+		t.Fatal("the link is not seen")
+	}
+	if inEffect(t, s, "", "") || inEffect(t, s, "outlook/Main", "") || !inEffect(t, s, "outlook/Second", "") {
+		t.Fatal("an unlink is pending for the linked account only")
+	}
+	var linkedAt string
+	if err := s.db.QueryRow(`select linked_at from calendar_account_links`).Scan(&linkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Main", teams, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var again string
+	if err := s.db.QueryRow(`select linked_at from calendar_account_links`).Scan(&again); err != nil || again != linkedAt {
+		t.Fatalf("a link that was already in place was written again: %q %q %v", linkedAt, again, err)
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Second", teams, at); err == nil {
+		t.Fatal("a second Outlook account was linked to one Teams account")
+	}
+
+	if err := s.SetOutlookLink(ctx, "outlook/Main", "", at); err != nil {
+		t.Fatal(err)
+	}
+	if !inEffect(t, s, "", "") || inEffect(t, s, "", teams) {
+		t.Fatal("the link was not ended")
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Main", other, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOutlookLinkFailuresOnABrokenArchive(t *testing.T) {
+	ctx, s := context.Background(), newStore(t)
+	if _, err := s.db.Exec(`drop table calendar_account_links`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Main", "", base); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := s.OutlookLinkInEffect(ctx, "", ""); err == nil {
+		t.Fatal("no error")
+	}
+}

@@ -75,6 +75,9 @@ type listResult struct {
 	CoverageAsOf     *time.Time `json:"coverage_as_of,omitempty"`
 	Range            *rangeInfo `json:"range,omitempty"`
 	UnlinkedAccounts []string   `json:"unlinked_accounts,omitempty"`
+	// UnlinkedFix has the exact command that links each of UnlinkedAccounts, in the same order. It
+	// names the Teams account when the archive holds only one, and a placeholder otherwise.
+	UnlinkedFix []string `json:"unlinked_fix,omitempty"`
 	// UncoveredDays lists the dates of the range some account does not cover (at most
 	// maxUncoveredDays, with UncoveredDaysTotal when it is longer); Accounts says, per account, when
 	// it last synced and the oldest verification behind its covered days.

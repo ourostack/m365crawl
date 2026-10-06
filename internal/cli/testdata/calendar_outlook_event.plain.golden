@@ -1,0 +1,13 @@
+FIXTURE ALL-DAY EVENT
+=====================
+
+detail    : basic
+event id  : ev_d122fb0038
+location  : Fixture Room 1
+organizer : Fixture Organizer
+response  : none
+status    : confirmed
+when      : 2031-03-05 (all day)
+unknown: attachments, attendees, body, categories, has_attachments, is_organizer, is_private, recurrence, reminder, rooms, time_zone_iana, utc_offset
+outlook is the only source of this event; not known: attendees, body
+archive age: <age>

@@ -244,3 +244,51 @@ func (s *Store) SetOutlookLastAttempt(ctx context.Context, profile string, at ti
 	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookAttemptKey+profile, at.UTC().Format(timeLayout))
 	return err
 }
+
+// OutlookLinkMethod is how an operator's explicit link is recorded in calendar_account_links.
+const OutlookLinkMethod = "config"
+
+// SetOutlookLink links the Outlook account to the Teams account principal, or ends its link when
+// principal is empty. It is idempotent: an account already linked to principal, or an unlink of an
+// account with no link, changes nothing, so a link given on every run (an environment variable)
+// does not rewrite the row. A rule of the core (an unknown Teams account, a principal that
+// already has another Outlook account) comes back as its usage-class error and nothing changes.
+func (s *Store) SetOutlookLink(ctx context.Context, account, principal string, at time.Time) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		p, err := calendar.LoadPrincipals(ctx, tx)
+		if err != nil {
+			return err
+		}
+		switch {
+		case principal == "" && p.Of(account) == account:
+			return nil
+		case principal != "" && p.Of(account) == principal:
+			return nil
+		case principal == "":
+			return calendar.UnlinkAccount(ctx, tx, calendar.SourceOutlook, account, at)
+		}
+		return calendar.LinkAccount(ctx, tx, calendar.SourceOutlook, account, principal, OutlookLinkMethod, at)
+	})
+}
+
+// OutlookLinkInEffect says whether an Outlook link already is what an operator asked for: with a
+// principal, that account (any Outlook account when account is empty) is linked to it; with none,
+// the account (or every Outlook account) has no link. A read command uses it to know whether the
+// flag still needs a sync to take effect.
+func (s *Store) OutlookLinkInEffect(ctx context.Context, account, principal string) (bool, error) {
+	p, err := calendar.LoadPrincipals(ctx, s.db)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case principal != "" && account != "":
+		return p.Of(account) == principal, nil
+	case principal != "":
+		return len(p.Accounts(principal)) > 1, nil
+	case account != "":
+		return p.Of(account) == account, nil
+	}
+	var active int
+	err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where unlinked_at is null and source=?`, string(calendar.SourceOutlook)).Scan(&active)
+	return active == 0, err
+}
