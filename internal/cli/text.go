@@ -334,9 +334,13 @@ func (rt *runtime) unlinkedRecapTable(r *listResult) {
 		for _, a := range u.ActionItems {
 			actions = append(actions, oneLine(firstOf(a.Title, a.Text)))
 		}
-		rows[i] = []string{stamp(u.MeetingStart), oneLine(firstOf(u.Headline, u.ShortSummary)), strings.Join(actions, "; ")}
+		when := stamp(u.PlacedAt)
+		if u.PlacedBy == "recording_start" {
+			when += " (recording start; meeting start unknown)"
+		}
+		rows[i] = []string{when, firstOf(oneLine(firstOf(u.Headline, u.ShortSummary)), "(no summary text)"), strings.Join(actions, "; ")}
 	}
-	render.Table(w, []string{"meeting start", "summary", "action items"}, rows, color)
+	render.Table(w, []string{"started", "summary", "action items"}, rows, color)
 	if r.UnlinkedRecapsTotal > len(r.UnlinkedRecaps) {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%d of %d recaps shown; raise --limit", len(r.UnlinkedRecaps), r.UnlinkedRecapsTotal), color))
 	}

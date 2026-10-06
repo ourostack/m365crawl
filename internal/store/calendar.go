@@ -42,7 +42,14 @@ type CalendarCounts struct {
 	RecapItems Counts `json:"recap_items"`
 	Gone       int    `json:"gone"`
 	Linked     int    `json:"linked"`
-	Refused    int    `json:"refused"`
+	// LinkedByStart, UnlinkedNoEvent and UnlinkedAmbiguous are a census after the derivation, summed over
+	// the accounts it read: the recaps linked by meeting start, and the recaps with a meeting start and
+	// no iCalUID that stay unlinked because no event, or several, start within five minutes. They are
+	// not what this run changed: start links are recomputed from the archive on every derivation.
+	LinkedByStart     int `json:"linked_by_start"`
+	UnlinkedNoEvent   int `json:"unlinked_no_event"`
+	UnlinkedAmbiguous int `json:"unlinked_ambiguous"`
+	Refused           int `json:"refused"`
 }
 
 // Add adds b to c.
@@ -55,6 +62,9 @@ func (c *CalendarCounts) Add(b CalendarCounts) {
 	}
 	c.Gone += b.Gone
 	c.Linked += b.Linked
+	c.LinkedByStart += b.LinkedByStart
+	c.UnlinkedNoEvent += b.UnlinkedNoEvent
+	c.UnlinkedAmbiguous += b.UnlinkedAmbiguous
 	c.Refused += b.Refused
 }
 
@@ -710,13 +720,15 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 	if err != nil {
 		return counts, nil, err
 	}
-	counts = CalendarCounts{Events: toCounts(bc.Events), Recaps: toCounts(bc.Recaps), RecapItems: toCounts(bc.RecapItems), Gone: bc.Gone, Linked: bc.Linked, Refused: len(bc.Refused)}
+	counts = CalendarCounts{Events: toCounts(bc.Events), Recaps: toCounts(bc.Recaps), RecapItems: toCounts(bc.RecapItems), Gone: bc.Gone, Linked: bc.Linked, LinkedByStart: bc.LinkedByStart, UnlinkedNoEvent: bc.NoStartMatch, UnlinkedAmbiguous: bc.AmbiguousStart, Refused: len(bc.Refused)}
 	if len(g.gone) > 0 {
 		gc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, GoneSourceIDs: g.gone}, opts, m.at)
 		if err != nil {
 			return counts, nil, err
 		}
 		counts.Gone += gc.Gone
+		// The census after the gone ids are applied: an event that went takes its start links with it.
+		counts.LinkedByStart, counts.UnlinkedNoEvent, counts.UnlinkedAmbiguous = gc.LinkedByStart, gc.NoStartMatch, gc.AmbiguousStart
 	}
 	return counts, bc.Refused, nil
 }

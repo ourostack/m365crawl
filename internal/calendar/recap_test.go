@@ -205,7 +205,7 @@ func TestLinkRecapsAmbiguousStaysUnlinked(t *testing.T) {
 	master.EventType = EventMaster
 	allDay := evAt(t, "d", "uid-d", "2026-10-05T16:00:00Z", "2026-10-05T17:00:00Z")
 	setAllDay(&allDay, "2026-10-05", "")
-	far := evAt(t, "f", "uid-f", "2026-10-05T16:05:00Z", "2026-10-05T17:00:00Z")
+	far := evAt(t, "f", "uid-f", "2026-10-05T16:06:00Z", "2026-10-05T17:00:00Z")
 	seedLinkable(t, db2, gone, master, allDay, far)
 	batch(t, db2, Batch{Window: tw(t), GoneSourceIDs: []string{"g"}}, "2026-10-06T01:30:00Z")
 	batch(t, db2, Batch{Window: tw(t), Recaps: []Recap{unlinked(t, "c1")}}, "2026-10-06T02:00:00Z")
