@@ -8,7 +8,9 @@ import (
 )
 
 // The occurrence id: the per-occurrence id Teams uses as iCalUID. These ids are Exchange global
-// object ids written as uppercase hex. In that layout (MS-OXOCAL) a 16-byte class id is followed
+// object ids written as hex (Teams writes them in lower case, Outlook's store in upper case; both
+// functions answer in upper case, and a caller that compares with Teams ids lower-cases the result,
+// as the Outlook mapper does). In that layout (MS-OXOCAL) a 16-byte class id is followed
 // by the year (2 bytes, big-endian), the month (1 byte) and the day (1 byte), then creation time,
 // reserved bytes, a size and the data. A series id has the four date bytes zero; the
 // per-occurrence id is the series id with those bytes replaced by the occurrence's original date.

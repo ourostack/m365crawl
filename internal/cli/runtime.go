@@ -36,6 +36,8 @@ type runtime struct {
 	root           string
 	outlookRoot    string // the Outlook profiles directory; empty means the default
 	outlookOn      bool
+	outlookLink    string // --outlook-account: a Teams account as <tenantId>/<userId>, "none", or empty
+	outlookProfile string // --outlook-profile
 	account        *teamsdesktop.Account
 	now            func() time.Time
 	exitErr        error       // a failure while printing for a flag that ends the run (--version)
@@ -109,14 +111,22 @@ func (rt *runtime) progress() io.Writer {
 // older than --max-age. A failed sync does not stop the read: it comes back as a warning. Only
 // cancellation is returned as an error.
 func (rt *runtime) ensureFresh() (*syncError, error) {
-	if rt.maxAge <= 0 {
+	if rt.maxAge <= 0 && rt.outlookLink == "" {
 		return nil, nil
 	}
-	last, err := rt.lastSuccess()
+	last, pending, err := rt.lastSuccess()
 	if err != nil {
 		return nil, err
 	}
-	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge {
+	if rt.maxAge <= 0 {
+		if !pending {
+			return nil, nil
+		}
+		c := errs.Usage("--outlook-account is not applied while --max-age is 0, which turns the implicit sync off")
+		c.Fix = "Run `teamscrawl sync " + rt.linkFlags() + "` to apply it."
+		return nil, c
+	}
+	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge && !pending {
 		return nil, nil
 	}
 	age := time.Duration(0) // zero: no complete sync yet
@@ -126,7 +136,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	rt.printSyncNotice(age) // stderr only; stdout stays the result
 	began := rt.now()
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
-	rep, _, err := runSync(rt.ctx, rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()}))
+	rep, _, err := runSync(rt.ctx, rt.linkOptions(rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})))
 	rt.synced = &syncedInfo{Seconds: math.Round(rt.now().Sub(began).Seconds()*10) / 10, Status: rep.Status}
 	if err == nil {
 		return nil, nil
@@ -141,21 +151,27 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	if !errors.As(err, &coded) {
 		coded = errs.Internal(err)
 	}
+	if coded.Exit == errs.ExitUsage {
+		return nil, coded // the link the operator asked for was refused: that is theirs to fix, not a warning
+	}
 	rt.printWarning(coded)
 	b := bodyOf(coded)
 	return &syncError{Code: b.Code, Message: b.Message}, nil
 }
 
-func (rt *runtime) lastSuccess() (time.Time, error) {
+// lastSuccess is when the archive was last fully synced for this read, and whether an
+// --outlook-account link is still waiting for a sync to apply it.
+func (rt *runtime) lastSuccess() (last time.Time, pending bool, err error) {
 	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
 	if errors.Is(err, store.ErrNoArchive) {
-		return time.Time{}, nil
+		return time.Time{}, false, nil
 	}
 	if err != nil {
-		return time.Time{}, errs.DBError(err)
+		return time.Time{}, false, errs.DBError(err)
 	}
 	defer func() { _ = st.Close() }()
-	return rt.freshness(st)
+	last, err = rt.freshness(st)
+	return last, rt.linkPending(st), err
 }
 
 // freshness is when the accounts this read covers were last fully synced: --account's own time, or
@@ -337,6 +353,77 @@ func outlookChoice(root, teamsRoot, env string) (dir string, on bool) {
 		return root, true
 	}
 	return "", env == "1" && teamsRoot == ""
+}
+
+// outlookAccountEnv is the environment variable of --outlook-account.
+const outlookAccountEnv = "TEAMSCRAWL_OUTLOOK_ACCOUNT"
+
+// checkLink validates --outlook-account and --outlook-profile and, when they are good, turns the
+// link on for this run. Only a command that syncs or reads the calendar calls it, so a stray
+// variable never breaks whoami, status or version. The account is a Teams account in the form of
+// --account, or "none". A link needs the Outlook source on: with the source off, a value that came
+// from the environment alone is a warning (it is the ambient setting of a machine that sometimes
+// runs without Outlook) and a flag is a usage error. A profile name means nothing without a link.
+func (rt *runtime) checkLink() error {
+	account, profile := rt.g.OutlookAccount, rt.g.OutlookProfile
+	switch {
+	case account == "" && profile == "":
+		return nil
+	case account == "":
+		return errs.Usage("--outlook-profile names the profile --outlook-account applies to; give --outlook-account too")
+	case !rt.outlookOn:
+		c := errs.Usage("--outlook-account needs the Outlook source, which is off")
+		c.Fix = "Add --outlook-root DIR, or set TEAMSCRAWL_OUTLOOK=1 (which is ignored when --teams-root is set)."
+		if os.Getenv(outlookAccountEnv) == account {
+			rt.printWarning(c) // from the environment only: ignored
+			return nil
+		}
+		return c
+	case account == syncer.OutlookLinkNone:
+		rt.outlookLink, rt.outlookProfile = account, profile
+		return nil
+	}
+	a, err := parseAccount(account)
+	if err != nil {
+		c := errs.Usage("--outlook-account must be <tenantId>/<userId> of a Teams account, or none")
+		c.Fix = "`teamscrawl whoami` lists the Teams accounts."
+		return c
+	}
+	rt.outlookLink, rt.outlookProfile = a.TenantID+"/"+a.UserID, profile
+	return nil
+}
+
+// linkFlags is the --outlook-account (and --outlook-profile) of this run, as one would type them.
+func (rt *runtime) linkFlags() string {
+	out := "--outlook-account " + rt.outlookLink
+	if rt.outlookProfile != "" {
+		out = "--outlook-profile " + shellWord(rt.outlookProfile) + " " + out
+	}
+	return out
+}
+
+// linkOptions adds the explicit Outlook link to the options of a sync that applies it.
+func (rt *runtime) linkOptions(o syncer.Options) syncer.Options {
+	o.OutlookLink, o.OutlookLinkProfile = rt.outlookLink, rt.outlookProfile
+	return o
+}
+
+// linkPending says whether --outlook-account still has to be applied by a sync: the archive does
+// not show the link as asked for. An archive that cannot say (no calendar tables) counts as
+// pending.
+func (rt *runtime) linkPending(st *store.Store) bool {
+	if rt.outlookLink == "" {
+		return false
+	}
+	account, principal := "", rt.outlookLink
+	if rt.outlookProfile != "" {
+		account = "outlook/" + rt.outlookProfile
+	}
+	if principal == syncer.OutlookLinkNone {
+		principal = ""
+	}
+	ok, err := st.OutlookLinkInEffect(rt.ctx, account, principal)
+	return err != nil || !ok
 }
 
 // syncOptions adds the Outlook choice to a run's options.

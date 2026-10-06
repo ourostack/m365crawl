@@ -407,9 +407,14 @@ func TestTwinsAreInTeamsFixture(t *testing.T) {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
+		// The store holds the id in upper case and Teams in lower case, so the Teams fixture must
+		// hold the lower-case form and not the store's.
 		found := false
 		for _, b := range all {
 			if bytes.Contains(b, []byte(line)) {
+				t.Errorf("twin %s is in the Teams fixture in the store's case", line)
+			}
+			if bytes.Contains(b, []byte(strings.ToLower(line))) {
 				found = true
 				break
 			}

@@ -398,11 +398,17 @@ func TestItemOfFilledRoomsAndSources(t *testing.T) {
 		t.Errorf("rooms next to unknown rooms: %+v", it)
 	}
 	row.Unknown = nil
-	// A basic copy counts no attendees, and an outlook-only event has no tenant.
+	// A basic copy counts no attendees. An outlook-only event has the tenant and user of the Teams
+	// account it is linked to, and none while its account is unlinked.
 	row.DetailLevel, row.Sources = calendar.DetailBasic, []calendar.Source{calendar.SourceOutlook}
-	if it = itemOf(row); it.AttendeeCount != nil || it.TenantID != "" {
+	if it = itemOf(row); it.AttendeeCount != nil || it.TenantID != "tenant" || it.UserID != "user" {
 		t.Errorf("%+v", it)
 	}
+	row.Principal = "outlook/Main"
+	if it = itemOf(row); it.TenantID != "" || it.UserID != "" {
+		t.Errorf("an unlinked Outlook account has no tenant: %+v", it)
+	}
+	row.Principal = "tenant/user"
 	row.DetailLevel, row.AttendeesJSON = calendar.DetailFull, "not json"
 	if it = itemOf(row); it.AttendeeCount != nil {
 		t.Errorf("%+v", it)
@@ -815,7 +821,7 @@ func TestActionTextTable(t *testing.T) {
 }
 
 // fixtureStandupSeries is the series key of the fixture standup of the first account.
-const fixtureStandupSeries = "040000008200E00074C5B7101A82E00800000000464958545552452D5354414E4455502D3100000000000000000000000000000000000000"
+const fixtureStandupSeries = "040000008200e00074c5b7101a82e00800000000464958545552452d5354414e4455502d3100000000000000000000000000000000000000"
 
 // A Meeting conversation that events name as their chat carries the series and the occurrence count;
 // a conversation no event names carries neither key.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
@@ -244,4 +246,84 @@ func outlookOmissions(res outlookcal.Result, cal store.CalendarResult) map[strin
 		return nil
 	}
 	return out
+}
+
+// OutlookLinkNone, as Options.OutlookLink, ends the link of an Outlook profile.
+const OutlookLinkNone = "none"
+
+// linkOutlook applies Options.OutlookLink. A mistake is a usage-class error, and nothing changes.
+func (r *runner) linkOutlook(ctx context.Context) error {
+	profiles, err := r.linkProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	principal := r.o.OutlookLink
+	if principal == OutlookLinkNone {
+		principal = ""
+	}
+	at := outlookNow()
+	for _, name := range profiles {
+		if err := r.st.SetOutlookLink(ctx, outlookAccount(name), principal, at); err != nil {
+			return asCoded(err)
+		}
+	}
+	return nil
+}
+
+// linkProfiles picks the profiles a link applies to: the one named, the only one there is, or (to
+// end links only) all of them. A link of two profiles to one Teams account is refused by the core,
+// so a choice among several is the operator's. Ending a link also knows the profiles the archive
+// holds an active link for, so a link whose profile directory is gone can still be ended.
+func (r *runner) linkProfiles(ctx context.Context) ([]string, error) {
+	none := r.o.OutlookLink == OutlookLinkNone
+	root := r.o.OutlookRoot
+	var names []string
+	var err error
+	if root == "" {
+		root, err = outlookDefaultRoot()
+	}
+	if err == nil {
+		var found []outlookdesktop.Profile
+		if found, _, _, err = outlookDiscover(root); err == nil {
+			for _, p := range found {
+				names = append(names, p.Name)
+			}
+		}
+	}
+	if err != nil && !none {
+		return nil, err
+	}
+	if none { // a missing directory is no reason to keep a link
+		linked, lerr := r.st.OutlookLinkedAccounts(ctx)
+		if lerr != nil {
+			return nil, asCoded(lerr)
+		}
+		for _, a := range linked {
+			if n := strings.TrimPrefix(a, "outlook/"); !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
+		slices.Sort(names)
+	}
+	switch want := r.o.OutlookLinkProfile; {
+	case want != "":
+		if !slices.Contains(names, want) {
+			return nil, linkProfileUsage("no Outlook profile named "+want+" under "+root, names)
+		}
+		return []string{want}, nil
+	case len(names) == 0 && !none:
+		return nil, linkProfileUsage("no Outlook profile found under "+root+" to link", names)
+	case len(names) > 1 && !none:
+		return nil, linkProfileUsage("more than one Outlook profile is under "+root+": say which one to link", names)
+	}
+	return names, nil
+}
+
+func linkProfileUsage(msg string, names []string) error {
+	c := errs.Usage(msg)
+	c.Fix = "Add --outlook-profile NAME."
+	if len(names) > 0 {
+		c.Fix = "Add --outlook-profile NAME, one of: " + strings.Join(names, ", ") + "."
+	}
+	return c
 }

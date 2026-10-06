@@ -194,10 +194,10 @@ func itemOf(r store.CalendarRow) calendarItem {
 	if e.LastModified != nil {
 		it.LastModified = e.LastModified.UTC()
 	}
-	for _, s := range r.Sources {
-		if s == calendar.SourceTeams {
-			it.TenantID, it.UserID, _ = strings.Cut(r.Principal, "/")
-		}
+	// The tenant and user are the principal's: a Teams account's, which an Outlook-only event has
+	// once its profile is linked. An unlinked Outlook account has no tenant or user to name.
+	if !strings.HasPrefix(r.Principal, outlookAccountPrefix) {
+		it.TenantID, it.UserID, _ = strings.Cut(r.Principal, "/")
 	}
 	// A room list nobody stated is not printed: calendar.Rooms still builds text rooms from the
 	// location, which location already carries, and rooms must never sit next to "rooms" in
@@ -273,6 +273,9 @@ func checkCalendarFields(rt *runtime) error {
 }
 
 func (c *calendarCmd) Run(rt *runtime) error {
+	if err := rt.checkLink(); err != nil {
+		return err
+	}
 	if err := checkCalendarFields(rt); err != nil {
 		return err
 	}
@@ -310,12 +313,47 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}
+		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.setCoverage(agenda.UncoveredDays, agenda.Accounts, agenda.AsOf)
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
 		return list, nil
 	})
+}
+
+// outlookAccountPrefix starts the account id of an Outlook profile.
+const outlookAccountPrefix = "outlook/"
+
+// linkFixes is, for each unlinked Outlook account, the command that links it. The Teams account is
+// named when the agenda knows exactly one; with several it is a placeholder, and whoami lists them.
+func linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
+	if len(unlinked) == 0 {
+		return nil
+	}
+	teams := "<tenantId>/<userId>"
+	var only []string
+	for _, a := range known {
+		if !strings.HasPrefix(a.AccountID, outlookAccountPrefix) {
+			only = append(only, a.AccountID)
+		}
+	}
+	if len(only) == 1 {
+		teams = only[0]
+	}
+	out := make([]string, len(unlinked))
+	for i, u := range unlinked {
+		out[i] = "teamscrawl sync --outlook-profile " + shellWord(strings.TrimPrefix(u, outlookAccountPrefix)) + " --outlook-account " + teams
+	}
+	return out
+}
+
+// shellWord quotes s for a POSIX shell when it holds anything but plain characters.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // setCoverage fills the per-day and per-account coverage keys of a calendar list.
@@ -539,6 +577,9 @@ type calendarEventCmd struct {
 }
 
 func (c *calendarEventCmd) Run(rt *runtime) error {
+	if err := rt.checkLink(); err != nil {
+		return err
+	}
 	for _, f := range rt.fields {
 		if !contains(eventKeys(), f) {
 			u := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(eventKeys(), ", ")))

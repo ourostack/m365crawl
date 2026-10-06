@@ -22,6 +22,8 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | `--db=PATH` | Archive database path (default `~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) (`$TEAMSCRAWL_DB`). On Windows the default path is private by construction; a custom path must use a private existing parent, let teamscrawl create a new private parent, and any pre-existing archive file must already be private, or open fails with `db_error` before SQLite writes anything. |
 | `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($TEAMSCRAWL_TEAMS_ROOT). |
 | `--outlook-root=DIR` | New Outlook for Mac profiles directory, read as a second calendar source; `none` turns it off ($TEAMSCRAWL_OUTLOOK_ROOT; `TEAMSCRAWL_OUTLOOK=1` uses the default directory). Off by default. |
+| `--outlook-account=TENANT/USER\|none` | Link the Outlook profile to this Teams account so their events merge; `none` ends the link. The link is kept, so the flag is needed only to change it. Needs the Outlook source on ($TEAMSCRAWL_OUTLOOK_ACCOUNT). |
+| `--outlook-profile=NAME` | The Outlook profile `--outlook-account` applies to: required when more than one profile is under the Outlook root ($TEAMSCRAWL_OUTLOOK_PROFILE). |
 | `--account=TENANT/USER` | Only this account, as &lt;tenantId&gt;/&lt;userId&gt;. Default: every account. |
 | `--no-color` | Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color. |
 | `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($TEAMSCRAWL_MAX_AGE). When a read does sync first, stderr gets one line before it starts (plain text in text mode, `teamscrawl: syncing — archive is 2h14m old (max-age 15m)`; one JSON line in json and log mode, `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}`) and the result gains `synced: {seconds, status}`. |
@@ -88,11 +90,14 @@ teamscrawl sync [flags]
 
 Result: The sync report (see SPEC.md sections 4 and 5). It carries `calendar` counts (`events`, `recaps`, `recap_items`, `gone`, `linked`, `linked_by_start`, `unlinked_no_event`, `unlinked_ambiguous`, `refused`) for the calendar tables the sync filled from the calendar and recap records; there is no calendar command yet, so read them with `teamscrawl sql "select count(*) from calendar_source_events"`. Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
+`--outlook-account` and `--outlook-profile` link an Outlook profile to a Teams account (SPEC.md section 4.2): the link is applied after the sources, a refused link exits 2 with the report on stdout, and `--account` cannot be combined with it.
+
 Examples:
 
 ```sh
 teamscrawl sync
 teamscrawl sync --json
+teamscrawl sync --outlook-root ~/outlook --outlook-profile Main --outlook-account <tenantId>/<userId>
 ```
 
 ## status
@@ -317,11 +322,11 @@ Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
 
 `calendar event <event>` takes an `event_id`, an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates by `event_id`. `--fields` keeps the keys named, in that order; `--max-text` cuts the body, summaries and action-item text and sets `text_truncated`.
 
-Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverage_gap", "coverage_as_of"?, "uncovered_days"?, "uncovered_days_total"?, "accounts"?, "range": {"from", "to", "zone"}, "unlinked_accounts"?, "unlinked_recaps"?, "unlinked_recaps_total"?, "archive_age_seconds", ...}`.
+Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverage_gap", "coverage_as_of"?, "uncovered_days"?, "uncovered_days_total"?, "accounts"?, "range": {"from", "to", "zone"}, "unlinked_accounts"?, "unlinked_fix"?, "unlinked_recaps"?, "unlinked_recaps_total"?, "archive_age_seconds", ...}`.
 
 - `coverage_gap` is true when some day of the range is not covered by any cached data. `coverage_as_of` is the oldest time a covered day of the range was verified (so "as of three weeks ago" can be said). `uncovered_days` lists the dates of the range some account does not cover (at most 31; `uncovered_days_total` gives the count when it is longer), and `accounts` lists, for each account, `account_id`, `synced_at` and its own `coverage_as_of`, so an agent can tell which days and which account to distrust.
 - `range` is the range read, in this machine's zone.
-- `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged).
+- `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged). `unlinked_fix` has, in the same order, the exact command that links each one: `teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`, with the Teams account written out when the agenda holds only one. Linking is explicit only; see `--outlook-account`.
 - `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event of the archive (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions; `unlinked_recaps_total` appears only when the limit cut the list. Each carries `placed_at` and `placed_by`: `meeting_start` when the recap has its own meeting start, `recording_start` when it has none and the recording's start stands in for it (then `meeting_start` is absent, and the text says "meeting start unknown"). A recap with neither time cannot be placed in a range and is not listed.
 - A recap's `link_method` says how it reached its event: `ical_uid` (the recap carries the event's id: certain), `time` (no id, but its start and end each match the event's within a minute: very likely) or `start_time` (no id, and exactly one event starts within five minutes of the meeting start: a match by time only, not by id, so weigh it accordingly). Cancelled and declined events are never matched, and `start_time` links are recomputed on every sync, so one disappears when it stops being unique or its event goes. When several occurrences of a recurring series carry the same id (the series id), a recap linked to that id belongs to the one occurrence whose start is nearest its `meeting_start` within five minutes (the `start_time` tolerance; the lower key on a tie), and is listed on no other. The choice is made among every occurrence of the id, removed, cancelled and declined ones too, so removing or cancelling an occurrence never moves its recap to another. A recap that no occurrence matches, or that has no `meeting_start`, cannot be placed: it stays on every occurrence with `series_level: true`, and `meeting_start` is the only hint to which one it belongs to. An id that only one occurrence holds attaches all its recaps to it.
 
@@ -349,7 +354,7 @@ Examples:
 ```sh
 teamscrawl calendar --days 7
 teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
-teamscrawl calendar event ev_5ad4c8d3c8 --max-text 400
+teamscrawl calendar event ev_2da7280856 --max-text 400
 ```
 
 ## stores

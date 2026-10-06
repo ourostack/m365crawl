@@ -419,7 +419,7 @@ func (g *gen) twins() string {
 	ids := []event{g.plain(), g.online(), master, occ, exc}
 	var sb strings.Builder
 	sb.WriteString("# iCal UIDs (hex) of fixture events that are the same meetings as events in the Teams fixture.\n")
-	sb.WriteString("# They equal the iCalUID values in testdata/teams-fixture (account seed 1).\n")
+	sb.WriteString("# They equal the iCalUID values in testdata/teams-fixture (account seed 1) once lower-cased: the store holds ids in upper case, as the real one does, and Teams holds them in lower case.\n")
 	for _, e := range ids {
 		sb.WriteString(hxbuild.HexID(e.spec.ID) + "\n")
 	}
