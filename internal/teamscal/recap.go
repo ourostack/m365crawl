@@ -94,16 +94,23 @@ func MapCatchUpRecord(acct teamsdesktop.Account, key string, valueJSON []byte) (
 
 // MapRecapRecord maps one record of the meeting recap store (key is its recapId) to one recap
 // with its action items and mentions. Its callId joins it to a catch-up recap of the same call;
-// iCalUID stays empty, and the link step fills it from the event. A record without a callId is
-// unmapped.
+// iCalUID stays empty, and the link step fills it from the event. The record is {data, recapId,
+// syncTimeUtc} and the content is under data (measured on a real cache: all 17 records); a record
+// without a data object or without data.callId is unmapped.
 func MapRecapRecord(acct teamsdesktop.Account, key string, valueJSON []byte) (calendar.Recap, []calendar.RecapItem, MapNotes, error) {
 	var notes MapNotes
 	if key == "" {
 		return calendar.Recap{}, nil, notes, &UnmappedError{Reason: "no recapId"}
 	}
-	m, err := decode(valueJSON)
+	outer, err := decode(valueJSON)
 	if err != nil {
 		return calendar.Recap{}, nil, notes, err
+	}
+	// The real store wraps the content: {data, recapId, syncTimeUtc}. Every field below is read
+	// from data; a record that has no data object has no content and is unmapped.
+	m := object(outer["data"])
+	if m == nil {
+		return calendar.Recap{}, nil, notes, &UnmappedError{Reason: "no data object"}
 	}
 	callID := str(m["callId"])
 	if callID == "" {
