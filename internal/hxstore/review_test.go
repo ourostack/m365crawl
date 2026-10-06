@@ -68,7 +68,7 @@ func TestResyncFlag(t *testing.T) {
 	p = append(p, hxbuild.NewObject(4, 12, 12).Encode()...) // contiguous again
 	var got []bool
 	var classes []uint16
-	walkObjects(p, func(_ int, class, _ uint16, _ []byte, r bool) error {
+	_, _ = walkObjects(p, func(_ int, class, _ uint16, _ []byte, r bool) error {
 		got = append(got, r)
 		classes = append(classes, class)
 		return nil
@@ -88,7 +88,7 @@ func TestResyncFlag(t *testing.T) {
 	inner := hxbuild.NewObject(9, 12, 12).Encode()
 	outer := append([]byte{0x20, 0, 0, 0, 5, 0, 0x20, 0, 0x21, 0, 0, 0, 0, 0, 7, 0}, inner...)
 	got = nil
-	walkObjects(outer, func(_ int, class, _ uint16, _ []byte, r bool) error {
+	_, _ = walkObjects(outer, func(_ int, class, _ uint16, _ []byte, r bool) error {
 		if class != 9 {
 			t.Fatalf("class %d", class)
 		}
