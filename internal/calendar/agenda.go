@@ -394,17 +394,33 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 	idCols := []column{eventColumns[1]} // account_id
 	want := map[groupKey]bool{}
 	var keys []string
-	for _, q := range eventQueries(idCols, scope, from, to, first.AddDate(0, 0, -1).Format(dateLayout), last.AddDate(0, 0, 1).Format(dateLayout)) {
-		found, err := queryKeyed(ctx, db, idCols, q)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range found {
-			if g := (groupKey{p.Of(r.AccountID), r.key}); !want[g] {
-				want[g] = true
-				keys = append(keys, r.key)
+	have := map[string]bool{}
+	collect := func(queries []eventQuery) error {
+		for _, q := range queries {
+			found, err := queryKeyed(ctx, db, idCols, q)
+			if err != nil {
+				return err
+			}
+			for _, r := range found {
+				if g := (groupKey{p.Of(r.AccountID), r.key}); !want[g] {
+					want[g] = true
+					if !have[r.key] {
+						have[r.key] = true
+						keys = append(keys, r.key)
+					}
+				}
 			}
 		}
+		return nil
+	}
+	err := collect(eventQueries(idCols, scope, from, to, first.AddDate(0, 0, -1).Format(dateLayout), last.AddDate(0, 0, 1).Format(dateLayout)))
+	if err == nil {
+		// Keys never move, so one occurrence can sit under a timed key in one source and a date key
+		// in another. Every key of a candidate's global id is a candidate too; joinOccurrences decides.
+		err = collect(siblingQueries(idCols, keys, first.AddDate(0, 0, -2).Format(dateLayout), last.AddDate(0, 0, 3).Format(dateLayout)))
+	}
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(keys)
 	cols := selectColumns(false)
@@ -426,10 +442,152 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 		}
 		keys = keys[n:]
 	}
+	joinOccurrences(groups)
 	for _, rows := range groups {
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Source < rows[j].Source })
 	}
 	return groups, nil
+}
+
+// siblingQueries select the account and key of the keys of each global id in keys that can join a
+// candidate: the date-form keys within the range widened by one day, and the timed keys whose
+// start is within one day of those dates. Key suffixes sort by their leading date, so one range
+// [id|lo, id|hi) per id covers both, and a long series costs a few rows, not all of its
+// occurrences. lo and hi are dates (the range's first date less two days, its last plus three).
+func siblingQueries(idCols []column, keys []string, lo, hi string) []eventQuery {
+	seen := map[string]bool{}
+	var out []eventQuery
+	for _, k := range keys {
+		gid, suffix, ok := splitKey(k)
+		if !ok || suffix == "" || seen[gid] {
+			continue
+		}
+		seen[gid] = true
+		out = append(out, eventQuery{sql: selectSQL(idCols, "event_key >= ? AND event_key < ?"), args: []any{gid + "|" + lo, gid + "|" + hi}})
+	}
+	return out
+}
+
+// splitKey splits a global key "<id>|<suffix>"; a composite key has no global id.
+func splitKey(key string) (gid, suffix string, ok bool) {
+	i := strings.LastIndex(key, "|")
+	if i < 0 || strings.HasPrefix(key, compositePrefix) {
+		return "", "", false
+	}
+	return key[:i], key[i+1:], true
+}
+
+// joinOccurrences merges, within one principal, the group of a date key with the group of a timed
+// key of the same global id whose original start falls on that date. Keys never move, so an
+// occurrence first stored as timed that later became all-day keeps its timed key while its
+// twin mints the date key; reading joins them.
+//
+// The date of an instant is read in the rows' own zone (IANA name, then UTC offset). With no zone
+// on any row the instant must lie in the date's UTC day: that holds for Outlook, which stores
+// an all-day event at midnight UTC, and for Teams, which stores it at local midnight, in every
+// zone west of UTC. An instant before the date's UTC midnight (an eastern zone, or the previous
+// evening's occurrence of a daily series) is not joined, because without a zone the two cannot be
+// told apart. Two occurrences on adjacent days therefore never join.
+//
+// A joined group holds at most one row per source: of the timed keys that fall on a date, a source
+// contributes the one nearest the date's local midnight, and only if the date group has no row of
+// that source already. The rest stay groups of their own.
+func joinOccurrences(groups map[groupKey][]Event) {
+	type id struct{ principal, gid string }
+	dates := map[id][]string{}
+	var timed []groupKey
+	for g := range groups {
+		gid, suffix, ok := splitKey(g.key)
+		switch {
+		case !ok || suffix == "":
+		case isDateSuffix(suffix):
+			dates[id{g.principal, gid}] = append(dates[id{g.principal, gid}], suffix)
+		default:
+			timed = append(timed, g)
+		}
+	}
+	type offer struct {
+		from groupKey
+		to   groupKey
+		dist time.Duration
+	}
+	var offers []offer
+	for _, g := range timed {
+		gid, suffix, _ := splitKey(g.key)
+		cands := dates[id{g.principal, gid}]
+		at, err := time.Parse(time.RFC3339, suffix)
+		if len(cands) == 0 || err != nil { // err: not a key this package minted
+			continue
+		}
+		if date, dist, ok := occurrenceDate(at, groups[g], cands); ok {
+			offers = append(offers, offer{g, groupKey{g.principal, gid + "|" + date}, dist})
+		}
+	}
+	sort.Slice(offers, func(i, j int) bool {
+		if offers[i].dist != offers[j].dist {
+			return offers[i].dist < offers[j].dist
+		}
+		return offers[i].from.key < offers[j].from.key
+	})
+	held := map[groupKey]map[Source]bool{}
+	for _, o := range offers {
+		if held[o.to] == nil {
+			held[o.to] = map[Source]bool{}
+			for _, r := range groups[o.to] {
+				held[o.to][r.Source] = true
+			}
+		}
+		clash := false
+		for _, r := range groups[o.from] {
+			clash = clash || held[o.to][r.Source]
+		}
+		if clash {
+			continue
+		}
+		for _, r := range groups[o.from] {
+			held[o.to][r.Source] = true
+		}
+		groups[o.to] = append(groups[o.to], groups[o.from]...)
+		delete(groups, o.from)
+	}
+}
+
+func isDateSuffix(s string) bool {
+	_, err := time.Parse(dateLayout, s)
+	return err == nil && len(s) == len(dateLayout)
+}
+
+// occurrenceDate is the date key among cands that the instant at belongs to, and how far at is
+// from that date's local midnight. The rows' own zone decides when one is known; otherwise the
+// date is the UTC day that holds at, and the distance is from its UTC midnight.
+func occurrenceDate(at time.Time, rows []Event, cands []string) (string, time.Duration, bool) {
+	loc := time.UTC
+	known := false
+	for _, r := range rows {
+		if r.TimeZoneIANA != "" {
+			if l, err := time.LoadLocation(r.TimeZoneIANA); err == nil {
+				loc, known = l, true
+				break
+			}
+		}
+	}
+	if !known {
+		for _, r := range rows {
+			if t, err := time.Parse("-07:00", r.UTCOffset); err == nil {
+				_, secs := t.Zone()
+				loc, known = time.FixedZone("", secs), true
+				break
+			}
+		}
+	}
+	d := at.In(loc).Format(dateLayout)
+	for _, c := range cands {
+		if c == d {
+			midnight, _ := time.ParseInLocation(dateLayout, c, loc)
+			return d, at.Sub(midnight).Abs(), true
+		}
+	}
+	return "", 0, false
 }
 
 // accountClause is the WHERE condition that limits a table to accounts; empty means all.

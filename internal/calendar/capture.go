@@ -336,9 +336,24 @@ func (u unit) prefers(base, in Event, c clock) bool {
 		}
 	}
 	if c == tied {
-		return u.key(in) >= u.key(base)
+		return tieKey(u, in) >= tieKey(u, base)
 	}
 	return true
+}
+
+// tieKey is the last tie-break of a unit at equal times: the stated value's bytes, then which of
+// the unit's fields the copy stated (a copy that stated more of them wins), so two copies with the
+// same value but different Unknown store the same row in any order.
+func tieKey(u unit, e Event) string {
+	var status strings.Builder
+	for _, n := range u.names {
+		if e.unknown(n) {
+			status.WriteByte('0')
+		} else {
+			status.WriteByte('1')
+		}
+	}
+	return u.key(e) + "\x00" + status.String()
 }
 
 // expandClocks gives every schedule unit the row stores no clock for, and that the row knows, the
@@ -679,18 +694,19 @@ func ValidateEvent(e Event) error {
 			return refuse(fmt.Sprintf("unknown field name %q is not in the vocabulary", f))
 		}
 	}
+	if e.Start.IsZero() {
+		return refuse("event with a zero start")
+	}
+	if e.End.IsZero() {
+		return refuse("event with a zero end")
+	}
 	if e.AllDay.Is(true) {
 		if e.StartDate == "" {
 			return refuse("all-day event without a start date")
 		}
-		if e.Start.IsZero() && e.End.IsZero() {
-			return refuse("all-day event without instants")
-		}
 		if d, err := time.Parse(dateLayout, e.StartDate); err != nil || d.Format(dateLayout) != e.StartDate {
 			return refuse("all-day start date is not a calendar date in YYYY-MM-DD form")
 		}
-	} else if e.Start.IsZero() {
-		return refuse("timed event with a zero start")
 	}
 	for name, t := range map[string]*time.Time{
 		"start": &e.Start, "end": &e.End, "last modified": e.LastModified, "original start": e.OriginalStart,
