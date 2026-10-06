@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"strconv"
 
 	"github.com/golang/snappy"
 	"github.com/ourostack/teamscrawl/internal/v8"
@@ -31,7 +32,16 @@ const (
 	CodeBadKey          = "bad_key"
 	CodeV8Version       = "v8_version"
 	CodeV8Malformed     = "v8_malformed"
+	CodeSnappyTooLarge  = "snappy_too_large"
 )
+
+// maxSnappyRatio bounds the decoded length a snappy envelope may declare, as a multiple of its
+// compressed length. snappy.Decode allocates the declared length before it checks the data, so a
+// forged header such as ff 11 02 ff ff ff ff 0f (4 GiB declared by 5 bytes) would allocate 4 GiB.
+// The densest valid Snappy encoding (copy elements repeating one byte) is about 21:1, so 32:1
+// never rejects real data and rejects forged headers whatever their absolute size; it does not
+// depend on a guess at the largest real value.
+const maxSnappyRatio = 32
 
 // Omission describes a value that could not be decoded.
 type Omission struct{ Code, Detail string }
@@ -156,6 +166,9 @@ func (o *Origin) unwrap(dbID int64, raw []byte, depth int) ([]byte, error) {
 			}
 			return o.unwrap(dbID, b, depth+1)
 		case wrapSnappy:
+			if n, err := snappy.DecodedLen(rest[1:]); err == nil && n > maxSnappyRatio*len(rest[1:]) {
+				return nil, &OmissionError{Omission{Code: CodeSnappyTooLarge, Detail: "snappy envelope declares " + strconv.Itoa(n) + " decoded bytes from " + strconv.Itoa(len(rest)-1) + " compressed, above " + strconv.Itoa(maxSnappyRatio) + ":1; envelope " + hex.EncodeToString(raw[:min(len(raw), envelopeHexBytes)])}}
+			}
 			dec, err := snappy.Decode(nil, rest[1:])
 			if err != nil {
 				return nil, unknown(raw, "snappy: "+err.Error())

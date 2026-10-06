@@ -7,6 +7,7 @@
 //
 //	empty_value       the record has no value
 //	unknown_envelope  the Blink envelope is not recognized (detail ends with the first 16 bytes in hex)
+//	snappy_too_large  a snappy envelope declares more than 32 times its compressed length (nothing is allocated)
 //	blob_missing      the external blob file or its blob entry is absent
 //	bad_key           the record key could not be decoded (Record.Err; detail has the key in hex)
 //	v8_unknown_tag, v8_host_object, v8_shared   passed through from internal/v8

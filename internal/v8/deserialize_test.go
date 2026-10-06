@@ -395,9 +395,9 @@ func TestDecodedTypes(t *testing.T) {
 		}},
 		{"array_empty_cycle_through_property", func(t *testing.T, v any) {
 			a := v.(*ArrayWithProps)
-			inner, ok := a.Props.Values[0].([]any)
+			inner, ok := a.Props.Values[0].(*ArrayWithProps)
 			mustEq(t, ok, true)
-			mustEq(t, len(inner), 0)
+			mustEq(t, inner == a, true)
 		}},
 		{"date_invalid_nan", func(t *testing.T, v any) { _ = v.(InvalidDate) }},
 		{"date_max_js_date", func(t *testing.T, v any) { mustEq(t, v.(time.Time).UnixMilli(), int64(8.64e15)) }},
@@ -555,4 +555,55 @@ func nodeGate(ci bool, lookErr error, major string) (skip, fail string) {
 		return "", problem + " (CI requires Node 22; the ci.yml test job sets it up)"
 	}
 	return problem, ""
+}
+
+// A back-reference to an array that carries named properties must decode to the same value as
+// the first occurrence: [a, a] where a = [] and a.x = 1.
+func TestBackReferenceKeepsArrayProperties(t *testing.T) {
+	in := []byte{0xff, 15,
+		'A', 2,
+		'A', 0, '"', 1, 'x', 'I', 2, '$', 1, 0, // a: dense, length 0, property x = 1
+		'^', 1, // a again
+		'$', 0, 2}
+	v, err := Deserialize(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Canonical(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"$array":[],"$props":{"x":1}},{"$array":[],"$props":{"x":1}}]`
+	if string(got) != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+	// The sparse form takes the same path.
+	sparse := []byte{0xff, 15, 'A', 2,
+		'a', 0, '"', 1, 'x', 'I', 2, '@', 1, 0,
+		'^', 1, '$', 0, 2}
+	v, err = Deserialize(sparse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Canonical(v); string(got) != want {
+		t.Fatalf("sparse: got %s, want %s", got, want)
+	}
+}
+
+// A reference to an array taken while the array is still being read (a cycle through its own
+// named property) must also be the wrapper, so it carries the properties.
+func TestSelfReferenceKeepsArrayProperties(t *testing.T) {
+	in := []byte{0xff, 15,
+		'A', 0, '"', 4, 's', 'e', 'l', 'f', '^', 0, '$', 1, 0}
+	v, err := Deserialize(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := v.(*ArrayWithProps)
+	if !ok {
+		t.Fatalf("got %T", v)
+	}
+	if a.Props.Values[0] != any(a) {
+		t.Fatalf("self reference is %T, want the wrapper", a.Props.Values[0])
+	}
 }

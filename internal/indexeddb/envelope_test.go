@@ -414,3 +414,15 @@ func TestDecodePayloadMatchesDecode(t *testing.T) {
 		t.Fatalf("a bad payload: %v vs %v", err, derr)
 	}
 }
+
+func TestSnappyDeclaredLengthIsBounded(t *testing.T) {
+	o := newTestOrigin(fakeKV{}, "")
+	raw := []byte{0xff, 0x11, 0x02, 0xff, 0xff, 0xff, 0xff, 0x0f} // declares 4 GiB
+	_, err := o.Decode(1, raw)
+	if omissionCode(t, err) != CodeSnappyTooLarge {
+		t.Fatalf("got %v", err)
+	}
+	if want := "envelope " + hex.EncodeToString(raw); !strings.Contains(err.Error(), want) {
+		t.Errorf("detail %q lacks %q", err.Error(), want)
+	}
+}
