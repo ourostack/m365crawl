@@ -52,6 +52,9 @@ func (c *Counts) add(o outcome) {
 type BatchCounts struct {
 	Events, Recaps, RecapItems Counts
 	Gone, Linked               int
+	// Refused lists the events that could not be stored (see ValidateEvent). Nothing was stored for
+	// them and the rest of the batch was applied. A batch with a refusal infers no removals.
+	Refused []*InvalidEventError
 }
 
 // Batch is one source's contribution for one account: the events it read, the source ids it knows
@@ -87,6 +90,9 @@ type ApplyOptions struct {
 // events under their resolved keys, sets removed_at on that source's live rows inside the window
 // that events no longer contain, and records the window. Timed rows are inside when their start
 // is in [w.Start, w.End); all-day rows when their start date is within the window's UTC dates.
+// An event that cannot be stored (ValidateEvent) is refused: nothing is stored for it, the other
+// events are applied and committed, and the refused ones come back as one error holding an
+// *InvalidEventError each.
 func ApplySnapshot(ctx context.Context, db *sql.DB, w Window, events []Event, at time.Time) (err error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -97,16 +103,31 @@ func ApplySnapshot(ctx context.Context, db *sql.DB, w Window, events []Event, at
 			_ = tx.Rollback()
 		}
 	}()
-	if err := ApplySnapshotTx(ctx, tx, w, events, at); err != nil {
+	counts, err := ApplyBatch(ctx, tx, Batch{Window: w, Events: events}, ApplyOptions{InferUnseenInWindow: true}, at)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return errors.Join(tx.Commit(), refusals(counts))
 }
 
-// ApplySnapshotTx is ApplySnapshot inside the caller's transaction.
+// ApplySnapshotTx is ApplySnapshot inside the caller's transaction. Like ApplySnapshot it applies
+// every storable event and then returns the refused ones as one error; the caller may find each
+// with errors.As on *InvalidEventError and still commit.
 func ApplySnapshotTx(ctx context.Context, tx *sql.Tx, w Window, events []Event, at time.Time) error {
-	_, err := ApplyBatch(ctx, tx, Batch{Window: w, Events: events}, ApplyOptions{InferUnseenInWindow: true}, at)
-	return err
+	counts, err := ApplyBatch(ctx, tx, Batch{Window: w, Events: events}, ApplyOptions{InferUnseenInWindow: true}, at)
+	if err != nil {
+		return err
+	}
+	return refusals(counts)
+}
+
+// refusals joins the refused events of a batch into one error, nil when there are none.
+func refusals(c BatchCounts) error {
+	errs := make([]error, len(c.Refused))
+	for i, r := range c.Refused {
+		errs[i] = r
+	}
+	return errors.Join(errs...)
 }
 
 // ApplyBatch applies b inside the caller's transaction (SQLite allows one writer, and a sync
@@ -141,10 +162,20 @@ func ApplyBatch(ctx context.Context, tx *sql.Tx, b Batch, opts ApplyOptions, at 
 	}
 	counts.Gone = gone
 	// Process in SourceID order so keys never depend on the order the adapter listed events in.
-	events := append([]Event(nil), b.Events...)
+	// Refused events are set aside first: they are counted and returned, and the rest is applied.
+	events := make([]Event, 0, len(b.Events))
+	seen := make(map[string]bool, len(b.Events))
+	for _, e := range b.Events {
+		if err := ValidateEvent(e); err != nil {
+			var bad *InvalidEventError
+			errors.As(err, &bad)
+			counts.Refused = append(counts.Refused, bad)
+			continue
+		}
+		events = append(events, e)
+	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].SourceID < events[j].SourceID })
 	snap := newSnapshot(events)
-	seen := make(map[string]bool, len(events))
 	for _, e := range events {
 		key := Key(e)
 		if !opts.SkipMatches {
@@ -159,7 +190,9 @@ func ApplyBatch(ctx context.Context, tx *sql.Tx, b Batch, opts ApplyOptions, at 
 		counts.Events.add(res)
 		seen[key] = true
 	}
-	if opts.InferUnseenInWindow {
+	// A refused event may be the live row it would have updated, and its key is unreliable, so a
+	// batch with a refusal infers no removals; nothing is lost, rows just stay live until a clean batch.
+	if opts.InferUnseenInWindow && len(counts.Refused) == 0 {
 		if err := markRemoved(ctx, tx, w, seen, at); err != nil {
 			return counts, err
 		}
@@ -465,7 +498,10 @@ func upsertEvent(ctx context.Context, tx *sql.Tx, e Event, key string, at time.T
 	if err != nil {
 		return 0, err
 	}
-	got := Capture(old, e)
+	got, err := Capture(old, e)
+	if err != nil {
+		return 0, err
+	}
 	got.FirstSeenAt, got.SeenAt = at, at
 	res := outcomeNew
 	if old != nil {

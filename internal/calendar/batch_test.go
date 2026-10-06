@@ -406,11 +406,11 @@ func TestBatchReadErrors(t *testing.T) {
 }
 
 func TestCaptureReminderAloneKeepsDetailClock(t *testing.T) {
-	old := Capture(nil, thin(t, t1))
+	old := mustCapture(t, nil, thin(t, t1))
 	in := thin(t, t2)
 	five := 5
 	in.ReminderMinutes = &five
-	got := Capture(&old, in)
+	got := mustCapture(t, &old, in)
 	if got.ReminderMinutes == nil || *got.ReminderMinutes != 5 || got.DetailAsOf != nil {
 		t.Fatalf("%+v", got)
 	}

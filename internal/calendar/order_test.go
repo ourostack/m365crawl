@@ -1,10 +1,14 @@
 package calendar
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 // permutations returns every ordering of 0..n-1.
@@ -30,7 +34,7 @@ func converge(t *testing.T, name string, copies []Event) Event {
 	for _, order := range permutations(len(copies)) {
 		var stored *Event
 		for _, i := range order {
-			next := Capture(stored, copies[i])
+			next := mustCapture(t, stored, copies[i])
 			stored = &next
 		}
 		if first == nil {
@@ -95,17 +99,18 @@ func TestCaptureSmallFieldsConvergeInAnyArrivalOrder(t *testing.T) {
 }
 
 func TestCaptureSmallFieldClocksAdvanceOnlyWhenStated(t *testing.T) {
-	got := Capture(nil, thin(t, t1))
-	if got.FieldClocksJSON != "" || got.DetailAsOf != nil {
+	got := mustCapture(t, nil, thin(t, t1))
+	// Every copy states the location text, so that is the one clock a thin copy sets.
+	if clocks := ParseFieldClocks(got.FieldClocksJSON); len(clocks) != 1 || got.DetailAsOf != nil {
 		t.Fatalf("a thin copy claimed a clock: %+v", got)
 	}
-	got = Capture(&got, rich(t, t2))
+	got = mustCapture(t, &got, rich(t, t2))
 	if !ParseFieldClocks(got.FieldClocksJSON)["reminder"].Equal(mustTime(t, t2)) || !ParseFieldClocks(got.FieldClocksJSON)["categories"].Equal(mustTime(t, t2)) {
 		t.Fatalf("a stating copy did not set the clocks: %v", got.FieldClocksJSON)
 	}
 	onlyCat := thin(t, t3)
 	onlyCat.CategoriesJSON = `["B"]`
-	got = Capture(&got, onlyCat)
+	got = mustCapture(t, &got, onlyCat)
 	if !ParseFieldClocks(got.FieldClocksJSON)["reminder"].Equal(mustTime(t, t2)) || !ParseFieldClocks(got.FieldClocksJSON)["categories"].Equal(mustTime(t, t3)) {
 		t.Fatalf("clocks moved together: %v", got.FieldClocksJSON)
 	}
@@ -129,21 +134,21 @@ func TestCaptureRichCopiesConvergeWhenNewestDiffersOnlyInASmallField(t *testing.
 }
 
 func TestCaptureBodyTypeTravelsWithTheBody(t *testing.T) {
-	old := Capture(nil, rich(t, t1)) // html body
+	old := mustCapture(t, nil, rich(t, t1)) // html body
 	typeOnly := thin(t, t3)
 	typeOnly.BodyType = "text"
-	got := Capture(&old, typeOnly)
+	got := mustCapture(t, &old, typeOnly)
 	if got.BodyType != "html" || !got.DetailAsOf.Equal(mustTime(t, t1)) {
 		t.Fatalf("a body type alone changed the row: %q as of %v", got.BodyType, got.DetailAsOf)
 	}
 	// A thin copy with only a body type claims no clock on a fresh row either.
-	if bare := Capture(nil, typeOnly); bare.DetailAsOf != nil {
+	if bare := mustCapture(t, nil, typeOnly); bare.DetailAsOf != nil {
 		t.Fatalf("a body type alone claimed the detail clock: %v", bare.DetailAsOf)
 	}
 	// The copy that supplies the body supplies its type.
 	text := rich(t, t2)
 	text.BodyHTML, text.BodyText, text.BodyType = "", "Plain body, longer than before", "text"
-	got = Capture(&old, text)
+	got = mustCapture(t, &old, text)
 	if got.BodyType != "text" {
 		t.Fatalf("body type %q, want the supplier's", got.BodyType)
 	}
@@ -151,12 +156,12 @@ func TestCaptureBodyTypeTravelsWithTheBody(t *testing.T) {
 	// body brings its type with it.
 	staleText := rich(t, t1)
 	staleText.BodyType = "text"
-	cur := Capture(nil, rich(t, t3))
-	if got := Capture(&cur, staleText); got.BodyType != "html" {
+	cur := mustCapture(t, nil, rich(t, t3))
+	if got := mustCapture(t, &cur, staleText); got.BodyType != "html" {
 		t.Fatalf("stale copy changed the type: %q", got.BodyType)
 	}
-	noBody := Capture(nil, thin(t, t1))
-	if got := Capture(&noBody, rich(t, t2)); got.BodyType != "html" {
+	noBody := mustCapture(t, nil, thin(t, t1))
+	if got := mustCapture(t, &noBody, rich(t, t2)); got.BodyType != "html" {
 		t.Fatalf("filled body lost its type: %q", got.BodyType)
 	}
 }
@@ -193,6 +198,39 @@ func TestEveryEventFieldHasAGroup(t *testing.T) {
 			}
 		}
 	}
+	// Fields that describe one thing share a family, and the grouping is pinned.
+	families := map[string][]string{}
+	for name, u := range clocked {
+		for _, unit := range units {
+			if unit.name == u {
+				families[unit.family] = append(families[unit.family], name)
+			}
+		}
+	}
+	for _, want := range [][]string{
+		{"OnlineMeetingURL", "ShortJoinURL", "DialInConferenceID", "DialInTollNumber", "TeamsThreadID"},
+		{"Location", "LocationsJSON"},
+		{"BodyHTML", "BodyText", "BodyType"},
+	} {
+		fam := ""
+		for _, u := range units {
+			if _, ok := reflect.TypeOf(Event{}).FieldByName(want[0]); ok && clocked[want[0]] == u.name {
+				fam = u.family
+			}
+		}
+		got := append([]string(nil), families[fam]...)
+		sort.Strings(got)
+		w := append([]string(nil), want...)
+		sort.Strings(w)
+		if fam == "" || !reflect.DeepEqual(got, w) {
+			t.Errorf("family of %s is %v, want %v", want[0], got, w)
+		}
+	}
+	for _, apart := range [][2]string{{"BodyPreview", "BodyHTML"}, {"RecurrenceJSON", "Start"}} {
+		if clocked[apart[0]] == clocked[apart[1]] {
+			t.Errorf("%s and %s must not share a unit", apart[0], apart[1])
+		}
+	}
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name
 		g, ok := fieldGroups[name]
@@ -225,6 +263,7 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	e.Location = pick("Fixture Room Alpha", "", "Fixture Room Beta")
 	e.Cancelled = r.Intn(5) == 0
 	e.IsOnlineMeeting = r.Intn(4) != 0
+	e.OnlineStated = r.Intn(2) == 0
 	e.AttendeesJSON = pick("", "", attendeesOne, attendeesTwo, attendeesThree)
 	switch r.Intn(5) {
 	case 0:
@@ -241,7 +280,8 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	}
 	e.BodyPreview = pick("", "", "p1", "p22")
 	e.OnlineMeetingURL = pick("", "", "https://teams.example.test/a", "https://teams.example.test/b")
-	e.TeamsThreadID = pick("", "19:meeting_A@thread.v2")
+	e.TeamsThreadID = pick("", "19:meeting_A@thread.v2", "19:meeting_B@thread.v2")
+	e.DialInConferenceID = pick("", "111", "222")
 	e.LocationsJSON = pick("", roomJSON)
 	e.AttachmentsJSON = pick("", `[{"name":"a"}]`)
 	e.HasAttachments = r.Intn(2) == 0
@@ -311,5 +351,92 @@ func TestCapturePartialCopyDoesNotClaimTheDetailClock(t *testing.T) {
 	}
 	if !got.DetailAsOf.Equal(mustTime(t, "2026-10-01T15:00:00Z")) {
 		t.Fatalf("detail clock %v", got.DetailAsOf)
+	}
+}
+
+// linkFields are the five meeting link fields; a stored row must hold one copy's version of them.
+func linkFields(e Event) [5]string {
+	return [5]string{e.OnlineMeetingURL, e.ShortJoinURL, e.DialInConferenceID, e.DialInTollNumber, e.TeamsThreadID}
+}
+
+func TestCaptureMeetingLinksComeFromOneCopy(t *testing.T) {
+	// The confirmed fault: a new join URL kept the old meeting's other link fields.
+	old := rich(t, t1)
+	newer := thin(t, t3)
+	newer.OnlineMeetingURL = "https://teams.example.test/l/meetup-join/new"
+	got := mustCapture(t, &[]Event{mustCapture(t, nil, old)}[0], newer)
+	if linkFields(got) != [5]string{newer.OnlineMeetingURL, "", "", "", ""} {
+		t.Fatalf("a new join URL kept old companions: %v", linkFields(got))
+	}
+	// And in every arrival order of random copies, the stored links equal some copy's links.
+	r := rand.New(rand.NewSource(7)) //nolint:gosec // a fixed seed makes the sweep reproducible, not secret
+	for n := 0; n < 300; n++ {
+		copies := make([]Event, 2+r.Intn(3))
+		for i := range copies {
+			copies[i] = randomCopy(t, r)
+			copies[i].OnlineStated = false // clearing is covered elsewhere
+			if r.Intn(2) == 0 {
+				copies[i].ShortJoinURL = "https://teams.example.test/short"
+				copies[i].DialInTollNumber = "+1 555 0101"
+			}
+		}
+		got := converge(t, fmt.Sprintf("links %d", n), copies)
+		ok := linkFields(got) == [5]string{}
+		for _, c := range copies {
+			ok = ok || linkFields(got) == linkFields(c)
+		}
+		if !ok {
+			t.Fatalf("set %d: stored links %v come from no single copy", n, linkFields(got))
+		}
+	}
+}
+
+func TestCaptureNotOnlineIsAStatementNotADefault(t *testing.T) {
+	old := mustCapture(t, nil, rich(t, t1))
+	silent := thin(t, t3) // IsOnlineMeeting false is the zero value here
+	silent.IsOnlineMeeting = false
+	if got := mustCapture(t, &old, silent); got.OnlineMeetingURL == "" {
+		t.Fatal("a copy that does not state the flag cleared the links")
+	}
+	stated := silent
+	stated.OnlineStated = true
+	got := mustCapture(t, &old, stated)
+	if got.OnlineMeetingURL != "" || got.OnlineStated {
+		t.Fatalf("a stated not-online must clear and the flag is input only: %q %v", got.OnlineMeetingURL, got.OnlineStated)
+	}
+	// An online copy that states the flag clears nothing.
+	online := thin(t, t3)
+	online.OnlineStated = true
+	if got := mustCapture(t, &old, online); got.OnlineMeetingURL == "" {
+		t.Fatal("an online copy cleared the links")
+	}
+}
+
+func TestCaptureRefusesUnstorableEvents(t *testing.T) {
+	zeroStart := thin(t, t1)
+	zeroStart.Start = time.Time{}
+	noDate := thin(t, t1)
+	noDate.AllDay = true
+	farEnd := thin(t, t1)
+	farEnd.End = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	farMod := thin(t, t1)
+	farMod.LastModified = tp(t, "2026-10-01T00:00:00Z")
+	*farMod.LastModified = time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, e := range map[string]Event{"zero start": zeroStart, "all-day without date": noDate, "year 10000": farEnd, "year -1": farMod} {
+		got, err := Capture(nil, e)
+		var bad *InvalidEventError
+		if !errors.As(err, &bad) || bad.SourceID != "ev1" || bad.Reason == "" || got.SourceID != "" {
+			t.Errorf("%s: got %+v, %v", name, got, err)
+		}
+		if bad != nil && !strings.Contains(bad.Error(), "ev1") {
+			t.Errorf("%s: error text %q", name, bad.Error())
+		}
+	}
+	// A valid all-day event and an unset End are fine.
+	ok := thin(t, t1)
+	ok.End = time.Time{}
+	ok.AllDay, ok.StartDate = true, "2026-10-05"
+	if _, err := Capture(nil, ok); err != nil {
+		t.Fatal(err)
 	}
 }

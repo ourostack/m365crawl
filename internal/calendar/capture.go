@@ -83,19 +83,19 @@ var fieldGroups = map[string]string{
 	"EndDate": groupSchedule, "TimeZone": groupSchedule, "TimeZoneIANA": groupSchedule, "UTCOffset": groupSchedule,
 	"Subject": groupSchedule, "Organizer": groupSchedule, "OrganizerAddress": groupSchedule,
 	"IsOrganizer": groupSchedule, "IsPrivate": groupSchedule, "Cancelled": groupSchedule, "Response": groupSchedule,
-	"ShowAs": groupSchedule, "IsOnlineMeeting": groupSchedule, "Location": groupSchedule, "LastModified": groupSchedule,
+	"ShowAs": groupSchedule, "IsOnlineMeeting": groupSchedule, "LastModified": groupSchedule,
 
 	"AttendeesJSON": groupDetail, "BodyHTML": groupDetail, "BodyText": groupDetail, "BodyType": groupDetail,
 	"DetailRawJSON": groupDetail,
 
 	"OnlineMeetingURL": groupSmall, "ShortJoinURL": groupSmall, "DialInConferenceID": groupSmall,
-	"DialInTollNumber": groupSmall, "TeamsThreadID": groupSmall, "LocationsJSON": groupSmall,
+	"DialInTollNumber": groupSmall, "TeamsThreadID": groupSmall, "Location": groupSmall, "LocationsJSON": groupSmall,
 	"BodyPreview": groupSmall, "AttachmentsJSON": groupSmall, "CategoriesJSON": groupSmall,
 	"RecurrenceJSON": groupSmall, "ReminderMinutes": groupSmall,
 
 	"HasAttachments": groupSticky,
 
-	"ReminderStated": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
+	"ReminderStated": groupCore, "OnlineStated": groupCore, "FieldClocksJSON": groupCore, "DetailAsOf": groupCore, "DetailSeenAt": groupCore,
 	"FirstSeenAt": groupCore, "SeenAt": groupCore, "RemovedAt": groupCore,
 }
 
@@ -116,6 +116,9 @@ func scheduleFields() []string {
 type unit struct {
 	name  string
 	group string
+	// family names the things that describe one subject and are listed together; it is the unit
+	// name unless a unit needs two clocks (location).
+	family string
 	// states reports whether a copy states this unit (a reminder of zero minutes is stated; an
 	// empty text is not).
 	states func(Event) bool
@@ -133,7 +136,7 @@ type unit struct {
 func fieldsUnit(name, group string, measure func(Event) int, fields ...string) unit {
 	get := func(e *Event, f string) reflect.Value { return reflect.ValueOf(e).Elem().FieldByName(f) }
 	return unit{
-		name: name, group: group, measure: measure,
+		name: name, family: name, group: group, measure: measure,
 		states: func(e Event) bool {
 			for _, f := range fields {
 				if get(&e, f).String() != "" {
@@ -169,15 +172,19 @@ func fieldMeasure(f func(string) int, field string) func(Event) int {
 // ReminderStated is set, which is how a mapper says the source reported no reminder (Teams
 // isReminderSet false, reminderMinutesBeforeStart null). A statement of "none" sets the reminder to
 // nil and moves its clock like any other value.
+//
+// Fields that describe one thing share one unit, so a stored row never mixes two copies' versions
+// of it: the five meeting links (a new join URL replaces the old conference id, toll number and
+// thread id with it) and the location text with its structured form. Body preview stays apart
+// from the body, and recurrence apart from the schedule, because thin and rich copies
+// legitimately state them at different times (the Teams list view carries a preview and a
+// recurrence without attendees or body).
 var units = []unit{
 	fieldsUnit("attendees", groupDetail, fieldMeasure(listLen, "AttendeesJSON"), "AttendeesJSON"),
 	bodyUnit(),
-	fieldsUnit("online_meeting_url", groupSmall, nil, "OnlineMeetingURL"),
-	fieldsUnit("short_join_url", groupSmall, nil, "ShortJoinURL"),
-	fieldsUnit("dial_in_conference_id", groupSmall, nil, "DialInConferenceID"),
-	fieldsUnit("dial_in_toll_number", groupSmall, nil, "DialInTollNumber"),
-	fieldsUnit("teams_thread_id", groupSmall, nil, "TeamsThreadID"),
-	fieldsUnit("locations", groupSmall, fieldMeasure(listLen, "LocationsJSON"), "LocationsJSON"),
+	linksUnit(),
+	locationUnit(),
+	locationListUnit(),
 	fieldsUnit("body_preview", groupSmall, fieldMeasure(byteLen, "BodyPreview"), "BodyPreview"),
 	fieldsUnit("attachments", groupSmall, fieldMeasure(listLen, "AttachmentsJSON"), "AttachmentsJSON"),
 	fieldsUnit("categories", groupSmall, nil, "CategoriesJSON"),
@@ -185,13 +192,34 @@ var units = []unit{
 	reminderUnit(),
 }
 
-func init() {
-	for i := range units {
-		switch units[i].name {
-		case "online_meeting_url", "short_join_url", "dial_in_conference_id", "dial_in_toll_number", "teams_thread_id":
-			units[i].links = true
-		}
+// linksUnit is the five meeting link fields, replaced together by the newest copy that states any
+// of them. The organizer removes all of them when the meeting stops being online (captureLinks).
+func linksUnit() unit {
+	u := fieldsUnit("meeting_links", groupSmall, nil,
+		"OnlineMeetingURL", "ShortJoinURL", "DialInConferenceID", "DialInTollNumber", "TeamsThreadID")
+	u.links = true
+	return u
+}
+
+// locationUnit and locationListUnit are the location text and its structured form: one family
+// (they describe one place) with two clocks. Every copy states the text (an empty one means no
+// location, as for the rest of the schedule). Only a copy that has one states the structured
+// list. They cannot share a clock: a newer thin copy must replace the text yet keep the older
+// structured rooms (Rooms marks them stale), and an older rich copy arriving later must still be
+// able to supply them. Fusing the two would make the thin copy erase the rooms.
+func locationUnit() unit {
+	return unit{
+		name: "location", family: "location", group: groupSmall,
+		states: func(Event) bool { return true },
+		key:    func(e Event) string { return e.Location },
+		assign: func(dst *Event, src Event) { dst.Location = src.Location },
 	}
+}
+
+func locationListUnit() unit {
+	u := fieldsUnit("location_list", groupSmall, fieldMeasure(listLen, "LocationsJSON"), "LocationsJSON")
+	u.family = "location"
+	return u
 }
 
 // bodyUnit is the body: HTML, text and body type travel together, because a type has no meaning
@@ -206,7 +234,7 @@ func bodyUnit() unit {
 
 func reminderUnit() unit {
 	return unit{
-		name: "reminder", group: groupSmall,
+		name: "reminder", family: "reminder", group: groupSmall,
 		states: func(e Event) bool { return e.ReminderMinutes != nil || e.ReminderStated },
 		key: func(e Event) string {
 			switch {
@@ -263,22 +291,31 @@ func (u unit) prefers(base, in Event, c clock) bool {
 //     copies in any order store one row. For the schedule group the greater canonical bytes of
 //     its values decide. A copy with no time cannot be ordered: it competes as a peer, the
 //     incoming copy wins an otherwise equal contest, and it cannot move a clock.
-//   - A copy that says the event is not an online meeting states "no link" for each meeting link
-//     it does not carry, at its own time, so it clears an older link and loses to a newer one
-//     whether or not its schedule won.
+//   - "Not an online meeting" is a statement, not a default: a copy says it only by setting
+//     OnlineStated with IsOnlineMeeting false, at its own time. That outdates every older meeting
+//     link (clock no_links) and loses to a newer link, whether or not its schedule won. A copy
+//     that does not set OnlineStated leaves the links alone.
 //   - DetailAsOf is the newest time of a rich copy (one that states attendees or a body); a
 //     thin copy, or one carrying only small fields or only a body type, never moves it.
 //     DetailRawJSON follows the rich copies by its own clock and an empty one never replaces a
 //     stored one.
 //   - HasAttachments is true once any copy says so.
+//   - An event that cannot be stored is refused (ValidateEvent) and nothing is captured.
+//
+// Known limits. At an equal timestamp the fuller statement wins even when the shorter one is the
+// truth, because equal times cannot say which was written last. A copy with no time cannot be
+// ordered, so the result then depends on arrival order; mappers must always supply a time.
 //   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
-func Capture(old *Event, in Event) Event {
+func Capture(old *Event, in Event) (Event, error) {
+	if err := ValidateEvent(in); err != nil {
+		return Event{}, err
+	}
 	var base Event
 	if old != nil {
 		base = *old
 	}
 	out := base
-	out.ReminderStated = false
+	out.ReminderStated, out.OnlineStated = false, false
 	clocks := ParseFieldClocks(base.FieldClocksJSON)
 
 	// Identity.
@@ -345,14 +382,16 @@ func Capture(old *Event, in Event) Event {
 	}
 	out.FieldClocksJSON = formatClocks(clocks)
 	out.RemovedAt = nil
-	return out
+	return out, nil
 }
 
 // noLinks is the clock key of the newest copy that said the event is not an online meeting.
 const noLinks = "no_links"
 
-// captureLinks applies "the event is not an online meeting". The organizer removes the meeting
-// links when they turn the meeting off, so a copy that says IsOnlineMeeting is false, at its time,
+// captureLinks applies "the event is not an online meeting". The core cannot tell an absent flag
+// from false, so only a copy that sets OnlineStated and has IsOnlineMeeting false says it; any
+// other copy leaves the links alone. The organizer removes the meeting links when they turn the
+// meeting off, so a copy that says so, at its time,
 // outdates every link stated before that time: a link whose clock is older than the newest such
 // copy reads as none, in any arrival order, and a link stated later comes back. A copy with no time
 // cannot be ordered, so its "not online" clears the stored links at once, as it always has.
@@ -361,7 +400,8 @@ func captureLinks(out *Event, in Event, clocks map[string]time.Time) {
 	if t, ok := clocks[noLinks]; ok {
 		cleared = &t
 	}
-	if !in.IsOnlineMeeting && in.LastModified != nil {
+	says := in.OnlineStated && !in.IsOnlineMeeting
+	if says && in.LastModified != nil {
 		cleared = laterOf(cleared, in.LastModified)
 		clocks[noLinks] = *cleared
 	}
@@ -370,7 +410,7 @@ func captureLinks(out *Event, in Event, clocks map[string]time.Time) {
 			continue
 		}
 		stated, has := clocks[u.name]
-		if (!in.IsOnlineMeeting && in.LastModified == nil) || (cleared != nil && (!has || stated.Before(*cleared))) {
+		if (says && in.LastModified == nil) || (cleared != nil && (!has || stated.Before(*cleared))) {
 			u.assign(out, Event{})
 		}
 	}
@@ -442,4 +482,42 @@ func detailEqual(a, b Event) bool {
 		}
 	}
 	return true
+}
+
+// InvalidEventError is returned for an event that cannot be stored: a timed event with a zero
+// start, an all-day event without a start date, or any time outside the years 0001 to 9999 (the
+// stored text could not be read back in order).
+type InvalidEventError struct {
+	Source   Source
+	SourceID string
+	Reason   string
+}
+
+func (e *InvalidEventError) Error() string {
+	return fmt.Sprintf("calendar: refused event %q of source %q: %s", e.SourceID, e.Source, e.Reason)
+}
+
+// ValidateEvent returns an *InvalidEventError when e cannot be stored. Zero times are allowed
+// where the model allows them (an unset End, LastModified or OriginalStart).
+func ValidateEvent(e Event) error {
+	refuse := func(reason string) error {
+		return &InvalidEventError{Source: e.Source, SourceID: e.SourceID, Reason: reason}
+	}
+	if e.AllDay {
+		if e.StartDate == "" {
+			return refuse("all-day event without a start date")
+		}
+	} else if e.Start.IsZero() {
+		return refuse("timed event with a zero start")
+	}
+	for name, t := range map[string]*time.Time{
+		"start": &e.Start, "end": &e.End, "last modified": e.LastModified, "original start": e.OriginalStart,
+	} {
+		if t != nil && !t.IsZero() {
+			if y := t.UTC().Year(); y < 1 || y > 9999 {
+				return refuse(fmt.Sprintf("%s time outside the years 0001 to 9999", name))
+			}
+		}
+	}
+	return nil
 }

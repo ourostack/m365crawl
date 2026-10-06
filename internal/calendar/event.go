@@ -97,6 +97,10 @@ type Event struct {
 	// non-nil ReminderMinutes always states it. Input only: Capture clears it, and stored rows carry
 	// the reminder clock in FieldClocksJSON instead.
 	ReminderStated bool
+	// OnlineStated marks an incoming copy that states whether the event is an online meeting, so
+	// IsOnlineMeeting false means "not online" and not merely "not said". Only such a copy outdates
+	// older meeting links. Input only: Capture clears it in the stored row.
+	OnlineStated bool
 	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
 	DetailRawJSON string
 
