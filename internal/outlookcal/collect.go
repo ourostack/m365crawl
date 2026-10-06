@@ -113,7 +113,7 @@ type Notes struct {
 	SeriesKeySplits                                 int // series keys (+20) whose events split into more than one series by id
 	SeriesGroupSplits                               int // series by id whose events carry more than one series key (+20)
 	DetailCopiesDiffer                              int // detail keys with more than one differing copy
-	BodyNULTrimmed                                  int // bodies that ended in a NUL, removed
+	BodyNULTrimmed                                  int // detail objects (by detail key) whose body ended in a NUL, removed
 	UnknownZonesRejected                            int // events whose unresolved zone name is not printable ASCII of at most MaxZoneNameLen
 	// Unparsed attendee lists by cause; they sum to AttendeesUnparsed.
 	AttendeesEndMismatch, AttendeesCountZero, AttendeesOtherUnparsed int
@@ -135,7 +135,8 @@ type Notes struct {
 	ResponseUnmapped             int
 	Redacted                     int
 	UnmappedReasons              map[string]int
-	UnknownZones                 []string // sorted, distinct
+	UnknownZones                 []string // sorted, distinct, at most MaxUnknownZones
+	UnknownZonesOver             int      // distinct names past MaxUnknownZones, dropped
 }
 
 // Result is what Collect read.
@@ -283,13 +284,15 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 	sort.Strings(ids)
 	n := &res.Notes
 	zones := map[string]bool{}
+	nulKeys := map[uint32]bool{}
 	keySeries := map[uint64]map[string]bool{}
 	seriesKeys := map[string]map[uint64]bool{}
 	unmapped := 0
 	for _, id := range ids {
 		ev := winners[id].obj
 		var d *hxstore.Object
-		if link, ok := detailLink(ev); ok {
+		link, hasLink := detailLink(ev)
+		if hasLink {
 			if obj, found := details[link]; found {
 				d = &obj
 			}
@@ -307,6 +310,10 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 		}
 		res.Events = append(res.Events, e)
 		n.add(mn, zones)
+		if mn.BodyNULTrimmed && !nulKeys[link] {
+			nulKeys[link] = true // events sharing one detail object count once
+			n.BodyNULTrimmed++
+		}
 		link2(keySeries, mn.SeriesWord, mn.SeriesID)
 		link2(seriesKeys, mn.SeriesID, mn.SeriesWord)
 	}
@@ -318,7 +325,14 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 		n.UnknownZones = append(n.UnknownZones, z)
 	}
 	sort.Strings(n.UnknownZones)
+	if len(n.UnknownZones) > MaxUnknownZones {
+		n.UnknownZonesOver = len(n.UnknownZones) - MaxUnknownZones
+		n.UnknownZones = n.UnknownZones[:MaxUnknownZones]
+	}
 }
+
+// MaxUnknownZones caps the distinct unresolved zone names Notes keeps.
+const MaxUnknownZones = 32
 
 // link2 records that a belongs with b.
 func link2[A, B comparable](m map[A]map[B]bool, a A, b B) {
@@ -366,7 +380,6 @@ func (n *Notes) add(m MapNotes, zones map[string]bool) {
 	count(&n.CancelledSubjectsDiffer, m.CancelledSubjectsDiffer)
 	count(&n.CancelledSubjectsMatch, m.CancelledSubjectsMatch)
 	count(&n.OccurrenceNoDate, m.OccurrenceNoDate)
-	count(&n.BodyNULTrimmed, m.BodyNULTrimmed)
 	count(&n.UnknownZonesRejected, m.UnknownZoneRejected)
 	count(&n.AttendeesEndMismatch, m.AttendeesEndMismatch)
 	count(&n.AttendeesCountZero, m.AttendeesCountZero)

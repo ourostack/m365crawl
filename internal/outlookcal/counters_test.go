@@ -1,12 +1,17 @@
 package outlookcal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ourostack/teamscrawl/internal/hxstore"
 	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
 )
 
 func TestCancelledSubjectCounters(t *testing.T) {
@@ -264,11 +269,11 @@ func TestOddLengthDiagnostic(t *testing.T) {
 		put := func(text string) {
 			u := hxbuild.UTF16Z(text)
 			u = u[:len(u)-2]
+			n := len(u)
 			if chars {
-				out = append(out, byte(len(text)))
-			} else {
-				out = append(out, byte(len(u)))
+				n = len(text)
 			}
+			out = append(out, byte(n)) //nolint:gosec // short test strings
 			out = append(out, u...)
 		}
 		put("Fixture")
@@ -287,5 +292,71 @@ func TestOddLengthDiagnostic(t *testing.T) {
 	o.Raw = append(o.Raw, 9)
 	if _, n = mapOK(t, o, nil); !n.AttendeesUnparsed || n.AttendeesOddLengthCharsParse {
 		t.Fatalf("%+v", n)
+	}
+}
+
+func TestBodyNULCountsOncePerDetailObject(t *testing.T) {
+	d := baseDetail(1)
+	d.BodyHTML += "\x00"
+	a, b := baseSpec(1), baseSpec(1)
+	b.ID = hxbuild.GlobalObjectID(0, 0, 0, "FIXTURE-SHARED")
+	r := collect(t, storeOf(t, framed(hxbuild.NewEvent(a), hxbuild.NewEvent(b), hxbuild.NewDetail(d))), Options{})
+	if len(r.Events) != 2 || r.Notes.BodyNULTrimmed != 1 {
+		t.Fatalf("%d events, %+v", len(r.Events), r.Notes)
+	}
+}
+
+func TestUnknownZonesAreCapped(t *testing.T) {
+	var objs []*hxbuild.Object
+	for i := 0; i < MaxUnknownZones+5; i++ {
+		s := baseSpec(1)
+		s.ID = hxbuild.GlobalObjectID(0, 0, 0, fmt.Sprintf("FIXTURE-Z%02d", i))
+		s.ZoneName = fmt.Sprintf("Fixture Zone %02d", i)
+		objs = append(objs, hxbuild.NewEvent(s))
+	}
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Notes.UnknownZones) != MaxUnknownZones || r.Notes.UnknownZonesOver != 5 || r.Notes.UnknownZones[0] != "Fixture Zone 00" {
+		t.Fatalf("%d kept, %d over", len(r.Notes.UnknownZones), r.Notes.UnknownZonesOver)
+	}
+}
+
+// mappedDigest is a hash of the derived events of the committed fixture.
+func mappedDigest(t *testing.T) string {
+	t.Helper()
+	res := collect(t, fixtureStore(t, "HxStore.hxd"), Options{})
+	data, err := json.Marshal(res.Events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// pinnedMapping ties MapperVersion to the output it describes. A mapping change alters
+// the digest, which fails this test until MapperVersion is raised (so a stored event is
+// derived again) and the pair below is updated together.
+var pinnedMapping = struct {
+	version int
+	digest  string
+}{version: 3, digest: "44f3b74529510bc3ea08c903b0f7d5590e08b10dc82e5d76729dfdb72df7cfee"}
+
+func TestMapperVersionIsPinnedToTheMappedOutput(t *testing.T) {
+	got := mappedDigest(t)
+	if got != pinnedMapping.digest && MapperVersion == pinnedMapping.version {
+		t.Fatalf("the mapped output changed: raise MapperVersion and set the pin to {%d, %q}", MapperVersion+1, got)
+	}
+	if got == pinnedMapping.digest && MapperVersion != pinnedMapping.version {
+		t.Fatalf("MapperVersion is %d but the pin says %d for the same output", MapperVersion, pinnedMapping.version)
+	}
+	if MapperVersion != pinnedMapping.version || got != pinnedMapping.digest {
+		t.Fatalf("update the pin to {%d, %q}", MapperVersion, got)
+	}
+	// The version feeds the store fingerprint, so a bump reads an unchanged store again.
+	at := time.Unix(1, 0)
+	v := outlookdesktop.Versions{Store: "i", Reader: 1, Mapper: MapperVersion, Rules: 1}
+	w := v
+	w.Mapper++
+	if outlookdesktop.FingerprintFor(10, at, v) == outlookdesktop.FingerprintFor(10, at, w) {
+		t.Fatal("the mapper version does not move the fingerprint")
 	}
 }

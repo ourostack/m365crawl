@@ -44,7 +44,8 @@ type MapNotes struct {
 	// Collect compares them across events.
 	SeriesWord uint64
 	SeriesID   string
-	// BodyNULTrimmed is set when the body ended in a NUL that was removed.
+	// BodyNULTrimmed is set when the event's detail body ended in a NUL that was removed;
+	// Collect counts it once per detail object.
 	BodyNULTrimmed bool
 	// EventTypeUnknown, ShowAsUnmapped and ResponseUnmapped are set when the stored code
 	// is outside the values the layout lists; the field is then left unknown.
