@@ -114,7 +114,7 @@ func TestGoneSkipsMasters(t *testing.T) {
 	}
 	// And inferring unseen rows in a window skips masters too.
 	tx, _ := db.BeginTx(ctx, nil)
-	if err := ApplySnapshotTx(ctx, tx, tw(t), nil, mustTime(t, "2026-10-06T03:00:00Z")); err != nil {
+	if _, err := ApplySnapshotTx(ctx, tx, tw(t), nil, mustTime(t, "2026-10-06T03:00:00Z")); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()

@@ -301,11 +301,11 @@ func (u unit) prefers(base, in Event, c clock) bool {
 //     stored one.
 //   - HasAttachments is true once any copy says so.
 //   - An event that cannot be stored is refused (ValidateEvent) and nothing is captured.
+//   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 //
 // Known limits. At an equal timestamp the fuller statement wins even when the shorter one is the
 // truth, because equal times cannot say which was written last. A copy with no time cannot be
 // ordered, so the result then depends on arrival order; mappers must always supply a time.
-//   - Seeing an event clears RemovedAt. FirstSeenAt, SeenAt and DetailSeenAt are the store's.
 func Capture(old *Event, in Event) (Event, error) {
 	if err := ValidateEvent(in); err != nil {
 		return Event{}, err
@@ -506,6 +506,9 @@ func ValidateEvent(e Event) error {
 	if e.AllDay {
 		if e.StartDate == "" {
 			return refuse("all-day event without a start date")
+		}
+		if d, err := time.Parse(dateLayout, e.StartDate); err != nil || d.Format(dateLayout) != e.StartDate {
+			return refuse("all-day start date is not a calendar date in YYYY-MM-DD form")
 		}
 	} else if e.Start.IsZero() {
 		return refuse("timed event with a zero start")
