@@ -187,8 +187,8 @@ func TestE2EFreshMachine(t *testing.T) {
 	var convs, msgs, acts int
 	for _, a := range accts {
 		m, _ := a.(map[string]any)
-		if num(t, m, "conversations") != 7 || num(t, m, "messages") != 55 || num(t, m, "people") != 5 || num(t, m, "activity") != 11 {
-			t.Fatalf("account counts = %v, want 7/55/5/11", m)
+		if num(t, m, "conversations") != 7 || num(t, m, "messages") != 60 || num(t, m, "people") != 5 || num(t, m, "activity") != 11 {
+			t.Fatalf("account counts = %v, want 7/60/5/11", m)
 		}
 		convs += num(t, m, "conversations")
 		msgs += num(t, m, "messages")
@@ -245,7 +245,7 @@ func TestE2EFreshMachine(t *testing.T) {
 	}
 
 	res := ok(t, e.run(append([]string{"sql", "select count(*) from messages"}, root...)...))
-	if rows, _ := res["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0] != float64(110) {
+	if rows, _ := res["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0] != float64(120) {
 		t.Fatalf("sql rows = %v", res["rows"])
 	}
 }
@@ -264,7 +264,7 @@ func TestE2EIdempotent(t *testing.T) {
 		t.Fatalf("second sync changed messages: %v", m)
 	}
 	res := ok(t, e.cmd("sql", "select count(*) from messages"))
-	if rows, _ := res["rows"].([]any); rows[0].([]any)[0] != float64(110) {
+	if rows, _ := res["rows"].([]any); rows[0].([]any)[0] != float64(120) {
 		t.Fatalf("rows after two syncs = %v", res["rows"])
 	}
 }
@@ -1025,7 +1025,7 @@ func TestE2EWatch(t *testing.T) {
 	count := func(q string) int { return archiveCount(t, e.db, q) }
 	// The baseline is done once its sync run is recorded as successful (it is written last).
 	s.waitFor("the baseline sync", func() bool {
-		return count("select count(*) from sync_runs where status='ok' and accounts_json is not null") == 1 && count("select count(*) from messages") == 110
+		return count("select count(*) from sync_runs where status='ok' and accounts_json is not null") == 1 && count("select count(*) from messages") == 120
 	})
 	if out := s.stdout.String(); out != "" {
 		t.Fatalf("the baseline must print nothing, got %q", out)
@@ -1174,8 +1174,9 @@ func TestE2EPolish(t *testing.T) {
 			call++
 		}
 	}
-	if card != 2 || call != 2 {
-		t.Fatalf("card text %d, call text %d, want 2 each", card, call)
+	// Each account has a chat call event and one in the meeting conversation (with the recordings).
+	if card != 2 || call != 4 {
+		t.Fatalf("card text %d, call text %d, want 2 and 4", card, call)
 	}
 }
 

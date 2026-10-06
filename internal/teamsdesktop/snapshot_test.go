@@ -29,7 +29,7 @@ func TestSnapshotFixtureOpens(t *testing.T) {
 	}
 	defer func() { _ = o.Close() }()
 	dbs, err := o.Databases()
-	if err != nil || len(dbs) != 13 {
+	if err != nil || len(dbs) != 19 {
 		t.Fatalf("dbs=%d err=%v", len(dbs), err)
 	}
 	// Teams' lock and text log are not copied.
