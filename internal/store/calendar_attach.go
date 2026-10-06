@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -207,6 +208,8 @@ type CalendarAction struct {
 	// SeriesLevel says the recap is linked to the series, not this occurrence, and appears once,
 	// under the first occurrence of the range that holds it.
 	SeriesLevel bool
+	// Outlook says the event the item was held on has an Outlook row.
+	Outlook bool
 }
 
 // How CalendarAction.Mine was decided.
@@ -319,7 +322,7 @@ func (s *Store) CalendarActions(ctx context.Context, f CalendarActionFilter) (Ca
 				}
 				all = append(all, CalendarAction{
 					EventID: EventID(it.Principal, it.Key), EventKey: it.Key, Subject: it.Subject, EventStart: it.Start, CallID: r.CallID,
-					CalendarRecapItem: a, Mine: mine, MineBasis: basis, ExpiresAt: r.ExpiresAt, SeriesLevel: h.SeriesLevel,
+					CalendarRecapItem: a, Mine: mine, MineBasis: basis, ExpiresAt: r.ExpiresAt, SeriesLevel: h.SeriesLevel, Outlook: slices.Contains(it.Sources, calendar.SourceOutlook),
 				})
 			}
 		}
