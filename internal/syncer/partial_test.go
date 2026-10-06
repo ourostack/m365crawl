@@ -19,13 +19,15 @@ import (
 func failNthSource(t *testing.T, n int) {
 	t.Helper()
 	seen := 0
-	hookAfterSnap.set(t, func() { seen++ })
+	oldAfter := afterSnapshot
+	afterSnapshot = func() { seen++ }
 	hookFlush(t, 2000, func(string, int) error {
 		if seen == n {
 			return errs.StoreMissing("injected for the partial sync test")
 		}
 		return nil
 	})
+	t.Cleanup(func() { afterSnapshot = oldAfter })
 }
 
 func runRows(t *testing.T, db, query string) []string {
@@ -83,7 +85,7 @@ func TestPartialSyncKeepsTheCommittedSourcesChanges(t *testing.T) {
 	}
 
 	// The next run retries only the failed source: the committed one is unchanged, and nothing is lost.
-	hookBeforeFlush.clear()
+	beforeFlush = func(string, int) error { return nil }
 	rep, changes, err = Run(context.Background(), Options{Root: root, DBPath: db})
 	if err != nil || rep.Status != StatusOK || sourceNamed(t, rep, "https_teams.cloud.microsoft_0").Status != StatusUnchanged || sourceNamed(t, rep, "https_teams.microsoft.com_0").Status != StatusOK {
 		t.Fatalf("retry: %v %+v", err, rep)
@@ -97,7 +99,6 @@ func TestPartialSyncKeepsTheCommittedSourcesChanges(t *testing.T) {
 }
 
 func TestFilteredSyncRefreshesOnlyItsAccount(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	acct := &acctA
 	run(t, Options{Root: fixtureRoot, DBPath: db, Account: acct})
@@ -128,17 +129,18 @@ func TestEverySourceFailingIsAFailedRun(t *testing.T) {
 }
 
 func TestInterruptedRunReportsInterruptedAndKeepsCommittedChanges(t *testing.T) {
-	t.Parallel()
 	root, _ := twoSourceRoot(t)
 	db := newDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	seen := 0
-	hookAfterSnap.set(t, func() {
+	old := afterSnapshot
+	afterSnapshot = func() {
 		if seen++; seen == 2 {
 			cancel()
 		}
-	})
+	}
+	t.Cleanup(func() { afterSnapshot = old })
 	rep, changes, err := Run(ctx, Options{Root: root, DBPath: db})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
@@ -158,13 +160,15 @@ func TestCancelledDuringTheSnapshotLoadIsInterrupted(t *testing.T) {
 	db := newDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	hookAfterSnap.set(t, func() {
+	old := afterSnapshot
+	afterSnapshot = func() {
 		cancel()
 		// Make the read fail the way a removed snapshot does.
 		for _, d := range snapshotDirs(t, os.TempDir()) {
 			_ = os.Remove(filepath.Join(d, "leveldb", "CURRENT"))
 		}
-	})
+	}
+	t.Cleanup(func() { afterSnapshot = old })
 	_, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: db})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
@@ -175,7 +179,7 @@ func TestCancelledDuringTheSnapshotLoadIsInterrupted(t *testing.T) {
 }
 
 func TestRunLevelRecordFailureIsNotAFreshSync(t *testing.T) {
-	t.Parallel()
+	isolateTmp(t)
 	db := archiveWith(t, `create trigger boom before insert on sync_runs when new.accounts_json is not null and new.status in ('ok','ok_with_omissions') begin select raise(abort, 'injected'); end;`)
 	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	codedErr(t, err, errs.CodeDBError)
@@ -193,7 +197,9 @@ func TestStubbornPauseIgnoresCancellation(t *testing.T) {
 	t.Setenv(testPauseStubbornEnv, "1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	hookAfterSnap.set(t, cancel) // cancelled right after the pause: the pause itself did not stop early
+	old := afterSnapshot
+	afterSnapshot = cancel // cancelled right after the pause: the pause itself did not stop early
+	t.Cleanup(func() { afterSnapshot = old })
 	start := time.Now()
 	_, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: newDB(t)})
 	if !errors.Is(err, context.Canceled) || time.Since(start) < 30*time.Millisecond {
@@ -203,16 +209,16 @@ func TestStubbornPauseIgnoresCancellation(t *testing.T) {
 
 func TestPanicsInRederiveAndDiscoveryAreContained(t *testing.T) {
 	isolateTmp(t)
-	oldD := discoverSources
-	t.Cleanup(func() { discoverSources = oldD })
-	hookRederive.set(t, func(context.Context, *store.Store) (*store.Migration, error) { panic("boom in rederive") })
+	oldR, oldD := rederiveArchive, discoverSources
+	t.Cleanup(func() { rederiveArchive, discoverSources = oldR, oldD })
+	rederiveArchive = func(context.Context, *store.Store) (*store.Migration, error) { panic("boom in rederive") }
 	db := newDB(t)
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	codedErr(t, err, errs.CodeDBError) // an error from Rederive is a database error
 	if !strings.Contains(err.Error(), "boom in rederive") {
 		t.Fatalf("err = %v", err)
 	}
-	hookRederive.clear()
+	rederiveArchive = oldR
 	discoverSources = func(string) ([]teamsdesktop.Source, []string, error) { panic("boom in discover") }
 	_, _, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	codedErr(t, err, errs.CodeInternal)

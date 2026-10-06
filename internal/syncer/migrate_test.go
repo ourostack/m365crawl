@@ -105,7 +105,6 @@ func snapshot(t *testing.T, db string) string {
 }
 
 func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
-	t.Parallel()
 	root := fixtureCopy(t)
 	fresh := newDB(t)
 	run(t, Options{Root: root, DBPath: fresh})
@@ -148,7 +147,6 @@ func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
 }
 
 func TestNewArchiveReportsNoMigration(t *testing.T) {
-	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	if rep, _ := run(t, Options{Root: root, DBPath: db}); rep.Migrated != nil {
@@ -160,10 +158,7 @@ func TestNewArchiveReportsNoMigration(t *testing.T) {
 }
 
 func TestMigrationFailureFailsTheSync(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	exec(t, openRaw(t, db), `update meta set value='x' where key='derivation_version'`)
 	if _, _, err := Run(context.Background(), Options{Root: root, DBPath: db}); err == nil {
 		t.Fatal("a corrupt derivation version should fail the sync")
@@ -171,10 +166,7 @@ func TestMigrationFailureFailsTheSync(t *testing.T) {
 }
 
 func TestNewerArchiveIsNeverWritten(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	d := openRaw(t, db)
 	exec(t, d, `update meta set value='99' where key='derivation_version'`)
 	exec(t, d, `update messages set content_text='sentinel' where rowid=(select min(rowid) from messages)`)

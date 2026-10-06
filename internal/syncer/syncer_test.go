@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -110,7 +111,15 @@ func copyTree(t *testing.T, src, dst string) {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o600) //nolint:gosec // G703: test copy into a temp dir
+		if err := os.WriteFile(target, b, 0o600); err != nil { //nolint:gosec // G703: test copy into a temp dir
+			return err
+		}
+		// A copy keeps the fixture's modification times, so it fingerprints as the fixture does.
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(target, info.ModTime(), info.ModTime())
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +131,57 @@ func fixtureCopy(t *testing.T) string {
 	root := filepath.Join(t.TempDir(), "EBWebView")
 	copyTree(t, fixtureRoot, root)
 	return root
+}
+
+// The first sync of the fixture makes the same archive every time, and many tests only need that
+// archive as the state they start from. syncedStart gives such a test a fresh copy of the fixture
+// together with a copy of the archive a first sync of it makes, which was synced once per process.
+// The copy has the fixture's modification times, so a sync of it finds the cache as the template
+// left it: unchanged until the test changes it.
+var syncedTemplate struct {
+	sync.Once
+	dir string // made by TestMain, outside any test's own temp dir
+	err error
+}
+
+func syncedStart(t *testing.T) (root, db string) {
+	t.Helper()
+	syncedTemplate.Do(func() {
+		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "teamscrawl.db")})
+	})
+	if syncedTemplate.err != nil {
+		t.Fatalf("syncing the fixture once: %v", syncedTemplate.err)
+	}
+	root, db = fixtureCopy(t), newDB(t)
+	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "teamscrawl.db*"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("template archive: %v %v", files, err)
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f) //nolint:gosec // the template archive
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(db+strings.TrimPrefix(filepath.Base(f), "teamscrawl.db"), b, 0o600); err != nil { //nolint:gosec // G703: a copy into a temp dir
+			t.Fatal(err)
+		}
+	}
+	return root, db
+}
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "teamscrawl-syncer-template-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	syncedTemplate.dir = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func logFile(t *testing.T, root string) string {
@@ -194,7 +254,6 @@ func TestSyncFixture(t *testing.T) {
 }
 
 func TestSecondSyncUnchanged(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	before := readStatus(t, db)
@@ -217,10 +276,7 @@ func TestSecondSyncUnchanged(t *testing.T) {
 }
 
 func TestSyncAfterWrite(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
 		t.Fatal(err)
@@ -295,7 +351,6 @@ func TestSyncOmissions(t *testing.T) {
 }
 
 func TestSyncLocked(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	release, err := store.AcquireLock(db)
 	if err != nil {
@@ -313,7 +368,6 @@ func TestSyncLocked(t *testing.T) {
 }
 
 func TestSyncAccountFilter(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db, Account: &acctA})
 	if r.Status != "ok" {
@@ -333,7 +387,6 @@ func TestSyncAccountFilter(t *testing.T) {
 }
 
 func TestFilteredRunNeverSkipsOtherAccount(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db, Account: &acctA})
 	// The same unchanged cache, now for B: must decode, not skip.
@@ -369,7 +422,6 @@ func TestFilteredRunNeverSkipsOtherAccount(t *testing.T) {
 }
 
 func TestDecoderVersionBumpResyncs(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	srcs, _, err := teamsdesktop.Discover(fixtureRoot)
@@ -394,7 +446,6 @@ func TestDecoderVersionBumpResyncs(t *testing.T) {
 }
 
 func TestFailedRunRecorded(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	missing := filepath.Join(t.TempDir(), "no-teams")
 	r, ch, err := Run(context.Background(), Options{Root: missing, DBPath: db})
@@ -497,7 +548,6 @@ func TestSweepsStaleSnapshots(t *testing.T) {
 }
 
 func TestProgressOutput(t *testing.T) {
-	t.Parallel()
 	var buf strings.Builder
 	run(t, Options{Root: fixtureRoot, DBPath: newDB(t), Progress: &buf})
 	if !strings.Contains(buf.String(), "https_teams.microsoft.com_0") {
@@ -514,16 +564,16 @@ type flushLog struct {
 func hookFlush(t *testing.T, size int, fn func(kind string, n int) error) *flushLog {
 	t.Helper()
 	log := &flushLog{}
-	oldSize := batchSize
+	oldSize, oldHook := batchSize, beforeFlush
 	batchSize = size
-	t.Cleanup(func() { batchSize = oldSize })
-	hookBeforeFlush.set(t, func(kind string, n int) error {
+	beforeFlush = func(kind string, n int) error {
 		log.kinds, log.sizes = append(log.kinds, kind), append(log.sizes, n)
 		if fn != nil {
 			return fn(kind, n)
 		}
 		return nil
-	})
+	}
+	t.Cleanup(func() { batchSize, beforeFlush = oldSize, oldHook })
 	return log
 }
 
@@ -584,7 +634,7 @@ func TestFailedSourceRollsBackEverything(t *testing.T) {
 		t.Fatalf("last run: %+v", st.LastRun)
 	}
 	// The next run decodes the source again and reports every row as new.
-	hookBeforeFlush.clear()
+	beforeFlush = func(string, int) error { return nil }
 	r, ch, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	if err != nil || r.Status != "ok" || r.Messages.Inserted != fixtureMessages || len(ch) != fixtureMessages+fixtureActivity {
 		t.Fatalf("retry: %v %+v %d", err, r.Messages, len(ch))
@@ -607,8 +657,7 @@ func TestPanicInMappingIsContained(t *testing.T) {
 		t.Fatalf("last run: %+v", st.LastRun)
 	}
 	// The lock was released: a clean run works.
-	batchSize = 2000
-	hookBeforeFlush.clear()
+	batchSize, beforeFlush = 2000, func(string, int) error { return nil }
 	if r, _ := run(t, Options{Root: fixtureRoot, DBPath: db}); r.Status != "ok" {
 		t.Fatalf("status = %q", r.Status)
 	}
@@ -644,7 +693,6 @@ func sourceNamed(t *testing.T, r Report, origin string) SourceReport {
 }
 
 func TestMultiSourceReport(t *testing.T) {
-	t.Parallel()
 	root, second := twoSourceRoot(t)
 	db := newDB(t)
 	r, _ := run(t, Options{Root: root, DBPath: db})
@@ -681,7 +729,6 @@ func TestMultiSourceReport(t *testing.T) {
 }
 
 func TestMultiSourceOmissionsSum(t *testing.T) {
-	t.Parallel()
 	rel := omittingBlob(t)
 	root, _ := twoSourceRoot(t)
 	blobs, _ := filepath.Glob(filepath.Join(root, "*", "IndexedDB", "*.blob"))
@@ -755,7 +802,6 @@ func seedRecords(t *testing.T, db string, rs ...teamsdesktop.GenericRecord) {
 }
 
 func TestSyncWritesGenericRecords(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
 	if r.Records.Inserted != fixtureRecords {
@@ -784,10 +830,7 @@ func TestSyncWritesGenericRecords(t *testing.T) {
 }
 
 func TestSyncMarksVanishedRecordsRemoved(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctA
 	seedRecords(t, db,
 		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "events", KeyJSON: []byte(`"stale-key"`), ValueJSON: []byte(`1`)},
@@ -808,10 +851,7 @@ func TestSyncMarksVanishedRecordsRemoved(t *testing.T) {
 }
 
 func TestFilteredSyncLeavesOtherAccountsRecordsAlone(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctB
 	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctB.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`2`)})
 	a := acctA
@@ -895,7 +935,6 @@ func TestRecordBatchesAreBounded(t *testing.T) {
 }
 
 func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
-	t.Parallel()
 	stale := func(database, store string) teamsdesktop.GenericRecord {
 		a := acctA
 		return teamsdesktop.GenericRecord{Account: &a, Database: database, Store: store, KeyJSON: []byte(`"stale"`), ValueJSON: []byte(`2`)}
@@ -913,13 +952,12 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 		// A removed row under a key that scrubs differently: only the key purge touches it.
 		{"purge keys", `update records set removed_at = '2020-01-01T00:00:00.000Z', key_json = '"Bearer x"' where store = 'other'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "other"))},
 	}
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool { return name == "things" }
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			hookDenied.set(t, func(name string) bool { return name == "things" }) // a subtest runs on its own goroutine
-			root := fixtureCopy(t)
-			db := newDB(t)
-			run(t, Options{Root: root, DBPath: db})
+			root, db := syncedStart(t)
 			if c.seed != nil {
 				seedRecords(t, db, *c.seed)
 			} else {
@@ -940,7 +978,6 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestMergeOmissions(t *testing.T) {
-	t.Parallel()
 	var m map[string]int
 	mergeOmissions(&m, map[string]int{"blob_missing": 1, "truncated_log_tail": 2})
 	mergeOmissions(&m, map[string]int{"blob_missing": 2, "truncated_log_tail": 1, "denied_database": 3})
@@ -957,13 +994,14 @@ func TestMergeOmissions(t *testing.T) {
 // the typed data still syncs, and the rows of the unreadable database are neither removed nor
 // lost. Redactions are reported as a count and are not an omission.
 func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
-	t.Parallel()
 	db := newDB(t)
 	calendar := "Teams:calendar-manager:react-web-client:" + acctA.UserID
 	acct := acctA
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: calendar, Store: "events", KeyJSON: []byte(`"kept"`), ValueJSON: []byte(`1`)})
-	hookReadGeneric.set(t, func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, _ func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, _ func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
 		if err := opts.OnDatabase(calendar, false, nil); err != nil {
 			return teamsdesktop.GenericResult{}, err
 		}
@@ -973,7 +1011,7 @@ func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
 			Complete:  map[string]bool{calendar: false},
 			Redacted:  3,
 		}, nil
-	})
+	}
 	db2 := newDB(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db2})
 	if r.Status != StatusOmissions || r.Omissions["database_unreadable"] != 1 || r.Messages.Inserted != fixtureMessages {
@@ -998,18 +1036,17 @@ func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
 // Rows archived under a name the denylist now matches are cleared on the next sync: the key stays,
 // the value and hash go, and the row is marked removed.
 func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
-	t.Parallel()
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctA
 	seedRecords(t, db,
 		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":1}`)},
 		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "private", KeyJSON: []byte(`"y"`), ValueJSON: []byte(`{"v":2}`)},
 	)
-	hookDenied.set(t, func(name string) bool {
-		return origDenied(name) || name == "private" || strings.Contains(name, "gone-manager")
-	})
+	old := deniedFn
+	t.Cleanup(func() { deniedFn = old })
+	deniedFn = func(name string) bool {
+		return old(name) || name == "private" || strings.Contains(name, "gone-manager")
+	}
 	later := time.Now().Add(time.Hour)
 	_ = os.Chtimes(logFile(t, root), later, later)
 	run(t, Options{Root: root, DBPath: db})
@@ -1024,13 +1061,15 @@ func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
 // Records of a database that was not read completely are flushed after the read, and a failure of
 // that last flush fails the source.
 func TestFinalRecordFlushFailureFailsTheSource(t *testing.T) {
-	hookReadGeneric.set(t, func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, fn func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+	old := readGenericFn
+	t.Cleanup(func() { readGenericFn = old })
+	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, fn func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
 		a := acctA
 		if err := fn(teamsdesktop.GenericRecord{Account: &a, Database: "Teams:x-manager:react-web-client:" + acctA.UserID, Store: "s", KeyJSON: []byte(`"k"`), ValueJSON: []byte(`1`)}); err != nil {
 			return teamsdesktop.GenericResult{}, err
 		}
 		return teamsdesktop.GenericResult{Omissions: map[string]int{}}, opts.OnDatabase("Teams:x-manager:react-web-client:"+acctA.UserID, false, nil)
-	})
+	}
 	hookFlush(t, 2000, func(kind string, _ int) error {
 		if kind == "record" {
 			return errors.New("flush refused")

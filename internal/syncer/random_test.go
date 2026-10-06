@@ -157,7 +157,6 @@ func logFiles(t *testing.T, root string) []string {
 // records make one row, identical or not), edits that revert, a source that stays still, and a
 // sync of one account only. A failure names the seed; TEAMSCRAWL_TEST_SEED=<n> runs that one.
 func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
-	t.Parallel()
 	seeds := []int64{1, 2, 3}
 	if s := os.Getenv("TEAMSCRAWL_TEST_SEED"); s != "" {
 		n, err := strconv.ParseInt(s, 10, 64)
@@ -168,7 +167,7 @@ func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 	}
 	for _, seed := range seeds {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
-			t.Parallel()
+			isolateTmp(t)
 			rng := rand.New(rand.NewSource(seed)) //nolint:gosec // a test series, not security
 			root := fixtureCopy(t)
 			secondSource(t, root)
@@ -235,7 +234,7 @@ func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 					if a, b := reportKey(t, sr, sc), reportKey(t, fr, fc); a != b {
 						t.Fatalf("%s pass %d: reports differ\nskip: %s\nfull: %s", label, pass, a, b)
 					}
-					if a, b := dumpArchive(t, skipDB), dumpArchive(t, fullDB); a != b {
+					if !sameArchive(t, skipDB, fullDB) {
 						t.Fatalf("%s pass %d: archives differ", label, pass)
 					}
 				}
