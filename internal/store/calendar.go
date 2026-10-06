@@ -786,44 +786,59 @@ func eachRow(ctx context.Context, tx *sql.Tx, q string, args []any, fn func(*sql
 // rebuilt by the derivation that follows.
 func blankCalendar(ctx context.Context, tx *sql.Tx, at time.Time) error {
 	stamp := at.UTC().Format(timeLayout)
-	for _, t := range []struct {
-		table string
-		keep  []string
-	}{
-		{"calendar_source_events", []string{"composite_key", "source_id", "first_seen_at", "seen_at", "removed_at"}},
-		{"calendar_recaps", []string{"first_seen_at", "updated_at"}},
-		{"calendar_recap_items", []string{"kind", "origin", "first_seen_at", "updated_at", "superseded_at"}},
-	} {
-		var sets []string
-		if err := eachRow(ctx, tx, `select name, dflt_value from pragma_table_info(?) where pk=0`, []any{t.table}, func(r *sql.Rows) error {
-			var name string
-			var dflt sql.NullString
-			if err := r.Scan(&name, &dflt); err != nil {
-				return err
-			}
-			for _, k := range t.keep {
-				if k == name {
-					return nil
-				}
-			}
-			switch {
-			case dflt.Valid:
-				sets = append(sets, name+"="+dflt.String)
-			default:
-				sets = append(sets, name+"=NULL")
-			}
-			return nil
-		}); err != nil {
+	for _, t := range blankTables {
+		sets, err := blankSets(ctx, tx, t.table, t.keep)
+		if err != nil {
 			return err
 		}
 		if t.table == "calendar_recap_items" {
 			sets = append(sets, "superseded_at=coalesce(superseded_at, '"+stamp+"')")
 		}
-		if _, err := tx.ExecContext(ctx, `update `+t.table+` set `+strings.Join(sets, ", ")); err != nil { //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
+		// The rebuild is the Teams one: an Outlook row has no record to be rebuilt from. The recap
+		// tables have no source column; an Outlook account is "outlook/<profile>", so they are
+		// scoped by account. Outlook writes no recap today (TestOutlookWritesNoRecaps).
+		where, args := ` where account_id not like 'outlook/%'`, []any(nil)
+		if t.table == "calendar_source_events" {
+			where, args = ` where source=?`, []any{string(calendar.SourceTeams)}
+		}
+		if _, err := tx.ExecContext(ctx, `update `+t.table+` set `+strings.Join(sets, ", ")+where, args...); err != nil { //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
 			return err
 		}
 	}
 	return nil
+}
+
+// blankTables are the derived tables a blank empties and the columns each keeps.
+var blankTables = []struct {
+	table string
+	keep  []string
+}{
+	{"calendar_source_events", []string{"composite_key", "source_id", "first_seen_at", "seen_at", "removed_at"}},
+	{"calendar_recaps", []string{"first_seen_at", "updated_at"}},
+	{"calendar_recap_items", []string{"kind", "origin", "first_seen_at", "updated_at", "superseded_at"}},
+}
+
+// blankSets is the "column=default" list that empties the content of a table's rows: every
+// non-key column except keep goes back to its default, or NULL.
+func blankSets(ctx context.Context, tx *sql.Tx, table string, keep []string) ([]string, error) {
+	var sets []string
+	err := eachRow(ctx, tx, `select name, dflt_value from pragma_table_info(?) where pk=0`, []any{table}, func(r *sql.Rows) error {
+		var name string
+		var dflt sql.NullString
+		if err := r.Scan(&name, &dflt); err != nil {
+			return err
+		}
+		if slices.Contains(keep, name) {
+			return nil
+		}
+		if dflt.Valid {
+			sets = append(sets, name+"="+dflt.String)
+		} else {
+			sets = append(sets, name+"=NULL")
+		}
+		return nil
+	})
+	return sets, err
 }
 
 // CalendarCache is what the doctor needs to judge the calendar cache: how many accounts the

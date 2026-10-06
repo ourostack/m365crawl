@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -665,5 +668,55 @@ func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
 		checkGolden(t, "calendar_unlinked_recap."+suffix, e.scrub(out))
+	}
+}
+
+// With Outlook on, its events sit in the agenda beside the Teams ones, as their own principal: an
+// unlinked profile is named in the envelope, and an Outlook-only event says what it does not know.
+func TestCalendarShowsOutlookEvents(t *testing.T) {
+	e := textEnv(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile("../../testdata/outlook-fixture/HxStore.hxd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
+		t.Fatalf("sync exit %d: %s", code, stderr)
+	}
+	m := agenda(t, e, "--from", "2023-11-20", "--to", "2023-11-25", "--limit", "200")
+	if got := asStrings(m["unlinked_accounts"]); len(got) != 1 || got[0] != "outlook/Main" {
+		t.Fatalf("unlinked_accounts %v", got)
+	}
+	plain := itemBySubject(t, m, "Fixture plain event")
+	if src := asStrings(plain["sources"]); len(src) != 1 || src[0] != "outlook" {
+		t.Fatalf("sources %v", src)
+	}
+	if !slices.Contains(asStrings(plain["unknown_fields"]), "rooms") {
+		t.Fatalf("an Outlook event must say what it does not know: %v", plain["unknown_fields"])
+	}
+	// The Teams events are still there, and no item claims both sources while the profile is unlinked.
+	teams := 0
+	for _, it := range items(t, m) {
+		src := asStrings(it["sources"])
+		if len(src) > 1 {
+			t.Fatalf("an unlinked Outlook event merged: %v", src)
+		}
+		if len(src) == 1 && src[0] == "teams" {
+			teams++
+		}
+	}
+	if teams == 0 {
+		t.Fatal("no Teams events")
+	}
+	// `calendar event` opens the Outlook event by its id.
+	ev := eventDoc(t, e, plain["event_id"].(string))
+	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture plain event" {
+		t.Fatalf("%v", ev)
 	}
 }
