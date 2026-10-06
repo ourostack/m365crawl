@@ -67,6 +67,19 @@ type listResult struct {
 	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
 	// does not read the result as covering every conversation. Omitted otherwise.
 	ChannelsExcluded bool `json:"channels_excluded,omitempty"`
+	// CoverageGap, CoverageAsOf, Range and UnlinkedAccounts are the calendar's: whether some day of
+	// the range is not covered by any cached data (so an absent event is not evidence), the oldest
+	// verification time behind the covered part, the range as read, and Outlook accounts that no
+	// link joins to a Teams account. Nil or empty on every other list.
+	CoverageGap      *bool      `json:"coverage_gap,omitempty"`
+	CoverageAsOf     *time.Time `json:"coverage_as_of,omitempty"`
+	Range            *rangeInfo `json:"range,omitempty"`
+	UnlinkedAccounts []string   `json:"unlinked_accounts,omitempty"`
+	// UnlinkedRecaps are the recaps that started in the range and belong to no event of the archive
+	// (a meeting with no calendar entry, or an event the cache dropped): their content is listed
+	// here instead of being hidden. UnlinkedRecapsTotal is printed only when the limit cut the list.
+	UnlinkedRecaps      []unlinkedRecap `json:"unlinked_recaps,omitempty"`
+	UnlinkedRecapsTotal int             `json:"unlinked_recaps_total,omitempty"`
 	meta
 }
 

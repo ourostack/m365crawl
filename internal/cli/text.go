@@ -53,6 +53,15 @@ func (rt *runtime) renderText(label string, v any) error {
 	case *listResult:
 		rt.listTable(r)
 		_, _ = fmt.Fprintln(w)
+		if r.CoverageGap != nil && *r.CoverageGap {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("no cached data covers part of this range", color))
+		}
+		if len(r.UnlinkedAccounts) > 0 {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("events of these outlook accounts are not merged with a Teams account: "+strings.Join(r.UnlinkedAccounts, ", "), color))
+		}
+		if len(r.UnlinkedRecaps) > 0 {
+			rt.unlinkedRecapTable(r)
+		}
 		more, count := "", strconv.Itoa(r.Count)
 		if r.Truncated {
 			more = " (more exist; raise --limit)"
@@ -101,6 +110,8 @@ func (rt *runtime) renderText(label string, v any) error {
 	case *statusResult:
 		rt.statusBlock("Status", r)
 		metaLines(w, r.meta, color)
+	case *eventResult:
+		rt.eventBlock(r)
 	case *whoamiResult:
 		rows := [][]string{}
 		for _, a := range r.Accounts {
@@ -222,6 +233,13 @@ func (rt *runtime) listTable(r *listResult) {
 			}
 			cols, textCol = []string{"at", "type", "state", "actor", "sender", "conversation", "text"}, 6
 			rows = append(rows, []string{stamp(x.At), x.Type, read, x.ActorName, x.SenderName, x.ConversationDisplayName, oneLine(x.Text)})
+		case calendarItem:
+			cols, textCol = []string{"start", "end", "status", "subject", "where", "response"}, 3
+			start, end := stamp(x.Start), stamp(x.End)
+			if x.AllDay != nil && *x.AllDay {
+				start, end = x.StartDate, "all day"
+			}
+			rows = append(rows, []string{start, end, x.Status, oneLine(x.Subject), calendarWhere(x), x.Response})
 		case storeItem:
 			label, acct := databaseLabel(x.Database)
 			cols, textCol = []string{"database", "account", "store", "records", "removed", "last_updated_at"}, -1
@@ -306,4 +324,140 @@ func (rt *runtime) doctorSnapshot() *render.Snapshot {
 	}
 	snap.Lines = [][2]string{{"last sync", stamp(row.LastSuccessAt)}, {"archive age", age}}
 	return snap
+}
+
+// unlinkedRecapTable lists the recaps that belong to no event, with their action items, so a
+// meeting that has no calendar entry is still readable.
+func (rt *runtime) unlinkedRecapTable(r *listResult) {
+	w, color := rt.stdout, rt.color
+	_, _ = fmt.Fprintf(w, "\n%s\n", render.Dim("recaps with no event in the archive", color))
+	rows := make([][]string, len(r.UnlinkedRecaps))
+	for i, u := range r.UnlinkedRecaps {
+		var actions []string
+		for _, a := range u.ActionItems {
+			actions = append(actions, oneLine(firstOf(a.Title, a.Text)))
+		}
+		rows[i] = []string{stamp(u.MeetingStart), oneLine(firstOf(u.Headline, u.ShortSummary)), strings.Join(actions, "; ")}
+	}
+	render.Table(w, []string{"meeting start", "summary", "action items"}, rows, color)
+	if r.UnlinkedRecapsTotal > len(r.UnlinkedRecaps) {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%d of %d recaps shown; raise --limit", len(r.UnlinkedRecaps), r.UnlinkedRecapsTotal), color))
+	}
+}
+
+// calendarWhere is the first room of an event, or "online" for a meeting with no room.
+func calendarWhere(x calendarItem) string {
+	if len(x.Rooms) > 0 {
+		return x.Rooms[0].Name
+	}
+	if x.IsOnlineMeeting != nil && *x.IsOnlineMeeting || x.JoinURL != "" {
+		return "online"
+	}
+	return ""
+}
+
+// eventBlock prints one event for a person: the headline fields, then attendees, action items and
+// the recap text.
+func (rt *runtime) eventBlock(r *eventResult) {
+	w, color, ev := rt.stdout, rt.color, r.event
+	if ev == nil {
+		_, _ = fmt.Fprintln(w, "no calendar event to show: the archive has no calendar yet; run teamscrawl sync")
+		metaLines(w, r.meta, color)
+		return
+	}
+	when := stamp(ev.Start) + " to " + stamp(ev.End)
+	if ev.AllDay != nil && *ev.AllDay {
+		when = ev.StartDate + " (all day)"
+	}
+	head := map[string]any{"when": when, "status": ev.Status, "detail": ev.DetailLevel}
+	set := func(k, v string) {
+		if v != "" {
+			head[k] = v
+		}
+	}
+	set("response", ev.Response)
+	set("organizer", ev.OrganizerName)
+	set("join link", ev.JoinURL)
+	set("location", ev.Location)
+	set("event id", ev.EventID)
+	if len(ev.Rooms) > 0 {
+		names := make([]string, len(ev.Rooms))
+		for i, rm := range ev.Rooms {
+			names[i] = rm.Name
+		}
+		set("rooms", strings.Join(names, ", "))
+	}
+	if ev.Chat != nil {
+		set("chat", fmt.Sprintf("%s (%d messages)", ev.Chat.DisplayName, ev.Chat.MessageCount))
+	}
+	render.Block(w, oneLine(ev.Subject), head, color)
+	if len(ev.UnknownFields) > 0 {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("unknown: "+strings.Join(ev.UnknownFields, ", "), color))
+	}
+	if ev.DetailLevel == "stale" {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("attendees as of "+stamp(ev.DetailAsOf)+"; the event changed since", color))
+	}
+	if len(ev.Attendees) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.Attendees))
+		for i, a := range ev.Attendees {
+			rows[i] = []string{a.Name, a.Role, a.Response}
+		}
+		render.Table(w, []string{"attendee", "role", "response"}, rows, color)
+	}
+	var actions [][]string
+	for _, rc := range ev.Recaps {
+		for _, a := range rc.ActionItems {
+			actions = append(actions, []string{a.Owner, oneLine(firstOf(a.Title, a.Text))})
+		}
+	}
+	if len(actions) > 0 {
+		_, _ = fmt.Fprintln(w)
+		render.Table(w, []string{"owner", "action item"}, actions, color)
+	}
+	for _, rc := range ev.Recaps {
+		for _, text := range []string{rc.ShortSummary, rc.Outline} {
+			if text != "" {
+				_, _ = fmt.Fprintf(w, "\n%s\n", wrapText(text, rt.termWidth()))
+			}
+		}
+	}
+	if len(ev.Recordings) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.Recordings))
+		for i, rec := range ev.Recordings {
+			rows[i] = []string{stamp(rec.SentAt), rec.Kind, rec.MatchedBy}
+		}
+		render.Table(w, []string{"sent_at", "recording", "matched by"}, rows, color)
+	}
+	metaLines(w, r.meta, color)
+}
+
+func firstOf(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// wrapText breaks s into lines of at most width cells at word boundaries; newlines in s stay.
+func wrapText(s string, width int) string {
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		line := ""
+		for _, word := range strings.Fields(para) {
+			if line != "" && runewidth.StringWidth(line)+1+runewidth.StringWidth(word) > width {
+				out = append(out, line)
+				line = ""
+			}
+			if line != "" {
+				line += " "
+			}
+			line += word
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }

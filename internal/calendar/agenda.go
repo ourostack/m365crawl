@@ -47,6 +47,10 @@ type AgendaItem struct {
 	Principal string
 	// Accounts lists the accounts whose rows are in the group, sorted.
 	Accounts []string
+	// JoinedKeys are the other keys whose rows joined this group at read time (a timed key that
+	// later became all-day, joined to its twin's date key), sorted. Key is the date key. Anything
+	// that finds an event by key must accept these too.
+	JoinedKeys []string
 }
 
 // Agenda returns the merged events overlapping the query's range, sorted by start. It loads in
@@ -65,7 +69,7 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 	scope := principals.Resolve(q.AccountID)
 	fromDate := q.From.Format(dateLayout)
 	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
-	groups, err := loadGroups(ctx, db, principals, scope, q.From, q.To, fromDate, toDate)
+	groups, joined, err := loadGroupsJoined(ctx, db, principals, scope, q.From, q.To, fromDate, toDate)
 	if err != nil {
 		return res, err
 	}
@@ -81,37 +85,14 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 		return res, nil
 	}
 	res.Gap, res.AsOf = coverage(windows, days, principals, q.From, q.To)
-	fresh := map[string]map[Source]time.Time{}
-	unlinked := map[string]bool{}
-	for _, w := range windows {
-		p := principals.Of(w.AccountID)
-		if fresh[p] == nil {
-			fresh[p] = map[Source]time.Time{}
-		}
-		fresh[p][w.Source] = w.CacheFreshAt
-		if w.Source != SourceTeams && p == w.AccountID {
-			unlinked[w.AccountID] = true
-		}
-	}
-	for a := range unlinked {
-		res.Unlinked = append(res.Unlinked, a)
-	}
-	sort.Strings(res.Unlinked)
+	fresh, unlinked := freshness(windows, principals)
+	res.Unlinked = unlinked
 	needle := strings.ToLower(q.Query)
 	for k, g := range groups {
-		m := Merge(g, fresh[k.principal])
-		if m.Removed && !q.IncludeRemoved || !overlaps(m.Event, q.From, q.To, fromDate, toDate) || !visible(m.Event, q, needle) {
+		item := mergeItem(k, g, fresh[k.principal], joined[k])
+		if item.Removed && !q.IncludeRemoved || !overlaps(item.Event, q.From, q.To, fromDate, toDate) || !visible(item.Event, q, needle) {
 			continue
 		}
-		accounts := map[string]bool{}
-		for _, r := range g {
-			accounts[r.AccountID] = true
-		}
-		item := AgendaItem{Merged: m, Key: k.key, Principal: k.principal}
-		for a := range accounts {
-			item.Accounts = append(item.Accounts, a)
-		}
-		sort.Strings(item.Accounts)
 		res.Items = append(res.Items, item)
 	}
 	sort.Slice(res.Items, func(i, j int) bool {
@@ -131,6 +112,42 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 		return a.Principal < b.Principal
 	})
 	return res, nil
+}
+
+// freshness is the cache_fresh_at of each source of each principal, and the accounts of sources
+// other than Teams that no link joins to a principal (sorted; nil when none).
+func freshness(windows []Window, p Principals) (fresh map[string]map[Source]time.Time, unlinked []string) {
+	fresh = map[string]map[Source]time.Time{}
+	seen := map[string]bool{}
+	for _, w := range windows {
+		pr := p.Of(w.AccountID)
+		if fresh[pr] == nil {
+			fresh[pr] = map[Source]time.Time{}
+		}
+		fresh[pr][w.Source] = w.CacheFreshAt
+		if w.Source != SourceTeams && pr == w.AccountID {
+			seen[w.AccountID] = true
+		}
+	}
+	for a := range seen {
+		unlinked = append(unlinked, a)
+	}
+	sort.Strings(unlinked)
+	return fresh, unlinked
+}
+
+// mergeItem merges one group into the item Agenda and Find return.
+func mergeItem(k groupKey, rows []Event, fresh map[Source]time.Time, joined []string) AgendaItem {
+	item := AgendaItem{Merged: Merge(rows, fresh), Key: k.key, Principal: k.principal, JoinedKeys: joined}
+	accounts := map[string]bool{}
+	for _, r := range rows {
+		accounts[r.AccountID] = true
+	}
+	for a := range accounts {
+		item.Accounts = append(item.Accounts, a)
+	}
+	sort.Strings(item.Accounts)
+	return item
 }
 
 // groupKey names one event of one principal.
@@ -389,6 +406,12 @@ const keyChunk = 400
 // principals involved, and groups them by (principal, key). A corrupt start that sorts outside the
 // range is not read; writes refuse such events and CheckStoredTimes counts the ones already stored.
 func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, from, to time.Time, fromDate, toDate string) (map[groupKey][]Event, error) {
+	groups, _, err := loadGroupsJoined(ctx, db, p, scope, from, to, fromDate, toDate)
+	return groups, err
+}
+
+// loadGroupsJoined is loadGroups and also says, for each group, which other keys joined it.
+func loadGroupsJoined(ctx context.Context, db *sql.DB, p Principals, scope []string, from, to time.Time, fromDate, toDate string) (map[groupKey][]Event, map[groupKey][]string, error) {
 	first, _ := time.Parse(dateLayout, fromDate)
 	last, _ := time.Parse(dateLayout, toDate)
 	idCols := []column{eventColumns[1]} // account_id
@@ -420,7 +443,7 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 		err = collect(siblingQueries(idCols, keys, first.AddDate(0, 0, -2).Format(dateLayout), last.AddDate(0, 0, 3).Format(dateLayout)))
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Strings(keys)
 	cols := selectColumns(false)
@@ -433,7 +456,7 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 		}
 		found, err := queryKeyed(ctx, db, cols, eventQuery{sql: selectSQL(cols, "event_key IN ("+placeholders(n)+")"), args: args})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, r := range found {
 			if g := (groupKey{p.Of(r.AccountID), r.key}); want[g] {
@@ -442,11 +465,11 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 		}
 		keys = keys[n:]
 	}
-	joinOccurrences(groups)
+	joined := joinOccurrences(groups)
 	for _, rows := range groups {
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Source < rows[j].Source })
 	}
-	return groups, nil
+	return groups, joined, nil
 }
 
 // siblingQueries select the account and key of the keys of each global id in keys that can join a
@@ -492,7 +515,7 @@ func splitKey(key string) (gid, suffix string, ok bool) {
 // A joined group holds at most one row per source: of the timed keys that fall on a date, a source
 // contributes the one nearest the date's local midnight, and only if the date group has no row of
 // that source already. The rest stay groups of their own.
-func joinOccurrences(groups map[groupKey][]Event) {
+func joinOccurrences(groups map[groupKey][]Event) map[groupKey][]string {
 	type id struct{ principal, gid string }
 	dates := map[id][]string{}
 	var timed []groupKey
@@ -530,6 +553,7 @@ func joinOccurrences(groups map[groupKey][]Event) {
 		return offers[i].from.key < offers[j].from.key
 	})
 	held := map[groupKey]map[Source]bool{}
+	joined := map[groupKey][]string{}
 	for _, o := range offers {
 		if held[o.to] == nil {
 			held[o.to] = map[Source]bool{}
@@ -549,7 +573,12 @@ func joinOccurrences(groups map[groupKey][]Event) {
 		}
 		groups[o.to] = append(groups[o.to], groups[o.from]...)
 		delete(groups, o.from)
+		joined[o.to] = append(joined[o.to], o.from.key)
 	}
+	for _, keys := range joined {
+		sort.Strings(keys)
+	}
+	return joined
 }
 
 func isDateSuffix(s string) bool {

@@ -13,7 +13,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, `calendar`, `calendar event`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -43,6 +43,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
+| [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it. |
 | [`stores`](#stores) | List every database and object store archived without a typed table, with record counts; the database name is what records --database takes. |
 | [`records`](#records) | List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated). |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
@@ -287,6 +288,54 @@ Examples:
 ```sh
 teamscrawl activity --unread --limit 5 --fields at,type,conversation_display_name,text
 teamscrawl activity --type mention,mentionInChat
+```
+
+## calendar
+
+Read the calendar offline: the agenda for a range (default today), or one event with everything the archive holds about it. The Teams cache holds the days Teams has loaded, so `coverage_gap` says when part of the range is not covered: an absent event is then not evidence that there was none.
+
+```
+teamscrawl calendar [flags]
+teamscrawl calendar event <event> [flags]
+```
+
+Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
+
+| Flag | Meaning |
+| --- | --- |
+| `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error, because `--since` reads it as "back". |
+| `--to=WHEN` | End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days. |
+| `--days=INT` | Range length in days from --from (instead of --to). |
+| `--query=STRING` | Only events whose subject, organizer or location contains this text, ignoring case. |
+| `--include-cancelled` | Also list cancelled events. |
+| `--include-declined` | Also list events you declined. |
+| `--include-masters` | Also list recurring masters, which stand for the whole series. |
+| `--include-removed` | Also list events a source saw go (`removed` is true on them, `removed_by` names the sources). |
+| `--limit=50` | Maximum items to return; truncated says whether more exist. |
+
+`calendar event <event>` takes an `event_id`, an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates by `event_id`. `--fields` keeps the keys named, in that order; `--max-text` cuts the body, summaries and action-item text and sets `text_truncated`.
+
+Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverage_gap", "coverage_as_of"?, "range": {"from", "to", "zone"}, "unlinked_accounts"?, "unlinked_recaps"?, "unlinked_recaps_total"?, "archive_age_seconds", ...}`.
+
+- `coverage_gap` is true when some day of the range is not covered by any cached data. `coverage_as_of` is the oldest time a covered day of the range was verified (so "as of three weeks ago" can be said).
+- `range` is the range read, in this machine's zone.
+- `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged).
+- `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event of the archive (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions; `unlinked_recaps_total` appears only when the limit cut the list.
+
+An agenda item carries, in this order: `event_id` (a short id computed from the principal and the key, stable when another source is linked), `event_key`, `account_id` (the principal), `tenant_id` and `user_id` (only when a Teams account is the principal), `sources` (`["teams"]`, plus `"outlook"` when one is linked), `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end` (UTC), `start_local` and `end_local` (in the event's own zone, when it has one Teams can name), `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status` (`confirmed`, `cancelled` or `declined`), `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of`, `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields` and `filled_fields`. Strings that are empty and flags that are false are omitted, with one exception that matters: a flag the source stated is printed `true` or `false`, and a flag it did not state has no key and its name is in `unknown_fields`. So a missing `cancelled` means "not known", never "no". `filled_fields` lists schedule fields taken from another source (`{"field", "from", "as_of"}`).
+
+`detail_level` is `basic` (only the schedule), `full` (attendees, body and rooms from a copy at least as new as the schedule) or `stale` (the detail is older than the schedule, so the attendee list may be out of date; `detail_as_of` says how old). `recording_count` counts the recordings, transcripts and call events of the meeting chat that belong to this occurrence (matched by the recap's recording window, then by the occurrence window plus four hours).
+
+Result of `calendar event`: the item above, plus `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series` (`key`, `rule`, `master_event_id`, `occurrence_count_known`), `recaps` (each with `call_id`, `headline`, `short_summary`, `outline`, `summary_sections`, `action_items`, `mentions`, `speakers`, `topics`, `recording`, `meeting_start`, `meeting_end`, `expires_at`, `link_method`, `attendance_status`, `attendees_count`), `chat` (`conversation_id`, `display_name`, `message_count`), `recordings` (each with `message_id`, `sent_at`, `kind`, `text`, `link` and `matched_by`: `recap` or `window`), `series_recordings` (recordings of the chat that match no occurrence, newest 20) and `series_recordings_total`, then the archive meta. `text_truncated` appears when `--max-text` cut anything.
+
+On an archive from before the calendar tables, both commands return an empty result with `needs_sync` and a hint to run `sync`.
+
+Examples:
+
+```sh
+teamscrawl calendar --days 7
+teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
+teamscrawl calendar event ev_5ad4c8d3c8 --max-text 400
 ```
 
 ## stores
