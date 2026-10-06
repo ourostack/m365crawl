@@ -52,7 +52,6 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 - A linked Outlook profile no longer overwrites what Teams knows about its own meeting. The Outlook copy is the newer one in 146 of 148 real twins, so it won the detail base and replaced the join link, short link, dial-in and meeting chat id (and with the chat id, the recordings), turned `is_online_meeting` false, and dropped rooms only Teams named. Now the Teams copy supplies the meeting links when it states them (Outlook fills only a Teams gap), an event Teams says is online stays online while its join link is kept, and `rooms` is the union of every copy's rooms, including places named only in one copy's location text. The history rule for a removed Teams meeting is unchanged.
 - New `overridden_fields` on `calendar` and `calendar event` items: `[{"field", "from", "as_of"}]` names each field both copies of a linked twin stated with different values and the source whose value the merged event holds (`union` for a merged list), so a replaced value is visible the way `filled_fields` makes a filled one visible. Time zones compare by their resolved IANA zone (Teams' `PacificSt` and Outlook's `Pacific Standard Time` are one zone), and addresses without case, so a difference of spelling alone is not listed.
 
-
 ## [0.2.0] - 2026-10-05
 
 ### Added
