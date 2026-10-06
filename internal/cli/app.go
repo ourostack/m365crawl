@@ -64,6 +64,7 @@ type cliApp struct {
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
+	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams cache holds the days Teams has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: teamscrawl calendar agenda --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
 	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
@@ -150,7 +151,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event"}
 
 const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
 
@@ -235,7 +236,11 @@ func commandName(k *kong.Context) string {
 		}
 		words = append(words, w)
 	}
-	return strings.Join(words, " ")
+	name := strings.Join(words, " ")
+	if name == "calendar agenda" {
+		return "calendar" // the agenda is the calendar group's default command
+	}
+	return name
 }
 
 // checkListOnly rejects --fields and --max-text on commands that do not return item lists.
