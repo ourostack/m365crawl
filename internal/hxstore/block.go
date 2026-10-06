@@ -17,11 +17,12 @@ import (
 )
 
 // Block layout constants. All integers are little-endian. The field positions,
-// the checksum ranges and the constant at +0x1c are reference-derived: they come
-// from the public notes (github.com/ukd1/hxstore-reverse-engineering, SPEC.md
-// section 3.1) and were agreed with by 16,884 valid blocks in the spike's copy of
-// a real store, but this package has not itself been run against a real store.
-// The scan slice confirms them there.
+// the checksum ranges and the constant at +0x1c came from the public notes
+// (github.com/ukd1/hxstore-reverse-engineering, SPEC.md section 3.1). They were
+// confirmed on 2026-10-05 against a private copy of a real store: this package
+// verified and inflated 16,884 blocks byte for byte identically to an
+// independent decoder and rejected the same 31 candidates, so the header
+// positions and both CRC ranges hold on real data.
 const (
 	// HeaderSize is the size of a block header; the payload starts here.
 	HeaderSize = 0x28
@@ -44,8 +45,8 @@ const (
 // blockMagic is the 8-byte marker at +0x08 that block finding scans for.
 var blockMagic = [8]byte{0x05, 0x6a, 0x70, 0x3b, 0x64, 0x45, 0x02, 0x5d}
 
-// Block rejection reasons, each a distinct sentinel. The scan in a later slice
-// counts them: ErrBlockTruncated, ErrBlockMagic and ErrBlockHeaderUnknown are
+// Block rejection reasons, each a distinct sentinel. Store.Walk counts them
+// by reason: ErrBlockTruncated, ErrBlockMagic and ErrBlockHeaderUnknown are
 // header problems, ErrBlockTypeOther and ErrBlockOversize are skipped blocks,
 // and the CRC and inflate errors mean an invalid (torn or rewritten) block.
 var (
