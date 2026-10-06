@@ -360,12 +360,11 @@ var attNames = map[attCause]string{
 	attLengthOdd: "length_odd", attTextOutside: "text_outside", attWordsCut: "words_cut",
 }
 
-// attendees reads the list that follows the last string of the string area: a u32 count,
-// then records of a one-byte name length, the name, a one-byte address length, the address
-// and three u32 words A, B and C, up to the end of the object. B is the response; A is 1
-// where Teams says optional (likely). The last string is usually the bare subject (+876)
-// but not always: another string (+980, or +772) can follow it, and is skipped. ok is false, with a cause, when the list does
-// not parse exactly to the object's end.
+// attendees reads the list that follows the bare subject (+876) and any +980 or +772 string
+// after it (see listStart): a u32 count, then records of a one-byte name length, the name,
+// a one-byte address length, the address and three u32 words A, B and C, up to the end of
+// the object. B is the response; A is 1 where Teams says optional (likely). The cause says
+// why when the list does not parse exactly to the object's end.
 func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause) {
 	pos, ok := listStart(o, base)
 	if !ok {

@@ -220,7 +220,7 @@ func TestAttendeeFailureCauses(t *testing.T) {
 
 func TestAttendeeListFollowsTheLastString(t *testing.T) {
 	// Another string (+980, or +772) sits after the bare subject: the list starts after
-	// the furthest string, and that string's text is not mapped.
+	// the extra string, and that string's text is not mapped.
 	for _, word := range []int{980, 772} {
 		for _, extra := range []string{"", "Fixture extra text", "x"} {
 			s := baseSpec(1)
