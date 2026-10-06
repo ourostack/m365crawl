@@ -1,0 +1,246 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+)
+
+const (
+	outlookFailureKey = "outlook_failure:"
+	outlookStampKey   = "outlook_derivation:"
+	outlookAttemptKey = "outlook_last_attempt:"
+)
+
+// OutlookBatch is one Outlook profile's events, read whole from its store copy.
+type OutlookBatch struct {
+	Account string // "outlook/<profile directory name>"
+	Events  []calendar.Event
+	FreshAt time.Time // the store file's modification time: when Outlook last wrote it
+	At      time.Time
+	Zone    *time.Location // days are taken in this zone
+	// Stamp is what this build derives under (see OutlookStamp); it is kept per account.
+	Stamp string
+}
+
+// OutlookStamp is the stamp of what an Outlook derivation was made under: the Outlook mapper
+// version, the time zone and the scrub rules, in the form of the Teams stamp. A stored stamp that
+// differs makes the next batch re-derive the events it holds (see ApplyOutlook).
+func OutlookStamp(mapper int, zone *time.Location) string {
+	return calendarDerivation(mapper, zoneStamp(zone), teamsdesktop.RulesStamp())
+}
+
+// CommitOutlook writes one profile's batch through the core and records the source's run, in one
+// transaction. The batch is applied in the calendar savepoint; a failure rolls everything back and
+// is returned. run builds the run row from what the batch did. Gone detection is
+// off (no gone ids, no inference of unseen rows), so an event Outlook stops holding stays; past
+// days stay covered, cumulatively.
+//
+// When the stored stamp is not b.Stamp (a changed mapper, time zone or rule set, or none) each
+// event of the batch is blanked first, so the copy that is captured is the one this mapper
+// gives, not a merge with what an older mapper stored. Without it Capture keeps a stored flag
+// over an unknown incoming one, and an all-day flag an older mapper wrote as false could never
+// become unknown. A changed time zone also forgets the covered days, which were taken in the old
+// zone, and takes them again. Events the batch does not hold are left as they are.
+func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(CalendarResult) Run) (res CalendarResult, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		var aerr error
+		if res, aerr = isolated(ctx, tx, func() (CalendarResult, error) { return applyOutlook(ctx, tx, b) }); aerr == nil {
+			aerr = res.failure
+		}
+		if aerr != nil {
+			return aerr
+		}
+		if _, err := tx.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+b.Account); err != nil {
+			return err
+		}
+		return recordRun(ctx, tx, run(res))
+	})
+	return res, err
+}
+
+func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResult, error) {
+	res := CalendarResult{Omissions: map[string]int{}}
+	var stored string
+	if err := tx.QueryRowContext(ctx, `select value from meta where key=?`, outlookStampKey+b.Account).Scan(&stored); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return res, err
+	}
+	zoneChanged := stored != "" && !strings.Contains(stored, ";"+calendarZone(zoneStamp(b.Zone))+";")
+	if stored != b.Stamp {
+		if zoneChanged {
+			if _, err := tx.ExecContext(ctx, `delete from calendar_covered_days where source=? and account_id=?`, string(calendar.SourceOutlook), b.Account); err != nil {
+				return res, err
+			}
+		}
+		if err := blankEvents(ctx, tx, b.Account, b.Events); err != nil {
+			return res, err
+		}
+	}
+	days := coveredDays(b.Events, b.Zone)
+	w := calendar.Window{Source: calendar.SourceOutlook, AccountID: b.Account, SyncedAt: b.At, CacheFreshAt: b.FreshAt}
+	if len(days) > 0 {
+		lo, _ := time.ParseInLocation(time.DateOnly, days[0], b.Zone)
+		hi, _ := time.ParseInLocation(time.DateOnly, days[len(days)-1], b.Zone)
+		w.Start, w.End = lo, hi.AddDate(0, 0, 1)
+	}
+	bc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, Events: b.Events, CoveredDays: days}, calendar.ApplyOptions{SkipMatches: true}, b.At)
+	if err != nil {
+		return res, err
+	}
+	if zoneChanged {
+		// The days of events the store no longer holds were forgotten with the rest: take them
+		// again from the archived rows, in the new zone, so a covered day never uncovers.
+		if err := retakeOutlookDays(ctx, tx, b); err != nil {
+			return res, err
+		}
+	}
+	res.Counts = CalendarCounts{Events: toCounts(bc.Events), Refused: len(bc.Refused)}
+	res.omit(OmitCalendarRefused, len(bc.Refused))
+	if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookStampKey+b.Account, b.Stamp); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// retakeOutlookDays records the days, in the batch's zone, of every live archived event of the
+// account, including events the batch no longer holds.
+func retakeOutlookDays(ctx context.Context, tx *sql.Tx, b OutlookBatch) error {
+	var stored []calendar.Event
+	if err := eachRow(ctx, tx, `select start_at, coalesce(all_day,0), start_date, event_type from calendar_source_events where source=? and account_id=?`,
+		[]any{string(calendar.SourceOutlook), b.Account}, func(r *sql.Rows) error {
+			var start string
+			var allDay int
+			var e calendar.Event
+			if err := r.Scan(&start, &allDay, &e.StartDate, &e.EventType); err != nil {
+				return err
+			}
+			e.Start, _ = time.Parse(timeLayout, start)
+			e.AllDay = calendar.TriOf(allDay == 1)
+			stored = append(stored, e)
+			return nil
+		}); err != nil {
+		return err
+	}
+	return calendar.RecordCoveredDays(ctx, tx, calendar.SourceOutlook, b.Account, coveredDays(stored, b.Zone), b.At)
+}
+
+// coveredDays are the days, in zone, on which the batch holds at least one event that is not a
+// series master; an all-day event is on its stated start date.
+func coveredDays(events []calendar.Event, zone *time.Location) []string {
+	set := map[string]bool{}
+	for _, e := range events {
+		switch {
+		case e.EventType == calendar.EventMaster:
+		case e.AllDay.Is(true) && e.StartDate != "":
+			set[e.StartDate] = true
+		default:
+			set[e.Start.In(zone).Format(time.DateOnly)] = true
+		}
+	}
+	days := make([]string, 0, len(set))
+	for d := range set {
+		days = append(days, d)
+	}
+	sort.Strings(days)
+	return days
+}
+
+// blankEvents empties the content of the stored rows of the batch's events (by source id),
+// keeping their keys and first sighting, so the batch is captured over nothing. An event the
+// core will refuse is not blanked: nothing is written for it, so blanking would erase its row.
+func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calendar.Event) error {
+	sets, err := blankSets(ctx, tx, blankTables[0].table, blankTables[0].keep)
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx, `update calendar_source_events set `+strings.Join(sets, ", ")+` where source=? and account_id=? and source_id=?`) //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, e := range events {
+		if calendar.ValidateEvent(e) != nil {
+			continue // the core refuses it and writes nothing: its stored copy keeps its content
+		}
+		if _, err := stmt.ExecContext(ctx, string(calendar.SourceOutlook), account, e.SourceID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OutlookState is what the archive remembers of one Outlook profile before a read.
+type OutlookState struct {
+	LastAttempt time.Time      // when the store was last copied, whether it worked or not; zero for never
+	Fingerprint string         // of the last successful read
+	Omissions   map[string]int // of the last successful read, so a run that reads nothing still reports them
+	HoldsEvents bool           // the archive holds events of the account
+	// Failure is why the last read failed, until a read succeeds; nil when it did not.
+	Failure *OutlookFailure
+}
+
+// OutlookFailure is a failed read's coded error, kept so a skipped read can report it.
+type OutlookFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+	Exit    int    `json:"exit"`
+}
+
+// SetOutlookFailure remembers why the account's last read failed; nil forgets it.
+func (s *Store) SetOutlookFailure(ctx context.Context, account string, f *OutlookFailure) error {
+	if f == nil {
+		_, err := s.db.ExecContext(ctx, `delete from meta where key=?`, outlookFailureKey+account)
+		return err
+	}
+	b, _ := json.Marshal(f) // plain strings and an int
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookFailureKey+account, string(b))
+	return err
+}
+
+// OutlookState reads it. The last attempt is recorded whether the copy worked or not, so a
+// failing store is not retried in a loop.
+func (s *Store) OutlookState(ctx context.Context, profile, source, account string) (OutlookState, error) {
+	var st OutlookState
+	var attempt, failure sql.NullString
+	err := s.db.QueryRowContext(ctx, `select (select value from meta where key=?), (select value from meta where key=?), exists(select 1 from calendar_source_events where source=? and account_id=?)`,
+		outlookAttemptKey+profile, outlookFailureKey+account, string(calendar.SourceOutlook), account).Scan(&attempt, &failure, &st.HoldsEvents)
+	if err != nil {
+		return st, err
+	}
+	st.LastAttempt, _ = time.Parse(timeLayout, attempt.String)
+	if failure.Valid {
+		st.Failure = new(OutlookFailure)
+		if err = json.Unmarshal([]byte(failure.String), st.Failure); err != nil {
+			return st, err
+		}
+	}
+	if st.Fingerprint, err = s.LastFingerprint(ctx, source); err != nil {
+		return st, err
+	}
+	var raw sql.NullString
+	err = s.db.QueryRowContext(ctx, `select omissions_json from sync_runs where source=? and status in `+successStatuses+` order by id desc limit 1`, source).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if raw.Valid && raw.String != "" {
+		err = json.Unmarshal([]byte(raw.String), &st.Omissions)
+	}
+	return st, err
+}
+
+// SetOutlookLastAttempt records the time of a copy attempt.
+func (s *Store) SetOutlookLastAttempt(ctx context.Context, profile string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookAttemptKey+profile, at.UTC().Format(timeLayout))
+	return err
+}
