@@ -17,10 +17,12 @@ type scanEvent struct {
 	clocks                                                     clockText
 	removed                                                    timeText
 	remind                                                     sql.NullInt64
+	flags                                                      [6]sql.NullInt64
+	unknown                                                    string
 }
 
 // finish moves the scanned temporaries into the Event.
-func (s *scanEvent) finish() Event {
+func (s *scanEvent) finish() (Event, error) {
 	e := s.Event
 	e.Source = Source(s.src)
 	e.OriginalStart, e.Start, e.End, e.LastModified = s.orig.ptr(), s.start.t, s.end.t, s.mod.ptr()
@@ -31,7 +33,16 @@ func (s *scanEvent) finish() Event {
 		n := int(s.remind.Int64)
 		e.ReminderMinutes = &n
 	}
-	return e
+	var err error
+	for i, f := range flagFields(&e) {
+		if *f.tri, err = triFromSQL(s.flags[i]); err != nil {
+			return Event{}, fmt.Errorf("%w (column %s)", err, f.name)
+		}
+	}
+	if e.Unknown, err = parseUnknown(s.unknown); err != nil {
+		return Event{}, err
+	}
+	return e, nil
 }
 
 // column binds one calendar_source_events column to the Event field it holds: val renders the
@@ -57,7 +68,7 @@ var eventColumns = []column{
 	{name: "original_start", val: func(e Event) any { return formatTimePtr(e.OriginalStart) }, dst: func(s *scanEvent) any { return &s.orig }},
 	{name: "start_at", val: func(e Event) any { return formatTime(e.Start) }, dst: func(s *scanEvent) any { return &s.start }},
 	{name: "end_at", val: func(e Event) any { return formatTime(e.End) }, dst: func(s *scanEvent) any { return &s.end }},
-	{name: "all_day", val: func(e Event) any { return e.AllDay }, dst: func(s *scanEvent) any { return &s.AllDay }},
+	{name: "all_day", val: func(e Event) any { return triArg(e.AllDay) }, dst: func(s *scanEvent) any { return &s.flags[0] }},
 	{name: "start_date", val: func(e Event) any { return e.StartDate }, dst: func(s *scanEvent) any { return &s.StartDate }},
 	{name: "end_date", val: func(e Event) any { return e.EndDate }, dst: func(s *scanEvent) any { return &s.EndDate }},
 	{name: "time_zone", val: func(e Event) any { return e.TimeZone }, dst: func(s *scanEvent) any { return &s.TimeZone }},
@@ -66,12 +77,12 @@ var eventColumns = []column{
 	{name: "subject", val: func(e Event) any { return e.Subject }, dst: func(s *scanEvent) any { return &s.Subject }},
 	{name: "organizer", val: func(e Event) any { return e.Organizer }, dst: func(s *scanEvent) any { return &s.Organizer }},
 	{name: "organizer_address", val: func(e Event) any { return e.OrganizerAddress }, dst: func(s *scanEvent) any { return &s.OrganizerAddress }},
-	{name: "is_organizer", val: func(e Event) any { return e.IsOrganizer }, dst: func(s *scanEvent) any { return &s.IsOrganizer }},
-	{name: "is_private", val: func(e Event) any { return e.IsPrivate }, dst: func(s *scanEvent) any { return &s.IsPrivate }},
-	{name: "cancelled", val: func(e Event) any { return e.Cancelled }, dst: func(s *scanEvent) any { return &s.Cancelled }},
+	{name: "is_organizer", val: func(e Event) any { return triArg(e.IsOrganizer) }, dst: func(s *scanEvent) any { return &s.flags[1] }},
+	{name: "is_private", val: func(e Event) any { return triArg(e.IsPrivate) }, dst: func(s *scanEvent) any { return &s.flags[2] }},
+	{name: "cancelled", val: func(e Event) any { return triArg(e.Cancelled) }, dst: func(s *scanEvent) any { return &s.flags[3] }},
 	{name: "response", val: func(e Event) any { return e.Response }, dst: func(s *scanEvent) any { return &s.Response }},
 	{name: "show_as", val: func(e Event) any { return e.ShowAs }, dst: func(s *scanEvent) any { return &s.ShowAs }},
-	{name: "is_online_meeting", val: func(e Event) any { return e.IsOnlineMeeting }, dst: func(s *scanEvent) any { return &s.IsOnlineMeeting }},
+	{name: "is_online_meeting", val: func(e Event) any { return triArg(e.IsOnlineMeeting) }, dst: func(s *scanEvent) any { return &s.flags[4] }},
 	{name: "location", val: func(e Event) any { return e.Location }, dst: func(s *scanEvent) any { return &s.Location }},
 	{name: "last_modified", val: func(e Event) any { return formatTimePtr(e.LastModified) }, dst: func(s *scanEvent) any { return &s.mod }},
 	{name: "online_meeting_url", val: func(e Event) any { return e.OnlineMeetingURL }, dst: func(s *scanEvent) any { return &s.OnlineMeetingURL }},
@@ -86,7 +97,7 @@ var eventColumns = []column{
 	{name: "body_type", val: func(e Event) any { return e.BodyType }, dst: func(s *scanEvent) any { return &s.BodyType }},
 	{name: "body_preview", val: func(e Event) any { return e.BodyPreview }, dst: func(s *scanEvent) any { return &s.BodyPreview }},
 	{name: "attachments_json", val: func(e Event) any { return e.AttachmentsJSON }, dst: func(s *scanEvent) any { return &s.AttachmentsJSON }},
-	{name: "has_attachments", val: func(e Event) any { return e.HasAttachments }, dst: func(s *scanEvent) any { return &s.HasAttachments }},
+	{name: "has_attachments", val: func(e Event) any { return triArg(e.HasAttachments) }, dst: func(s *scanEvent) any { return &s.flags[5] }},
 	{name: "categories_json", val: func(e Event) any { return e.CategoriesJSON }, dst: func(s *scanEvent) any { return &s.CategoriesJSON }},
 	{name: "recurrence_json", val: func(e Event) any { return e.RecurrenceJSON }, dst: func(s *scanEvent) any { return &s.RecurrenceJSON }},
 	{name: "reminder_minutes", val: func(e Event) any {
@@ -96,6 +107,7 @@ var eventColumns = []column{
 		return *e.ReminderMinutes
 	}, dst: func(s *scanEvent) any { return &s.remind }},
 	{name: "detail_raw_json", heavy: true, val: func(e Event) any { return e.DetailRawJSON }, dst: func(s *scanEvent) any { return &s.DetailRawJSON }},
+	{name: "unknown_fields", val: func(e Event) any { return unknownColumn(e.Unknown) }, dst: func(s *scanEvent) any { return &s.unknown }},
 	{name: "field_clocks_json", val: func(e Event) any { return e.FieldClocksJSON }, dst: func(s *scanEvent) any { return &s.clocks }},
 	{name: "detail_as_of", val: func(e Event) any { return formatTimePtr(e.DetailAsOf) }, dst: func(s *scanEvent) any { return &s.detailAsOf }},
 	{name: "detail_seen_at", val: func(e Event) any { return formatTimePtr(e.DetailSeenAt) }, dst: func(s *scanEvent) any { return &s.detailSeen }},
@@ -145,7 +157,11 @@ func scanKeyed(rows *sql.Rows, cols []column) (keyedEvent, error) {
 	if err := scanRow(rows, dst...); err != nil {
 		return keyedEvent{}, err
 	}
-	return keyedEvent{Event: s.finish(), key: key}, nil
+	e, err := s.finish()
+	if err != nil {
+		return keyedEvent{}, err
+	}
+	return keyedEvent{Event: e, key: key}, nil
 }
 
 // storedEqual reports whether two events would store the same row (bookkeeping included).
