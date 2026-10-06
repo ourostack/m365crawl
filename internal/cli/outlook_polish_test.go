@@ -27,12 +27,12 @@ func TestOutlookRootMissingIsOneCodedError(t *testing.T) {
 	for _, c := range []struct{ root, want string }{
 		{missing, "does not exist"},
 		{file, "is not a directory"},
-		{filepath.Join(file, "below"), "cannot be read"},
+		{filepath.Join(file, "below"), "ENOTDIR-or-missing"}, // Unix says the path cannot be read, Windows that it does not exist
 	} {
 		for _, cmd := range [][]string{{"sync"}, {"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions"}, {"conversations"}} {
 			code, out, errOut := e.run(append([]string{"--max-age", "0", "--outlook-root", c.root}, cmd...)...)
 			body := usageBody(t, errOut)
-			if code != 3 || out != "" || body["code"] != "outlook_root_missing" || !strings.Contains(body["message"].(string), c.want) || !strings.Contains(body["message"].(string), "--outlook-root") || body["fix"] == "" {
+			if code != 3 || out != "" || body["code"] != "outlook_root_missing" || !messageHas(body["message"].(string), c.want) || !strings.Contains(body["message"].(string), "--outlook-root") || body["fix"] == "" {
 				t.Fatalf("%v with %s: exit %d out %q err %s", cmd, c.root, code, out, errOut)
 			}
 		}
@@ -230,4 +230,11 @@ func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 	if code != 0 || len(got) != 1 || strings.Contains(got[0], "last read") {
 		t.Fatalf("%d %v %s", code, got, errOut)
 	}
+}
+
+func messageHas(msg, want string) bool {
+	if want == "ENOTDIR-or-missing" {
+		return strings.Contains(msg, "cannot be read") || strings.Contains(msg, "does not exist")
+	}
+	return strings.Contains(msg, want)
 }
