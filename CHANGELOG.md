@@ -4,6 +4,11 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- A linked Outlook profile no longer shrinks an event's attendees. The merge chose the attendee list of one copy by clock, and the Outlook copy is newer in 146 of 148 real twins while holding the shorter list (in all 67 twins with two lists, Teams has more), so linking made the agenda lose attendees. The attendee list and the structured room list are now the union of both copies' lists (by lower-case address, display name when there is none; rooms by name), an entry both copies hold takes the response, type and role of the copy with the newer list clock, an entry only one holds is kept, a list the union enlarged is named in `filled_fields`, and `attendee_count` follows the merged list. Other fields keep the clock rule.
+- The Outlook fixture's twins now describe the same meetings as the Teams fixture: "Fixture plain event" is "Fixture planning review" and "Fixture online meeting" is "Fixture pacific sync", and the first lists three of the Teams copy's six attendees, one with a newer answer. `scripts/hxfixture` is at generator version 2 and the committed `HxStore.hxd` and provenance are regenerated; `outlookcal.MapperVersion` stays 4 (the mapper did not change) and its pinned digest moved with the fixture.
+
 ### Added
 
 - A missing Outlook root is one coded error. `--outlook-root` (or the default directory of `TEAMSCRAWL_OUTLOOK=1`) that does not exist, is not a directory or cannot be read now fails `sync` and every read command (the implicit sync included, even when it would be skipped) with `outlook_root_missing`, exit 3 and a `fix`; before, `sync` failed as `internal` ("a bug in teamscrawl") and `calendar` carried on with a warning. A root that exists but holds no profile keeps `no_outlook_profiles`. `whoami`, `status` and `version` are not stopped by a bad root, and `status` reports it as an `outlook` object with the same `code`, `message` and `fix`.

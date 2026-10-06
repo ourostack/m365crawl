@@ -61,6 +61,11 @@ type Merged struct {
 //     online meeting and the schedule base is later than the detail base's DetailAsOf by more than
 //     the skew, the join fields are not filled from another row.
 //   - M7 Unknown is what every taking-part row leaves unknown.
+//   - M8 Lists. The attendee list and the structured location list are unions of the copies'
+//     lists, by lower-case address (display name when an attendee has none) and by lower-case
+//     name. An entry both copies hold takes the values of the copy whose list clock is newer; an
+//     entry only one copy holds is kept. A list the union enlarged beyond the one M6 chose is
+//     recorded as a Fill.
 func Merge(rows []Event, fresh map[Source]time.Time) Merged {
 	var m Merged
 	if len(rows) == 0 {
@@ -79,6 +84,7 @@ func Merge(rows []Event, fresh map[Source]time.Time) Merged {
 	fillAllDay(&out, base, others, &fills)
 	fillFlags(&out, base, others, &fills)
 	mergeDetail(&out, base, ordered)
+	mergeLists(&out, ordered, &fills)
 	out.Unknown = mergedUnknown(ordered)
 	out.RemovedAt = m.RemovedAt
 	if out.LastModified == nil {

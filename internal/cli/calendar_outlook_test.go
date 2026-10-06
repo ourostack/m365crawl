@@ -80,6 +80,18 @@ func eventVia(t *testing.T, run func(args ...string) (int, string, string), ref 
 
 func sourcesOf(it map[string]any) string { return strings.Join(asStrings(it["sources"]), ",") }
 
+// itemBySubjectFrom is the item of the subject whose sources are exactly sources.
+func itemBySubjectFrom(t *testing.T, m map[string]any, subject, sources string) map[string]any {
+	t.Helper()
+	for _, it := range items(t, m) {
+		if it["subject"] == subject && sourcesOf(it) == sources {
+			return it
+		}
+	}
+	t.Fatalf("no %q from %s in %v", subject, sources, m)
+	return nil
+}
+
 func subjectsBySources(t *testing.T, m map[string]any, sources, from string) []string {
 	t.Helper()
 	var out []string
@@ -246,7 +258,7 @@ func TestOutlookLinkMergesAgenda(t *testing.T) {
 	if oldID == "" {
 		t.Fatal("no id")
 	}
-	oldTwinID := itemBySubject(t, before, "Fixture plain event")["event_id"].(string)
+	oldTwinID := itemBySubjectFrom(t, before, "Fixture planning review", "outlook")["event_id"].(string)
 
 	// A range only Outlook covers: the person's gap is the days neither source covers.
 	const far = "2031-03-05"
@@ -283,6 +295,26 @@ func TestOutlookLinkMergesAgenda(t *testing.T) {
 	}
 	if merged != 4 {
 		t.Fatalf("%d merged twins, want the fixtures' 4 in the window", merged)
+	}
+	// A linked twin keeps every attendee either copy holds: Teams lists six, the shorter Outlook list
+	// holds three of them, and the Outlook copy is the newer one, so its answer for Sam stands.
+	review := itemBySubjectFrom(t, m, "Fixture planning review", "teams,outlook")
+	if review["attendee_count"] != float64(6) {
+		t.Fatalf("the agenda must show the union of both lists: %v", review["attendee_count"])
+	}
+	ev := eventVia(t, run, review["event_id"].(string))
+	responses := map[string]string{}
+	for _, a := range ev["attendees"].([]any) {
+		a := a.(map[string]any)
+		responses[a["address"].(string)] = a["response"].(string)
+	}
+	if len(responses) != 6 || responses["sam@example.invalid"] != "accepted" || responses["casey@example.invalid"] != "declined" ||
+		responses["jordan@example.invalid"] != "tentative" || responses["room-alpha@example.invalid"] != "accepted" {
+		t.Fatalf("the merged attendees: %v", responses)
+	}
+	pacific := itemBySubjectFrom(t, m, "Fixture pacific sync", "teams,outlook")
+	if pacific["attendee_count"] != float64(4) {
+		t.Fatalf("a Teams copy without a list leaves the Outlook list whole: %v", pacific["attendee_count"])
 	}
 	standups = 0
 	for _, it := range items(t, m) {

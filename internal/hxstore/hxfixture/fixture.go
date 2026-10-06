@@ -20,7 +20,7 @@ import (
 )
 
 // GeneratorVersion changes whenever the fixture's content changes on purpose.
-const GeneratorVersion = 1
+const GeneratorVersion = 2
 
 // Dir is where the fixture lives, relative to the repository root.
 const Dir = "testdata/outlook-fixture"
@@ -203,8 +203,15 @@ func (g *gen) plain() event {
 	s := base(1)
 	s.ID = teamsID("RICH-MEETING", 0, 0, 0)
 	s.Start, s.End = teamsAt(20, 17, 0), teamsAt(20, 18, 0)
-	s.Subject, s.SubjectBare = "Fixture plain event", "Fixture plain event"
-	s.Attendees = attendees(3, 0)
+	s.Subject, s.SubjectBare = "Fixture planning review", "Fixture planning review"
+	// Three of the six attendees the Teams copy of this meeting lists (scripts/fixture/page.html),
+	// as in real data, where the Outlook list is the shorter one. Sam Example answered since the
+	// Teams copy was cached, so the two copies disagree on that response.
+	s.Attendees = []hxbuild.Attendee{
+		{Name: "Sam Fixture", Address: "sam@example.invalid", B: 0},
+		{Name: "Jordan Fixture", Address: "jordan@example.invalid", B: 1},
+		{Name: "Casey Fixture", Address: "casey@example.invalid", B: 2},
+	}
 	return event{s, hxbuild.DetailSpec{Key: s.DetailKey, SeriesKey: s.SeriesKey, BodyHTML: body(1)}}
 }
 
@@ -212,7 +219,7 @@ func (g *gen) online() event {
 	s := base(2)
 	s.ID = teamsID("PACIFIC-1", 0, 0, 0)
 	s.Start, s.End = teamsAt(21, 18, 0), teamsAt(21, 19, 0)
-	s.Subject, s.SubjectBare = "Fixture online meeting", "Fixture online meeting"
+	s.Subject, s.SubjectBare = "Fixture pacific sync", "Fixture pacific sync"
 	s.Online, s.ShowAs, s.Response, s.ReminderMinutes, s.ZoneID = true, 1, 1, 15, 3
 	s.ZoneName = "Fixture Mountain Time"
 	s.AreaOneSize = 812 // an even area one puts the strings at odd offsets

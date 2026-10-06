@@ -442,13 +442,13 @@ func TestMergeDetailBaseIsRowWithDetailAsOf(t *testing.T) {
 	}
 	// With both set, the later DetailAsOf wins; equal or nil falls to the schedule base.
 	later := row(t, SourceOutlook, "08:00:00", detailAsOf(t, "09:30:00"), func(e *Event) { e.AttendeesJSON = attendeesThree })
-	if m := Merge([]Event{full, later}, nil); m.AttendeesJSON != attendeesThree || !m.DetailAsOf.Equal(*later.DetailAsOf) {
+	if m := Merge([]Event{full, later}, nil); listLen(m.AttendeesJSON) != 3 || !m.DetailAsOf.Equal(*later.DetailAsOf) {
 		t.Fatalf("%q %v", m.AttendeesJSON, m.DetailAsOf)
 	}
 	same := later
 	same.DetailAsOf = full.DetailAsOf
-	if m := Merge([]Event{full, same}, nil); m.AttendeesJSON != attendeesTwo { // teams has the later schedule time
-		t.Fatalf("an equal detail time falls to the schedule base: %q", m.AttendeesJSON)
+	if m := Merge([]Event{full, same}, nil); listLen(m.AttendeesJSON) != 3 { // M8: the lists are unioned whatever the detail base
+		t.Fatalf("the attendee lists are unioned: %q", m.AttendeesJSON)
 	}
 	// An unknown reminder in the detail base is filled; a known "none" is a statement and stays.
 	unknownReminder := row(t, SourceTeams, "09:00:00", detailAsOf(t, "09:00:00"), unknownOf(FieldReminder))
