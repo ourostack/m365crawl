@@ -364,8 +364,7 @@ var attNames = map[attCause]string{
 // then records of a one-byte name length, the name, a one-byte address length, the address
 // and three u32 words A, B and C, up to the end of the object. B is the response; A is 1
 // where Teams says optional (likely). The last string is usually the bare subject (+876)
-// but not always: another string (+980, or +772) can follow it, so the list starts after
-// the furthest end among the string words. ok is false, with a cause, when the list does
+// but not always: another string (+980, or +772) can follow it, and is skipped. ok is false, with a cause, when the list does
 // not parse exactly to the object's end.
 func attendees(o hxstore.Object, base int, r *reader) (list string, count int, cause attCause) {
 	pos, ok := listStart(o, base)
@@ -394,21 +393,33 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 	return string(data), len(out), attOK
 }
 
-// listStart is the offset just past the furthest string of the string area. The known
-// string words must each end in a terminator; the two unidentified words (+980, +772) are
-// counted only when they do.
+// listStart is where the attendee list begins: just past the bare subject (+876), and past
+// each further string that starts there and is the target of the +980 or +772 word. A
+// maximum over all the string words was tried and overshot on real data, so it is not used.
 func listStart(o hxstore.Object, base int) (int, bool) {
-	furthest := 0
-	for _, w := range stringWords {
-		off, _ := o.U32(w)
-		end, ok := stringEnd(o, base+int(off))
-		if ok {
-			furthest = max(furthest, end)
-		} else if w != evExtraA && w != evExtraB {
-			return 0, false
+	w, _ := o.U32(evSubjectBare)
+	pos, ok := stringEnd(o, base+int(w))
+	if !ok {
+		return 0, false
+	}
+	for {
+		skipped := false
+		for _, extra := range []int{evExtraA, evExtraB} {
+			off, _ := o.U32(extra)
+			if base+int(off) != pos {
+				continue
+			}
+			end, ok := stringEnd(o, pos)
+			if !ok {
+				return 0, false
+			}
+			pos, skipped = end, true
+			break
+		}
+		if !skipped {
+			return pos, true
 		}
 	}
-	return furthest, true
 }
 
 // minRecord is the size of the smallest attendee record: two length bytes and three words.

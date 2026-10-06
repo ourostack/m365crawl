@@ -79,11 +79,6 @@ const (
 	lengthFlag = 1 << 31
 )
 
-// stringWords are the string words of the string area (base T). The attendee list starts
-// after the furthest of their ends; the last two are unidentified and are used for that
-// only.
-var stringWords = []int{evPreview, evLocation, evSubjectBare, evOrgName, evOrgAddr, evSubject, evExtraA, evExtraB}
-
 // UnlocatedFields lists the event fields the layout document does not pin. The mapper
 // leaves each unknown on every event; TestUnlocatedFieldsStayUnknown asserts it.
 //

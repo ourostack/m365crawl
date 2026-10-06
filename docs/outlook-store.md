@@ -91,7 +91,7 @@ The fixed region is 1109 bytes. After it come two variable areas:
 - **Area one** starts at +1109.
 - **The string area**, called T below, starts at `T = 1109 + u32@104`. The word at +104 was 813 in 239 objects and took at least seven other values, so it must be read from each object and never assumed.
 
-The id word at +820 is relative to +1109 (area one). The subject, location, organizer, preview and the other text fields named "base T" are relative to T. The attendee list sits in the string area after its last string (see Attendees).
+The id word at +820 is relative to +1109 (area one). The subject, location, organizer, preview and the other text fields named "base T" are relative to T. The attendee list sits in the string area after the bare subject and an optional extra string (see Attendees).
 
 ### Field table
 
@@ -134,7 +134,7 @@ Id structure. All ids start with the same 16 bytes, the public iCal UID prefix `
 
 ### Attendees
 
-Inside the event, in the string area after the last string of the area, there is a `u32` count, then one record per attendee:
+Inside the event, in the string area after the bare subject (and the extra string, if any), there is a `u32` count, then one record per attendee:
 
 | Part | Width | Meaning |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ Inside the event, in the string area after the last string of the area, there is
 | B | 4 | response: 0 accepted, 1 tentative, 2 declined, 4 none (established on 2,001 records) |
 | C | 4 | undetermined |
 
-The last string is usually the bare subject (+876) but not always: in a probe of 456 event copies whose count read as over 1,000 when taken after +876, another string followed it (the string word was +980 in 452 copies and +772 in 4), and after skipping that one string the list parsed cleanly in all 456. So the reader starts the list after the furthest end among the string words (base T: +700, +772, +836, +876, +884, +892, +980, +1024). +772 and +980 are unidentified string words: their content has not been looked at, and they are not mapped. The list ends at the object end. The count is capped at 8 or 9, so long lists are truncated. 3,206 of 3,366 distinct events (95.2%) parse cleanly with a count above 0. The organizer is not in the list. Outlook holds attendees for 78 events where Teams holds none.
+The list starts where the bare subject (+876) ends, except that another string can sit between them. The reader starts at the end of the +876 string and, while the string starting at that position is the target of the +980 or +772 word, skips it and continues from its end; it reads the count there. In a probe of 456 event copies whose count read as over 1,000 when taken right after +876, another string followed it (the string word was +980 in 452 copies and +772 in 4), and after skipping that one string the list parsed cleanly in all 456. +772 and +980 are unidentified string words: their content has not been looked at, and they are not mapped. A rule that starts the list after the furthest end among all the string words was tried and overshot on real data (663 unparsed lists, against 192 before), because a known string word (+700, +836, +884, +892 or +1024) often ends past the list; do not retry it. The list ends at the object end. The count is capped at 8 or 9, so long lists are truncated. 3,206 of 3,366 distinct events (95.2%) parse cleanly with a count above 0. The organizer is not in the list. Outlook holds attendees for 78 events where Teams holds none.
 
 ## Detail object (class 0x6c, tag 0x348)
 

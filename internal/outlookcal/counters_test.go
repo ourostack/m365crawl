@@ -234,13 +234,30 @@ func TestAttendeeListFollowsTheLastString(t *testing.T) {
 			}
 		}
 	}
-	// Without the furthest-string rule this list would start inside the extra string. An
-	// extra string word that points outside the object is ignored, a known one is not.
+	// An extra string word that points outside the object is ignored, a known one is not.
 	s := baseSpec(1)
 	o := hxbuild.NewEvent(s)
 	o.PutU32(980, 1<<30)
 	if e, _ := mapOK(t, obj(o), nil); strings.Count(e.AttendeesJSON, `"name"`) != 2 {
 		t.Error("a bad unidentified word must not hide the list")
+	}
+	// A known string word (+1024) that points past the start of the list changes nothing:
+	// the list still starts where the bare subject ends. A maximum-end rule failed here.
+	o = hxbuild.NewEvent(s)
+	endAt := len(obj(o).Raw) - 14 - 1109 - 812 // inside the last record, as an offset from T
+	o.PutU32(1024, uint32(endAt))              //nolint:gosec // a small test offset
+	o.PutU32(1028, 2)
+	if e, n := mapOK(t, obj(o), nil); n.AttendeesUnparsed || strings.Count(e.AttendeesJSON, `"name"`) != 2 {
+		t.Errorf("%+v", n)
+	}
+	// An extra string with no terminator before the object ends: no list start.
+	o = hxbuild.NewEvent(s)
+	end := oEnd(o, 876)
+	o.PutU32(980, uint32(end-1109-812)) //nolint:gosec // a small test offset
+	cut := obj(o)
+	cut.Raw = cut.Raw[:end]
+	if _, n := mapOK(t, cut, nil); n.AttendeeFailure != "bare_string_end" {
+		t.Errorf("%+v", n)
 	}
 	o = hxbuild.NewEvent(s)
 	o.PutU32(876, 1<<30)
