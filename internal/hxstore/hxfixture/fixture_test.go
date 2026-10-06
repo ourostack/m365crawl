@@ -158,11 +158,19 @@ func TestEventsReadBack(t *testing.T) {
 			idOff, _ := o.U32(820)
 			idLen, _ := o.U32(824)
 			start := 1109 + int(idOff)
-			// The id is binary and its length word counts bytes: 56 for a normal id.
-			if idLen != 56 {
+			// The id is the upper-case hex of a 56-byte global object id, stored as
+			// UTF-16LE text with a terminator; the length word counts those bytes.
+			if idLen != 226 {
 				t.Fatalf("id is %d bytes", idLen)
 			}
-			ids[hex.EncodeToString(o.Raw[start:start+int(idLen)])]++
+			var text []byte // ASCII hex, so the low byte of each UTF-16 unit
+			for i := start; i+1 < start+int(idLen) && o.Raw[i] != 0; i += 2 {
+				text = append(text, o.Raw[i])
+			}
+			if _, err := hex.DecodeString(string(text)); err != nil || len(text) != 112 {
+				t.Fatalf("id text %q", text)
+			}
+			ids[string(text)]++
 		}
 	})
 	if events != 12 || stubs != 2 || details != 8 {
@@ -173,7 +181,7 @@ func TestEventsReadBack(t *testing.T) {
 	}
 	versioned := 0
 	for id, n := range ids {
-		if strings.HasSuffix(id, strings.ToLower("464958545552452D4556542D30303036")) && n == 3 { // FIXTURE-EVT-0006
+		if strings.HasSuffix(id, "464958545552452D4556542D30303036") && n == 3 { // FIXTURE-EVT-0006
 			versioned++
 		}
 	}

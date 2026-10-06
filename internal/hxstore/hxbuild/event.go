@@ -77,7 +77,7 @@ func Ticks(t time.Time) uint64 {
 // format constant.
 var uidPrefix = []byte{0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xe0, 0x00, 0x74, 0xc5, 0xb7, 0x10, 0x1a, 0x82, 0xe0, 0x08}
 
-// GlobalObjectID builds an iCal UID as the store holds it: binary, 16 bytes of prefix, four bytes of date (year big-endian, month, day; zero for
+// GlobalObjectID builds an iCal UID in its binary form (NewEvent stores its hex as text): 16 bytes of prefix, four bytes of date (year big-endian, month, day; zero for
 // a series or a single event), 8 bytes of creation time and 8 reserved (zero
 // here), a four-byte length and the data bytes.
 func GlobalObjectID(year, month, day int, data string) []byte {
@@ -112,7 +112,9 @@ type EventSpec struct {
 	// TagEvent. The object keeps the fixed size EventSize either way.
 	Tag uint16
 	// ID is the binary iCal UID (a global object id, 56 bytes for a normal
-	// one); it must not be empty (see NewEventStub).
+	// one); it must not be empty (see NewEventStub). The store holds it as
+	// text: the upper-case hex of these bytes in UTF-16LE with a terminator,
+	// and the length word at +824 counts those bytes.
 	ID                           []byte
 	SeriesKey                    uint64
 	Stamp                        uint64
@@ -148,7 +150,7 @@ func NewEvent(s EventSpec) *Object {
 		tag = TagEvent
 	}
 	o := NewObject(ClassEvent, tag, EventSize)
-	id, zone := s.ID, UTF16Z(s.ZoneName)
+	id, zone := UTF16Z(HexID(s.ID)), UTF16Z(s.ZoneName)
 	if s.AreaOneSize == 0 {
 		s.AreaOneSize = len(id) + len(zone)
 	}

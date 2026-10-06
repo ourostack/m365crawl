@@ -83,18 +83,19 @@ func fullSpec() EventSpec {
 
 func TestNewEventLayout(t *testing.T) {
 	spec := fullSpec()
-	spec.AreaOneSize = 22 // even, so the string area starts at an odd offset (1109 is odd)
+	spec.AreaOneSize = 26 // even, so the string area starts at an odd offset (1109 is odd)
 	e := NewEvent(spec).Encode()[4:]
 	if len(e) != int(u32(e, 4)) || u16(e, 2) != 0x455 || u16(e, 10) != 0x6b {
 		t.Fatalf("envelope %x", e[:12])
 	}
-	if u32(e, 104) != 22 {
+	if u32(e, 104) != 26 {
 		t.Fatal(u32(e, 104))
 	}
-	T := 1109 + 22
+	T := 1109 + 26
 	// id and zone name live in area one, with offsets relative to 1109.
 	id := 1109 + int(u32(e, 820))
-	if string(e[id:id+4]) != "ABCD" || u32(e, 824) != 4 {
+	// The id is stored as the upper-case hex of its bytes in UTF-16LE text.
+	if utf16z(t, e, id) != "41424344" || u32(e, 824) != 18 {
 		t.Fatal("id")
 	}
 	if utf16z(t, e, 1109+int(u32(e, 780))) != "Zed" || u32(e, 784) != 8 {
@@ -168,7 +169,8 @@ func TestNewEventDefaults(t *testing.T) {
 	if u16(e, 2) != 0x456 || len(e) < 1109 {
 		t.Fatal("tag override keeps the fixed size")
 	}
-	if u32(e, 104) != 1+4 || u32(e, 1028) != 2|1<<31 {
+	if u32(e, 104) != 6+4 || // "41" as UTF-16 with a terminator, then "Z"
+		u32(e, 1028) != 2|1<<31 {
 		t.Fatal(u32(e, 104), u32(e, 1028))
 	}
 	if e[1082] != 0 || e[1083] != 0 || u64(e, 288) != 0 {
@@ -228,5 +230,20 @@ func TestNewDetail(t *testing.T) {
 	empty := NewDetail(DetailSpec{Key: 1}).Encode()[4:]
 	if u32(empty, 704) != 0 || u32(empty, 732) != 0 || u32(empty, 604) != 0 || len(empty) != 840 {
 		t.Fatal("empty detail")
+	}
+}
+
+// TestEventIDIsUTF16HexText pins the stored form found on the real store: the
+// id word at +820 (base area one) points at the upper-case hex of the binary id
+// as NUL-terminated UTF-16LE, and +824 counts its bytes with the terminator.
+func TestEventIDIsUTF16HexText(t *testing.T) {
+	raw := GlobalObjectID(2031, 3, 4, "FIXTURE-EVT-0001")
+	b := NewEvent(EventSpec{ID: raw}).Encode()[4:]
+	off, n := int(u32(b, 820)), int(u32(b, 824))
+	if n != 2*len(HexID(raw))+2 {
+		t.Fatalf("id length %d, want %d", n, 2*len(HexID(raw))+2)
+	}
+	if got := utf16z(t, b, 1109+off); got != HexID(raw) {
+		t.Fatalf("stored id %q, want %q", got, HexID(raw))
 	}
 }
