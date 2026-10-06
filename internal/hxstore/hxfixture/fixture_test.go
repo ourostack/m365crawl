@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"unicode/utf16"
 
 	"github.com/ourostack/teamscrawl/internal/hxstore"
 )
@@ -159,16 +158,11 @@ func TestEventsReadBack(t *testing.T) {
 			idOff, _ := o.U32(820)
 			idLen, _ := o.U32(824)
 			start := 1109 + int(idOff)
-			// The id starts at an odd offset (1109 is odd), so it is decoded here
-			// by hand: Object.StringAt only accepts even starts.
-			units := make([]uint16, 0, idLen/2)
-			for i := start; i+1 < start+int(idLen); i += 2 {
-				units = append(units, binary.LittleEndian.Uint16(o.Raw[i:]))
+			// The id is binary and its length word counts bytes: 56 for a normal id.
+			if idLen != 56 {
+				t.Fatalf("id is %d bytes", idLen)
 			}
-			if len(units) != 113 || units[112] != 0 {
-				t.Fatalf("id is %d units", len(units))
-			}
-			ids[string(utf16.Decode(units[:112]))]++
+			ids[hex.EncodeToString(o.Raw[start:start+int(idLen)])]++
 		}
 	})
 	if events != 12 || stubs != 2 || details != 8 {
@@ -179,7 +173,7 @@ func TestEventsReadBack(t *testing.T) {
 	}
 	versioned := 0
 	for id, n := range ids {
-		if strings.HasSuffix(id, "464958545552452D4556542D30303036") && n == 3 { // FIXTURE-EVT-0006
+		if strings.HasSuffix(id, strings.ToLower("464958545552452D4556542D30303036")) && n == 3 { // FIXTURE-EVT-0006
 			versioned++
 		}
 	}

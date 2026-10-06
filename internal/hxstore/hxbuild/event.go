@@ -77,18 +77,21 @@ func Ticks(t time.Time) uint64 {
 // format constant.
 var uidPrefix = []byte{0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xe0, 0x00, 0x74, 0xc5, 0xb7, 0x10, 0x1a, 0x82, 0xe0, 0x08}
 
-// GlobalObjectID builds an iCal UID as the store holds it, uppercase hex text of
-// 16 bytes of prefix, four bytes of date (year big-endian, month, day; zero for
+// GlobalObjectID builds an iCal UID as the store holds it: binary, 16 bytes of prefix, four bytes of date (year big-endian, month, day; zero for
 // a series or a single event), 8 bytes of creation time and 8 reserved (zero
 // here), a four-byte length and the data bytes.
-func GlobalObjectID(year, month, day int, data string) string {
+func GlobalObjectID(year, month, day int, data string) []byte {
 	b := append([]byte(nil), uidPrefix...)
 	b = append(b, byte(year>>8), byte(year), byte(month), byte(day)) //nolint:gosec // truncation to the format's fields is the point; a test passes small values
 	b = append(b, make([]byte, 16)...)
 	b = binary.LittleEndian.AppendUint32(b, clampU32(len(data)))
 	b = append(b, data...)
-	return strings.ToUpper(hex.EncodeToString(b))
+	return b
 }
+
+// HexID returns the id as the Teams iCalUID writes it: 112 upper-case hex
+// characters for a 56-byte id.
+func HexID(id []byte) string { return strings.ToUpper(hex.EncodeToString(id)) }
 
 // Attendee is one record of an event's attendee list. A, B and C are the three
 // words after the address; B is the response (0 accepted, 1 tentative, 2
@@ -104,8 +107,9 @@ type EventSpec struct {
 	// Tag overrides the envelope tag (a test of an unknown layout); zero means
 	// TagEvent. The object keeps the fixed size EventSize either way.
 	Tag uint16
-	// ID is the iCal UID text; it must not be empty (see NewEventStub).
-	ID                           string
+	// ID is the binary iCal UID (a global object id, 56 bytes for a normal
+	// one); it must not be empty (see NewEventStub).
+	ID                           []byte
 	SeriesKey                    uint64
 	Stamp                        uint64
 	DetailKey                    uint32
@@ -132,7 +136,7 @@ type EventSpec struct {
 // NewEvent builds an event object. It panics on a mistake in the spec: an empty
 // id, an area one that is too small, a name or address over 255 bytes.
 func NewEvent(s EventSpec) *Object {
-	if s.ID == "" {
+	if len(s.ID) == 0 {
 		panic("hxbuild: an event needs an id")
 	}
 	tag := s.Tag
@@ -140,7 +144,7 @@ func NewEvent(s EventSpec) *Object {
 		tag = TagEvent
 	}
 	o := NewObject(ClassEvent, tag, EventSize)
-	id, zone := UTF16Z(s.ID), UTF16Z(s.ZoneName)
+	id, zone := s.ID, UTF16Z(s.ZoneName)
 	if s.AreaOneSize == 0 {
 		s.AreaOneSize = len(id) + len(zone)
 	}

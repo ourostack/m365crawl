@@ -39,8 +39,9 @@ func TestTicks(t *testing.T) {
 }
 
 func TestGlobalObjectID(t *testing.T) {
-	id := GlobalObjectID(2031, 3, 4, "FIXTURE-EVT-0001")
-	if len(id) != 112 || id != strings.ToUpper(id) {
+	raw := GlobalObjectID(2031, 3, 4, "FIXTURE-EVT-0001")
+	id := HexID(raw)
+	if len(raw) != 56 || len(id) != 112 || id != strings.ToUpper(id) {
 		t.Fatal(len(id), id)
 	}
 	if !strings.HasPrefix(id, "040000008200E00074C5B7101A82E008") {
@@ -53,14 +54,14 @@ func TestGlobalObjectID(t *testing.T) {
 	if !strings.HasSuffix(id, "464958545552452D4556542D30303031") { // FIXTURE-EVT-0001
 		t.Fatal(id)
 	}
-	if series := GlobalObjectID(0, 0, 0, "FIXTURE-EVT-0001"); series[32:40] != "00000000" {
+	if series := HexID(GlobalObjectID(0, 0, 0, "FIXTURE-EVT-0001")); series[32:40] != "00000000" {
 		t.Fatal(series)
 	}
 }
 
 func fullSpec() EventSpec {
 	return EventSpec{
-		ID: "ABCD", SeriesKey: 0x1122334455667788, Stamp: 77, DetailKey: 9,
+		ID: []byte("ABCD"), SeriesKey: 0x1122334455667788, Stamp: 77, DetailKey: 9,
 		LastModified:    time.Date(2031, 1, 2, 3, 4, 5, 0, time.UTC),
 		Start:           time.Date(2031, 1, 3, 0, 0, 0, 0, time.UTC),
 		End:             time.Date(2031, 1, 3, 1, 0, 0, 0, time.UTC),
@@ -86,7 +87,7 @@ func TestNewEventLayout(t *testing.T) {
 	T := 1109 + 22
 	// id and zone name live in area one, with offsets relative to 1109.
 	id := 1109 + int(u32(e, 820))
-	if utf16z(t, e, id) != "ABCD" || u32(e, 824) != 10 {
+	if string(e[id:id+4]) != "ABCD" || u32(e, 824) != 4 {
 		t.Fatal("id")
 	}
 	if utf16z(t, e, 1109+int(u32(e, 780))) != "Zed" || u32(e, 784) != 8 {
@@ -155,12 +156,12 @@ func u16s(b []byte) []uint16 {
 }
 
 func TestNewEventDefaults(t *testing.T) {
-	spec := EventSpec{ID: "A", Tag: 0x456, HighBitLengths: true, ZoneName: "Z"}
+	spec := EventSpec{ID: []byte("A"), Tag: 0x456, HighBitLengths: true, ZoneName: "Z"}
 	e := NewEvent(spec).Encode()[4:]
 	if u16(e, 2) != 0x456 || len(e) < 1109 {
 		t.Fatal("tag override keeps the fixed size")
 	}
-	if u32(e, 104) != 4+4 || u32(e, 1028) != 2|1<<31 {
+	if u32(e, 104) != 1+4 || u32(e, 1028) != 2|1<<31 {
 		t.Fatal(u32(e, 104), u32(e, 1028))
 	}
 	if e[1082] != 0 || e[1083] != 0 || u64(e, 288) != 0 {
@@ -184,9 +185,9 @@ func mustPanic(t *testing.T, f func()) {
 
 func TestNewEventPanics(t *testing.T) {
 	mustPanic(t, func() { NewEvent(EventSpec{}) })
-	mustPanic(t, func() { NewEvent(EventSpec{ID: "ABCD", AreaOneSize: 4}) })
+	mustPanic(t, func() { NewEvent(EventSpec{ID: []byte("ABCD"), AreaOneSize: 4}) })
 	mustPanic(t, func() {
-		NewEvent(EventSpec{ID: "A", Attendees: []Attendee{{Name: strings.Repeat("x", 128)}}})
+		NewEvent(EventSpec{ID: []byte("A"), Attendees: []Attendee{{Name: strings.Repeat("x", 128)}}})
 	})
 }
 

@@ -3,18 +3,18 @@
   "generator_version": 1,
   "layout": "docs/outlook-store.md",
   "files": {
-    "HxStore.hxd": "1b8a4c2f2a8d8360911e78f480ff67870c0ad2c73aac88bb3007832d71758697",
-    "profile-two/HxStore.hxd": "43d71396c7027fd4239f7946c95200bc5568601bb75e113a03de82eeaf8ecf07",
-    "store-damaged-blocks.hxd": "5ba768bb16359a3c8912a97891119bdbcaafb0760f6919ab522c5c022529d792",
+    "HxStore.hxd": "541496c43fe0b2bc0123d9e1a67ec4a78b95a0806fd106608a1df36b51fd368c",
+    "profile-two/HxStore.hxd": "7cbe56fdb0bf8f2cc76706bfc02648454f60f93aa208fadce5526eb3ae5b637f",
+    "store-damaged-blocks.hxd": "35f8bb16f75cdacae9bc5fc9ce01a5d541ae50729bf2afb0d30ce86e6cc8f095",
     "store-empty.hxd": "862a99eac9f3453cb5a357f62b5b5ba1b425a7a5044024f7c3d041cb245d54d3",
-    "store-low-coverage.hxd": "21acdeea16dbdbdcafa6ec5d500ab7f614796c8d23888f82e39daf3654b468c6",
-    "store-new-tag-mixed.hxd": "df973e9298a512423e872c861d6da86983ba6a2c533e2ec30fcdb4293d51642f",
+    "store-low-coverage.hxd": "7f071b6fba37bc19c6de140ce2226a9e816cf648b9e43b492c9085ae4df5e83d",
+    "store-new-tag-mixed.hxd": "3d70ba757c8d78454802fa017ef1c6dcb8598f6a765467cc02eb889d968321e4",
     "store-not-hxstore.hxd": "ff246e3641709896653725d5fc5aac7e9cce481cfa1a71f8d3fd3b955147a859",
-    "store-page-8192.hxd": "a16529347fd3b1509b37fda6543bb2393070ccedc4408aa0c60488413d5f8ec0",
+    "store-page-8192.hxd": "d678161157fc2435cb7cc3b0a665ac805d283dd5df3667b6eb66ea3b6fd6c8a3",
     "store-short.hxd": "408514ce67103ff298f8239893db37afef583f1ac026d6be90df01c1b1018a12",
     "store-unknown-classes-only.hxd": "625a063879740ec9e1fb51ffc77c7f0d30a28b2b1bf4fe992be14410b7e6578d",
-    "store-version-j.hxd": "e447e3626757bb62522a3add0a1a8e0b492756c7e087305f3c29776019b70311",
+    "store-version-j.hxd": "f149a4ee6af546a89608d4354c684a431fc637915b49bd4971b52aa1ae5a43eb",
     "twin-candidates.txt": "38ad3832afce73d029710516d4095bfa9767279568c38e4da5a22586b9a28671"
   },
-  "hash": "16188836962aaa008a2a92070795c70bb7edbf0bbcdbdb3be6821d361c134c4f"
+  "hash": "20ec08db12a9421f6609bda150390f4febd354c748219b7b9c4d092ad5dd948b"
 }

@@ -381,7 +381,7 @@ func (g *gen) twins() string {
 	sb.WriteString("# Invented iCal UIDs of fixture events meant to be twins of Teams fixture events.\n")
 	sb.WriteString("# The Teams fixture has no calendar records yet, so these are not yet shared.\n")
 	for _, e := range ids {
-		sb.WriteString(e.spec.ID + "\n")
+		sb.WriteString(hxbuild.HexID(e.spec.ID) + "\n")
 	}
 	return sb.String()
 }
