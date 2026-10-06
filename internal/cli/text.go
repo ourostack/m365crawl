@@ -168,13 +168,20 @@ func (rt *runtime) renderText(label string, v any) error {
 func (rt *runtime) statusBlock(title string, r *statusResult) {
 	w := rt.stdout
 	if !r.ArchiveExists {
-		render.Block(w, title, map[string]any{"archive_path": r.ArchivePath, "archive_exists": false}, rt.color)
+		m := map[string]any{"archive_path": r.ArchivePath, "archive_exists": false}
+		if r.Outlook != nil {
+			m["outlook"] = r.Outlook.Code + ": " + r.Outlook.Message
+		}
+		render.Block(w, title, m, rt.color)
 		_, _ = fmt.Fprintln(w, "run teamscrawl sync to create it")
 		return
 	}
 	m := map[string]any{"archive_path": r.ArchivePath, "schema_version": r.SchemaVersion, "fts_present": r.FTSPresent}
 	if r.LastRun != nil {
 		m["last_run"] = r.LastRun.Status + " at " + stamp(r.LastRun.FinishedAt)
+	}
+	if r.Outlook != nil {
+		m["outlook"] = r.Outlook.Code + ": " + r.Outlook.Message
 	}
 	if len(r.OtherOrigins) > 0 {
 		m["other_origins"] = strings.Join(r.OtherOrigins, ", ")

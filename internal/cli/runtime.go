@@ -215,8 +215,11 @@ func (rt *runtime) checkTeam() error {
 // read runs a read command: implicit sync, open the archive read-only (nil when there is none),
 // run fn, stamp the result with the archive's age and any sync error, and print it.
 func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) error {
-	if err := rt.checkOutlookRoot(); err != nil {
-		return err
+	// whoami and status are how a bad setup is looked at, so a stale root never stops them; status
+	// reports it as data.
+	bad := rt.checkOutlookRoot()
+	if bad != nil && label != "status" && label != "whoami" {
+		return bad
 	}
 	if err := rt.checkTeam(); err != nil {
 		return err
@@ -255,6 +258,10 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	res, err := fn(st)
 	if err != nil {
 		return asCoded(err)
+	}
+	if sr, ok := res.(*statusResult); ok && bad != nil {
+		b := bodyOf(bad)
+		sr.Outlook = &b
 	}
 	res.setMeta(age, syncErr)
 	res.setSynced(rt.synced)
@@ -367,7 +374,7 @@ const CodeOutlookRootMissing = "outlook_root_missing"
 // that takes --outlook-root, before any sync starts. It does nothing while the Outlook source is
 // off. A root that
 // exists but holds no profiles is the sync's own failure (no_outlook_profiles).
-func (rt *runtime) checkOutlookRoot() error {
+func (rt *runtime) checkOutlookRoot() *errs.Coded {
 	if !rt.outlookOn {
 		return nil
 	}

@@ -231,3 +231,40 @@ func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 		t.Fatalf("%d %v %s", code, got, errOut)
 	}
 }
+
+// A stale Outlook root in the environment never stops whoami, status or version; status says so as data.
+func TestBadOutlookRootDoesNotStopWhoamiStatusVersion(t *testing.T) {
+	e := textEnv(t)
+	e.sync()
+	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
+	for _, cmd := range []string{"whoami", "status", "--version"} {
+		code, out, errOut := e.run("--max-age", "0", cmd)
+		if code != 0 || out == "" {
+			t.Fatalf("%s: exit %d %s", cmd, code, errOut)
+		}
+	}
+	_, out, _ := e.run("--max-age", "0", "status")
+	o, _ := decode(t, out)["outlook"].(map[string]any)
+	if o["code"] != "outlook_root_missing" || o["message"] == "" || o["fix"] == "" {
+		t.Fatalf("status outlook: %s", out)
+	}
+	// Text shows it, with and without an archive.
+	_, out, _ = e.run("--format", "text", "--max-age", "0", "status")
+	if !strings.Contains(out, "outlook_root_missing") {
+		t.Fatalf("text: %s", out)
+	}
+	fresh := &env{t: t, root: e.root, db: filepath.Join(t.TempDir(), "none.db")}
+	_, out, _ = fresh.run("--format", "text", "--max-age", "0", "status")
+	if !strings.Contains(out, "outlook_root_missing") {
+		t.Fatalf("text, no archive: %s", out)
+	}
+	// Without the problem the field is absent, and sync still fails hard.
+	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "")
+	if _, out, _ = e.run("--max-age", "0", "status"); decode(t, out)["outlook"] != nil {
+		t.Fatalf("clean: %s", out)
+	}
+	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
+	if code, _, _ := e.run("sync"); code != 3 {
+		t.Fatalf("sync exit %d", code)
+	}
+}

@@ -598,6 +598,9 @@ type statusResult struct {
 	ArchiveExists bool   `json:"archive_exists"`
 	store.StatusRow
 	OtherOrigins []string `json:"other_origins,omitempty"`
+	// Outlook is the Outlook root's problem (the same code, message and fix as the error sync gives),
+	// present only when the Outlook source is on and its root is not a readable directory.
+	Outlook *errorBody `json:"outlook,omitempty"`
 	meta
 }
 
