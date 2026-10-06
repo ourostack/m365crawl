@@ -114,7 +114,7 @@ func TestGoneSkipsMasters(t *testing.T) {
 	}
 	// And inferring unseen rows in a window skips masters too.
 	tx, _ := db.BeginTx(ctx, nil)
-	if err := ApplySnapshotTx(ctx, tx, tw(t), nil, mustTime(t, "2026-10-06T03:00:00Z")); err != nil {
+	if _, err := ApplySnapshotTx(ctx, tx, tw(t), nil, mustTime(t, "2026-10-06T03:00:00Z")); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
@@ -406,11 +406,11 @@ func TestBatchReadErrors(t *testing.T) {
 }
 
 func TestCaptureReminderAloneKeepsDetailClock(t *testing.T) {
-	old := Capture(nil, thin(t, t1))
+	old := mustCapture(t, nil, thin(t, t1))
 	in := thin(t, t2)
 	five := 5
 	in.ReminderMinutes = &five
-	got := Capture(&old, in)
+	got := mustCapture(t, &old, in)
 	if got.ReminderMinutes == nil || *got.ReminderMinutes != 5 || got.DetailAsOf != nil {
 		t.Fatalf("%+v", got)
 	}

@@ -557,6 +557,12 @@ func TestFieldsAndMaxText(t *testing.T) {
 			t.Fatalf("short text must not be flagged: %v", it)
 		}
 	}
+	_, stdout, _ = e.run("--max-age", "0", "--fields", "id,text_truncated", "--max-text", "5", "search", "Hello")
+	for _, it := range items(t, decode(t, stdout)) {
+		if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
+			t.Fatalf("explicit text_truncated field: %v", it)
+		}
+	}
 }
 
 func TestHTMLFlag(t *testing.T) {

@@ -106,10 +106,7 @@ func TestTablesMatchGoleveldb(t *testing.T) {
 			if len(listExt(t, dir, ".ldb")) < 2 {
 				t.Fatal("want several tables")
 			}
-			d, err := Load(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
+			d := mustLoad(t, dir)
 			checkAgainst(t, d, want)
 			if d.Stats().Keys != len(want) {
 				t.Fatalf("Keys = %d want %d", d.Stats().Keys, len(want))
@@ -121,10 +118,7 @@ func TestTablesMatchGoleveldb(t *testing.T) {
 // Large table values are not held in memory: they are re-read from their block when asked for.
 func TestLargeTableValuesAreLazy(t *testing.T) {
 	dir, want := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	lazy, held := 0, 0
 	for _, e := range d.entries {
 		if e.deleted {
@@ -160,20 +154,14 @@ func TestAllTableValuesLazy(t *testing.T) {
 	lazyMin = 0
 	t.Cleanup(func() { lazyMin = old })
 	dir, want := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	checkAgainst(t, d, want)
 }
 
 // A lazy value whose table vanished is an error from Scan and from Get, never an absent key.
 func TestLazyValueRereadFailure(t *testing.T) {
 	dir, want := buildMixed(t, opt.SnappyCompression)
-	d, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := mustLoad(t, dir)
 	var lazyKey string
 	for k, e := range d.entries {
 		if e.lazy && !e.deleted {
@@ -193,7 +181,7 @@ func TestLazyValueRereadFailure(t *testing.T) {
 	if v, ok, err := d.Get([]byte(lazyKey)); !errors.As(err, &mf) || ok || v != nil {
 		t.Fatalf("Get of an unreadable lazy value = %d bytes, %v, %v; want a MissingFileError", len(v), ok, err)
 	}
-	err = d.Scan([]byte(lazyKey), func(k, v []byte) error { return nil })
+	err := d.Scan([]byte(lazyKey), func(k, v []byte) error { return nil })
 	if !errors.As(err, &mf) {
 		t.Fatalf("Scan err = %v, want MissingFileError", err)
 	}
@@ -273,11 +261,8 @@ func TestFilteredLazyMatchesGoleveldb(t *testing.T) {
 			lazyMin = min
 			dir, all := buildMixed(t, c)
 			keep := func(k []byte) bool { return k[len(k)-1]%2 == 0 }
-			d, err := LoadWith(dir, LoadOptions{Keep: keep})
+			d := mustLoadWith(t, dir, LoadOptions{Keep: keep})
 			lazyMin = old
-			if err != nil {
-				t.Fatal(err)
-			}
 			want := map[string][]byte{}
 			for k, v := range all {
 				if keep([]byte(k)) {

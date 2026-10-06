@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
@@ -50,8 +51,8 @@ type Counts struct {
 // Open creates or opens the archive at path for writing: parent directory 0700, file 0600.
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = absPath(path)
-	if err := ensureParent(path); err != nil {
-		return nil, err
+	if err := prepareArchiveForWrite(path); err != nil {
+		return nil, mapArchiveOpenError(err)
 	}
 	if err := checkSchemaNotNewer(ctx, path); err != nil {
 		return nil, err
@@ -60,7 +61,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := chmodFile(path, 0o600); err != nil {
+	if err := finalizeArchiveFile(path); err != nil {
 		_ = cs.Close()
 		return nil, fmt.Errorf("chmod archive: %w", err)
 	}
@@ -79,7 +80,7 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	db, _ := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()) // lazy: it fails only on an unknown driver
+	db, _ := sql.Open("sqlite", sqliteFileURI(path, "mode=ro")) // lazy: it fails only on an unknown driver
 	defer func() { _ = db.Close() }()
 	var found int
 	if err := db.QueryRowContext(ctx, `select coalesce(max(version), 0) from schema_migrations`).Scan(&found); err != nil {
@@ -89,6 +90,14 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
 	}
 	return nil
+}
+
+func sqliteFileURI(path, rawQuery string) string {
+	slashPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath, RawQuery: rawQuery}).String()
 }
 
 // absPath returns path as an absolute path. The SQLite driver takes the path as a URI and reads a

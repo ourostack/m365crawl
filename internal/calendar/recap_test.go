@@ -438,3 +438,30 @@ func TestCaptureRecapRecordingTravelsAsOneUnit(t *testing.T) {
 		t.Fatalf("fill: %+v", filled)
 	}
 }
+
+// TestCaptureRecapRecordingNeverMixesCopies runs every arrival order of copies with and without a
+// URL and checks that the stored URL, times and duration always come from one copy: the last copy
+// in that order that supplied a URL.
+func TestCaptureRecapRecordingNeverMixesCopies(t *testing.T) {
+	copies := []Recap{
+		{AccountID: acct, CallID: "c", RecordingURL: "https://rec.example.test/1", RecordingStartAt: tp(t, "2026-10-05T16:00:00Z"), RecordingEndAt: tp(t, "2026-10-05T17:00:00Z"), DurationSeconds: 3600},
+		{AccountID: acct, CallID: "c", RecordingURL: "https://rec.example.test/2"}, // a URL with no times
+		{AccountID: acct, CallID: "c", RecordingStartAt: tp(t, "2026-10-05T18:00:00Z"), DurationSeconds: 5},
+		{AccountID: acct, CallID: "c", RecordingURL: "https://rec.example.test/3", RecordingEndAt: tp(t, "2026-10-05T19:00:00Z"), DurationSeconds: 30},
+	}
+	for _, order := range permutations(len(copies)) {
+		var stored *Recap
+		var supplier *Recap
+		for _, i := range order {
+			next := CaptureRecap(stored, copies[i])
+			stored = &next
+			if copies[i].RecordingURL != "" {
+				supplier = &copies[i]
+			}
+		}
+		if stored.RecordingURL != supplier.RecordingURL || !reflect.DeepEqual(stored.RecordingStartAt, supplier.RecordingStartAt) ||
+			!reflect.DeepEqual(stored.RecordingEndAt, supplier.RecordingEndAt) || stored.DurationSeconds != supplier.DurationSeconds {
+			t.Fatalf("order %v mixed copies: %+v, supplier %+v", order, stored, supplier)
+		}
+	}
+}

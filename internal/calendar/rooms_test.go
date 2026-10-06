@@ -92,3 +92,56 @@ func TestDetailLevel(t *testing.T) {
 		t.Fatal("no row time means nothing newer to be stale against")
 	}
 }
+
+// A newer rich copy changes the location text and carries no list: the older list is kept but
+// marked stale although the event's detail level is full.
+func TestRoomsMarkAListOlderThanTheTextStale(t *testing.T) {
+	old := rich(t, t1)
+	old.Location = "Fixture Room Alpha"
+	old.LocationsJSON = `[{"name":"Fixture Room Alpha","kind":"conferenceRoom"},{"name":"Fixture Room Gamma","kind":"conferenceRoom"}]`
+	stored := mustCapture(t, nil, old)
+	moved := rich(t, t3)
+	moved.Location, moved.LocationsJSON = "Fixture Room Beta", ""
+	stored = mustCapture(t, &stored, moved)
+	if DetailLevel(stored) != DetailFull || stored.LocationsJSON != old.LocationsJSON {
+		t.Fatalf("setup: level %s list %q", DetailLevel(stored), stored.LocationsJSON)
+	}
+	for _, r := range Rooms(stored) {
+		if r.Kind == RoomStructured && !r.Stale {
+			t.Errorf("structured room %q is current but its list predates the text", r.Name)
+		}
+	}
+	// A list as new as the text is not stale.
+	for _, r := range Rooms(mustCapture(t, nil, old)) {
+		if r.Stale {
+			t.Errorf("fresh room %q marked stale", r.Name)
+		}
+	}
+	older := stored
+	older.Location = "Fixture Room Alpha; Fixture Room Gamma; https://teams.example.test/join"
+	for _, r := range Rooms(older) {
+		if r.Stale {
+			t.Errorf("text that matches the list implies no change: %q stale", r.Name)
+		}
+	}
+	// No clocks, or a list newer than the text, say nothing.
+	if structuredOlderThanText(Event{Location: "x", LocationsJSON: old.LocationsJSON}) {
+		t.Error("no clocks")
+	}
+}
+
+func TestStructuredOlderThanTextComparesNames(t *testing.T) {
+	clocks := `{"location":"2026-10-03T10:00:00.000Z","location_list":"2026-10-01T10:00:00.000Z"}`
+	list := `[{"name":"Alpha"},{"name":""}]`
+	for text, want := range map[string]bool{
+		"Alpha":                   false,
+		"alpha; https://x.test/j": false,
+		"Beta":                    true,
+		"Alpha; Beta":             true,
+	} {
+		e := Event{Location: text, LocationsJSON: list, FieldClocksJSON: clocks}
+		if got := structuredOlderThanText(e); got != want {
+			t.Errorf("%q: %v, want %v", text, got, want)
+		}
+	}
+}

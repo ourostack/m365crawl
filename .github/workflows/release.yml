@@ -1,24 +1,77 @@
 name: Release
 
 on:
+  # Merging a release-notes file to main is the release. Nobody pushes a tag: the decide
+  # job reads main, finds the notes files whose release is not done and releases the lowest
+  # version, and the release job creates the tag. Pushing a tag by hand starts nothing.
+  # A CHANGELOG.md change re-evaluates, so a changelog fix-up releases a version that was
+  # refused for lacking its section. workflow_dispatch (no inputs) is the manual retry, and
+  # how the workflow starts itself again for notes that were waiting.
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "docs/releases/*.md"
+      - "CHANGELOG.md"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# One release at a time. A run waiting behind a release in flight can be replaced by a newer
+# waiting run; that loses nothing, because decide reads the state of main, not the push.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   GOWORK: "off"
 
 jobs:
-  # A tag publishes only a commit that passes every gate CI enforces: a failing check blocks the release.
+  # Reads main and decides: is there a release to make, and which version (the lowest notes
+  # file without a finished release). It refuses what is wrong (scripts/release-decide.sh).
+  # Every later job reads the tag and commit from these outputs; none reads github.ref_name.
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      sha: ${{ steps.decide.outputs.sha }}
+      rehearsal: ${{ steps.decide.outputs.rehearsal }}
+      remaining: ${{ steps.decide.outputs.remaining }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide what to release from the state of main
+        id: decide
+        env:
+          AFTER: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/release-decide.sh
+
+  # A release reruns the macOS check gate on the released commit before publishing; the Windows
+  # test, e2e and coverage gates are enforced in pull-request CI, and the published Windows
+  # artifacts are verified below before the cask is pushed.
   verify:
+    needs: decide
+    if: ${{ needs.decide.outputs.release == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -33,7 +86,7 @@ jobs:
         run: make check
 
   release:
-    needs: verify
+    needs: [decide, verify]
     runs-on: macos-latest
     timeout-minutes: 60
     permissions:
@@ -42,11 +95,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.decide.outputs.sha }}
           fetch-depth: 0
+          # This job pushes the tag with the workflow token, so it keeps the checkout credentials.
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # Before the tag exists: a missing secret must not leave a tag behind.
       - name: Require every Apple signing secret
         env:
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -56,10 +112,26 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: scripts/sign-notarize.sh --check-secrets
+      - name: Create the tag at the released commit
+        env:
+          TAG: ${{ needs.decide.outputs.tag }}
+          SHA: ${{ needs.decide.outputs.sha }}
+        run: |
+          # A tag made with GITHUB_TOKEN starts no other workflow, so the pipeline
+          # continues in this run. On a re-run of this job the tag may already exist
+          # at the same commit; at any other commit it is an error.
+          existing="$(git ls-remote --tags origin "refs/tags/${TAG}" | cut -f1)"
+          if [ -z "$existing" ]; then
+            git tag "$TAG" "$SHA"
+            git push origin "refs/tags/${TAG}"
+          elif [ "$existing" != "$SHA" ]; then
+            echo "::error::the tag ${TAG} already points at ${existing}, not ${SHA}"
+            exit 1
+          fi
       - name: Pick release notes
         id: notes
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.decide.outputs.tag }}
         run: |
           notes="${RUNNER_TEMP}/release-notes.md"
           if [ -f "docs/releases/${TAG}.md" ]; then
@@ -68,6 +140,7 @@ jobs:
             : > "$notes"
           fi
           printf '\nThe darwin binaries are Developer ID signed and notarized by Apple.\n' >> "$notes"
+          printf 'The Windows binaries are unsigned.\n' >> "$notes"
           echo "args=release --clean --release-notes=${notes}" >> "$GITHUB_OUTPUT"
       - name: Release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -77,10 +150,10 @@ jobs:
           args: ${{ steps.notes.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Build the tag that triggered this run. Without it goreleaser picks a tag
+          # Build the tag this run derived. Without it goreleaser picks a tag
           # from git describe, and a prerelease tag on the same commit (v0.1.0-rc.4
           # beside v0.1.0) made the v0.1.0 run rebuild and re-upload the rc.
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ needs.decide.outputs.tag }}
           # scripts/sign-notarize.sh fails the build when any is missing or any gate fails.
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -88,18 +161,28 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      # publish-homebrew pushes this cask to the tap once the release verifies. A prerelease
-      # (a tag with a hyphen, such as v0.1.0-rc.2) carries no cask, so it never reaches the tap.
+      # publish-homebrew pushes this cask to the tap once the release verifies. Every
+      # release carries one, a rehearsal included: goreleaser renders it for the rc tag
+      # (version and URLs of the rc) even with skip_upload: true, which only skips pushing it
+      # to the tap (checked with a local snapshot build of a prerelease version), and
+      # publish-homebrew puts a rehearsal's cask on the tap's rehearsal branch, never on main.
+      # If goreleaser ever stops rendering it, this step fails here with the reason, not later in
+      # publish-homebrew with a missing asset.
       - name: Attach Homebrew cask to the release
-        if: ${{ !contains(github.ref_name, '-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" dist/homebrew/Casks/teamscrawl.rb --clobber
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: |
+          cask="dist/homebrew/Casks/teamscrawl.rb"
+          if [ ! -f "$cask" ]; then
+            echo "::error::goreleaser did not render ${cask} for ${TAG}; the release has no cask to publish"
+            exit 1
+          fi
+          gh release upload "$TAG" "$cask" --clobber
 
-  # Verifies the published artifacts exactly as a user downloads them.
-  verify-release:
-    needs: release
+  # Verifies the published darwin artifacts exactly as a user downloads them.
+  verify-release-darwin:
+    needs: [decide, release]
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -107,21 +190,81 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
       - name: Verify the published darwin artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.decide.outputs.tag }}
           REPO: ${{ github.repository }}
-          EXPECT_COMMIT: ${{ github.sha }}
+          EXPECT_COMMIT: ${{ needs.decide.outputs.sha }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: scripts/verify-release.sh
 
-  # Stable tags only: a prerelease never reaches the tap. Publishing is part of this
-  # pipeline: the job pushes the cask to ourostack/homebrew-tap with a deploy key that
-  # can write to that one repository, and only after the published artifacts verify.
+  # Verifies the published Windows zip files on native Windows runners.
+  verify-release-windows:
+    needs: [decide, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: amd64
+          - runner: windows-11-arm
+            arch: arm64
+    name: verify-release-windows (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
+      - name: Verify the published Windows artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          REPO: ${{ github.repository }}
+          EXPECT_COMMIT: ${{ needs.decide.outputs.sha }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: scripts/verify-release.ps1
+
+  # Settles the release flags after every verification job passed (scripts/release-flags.sh): a
+  # rehearsal must be a prerelease and not latest; a stable release that an earlier flake demoted
+  # (contain) is restored (not prerelease, latest unless a higher stable release exists). It is its
+  # own job, and publish-homebrew needs it, so "Re-run failed jobs" after any single verification
+  # flake always passes through it before the cask is published.
+  settle:
+    needs: [decide, verify-release-darwin, verify-release-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
+      - name: Settle the release flags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: scripts/release-flags.sh settle
+
+  # Pushes the cask to ourostack/homebrew-tap with a deploy key that can write to that
+  # one repository, and only after the published darwin and Windows artifacts verify. A stable release
+  # goes to the tap's main, which is what users install. A rehearsal goes to the
+  # branch "rehearsal", so the real key and the real push are exercised without
+  # changing what users install.
   publish-homebrew:
-    if: ${{ !contains(github.ref_name, '-') }}
-    needs: verify-release
+    needs: [decide, settle]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -129,27 +272,107 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
       - name: Push the cask to the tap
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          TAP_BRANCH: ${{ needs.decide.outputs.rehearsal == 'true' && 'rehearsal' || 'main' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: scripts/publish-cask.sh
 
-  # Installs from the tap the way a user does and checks the installed binary.
+  # Stable releases only: installs from the tap the way a user does and checks the installed binary.
   verify-homebrew:
-    if: ${{ !contains(github.ref_name, '-') }}
-    needs: publish-homebrew
+    if: ${{ needs.decide.outputs.rehearsal == 'false' }}
+    needs: [decide, publish-homebrew]
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
       - name: Wait for the tap, install the cask and verify it
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.decide.outputs.tag }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: scripts/verify-homebrew.sh
+        # Three attempts, a minute apart: a transient failure must not roll the tap back and demote a good release.
+        run: scripts/retry.sh 3 60 scripts/verify-homebrew.sh
+
+  # Containment. A release that failed after it may have been published must not stay
+  # "latest": it is marked as a prerelease (harmless when no release exists yet). If the
+  # install from the tap failed, the tap is also put back to the cask it served before, with a
+  # new commit. A later successful settle restores a release that a flake demoted.
+  contain:
+    if: ${{ always() && (needs.release.result == 'failure' || needs.verify-release-darwin.result == 'failure' || needs.verify-release-windows.result == 'failure' || needs.settle.result == 'failure' || needs.verify-homebrew.result == 'failure') }}
+    needs: [decide, release, verify-release-darwin, verify-release-windows, settle, verify-homebrew]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
+      - name: Mark the release as a prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: scripts/release-flags.sh demote
+      - name: Put the tap back to the previous cask
+        if: ${{ always() && needs.verify-homebrew.result == 'failure' }}
+        env:
+          TAG: ${{ needs.decide.outputs.tag }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: scripts/publish-cask.sh --restore-previous
+
+  # Starts this workflow again when more notes files are waiting, after a release finished
+  # cleanly, so back-to-back notes all get released, one per run, lowest version first.
+  # workflow_dispatch is the one event a run started with the workflow token can start.
+  continue-release:
+    if: ${{ !failure() && !cancelled() && needs.decide.outputs.remaining == 'true' && needs.publish-homebrew.result == 'success' }}
+    needs: [decide, publish-homebrew, verify-homebrew]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Start the next release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run release.yml -R "$REPO" --ref main
+
+  # Reporting: any failed or cancelled job opens an issue, or comments on the open one with the
+  # same title. A run cancelled before any job started cannot report; the next run releases it anyway.
+  report-failure:
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    needs: [decide, verify, release, verify-release-darwin, verify-release-windows, settle, publish-homebrew, verify-homebrew, contain, continue-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          VERSION: ${{ needs.decide.outputs.tag }}
+          OUTCOME: ${{ contains(needs.*.result, 'failure') && 'failed' || 'cancelled' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: scripts/report-failure.sh

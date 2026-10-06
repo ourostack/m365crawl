@@ -58,17 +58,57 @@ type attendeeEntry struct {
 	Type    string `json:"type"`
 }
 
+// structuredOlderThanText reports whether the structured room list was stated before the current
+// location text and the text names other places than the list does. The two clocks (location and
+// location_list in FieldClocksJSON) are independent, so a newer copy can change the text and carry
+// no list; the older list is kept but must not read as current. DetailLevel does not see this: the
+// event's detail can be full while its list is not.
+func structuredOlderThanText(e Event) bool {
+	clocks := ParseFieldClocks(e.FieldClocksJSON)
+	list, haveList := clocks["location_list"]
+	text, haveText := clocks["location"]
+	if !haveList || !haveText || !list.Before(text) {
+		return false
+	}
+	var locations []structuredLocation
+	_ = json.Unmarshal([]byte(e.LocationsJSON), &locations)
+	implied := map[string]bool{}
+	for _, l := range locations {
+		if n := strings.ToLower(strings.TrimSpace(l.Name)); n != "" {
+			implied[n] = true
+		}
+	}
+	named := map[string]bool{}
+	for _, piece := range strings.Split(e.Location, ";") {
+		piece = strings.ToLower(strings.TrimSpace(piece))
+		if piece != "" && !strings.HasPrefix(piece, "http://") && !strings.HasPrefix(piece, "https://") {
+			named[piece] = true
+		}
+	}
+	if len(named) != len(implied) {
+		return true
+	}
+	for n := range named {
+		if !implied[n] {
+			return true
+		}
+	}
+	return false
+}
+
 // Rooms builds one room list from the three places Teams names rooms, de-duplicated by
 // case-folded name: (1) each ";"-separated piece of Location that is not a join URL, kind text;
 // (2) each LocationsJSON entry, kind structured; (3) each attendee of type Resource, kind
 // resource. A structured or resource entry fills a text entry of the same name, taking its kind,
 // and fills an earlier entry's missing address. Structured and resource entries carry Stale when
-// the detail is older than the event. Entries without a name are skipped, and JSON that does not
+// the detail is older than the event; structured entries also when the list is older than the
+// location text and the text names other places (structuredOlderThanText). Entries without a name are skipped, and JSON that does not
 // parse contributes nothing.
 func Rooms(e Event) []Room {
 	var rooms []Room
 	index := map[string]int{}
 	stale := DetailLevel(e) == DetailStale
+	listStale := stale || structuredOlderThanText(e)
 	add := func(r Room) {
 		name := strings.TrimSpace(r.Name)
 		if name == "" {
@@ -108,7 +148,7 @@ func Rooms(e Event) []Room {
 	_ = json.Unmarshal([]byte(e.LocationsJSON), &locations)
 	for _, l := range locations {
 		add(Room{Name: l.Name, Kind: RoomStructured, LocationType: l.Kind, Address: l.Address,
-			Latitude: l.Latitude, Longitude: l.Longitude, Stale: stale})
+			Latitude: l.Latitude, Longitude: l.Longitude, Stale: listStale})
 	}
 	var attendees []attendeeEntry
 	_ = json.Unmarshal([]byte(e.AttendeesJSON), &attendees)

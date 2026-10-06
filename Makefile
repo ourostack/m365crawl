@@ -3,6 +3,7 @@ GOLANGCI_LINT_VERSION ?= v2.14.0
 GOVULNCHECK_VERSION ?= v1.8.0
 ACTIONLINT_VERSION ?= v1.7.12
 GORELEASER_VERSION ?= v2.18.2
+POWERSHELL ?= powershell
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -26,9 +27,9 @@ help:
 		'  fmt            Apply Go formatting.' \
 		'  fmt-check      Fail if any file needs formatting.' \
 		'  vet            Run go vet.' \
-		'  lint           Run golangci-lint, govulncheck, actionlint, shellcheck and the signing script selftest.' \
+		'  lint           Run golangci-lint, govulncheck, actionlint, shellcheck and the release script selftests.' \
 		'  tidy-check     Verify go.mod and go.sum are tidy.' \
-		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow).' \
+		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow on Unix; on Windows the PowerShell gate proves the Windows-only files are covered).' \
 		'  check          Run every local gate enforced by CI.' \
 		'  snapshot       Build release artifacts locally without publishing.' \
 		'  screenshot     Regenerate screenshot.png from the committed fixture (Node 22, Edge via Playwright).' \
@@ -83,6 +84,13 @@ script-lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck is required (brew install shellcheck)"; exit 1; }
 	shellcheck scripts/*.sh
 	scripts/sign-notarize.sh --selftest
+	scripts/release-decide.sh --selftest
+	scripts/publish-cask.sh --selftest
+	scripts/check-tap-key.sh --selftest
+	scripts/report-failure.sh --selftest
+	scripts/release-flags.sh --selftest
+	scripts/automerge-eligible.sh --selftest
+	scripts/retry.sh --selftest
 
 tidy-check:
 	go mod verify
@@ -91,7 +99,11 @@ tidy-check:
 check: tidy-check fmt-check vet lint test coverage e2e
 
 coverage:
+ifeq ($(OS),Windows_NT)
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/check-coverage.ps1
+else
 	./scripts/check-coverage.sh
+endif
 
 screenshot:
 	cd scripts/fixture && npm ci --no-audit --no-fund

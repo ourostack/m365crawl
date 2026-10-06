@@ -54,20 +54,25 @@ func at(t testing.TB, s string) *time.Time { return tp(t, s) }
 
 func TestCaptureNewEventTakesIncoming(t *testing.T) {
 	in := rich(t, t1)
-	got := Capture(nil, in)
+	got := mustCapture(t, nil, in)
 	want := in
-	want.DetailAsOf, want.ReminderAsOf, want.CategoriesAsOf = at(t, t1), at(t, t1), at(t, t1)
+	want.DetailAsOf = at(t, t1)
+	clocks := map[string]time.Time{"raw": *at(t, t1)}
+	for _, u := range units {
+		clocks[u.name] = *at(t, t1)
+	}
+	want.FieldClocksJSON = formatClocks(clocks)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
-	if bare := Capture(nil, thin(t, t1)); bare.DetailAsOf != nil || bare.DetailRawJSON != "" {
+	if bare := mustCapture(t, nil, thin(t, t1)); bare.DetailAsOf != nil || bare.DetailRawJSON != "" {
 		t.Fatalf("a thin first copy supplies no detail: %+v", bare)
 	}
 }
 
 func TestCaptureThinnerLaterCopyKeepsDetail(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
-	got := Capture(&old, thin(t, t3))
+	old := mustCapture(t, nil, rich(t, t1))
+	got := mustCapture(t, &old, thin(t, t3))
 	if got.AttendeesJSON != attendeesTwo || got.BodyHTML != "<p>Agenda body</p>" || got.LocationsJSON != roomJSON ||
 		got.OnlineMeetingURL == "" || got.TeamsThreadID == "" || got.HasAttachments != true || got.ReminderMinutes == nil {
 		t.Fatalf("thin copy erased detail: %+v", got)
@@ -81,10 +86,10 @@ func TestCaptureThinnerLaterCopyKeepsDetail(t *testing.T) {
 }
 
 func TestCaptureThinnerCopyWithTimeMoveWins(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	moved := thin(t, t3)
 	moved.Start, moved.End = mustTime(t, "2026-10-06T16:00:00Z"), mustTime(t, "2026-10-06T17:00:00Z")
-	got := Capture(&old, moved)
+	got := mustCapture(t, &old, moved)
 	if !got.Start.Equal(moved.Start) || !got.End.Equal(moved.End) {
 		t.Fatalf("time move lost: %v", got.Start)
 	}
@@ -104,7 +109,7 @@ func TestCaptureOrderIndependentDetail(t *testing.T) {
 	for _, order := range orders {
 		var stored *Event
 		for _, name := range order {
-			next := Capture(stored, copies[name])
+			next := mustCapture(t, stored, copies[name])
 			stored = &next
 		}
 		if stored.AttendeesJSON != attendeesThree || stored.BodyHTML != "<p>new body</p>" {
@@ -118,7 +123,7 @@ func TestCaptureOrderIndependentDetail(t *testing.T) {
 	for _, order := range [][]string{{"r1", "t3"}, {"t3", "r1"}} {
 		var stored *Event
 		for _, name := range order {
-			next := Capture(stored, copies[name])
+			next := mustCapture(t, stored, copies[name])
 			stored = &next
 		}
 		if stored.AttendeesJSON != attendeesTwo || !stored.DetailAsOf.Equal(mustTime(t, t1)) || !stored.LastModified.Equal(mustTime(t, t3)) {
@@ -132,10 +137,10 @@ func TestCaptureStaleRichCopyFillsOnlyEmptyDetail(t *testing.T) {
 	cur := rich(t, t3)
 	cur.BodyHTML, cur.BodyText, cur.BodyPreview = "", "", ""
 	cur.Subject = "Renamed At T3"
-	old := Capture(nil, cur)
+	old := mustCapture(t, nil, cur)
 	staleRich := rich(t, t1)
 	staleRich.AttendeesJSON = attendeesOne
-	got := Capture(&old, staleRich)
+	got := mustCapture(t, &old, staleRich)
 	if got.Subject != "Renamed At T3" || !got.LastModified.Equal(mustTime(t, t3)) {
 		t.Fatalf("schedule regressed: %q %v", got.Subject, got.LastModified)
 	}
@@ -151,19 +156,19 @@ func TestCaptureStaleRichCopyFillsOnlyEmptyDetail(t *testing.T) {
 }
 
 func TestCaptureCancelledNewerWins(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	c := thin(t, t3)
 	c.Cancelled = true
-	if got := Capture(&old, c); !got.Cancelled {
+	if got := mustCapture(t, &old, c); !got.Cancelled {
 		t.Fatal("a newer cancellation must win")
 	}
 }
 
 func TestCaptureStaleCancelledIgnored(t *testing.T) {
-	old := Capture(nil, rich(t, t3))
+	old := mustCapture(t, nil, rich(t, t3))
 	c := thin(t, t1)
 	c.Cancelled = true
-	if got := Capture(&old, c); got.Cancelled {
+	if got := mustCapture(t, &old, c); got.Cancelled {
 		t.Fatal("a stale cancellation must be ignored")
 	}
 }
@@ -171,8 +176,8 @@ func TestCaptureStaleCancelledIgnored(t *testing.T) {
 func TestCaptureUncancelNewerWins(t *testing.T) {
 	first := rich(t, t1)
 	first.Cancelled = true
-	old := Capture(nil, first)
-	if got := Capture(&old, thin(t, t3)); got.Cancelled {
+	old := mustCapture(t, nil, first)
+	if got := mustCapture(t, &old, thin(t, t3)); got.Cancelled {
 		t.Fatal("a newer un-cancel must win")
 	}
 }
@@ -180,10 +185,10 @@ func TestCaptureUncancelNewerWins(t *testing.T) {
 func TestCaptureNewerRichReplacesAttendees(t *testing.T) {
 	first := rich(t, t1)
 	first.AttendeesJSON = attendeesThree
-	old := Capture(nil, first)
+	old := mustCapture(t, nil, first)
 	next := rich(t, t2)
 	next.AttendeesJSON = attendeesOne
-	got := Capture(&old, next)
+	got := mustCapture(t, &old, next)
 	if got.AttendeesJSON != attendeesOne || !got.DetailAsOf.Equal(mustTime(t, t2)) {
 		t.Fatalf("a strictly newer detail copy must replace: %q %v", got.AttendeesJSON, got.DetailAsOf)
 	}
@@ -194,34 +199,34 @@ func TestCapturePeersKeepsLargerListEvenWhenAttendeeRemoved(t *testing.T) {
 	// modification time cannot be told from a thinner copy, so the larger list stays.
 	first := rich(t, t1)
 	first.AttendeesJSON = attendeesThree
-	old := Capture(nil, first)
+	old := mustCapture(t, nil, first)
 	same := rich(t, t1)
 	same.AttendeesJSON = attendeesOne
-	if got := Capture(&old, same); got.AttendeesJSON != attendeesThree {
+	if got := mustCapture(t, &old, same); got.AttendeesJSON != attendeesThree {
 		t.Fatalf("equal time: %q", got.AttendeesJSON)
 	}
 	noTime := rich(t, t1)
 	noTime.LastModified = nil
 	noTime.AttendeesJSON = attendeesOne
-	if got := Capture(&old, noTime); got.AttendeesJSON != attendeesThree {
+	if got := mustCapture(t, &old, noTime); got.AttendeesJSON != attendeesThree {
 		t.Fatalf("missing time: %q", got.AttendeesJSON)
 	}
 	// A bigger peer list wins, and on a tie the incoming copy does.
 	bigger := rich(t, t1)
 	bigger.AttendeesJSON = attendeesThree + " "
 	bigger.LocationsJSON = `[{"name":"A"},{"name":"B"}]`
-	if got := Capture(&old, bigger); got.LocationsJSON != bigger.LocationsJSON {
+	if got := mustCapture(t, &old, bigger); got.LocationsJSON != bigger.LocationsJSON {
 		t.Fatalf("peer with more locations: %q", got.LocationsJSON)
 	}
 	tie := rich(t, t1)
 	tie.AttendeesJSON = `[{"name":"Dana Fixture"},{"name":"Eli Fixture"},{"name":"Fay Fixture"}]`
-	if got := Capture(&old, tie); got.AttendeesJSON != tie.AttendeesJSON {
+	if got := mustCapture(t, &old, tie); got.AttendeesJSON != tie.AttendeesJSON {
 		t.Fatalf("tie must take the incoming list: %q", got.AttendeesJSON)
 	}
 	// A value that is not a JSON array measures as zero, so any real list beats it.
 	junk := old
 	junk.AttendeesJSON = "not json"
-	if got := Capture(&junk, rich(t, t1)); got.AttendeesJSON != attendeesTwo {
+	if got := mustCapture(t, &junk, rich(t, t1)); got.AttendeesJSON != attendeesTwo {
 		t.Fatalf("list must beat junk: %q", got.AttendeesJSON)
 	}
 }
@@ -229,29 +234,29 @@ func TestCapturePeersKeepsLargerListEvenWhenAttendeeRemoved(t *testing.T) {
 func TestCaptureBodyGrowsAndShrinks(t *testing.T) {
 	first := rich(t, t1)
 	first.BodyHTML = "<p>a long original body</p>"
-	old := Capture(nil, first)
+	old := mustCapture(t, nil, first)
 	short := rich(t, t2)
 	short.BodyHTML = "<p>short</p>"
-	if got := Capture(&old, short); got.BodyHTML != "<p>short</p>" {
+	if got := mustCapture(t, &old, short); got.BodyHTML != "<p>short</p>" {
 		t.Fatalf("a newer, shorter body must replace: %q", got.BodyHTML)
 	}
 	peer := rich(t, t1)
 	peer.BodyHTML = "<p>short</p>"
-	if got := Capture(&old, peer); got.BodyHTML != first.BodyHTML {
+	if got := mustCapture(t, &old, peer); got.BodyHTML != first.BodyHTML {
 		t.Fatalf("a peer, shorter body must not replace: %q", got.BodyHTML)
 	}
 	longer := rich(t, t1)
 	longer.BodyHTML = "<p>a long original body with more words</p>"
-	if got := Capture(&old, longer); got.BodyHTML != longer.BodyHTML {
+	if got := mustCapture(t, &old, longer); got.BodyHTML != longer.BodyHTML {
 		t.Fatalf("a peer, longer body must replace: %q", got.BodyHTML)
 	}
 }
 
 func TestCaptureRoomChangeMarksStructuredRoomStale(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	moved := thin(t, t3)
 	moved.Location = "Fixture Room Beta"
-	got := Capture(&old, moved)
+	got := mustCapture(t, &old, moved)
 	if got.LocationsJSON != roomJSON || got.Location != "Fixture Room Beta" {
 		t.Fatalf("location %q structured %q", got.Location, got.LocationsJSON)
 	}
@@ -272,10 +277,10 @@ func TestCaptureRoomChangeMarksStructuredRoomStale(t *testing.T) {
 }
 
 func TestCaptureOnlineMeetingRemoved(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	off := thin(t, t3)
-	off.IsOnlineMeeting = false
-	got := Capture(&old, off)
+	off.IsOnlineMeeting, off.OnlineStated = false, true
+	got := mustCapture(t, &old, off)
 	if got.OnlineMeetingURL != "" || got.ShortJoinURL != "" || got.DialInConferenceID != "" || got.DialInTollNumber != "" || got.TeamsThreadID != "" {
 		t.Fatalf("meeting links survived removal: %+v", got)
 	}
@@ -283,59 +288,59 @@ func TestCaptureOnlineMeetingRemoved(t *testing.T) {
 		t.Fatal("only the meeting links clear")
 	}
 	// A stale copy that says it is not online does not clear anything.
-	cur := Capture(nil, rich(t, t3))
+	cur := mustCapture(t, nil, rich(t, t3))
 	staleOff := thin(t, t1)
 	staleOff.IsOnlineMeeting = false
-	if got := Capture(&cur, staleOff); got.OnlineMeetingURL == "" {
+	if got := mustCapture(t, &cur, staleOff); got.OnlineMeetingURL == "" {
 		t.Fatal("a stale copy cleared the join link")
 	}
 	// A newer copy that still carries the link keeps it even if it says not online.
 	both := rich(t, t3)
 	both.IsOnlineMeeting = false
-	if got := Capture(&old, both); got.OnlineMeetingURL == "" {
+	if got := mustCapture(t, &old, both); got.OnlineMeetingURL == "" {
 		t.Fatal("the incoming copy's own link was cleared")
 	}
 	// A copy that merely lacks the URL while still online does not clear it.
-	if got := Capture(&old, thin(t, t3)); got.OnlineMeetingURL == "" {
+	if got := mustCapture(t, &old, thin(t, t3)); got.OnlineMeetingURL == "" {
 		t.Fatal("a thin online copy cleared the join link")
 	}
 }
 
 func TestCaptureEmptyLocationNewerClears(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	c := thin(t, t3)
 	c.Location = ""
-	if got := Capture(&old, c); got.Location != "" {
+	if got := mustCapture(t, &old, c); got.Location != "" {
 		t.Fatalf("a newer empty location must clear: %q", got.Location)
 	}
 	stale := thin(t, t1)
 	stale.Location = ""
-	cur := Capture(nil, rich(t, t3))
-	if got := Capture(&cur, stale); got.Location != "Fixture Room Alpha" {
+	cur := mustCapture(t, nil, rich(t, t3))
+	if got := mustCapture(t, &cur, stale); got.Location != "Fixture Room Alpha" {
 		t.Fatalf("a stale empty location must not clear: %q", got.Location)
 	}
 }
 
 func TestCaptureLastModifiedMissing(t *testing.T) {
-	old := Capture(nil, rich(t, t2))
+	old := mustCapture(t, nil, rich(t, t2))
 	in := thin(t, t2)
 	in.LastModified = nil
 	in.Subject = "Edited Without A Time"
-	got := Capture(&old, in)
+	got := mustCapture(t, &old, in)
 	if got.Subject != "Edited Without A Time" || !got.LastModified.Equal(mustTime(t, t2)) {
 		t.Fatalf("a missing time is a peer: %q %v", got.Subject, got.LastModified)
 	}
 	// With no stored time either, the incoming copy is taken and the time stays missing.
 	none := thin(t, t2)
 	none.LastModified = nil
-	first := Capture(nil, none)
+	first := mustCapture(t, nil, none)
 	if first.LastModified != nil || first.DetailAsOf != nil {
 		t.Fatalf("%+v", first)
 	}
 	// Detail that arrives without a time still lands, but cannot claim a clock.
 	r := rich(t, t2)
 	r.LastModified = nil
-	got = Capture(&first, r)
+	got = mustCapture(t, &first, r)
 	if got.AttendeesJSON != attendeesTwo || got.DetailAsOf != nil || DetailLevel(got) != "basic" {
 		t.Fatalf("%q %v %s", got.AttendeesJSON, got.DetailAsOf, DetailLevel(got))
 	}
@@ -343,8 +348,8 @@ func TestCaptureLastModifiedMissing(t *testing.T) {
 
 func TestCaptureIdempotent(t *testing.T) {
 	for name, in := range map[string]Event{"rich": rich(t, t2), "thin": thin(t, t2)} {
-		once := Capture(nil, in)
-		twice := Capture(&once, in)
+		once := mustCapture(t, nil, in)
+		twice := mustCapture(t, &once, in)
 		if !storedEqual(once, twice) {
 			t.Errorf("%s: the same copy twice changed the row:\n%+v\n%+v", name, once, twice)
 		}
@@ -355,12 +360,12 @@ func TestCaptureIdentityAndRemoval(t *testing.T) {
 	first := rich(t, t1)
 	first.EventType = EventException
 	first.OriginalStart = at(t, "2026-10-05T16:00:00Z")
-	old := Capture(nil, first)
+	old := mustCapture(t, nil, first)
 	removed := mustTime(t, t2)
 	old.RemovedAt, old.FirstSeenAt = &removed, mustTime(t, t1)
 	blank := thin(t, t3)
 	blank.EventType, blank.SeriesKey, blank.ICalUID, blank.OriginalStart = "", "", "", nil
-	got := Capture(&old, blank)
+	got := mustCapture(t, &old, blank)
 	if got.EventType != EventException || got.SeriesKey != "series-1" || got.ICalUID != "uid-1" || got.OriginalStart == nil {
 		t.Fatalf("identity must survive an empty incoming value: %+v", got)
 	}
@@ -369,37 +374,44 @@ func TestCaptureIdentityAndRemoval(t *testing.T) {
 	}
 	renamed := thin(t, t3)
 	renamed.SeriesKey, renamed.EventType = "series-2", EventSingle
-	if got := Capture(&old, renamed); got.SeriesKey != "series-2" || got.EventType != EventSingle {
+	if got := mustCapture(t, &old, renamed); got.SeriesKey != "series-2" || got.EventType != EventSingle {
 		t.Fatalf("a non-empty identity value must win: %+v", got)
 	}
 }
 
 func TestCaptureReminderAndAttachmentsFollowDetailClock(t *testing.T) {
 	first := rich(t, t1)
-	old := Capture(nil, first)
+	old := mustCapture(t, nil, first)
 	// Incoming empty keeps.
-	if got := Capture(&old, thin(t, t2)); got.ReminderMinutes == nil || *got.ReminderMinutes != 15 || !got.HasAttachments {
+	if got := mustCapture(t, &old, thin(t, t2)); got.ReminderMinutes == nil || *got.ReminderMinutes != 15 || !got.HasAttachments {
 		t.Fatalf("empty incoming erased: %+v", got)
 	}
 	// Newer both-set takes incoming; stale keeps old; peers take incoming.
 	five := 5
 	newer := rich(t, t2)
 	newer.ReminderMinutes = &five
-	if got := Capture(&old, newer); *got.ReminderMinutes != 5 {
+	if got := mustCapture(t, &old, newer); *got.ReminderMinutes != 5 {
 		t.Fatalf("newer reminder: %d", *got.ReminderMinutes)
 	}
-	cur := Capture(nil, rich(t, t3))
-	if got := Capture(&cur, newer); *got.ReminderMinutes != 15 {
+	cur := mustCapture(t, nil, rich(t, t3))
+	if got := mustCapture(t, &cur, newer); *got.ReminderMinutes != 15 {
 		t.Fatalf("stale reminder: %d", *got.ReminderMinutes)
 	}
+	// Equal times: the greater stated value wins in either order, never the arrival order.
+	tie := rich(t, t1)
+	tie.ReminderMinutes = &five
+	if got := mustCapture(t, &old, tie); *got.ReminderMinutes != 15 {
+		t.Fatalf("tied reminder: %d", *got.ReminderMinutes)
+	}
+	// A copy with no time cannot be ordered: it competes as a peer and wins.
 	peer := rich(t, t1)
-	peer.ReminderMinutes = &five
-	if got := Capture(&old, peer); *got.ReminderMinutes != 5 {
+	peer.LastModified, peer.ReminderMinutes = nil, &five
+	if got := mustCapture(t, &old, peer); *got.ReminderMinutes != 5 {
 		t.Fatalf("peer reminder: %d", *got.ReminderMinutes)
 	}
 	// Filling an empty reminder.
-	bare := Capture(nil, thin(t, t1))
-	if got := Capture(&bare, rich(t, t2)); got.ReminderMinutes == nil || !got.HasAttachments {
+	bare := mustCapture(t, nil, thin(t, t1))
+	if got := mustCapture(t, &bare, rich(t, t2)); got.ReminderMinutes == nil || !got.HasAttachments {
 		t.Fatalf("fill: %+v", got)
 	}
 }
@@ -421,7 +433,7 @@ func TestCaptureThinCopyWithSmallFieldsDoesNotClaimDetailClock(t *testing.T) {
 		} {
 			var stored *Event
 			for _, n := range order {
-				next := Capture(stored, copies[n])
+				next := mustCapture(t, stored, copies[n])
 				stored = &next
 			}
 			if stored.AttendeesJSON != attendeesThree || stored.BodyHTML != "<p>new body</p>" {
@@ -442,10 +454,10 @@ func TestCaptureThinCopyWithSmallFieldsDoesNotClaimDetailClock(t *testing.T) {
 }
 
 func TestCaptureEmptyRawDetailNeverOverwrites(t *testing.T) {
-	old := Capture(nil, rich(t, t1))
+	old := mustCapture(t, nil, rich(t, t1))
 	in := rich(t, t2)
 	in.AttendeesJSON, in.DetailRawJSON = attendeesThree, ""
-	got := Capture(&old, in)
+	got := mustCapture(t, &old, in)
 	if got.AttendeesJSON != attendeesThree || !got.DetailAsOf.Equal(mustTime(t, t2)) {
 		t.Fatalf("substantive copy did not advance: %q %v", got.AttendeesJSON, got.DetailAsOf)
 	}
@@ -482,4 +494,14 @@ func TestDetailEqualComparesBodyTypeAndCategories(t *testing.T) {
 	if detailEqual(a, b) {
 		t.Fatal("different categories differ")
 	}
+}
+
+// mustCapture is Capture for copies that are valid.
+func mustCapture(t testing.TB, old *Event, in Event) Event {
+	t.Helper()
+	got, err := Capture(old, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
 }

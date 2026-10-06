@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -107,6 +108,8 @@ func fastWatch(t *testing.T) {
 	t.Cleanup(func() { watchQuiet, watchMaxWait, watchLockedRetry = q, m, l })
 }
 
+const watchTestWaitTimeout = 30 * time.Second
+
 // noEvents makes watch poll only.
 func noEvents(t *testing.T) {
 	t.Helper()
@@ -163,7 +166,13 @@ func (w *watchEnv) stop() int {
 
 func (w *watchEnv) waitFor(what string, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(watchTestWaitTimeout)
+	if testDeadline, ok := w.t.Deadline(); ok {
+		latest := testDeadline.Add(-time.Second)
+		if latest.Before(deadline) {
+			deadline = latest
+		}
+	}
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -184,6 +193,9 @@ func (w *watchEnv) baselineDone() {
 }
 
 func (w *watchEnv) archiveCount(q string) int {
+	if _, err := os.Stat(w.db); err != nil {
+		return 0
+	}
 	db, err := sql.Open("sqlite", w.db+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return 0
@@ -194,6 +206,19 @@ func (w *watchEnv) archiveCount(q string) int {
 		return 0
 	}
 	return n
+}
+
+func TestArchiveCountDoesNotCreateArchive(t *testing.T) {
+	w := newWatchEnv(t)
+	if _, err := os.Stat(w.db); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive should start absent: %v", err)
+	}
+	if got := w.archiveCount("select count(*) from messages"); got != 0 {
+		t.Fatalf("archiveCount = %d, want 0", got)
+	}
+	if _, err := os.Stat(w.db); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archiveCount created %s: %v", w.db, err)
+	}
 }
 
 func (w *watchEnv) exec(q string, args ...any) {
@@ -316,6 +341,45 @@ func TestWatchFieldsMaxTextAndAccount(t *testing.T) {
 	}
 	if l["kind"] != "message" || l["change"] != "new" {
 		t.Errorf("envelope: %v", l)
+	}
+}
+
+func TestWatchFieldsExplicitTextTruncated(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	w.start("watch", "--every", "30ms", "--fields", "id,text_truncated", "--max-text", "5")
+	w.baselineDone()
+	w.forget(`content_text<>''`)
+	w.touch()
+	w.waitFor("a change", func() bool { return len(kinds(w.out.lines(t), "message")) > 0 })
+	l := kinds(w.out.lines(t), "message")[0]
+	it := l["item"].(map[string]any)
+	if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
+		t.Fatalf("explicit text_truncated field: %v", it)
+	}
+}
+
+func TestWatchFieldsExplicitTextTruncatedWaitsForDelayedSync(t *testing.T) {
+	w := newWatchEnv(t)
+	noEvents(t)
+	var calls atomic.Int32
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		if calls.Add(1) == 2 {
+			time.Sleep(11 * time.Second)
+		}
+		return old(ctx, o)
+	}
+	t.Cleanup(func() { runSync = old })
+	w.start("watch", "--every", "30ms", "--fields", "id,text_truncated", "--max-text", "5")
+	w.baselineDone()
+	w.forget(`content_text<>''`)
+	w.touch()
+	w.waitFor("a delayed change", func() bool { return len(kinds(w.out.lines(t), "message")) > 0 })
+	l := kinds(w.out.lines(t), "message")[0]
+	it := l["item"].(map[string]any)
+	if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
+		t.Fatalf("explicit text_truncated field after delayed sync: %v", it)
 	}
 }
 
