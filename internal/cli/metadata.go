@@ -18,7 +18,8 @@ func manifest() control.Manifest {
 	for _, name := range []string{"status", "sync", "doctor", "search"} {
 		m.Commands[name] = control.Command{Argv: []string{"teamscrawl", "--json", name}, JSON: true, Mutates: name == "sync"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql"}
+	m.Commands["calendar"] = control.Command{Argv: []string{"teamscrawl", "--json", "calendar"}, JSON: true}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache"}}
 	return m
 }
