@@ -147,16 +147,22 @@ var syncedTemplate struct {
 func syncedStart(t *testing.T) (root, db string) {
 	t.Helper()
 	syncedTemplate.Do(func() {
-		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "teamscrawl.db")})
+		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db")})
 	})
 	if syncedTemplate.err != nil {
 		t.Fatalf("syncing the fixture once: %v", syncedTemplate.err)
 	}
 	root, db = fixtureCopy(t), newDB(t)
-	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
+	// Opening the archive makes its private parent directory (Windows refuses a parent a test made
+	// itself); the template's bytes then replace the empty archive.
+	st, err := store.Open(context.Background(), db)
+	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "teamscrawl.db*"))
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db*"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("template archive: %v %v", files, err)
 	}
