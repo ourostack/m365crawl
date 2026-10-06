@@ -400,3 +400,40 @@ func TestLinkHistoryOnABrokenArchive(t *testing.T) {
 		t.Fatal("no error")
 	}
 }
+
+// Re-deriving under a new stamp replaces a key that differs only in case, and a failing delete
+// fails the batch.
+func TestOutlookStampChangeReplacesCaseVariantKeys(t *testing.T) {
+	s := newStore(t)
+	upper := outlookEvent(calendar.TriFalse, base)
+	upper.SourceID, upper.GlobalID, upper.ICalUID, upper.SeriesKey = "AA11", "AA11", "AA11", "AA11"
+	lower := upper
+	lower.SourceID, lower.GlobalID, lower.ICalUID, lower.SeriesKey = "aa11", "aa11", "aa11", "aa11"
+	applyOutlookBatch(t, s, "v1", upper)
+	applyOutlookBatch(t, s, "v2", lower)
+	var rows int
+	var key string
+	if err := s.db.QueryRow(`select count(*), min(event_key) from calendar_source_events where source='outlook'`).Scan(&rows, &key); err != nil || rows != 1 || key != "aa11|" {
+		t.Fatalf("%d rows, key %q, %v", rows, key, err)
+	}
+	// The same stamp does not look for variants: the upper-case row would stay.
+	applyOutlookBatch(t, s, "v2", upper)
+	if err := s.db.QueryRow(`select count(*) from calendar_source_events where source='outlook'`).Scan(&rows); err != nil || rows != 2 {
+		t.Fatalf("%d rows", rows)
+	}
+
+	for name, ddl := range map[string]string{
+		"events":  `create trigger boom before delete on calendar_source_events begin select raise(abort, 'injected'); end`,
+		"matches": `drop table calendar_matches`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			applyOutlookBatch(t, s, "v1", upper)
+			s.qExec(t, ddl)
+			_, err := s.CommitOutlook(context.Background(), OutlookBatch{Account: "outlook/Main", Events: []calendar.Event{lower}, FreshAt: base, At: base, Zone: time.UTC, Stamp: "v9"}, outlookRun)
+			if err == nil {
+				t.Fatal("no error")
+			}
+		})
+	}
+}

@@ -257,3 +257,46 @@ func TestSyncOutlookLinkNoneSeesABrokenArchive(t *testing.T) {
 		t.Fatal("no error")
 	}
 }
+
+// An archive built when the mapper kept ids in upper case is re-derived by the next mapper without
+// a second copy of any event: the old keys are replaced, not left live beside the new ones.
+func TestSyncOutlookRederiveReplacesUpperCaseKeys(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	o := outlookOpts(db, root)
+	run(t, o)
+	events := count(t, db, `select count(*) from calendar_source_events where source='outlook'`)
+	if events == 0 {
+		t.Fatal("no Outlook rows")
+	}
+	raw := openRaw(t, db)
+	// What the earlier mapper stored: every id in upper case, and an event Outlook no longer holds.
+	for _, q := range []string{
+		`update calendar_source_events set event_key=upper(event_key), source_id=upper(source_id), global_id=upper(global_id), ical_uid=upper(ical_uid), series_key=upper(series_key) where source='outlook'`,
+		`update calendar_matches set event_key=upper(event_key), source_id=upper(source_id) where source='outlook'`,
+		`insert into calendar_source_events(source, account_id, event_key, composite_key, source_id, subject, start_at, end_at, first_seen_at, seen_at) values('outlook','outlook/Main','dropped|','','dropped','Dropped','2020-01-01T00:00:00.000Z','2020-01-01T01:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')`,
+		`update meta set value='old' where key like 'outlook_derivation:%'`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	old := outlookMapperVersion
+	outlookMapperVersion = old + 1
+	t.Cleanup(func() { outlookMapperVersion = old })
+	run(t, o)
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook'`); n != events+1 {
+		t.Fatalf("%d Outlook rows, want the store's %d plus the dropped one", n, events)
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and event_key<>lower(event_key)`); n != 0 {
+		t.Fatalf("%d upper-case keys are left", n)
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and event_key='dropped|' and removed_at is null`); n != 1 {
+		t.Fatal("an event the store no longer holds was dropped")
+	}
+	if n := count(t, db, `select count(*) from calendar_matches where source='outlook' and event_key<>lower(event_key)`); n != 0 {
+		t.Fatalf("%d upper-case match rows are left", n)
+	}
+}

@@ -79,6 +79,9 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 				return res, err
 			}
 		}
+		if err := dropSupersededKeys(ctx, tx, b.Account, b.Events); err != nil {
+			return res, err
+		}
 		if err := blankEvents(ctx, tx, b.Account, b.Events); err != nil {
 			return res, err
 		}
@@ -150,6 +153,26 @@ func coveredDays(events []calendar.Event, zone *time.Location) []string {
 	}
 	sort.Strings(days)
 	return days
+}
+
+// dropSupersededKeys deletes the account's stored rows whose key an event of the batch now has in
+// another case. A mapper that changes the case of an id (version 4 lower-cased them) gives every
+// event a new key, and the old row would stay live beside it as a second copy of the same event.
+// Only a row the batch re-derives under another key goes: an event Outlook no longer holds has no
+// counterpart and stays, as the archive keeps what a source dropped.
+func dropSupersededKeys(ctx context.Context, tx *sql.Tx, account string, events []calendar.Event) error {
+	for _, e := range events {
+		key := calendar.Key(e)
+		for _, q := range []string{
+			`delete from calendar_source_events where source=? and account_id=? and lower(event_key)=lower(?) and event_key<>?`,
+			`delete from calendar_matches where source=? and account_id=? and lower(event_key)=lower(?) and event_key<>?`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, string(calendar.SourceOutlook), account, key, key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // blankEvents empties the content of the stored rows of the batch's events (by source id),
