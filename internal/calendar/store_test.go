@@ -3,7 +3,10 @@ package calendar
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +20,7 @@ func window(t testing.TB, src Source, start, end, fresh string) Window {
 
 func apply(t testing.TB, db *sql.DB, w Window, at string, events ...Event) {
 	t.Helper()
-	if err := ApplySnapshot(ctx, db, w, events, mustTime(t, at)); err != nil {
+	if _, err := ApplySnapshot(ctx, db, w, events, mustTime(t, at)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -36,13 +39,18 @@ func count(t testing.TB, db *sql.DB, query string, args ...any) int {
 	return n
 }
 
+func agendaRange(db *sql.DB, from, to time.Time) ([]AgendaItem, error) {
+	res, err := Agenda(ctx, db, AgendaQuery{From: from, To: to})
+	return res.Items, err
+}
+
 func agenda(t testing.TB, db *sql.DB, from, to string) ([]AgendaItem, bool) {
 	t.Helper()
-	items, gap, err := Agenda(ctx, db, mustTime(t, from), mustTime(t, to))
+	res, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, from), To: mustTime(t, to)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return items, gap
+	return res.Items, res.Gap
 }
 
 const (
@@ -253,7 +261,7 @@ func TestCompositeAmbiguousFromComposite(t *testing.T) {
 func TestApplySnapshotRejectsForeignSource(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
-	err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceOutlook, "o", "O", "2026-10-05T16:00:00Z")}, time.Now())
+	_, err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceOutlook, "o", "O", "2026-10-05T16:00:00Z")}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "outlook") {
 		t.Fatalf("err = %v", err)
 	}
@@ -272,7 +280,7 @@ func TestAgendaAllDayAcrossZones(t *testing.T) {
 	west, east := time.FixedZone("UTC-7", -7*3600), time.FixedZone("UTC+9", 9*3600)
 	for _, loc := range []*time.Location{west, east, time.UTC} {
 		from := time.Date(2026, 10, 5, 0, 0, 0, 0, loc)
-		items, _, err := Agenda(ctx, db, from, from.AddDate(0, 0, 1))
+		items, err := agendaRange(db, from, from.AddDate(0, 0, 1))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,21 +288,21 @@ func TestAgendaAllDayAcrossZones(t *testing.T) {
 			t.Fatalf("%s: want 3 events on 10-05, got %d", loc, len(items))
 		}
 		prev := time.Date(2026, 10, 4, 0, 0, 0, 0, loc)
-		if items, _, _ := Agenda(ctx, db, prev, prev.AddDate(0, 0, 1)); len(items) != 0 {
+		if items, _ := agendaRange(db, prev, prev.AddDate(0, 0, 1)); len(items) != 0 {
 			t.Fatalf("%s: all-day event shifted onto 10-04: %+v", loc, items)
 		}
 		next := time.Date(2026, 10, 6, 0, 0, 0, 0, loc)
-		items, _, _ = Agenda(ctx, db, next, next.AddDate(0, 0, 1))
+		items, _ = agendaRange(db, next, next.AddDate(0, 0, 1))
 		if len(items) != 1 || items[0].Subject != "Trip" {
 			t.Fatalf("%s: 10-06 should hold only the multi-day trip: %+v", loc, items)
 		}
-		if items, _, _ := Agenda(ctx, db, time.Date(2026, 10, 8, 0, 0, 0, 0, loc), time.Date(2026, 10, 9, 0, 0, 0, 0, loc)); len(items) != 0 {
+		if items, _ := agendaRange(db, time.Date(2026, 10, 8, 0, 0, 0, 0, loc), time.Date(2026, 10, 9, 0, 0, 0, 0, loc)); len(items) != 0 {
 			t.Fatalf("%s: exclusive end date included", loc)
 		}
 	}
 	// A range ending after midnight local picks up the next date.
 	from := time.Date(2026, 10, 4, 12, 0, 0, 0, west)
-	if items, _, _ := Agenda(ctx, db, from, from.Add(24*time.Hour)); len(items) != 3 {
+	if items, _ := agendaRange(db, from, from.Add(24*time.Hour)); len(items) != 3 {
 		t.Fatalf("got %d", len(items))
 	}
 }
@@ -533,24 +541,64 @@ func TestUpgradeBlockedByExistingKey(t *testing.T) {
 func TestEventRoundTrip(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
-	e := Event{
-		Source: SourceTeams, SourceID: "t1", GlobalID: "uid", OriginalStart: tp(t, "2026-10-05T16:00:00Z"),
-		Start: mustTime(t, "2026-10-06T16:00:00Z"), End: mustTime(t, "2026-10-06T17:00:00Z"), TimeZone: "Pacific Standard Time",
-		Subject: "S", Organizer: "o", AttendeesJSON: `["a"]`, Location: "L", OnlineMeetingURL: "u", TeamsThreadID: "th", SeriesKey: "sk",
-		Cancelled: true, Response: "accepted", ShowAs: "busy", BodyPreview: "bp", LastModified: tp(t, "2026-10-01T00:00:00Z"),
-	}
+	e := rich(t, "2026-10-01T00:00:00Z")
+	e.OriginalStart = tp(t, "2026-10-05T16:00:00Z")
+	e.AccountID = ""
+	e.TimeZoneIANA, e.UTCOffset = "America/Los_Angeles", "-07:00"
+	e.OrganizerAddress, e.IsOrganizer, e.IsPrivate, e.Cancelled = "alex@example.test", true, true, true
+	e.AllDay, e.StartDate, e.EndDate = false, "", ""
 	apply(t, db, w, "2026-10-02T01:00:00Z", e)
 	items, _ := agenda(t, db, octStart, octEnd)
-	if len(items) != 1 || items[0].Start != e.Start.UTC() || items[0].End != e.End.UTC() {
-		t.Fatalf("%+v", items)
+	if len(items) != 0 {
+		t.Fatal("a cancelled event is hidden by default")
 	}
-	got := items[0].Event
-	if !got.OriginalStart.Equal(*e.OriginalStart) || !got.LastModified.Equal(*e.LastModified) {
-		t.Fatalf("times: %+v", got)
+	res, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd), IncludeCancelled: true})
+	if err != nil || len(res.Items) != 1 {
+		t.Fatalf("%v %+v", err, res)
 	}
-	got.OriginalStart, got.LastModified, e.OriginalStart, e.LastModified = nil, nil, nil, nil
-	if got != e.withUTC() {
-		t.Fatalf("got  %+v\nwant %+v", got, e)
+	got := res.Items[0].Event
+	// Agenda leaves out the heavy columns; the full row is checked below.
+	if got.BodyHTML != "" || got.BodyText != "" || got.DetailRawJSON != "" {
+		t.Fatalf("agenda must not carry bodies: %+v", got)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := loadStored(ctx, tx, e, res.Items[0].Key)
+	_ = tx.Rollback()
+	if err != nil || full == nil {
+		t.Fatalf("%v %v", err, full)
+	}
+	at := mustTime(t, "2026-10-02T01:00:00Z")
+	want := mustCapture(t, nil, e)
+	want.FirstSeenAt, want.SeenAt, want.DetailSeenAt = at, at, &at
+	if !reflect.DeepEqual(*full, want.withUTC()) {
+		t.Fatalf("got  %+v\nwant %+v", *full, want.withUTC())
+	}
+	// And every column has a Go field behind it, and the other way round.
+	var cols []string
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('calendar_source_events')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, n)
+	}
+	_ = rows.Close()
+	var goCols []string
+	for _, c := range eventColumns {
+		goCols = append(goCols, c.name)
+	}
+	goCols = append(goCols, "event_key", "composite_key")
+	sort.Strings(cols)
+	sort.Strings(goCols)
+	if !reflect.DeepEqual(cols, goCols) {
+		t.Fatalf("schema columns and eventColumns differ:\n%v\n%v", cols, goCols)
 	}
 }
 
@@ -612,7 +660,7 @@ func TestApplySnapshotErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := openDB(t)
 			tt.setup(t, db)
-			if err := ApplySnapshot(ctx, db, tt.w, tt.events, time.Now()); err == nil {
+			if _, err := ApplySnapshot(ctx, db, tt.w, tt.events, time.Now()); err == nil {
 				t.Fatal("want an error")
 			}
 		})
@@ -623,7 +671,7 @@ func TestApplySnapshotRollsBack(t *testing.T) {
 	db := openDB(t)
 	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
 	exec(t, db, `CREATE TRIGGER boom BEFORE INSERT ON calendar_sources BEGIN SELECT RAISE(ABORT, 'boom'); END`)
-	if err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceTeams, "t", "T", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceTeams, "t", "T", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
 		t.Fatal("want error")
 	}
 	if n := count(t, db, `SELECT count(*) FROM calendar_source_events`); n != 0 {
@@ -643,7 +691,7 @@ func TestScanErrorsInResolve(t *testing.T) {
 	db := openDB(t)
 	apply(t, db, w, "2026-10-02T01:00:00Z", timed(t, SourceTeams, "t0", "Sync", "2026-10-05T16:00:00Z"))
 	scanRow = func(*sql.Rows, ...any) error { return errBoom }
-	if err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
 		t.Fatal("own count scan: want error")
 	}
 
@@ -652,7 +700,7 @@ func TestScanErrorsInResolve(t *testing.T) {
 	db2 := openDB(t)
 	apply(t, db2, ow, "2026-10-02T01:00:00Z", timed(t, SourceOutlook, "o0", "Sync", "2026-10-05T16:00:00Z"))
 	scanRow = func(*sql.Rows, ...any) error { return errBoom }
-	if err := ApplySnapshot(ctx, db2, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db2, w, []Event{timed(t, SourceTeams, "t1", "Sync", "2026-10-05T16:00:00Z")}, time.Now()); err == nil {
 		t.Fatal("other rows scan: want error")
 	}
 }
@@ -672,7 +720,7 @@ func TestAgendaErrors(t *testing.T) {
 		{"closed db", func(t *testing.T, db *sql.DB) { _ = db.Close() }},
 		{"events table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_source_events`) }},
 		{"sources table", func(t *testing.T, db *sql.DB) { exec(t, db, `DROP TABLE calendar_sources`) }},
-		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "soon") }},
+		{"bad start", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "start_at", "2026-10-05 soon") }},
 		{"bad original", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "original_start", "soon") }},
 		{"bad modified", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "last_modified", "soon") }},
 		{"bad flag", func(t *testing.T, db *sql.DB) { insertRaw(t, db, "all_day", "maybe") }},
@@ -685,7 +733,7 @@ func TestAgendaErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := openDB(t)
 			tt.setup(t, db)
-			if _, _, err := Agenda(ctx, db, from, to); err == nil {
+			if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
 				t.Fatal("want an error")
 			}
 		})
@@ -699,21 +747,21 @@ func TestRowsErrInjected(t *testing.T) {
 	orig, origScan := rowsErr, scanRow
 	t.Cleanup(func() { rowsErr = orig })
 	rowsErr = func(*sql.Rows) error { return errBoom }
-	if _, _, err := Agenda(ctx, db, mustTime(t, octStart), mustTime(t, octEnd)); err == nil {
+	if _, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd)}); err == nil {
 		t.Fatal("agenda: want error")
 	}
-	if err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
 		t.Fatal("apply: want error")
 	}
 	other := timed(t, SourceOutlook, "o", "T", "2026-10-05T16:00:00Z")
 	other.GlobalID = "g"
-	if err := ApplySnapshot(ctx, db, window(t, SourceOutlook, octStart, octEnd, "2026-10-02T00:00:00Z"), []Event{other}, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db, window(t, SourceOutlook, octStart, octEnd, "2026-10-02T00:00:00Z"), []Event{other}, time.Now()); err == nil {
 		t.Fatal("candidates: want error")
 	}
 	rowsErr = orig
 	scanRow = func(*sql.Rows, ...any) error { return errBoom }
 	t.Cleanup(func() { scanRow = origScan })
-	if err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
+	if _, err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
 		t.Fatal("scan: want error")
 	}
 	scanRow = origScan
@@ -726,7 +774,7 @@ func TestRowsErrInjected(t *testing.T) {
 		}
 		return orig(r)
 	}
-	if _, _, err := Agenda(ctx, db, mustTime(t, octStart), mustTime(t, octEnd)); err == nil {
+	if _, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, octStart), To: mustTime(t, octEnd)}); err == nil {
 		t.Fatal("sources: want error")
 	}
 }
@@ -736,3 +784,289 @@ var errBoom = errString("boom")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestLoadEventsFiltersByDateInSQL(t *testing.T) {
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	before := timed(t, SourceTeams, "before", "Before", "2026-10-01T10:00:00Z")
+	inside := timed(t, SourceTeams, "inside", "Inside", "2026-10-05T10:00:00Z")
+	after := timed(t, SourceTeams, "after", "After", "2026-10-20T10:00:00Z")
+	dayIn := Event{Source: SourceTeams, SourceID: "dayin", Subject: "Day in", AllDay: true, StartDate: "2026-10-05", EndDate: "2026-10-06"}
+	dayOut := Event{Source: SourceTeams, SourceID: "dayout", Subject: "Day out", AllDay: true, StartDate: "2026-10-12", EndDate: "2026-10-13"}
+	apply(t, db, w, "2026-10-02T01:00:00Z", before, inside, after, dayIn, dayOut)
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	rows, err := loadEvents(ctx, db, "", from, to, "2026-10-05", "2026-10-05")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.SourceID)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "dayin,inside" {
+		t.Fatalf("SQL must load only candidate rows, got %v", got)
+	}
+}
+
+func seedForPlans(t *testing.T, analyze bool) *sql.DB {
+	t.Helper()
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	w.AccountID = "tenant-1/user-1"
+	var events []Event
+	for i := 0; i < 60; i++ {
+		day := time.Date(2026, 10, 1, 16, 0, 0, 0, time.UTC).AddDate(0, 0, i/2)
+		e := timed(t, SourceTeams, fmt.Sprintf("t%02d", i), "S", day.Format("2006-01-02T15:04:05Z"))
+		e.AccountID = "tenant-1/user-1"
+		if i%2 == 1 {
+			e.AllDay, e.StartDate, e.EndDate = true, day.Format(dateLayout), day.AddDate(0, 0, 1).Format(dateLayout)
+		}
+		events = append(events, e)
+	}
+	apply(t, db, w, "2026-10-02T01:00:00Z", events...)
+	if analyze {
+		exec(t, db, `ANALYZE`)
+	}
+	return db
+}
+
+func planOf(t *testing.T, db *sql.DB, q eventQuery) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+q.sql, q.args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	return strings.Join(plan, " | ")
+}
+
+// TestEventQueriesUseAnIndex asserts the window queries search an index, with and without table
+// statistics (with them the planner may skip-scan, which hides a missing index), for one account
+// and for all accounts. The load-time checks must never scan the table itself.
+func TestEventQueriesUseAnIndex(t *testing.T) {
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	for _, analyze := range []bool{false, true} {
+		db := seedForPlans(t, analyze)
+		for _, account := range []string{"tenant-1/user-1", ""} {
+			queries := eventQueries(selectColumns(false), account, from, to, "2026-10-05", "2026-10-05")
+			if len(queries) != 2 {
+				t.Fatalf("want a timed and an all-day query, got %d", len(queries))
+			}
+			for i, q := range queries {
+				if account == "" && strings.Contains(q.sql, "account_id=?") {
+					t.Errorf("query %d: account predicate present without an account", i)
+				}
+				if plan := planOf(t, db, q); !strings.Contains(plan, "SEARCH calendar_source_events USING") {
+					t.Errorf("analyze=%v account %q query %d does not search an index: %s", analyze, account, i, plan)
+				}
+			}
+		}
+		for i, q := range checkQueries() {
+			if plan := planOf(t, db, q); strings.Contains(plan, "SCAN calendar_source_events") && !strings.Contains(plan, "USING COVERING INDEX") {
+				t.Errorf("analyze=%v check %d scans the table: %s", analyze, i, plan)
+			}
+		}
+	}
+}
+
+// Writes refuse a bad start, so a corrupt stored one is made by hand here. CheckStoredTimes finds
+// it wherever it sorts; Agenda errors only for a corrupt row inside the window.
+func TestCheckStoredTimesCountsCorruptStarts(t *testing.T) {
+	cases := []struct{ name, col, val string }{
+		{"letters", "start_at", "soon"},
+		{"sorts inside the window", "start_at", "2026-10-05 soon"},
+		{"sorts after the window", "start_at", "2026-10-20 soon"},
+		{"future looking", "start_at", "3000-bad"},
+		{"empty on a timed event", "start_at", ""},
+		{"no milliseconds", "start_at", "2026-10-05T16:00:00Z"},
+		{"bad date", "start_date", "2026-1-5"},
+		{"empty date", "start_date", ""},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			db := seedForPlans(t, false)
+			if n, err := CheckStoredTimes(ctx, db); err != nil || n != 0 {
+				t.Fatalf("healthy archive: %d %v", n, err)
+			}
+			kind := "<>1"
+			if tt.col == "start_date" {
+				kind = "=1"
+			}
+			exec(t, db, `UPDATE calendar_source_events SET `+tt.col+`=? WHERE event_key=(SELECT event_key FROM calendar_source_events WHERE all_day`+kind+` ORDER BY event_key LIMIT 1)`, tt.val)
+			if n, err := CheckStoredTimes(ctx, db); err != nil || n != 1 {
+				t.Fatalf("want one corrupt row, got %d %v", n, err)
+			}
+		})
+	}
+	db := openDB(t)
+	_ = db.Close()
+	if _, err := CheckStoredTimes(ctx, db); err == nil {
+		t.Fatal("want an error from a closed database")
+	}
+}
+
+func TestAgendaErrorsOnACorruptRowInsideTheWindow(t *testing.T) {
+	db := seedForPlans(t, false)
+	exec(t, db, `UPDATE calendar_source_events SET start_at='2026-10-05 soon' WHERE all_day<>1 AND start_at LIKE '2026-10-05%'`)
+	if _, err := Agenda(ctx, db, AgendaQuery{From: mustTime(t, "2026-10-05T00:00:00Z"), To: mustTime(t, "2026-10-06T00:00:00Z")}); err == nil {
+		t.Fatal("want a parse error")
+	}
+}
+
+func TestAgendaRejectsCorruptFieldClocksAndBrokenQueries(t *testing.T) {
+	from, to := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	for _, bad := range []string{"not json", `{"body":"yesterday"}`, `[1]`} {
+		db := seedForPlans(t, false)
+		exec(t, db, `UPDATE calendar_source_events SET field_clocks_json=?`, bad)
+		if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
+			t.Errorf("field clocks %q: want an error", bad)
+		}
+	}
+	var c clockText
+	if err := c.Scan(42); err == nil {
+		t.Error("a non-text value: want an error")
+	}
+	if err := c.Scan(nil); err != nil || c.text != "" {
+		t.Errorf("NULL: %v %q", err, c.text)
+	}
+	if got := ParseFieldClocks("not json"); len(got) != 0 {
+		t.Errorf("unreadable clocks read as %v", got)
+	}
+	// A column the window queries need but the checks do not: the query itself fails.
+	db := seedForPlans(t, false)
+	exec(t, db, `DROP INDEX calendar_source_events_composite`)
+	exec(t, db, `ALTER TABLE calendar_source_events DROP COLUMN end_at`)
+	if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
+		t.Error("missing column: want an error")
+	}
+}
+
+func TestApplySnapshotRefusesBadEventsAndAppliesTheRest(t *testing.T) {
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	good := timed(t, SourceTeams, "good", "Good", "2026-10-05T16:00:00Z")
+	zero := timed(t, SourceTeams, "zero", "Zero start", "2026-10-05T16:00:00Z")
+	zero.Start = time.Time{}
+	far := timed(t, SourceTeams, "far", "Far", "2026-10-05T16:00:00Z")
+	far.End = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	noDate := timed(t, SourceTeams, "nodate", "No date", "2026-10-05T16:00:00Z")
+	noDate.AllDay = true
+	badDate := timed(t, SourceTeams, "baddate", "Bad date", "2026-10-05T16:00:00Z")
+	badDate.AllDay, badDate.StartDate = true, "2026-13-45"
+	counts, err := ApplySnapshot(ctx, db, w, []Event{zero, good, far, noDate, badDate}, mustTime(t, "2026-10-02T01:00:00Z"))
+	if err != nil {
+		t.Fatalf("a stored snapshot is not a failure: %v", err)
+	}
+	if len(counts.Refused) != 4 || counts.Events.New != 1 {
+		t.Fatalf("%+v", counts)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM calendar_source_events`); n != 1 {
+		t.Fatalf("want only the good event stored, got %d", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM calendar_sources`); n != 1 {
+		t.Fatal("the window must be recorded")
+	}
+	// The Tx form returns them in its counts too, and a storage error is still an error.
+	tx, _ := db.BeginTx(ctx, nil)
+	zero2 := zero
+	if c, err := ApplySnapshotTx(ctx, tx, w, []Event{zero2}, mustTime(t, "2026-10-04T01:00:00Z")); err != nil || len(c.Refused) != 1 {
+		t.Fatalf("tx form: %+v %v", c, err)
+	}
+	_ = tx.Rollback()
+	_ = db.Close()
+	if _, err := ApplySnapshot(ctx, db, w, nil, time.Now()); err == nil {
+		t.Fatal("want an error")
+	}
+}
+
+// A permanently refused event must not freeze removal inference: the departed event goes on the
+// first sync, while a live row that shares the refused event's source id is spared.
+func TestRefusedEventsDoNotFreezeRemovalInference(t *testing.T) {
+	db := openDB(t)
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	gone := timed(t, SourceTeams, "gone", "Departed", "2026-10-05T16:00:00Z")
+	shared := timed(t, SourceTeams, "shared", "Shares an id", "2026-10-06T16:00:00Z")
+	apply(t, db, w, "2026-10-02T01:00:00Z", gone, shared)
+	bad := timed(t, SourceTeams, "shared", "Same id, bad copy", "2026-10-07T16:00:00Z")
+	bad.Start = time.Time{}
+	noID := timed(t, SourceTeams, "", "No id", "2026-10-07T16:00:00Z")
+	noID.Start = time.Time{}
+	counts, err := ApplySnapshot(ctx, db, w, []Event{bad, noID}, mustTime(t, "2026-10-03T01:00:00Z"))
+	if err != nil || len(counts.Refused) != 2 {
+		t.Fatalf("%+v %v", counts, err)
+	}
+	live := func(id string) int {
+		return count(t, db, `SELECT COUNT(*) FROM calendar_source_events WHERE source_id=? AND removed_at IS NULL`, id)
+	}
+	if live("gone") != 0 {
+		t.Fatal("the departed event must be marked removed on the first sync")
+	}
+	if live("shared") != 1 {
+		t.Fatal("a live row sharing the refused event's source id must stay live")
+	}
+	// Repeating it changes nothing: the refusal is permanent and inference keeps working.
+	if _, err := ApplySnapshot(ctx, db, w, []Event{bad}, mustTime(t, "2026-10-04T01:00:00Z")); err != nil || live("shared") != 1 {
+		t.Fatalf("second sync: %v", err)
+	}
+}
+
+func TestSnapshotTxAndUpsertReportErrors(t *testing.T) {
+	db := openDB(t)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	other := timed(t, SourceOutlook, "o", "Other", "2026-10-05T16:00:00Z")
+	if _, err := ApplySnapshotTx(ctx, tx, w, []Event{other}, time.Now()); err == nil || errors.As(err, new(*InvalidEventError)) {
+		t.Fatalf("a source mismatch is an ordinary error: %v", err)
+	}
+	bad := timed(t, SourceTeams, "bad", "Bad", "2026-10-05T16:00:00Z")
+	bad.Start = time.Time{}
+	if _, err := upsertEvent(ctx, tx, bad, "k", time.Now()); !errors.As(err, new(*InvalidEventError)) {
+		t.Fatalf("upsert must refuse: %v", err)
+	}
+}
+
+func TestSpareReportsStorageErrors(t *testing.T) {
+	w := window(t, SourceTeams, octStart, octEnd, "2026-10-02T00:00:00Z")
+	bad := timed(t, SourceTeams, "x", "Bad", "2026-10-05T16:00:00Z")
+	bad.Start = time.Time{}
+	run := func(t *testing.T, prep func(*sql.Tx)) error {
+		db := openDB(t)
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		prep(tx)
+		_, err = ApplyBatch(ctx, tx, Batch{Window: w, Events: []Event{bad}}, ApplyOptions{InferUnseenInWindow: true}, time.Now())
+		return err
+	}
+	if err := run(t, func(tx *sql.Tx) {
+		if _, err := tx.Exec(`ALTER TABLE calendar_source_events RENAME COLUMN source_id TO sid`); err != nil {
+			t.Fatal(err)
+		}
+	}); err == nil {
+		t.Error("query failure: want an error")
+	}
+	orig := scanRow
+	t.Cleanup(func() { scanRow = orig })
+	scanRow = func(*sql.Rows, ...any) error { return errBoom }
+	if err := run(t, func(tx *sql.Tx) {
+		_, _ = tx.Exec(`INSERT INTO calendar_source_events (source, account_id, event_key, composite_key, source_id, first_seen_at, seen_at) VALUES ('teams','','k','c','x','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z')`)
+	}); err == nil {
+		t.Error("scan failure: want an error")
+	}
+}
