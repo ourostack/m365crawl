@@ -44,6 +44,10 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 - A sync reads the cache's LevelDB more than once now (once for the typed databases, then once to size the generic databases and once per batch), so a sync takes longer on a real cache. Real-cache timing, memory and record counts per manager are not measured yet; sync and watch cost on a large cache is gated on a run on a work machine before release.
 - A sync is faster and allocates less: LevelDB table files stay open for the life of a reader instead of being opened for every block re-read, and the block cache is bounded at 4 MiB instead of 16 blocks. The rows a sync produces are unchanged and the decoder version stays 3.
 
+### Fixed
+
+- Release: a run that resumes a published release at the publish step now runs `settle`, `publish-homebrew` and `verify-homebrew`; they were skipped because `release` is skipped in a resume. `make lint` checks the wiring with `scripts/check-release-wiring.sh`.
+
 ## [0.1.0] - 2026-10-01
 
 The first non-alpha release. Everything below is relative to 0.1.0-alpha.1. No JSON field was renamed or removed and the exit codes did not change, so scripts written against the alpha keep working, with the text changes noted under Changed.
