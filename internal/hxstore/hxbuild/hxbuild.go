@@ -27,6 +27,8 @@ const (
 	DefaultPageSize = 4096
 	// BlockTypeData is the block type the reader parses.
 	BlockTypeData = 8
+	// HeaderConstant is the value at +0x1c of every block header.
+	HeaderConstant = 4
 )
 
 var (
@@ -73,6 +75,11 @@ func (b *Builder) BlockType(typ uint32, inflated []byte) {
 	b.buf = append(b.buf, EncodeBlock(typ, inflated)...)
 }
 
+// BlockCodec appends a type-8 block whose payload is compressed with the codec.
+func (b *Builder) BlockCodec(inflated []byte, c Codec) {
+	b.buf = append(b.buf, EncodeBlockCodec(BlockTypeData, inflated, c)...)
+}
+
 // Raw appends bytes as they are: a hole, a torn block, a false magic.
 func (b *Builder) Raw(p []byte) { b.buf = append(b.buf, p...) }
 
@@ -93,17 +100,32 @@ func (b *Builder) Len() int { return len(b.buf) }
 func (b *Builder) Bytes() []byte { return append([]byte(nil), b.buf...) }
 
 // EncodeBlock returns one complete block: header, checksums, and a literal-only
-// LZ4 payload. The two CRC-32 ranges are written out here as arithmetic on
-// purpose, independently of the reader: the header checksum covers bytes 4 to
-// 0x20 and the payload checksum bytes 8 to 0x28 plus the payload length.
+// LZ4 payload. See EncodeBlockCodec and EncodeRaw.
 func EncodeBlock(typ uint32, inflated []byte) []byte {
-	payload := LiteralLZ4(inflated)
+	return EncodeBlockCodec(typ, inflated, CodecLiteral)
+}
+
+// EncodeBlockCodec returns one complete, valid block whose payload is inflated
+// compressed with the codec.
+func EncodeBlockCodec(typ uint32, inflated []byte, c Codec) []byte {
+	return EncodeRaw(typ, c.encode(inflated), clampU32(len(inflated)), HeaderConstant)
+}
+
+// EncodeRaw returns a block with the given type, payload bytes, declared
+// inflated length and header constant, and correct checksums for exactly those
+// values. It is how a test makes a block that is well formed but lies: an
+// inflated length that the payload does not decode to, one above the reader's
+// limit, a different constant. The two CRC-32 ranges are written out here as
+// arithmetic on purpose, independently of the reader: the header checksum covers
+// bytes 4 to 0x20 and the payload checksum bytes 8 to 0x28 plus the payload
+// length.
+func EncodeRaw(typ uint32, payload []byte, inflatedLen, constant uint32) []byte {
 	blk := make([]byte, BlockHeaderSize, BlockHeaderSize+len(payload))
 	copy(blk[8:], blockMagic)
 	binary.LittleEndian.PutUint32(blk[0x10:], typ)
 	binary.LittleEndian.PutUint32(blk[0x14:], clampU32(len(payload)))
-	binary.LittleEndian.PutUint32(blk[0x18:], clampU32(len(inflated)))
-	binary.LittleEndian.PutUint32(blk[0x1c:], 4)
+	binary.LittleEndian.PutUint32(blk[0x18:], inflatedLen)
+	binary.LittleEndian.PutUint32(blk[0x1c:], constant)
 	blk = append(blk, payload...)
 	binary.LittleEndian.PutUint32(blk[4:], crc32.ChecksumIEEE(blk[8:]))
 	binary.LittleEndian.PutUint32(blk[0:], crc32.ChecksumIEEE(blk[4:0x20]))

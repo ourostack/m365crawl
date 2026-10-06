@@ -244,3 +244,38 @@ func TestRunReportsNearTrailerAndLong(t *testing.T) {
 		t.Fatal("missing key")
 	}
 }
+
+// TestRunOnOutlookFixture runs the probe on the committed synthetic store and
+// checks the per-class counts written by the generator (internal/hxstore/
+// hxfixture): no block rejected, and no object reached after bytes that are not
+// known framing.
+func TestRunOnOutlookFixture(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "testdata", "outlook-fixture", "HxStore.hxd")
+	var out bytes.Buffer
+	if code := run([]string{path}, &out, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("%d %s", code, out.String())
+	}
+	var r report
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	want := []pairCount{
+		{Class: 0x55, Tag: 32, Count: 2},
+		{Class: 0x6b, Tag: 0x455, Count: 14},
+		{Class: 0x6c, Tag: 0x348, Count: 8},
+		{Class: 0x71, Tag: 20, Count: 3},
+		{Class: 0xd7, Tag: 40, Count: 1},
+	}
+	if len(r.Pairs) != len(want) {
+		t.Fatalf("%+v", r.Pairs)
+	}
+	for i := range want {
+		if r.Pairs[i] != want[i] {
+			t.Fatalf("%+v", r.Pairs)
+		}
+	}
+	if r.BlocksFound != 4 || r.BlocksValid != 4 || r.BlocksRejected != 0 || r.Objects != 28 ||
+		r.ObjectsResynced != 0 || r.UnwalkedBytes != 0 || r.PayloadsWithoutObjects != 0 || r.HeadsTrailerForm != 2 {
+		t.Fatalf("%+v", r)
+	}
+}

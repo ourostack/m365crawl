@@ -196,3 +196,61 @@ func TestFramedPayload(t *testing.T) {
 		t.Fatalf("%x", got)
 	}
 }
+
+func TestEncodeRaw(t *testing.T) {
+	blk := EncodeRaw(16, []byte{1, 2, 3}, 99, 7)
+	if binary.LittleEndian.Uint32(blk[0x10:]) != 16 || binary.LittleEndian.Uint32(blk[0x14:]) != 3 ||
+		binary.LittleEndian.Uint32(blk[0x18:]) != 99 || binary.LittleEndian.Uint32(blk[0x1c:]) != 7 ||
+		crc32.ChecksumIEEE(blk[4:0x20]) != binary.LittleEndian.Uint32(blk) ||
+		crc32.ChecksumIEEE(blk[8:]) != binary.LittleEndian.Uint32(blk[4:]) || !bytes.Equal(blk[0x28:], []byte{1, 2, 3}) {
+		t.Fatalf("%x", blk)
+	}
+}
+
+func TestTamper(t *testing.T) {
+	good := EncodeBlock(8, []byte("FIXTURE"))
+	h, p := BadHeaderCRC(good), BadPayloadCRC(good)
+	if bytes.Equal(h, good) || bytes.Equal(p, good) || good[0] != EncodeBlock(8, []byte("FIXTURE"))[0] {
+		t.Fatal("tamper must copy and change")
+	}
+	if crc32.ChecksumIEEE(h[4:0x20]) == binary.LittleEndian.Uint32(h) || crc32.ChecksumIEEE(h[8:]) != binary.LittleEndian.Uint32(h[4:]) {
+		t.Fatal("header tamper breaks the header checksum only")
+	}
+	if crc32.ChecksumIEEE(p[4:0x20]) != binary.LittleEndian.Uint32(p) || crc32.ChecksumIEEE(p[8:]) == binary.LittleEndian.Uint32(p[4:]) {
+		t.Fatal("payload tamper breaks the payload checksum only")
+	}
+	if len(Truncated(good, 30)) != 30 {
+		t.Fatal("truncated")
+	}
+	o := OversizeBlock(33 << 20)
+	if binary.LittleEndian.Uint32(o[0x18:]) != 33<<20 || crc32.ChecksumIEEE(o[8:]) != binary.LittleEndian.Uint32(o[4:]) || len(o) > 60 {
+		t.Fatal("oversize")
+	}
+	m := BlockMagic()
+	m[0] = 0
+	if !bytes.Equal(BlockMagic(), good[8:16]) {
+		t.Fatal("magic must be a copy")
+	}
+}
+
+func TestHead(t *testing.T) {
+	if len(Head(15)) != 15 || bytes.HasSuffix(Head(15), Trailer) {
+		t.Fatal("plain head")
+	}
+	for _, n := range []int{19, 31, 59, 63} {
+		h := Head(n)
+		if len(h) != n || !bytes.HasSuffix(h, Trailer) {
+			t.Fatalf("trailer-form head %d", n)
+		}
+	}
+	for _, n := range []int{0, 14, 16, 18, 67} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("head %d must panic", n)
+				}
+			}()
+			Head(n)
+		}()
+	}
+}
