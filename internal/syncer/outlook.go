@@ -81,7 +81,7 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 		out = append(out, outlookOutcome{key: outlookKey(sp.Name), err: skippedProfileError(sp)})
 	}
 	if len(profiles) == 0 && len(skipped) == 0 {
-		out = append(out, outlookOutcome{key: "outlook", err: noProfilesError(root, classic)})
+		out = append(out, outlookOutcome{key: "outlook", err: NoOutlookProfilesError(root, classic)})
 	}
 	for _, p := range profiles {
 		o := outlookOutcome{key: outlookKey(p.Name)}
@@ -103,7 +103,9 @@ const (
 	CodeOutlookProfileUnreadable = "outlook_profile_unreadable"
 )
 
-func noProfilesError(root string, classic []string) *errs.Coded {
+// NoOutlookProfilesError is the failure of an Outlook source that finds no profile under root;
+// `doctor` gives the same message and fix.
+func NoOutlookProfilesError(root string, classic []string) *errs.Coded {
 	fix := "--outlook-root is the directory of Outlook profiles: one directory per profile, each holding HxStore.hxd (<root>/<profile>/HxStore.hxd)."
 	if info, err := os.Stat(filepath.Join(root, outlookdesktop.StoreFileName)); err == nil && info.Mode().IsRegular() {
 		fix = "HxStore.hxd is directly in " + root + ", which is a profile directory: point --outlook-root at its parent (<root>/<profile>/HxStore.hxd)."
@@ -151,10 +153,12 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 				// A skip after a failed read is still that failure, not a success.
 				return SourceReport{}, false, &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
 			}
+			_ = r.st.SetOutlookSkipped(ctx, p.Name)
 			r.progress("%s: %s", key, StatusSkippedInterval)
 			return SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}, false, nil
 		}
 	}
+	_ = r.st.SetOutlookChecked(ctx, p.Name, begun) // the store is looked at from here on; a skip never gets here
 	fp, err := outlookdesktop.FingerprintOf(p.StorePath, outlookVersions())
 	if err != nil {
 		return SourceReport{}, false, err
@@ -186,7 +190,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	zone := calendarZone()
 	var omissions map[string]int
 	status := StatusOK
-	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone)},
+	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res)},
 		func(cal store.CalendarResult) store.Run {
 			if omissions = outlookOmissions(res, cal); lost(omissions) > 0 {
 				status = StatusOmissions
@@ -209,9 +213,9 @@ func collectOutlook(ctx context.Context, info outlookdesktop.Info, account strin
 		return outlookcal.Result{}, errs.Internal(err)
 	}
 	defer func() { _ = f.Close() }()
+	var res outlookcal.Result
 	s, err := outlookcal.OpenStore(f, info.Size)
 	if err == nil {
-		var res outlookcal.Result
 		if res, err = outlookcal.Collect(ctx, s, account, outlookcal.Options{ExpectEvents: had}); err == nil {
 			return res, nil
 		}
@@ -246,6 +250,24 @@ func outlookOmissions(res outlookcal.Result, cal store.CalendarResult) map[strin
 		return nil
 	}
 	return out
+}
+
+// outlookRead is the census of one read that `calendar sources` shows: the layouts the reader does
+// not know, how many blocks were damaged and how many values fell outside the mapped sets.
+func outlookRead(res outlookcal.Result) store.OutlookRead {
+	r := store.OutlookRead{BlocksFound: res.Stats.BlocksFound, BlocksInvalid: res.Stats.BlocksRejected()}
+	for _, l := range res.UnknownLayouts {
+		r.UnknownLayouts = append(r.UnknownLayouts, store.OutlookLayout{Class: l.Class, Tag: l.Tag, Count: l.Count})
+	}
+	for name, n := range map[string]int{"event_type": res.Notes.EventTypeUnknown, "show_as": res.Notes.ShowAsUnmapped, "response": res.Notes.ResponseUnmapped} {
+		if n > 0 {
+			if r.UnmappedValues == nil {
+				r.UnmappedValues = map[string]int{}
+			}
+			r.UnmappedValues[name] = n
+		}
+	}
+	return r
 }
 
 // OutlookLinkNone, as Options.OutlookLink, ends the link of an Outlook profile.

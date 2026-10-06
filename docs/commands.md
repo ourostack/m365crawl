@@ -46,7 +46,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
-| [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it; `calendar actions` lists the action items of the recaps held by the events of a range. |
+| [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it; `calendar actions` lists the action items of the recaps held by the events of a range; `calendar sources` says what the archive holds per account and source and how fresh it is. |
 | [`stores`](#stores) | List every database and object store archived without a typed table, with record counts; the database name is what records --database takes. |
 | [`records`](#records) | List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated). |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
@@ -68,7 +68,7 @@ teamscrawl doctor [flags]
 
 No flags beyond the global ones.
 
-Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade`, `last_sync_status` and `calendar_cache` (warnings; `calendar_cache` fires when an account has no Teams calendar database in the archive or the newest calendar cache time is more than 7 days old). On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
+Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade`, `last_sync_status`, `calendar_cache` and `outlook_store` (warnings; `calendar_cache` fires when an account has no Teams calendar database in the archive or the newest Teams calendar cache time is more than 7 days old; `outlook_store` says the Outlook source is off, or lists each profile with whether its store header is a version this build reads and what the last sync recorded, and warns when no profile is found, a store version is unknown or the last read failed, with the same fix a sync gives). On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
 
 Examples:
 
@@ -304,6 +304,7 @@ Read the calendar offline: the agenda for a range (default today), or one event 
 teamscrawl calendar [flags]
 teamscrawl calendar event <event> [flags]
 teamscrawl calendar actions [flags]
+teamscrawl calendar sources [flags]
 ```
 
 Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
@@ -347,6 +348,8 @@ teamscrawl calendar actions --from yesterday --to today --mine
 teamscrawl calendar actions --days 7 --owner pat
 ```
 
+`calendar sources` answers "what does the archive hold, and how fresh is it", one row per account and source (Teams first). `--account` keeps that Teams account and the Outlook profiles linked to it. A Teams row: `covered_days` (days the cache ever showed, cumulative), `last_verified_at`, `window_start`, `window_end`, `synced_at`, `cache_fresh_at`, `events_live`, `events_removed`, `events_with_detail`, `events_with_attendees`, `events_with_body`, `events_online`, `recaps_total` (all recap rows), `recaps_with_content` (placeholders create no row; a row with neither text nor a live item is not counted), `recaps_linked` (rows with an iCalUID, content or not), `recap_action_items`, `unknown_time_zones` (zone names with no known IANA id, at most 50). Every row also has `principal` and `link` (`config` or `none`; a Teams row is always `none`, and a link shows on the Outlook rows pointing to its principal). The window is a span, not a coverage claim: `covered_days` is. An Outlook row adds `status` (`ok`, `skipped_interval`, `unsupported_version`, `unsupported_layout`, `unreadable`), `error` (`code`, `message`, `fix`) when the last read failed, `last_read_at` (last good read), `last_attempt_at` (last copy), `last_checked_at` (latest sync that looked at the store, even when it was unchanged and read nothing), `census_as_of` (when the read behind the census fields happened; they stay from the last good read on a failure row), `next_read_after` and `read_interval_seconds` (the Outlook store is copied at most once per interval), `unknown_layouts` (`class`, `tag`, `count`: event or detail objects of a tag this build does not know; other classes are not calendar and are not listed), `blocks_invalid_ratio`, `unmapped_values` and `deletions: "unverified"`. A status other than `ok` means Outlook is not being read, and `error` says why; a `skipped_interval` row is healthy.
+
 On an archive from before the calendar tables, all three commands return an empty result with `needs_sync` and a hint to run `sync`.
 
 Examples:
@@ -355,6 +358,7 @@ Examples:
 teamscrawl calendar --days 7
 teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
 teamscrawl calendar event ev_2da7280856 --max-text 400
+teamscrawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1
 ```
 
 ## stores

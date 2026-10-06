@@ -135,7 +135,7 @@ type Result struct {
 	Events         []calendar.Event // the current copy of each event, sorted by SourceID
 	Notes          Notes
 	Losses         []Loss
-	UnknownLayouts []PairCount // pairs in the store that KnownLayouts does not list
+	UnknownLayouts []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
 	Stats          hxstore.Stats
 }
 
@@ -189,13 +189,13 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	if err != nil {
 		return res, err
 	}
+	res.UnknownLayouts = unknownLayouts(stats) // before the guard, so a refused read still says which layout it met
 	if g := guard(stats, badTags, len(winners)+res.Notes.EventNoID, opt); g != nil {
 		return res, g
 	}
 	res.Notes.DetailCopiesDiffer = len(differing)
 	res.Notes.DistinctEvents = len(winners)
 	res.Notes.SupersededCopies = res.Notes.EventObjects - len(winners)
-	res.UnknownLayouts = unknownLayouts(stats)
 	if rej := stats.BlocksRejected(); rej*100 > stats.BlocksFound*damagedBlocksPercent {
 		res.Losses = append(res.Losses, Loss{CodeBlocksDamaged, rej})
 	}
@@ -246,14 +246,18 @@ func guard(st hxstore.Stats, badTags map[uint16]int, events int, opt Options) er
 	return nil
 }
 
+// unknownLayouts lists the (class, tag) pairs of the classes the reader maps (event and detail)
+// whose tag it does not know: the sign that Outlook changed a layout. Objects of any other class
+// are not calendar objects and are not reported.
 func unknownLayouts(st hxstore.Stats) []PairCount {
 	var out []PairCount
 	for p, n := range st.Pairs {
-		known := false
+		mapped, known := false, false
 		for _, l := range KnownLayouts {
+			mapped = mapped || l.Class == p.Class
 			known = known || (l.Class == p.Class && l.Tag == p.Tag)
 		}
-		if !known {
+		if mapped && !known {
 			out = append(out, PairCount{p.Class, p.Tag, n})
 		}
 	}

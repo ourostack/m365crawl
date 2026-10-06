@@ -196,13 +196,7 @@ func databaseLabel(name string) (label, account string) {
 	if !ok {
 		return name, "-"
 	}
-	short := func(id string) string {
-		if len(id) > 9 {
-			return id[:4] + "…" + id[len(id)-4:]
-		}
-		return id
-	}
-	return "Teams:" + manager, short(acct.TenantID) + "/" + short(acct.UserID)
+	return "Teams:" + manager, shortID(acct.TenantID) + "/" + shortID(acct.UserID)
 }
 
 // listTable prints a list result as an aligned table with a column subset per item type; the
@@ -243,6 +237,9 @@ func (rt *runtime) listTable(r *listResult) {
 				start, end = x.StartDate, "all day"
 			}
 			rows = append(rows, []string{start, end, x.Status, oneLine(x.Subject), calendarWhere(x), x.Response})
+		case calendarSourceItem:
+			cols, textCol = []string{"source", "account", "status", "window", "covered_days", "events", "with_detail", "recaps"}, -1
+			rows = append(rows, []string{x.Source, shortAccount(x.AccountID), x.Status, sourceWindow(x), strconv.Itoa(x.CoveredDays), strconv.Itoa(x.EventsLive), strconv.Itoa(x.EventsWithDetail), strconv.Itoa(x.RecapsWithContent)})
 		case actionItem:
 			cols, textCol = []string{"event_start", "subject", "owner", "title"}, 3
 			title := oneLine(x.Title)
@@ -360,6 +357,31 @@ func (rt *runtime) unlinkedRecapTable(r *listResult) {
 	if r.UnlinkedRecapsTotal > len(r.UnlinkedRecaps) {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%d of %d recaps shown; raise --limit", len(r.UnlinkedRecaps), r.UnlinkedRecapsTotal), color))
 	}
+}
+
+// shortAccount shortens the ids of a "tenant/user" account as the database tables do; any other
+// account name is shown as it is.
+func shortAccount(account string) string {
+	tenant, user, ok := strings.Cut(account, "/")
+	if !ok || strings.HasPrefix(account, "outlook/") {
+		return account
+	}
+	return shortID(tenant) + "/" + shortID(user)
+}
+
+func shortID(id string) string {
+	if len(id) > 9 {
+		return id[:4] + "…" + id[len(id)-4:]
+	}
+	return id
+}
+
+// sourceWindow is the first and last covered day of a source, or "-" when it has none.
+func sourceWindow(x calendarSourceItem) string {
+	if x.WindowStart.IsZero() {
+		return "-"
+	}
+	return x.WindowStart.Format("2006-01-02") + ".." + x.WindowEnd.Format("2006-01-02")
 }
 
 // calendarWhere is the first room of an event, or "online" for a meeting with no room.
