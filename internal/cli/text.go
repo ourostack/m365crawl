@@ -28,6 +28,9 @@ func stamp(t time.Time) string {
 }
 
 func metaLines(w io.Writer, m meta, color bool) {
+	for _, n := range m.Notices {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
+	}
 	if m.ArchiveAgeSeconds != nil {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("archive age: "+(time.Duration(*m.ArchiveAgeSeconds)*time.Second).String(), color))
 	} else {

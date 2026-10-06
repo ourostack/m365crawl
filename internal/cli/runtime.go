@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,6 +216,9 @@ func (rt *runtime) checkTeam() error {
 // read runs a read command: implicit sync, open the archive read-only (nil when there is none),
 // run fn, stamp the result with the archive's age and any sync error, and print it.
 func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) error {
+	if err := rt.checkOutlookRoot(); err != nil {
+		return err
+	}
 	if err := rt.checkTeam(); err != nil {
 		return err
 	}
@@ -353,6 +359,86 @@ func outlookChoice(root, teamsRoot, env string) (dir string, on bool) {
 		return root, true
 	}
 	return "", env == "1" && teamsRoot == ""
+}
+
+// CodeOutlookRootMissing is the failure of an Outlook root that is not a directory.
+const CodeOutlookRootMissing = "outlook_root_missing"
+
+// checkOutlookRoot refuses an Outlook root that is not a directory, the same way on every command
+// that takes --outlook-root, before any sync starts. It does nothing while the Outlook source is
+// off. A root that
+// exists but holds no profiles is the sync's own failure (no_outlook_profiles).
+func (rt *runtime) checkOutlookRoot() error {
+	if !rt.outlookOn {
+		return nil
+	}
+	root, how := rt.outlookRoot, "--outlook-root "
+	if root == "" {
+		var err error
+		if root, err = outlookDefaultRoot(); err != nil {
+			return errs.Internal(err)
+		}
+		how = "the default Outlook directory (TEAMSCRAWL_OUTLOOK=1) "
+	}
+	info, err := os.Stat(root)
+	if err == nil && info.IsDir() {
+		return nil
+	}
+	c := &errs.Coded{Code: CodeOutlookRootMissing, Exit: errs.ExitEnvironment}
+	switch {
+	case err == nil:
+		c.Message = how + root + " is not a directory"
+	case errors.Is(err, fs.ErrNotExist):
+		c.Message = how + root + " does not exist"
+	default:
+		c.Message = how + root + " cannot be read: " + err.Error()
+	}
+	c.Fix = "Point --outlook-root at the directory of Outlook profiles (one directory per profile, each holding HxStore.hxd), or turn the Outlook source off with --outlook-root none."
+	if rt.outlookRoot == "" {
+		c.Fix = "Install the new Outlook for Mac, point --outlook-root at the directory of Outlook profiles, or unset TEAMSCRAWL_OUTLOOK to turn the Outlook source off."
+	}
+	return c
+}
+
+// noteOutlookOff adds the notice that Outlook events in a result are archived data this run did not
+// refresh, with the age of the last read of each Outlook account. has says the result holds an
+// Outlook event; with the Outlook source on the sync keeps them fresh and there is nothing to say.
+// A read time that cannot be loaded leaves the ages out; the notice is still given.
+func (rt *runtime) noteOutlookOff(st *store.Store, res result, has bool) {
+	if !has || rt.outlookOn {
+		return
+	}
+	reads, _ := outlookReadTimes(st, rt.ctx)
+	accounts := make([]string, 0, len(reads))
+	for a := range reads {
+		accounts = append(accounts, a)
+	}
+	sort.Strings(accounts)
+	var ages []string
+	for _, a := range accounts {
+		ages = append(ages, a+" "+ageText(rt.now().Sub(reads[a])))
+	}
+	msg := "the Outlook source is off for this run, so the Outlook events in this result are archived data that is not being refreshed"
+	if len(ages) > 0 {
+		msg += "; last read " + strings.Join(ages, ", ")
+	}
+	res.addNotice(msg + ". Add --outlook-root DIR or set TEAMSCRAWL_OUTLOOK=1 to read Outlook again.")
+}
+
+// outlookReadTimes is the test seam of the read times.
+var outlookReadTimes = (*store.Store).OutlookReadTimes
+
+// ageText is a coarse age: minutes under an hour, hours under two days, days after that.
+func ageText(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d/time.Minute)) + " min ago"
+	case d < 48*time.Hour:
+		return strconv.Itoa(int(d/time.Hour)) + " h ago"
+	}
+	return strconv.Itoa(int(d/(24*time.Hour))) + " days ago"
 }
 
 // outlookAccountEnv is the environment variable of --outlook-account.

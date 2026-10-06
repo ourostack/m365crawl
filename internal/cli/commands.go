@@ -569,6 +569,9 @@ func (c syncCmd) Run(rt *runtime) error {
 	if err := rt.checkLink(); err != nil {
 		return err
 	}
+	if err := rt.checkOutlookRoot(); err != nil {
+		return err
+	}
 	if rt.account != nil && rt.outlookLink != "" {
 		e := errs.Usage("--outlook-account cannot be combined with --account on sync: a Teams account filter leaves Outlook out of the run")
 		e.Fix = "Drop --account, or run the link on its own."
