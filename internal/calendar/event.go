@@ -11,6 +11,11 @@
 // is used for a known all-day flag, or an unknown one whose instants look all-day, and a source
 // row keeps the key it was first stored under. Limits of Capture (equal-time ties, copies with no
 // time, the block stash) are on Capture.
+//
+// Reads join what keys cannot. A timed key that later became all-day keeps its key, so the agenda
+// load groups it with its twin's date key (joinOccurrences). Any other lookup of one occurrence,
+// such as `calendar event` by key or by event_id, must run the same join, and an event_id alias
+// must cover a timed key that later joined a date key.
 package calendar
 
 import (
