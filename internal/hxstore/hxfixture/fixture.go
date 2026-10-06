@@ -64,6 +64,27 @@ func MainCounts() map[Pair]int {
 	return g.counts
 }
 
+// Case is one class 0x6b object of the main store, as the generator specified it.
+type Case struct {
+	// Spec and Detail are what the generator wrote; a Stub has neither.
+	Spec   hxbuild.EventSpec
+	Detail hxbuild.DetailSpec
+	Stub   bool
+}
+
+// MainEvents lists every event object of the main store, every copy included, so a test
+// can read the store back and compare each mapped field with what was written.
+func MainEvents() []Case {
+	g := &gen{}
+	master, occ, exc := g.series()
+	v := g.versions()
+	var out []Case
+	for _, e := range []event{g.plain(), g.online(), g.allDay(), g.cancelled(), master, occ, exc, v[0], v[1], v[2], g.nineAttendees(), g.highBit()} {
+		out = append(out, Case{Spec: e.spec, Detail: e.detail})
+	}
+	return append(out, Case{Stub: true}, Case{Stub: true})
+}
+
 type provenanceDoc struct {
 	Generator        string            `json:"generator"`
 	GeneratorVersion int               `json:"generator_version"`

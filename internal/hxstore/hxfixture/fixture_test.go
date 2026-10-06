@@ -419,3 +419,19 @@ func TestTwinsAreInTeamsFixture(t *testing.T) {
 		}
 	}
 }
+
+func TestMainEventsMatchTheStore(t *testing.T) {
+	cases := MainEvents()
+	if len(cases) != MainCounts()[Pair{0x6b, 0x455}] {
+		t.Fatalf("%d cases, %d objects", len(cases), MainCounts()[Pair{0x6b, 0x455}])
+	}
+	stubs := 0
+	for _, c := range cases {
+		if c.Stub {
+			stubs++
+		}
+	}
+	if stubs != 2 {
+		t.Fatal(stubs)
+	}
+}
