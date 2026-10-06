@@ -607,3 +607,34 @@ func TestSelfReferenceKeepsArrayProperties(t *testing.T) {
 		t.Fatalf("self reference is %T, want the wrapper", a.Props.Values[0])
 	}
 }
+
+// walk reaches every container kind that can hold a reference taken during a cycle.
+func TestArrayRefsWalk(t *testing.T) {
+	items := make([]any, 1, 2)
+	w := &ArrayWithProps{Items: items}
+	r := &arrayRefs{slice: &items[:1][0], length: 1, w: w, seen: map[any]bool{}}
+	self := items // the bare slice of the array being finished
+	other := make([]any, 1)
+	var nilObj *Object
+	obj := &Object{Keys: []string{"a", "b"}, Values: []any{self, "x"}}
+	m := &Map{Entries: [][2]any{{self, self}}}
+	set := &Set{Items: []any{self, int64(1)}}
+	errv := &Error{HasCause: true, Cause: self}
+	inner := &ArrayWithProps{Items: []any{self}, Props: obj}
+	nested := []any{self, other, make([]any, 0), obj, m, set, errv, inner, nilObj, "s"}
+	r.walk(nested)
+	r.walk(nested) // already visited
+	r.walk(obj)    // already visited
+	r.walk(m)
+	r.walk(set)
+	r.walk(errv)
+	r.walk(inner)
+	r.walk(int64(3))
+	if nested[0] != any(w) || obj.Values[0] != any(w) || m.Entries[0][0] != any(w) || m.Entries[0][1] != any(w) ||
+		set.Items[0] != any(w) || errv.Cause != any(w) || inner.Items[0] != any(w) {
+		t.Fatalf("a self reference was not replaced: %v %v %v %v %v", nested[0], obj.Values[0], m.Entries[0], set.Items[0], errv.Cause)
+	}
+	if _, ok := nested[1].([]any); !ok {
+		t.Fatalf("an unrelated array was replaced")
+	}
+}
