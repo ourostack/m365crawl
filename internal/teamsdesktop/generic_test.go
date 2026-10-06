@@ -124,13 +124,17 @@ func TestReadGenericFixture(t *testing.T) {
 		}
 		perStore[m+"/"+r.Store]++
 	}
-	if perStore["calendar-manager/events"] != 4 || perStore["pinned-manager/pins"] != 8 || len(perStore) != 2 {
+	// The calendar, catch-up and recap databases are generic here (they are not typed); the first
+	// two accounts hold 14 events, 3 bookkeeping records, 5 catch-up and 2 recap records each.
+	if perStore["calendar-manager/events"] != 4 || perStore["pinned-manager/pins"] != 8 ||
+		perStore["calendar/calendar"] != 28 || perStore["calendar/calendar-internal-data"] != 6 ||
+		perStore["meetforwork-manager/meetforwork-meeting-catch-up"] != 10 || perStore["meeting-recap-manager/meeting-recap-catchup"] != 4 || len(perStore) != 6 {
 		t.Fatalf("records per store = %v", perStore)
 	}
 	if g.res.Omissions["denied_database"] != 3 || g.res.Omissions["denied_store"] != 1 {
 		t.Fatalf("omissions = %v", g.res.Omissions)
 	}
-	if len(g.res.Present) != 4 {
+	if len(g.res.Present) != 10 {
 		t.Fatalf("present = %v", g.res.Present)
 	}
 	for _, n := range g.res.Present {

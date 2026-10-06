@@ -29,11 +29,11 @@ var (
 
 // Golden totals of the fixture (distinct rows in testdata/teams-fixture/expected/mapped-*.json).
 const (
-	fixtureMessages      = 110
+	fixtureMessages      = 120
 	fixtureConversations = 14
 	fixtureActivity      = 22
-	// fixtureRecords is the generic fixture records: calendar-manager events and pinned-manager pins.
-	fixtureRecords = 12
+	// fixtureRecords is the generic fixture records: the calendar-manager decoy events and the pinned-manager pins (12), plus the calendar, calendar-internal-data, meeting catch-up and meeting recap stores (48).
+	fixtureRecords = 60
 )
 
 func newDB(t *testing.T) string { return filepath.Join(t.TempDir(), "data", "teamscrawl.db") }

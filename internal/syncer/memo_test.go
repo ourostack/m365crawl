@@ -798,7 +798,7 @@ func TestPruneFailuresFailTheSource(t *testing.T) {
 			blobs := readBlobs(t, root)
 			db := newDB(t)
 			run(t, Options{Root: root, DBPath: db})
-			applyState(t, root, full, blobs, cacheState{"cut", 0.4, nil})
+			applyState(t, root, full, blobs, cacheState{"cut", 0.8, nil}) // 0.8, not 0.4: with the calendar databases added, a cut at 0.4 no longer leaves a fully read database missing keys, so nothing is pruned
 			touchLog(t, root)
 			boom := errors.New("injected prune failure")
 			old := beforeRead
