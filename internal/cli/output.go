@@ -75,6 +75,12 @@ type listResult struct {
 	CoverageAsOf     *time.Time `json:"coverage_as_of,omitempty"`
 	Range            *rangeInfo `json:"range,omitempty"`
 	UnlinkedAccounts []string   `json:"unlinked_accounts,omitempty"`
+	// UncoveredDays lists the dates of the range some account does not cover (at most
+	// maxUncoveredDays, with UncoveredDaysTotal when it is longer); Accounts says, per account, when
+	// it last synced and the oldest verification behind its covered days.
+	UncoveredDays      []string          `json:"uncovered_days,omitempty"`
+	UncoveredDaysTotal int               `json:"uncovered_days_total,omitempty"`
+	Accounts           []accountCoverage `json:"accounts,omitempty"`
 	// UnlinkedRecaps are the recaps that started in the range and belong to no event of the archive
 	// (a meeting with no calendar entry, or an event the cache dropped): their content is listed
 	// here instead of being hidden. UnlinkedRecapsTotal is printed only when the limit cut the list.

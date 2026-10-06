@@ -380,6 +380,12 @@ func TestItemOfFilledRoomsAndSources(t *testing.T) {
 	if len(it.Rooms) != 2 || it.RoomsAsOf != asAt || it.AttendeeCount == nil || *it.AttendeeCount != 2 || !it.Removed || len(it.RemovedBy) != 1 {
 		t.Errorf("%+v", it)
 	}
+	// A room list the source never stated is not printed, whatever text rooms the location gives.
+	row.Unknown = []calendar.Field{calendar.FieldRooms}
+	if it = itemOf(row); len(it.Rooms) != 0 || !it.RoomsAsOf.IsZero() {
+		t.Errorf("rooms next to unknown rooms: %+v", it)
+	}
+	row.Unknown = nil
 	// A basic copy counts no attendees, and an outlook-only event has no tenant.
 	row.DetailLevel, row.Sources = calendar.DetailBasic, []calendar.Source{calendar.SourceOutlook}
 	if it = itemOf(row); it.AttendeeCount != nil || it.TenantID != "" {
@@ -547,5 +553,98 @@ func TestUnlinkedRecapTableSaysWhenTheLimitCutIt(t *testing.T) {
 	got := renderToString(t, "calendar", l)
 	if !strings.Contains(got, "1 of 3 recaps shown; raise --limit") {
 		t.Errorf("%s", got)
+	}
+}
+
+// rooms and an unknown "rooms" never appear together, in the agenda or in the event detail, and
+// rooms_as_of never appears without rooms.
+func TestRoomsNeverSitNextToUnknownRooms(t *testing.T) {
+	e := calEnv(t)
+	wide := agenda(t, e, "--from", "2023-11-01", "--to", "2023-12-31")
+	stated, unstated := 0, 0
+	for _, it := range items(t, wide) {
+		_, rooms := it["rooms"]
+		_, asOf := it["rooms_as_of"]
+		named := contains(asStrings(it["unknown_fields"]), "rooms")
+		if rooms == named || asOf && !rooms {
+			t.Errorf("%v: rooms %v, rooms_as_of %v, rooms unknown %v", it["subject"], rooms, asOf, named)
+		}
+		if rooms {
+			stated++
+		} else {
+			unstated++
+		}
+		ev := eventDoc(t, e, it["event_id"].(string), "--account", it["account_id"].(string))
+		if _, has := ev["rooms"]; has == contains(asStrings(ev["unknown_fields"]), "rooms") {
+			t.Errorf("event %v: rooms %v, unknown %v", it["subject"], has, ev["unknown_fields"])
+		}
+	}
+	if unstated == 0 {
+		t.Errorf("the fixture should hold events whose rooms are unknown (stated %d)", stated)
+	}
+}
+
+func TestCalendarSaysWhichDaysAndAccountsToDistrust(t *testing.T) {
+	e := calEnv(t)
+	m := agenda(t, e, "--from", "2023-11-01", "--to", "2023-11-03")
+	days := asStrings(m["uncovered_days"])
+	if m["coverage_gap"] != true || len(days) != 2 || days[0] != "2023-11-01" || days[1] != "2023-11-02" {
+		t.Errorf("uncovered days %v of %v", days, m["coverage_gap"])
+	}
+	if _, has := m["uncovered_days_total"]; has {
+		t.Error("a short list has no total")
+	}
+	accounts, _ := m["accounts"].([]any)
+	if len(accounts) == 0 {
+		t.Fatalf("no per-account freshness: %v", keysOf(m))
+	}
+	for _, a := range accounts {
+		a := a.(map[string]any)
+		if a["account_id"] == nil || a["synced_at"] == nil {
+			t.Errorf("account %v", a)
+		}
+	}
+	// A covered day lists no gap; a long range is cut and counted.
+	day := agenda(t, e, "--from", "2023-11-22", "--days", "1", "--account", tenantA+"/"+userA)
+	if day["coverage_gap"] != false || day["uncovered_days"] != nil {
+		t.Errorf("covered day: %v %v", day["coverage_gap"], day["uncovered_days"])
+	}
+	long := agenda(t, e, "--from", "2023-01-01", "--to", "2024-01-01")
+	if len(asStrings(long["uncovered_days"])) != maxUncoveredDays || long["uncovered_days_total"].(float64) < 300 {
+		t.Errorf("long range: %d days, total %v", len(asStrings(long["uncovered_days"])), long["uncovered_days_total"])
+	}
+}
+
+func TestUncoveredNote(t *testing.T) {
+	for _, c := range []struct {
+		r    listResult
+		want string
+	}{
+		{listResult{}, "no cached data covers part of this range"},
+		{listResult{UncoveredDays: []string{"2023-11-01"}}, "no cached data covers 1 day(s) of this range: 2023-11-01"},
+		{listResult{UncoveredDays: []string{"a", "b", "c", "d", "e", "f"}}, "no cached data covers 6 days of this range, from a"},
+		{listResult{UncoveredDays: []string{"a"}, UncoveredDaysTotal: 40}, "no cached data covers 40 days of this range, from a"},
+	} {
+		if got := uncoveredNote(&c.r); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+	}
+}
+
+// The recap of 2023-11-15 has no event: the agenda lists it, in text as well as in JSON.
+func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
+	e := calEnv(t)
+	for _, color := range []bool{false, true} {
+		t.Setenv("CLICOLOR_FORCE", "")
+		suffix := "plain"
+		if color {
+			suffix = "color"
+			t.Setenv("CLICOLOR_FORCE", "1")
+		}
+		code, out, errOut := e.run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errOut)
+		}
+		checkGolden(t, "calendar_unlinked_recap."+suffix, e.scrub(out))
 	}
 }

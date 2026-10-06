@@ -36,6 +36,23 @@ type AgendaResult struct {
 	// Unlinked lists the accounts in scope of sources other than Teams that have no active link, so
 	// their events are not merged with any Teams account's. Sorted; nil when there are none.
 	Unlinked []string
+	// UncoveredDays are the dates (in From's zone) of the range that some principal in scope does
+	// not cover: the days on which an absent event is not evidence. Empty exactly when Gap is false.
+	UncoveredDays []string
+	// Accounts says, for each principal in scope that has a source, when it last synced and how old
+	// the verification behind its covered days is, so a reader knows which account to distrust.
+	// Sorted by account id.
+	Accounts []AccountCoverage
+}
+
+// AccountCoverage is one principal's freshness over an agenda's range.
+type AccountCoverage struct {
+	AccountID string
+	// SyncedAt is the newest sync of any of the principal's sources; zero when none is known.
+	SyncedAt time.Time
+	// AsOf is the oldest verification time behind the principal's coverage of the range; zero when
+	// it covers none of it.
+	AsOf time.Time
 }
 
 // AgendaItem is one merged event and the key it is stored under.
@@ -84,7 +101,8 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 	if !q.To.After(q.From) {
 		return res, nil
 	}
-	res.Gap, res.AsOf = coverage(windows, days, principals, q.From, q.To)
+	cov := coverage(windows, days, principals, q.From, q.To)
+	res.Gap, res.AsOf, res.UncoveredDays, res.Accounts = len(cov.uncovered) > 0, cov.asOf, cov.uncovered, cov.accounts
 	fresh, unlinked := freshness(windows, principals)
 	res.Unlinked = unlinked
 	needle := strings.ToLower(q.Query)
@@ -199,15 +217,22 @@ type coveredDay struct {
 	FirstVerifiedAt time.Time
 }
 
-// coverage reports whether any part of [from, to) is uncovered, and the oldest verification time
-// among what covers it. Coverage is recorded by (source, account) and judged per principal. Within
-// a principal, a source with covered-day rows covers exactly those days (dates in from's zone) and
-// a source without any covers its whole window; the sources and accounts of one principal
-// complement each other, so a day covered by either the Teams days or the Outlook days is covered.
-// A day is a gap when any principal in scope does not cover it, so an all-accounts query never
-// hides an account that skipped the day; an unlinked account is its own principal and is judged
-// alone. With nothing in scope every day is a gap.
-func coverage(windows []Window, days []coveredDay, p Principals, from, to time.Time) (gap bool, asOf time.Time) {
+// coverageInfo is what coverage found out about a range.
+type coverageInfo struct {
+	uncovered []string // dates some principal does not cover
+	asOf      time.Time
+	accounts  []AccountCoverage
+}
+
+// coverage reports which days of [from, to) are uncovered, the oldest verification time among what
+// covers the range, and each principal's own freshness. Coverage is recorded by (source, account)
+// and judged per principal. Within a principal, a source with covered-day rows covers exactly those
+// days (dates in from's zone) and a source without any covers its whole window; the sources and
+// accounts of one principal complement each other, so a day covered by either the Teams days or the
+// Outlook days is covered. A day is uncovered when any principal in scope does not cover it, so an
+// all-accounts query never hides an account that skipped the day; an unlinked account is its own
+// principal and is judged alone. With nothing in scope every day is uncovered.
+func coverage(windows []Window, days []coveredDay, p Principals, from, to time.Time) coverageInfo {
 	type srcKey struct {
 		source  Source
 		account string
@@ -215,6 +240,8 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 	type accountCover struct {
 		verified map[string]time.Time // date -> newest verification across the principal's sources
 		spans    []Window             // windows of the principal's sources that have no covered days
+		synced   time.Time
+		asOf     time.Time
 	}
 	withDays := map[srcKey]bool{}
 	accounts := map[string]*accountCover{}
@@ -233,16 +260,20 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 	}
 	for _, w := range windows {
 		c := of(p.Of(w.AccountID))
+		if w.SyncedAt.After(c.synced) {
+			c.synced = w.SyncedAt
+		}
 		if !withDays[srcKey{w.Source, w.AccountID}] {
 			c.spans = append(c.spans, w)
 		}
 	}
-	if len(accounts) == 0 {
-		return true, asOf
-	}
-	note := func(t time.Time) {
-		if asOf.IsZero() || t.Before(asOf) {
-			asOf = t
+	var out coverageInfo
+	note := func(c *accountCover, t time.Time) {
+		if out.asOf.IsZero() || t.Before(out.asOf) {
+			out.asOf = t
+		}
+		if c.asOf.IsZero() || t.Before(c.asOf) {
+			c.asOf = t
 		}
 	}
 	loc := from.Location()
@@ -257,26 +288,34 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		if pieceTo.After(to) {
 			pieceTo = to
 		}
+		uncovered := len(accounts) == 0
 		for name, c := range accounts {
 			switch t, ok := c.verified[start.Format(dateLayout)]; {
 			case ok:
-				note(t)
+				note(c, t)
 			case coveredBySpans(c.spans, pieceFrom, pieceTo):
 				usedSpan[name] = true
 			default:
-				gap = true
+				uncovered = true
 			}
+		}
+		if uncovered {
+			out.uncovered = append(out.uncovered, start.Format(dateLayout))
 		}
 		start = next
 	}
 	for name := range usedSpan {
 		for _, w := range accounts[name].spans {
 			if w.Start.Before(to) && w.End.After(from) {
-				note(w.SyncedAt)
+				note(accounts[name], w.SyncedAt)
 			}
 		}
 	}
-	return gap, asOf
+	for name, c := range accounts {
+		out.accounts = append(out.accounts, AccountCoverage{AccountID: name, SyncedAt: c.synced, AsOf: c.asOf})
+	}
+	sort.Slice(out.accounts, func(i, j int) bool { return out.accounts[i].AccountID < out.accounts[j].AccountID })
+	return out
 }
 
 // coveredBySpans reports whether the union of the windows contains all of [from, to).

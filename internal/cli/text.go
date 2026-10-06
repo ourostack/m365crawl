@@ -54,7 +54,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.listTable(r)
 		_, _ = fmt.Fprintln(w)
 		if r.CoverageGap != nil && *r.CoverageGap {
-			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("no cached data covers part of this range", color))
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
 		}
 		if len(r.UnlinkedAccounts) > 0 {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("events of these outlook accounts are not merged with a Teams account: "+strings.Join(r.UnlinkedAccounts, ", "), color))
@@ -460,4 +460,20 @@ func wrapText(s string, width int) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+// uncoveredNote says which days of a calendar range no cached data covers, so an absent event on
+// one of them is not read as "nothing happened".
+func uncoveredNote(r *listResult) string {
+	n := r.UncoveredDaysTotal
+	if n == 0 {
+		n = len(r.UncoveredDays)
+	}
+	switch {
+	case n == 0:
+		return "no cached data covers part of this range"
+	case n <= 5 && len(r.UncoveredDays) == n:
+		return "no cached data covers " + strconv.Itoa(n) + " day(s) of this range: " + strings.Join(r.UncoveredDays, ", ")
+	}
+	return "no cached data covers " + strconv.Itoa(n) + " days of this range, from " + r.UncoveredDays[0]
 }

@@ -66,6 +66,10 @@ type CalendarAgenda struct {
 	AsOf time.Time
 	// Unlinked lists the accounts of other sources that no link joins to a Teams account.
 	Unlinked []string
+	// UncoveredDays and Accounts are calendar.AgendaResult's: the days some account does not cover,
+	// and each account's own freshness.
+	UncoveredDays []string
+	Accounts      []calendar.AccountCoverage
 	// UnlinkedRecaps are the recaps whose meeting started in the range and that no event holds: a
 	// recap with no iCalUID, or one whose event the archive does not have (an impromptu meeting,
 	// an evicted event). They are listed so their content is not hidden behind an event that is
@@ -111,6 +115,7 @@ func (s *Store) CalendarAgenda(ctx context.Context, f CalendarFilter) (CalendarA
 		return out, err
 	}
 	out.Gap, out.AsOf, out.Unlinked, out.Total = res.Gap, res.AsOf, res.Unlinked, len(res.Items)
+	out.UncoveredDays, out.Accounts = res.UncoveredDays, res.Accounts
 	items := res.Items
 	limit := f.Limit
 	if limit <= 0 {
@@ -369,8 +374,8 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 }
 
 func noEvent(ref string) *errs.Coded {
-	c := errs.Usage(fmt.Sprintf("no calendar event matches %q", ref))
-	c.Fix = "List events with `teamscrawl calendar --from <date> --days 7` and pass an event_id (or event_key) from the result. Events outside the cached days are not archived."
+	c := errs.Usage(fmt.Sprintf("no calendar event matches %q. Events on days Teams never cached are not in the archive, so this does not show that the event does not exist", ref))
+	c.Fix = "List events with `teamscrawl calendar --from <date> --days 7` and pass an event_id (or event_key) from the result."
 	return c
 }
 

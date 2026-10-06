@@ -199,7 +199,13 @@ func itemOf(r store.CalendarRow) calendarItem {
 			it.TenantID, it.UserID, _ = strings.Cut(r.Principal, "/")
 		}
 	}
+	// A room list nobody stated is not printed: calendar.Rooms still builds text rooms from the
+	// location, which location already carries, and rooms must never sit next to "rooms" in
+	// unknown_fields.
 	for _, rm := range r.Rooms {
+		if contains(it.UnknownFields, string(calendar.FieldRooms)) {
+			break
+		}
 		it.Rooms = append(it.Rooms, calendarRoom{Name: rm.Name, Kind: rm.Kind, LocationType: rm.LocationType, Address: rm.Address, Latitude: rm.Latitude, Longitude: rm.Longitude, Stale: rm.Stale})
 		if rm.Kind != calendar.RoomText && !it.DetailAsOf.IsZero() {
 			it.RoomsAsOf = it.DetailAsOf
@@ -303,6 +309,18 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecap{AccountID: u.Principal, calendarRecap: recapOf(u.CalendarRecap)})
 		}
+		list.UncoveredDays = agenda.UncoveredDays
+		if len(list.UncoveredDays) > maxUncoveredDays {
+			list.UncoveredDays, list.UncoveredDaysTotal = list.UncoveredDays[:maxUncoveredDays], len(agenda.UncoveredDays)
+		}
+		for _, a := range agenda.Accounts {
+			ac := accountCoverage{AccountID: a.AccountID, SyncedAt: a.SyncedAt.UTC()}
+			if !a.AsOf.IsZero() {
+				t := a.AsOf.UTC()
+				ac.CoverageAsOf = &t
+			}
+			list.Accounts = append(list.Accounts, ac)
+		}
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
@@ -312,6 +330,16 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		}
 		return list, nil
 	})
+}
+
+// maxUncoveredDays caps uncovered_days; uncovered_days_total gives the full count when it is cut.
+const maxUncoveredDays = 31
+
+// accountCoverage is one account's freshness over the range of an agenda.
+type accountCoverage struct {
+	AccountID    string     `json:"account_id"`
+	SyncedAt     time.Time  `json:"synced_at,omitzero"`
+	CoverageAsOf *time.Time `json:"coverage_as_of,omitempty"`
 }
 
 func rangeOf(from, to time.Time) *rangeInfo {
