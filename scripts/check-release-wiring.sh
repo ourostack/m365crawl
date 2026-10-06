@@ -24,7 +24,7 @@ jobs() {
 }
 
 check() {
-  local file="$1" skippable="$2" table changed=1 line job needs cond n bad=0
+  local file="$1" skippable="$2" table changed=1 job needs cond n bad=0
   table="$(jobs "$file")"
   [[ -n "$table" ]] || { echo "error: no jobs found in $file" >&2; return 1; }
   grep -q "^$skippable|" <<<"$table" || { echo "error: no job $skippable in $file" >&2; return 1; }
