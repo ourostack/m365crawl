@@ -59,6 +59,13 @@ func TestGlobalObjectID(t *testing.T) {
 	}
 }
 
+func TestGlobalObjectIDTail(t *testing.T) {
+	id := GlobalObjectIDTail(2023, 11, 22, []byte("AB"))
+	if HexID(id) != "040000008200E00074C5B7101A82E00807E70B164142" {
+		t.Fatal(HexID(id))
+	}
+}
+
 func fullSpec() EventSpec {
 	return EventSpec{
 		ID: []byte("ABCD"), SeriesKey: 0x1122334455667788, Stamp: 77, DetailKey: 9,

@@ -81,12 +81,16 @@ var uidPrefix = []byte{0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xe0, 0x00, 0x74, 0xc
 // a series or a single event), 8 bytes of creation time and 8 reserved (zero
 // here), a four-byte length and the data bytes.
 func GlobalObjectID(year, month, day int, data string) []byte {
+	tail := append(make([]byte, 16), binary.LittleEndian.AppendUint32(nil, clampU32(len(data)))...)
+	return GlobalObjectIDTail(year, month, day, append(tail, data...))
+}
+
+// GlobalObjectIDTail builds an id from the prefix, the date and the bytes that
+// follow the date, for a test that must reproduce another fixture's ids.
+func GlobalObjectIDTail(year, month, day int, tail []byte) []byte {
 	b := append([]byte(nil), uidPrefix...)
 	b = append(b, byte(year>>8), byte(year), byte(month), byte(day)) //nolint:gosec // truncation to the format's fields is the point; a test passes small values
-	b = append(b, make([]byte, 16)...)
-	b = binary.LittleEndian.AppendUint32(b, clampU32(len(data)))
-	b = append(b, data...)
-	return b
+	return append(b, tail...)
 }
 
 // HexID returns the id as the Teams iCalUID writes it: 112 upper-case hex

@@ -1,7 +1,7 @@
 // Package hxfixture builds the committed synthetic Outlook store fixture under
 // testdata/outlook-fixture. Everything in it is invented: the names start with
 // "Fixture", the addresses end in example.invalid, the ids are hex of the ASCII
-// word FIXTURE plus a counter, and the dates are in 2031. Nothing here reads a
+// word FIXTURE plus a counter, and the dates are in 2031 (the five events shared with the Teams fixture use its November 2023 dates). Nothing here reads a
 // real store, a clock or a random source, so the output is the same bytes every
 // time. scripts/hxfixture writes it; the tests here check that the committed
 // copy is what this code makes.
@@ -163,8 +163,25 @@ func attendees(n int, optionalFrom int) []hxbuild.Attendee {
 
 func body(n int) string { return fmt.Sprintf("<html><body><p>Fixture body %d.</p></body></html>", n) }
 
+// teamsID is the iCal UID the Teams fixture (scripts/fixture/page.html) gives an
+// event: the prefix, a date (zero for none), then the ASCII text FIXTURE-label
+// padded with zeros to 36 bytes. Sharing these ids makes an Outlook event and a
+// Teams event the same meeting.
+func teamsID(label string, y, m, d int) []byte {
+	tail := make([]byte, 36)
+	copy(tail, "FIXTURE-"+label)
+	return hxbuild.GlobalObjectIDTail(y, m, d, tail)
+}
+
+// teamsAt is a time on the Teams fixture's calendar (November 2023, UTC).
+func teamsAt(day, hour, min int) time.Time {
+	return time.Date(2023, 11, day, hour, min, 0, 0, time.UTC)
+}
+
 func (g *gen) plain() event {
 	s := base(1)
+	s.ID = teamsID("RICH-MEETING", 0, 0, 0)
+	s.Start, s.End = teamsAt(20, 17, 0), teamsAt(20, 18, 0)
 	s.Subject, s.SubjectBare = "Fixture plain event", "Fixture plain event"
 	s.Attendees = attendees(3, 0)
 	return event{s, hxbuild.DetailSpec{Key: s.DetailKey, SeriesKey: s.SeriesKey, BodyHTML: body(1)}}
@@ -172,6 +189,8 @@ func (g *gen) plain() event {
 
 func (g *gen) online() event {
 	s := base(2)
+	s.ID = teamsID("PACIFIC-1", 0, 0, 0)
+	s.Start, s.End = teamsAt(21, 18, 0), teamsAt(21, 19, 0)
 	s.Subject, s.SubjectBare = "Fixture online meeting", "Fixture online meeting"
 	s.Online, s.ShowAs, s.Response, s.ReminderMinutes, s.ZoneID = true, 1, 1, 15, 3
 	s.ZoneName = "Fixture Mountain Time"
@@ -205,20 +224,21 @@ func (g *gen) cancelled() event {
 func (g *gen) series() (master, occurrence, exception event) {
 	mk := func(typ uint32, y, m, d int, subject string) event {
 		s := base(5)
-		s.ID = hxbuild.GlobalObjectID(y, m, d, fixtureID(5))
+		s.ID = teamsID("STANDUP-1", y, m, d)
 		s.EventType, s.Subject, s.SubjectBare = typ, subject, subject
-		s.Start, s.End = at(d, 14), at(d, 15)
+		day := d
 		if d == 0 {
-			s.Start, s.End = at(3, 14), at(3, 15)
+			day = 22 // the master starts on the first day of the series
 		}
+		s.Start, s.End = teamsAt(day, 18, 0), teamsAt(day, 18, 30)
 		return event{s, hxbuild.DetailSpec{Key: s.DetailKey, SeriesKey: s.SeriesKey, JoinLink: "https://example.invalid/fixture/join/0005", BodyHTML: body(5)}}
 	}
-	master = mk(3, 0, 0, 0, "Fixture weekly series")
+	master = mk(3, 0, 0, 0, "Fixture standup")
 	master.spec.Online = true
-	occurrence = mk(1, 2031, 3, 10, "Fixture weekly series")
+	occurrence = mk(1, 2023, 11, 22, "Fixture standup")
 	occurrence.spec.Online = true
-	exception = mk(2, 2031, 3, 17, "Fixture weekly series moved")
-	exception.spec.Online, exception.spec.Start, exception.spec.End = true, at(17, 16), at(17, 17)
+	exception = mk(2, 2023, 11, 24, "Fixture standup")
+	exception.spec.Online, exception.spec.Start, exception.spec.End = true, teamsAt(24, 19, 0), teamsAt(24, 19, 30)
 	return
 }
 
@@ -371,15 +391,14 @@ func (g *gen) damaged() []byte {
 	return b.Bytes()
 }
 
-// twins lists the ids of the fixture events that are meant to be the same
-// meetings as events in the Teams fixture's calendar, and the Teams fixture has
-// no calendar records yet. They are invented here and need aligning when it does.
+// twins lists, in hex, the ids of the fixture events that are the same meetings
+// as events in the Teams fixture's calendar.
 func (g *gen) twins() string {
 	master, occ, exc := g.series()
 	ids := []event{g.plain(), g.online(), master, occ, exc}
 	var sb strings.Builder
-	sb.WriteString("# Invented iCal UIDs of fixture events meant to be twins of Teams fixture events.\n")
-	sb.WriteString("# The Teams fixture has no calendar records yet, so these are not yet shared.\n")
+	sb.WriteString("# iCal UIDs (hex) of fixture events that are the same meetings as events in the Teams fixture.\n")
+	sb.WriteString("# They equal the iCalUID values in testdata/teams-fixture (account seed 1).\n")
 	for _, e := range ids {
 		sb.WriteString(hxbuild.HexID(e.spec.ID) + "\n")
 	}

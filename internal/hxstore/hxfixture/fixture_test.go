@@ -377,3 +377,37 @@ func TestEveryTwinIsAnEventID(t *testing.T) {
 		}
 	}
 }
+
+// TestTwinsAreInTeamsFixture checks that every twin id appears, as the hex text
+// Teams stores, in the committed Teams fixture: the two fixtures describe the
+// same meetings.
+func TestTwinsAreInTeamsFixture(t *testing.T) {
+	teamsDir := filepath.Join("..", "..", "..", "testdata", "teams-fixture")
+	var all [][]byte
+	err := filepath.WalkDir(teamsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(path) //nolint:gosec // walking the committed Teams fixture
+		all = append(all, b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(byName(t)["twin-candidates.txt"])), "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		found := false
+		for _, b := range all {
+			if bytes.Contains(b, []byte(line)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("twin %s is not in the Teams fixture", line)
+		}
+	}
+}

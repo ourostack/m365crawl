@@ -3,7 +3,7 @@
   "generator_version": 1,
   "layout": "docs/outlook-store.md",
   "files": {
-    "HxStore.hxd": "541496c43fe0b2bc0123d9e1a67ec4a78b95a0806fd106608a1df36b51fd368c",
+    "HxStore.hxd": "af39feec1435c9d783f27ba31fe336ce347033abe9b95c9de7385ae3dd7ede98",
     "profile-two/HxStore.hxd": "7cbe56fdb0bf8f2cc76706bfc02648454f60f93aa208fadce5526eb3ae5b637f",
     "store-damaged-blocks.hxd": "35f8bb16f75cdacae9bc5fc9ce01a5d541ae50729bf2afb0d30ce86e6cc8f095",
     "store-empty.hxd": "862a99eac9f3453cb5a357f62b5b5ba1b425a7a5044024f7c3d041cb245d54d3",
@@ -14,7 +14,7 @@
     "store-short.hxd": "408514ce67103ff298f8239893db37afef583f1ac026d6be90df01c1b1018a12",
     "store-unknown-classes-only.hxd": "625a063879740ec9e1fb51ffc77c7f0d30a28b2b1bf4fe992be14410b7e6578d",
     "store-version-j.hxd": "f149a4ee6af546a89608d4354c684a431fc637915b49bd4971b52aa1ae5a43eb",
-    "twin-candidates.txt": "38ad3832afce73d029710516d4095bfa9767279568c38e4da5a22586b9a28671"
+    "twin-candidates.txt": "ac1426eee632d15a3734f2e41b6ada156e0c69e1d4f076f1772daf8e6e7488dc"
   },
-  "hash": "20ec08db12a9421f6609bda150390f4febd354c748219b7b9c4d092ad5dd948b"
+  "hash": "4eb89447a1806fc6c864bdec0cec48fcbb489e6cec34c41208dbe4ea073f2275"
 }
