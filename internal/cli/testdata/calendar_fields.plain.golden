@@ -1,0 +1,9 @@
+subject          start                 status
+---------------  --------------------  ---------
+Fixture holiday  2023-11-22T08:00:00Z  confirmed
+Fixture holiday  2023-11-22T08:00:00Z  confirmed
+Fixture standup  2023-11-22T18:00:00Z  confirmed
+Fixture standup  2023-11-22T18:00:00Z  confirmed
+
+4 items
+archive age: <age>

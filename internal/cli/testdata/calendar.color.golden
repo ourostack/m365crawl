@@ -1,0 +1,9 @@
+[2mstart[0m             [2mend[0m               [2mstatus[0m     [2msubject[0m                      [2mwhere[0m   [2mresponse[0m
+[2m----------------[0m  [2m----------------[0m  [2m---------[0m  [2m---------------------------[0m  [2m------[0m  [2m--------[0m
+2023-11-22        all day           confirmed  Fixture holiday              [2m-[0m       accepted
+2023-11-22 18:00  2023-11-22 18:30  confirmed  Fixture standup              online  accepted
+2023-11-23 09:00  2023-11-23 10:00  confirmed  Fixture central europe sync  [2m-[0m       accepted
+2023-11-23 18:00  2023-11-23 18:30  confirmed  Fixture standup              online  accepted
+
+[2m4 items[0m
+[2marchive age: <age>[0m

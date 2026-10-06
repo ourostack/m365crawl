@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // twin is one source's row of the meeting "Fixture Weekly Sync" on 2026-11-02, all flags known.
@@ -430,5 +431,29 @@ func TestAgendaReportsCorruptUnknownFieldsAndLateLoadErrors(t *testing.T) {
 	exec(t, db, `ALTER TABLE calendar_source_events DROP COLUMN show_as`)
 	if _, err := Agenda(ctx, db, AgendaQuery{From: from, To: to}); err == nil {
 		t.Fatal("want an error from the second step")
+	}
+}
+
+func TestCoverageNamesUncoveredDaysAndEachAccount(t *testing.T) {
+	from, to := mustTime(t, "2026-11-02T00:00:00Z"), mustTime(t, "2026-11-05T00:00:00Z")
+	db := openDB(t)
+	w := Window{Source: SourceTeams, AccountID: acctTeams, Start: from, End: to, SyncedAt: from.Add(time.Hour), CacheFreshAt: from}
+	if _, err := ApplySnapshot(ctx, db, w, nil, from); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, db, `DELETE FROM calendar_covered_days`)
+	exec(t, db, `INSERT INTO calendar_covered_days VALUES ('teams',?,'2026-11-03','2026-11-03T00:00:00.000Z','2026-11-03T05:00:00.000Z')`, acctTeams)
+	res := day(t, db, AgendaQuery{From: from, To: to})
+	if !reflect.DeepEqual(res.UncoveredDays, []string{"2026-11-02", "2026-11-04"}) || !res.Gap {
+		t.Fatalf("uncovered %v gap %v", res.UncoveredDays, res.Gap)
+	}
+	want := []AccountCoverage{{AccountID: acctTeams, SyncedAt: from.Add(time.Hour), AsOf: mustTime(t, "2026-11-03T05:00:00Z")}}
+	if !reflect.DeepEqual(res.Accounts, want) {
+		t.Fatalf("%+v, want %+v", res.Accounts, want)
+	}
+	// With nothing in scope every day is uncovered and no account is listed.
+	empty := day(t, openDB(t), AgendaQuery{From: from, To: to})
+	if len(empty.UncoveredDays) != 3 || len(empty.Accounts) != 0 || !empty.Gap {
+		t.Fatalf("%+v", empty)
 	}
 }
