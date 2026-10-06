@@ -394,17 +394,33 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 	idCols := []column{eventColumns[1]} // account_id
 	want := map[groupKey]bool{}
 	var keys []string
-	for _, q := range eventQueries(idCols, scope, from, to, first.AddDate(0, 0, -1).Format(dateLayout), last.AddDate(0, 0, 1).Format(dateLayout)) {
-		found, err := queryKeyed(ctx, db, idCols, q)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range found {
-			if g := (groupKey{p.Of(r.AccountID), r.key}); !want[g] {
-				want[g] = true
-				keys = append(keys, r.key)
+	have := map[string]bool{}
+	collect := func(queries []eventQuery) error {
+		for _, q := range queries {
+			found, err := queryKeyed(ctx, db, idCols, q)
+			if err != nil {
+				return err
+			}
+			for _, r := range found {
+				if g := (groupKey{p.Of(r.AccountID), r.key}); !want[g] {
+					want[g] = true
+					if !have[r.key] {
+						have[r.key] = true
+						keys = append(keys, r.key)
+					}
+				}
 			}
 		}
+		return nil
+	}
+	err := collect(eventQueries(idCols, scope, from, to, first.AddDate(0, 0, -1).Format(dateLayout), last.AddDate(0, 0, 1).Format(dateLayout)))
+	if err == nil {
+		// Keys never move, so one occurrence can sit under a timed key in one source and a date key
+		// in another. Every key of a candidate's global id is a candidate too; joinOccurrences decides.
+		err = collect(siblingQueries(idCols, keys))
+	}
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(keys)
 	cols := selectColumns(false)
@@ -426,10 +442,127 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 		}
 		keys = keys[n:]
 	}
+	joinOccurrences(groups)
 	for _, rows := range groups {
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Source < rows[j].Source })
 	}
 	return groups, nil
+}
+
+// siblingQueries select the account and key of every key of the global ids in keys. "|" is followed
+// by "}" in byte order, so the range [id|, id}) is exactly the keys "<id>|...".
+func siblingQueries(idCols []column, keys []string) []eventQuery {
+	seen := map[string]bool{}
+	var out []eventQuery
+	for _, k := range keys {
+		gid, suffix, ok := splitKey(k)
+		if !ok || suffix == "" || seen[gid] {
+			continue
+		}
+		seen[gid] = true
+		out = append(out, eventQuery{sql: selectSQL(idCols, "event_key >= ? AND event_key < ?"), args: []any{gid + "|", gid + "}"}})
+	}
+	return out
+}
+
+// splitKey splits a global key "<id>|<suffix>"; a composite key has no global id.
+func splitKey(key string) (gid, suffix string, ok bool) {
+	i := strings.LastIndex(key, "|")
+	if i < 0 || strings.HasPrefix(key, compositePrefix) {
+		return "", "", false
+	}
+	return key[:i], key[i+1:], true
+}
+
+// joinOccurrences merges, within one principal, the group of a date key with the groups of timed
+// keys of the same global id whose original start falls on that date. Keys never move, so an
+// occurrence first stored as timed that later became all-day keeps its timed key while its
+// twin mints the date key; reading joins them. Two occurrences on adjacent days never join: an
+// instant belongs to the one date it falls on (in the rows' own zone), or, when no row knows its
+// zone, to the nearest date key within AllDayConsistencyWindow, and to none when two are equally near.
+func joinOccurrences(groups map[groupKey][]Event) {
+	type id struct{ principal, gid string }
+	dates := map[id][]string{}
+	var timed []groupKey
+	for g := range groups {
+		gid, suffix, ok := splitKey(g.key)
+		switch {
+		case !ok || suffix == "":
+		case isDateSuffix(suffix):
+			dates[id{g.principal, gid}] = append(dates[id{g.principal, gid}], suffix)
+		default:
+			timed = append(timed, g)
+		}
+	}
+	sort.Slice(timed, func(i, j int) bool { return timed[i].key < timed[j].key })
+	for _, g := range timed {
+		gid, suffix, _ := splitKey(g.key)
+		cands := dates[id{g.principal, gid}]
+		if len(cands) == 0 {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, suffix)
+		if err != nil { // not a key this package minted
+			continue
+		}
+		date, ok := occurrenceDate(at, groups[g], cands)
+		if !ok {
+			continue
+		}
+		target := groupKey{g.principal, gid + "|" + date}
+		groups[target] = append(groups[target], groups[g]...)
+		delete(groups, g)
+	}
+}
+
+func isDateSuffix(s string) bool {
+	_, err := time.Parse(dateLayout, s)
+	return err == nil && len(s) == len(dateLayout)
+}
+
+// occurrenceDate is the date key among cands that the instant at belongs to. The rows' own zone
+// decides when one is known (IANA name, then UTC offset); otherwise it is the nearest date's
+// midnight within AllDayConsistencyWindow, when exactly one is nearest.
+func occurrenceDate(at time.Time, rows []Event, cands []string) (string, bool) {
+	var loc *time.Location
+	for _, r := range rows {
+		if r.TimeZoneIANA != "" {
+			if l, err := time.LoadLocation(r.TimeZoneIANA); err == nil {
+				loc = l
+				break
+			}
+		}
+	}
+	if loc == nil {
+		for _, r := range rows {
+			if t, err := time.Parse("-07:00", r.UTCOffset); err == nil {
+				_, secs := t.Zone()
+				loc = time.FixedZone("", secs)
+				break
+			}
+		}
+	}
+	if loc != nil {
+		d := at.In(loc).Format(dateLayout)
+		for _, c := range cands {
+			if c == d {
+				return d, true
+			}
+		}
+		return "", false
+	}
+	best, bestDist, tie := "", AllDayConsistencyWindow+1, false
+	for _, c := range cands {
+		m, _ := time.Parse(dateLayout, c) // cands are date suffixes
+		switch dist := at.Sub(m).Abs(); {
+		case dist > AllDayConsistencyWindow:
+		case dist < bestDist:
+			best, bestDist, tie = c, dist, false
+		case dist == bestDist:
+			tie = true
+		}
+	}
+	return best, best != "" && !tie
 }
 
 // accountClause is the WHERE condition that limits a table to accounts; empty means all.

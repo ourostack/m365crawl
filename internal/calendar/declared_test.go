@@ -27,14 +27,38 @@ func TestStoredRowDoesNotCarryTheDeclaration(t *testing.T) {
 	}
 }
 
-func TestValidateEventRefusesAllDayWithoutInstants(t *testing.T) {
-	e := Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "d", AllDay: TriTrue, StartDate: "2026-10-05"}
-	if err := ValidateEvent(e); err == nil || !strings.Contains(err.Error(), "instants") {
-		t.Fatalf("%v", err)
+func TestValidateEventRefusesAZeroStartOrEnd(t *testing.T) {
+	s, e := mustTime(t, "2026-10-05T00:00:00Z"), mustTime(t, "2026-10-06T00:00:00Z")
+	for name, ev := range map[string]Event{
+		"all-day, zero start, end set": {AllDay: TriTrue, StartDate: "2026-10-05", End: e},
+		"all-day, start set, zero end": {AllDay: TriTrue, StartDate: "2026-10-05", Start: s},
+		"all-day, both zero":           {AllDay: TriTrue, StartDate: "2026-10-05"},
+		"timed, zero start":            {End: e},
+		"timed, zero end":              {Start: s},
+		"unknown flag, zero end":       {AllDay: TriUnknown, Start: s},
+	} {
+		ev.UnknownDeclared, ev.Source, ev.SourceID = true, SourceTeams, "d"
+		if err := ValidateEvent(ev); err == nil || !strings.Contains(err.Error(), "zero") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
-	e.Start = mustTime(t, "2026-10-05T00:00:00Z")
-	if err := ValidateEvent(e); err != nil {
+	ok := Event{UnknownDeclared: true, Source: SourceTeams, SourceID: "d", AllDay: TriTrue, StartDate: "2026-10-05", Start: s, End: e}
+	if err := ValidateEvent(ok); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEqualTimeCopiesWithDifferentStatedStatusStoreOneRow(t *testing.T) {
+	// Two copies at one time carry the same join link. One states the dial-in as known empty, the
+	// other lists it unknown. The byte-equal values tie, so the stated status must decide.
+	a, b := thin(t, t1), thin(t, t1)
+	a.OnlineMeetingURL, b.OnlineMeetingURL = "https://teams.example.test/l/x", "https://teams.example.test/l/x"
+	a.Unknown = without(a.Unknown, FieldJoinURL, FieldDialIn, FieldShortJoinURL, FieldMeetingChatID)
+	b.Unknown = without(b.Unknown, FieldJoinURL, FieldShortJoinURL, FieldMeetingChatID)
+	b.Unknown = append(b.Unknown, FieldDialIn)
+	got := converge(t, "tie", []Event{a, b})
+	if got.unknown(FieldDialIn) {
+		t.Fatalf("the copy that stated more wins: %v", got.Unknown)
 	}
 }
 
