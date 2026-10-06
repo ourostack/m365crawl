@@ -1,6 +1,7 @@
 package outlookcal
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -226,6 +227,9 @@ func (r reader) scrub(s string) string {
 	in, _ := json.Marshal(s) // a string always marshals
 	out, n := teamsdesktop.Scrub(in)
 	r.notes.Redacted += n
+	if n == 0 && bytes.Equal(out, in) {
+		return s // nothing removed: skip decoding a second copy of a string we already hold
+	}
 	var back string
 	_ = json.Unmarshal(out, &back) // the scrubber returns a JSON string for a JSON string
 	return back
