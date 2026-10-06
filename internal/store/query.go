@@ -126,7 +126,8 @@ type ConversationRow struct {
 	ReadHorizonAt time.Time `json:"read_horizon_at,omitzero"`
 	Favorite      bool      `json:"favorite"`
 	// CalendarSeriesKey and CalendarEventCount place a Meeting conversation in the calendar: the
-	// series its events share and how many live occurrences the archive holds. Both are empty for
+	// series its events share and how many live, non-cancelled occurrences the archive holds (a declined
+	// one counts: the meeting happened). Both are empty for
 	// a chat no event names. See Store.linkCalendar.
 	CalendarSeriesKey  string `json:"calendar_series_key,omitempty"`
 	CalendarEventCount int    `json:"calendar_event_count,omitempty"`

@@ -935,3 +935,14 @@ func TestCalendarActionsMineBasis(t *testing.T) {
 		t.Fatalf("mine: %v", mine)
 	}
 }
+
+// --mine over several accounts names the ones whose own name is not archived.
+func TestCalendarActionsMineNamesUnnamedAccounts(t *testing.T) {
+	const tenantB, userB = "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-0000000000a2"
+	e := calEnv(t)
+	e.exec(`delete from people where tenant_id='` + tenantB + `'`)
+	m := actionsDoc(t, e, "--from", "2023-11-20", "--days", "1", "--mine")
+	if got := fmt.Sprint(m["mine_unknown_accounts"]); got != "["+tenantB+"/"+userB+"]" || len(items(t, m)) != 1 {
+		t.Fatalf("%v", m)
+	}
+}

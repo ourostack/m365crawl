@@ -27,14 +27,16 @@ type occurrenceStart struct {
 	start time.Time
 }
 
-// seriesOccurrences lists the live, non-master occurrences of the accounts that carry ical and are
-// neither cancelled nor declined, one entry per event key, in key order: the same candidates a
-// start-time link considers.
+// seriesOccurrences lists every non-master occurrence of the accounts that carries ical, one entry
+// per event key, in key order, whether it is live, removed, cancelled or declined. Whether an id is
+// shared by a series, and which occurrence a recap belongs to, must not change when an occurrence
+// is removed or cancelled: that only decides what is shown. This is placing, not linking, so the
+// start-link's candidate rule (live, neither cancelled nor declined) does not apply.
 func (s *Store) seriesOccurrences(ctx context.Context, accounts []string, ical string) ([]occurrenceStart, error) {
 	args := append(stringArgs(accounts), ical, calendar.EventMaster)
 	rows, err := s.query(ctx, `select event_key, start_at from calendar_source_events
-	  where account_id in `+inList(len(accounts))+` and ical_uid=? and removed_at is null and event_type<>? and coalesce(cancelled,0)<>1
-	  and response<>'declined' and start_at<>'' order by event_key, source, account_id`, args...)
+	  where account_id in `+inList(len(accounts))+` and ical_uid=? and event_type<>? and start_at<>''
+	  order by event_key, source, account_id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +58,7 @@ func (s *Store) seriesOccurrences(ctx context.Context, accounts []string, ical s
 }
 
 // ownerOccurrence is the occurrence a recap with meeting start at belongs to: the one that starts
-// nearest to it within calendar.RecapStartTolerance, the lower key on a tie. ok is false when none
+// nearest to it within calendar.RecapStartTolerance, the lower key on a tie (occs is in key order). ok is false when none
 // does, or when the recap has no meeting start.
 func ownerOccurrence(occs []occurrenceStart, at time.Time) (key string, ok bool) {
 	if at.IsZero() {
@@ -220,8 +222,11 @@ type CalendarActions struct {
 	// MineAmbiguous counts the items --mine left out because their owner is a first name another
 	// person of the meeting shares.
 	MineAmbiguous int
-	Total         int
-	Truncated     bool
+	// MineUnknownAccounts lists, with Mine, the accounts in scope whose own name is not archived:
+	// their items cannot be matched, so --mine does not show them.
+	MineUnknownAccounts []string
+	Total               int
+	Truncated           bool
 	// The coverage fields are CalendarAgenda's: they say how far an absent item is evidence.
 	Gap           bool
 	AsOf          time.Time
@@ -253,12 +258,15 @@ func (s *Store) CalendarActions(ctx context.Context, f CalendarActionFilter) (Ca
 		out.NoTables = true
 		return out, nil
 	}
-	names, err := s.ownNames(ctx, f.Account)
+	names, unnamed, err := s.ownNames(ctx, f.Account)
 	if err != nil {
 		return out, err
 	}
 	if f.Mine && len(names) == 0 {
 		return out, noOwnName()
+	}
+	if f.Mine {
+		out.MineUnknownAccounts = unnamed
 	}
 	res, err := calendar.Agenda(ctx, s.db, calendar.AgendaQuery{AccountID: accountString(f.Account), From: f.From, To: f.To})
 	if err != nil {
@@ -328,26 +336,31 @@ func (s *Store) CalendarActions(ctx context.Context, f CalendarActionFilter) (Ca
 	return out, nil
 }
 
-// ownNames maps each account in scope to the display name of its own user, leaving out accounts
+// ownNames maps each account in scope to the display name of its own user, and lists the accounts
 // whose own user has not been seen as a person yet.
-func (s *Store) ownNames(ctx context.Context, account *teamsdesktop.Account) (map[string]string, error) {
+func (s *Store) ownNames(ctx context.Context, account *teamsdesktop.Account) (names map[string]string, unnamed []string, err error) {
 	rows, err := s.Whoami(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := map[string]string{}
+	names = map[string]string{}
 	for _, r := range rows {
-		if r.DisplayName == "" || account != nil && (r.TenantID != account.TenantID || r.UserID != account.UserID) {
+		if account != nil && (r.TenantID != account.TenantID || r.UserID != account.UserID) {
 			continue
 		}
-		out[r.TenantID+"/"+r.UserID] = r.DisplayName
+		if r.DisplayName == "" {
+			unnamed = append(unnamed, r.TenantID+"/"+r.UserID)
+			continue
+		}
+		names[r.TenantID+"/"+r.UserID] = r.DisplayName
 	}
-	return out, nil
+	return names, unnamed, nil
 }
 
 // linkCalendar fills CalendarSeriesKey and CalendarEventCount of the Meeting conversations whose id
 // is the meeting chat of at least one live, non-master event of the same principal. The count is
-// of distinct event keys, so an event two sources hold counts once; the key is the series the
+// of distinct event keys, so an event two sources hold counts once; a cancelled event does not
+// count, a declined one does (the meeting happened); the key is the series the
 // events share, and stays empty when they belong to several. A chat with no event, and an archive
 // without the calendar tables, are left as they are.
 func (s *Store) linkCalendar(ctx context.Context, rows []ConversationRow) error {
@@ -378,7 +391,7 @@ func (s *Store) linkCalendar(ctx context.Context, rows []ConversationRow) error 
 		// A single event is its own "series" and does not vote for the chat's series key.
 		if err := s.db.QueryRowContext(ctx, `select count(distinct event_key), count(distinct case when event_type<>? then series_key end),
 		  coalesce(min(case when event_type<>? then series_key end),'') from calendar_source_events
-		  where account_id in `+inList(len(accounts))+` and teams_thread_id=? and removed_at is null and event_type<>?`, args...).Scan(&n, &series, &key); err != nil {
+		  where account_id in `+inList(len(accounts))+` and teams_thread_id=? and removed_at is null and coalesce(cancelled,0)<>1 and event_type<>?`, args...).Scan(&n, &series, &key); err != nil {
 			return err
 		}
 		r.CalendarEventCount = n

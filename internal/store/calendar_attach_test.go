@@ -127,14 +127,91 @@ func TestSeriesRecapWithNoMatchingOccurrenceStaysSeriesLevel(t *testing.T) {
 }
 
 // A uid one occurrence holds attaches all its recaps whatever their start, as a recap linked by id
-// always did. A cancelled occurrence is not a candidate, so the recap goes to the live one.
+// always did.
 func TestRecapOfAUidOneOccurrenceHoldsAttachesToIt(t *testing.T) {
-	s := sSeriesArchive(t)
-	s.qExec(t, `update calendar_source_events set cancelled=1 where source_id in ('s1','s3')`)
-	s.sRecap(t, "c1", sharedUID, "2026-11-03T10:00:00.000Z", "Ada Fixture")
-	d := eventOn(t, s, "s2", 10)
-	if len(d.Recaps) != 1 || d.Recaps[0].SeriesLevel {
-		t.Fatalf("%+v", d.Recaps)
+	s := newStore(t)
+	s.qApply(t, calendar.SourceTeams, qTeams, qEvent("only", 3, func(e *calendar.Event) { e.ICalUID = sharedUID }))
+	s.sRecap(t, "c1", sharedUID, "2026-11-20T10:00:00.000Z", "Ada Fixture")
+	d, err := s.CalendarEvent(context.Background(), nil, EventID(qTeams, calendar.Key(qEvent("only", 3, func(e *calendar.Event) { e.ICalUID = sharedUID }))))
+	if err != nil || len(d.Recaps) != 1 || d.Recaps[0].SeriesLevel {
+		t.Fatalf("%+v %v", d.Recaps, err)
+	}
+}
+
+// Placing a recap does not depend on which occurrences are shown: a removed, cancelled or declined
+// occurrence still owns the recap that starts at it, and the live ones do not take it over.
+func TestSeriesRecapPlacementIgnoresVisibility(t *testing.T) {
+	for _, c := range []struct{ name, set string }{
+		{"removed", `removed_at='2026-11-05T00:00:00.000Z'`},
+		{"cancelled", `cancelled=1`},
+		{"declined", `response='declined'`},
+	} {
+		t.Run(c.name+" two", func(t *testing.T) {
+			s := sSeriesArchive(t)
+			s.sRecap(t, "call-1", sharedUID, "2026-11-03T10:00:00.000Z", "Ada Fixture")
+			s.qExec(t, `update calendar_source_events set `+c.set+` where source_id in ('s1','s3')`)
+			if got := eventOn(t, s, "s2", 10); len(got.Recaps) != 0 || got.HasRecap {
+				t.Fatalf("the live occurrence took the recap: %+v", got.Recaps)
+			}
+		})
+	}
+	// The recap of the occurrence is found on it when it is cancelled or declined, and by the
+	// actions list when the agenda is asked for it.
+	for _, c := range []struct{ name, set string }{{"cancelled", `cancelled=1`}, {"declined", `response='declined'`}} {
+		s := sSeriesArchive(t)
+		s.sRecap(t, "call-2", sharedUID, "2026-11-10T10:00:00.000Z", "Ada Fixture")
+		s.qExec(t, `update calendar_source_events set `+c.set+` where source_id='s2'`)
+		a, err := s.CalendarAgenda(context.Background(), CalendarAgendaFilterAll())
+		if err != nil {
+			t.Fatal(err)
+		}
+		held := 0
+		for _, r := range a.Rows {
+			if r.HasRecap {
+				held++
+				if r.Key != calendar.Key(qEvent("s2", 10, func(e *calendar.Event) { e.ICalUID = sharedUID })) || r.ActionItems != 1 {
+					t.Fatalf("%s: wrong owner %+v", c.name, r)
+				}
+			}
+		}
+		if held != 1 {
+			t.Fatalf("%s: %d occurrences hold the recap", c.name, held)
+		}
+	}
+}
+
+// CalendarAgendaFilterAll is the filter of November 2026 that shows cancelled and declined events.
+func CalendarAgendaFilterAll() CalendarFilter {
+	return CalendarFilter{From: qt("2026-11-01T00:00:00Z"), To: qt("2026-11-30T00:00:00Z"), IncludeCancelled: true, IncludeDeclined: true}
+}
+
+// Two occurrences four minutes apart: the nearer one owns the recap, and on a tie the lower key.
+func TestSeriesRecapNearestOccurrenceWins(t *testing.T) {
+	same := func(e *calendar.Event) { e.ICalUID = sharedUID }
+	later := func(e *calendar.Event) {
+		e.ICalUID = sharedUID
+		e.Start, e.End = e.Start.Add(4*time.Minute), e.End.Add(4*time.Minute)
+	}
+	for _, c := range []struct {
+		start string
+		owner string // source id of the occurrence that holds it
+	}{{"2026-11-10T10:03:00.000Z", "b"}, {"2026-11-10T10:01:00.000Z", "a"}, {"2026-11-10T10:02:00.000Z", "a"}} {
+		s := newStore(t)
+		s.qApply(t, calendar.SourceTeams, qTeams, qEvent("a", 10, same), qEvent("b", 10, later), qEvent("c", 17, same))
+		s.sRecap(t, "call", sharedUID, c.start, "Ada Fixture")
+		a, err := s.CalendarAgenda(context.Background(), CalendarAgendaFilterAll())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var holders []string
+		for _, r := range a.Rows {
+			if r.HasRecap {
+				holders = append(holders, strings.TrimPrefix(r.Subject, "Q sync "))
+			}
+		}
+		if len(holders) != 1 || holders[0] != c.owner {
+			t.Fatalf("%s: held by %v, want %s", c.start, holders, c.owner)
+		}
 	}
 }
 
@@ -319,7 +396,7 @@ func TestCalendarActionsAndLinksReportEveryStorageFailure(t *testing.T) {
 		if _, err := s.ApplyPeople(ctx, []teamsdesktop.Person{{TenantID: acctA.TenantID, ID: selfMRI(acctA), DisplayName: "Ada", SeenAt: base}}); err != nil {
 			t.Fatal(err)
 		}
-		s.qApply(t, calendar.SourceTeams, qTeams, qEvent("s1", 4, func(e *calendar.Event) { e.ICalUID = "uid-o1" }))
+		s.qApply(t, calendar.SourceTeams, qTeams, qEvent("o1", 3), qEvent("o2", 10), qEvent("o3", 17), qEvent("s1", 4, func(e *calendar.Event) { e.ICalUID = "uid-o1" }))
 		s.qLink(t)
 	}
 	ops := map[string]func(context.Context, *Store) error{
@@ -435,5 +512,40 @@ func TestCalendarActionsMatchFirstNames(t *testing.T) {
 	got, err = s.CalendarActions(ctx, f)
 	if err != nil || len(got.Items) != 2 || got.MineAmbiguous != 1 || got.Total != 2 {
 		t.Fatalf("mine: %d items, %d ambiguous, %v", len(got.Items), got.MineAmbiguous, err)
+	}
+}
+
+// A cancelled occurrence does not count toward the chat's events, a declined one does: the meeting
+// happened.
+func TestLinkCalendarCountsDeclinedButNotCancelled(t *testing.T) {
+	s := qArchive(t)
+	s.qExec(t, `update calendar_source_events set response='declined' where source_id='o2'`)
+	s.qExec(t, `update calendar_source_events set cancelled=1 where source_id='o3'`)
+	rows := []ConversationRow{{TenantID: acctA.TenantID, UserID: acctA.UserID, ID: qChat, Kind: "Meeting"}}
+	if err := s.linkCalendar(context.Background(), rows); err != nil || rows[0].CalendarEventCount != 2 {
+		t.Fatalf("%d %v", rows[0].CalendarEventCount, err)
+	}
+}
+
+// --mine matches the accounts that have a name and lists the ones that do not.
+func TestCalendarActionsMineListsUnnamedAccounts(t *testing.T) {
+	ctx := context.Background()
+	s := qArchive(t)
+	for _, a := range []teamsdesktop.Account{acctA, acctB} {
+		if err := s.ApplyAccount(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.ApplyPeople(ctx, []teamsdesktop.Person{{TenantID: acctA.TenantID, ID: selfMRI(acctA), DisplayName: "Ada", SeenAt: base}}); err != nil {
+		t.Fatal(err)
+	}
+	f := CalendarActionFilter{From: qt("2026-11-01T00:00:00Z"), To: qt("2026-11-30T00:00:00Z"), Mine: true}
+	got, err := s.CalendarActions(ctx, f)
+	if err != nil || len(got.Items) != 1 || len(got.MineUnknownAccounts) != 1 || got.MineUnknownAccounts[0] != acctB.TenantID+"/"+acctB.UserID {
+		t.Fatalf("%+v %v", got, err)
+	}
+	f.Mine = false
+	if got, err = s.CalendarActions(ctx, f); err != nil || got.MineUnknownAccounts != nil {
+		t.Fatalf("without --mine: %+v %v", got.MineUnknownAccounts, err)
 	}
 }

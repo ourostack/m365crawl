@@ -796,7 +796,7 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		list := newList(shape(rt, items), res.Truncated).withTotal(res.Total)
 		list.CoverageGap, list.Range, list.UnlinkedAccounts = &res.Gap, out.Range, res.Unlinked
 		list.setCoverage(res.UncoveredDays, res.Accounts, res.AsOf)
-		list.MineAmbiguousOmitted = res.MineAmbiguous
+		list.MineAmbiguousOmitted, list.MineUnknownAccounts = res.MineAmbiguous, res.MineUnknownAccounts
 		return list, nil
 	})
 }
