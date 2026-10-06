@@ -1,8 +1,9 @@
 package store
 
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
-// Version 3 added the records table.
-const SchemaVersion = 3
+// Version 3 added the records table. Version 4 added read memory: records.raw_digest and
+// records.value_redacted, and the typed_memo table (see memo.go).
+const SchemaVersion = 4
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -139,10 +140,20 @@ create table if not exists records(
   first_seen_at text not null,
   updated_at text not null,
   removed_at text,
+  raw_digest blob,
+  value_redacted integer not null default 0,
   primary key(source, database, store, key_json)
 );
 create index if not exists records_db_store on records(database, store);
 create index if not exists records_updated on records(updated_at);
+create table if not exists typed_memo(
+  source text not null,
+  database text not null,
+  key_json text not null,
+  digest blob not null,
+  effects blob not null,
+  primary key(source, database, key_json)
+);
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);
 `

@@ -9,6 +9,7 @@ import (
 	"github.com/ourostack/teamscrawl/internal/errs"
 	"github.com/ourostack/teamscrawl/internal/indexeddb"
 	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/teamscrawl/internal/v8"
 )
 
 // typed is the set of databases that have a mapper, and so are read by Read: manager -> (object
@@ -31,6 +32,20 @@ type origin interface {
 	Records(dbID, storeID int64, fn func(indexeddb.Record) error) error
 	Decode(dbID int64, raw []byte) (any, error)
 	Stats() leveldb.Stats
+	Payload(dbID int64, raw []byte) ([]byte, error)
+	DecodePayload(payload []byte) (any, error)
+}
+
+// ReadOptions tunes ReadWith.
+type ReadOptions struct {
+	// Sig is the signature (see MemoSignature) that record digests are taken under.
+	Sig []byte
+	// Skip, when set, is called for every record whose key decoded, before its value is decoded,
+	// with the record's account, kind, database, canonical key and digest. digest is nil when the
+	// key or the value's bytes could not be read, and then Skip must report false. When Skip
+	// reports true the record is not decoded, mapped or passed to fn: the caller has already done
+	// what fn would have done, with the same outcome. Skip must report true only when that holds.
+	Skip func(acct Account, kind, database, keyJSON string, digest []byte) bool
 }
 
 // Read opens the snapshot in snapDir and calls fn for every record of the typed stores
@@ -42,6 +57,11 @@ type origin interface {
 // that is present without its store is store_missing. Other errors from fn stop the read and are
 // returned as is.
 func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Account, kind string, v any) error) (omissions map[string]int, err error) {
+	return ReadWith(ctx, snapDir, account, ReadOptions{}, fn)
+}
+
+// ReadWith is Read with options.
+func ReadWith(ctx context.Context, snapDir string, account *Account, opts ReadOptions, fn func(acct Account, kind string, v any) error) (omissions map[string]int, err error) {
 	o, err := indexeddb.OpenWith(filepath.Join(snapDir, "leveldb"), filepath.Join(snapDir, "blob"),
 		indexeddb.OpenOptions{KeepDatabase: keepDatabase(account)})
 	if err != nil {
@@ -53,7 +73,7 @@ func Read(ctx context.Context, snapDir string, account *Account, fn func(acct Ac
 		return map[string]int{}, classify(err)
 	}
 	defer func() { _ = o.Close() }()
-	return readOrigin(ctx, o, account, fn)
+	return readOriginWith(ctx, o, account, opts, fn)
 }
 
 // keepDatabase selects the databases Read loads into memory: the typed managers, for the
@@ -72,6 +92,10 @@ func keepDatabase(account *Account) func(name string) bool {
 }
 
 func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Account, kind string, v any) error) (map[string]int, error) {
+	return readOriginWith(ctx, o, account, ReadOptions{}, fn)
+}
+
+func readOriginWith(ctx context.Context, o origin, account *Account, opts ReadOptions, fn func(acct Account, kind string, v any) error) (map[string]int, error) {
 	omissions := map[string]int{}
 	dbs, err := o.Databases()
 	if err != nil {
@@ -106,7 +130,26 @@ func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Ac
 			if r.Err != nil {
 				return count(omissions, r.Err)
 			}
-			v, err := o.Decode(db.ID, r.Raw)
+			// The value is unwrapped (snappy, blob file) once: the payload that is digested is the
+			// one that is decoded.
+			var payload []byte
+			if opts.Skip != nil {
+				var keyJSON string
+				var digest []byte
+				if kj, err := v8.Canonical(canonKey(r.Key)); err == nil {
+					keyJSON = string(kj)
+					var perr error
+					if payload, perr = o.Payload(db.ID, r.Raw); perr == nil {
+						digest = recordDigest(opts.Sig, db.Name, payload)
+					} else {
+						payload = nil
+					}
+				}
+				if opts.Skip(acct, spec.kind, db.Name, keyJSON, digest) {
+					return nil
+				}
+			}
+			v, err := decodeRecord(o, db.ID, r.Raw, payload)
 			if err != nil {
 				return count(omissions, err)
 			}
@@ -133,6 +176,18 @@ func readOrigin(ctx context.Context, o origin, account *Account, fn func(acct Ac
 		omissions[omitTruncatedLogTail] += n
 	}
 	return omissions, nil
+}
+
+// decodeRecord decodes a record value, from its payload when the caller already unwrapped it
+// (payload is nil otherwise).
+func decodeRecord(o interface {
+	Decode(dbID int64, raw []byte) (any, error)
+	DecodePayload(payload []byte) (any, error)
+}, dbID int64, raw, payload []byte) (any, error) {
+	if payload != nil {
+		return o.DecodePayload(payload)
+	}
+	return o.Decode(dbID, raw)
 }
 
 // count records an omission. Any other error is fatal and returned.

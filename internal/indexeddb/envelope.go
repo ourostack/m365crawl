@@ -93,6 +93,13 @@ func (o *Origin) Decode(dbID int64, raw []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return o.DecodePayload(payload)
+}
+
+// DecodePayload deserializes a V8 payload that Payload returned. Decode is Payload followed by
+// DecodePayload, so a caller that needs the payload as well (to digest it) unwraps the value once.
+// Failures are *OmissionError.
+func (o *Origin) DecodePayload(payload []byte) (any, error) {
 	v, err := v8.Deserialize(payload)
 	if err != nil {
 		var ue *v8.UnsupportedError

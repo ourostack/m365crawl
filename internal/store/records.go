@@ -31,20 +31,22 @@ func (x *Session) UpsertRecords(source string, rs []teamsdesktop.GenericRecord, 
 		c.Seen++
 		var oldHash string
 		var removed sql.NullString
-		err := x.tx.QueryRowContext(ctx, `select content_hash, removed_at from records where source=? and database=? and store=? and key_json=?`,
-			source, r.Database, r.Store, string(r.KeyJSON)).Scan(&oldHash, &removed)
+		var oldDigest []byte
+		var oldRedacted int
+		err := x.tx.QueryRowContext(ctx, `select content_hash, removed_at, raw_digest, value_redacted from records where source=? and database=? and store=? and key_json=?`,
+			source, r.Database, r.Store, string(r.KeyJSON)).Scan(&oldHash, &removed, &oldDigest, &oldRedacted)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			if _, err := x.tx.ExecContext(ctx, `insert into records(source, tenant_id, user_id, database, store, key_json, value_json, content_hash, first_seen_at, updated_at) values(?,?,?,?,?,?,?,?,?,?)`,
-				source, tenant, user, r.Database, r.Store, string(r.KeyJSON), value, hash, now, now); err != nil {
+			if _, err := x.tx.ExecContext(ctx, `insert into records(source, tenant_id, user_id, database, store, key_json, value_json, content_hash, first_seen_at, updated_at, raw_digest, value_redacted) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
+				source, tenant, user, r.Database, r.Store, string(r.KeyJSON), value, hash, now, now, r.Digest, r.ValueRedacted); err != nil {
 				return c, err
 			}
 			c.Inserted++
 		case err != nil:
 			return c, err
 		case r.ValueJSON != nil && hash != oldHash:
-			if _, err := x.tx.ExecContext(ctx, `update records set value_json=?, content_hash=?, updated_at=?, removed_at=null where source=? and database=? and store=? and key_json=?`,
-				value, hash, now, source, r.Database, r.Store, string(r.KeyJSON)); err != nil {
+			if _, err := x.tx.ExecContext(ctx, `update records set value_json=?, content_hash=?, updated_at=?, removed_at=null, raw_digest=?, value_redacted=? where source=? and database=? and store=? and key_json=?`,
+				value, hash, now, r.Digest, r.ValueRedacted, source, r.Database, r.Store, string(r.KeyJSON)); err != nil {
 				return c, err
 			}
 			c.Updated++
@@ -56,6 +58,15 @@ func (x *Session) UpsertRecords(source string, rs []teamsdesktop.GenericRecord, 
 			c.Updated++
 		default:
 			c.Unchanged++
+		}
+		// Whatever branch ran, the row now holds this record's value (or, with no value, keeps an
+		// older one), so remember the bytes it came from. A record with no value has no digest
+		// and leaves what the row remembers alone.
+		if r.Digest != nil && err == nil && (!bytes.Equal(oldDigest, r.Digest) || oldRedacted != r.ValueRedacted) && (hash == oldHash) {
+			if _, err := x.tx.ExecContext(ctx, `update records set raw_digest=?, value_redacted=? where source=? and database=? and store=? and key_json=?`,
+				r.Digest, r.ValueRedacted, source, r.Database, r.Store, string(r.KeyJSON)); err != nil {
+				return c, err
+			}
 		}
 	}
 	return c, nil
@@ -88,7 +99,7 @@ func (x *Session) MarkRecordsRemoved(source, database string, seen map[string]ma
 		return 0, err
 	}
 	for _, g := range gone {
-		if _, err := x.tx.ExecContext(ctx, `update records set removed_at=? where source=? and database=? and store=? and key_json=?`,
+		if _, err := x.tx.ExecContext(ctx, `update records set removed_at=?, raw_digest=null, value_redacted=0 where source=? and database=? and store=? and key_json=?`,
 			fmtTime(at), source, database, g[0], g[1]); err != nil {
 			return 0, err
 		}
@@ -134,7 +145,7 @@ func (x *Session) MarkDatabasesRemoved(source string, present []string, account 
 	sort.Strings(gone)
 	total := 0
 	for _, db := range gone {
-		res, err := x.tx.ExecContext(ctx, `update records set removed_at=? where source=? and database=? and removed_at is null`, fmtTime(at), source, db)
+		res, err := x.tx.ExecContext(ctx, `update records set removed_at=?, raw_digest=null, value_redacted=0 where source=? and database=? and removed_at is null`, fmtTime(at), source, db)
 		if err != nil {
 			return total, err
 		}
@@ -173,7 +184,7 @@ func (x *Session) PurgeDenied(source string, denied func(name string) bool, at t
 	}
 	total := 0
 	for _, h := range hit {
-		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
+		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
 			fmtTime(at), source, h[0], h[1])
 		if err != nil {
 			return total, err
@@ -213,7 +224,7 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 	}
 	total := 0
 	for _, h := range hit {
-		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
+		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
 			fmtTime(at), source, h[0], h[1], h[2])
 		if err != nil {
 			return total, err
