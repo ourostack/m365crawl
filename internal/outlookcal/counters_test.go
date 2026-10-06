@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ourostack/teamscrawl/internal/hxstore"
 	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
 )
 
@@ -135,23 +136,57 @@ func TestAttendeeFailureCauses(t *testing.T) {
 		}
 		return hxbuild.NewEvent(s)
 	}
+	cut := func(o *hxbuild.Object, keep func(end int) int) hxstore.Object {
+		e := obj(o)
+		e.Raw = e.Raw[:keep(oEnd(o, 876))]
+		return e
+	}
 	cases := map[string]struct {
-		o                *hxbuild.Object
-		end, zero, other bool
+		o     hxstore.Object
+		cause string
 	}{
-		"end":   {o: func() *hxbuild.Object { o := base(true); o.Append([]byte{1, 2}); return o }(), end: true},
-		"zero":  {o: func() *hxbuild.Object { o := base(false); o.Append([]byte{1, 2}); return o }(), zero: true},
-		"other": {o: func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 1<<30); return o }(), other: true},
+		"end":     {obj(func() *hxbuild.Object { o := base(true); o.Append([]byte{1, 2}); return o }()), "end_mismatch"},
+		"zero":    {obj(func() *hxbuild.Object { o := base(false); o.Append([]byte{1, 2}); return o }()), "count_zero"},
+		"bare":    {obj(func() *hxbuild.Object { o := base(true); o.PutU32(876, 1<<30); return o }()), "bare_string_end"},
+		"outside": {cut(base(true), func(end int) int { return end + 2 }), "count_outside"},
+		"big":     {obj(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 1<<30); return o }()), "count_too_big"},
+		// A count of three over two records: the third record's length byte is past the end.
+		"records": {obj(func() *hxbuild.Object { o := base(true); o.PutU32(oEnd(o, 876), 3); return o }()), "length_missing"},
+		"odd":     {obj(func() *hxbuild.Object { o := base(true); o.PutU8(oEnd(o, 876)+4, 3); return o }()), "length_odd"},
+		"text":    {obj(func() *hxbuild.Object { o := base(true); o.PutU8(oEnd(o, 876)+4, 250); return o }()), "text_outside"},
+		"words":   {cut(base(true), func(int) int { return len(obj(base(true)).Raw) - 6 }), "words_cut"},
 	}
 	for name, c := range cases {
-		_, n := mapOK(t, obj(c.o), nil)
-		if !n.AttendeesUnparsed || n.AttendeesEndMismatch != c.end || n.AttendeesCountZero != c.zero || n.AttendeesOtherUnparsed != c.other {
+		_, n := mapOK(t, c.o, nil)
+		other := c.cause != "end_mismatch" && c.cause != "count_zero"
+		if !n.AttendeesUnparsed || n.AttendeeFailure != c.cause || n.AttendeesEndMismatch != (c.cause == "end_mismatch") ||
+			n.AttendeesCountZero != (c.cause == "count_zero") || n.AttendeesOtherUnparsed != other {
 			t.Errorf("%s: %+v", name, n)
 		}
 	}
+	// Every named cause is exercised, and an intact list names none.
+	if _, n := mapOK(t, obj(base(true)), nil); n.AttendeeFailure != "" || n.AttendeesUnparsed {
+		t.Fatalf("%+v", n)
+	}
+	for _, name := range attNames {
+		found := false
+		for _, c := range cases {
+			found = found || c.cause == name
+		}
+		if !found {
+			t.Errorf("cause %s has no case", name)
+		}
+	}
 	// Collect adds them, and they sum to the unparsed count.
-	s := collect(t, storeOf(t, framed(cases["end"].o)), Options{})
-	if s.Notes.AttendeesUnparsed != 1 || s.Notes.AttendeesEndMismatch != 1 || s.Notes.AttendeesCountZero != 0 || s.Notes.AttendeesOtherUnparsed != 0 {
+	endO := base(true)
+	endO.Append([]byte{1, 2})
+	bigSpec := baseSpec(2)
+	bigSpec.ID = hxbuild.GlobalObjectID(0, 0, 0, "FIXTURE-BIG")
+	bigO2 := hxbuild.NewEvent(bigSpec)
+	bigO2.PutU32(oEnd(bigO2, 876), 1<<30)
+	s := collect(t, storeOf(t, framed(endO, bigO2)), Options{})
+	if s.Notes.AttendeesUnparsed != 2 || s.Notes.AttendeesEndMismatch != 1 || s.Notes.AttendeesOtherUnparsed != 1 ||
+		s.Notes.AttendeeFailures["end_mismatch"] != 1 || s.Notes.AttendeeFailures["count_too_big"] != 1 || len(s.Notes.AttendeeFailures) != 2 {
 		t.Fatalf("%+v", s.Notes)
 	}
 	// The cancelled and body counters reach the result too.

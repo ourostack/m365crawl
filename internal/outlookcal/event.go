@@ -60,6 +60,9 @@ type MapNotes struct {
 	// AttendeesCountZero: the count is zero and bytes follow it. AttendeesOtherUnparsed:
 	// any other failure.
 	AttendeesEndMismatch, AttendeesCountZero, AttendeesOtherUnparsed bool
+	// AttendeeFailure names the one cause (a key of Notes.AttendeeFailures) when the list
+	// did not parse, else it is empty.
+	AttendeeFailure string
 	// AttendeeResponsesUnmapped counts attendee records whose response code is not one
 	// the layout lists.
 	AttendeeResponsesUnmapped int
@@ -190,7 +193,8 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		notes.AttendeesUnparsed = cause != attOK
 		notes.AttendeesEndMismatch = cause == attEndMismatch
 		notes.AttendeesCountZero = cause == attCountZero
-		notes.AttendeesOtherUnparsed = cause == attOther
+		notes.AttendeesOtherUnparsed = cause != attOK && cause != attEndMismatch && cause != attCountZero
+		notes.AttendeeFailure = attNames[cause]
 	}
 
 	unknown = r.detail(&e, detail, unknown)
@@ -338,8 +342,22 @@ const (
 	attOK attCause = iota
 	attEndMismatch
 	attCountZero
-	attOther
+	attBareStringEnd // no terminator after the bare subject, so no list start
+	attCountOutside  // the count word is outside the object
+	attCountTooBig   // the count is more than the bytes left can hold
+	attLengthMissing // a name or address length byte is outside the object
+	attLengthOdd     // a name or address byte length is odd, so not UTF-16
+	attTextOutside   // a name or address runs past the end of the object
+	attWordsCut      // the three words after a record are cut off by the object end
 )
+
+// attNames are the fixed counter names, one per cause, used as keys in
+// Notes.AttendeeFailures. They carry no store content.
+var attNames = map[attCause]string{
+	attEndMismatch: "end_mismatch", attCountZero: "count_zero", attBareStringEnd: "bare_string_end",
+	attCountOutside: "count_outside", attCountTooBig: "count_too_big", attLengthMissing: "length_missing",
+	attLengthOdd: "length_odd", attTextOutside: "text_outside", attWordsCut: "words_cut",
+}
 
 // attendees reads the list that follows the string at +876: a u32 count, then records of
 // a one-byte name length, the name, a one-byte address length, the address and three u32
@@ -350,12 +368,15 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 	w, _ := o.U32(evSubjectBare)
 	pos, ok := stringEnd(o, base+int(w))
 	if !ok {
-		return "", 0, attOther
+		return "", 0, attBareStringEnd
 	}
 	n, ok := o.U32(pos)
+	if !ok {
+		return "", 0, attCountOutside
+	}
 	// Each record is at least 14 bytes; a count the object cannot hold is damage.
-	if !ok || int64(n)*14 > int64(o.Len()-pos-4) {
-		return "", 0, attOther
+	if int64(n)*14 > int64(o.Len()-pos-4) {
+		return "", 0, attCountTooBig
 	}
 	pos += 4
 	if n == 0 && pos != o.Len() {
@@ -366,12 +387,15 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 		var a attendee
 		for k := 0; k < 2; k++ {
 			l, ok := o.U8(pos)
-			if !ok || l%2 != 0 {
-				return "", 0, attOther
+			if !ok {
+				return "", 0, attLengthMissing
+			}
+			if l%2 != 0 {
+				return "", 0, attLengthOdd
 			}
 			b, ok := o.Bytes(pos+1, int(l))
 			if !ok {
-				return "", 0, attOther
+				return "", 0, attTextOutside
 			}
 			pos += 1 + int(l)
 			text := r.scrub(utf16Text(b))
@@ -385,7 +409,7 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 		bv, ok1 := o.U32(pos + 4)
 		_, ok2 := o.U32(pos + 8)
 		if !ok1 || !ok2 {
-			return "", 0, attOther
+			return "", 0, attWordsCut
 		}
 		pos += 12
 		if av == 1 {

@@ -117,12 +117,16 @@ type Notes struct {
 	UnknownZonesRejected                            int // events whose unresolved zone name is not printable ASCII of at most MaxZoneNameLen
 	// Unparsed attendee lists by cause; they sum to AttendeesUnparsed.
 	AttendeesEndMismatch, AttendeesCountZero, AttendeesOtherUnparsed int
-	EventTypeUnknown                                                 int
-	ShowAsUnmapped                                                   int
-	ResponseUnmapped                                                 int
-	Redacted                                                         int
-	UnmappedReasons                                                  map[string]int
-	UnknownZones                                                     []string // sorted, distinct
+	// AttendeeFailures counts every unparsed list under one fixed cause name: end_mismatch,
+	// count_zero, bare_string_end, count_outside, count_too_big, length_missing,
+	// length_odd, text_outside, words_cut. The values sum to AttendeesUnparsed.
+	AttendeeFailures map[string]int
+	EventTypeUnknown int
+	ShowAsUnmapped   int
+	ResponseUnmapped int
+	Redacted         int
+	UnmappedReasons  map[string]int
+	UnknownZones     []string // sorted, distinct
 }
 
 // Result is what Collect read.
@@ -345,6 +349,12 @@ func (n *Notes) add(m MapNotes, zones map[string]bool) {
 	count(&n.AttendeesEndMismatch, m.AttendeesEndMismatch)
 	count(&n.AttendeesCountZero, m.AttendeesCountZero)
 	count(&n.AttendeesOtherUnparsed, m.AttendeesOtherUnparsed)
+	if m.AttendeeFailure != "" {
+		if n.AttendeeFailures == nil {
+			n.AttendeeFailures = map[string]int{}
+		}
+		n.AttendeeFailures[m.AttendeeFailure]++
+	}
 	count(&n.EventTypeUnknown, m.EventTypeUnknown)
 	count(&n.ShowAsUnmapped, m.ShowAsUnmapped)
 	count(&n.ResponseUnmapped, m.ResponseUnmapped)
