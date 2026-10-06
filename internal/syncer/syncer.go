@@ -32,6 +32,14 @@ type Options struct {
 	// The archive comes out the same either way; this is the check, not a repair. The read
 	// memory is refreshed by it.
 	FullRead bool
+	// OutlookEnabled reads the new Outlook store as a second source, after the Teams sources. It
+	// is off unless the caller turns it on. OutlookRoot is the Outlook profiles directory; empty
+	// means outlookdesktop.DefaultRoot(). OutlookMinReadInterval is the least time between two
+	// copies of one store: zero means OutlookMinReadInterval, a negative value none (tests).
+	// A Teams account filter leaves Outlook out: the filter names a Teams account.
+	OutlookEnabled         bool
+	OutlookRoot            string
+	OutlookMinReadInterval time.Duration
 }
 
 // Run syncs every Teams origin under o.Root into the archive at o.DBPath while holding the
@@ -107,6 +115,15 @@ type runner struct {
 	calendar *store.CalendarResult
 }
 
+// outlookOn says whether the Outlook source takes part in this run.
+func (r *runner) outlookOn() bool { return r.o.OutlookEnabled && r.o.Account == nil }
+
+// teamsAbsent reports the errors of a machine with no Teams data to read.
+func teamsAbsent(err error) bool {
+	var coded *errs.Coded
+	return errors.As(err, &coded) && (coded.Code == errs.CodeTeamsNotInstalled || coded.Code == errs.CodeNoTeamsOrigin)
+}
+
 // scope is the accounts a run-level sync_runs row covers: every account, or the filtered one.
 func (r *runner) scope() []string {
 	if a := r.o.Account; a != nil {
@@ -131,6 +148,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	var sources []teamsdesktop.Source
 	var other []string
 	err := contained(func() (e error) { sources, other, e = discoverSources(root); return })
+	if err != nil && r.outlookOn() && teamsAbsent(err) {
+		err = nil // Outlook is on and Teams is not installed: Outlook runs alone
+	}
 	if err != nil {
 		return Report{}, nil, err
 	}
@@ -154,29 +174,40 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		decoded   bool
 		stopped   error // cancellation: the sources after it are not tried
 	)
-	for _, src := range sources {
-		if stopped = ctx.Err(); stopped != nil {
-			break
-		}
-		sr, didDecode, err := r.safeSource(ctx, src, &rep, &changes)
+	// settle books one source's outcome, whichever kind of source it is.
+	settle := func(key string, sr SourceReport, didDecode bool, err error) {
 		if err != nil {
 			// Cancelling removes the snapshot a source is still reading, so its failure can look like
 			// a damaged cache: the cancellation is the real reason.
 			if stopped = ctx.Err(); stopped != nil {
-				break
+				return
 			}
 			coded := codedOf(err)
-			failures = append(failures, sourceFailure{src.Key(), err, coded})
-			rep.Sources = append(rep.Sources, SourceReport{Source: src.Key(), Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded)}})
-			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: src.Key(), Status: StatusFailed})
-			r.progress("%s: failed (%s)", src.Key(), coded.Code)
-			continue
+			failures = append(failures, sourceFailure{key, err, coded})
+			rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded)}})
+			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
+			r.progress("%s: failed (%s)", key, coded.Code)
+			return
 		}
 		committed++
 		decoded = decoded || didDecode
 		rep.Sources = append(rep.Sources, sr)
 		for k, v := range sr.Omissions {
 			rep.Omissions[k] += v
+		}
+	}
+	for _, src := range sources {
+		if stopped = ctx.Err(); stopped != nil {
+			break
+		}
+		sr, didDecode, err := r.safeSource(ctx, src, &rep, &changes)
+		if settle(src.Key(), sr, didDecode, err); stopped != nil {
+			break
+		}
+	}
+	if stopped == nil && r.outlookOn() {
+		for _, o := range r.outlookSources(ctx, &rep) {
+			settle(o.key, o.report, o.decoded, o.err)
 		}
 	}
 	rep.FinishedAt = time.Now().UTC()

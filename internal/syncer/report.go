@@ -60,6 +60,8 @@ type SourceReport struct {
 	Accounts []string      `json:"accounts,omitempty"` // "<tenantId>/<userId>"
 	Counts   *SourceCounts `json:"counts,omitempty"`
 	Error    *SourceError  `json:"error,omitempty"`
+	// NextReadAfter is set on an Outlook source that was skipped_interval: the earliest time it is read again.
+	NextReadAfter *time.Time `json:"next_read_after,omitempty"`
 }
 
 // SourceCounts is what one source's commit did.

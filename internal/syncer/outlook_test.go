@@ -1,0 +1,310 @@
+package syncer
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/outlookcal"
+	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
+	"github.com/ourostack/teamscrawl/internal/store"
+)
+
+const outlookFixture = "../../testdata/outlook-fixture"
+
+// outlookRoot is a profiles directory with one profile, "Main", holding the named fixture store.
+func outlookRoot(t *testing.T, store string) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	putOutlookStore(t, root, store)
+	return root
+}
+
+func putOutlookStore(t *testing.T, root, store string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(outlookFixture, store)) //nolint:gosec // a committed fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+}
+
+func outlookOpts(db, root string) Options {
+	return Options{Root: fixtureRoot, DBPath: db, OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1}
+}
+
+func count(t *testing.T, db, q string) int {
+	t.Helper()
+	var n int
+	if err := openRaw(t, db).QueryRow(q).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func sourceKeyed(t *testing.T, r Report, key string) SourceReport {
+	t.Helper()
+	for _, s := range r.Sources {
+		if s.Source == key {
+			return s
+		}
+	}
+	t.Fatalf("no source %s in %+v", key, r.Sources)
+	return SourceReport{}
+}
+
+// The fixture's Teams and Outlook stores fill both sources' rows; a second sync reads nothing; a
+// raised mapper version reads the unchanged store again; Outlook is off unless it is switched on.
+func TestSyncOutlookFixture(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+
+	off := Options{Root: fixtureRoot, DBPath: db}
+	if r, _ := run(t, off); len(r.Sources) == 0 || count(t, db, `select count(*) from calendar_source_events where source='outlook'`) != 0 {
+		t.Fatal("Outlook ran without being switched on")
+	}
+
+	r, _ := run(t, outlookOpts(db, root))
+	o := sourceKeyed(t, r, "outlook|Main")
+	if o.Status != StatusOK || o.Counts.Calendar.Events.Inserted != 10 || o.Accounts[0] != "outlook/Main" {
+		t.Fatalf("%+v %+v", o, *o.Counts)
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='teams'`); n == 0 {
+		t.Fatal("no Teams rows")
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is null`); n != 10 {
+		t.Fatalf("%d Outlook rows", n)
+	}
+	if count(t, db, `select count(*) from calendar_covered_days where source='outlook'`) == 0 || count(t, db, `select count(*) from sync_runs where source='outlook|Main'`) != 1 {
+		t.Fatal("covered days or the run row are missing")
+	}
+
+	if r, _ := run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusUnchanged {
+		t.Fatalf("second sync: %+v", r.Sources)
+	}
+
+	old := outlookMapperVersion
+	outlookMapperVersion = old + 1
+	t.Cleanup(func() { outlookMapperVersion = old })
+	if r, _ := run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusOK || sourceKeyed(t, r, "outlook|Main").Counts.Calendar.Events.Updated != 10 {
+		t.Fatalf("a bumped mapper version did not re-derive: %+v", sourceKeyed(t, r, "outlook|Main"))
+	}
+}
+
+func TestSyncOutlookMinReadInterval(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	now := time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC)
+	old := outlookNow
+	outlookNow = func() time.Time { return now }
+	t.Cleanup(func() { outlookNow = old })
+	o := outlookOpts(db, root)
+	o.OutlookMinReadInterval = 0 // the default, five minutes
+	run(t, o)
+	now = now.Add(time.Minute)
+	r, _ := run(t, o)
+	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusSkippedInterval || s.NextReadAfter == nil || !s.NextReadAfter.Equal(now.Add(4*time.Minute)) || r.Status != StatusUnchanged {
+		t.Fatalf("%+v %s", s, r.Status)
+	}
+	now = now.Add(OutlookMinReadInterval)
+	if r, _ = run(t, o); sourceKeyed(t, r, "outlook|Main").Status != StatusUnchanged {
+		t.Fatalf("%+v", r.Sources)
+	}
+}
+
+// A store that cannot be read fails Outlook alone: Teams commits, the run is partial, and nothing
+// of Outlook is kept. Fixing the store afterwards reads it.
+func TestSyncOutlookFailureIsIsolated(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "store-version-j.hxd")
+	rep, _, err := Run(context.Background(), outlookOpts(db, root))
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodePartialSync || rep.Status != StatusPartial {
+		t.Fatalf("%v %s", err, rep.Status)
+	}
+	if s := sourceKeyed(t, rep, "outlook|Main"); s.Status != StatusFailed || s.Error == nil || s.Error.Code != "outlook_store_version" {
+		t.Fatalf("%+v", s)
+	}
+	if count(t, db, `select count(*) from calendar_source_events where source='outlook'`) != 0 || count(t, db, `select count(*) from calendar_source_events where source='teams'`) == 0 {
+		t.Fatal("rows are not isolated")
+	}
+	putOutlookStore(t, root, "HxStore.hxd")
+	if r, _ := run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
+		t.Fatalf("%+v", r.Sources)
+	}
+}
+
+// With Teams not installed Outlook runs alone; a Teams account filter leaves Outlook out; a root
+// that does not exist fails the Outlook source and not the run's Teams side.
+func TestSyncOutlookAlone(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	o := outlookOpts(db, root)
+	o.Root = t.TempDir()
+	if r, _ := run(t, o); r.Status != StatusOK || len(r.Sources) != 1 {
+		t.Fatalf("%s %+v", r.Status, r.Sources)
+	}
+	o.OutlookRoot = filepath.Join(root, "missing")
+	if _, _, err := Run(context.Background(), o); err == nil {
+		t.Fatal("a missing Outlook root with no Teams is not an error")
+	}
+}
+
+// outlookRunErr runs a sync with Outlook only and returns the Outlook source's failure code.
+func outlookFailure(t *testing.T, o Options) string {
+	t.Helper()
+	rep, _, err := Run(context.Background(), o)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	return sourceKeyed(t, rep, "outlook|Main").Error.Code
+}
+
+// Each way an Outlook source can fail comes back as that source's coded failure; the Teams side is
+// untouched, and nothing of Outlook is kept.
+func TestSyncOutlookFailures(t *testing.T) {
+	isolateTmp(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	broken := func(name, ddl string) {
+		t.Run(name, func(t *testing.T) {
+			db := archiveWith(t, ddl)
+			if code := outlookFailure(t, outlookOpts(db, root)); code != errs.CodeDBError {
+				t.Fatal(code)
+			}
+		})
+	}
+	abort := func(table, when string) string {
+		return `create trigger boom before insert on ` + table + ` when ` + when + ` begin select raise(abort, 'injected'); end;`
+	}
+	broken("last attempt", abort("meta", `new.key like 'outlook_last_attempt:%'`))
+	broken("commit", abort("calendar_source_events", `new.source='outlook'`))
+
+	t.Run("state", func(t *testing.T) {
+		db := newDB(t)
+		run(t, outlookOpts(db, root))
+		if _, err := openRaw(t, db).Exec(`update sync_runs set omissions_json='{' where source='outlook|Main'`); err != nil {
+			t.Fatal(err)
+		}
+		if code := outlookFailure(t, outlookOpts(db, root)); code != errs.CodeDBError {
+			t.Fatal(code)
+		}
+	})
+	t.Run("unchanged run record", func(t *testing.T) {
+		db := newDB(t)
+		run(t, outlookOpts(db, root))
+		raw := openRaw(t, db)
+		if _, err := raw.Exec(abort("sync_runs", `new.status='unchanged' and new.source like 'outlook|%'`)); err != nil {
+			t.Fatal(err)
+		}
+		if code := outlookFailure(t, outlookOpts(db, root)); code != errs.CodeDBError {
+			t.Fatal(code)
+		}
+	})
+	seam := func(name string, set func(), want string) {
+		t.Run(name, func(t *testing.T) {
+			set()
+			if code := outlookFailure(t, outlookOpts(newDB(t), root)); code != want {
+				t.Fatalf("%s, want %s", code, want)
+			}
+		})
+	}
+	restore := func() func() {
+		d, s, n := outlookDiscover, outlookSnapshot, outlookNow
+		return func() { outlookDiscover, outlookSnapshot, outlookNow = d, s, n }
+	}()
+	t.Cleanup(restore)
+	seam("no store file", func() {
+		outlookDiscover = func(string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+			return []outlookdesktop.Profile{{Name: "Main", StorePath: filepath.Join(root, "gone", "HxStore.hxd")}}, nil, nil, nil
+		}
+	}, errs.CodeInternal)
+	seam("copy fails", func() {
+		restore()
+		outlookSnapshot = func(context.Context, string) (outlookdesktop.Info, func(), error) {
+			return outlookdesktop.Info{}, func() {}, errs.SnapshotInconsistent("busy")
+		}
+	}, errs.CodeSnapshotInconsistent)
+	seam("copy missing", func() {
+		outlookSnapshot = func(context.Context, string) (outlookdesktop.Info, func(), error) {
+			return outlookdesktop.Info{Path: filepath.Join(root, "gone")}, func() {}, nil
+		}
+	}, errs.CodeInternal)
+	seam("copy unreadable", func() { // a directory opens and cannot be read
+		outlookSnapshot = func(context.Context, string) (outlookdesktop.Info, func(), error) {
+			return outlookdesktop.Info{Path: root, Size: 1 << 20}, func() {}, nil
+		}
+	}, errs.CodeInternal)
+	seam("panic", func() {
+		restore()
+		outlookNow = func() time.Time { panic("boom") }
+	}, errs.CodeInternal)
+}
+
+func TestSyncOutlookDefaultRootFailure(t *testing.T) {
+	isolateTmp(t)
+	old := outlookDefaultRoot
+	outlookDefaultRoot = func() (string, error) { return "", errs.Internal(errors.New("no home")) }
+	t.Cleanup(func() { outlookDefaultRoot = old })
+	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t), OutlookEnabled: true})
+	if err == nil || sourceKeyed(t, rep, "outlook").Error.Code != errs.CodeInternal || rep.Status != StatusPartial {
+		t.Fatalf("%v %+v", err, rep.Sources)
+	}
+}
+
+func TestOutlookOmissions(t *testing.T) {
+	res := outlookcal.Result{Losses: []outlookcal.Loss{{Code: outlookcal.CodeEventUnmapped, Count: 2}, {Code: outlookcal.CodeBlocksDamaged, Count: 5}}}
+	res.Notes.AllDayUnaligned = 3
+	cal := store.CalendarResult{Omissions: map[string]int{store.OmitCalendarRefused: 1}}
+	got := outlookOmissions(res, cal)
+	want := map[string]int{store.OmitCalendarUnmapped: 2, outlookcal.CodeBlocksDamaged: 5, store.OmitCalendarRefused: 1, store.OmitCalendarAllDayUnaligned: 3}
+	if len(got) != len(want) {
+		t.Fatalf("%v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%v", got)
+		}
+	}
+	if outlookOmissions(outlookcal.Result{}, store.CalendarResult{}) != nil {
+		t.Fatal("no losses is nil")
+	}
+}
+
+// A run that reads nothing still reports what the last read could not use.
+func TestSyncOutlookUnchangedKeepsOmissions(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	run(t, outlookOpts(db, root))
+	if _, err := openRaw(t, db).Exec(`update sync_runs set omissions_json='{"calendar_unmapped":2}' where source='outlook|Main'`); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := run(t, outlookOpts(db, root))
+	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusOmissions || s.Omissions["calendar_unmapped"] != 2 || r.Status != StatusOmissions {
+		t.Fatalf("%+v %s", s, r.Status)
+	}
+}
+
+// Damaged blocks are a counted loss: the events that read are kept, the run is ok_with_omissions.
+func TestSyncOutlookDamagedBlocksAreALoss(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	r, _ := run(t, outlookOpts(db, outlookRoot(t, "store-damaged-blocks.hxd")))
+	if s := sourceKeyed(t, r, "outlook|Main"); s.Status != StatusOmissions || s.Omissions[outlookcal.CodeBlocksDamaged] == 0 {
+		t.Fatalf("%+v", s)
+	}
+}

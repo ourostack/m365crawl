@@ -164,6 +164,16 @@ A new omission code may be added in a minor release. The `sources[].omissions` m
 
 Each entry of `sources` (in every report, not only a partial one) has a `status` (`ok`, `ok_with_omissions`, `unchanged` or `failed`). A source that was decoded and committed also lists its `accounts` (`<tenantId>/<userId>`) and `counts` (`conversations`, `messages`, `people`, `activity`, `records`, each with `seen`, `inserted`, `updated`, `unchanged`); an `unchanged` source has neither; a failed source has `error: {code, message}`. The top-level counts add up the committed sources only.
 
+### 4.2 The Outlook source (behind a flag)
+
+With `--outlook-root` (or `TEAMSCRAWL_OUTLOOK=1`) the sync reads the new Outlook for Mac store as a second source, after every Teams source has finished. Each profile directory holding an `HxStore.hxd` is one source, `outlook|<profile>`, with calendar account `outlook/<profile>`. It is never part of a `--account` run, which names a Teams account. With Teams not installed, Outlook runs alone.
+
+- **Read-only copy.** The store file is copied once into a private temporary directory (never the lock or side files) and read from the copy, which is removed on every exit. At most one copy is made per `OutlookMinReadInterval` (5 minutes, assumed), measured from the last attempted copy and kept in `meta`, so a failing store is not retried in a loop. A skipped read is the source status `skipped_interval` with `next_read_after`; it is not a loss.
+- **Fingerprint.** The file's size and modification time plus the store version byte, the reader version, the Outlook mapper version and the scrub rules version. An unchanged store reads nothing and reports the losses of its last read. A change to the mapper version reads an unchanged store again.
+- **Guard.** `outlook_store_unrecognized`, `outlook_store_version` and `outlook_layout_unsupported` fail the Outlook source (a coded source failure; the run is `partial` when Teams committed) and apply nothing. A damaged-block share over 2% is the loss `outlook_blocks_damaged`; an event that does not map is `calendar_unmapped`; one the core refuses is `calendar_refused`. An all-day flag whose times fit no whole-day shape is stored with the flag unknown and counted as `calendar_all_day_unaligned` (not a loss).
+- **Apply.** One transaction per profile: the events go through the calendar core under the calendar savepoint (a failure rolls the profile back and fails that source alone), covered days are the days on which the store holds at least one event that is not a series master (cumulative, in the machine's zone), and gone detection is off, so an event Outlook stops holding stays. `meta.outlook_derivation:<account>` stamps the mapper version, zone and scrub rules the profile was derived under; when it differs, each event of the batch is blanked before it is applied, so a stored value an older mapper wrote (an all-day flag stored as false) can become unknown instead of being kept over the unknown flag.
+- **No link.** An Outlook account is not merged with a Teams account in this slice.
+
 ## 5. Commands
 
 Every command accepts the global flags in section 6.1. This section states what each command does and the shape of its result; every flag with its help text is in [docs/commands.md](docs/commands.md).
@@ -204,6 +214,7 @@ Filter values: `--since` and `--until` accept RFC3339, `YYYY-MM-DD` (local midni
 | `--json` | | Alias for `--format json`. |
 | `--db PATH` | `TEAMSCRAWL_DB` | Archive path. |
 | `--teams-root DIR` | `TEAMSCRAWL_TEAMS_ROOT` | The EBWebView directory to read. |
+| `--outlook-root DIR` | `TEAMSCRAWL_OUTLOOK_ROOT` | The new Outlook for Mac profiles directory to read as a second calendar source (4.2). `none` turns it off. `TEAMSCRAWL_OUTLOOK=1` uses the default directory. Off by default, and off when `--teams-root` is set without an Outlook root. |
 | `--account TENANT/USER` | | Limit results (and `sync`) to one account. Default: every account. `whoami` lists the ids. |
 | `--no-color` | `NO_COLOR` | Disable ANSI color. `CLICOLOR_FORCE=1` forces it when output is piped. |
 | `--max-age DURATION` | `TEAMSCRAWL_MAX_AGE` | Default `15m`. A read command first syncs when the last successful sync is older, or when the archive has never synced. `0` disables the implicit sync. |
