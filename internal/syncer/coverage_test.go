@@ -63,6 +63,7 @@ func requireNothingKept(t *testing.T, db string) {
 }
 
 func TestStoreFailuresAreCodedAndRollBack(t *testing.T) {
+	t.Parallel()
 	abort := func(table string) string {
 		return `create trigger boom before insert on ` + table + ` begin select raise(abort, 'injected'); end;`
 	}
@@ -80,7 +81,6 @@ create trigger boom after insert on sync_runs when new.status in ('ok','ok_with_
 	}
 	for name, ddl := range cases {
 		t.Run(name, func(t *testing.T) {
-			isolateTmp(t)
 			db := archiveWith(t, ddl)
 			r, ch, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 			codedErr(t, err, errs.CodeDBError)
@@ -96,14 +96,14 @@ create trigger boom after insert on sync_runs when new.status in ('ok','ok_with_
 }
 
 func TestFingerprintLookupFailure(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	db := archiveWith(t, `alter table sync_runs rename column fingerprint to fp`)
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	codedErr(t, err, errs.CodeDBError)
 }
 
 func TestUnchangedRunRecordFailure(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	raw, err := sql.Open("sqlite", db)
@@ -123,7 +123,7 @@ func TestUnchangedRunRecordFailure(t *testing.T) {
 }
 
 func TestOpenFailureIsCoded(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	// The archive path is a directory: the lock beside it is fine, the database cannot open.
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: t.TempDir()})
 	codedErr(t, err, errs.CodeDBError)
@@ -134,8 +134,7 @@ func TestCancelledBeforeTransactionBegins(t *testing.T) {
 	db := newDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterSnapshot = cancel
-	t.Cleanup(func() { afterSnapshot = func() {} })
+	hookAfterSnap.set(t, cancel)
 	_, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: db})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
@@ -151,7 +150,7 @@ func TestCancelledBeforeTransactionBegins(t *testing.T) {
 }
 
 func TestCancelledBetweenSources(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root, _ := twoSourceRoot(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -184,7 +183,7 @@ func TestDefaultRootWhenNoneGiven(t *testing.T) {
 }
 
 func TestUnreadableSourceFailsFingerprint(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	ldb, _ := filepath.Glob(filepath.Join(root, "*", "IndexedDB", "*.leveldb"))
 	if len(ldb) != 1 {
@@ -256,6 +255,7 @@ func TestWriterFlushesNothingWhenEmpty(t *testing.T) {
 }
 
 func TestWriterRejectsUnmappableRecords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, err := store.Open(ctx, newDB(t))
 	if err != nil {
@@ -281,6 +281,7 @@ func TestWriterRejectsUnmappableRecords(t *testing.T) {
 }
 
 func TestWriterOnFinishedSessionReportsArchiveErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, err := store.Open(ctx, newDB(t))
 	if err != nil {
@@ -330,6 +331,7 @@ func TestWriterOnFinishedSessionReportsArchiveErrors(t *testing.T) {
 }
 
 func TestAsCoded(t *testing.T) {
+	t.Parallel()
 	coded := errs.Usage("x")
 	if got := asCoded(coded); got != error(coded) { //nolint:errorlint // identity: the error must come back unwrapped
 		t.Fatalf("coded error was rewrapped: %v", got)

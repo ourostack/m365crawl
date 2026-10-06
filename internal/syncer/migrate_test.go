@@ -105,6 +105,7 @@ func snapshot(t *testing.T, db string) string {
 }
 
 func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
+	t.Parallel()
 	root := fixtureCopy(t)
 	fresh := newDB(t)
 	run(t, Options{Root: root, DBPath: fresh})
@@ -147,6 +148,7 @@ func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
 }
 
 func TestNewArchiveReportsNoMigration(t *testing.T) {
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	if rep, _ := run(t, Options{Root: root, DBPath: db}); rep.Migrated != nil {
@@ -158,6 +160,7 @@ func TestNewArchiveReportsNoMigration(t *testing.T) {
 }
 
 func TestMigrationFailureFailsTheSync(t *testing.T) {
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	run(t, Options{Root: root, DBPath: db})
@@ -168,6 +171,7 @@ func TestMigrationFailureFailsTheSync(t *testing.T) {
 }
 
 func TestNewerArchiveIsNeverWritten(t *testing.T) {
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	run(t, Options{Root: root, DBPath: db})

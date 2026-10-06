@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,12 +73,11 @@ func reportKey(t *testing.T, r Report, ch []Change) string {
 }
 
 // touch changes a file's modification time so the next sync sees a changed source.
-var touchCount int
+var touchCount atomic.Int64
 
 func touchLog(t *testing.T, root string) {
 	t.Helper()
-	touchCount++
-	later := time.Now().Add(time.Duration(touchCount) * time.Hour)
+	later := time.Now().Add(time.Duration(touchCount.Add(1)) * time.Hour)
 	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func readBlobs(t *testing.T, root string) map[string][]byte {
 // reading every record in full gives, at every step of a series of cache states, whether the
 // state is new or the same one is read again.
 func TestSkippingEquivalentToFullReads(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	full, err := os.ReadFile(logFile(t, root)) //nolint:gosec // test fixture copy
 	if err != nil {
@@ -167,9 +168,7 @@ func TestSkippingEquivalentToFullReads(t *testing.T) {
 	}
 	skipDB, fullDB := newDB(t), newDB(t)
 	var typedSkips, genericSkips int
-	old := afterApply
-	afterApply = func(w *writer) { typedSkips += w.memo.typedSkipped; genericSkips += w.memo.genericSkipped }
-	t.Cleanup(func() { afterApply = old })
+	hookAfterApply.set(t, func(w *writer) { typedSkips += w.memo.typedSkipped; genericSkips += w.memo.genericSkipped })
 	for _, s := range states {
 		applyState(t, root, full, blobs, s)
 		for pass := 0; pass < 2; pass++ { // the second pass reads the same bytes again
@@ -208,6 +207,7 @@ func TestSkippingEquivalentToFullReads(t *testing.T) {
 }
 
 func TestEffectsRoundTrip(t *testing.T) {
+	t.Parallel()
 	var h [store.DigestLen]byte
 	for i := range h {
 		h[i] = byte(i)
@@ -276,6 +276,7 @@ func TestEffectsRoundTrip(t *testing.T) {
 }
 
 func TestMemoConflictNeedsAChangedVouchedRow(t *testing.T) {
+	t.Parallel()
 	m := &memo{changed: map[byte]map[int64]struct{}{}}
 	if m.conflict() {
 		t.Fatal("conflict with nothing")
@@ -301,18 +302,22 @@ type memoRun struct {
 func watchApplies(t *testing.T) *[]memoRun {
 	t.Helper()
 	var runs []memoRun
-	old := afterApply
-	afterApply = func(w *writer) {
-		runs = append(runs, memoRun{w.memo.typedSkipped, w.memo.genericSkipped, w.memo.full})
-	}
-	t.Cleanup(func() { afterApply = old })
+	watchAppliesInto(t, &runs)
 	return &runs
+}
+
+// watchAppliesInto is watchApplies for the goroutine of a subtest, which records into its parent's list.
+func watchAppliesInto(t *testing.T, runs *[]memoRun) {
+	t.Helper()
+	hookAfterApply.set(t, func(w *writer) {
+		*runs = append(*runs, memoRun{w.memo.typedSkipped, w.memo.genericSkipped, w.memo.full})
+	})
 }
 
 // A re-sync of an unchanged-bytes cache skips every typed and generic record it can, yet reports
 // the same counts a full read reports, and writes nothing.
 func TestResyncSkipsAndReportsTheSameCounts(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	runs := watchApplies(t)
 	db := newDB(t)
@@ -345,16 +350,14 @@ func TestResyncSkipsAndReportsTheSameCounts(t *testing.T) {
 // Anything that changes how bytes become rows (here: the signature, as a DecoderVersion bump
 // changes it) makes every remembered digest stop matching, and the next sync remembers afresh.
 func TestSignatureChangeRereadsEverything(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	runs := watchApplies(t)
 	skipDB, fullDB := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: skipDB})
 	run(t, Options{Root: root, DBPath: fullDB, FullRead: true})
 
-	old := memoSignature
-	t.Cleanup(func() { memoSignature = old })
-	memoSignature = func(v int) []byte { return append(old(v), "bumped"...) }
+	hookMemoSig.set(t, func(v int) []byte { return append(origMemoSignature(v), "bumped"...) })
 	touchLog(t, root)
 	sr, sc := run(t, Options{Root: root, DBPath: skipDB})
 	fr, fc := run(t, Options{Root: root, DBPath: fullDB, FullRead: true})
@@ -374,16 +377,14 @@ func TestSignatureChangeRereadsEverything(t *testing.T) {
 // A run for one account must not make another account's remembered records look current: the
 // digests are per record, so after a signature change a filtered run refreshes only its own.
 func TestFilteredRunDoesNotPoisonOtherAccounts(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	runs := watchApplies(t)
 	skipDB, fullDB := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: skipDB})
 	run(t, Options{Root: root, DBPath: fullDB, FullRead: true})
 
-	old := memoSignature
-	t.Cleanup(func() { memoSignature = old })
-	memoSignature = func(v int) []byte { return append(old(v), "bumped"...) }
+	hookMemoSig.set(t, func(v int) []byte { return append(origMemoSignature(v), "bumped"...) })
 	// Only account A is read under the new signature.
 	touchLog(t, root)
 	run(t, Options{Root: root, DBPath: skipDB, Account: &acctA})
@@ -412,7 +413,7 @@ func TestFilteredRunDoesNotPoisonOtherAccounts(t *testing.T) {
 // A record that failed to decode is never remembered, so it is decoded again, and counted
 // again, on every sync.
 func TestOmissionsAreRecountedOnEverySync(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	rel := omittingBlob(t)
 	root := fixtureCopy(t)
 	blobDir, _ := filepath.Glob(filepath.Join(root, "*", "IndexedDB", "*.blob"))
@@ -440,7 +441,7 @@ func TestOmissionsAreRecountedOnEverySync(t *testing.T) {
 // A blob-backed value is digested by what the blob holds: a blob file whose bytes change under an
 // unchanged pointer makes the record be read again.
 func TestBlobContentIsPartOfTheDigest(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	rel := omittingBlob(t)
 	root := fixtureCopy(t)
 	blobDir, _ := filepath.Glob(filepath.Join(root, "*", "IndexedDB", "*.blob"))
@@ -484,7 +485,7 @@ func TestBlobContentIsPartOfTheDigest(t *testing.T) {
 // If a row a skipped record vouched for no longer holds what was remembered, the record is read
 // in full (and the row is put right), exactly as a full read does.
 func TestRowsThatMovedForceAFullReadOfTheRecord(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	skipDB, fullDB := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: skipDB})
@@ -516,7 +517,7 @@ func TestRowsThatMovedForceAFullReadOfTheRecord(t *testing.T) {
 
 // Effects that cannot be read are no reason to fail: the record is read in full.
 func TestUnreadableEffectsMeanAFullRead(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	skipDB, fullDB := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: skipDB})
@@ -557,17 +558,15 @@ func TestFullReadSwitches(t *testing.T) {
 // When a record rewrites a row a skipped record vouched for, the source is read again in full
 // from the same snapshot, and the outcome is a full read's.
 func TestMemoConflictRereadsInFull(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	skipDB, fullDB := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: skipDB})
 	run(t, Options{Root: root, DBPath: fullDB, FullRead: true})
 	touchLog(t, root)
 	runs := watchApplies(t)
-	old := conflictFn
-	t.Cleanup(func() { conflictFn = old })
 	calls := 0
-	conflictFn = func(m *memo) bool { calls++; return calls == 1 }
+	hookConflict.set(t, func(m *memo) bool { calls++; return calls == 1 })
 	sr, sc := run(t, Options{Root: root, DBPath: skipDB})
 	fr, fc := run(t, Options{Root: root, DBPath: fullDB, FullRead: true})
 	// The first attempt never reached afterApply (it was rolled back); the retry was full.
@@ -582,9 +581,10 @@ func TestMemoConflictRereadsInFull(t *testing.T) {
 // Failures of the archive operations the memory needs fail the source with a coded error and keep
 // nothing.
 func TestMemoFailuresFailTheSource(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"load typed", "rows match", "put typed", "load records"} {
 		t.Run(name, func(t *testing.T) {
-			isolateTmp(t)
+			t.Parallel()
 			root := fixtureCopy(t)
 			db := newDB(t)
 			if name != "put typed" { // there is something to remember only when records are read in full
@@ -592,9 +592,7 @@ func TestMemoFailuresFailTheSource(t *testing.T) {
 				touchLog(t, root)
 			}
 			boom := errors.New("injected memory failure")
-			old := beforeRead
-			t.Cleanup(func() { beforeRead = old })
-			beforeRead = func(w *writer) {
+			hookBeforeRead.set(t, func(w *writer) {
 				switch name {
 				case "load typed":
 					w.memo.loadTyped = func(string, string) (map[string]store.TypedMemo, error) { return nil, boom }
@@ -605,7 +603,7 @@ func TestMemoFailuresFailTheSource(t *testing.T) {
 				case "load records":
 					w.memo.loadRecords = func(string, string) (map[[2]string]store.RecordMemo, error) { return nil, boom }
 				}
-			}
+			})
 			before := ""
 			if name != "put typed" {
 				before = dumpArchive(t, db)
@@ -641,7 +639,7 @@ func TestMemoRollsBackWithTheSource(t *testing.T) {
 		t.Fatalf("a rolled-back source left memory: %d typed, %d record digests", typed, digests)
 	}
 	// And a store failure while remembering rolls everything back too.
-	beforeFlush = func(string, int) error { return nil }
+	hookBeforeFlush.clear()
 	db2 := archiveWith(t, `create trigger boom before insert on typed_memo begin select raise(abort, 'injected'); end;`)
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db2})
 	codedErr(t, err, errs.CodeDBError)
@@ -651,6 +649,7 @@ func TestMemoRollsBackWithTheSource(t *testing.T) {
 // A row with no usable hash can not be vouched for, so the record that produced it is not
 // remembered; rows nobody owns are only noted as changed.
 func TestUnusableRowsAreNotRemembered(t *testing.T) {
+	t.Parallel()
 	m := &memo{changed: map[byte]map[int64]struct{}{}}
 	good := store.RowState{Rowid: 1, Hash: strings.Repeat("ab", 32), Changed: true}
 	bad := store.RowState{Rowid: 2, Hash: "not-hex", Changed: true}
@@ -675,7 +674,7 @@ func TestUnusableRowsAreNotRemembered(t *testing.T) {
 
 // Refreshing the account of a skipped record can fail like any write; the source then fails.
 func TestAccountFailureWhileSkippingFailsTheSource(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	run(t, Options{Root: root, DBPath: db})
@@ -706,6 +705,7 @@ func TestFullReadBypassesTheFingerprintShortcut(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			watchAppliesInto(t, runs)
 			n := len(*runs)
 			forced, _ := run(t, o(t)) // the same bytes, the same fingerprint
 			if forced.Status == StatusUnchanged || len(*runs) != n+1 {
@@ -725,7 +725,7 @@ func TestFullReadBypassesTheFingerprintShortcut(t *testing.T) {
 // the next sync deletes their typed memory and the digest of their generic row, while the archive
 // rows themselves stay (removed_at stays set).
 func TestMemoIsPrunedWhenRecordsLeaveTheCache(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	full, err := os.ReadFile(logFile(t, root)) //nolint:gosec // test fixture copy
 	if err != nil {
@@ -772,7 +772,7 @@ func TestMemoIsPrunedWhenRecordsLeaveTheCache(t *testing.T) {
 // A run for one account only prunes that account's memory: it never saw the others' databases, so
 // it can not say their records left.
 func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	run(t, Options{Root: root, DBPath: db})
@@ -785,6 +785,12 @@ func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 	}
 }
 
+var pruningCut struct {
+	sync.Mutex
+	found bool
+	cut   float64
+}
+
 // keyPruningCut returns the fraction of the fixture's log to keep so that a sync after a full read
 // forgets some keys of a database it still reads: the scenario the "keys" prune path handles. It
 // is found by probing, not fixed, because a cut that works depends on where the fixture's database
@@ -793,8 +799,12 @@ func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 // longer has the scenario, and the test fails here rather than passing without testing anything.
 func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
 	t.Helper()
-	old := beforeRead
-	t.Cleanup(func() { beforeRead = old })
+	// The cut depends only on the fixture, so it is found once per process, however many tests ask.
+	pruningCut.Lock()
+	defer pruningCut.Unlock()
+	if pruningCut.found {
+		return pruningCut.cut
+	}
 	for cut := 0.95; cut > 0.05; cut -= 0.01 {
 		root := fixtureCopy(t)
 		db := newDB(t)
@@ -802,16 +812,17 @@ func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
 		applyState(t, root, full, blobs, cacheState{"probe", cut, nil})
 		touchLog(t, root)
 		pruned := 0
-		beforeRead = func(w *writer) {
+		hookBeforeRead.set(t, func(w *writer) {
 			inner := w.memo.deleteKeys
 			w.memo.deleteKeys = func(source, database string, keys []string) error {
 				pruned += len(keys)
 				return inner(source, database, keys)
 			}
-		}
+		})
 		_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
-		beforeRead = old
+		hookBeforeRead.clear()
 		if err == nil && pruned > 0 {
+			pruningCut.found, pruningCut.cut = true, cut
 			return cut
 		}
 	}
@@ -821,9 +832,10 @@ func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
 
 // Forgetting records that left the cache can fail like any write; the source then fails and keeps nothing.
 func TestPruneFailuresFailTheSource(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"keys", "databases"} {
 		t.Run(name, func(t *testing.T) {
-			isolateTmp(t)
+			t.Parallel()
 			root := fixtureCopy(t)
 			full, err := os.ReadFile(logFile(t, root)) //nolint:gosec // test fixture copy
 			if err != nil {
@@ -836,15 +848,13 @@ func TestPruneFailuresFailTheSource(t *testing.T) {
 			applyState(t, root, full, blobs, cacheState{"cut", cut, nil})
 			touchLog(t, root)
 			boom := errors.New("injected prune failure")
-			old := beforeRead
-			t.Cleanup(func() { beforeRead = old })
-			beforeRead = func(w *writer) {
+			hookBeforeRead.set(t, func(w *writer) {
 				if name == "keys" {
 					w.memo.deleteKeys = func(string, string, []string) error { return boom }
 				} else {
 					w.memo.deleteDBs = func(string, []string) error { return boom }
 				}
-			}
+			})
 			before := dumpArchive(t, db)
 			typed, digests := memoRows(t, db)
 			_, _, err = Run(context.Background(), Options{Root: root, DBPath: db})
@@ -864,20 +874,18 @@ func TestPruneFailuresFailTheSource(t *testing.T) {
 
 // The hashes of archive rows are loaded for the rows the memory names, not for whole tables.
 func TestRowHashesAreLoadedOnlyForRowsTheMemoryNames(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	db := newDB(t)
 	run(t, Options{Root: root, DBPath: db})
 	asked := map[byte]int{}
-	old := beforeRead
-	t.Cleanup(func() { beforeRead = old })
-	beforeRead = func(w *writer) {
+	hookBeforeRead.set(t, func(w *writer) {
 		real := w.memo.rowHashes
 		w.memo.rowHashes = func(kind byte, ids []int64) (map[int64][store.DigestLen]byte, error) {
 			asked[kind] += len(ids)
 			return real(kind, ids)
 		}
-	}
+	})
 	touchLog(t, root)
 	run(t, Options{Root: root, DBPath: db})
 	if asked[store.RowMessage] != fixtureMessages || asked[store.RowConversation] != fixtureConversations || asked[store.RowActivity] != fixtureActivity {
@@ -915,15 +923,13 @@ func addDuplicateRecord(t *testing.T, root string, edit func(val []byte) []byte)
 // source, not two: the conflict is remembered, so the records that share the row are read in full
 // from the start, without first being skipped and rolled back.
 func TestTwoRecordsOneTypedRowCostOneReadAndMatchAFullRead(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	addDuplicateRecord(t, root, func(val []byte) []byte {
 		return bytes.Replace(val, []byte("<p>Hello from"), []byte("<p>Hxllo from"), 1)
 	})
 	reads := 0
-	old := beforeRead
-	beforeRead = func(*writer) { reads++ }
-	t.Cleanup(func() { beforeRead = old })
+	hookBeforeRead.set(t, func(*writer) { reads++ })
 	skipDB, fullDB := newDB(t), newDB(t)
 	for i := 1; i <= 6; i++ {
 		touchLog(t, root)
@@ -949,6 +955,7 @@ func TestTwoRecordsOneTypedRowCostOneReadAndMatchAFullRead(t *testing.T) {
 // A record is contended when another record of the read produced one of its rows, whether that
 // record was read in full or skipped; a row a record names twice is not contention.
 func TestMarkContended(t *testing.T) {
+	t.Parallel()
 	ref := func(id int64) store.RowRef { return store.RowRef{Kind: store.RowMessage, Rowid: id} }
 	shared, alone, twice, vouched := &memoEntry{}, &memoEntry{}, &memoEntry{}, &memoEntry{}
 	m := &memo{entries: []*memoEntry{
@@ -974,7 +981,7 @@ func TestMarkContended(t *testing.T) {
 // next sync: nothing is lost, the first sync reads every record and counts them as a full read
 // does, remembers them, and the sync after that skips.
 func TestUpgradeFromAVersion3ArchiveAsV020WritesIt(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	root := fixtureCopy(t)
 	db, fresh := newDB(t), newDB(t)
 	run(t, Options{Root: root, DBPath: db})

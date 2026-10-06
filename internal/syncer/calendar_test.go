@@ -17,9 +17,7 @@ import (
 // utcDays makes the sync group days in UTC, so the expected windows do not depend on the machine.
 func utcDays(t *testing.T) {
 	t.Helper()
-	old := calendarZone
-	calendarZone = func() *time.Location { return time.UTC }
-	t.Cleanup(func() { calendarZone = old })
+	hookCalendarZone.set(t, func() *time.Location { return time.UTC })
 }
 
 func queryStr(t *testing.T, db, q string, args ...any) string {
@@ -36,7 +34,7 @@ func queryStr(t *testing.T, db, q string, args ...any) string {
 
 // Syncing the fixture fills the calendar tables from its calendar, catch-up and recap records.
 func TestSyncCalendarFromFixture(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
@@ -79,7 +77,7 @@ func TestSyncCalendarFromFixture(t *testing.T) {
 }
 
 func TestSyncCalendarSecondSyncMapsNothing(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
@@ -105,7 +103,7 @@ func TestSyncCalendarSecondSyncMapsNothing(t *testing.T) {
 // With the skip machinery of the sync itself (an unchanged record is neither re-read nor
 // rewritten), a second sync maps no calendar row, and the window and the covered days stay.
 func TestSyncCalendarWithRecordSkipping(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	root := fixtureCopy(t)
 	runs := watchApplies(t)
@@ -141,9 +139,7 @@ type fakeCache struct {
 
 func (f *fakeCache) install(t *testing.T) {
 	t.Helper()
-	old := readGenericFn
-	t.Cleanup(func() { readGenericFn = old })
-	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, emit func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
+	hookReadGeneric.set(t, func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, emit func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
 		res := teamsdesktop.GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}}
 		names := make([]string, 0, len(f.dbs))
 		for n := range f.dbs {
@@ -170,7 +166,7 @@ func (f *fakeCache) install(t *testing.T) {
 			}
 		}
 		return res, nil
-	}
+	})
 }
 
 func calJSON(id, start string, extra map[string]any) []byte {
@@ -209,7 +205,7 @@ func rich() map[string]any {
 
 // A later copy of an event that Teams fetched without its attendees does not erase them.
 func TestSyncThinnerCalendarCopyKeepsAttendees(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {fakeEvent("e1", "2026-09-10T09:00:00Z", rich())}}}
@@ -235,7 +231,7 @@ func TestSyncThinnerCalendarCopyKeepsAttendees(t *testing.T) {
 // Only changed records are mapped when the sync skips the unchanged ones; the days the cache holds
 // still count, a removed event on a held day is gone, and unchanged events keep their detail.
 func TestSyncCalendarSkippingMapsOnlyChangedRecords(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	e1 := fakeEvent("e1", "2026-09-10T09:00:00Z", rich())
@@ -289,7 +285,7 @@ func TestSyncCalendarSkippingMapsOnlyChangedRecords(t *testing.T) {
 
 // An unmapped record is a counted loss, never fatal, and the messages of the same sync are kept.
 func TestSyncCalendarUnmappedRecordIsAnOmissionNotAFailure(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	a := acctA
@@ -307,7 +303,7 @@ func TestSyncCalendarUnmappedRecordIsAnOmissionNotAFailure(t *testing.T) {
 // A calendar write that fails is rolled back to a savepoint and counted as a loss: the source's
 // messages and records are kept, and the next sync derives again.
 func TestSyncCalendarWriteFailureIsACountedLossNotAFailedSource(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {fakeEvent("e1", "2026-09-10T09:00:00Z", nil)}}}
@@ -344,7 +340,7 @@ func TestSyncCalendarWriteFailureIsACountedLossNotAFailedSource(t *testing.T) {
 // An archive upgraded from schema 4 (or whose calendar was derived by another mapper) fills its
 // calendar from the records it holds, before any source is read.
 func TestRunBackfillsCalendarFromRecordsWithoutTheCache(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	first, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
@@ -373,12 +369,10 @@ func TestRunBackfillsCalendarFromRecordsWithoutTheCache(t *testing.T) {
 }
 
 func TestRunFailsWhenTheCalendarBackfillFails(t *testing.T) {
-	isolateTmp(t)
-	old := ensureCalendar
-	t.Cleanup(func() { ensureCalendar = old })
-	ensureCalendar = func(context.Context, *store.Store, time.Time) (*store.CalendarResult, error) {
+	t.Parallel()
+	hookEnsureCal.set(t, func(context.Context, *store.Store, time.Time) (*store.CalendarResult, error) {
 		return nil, errors.New("backfill refused")
-	}
+	})
 	db := newDB(t)
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	var coded *errs.Coded
@@ -391,6 +385,7 @@ func TestRunFailsWhenTheCalendarBackfillFails(t *testing.T) {
 }
 
 func TestEnsureCalendarSeamUsesTheSyncZone(t *testing.T) {
+	t.Parallel()
 	st, err := store.Open(context.Background(), newDB(t))
 	if err != nil {
 		t.Fatal(err)
@@ -406,6 +401,7 @@ func TestEnsureCalendarSeamUsesTheSyncZone(t *testing.T) {
 }
 
 func TestLostIgnoresEventsThatAreOnlyLessPrecise(t *testing.T) {
+	t.Parallel()
 	if n := lost(map[string]int{"calendar_unknown_time_zone": 3, "calendar_all_day_unaligned": 2, "denied_store": 1}); n != 0 {
 		t.Fatalf("lost = %d", n)
 	}
@@ -417,7 +413,7 @@ func TestLostIgnoresEventsThatAreOnlyLessPrecise(t *testing.T) {
 // A sync that finds nothing changed still says what the calendar could not use before: reporting
 // "unchanged" while a record is missing from the calendar would hide the loss.
 func TestUnchangedSyncStillReportsCalendarLosses(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	a := acctA
@@ -449,7 +445,7 @@ func TestUnchangedSyncStillReportsCalendarLosses(t *testing.T) {
 // The upgrade sync, which rebuilds the calendar before any source, is not "unchanged" when the
 // rebuild found records it could not use.
 func TestUpgradeSyncWithCalendarLossesIsNotUnchanged(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	a := acctA
@@ -473,7 +469,7 @@ func TestUpgradeSyncWithCalendarLossesIsNotUnchanged(t *testing.T) {
 
 // A sync filtered to one account moves the freshness of that account only.
 func TestFilteredSyncLeavesTheOtherAccountsFreshnessAlone(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
@@ -516,7 +512,7 @@ func TestFilteredSyncLeavesTheOtherAccountsFreshnessAlone(t *testing.T) {
 
 // A store that cannot say what the calendar lost fails the unchanged source, as any read error does.
 func TestUnchangedSyncFailsWhenTheLossesCannotBeRead(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
@@ -531,7 +527,7 @@ func TestUnchangedSyncFailsWhenTheLossesCannotBeRead(t *testing.T) {
 
 // A derivation that fails and cannot even forget its stamp fails the source.
 func TestSourceFailsWhenAFailedDerivationCannotForgetItsStamp(t *testing.T) {
-	isolateTmp(t)
+	t.Parallel()
 	utcDays(t)
 	db := newDB(t)
 	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {fakeEvent("e1", "2026-09-10T09:00:00Z", nil)}}}
