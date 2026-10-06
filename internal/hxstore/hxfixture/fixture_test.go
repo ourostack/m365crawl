@@ -264,6 +264,8 @@ func textRuns(b []byte) []string {
 	return out
 }
 
+var exampleAddress = regexp.MustCompile(`^[a-z0-9.-]+@example\.invalid$`)
+
 // realLooking explains why text could be real data, or returns "".
 func realLooking(s string) string {
 	if hexText.MatchString(s) {
@@ -282,6 +284,9 @@ func realLooking(s string) string {
 		if m[1] != "example.invalid" {
 			return "a link outside example.invalid"
 		}
+	}
+	if exampleAddress.MatchString(s) {
+		return "" // an address the Teams fixture also holds, so the two stores' twins can match by address
 	}
 	if !strings.Contains(strings.ToLower(s), "fixture") {
 		return "text that does not say it is a fixture"

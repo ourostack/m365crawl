@@ -147,7 +147,7 @@ func TestCollectFixtureOddOffsets(t *testing.T) {
 	res := collect(t, fixtureStore(t, "HxStore.hxd"), Options{})
 	found := false
 	for _, e := range res.Events {
-		if e.Subject == "Fixture online meeting" {
+		if e.Subject == "Fixture pacific sync" {
 			found = e.OnlineMeetingURL == "https://example.invalid/fixture/join/0002" && e.TeamsThreadID == "" && e.DialInTollNumber == "Fixture dial-in 555-0100"
 		}
 	}

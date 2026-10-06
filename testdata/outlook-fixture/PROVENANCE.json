@@ -1,9 +1,9 @@
 {
   "generator": "scripts/hxfixture",
-  "generator_version": 1,
+  "generator_version": 2,
   "layout": "docs/outlook-store.md",
   "files": {
-    "HxStore.hxd": "44a3726ccc4267272cec1ded91e46e2d19bbd00986787c53ce9785d038e94aec",
+    "HxStore.hxd": "7d5ed8219ecab5bb67333c469aa667e29655a9548bbbc0ec79da1a47db0b3d21",
     "profile-two/HxStore.hxd": "43d71396c7027fd4239f7946c95200bc5568601bb75e113a03de82eeaf8ecf07",
     "store-damaged-blocks.hxd": "5ba768bb16359a3c8912a97891119bdbcaafb0760f6919ab522c5c022529d792",
     "store-empty.hxd": "862a99eac9f3453cb5a357f62b5b5ba1b425a7a5044024f7c3d041cb245d54d3",
@@ -16,5 +16,5 @@
     "store-version-j.hxd": "e447e3626757bb62522a3add0a1a8e0b492756c7e087305f3c29776019b70311",
     "twin-candidates.txt": "8946f61e7c927959a3642bf9f0b6536f0e290e2e1c20c5fba9a2396d0b00c1a6"
   },
-  "hash": "ad757bc77aecb746a93c7e657dc43c92675eeac9abd9ca901cf1d47e3599736d"
+  "hash": "31aa82fc04eed8a99c881647d10546da6d1616e30f2e6e14dfea22f31326ef30"
 }
