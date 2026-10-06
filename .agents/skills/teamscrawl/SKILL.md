@@ -36,7 +36,7 @@ Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read co
 
 ## Global flags
 
-`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`). Platform defaults: macOS `--teams-root ~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`, Windows `--teams-root %LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`; macOS `--db ~/.teamscrawl/teamscrawl.db`, Windows `--db %LOCALAPPDATA%\teamscrawl\teamscrawl.db`.
+`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`. Platform defaults: macOS `--teams-root ~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`, Windows `--teams-root %LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`; macOS `--db ~/.teamscrawl/teamscrawl.db`, Windows `--db %LOCALAPPDATA%\teamscrawl\teamscrawl.db`.
 
 On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself; otherwise `sync`, `watch`, and any implicit sync fail with `db_error` before SQLite opens the database.
 
@@ -130,10 +130,10 @@ When the first sync after an upgrade re-derives an older archive, watch prints o
 
 | Question | Command |
 | --- | --- |
-| What is on my calendar (default: today)? | `calendar --from tomorrow --days 7`, `calendar --from 2026-10-12 --to 2026-10-19`, `calendar --query planning`. `--from` and `--to` take `today`, `yesterday`, `tomorrow`, `YYYY-MM-DD`, RFC3339 or a signed offset (`+3d`, `-1d`). Write a negative offset with an equals sign (`--from=-7d`); `--from -7d` is a usage error. An unsigned `7d` is a usage error too. |
+| What is on my calendar (default: today)? | `calendar --from tomorrow --days 7`, `calendar --from 2026-10-12 --to 2026-10-19`, `calendar --query planning`. Add `--fields event_id,subject,start,end,sources,has_recap` to keep the answer small (`--fields` and `--max-text` work on `calendar`, `calendar event` and `calendar actions`). `--from` and `--to` take `today`, `yesterday`, `tomorrow`, `YYYY-MM-DD`, RFC3339 or a signed offset (`+3d`, `-1d`). Write a negative offset with an equals sign (`--from=-7d`); `--from -7d` is a usage error. An unsigned `7d` is a usage error too. |
 | Who is in it, what is the agenda, the recap, the recording? | `calendar event <event_id>`: take the `event_id` (or `event_key`, or a unique prefix) from the agenda. Add `--max-text 400` to cut long bodies and summaries. |
 | What did I agree to do? | `calendar actions --from=-7d --to=tomorrow --mine`. Without `--mine` it lists everyone's items (`--owner pat` filters by name). |
-| What does the archive hold, and how fresh is it? | `calendar sources [--account ...]`: one row per account and source, Teams first, with `covered_days`, `last_verified_at`, event and recap counts and `unknown_time_zones`. An Outlook row adds `status` (`ok`; `skipped_interval`, which is not a failure: the last sync reused a read under 5 minutes old; `unsupported_version`, `unsupported_layout` or `unreadable`, which mean Outlook is not being read, with `error.fix`), `last_read_at`, `next_read_after`, `deletions: "unverified"` and `link` (`config` when linked to its `principal`, else `none`). With the Outlook source off, archived Outlook rows still appear but are no longer refreshed. Run it when an answer looks too thin or too old. |
+| What does the archive hold, and how fresh is it? | `calendar sources [--account ...]`: one row per account and source, Teams first, with `covered_days`, `last_verified_at`, event and recap counts and `unknown_time_zones`. An Outlook row adds `status` (`ok`; `skipped_interval`, which is not a failure: the last sync reused a read under 5 minutes old; `unsupported_version`, `unsupported_layout` or `unreadable`, which mean Outlook is not being read, with `error.fix`), `last_read_at`, `next_read_after`, `deletions: "unverified"` and `link` (`config` when linked to its `principal`, else `none`). With the Outlook source off, archived Outlook rows still appear but are no longer refreshed. Run it when an answer looks too thin or too old, or to see which days the archive covers (see Choosing a range). |
 | Why is Outlook missing or stale? | `doctor`: the `outlook_store` check says whether the source is on, which profiles it found, whether the store version is readable and when the last read ran. It only warns. |
 
 Agenda items are chronological. Cancelled events, events you declined and recurring masters are hidden unless you add `--include-cancelled`, `--include-declined` or `--include-masters`; `--include-removed` adds events a source saw go (`removed: true`, `removed_by` names the sources). Default `--limit` is 50: check `truncated`. To read a meeting's chat, pass the event's `meeting_chat_id` as `-c` to `messages`.
@@ -146,7 +146,14 @@ Teams caches an event's attendees, body and rooms only for meetings the user ope
 - A list or text field (`attendees`, `body`, `rooms`, `attachments`, `categories`) named in `unknown_fields` was never fetched. The same field absent and not named was stated empty.
 - `detail_level` is `basic` (schedule only), `full` (attendees, body and rooms from a copy as new as the schedule) or `stale` (the detail is older than the schedule, so the attendee list may be out of date). `detail_as_of` says how old.
 - `filled_fields` lists schedule fields taken from the other source or an older copy, each `{field, from, as_of}`. Treat them as true as of `as_of`.
+- How a linked twin is merged: Teams owns the Teams meeting fields (join link, dial-in, meeting chat id), and recordings and recaps never detach on link. Attendees and rooms are the union of both copies. The schedule and every other scalar come from the newer copy. `overridden_fields` lists each field whose value differed between the copies and which source won (a field not named there agreed, or was stated by one copy only). The name `overridden_fields` is not final: if the key is missing, read the item's other keys.
 - `sources` says who holds the event: `["teams"]`, `["outlook"]` or both.
+
+### Choosing a range
+
+The agenda is today unless you say otherwise. Pick the range from the question: "tomorrow" is `--from tomorrow`, "this week" is `--from today --days 7`, "last week" is `--from=-7d --to=today`, a named day is `--from 2026-10-12 --days 1`. `--days` replaces `--to`. Keep ranges to a week or two: a long range returns many items (check `truncated`) and `uncovered_days`.
+
+To tell empty from unknown, read `coverage_gap` and `uncovered_days`. `coverage_gap: false` means every day was covered, so an empty agenda means no meetings. `coverage_gap: true` with the day you asked about in `uncovered_days` means Teams never cached that day: report it as unknown, not as free. `uncovered_days` is capped at 31 days (`uncovered_days_total` gives the full count), so do not page through it. For a quick look at what the archive covers, run `calendar sources --fields source,account_id,window_start,window_end,covered_days`, or `calendar --days 1 --fields event_id --limit 1` for one day.
 
 ### How fresh, and what is missing
 
@@ -160,11 +167,17 @@ Teams caches an event's attendees, body and rooms only for meetings the user ope
 Outlook is off by default. Turn it on for `sync` and the read commands with `--outlook-root DIR` (`TEAMSCRAWL_OUTLOOK_ROOT`) or `TEAMSCRAWL_OUTLOOK=1` (the default macOS directory). Events already archived stay readable without the flag, but only a run with it on refreshes them. An unlinked Outlook profile is its own account: its events are not merged with Teams, and the agenda lists it in `unlinked_accounts` with the exact command to link it in `unlinked_fix`. Linking is explicit and never guessed, because two people invited to one meeting hold the same events:
 
 ```sh
-teamscrawl whoami --json     # find <tenantId>/<userId> of the Teams account that owns this Outlook profile
+teamscrawl whoami --json     # the Teams accounts: tenant_id, user_id, display_name
 teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>
 ```
 
-`--outlook-profile` is needed only when the root holds several profiles. The link is kept in the archive; `--outlook-account none` ends it. Linked, twins merge into one item with `sources: ["teams","outlook"]` and `filled_fields`. A linked Outlook-only event gets a new `event_id`; the old one still resolves. A meeting Teams marked gone stays hidden unless the Outlook copy was edited after the removal. teamscrawl does not detect deletions in Outlook, so a meeting deleted only in Outlook stays listed. Ask the user which Teams account a profile belongs to if `whoami` shows more than one.
+Which account to link: nothing the tool prints names the Outlook profile's owner. An Outlook account is only `outlook/<profile directory name>` (in `calendar sources` and `unlinked_accounts`), and `whoami` lists Teams accounts by `display_name` and ids with no email address, so the two cannot be matched by the tool. Do not guess from the display name, and do not link by event overlap (two people invited to one meeting hold the same events). If `whoami` lists one account and the user says it is theirs, use it. Otherwise ask the user which Teams account (by `display_name`) owns the Outlook profile, and ask only once.
+
+`--outlook-profile` is needed only when the root holds several profiles. The link is kept in the archive; `--outlook-account none` ends it.
+
+What you will see: the linking `sync` can print `skipped_interval` for the Outlook source and `linked: 0`. That is not a failure. The link is applied after the sources are read, and an Outlook read under 5 minutes old is reused, so there was nothing new to count. To confirm the link took effect, run `teamscrawl calendar sources --json`: the Outlook row now has `link: "config"` and its `principal` is the Teams account. The agenda confirms it too: `unlinked_accounts` and `unlinked_fix` are gone and twin events have merged, so the agenda gets shorter.
+
+Linked, twins merge into one item with `sources: ["teams","outlook"]` and `filled_fields`. A linked Outlook-only event gets a new `event_id`; the old one still resolves. A meeting Teams marked gone stays hidden unless the Outlook copy was edited after the removal. teamscrawl does not detect deletions in Outlook, so a meeting deleted only in Outlook stays listed.
 
 ### What "mine" means
 
