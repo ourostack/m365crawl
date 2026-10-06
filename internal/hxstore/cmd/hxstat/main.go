@@ -4,7 +4,7 @@
 // Usage: hxstat PATH
 //
 // The output holds counts and format numbers only (blocks seen, valid and
-// rejected by reason, objects per class and tag, how many of them were reached by resync, bytes no object covers, the
+// rejected by reason, objects per class and tag, how many of them were reached by resync, bytes of recognized framing, bytes that are neither object nor framing, and histograms (numbers only) of the payload head, the gaps between objects, the tails and the payloads with no object, the
 // header's version byte and page size). It never prints an object's bytes, a
 // string, or the path. On failure it prints a coded error as JSON and exits 1.
 package main
@@ -39,22 +39,42 @@ type pairCount struct {
 	Count int    `json:"count"`
 	// Resynced is how many of Count were reached after skipped bytes.
 	Resynced int `json:"resynced"`
+	// ResyncedLong is how many resynced objects are at least 824 bytes long.
+	ResyncedLong int `json:"resynced_len_ge_824"`
 }
 
 type report struct {
-	VersionByte     byte           `json:"version_byte"`
-	PageSize        uint64         `json:"page_size"`
-	FileSize        int64          `json:"file_size"`
-	BlocksFound     int            `json:"blocks_found"`
-	BlocksValid     int            `json:"blocks_valid"`
-	BlocksRejected  int            `json:"blocks_rejected"`
-	Rejected        map[string]int `json:"rejected_by_reason"`
-	PayloadBytes    int64          `json:"payload_bytes"`
-	UnwalkedBytes   int64          `json:"unwalked_bytes"`
-	Objects         int            `json:"objects"`
-	ObjectsResynced int            `json:"objects_resynced"`
-	Pairs           []pairCount    `json:"objects_by_class_tag"`
-	PairsOverflow   int            `json:"pairs_overflow"`
+	VersionByte    byte           `json:"version_byte"`
+	PageSize       uint64         `json:"page_size"`
+	FileSize       int64          `json:"file_size"`
+	BlocksFound    int            `json:"blocks_found"`
+	BlocksValid    int            `json:"blocks_valid"`
+	BlocksRejected int            `json:"blocks_rejected"`
+	Rejected       map[string]int `json:"rejected_by_reason"`
+	PayloadBytes   int64          `json:"payload_bytes"`
+	UnwalkedBytes  int64          `json:"unwalked_bytes"`
+	FramingBytes   int64          `json:"framing_bytes"`
+	// Payload framing, all counts: how the bytes around objects are shaped.
+	PayloadsWithoutObjects int            `json:"payloads_without_objects"`
+	NoObjectBytes          int64          `json:"no_object_bytes"`
+	NoObjectFirst4         map[string]int `json:"no_object_first4"`
+	HeadLengths            map[int]int    `json:"head_lengths"`
+	HeadEndsInTrailer      int            `json:"head_ends_in_trailer"`
+	HeadFirst4             map[string]int `json:"head_first4"`
+	GapLengths             map[int]int    `json:"gap_lengths"`
+	GapsEqualTrailer       int            `json:"gaps_equal_trailer"`
+	GapFirst4              map[string]int `json:"gap_first4"`
+	Tails                  int            `json:"tails"`
+	TailBytes              int64          `json:"tail_bytes"`
+	TailsStartWithTrailer  int            `json:"tails_start_with_trailer"`
+	HeadsTrailerForm       int            `json:"heads_trailer_form"`
+	Gap1Values             map[int]int    `json:"gap1_values"`
+	Gap11OneByteDiff       map[int]int    `json:"gap11_one_byte_diff_by_index"`
+	Gap11ManyDiff          int            `json:"gap11_many_diff"`
+	Objects                int            `json:"objects"`
+	ObjectsResynced        int            `json:"objects_resynced"`
+	Pairs                  []pairCount    `json:"objects_by_class_tag"`
+	PairsOverflow          int            `json:"pairs_overflow"`
 }
 
 type failure struct {
@@ -81,13 +101,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		VersionByte: s.Version, PageSize: s.PageSize, FileSize: s.Size(),
 		BlocksFound: st.BlocksFound, BlocksValid: st.BlocksValid, BlocksRejected: st.BlocksRejected(),
 		Rejected: st.Rejected, PayloadBytes: st.PayloadBytes, UnwalkedBytes: st.UnwalkedBytes,
+		FramingBytes: st.FramingBytes, PayloadsWithoutObjects: st.PayloadsNoObject, NoObjectBytes: st.NoObjectBytes,
+		NoObjectFirst4: nz(st.NoObjectFirst4), HeadLengths: nz(st.HeadLens), HeadEndsInTrailer: st.HeadEndsInTrailer,
+		HeadFirst4: nz(st.HeadFirst4), GapLengths: nz(st.GapLens), GapsEqualTrailer: st.GapsTrailer,
+		GapFirst4: nz(st.GapFirst4), Tails: st.Tails, TailBytes: st.TailBytes, TailsStartWithTrailer: st.TailsStartWithTrailer,
+		HeadsTrailerForm: st.HeadsTrailerForm, Gap1Values: nz(st.Gap1Values), Gap11OneByteDiff: nz(st.Gap11OneByteDiff), Gap11ManyDiff: st.Gap11ManyDiff,
 		Objects: st.Objects, ObjectsResynced: st.ObjectsResynced, Pairs: []pairCount{}, PairsOverflow: st.PairsOverflow,
 	}
 	if r.Rejected == nil {
 		r.Rejected = map[string]int{}
 	}
 	for p, n := range st.Pairs {
-		r.Pairs = append(r.Pairs, pairCount{Class: p.Class, Tag: p.Tag, Count: n, Resynced: st.PairsResynced[p]})
+		r.Pairs = append(r.Pairs, pairCount{Class: p.Class, Tag: p.Tag, Count: n, Resynced: st.PairsResynced[p], ResyncedLong: st.PairsResyncedLong[p]})
 	}
 	sort.Slice(r.Pairs, func(i, j int) bool {
 		if r.Pairs[i].Class != r.Pairs[j].Class {
@@ -96,6 +121,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return r.Pairs[i].Tag < r.Pairs[j].Tag
 	})
 	return emit(stdout, r, 0)
+}
+
+// nz turns a nil map into an empty one so the JSON has {} and not null.
+func nz[K comparable](m map[K]int) map[K]int {
+	if m == nil {
+		return map[K]int{}
+	}
+	return m
 }
 
 // fail prints a coded error. It never prints err's text, which can hold a path.

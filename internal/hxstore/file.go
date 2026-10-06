@@ -245,16 +245,26 @@ func (sc *scanner) fill(ctx context.Context, at int64) error {
 // Object.Clone to keep one. If fn returns an error Walk stops and returns it. A
 // nil fn only counts.
 //
-// Resync policy. Inside a payload the walk looks for an object at every byte. At
-// a position that is not a valid object it moves on one byte and tries again, so
-// a corrupt object does not hide the ones after it, but the same rule can report
-// an envelope that sits inside a malformed object, or a stale one, as if it were
-// top level. Such an object is reported with Object.Resynced true and counted in
-// Stats.ObjectsResynced and Stats.PairsResynced. An object is Resynced exactly
-// when at least one byte was skipped between the end of the previous object (or
-// the start of the payload) and its start; an object that begins exactly where
-// the previous one ended is not, so the flag is true for the first object after
-// skipped bytes and false again from the next contiguous object on.
+// Payload framing and resync. A payload is not only objects. In a well-formed
+// one an object (a u32 length, then that many bytes from the envelope) is
+// followed by a constant 11-byte trailer (Trailer), and the first object may be
+// preceded by a 15-byte head (HeadSize; its meaning is not known, only its
+// length is checked). These are framing, counted in Stats.FramingBytes. Other
+// bytes that are neither object nor framing (long gaps in a different record
+// form, tails, payloads with no object at all) are only counted, in
+// Stats.UnwalkedBytes, the gap and tail histograms and PayloadsNoObject; they
+// are not decoded.
+//
+// Inside a payload the walk looks for an object at every byte. At a position
+// that is not a valid object it moves on one byte and tries again, so a corrupt
+// object does not hide the ones after it, but the same rule can report an
+// envelope that sits inside a malformed object, or a stale one, as if it were
+// top level. An object is Resynced exactly when it was reached after bytes that
+// are not known framing: it does not begin at the payload start, right after the
+// head, right after the previous object, or right after the previous object and
+// one Trailer. The next object that follows its predecessor in that way is not
+// resynced. Resynced objects are counted in Stats.ObjectsResynced and
+// Stats.PairsResynced.
 //
 // Partial stats on error. When Walk returns a non-nil error (a read failure, a
 // cancelled context, or an error from fn) the Stats are those counted so far: a
@@ -301,14 +311,15 @@ func (s *Store) Walk(ctx context.Context, opts WalkOptions, fn func(Object) erro
 		}
 		st.BlocksValid++
 		st.PayloadBytes += int64(len(out))
-		covered, err := walkObjects(out, func(pos int, class, tag uint16, raw []byte, resynced bool) error {
-			st.countPair(Pair{Class: class, Tag: tag}, resynced)
+		framingBefore := st.FramingBytes
+		covered, err := walkObjects(out, &st, func(pos int, class, tag uint16, raw []byte, resynced bool) error {
+			st.countPair(Pair{Class: class, Tag: tag}, resynced, len(raw))
 			if fn == nil {
 				return nil
 			}
 			return fn(Object{BlockOffset: start, PayloadPos: pos, Class: class, Tag: tag, Raw: raw, Resynced: resynced})
 		})
-		st.UnwalkedBytes += int64(len(out) - covered)
+		st.UnwalkedBytes += int64(len(out)-covered) - (st.FramingBytes - framingBefore)
 		if err != nil {
 			return st, err
 		}

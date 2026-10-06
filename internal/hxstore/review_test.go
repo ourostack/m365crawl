@@ -68,7 +68,7 @@ func TestResyncFlag(t *testing.T) {
 	p = append(p, hxbuild.NewObject(4, 12, 12).Encode()...) // contiguous again
 	var got []bool
 	var classes []uint16
-	_, _ = walkObjects(p, func(_ int, class, _ uint16, _ []byte, r bool) error {
+	_, _ = walkObjects(p, &Stats{}, func(_ int, class, _ uint16, _ []byte, r bool) error {
 		got = append(got, r)
 		classes = append(classes, class)
 		return nil
@@ -88,7 +88,7 @@ func TestResyncFlag(t *testing.T) {
 	inner := hxbuild.NewObject(9, 12, 12).Encode()
 	outer := append([]byte{0x20, 0, 0, 0, 5, 0, 0x20, 0, 0x21, 0, 0, 0, 0, 0, 7, 0}, inner...)
 	got = nil
-	_, _ = walkObjects(outer, func(_ int, class, _ uint16, _ []byte, r bool) error {
+	_, _ = walkObjects(outer, &Stats{}, func(_ int, class, _ uint16, _ []byte, r bool) error {
 		if class != 9 {
 			t.Fatalf("class %d", class)
 		}
@@ -125,9 +125,9 @@ func TestResyncStats(t *testing.T) {
 func TestResyncStatsPastPairCap(t *testing.T) {
 	var st Stats
 	for c := 0; c < maxPairs; c++ {
-		st.countPair(Pair{uint16(c), 12}, false)
+		st.countPair(Pair{uint16(c), 12}, false, 12)
 	}
-	st.countPair(Pair{60000, 12}, true)
+	st.countPair(Pair{60000, 12}, true, 12)
 	if st.ObjectsResynced != 1 || st.PairsOverflow != 1 || len(st.PairsResynced) != 0 {
 		t.Fatalf("%+v", st.ObjectsResynced)
 	}

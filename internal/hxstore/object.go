@@ -39,9 +39,10 @@ type Object struct {
 	// is exactly the length the envelope declares. All accessor offsets count
 	// from the first byte of Raw.
 	Raw []byte
-	// Resynced is true if bytes were skipped between the end of the previous
-	// object in this payload (or the payload start) and this object. Such an
-	// object may be an envelope found inside a malformed one. See Walk.
+	// Resynced is true if the object was reached after bytes that are not known
+	// framing: not at the payload start or after the 15-byte head, and not right
+	// after the previous object or its constant 11-byte trailer. Such an object
+	// may be an envelope found inside a malformed one. See Walk.
 	Resynced bool
 }
 
@@ -173,16 +174,66 @@ func (o Object) Ticks(off int) (time.Time, bool) {
 	return time.Unix(secs, int64(v%ticksPerSecond)*100).UTC(), true
 }
 
-// walkObjects finds the objects in one inflated payload and calls fn for each.
-// At every position it checks a u32 length L, then the envelope (u16 5, tag, the
-// same L, u16 0, class), then that 12 <= L, tag <= L and the object lies inside
-// the payload. A hit is reported and the scan continues after it; a miss moves
-// on one byte. It returns the number of payload bytes the objects cover; resynced tells the callback whether bytes were skipped before the object (each
-// object plus its length word) and the first error fn returned.
-func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte, resynced bool) error) (int, error) {
+// Payload framing, as measured on a real store (counts only; see Walk).
+//
+// Object extent: an object is the length word, then length bytes starting at the
+// envelope. That is the only reading under which the envelope's repeated length
+// equals the outer one and the tag (the size of the fixed region) never exceeds
+// the length, so the walk keeps it. What follows an object in a well-formed
+// payload is a constant 11-byte trailer, and a payload that starts with an
+// object has a 15-byte head. Whether the 11 bytes are better read as a trailer
+// of the object before or a header of the object after is not decidable from
+// these facts (the 15-byte head, 4 bytes more than the constant, would fit a
+// header with 4 unknown bytes in front); the walk treats the constant as the
+// trailer, which gives the same object positions either way.
+const (
+	// TrailerSize is the length of the constant bytes between objects.
+	TrailerSize = 11
+	// HeadSize is the length of the payload head seen before the first object.
+	HeadSize = 15
+	// gapCap is the largest gap length with its own histogram bucket; longer
+	// gaps share the last bucket.
+	gapCap = 64
+)
+
+// Trailer is the constant that follows an object in a well-formed payload.
+var Trailer = [TrailerSize]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+
+// firstWordClass names the size class of the first four bytes of a run, read as
+// a little-endian u32, so a histogram can describe unknown bytes without
+// printing them.
+func firstWordClass(b []byte) string {
+	switch v := binary.LittleEndian.Uint32(b); {
+	case v == 0:
+		return "zero"
+	case v < 256:
+		return "small"
+	case v < 65536:
+		return "medium"
+	}
+	return "large"
+}
+
+func hasTrailerAt(p []byte, at int) bool {
+	return at >= 0 && len(p)-at >= TrailerSize && [TrailerSize]byte(p[at:at+TrailerSize]) == Trailer
+}
+
+// walkObjects finds the objects in one inflated payload and calls visit for
+// each. At every position it checks a u32 length L, then the envelope (u16 5,
+// tag, the same L, u16 0, class), then that 12 <= L, tag <= L and the object
+// lies inside the payload. A hit is reported and the scan continues after it; a
+// miss moves on one byte. It returns the number of payload bytes the objects
+// cover (each object plus its length word) and the first error visit returned.
+//
+// It also records the framing in st: the head before the first object, the gaps
+// between objects, the tail, and the bytes of framing it recognizes. An object
+// is resynced unless it begins at the payload start or right after the head
+// (HeadSize bytes), or right after the previous object, or right after the
+// previous object plus a Trailer.
+func walkObjects(p []byte, st *Stats, visit func(pos int, class, tag uint16, raw []byte, resynced bool) error) (int, error) {
 	covered := 0
 	i := 0
-	prevEnd := 0 // end of the previous object, or the payload start
+	prevEnd := -1 // end of the previous object, -1 before the first
 	for i+lenPrefix+EnvelopeSize <= len(p) {
 		env := p[i+lenPrefix:]
 		if binary.LittleEndian.Uint16(env) != envMarker {
@@ -201,7 +252,8 @@ func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte, re
 			continue
 		}
 		raw := env[:l]
-		if err := visit(i, binary.LittleEndian.Uint16(env[offEnvCls:]), tag, raw, i != prevEnd); err != nil {
+		resynced := st.noteGap(p, prevEnd, i)
+		if err := visit(i, binary.LittleEndian.Uint16(env[offEnvCls:]), tag, raw, resynced); err != nil {
 			return covered, err
 		}
 		step := lenPrefix + len(raw)
@@ -209,5 +261,6 @@ func walkObjects(p []byte, visit func(pos int, class, tag uint16, raw []byte, re
 		i += step
 		prevEnd = i
 	}
+	st.noteEnd(p, prevEnd)
 	return covered, nil
 }

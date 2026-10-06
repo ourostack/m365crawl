@@ -187,3 +187,12 @@ func TestPayload(t *testing.T) {
 		t.Fatal(len(p))
 	}
 }
+
+func TestFramedPayload(t *testing.T) {
+	o := NewObject(1, 12, 12)
+	got := FramedPayload([]byte{9}, o, o)
+	want := append(append(append(append([]byte{9}, o.Encode()...), Trailer...), o.Encode()...), Trailer...)
+	if !bytes.Equal(got, want) || len(Trailer) != 11 || len(FramedPayload(nil)) != 0 {
+		t.Fatalf("%x", got)
+	}
+}
