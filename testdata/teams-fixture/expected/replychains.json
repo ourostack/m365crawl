@@ -1708,6 +1708,171 @@
         },
         "latestDeliveryTime": 1700000056000
       }
+    },
+    {
+      "key": "1700000057000",
+      "envelope": "v21",
+      "canonical_bytes": 754,
+      "canonical_sha256": "1da9d9d0448cd887169da2fb162c42d9dacffc46d085617f362e4f168ba8f00d",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE1@thread.v2",
+        "replyChainId": "1700000057000",
+        "messageMap": {
+          "1700000057000": {
+            "id": "1700000057000",
+            "conversationId": "19:meeting_FIXTURE1@thread.v2",
+            "parentMessageId": "1700000057000",
+            "clientMessageId": "9000000057",
+            "version": 1700000057000,
+            "sequenceId": 57,
+            "messageType": "Event/Call",
+            "contentType": "Text",
+            "content": "<ended/><partlist type=\"ended\" alt=\"\"><part identity=\"00000000-0000-4000-8000-0000000000a1\"><name>Alex Fixture</name></part></partlist>",
+            "imDisplayName": "Alex Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "originalArrivalTime": 1700676030000,
+            "clientArrivalTime": 1700676030005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700676030000
+      }
+    },
+    {
+      "key": "1700000058000",
+      "envelope": "v21",
+      "canonical_bytes": 870,
+      "canonical_sha256": "9835ee35e4159244649cf67418ac4c9e66e640ae6c2ca15a5bbbb26607c8e7be",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE1@thread.v2",
+        "replyChainId": "1700000058000",
+        "messageMap": {
+          "1700000058000": {
+            "id": "1700000058000",
+            "conversationId": "19:meeting_FIXTURE1@thread.v2",
+            "parentMessageId": "1700000058000",
+            "clientMessageId": "9000000058",
+            "version": 1700000058000,
+            "sequenceId": 58,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-1\"><Title>Fixture standup recording 1</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-1\">Recording 1</a></URIObject>",
+            "imDisplayName": "Alex Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "originalArrivalTime": 1700677860000,
+            "clientArrivalTime": 1700677860005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700677860000
+      }
+    },
+    {
+      "key": "1700000059000",
+      "envelope": "v21",
+      "canonical_bytes": 788,
+      "canonical_sha256": "12ffc1307dd01995943f411a3dcb834bef98667cd22e23ff296fd30e0595b4c6",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE1@thread.v2",
+        "replyChainId": "1700000059000",
+        "messageMap": {
+          "1700000059000": {
+            "id": "1700000059000",
+            "conversationId": "19:meeting_FIXTURE1@thread.v2",
+            "parentMessageId": "1700000059000",
+            "clientMessageId": "9000000059",
+            "version": 1700000059000,
+            "sequenceId": 59,
+            "messageType": "RichText/Media_CallTranscript",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/transcripts/standup-1\"><Title>Fixture standup transcript</Title></URIObject>",
+            "imDisplayName": "Alex Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "originalArrivalTime": 1700677920000,
+            "clientArrivalTime": 1700677920005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700677920000
+      }
+    },
+    {
+      "key": "1700000060000",
+      "envelope": "v21",
+      "canonical_bytes": 870,
+      "canonical_sha256": "c1c00d371f08c3caf30b8e9d3c2b503b5e3ba4e052de06b9df78d4df6c41177c",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE1@thread.v2",
+        "replyChainId": "1700000060000",
+        "messageMap": {
+          "1700000060000": {
+            "id": "1700000060000",
+            "conversationId": "19:meeting_FIXTURE1@thread.v2",
+            "parentMessageId": "1700000060000",
+            "clientMessageId": "9000000060",
+            "version": 1700000060000,
+            "sequenceId": 60,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-2\"><Title>Fixture standup recording 2</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-2\">Recording 2</a></URIObject>",
+            "imDisplayName": "Alex Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "originalArrivalTime": 1700764260000,
+            "clientArrivalTime": 1700764260005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700764260000
+      }
+    },
+    {
+      "key": "1700000061000",
+      "envelope": "v21",
+      "canonical_bytes": 870,
+      "canonical_sha256": "220db5f645e89fab6e6e856423f136607341f09baa69b6e44507ce7145f75d7b",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE1@thread.v2",
+        "replyChainId": "1700000061000",
+        "messageMap": {
+          "1700000061000": {
+            "id": "1700000061000",
+            "conversationId": "19:meeting_FIXTURE1@thread.v2",
+            "parentMessageId": "1700000061000",
+            "clientMessageId": "9000000061",
+            "version": 1700000061000,
+            "sequenceId": 61,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-3\"><Title>Fixture standup recording 3</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-3\">Recording 3</a></URIObject>",
+            "imDisplayName": "Alex Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a1",
+            "originalArrivalTime": 1701801060000,
+            "clientArrivalTime": 1701801060005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1701801060000
+      }
     }
   ],
   "Teams:replychain-manager:react-web-client:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-0000000000a2:en-us": [
@@ -3418,6 +3583,171 @@
           }
         },
         "latestDeliveryTime": 1700000056000
+      }
+    },
+    {
+      "key": "1700000057000",
+      "envelope": "v21",
+      "canonical_bytes": 756,
+      "canonical_sha256": "f55df9bf2930bda27eb5ab07b564a0e740e67a17488692d695a283876c77563f",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE2@thread.v2",
+        "replyChainId": "1700000057000",
+        "messageMap": {
+          "1700000057000": {
+            "id": "1700000057000",
+            "conversationId": "19:meeting_FIXTURE2@thread.v2",
+            "parentMessageId": "1700000057000",
+            "clientMessageId": "9000000057",
+            "version": 1700000057000,
+            "sequenceId": 57,
+            "messageType": "Event/Call",
+            "contentType": "Text",
+            "content": "<ended/><partlist type=\"ended\" alt=\"\"><part identity=\"00000000-0000-4000-8000-0000000000a2\"><name>Blair Fixture</name></part></partlist>",
+            "imDisplayName": "Blair Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "originalArrivalTime": 1700676030000,
+            "clientArrivalTime": 1700676030005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700676030000
+      }
+    },
+    {
+      "key": "1700000058000",
+      "envelope": "v21",
+      "canonical_bytes": 871,
+      "canonical_sha256": "931f3ad7e40f48173ada294aa7dd5138bd6dd5988b44ff4944dec50b78fb2be9",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE2@thread.v2",
+        "replyChainId": "1700000058000",
+        "messageMap": {
+          "1700000058000": {
+            "id": "1700000058000",
+            "conversationId": "19:meeting_FIXTURE2@thread.v2",
+            "parentMessageId": "1700000058000",
+            "clientMessageId": "9000000058",
+            "version": 1700000058000,
+            "sequenceId": 58,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-1\"><Title>Fixture standup recording 1</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-1\">Recording 1</a></URIObject>",
+            "imDisplayName": "Blair Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "originalArrivalTime": 1700677860000,
+            "clientArrivalTime": 1700677860005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700677860000
+      }
+    },
+    {
+      "key": "1700000059000",
+      "envelope": "v21",
+      "canonical_bytes": 789,
+      "canonical_sha256": "adf14bed4a1fd7007c7b4a5b75c5e9e26619140de2d923c51de82d81bbf2510b",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE2@thread.v2",
+        "replyChainId": "1700000059000",
+        "messageMap": {
+          "1700000059000": {
+            "id": "1700000059000",
+            "conversationId": "19:meeting_FIXTURE2@thread.v2",
+            "parentMessageId": "1700000059000",
+            "clientMessageId": "9000000059",
+            "version": 1700000059000,
+            "sequenceId": 59,
+            "messageType": "RichText/Media_CallTranscript",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/transcripts/standup-1\"><Title>Fixture standup transcript</Title></URIObject>",
+            "imDisplayName": "Blair Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "originalArrivalTime": 1700677920000,
+            "clientArrivalTime": 1700677920005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700677920000
+      }
+    },
+    {
+      "key": "1700000060000",
+      "envelope": "v21",
+      "canonical_bytes": 871,
+      "canonical_sha256": "4ed636de91d07d36e649d7453d70112132455d329e46ef9ba97c9d428a95345e",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE2@thread.v2",
+        "replyChainId": "1700000060000",
+        "messageMap": {
+          "1700000060000": {
+            "id": "1700000060000",
+            "conversationId": "19:meeting_FIXTURE2@thread.v2",
+            "parentMessageId": "1700000060000",
+            "clientMessageId": "9000000060",
+            "version": 1700000060000,
+            "sequenceId": 60,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-2\"><Title>Fixture standup recording 2</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-2\">Recording 2</a></URIObject>",
+            "imDisplayName": "Blair Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "originalArrivalTime": 1700764260000,
+            "clientArrivalTime": 1700764260005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1700764260000
+      }
+    },
+    {
+      "key": "1700000061000",
+      "envelope": "v21",
+      "canonical_bytes": 871,
+      "canonical_sha256": "e815ca3f7fefa3488c9c432e2485fba470bd8dbbef01309db85a06bfbbdef2d2",
+      "canonical": {
+        "conversationId": "19:meeting_FIXTURE2@thread.v2",
+        "replyChainId": "1700000061000",
+        "messageMap": {
+          "1700000061000": {
+            "id": "1700000061000",
+            "conversationId": "19:meeting_FIXTURE2@thread.v2",
+            "parentMessageId": "1700000061000",
+            "clientMessageId": "9000000061",
+            "version": 1700000061000,
+            "sequenceId": 61,
+            "messageType": "RichText/Media_CallRecording",
+            "contentType": "Text",
+            "content": "<URIObject type=\"Video.1/Message.1\" uri=\"https://fixture.sharepoint.example/recordings/standup-3\"><Title>Fixture standup recording 3</Title><a href=\"https://fixture.sharepoint.example/recordings/standup-3\">Recording 3</a></URIObject>",
+            "imDisplayName": "Blair Fixture",
+            "creator": "8:orgid:00000000-0000-4000-8000-0000000000a2",
+            "originalArrivalTime": 1701801060000,
+            "clientArrivalTime": 1701801060005,
+            "deletionInfo": null,
+            "properties": {
+              "importance": "normal",
+              "subject": ""
+            }
+          }
+        },
+        "latestDeliveryTime": 1701801060000
       }
     }
   ]
