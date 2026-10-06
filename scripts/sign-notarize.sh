@@ -138,14 +138,17 @@ prepare_keychain() {
 
 # Submits a zip to the notary service and succeeds only when the final status is
 # exactly "Accepted". `notarytool submit --wait` can exit 0 for an "Invalid"
-# submission, so the JSON status is checked explicitly.
+# submission, so the JSON status is checked explicitly. The wait is bounded
+# (NOTARY_TIMEOUT, default 20m) so a slow notary queue fails with its reason
+# instead of running into the release job's own timeout without one.
 notarize_zip() {
   local zip="$1" out id status
   out="$(xcrun notarytool submit "$zip" \
     --apple-id "$APPLE_ID" \
     --password "$APPLE_APP_SPECIFIC_PASSWORD" \
     --team-id "$APPLE_TEAM_ID" \
-    --wait --output-format json)" || fail "notarytool submit failed"
+    --wait --timeout "${NOTARY_TIMEOUT:-20m}" --output-format json)" ||
+    fail "notarytool submit failed or did not finish within ${NOTARY_TIMEOUT:-20m} (when Apple's notary queue is slow the submission carries on at Apple; run the Release workflow again later and it resumes from the tag)"
   status="$(json_field status "$out")"
   id="$(json_field id "$out")"
   if [[ "$status" != "Accepted" ]]; then
