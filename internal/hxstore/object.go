@@ -97,7 +97,21 @@ func (o Object) U64(off int) (uint64, bool) {
 // before the end of the object, and the text has no unpaired surrogate. The
 // terminator is not part of the result. The scan never reads past the object.
 func (o Object) StringAt(off int) (string, bool) {
-	if off < 0 || off%2 != 0 || off >= len(o.Raw) {
+	if off%2 != 0 {
+		return "", false
+	}
+	return o.StringAtUnaligned(off)
+}
+
+// StringAtUnaligned is StringAt without the even-start rule. Strings in the
+// calendar objects are not 2-byte aligned (the id area starts at an odd offset),
+// so a reader scans bytes: the text is read in two-byte steps from off, whatever
+// the parity of off, and ends at the first two-byte NUL in that step. The other
+// rules of StringAt hold: the start is inside the object, the terminator is
+// found before the end, there is no unpaired surrogate, and nothing is read past
+// the object.
+func (o Object) StringAtUnaligned(off int) (string, bool) {
+	if off < 0 || off >= len(o.Raw) {
 		return "", false
 	}
 	end := -1
@@ -133,6 +147,15 @@ func (o Object) StringAt(off int) (string, bool) {
 	return string(runes), true
 }
 
+// Bytes returns n bytes starting at off, aliasing Raw. ok is false if they do
+// not lie inside the object.
+func (o Object) Bytes(off, n int) ([]byte, bool) {
+	if !o.has(off, n) {
+		return nil, false
+	}
+	return o.Raw[off : off+n], true
+}
+
 // String reads a 4-byte offset word at wordOff, adds base, and returns the
 // NUL-terminated UTF-16LE string at that position (see StringAt). base must not
 // be negative. Both the word and the sum are checked against the object length
@@ -147,6 +170,20 @@ func (o Object) String(wordOff, base int) (string, bool) {
 		return "", false
 	}
 	return o.StringAt(int(pos))
+}
+
+// StringUnaligned is String for a string that may start at an odd offset: it
+// reads the offset word at wordOff, adds base and reads as StringAtUnaligned.
+func (o Object) StringUnaligned(wordOff, base int) (string, bool) {
+	w, ok := o.U32(wordOff)
+	if !ok || base < 0 {
+		return "", false
+	}
+	pos := int64(w) + int64(base)
+	if pos >= int64(len(o.Raw)) {
+		return "", false
+	}
+	return o.StringAtUnaligned(int(pos))
 }
 
 // .NET ticks are 100 ns units since 0001-01-01 UTC; Unix time starts this many
