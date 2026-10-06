@@ -4,6 +4,8 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
 ### Fixed
 
 - V8 decoder: an array with named properties is stored in the reference table as the final value, so a later back-reference to it keeps the properties. Before, `[a, a]` with `a = []` and `a.x = 1` decoded the second element as a bare array and lost `x`. A reference made while the array is still being read (a cycle) still holds the bare slice, which the canonical form already identifies with the array.
