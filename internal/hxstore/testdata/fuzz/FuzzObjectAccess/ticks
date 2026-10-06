@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("\x00\x80\xec\x01\x20\x14\xd7\x08")
+int32(0)
+int32(0)
