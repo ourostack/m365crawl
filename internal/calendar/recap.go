@@ -332,7 +332,9 @@ func loadItems(ctx context.Context, tx *sql.Tx, k setKey) (map[string]RecapItem,
 // LinkRecaps links recaps that have no iCalUID to events by time. A recap in accountID whose
 // meeting start and end are each within tolerance of the start and end of exactly one live,
 // non-master, timed event that has an iCalUID takes that event's iCalUID with link method "time".
-// Zero or several candidates leave the recap unlinked, never guessed. A recap that already has an
+// The events searched are those of every account of accountID's principal, and an event held by two
+// sources counts once (one event key, whatever the accounts). Zero or several candidate events
+// leave the recap unlinked, never guessed. A recap that already has an
 // iCalUID is never relinked. It returns the number of recaps linked. A recap links later, when
 // its event appears.
 func LinkRecaps(ctx context.Context, tx *sql.Tx, accountID string, tolerance time.Duration, at time.Time) (int, error) {
@@ -364,7 +366,11 @@ func LinkRecaps(ctx context.Context, tx *sql.Tx, accountID string, tolerance tim
 	if len(todo) == 0 {
 		return 0, nil
 	}
-	cands, err := timedEvents(ctx, tx, accountID)
+	principals, err := LoadPrincipals(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	cands, err := timedEvents(ctx, tx, principals.Accounts(principals.Of(accountID)))
 	if err != nil {
 		return 0, err
 	}
@@ -416,26 +422,47 @@ type timedEvent struct {
 	start, end time.Time
 }
 
-// timedEvents lists the live, non-master, timed events of an account.
-func timedEvents(ctx context.Context, tx *sql.Tx, accountID string) ([]timedEvent, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT ical_uid, start_at, end_at FROM calendar_source_events
-	  WHERE account_id=? AND removed_at IS NULL AND all_day=0 AND event_type<>? AND start_at<>'' ORDER BY source, event_key`,
-		accountID, EventMaster)
+// timedEvents lists the live, non-master, timed events of the accounts, one entry per event key:
+// the same event held by two sources is one event. Its uid is the first non-empty one among its
+// rows, in source order, and its times are those row's.
+func timedEvents(ctx context.Context, tx *sql.Tx, accounts []string) ([]timedEvent, error) {
+	var args []any
+	for _, a := range accounts {
+		args = append(args, a)
+	}
+	args = append(args, EventMaster)
+	rows, err := tx.QueryContext(ctx, strings.Replace(`SELECT event_key, ical_uid, start_at, end_at FROM calendar_source_events
+	  WHERE account_id IN (@accounts) AND removed_at IS NULL AND COALESCE(all_day,0)=0 AND event_type<>? AND start_at<>''
+	  ORDER BY event_key, source, account_id`, "@accounts", placeholders(len(accounts)), 1), args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []timedEvent
+	last := ""
 	for rows.Next() {
+		var key string
 		var c timedEvent
 		var s, e timeText
-		if err := scanRow(rows, &c.uid, &s, &e); err != nil {
+		if err := scanRow(rows, &key, &c.uid, &s, &e); err != nil {
 			return nil, err
 		}
 		c.start, c.end = s.t, e.t
+		if n := len(out); n > 0 && key == last {
+			if out[n-1].uid == "" {
+				out[n-1] = c
+			}
+			continue
+		}
+		last = key
 		out = append(out, c)
 	}
 	return out, rowsErr(rows)
+}
+
+// placeholders is n comma-separated SQL parameters.
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // captureRecording moves the recording as one unit: its URL, start, end and duration describe one

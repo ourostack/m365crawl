@@ -2,6 +2,10 @@ package calendar
 
 // SchemaDDL creates the calendar tables; it is idempotent. There is no SQL view of the merged
 // calendar: merging happens in Go (Agenda), because the tie-breaks need per-source freshness.
+// A flag column is NULL when the source did not say (unknown), 0 for false and 1 for true;
+// unknown_fields lists the unknown non-flag fields, sorted and comma-joined. calendar_account_links
+// says which accounts of other sources belong to which Teams principal; a link is never deleted,
+// only unlinked.
 // Archive rule: nothing here deletes rows; a row a source stops reporting gets removed_at, a
 // sticky timestamp, and reappearing clears it. Every table is partitioned by account_id (the
 // "<tenantId>/<userId>" form; empty only for a source with no account).
@@ -19,7 +23,7 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
   original_start TEXT,
   start_at TEXT NOT NULL DEFAULT '',
   end_at TEXT NOT NULL DEFAULT '',
-  all_day INTEGER NOT NULL DEFAULT 0,
+  all_day INTEGER,
   start_date TEXT NOT NULL DEFAULT '',
   end_date TEXT NOT NULL DEFAULT '',
   time_zone TEXT NOT NULL DEFAULT '',
@@ -28,12 +32,12 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
   subject TEXT NOT NULL DEFAULT '',
   organizer TEXT NOT NULL DEFAULT '',
   organizer_address TEXT NOT NULL DEFAULT '',
-  is_organizer INTEGER NOT NULL DEFAULT 0,
-  is_private INTEGER NOT NULL DEFAULT 0,
-  cancelled INTEGER NOT NULL DEFAULT 0,
+  is_organizer INTEGER,
+  is_private INTEGER,
+  cancelled INTEGER,
   response TEXT NOT NULL DEFAULT '',
   show_as TEXT NOT NULL DEFAULT '',
-  is_online_meeting INTEGER NOT NULL DEFAULT 0,
+  is_online_meeting INTEGER,
   location TEXT NOT NULL DEFAULT '',
   last_modified TEXT,
   online_meeting_url TEXT NOT NULL DEFAULT '',
@@ -48,11 +52,12 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
   body_type TEXT NOT NULL DEFAULT '',
   body_preview TEXT NOT NULL DEFAULT '',
   attachments_json TEXT NOT NULL DEFAULT '',
-  has_attachments INTEGER NOT NULL DEFAULT 0,
+  has_attachments INTEGER,
   categories_json TEXT NOT NULL DEFAULT '',
   recurrence_json TEXT NOT NULL DEFAULT '',
   reminder_minutes INTEGER,
   detail_raw_json TEXT NOT NULL DEFAULT '',
+  unknown_fields TEXT NOT NULL DEFAULT '',
   field_clocks_json TEXT NOT NULL DEFAULT '',
   detail_as_of TEXT,
   detail_seen_at TEXT,
@@ -64,6 +69,7 @@ CREATE TABLE IF NOT EXISTS calendar_source_events (
 CREATE INDEX IF NOT EXISTS calendar_source_events_start ON calendar_source_events(account_id, start_at);
 CREATE INDEX IF NOT EXISTS calendar_source_events_start_any ON calendar_source_events(start_at);
 CREATE INDEX IF NOT EXISTS calendar_source_events_allday_any ON calendar_source_events(start_date) WHERE all_day=1;
+CREATE INDEX IF NOT EXISTS calendar_source_events_key ON calendar_source_events(event_key, account_id);
 CREATE INDEX IF NOT EXISTS calendar_source_events_ical ON calendar_source_events(ical_uid);
 CREATE INDEX IF NOT EXISTS calendar_source_events_composite ON calendar_source_events(composite_key);
 CREATE INDEX IF NOT EXISTS calendar_source_events_thread ON calendar_source_events(teams_thread_id);
@@ -85,6 +91,19 @@ CREATE TABLE IF NOT EXISTS calendar_covered_days (
   last_verified_at TEXT NOT NULL,
   PRIMARY KEY (source, account_id, day)
 );
+CREATE TABLE IF NOT EXISTS calendar_account_links (
+  source TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  method TEXT NOT NULL,
+  evidence INTEGER,
+  linked_at TEXT NOT NULL,
+  unlinked_at TEXT,
+  PRIMARY KEY (source, account_id)
+);
+CREATE INDEX IF NOT EXISTS calendar_account_links_principal ON calendar_account_links(principal_id);
+CREATE UNIQUE INDEX IF NOT EXISTS calendar_account_links_one_per_source
+  ON calendar_account_links(source, principal_id) WHERE unlinked_at IS NULL;
 CREATE TABLE IF NOT EXISTS calendar_matches (
   event_key TEXT NOT NULL,
   source TEXT NOT NULL,
