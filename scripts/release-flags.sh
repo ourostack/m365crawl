@@ -10,7 +10,7 @@
 #   scripts/release-flags.sh demote   marks the release as a prerelease and not latest, so users
 #                                     and brew do not resolve it as the newest. A release that does
 #                                     not exist is left alone.
-#   scripts/release-flags.sh settle   after every other check passed: a rehearsal must be a prerelease
+#   scripts/release-flags.sh settle   (the settle job, after every verification job passed): a rehearsal must be a prerelease
 #                                     and not latest; a stable release that an earlier flake demoted is
 #                                     restored (not prerelease, and latest unless a higher stable release
 #                                     exists: versions only move forward, so an old version never becomes
@@ -35,16 +35,18 @@ prerelease_flag() {
   fail "could not read the release $TAG: $out"
 }
 
-# higher_stable prints a published stable release tag (X.Y.Z, no hyphen) above $TAG, if any.
+# higher_stable prints a published stable release tag (vX.Y.Z, no hyphen) above $TAG, if any. It reads
+# the whole list before deciding, so nothing closes the pipe early.
 higher_stable() {
-  local mine="${TAG#v}" t
-  gh api "repos/$REPO/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' | while IFS= read -r t; do
-    [[ "$t" != *-* && "$t" != "$TAG" ]] || continue
-    if [[ "$(printf '%s\n%s\n' "${t#v}" "$mine" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" == "${t#v}" ]]; then
-      echo "$t"
-      break
-    fi
-  done
+  local mine="${TAG#v}" list top
+  list="$(gh api "repos/$REPO/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')" \
+    || fail "could not list the releases of $REPO"
+  top="$(printf '%s\n' "$list" | { grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' || true; } | { grep -vxF "$TAG" || true; } | sed 's/^v//' \
+    | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+  [[ -n "$top" && "$top" != "$mine" ]] || return 0
+  if [[ "$(printf '%s\n%s\n' "$top" "$mine" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" == "$top" ]]; then
+    echo "v$top"
+  fi
 }
 
 demote() {
@@ -153,6 +155,19 @@ STUB
   set_state true "" v0.10.0
   run settle v0.9.0
   [[ "$status" -eq 0 && -z "$(cat "$state/latest")" ]] || fail "selftest: v0.10.0 is higher than v0.9.0: $out"
+  # A long list is read in full: no early close of the pipe, and the highest one decides.
+  local many i
+  many=""
+  for i in $(seq 1 400); do many="$many v0.$i.0"; done
+  # shellcheck disable=SC2086 # the list is words on purpose
+  set_state true "" $many v1.2.4
+  run settle v0.5.0
+  [[ "$status" -eq 0 && "$(cat "$state/pre")" == false && -z "$(cat "$state/latest")" ]] || fail "selftest: with 401 releases, one higher stable release must stop it taking latest: $out"
+  grep -Fq "v1.2.4 is a higher stable release" <<<"$out" || fail "selftest: the highest release should be named: $out"
+  # shellcheck disable=SC2086
+  set_state true "" $many
+  run settle v9.0.0
+  [[ "$status" -eq 0 && "$(cat "$state/latest")" == v9.0.0 ]] || fail "selftest: with 400 lower releases it becomes latest: $out"
   set_state ""
   run settle v0.2.0
   [[ "$status" -ne 0 ]] && grep -Fq "no release for v0.2.0" <<<"$out" || fail "selftest: settling a missing release fails: $out"

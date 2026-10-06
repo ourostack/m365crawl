@@ -13,8 +13,8 @@
 # Checks, failing on the first mismatch: checksums, architecture of each
 # tarball, every sign-notarize.sh gate on each downloaded binary, Gatekeeper
 # acceptance after a quarantine attribute is added, and `teamscrawl --json version`
-# on the arm64 binary. Last, release flags (scripts/release-flags.sh settle): prerelease iff the
-# tag has a hyphen and never "latest"; a stable release that an earlier flake demoted is restored.
+# on the arm64 binary. The release flags are settled by the settle job (scripts/release-flags.sh
+# settle), after this job and the Windows jobs have passed.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,7 +66,4 @@ got_version="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load
 got_commit="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
 [[ "$got_version" == "$version" ]] || fail "version is '$got_version', expected '$version'"
 [[ "$got_commit" == "$EXPECT_COMMIT" ]] || fail "commit is '$got_commit', expected '$EXPECT_COMMIT'"
-echo "==> Release flags"
-# Last, so a release that an earlier flake demoted is restored only after every artifact check passed.
-TAG="$TAG" REPO="$REPO" "$here/release-flags.sh" settle
 echo "verify-release: $TAG verified ($got_version, $got_commit)"
