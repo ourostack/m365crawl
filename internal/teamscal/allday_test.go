@@ -46,3 +46,10 @@ func TestAllDayDates(t *testing.T) {
 		})
 	}
 }
+
+func TestMapEventAllDayKeyAbsentIsUnknownAndTimed(t *testing.T) {
+	e, notes, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","startTime":{"$date":"2026-03-10T00:00:00.000Z"},"endTime":{"$date":"2026-03-11T00:00:00.000Z"}}`), time.UTC)
+	if err != nil || e.AllDay.Known() || e.StartDate != "" || notes.AllDayUnaligned || e.Start.IsZero() {
+		t.Fatalf("err %v %+v %+v", err, e, notes)
+	}
+}

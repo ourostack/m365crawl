@@ -288,7 +288,7 @@ func TestAgendaHidesCancelledDeclinedMasters(t *testing.T) {
 	}
 	events := []Event{
 		mk("a", "Plain", func(*Event) {}),
-		mk("b", "Cancelled", func(e *Event) { e.Cancelled = true }),
+		mk("b", "Cancelled", func(e *Event) { e.Cancelled = TriTrue }),
 		mk("c", "Declined", func(e *Event) { e.Response = "declined" }),
 		mk("d", "Master", func(e *Event) { e.EventType = EventMaster }),
 		mk("e", "Searchable Zebra", func(e *Event) { e.Location = "Zebra Room" }),

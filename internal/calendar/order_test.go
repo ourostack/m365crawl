@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -55,6 +56,9 @@ func converge(t *testing.T, name string, copies []Event) Event {
 	return *first
 }
 
+// randomTri is a random flag: unknown, false or true.
+func randomTri(r *rand.Rand) Tri { return []Tri{TriUnknown, TriFalse, TriTrue}[r.Intn(3)] }
+
 func intp(n int) *int { return &n }
 
 func TestCaptureSmallFieldsConvergeInAnyArrivalOrder(t *testing.T) {
@@ -68,7 +72,7 @@ func TestCaptureSmallFieldsConvergeInAnyArrivalOrder(t *testing.T) {
 	thinCat := thin(t, t4)
 	thinCat.CategoriesJSON = `["C"]`
 	thinNoReminder := thin(t, t5) // states "no reminder is set"
-	thinNoReminder.ReminderStated = true
+	thinNoReminder.Unknown = without(thinNoReminder.Unknown, FieldReminder)
 	zero := thin(t, t3) // a reminder of zero minutes is a real value
 	zero.ReminderMinutes = intp(0)
 
@@ -177,8 +181,13 @@ func TestEveryEventFieldHasAGroup(t *testing.T) {
 		// Each unit names the fields it assigns: find them by assigning from a fully set copy.
 		full := reflect.New(typ).Elem()
 		for i := 0; i < typ.NumField(); i++ {
-			if f := full.Field(i); f.Kind() == reflect.String {
+			switch f := full.Field(i); {
+			case f.Kind() == reflect.String:
 				f.SetString("x")
+			case f.Type() == reflect.TypeOf(TriTrue):
+				f.Set(reflect.ValueOf(TriTrue))
+			case f.Type() == reflect.TypeOf(time.Time{}):
+				f.Set(reflect.ValueOf(time.Unix(1, 0)))
 			}
 		}
 		fullEvent := full.Interface().(Event)
@@ -239,11 +248,11 @@ func TestEveryEventFieldHasAGroup(t *testing.T) {
 			continue
 		}
 		_, inUnit := clocked[name]
-		raw := name == "DetailRawJSON" // clocked by captureRaw
-		if (g == groupDetail || g == groupSmall) && !inUnit && !raw {
+		raw := name == "DetailRawJSON" || name == "LastModified" // clocked by captureRaw, and the row's own clock
+		if (g == groupDetail || g == groupSmall || g == groupSchedule) && !inUnit && !raw {
 			t.Errorf("Event.%s is in group %s but no unit clocks it", name, g)
 		}
-		if g != groupDetail && g != groupSmall && inUnit {
+		if g != groupDetail && g != groupSmall && g != groupSchedule && inUnit {
 			t.Errorf("Event.%s is in group %s but unit %s clocks it", name, g, clocked[name])
 		}
 	}
@@ -261,9 +270,37 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	pick := func(vals ...string) string { return vals[r.Intn(len(vals))] }
 	e.Subject = pick("Sync A", "Sync B", "Sync C")
 	e.Location = pick("Fixture Room Alpha", "", "Fixture Room Beta")
-	e.Cancelled = r.Intn(5) == 0
-	e.IsOnlineMeeting = r.Intn(4) != 0
-	e.OnlineStated = r.Intn(2) == 0
+	e.Cancelled = randomTri(r)
+	e.IsOnlineMeeting = randomTri(r)
+	e.IsOrganizer, e.IsPrivate = randomTri(r), randomTri(r)
+	// The all-day block: known true carries dates, known false and unknown carry none.
+	e.AllDay = randomTri(r)
+	midnight := func(d string) time.Time { return mustTime(t, d+"T00:00:00Z") }
+	switch {
+	case e.AllDay == TriTrue:
+		// A known all-day copy carries instants that agree with its dates.
+		e.StartDate, e.EndDate = pick("2026-10-05", "2026-10-06"), pick("", "2026-10-07", "2026-10-08")
+		e.Start, e.End = midnight(e.StartDate), midnight(e.StartDate).Add(24*time.Hour)
+		if e.EndDate != "" {
+			e.End = midnight(e.EndDate)
+		}
+	case r.Intn(3) == 0:
+		e.Start, e.End = e.Start.Add(time.Hour), e.End.Add(2*time.Hour)
+	}
+	e.TimeZone, e.UTCOffset = pick("PacificSt", "UTC", ""), pick("", "-07:00", "+01:00")
+	e.Organizer, e.Response = pick("Alex Fixture", "", "Blake Fixture"), pick("accepted", "declined", "")
+	for _, f := range []struct {
+		name Field
+		ptr  *string
+	}{
+		{FieldSubject, &e.Subject}, {FieldLocation, &e.Location}, {FieldOrganizer, &e.Organizer},
+		{FieldResponse, &e.Response}, {FieldShowAs, &e.ShowAs}, {FieldTimeZone, &e.TimeZone}, {FieldUTCOffset, &e.UTCOffset},
+	} {
+		if r.Intn(4) == 0 {
+			*f.ptr = ""
+			e.Unknown = append(e.Unknown, f.name)
+		}
+	}
 	e.AttendeesJSON = pick("", "", attendeesOne, attendeesTwo, attendeesThree)
 	switch r.Intn(5) {
 	case 0:
@@ -284,7 +321,7 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	e.DialInConferenceID = pick("", "111", "222")
 	e.LocationsJSON = pick("", roomJSON)
 	e.AttachmentsJSON = pick("", `[{"name":"a"}]`)
-	e.HasAttachments = r.Intn(2) == 0
+	e.HasAttachments = randomTri(r)
 	e.CategoriesJSON = pick("", "", `["B"]`, `["C"]`, `[]`)
 	e.RecurrenceJSON = pick("", `{"p":1}`, `{"p":2}`)
 	switch r.Intn(5) {
@@ -293,14 +330,22 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	case 1:
 		e.ReminderMinutes = intp(15)
 	case 2:
-		e.ReminderStated = true // the source says no reminder is set
+		e.Unknown = without(e.Unknown, FieldReminder) // the source says no reminder is set
 	}
 	return e
 }
 
+// sweepSize is n sets, or many more with TEAMSCRAWL_SWEEP set (a local soak, not run in CI).
+func sweepSize(n int) int {
+	if os.Getenv("TEAMSCRAWL_SWEEP") != "" {
+		return n * 40
+	}
+	return n
+}
+
 func TestCaptureConvergesForRandomSubsetsOfGroups(t *testing.T) {
 	r := rand.New(rand.NewSource(20261005)) //nolint:gosec // a fixed seed makes the sweep reproducible, not secret
-	for n := 0; n < 1000; n++ {
+	for n := 0; n < sweepSize(1000); n++ {
 		size := 2 + r.Intn(3)
 		copies := make([]Event, size)
 		for i := range copies {
@@ -374,7 +419,9 @@ func TestCaptureMeetingLinksComeFromOneCopy(t *testing.T) {
 		copies := make([]Event, 2+r.Intn(3))
 		for i := range copies {
 			copies[i] = randomCopy(t, r)
-			copies[i].OnlineStated = false // clearing is covered elsewhere
+			if copies[i].IsOnlineMeeting.Is(false) {
+				copies[i].IsOnlineMeeting = TriUnknown // clearing is covered elsewhere
+			}
 			if r.Intn(2) == 0 {
 				copies[i].ShortJoinURL = "https://teams.example.test/short"
 				copies[i].DialInTollNumber = "+1 555 0101"
@@ -393,20 +440,20 @@ func TestCaptureMeetingLinksComeFromOneCopy(t *testing.T) {
 
 func TestCaptureNotOnlineIsAStatementNotADefault(t *testing.T) {
 	old := mustCapture(t, nil, rich(t, t1))
-	silent := thin(t, t3) // IsOnlineMeeting false is the zero value here
-	silent.IsOnlineMeeting = false
-	if got := mustCapture(t, &old, silent); got.OnlineMeetingURL == "" {
-		t.Fatal("a copy that does not state the flag cleared the links")
+	silent := thin(t, t3)
+	silent.IsOnlineMeeting = TriUnknown // the source does not say
+	if got := mustCapture(t, &old, silent); got.OnlineMeetingURL == "" || got.IsOnlineMeeting != TriTrue {
+		t.Fatalf("a copy that does not know the flag cleared the links or the flag: %+v", got)
 	}
 	stated := silent
-	stated.OnlineStated = true
+	stated.IsOnlineMeeting = TriFalse
 	got := mustCapture(t, &old, stated)
-	if got.OnlineMeetingURL != "" || got.OnlineStated {
-		t.Fatalf("a stated not-online must clear and the flag is input only: %q %v", got.OnlineMeetingURL, got.OnlineStated)
+	if got.OnlineMeetingURL != "" || got.IsOnlineMeeting != TriFalse {
+		t.Fatalf("a known not-online must clear the links and be stored: %q %v", got.OnlineMeetingURL, got.IsOnlineMeeting)
 	}
-	// An online copy that states the flag clears nothing.
+	// An online copy clears nothing.
 	online := thin(t, t3)
-	online.OnlineStated = true
+	online.IsOnlineMeeting = TriTrue
 	if got := mustCapture(t, &old, online); got.OnlineMeetingURL == "" {
 		t.Fatal("an online copy cleared the links")
 	}
@@ -416,7 +463,7 @@ func TestCaptureRefusesUnstorableEvents(t *testing.T) {
 	zeroStart := thin(t, t1)
 	zeroStart.Start = time.Time{}
 	noDate := thin(t, t1)
-	noDate.AllDay = true
+	noDate.AllDay = TriTrue
 	farEnd := thin(t, t1)
 	farEnd.End = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
 	farMod := thin(t, t1)
@@ -435,7 +482,7 @@ func TestCaptureRefusesUnstorableEvents(t *testing.T) {
 	// A valid all-day event and an unset End are fine.
 	ok := thin(t, t1)
 	ok.End = time.Time{}
-	ok.AllDay, ok.StartDate = true, "2026-10-05"
+	setAllDay(&ok, "2026-10-05", "")
 	if _, err := Capture(nil, ok); err != nil {
 		t.Fatal(err)
 	}

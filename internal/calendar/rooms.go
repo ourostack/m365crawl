@@ -13,12 +13,14 @@ const (
 	DetailFull  = "full"  // captured at the event's last modification
 )
 
-// DetailLevel reports how current e's detail is, comparing DetailAsOf with LastModified.
+// DetailLevel reports how current e's detail is, comparing DetailAsOf with LastModified. Detail
+// that is older than the last modification by no more than MergeClockSkew is full: two sources
+// stamp one version of an event a few seconds apart.
 func DetailLevel(e Event) string {
 	switch {
 	case e.DetailAsOf == nil:
 		return DetailBasic
-	case e.LastModified != nil && e.DetailAsOf.Before(*e.LastModified):
+	case e.LastModified != nil && e.LastModified.Sub(*e.DetailAsOf) > MergeClockSkew:
 		return DetailStale
 	}
 	return DetailFull

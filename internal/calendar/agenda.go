@@ -11,13 +11,15 @@ import (
 // AgendaQuery selects the events overlapping [From, To). All-day events are compared by date in
 // From's zone: the range covers the dates of From through the last instant before To.
 type AgendaQuery struct {
-	// AccountID limits the agenda to one account; empty means every account (events of different
-	// accounts are never merged with each other).
+	// AccountID limits the agenda to one principal: the account named and every account linked to
+	// the same principal. Empty means every account. Events of different principals are never
+	// merged with each other.
 	AccountID string
 	From, To  time.Time
 	// IncludeCancelled and IncludeDeclined show events the default agenda hides. IncludeMasters
-	// shows recurring masters, which are otherwise never listed.
-	IncludeCancelled, IncludeDeclined, IncludeMasters bool
+	// shows recurring masters, which are otherwise never listed. IncludeRemoved shows events a
+	// source saw go (see Merge, rule M0).
+	IncludeCancelled, IncludeDeclined, IncludeMasters, IncludeRemoved bool
 	// Query keeps events whose subject, organizer or location contains it, ignoring case.
 	Query string
 }
@@ -31,67 +33,94 @@ type AgendaResult struct {
 	// AsOf is the oldest verification time among the sources and covered days that cover the range;
 	// zero when nothing covers it.
 	AsOf time.Time
+	// Unlinked lists the accounts in scope of sources other than Teams that have no active link, so
+	// their events are not merged with any Teams account's. Sorted; nil when there are none.
+	Unlinked []string
 }
 
 // AgendaItem is one merged event and the key it is stored under.
 type AgendaItem struct {
-	Event
+	Merged
 	Key string
+	// Principal is the account the event is grouped under: a Teams account, or the account itself
+	// when nothing links it.
+	Principal string
+	// Accounts lists the accounts whose rows are in the group, sorted.
+	Accounts []string
 }
 
-// Agenda returns the merged events overlapping the query's range, sorted by start. Events are
-// merged across sources by key within an account. Cancelled, declined and master events are left
-// out unless the query asks for them.
+// Agenda returns the merged events overlapping the query's range, sorted by start. It loads in
+// two steps, so a meeting that one source holds as all-day and another as timed, or that one
+// source saw go, is judged as one event: it finds the (principal, key) groups that have a row
+// near the range, loads every row, live and removed, of those groups, merges each group, and only
+// then applies the overlap test, the visibility rules and the removal rule to the merged event.
+// Events are merged across sources by key within a principal. Cancelled, declined, master and
+// removed events are left out unless the query asks for them.
 func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error) {
 	var res AgendaResult
+	principals, err := LoadPrincipals(ctx, db)
+	if err != nil {
+		return res, err
+	}
+	scope := principals.Resolve(q.AccountID)
 	fromDate := q.From.Format(dateLayout)
 	toDate := q.To.Add(-time.Nanosecond).In(q.From.Location()).Format(dateLayout)
-	rows, err := loadEvents(ctx, db, q.AccountID, q.From, q.To, fromDate, toDate)
+	groups, err := loadGroups(ctx, db, principals, scope, q.From, q.To, fromDate, toDate)
 	if err != nil {
 		return res, err
 	}
-	windows, err := loadWindows(ctx, db, q.AccountID)
+	windows, err := loadWindows(ctx, db, scope)
 	if err != nil {
 		return res, err
 	}
-	days, err := loadCoveredDays(ctx, db, q.AccountID)
+	days, err := loadCoveredDays(ctx, db, scope)
 	if err != nil {
 		return res, err
 	}
 	if !q.To.After(q.From) {
 		return res, nil
 	}
-	res.Gap, res.AsOf = coverage(windows, days, q.From, q.To)
+	res.Gap, res.AsOf = coverage(windows, days, principals, q.From, q.To)
 	fresh := map[string]map[Source]time.Time{}
+	unlinked := map[string]bool{}
 	for _, w := range windows {
-		if fresh[w.AccountID] == nil {
-			fresh[w.AccountID] = map[Source]time.Time{}
+		p := principals.Of(w.AccountID)
+		if fresh[p] == nil {
+			fresh[p] = map[Source]time.Time{}
 		}
-		fresh[w.AccountID][w.Source] = w.CacheFreshAt
-	}
-	type groupKey struct{ account, key string }
-	groups := map[groupKey][]Event{}
-	for _, r := range rows {
-		if overlaps(r.Event, q.From, q.To, fromDate, toDate) {
-			k := groupKey{r.AccountID, r.key}
-			groups[k] = append(groups[k], r.Event)
+		fresh[p][w.Source] = w.CacheFreshAt
+		if w.Source != SourceTeams && p == w.AccountID {
+			unlinked[w.AccountID] = true
 		}
 	}
+	for a := range unlinked {
+		res.Unlinked = append(res.Unlinked, a)
+	}
+	sort.Strings(res.Unlinked)
 	needle := strings.ToLower(q.Query)
 	for k, g := range groups {
-		m := Merge(g, fresh[k.account])
-		if !visible(m, q, needle) {
+		m := Merge(g, fresh[k.principal])
+		if m.Removed && !q.IncludeRemoved || !overlaps(m.Event, q.From, q.To, fromDate, toDate) || !visible(m.Event, q, needle) {
 			continue
 		}
-		res.Items = append(res.Items, AgendaItem{Event: m, Key: k.key})
+		accounts := map[string]bool{}
+		for _, r := range g {
+			accounts[r.AccountID] = true
+		}
+		item := AgendaItem{Merged: m, Key: k.key, Principal: k.principal}
+		for a := range accounts {
+			item.Accounts = append(item.Accounts, a)
+		}
+		sort.Strings(item.Accounts)
+		res.Items = append(res.Items, item)
 	}
 	sort.Slice(res.Items, func(i, j int) bool {
 		a, b := res.Items[i], res.Items[j]
 		if sa, sb := sortStart(a.Event, q.From), sortStart(b.Event, q.From); !sa.Equal(sb) {
 			return sa.Before(sb)
 		}
-		if a.AllDay != b.AllDay {
-			return a.AllDay
+		if aa, ba := a.AllDay.Is(true), b.AllDay.Is(true); aa != ba {
+			return aa
 		}
 		if a.Subject != b.Subject {
 			return a.Subject < b.Subject
@@ -99,17 +128,20 @@ func Agenda(ctx context.Context, db *sql.DB, q AgendaQuery) (AgendaResult, error
 		if a.Key != b.Key {
 			return a.Key < b.Key
 		}
-		return a.AccountID < b.AccountID
+		return a.Principal < b.Principal
 	})
 	return res, nil
 }
+
+// groupKey names one event of one principal.
+type groupKey struct{ principal, key string }
 
 // visible applies the query's filters to a merged event.
 func visible(e Event, q AgendaQuery, needle string) bool {
 	switch {
 	case e.EventType == EventMaster && !q.IncludeMasters:
 		return false
-	case e.Cancelled && !q.IncludeCancelled:
+	case e.Cancelled.Is(true) && !q.IncludeCancelled:
 		return false
 	case e.Response == "declined" && !q.IncludeDeclined:
 		return false
@@ -124,9 +156,10 @@ func visible(e Event, q AgendaQuery, needle string) bool {
 	return false
 }
 
-// overlaps reports whether e touches [from, to).
+// overlaps reports whether e touches [from, to). An event whose all-day flag is unknown is timed
+// here: its instants decide.
 func overlaps(e Event, from, to time.Time, fromDate, toDate string) bool {
-	if e.AllDay {
+	if e.AllDay.Is(true) {
 		return e.StartDate <= toDate && (e.EndDate > fromDate || e.StartDate >= fromDate)
 	}
 	return e.Start.Before(to) && (e.End.After(from) || e.Start.Equal(from))
@@ -134,7 +167,7 @@ func overlaps(e Event, from, to time.Time, fromDate, toDate string) bool {
 
 // sortStart is the instant an event sorts by: its start, or midnight of its date in loc's zone.
 func sortStart(e Event, ref time.Time) time.Time {
-	if e.AllDay {
+	if e.AllDay.Is(true) {
 		t, _ := time.ParseInLocation(dateLayout, e.StartDate, ref.Location())
 		return t
 	}
@@ -150,19 +183,21 @@ type coveredDay struct {
 }
 
 // coverage reports whether any part of [from, to) is uncovered, and the oldest verification time
-// among what covers it. Coverage is keyed by (source, account) and judged per account. Within an
-// account, a source with covered-day rows covers exactly those days (dates in from's zone) and a
-// source without any covers its whole window; sources of one account complement each other. A day
-// is a gap when any account in scope does not cover it, so an all-accounts query never hides an
-// account that skipped the day. With nothing in scope every day is a gap.
-func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool, asOf time.Time) {
+// among what covers it. Coverage is recorded by (source, account) and judged per principal. Within
+// a principal, a source with covered-day rows covers exactly those days (dates in from's zone) and
+// a source without any covers its whole window; the sources and accounts of one principal
+// complement each other, so a day covered by either the Teams days or the Outlook days is covered.
+// A day is a gap when any principal in scope does not cover it, so an all-accounts query never
+// hides an account that skipped the day; an unlinked account is its own principal and is judged
+// alone. With nothing in scope every day is a gap.
+func coverage(windows []Window, days []coveredDay, p Principals, from, to time.Time) (gap bool, asOf time.Time) {
 	type srcKey struct {
 		source  Source
 		account string
 	}
 	type accountCover struct {
-		verified map[string]time.Time // date -> newest verification across the account's sources
-		spans    []Window             // windows of the account's sources that have no covered days
+		verified map[string]time.Time // date -> newest verification across the principal's sources
+		spans    []Window             // windows of the principal's sources that have no covered days
 	}
 	withDays := map[srcKey]bool{}
 	accounts := map[string]*accountCover{}
@@ -174,13 +209,13 @@ func coverage(windows []Window, days []coveredDay, from, to time.Time) (gap bool
 	}
 	for _, d := range days {
 		withDays[srcKey{d.Source, d.AccountID}] = true
-		c := of(d.AccountID)
+		c := of(p.Of(d.AccountID))
 		if d.LastVerifiedAt.After(c.verified[d.Day]) {
 			c.verified[d.Day] = d.LastVerifiedAt
 		}
 	}
 	for _, w := range windows {
-		c := of(w.AccountID)
+		c := of(p.Of(w.AccountID))
 		if !withDays[srcKey{w.Source, w.AccountID}] {
 			c.spans = append(c.spans, w)
 		}
@@ -243,7 +278,7 @@ func coveredBySpans(windows []Window, from, to time.Time) bool {
 	return !cur.Before(to)
 }
 
-// eventQuery is one SELECT of loadEvents with its bound arguments.
+// eventQuery is one SELECT of loadGroups with its bound arguments.
 type eventQuery struct {
 	sql  string
 	args []any
@@ -256,30 +291,35 @@ const (
 	dateGlob = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
 )
 
-// eventQueries builds the SELECTs that read the live events that can overlap [from, to), so memory
-// does not grow with the archive. The predicates mirror overlaps with bound parameters; stored
-// instants have millisecond precision, so the instant bounds are widened to whole milliseconds
-// (from down, to up) and the caller's exact overlaps check decides the edge.
+// eventQueries builds the SELECTs that read the rows, live and removed, that can overlap
+// [from, to), so memory does not grow with the archive. The predicates mirror overlaps with bound
+// parameters; stored instants have millisecond precision, so the instant bounds are widened to
+// whole milliseconds (from down, to up) and the caller's exact overlaps check decides the edge. An
+// unknown all-day flag (NULL) reads as timed, so such a row is found by its instants and never
+// silently dropped.
 //
 // Timed and all-day events are read by two queries, not one OR, so each can search its own index
-// (account_id, start_at) or start_at, and the partial all-day index on start_date; the account predicate is present only when an
-// account is given.
-func eventQueries(cols []column, accountID string, from, to time.Time, fromDate, toDate string) []eventQuery {
+// (account_id, start_at) or start_at, and the partial all-day index on start_date; the account
+// predicate is present only when accounts are given.
+func eventQueries(cols []column, accounts []string, from, to time.Time, fromDate, toDate string) []eventQuery {
 	fromText := formatTime(from.UTC().Truncate(time.Millisecond))
 	toText := formatTime(to.UTC().Truncate(time.Millisecond).Add(time.Millisecond))
 	account, args := "", []any(nil)
-	if accountID != "" {
-		account, args = " AND account_id=?", []any{accountID}
+	if len(accounts) > 0 {
+		account = " AND account_id IN (" + placeholders(len(accounts)) + ")"
+		for _, a := range accounts {
+			args = append(args, a)
+		}
 	}
 	with := func(more ...any) []any { return append(append([]any(nil), args...), more...) }
 	return []eventQuery{
 		{
-			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day<>1
+			sql: selectSQL(cols, "COALESCE(all_day,0)<>1"+account+`
 	  AND start_at < ? AND (end_at > ? OR start_at >= ?)`),
 			args: with(toText, fromText, fromText),
 		},
 		{
-			sql: selectSQL(cols, "removed_at IS NULL"+account+` AND all_day=1
+			sql: selectSQL(cols, "all_day=1"+account+`
 	  AND start_date <= ? AND (end_date > ? OR start_date >= ?)`),
 			args: with(toDate, fromDate, fromDate),
 		},
@@ -298,7 +338,7 @@ func checkQueries() []eventQuery {
 	return []eventQuery{
 		count("start_at<>'' AND NOT (start_at GLOB '" + timeGlob + "')"),
 		count("all_day=1 AND (start_date='' OR NOT (start_date GLOB '" + dateGlob + "'))"),
-		count("all_day<>1 AND start_at=''"),
+		count("COALESCE(all_day,0)<>1 AND start_at=''"),
 	}
 }
 
@@ -319,48 +359,95 @@ func CheckStoredTimes(ctx context.Context, db *sql.DB) (int, error) {
 	return bad, nil
 }
 
-// loadEvents runs eventQueries and returns every row they select. A stored time that does not
-// parse fails the load when its row is scanned, so a corrupt row inside the window is an error,
-// not an omission. A corrupt start that sorts outside the window is not read here; writes refuse
-// such events and CheckStoredTimes counts the ones already stored.
-func loadEvents(ctx context.Context, db *sql.DB, accountID string, from, to time.Time, fromDate, toDate string) ([]keyedEvent, error) {
-	cols := selectColumns(false)
-	var out []keyedEvent
-	for _, q := range eventQueries(cols, accountID, from, to, fromDate, toDate) {
-		rows, err := db.QueryContext(ctx, q.sql, q.args...)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			e, err := scanKeyed(rows, cols)
-			if err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			out = append(out, e)
-		}
-		err = rowsErr(rows)
-		_ = rows.Close()
-		if err != nil {
-			return nil, err
-		}
+// queryKeyed runs one SELECT built with selectSQL and scans its rows. A stored time that does not
+// parse fails the load when its row is scanned, so a corrupt row inside the window is an error, not
+// an omission.
+func queryKeyed(ctx context.Context, db *sql.DB, cols []column, q eventQuery) ([]keyedEvent, error) {
+	rows, err := db.QueryContext(ctx, q.sql, q.args...)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.Source != b.Source {
-			return a.Source < b.Source
+	defer func() { _ = rows.Close() }()
+	var out []keyedEvent
+	for rows.Next() {
+		e, err := scanKeyed(rows, cols)
+		if err != nil {
+			return nil, err
 		}
-		if a.AccountID != b.AccountID {
-			return a.AccountID < b.AccountID
-		}
-		return a.key < b.key
-	})
-	return out, nil
+		out = append(out, e)
+	}
+	return out, rowsErr(rows)
 }
 
-func loadWindows(ctx context.Context, db *sql.DB, accountID string) ([]Window, error) {
-	rows, err := db.QueryContext(ctx, `SELECT source, account_id, window_start, window_end, synced_at, cache_fresh_at
-	  FROM calendar_sources WHERE (?='' OR account_id=?) ORDER BY source, account_id`, accountID, accountID)
+// keyChunk bounds the keys in one IN list, well under SQLite's variable limit.
+const keyChunk = 400
+
+// loadGroups is the two-step load. Step one finds the candidate groups: (principal, key) of every
+// row of the accounts in scope, live or removed, that can overlap the range, with all-day rows
+// widened by a day on each side because an all-day row and a timed row of one meeting can fall on
+// different sides of an edge. Step two loads every row of those keys, of every account of the
+// principals involved, and groups them by (principal, key). A corrupt start that sorts outside the
+// range is not read; writes refuse such events and CheckStoredTimes counts the ones already stored.
+func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, from, to time.Time, fromDate, toDate string) (map[groupKey][]Event, error) {
+	first, _ := time.Parse(dateLayout, fromDate)
+	last, _ := time.Parse(dateLayout, toDate)
+	idCols := []column{eventColumns[1]} // account_id
+	want := map[groupKey]bool{}
+	var keys []string
+	for _, q := range eventQueries(idCols, scope, from, to, first.AddDate(0, 0, -1).Format(dateLayout), last.AddDate(0, 0, 1).Format(dateLayout)) {
+		found, err := queryKeyed(ctx, db, idCols, q)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range found {
+			if g := (groupKey{p.Of(r.AccountID), r.key}); !want[g] {
+				want[g] = true
+				keys = append(keys, r.key)
+			}
+		}
+	}
+	sort.Strings(keys)
+	cols := selectColumns(false)
+	groups := map[groupKey][]Event{}
+	for len(keys) > 0 {
+		n := min(len(keys), keyChunk)
+		args := make([]any, n)
+		for i, k := range keys[:n] {
+			args[i] = k
+		}
+		found, err := queryKeyed(ctx, db, cols, eventQuery{sql: selectSQL(cols, "event_key IN ("+placeholders(n)+")"), args: args})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range found {
+			if g := (groupKey{p.Of(r.AccountID), r.key}); want[g] {
+				groups[g] = append(groups[g], r.Event)
+			}
+		}
+		keys = keys[n:]
+	}
+	for _, rows := range groups {
+		sort.Slice(rows, func(i, j int) bool { return rows[i].Source < rows[j].Source })
+	}
+	return groups, nil
+}
+
+// accountClause is the WHERE condition that limits a table to accounts; empty means all.
+func accountClause(accounts []string) (string, []any) {
+	if len(accounts) == 0 {
+		return "1", nil
+	}
+	args := make([]any, len(accounts))
+	for i, a := range accounts {
+		args[i] = a
+	}
+	return "account_id IN (" + placeholders(len(accounts)) + ")", args
+}
+
+func loadWindows(ctx context.Context, db *sql.DB, accounts []string) ([]Window, error) {
+	where, args := accountClause(accounts)
+	rows, err := db.QueryContext(ctx, strings.Replace(`SELECT source, account_id, window_start, window_end, synced_at, cache_fresh_at
+	  FROM calendar_sources WHERE @where ORDER BY source, account_id`, "@where", where, 1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -379,9 +466,10 @@ func loadWindows(ctx context.Context, db *sql.DB, accountID string) ([]Window, e
 	return out, rowsErr(rows)
 }
 
-func loadCoveredDays(ctx context.Context, db *sql.DB, accountID string) ([]coveredDay, error) {
-	rows, err := db.QueryContext(ctx, `SELECT source, account_id, day, first_verified_at, last_verified_at
-	  FROM calendar_covered_days WHERE (?='' OR account_id=?) ORDER BY source, account_id, day`, accountID, accountID)
+func loadCoveredDays(ctx context.Context, db *sql.DB, accounts []string) ([]coveredDay, error) {
+	where, args := accountClause(accounts)
+	rows, err := db.QueryContext(ctx, strings.Replace(`SELECT source, account_id, day, first_verified_at, last_verified_at
+	  FROM calendar_covered_days WHERE @where ORDER BY source, account_id, day`, "@where", where, 1), args...)
 	if err != nil {
 		return nil, err
 	}

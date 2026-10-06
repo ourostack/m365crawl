@@ -2,6 +2,15 @@
 // the keys that identify one occurrence across sources, the merge that picks the freshest copy,
 // and the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no
 // source adapter and no archive code; callers hand it a *sql.DB opened with SchemaDDL.
+//
+// Contract for mappers. Every Event a mapper hands in must list in Unknown each vocabulary field
+// the source did not state, then set UnknownDeclared; ValidateEvent refuses an event without it,
+// so forgetting Unknown cannot silently mean "everything is known". A mapper test calls
+// AssertEveryFieldClassified to prove each field is stated, listed unknown, or deliberately empty.
+// A known all-day event carries instants that agree with its dates. Keys never move: the date form
+// is used for a known all-day flag, or an unknown one whose instants look all-day, and a source
+// row keeps the key it was first stored under. Limits of Capture (equal-time ties, copies with no
+// time, the block stash) are on Capture.
 package calendar
 
 import (
@@ -57,7 +66,7 @@ type Event struct {
 	Start, End time.Time
 	// AllDay events carry dates, never instants: StartDate and EndDate are YYYY-MM-DD, and EndDate
 	// is exclusive (the iCalendar DTEND convention). An empty or non-later EndDate means one day.
-	AllDay                 bool
+	AllDay                 Tri
 	StartDate, EndDate     string
 	TimeZone               string
 	TimeZoneIANA           string
@@ -65,12 +74,14 @@ type Event struct {
 	Subject                string
 	Organizer              string
 	OrganizerAddress       string
-	IsOrganizer, IsPrivate bool
-	Cancelled              bool
+	IsOrganizer, IsPrivate Tri
+	Cancelled              Tri
 	Response, ShowAs       string
-	IsOnlineMeeting        bool
-	Location               string
-	LastModified           *time.Time
+	// IsOnlineMeeting known false is the statement "this is not an online meeting", which outdates
+	// older meeting links; unknown says nothing.
+	IsOnlineMeeting Tri
+	Location        string
+	LastModified    *time.Time
 
 	// Detail group: sources fetch these only for events the user opened, so a later copy often
 	// lacks them. Capture compares each unit against its own clock, not LastModified.
@@ -86,23 +97,25 @@ type Event struct {
 	BodyType           string
 	BodyPreview        string
 	AttachmentsJSON    string
-	HasAttachments     bool
+	HasAttachments     Tri
 	CategoriesJSON     string
 	RecurrenceJSON     string
 	// ReminderMinutes is the reminder lead time; zero minutes is a real value. nil means no
-	// reminder is set, or that the copy did not state one: see ReminderStated.
+	// reminder is set when "reminder" is not in Unknown, and that the copy did not say when it is.
 	ReminderMinutes *int
-	// ReminderStated marks an incoming copy that states the reminder even when ReminderMinutes is
-	// nil, that is, the source said no reminder is set (Teams: isReminderSet false). A copy with a
-	// non-nil ReminderMinutes always states it. Input only: Capture clears it, and stored rows carry
-	// the reminder clock in FieldClocksJSON instead.
-	ReminderStated bool
-	// OnlineStated marks an incoming copy that states whether the event is an online meeting, so
-	// IsOnlineMeeting false means "not online" and not merely "not said". Only such a copy outdates
-	// older meeting links. Input only: Capture clears it in the stored row.
-	OnlineStated bool
 	// DetailRawJSON is the whole scrubbed record of the copy that last supplied detail.
 	DetailRawJSON string
+	// Unknown names the non-flag fields this copy's source did not supply (see Field): sorted, no
+	// duplicates (NormalizeUnknown). A field is known when the source stated it, even as empty;
+	// unknown when it could not or did not say. The six flags carry their own unknown in Tri. Capture
+	// never lets an unknown field replace or clear a known one, and a stored row's Unknown is what no
+	// copy has stated. start, end, last_modified and the identity fields are never unknown.
+	Unknown []Field
+	// UnknownDeclared is set by a mapper after it has computed Unknown, to say that every
+	// vocabulary field is either stated or listed in Unknown. An empty Unknown means "everything
+	// known", the unsafe default for a mapper that forgot it, so ValidateEvent refuses an event
+	// without the declaration. Input only: Capture clears it in the stored row.
+	UnknownDeclared bool
 
 	// Bookkeeping. DetailAsOf is the newest LastModified of a copy that stated attendees or a body;
 	// nil when no such copy was captured.
