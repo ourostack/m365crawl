@@ -81,59 +81,68 @@ type filledField struct {
 	AsOf  time.Time `json:"as_of,omitzero"`
 }
 
+// overriddenField says both copies of an event stated a field with different values, and which
+// source the merged value came from ("union" for a merged list).
+type overriddenField struct {
+	Field string    `json:"field"`
+	From  string    `json:"from"`
+	AsOf  time.Time `json:"as_of,omitzero"`
+}
+
 // calendarItem is one event of the agenda. A known flag is printed true or false; an unknown flag
 // has no key and its name is in unknown_fields. An empty string that is not named in unknown_fields
 // means known and empty.
 type calendarItem struct {
-	EventID            string         `json:"event_id"`
-	EventKey           string         `json:"event_key"`
-	AccountID          string         `json:"account_id"`
-	TenantID           string         `json:"tenant_id,omitempty"`
-	UserID             string         `json:"user_id,omitempty"`
-	Sources            []string       `json:"sources"`
-	ICalUID            string         `json:"ical_uid,omitempty"`
-	SeriesKey          string         `json:"series_key,omitempty"`
-	EventType          string         `json:"event_type,omitempty"`
-	Subject            string         `json:"subject,omitempty"`
-	Start              time.Time      `json:"start"`
-	End                time.Time      `json:"end"`
-	StartLocal         string         `json:"start_local,omitempty"`
-	EndLocal           string         `json:"end_local,omitempty"`
-	AllDay             *bool          `json:"all_day,omitempty"`
-	StartDate          string         `json:"start_date,omitempty"`
-	EndDate            string         `json:"end_date,omitempty"`
-	TimeZone           string         `json:"time_zone,omitempty"`
-	TimeZoneIANA       string         `json:"time_zone_iana,omitempty"`
-	Status             string         `json:"status"`
-	Cancelled          *bool          `json:"cancelled,omitempty"`
-	Response           string         `json:"response,omitempty"`
-	ShowAs             string         `json:"show_as,omitempty"`
-	IsOrganizer        *bool          `json:"is_organizer,omitempty"`
-	IsPrivate          *bool          `json:"is_private,omitempty"`
-	OrganizerName      string         `json:"organizer_name,omitempty"`
-	OrganizerAddress   string         `json:"organizer_address,omitempty"`
-	IsOnlineMeeting    *bool          `json:"is_online_meeting,omitempty"`
-	JoinURL            string         `json:"join_url,omitempty"`
-	ShortJoinURL       string         `json:"short_join_url,omitempty"`
-	DialInConferenceID string         `json:"dial_in_conference_id,omitempty"`
-	DialInTollNumber   string         `json:"dial_in_toll_number,omitempty"`
-	MeetingChatID      string         `json:"meeting_chat_id,omitempty"`
-	Location           string         `json:"location,omitempty"`
-	Rooms              []calendarRoom `json:"rooms,omitempty"`
-	RoomsAsOf          time.Time      `json:"rooms_as_of,omitzero"`
-	AttendeeCount      *int           `json:"attendee_count,omitempty"`
-	HasAttachments     *bool          `json:"has_attachments,omitempty"`
-	BodyPreview        string         `json:"body_preview,omitempty"`
-	HasRecap           bool           `json:"has_recap,omitempty"`
-	ActionItemCount    int            `json:"action_item_count,omitempty"`
-	RecordingCount     int            `json:"recording_count,omitempty"`
-	DetailLevel        string         `json:"detail_level"`
-	DetailAsOf         time.Time      `json:"detail_as_of,omitzero"`
-	LastModified       time.Time      `json:"last_modified,omitzero"`
-	Removed            bool           `json:"removed,omitempty"`
-	RemovedBy          []string       `json:"removed_by,omitempty"`
-	UnknownFields      []string       `json:"unknown_fields,omitempty"`
-	FilledFields       []filledField  `json:"filled_fields,omitempty"`
+	EventID            string            `json:"event_id"`
+	EventKey           string            `json:"event_key"`
+	AccountID          string            `json:"account_id"`
+	TenantID           string            `json:"tenant_id,omitempty"`
+	UserID             string            `json:"user_id,omitempty"`
+	Sources            []string          `json:"sources"`
+	ICalUID            string            `json:"ical_uid,omitempty"`
+	SeriesKey          string            `json:"series_key,omitempty"`
+	EventType          string            `json:"event_type,omitempty"`
+	Subject            string            `json:"subject,omitempty"`
+	Start              time.Time         `json:"start"`
+	End                time.Time         `json:"end"`
+	StartLocal         string            `json:"start_local,omitempty"`
+	EndLocal           string            `json:"end_local,omitempty"`
+	AllDay             *bool             `json:"all_day,omitempty"`
+	StartDate          string            `json:"start_date,omitempty"`
+	EndDate            string            `json:"end_date,omitempty"`
+	TimeZone           string            `json:"time_zone,omitempty"`
+	TimeZoneIANA       string            `json:"time_zone_iana,omitempty"`
+	Status             string            `json:"status"`
+	Cancelled          *bool             `json:"cancelled,omitempty"`
+	Response           string            `json:"response,omitempty"`
+	ShowAs             string            `json:"show_as,omitempty"`
+	IsOrganizer        *bool             `json:"is_organizer,omitempty"`
+	IsPrivate          *bool             `json:"is_private,omitempty"`
+	OrganizerName      string            `json:"organizer_name,omitempty"`
+	OrganizerAddress   string            `json:"organizer_address,omitempty"`
+	IsOnlineMeeting    *bool             `json:"is_online_meeting,omitempty"`
+	JoinURL            string            `json:"join_url,omitempty"`
+	ShortJoinURL       string            `json:"short_join_url,omitempty"`
+	DialInConferenceID string            `json:"dial_in_conference_id,omitempty"`
+	DialInTollNumber   string            `json:"dial_in_toll_number,omitempty"`
+	MeetingChatID      string            `json:"meeting_chat_id,omitempty"`
+	Location           string            `json:"location,omitempty"`
+	Rooms              []calendarRoom    `json:"rooms,omitempty"`
+	RoomsAsOf          time.Time         `json:"rooms_as_of,omitzero"`
+	AttendeeCount      *int              `json:"attendee_count,omitempty"`
+	HasAttachments     *bool             `json:"has_attachments,omitempty"`
+	BodyPreview        string            `json:"body_preview,omitempty"`
+	HasRecap           bool              `json:"has_recap,omitempty"`
+	ActionItemCount    int               `json:"action_item_count,omitempty"`
+	RecordingCount     int               `json:"recording_count,omitempty"`
+	DetailLevel        string            `json:"detail_level"`
+	DetailAsOf         time.Time         `json:"detail_as_of,omitzero"`
+	LastModified       time.Time         `json:"last_modified,omitzero"`
+	Removed            bool              `json:"removed,omitempty"`
+	RemovedBy          []string          `json:"removed_by,omitempty"`
+	UnknownFields      []string          `json:"unknown_fields,omitempty"`
+	FilledFields       []filledField     `json:"filled_fields,omitempty"`
+	OverriddenFields   []overriddenField `json:"overridden_fields,omitempty"`
 }
 
 func triPtr(t calendar.Tri) *bool {
@@ -222,6 +231,9 @@ func itemOf(r store.CalendarRow) calendarItem {
 	}
 	for _, f := range r.Filled {
 		it.FilledFields = append(it.FilledFields, filledField{Field: string(f.Field), From: string(f.Source), AsOf: asOf(f.AsOf)})
+	}
+	for _, o := range r.Overridden {
+		it.OverriddenFields = append(it.OverriddenFields, overriddenField{Field: string(o.Field), From: o.From, AsOf: asOf(o.AsOf)})
 	}
 	return it
 }

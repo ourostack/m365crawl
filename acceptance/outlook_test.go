@@ -26,7 +26,9 @@ import (
 // The Outlook real-store checks (plan-calendar-outlook.md, O12). They read the store under
 // TEAMSCRAWL_OUTLOOK_ROOT (<root>/<profile>/HxStore.hxd) and skip without it. They log counts,
 // field names, class and tag numbers, durations and sizes only: never a string from the store.
-// Every Outlook check starts with outlookSyncs, so the syncs and their peak RSS come first.
+// Every Outlook check starts with outlookSyncs, so the syncs and their peak RSS come first. The peak
+// RSS is the whole process's, so make acceptance-calendar runs TestRealOutlookCost in a process of
+// its own: in a shared process the other checks' in-process store scans set the peak first.
 //
 // Fail: the container and guard counts, the twin rate, the unwalked-byte ids, the cost budgets, the
 // safety rules and the append-only rule. Report: agreement counts, histograms, E15, the watch

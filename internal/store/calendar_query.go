@@ -168,7 +168,7 @@ func (s *Store) unlinkedRecaps(ctx context.Context, f CalendarFilter, p calendar
 
 // rowOf adds what is derived at read time to a merged event.
 func (s *Store) rowOf(ctx context.Context, it calendar.AgendaItem, p calendar.Principals, rec *recordingCache) (CalendarRow, error) {
-	row := CalendarRow{AgendaItem: it, EventID: EventID(it.Principal, it.Key), Rooms: calendar.Rooms(it.Event), DetailLevel: calendar.DetailLevel(it.Event)}
+	row := CalendarRow{AgendaItem: it, EventID: EventID(it.Principal, it.Key), Rooms: calendar.MergedRooms(it.Merged), DetailLevel: calendar.DetailLevel(it.Event)}
 	accounts := p.Accounts(it.Principal)
 	if it.ICalUID != "" {
 		recaps, items, err := s.recapCounts(ctx, accounts, it)
