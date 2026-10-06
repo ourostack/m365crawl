@@ -89,6 +89,8 @@ Teams caches the days the user looked at, not a range, so coverage is a set of d
 
 Teams fetches an event's attendees, body and rooms only for events the user opened, so a later copy is often thinner than an earlier one. The calendar tables keep the richest copy: each part of an event is compared against its own clock, a newer copy replaces it, an older or empty copy never does, and `detail_as_of` says how old the detail is. Recaps are merged field group by field group in the same spirit, and an action item a newer copy no longer lists is marked superseded, never deleted. Recaps link to their event by `iCalUID`, or by time when they have none.
 
+Two profiles can hold the same account, so an event is gone only when none of them still holds it. A sync moves the freshness of the accounts whose cache it read, no others. What the derivation cannot use (a record it cannot map, an event the core refuses) is remembered per record, with a reason, and counted again by every sync until the record changes; a sync that finds the cache unchanged still reports it. The derivation runs in a savepoint, so a calendar failure is a counted loss and the messages of the same sync are kept.
+
 The archive remembers which mapper and which scrub rules the calendar was derived under (`meta.calendar_derivation`). The first sync after an upgrade from an archive without calendar tables fills them from the records it already holds, without the cache. A new mapper version maps every record again, and changed scrub rules blank the derived rows and rebuild them, so nothing an older rule let through survives in a derived copy.
 
 ## Step 8: the archive and full-text search

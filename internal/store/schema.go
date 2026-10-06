@@ -162,5 +162,22 @@ create virtual table if not exists message_fts using fts5(message_key unindexed,
 create virtual table if not exists conversation_fts using fts5(conversation_id unindexed, title);
 `
 
+// calendarSchemaDDL is what the sync adds to the calendar tables of internal/calendar.
+// calendar_losses remembers, per record, what the derivation could not use, so every sync can count
+// what is still missing, and why, without mapping the record again; it holds a reason (a field
+// name or a shape), never content.
+const calendarSchemaDDL = `
+create table if not exists calendar_losses(
+  source text not null,
+  database text not null,
+  store text not null,
+  key_json text not null,
+  kind text not null,
+  reason text not null,
+  n integer not null,
+  primary key(source, database, store, key_json, kind, reason)
+);
+`
+
 // schemaDDL is every table the archive has: the Teams tables above and the calendar tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL

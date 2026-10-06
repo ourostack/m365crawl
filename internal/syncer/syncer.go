@@ -141,6 +141,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	if c := r.calendar; c != nil {
 		rep.Calendar.Add(c.Counts)
 		for k, v := range c.Omissions {
+			if k == store.OmitCalendarUnmapped || k == store.OmitCalendarRefused {
+				continue // every source recounts what is still missing, this rebuild's share included
+			}
 			rep.Omissions[k] += v
 		}
 	}
@@ -184,10 +187,10 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		rep.Status = StatusFailed
 	case len(failures) > 0:
 		rep.Status = StatusPartial
-	case !decoded:
-		rep.Status = StatusUnchanged
 	case lost(rep.Omissions) > 0:
 		rep.Status = StatusOmissions
+	case !decoded:
+		rep.Status = StatusUnchanged
 	default:
 		rep.Status = StatusOK
 	}
@@ -279,11 +282,23 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 			return SourceReport{}, false, errs.DBError(err)
 		}
 		if last == fp && !r.o.FullRead { // a forced full read reads a source whose fingerprint has not changed too
-			if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: src.Key(), Fingerprint: fp, Status: StatusUnchanged}); err != nil {
+			// Nothing was read, but what the calendar could not use before it still cannot: a sync
+			// that reports nothing missing while data is missing is wrong.
+			losses, err := r.st.CalendarLosses(ctx, src.Key(), nil)
+			if err != nil {
 				return SourceReport{}, false, errs.DBError(err)
 			}
-			r.progress("%s: unchanged", src.Key())
-			return SourceReport{Source: src.Key(), Status: StatusUnchanged}, false, nil
+			status := StatusUnchanged
+			if lost(losses) > 0 {
+				status = StatusOmissions
+			} else {
+				losses = nil
+			}
+			if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: src.Key(), Fingerprint: fp, Status: status, Omissions: losses}); err != nil {
+				return SourceReport{}, false, errs.DBError(err)
+			}
+			r.progress("%s: %s", src.Key(), status)
+			return SourceReport{Source: src.Key(), Status: status, Omissions: losses}, false, nil
 		}
 	} else {
 		fp = "" // a filtered run says nothing about the other accounts
@@ -363,7 +378,7 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if w.memo.err != nil {
 		return nil, nil, 0, errs.DBError(w.memo.err)
 	}
-	cal, err := sess.DeriveCalendar(ctx, source, begun, calendarZone())
+	cal, err := sess.DeriveCalendar(ctx, source, begun, calendarZone(), w.present)
 	if err != nil {
 		return nil, nil, 0, asCoded(err)
 	}
@@ -411,6 +426,7 @@ type writer struct {
 	recs     []teamsdesktop.GenericRecord
 	recBytes int
 	people   map[[2]string]teamsdesktop.Person
+	present  []string // the databases the generic read found: the accounts whose cache was read
 	counts   runCounts
 	changes  []Change // held until the source commits
 
@@ -571,6 +587,7 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 	if err := w.flushRecords(source, at); err != nil {
 		return nil, 0, err
 	}
+	w.present = res.Present
 	if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
 		return nil, 0, asCoded(err)
 	}

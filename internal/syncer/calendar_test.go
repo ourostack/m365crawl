@@ -304,27 +304,40 @@ func TestSyncCalendarUnmappedRecordIsAnOmissionNotAFailure(t *testing.T) {
 	}
 }
 
-// A calendar write that fails fails the source like any write error, and nothing of it is kept.
-func TestSyncCalendarWriteFailureFailsTheSource(t *testing.T) {
+// A calendar write that fails is rolled back to a savepoint and counted as a loss: the source's
+// messages and records are kept, and the next sync derives again.
+func TestSyncCalendarWriteFailureIsACountedLossNotAFailedSource(t *testing.T) {
 	isolateTmp(t)
 	utcDays(t)
 	db := newDB(t)
 	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {fakeEvent("e1", "2026-09-10T09:00:00Z", nil)}}}
 	cache.install(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
-	if _, err := openRaw(t, db).Exec(`create trigger refuse before update on calendar_source_events begin select raise(abort, 'calendar refused'); end`); err != nil {
+	raw := openRaw(t, db)
+	if _, err := raw.Exec(`create trigger refuse before update on calendar_source_events begin select raise(abort, 'calendar refused'); end`); err != nil {
 		t.Fatal(err)
 	}
 	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", map[string]any{"subject": "Renamed", "lastModifiedTime": map[string]any{"$date": "2026-08-02T00:00:00Z"}})}
-	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
-	if err == nil || !strings.Contains(err.Error(), "calendar refused") {
-		t.Fatalf("err = %v", err)
+	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
+	if err != nil || rep.Status != StatusOmissions || rep.Omissions["calendar_derivation_failed"] != 1 {
+		t.Fatalf("status %s omissions %v err %v", rep.Status, rep.Omissions, err)
 	}
 	if got := queryStr(t, db, `select subject from calendar_source_events`); got != "Subject e1" {
-		t.Fatalf("a failed source kept %q", got)
+		t.Fatalf("the failed derivation kept %q", got)
 	}
-	if n := recordsQuery(t, db, `select count(*) from records where store='calendar' and value_json like '%Renamed%'`); n != 0 {
-		t.Fatal("the records of a failed source were kept")
+	if n := recordsQuery(t, db, `select count(*) from records where store='calendar' and value_json like '%Renamed%'`); n != 1 {
+		t.Fatal("the records of the source were not kept")
+	}
+	// Once the fault is gone the next sync derives the change.
+	if _, err := raw.Exec(`drop trigger refuse`); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
+	if err != nil || rep.Omissions["calendar_derivation_failed"] != 0 {
+		t.Fatalf("omissions %v err %v", rep.Omissions, err)
+	}
+	if got := queryStr(t, db, `select subject from calendar_source_events`); got != "Renamed" {
+		t.Fatalf("the next sync kept %q", got)
 	}
 }
 
@@ -398,5 +411,144 @@ func TestLostIgnoresEventsThatAreOnlyLessPrecise(t *testing.T) {
 	}
 	if n := lost(map[string]int{"calendar_unmapped": 1, "calendar_refused": 2, "calendar_unknown_time_zone": 3}); n != 3 {
 		t.Fatalf("lost = %d", n)
+	}
+}
+
+// A sync that finds nothing changed still says what the calendar could not use before: reporting
+// "unchanged" while a record is missing from the calendar would hide the loss.
+func TestUnchangedSyncStillReportsCalendarLosses(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	a := acctA
+	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {
+		fakeEvent("e1", "2026-09-10T09:00:00Z", nil),
+		{Account: &a, Database: fakeCalendarDB, Store: "calendar", KeyJSON: []byte(`"broken"`), ValueJSON: []byte(`{"objectId":"broken"}`)},
+	}}}
+	cache.install(t)
+	first, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if first.Status != StatusOmissions || first.Omissions["calendar_unmapped"] != 1 {
+		t.Fatalf("first: %s %v", first.Status, first.Omissions)
+	}
+	again, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 || again.Sources[0].Status != StatusOmissions || again.Sources[0].Counts != nil {
+		t.Fatalf("an unchanged sync: %s %v %+v", again.Status, again.Omissions, again.Sources)
+	}
+	// The run is recorded as a success with its omission, so the fingerprint still skips the read.
+	if n := recordsQuery(t, db, `select count(*) from sync_runs where status='ok_with_omissions' and fingerprint<>''`); n < 2 {
+		t.Fatalf("%d runs recorded with omissions", n)
+	}
+	// Once the record is fixed the loss is gone.
+	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", nil), fakeEvent("broken", "2026-09-11T09:00:00Z", nil)}
+	fixed, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
+	if err != nil || fixed.Omissions["calendar_unmapped"] != 0 || fixed.Status != StatusOK {
+		t.Fatalf("fixed: %s %v %v", fixed.Status, fixed.Omissions, err)
+	}
+}
+
+// The upgrade sync, which rebuilds the calendar before any source, is not "unchanged" when the
+// rebuild found records it could not use.
+func TestUpgradeSyncWithCalendarLossesIsNotUnchanged(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	a := acctA
+	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {
+		fakeEvent("e1", "2026-09-10T09:00:00Z", nil),
+		{Account: &a, Database: fakeCalendarDB, Store: "calendar", KeyJSON: []byte(`"broken"`), ValueJSON: []byte(`{"objectId":"broken"}`)},
+	}}}
+	cache.install(t)
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	d := openRaw(t, db)
+	for _, q := range []string{`delete from calendar_losses`, `delete from calendar_recap_items`, `delete from calendar_recaps`, `delete from calendar_covered_days`, `delete from calendar_sources`, `delete from calendar_source_events`, `delete from meta where key='calendar_derivation'`} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	again, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 {
+		t.Fatalf("%s %v", again.Status, again.Omissions)
+	}
+}
+
+// A sync filtered to one account moves the freshness of that account only.
+func TestFilteredSyncLeavesTheOtherAccountsFreshnessAlone(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	d := openRaw(t, db)
+	var accounts []string
+	rows, err := d.Query(`select account_id from calendar_sources order by account_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		accounts = append(accounts, s)
+	}
+	_ = rows.Close()
+	if len(accounts) != 2 {
+		t.Fatalf("accounts %v", accounts)
+	}
+	old := "2020-01-01T00:00:00.000Z"
+	if _, err := d.Exec(`update calendar_sources set synced_at=?`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`update calendar_covered_days set last_verified_at=?`, old); err != nil {
+		t.Fatal(err)
+	}
+	tenant, user, _ := strings.Cut(accounts[0], "/")
+	run(t, Options{Root: fixtureRoot, DBPath: db, Account: &teamsdesktop.Account{TenantID: tenant, UserID: user}, FullRead: true})
+	if got := queryStr(t, db, `select synced_at from calendar_sources where account_id=?`, accounts[0]); got == old {
+		t.Fatal("the account that was read did not move")
+	}
+	if got := queryStr(t, db, `select synced_at from calendar_sources where account_id=?`, accounts[1]); got != old {
+		t.Fatalf("the other account moved: %q", got)
+	}
+	if got := queryStr(t, db, `select max(last_verified_at) from calendar_covered_days where account_id=?`, accounts[1]); got != old {
+		t.Fatalf("the other account's days moved: %q", got)
+	}
+}
+
+// A store that cannot say what the calendar lost fails the unchanged source, as any read error does.
+func TestUnchangedSyncFailsWhenTheLossesCannotBeRead(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	if _, err := openRaw(t, db).Exec(`drop table calendar_losses; create table calendar_losses(x)`); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	if err == nil || rep.Status == StatusOK {
+		t.Fatalf("status %s err %v", rep.Status, err)
+	}
+}
+
+// A derivation that fails and cannot even forget its stamp fails the source.
+func TestSourceFailsWhenAFailedDerivationCannotForgetItsStamp(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	cache := &fakeCache{dbs: map[string][]teamsdesktop.GenericRecord{fakeCalendarDB: {fakeEvent("e1", "2026-09-10T09:00:00Z", nil)}}}
+	cache.install(t)
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	raw := openRaw(t, db)
+	for _, q := range []string{
+		`create trigger refuse before update on calendar_source_events begin select raise(abort, 'calendar refused'); end`,
+		`create trigger keep before delete on meta begin select raise(abort, 'stamp kept'); end`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", map[string]any{"subject": "Renamed", "lastModifiedTime": map[string]any{"$date": "2026-08-02T00:00:00Z"}})}
+	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
+	if err == nil || !strings.Contains(err.Error(), "stamp kept") {
+		t.Fatalf("err = %v", err)
 	}
 }

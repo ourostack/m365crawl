@@ -24,6 +24,9 @@ const (
 	OmitCalendarRefused         = "calendar_refused"
 	OmitCalendarUnknownZone     = "calendar_unknown_time_zone"
 	OmitCalendarAllDayUnaligned = "calendar_all_day_unaligned"
+	// OmitCalendarFailed counts a derivation that failed and was rolled back; the sync's other
+	// data was kept, and the next sync derives again.
+	OmitCalendarFailed = "calendar_derivation_failed"
 )
 
 // calendarMetaKey is the meta row that remembers which mapper and which scrub rules the calendar
@@ -59,6 +62,9 @@ func (c *CalendarCounts) Add(b CalendarCounts) {
 type CalendarResult struct {
 	Counts    CalendarCounts
 	Omissions map[string]int
+	losses    []loss
+	// failure is the error a rolled-back derivation was counted for; the omission is what readers see.
+	failure error
 }
 
 func (r *CalendarResult) omit(code string, n int) {
@@ -67,10 +73,12 @@ func (r *CalendarResult) omit(code string, n int) {
 	}
 }
 
-// Test seams: the scrub and denylist the replace mode applies.
+// Test seams: the scrub and denylist the replace mode applies, and the event mapper (which
+// validates what it maps, so only a seam reaches the core's own refusal).
 var (
-	calendarScrub  = teamsdesktop.Scrub
-	calendarDenied = teamsdesktop.Denied
+	calendarMapEvent = teamscal.MapEventRecord
+	calendarScrub    = teamsdesktop.Scrub
+	calendarDenied   = teamsdesktop.Denied
 )
 
 // calendarMode says which rows a derivation maps and how it writes them.
@@ -80,6 +88,10 @@ type calendarMode struct {
 	replace bool   // blank the derived rows first, so nothing of an older copy survives
 	zone    *time.Location
 	at      time.Time
+	// read is the accounts whose Teams cache this derivation read, as {tenant, user}. Only they get
+	// a fresh window and fresh covered days; nil means every account (a rebuild from the records
+	// reads no cache, and stamps nothing it did not see).
+	read map[[2]string]bool
 }
 
 // calGroup is one source's rows for one account.
@@ -93,6 +105,19 @@ type calGroup struct {
 	recaps      []calendar.Recap
 	items       []calendar.RecapItem
 	stamp       time.Time
+	rows        map[string]recordRef // the record each event came from, by source id
+}
+
+// recordRef names one record of the records table.
+type recordRef struct{ source, database, store, key string }
+
+// loss is a record (or part of one) the derivation could not use, kept until the record is
+// mapped again so every sync can count what is still missing.
+type loss struct {
+	ref    recordRef
+	kind   string
+	reason string
+	n      int
 }
 
 type calGroupKey struct{ source, tenant, user string }
@@ -114,16 +139,146 @@ func calendarStoreNames() (list string, args []any) {
 // the result to the calendar tables and links recaps to events, all inside the session's
 // transaction. Days are taken in zone. It reads only the records table, so it needs the cache
 // for nothing and does not depend on how many records the sync read.
-func (x *Session) DeriveCalendar(ctx context.Context, source string, at time.Time, zone *time.Location) (CalendarResult, error) {
-	return deriveCalendar(ctx, x.tx, calendarMode{source: source, since: at.UTC().Format(timeLayout), zone: zone, at: at})
+//
+// present is the databases the sync found in the cache; the accounts they belong to are the ones
+// it read, and the only ones whose freshness it moves. A failure in the derivation is rolled back
+// to a savepoint and counted as the omission calendar_derivation_failed, so it never fails the
+// source's message sync.
+func (x *Session) DeriveCalendar(ctx context.Context, source string, at time.Time, zone *time.Location, present []string) (CalendarResult, error) {
+	read := map[[2]string]bool{}
+	for _, d := range present {
+		if _, a, ok := teamsdesktop.ParseDatabaseName(d); ok {
+			read[[2]string{a.TenantID, a.UserID}] = true
+		}
+	}
+	res, err := isolated(ctx, x.tx, func() (CalendarResult, error) {
+		return deriveCalendar(ctx, x.tx, calendarMode{source: source, since: at.UTC().Format(timeLayout), zone: zone, at: at, read: read})
+	})
+	if err == nil && res.failure != nil {
+		// The records of this sync are kept but were not derived, and a later sync maps only what
+		// it writes: forget the stamp, so the next run derives the whole calendar again.
+		_, err = x.tx.ExecContext(ctx, `delete from meta where key=?`, calendarMetaKey)
+	}
+	return res, err
 }
 
-// EnsureCalendar derives the whole calendar from the archived records when the mapper or the scrub
-// rules it was derived under are not the ones this build has (including never: an archive from
-// before the calendar tables). A changed mapper maps every record and captures the result over
-// what is stored; changed scrub rules also blank the derived rows first and rebuild them from the
-// records, so nothing an older rule let through survives in a derived copy. It returns nil when
-// nothing was due.
+// isolated runs fn in a savepoint. When fn fails the savepoint is rolled back and the failure is a
+// counted loss; only a failure to manage the savepoint itself is returned.
+func isolated(ctx context.Context, tx *sql.Tx, fn func() (CalendarResult, error)) (CalendarResult, error) {
+	if _, err := tx.ExecContext(ctx, `savepoint calendar_derive`); err != nil {
+		return CalendarResult{}, err
+	}
+	res, err := fn()
+	if err != nil {
+		if _, rerr := tx.ExecContext(ctx, `rollback to savepoint calendar_derive`); rerr != nil {
+			return CalendarResult{}, rerr
+		}
+		if _, rerr := tx.ExecContext(ctx, `release savepoint calendar_derive`); rerr != nil {
+			return CalendarResult{}, rerr
+		}
+		return CalendarResult{Omissions: map[string]int{OmitCalendarFailed: 1}, failure: err}, nil
+	}
+	if _, err := tx.ExecContext(ctx, `release savepoint calendar_derive`); err != nil {
+		return CalendarResult{}, err
+	}
+	return res, nil
+}
+
+// CalendarLosses counts the records the calendar derivation could not use and still cannot, by
+// omission code, for the accounts of source (every account when account is nil). It reads what
+// each derivation recorded, so it needs no cache and costs one query.
+func (s *Store) CalendarLosses(ctx context.Context, source string, account *teamsdesktop.Account) (map[string]int, error) {
+	return currentLosses(ctx, s.db, source, func(tenant, user string) bool {
+		return account == nil || (account.TenantID == tenant && account.UserID == user)
+	})
+}
+
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// currentLosses counts, by omission code, the stored losses of live records of source (every
+// source when empty) whose account keep accepts.
+func currentLosses(ctx context.Context, db queryer, source string, keep func(tenant, user string) bool) (map[string]int, error) {
+	out := map[string]int{}
+	q := `select r.tenant_id, r.user_id, l.kind, coalesce(sum(l.n),0) from calendar_losses l join records r
+	  on r.source=l.source and r.database=l.database and r.store=l.store and r.key_json=l.key_json
+	  where r.removed_at is null and r.value_json is not null and (?='' or l.source=?) group by r.tenant_id, r.user_id, l.kind`
+	rows, err := db.QueryContext(ctx, q, source, source)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var tenant, user, kind string
+		var n int
+		if err := rows.Scan(&tenant, &user, &kind, &n); err != nil {
+			return nil, err
+		}
+		if keep(tenant, user) {
+			out[lossCodes[kind]] += n
+		}
+	}
+	return out, rows.Err()
+}
+
+// recordLosses replaces the stored losses of every record this derivation mapped with what the
+// mapping found, so a record that maps cleanly now loses its old losses.
+func recordLosses(ctx context.Context, tx *sql.Tx, m calendarMode, mapped []recordRef, losses []loss) error {
+	if m.replace {
+		if _, err := tx.ExecContext(ctx, `delete from calendar_losses`); err != nil {
+			return err
+		}
+	}
+	del, err := tx.PrepareContext(ctx, `delete from calendar_losses where source=? and database=? and store=? and key_json=?`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = del.Close() }()
+	for _, r := range mapped {
+		if _, err := del.ExecContext(ctx, r.source, r.database, r.store, r.key); err != nil {
+			return err
+		}
+	}
+	for _, l := range losses {
+		if _, err := tx.ExecContext(ctx, `insert into calendar_losses(source, database, store, key_json, kind, reason, n) values(?,?,?,?,?,?,?)
+		  on conflict(source, database, store, key_json, kind, reason) do update set n=n+excluded.n`, l.ref.source, l.ref.database, l.ref.store, l.ref.key, l.kind, l.reason, l.n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// countLosses adds the losses that still stand, not only the ones this derivation found, to the
+// omissions: a record that cannot be used stays missing until it changes.
+func countLosses(ctx context.Context, tx *sql.Tx, m calendarMode, res *CalendarResult) error {
+	cur, err := currentLosses(ctx, tx, m.source, func(tenant, user string) bool { return m.read == nil || m.read[[2]string{tenant, user}] })
+	if err != nil {
+		return err
+	}
+	for code, n := range cur {
+		res.omit(code, n)
+	}
+	return nil
+}
+
+// lossCodes maps a stored loss kind to the omission code it is reported as.
+var lossCodes = map[string]string{lossUnmapped: OmitCalendarUnmapped, lossRefused: OmitCalendarRefused}
+
+const (
+	lossUnmapped = "unmapped"
+	lossRefused  = "refused"
+)
+
+// EnsureCalendar derives the whole calendar from the archived records when the mapper, the scrub
+// rules or the time zone it was derived under are not the ones this build has (including never:
+// an archive from before the calendar tables), or when the stamp is current but the calendar
+// tables are empty while calendar records exist. A changed mapper maps every record and captures
+// the result over what is stored; changed scrub rules also blank the derived rows first and
+// rebuild them from the records, so nothing an older rule let through survives in a derived copy.
+// A changed zone also forgets the covered days, which were taken in the old zone and never
+// shrink, and takes them again. A rebuild that fails is rolled back, counted as the omission
+// calendar_derivation_failed and tried again by the next sync. It returns nil when nothing was due.
 func (s *Store) EnsureCalendar(ctx context.Context, zone *time.Location, at time.Time) (*CalendarResult, error) {
 	var res *CalendarResult
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
@@ -133,28 +288,73 @@ func (s *Store) EnsureCalendar(ctx context.Context, zone *time.Location, at time
 		case err != nil:
 			return err
 		}
-		want := calendarDerivation(teamscal.MapperVersion, teamsdesktop.RulesStamp())
+		want := calendarDerivation(teamscal.MapperVersion, zoneStamp(zone), teamsdesktop.RulesStamp())
 		if stored == want {
-			return nil
+			empty, err := calendarLost(ctx, tx)
+			if err != nil || !empty {
+				return err
+			}
 		}
 		rulesChanged := stored != "" && !strings.HasSuffix(stored, ";"+calendarRules(teamsdesktop.RulesStamp()))
-		r, err := deriveCalendar(ctx, tx, calendarMode{replace: rulesChanged, zone: zone, at: at})
+		zoneChanged := stored != "" && !strings.Contains(stored, ";"+calendarZone(zoneStamp(zone))+";")
+		r, err := isolated(ctx, tx, func() (CalendarResult, error) {
+			if zoneChanged {
+				if _, err := tx.ExecContext(ctx, `delete from calendar_covered_days where source=?`, string(calendar.SourceTeams)); err != nil {
+					return CalendarResult{}, err
+				}
+			}
+			return deriveCalendar(ctx, tx, calendarMode{replace: rulesChanged, zone: zone, at: at})
+		})
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, calendarMetaKey, want); err != nil {
-			return err
-		}
 		res = &r
-		return nil
+		if r.Omissions[OmitCalendarFailed] > 0 {
+			return nil // no stamp: the next sync derives again
+		}
+		_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, calendarMetaKey, want)
+		return err
 	})
 	return res, err
 }
 
+// calendarLost reports that the calendar tables hold nothing although calendar records exist: the
+// derivation was lost (a restore, a deleted table) while its stamp stayed.
+func calendarLost(ctx context.Context, tx *sql.Tx) (bool, error) {
+	names, args := calendarStoreNames()
+	var records, derived int
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from records where store in `+names+` and value_json is not null)`, args...).Scan(&records); err != nil {
+		return false, err
+	}
+	if records == 0 {
+		return false, nil
+	}
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from calendar_source_events) or exists(select 1 from calendar_recaps) or exists(select 1 from calendar_sources)`).Scan(&derived); err != nil {
+		return false, err
+	}
+	return derived == 0, nil
+}
+
 func calendarRules(stamp string) string { return "rules=" + stamp }
 
-func calendarDerivation(mapper int, stamp string) string {
-	return fmt.Sprintf("mapper=%d;%s", mapper, calendarRules(stamp))
+func calendarZone(stamp string) string { return "zone=" + stamp }
+
+// calendarDerivation is the stamp of what the calendar tables were derived under. The rules come
+// last: a change of them alone is told by the suffix.
+func calendarDerivation(mapper int, zone, stamp string) string {
+	return fmt.Sprintf("mapper=%d;%s;%s", mapper, calendarZone(zone), calendarRules(stamp))
+}
+
+// zoneStamp names a zone by what it does, because time.Local is only ever called "Local": its
+// offsets in the middle of January and July of a fixed year, which change when the machine moves
+// to another zone (or another daylight saving rule).
+func zoneStamp(z *time.Location) string {
+	if z == nil {
+		z = time.UTC
+	}
+	_, jan := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC).In(z).Zone()
+	_, jul := time.Date(2024, 7, 15, 12, 0, 0, 0, time.UTC).In(z).Zone()
+	return fmt.Sprintf("%d/%d", jan, jul)
 }
 
 // recordKey is the text a record key mappers see: the string a JSON string key holds, or the key's
@@ -212,15 +412,27 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 	}
 
 	// The days the cache holds now come from the live calendar rows by SQL, so the answer does not
-	// depend on which records this sync happened to read.
-	if err := eachRow(ctx, tx, `select source, database, json_extract(value_json,'$.startTime'), json_extract(value_json,'$.eventType') from records where store='calendar' and removed_at is null and value_json is not null`+srcSQL, srcArgs, func(r *sql.Rows) error {
-		var source, database string
+	// depend on which records this sync happened to read. The live rows of every source are read,
+	// because two profiles can hold one account: an event is live while any source holds it.
+	live := map[[2]string]map[string]bool{} // account -> record keys some source holds live
+	if err := eachRow(ctx, tx, `select source, database, key_json, json_extract(value_json,'$.startTime'), json_extract(value_json,'$.eventType') from records where store='calendar' and removed_at is null and value_json is not null`, nil, func(r *sql.Rows) error {
+		var source, database, key string
 		var start, typ sql.NullString
-		if err := r.Scan(&source, &database, &start, &typ); err != nil {
+		if err := r.Scan(&source, &database, &key, &start, &typ); err != nil {
 			return err
 		}
-		g, manager, ok := group(source, database)
-		if day, has := teamscal.EventDay(start.String, typ.String, m.zone); ok && manager == "calendar" && has {
+		manager, acct, ok := teamsdesktop.ParseDatabaseName(database)
+		day, has := teamscal.EventDay(start.String, typ.String, m.zone)
+		if !ok || manager != "calendar" || !has {
+			return nil
+		}
+		a := [2]string{acct.TenantID, acct.UserID}
+		if live[a] == nil {
+			live[a] = map[string]bool{}
+		}
+		live[a][recordKey(key)] = true
+		if m.source == "" || source == m.source {
+			g, _, _ := group(source, database)
 			g.days[day] = struct{}{}
 		}
 		return nil
@@ -229,7 +441,8 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 	}
 
 	// A removed calendar record whose day the cache still holds was deleted, cancelled or declined
-	// away; one whose day is gone from the cache was only evicted, and its event stays live.
+	// away; one whose day is gone from the cache was only evicted, and its event stays live. An
+	// event is gone only when no source that holds its account has it live.
 	type removedRow struct {
 		g   *calGroup
 		key string
@@ -251,7 +464,7 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 		return res, err
 	}
 	for _, rm := range removed {
-		if _, loaded := rm.g.days[rm.day]; loaded {
+		if _, loaded := rm.g.days[rm.day]; loaded && !live[[2]string{rm.g.acct.TenantID, rm.g.acct.UserID}][rm.key] {
 			rm.g.gone = append(rm.g.gone, rm.key)
 		}
 	}
@@ -271,6 +484,7 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 	}
 
 	// The rows to map.
+	var mapped []recordRef
 	q, args := `select source, database, store, key_json, value_json from records where store in `+names+` and value_json is not null`+srcSQL, append(slices.Clone(nameArgs), srcArgs...)
 	if m.since != "" {
 		q, args = q+` and updated_at>=?`, append(args, m.since)
@@ -292,7 +506,9 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 			}
 			raw, _ = calendarScrub(raw)
 		}
-		g.mapRecord(&res, kind, recordKey(key), raw, m.zone)
+		ref := recordRef{source, database, store, key}
+		mapped = append(mapped, ref)
+		g.mapRecord(&res, ref, kind, recordKey(key), raw, m.zone)
 		return nil
 	}); err != nil {
 		return res, err
@@ -317,12 +533,25 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 		if !g.hasCalendar && len(g.events)+len(g.recaps)+len(g.items)+len(g.gone) == 0 {
 			continue // an account with no calendar database and nothing to apply gets no row
 		}
-		counts, err := g.apply(ctx, tx, m)
+		if m.read != nil && !m.read[[2]string{g.acct.TenantID, g.acct.UserID}] {
+			continue // its cache was not read: nothing here says it is fresher than it was
+		}
+		counts, refused, err := g.apply(ctx, tx, m)
 		if err != nil {
 			return res, err
 		}
 		res.Counts.Add(counts)
-		res.omit(OmitCalendarRefused, counts.Refused)
+		for _, bad := range refused {
+			if ref, ok := g.rows[bad.SourceID]; ok {
+				res.losses = append(res.losses, loss{ref, lossRefused, bad.Reason, 1})
+			}
+		}
+	}
+	if err := recordLosses(ctx, tx, m, mapped, res.losses); err != nil {
+		return res, err
+	}
+	if err := countLosses(ctx, tx, m, &res); err != nil {
+		return res, err
 	}
 	if m.replace {
 		// A derived event with no record left to rebuild it from (its store was denied) keeps
@@ -335,13 +564,18 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 	return res, nil
 }
 
-// mapRecord maps one record into the group, counting what it cannot map.
-func (g *calGroup) mapRecord(res *CalendarResult, kind teamscal.Kind, key string, raw []byte, zone *time.Location) {
+// mapRecord maps one record into the group. What it cannot use becomes a loss of that record.
+func (g *calGroup) mapRecord(res *CalendarResult, ref recordRef, kind teamscal.Kind, key string, raw []byte, zone *time.Location) {
+	lose := func(reason string, n int) {
+		if n > 0 {
+			res.losses = append(res.losses, loss{ref, lossUnmapped, reason, n})
+		}
+	}
 	switch kind {
 	case teamscal.KindEvent:
-		e, notes, err := teamscal.MapEventRecord(g.acct, key, raw, zone)
+		e, notes, err := calendarMapEvent(g.acct, key, raw, zone)
 		if err != nil {
-			res.omit(OmitCalendarUnmapped, 1)
+			lose(unmappedReason(err), 1)
 			return
 		}
 		if notes.UnknownZone != "" {
@@ -350,29 +584,55 @@ func (g *calGroup) mapRecord(res *CalendarResult, kind teamscal.Kind, key string
 		if notes.AllDayUnaligned {
 			res.omit(OmitCalendarAllDayUnaligned, 1)
 		}
+		if g.rows == nil {
+			g.rows = map[string]recordRef{}
+		}
+		g.rows[e.SourceID] = ref
 		g.events = append(g.events, e)
 	case teamscal.KindCatchUp:
 		recaps, items, notes, err := teamscal.MapCatchUpRecord(g.acct, key, raw)
-		res.omit(OmitCalendarUnmapped, notes.Skipped+notes.SkippedItems)
+		lose("catch-up item without a callId", notes.Skipped)
+		lose("catch-up task or mention that is not an object", notes.SkippedItems)
 		if err != nil {
-			res.omit(OmitCalendarUnmapped, 1)
+			lose(unmappedReason(err), 1)
 			return
 		}
 		g.recaps, g.items = append(g.recaps, recaps...), append(g.items, items...)
 	case teamscal.KindRecap:
 		recap, items, notes, err := teamscal.MapRecapRecord(g.acct, key, raw)
-		res.omit(OmitCalendarUnmapped, notes.Skipped+notes.SkippedItems)
+		lose("recap item without a callId", notes.Skipped)
+		lose("recap task or mention that is not an object", notes.SkippedItems)
 		if err != nil {
-			res.omit(OmitCalendarUnmapped, 1)
+			lose(unmappedReason(err), 1)
 			return
 		}
 		g.recaps, g.items = append(g.recaps, recap), append(g.items, items...)
 	}
 }
 
+// unmappedReason is why a record could not be mapped, as a short fixed phrase: the mapper's own
+// reason names a field or a shape, never the record's content, except for the parser's message,
+// which can quote a byte of it and is reduced to its first words.
+func unmappedReason(err error) string {
+	var u *teamscal.UnmappedError
+	if !errors.As(err, &u) {
+		return "record could not be mapped"
+	}
+	if i := strings.LastIndex(u.Reason, ": "); strings.HasPrefix(u.Reason, "calendar: refused event") && i >= 0 {
+		return "event refused: " + u.Reason[i+2:] // the core's reason, without the event's id
+	}
+	if strings.HasPrefix(u.Reason, "not JSON") {
+		return "not JSON"
+	}
+	if strings.HasPrefix(u.Reason, "value is ") {
+		return "value is not an object"
+	}
+	return u.Reason
+}
+
 // apply writes one group through the core. The window is the span of every day the cache ever
 // showed for the account, so it never shrinks when a later sync sees fewer days.
-func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarCounts, error) {
+func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarCounts, []*calendar.InvalidEventError, error) {
 	var counts CalendarCounts
 	account := teamscal.AccountID(g.acct)
 	days := make([]string, 0, len(g.days))
@@ -384,7 +644,7 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 	var known int
 	if err := tx.QueryRowContext(ctx, `select min(day), max(day), count(*) from calendar_covered_days where source=? and account_id=?`,
 		string(calendar.SourceTeams), account).Scan(&first, &last, &known); err != nil {
-		return counts, err
+		return counts, nil, err
 	}
 	lo, hi := first.String, last.String
 	if len(days) > 0 {
@@ -396,6 +656,27 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 		}
 	}
 	w := calendar.Window{Source: calendar.SourceTeams, AccountID: account, SyncedAt: m.at}
+	if m.read == nil {
+		// A rebuild reads no cache: it verifies no day again and does not say the account synced now.
+		var prev string
+		if err := tx.QueryRowContext(ctx, `select synced_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return counts, nil, err
+		}
+		if t := parseTime(sql.NullString{String: prev, Valid: prev != ""}); !t.IsZero() {
+			w.SyncedAt = t
+		}
+		fresh := days[:0:0]
+		for _, d := range days {
+			var n int
+			if err := tx.QueryRowContext(ctx, `select count(*) from calendar_covered_days where source=? and account_id=? and day=?`, string(calendar.SourceTeams), account, d).Scan(&n); err != nil {
+				return counts, nil, err
+			}
+			if n == 0 {
+				fresh = append(fresh, d)
+			}
+		}
+		days = fresh
+	}
 	if lo != "" {
 		start, _ := time.ParseInLocation(time.DateOnly, lo, m.zone)
 		end, _ := time.ParseInLocation(time.DateOnly, hi, m.zone)
@@ -403,7 +684,7 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 	}
 	fresh, err := g.freshAt(ctx, tx, account, m.at)
 	if err != nil {
-		return counts, err
+		return counts, nil, err
 	}
 	w.CacheFreshAt = fresh
 	// The core marks the ids it is given as gone before it captures the batch's events, and an event
@@ -412,17 +693,17 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 	opts := calendar.ApplyOptions{SkipMatches: true, RecapTolerance: teamscal.RecapTimeTolerance}
 	bc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, Events: g.events, CoveredDays: days, Recaps: g.recaps, RecapItems: g.items}, opts, m.at)
 	if err != nil {
-		return counts, err
+		return counts, nil, err
 	}
 	counts = CalendarCounts{Events: toCounts(bc.Events), Recaps: toCounts(bc.Recaps), RecapItems: toCounts(bc.RecapItems), Gone: bc.Gone, Linked: bc.Linked, Refused: len(bc.Refused)}
 	if len(g.gone) > 0 {
 		gc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, GoneSourceIDs: g.gone}, opts, m.at)
 		if err != nil {
-			return counts, err
+			return counts, nil, err
 		}
 		counts.Gone += gc.Gone
 	}
-	return counts, nil
+	return counts, bc.Refused, nil
 }
 
 // freshAt is when the cache last synced with the calendar service: its own timestamp when it has
