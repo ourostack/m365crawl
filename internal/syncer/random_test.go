@@ -221,8 +221,7 @@ func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 				for pass := 0; pass < 1+rng.Intn(2); pass++ {
 					// Every pass sees changed files (the fingerprint), whether or not the records changed.
 					for _, l := range logs {
-						touchCount++
-						later := time.Now().Add(time.Duration(touchCount) * time.Hour)
+						later := time.Now().Add(time.Duration(touchCount.Add(1)) * time.Hour)
 						if err := os.Chtimes(l, later, later); err != nil {
 							t.Fatal(err)
 						}
@@ -235,7 +234,7 @@ func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 					if a, b := reportKey(t, sr, sc), reportKey(t, fr, fc); a != b {
 						t.Fatalf("%s pass %d: reports differ\nskip: %s\nfull: %s", label, pass, a, b)
 					}
-					if a, b := dumpArchive(t, skipDB), dumpArchive(t, fullDB); a != b {
+					if !sameArchive(t, skipDB, fullDB) {
 						t.Fatalf("%s pass %d: archives differ", label, pass)
 					}
 				}
