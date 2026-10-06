@@ -171,7 +171,7 @@ func (s *Store) rowOf(ctx context.Context, it calendar.AgendaItem, p calendar.Pr
 	row := CalendarRow{AgendaItem: it, EventID: EventID(it.Principal, it.Key), Rooms: calendar.Rooms(it.Event), DetailLevel: calendar.DetailLevel(it.Event)}
 	accounts := p.Accounts(it.Principal)
 	if it.ICalUID != "" {
-		recaps, items, err := s.recapCounts(ctx, accounts, it.ICalUID)
+		recaps, items, err := s.recapCounts(ctx, accounts, it)
 		if err != nil {
 			return row, err
 		}
@@ -211,17 +211,6 @@ func stringArgs(ss []string) []any {
 const preferredItems = `i.superseded_at is null and (i.origin='recap' or not exists (
   select 1 from calendar_recap_items j where j.account_id=i.account_id and j.call_id=i.call_id and j.kind=i.kind and j.superseded_at is null and j.origin='recap'))`
 
-// recapCounts counts the recaps linked to an iCalUID and their action items.
-func (s *Store) recapCounts(ctx context.Context, accounts []string, ical string) (recaps, actions int, err error) {
-	args := append(stringArgs(accounts), ical)
-	if err = s.db.QueryRowContext(ctx, `select count(*) from calendar_recaps where account_id in `+inList(len(accounts))+` and ical_uid=?`, args...).Scan(&recaps); err != nil {
-		return 0, 0, err
-	}
-	err = s.db.QueryRowContext(ctx, `select count(*) from calendar_recap_items i join calendar_recaps r on r.account_id=i.account_id and r.call_id=i.call_id
-	  where r.account_id in `+inList(len(accounts))+` and r.ical_uid=? and i.kind='action_item' and `+preferredItems, args...).Scan(&actions)
-	return recaps, actions, err
-}
-
 // CalendarUnlinkedRecap is a recap that belongs to no event of the archive.
 type CalendarUnlinkedRecap struct {
 	// Principal is the account the recap is grouped under (a Teams account).
@@ -254,7 +243,11 @@ type CalendarRecap struct {
 	AttendanceStatus                                             string
 	AttendeesCount                                               int
 	HasConfRoomConnected, HasCatchUp, HasRecap                   bool
-	ActionItems, Mentions                                        []CalendarRecapItem
+	// SeriesLevel is true on a recap read for an event when the recap is linked to the series id
+	// several occurrences share and no occurrence's start matches its meeting start: it appears on
+	// every occurrence.
+	SeriesLevel           bool
+	ActionItems, Mentions []CalendarRecapItem
 }
 
 // CalendarRecording is a recording, transcript or call event of the event's meeting chat.
@@ -349,7 +342,7 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 	d.Attendees = parseAttendees(it.AttendeesJSON)
 	accounts := principals.Accounts(it.Principal)
 	if it.ICalUID != "" {
-		if d.Recaps, err = s.recaps(ctx, accounts, it.ICalUID); err != nil {
+		if d.Recaps, err = s.recaps(ctx, accounts, it); err != nil {
 			return d, err
 		}
 	}
@@ -523,12 +516,6 @@ func rawJSON(s string) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(s)
-}
-
-// recaps loads the recaps linked to an iCalUID with their preferred items, oldest meeting first.
-func (s *Store) recaps(ctx context.Context, accounts []string, ical string) ([]CalendarRecap, error) {
-	out, _, err := s.recapRows(ctx, `account_id in `+inList(len(accounts))+` and ical_uid=?`, append(stringArgs(accounts), ical))
-	return out, err
 }
 
 // recapRows loads the recaps that match cond (a condition over calendar_recaps) with their

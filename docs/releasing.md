@@ -130,8 +130,9 @@ Pull-request CI runs on every pull request (the required checks include `test`, 
 - `scripts/release-flags.sh --selftest`: demote, restore of a demoted stable release (never latest while a higher stable exists, also with 400 releases listed), and the rehearsal flag checks.
 - `scripts/retry.sh --selftest`, `scripts/automerge-eligible.sh --selftest`, `scripts/check-tap-key.sh --selftest` and `scripts/report-failure.sh --selftest`.
 - `scripts/sign-notarize.sh --selftest`: every signing gate.
+- `scripts/check-release-wiring.sh --selftest`: every job in `release.yml` that runs after `release` states its own `if:` starting from `!cancelled()` or `always()`. A job without one is skipped whenever `release` is, which is what a publish-only resume does on purpose; rehearsal 4 of v0.4.0-rc.3 found `settle`, `publish-homebrew` and `verify-homebrew` skipped that way.
 
-What a pull request cannot prove: the workflow wiring (including the skipped-job conditions of a publish-only resume), the token's ability to create the tag, start the workflow and open issues, containment and the tap restore against real GitHub, that a cancelled run still reports, and the Dependabot auto-merge. The first rehearsal exercises all of them. Already proven by the v0.2.0 release: Apple signing and notarization, the darwin and Windows verification jobs, the deploy key and `publish-cask.sh` on the stable path, and the tap's install check.
+What a pull request cannot prove: the workflow wiring beyond what `check-release-wiring.sh` checks, the token's ability to create the tag, start the workflow and open issues, containment and the tap restore against real GitHub, that a cancelled run still reports, and the Dependabot auto-merge. The first rehearsal exercises all of them. Already proven by the v0.2.0 release: Apple signing and notarization, the darwin and Windows verification jobs, the deploy key and `publish-cask.sh` on the stable path, and the tap's install check.
 
 ## What a failure means
 

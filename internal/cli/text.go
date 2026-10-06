@@ -243,6 +243,16 @@ func (rt *runtime) listTable(r *listResult) {
 				start, end = x.StartDate, "all day"
 			}
 			rows = append(rows, []string{start, end, x.Status, oneLine(x.Subject), calendarWhere(x), x.Response})
+		case actionItem:
+			cols, textCol = []string{"event_start", "subject", "owner", "title"}, 3
+			title := oneLine(x.Title)
+			if title == "" {
+				title = oneLine(x.Text)
+			}
+			if x.SeriesLevel {
+				title += " (series level)"
+			}
+			rows = append(rows, []string{stamp(x.EventStart), oneLine(x.Subject), x.Owner, title})
 		case storeItem:
 			label, acct := databaseLabel(x.Database)
 			cols, textCol = []string{"database", "account", "store", "records", "removed", "last_updated_at"}, -1

@@ -13,7 +13,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, `calendar`, `calendar event`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, `calendar`, `calendar event`, `calendar actions`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -46,7 +46,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
-| [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it. |
+| [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it; `calendar actions` lists the action items of the recaps held by the events of a range. |
 | [`stores`](#stores) | List every database and object store archived without a typed table, with record counts; the database name is what records --database takes. |
 | [`records`](#records) | List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated). |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
@@ -210,7 +210,7 @@ Flags:
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
 
-Result: A list of conversation items, newest activity first (best match first with `--query`).
+Result: A list of conversation items, newest activity first (best match first with `--query`). A Meeting conversation that calendar events name as their chat also carries `calendar_series_key` (the series those events share; absent when they belong to several series or are all single events) and `calendar_event_count` (how many live, non-master occurrences of the account hold this chat; a cancelled one is not counted, a declined one is, because the meeting happened). A chat no event names has neither key. Go from the chat to its events with `teamscrawl calendar --query <subject>` or `sql` on `calendar_source_events.series_key`.
 
 Examples:
 
@@ -303,6 +303,7 @@ Read the calendar offline: the agenda for a range (default today), or one event 
 ```
 teamscrawl calendar [flags]
 teamscrawl calendar event <event> [flags]
+teamscrawl calendar actions [flags]
 ```
 
 Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
@@ -327,7 +328,7 @@ Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverag
 - `range` is the range read, in this machine's zone.
 - `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged). `unlinked_fix` has, in the same order, the exact command that links each one: `teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`, with the Teams account written out when the agenda holds only one. Linking is explicit only; see `--outlook-account`.
 - `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event of the archive (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions; `unlinked_recaps_total` appears only when the limit cut the list. Each carries `placed_at` and `placed_by`: `meeting_start` when the recap has its own meeting start, `recording_start` when it has none and the recording's start stands in for it (then `meeting_start` is absent, and the text says "meeting start unknown"). A recap with neither time cannot be placed in a range and is not listed.
-- A recap's `link_method` says how it reached its event: `ical_uid` (the recap carries the event's id: certain), `time` (no id, but its start and end each match the event's within a minute: very likely) or `start_time` (no id, and exactly one event starts within five minutes of the meeting start: a match by time only, not by id, so weigh it accordingly). Cancelled and declined events are never matched, and `start_time` links are recomputed on every sync, so one disappears when it stops being unique or its event goes. For an occurrence of a recurring series the matched event's id may be the series id, so the recap can be listed on every occurrence that shares it: use the recap's `meeting_start` to tell which occurrence it belongs to.
+- A recap's `link_method` says how it reached its event: `ical_uid` (the recap carries the event's id: certain), `time` (no id, but its start and end each match the event's within a minute: very likely) or `start_time` (no id, and exactly one event starts within five minutes of the meeting start: a match by time only, not by id, so weigh it accordingly). Cancelled and declined events are never matched, and `start_time` links are recomputed on every sync, so one disappears when it stops being unique or its event goes. When several occurrences of a recurring series carry the same id (the series id), a recap linked to that id belongs to the one occurrence whose start is nearest its `meeting_start` within five minutes (the `start_time` tolerance; the lower key on a tie), and is listed on no other. The choice is made among every occurrence of the id, removed, cancelled and declined ones too, so removing or cancelling an occurrence never moves its recap to another. A recap that no occurrence matches, or that has no `meeting_start`, cannot be placed: it stays on every occurrence with `series_level: true`, and `meeting_start` is the only hint to which one it belongs to. An id that only one occurrence holds attaches all its recaps to it.
 
 An agenda item carries, in this order: `event_id` (a short id computed from the principal and the key, stable when another source is linked), `event_key`, `account_id` (the principal), `tenant_id` and `user_id` (only when a Teams account is the principal), `sources` (`["teams"]`, plus `"outlook"` when one is linked), `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end` (UTC), `start_local` and `end_local` (in the event's own zone, when it has one Teams can name), `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status` (`confirmed`, `cancelled` or `declined`), `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of` (both only when the source stated a room list; otherwise `rooms` is in `unknown_fields` and `location` carries the text), `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields` and `filled_fields`. Strings that are empty and flags that are false are omitted, with one exception that matters: a flag the source stated is printed `true` or `false`, and a flag it did not state has no key and its name is in `unknown_fields`. So a missing `cancelled` means "not known", never "no". `filled_fields` lists schedule fields taken from another source (`{"field", "from", "as_of"}`).
 
@@ -335,7 +336,18 @@ An agenda item carries, in this order: `event_id` (a short id computed from the 
 
 Result of `calendar event`: the item above, plus `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series` (`key`, `rule`, `master_event_id`, `occurrence_count_known`), `recaps` (each with `call_id`, `headline`, `short_summary`, `outline`, `summary_sections`, `action_items`, `mentions`, `speakers`, `topics`, `recording`, `meeting_start`, `meeting_end`, `expires_at`, `link_method`, `attendance_status`, `attendees_count`), `chat` (`conversation_id`, `display_name`, `message_count`), `recordings` (each with `message_id`, `sent_at`, `kind`, `text`, `link` and `matched_by`: `recap` or `window`), `series_recordings` (recordings of the chat that match no occurrence, newest 20) and `series_recordings_total`, then the archive meta. `text_truncated` appears when `--max-text` cut anything.
 
-On an archive from before the calendar tables, both commands return an empty result with `needs_sync` and a hint to run `sync`.
+### calendar actions
+
+The action items of the recaps held by the events that start in a range, with their owners. Flags: `--from`, `--to` and `--days` (as for the agenda; the range applies to the event's start; default today), `--owner=NAME` (the owner's name contains NAME, ignoring case), `--mine` (the owner is you; see `mine_basis` below; the name is the one `whoami` prints for the account, and with no `--account` each event is judged against its own account's name) and `--limit` (default 50). `--fields` applies.
+
+Result: a list sorted by event start, then recap, then the order of the items in the recap. Each item carries `event_id`, `event_key`, `subject`, `event_start`, `call_id`, `title`, `text`, `owner`, `speaker`, `at`, `origin` (`recap` or `catchup`; the recap's own items win over the catch-up's for the same call), `mine`, `mine_basis`, `expires_at` and, when true, `series_level`. Recap owners are mostly a first name alone, so `mine` is decided like this: `mine_basis: full_name` when the owner equals your display name (ignoring case); `first_name` when the owner is one word equal to your first name and no other attendee of the event has that first word (the recap's speakers are used when the event has no attendee list); `ambiguous` when someone else in the meeting shares your first name, and then `mine` is absent and `unknown_fields` is `["mine"]`, because the item may or may not be yours. Any other owner has `mine: false` and no basis. `--mine` keeps `full_name` and `first_name` items and reports how many ambiguous ones it left out as `mine_ambiguous_omitted`, and names the accounts whose own name is not archived in `mine_unknown_accounts` (an error only when no account has a name). `mine` needs the owner to be your display name or a unique first name, so an owner written "Last, First" does not match; run without `--mine` and read `mine_basis` to see them. The list also carries the agenda's coverage keys (`coverage_gap`, `coverage_as_of`, `uncovered_days`, `accounts`, `range`), so an empty list on an uncovered day is not read as "no action items". Only action items are listed (mentions are in `calendar event`), items a newer copy of the recap dropped are hidden, and an expired recap is still listed, with its `expires_at`. A recap whose occurrence cannot be told (`series_level: true`, see `link_method` above) is listed once, under the first occurrence of the range that holds it, not once per occurrence. `--mine` on an account whose own name is not archived yet is a `usage` error; run `sync`, or use `--owner`. Recaps that no event holds are not listed here; they are in the agenda's `unlinked_recaps`.
+
+```sh
+teamscrawl calendar actions --from yesterday --to today --mine
+teamscrawl calendar actions --days 7 --owner pat
+```
+
+On an archive from before the calendar tables, all three commands return an empty result with `needs_sync` and a hint to run `sync`.
 
 Examples:
 

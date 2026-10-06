@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -110,7 +111,15 @@ func copyTree(t *testing.T, src, dst string) {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o600) //nolint:gosec // G703: test copy into a temp dir
+		if err := os.WriteFile(target, b, 0o600); err != nil { //nolint:gosec // G703: test copy into a temp dir
+			return err
+		}
+		// A copy keeps the fixture's modification times, so it fingerprints as the fixture does.
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(target, info.ModTime(), info.ModTime())
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +131,63 @@ func fixtureCopy(t *testing.T) string {
 	root := filepath.Join(t.TempDir(), "EBWebView")
 	copyTree(t, fixtureRoot, root)
 	return root
+}
+
+// The first sync of the fixture makes the same archive every time, and many tests only need that
+// archive as the state they start from. syncedStart gives such a test a fresh copy of the fixture
+// together with a copy of the archive a first sync of it makes, which was synced once per process.
+// The copy has the fixture's modification times, so a sync of it finds the cache as the template
+// left it: unchanged until the test changes it.
+var syncedTemplate struct {
+	sync.Once
+	dir string // made by TestMain, outside any test's own temp dir
+	err error
+}
+
+func syncedStart(t *testing.T) (root, db string) {
+	t.Helper()
+	syncedTemplate.Do(func() {
+		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db")})
+	})
+	if syncedTemplate.err != nil {
+		t.Fatalf("syncing the fixture once: %v", syncedTemplate.err)
+	}
+	root, db = fixtureCopy(t), newDB(t)
+	// Opening the archive makes its private parent directory (Windows refuses a parent a test made
+	// itself); the template's bytes then replace the empty archive.
+	st, err := store.Open(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db*"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("template archive: %v %v", files, err)
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f) //nolint:gosec // the template archive
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(db+strings.TrimPrefix(filepath.Base(f), "teamscrawl.db"), b, 0o600); err != nil { //nolint:gosec // G703: a copy into a temp dir
+			t.Fatal(err)
+		}
+	}
+	return root, db
+}
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "teamscrawl-syncer-template-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	syncedTemplate.dir = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func logFile(t *testing.T, root string) string {
@@ -216,9 +282,7 @@ func TestSecondSyncUnchanged(t *testing.T) {
 }
 
 func TestSyncAfterWrite(t *testing.T) {
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
 		t.Fatal(err)
@@ -772,9 +836,7 @@ func TestSyncWritesGenericRecords(t *testing.T) {
 }
 
 func TestSyncMarksVanishedRecordsRemoved(t *testing.T) {
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctA
 	seedRecords(t, db,
 		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "events", KeyJSON: []byte(`"stale-key"`), ValueJSON: []byte(`1`)},
@@ -795,9 +857,7 @@ func TestSyncMarksVanishedRecordsRemoved(t *testing.T) {
 }
 
 func TestFilteredSyncLeavesOtherAccountsRecordsAlone(t *testing.T) {
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctB
 	seedRecords(t, db, teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctB.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`2`)})
 	a := acctA
@@ -903,9 +963,7 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 	deniedFn = func(name string) bool { return name == "things" }
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			root := fixtureCopy(t)
-			db := newDB(t)
-			run(t, Options{Root: root, DBPath: db})
+			root, db := syncedStart(t)
 			if c.seed != nil {
 				seedRecords(t, db, *c.seed)
 			} else {
@@ -984,9 +1042,7 @@ func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
 // Rows archived under a name the denylist now matches are cleared on the next sync: the key stays,
 // the value and hash go, and the row is marked removed.
 func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	acct := acctA
 	seedRecords(t, db,
 		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":1}`)},

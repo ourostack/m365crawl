@@ -39,7 +39,7 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/teamscrawl/internal/cli.version=$(VERSION) -X github.com/ourostack/teamscrawl/internal/cli.commit=$(COMMIT) -X github.com/ourostack/teamscrawl/internal/cli.date=$(DATE)" -o "$(BINARY)" ./cmd/teamscrawl
 
 test:
-	go test -race -count=1 -timeout 18m $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...
+	go test -race -count=1 -timeout 15m $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...
 
 e2e:
 	go test -count=1 -tags e2e ./e2e/...
@@ -91,6 +91,7 @@ script-lint:
 	scripts/release-flags.sh --selftest
 	scripts/automerge-eligible.sh --selftest
 	scripts/retry.sh --selftest
+	scripts/check-release-wiring.sh --selftest
 
 tidy-check:
 	go mod verify

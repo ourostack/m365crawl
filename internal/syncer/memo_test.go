@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,24 +18,26 @@ import (
 	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
+// archiveQueries are the content tables of an archive, as dumpArchive and sameArchive read them.
+var archiveQueries = []struct{ name, q string }{
+	{"accounts", `select tenant_id, user_id, profile, locale, first_seen_at is not null, last_synced_at is not null from main.accounts order by 1, 2`},
+	{"conversations", `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from main.conversations order by 1`},
+	{"messages", `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from main.messages order by 1`},
+	{"people", `select tenant_id, id, display_name, first_seen_at, last_seen_at from main.people order by 1, 2`},
+	{"activity", `select rowid, tenant_id, user_id, id, type, subtype, is_read, at, conversation_id, message_id, reply_chain_id, app_id, raw_json, content_hash from main.activity order by 1`},
+	{"records", `select source, tenant_id, user_id, database, store, key_json, value_json, content_hash, first_seen_at is not null, removed_at is not null from main.records order by 1, 4, 5, 6`},
+	{"message_fts", `select rowid, message_key, content from main.message_fts order by 1`},
+	{"conversation_fts", `select rowid, conversation_id, title from main.conversation_fts order by 1`},
+}
+
 // dumpArchive renders every content table of the archive, one line per row, in primary key order.
 // It leaves out the read memory itself and the columns that hold when a sync ran, which differ
 // between two archives built at different moments; whether such a column is set is kept.
 func dumpArchive(t *testing.T, db string) string {
 	t.Helper()
 	d := openRaw(t, db)
-	queries := []struct{ name, q string }{
-		{"accounts", `select tenant_id, user_id, profile, locale, first_seen_at is not null, last_synced_at is not null from accounts order by 1, 2`},
-		{"conversations", `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from conversations order by 1`},
-		{"messages", `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from messages order by 1`},
-		{"people", `select tenant_id, id, display_name, first_seen_at, last_seen_at from people order by 1, 2`},
-		{"activity", `select rowid, tenant_id, user_id, id, type, subtype, is_read, at, conversation_id, message_id, reply_chain_id, app_id, raw_json, content_hash from activity order by 1`},
-		{"records", `select source, tenant_id, user_id, database, store, key_json, value_json, content_hash, first_seen_at is not null, removed_at is not null from records order by 1, 4, 5, 6`},
-		{"message_fts", `select rowid, message_key, content from message_fts order by 1`},
-		{"conversation_fts", `select rowid, conversation_id, title from conversation_fts order by 1`},
-	}
 	var b strings.Builder
-	for _, q := range queries {
+	for _, q := range archiveQueries {
 		rows, err := d.Query(q.q)
 		if err != nil {
 			t.Fatalf("%s: %v", q.name, err)
@@ -56,6 +59,54 @@ func dumpArchive(t *testing.T, db string) string {
 	return b.String()
 }
 
+// sameArchive reports whether two archives hold the same content, by the same queries as
+// dumpArchive. SQLite compares the rows itself, which is far cheaper than rendering both archives
+// as text; a test that fails on a difference can call dumpArchive on both to see it.
+func sameArchive(t *testing.T, a, b string) bool {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := openRaw(t, a).Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "attach database ? as o", b); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, "detach database o") }()
+	for _, q := range archiveQueries {
+		mine, _, _ := strings.Cut(q.q, " order by ") // a compound select has no order of its own
+		other := strings.ReplaceAll(mine, "main.", "o.")
+		var extra, missing, n1, n2 int
+		for _, c := range []struct {
+			sql string
+			dst *int
+		}{
+			{"select count(*) from (" + mine + " except " + other + ")", &extra},
+			{"select count(*) from (" + other + " except " + mine + ")", &missing},
+		} {
+			if err := conn.QueryRowContext(ctx, c.sql).Scan(c.dst); err != nil {
+				t.Fatalf("%s: %v", q.name, err)
+			}
+		}
+		for _, c := range []struct {
+			sql string
+			dst *int
+		}{
+			{"select count(*) from (" + mine + ")", &n1},
+			{"select count(*) from (" + other + ")", &n2},
+		} {
+			if err := conn.QueryRowContext(ctx, c.sql).Scan(c.dst); err != nil {
+				t.Fatalf("%s: %v", q.name, err)
+			}
+		}
+		if extra != 0 || missing != 0 || n1 != n2 {
+			return false
+		}
+	}
+	return true
+}
+
 // reportKey is a report without the fields that hold when the sync ran.
 func reportKey(t *testing.T, r Report, ch []Change) string {
 	t.Helper()
@@ -71,12 +122,11 @@ func reportKey(t *testing.T, r Report, ch []Change) string {
 }
 
 // touch changes a file's modification time so the next sync sees a changed source.
-var touchCount int
+var touchCount atomic.Int64
 
 func touchLog(t *testing.T, root string) {
 	t.Helper()
-	touchCount++
-	later := time.Now().Add(time.Duration(touchCount) * time.Hour)
+	later := time.Now().Add(time.Duration(touchCount.Add(1)) * time.Hour)
 	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +232,7 @@ func TestSkippingEquivalentToFullReads(t *testing.T) {
 			if a, b := reportKey(t, sr, sc), reportKey(t, fr, fc); a != b {
 				t.Fatalf("%s pass %d: reports differ\nskip: %s\nfull: %s", s.name, pass, a, b)
 			}
-			if a, b := dumpArchive(t, skipDB), dumpArchive(t, fullDB); a != b {
+			if !sameArchive(t, skipDB, fullDB) {
 				t.Fatalf("%s pass %d: archives differ", s.name, pass)
 			}
 		}
@@ -361,7 +411,7 @@ func TestSignatureChangeRereadsEverything(t *testing.T) {
 	if r := (*runs)[2]; r.typedSkips != 0 || r.genericSkips != 0 {
 		t.Fatalf("a new signature still skipped: %+v", r)
 	}
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("a re-read under a new signature differs from a full read")
 	}
 	touchLog(t, root)
@@ -398,7 +448,7 @@ func TestFilteredRunDoesNotPoisonOtherAccounts(t *testing.T) {
 	}
 	all := (*runs)[2].typedSkips + 0
 	_ = all
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("an unfiltered run after a filtered one differs from a full read")
 	}
 	// B's records were read in full, not skipped: fewer typed skips than a run where all match.
@@ -473,7 +523,7 @@ func TestBlobContentIsPartOfTheDigest(t *testing.T) {
 	if (e1 == nil) != (e2 == nil) {
 		t.Fatalf("errors %v vs %v", e1, e2)
 	}
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("a changed blob was not read again")
 	}
 	if dumpArchive(t, skipDB) == "" {
@@ -506,7 +556,7 @@ func TestRowsThatMovedForceAFullReadOfTheRecord(t *testing.T) {
 	if sr.Messages.Updated == 0 || sr.Conversations.Updated == 0 || sr.Activity.Updated == 0 {
 		t.Fatalf("the moved rows were not put right: %+v", sr)
 	}
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("moved rows: skipping differs from a full read")
 	}
 	if (*runs)[0].typedSkips == 0 {
@@ -529,7 +579,7 @@ func TestUnreadableEffectsMeanAFullRead(t *testing.T) {
 	if (*runs)[0].typedSkips != 0 {
 		t.Fatalf("records with unreadable effects were skipped: %+v", (*runs)[0])
 	}
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("unreadable effects: differs from a full read")
 	}
 }
@@ -537,9 +587,7 @@ func TestUnreadableEffectsMeanAFullRead(t *testing.T) {
 // TEAMSCRAWL_FULL_READ=1 and Options.FullRead both read every record in full.
 func TestFullReadSwitches(t *testing.T) {
 	isolateTmp(t)
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	runs := watchApplies(t)
 	touchLog(t, root)
 	run(t, Options{Root: root, DBPath: db, FullRead: true})
@@ -574,7 +622,7 @@ func TestMemoConflictRereadsInFull(t *testing.T) {
 	if len(*runs) != 2 || (*runs)[0].typedSkips != 0 || !(*runs)[0].full {
 		t.Fatalf("the retry skipped: %+v", (*runs)[0])
 	}
-	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || dumpArchive(t, skipDB) != dumpArchive(t, fullDB) {
+	if reportKey(t, sr, sc) != reportKey(t, fr, fc) || !sameArchive(t, skipDB, fullDB) {
 		t.Fatal("the retried source differs from a full read")
 	}
 }
@@ -676,9 +724,7 @@ func TestUnusableRowsAreNotRemembered(t *testing.T) {
 // Refreshing the account of a skipped record can fail like any write; the source then fails.
 func TestAccountFailureWhileSkippingFailsTheSource(t *testing.T) {
 	isolateTmp(t)
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	exec(t, openRaw(t, db), `create trigger boom before update on accounts begin select raise(abort, 'injected'); end;`)
 	touchLog(t, root)
 	_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
@@ -773,9 +819,7 @@ func TestMemoIsPrunedWhenRecordsLeaveTheCache(t *testing.T) {
 // it can not say their records left.
 func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 	isolateTmp(t)
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	typed, digests := memoRows(t, db)
 	acct := &teamsdesktop.Account{TenantID: "00000000-0000-4000-8000-000000000001", UserID: "00000000-0000-4000-8000-0000000000a1"}
 	touchLog(t, root)
@@ -783,6 +827,11 @@ func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 	if t2, d2 := memoRows(t, db); t2 != typed || d2 != digests {
 		t.Fatalf("a filtered run changed the memory: %d/%d typed, %d/%d digests", t2, typed, d2, digests)
 	}
+}
+
+var pruningCut struct {
+	found bool
+	cut   float64
 }
 
 // keyPruningCut returns the fraction of the fixture's log to keep so that a sync after a full read
@@ -793,12 +842,14 @@ func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 // longer has the scenario, and the test fails here rather than passing without testing anything.
 func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
 	t.Helper()
+	// The cut depends only on the fixture, so it is found once per process, however many tests ask.
+	if pruningCut.found {
+		return pruningCut.cut
+	}
 	old := beforeRead
 	t.Cleanup(func() { beforeRead = old })
 	for cut := 0.95; cut > 0.05; cut -= 0.01 {
-		root := fixtureCopy(t)
-		db := newDB(t)
-		run(t, Options{Root: root, DBPath: db})
+		root, db := syncedStart(t)
 		applyState(t, root, full, blobs, cacheState{"probe", cut, nil})
 		touchLog(t, root)
 		pruned := 0
@@ -812,6 +863,7 @@ func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
 		_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
 		beforeRead = old
 		if err == nil && pruned > 0 {
+			pruningCut.found, pruningCut.cut = true, cut
 			return cut
 		}
 	}
@@ -865,9 +917,7 @@ func TestPruneFailuresFailTheSource(t *testing.T) {
 // The hashes of archive rows are loaded for the rows the memory names, not for whole tables.
 func TestRowHashesAreLoadedOnlyForRowsTheMemoryNames(t *testing.T) {
 	isolateTmp(t)
-	root := fixtureCopy(t)
-	db := newDB(t)
-	run(t, Options{Root: root, DBPath: db})
+	root, db := syncedStart(t)
 	asked := map[byte]int{}
 	old := beforeRead
 	t.Cleanup(func() { beforeRead = old })
@@ -937,7 +987,7 @@ func TestTwoRecordsOneTypedRowCostOneReadAndMatchAFullRead(t *testing.T) {
 		if a, b := reportKey(t, sr, sc), reportKey(t, fr, fc); a != b {
 			t.Fatalf("sync %d: reports differ\nskip: %s\nfull: %s", i, a, b)
 		}
-		if a, b := dumpArchive(t, skipDB), dumpArchive(t, fullDB); a != b {
+		if !sameArchive(t, skipDB, fullDB) {
 			t.Fatalf("sync %d: archives differ", i)
 		}
 		if i >= 3 && skipReads != 1 {
@@ -1012,7 +1062,7 @@ func TestUpgradeFromAVersion3ArchiveAsV020WritesIt(t *testing.T) {
 		t.Fatalf("counts moved: %+v vs %+v", again, first)
 	}
 	run(t, Options{Root: root, DBPath: fresh})
-	if a, b := dumpArchive(t, db), dumpArchive(t, fresh); a != b {
+	if !sameArchive(t, db, fresh) {
 		t.Fatal("the upgraded archive differs from a fresh one")
 	}
 }

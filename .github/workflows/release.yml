@@ -252,6 +252,9 @@ jobs:
   # flake always passes through it before the cask is published.
   settle:
     needs: [decide, verify-release-darwin, verify-release-windows]
+    # A publish-only resume skips release on purpose, and a job with no if: is skipped whenever any
+    # job upstream of it was skipped, so every job after release states its own condition.
+    if: ${{ !cancelled() && needs.verify-release-darwin.result == 'success' && needs.verify-release-windows.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -278,6 +281,7 @@ jobs:
   # changing what users install.
   publish-homebrew:
     needs: [decide, settle]
+    if: ${{ !cancelled() && needs.settle.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -300,7 +304,7 @@ jobs:
 
   # Stable releases only: installs from the tap the way a user does and checks the installed binary.
   verify-homebrew:
-    if: ${{ needs.decide.outputs.rehearsal == 'false' }}
+    if: ${{ !cancelled() && needs.decide.outputs.rehearsal == 'false' && needs.publish-homebrew.result == 'success' }}
     needs: [decide, publish-homebrew]
     runs-on: macos-latest
     timeout-minutes: 60
