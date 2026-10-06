@@ -1,0 +1,48 @@
+name: Dependabot auto-merge
+
+# Turns on auto-merge (squash) for Dependabot pull requests that update Go modules by a
+# semver patch or minor, so each merges when the required checks pass. Nothing else
+# auto-merges: GitHub Actions updates (a moved upstream tag could reach the job that holds the
+# Apple secrets) and major versions stay open for a human to read. The decision is
+# scripts/automerge-eligible.sh. pull_request_target gives a Dependabot pull request a token that
+# can write; this workflow never checks out or runs the pull request's code (the script comes
+# from the base branch).
+on:
+  pull_request_target:
+
+permissions: {}
+
+jobs:
+  automerge:
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout the base branch for the decision script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Read the update metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Decide
+        id: eligible
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          UPDATED: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          if scripts/automerge-eligible.sh; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Enable auto-merge
+        if: ${{ steps.eligible.outputs.eligible == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
