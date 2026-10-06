@@ -87,7 +87,7 @@ func TestMapEventFieldByField(t *testing.T) {
 		{"OriginalStart", e.OriginalStart, (*time.Time)(nil)},
 		{"Start", e.Start, start},
 		{"End", e.End, end},
-		{"AllDay", e.AllDay, false},
+		{"AllDay", e.AllDay, calendar.TriFalse},
 		{"StartDate", e.StartDate, ""},
 		{"EndDate", e.EndDate, ""},
 		{"TimeZone", e.TimeZone, "PacificSt"},
@@ -96,12 +96,12 @@ func TestMapEventFieldByField(t *testing.T) {
 		{"Subject", e.Subject, "Fixture Planning Sync"},
 		{"Organizer", e.Organizer, "Alex Fixture"},
 		{"OrganizerAddress", e.OrganizerAddress, "alex@example.test"},
-		{"IsOrganizer", e.IsOrganizer, true},
-		{"IsPrivate", e.IsPrivate, true},
-		{"Cancelled", e.Cancelled, false},
+		{"IsOrganizer", e.IsOrganizer, calendar.TriTrue},
+		{"IsPrivate", e.IsPrivate, calendar.TriTrue},
+		{"Cancelled", e.Cancelled, calendar.TriFalse},
 		{"Response", e.Response, "organizer"},
 		{"ShowAs", e.ShowAs, "busy"},
-		{"IsOnlineMeeting", e.IsOnlineMeeting, true},
+		{"IsOnlineMeeting", e.IsOnlineMeeting, calendar.TriTrue},
 		{"Location", e.Location, "Fixture Room Alpha; Fixture Room Beta"},
 		{"LastModified", e.LastModified, &mod},
 		{"OnlineMeetingURL", e.OnlineMeetingURL, "https://teams.example.test/l/meetup-join/19%3ameeting_FIXTUREurl%40thread.v2/0?context=x"},
@@ -118,13 +118,12 @@ func TestMapEventFieldByField(t *testing.T) {
 		{"BodyText", e.BodyText, teamsdesktop.HTMLToText("<p>Hello&nbsp;team</p>")},
 		{"BodyType", e.BodyType, "html"},
 		{"BodyPreview", e.BodyPreview, "Hello team"},
-		{"HasAttachments", e.HasAttachments, true},
+		{"HasAttachments", e.HasAttachments, calendar.TriTrue},
 		{"AttachmentsJSON", e.AttachmentsJSON, `[{"id":"att-1","name":"agenda.txt","size":12,"content_type":"text/plain","content_id":"cid-1","is_inline":true,"attachment_type":"file"},` +
 			`{"id":"att-2","name":"b.txt","size":0,"content_type":"","content_id":"","is_inline":false,"attachment_type":""}]`},
 		{"CategoriesJSON", e.CategoriesJSON, `["Blue","Fixture"]`},
 		{"RecurrenceJSON", e.RecurrenceJSON, `{"eventRecurrenceRange":{"type":"endDate"},"recurrenceEnd":{"$date":"2026-12-31T00:00:00.000Z"},"recurrencePattern":{"interval":1,"type":"weekly"}}`},
 		{"ReminderMinutes", e.ReminderMinutes, &reminder},
-		{"ReminderStated", e.ReminderStated, true},
 		{"DetailRawJSON", e.DetailRawJSON, richEvent},
 		{"DetailAsOf", e.DetailAsOf, (*time.Time)(nil)},
 		{"RemovedAt", e.RemovedAt, (*time.Time)(nil)},
@@ -159,7 +158,7 @@ func TestMapEventThinRecord(t *testing.T) {
 	if !notes.EventTypeAbsent || e.EventType != calendar.EventSingle {
 		t.Errorf("absent event type: type %q notes %+v", e.EventType, notes)
 	}
-	if !e.HasAttachments || e.AttendeesJSON != "" || e.LocationsJSON != "" || e.AttachmentsJSON != "" || e.CategoriesJSON != "" || e.RecurrenceJSON != "" ||
+	if !e.HasAttachments.Is(true) || e.AttendeesJSON != "" || e.LocationsJSON != "" || e.AttachmentsJSON != "" || e.CategoriesJSON != "" || e.RecurrenceJSON != "" ||
 		e.ReminderMinutes != nil || e.BodyHTML != "" || e.BodyText != "" || e.TeamsThreadID != "" || e.LastModified != nil || e.TimeZoneIANA != "" {
 		t.Errorf("thin record has detail: %+v", e)
 	}
@@ -195,7 +194,7 @@ func TestMapEventResponseNormalized(t *testing.T) {
 
 func TestMapEventCancelledDeclined(t *testing.T) {
 	e, _ := mapEvent(t, "k", `{"iCalUID":"U","isCancelled":true,"myResponseType":"Declined"}`)
-	if !e.Cancelled || e.Response != "declined" {
+	if !e.Cancelled.Is(true) || e.Response != "declined" {
 		t.Fatalf("cancelled %v response %q", e.Cancelled, e.Response)
 	}
 }
@@ -297,7 +296,7 @@ func TestMapEventAllDayShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if e.AllDay != c.allDay || e.StartDate != c.startDate || e.EndDate != c.endDate || notes.AllDayUnaligned != c.unaligned {
+			if e.AllDay.Is(true) != c.allDay || e.StartDate != c.startDate || e.EndDate != c.endDate || notes.AllDayUnaligned != c.unaligned {
 				t.Fatalf("allDay %v %q..%q unaligned %v; want %v %q..%q %v", e.AllDay, e.StartDate, e.EndDate, notes.AllDayUnaligned, c.allDay, c.startDate, c.endDate, c.unaligned)
 			}
 		})
@@ -306,7 +305,7 @@ func TestMapEventAllDayShapes(t *testing.T) {
 
 func TestMapEventAllDayNilSyncZone(t *testing.T) {
 	e, notes, err := MapEventRecord(testAcct, "k", []byte(`{"iCalUID":"U","isAllDayEvent":true,"startTime":{"$date":"2026-03-10T10:00:00.000Z"},"endTime":{"$date":"2026-03-10T11:00:00.000Z"}}`), nil)
-	if err != nil || e.AllDay || !notes.AllDayUnaligned {
+	if err != nil || e.AllDay.Is(true) || !notes.AllDayUnaligned {
 		t.Fatalf("err %v allDay %v notes %+v", err, e.AllDay, notes)
 	}
 }
@@ -378,7 +377,7 @@ func TestMapEventRequiresUsableTimes(t *testing.T) {
 
 func TestMapEventScalarForms(t *testing.T) {
 	e, _ := mapEvent(t, "k", `{"iCalUID":12345,"subject":"S","isReminderSet":true,"reminderMinutesBeforeStart":"x","isOrganizer":"TRUE","isPrivate":"no","hasAttachments":1}`)
-	if e.ICalUID != "12345" || !e.IsOrganizer || e.IsPrivate || e.HasAttachments || e.ReminderMinutes != nil {
+	if e.ICalUID != "12345" || !e.IsOrganizer.Is(true) || e.IsPrivate.Known() || e.HasAttachments.Known() || e.ReminderMinutes != nil {
 		t.Fatalf("scalar forms: %+v", e)
 	}
 	e, _ = mapEvent(t, "k", `{"iCalUID":"U","isReminderSet":true,"reminderMinutesBeforeStart":7.0}`)
@@ -439,8 +438,8 @@ func TestMapEventReminderStates(t *testing.T) {
 	}
 	for _, c := range cases {
 		e, _ := mapEvent(t, "k", `{"iCalUID":"U",`+c.js+`}`)
-		if !reflect.DeepEqual(e.ReminderMinutes, c.minutes) || e.ReminderStated != c.stated {
-			t.Errorf("%s: minutes %v stated %v", c.name, e.ReminderMinutes, e.ReminderStated)
+		if !reflect.DeepEqual(e.ReminderMinutes, c.minutes) || containsField(e.Unknown, calendar.FieldReminder) == c.stated {
+			t.Errorf("%s: minutes %v unknown %v", c.name, e.ReminderMinutes, e.Unknown)
 		}
 	}
 }
@@ -448,11 +447,11 @@ func TestMapEventReminderStates(t *testing.T) {
 func TestMapEventReminderRange(t *testing.T) {
 	for js, ok := range map[string]bool{`-1`: false, `40321`: false, `40320`: true, `0`: true} {
 		e, notes := mapEvent(t, "k", `{"iCalUID":"U","isReminderSet":true,"reminderMinutesBeforeStart":`+js+`}`)
-		if ok && (e.ReminderMinutes == nil || !e.ReminderStated || notes.ReminderOutOfRange) {
-			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.ReminderStated, notes)
+		if ok && (e.ReminderMinutes == nil || containsField(e.Unknown, calendar.FieldReminder) || notes.ReminderOutOfRange) {
+			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.Unknown, notes)
 		}
-		if !ok && (e.ReminderMinutes != nil || e.ReminderStated || !notes.ReminderOutOfRange) {
-			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.ReminderStated, notes)
+		if !ok && (e.ReminderMinutes != nil || !containsField(e.Unknown, calendar.FieldReminder) || !notes.ReminderOutOfRange) {
+			t.Errorf("%s: %v %v %+v", js, e.ReminderMinutes, e.Unknown, notes)
 		}
 	}
 }
@@ -493,12 +492,67 @@ func TestMapCatchUpRecordingFieldsTravelTogether(t *testing.T) {
 	}
 }
 
-func TestMapEventOnlineStated(t *testing.T) {
-	for js, want := range map[string]bool{`"isOnlineMeeting":true`: true, `"isOnlineMeeting":false`: true, `"subject":"thin"`: false, `"isOnlineMeeting":null`: false} {
+func TestMapEventOnlineFlagIsKnownOnlyWhenPresent(t *testing.T) {
+	for js, want := range map[string]calendar.Tri{`"isOnlineMeeting":true`: calendar.TriTrue, `"isOnlineMeeting":false`: calendar.TriFalse, `"subject":"thin"`: calendar.TriUnknown, `"isOnlineMeeting":null`: calendar.TriUnknown} {
 		e, _ := mapEvent(t, "k", `{"iCalUID":"U",`+js+`}`)
-		if e.OnlineStated != want {
-			t.Errorf("%s: OnlineStated %v", js, e.OnlineStated)
+		if e.IsOnlineMeeting != want {
+			t.Errorf("%s: IsOnlineMeeting %v", js, e.IsOnlineMeeting)
 		}
+	}
+}
+
+func containsField(fields []calendar.Field, f calendar.Field) bool {
+	for _, x := range fields {
+		if x == f {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMapEventAbsentKeysAreUnknown(t *testing.T) {
+	e, _ := mapEvent(t, "k", `{"iCalUID":"U","startTime":1773162000000,"endTime":1773165600000}`)
+	for _, f := range []calendar.Field{calendar.FieldSubject, calendar.FieldLocation, calendar.FieldOrganizer, calendar.FieldAttendees,
+		calendar.FieldBody, calendar.FieldRooms, calendar.FieldReminder, calendar.FieldJoinURL, calendar.FieldDialIn, calendar.FieldMeetingChatID,
+		calendar.FieldRecurrence, calendar.FieldTimeZone, calendar.FieldTimeZoneIANA, calendar.FieldUTCOffset, calendar.FieldCategories} {
+		if !containsField(e.Unknown, f) {
+			t.Errorf("%s must be unknown: %v", f, e.Unknown)
+		}
+	}
+	for _, flag := range []calendar.Tri{e.AllDay, e.IsOrganizer, e.IsPrivate, e.Cancelled, e.IsOnlineMeeting, e.HasAttachments} {
+		if flag != calendar.TriUnknown {
+			t.Errorf("an absent flag must be unknown: %+v", e)
+		}
+	}
+	// A thin record says nothing of its detail, so the output collapses it to one name.
+	if got := calendar.UnknownFields(e); !containsString(got, "detail") {
+		t.Errorf("%v", got)
+	}
+}
+
+func containsString(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMapEventPresentFalseIsKnown(t *testing.T) {
+	e, _ := mapEvent(t, "k", `{"iCalUID":"U","subject":"","location":"","attendees":[],"categories":[],"isOrganizer":false,"isAllDayEvent":false,"isReminderSet":false}`)
+	for _, f := range []calendar.Field{calendar.FieldSubject, calendar.FieldLocation, calendar.FieldAttendees, calendar.FieldCategories, calendar.FieldReminder} {
+		if containsField(e.Unknown, f) {
+			t.Errorf("%s is present, so known: %v", f, e.Unknown)
+		}
+	}
+	if !e.IsOrganizer.Is(false) || !e.AllDay.Is(false) {
+		t.Errorf("%+v", e)
+	}
+	// A null key states nothing.
+	n, _ := mapEvent(t, "k", `{"iCalUID":"U","location":null}`)
+	if !containsField(n.Unknown, calendar.FieldLocation) {
+		t.Errorf("a null location is unknown: %v", n.Unknown)
 	}
 }
 
@@ -529,7 +583,7 @@ func TestMapEventLocationTextLeavesStructuredEmpty(t *testing.T) {
 
 func TestMapEventMeetingLinksComeFromOneRecord(t *testing.T) {
 	e, _ := mapEvent(t, "k", richEvent)
-	if e.OnlineMeetingURL == "" || e.ShortJoinURL == "" || e.DialInConferenceID == "" || e.DialInTollNumber == "" || e.TeamsThreadID == "" || !e.OnlineStated {
+	if e.OnlineMeetingURL == "" || e.ShortJoinURL == "" || e.DialInConferenceID == "" || e.DialInTollNumber == "" || e.TeamsThreadID == "" || !e.IsOnlineMeeting.Known() {
 		t.Errorf("%+v", e)
 	}
 }

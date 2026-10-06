@@ -53,12 +53,12 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		Subject:          str(m["subject"]),
 		Organizer:        str(m["organizerName"]),
 		OrganizerAddress: str(m["organizerAddress"]),
-		IsOrganizer:      flagValue(m, "isOrganizer"),
-		IsPrivate:        flagValue(m, "isPrivate"),
-		Cancelled:        flagValue(m, "isCancelled"),
+		IsOrganizer:      triFlag(m, "isOrganizer"),
+		IsPrivate:        triFlag(m, "isPrivate"),
+		Cancelled:        triFlag(m, "isCancelled"),
 		Response:         normalizeResponse(str(m["myResponseType"])),
 		ShowAs:           strings.ToLower(str(m["showAs"])),
-		IsOnlineMeeting:  flagValue(m, "isOnlineMeeting"),
+		IsOnlineMeeting:  triFlag(m, "isOnlineMeeting"),
 		Location:         str(m["location"]),
 		LastModified:     timePtr(moment(m["lastModifiedTime"])),
 
@@ -70,14 +70,14 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		LocationsJSON:      mapLocations(m["meetingLocations"]),
 		BodyPreview:        str(m["bodyPreview"]),
 		AttachmentsJSON:    mapAttachments(m["attachments"]),
-		HasAttachments:     flagValue(m, "hasAttachments"),
+		HasAttachments:     triFlag(m, "hasAttachments"),
 		CategoriesJSON:     mapCategories(m),
 		RecurrenceJSON:     mapRecurrence(m),
 		DetailRawJSON:      string(valueJSON),
 	}
 	e.EventType, notes.EventTypeAbsent = normalizeEventType(str(m["eventType"]))
-	_, e.OnlineStated = flag(m, "isOnlineMeeting")
-	e.ReminderMinutes, e.ReminderStated, notes.ReminderOutOfRange = mapReminder(m)
+	var reminderKnown bool
+	e.ReminderMinutes, reminderKnown, notes.ReminderOutOfRange = mapReminder(m)
 
 	e.TeamsThreadID = threadID(m, e.OnlineMeetingURL)
 
@@ -98,23 +98,81 @@ func MapEventRecord(acct teamsdesktop.Account, key string, valueJSON []byte, zon
 		}
 	}
 
-	if flagValue(m, "isAllDayEvent") {
+	// A missing isAllDayEvent is unknown, not false: 7 of 148 measured records lack the key.
+	e.AllDay = triFlag(m, "isAllDayEvent")
+	if e.AllDay.Is(true) {
 		if start, end, ok := allDayDates(e.Start, e.End, eventLoc, zone); ok {
-			e.AllDay, e.StartDate, e.EndDate = true, start, end
+			e.StartDate, e.EndDate = start, end
 		} else {
+			e.AllDay = calendar.TriFalse // stored as timed, as the note says
 			notes.AllDayUnaligned = true
 		}
 	}
+	e.Unknown = unknownFields(m, reminderKnown)
 	if err := calendar.ValidateEvent(e); err != nil {
 		return calendar.Event{}, notes, &UnmappedError{Reason: err.Error()}
 	}
 	return e, notes, nil
 }
 
-// flagValue is flag without the presence bit, for fields the core still holds as plain booleans.
-func flagValue(m map[string]any, key string) bool {
-	v, _ := flag(m, key)
-	return v
+// triFlag is the three-valued flag key of m: known when the key holds a boolean, unknown (the zero
+// value) when it is absent or not a boolean. Absence must stay absence: it is not false.
+func triFlag(m map[string]any, key string) calendar.Tri {
+	if v, ok := flag(m, key); ok {
+		return calendar.TriOf(v)
+	}
+	return calendar.TriUnknown
+}
+
+// has reports whether any of the record's keys holds a value (a key that is absent or null does
+// not).
+func has(m map[string]any, keys ...string) bool {
+	for _, k := range keys {
+		if m[k] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// unknownFields names the non-flag fields whose record keys are absent: a present key, even an
+// empty one, is known; an absent key is not known. A thin record therefore leaves the whole detail
+// group unknown. The reminder is known when isReminderSet was read and usable.
+func unknownFields(m map[string]any, reminderKnown bool) []calendar.Field {
+	var out []calendar.Field
+	for _, f := range []struct {
+		name calendar.Field
+		keys []string
+	}{
+		{calendar.FieldSubject, []string{"subject"}},
+		{calendar.FieldLocation, []string{"location"}},
+		{calendar.FieldOrganizer, []string{"organizerName"}},
+		{calendar.FieldOrganizerAddress, []string{"organizerAddress"}},
+		{calendar.FieldResponse, []string{"myResponseType"}},
+		{calendar.FieldShowAs, []string{"showAs"}},
+		{calendar.FieldTimeZone, []string{"eventTimeZone"}},
+		{calendar.FieldTimeZoneIANA, []string{"eventTimeZone"}}, // derived from the zone name
+		{calendar.FieldUTCOffset, []string{"utcOffset"}},
+		{calendar.FieldJoinURL, []string{"skypeTeamsMeetingUrl"}},
+		{calendar.FieldShortJoinURL, []string{"shortOnlineMeetingJoinUrl"}},
+		{calendar.FieldDialIn, []string{"onlineMeetingConferenceId", "onlineMeetingTollNumber"}},
+		{calendar.FieldMeetingChatID, []string{"skypeTeamsDataObject", "skypeTeamsData", "skypeTeamsMeetingUrl"}},
+		{calendar.FieldAttendees, []string{"attendees"}},
+		{calendar.FieldRooms, []string{"meetingLocations"}},
+		{calendar.FieldBody, []string{"bodyContent"}},
+		{calendar.FieldBodyPreview, []string{"bodyPreview"}},
+		{calendar.FieldAttachments, []string{"attachments"}},
+		{calendar.FieldCategories, []string{"categories"}},
+		{calendar.FieldRecurrence, recurrenceFields},
+	} {
+		if !has(m, f.keys...) {
+			out = append(out, f.name)
+		}
+	}
+	if !reminderKnown {
+		out = append(out, calendar.FieldReminder)
+	}
+	return calendar.NormalizeUnknown(out)
 }
 
 // normalizeEventType maps Teams' eventType to the core's lower-case vocabulary. An absent type is
@@ -272,10 +330,10 @@ func firstNonEmpty(ss ...string) string {
 const maxReminderMinutes = 40320
 
 // mapReminder reads the reminder from isReminderSet: true gives the lead time (zero minutes is a
-// value), false states that no reminder is set (nil minutes, stated), and an absent or non-boolean
-// key states nothing. A lead time that is negative or above four weeks is not stated, and
+// value), false states that no reminder is set (nil minutes, known), and an absent or non-boolean
+// key is not known. A lead time that is negative or above four weeks is not stated, and
 // outOfRange says so.
-func mapReminder(m map[string]any) (minutes *int, stated, outOfRange bool) {
+func mapReminder(m map[string]any) (minutes *int, known, outOfRange bool) {
 	set, present := flag(m, "isReminderSet")
 	if !present {
 		return nil, false, false
