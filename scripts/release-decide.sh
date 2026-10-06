@@ -25,7 +25,9 @@
 # the build and the signing (verify, release), reuses the published assets, re-verifies them,
 # settles the flags, publishes the cask and, for a stable release, installs it from the tap.
 # A release that a higher stable release has superseded is never resumed: its cask would move
-# the tap backwards.
+# the tap backwards. A release that a higher pending notes file supersedes (for example a stable
+# release demoted after a failed install, with the next patch version's notes merged) is left
+# alone too, so the next release is never blocked by an unfinished one.
 # No candidate: release=false and exit 0. Otherwise the lowest version in semantic-version
 # order is released, and remaining=true says more candidates wait (the workflow starts itself
 # again for them). Because the decision reads state, not the push, a run that was cancelled or
@@ -130,9 +132,14 @@ release_state() {
 }
 
 # tap_version BRANCH prints the version of the cask on that branch of the tap, or nothing when the
-# branch or the cask is not there. The tap is public; any other failure is a refusal, never "missing".
+# branch or the cask is not there. The tap is public; an unreadable tap repository, and any other
+# failure, is a refusal, never "missing".
 tap_version() {
   local out
+  # Check the tap itself first: a private or renamed tap answers 404 on the cask too, and that
+  # must not read as "cask missing".
+  out="$(gh api "repos/${TAP_REPO:-ourostack/homebrew-tap}" --jq .full_name 2>&1)" \
+    || fail "could not read the tap repository ${TAP_REPO:-ourostack/homebrew-tap}: $out"
   if out="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${TAP_REPO:-ourostack/homebrew-tap}/contents/Casks/teamscrawl.rb?ref=$1" 2>&1)"; then
     sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' <<<"$out" | head -n 1
     return 0
@@ -153,7 +160,7 @@ decide() {
   [[ -z "${REF:-}" || "$REF" == refs/heads/main ]] || fail "releases run from main only; this run started on $REF"
   git cat-file -e "${AFTER}^{commit}" 2>/dev/null || fail "the commit $AFTER is not in the checkout (fetch full history)"
 
-  local path base tag version tsha info highest="" candidates="" line best="" bestline="" count=0 file sha resume mode state released="" tapv branch
+  local path base tag version tsha info pending highest="" candidates="" line best="" bestline="" count=0 file sha resume mode state released="" tapv branch
   # -z: names come back raw, so a quoted or non-ASCII name is judged like any other.
   while IFS= read -r -d '' path; do
     [[ "$path" =~ ^docs/releases/v[^/]+\.md$ ]] || continue
@@ -186,9 +193,19 @@ decide() {
     fi
   done < <(git ls-tree -r -z --name-only "$AFTER" -- docs/releases)
 
+  # The highest version whose notes file is pending (no release yet). A newer pending release supersedes
+  # an unfinished lower one (a demoted or unpublished release): the next release is a new patch version.
+  pending=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ -z "$pending" || "$(semver_cmp "${line%%|*}" "$pending")" == 1 ]]; then pending="${line%%|*}"; fi
+  done <<<"$candidates"
+
   # A released version is finished only when its cask is published (and a stable release is not demoted).
   while IFS='|' read -r version tag path state; do
     [[ -n "$version" ]] || continue
+    # Superseded by a pending release with a higher version: left alone, so a demoted release cannot block it.
+    if [[ -n "$pending" && "$(semver_cmp "$version" "$pending")" == -1 ]]; then continue; fi
     # Superseded by a higher stable release: its cask would move the tap backwards, so it is never resumed.
     if [[ -n "$highest" && "$(semver_cmp "$version" "$highest")" == -1 ]]; then continue; fi
     branch=main
@@ -258,6 +275,11 @@ selftest() {
 # branch:version pairs for the cask on the tap.
 case "$1" in
   api)
+    if [[ "$2" == "repos/${TAP_REPO:-ourostack/homebrew-tap}" ]]; then
+      if [[ -n "${STUB_TAP_PRIVATE:-}" ]]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+      echo "${2#repos/}"
+      exit 0
+    fi
     if [[ "$*" == */contents/Casks/teamscrawl.rb\?ref=* ]]; then
       if [[ -n "${STUB_TAP_ERROR:-}" ]]; then echo "gh: HTTP 502" >&2; exit 1; fi
       args="$*"
@@ -410,6 +432,10 @@ STUB
   # Contain demoted the release after the install failed; the tap was put back (or not): resume either way.
   decide_run "$c1" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_DEMOTED="v0.2.0" STUB_TAP="main:0.2.0"
   expect_ok "demoted stable release, cask present" release=true tag=v0.2.0 publish_only=true
+  # A demoted v0.2.0 does not block a newer pending notes file: v0.3.0-rc.2 (above it) goes first and
+  # the unfinished v0.2.0 is left alone; and a demoted stable release with a pending higher stable one.
+  decide_run "$c3" STUB_TAGS="$tagsx" STUB_RELEASES="$relx" STUB_DEMOTED="v0.2.0" STUB_TAP="main:0.2.0"
+  expect_ok "demoted stable release, higher notes pending" release=true tag=v0.3.0-rc.2 publish_only=false resume=false remaining=false
   # Only main releases.
   decide_run "$c4" REF=refs/heads/other
   expect_fail "other branch" "main only"
@@ -507,9 +533,29 @@ STUB
   # A tap that cannot be read (not "not found") is a refusal, never "missing".
   decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0" STUB_TAP_ERROR=1
   expect_fail "unreadable tap" "could not read the cask on the tap's"
+  # A tap that is private or renamed answers 404 for its cask too: refused, never "missing".
+  decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:$late" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0" STUB_TAP_PRIVATE=1
+  expect_fail "private or missing tap repository" "could not read the tap repository"
   # A cask is missing and the tag is not a commit of main that holds the notes: refused with the reason.
   decide_run "$late" STUB_TAGS="$rtags v0.3.0-rc.2:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" STUB_RELEASES="$rrel v0.3.0-rc.2" STUB_TAP="main:0.2.0 rehearsal:0.3.0-rc.1"
   expect_fail "cask missing, tag at an unknown commit" "cannot resume at publish"
+
+  # A stable release demoted after a failed install (v0.4.0, released, tap back on 0.3.0) must not block the
+  # next patch version: v0.4.1's pending notes supersede it, and v0.4.0 is left alone.
+  repo="$tmp/repo3"
+  mkdir -p "$repo/docs/releases"
+  git -C "$repo" init --quiet --initial-branch=main
+  git -C "$repo" config user.name t
+  git -C "$repo" config user.email t@example.com
+  printf '# Changelog\n\n## [Unreleased]\n\n## [0.4.1] - 2026-10-08\n\n## [0.4.0] - 2026-10-07\n' > "$repo/CHANGELOG.md"
+  c0="$(commit "demoted" docs/releases/v0.4.0.md)"
+  decide_run "$c0" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.3.0"
+  expect_ok "demoted stable release alone resumes at publish" release=true tag=v0.4.0 publish_only=true remaining=false
+  c1="$(commit "next patch" docs/releases/v0.4.1.md)"
+  decide_run "$c1" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.3.0"
+  expect_ok "demoted v0.4.0 with a pending v0.4.1 notes file" release=true tag=v0.4.1 version=0.4.1 "sha=$c1" publish_only=false resume=false remaining=false
+  decide_run "$c1" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.4.0"
+  expect_ok "v0.4.0 unpublished (cask on tap, demoted) with a pending v0.4.1" release=true tag=v0.4.1 publish_only=false
   repo="$tmp/repo"
 
   # Semantic-version order.

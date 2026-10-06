@@ -198,7 +198,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Verify the published darwin artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -230,7 +232,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Verify the published Windows artifacts
         shell: pwsh
         env:
@@ -257,7 +261,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Settle the release flags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -281,7 +287,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Push the cask to the tap
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -303,7 +311,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Wait for the tap, install the cask and verify it
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -328,7 +338,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.decide.outputs.sha }}
+          # The scripts of a publish-only resume come from the commit this run started on (main), not from the
+          # tag's older commit; the release assets always come from the release itself.
+          ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
       - name: Mark the release as a prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
