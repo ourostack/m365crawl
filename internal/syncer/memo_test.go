@@ -785,6 +785,40 @@ func TestFilteredRunDoesNotPruneOtherAccountsMemory(t *testing.T) {
 	}
 }
 
+// keyPruningCut returns the fraction of the fixture's log to keep so that a sync after a full read
+// forgets some keys of a database it still reads: the scenario the "keys" prune path handles. It
+// is found by probing, not fixed, because a cut that works depends on where the fixture's database
+// boundaries fall, and those move whenever the fixture grows. It starts near the end and moves
+// back, so it picks the smallest loss that still prunes keys. If no cut prunes keys the fixture no
+// longer has the scenario, and the test fails here rather than passing without testing anything.
+func keyPruningCut(t *testing.T, full []byte, blobs map[string][]byte) float64 {
+	t.Helper()
+	old := beforeRead
+	t.Cleanup(func() { beforeRead = old })
+	for cut := 0.95; cut > 0.05; cut -= 0.01 {
+		root := fixtureCopy(t)
+		db := newDB(t)
+		run(t, Options{Root: root, DBPath: db})
+		applyState(t, root, full, blobs, cacheState{"probe", cut, nil})
+		touchLog(t, root)
+		pruned := 0
+		beforeRead = func(w *writer) {
+			inner := w.memo.deleteKeys
+			w.memo.deleteKeys = func(source, database string, keys []string) error {
+				pruned += len(keys)
+				return inner(source, database, keys)
+			}
+		}
+		_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
+		beforeRead = old
+		if err == nil && pruned > 0 {
+			return cut
+		}
+	}
+	t.Fatal("no cut of the fixture log makes a sync forget keys of a database it still reads; the fixture no longer has the scenario this test needs")
+	return 0
+}
+
 // Forgetting records that left the cache can fail like any write; the source then fails and keeps nothing.
 func TestPruneFailuresFailTheSource(t *testing.T) {
 	for _, name := range []string{"keys", "databases"} {
@@ -796,9 +830,10 @@ func TestPruneFailuresFailTheSource(t *testing.T) {
 				t.Fatal(err)
 			}
 			blobs := readBlobs(t, root)
+			cut := keyPruningCut(t, full, blobs)
 			db := newDB(t)
 			run(t, Options{Root: root, DBPath: db})
-			applyState(t, root, full, blobs, cacheState{"cut", 0.8, nil}) // 0.8, not 0.4: with the calendar databases added, a cut at 0.4 no longer leaves a fully read database missing keys, so nothing is pruned
+			applyState(t, root, full, blobs, cacheState{"cut", cut, nil})
 			touchLog(t, root)
 			boom := errors.New("injected prune failure")
 			old := beforeRead
