@@ -183,8 +183,12 @@ type twinData struct {
 	teamsLive, teamsSeries int
 	twinEvents             int
 	twinSeries             int
-	pairs                  []twinPair
-	linked                 bool
+	// newerEvents and newerSeries count the Teams events (and series made only of such events)
+	// with no twin that were last modified after the newest Outlook last-modified: snapshot skew.
+	// They are left out of teamsLive and teamsSeries, the gated denominators.
+	newerEvents, newerSeries int
+	pairs                    []twinPair
+	linked                   bool
 }
 
 func loadTwins(t *testing.T, d outlookRunData) twinData {
@@ -194,24 +198,42 @@ func loadTwins(t *testing.T, d outlookRunData) twinData {
 	acct := strings.ReplaceAll(d.account, "'", "''")
 	out.linked = count(t, st, `select count(*) from calendar_account_links where source='outlook' and unlinked_at is null and principal_id='`+acct+`'`) > 0
 	oKeys, oSeries := map[string]bool{}, map[string]bool{}
-	for _, r := range rowsOf(t, st, `select event_key, series_key from calendar_source_events where source='outlook' and removed_at is null`) {
+	var newestOutlook time.Time
+	for _, r := range rowsOf(t, st, `select event_key, series_key, coalesce(last_modified,'') from calendar_source_events where source='outlook' and removed_at is null`) {
 		oKeys[asString(r[0])] = true
 		oSeries[sidOf(asString(r[0]), asString(r[1]))] = true
-	}
-	tSeries := map[string]bool{}
-	const cols = `start_at, end_at, response, event_type, time_zone_iana, series_key, coalesce(last_modified,'')`
-	for _, r := range rowsOf(t, st, `select event_key, `+cols+` from calendar_source_events where source='teams' and account_id='`+acct+`' and removed_at is null and event_type<>'master'`) {
-		out.teamsLive++
-		key, sid := asString(r[0]), sidOf(asString(r[0]), asString(r[6]))
-		tSeries[sid] = true
-		if oKeys[key] {
-			out.twinEvents++
+		if lm, ok := parseTime(asString(r[2])); ok && lm.After(newestOutlook) {
+			newestOutlook = lm
 		}
 	}
-	out.teamsSeries = len(tSeries)
+	tSeries := map[string]bool{}
+	seriesEvents, seriesNewer := map[string]int{}, map[string]int{}
+	const cols = `start_at, end_at, response, event_type, time_zone_iana, series_key, coalesce(last_modified,'')`
+	for _, r := range rowsOf(t, st, `select event_key, `+cols+` from calendar_source_events where source='teams' and account_id='`+acct+`' and removed_at is null and event_type<>'master'`) {
+		key, sid := asString(r[0]), sidOf(asString(r[0]), asString(r[6]))
+		lm, _ := parseTime(asString(r[7]))
+		seriesEvents[sid]++
+		switch {
+		case oKeys[key]:
+			out.twinEvents++
+			out.teamsLive++
+		case newerThanCopy(lm, newestOutlook):
+			out.newerEvents++
+			seriesNewer[sid]++
+		default:
+			out.teamsLive++
+		}
+		tSeries[sid] = true
+	}
 	for sid := range tSeries {
-		if oSeries[sid] {
+		switch {
+		case oSeries[sid]:
 			out.twinSeries++
+			out.teamsSeries++
+		case seriesNewer[sid] == seriesEvents[sid]:
+			out.newerSeries++
+		default:
+			out.teamsSeries++
 		}
 	}
 	// The pairs, for the agreement counts: one Outlook row per Teams event (the first by account).
@@ -246,6 +268,7 @@ func TestRealOutlookTwinRate(t *testing.T) {
 	if tw.teamsLive == 0 {
 		t.Fatal("the Teams account has no live non-master events")
 	}
+	t.Logf("Teams events newer than the Outlook copy (last_modified after its newest, no twin; left out of the denominators): events %d, series %d", tw.newerEvents, tw.newerSeries)
 	evRate, serRate := ratio(tw.twinEvents, tw.teamsLive), ratio(tw.twinSeries, tw.teamsSeries)
 	t.Logf("twin rate, events: %d of %d (%.1f%%; spike %d of %d)", tw.twinEvents, tw.teamsLive, 100*evRate, c.SpikeTwinEvents, c.SpikeTwinEvents)
 	t.Logf("twin rate, series: %d of %d (%.1f%%; spike %d of %d)", tw.twinSeries, tw.teamsSeries, 100*serRate, c.SpikeTwinSeries, c.SpikeTwinSeries)

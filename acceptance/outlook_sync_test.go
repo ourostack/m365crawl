@@ -186,7 +186,10 @@ func outlookSyncs(t *testing.T) outlookRunData {
 			OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1,
 			OutlookLink: d.account, OutlookLinkProfile: d.profile.Name,
 		}
-		if d.first, outlookErr = measure(opts); outlookErr != "" {
+		stopProfile := startProfile(t)
+		d.first, outlookErr = measure(opts)
+		stopProfile()
+		if outlookErr != "" {
 			return
 		}
 		d.rowsFirst = outlookRows(t, teams.db)

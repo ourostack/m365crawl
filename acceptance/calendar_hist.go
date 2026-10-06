@@ -140,3 +140,11 @@ func countsLine(m map[string]int) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// newerThanCopy says whether a Teams event was last modified after the newest last-modified of the
+// whole Outlook copy. Such an event cannot be in that copy, whatever the mapper does: the two
+// copies were taken at different times (snapshot skew). A zero time on either side is unknown, so
+// the event is not excluded.
+func newerThanCopy(teams, newestOutlook time.Time) bool {
+	return !teams.IsZero() && !newestOutlook.IsZero() && teams.After(newestOutlook)
+}

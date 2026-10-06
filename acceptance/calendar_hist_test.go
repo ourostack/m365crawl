@@ -99,3 +99,21 @@ func TestCountsLineSortsAndSanitizes(t *testing.T) {
 		t.Error("empty map")
 	}
 }
+
+func TestNewerThanCopy(t *testing.T) {
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for name, c := range map[string]struct {
+		teams, outlook time.Time
+		want           bool
+	}{
+		"later":         {at.Add(time.Second), at, true},
+		"equal":         {at, at, false},
+		"earlier":       {at.Add(-time.Hour), at, false},
+		"unknown teams": {time.Time{}, at, false},
+		"unknown copy":  {at, time.Time{}, false},
+	} {
+		if got := newerThanCopy(c.teams, c.outlook); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
+	}
+}
