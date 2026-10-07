@@ -33,7 +33,7 @@ var (
 
 // KnownLayouts lists every (class, tag) the reader reads. Entries are added only with a
 // row in the layout document and an acceptance pass.
-var KnownLayouts = []Layout{EventLayout, DetailLayout}
+var KnownLayouts = []Layout{EventLayout, DetailLayout, AccountLayout}
 
 const (
 	classEvent  = 0x6b

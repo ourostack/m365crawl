@@ -112,6 +112,8 @@ type Notes struct {
 	OccurrenceNoDate                                int // occurrence or exception events whose id embeds no date
 	SeriesKeySplits                                 int // series keys (+20) whose events split into more than one series by id
 	SeriesGroupSplits                               int // series by id whose events carry more than one series key (+20)
+	AccountObjects                                  int // class 0x49 objects that carry an address
+	AccountAddresses                                int // distinct addresses they carry
 	DetailCopiesDiffer                              int // detail keys with more than one differing copy
 	BodyNULTrimmed                                  int // detail objects (by detail key) whose body ended in a NUL, removed
 	UnknownZonesRejected                            int // events whose unresolved zone name is not printable ASCII of at most MaxZoneNameLen
@@ -132,11 +134,15 @@ type Notes struct {
 
 // Result is what Collect read.
 type Result struct {
-	Events         []calendar.Event // the current copy of each event, sorted by SourceID
-	Notes          Notes
-	Losses         []Loss
-	UnknownLayouts []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
-	Stats          hxstore.Stats
+	Events []calendar.Event // the current copy of each event, sorted by SourceID
+	// AccountAddresses are the addresses of the accounts signed in to the profile, lower case, distinct
+	// and sorted: the addresses its account objects carry. They link the profile to the Teams account
+	// that has one of them.
+	AccountAddresses []string
+	Notes            Notes
+	Losses           []Loss
+	UnknownLayouts   []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
+	Stats            hxstore.Stats
 }
 
 type winner struct {
@@ -159,6 +165,7 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	details := map[uint32]hxstore.Object{}
 	differing := map[uint32]bool{}
 	badTags := map[uint16]int{}
+	addresses := map[string]bool{}
 	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
 		switch {
 		case o.Class == classEvent && o.Tag != tagEvent:
@@ -171,6 +178,13 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 				res.Notes.EventNoID++
 			default:
 				keepEvent(winners, o, rule, &res.Notes)
+			}
+		case o.Class == classAccount && o.Tag == tagAccount:
+			// A resynced object is taken too: the account objects of a real store all are, and the
+			// two matching copies of a well-formed address are what vouch for the record.
+			if a, ok := AccountAddress(o); ok {
+				res.Notes.AccountObjects++
+				addresses[a] = true
 			}
 		case o.Class == classDetail && o.Tag == tagDetail:
 			if o.Resynced {
@@ -194,6 +208,11 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	if g := guard(stats, badTags, len(winners)+res.Notes.EventNoID, opt); g != nil {
 		return res, g
 	}
+	res.Notes.AccountAddresses = len(addresses)
+	for a := range addresses {
+		res.AccountAddresses = append(res.AccountAddresses, a)
+	}
+	sort.Strings(res.AccountAddresses)
 	res.Notes.DetailCopiesDiffer = len(differing)
 	res.Notes.DistinctEvents = len(winners)
 	res.Notes.SupersededCopies = res.Notes.EventObjects - len(winners)

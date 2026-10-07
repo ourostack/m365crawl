@@ -21,6 +21,10 @@ const (
 	outlookSkippedKey = "outlook_skipped:"
 	outlookCheckedKey = "outlook_checked:"
 	outlookAbsentKey  = "outlook_absent:"
+	// outlookIdentityKey holds the addresses of the accounts signed in to the profile from the last
+	// good read: lower case, one per line, and the empty string when the read found none. The row
+	// exists once a read has looked for them.
+	outlookIdentityKey = "outlook_identity:"
 )
 
 // OutlookBatch is one Outlook profile's events, read whole from its store copy.
@@ -34,6 +38,10 @@ type OutlookBatch struct {
 	Stamp string
 	// Read is what the read saw beyond the events, kept for `calendar sources`.
 	Read OutlookRead
+	// Addresses are the addresses of the accounts signed in to the profile, or none when the read
+	// found none. They are kept to link the profile to the Teams account that has one of them (see
+	// AutoLinkOutlook), and they are not part of any output.
+	Addresses []string
 	// InferGone says the read can be trusted to be complete (no damaged block, so no event can
 	// have been missed): an event the archive holds live that this read no longer holds is then
 	// remembered, and marked gone when the next trusted read also misses it (see confirmedGone). Without it nothing is inferred and an unseen event stays.
@@ -107,6 +115,9 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		b.Read.At = b.At
 		raw, _ := json.Marshal(b.Read) // plain numbers and a time
 		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookReadKey+b.Account, string(raw)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
 			return err
 		}
 		return recordRun(ctx, tx, run(res))
@@ -358,6 +369,9 @@ type OutlookState struct {
 	Fingerprint string         // of the last successful read
 	Omissions   map[string]int // of the last successful read, so a run that reads nothing still reports them
 	HoldsEvents bool           // the archive holds events of the account
+	// IdentityRead says that a read has looked for the addresses signed in to the profile. An archive written
+	// before that was done has none, so its first sync reads the store again even when unchanged.
+	IdentityRead bool
 	// Failure is why the last read failed, until a read succeeds; nil when it did not.
 	Failure *OutlookFailure
 }
@@ -386,8 +400,8 @@ func (s *Store) SetOutlookFailure(ctx context.Context, account string, f *Outloo
 func (s *Store) OutlookState(ctx context.Context, profile, source, account string) (OutlookState, error) {
 	var st OutlookState
 	var attempt, failure sql.NullString
-	err := s.db.QueryRowContext(ctx, `select (select value from meta where key=?), (select value from meta where key=?), exists(select 1 from calendar_source_events where source=? and account_id=?)`,
-		outlookAttemptKey+profile, outlookFailureKey+account, string(calendar.SourceOutlook), account).Scan(&attempt, &failure, &st.HoldsEvents)
+	err := s.db.QueryRowContext(ctx, `select (select value from meta where key=?), (select value from meta where key=?), exists(select 1 from calendar_source_events where source=? and account_id=?), exists(select 1 from meta where key=?)`,
+		outlookAttemptKey+profile, outlookFailureKey+account, string(calendar.SourceOutlook), account, outlookIdentityKey+account).Scan(&attempt, &failure, &st.HoldsEvents, &st.IdentityRead)
 	if err != nil {
 		return st, err
 	}
@@ -436,52 +450,81 @@ func (s *Store) SetOutlookChecked(ctx context.Context, profile string, at time.T
 	return errors.Join(forget, err)
 }
 
-// OutlookLinkMethod is how an operator's explicit link is recorded in calendar_account_links.
-const OutlookLinkMethod = "config"
+// OutlookLinkMethod is how an operator's explicit link is recorded in calendar_account_links, and
+// OutlookLinkAddress how a link made by AutoLinkOutlook is. An explicit row, linked or ended, is
+// never changed by an automatic one.
+const (
+	OutlookLinkMethod  = "config"
+	OutlookLinkAddress = "address"
+)
 
 // SetOutlookLink links the Outlook account to the Teams account principal, or ends its link when
-// principal is empty. It is idempotent: an account already linked to principal, or an unlink of an
-// account with no link, changes nothing, so a link given on every run (an environment variable)
-// does not rewrite the row. A rule of the core (an unknown Teams account, a principal that
-// already has another Outlook account) comes back as its usage-class error and nothing changes.
+// principal is empty. Either way the row is the operator's (method config), so an automatic link
+// never replaces it: ending the link of an account that has none writes the ended row that keeps it
+// unlinked. It is idempotent, so a link given on every run (an environment variable) does not
+// rewrite the row. A rule of the core (an unknown Teams account, a principal that already has
+// another Outlook account) comes back as its usage-class error and nothing changes.
 func (s *Store) SetOutlookLink(ctx context.Context, account, principal string, at time.Time) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		p, err := calendar.LoadPrincipals(ctx, tx)
-		if err != nil {
+		var method, linked string
+		var ended sql.NullString
+		err := tx.QueryRowContext(ctx, `select method, principal_id, unlinked_at from calendar_account_links where source=? and account_id=?`, string(calendar.SourceOutlook), account).Scan(&method, &linked, &ended)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		switch {
-		case principal == "" && p.Of(account) == account:
-			return nil
-		case principal != "" && p.Of(account) == principal:
-			return nil
-		case principal == "":
-			return calendar.UnlinkAccount(ctx, tx, calendar.SourceOutlook, account, at)
+		held := err == nil
+		if principal == "" {
+			if held && method == OutlookLinkMethod && ended.Valid {
+				return nil
+			}
+			_, err := tx.ExecContext(ctx, `insert into calendar_account_links (source, account_id, principal_id, method, linked_at, unlinked_at) values (?,?,'',?,?,?)
+			  on conflict(source, account_id) do update set method=excluded.method, unlinked_at=coalesce(unlinked_at, excluded.unlinked_at)`,
+				string(calendar.SourceOutlook), account, OutlookLinkMethod, at.UTC().Format(timeLayout), at.UTC().Format(timeLayout))
+			return err
+		}
+		if held && !ended.Valid && linked == principal {
+			if method == OutlookLinkMethod {
+				return nil
+			}
+			// The operator names the link an automatic one already made: it is theirs from now on.
+			_, err := tx.ExecContext(ctx, `update calendar_account_links set method=? where source=? and account_id=?`, OutlookLinkMethod, string(calendar.SourceOutlook), account)
+			return err
 		}
 		return calendar.LinkAccount(ctx, tx, calendar.SourceOutlook, account, principal, OutlookLinkMethod, at)
 	})
 }
 
 // OutlookLinkInEffect says whether an Outlook link already is what an operator asked for: with a
-// principal, that account (any Outlook account when account is empty) is linked to it; with none,
-// the account (or every Outlook account) has no link. A read command uses it to know whether the
-// flag still needs a sync to take effect.
+// principal, that account (any Outlook account when account is empty) is linked to it by the
+// operator's own say; with none, the account (or every Outlook account the archive has read) has
+// no link and holds the ended row that keeps it so. A read command uses it to know whether the flag
+// still needs a sync to take effect.
 func (s *Store) OutlookLinkInEffect(ctx context.Context, account, principal string) (bool, error) {
 	p, err := calendar.LoadPrincipals(ctx, s.db)
 	if err != nil {
 		return false, err
 	}
+	src := string(calendar.SourceOutlook)
 	switch {
 	case principal != "" && account != "":
-		return p.Of(account) == principal, nil
+		var n int
+		err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where source=? and account_id=? and method=? and unlinked_at is null`, src, account, OutlookLinkMethod).Scan(&n)
+		return err == nil && n == 1 && p.Of(account) == principal, err
 	case principal != "":
-		return len(p.Accounts(principal)) > 1, nil
-	case account != "":
-		return p.Of(account) == account, nil
+		var n int
+		err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where source=? and principal_id=? and method=? and unlinked_at is null`, src, principal, OutlookLinkMethod).Scan(&n)
+		return n > 0, err
 	}
-	var active int
-	err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where unlinked_at is null and source=?`, string(calendar.SourceOutlook)).Scan(&active)
-	return active == 0, err
+	if account != "" {
+		var n int
+		err = s.db.QueryRowContext(ctx, `select count(*) from calendar_account_links where source=? and account_id=? and method=? and unlinked_at is not null`, src, account, OutlookLinkMethod).Scan(&n)
+		return err == nil && n == 1 && p.Of(account) == account, err
+	}
+	var open int
+	err = s.db.QueryRowContext(ctx, `select (select count(*) from calendar_account_links where unlinked_at is null and source=?)
+	  + (select count(*) from meta m where m.key like 'outlook\_identity:%' escape '\' and not exists (select 1 from calendar_account_links l where l.source=? and l.account_id=substr(m.key, ?) and l.method=? and l.unlinked_at is not null))`,
+		src, src, len(outlookIdentityKey)+1, OutlookLinkMethod).Scan(&open)
+	return open == 0, err
 }
 
 // OutlookLinkedAccounts lists the Outlook accounts that have an active link, sorted.

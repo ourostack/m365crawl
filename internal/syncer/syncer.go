@@ -37,7 +37,13 @@ type Options struct {
 	// means outlookdesktop.DefaultRoot(). OutlookMinReadInterval is the least time between two
 	// copies of one store: zero means OutlookMinReadInterval, a negative value none (tests).
 	// A Teams account filter leaves Outlook out: the filter names a Teams account.
-	OutlookEnabled         bool
+	OutlookEnabled bool
+	// OutlookImplicit says the caller did not ask for Outlook by name: it is on because it is the
+	// default. Then nothing Outlook does can fail the sync. A machine with no Outlook, no profile
+	// or no profile directory says nothing; a profile that cannot be read (no Full Disk Access, a
+	// store this build does not read) is a source with status unavailable and its error, and the
+	// run's status and exit are the Teams sources' alone.
+	OutlookImplicit        bool
 	OutlookRoot            string
 	OutlookMinReadInterval time.Duration
 	// OutlookLink is the operator's explicit link of an Outlook profile to a Teams account: a
@@ -156,7 +162,7 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	var sources []teamsdesktop.Source
 	var other []string
 	err := contained(func() (e error) { sources, other, e = discoverSources(root); return })
-	if err != nil && r.outlookOn() && teamsAbsent(err) {
+	if err != nil && r.outlookOn() && teamsAbsent(err) && (!r.o.OutlookImplicit || r.outlookPresent()) {
 		err = nil // Outlook is on and Teams is not installed: Outlook runs alone
 	}
 	if err != nil {
@@ -215,12 +221,20 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	}
 	if stopped == nil && r.outlookOn() {
 		for _, o := range r.outlookSources(ctx, &rep) {
+			if o.err != nil && r.o.OutlookImplicit && ctx.Err() == nil {
+				rep.Sources = append(rep.Sources, unavailableSource(o.key, codedOf(o.err)))
+				r.progress("%s: %s", o.key, StatusUnavailable)
+				continue
+			}
 			settle(o.key, o.report, o.decoded, o.err)
 		}
 	}
 	var linkErr error
 	if stopped == nil && r.o.OutlookLink != "" && r.outlookOn() {
 		linkErr = r.linkOutlook(ctx)
+	}
+	if stopped == nil && linkErr == nil && r.outlookOn() {
+		r.autoLinkOutlook(ctx)
 	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {

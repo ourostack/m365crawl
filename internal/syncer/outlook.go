@@ -29,6 +29,10 @@ const OutlookMinReadInterval = 5 * time.Minute
 // not passed. It is not an omission and not a loss.
 const StatusSkippedInterval = "skipped_interval"
 
+// StatusUnavailable is an Outlook source that was on by default and could not be read. It is a
+// report and not a failure: the Teams sync it ran beside is as good as it was.
+const StatusUnavailable = "unavailable"
+
 // outlookKey is the source key of an Outlook profile in sync_runs and in the report.
 func outlookKey(profile string) string { return "outlook|" + profile }
 
@@ -69,19 +73,19 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 	if root == "" {
 		var err error
 		if root, err = outlookDefaultRoot(); err != nil {
-			return []outlookOutcome{{key: "outlook", err: err}}
+			return r.noOutlook(err)
 		}
 	}
 	profiles, classic, skipped, err := outlookDiscover(root)
 	if err != nil {
-		return []outlookOutcome{{key: "outlook", err: err}}
+		return r.noOutlook(err)
 	}
 	rep.OutlookClassicOnly = classic
 	var out []outlookOutcome
 	for _, sp := range skipped {
 		out = append(out, outlookOutcome{key: outlookKey(sp.Name), err: skippedProfileError(sp)})
 	}
-	if len(profiles) == 0 && len(skipped) == 0 {
+	if len(profiles) == 0 && len(skipped) == 0 && !r.o.OutlookImplicit {
 		out = append(out, outlookOutcome{key: "outlook", err: NoOutlookProfilesError(root, classic)})
 	}
 	for _, p := range profiles {
@@ -95,6 +99,49 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 		out = append(out, o)
 	}
 	return out
+}
+
+// noOutlook is the outcome of an Outlook source whose profiles directory cannot be listed. Asked for
+// by name, that is a failed source. On by default, a machine without the new Outlook (no directory,
+// or an operating system with none) has nothing to say, and any other cause (no Full Disk Access)
+// is reported as unavailable.
+func (r *runner) noOutlook(err error) []outlookOutcome {
+	if r.o.OutlookImplicit && (errors.Is(err, outlookdesktop.ErrRootNotFound) || errors.Is(err, outlookdesktop.ErrNotSupported)) {
+		return nil
+	}
+	return []outlookOutcome{{key: "outlook", err: err}}
+}
+
+// outlookPresent says whether the default profiles directory holds a profile or one that cannot be
+// examined: whether Outlook has anything for a machine that has no Teams.
+func (r *runner) outlookPresent() bool {
+	root := r.o.OutlookRoot
+	if root == "" {
+		var err error
+		if root, err = outlookDefaultRoot(); err != nil {
+			return false
+		}
+	}
+	profiles, _, skipped, _ := outlookDiscover(root)
+	return len(profiles)+len(skipped) > 0
+}
+
+// unavailableSource is the report of an Outlook source that could not be read and did not have to be.
+func unavailableSource(key string, c *errs.Coded) SourceReport {
+	return SourceReport{Source: key, Status: StatusUnavailable, Error: &SourceError{Code: c.Code, Message: bodyMessage(c), Fix: c.Fix}}
+}
+
+// autoLinkOutlook links each profile to the Teams account that has one of its addresses (store
+// AutoLinkOutlook). It never fails a sync: the link only changes how events are merged, and a
+// profile that is not linked is told so by the unlinked notice.
+func (r *runner) autoLinkOutlook(ctx context.Context) {
+	res, err := r.st.AutoLinkOutlook(ctx, time.Now().UTC())
+	switch {
+	case err != nil:
+		r.progress("outlook: automatic link failed: %v", err)
+	case res.Linked+res.Unlinked > 0:
+		r.progress("outlook: %d linked and %d unlinked by address", res.Linked, res.Unlinked)
+	}
 }
 
 // CodeNoOutlookProfiles and CodeOutlookProfileUnreadable are the failures of an Outlook source
@@ -164,7 +211,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if err != nil {
 		return SourceReport{}, false, err
 	}
-	if prior.Fingerprint == fp && !r.o.FullRead {
+	if prior.Fingerprint == fp && !r.o.FullRead && prior.IdentityRead {
 		status := StatusUnchanged
 		if lost(prior.Omissions) > 0 {
 			status = StatusOmissions
@@ -194,7 +241,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	// would not map could hide a live event, and then every unseen event stays.
 	var omissions map[string]int
 	status := StatusOK
-	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0},
+	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0, Addresses: res.AccountAddresses},
 		func(cal store.CalendarResult) store.Run {
 			if omissions = outlookOmissions(res, cal); lost(omissions) > 0 {
 				status = StatusOmissions

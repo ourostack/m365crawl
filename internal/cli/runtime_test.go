@@ -208,20 +208,19 @@ func TestReadCommandsReportABrokenSyncLogAsDBError(t *testing.T) {
 
 func TestOutlookChoice(t *testing.T) {
 	for _, c := range []struct {
-		root, teams, env string
-		dir              string
-		on               bool
+		root, teams string
+		dir         string
+		on, auto    bool
 	}{
-		{"", "", "", "", false},      // off by default
-		{"/o", "", "", "/o", true},   // an explicit root turns it on
-		{"/o", "/t", "", "/o", true}, // with a Teams root too
-		{"none", "", "1", "", false}, // explicitly off, whatever the environment says
-		{"", "", "1", "", true},      // the environment: the default directory
-		{"", "/t", "1", "", false},   // hermetic: a Teams root alone never reads a real profile
-		{"", "", "0", "", false},     // only 1 turns it on
+		{"", "", "", true, true},         // on by default, the default directory
+		{"/o", "", "/o", true, false},    // an explicit root is asked for
+		{"/o", "/t", "/o", true, false},  // with a Teams root too
+		{"none", "", "", false, false},   // explicitly off
+		{"none", "/t", "", false, false}, // and off beside a Teams root
+		{"", "/t", "", false, false},     // hermetic: a Teams root alone never reads a real profile
 	} {
-		if dir, on := outlookChoice(c.root, c.teams, c.env); dir != c.dir || on != c.on {
-			t.Errorf("%+v: got %q %v", c, dir, on)
+		if dir, on, auto := outlookChoice(c.root, c.teams); dir != c.dir || on != c.on || auto != c.auto {
+			t.Errorf("%+v: got %q %v %v", c, dir, on, auto)
 		}
 	}
 }

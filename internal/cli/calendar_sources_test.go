@@ -309,7 +309,7 @@ func TestShortAccountAndWindow(t *testing.T) {
 func TestDoctorOutlookStoreCheck(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	rt := &runtime{ctx: context.Background(), now: func() time.Time { return now }}
-	if c := rt.outlookStoreCheck(nil); !c.OK || c.Warn || !strings.Contains(c.Detail, "Outlook source is off") {
+	if c := rt.outlookStoreCheck(nil); !c.OK || c.Warn || !strings.Contains(c.Detail, "Outlook source is off") || !strings.Contains(c.Detail, "--outlook-root none") {
 		t.Fatalf("off: %+v", c)
 	}
 	rt.outlookOn = true
@@ -318,7 +318,31 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		old := outlookDefaultRoot
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		outlookDefaultRoot = func() (string, error) { return "", errors.New("not here") }
-		if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || !strings.Contains(c.Detail, "not here") || !strings.Contains(c.Fix, "--outlook-root") {
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not here") || c.Fix != "" {
+			t.Fatalf("a machine that has no Outlook directory is not a problem: %+v", c)
+		}
+	})
+	t.Run("on by default", func(t *testing.T) {
+		rt := *rt
+		rt.outlookDefault = true
+		absent := filepath.Join(t.TempDir(), "absent")
+		old := outlookDefaultRoot
+		t.Cleanup(func() { outlookDefaultRoot = old })
+		outlookDefaultRoot = func() (string, error) { return absent, nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not installed") {
+			t.Fatalf("no Outlook: %+v", c)
+		}
+		outlookDefaultRoot = func() (string, error) { return t.TempDir(), nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "no profile") {
+			t.Fatalf("no profile: %+v", c)
+		}
+		outlookDefaultRoot = func() (string, error) { return outlookStoreRoot(t, "HxStore.hxd"), nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "profile Main: store version readable; not read yet") {
+			t.Fatalf("a normal state is a plain pass: %+v", c)
+		}
+		// Named by the operator, the same missing directory is a warning.
+		rt.outlookDefault, rt.outlookRoot = false, absent
+		if c := rt.outlookStoreCheck(nil); !c.Warn {
 			t.Fatalf("%+v", c)
 		}
 	})
@@ -397,6 +421,11 @@ func TestDoctorOutlookStoreCheckReadsTheArchive(t *testing.T) {
 	e.exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{"code":"outlook_layout_unsupported","message":"class 0x6b tag 0x456","fix":"","exit":3}')`)
 	if c := doctor(); !c.OK || !c.Warn || !strings.Contains(c.Detail, "the last read failed (unsupported_layout): outlook_layout_unsupported: class 0x6b tag 0x456") || !strings.Contains(c.Fix, "teamscrawl sync") {
 		t.Fatalf("after a failure: %+v", c)
+	}
+	e.exec(`delete from meta where key like 'outlook_failure:%'`)
+	e.exec(`insert into calendar_account_links(source, account_id, principal_id, method, linked_at) values('outlook', 'outlook/Main', 'x/y', 'address', '2026-10-06T00:00:00.000Z')`)
+	if c := doctor(); !strings.Contains(c.Detail, "linked to a Teams account (address)") {
+		t.Fatalf("a linked profile: %+v", c)
 	}
 	// doctor never fails because of Outlook.
 	if code, _, _ := e.run("--outlook-root", root, "doctor"); code != 0 {

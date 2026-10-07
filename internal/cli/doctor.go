@@ -281,24 +281,30 @@ func (rt *runtime) writableCheck() check {
 // outlookStoreCheck reports the Outlook source: off, or on with the profiles it finds, whether each
 // store's header (a 64-byte read of the live file, never a copy) is a version this build reads, and
 // what the archive remembers of the last read. It warns and never fails, because Outlook is optional
-// and fails alone. Its detail holds no event content.
+// and fails alone. Its detail holds no event content. Outlook is on by default, so a machine with no
+// new Outlook, or with Outlook and nothing wrong, is a plain pass: only a profile that cannot be read
+// or a root that was named and is wrong warns.
 func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 	const name = "outlook_store"
 	if !rt.outlookOn {
-		return check{Name: name, OK: true, Detail: "the Outlook source is off; TEAMSCRAWL_OUTLOOK=1 or --outlook-root DIR turns it on"}
+		return check{Name: name, OK: true, Detail: "the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on"}
 	}
 	root := rt.outlookRoot
 	if root == "" {
 		var err error
 		if root, err = outlookDefaultRoot(); err != nil {
-			return check{Name: name, OK: true, Warn: true, Detail: "the Outlook source is on but there is no profiles directory to read: " + err.Error(), Fix: "Pass --outlook-root DIR, or turn the Outlook source off with --outlook-root none."}
+			return check{Name: name, OK: true, Detail: "the new Outlook is not read on this machine: " + err.Error()}
 		}
 	}
 	profiles, classic, skipped, err := outlookDiscover(root)
 	var coded *errs.Coded
 	switch {
+	case rt.outlookDefault && errors.Is(err, outlookdesktop.ErrRootNotFound):
+		return check{Name: name, OK: true, Detail: "the new Outlook for Mac is not installed (no profiles directory); nothing to read"}
 	case errors.As(err, &coded):
 		return check{Name: name, OK: true, Warn: true, Detail: coded.Message, Fix: coded.Fix}
+	case rt.outlookDefault && err == nil && len(profiles) == 0 && len(skipped) == 0:
+		return check{Name: name, OK: true, Detail: "the new Outlook for Mac has no profile; nothing to read"}
 	case err != nil, len(profiles) == 0 && len(skipped) == 0:
 		e := syncer.NoOutlookProfilesError(root, classic)
 		return check{Name: name, OK: true, Warn: true, Detail: e.Message, Fix: e.Fix}
@@ -319,7 +325,11 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 		details, fixes = append(details, "profile "+sp.Name+" cannot be examined ("+sp.Reason+")"), append(fixes, "Give teamscrawl access to the profile directory "+sp.Dir+" (Full Disk Access on macOS).")
 	}
 	for _, p := range profiles {
-		d, fix := outlookProfileState(p, state["outlook/"+p.Name], rt.now())
+		row := state["outlook/"+p.Name]
+		d, fix := outlookProfileState(p, row, rt.now())
+		if row.Link == "config" || row.Link == "address" {
+			d += "; linked to a Teams account (" + row.Link + ")"
+		}
 		details, fixes = append(details, d), append(fixes, fix)
 	}
 	c := check{Name: name, OK: true, Detail: strings.Join(details, "; ")}

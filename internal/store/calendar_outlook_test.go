@@ -295,11 +295,21 @@ func TestSetOutlookLink(t *testing.T) {
 	}
 	addTeamsAccount(t, s, teams)
 	addTeamsAccount(t, s, other)
-	if !inEffect(t, s, "", "") || !inEffect(t, s, "outlook/Main", "") || inEffect(t, s, "", teams) || inEffect(t, s, "outlook/Main", teams) {
-		t.Fatal("nothing is linked yet")
+	if !inEffect(t, s, "", "") || inEffect(t, s, "outlook/Main", "") || inEffect(t, s, "", teams) || inEffect(t, s, "outlook/Main", teams) {
+		t.Fatal("nothing is linked yet, and no unlink is recorded")
 	}
 	if err := s.SetOutlookLink(ctx, "outlook/Main", "", at); err != nil {
 		t.Fatalf("an unlink of an account with no link is not an error: %v", err)
+	}
+	if !inEffect(t, s, "outlook/Main", "") {
+		t.Fatal("the ended row that keeps the account unlinked is missing")
+	}
+	var rows int
+	if err := s.db.QueryRow(`select count(*) from calendar_account_links where method='config' and unlinked_at is not null and principal_id=''`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("%d ended rows, %v", rows, err)
+	}
+	if err := s.SetOutlookLink(ctx, "outlook/Main", "", at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := s.SetOutlookLink(ctx, "outlook/Main", teams, at); err != nil {
@@ -308,8 +318,8 @@ func TestSetOutlookLink(t *testing.T) {
 	if !inEffect(t, s, "", teams) || !inEffect(t, s, "outlook/Main", teams) || inEffect(t, s, "outlook/Main", other) || inEffect(t, s, "outlook/Second", teams) {
 		t.Fatal("the link is not seen")
 	}
-	if inEffect(t, s, "", "") || inEffect(t, s, "outlook/Main", "") || !inEffect(t, s, "outlook/Second", "") {
-		t.Fatal("an unlink is pending for the linked account only")
+	if inEffect(t, s, "", "") || inEffect(t, s, "outlook/Main", "") || inEffect(t, s, "outlook/Second", "") {
+		t.Fatal("an unlink is pending for the linked account, and none is recorded for the other")
 	}
 	var linkedAt string
 	if err := s.db.QueryRow(`select linked_at from calendar_account_links`).Scan(&linkedAt); err != nil {
