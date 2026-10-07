@@ -140,6 +140,10 @@ type EventSpec struct {
 	// as the id and the zone name need; a bigger value pads with zeros, which
 	// moves the string area and so its alignment.
 	AreaOneSize int
+	// StaleSubject, when not empty, is written first in the string area and referenced by no
+	// word: the subject as first written, which a rename leaves behind (the area only grows).
+	// An absent string's offset word 0 then points at it.
+	StaleSubject string
 	// HighBitLengths sets bit 31 of every string length word.
 	HighBitLengths bool
 }
@@ -192,12 +196,22 @@ func NewEvent(s EventSpec) *Object {
 
 	base := EventSize + s.AreaOneSize
 	put := func(wordOff int, text string) {
+		if text == "" {
+			// An absent string, as the store writes it: offset word 0, length word 0, and no
+			// text appended (the word then points at the first string of the area).
+			o.PutU32(wordOff, 0)
+			o.PutU32(wordOff+4, 0)
+			return
+		}
 		o.PutStringWord(wordOff, base, text)
 		n := clampU32(len(UTF16Z(text)))
 		if s.HighBitLengths {
 			n |= lengthFlag
 		}
 		o.PutU32(wordOff+4, n)
+	}
+	if s.StaleSubject != "" {
+		o.AppendString(s.StaleSubject)
 	}
 	put(evSubject, s.Subject)
 	put(evLocation, s.Location)

@@ -166,6 +166,8 @@ To tell empty from unknown, read `coverage_gap` and `uncovered_days`. `coverage_
 
 Outlook is off by default. Turn it on for `sync` and the read commands with `--outlook-root DIR` (`TEAMSCRAWL_OUTLOOK_ROOT`) or `TEAMSCRAWL_OUTLOOK=1` (the default macOS directory). Events already archived stay readable without the flag, but only a run with it on refreshes them. An unlinked Outlook profile is its own account: its events are not merged with Teams, and the agenda lists it in `unlinked_accounts` with the exact command to link it in `unlinked_fix`. Linking is explicit and never guessed, because two people invited to one meeting hold the same events:
 
+An Outlook event with no location or body has an empty `location` or `body_preview` (older archives show the subject there until the next sync re-derives them). An all-day Outlook event has `start` and `end` at midnight UTC and `time_zone` `UTC`, which is Outlook's own label: use `start_date` and `end_date` (exclusive end) to say which day it is.
+
 ```sh
 teamscrawl whoami --json     # the Teams accounts: tenant_id, user_id, display_name
 teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>

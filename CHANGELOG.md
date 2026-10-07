@@ -4,6 +4,11 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Outlook events no longer take their location and body preview from the subject. The store writes an absent string as offset word 0 and length word 0, and offset 0 is the first string of the event's string area, which is the subject as first written; the mapper read every string by its offset word alone, so an event with no location or no body got the subject (or, after a rename, the old subject) for both. It now reads a string only when its length word is non-zero, so such an event has an empty `location` and `body_preview` (a probe appointment with neither had both equal to its subject, and kept the old subject after a rename). On a real copy of 3,374 live Outlook events, every one had a location and a body preview before (318 and 101 of them equal to the subject); now 3,027 have a location and 3,272 a body preview, and none equals the subject. `outlookcal.MapperVersion` is 5, so an archive re-derives its Outlook events on the next sync. The layout is recorded in `docs/outlook-store.md`.
+- Docs: all-day Outlook events are at midnight UTC with the zone name `UTC` (the store's own label); `start_date` and `end_date` are the dates to read, in SPEC.md and the skill guide.
+
 ## [0.3.1] - 2026-10-07
 
 ### Fixed

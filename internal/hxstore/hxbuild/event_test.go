@@ -164,14 +164,20 @@ func u16s(b []byte) []uint16 {
 }
 
 func TestNewEventDefaults(t *testing.T) {
-	spec := EventSpec{ID: []byte("A"), Tag: 0x456, HighBitLengths: true, ZoneName: "Z"}
+	spec := EventSpec{ID: []byte("A"), Tag: 0x456, HighBitLengths: true, ZoneName: "Z", Subject: "S"}
 	e := NewEvent(spec).Encode()[4:]
 	if u16(e, 2) != 0x456 || len(e) < 1109 {
 		t.Fatal("tag override keeps the fixed size")
 	}
 	if u32(e, 104) != 6+4 || // "41" as UTF-16 with a terminator, then "Z"
-		u32(e, 1028) != 2|1<<31 {
+		u32(e, 1028) != 4|1<<31 { // "S" with a terminator
 		t.Fatal(u32(e, 104), u32(e, 1028))
+	}
+	// An empty text is absent, as in the store: offset word 0, length word 0, nothing appended.
+	for _, off := range []int{700, 836, 876, 884, 892} {
+		if u32(e, off) != 0 || u32(e, off+4) != 0 {
+			t.Fatalf("empty text at +%d is not absent: %d %d", off, u32(e, off), u32(e, off+4))
+		}
 	}
 	if e[1082] != 0 || e[1083] != 0 || u64(e, 288) != 0 {
 		t.Fatal("unset fields must be zero")
@@ -260,5 +266,17 @@ func TestNewEventExtraString(t *testing.T) {
 	}
 	if n := binary.LittleEndian.Uint32(extra[4+980+4:]); int(n) != len(UTF16Z("Extra")) {
 		t.Fatalf("length word %d", n)
+	}
+}
+
+func TestNewEventStaleSubject(t *testing.T) {
+	e := NewEvent(EventSpec{ID: []byte("A"), ZoneName: "Z", Subject: "New", Location: "Room", StaleSubject: "Old"}).Encode()[4:]
+	base := 1109 + int(u32(e, 104))
+	// The stale text is first in the string area, which is where an absent string's word 0 points.
+	if got := u16s(e[base : base+8]); len(got) != 4 || got[0] != 'O' || got[2] != 'd' || got[3] != 0 {
+		t.Fatalf("string area does not start with the stale subject: %v", got)
+	}
+	if u32(e, 1024) != 8 { // the subject follows it: "Old" and its terminator are 8 bytes
+		t.Fatalf("subject word %d", u32(e, 1024))
 	}
 }
