@@ -399,5 +399,5 @@ Latency: a change reaches the output after Teams flushes it to its cache, plus t
 ## 10. Versioning and compatibility
 
 - The JSON contract in section 6 is stable within 0.x releases except where `CHANGELOG.md` records a break. Fields may be added; error codes, omission codes and activity types may be added.
-- The archive has two version numbers: the SQLite schema version (5) and the derivation version (2, section 3.2). An older archive is upgraded in place by the first `sync`; the schema 5 upgrade adds the calendar tables, and an older m365crawl cannot open such an archive (`archive_newer`). An archive written by a newer build is refused for writing with `archive_newer`.
+- The archive has two version numbers: the SQLite schema version (6) and the derivation version (2, section 3.2). An older archive is upgraded in place by the first `sync`; the schema 5 upgrade adds the calendar tables and the schema 6 upgrade adds the mail tables, and an older m365crawl cannot open such an archive (`archive_newer`). An archive written by a newer build is refused for writing with `archive_newer`.
 - The source fingerprint includes a decoder version; raising it makes the next sync re-read an unchanged cache, and the read memory signature includes it too, so that re-read decodes every record in full (section 4.1).
