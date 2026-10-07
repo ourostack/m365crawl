@@ -248,7 +248,16 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if err != nil {
 		return SourceReport{}, false, nil, err
 	}
+	if mailOn {
+		// The calendar commit records the new fingerprint. If the sync stops before the mail is
+		// committed, the old marker must not stand, or the mail would be skipped until the store
+		// changes again.
+		if err := r.st.ClearMailRead(ctx, account); err != nil {
+			return SourceReport{}, false, nil, errs.DBError(err)
+		}
+	}
 	sr, decoded, calErr := r.outlookCalendar(ctx, info, rep, prior, key, account, fp, begun)
+	afterCalendar()
 	if ctx.Err() != nil {
 		return sr, decoded, nil, calErr
 	}
@@ -259,6 +268,9 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	// read gave back (A19).
 	return sr, decoded, []outlookOutcome{r.outlookMail(ctx, p, info, fp, begun)}, calErr
 }
+
+// afterCalendar is a seam for a test that stops the sync between the calendar commit and the mail.
+var afterCalendar = func() {}
 
 // outlookCalendar reads the calendar from the private copy and commits it in one transaction.
 func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp string, begun time.Time) (SourceReport, bool, error) {

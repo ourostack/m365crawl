@@ -50,8 +50,11 @@ func (r *runner) outlookMail(ctx context.Context, p outlookdesktop.Profile, info
 		out.err = err
 		if ctx.Err() == nil {
 			c := codedOf(err)
-			// Forgets the read marker, so the next sync reads the mail again.
-			_ = r.st.SetMailFailure(ctx, outlookAccount(p.Name), store.OutlookFailure{Code: c.Code, Message: bodyMessage(c), Fix: c.Fix, Exit: c.Exit})
+			// Remembers why, for doctor. The read marker was cleared before the calendar commit, so
+			// a write that fails here cannot make the next sync skip the mail.
+			if werr := r.st.SetMailFailure(context.WithoutCancel(ctx), outlookAccount(p.Name), store.OutlookFailure{Code: c.Code, Message: bodyMessage(c), Fix: c.Fix, Exit: c.Exit}); werr != nil {
+				r.progress("%s: could not record the failure: %v", key, werr)
+			}
 		}
 	}
 	return out
@@ -82,7 +85,7 @@ func (r *runner) readMail(ctx context.Context, p outlookdesktop.Profile, info ou
 		omissions = nil
 	}
 	count := len(res.Messages)
-	mail, err := r.st.CommitMail(ctx, store.MailBatch{Account: account, ReadAt: begun, FreshAt: info.ModTime, Result: res, Trusted: len(res.Losses) == 0})
+	mail, err := r.st.CommitMail(ctx, store.MailBatch{Account: account, ReadAt: begun, FreshAt: info.ModTime, Result: res, Trusted: len(res.Losses) == 0 && !res.Doubtful})
 	if err != nil {
 		return SourceReport{}, false, asCoded(err)
 	}

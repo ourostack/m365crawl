@@ -634,3 +634,21 @@ func TestCollectCopiesWithTheSameStampTieByBlock(t *testing.T) {
 		t.Fatalf("%+v", r.Messages[0])
 	}
 }
+
+// A header reached after unknown bytes is not used, but when it maps it still names its message:
+// the key is seen. One that does not map makes the read doubtful, and nothing else.
+func TestCollectResyncedHeaderNamesItsKey(t *testing.T) {
+	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
+	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 23, FolderKey: fInbox}).Encode()...)
+	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if !slices.Equal(r.SeenDetailKeys, []uint32{22, 23}) || r.Doubtful || len(r.Messages) != 1 {
+		t.Fatalf("%+v doubtful=%v", r.SeenDetailKeys, r.Doubtful)
+	}
+	old := mapHeader
+	mapHeader = func(hxstore.Object) (Header, error) { return Header{}, errors.New("unmappable") }
+	t.Cleanup(func() { mapHeader = old })
+	r = collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if !r.Doubtful {
+		t.Fatal("an unmappable resynced header did not make the read doubtful")
+	}
+}

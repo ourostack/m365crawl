@@ -33,6 +33,12 @@ func TestMailStateMarkerAndFailure(t *testing.T) {
 	if st, _ = s.MailState(ctx, mailAcct); !st.Read || st.Failure != nil {
 		t.Fatalf("after second read: %+v", st)
 	}
+	if err := s.ClearMailRead(ctx, mailAcct); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = s.MailState(ctx, mailAcct); st.Read {
+		t.Fatal("the marker survived ClearMailRead")
+	}
 	other, _ := s.MailState(ctx, "outlook/other")
 	if other.Read {
 		t.Fatal("marker leaked to another account")
@@ -62,6 +68,9 @@ func TestMailStateErrorsOnClosedArchive(t *testing.T) {
 	}
 	if err := s.SetMailFailure(ctx, mailAcct, OutlookFailure{}); err == nil {
 		t.Error("SetMailFailure")
+	}
+	if err := s.ClearMailRead(ctx, mailAcct); err == nil {
+		t.Error("ClearMailRead")
 	}
 	if _, err := s.MailStatus(ctx); err == nil {
 		t.Error("MailStatus")

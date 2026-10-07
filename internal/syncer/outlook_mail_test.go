@@ -313,3 +313,121 @@ func TestSyncMailDatabaseFailures(t *testing.T) {
 		}
 	})
 }
+
+// touch moves the profile store's modification time forward, so the store reads as changed.
+func touch(t *testing.T, root string, d time.Duration) {
+	t.Helper()
+	path := filepath.Join(root, "Main", "HxStore.hxd")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := info.ModTime().Add(d)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A sync stopped after the calendar commit has recorded the store's new fingerprint, but not the
+// mail: the next sync reads the mail all the same, and finds the message that arrived meanwhile.
+func TestSyncMailReadAfterASyncStoppedBetweenCalendarAndMail(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := mailRoot(t)
+	run(t, outlookOpts(db, root))
+	appendBlock(t, root,
+		hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 13, Stamp: 1, DetailKey: 23, FolderKey: 101, Received: mailDay, Subject: "Fixture three", SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
+		hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 23, Stamp: 1, MessageID: "<three@example.invalid>", Class: "IPM.Note", Sent: mailDay}))
+	touch(t, root, time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	afterCalendar = cancel
+	t.Cleanup(func() { afterCalendar = func() {} })
+	_, _, _ = Run(ctx, outlookOpts(db, root))
+	afterCalendar = func() {}
+	if n := count(t, db, `select count(*) from mail_messages`); n != 2 {
+		t.Fatalf("%d messages after the stopped sync", n)
+	}
+
+	r, _ := run(t, outlookOpts(db, root))
+	if mail := sourceKeyed(t, r, "outlook|Main|mail"); mail.Status == StatusUnchanged || mail.Counts.Mail.Added != 1 {
+		t.Fatalf("the mail was not read after the stopped sync: %+v", r.Sources)
+	}
+}
+
+// A header that is reached after unknown bytes is not used, but it still names its message: the
+// message is never recorded absent, however many reads see it that way.
+func TestSyncMailResyncedHeaderIsNotAbsence(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := mailRoot(t)
+	run(t, outlookOpts(db, root))
+
+	// The store is rewritten without message one's header; a stray header for it follows three
+	// bytes of unknown framing. Its detail object is still there.
+	path := filepath.Join(root, "Main", "HxStore.hxd")
+	putOutlookStore(t, root, "HxStore.hxd")
+	var keep []*hxbuild.Object
+	for _, o := range mailObjects("~/Files/two.dat") {
+		keep = append(keep, o)
+	}
+	stray := hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 11, Stamp: 1, DetailKey: 21, FolderKey: 101, Received: mailDay, Subject: "Fixture one"}).Encode()
+	payload := append(hxbuild.FramedPayload(hxbuild.Head(15), keep[0], keep[2], keep[3], keep[4], keep[5], keep[6]), append([]byte{1, 2, 3}, stray...)...) // no clean header 11
+	b, err := os.ReadFile(path)                                                                                                                            //nolint:gosec // a test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = append(b, hxbuild.EncodeBlock(hxbuild.BlockTypeData, payload)...)
+	if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		touch(t, root, time.Duration(i)*time.Minute)
+		run(t, outlookOpts(db, root))
+	}
+	if n := count(t, db, `select count(*) from mail_messages where detail_key=21 and gone_at is null and evicted_at is null`); n != 1 {
+		t.Fatal("a message named by a resynced header was marked gone")
+	}
+	if n := count(t, db, `select count(*) from mail_absent where detail_key=21`); n != 0 {
+		t.Fatal("an absence was recorded for it")
+	}
+}
+
+// The failure record is a note for doctor: a write that fails does not change the outcome.
+func TestSyncMailFailureRecordCanFail(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	root := mailRoot(t)
+	appendBlock(t, root, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Tag: 0x42f, Key: 90, DetailKey: 21, FolderKey: 101}))
+	db := archiveWith(t, `create trigger boom before insert on meta when new.key like 'outlook_mail_failure:%' begin select raise(abort, 'injected'); end;`)
+	var progress bytes.Buffer
+	o := outlookOpts(db, root)
+	o.Progress = &progress
+	rep, _, err := Run(context.Background(), o)
+	if err == nil || sourceKeyed(t, rep, "outlook|Main|mail").Status != StatusFailed || !bytes.Contains(progress.Bytes(), []byte("could not record the failure")) {
+		t.Fatalf("%v %s", err, progress.String())
+	}
+	if count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Main'`) != 0 {
+		t.Fatal("a marker stands after a failed mail read")
+	}
+}
+
+// The marker is cleared before the calendar commit; a database that refuses that fails the profile
+// before anything is committed.
+func TestSyncMarkerClearFailure(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	root := mailRoot(t)
+	db := archiveWith(t, `create trigger boom before delete on meta when old.key like 'outlook_mail_read:%' begin select raise(abort, 'injected'); end;`)
+	if _, err := openRaw(t, db).Exec(`insert into meta(key, value) values('outlook_mail_read:outlook/Main', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if code := outlookFailure(t, outlookOpts(db, root)); code != errs.CodeDBError {
+		t.Fatal(code)
+	}
+	if count(t, db, `select count(*) from calendar_source_events where source='outlook'`) != 0 {
+		t.Fatal("the calendar committed past a marker it could not clear")
+	}
+}

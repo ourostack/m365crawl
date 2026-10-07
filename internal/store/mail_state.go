@@ -53,6 +53,14 @@ func (s *Store) SetMailRead(ctx context.Context, account string, at time.Time) e
 	})
 }
 
+// ClearMailRead removes the account's read marker, so the next sync reads its mail whatever the
+// store's fingerprint says. A sync clears it before it commits anything else from a changed store:
+// a sync stopped between the calendar and the mail then cannot leave the old marker standing.
+func (s *Store) ClearMailRead(ctx context.Context, account string) error {
+	_, err := s.db.ExecContext(ctx, `delete from meta where key=?`, mailReadKey+account)
+	return err
+}
+
 // SetMailFailure records why the account's last mail read failed and clears the read marker, so
 // the next sync reads the mail again even when the store did not change.
 func (s *Store) SetMailFailure(ctx context.Context, account string, f OutlookFailure) error {

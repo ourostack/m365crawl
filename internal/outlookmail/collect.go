@@ -107,9 +107,14 @@ type Result struct {
 	// (a header with no detail object or no folder is seen all the same), sorted. The archive
 	// never records such a key as absent: the store still holds it.
 	SeenDetailKeys []uint32
-	Notes          Notes
-	Losses         []Loss
-	Stats          hxstore.Stats
+	// Doubtful says a header object reached after unknown bytes did not map, so the read cannot
+	// tell which message it named. It makes the read untrusted for marking messages gone or
+	// evicted, and for nothing else (it is no loss).
+	Doubtful     bool
+	resyncedKeys []uint32 // detail keys named by resynced headers that mapped
+	Notes        Notes
+	Losses       []Loss
+	Stats        hxstore.Stats
 }
 
 // version orders the copies of one object key: the highest change stamp, then the highest block
@@ -194,6 +199,14 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 				c.badTags[o.Tag]++
 			case o.Resynced:
 				res.Notes.ResyncedSkipped++
+				if o.Class == ClassHeader {
+					// Not used as a header, but it still names a detail key: that key is not absent.
+					if h, err := mapHeader(o); err == nil {
+						res.resyncedKeys = append(res.resyncedKeys, h.DetailKey)
+					} else {
+						res.Doubtful = true
+					}
+				}
 			default:
 				c.keep(o)
 			}
@@ -302,6 +315,12 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		all = append(all, h)
 	}
 	seenKeys := map[uint32]bool{}
+	for _, k := range res.resyncedKeys {
+		if !seenKeys[k] {
+			seenKeys[k] = true
+			res.SeenDetailKeys = append(res.SeenDetailKeys, k)
+		}
+	}
 	for _, h := range all {
 		if !seenKeys[h.DetailKey] {
 			seenKeys[h.DetailKey] = true
