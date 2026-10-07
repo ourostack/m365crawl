@@ -140,54 +140,129 @@ func (a version) newer(b version) bool {
 	return a.pos > b.pos
 }
 
-type winner struct {
+// winner is the current copy of one object key, already mapped: the walk keeps what the mapper
+// returned and lets the object's bytes go, because a store holds hundreds of thousands of objects
+// and the read must not hold them all. err is the mapper's refusal of the winning copy; it is
+// counted when the read is assembled, and an older copy that would have mapped does not replace it.
+type winner[T any] struct {
 	v   version
-	obj hxstore.Object
+	val T
+	err error
 	// resynced says the copy was reached after unknown bytes: it stands in only while no clean
 	// copy of the key exists.
 	resynced bool
 }
 
-// class collects the current copy of every object key of one class.
-type class struct {
+// classBase is what the guard and the walk need of every class, whatever it maps to.
+type classBase struct {
 	id, tag uint16
 	refuse  bool // a tag other than the known one refuses the read
-	wins    map[uint32]winner
 	badTags map[uint16]int
-	// fits says whether an object of the class maps cleanly (a resynced object is kept only then).
-	fits func(hxstore.Object) bool
 }
 
-func newClass(id, tag uint16, refuse bool) *class {
-	return &class{id: id, tag: tag, refuse: refuse, wins: map[uint32]winner{}, badTags: map[uint16]int{}}
+// seer is a class the walk offers each object to.
+type seer interface {
+	base() *classBase
+	// see takes o if it is of the class and reports whether it was.
+	see(o hxstore.Object, res *Result) bool
 }
 
-// keep records o if it is the first copy of its key or beats the copy held.
-func (c *class) keep(o hxstore.Object) {
+// class collects the current copy of every object key of one class, mapped to T.
+type class[T any] struct {
+	classBase
+	wins map[uint32]winner[T]
+	// mapf maps an object of the class (a resynced object is kept only when it maps cleanly).
+	mapf func(hxstore.Object) (T, error)
+}
+
+func newClass[T any](id, tag uint16, refuse bool, mapf func(hxstore.Object) (T, error)) *class[T] {
+	return &class[T]{classBase: classBase{id: id, tag: tag, refuse: refuse, badTags: map[uint16]int{}}, wins: map[uint32]winner[T]{}, mapf: mapf}
+}
+
+func (c *class[T]) base() *classBase { return &c.classBase }
+
+// see offers o to the class.
+func (c *class[T]) see(o hxstore.Object, res *Result) bool {
+	if o.Class != c.id {
+		return false
+	}
+	switch {
+	case o.Tag != c.tag:
+		c.badTags[o.Tag]++
+	case o.Resynced:
+		// An object reached after unknown bytes is a real object: when it maps cleanly it
+		// competes under the version rule like any other copy. Only one that does not map
+		// is skipped, and a header that does not map leaves the read doubtful.
+		if val, err := c.mapf(o); err == nil {
+			res.Notes.ResyncedKept++
+			if c.takes(o) {
+				c.store(o, val, nil)
+			}
+			break
+		}
+		res.Notes.ResyncedSkipped++
+		if o.Class == ClassHeader {
+			res.Doubtful = true
+		}
+	default:
+		c.keep(o)
+	}
+	if o.Class == ClassHeader && o.Tag == TagHeader {
+		res.Notes.HeadersSeen++
+	}
+	return true
+}
+
+// keep records o if it is the first copy of its key or beats the copy held. A copy that loses is
+// not mapped.
+func (c *class[T]) keep(o hxstore.Object) {
+	if !c.takes(o) {
+		return
+	}
+	val, err := c.mapf(o)
+	c.store(o, val, err)
+}
+
+// takes says whether o would take its key.
+func (c *class[T]) takes(o hxstore.Object) bool {
+	key, v := keyOf(o)
+	old, held := c.wins[key]
+	switch {
+	case !held:
+		return true
+	case old.resynced != o.Resynced:
+		return !o.Resynced // a resynced copy never replaces a clean one, whatever its stamp
+	}
+	return v.newer(old.v)
+}
+
+// store records the mapped copy of o, which takes its key.
+func (c *class[T]) store(o hxstore.Object, val T, err error) {
+	key, v := keyOf(o)
+	c.wins[key] = winner[T]{v: v, val: val, err: err, resynced: o.Resynced}
+}
+
+// keyOf is the object key and the version of one copy.
+func keyOf(o hxstore.Object) (uint32, version) {
 	key, _ := o.U32(offKey) // every known tag is longer than the key word
 	stamp, _ := o.U64(offStamp)
-	v := version{stamp: stamp, block: o.BlockOffset, pos: o.PayloadPos}
-	if old, held := c.wins[key]; held {
-		switch {
-		case old.resynced != o.Resynced:
-			if o.Resynced {
-				return // a resynced copy never replaces a clean one, whatever its stamp
-			}
-		case !v.newer(old.v):
-			return
-		}
-	}
-	c.wins[key] = winner{v: v, obj: o.Clone(), resynced: o.Resynced}
+	return key, version{stamp: stamp, block: o.BlockOffset, pos: o.PayloadPos}
 }
 
 // keys returns the object keys in ascending order.
-func (c *class) keys() []uint32 {
+func (c *class[T]) keys() []uint32 {
 	out := make([]uint32, 0, len(c.wins))
 	for k := range c.wins {
 		out = append(out, k)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// mappedRecipient is a recipient with the detail key of the message it belongs to.
+type mappedRecipient struct {
+	parent uint32
+	r      Recipient
 }
 
 // Collect reads every message in the store. root is the Outlook profile directory, which the
@@ -200,46 +275,21 @@ func (c *class) keys() []uint32 {
 // invalid block is a counted loss, not a refusal.
 func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Options) (Result, error) {
 	var res Result
-	headers := newClass(ClassHeader, TagHeader, true)
-	details := newClass(ClassDetail, TagDetail, true)
-	bodies := newClass(ClassBody, TagBody, true)
-	attachments := newClass(ClassAttachment, TagAttachment, false)
-	folders := newClass(ClassFolder, TagFolder, false)
-	recipients := newClass(ClassRecipient, TagRecipient, false)
-	classes := []*class{headers, details, bodies, attachments, folders, recipients}
-	headers.fits = func(o hxstore.Object) bool { _, err := mapHeader(o); return err == nil }
-	details.fits = func(o hxstore.Object) bool { _, err := mapDetail(o); return err == nil }
-	bodies.fits = func(hxstore.Object) bool { return true } // MapBody cannot fail
-	attachments.fits = func(o hxstore.Object) bool { _, err := mapAttachment(o); return err == nil }
-	folders.fits = func(o hxstore.Object) bool { _, err := mapFolder(o); return err == nil }
-	recipients.fits = func(o hxstore.Object) bool { _, _, err := mapRecipient(o); return err == nil }
+	headers := newClass(ClassHeader, TagHeader, true, func(o hxstore.Object) (Header, error) { return mapHeader(o) })
+	details := newClass(ClassDetail, TagDetail, true, func(o hxstore.Object) (Detail, error) { return mapDetail(o) })
+	bodies := newClass(ClassBody, TagBody, true, func(o hxstore.Object) (Body, error) { return MapBody(o), nil }) // MapBody cannot fail
+	attachments := newClass(ClassAttachment, TagAttachment, false, func(o hxstore.Object) (Attachment, error) { return mapAttachment(o) })
+	folders := newClass(ClassFolder, TagFolder, false, func(o hxstore.Object) (Folder, error) { return mapFolder(o) })
+	recipients := newClass(ClassRecipient, TagRecipient, false, func(o hxstore.Object) (mappedRecipient, error) {
+		parent, r, err := mapRecipient(o)
+		return mappedRecipient{parent, r}, err
+	})
+	classes := []seer{headers, details, bodies, attachments, folders, recipients}
 	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
 		for _, c := range classes {
-			switch {
-			case o.Class != c.id:
-				continue
-			case o.Tag != c.tag:
-				c.badTags[o.Tag]++
-			case o.Resynced:
-				// An object reached after unknown bytes is a real object: when it maps cleanly it
-				// competes under the version rule like any other copy. Only one that does not map
-				// is skipped, and a header that does not map leaves the read doubtful.
-				if c.fits(o) {
-					res.Notes.ResyncedKept++
-					c.keep(o)
-					break
-				}
-				res.Notes.ResyncedSkipped++
-				if o.Class == ClassHeader {
-					res.Doubtful = true
-				}
-			default:
-				c.keep(o)
+			if c.see(o, &res) {
+				break
 			}
-			if o.Class == ClassHeader && o.Tag == TagHeader {
-				res.Notes.HeadersSeen++
-			}
-			break
 		}
 		return nil
 	})
@@ -250,7 +300,7 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 	if g := guard(stats, classes, res.Notes.HeadersSeen, opt); g != nil {
 		return res, g
 	}
-	for _, c := range []*class{attachments, folders, recipients} {
+	for _, c := range []*classBase{&attachments.classBase, &folders.classBase, &recipients.classBase} {
 		for _, n := range c.badTags {
 			res.Notes.OtherTagSkipped += n
 		}
@@ -300,9 +350,10 @@ var (
 var afterWalk = func() {}
 
 // guard decides whether the read must be refused.
-func guard(st hxstore.Stats, classes []*class, headers int, opt Options) error {
+func guard(st hxstore.Stats, classes []seer, headers int, opt Options) error {
 	var parts []string
-	for _, c := range classes {
+	for _, sc := range classes {
+		c := sc.base()
 		if !c.refuse || len(c.badTags) == 0 {
 			continue
 		}
@@ -328,12 +379,12 @@ func guard(st hxstore.Stats, classes []*class, headers int, opt Options) error {
 }
 
 // assemble maps the winners and joins them.
-func assemble(ctx context.Context, res *Result, root, account string, opt Options, headers, details, bodies, attachments, folders, recipients *class) error {
+func assemble(ctx context.Context, res *Result, root, account string, opt Options, headers *class[Header], details *class[Detail], bodies *class[Body], attachments *class[Attachment], folders *class[Folder], recipients *class[mappedRecipient]) error {
 	n := &res.Notes
 	// Folders.
 	byKey := map[uint32]Folder{}
 	for _, k := range folders.keys() {
-		f, err := mapFolder(folders.wins[k].obj)
+		f, err := folders.wins[k].val, folders.wins[k].err
 		if err != nil {
 			n.Unmapped++
 			continue
@@ -344,7 +395,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	// Headers, each tagged with its folder.
 	var all []Header
 	for _, k := range headers.keys() {
-		h, err := mapHeader(headers.wins[k].obj)
+		h, err := headers.wins[k].val, headers.wins[k].err
 		if err != nil {
 			n.Unmapped++
 			continue
@@ -405,7 +456,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	// Recipients and attachments, by the message they belong to.
 	recByMsg := map[uint32][]Recipient{}
 	for _, k := range recipients.keys() {
-		parent, r, err := mapRecipient(recipients.wins[k].obj)
+		parent, r, err := recipients.wins[k].val.parent, recipients.wins[k].val.r, recipients.wins[k].err
 		if err != nil {
 			n.Unmapped++
 			continue
@@ -415,7 +466,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	}
 	attByMsg := map[uint32][]Attachment{}
 	for _, k := range attachments.keys() {
-		a, err := mapAttachment(attachments.wins[k].obj)
+		a, err := attachments.wins[k].val, attachments.wins[k].err
 		if err != nil {
 			n.Unmapped++
 			continue
@@ -434,7 +485,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 			n.MissingDetail++
 			continue
 		}
-		d, err := mapDetail(dw.obj)
+		d, err := dw.val, dw.err
 		if err != nil {
 			n.Unmapped++
 			continue
@@ -453,7 +504,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		}
 		m.Recipients = recByMsg[dk]
 		if bw, ok := bodies.wins[dk]; ok {
-			m.Body = MapBody(bw.obj)
+			m.Body = bw.val
 		} else {
 			m.Body = Body{State: BodyNone}
 		}
