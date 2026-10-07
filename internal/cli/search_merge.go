@@ -193,10 +193,22 @@ func sourceConflict(msg string) error {
 // plan decides which sources to read. A flag that one source cannot use is a usage error when
 // --source names the other source, and narrows the search to its own source, with a note, when
 // --source is left at all. Mail is skipped, with a note, on a platform that cannot read it.
-func (c *searchCmd) plan() (searchPlan, error) {
+func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	p := searchPlan{chats: true, mail: true}
 	chatFlags := c.chatOnlyFlags()
+	mailAccount := isSearchMailAccount(rt.g.Account)
 	switch {
+	case mailAccount && c.Source == searchChats:
+		return p, sourceConflict("--account " + rt.g.Account + " names a mail account; --source chats searches Teams chats")
+	case mailAccount && len(chatFlags) > 0:
+		return p, sourceConflict("--account " + rt.g.Account + " names a mail account; " + strings.Join(chatFlags, ", ") + " applies to Teams chats only")
+	case rt.g.Account != "" && !mailAccount && c.Source == searchMail:
+		return p, sourceConflict("--account " + rt.g.Account + " names a Teams account; --source mail searches mail")
+	case rt.g.Account != "" && !mailAccount && c.Folder != "":
+		return p, sourceConflict("--account " + rt.g.Account + " names a Teams account; --folder applies to mail only")
+	case mailAccount && c.Source == "all":
+		p.chats = false
+		p.notes = append(p.notes, "--account names a mail account; Teams chats were not searched")
 	case c.Source == searchChats && c.Folder != "":
 		return p, sourceConflict("--folder applies to mail only; --source chats searches Teams chats")
 	case c.Source == searchMail && len(chatFlags) > 0:
@@ -225,6 +237,10 @@ func (c *searchCmd) plan() (searchPlan, error) {
 	}
 	return p, nil
 }
+
+// isSearchMailAccount says whether an --account value names an Outlook mail account (outlook/<profile>)
+// rather than a Teams account (<tenantId>/<userId>).
+func isSearchMailAccount(account string) bool { return strings.HasPrefix(account, "outlook/") }
 
 // searchHit is one result item with the time it is ordered by.
 type searchHit struct {
@@ -267,7 +283,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 	}
 	if searchMailNow {
-		rows, trunc, err := st.MailSearch(rt.ctx, c.Query, store.MailFilter{Folder: c.Folder, From: f.From, Since: f.Since, Until: f.Until, Limit: f.Limit})
+		rows, trunc, err := st.MailSearch(rt.ctx, c.Query, store.MailFilter{Account: mailAccountOf(rt.g.Account), Folder: c.Folder, From: f.From, Since: f.Since, Until: f.Until, Limit: f.Limit})
 		if errors.Is(err, store.ErrUnknownMailFolder) {
 			u := errs.Usage(fmt.Sprintf("no mail folder matches %q", c.Folder))
 			u.Code, u.Fix = searchCodeUnknownFolder, "`m365crawl mail folders` lists the folders."
@@ -277,7 +293,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		mailTrunc = trunc
-		if rt.g.Account != "" {
+		if rt.g.Account != "" && !isSearchMailAccount(rt.g.Account) {
 			notes = append(notes, "--account names a Teams account; mail was searched across all Outlook accounts")
 		}
 		for _, r := range rows {
@@ -319,4 +335,12 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	res.Note = strings.Join(notes, "; ")
 	return res, nil
+}
+
+// mailAccountOf is the mail account an --account value names, or "" for a Teams account or none.
+func mailAccountOf(account string) string {
+	if isSearchMailAccount(account) {
+		return account
+	}
+	return ""
 }

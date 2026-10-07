@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -559,5 +560,59 @@ func TestSearchReportsArchiveFailuresFromEitherSource(t *testing.T) {
 	code, _, errOut = e.run("--max-age", "0", "--json", "search", "Hello")
 	if code == 0 || errorOf(t, errOut)["code"] == nil {
 		t.Fatalf("a broken mail table must fail the search: %d %s", code, errOut)
+	}
+}
+
+func TestSearchAccountNamingAMailAccountNarrowsMailAndSkipsChats(t *testing.T) {
+	e := searchMailEnv(t)
+	m := searchJSON(t, e, "Hello", "--account", searchMailAccount)
+	if m["note"] != "--account names a mail account; Teams chats were not searched" || m["count"] != float64(4) {
+		t.Fatalf("mail account: %v", m)
+	}
+	src := m["sources"].(map[string]any)
+	if _, has := src["chats"]; has {
+		t.Fatalf("chats were skipped: %v", src)
+	}
+	// The account narrows: another profile holds none of this mail.
+	m = searchJSON(t, e, "Hello", "--account", "outlook/Other")
+	if m["count"] != float64(0) {
+		t.Fatalf("other account: %v", m)
+	}
+	// An explicit --source mail needs no note.
+	m = searchJSON(t, e, "Hello", "--source", "mail", "--account", searchMailAccount)
+	if _, has := m["note"]; has || m["count"] != float64(4) {
+		t.Fatalf("explicit source: %v", m)
+	}
+}
+
+func TestSearchAccountConflictsWithTheOtherSource(t *testing.T) {
+	e := searchMailEnv(t)
+	teams := tenantA + "/" + userA
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"mail account with a chats-only flag", []string{"Hello", "--account", searchMailAccount, "--mentions-me"}, "--mentions-me"},
+		{"mail account with --source chats", []string{"Hello", "--account", searchMailAccount, "--source", "chats"}, "--source chats"},
+		{"Teams account with --folder", []string{"Hello", "--account", teams, "--folder", "inbox"}, "--folder"},
+		{"Teams account with --source mail", []string{"Hello", "--account", teams, "--source", "mail"}, "--source mail"},
+	} {
+		er := searchFails(t, e, 2, c.args...)
+		if er["code"] != "flag_source_conflict" || !strings.Contains(er["message"].(string), c.want) {
+			t.Errorf("%s: %v", c.name, er)
+		}
+	}
+}
+
+// A search mail item has the keys of a mail list item plus source, so the two cannot drift apart
+// while the mail commands keep their own copy of the item.
+func TestSearchMailItemHasTheKeysOfAMailListItem(t *testing.T) {
+	mailListKeys := []string{"id", "account", "folder", "folder_kind", "to_me", "subject", "from_name", "from_address", "recipient_count",
+		"recipients_preview", "in_reply_to", "received_at", "sent_at", "is_read", "flag", "importance", "has_attachments", "preview",
+		"internet_message_id", "ical_uid", "gone_at", "evicted_at", "text_truncated"}
+	got := jsonKeys(reflect.TypeFor[searchMailItem]())
+	if got[0] != "source" || strings.Join(got[1:], ",") != strings.Join(mailListKeys, ",") {
+		t.Fatalf("search mail item keys:\n%v\nmail list item keys:\n%v", got, mailListKeys)
 	}
 }

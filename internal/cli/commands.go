@@ -224,14 +224,15 @@ type searchCmd struct {
 func (searchCmd) Help() string {
 	return "Searches Teams chats and Outlook mail together; every item has a source (chats or mail) and the result's sources says how many items each source gave and whether it had more. Items are newest first across both sources, by sent_at for chats and received_at for mail.\n" +
 		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with the other --source it is a usage error (flag_source_conflict). --from, --since, --until, --limit and --fields apply to both; --fields accepts the keys of both kinds of item.\n" +
-		"note also says when mail is left out because it is not in the archive yet or not yet read on this platform. --account names a Teams account, so it narrows chats only."
+		"note also says when mail is left out because it is not in the archive yet or not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
+		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only."
 }
 
 func (c *searchCmd) Run(rt *runtime) error {
 	if err := checkKeys(rt, searchKeys()); err != nil {
 		return err
 	}
-	p, err := c.plan()
+	p, err := c.plan(rt)
 	if err != nil {
 		return err
 	}
