@@ -47,6 +47,7 @@
       "json": true
     },
     "mail show": {
+      "title": "mail show (\u003cid\u003e is a placeholder: use an id printed by mail list)",
       "argv": [
         "m365crawl",
         "--json",
@@ -57,6 +58,7 @@
       "json": true
     },
     "mail thread": {
+      "title": "mail thread (\u003cid\u003e is a placeholder: use an id printed by mail list)",
       "argv": [
         "m365crawl",
         "--json",

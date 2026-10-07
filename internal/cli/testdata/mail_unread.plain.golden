@@ -10,6 +10,6 @@ outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender  Quarterly 
 outlook/Main:105  2026-08-01 08:00  unread                Ann Sender  Old report      Projects
 
 2 items
-note: Inbox: the local cache holds 4 messages in this folder; Outlook may show more; Projects: the local cache holds 1 messages in this folder; Outlook may show more
+note: the local cache holds 4 messages in Inbox, 1 message in Projects; Outlook may show more
 archive age: <age>
 synced 2026-09-10 09:00 · cache covers since 2026-08-01

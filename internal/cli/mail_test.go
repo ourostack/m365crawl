@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,7 +214,7 @@ func TestMailListFilters(t *testing.T) {
 		{[]string{"--flagged"}, "101"},
 		{[]string{"--has-attachments"}, "101"},
 		{[]string{"--since", "2026-09-07"}, "106 104 103"},
-		{[]string{"--until", "2026-09-06"}, "101 105"},
+		{[]string{"--until", "2026-09-06"}, "102 101 105"},
 		{[]string{"--folder", "inbox", "--unread", "--from", "ann"}, "101"},
 		{[]string{"--limit", "2"}, "106 104"},
 	}
@@ -395,7 +396,7 @@ func TestMailUnread(t *testing.T) {
 	if got := ids(items(t, m)); strings.Join(got, " ") != "outlook/Main:101 outlook/Main:105" && strings.Join(got, " ") != "outlook/Main:101" {
 		t.Fatalf("items = %v", got)
 	}
-	if note := m["note"].(string); !strings.Contains(note, "Inbox: the local cache holds 4 messages in this folder; Outlook may show more") {
+	if note := m["note"].(string); !strings.Contains(note, "the local cache holds 4 messages in Inbox, 1 message in Projects; Outlook may show more") {
 		t.Fatalf("note = %q", note)
 	}
 	m = mailJSON(t, e, "mail", "unread", "--folder", "inbox")
@@ -467,8 +468,20 @@ func TestMailEmptyNotes(t *testing.T) {
 		t.Fatalf("no profile: %q", n)
 	}
 	mailProfileCount = func(string) int { return 1 }
-	if n := note(e, "--outlook-root", root, "mail", "unread"); !strings.Contains(n, "no mail has been read yet") {
+	if n := note(e, "--outlook-root", root, "mail", "unread"); n != "no mail has been read yet: run m365crawl sync" {
 		t.Fatalf("not read: %q", n)
+	}
+	// This run's own sync already covered the mail source: do not send the agent round again.
+	if n := note(e, "--outlook-root", root, "--max-age", "1ns", "mail", "list"); strings.Contains(n, "run m365crawl sync") || !strings.Contains(n, "although this run synced") {
+		t.Fatalf("after an implicit sync: %q", n)
+	}
+	// The read marker says the source was read and found nothing.
+	e.exec(`insert into meta(key, value) values('outlook_mail_read:outlook/Main', 'x')`)
+	if n := note(e, "--outlook-root", root, "mail", "list"); !strings.Contains(n, "the Outlook source is on and the last read found no mail folders") {
+		t.Fatalf("marker: %q", n)
+	}
+	if n := note(e, "--outlook-root", root, "--account", "outlook/Other", "mail", "folders"); !strings.Contains(n, "no mail is archived for account") {
+		t.Fatalf("other account: %q", n)
 	}
 	// An empty mailbox: folders and a coverage row, no messages.
 	e2 := textEnv(t)
@@ -576,15 +589,20 @@ func TestMailHelpIsTheContract(t *testing.T) {
 		"folders": "List mail folders with message and unread counts and how far back the cache reaches.",
 		"unread":  "Unread mail by folder.",
 	} {
-		args := []string{"--format", "text", "mail", cmd, "--help"}
-		if cmd == "show" || cmd == "thread" {
-			args = []string{"--format", "text", "mail", cmd, "--help"}
-		}
-		_, out, _ := e.run(args...)
+		_, out, _ := e.run("--format", "text", "mail", cmd, "--help")
 		flat := strings.Join(strings.Fields(out), " ")
-		if !strings.Contains(flat, want) || !strings.Contains(flat, "likely") || !strings.Contains(flat, "To and Cc are not yet told apart") {
+		if !strings.Contains(flat, want) || !strings.Contains(flat, "m365crawl mail --help") || strings.Contains(flat, "likely") {
 			t.Errorf("mail %s help:\n%s", cmd, out)
 		}
+	}
+	_, out, _ := e.run("--format", "text", "mail", "--help")
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "likely") || !strings.Contains(flat, "To and Cc are not yet told apart") || !strings.Contains(flat, "outlook/<profile>") {
+		t.Errorf("mail group help:\n%s", out)
+	}
+	_, out, _ = e.run("--format", "text", "mail", "list", "--help")
+	if flat := strings.Join(strings.Fields(out), " "); !strings.Contains(flat, "a date alone (YYYY-MM-DD) includes that whole day") {
+		t.Errorf("--until help:\n%s", out)
 	}
 }
 
@@ -649,8 +667,8 @@ func TestMailDamagedArchive(t *testing.T) {
 		for _, args := range [][]string{{"mail", "list"}, {"mail", "show", "outlook/Main:101"}, {"mail", "thread", "outlook/Main:101"}, {"mail", "folders"}, {"mail", "unread"}} {
 			code, _, errOut := e.mail(append([]string{"--json"}, args...)...)
 			if code == 0 {
-				// folders reads no recipients, and show reads no coverage.
-				if (table != "mail_recipients" || args[1] != "folders") && (table != "mail_coverage" || args[1] != "show") {
+				// folders reads no recipients.
+				if table != "mail_recipients" || args[1] != "folders" {
 					t.Errorf("%s dropped, %v: exit 0", table, args)
 				}
 				continue
@@ -660,4 +678,74 @@ func TestMailDamagedArchive(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestMailUntilDateIncludesTheDay(t *testing.T) {
+	e := mailEnv(t)
+	got := func(until string) string {
+		var out []string
+		for _, id := range ids(items(t, mailJSON(t, e, "mail", "list", "--until", until))) {
+			out = append(out, strings.TrimPrefix(id, "outlook/Main:"))
+		}
+		return strings.Join(out, " ")
+	}
+	// 102 was received 2026-09-06 08:00 UTC.
+	if g := got("2026-09-06"); g != "102 101 105" {
+		t.Fatalf("date-only --until: %s", g)
+	}
+	if g := got("2026-09-06T00:00:00Z"); g != "101 105" {
+		t.Fatalf("datetime --until: %s", g)
+	}
+}
+
+func TestMailAccountMismatch(t *testing.T) {
+	e := mailEnv(t)
+	for _, cmd := range []string{"show", "thread"} {
+		er := mailFails(t, e, "account_mismatch", 2, "--account", "outlook/Other", "mail", cmd, "outlook/Main:101")
+		if !strings.Contains(er["fix"].(string), "outlook/Main") {
+			t.Fatalf("fix = %v", er)
+		}
+		mailJSON(t, e, "--account", "outlook/Main", "mail", cmd, "outlook/Main:101")
+	}
+}
+
+func TestMailShowSyncedAt(t *testing.T) {
+	e := mailEnv(t)
+	if m := mailJSON(t, e, "mail", "show", "outlook/Main:101"); m["synced_at"] == nil {
+		t.Fatalf("synced_at = %v", m["synced_at"])
+	}
+	if m := mailJSON(t, e, "--fields", "id", "mail", "show", "outlook/Main:101"); m["synced_at"] == nil {
+		t.Fatalf("synced_at with fields = %v", m)
+	}
+}
+
+func TestMailThreadOfOne(t *testing.T) {
+	e := mailEnv(t)
+	m := mailJSON(t, e, "mail", "thread", "outlook/Main:105")
+	if len(items(t, m)) != 1 || m["note"] != "no other message shares its subject and a participant" || m["truncated"] != false {
+		t.Fatalf("thread of one = %v", m)
+	}
+}
+
+func TestMailPlural(t *testing.T) {
+	if plural(1, "message", "messages") != "1 message" || cacheNote(1) != "the local cache holds 1 message in this folder; Outlook may show more" {
+		t.Fatal("singular")
+	}
+}
+
+func TestMailManifestTitles(t *testing.T) {
+	m := manifest()
+	for _, n := range []string{"mail show", "mail thread"} {
+		if !strings.Contains(m.Commands[n].Title, "<id> is a placeholder") {
+			t.Errorf("%s title = %q", n, m.Commands[n].Title)
+		}
+	}
+}
+
+func TestMailReadMarkerFailure(t *testing.T) {
+	e := mailEnv(t)
+	old := mailReadAccounts
+	mailReadAccounts = func(*store.Store, context.Context) ([]string, error) { return nil, errors.New("boom") }
+	t.Cleanup(func() { mailReadAccounts = old })
+	mailFails(t, e, "db_error", 1, "mail", "folders")
 }

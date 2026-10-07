@@ -25,7 +25,11 @@ func manifest() control.Manifest {
 		if name == "mail show" || name == "mail thread" {
 			argv = append(argv, "<id>")
 		}
-		m.Commands[name] = control.Command{Argv: argv, JSON: true}
+		c := control.Command{Argv: argv, JSON: true}
+		if name == "mail show" || name == "mail thread" {
+			c.Title = name + " (<id> is a placeholder: use an id printed by mail list)"
+		}
+		m.Commands[name] = c
 	}
 	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar", "mail"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}

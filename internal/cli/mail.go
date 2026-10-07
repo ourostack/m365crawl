@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	goruntime "runtime"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ const (
 	CodeUnknownFolder           = "unknown_folder"
 	CodeBadMailID               = "bad_mail_id"
 	CodeMailNotFound            = "mail_not_found"
+	CodeAccountMismatch         = "account_mismatch"
 )
 
 // mailPlatform is the operating system the mail commands believe they run on; tests set it.
@@ -50,35 +52,42 @@ type mailGroup struct {
 	Unread  mailUnreadCmd  `cmd:"" help:"Unread mail by folder."`
 }
 
-const mailCommon = `Mail comes from Outlook for Mac's local cache, so it holds only what Outlook has cached. Every result ends with when mail was last read and how far back the cache covers.
+const mailCommon = `Mail comes from Outlook for Mac's local cache, so it holds only what Outlook has cached. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers.
 --account takes the mail account as printed in the ids, outlook/<profile>.
 A field the archive does not hold is null: subject, sender, in_reply_to, ical_uid and internet_message_id when Outlook stored none, is_read when the read state is not known, sent_at when the store has no send time, address on a recipient with no address, gone_at and evicted_at while the message is present.
 Recipients: To and Cc are not yet told apart, so recipients carries each person once with kind_raw, the store's own number. importance is likely right (low, normal, high) but is read from one store field that is not fully confirmed.
 An id is account:detail_key, as printed by mail list.`
 
+// Help is the long help of the mail group, shared by every mail command.
+func (mailGroup) Help() string {
+	return mailCommon
+}
+
+const mailSeeGroup = "What every mail command shares (null fields, ids, --account, recipients, importance) is in `m365crawl mail --help`."
+
 // Help is the long help of mail list.
 func (mailListCmd) Help() string {
-	return mailCommon + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d; --until is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more."
+	return mailSeeGroup + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d; a date alone as --until includes that whole day, a time is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more."
 }
 
 // Help is the long help of mail show.
 func (mailShowCmd) Help() string {
-	return mailCommon + "\nmail show lists every recipient with its kind_raw and every attachment with its name, size and content type. body_text is read from the cached body; body_state says when it is missing or unreadable. --max-text cuts body_text and sets text_truncated."
+	return mailSeeGroup + "\nmail show lists every recipient with its kind_raw and every attachment with its name, size and content type. body_text is read from the cached body; body_state says when it is missing or unreadable. --max-text cuts body_text and sets text_truncated."
 }
 
 // Help is the long help of mail thread.
 func (mailThreadCmd) Help() string {
-	return mailCommon + "\nThe grouping key says how the thread was found: reply_chain follows In-Reply-To links in both directions; subject groups messages with the same subject (ignoring re:, fw: and the like) that share a sender or recipient address with the message. participants lists everyone in the thread once."
+	return mailSeeGroup + "\nThe grouping key says how the thread was found: reply_chain follows In-Reply-To links in both directions; subject groups messages with the same subject (ignoring re:, fw: and the like) that share a sender or recipient address with the message. participants lists everyone in the thread once."
 }
 
 // Help is the long help of mail folders.
 func (mailFoldersCmd) Help() string {
-	return mailCommon + "\nmessages and unread count what the archive holds in the folder, leaving out messages that are gone or evicted. oldest_at is the oldest message the cache held at the last read."
+	return mailSeeGroup + "\nmessages and unread count what the archive holds in the folder, leaving out messages that are gone or evicted. oldest_at is the oldest message the cache held at the last read."
 }
 
 // Help is the long help of mail unread.
 func (mailUnreadCmd) Help() string {
-	return mailCommon + "\nunread is the unread count of each folder against cached, the messages the archive holds there; the cache can hold fewer than Outlook shows, and the note says so. items are the newest unread messages (--limit changes how many, default 20)."
+	return mailSeeGroup + "\nunread is the unread count of each folder against cached, the messages the archive holds there; the cache can hold fewer than Outlook shows, and the note says so. items are the newest unread messages (--limit changes how many, default 20)."
 }
 
 // ---- items ----
@@ -290,6 +299,7 @@ type mailScope struct {
 	folders  []store.MailFolderRow // the folders --folder names (all when it is empty)
 	coverage []store.CoverageRow   // the coverage of those folders
 	syncedAt time.Time             // when mail was last read, over every folder of the account filter
+	marked   bool                  // a sync has read the mail of the account filter (the outlook_mail_read marker)
 }
 
 func (sc mailScope) since() time.Time {
@@ -353,6 +363,13 @@ func (rt *runtime) mailScope(st *store.Store, folder string) (mailScope, error) 
 	if err != nil {
 		return sc, err
 	}
+	marked, err := mailReadAccounts(st, rt.ctx)
+	if err != nil {
+		return sc, err
+	}
+	for _, a := range marked {
+		sc.marked = sc.marked || rt.g.Account == "" || a == rt.g.Account
+	}
 	for _, f := range all {
 		if rt.g.Account == "" || f.Account == rt.g.Account {
 			sc.all = append(sc.all, f)
@@ -397,6 +414,9 @@ func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 
 // ---- notes ----
 
+// mailReadAccounts is the test seam of the read markers.
+var mailReadAccounts = (*store.Store).MailReadAccounts
+
 // mailProfileCount counts the Outlook profiles under root (the default root when empty); a test seam.
 var mailProfileCount = func(root string) int {
 	if root == "" {
@@ -421,8 +441,12 @@ func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since
 		return "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
 	case len(sc.all) == 0 && mailProfileCount(rt.outlookRoot) == 0:
 		return "no Outlook for Mac profile was found on this machine, so there is no mail to read"
+	case len(sc.all) == 0 && sc.marked:
+		return "the Outlook source is on and the last read found no mail folders: mail is turned off in Outlook for this account, or none is set up"
+	case len(sc.all) == 0 && rt.synced != nil:
+		return "no mail has been read, although this run synced: m365crawl status shows the mail state and m365crawl doctor says why"
 	case len(sc.all) == 0:
-		return "no mail has been read yet: run m365crawl sync. If mail is turned off in Outlook for this account, there is none to read"
+		return "no mail has been read yet: run m365crawl sync"
 	}
 	if cut := sc.since(); filtered && !since.IsZero() && !cut.IsZero() && since.Before(cut) {
 		return "no message matched, and the cache covers only since " + cut.In(displayZone).Format("2006-01-02") + ": older mail is not in it"
@@ -433,12 +457,19 @@ func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since
 	return "the mailbox is empty: the cache holds no messages"
 }
 
-// cacheNote is the sentence every unread result carries for a folder.
-func cacheNote(cached int) string {
-	return fmt.Sprintf("the local cache holds %d messages in this folder; Outlook may show more", cached)
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
-// unreadNote joins the cache sentence of each folder; with several folders each names its own.
+// cacheNote is the sentence every unread result carries for a folder.
+func cacheNote(cached int) string {
+	return fmt.Sprintf("the local cache holds %s in this folder; Outlook may show more", plural(cached, "message", "messages"))
+}
+
+// unreadNote is the one sentence about what the cache holds: with several folders it names each.
 func unreadNote(rows []mailUnreadFolder) string {
 	switch len(rows) {
 	case 0:
@@ -448,9 +479,9 @@ func unreadNote(rows []mailUnreadFolder) string {
 	}
 	parts := make([]string, len(rows))
 	for i, r := range rows {
-		parts[i] = r.Folder + ": " + cacheNote(r.Cached)
+		parts[i] = plural(r.Cached, "message", "messages") + " in " + r.Folder
 	}
-	return strings.Join(parts, "; ")
+	return "the local cache holds " + strings.Join(parts, ", ") + "; Outlook may show more"
 }
 
 // ---- results ----
@@ -485,13 +516,16 @@ type mailRenderer interface {
 }
 
 // footer is the last line of every human mail list.
-func (r *mailListResult) footer(rt *runtime) {
+func (r *mailListResult) footer(rt *runtime) { syncFooter(rt, r.SyncedAt, r.covers) }
+
+// syncFooter prints when mail was last read and how far back the cache covers.
+func syncFooter(rt *runtime, syncedAt *time.Time, since time.Time) {
 	synced, covers := "never", "-"
-	if r.SyncedAt != nil {
-		synced = stamp(*r.SyncedAt)
+	if syncedAt != nil {
+		synced = stamp(*syncedAt)
 	}
-	if !r.covers.IsZero() {
-		covers = r.covers.In(displayZone).Format("2006-01-02")
+	if !since.IsZero() {
+		covers = since.In(displayZone).Format("2006-01-02")
 	}
 	_, _ = fmt.Fprintf(rt.stdout, "%s\n", render.Dim("synced "+synced+" · cache covers since "+covers, rt.color))
 }
@@ -583,7 +617,7 @@ type mailListCmd struct {
 	Folder         string `help:"Only this folder, by name (checked first) or kind: inbox, sent, drafts, archive, deleted, junk, to_me." placeholder:"NAME|KIND"`
 	From           string `help:"Only messages whose sender name or address contains this text, ignoring case." placeholder:"TEXT"`
 	Since          string `help:"Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d)." placeholder:"DATE"`
-	Until          string `help:"Only messages received before this time; same forms as --since." placeholder:"DATE"`
+	Until          string `help:"Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive." placeholder:"DATE"`
 	Unread         bool   `help:"Only unread messages."`
 	Flagged        bool   `help:"Only flagged messages."`
 	HasAttachments bool   `name:"has-attachments" help:"Only messages with attachments."`
@@ -609,6 +643,9 @@ func (c *mailListCmd) Run(rt *runtime) error {
 	until, err := rt.when("--until", c.Until)
 	if err != nil {
 		return err
+	}
+	if dateOnly.MatchString(c.Until) {
+		until = until.In(time.Local).AddDate(0, 0, 1) // a date alone names the whole day
 	}
 	return rt.read("mail list", func(st *store.Store) (result, error) {
 		if st == nil {
@@ -688,6 +725,17 @@ func parseMailID(id string) (string, uint32, error) {
 	return "", 0, c
 }
 
+// checkIDAccount refuses an --account that names another account than the id does.
+func (rt *runtime) checkIDAccount(account string) error {
+	if rt.g.Account == "" || rt.g.Account == account {
+		return nil
+	}
+	c := errs.Usage(fmt.Sprintf("--account %s does not match the id's account %s", rt.g.Account, account))
+	c.Code = CodeAccountMismatch
+	c.Fix = "Drop --account (the id already names the account), or pass --account " + account + "."
+	return c
+}
+
 func mailNotFound(id string) *errs.Coded {
 	c := errs.Usage(fmt.Sprintf("no mail message %q in the archive", id))
 	c.Code = CodeMailNotFound
@@ -706,6 +754,9 @@ func (c *mailShowCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	if err := rt.checkIDAccount(account); err != nil {
+		return err
+	}
 	return rt.read("mail show", func(st *store.Store) (result, error) {
 		if st == nil {
 			return nil, mailNotFound(c.ID)
@@ -717,14 +768,26 @@ func (c *mailShowCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		return &mailShowResult{item: showItemOf(row, rt.g.MaxText), keys: rt.fields}, nil
+		sc, err := rt.mailScope(st, "")
+		if err != nil {
+			return nil, err
+		}
+		return &mailShowResult{item: showItemOf(row, rt.g.MaxText), keys: rt.fields, syncedAt: tp(sc.syncedAt), covers: sc.since()}, nil
 	})
 }
 
 // mailShowResult is mail show's document: the message, or the keys --fields kept, then the meta.
 type mailShowResult struct {
-	item mailShowItem
-	keys []string
+	item     mailShowItem
+	keys     []string
+	syncedAt *time.Time
+	covers   time.Time
+	meta
+}
+
+// mailShowTail is what follows the message: when mail was last read, then the meta.
+type mailShowTail struct {
+	SyncedAt *time.Time `json:"synced_at"`
 	meta
 }
 
@@ -733,7 +796,7 @@ func (r *mailShowResult) MarshalJSON() ([]byte, error) {
 	if len(r.keys) > 0 {
 		body, _ = project(r.item, append(append([]string(nil), r.keys...), "text_truncated")) // an item always encodes
 	}
-	return joinJSON(body, r.meta)
+	return joinJSON(body, mailShowTail{SyncedAt: r.syncedAt, meta: r.meta})
 }
 
 func (r *mailShowResult) renderMail(rt *runtime) {
@@ -742,6 +805,7 @@ func (r *mailShowResult) renderMail(rt *runtime) {
 		p, _ := project(it, append(append([]string(nil), r.keys...), "text_truncated"))
 		rt.listTable(&listResult{Items: []any{p}})
 		metaLines(w, r.meta, color)
+		syncFooter(rt, r.syncedAt, r.covers)
 		return
 	}
 	head := map[string]any{"id": it.ID, "folder": sv(it.Folder), "received": stamp(derefTime(it.ReceivedAt))}
@@ -797,6 +861,7 @@ func (r *mailShowResult) renderMail(rt *runtime) {
 		}
 	}
 	metaLines(w, r.meta, color)
+	syncFooter(rt, r.syncedAt, r.covers)
 }
 
 func derefTime(t *time.Time) time.Time {
@@ -840,6 +905,9 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	if err := rt.checkIDAccount(account); err != nil {
+		return err
+	}
 	return rt.read("mail thread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return nil, mailNotFound(c.ID)
@@ -855,7 +923,10 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		res := &mailThreadResult{Grouping: grouping, Participants: []mailPersonOut{}, mailListResult: *rt.newMailList(rows, len(rows) >= mailThreadMax, sc)}
+		res := &mailThreadResult{Grouping: grouping, Participants: []mailPersonOut{}, mailListResult: *rt.newMailList(rows, len(rows) > mailThreadMax, sc)}
+		if len(rows) == 1 {
+			res.Note = "no other message shares its subject and a participant"
+		}
 		for _, p := range store.MailParticipants(rows) {
 			res.Participants = append(res.Participants, mailPersonOut{Name: nz(p.Name), Address: nz(p.Address)})
 		}
@@ -1015,6 +1086,8 @@ func (r *mailUnreadResult) renderMail(rt *runtime) {
 	}
 	r.tail(rt)
 }
+
+var dateOnly = regexp.MustCompile(`^\d{4}-\d\d-\d\d$`)
 
 // maxMailLimit is the most messages any mail command returns.
 const maxMailLimit = 1000
