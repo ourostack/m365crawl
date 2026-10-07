@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 )
 
 const ownAddress = "Fixture.Owner@Example.com"

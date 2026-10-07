@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func TestCheckSQL(t *testing.T) {

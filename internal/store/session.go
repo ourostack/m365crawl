@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Session is one write transaction spanning any number of Apply calls. Nothing it wrote is

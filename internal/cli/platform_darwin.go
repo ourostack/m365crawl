@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func defaultArchivePath() (string, error) {
@@ -17,7 +17,7 @@ func defaultArchivePath() (string, error) {
 	if err != nil {
 		return "", errs.Usage("cannot find the home directory; pass --db")
 	}
-	return filepath.Join(home, ".teamscrawl", "teamscrawl.db"), nil
+	return filepath.Join(home, ".m365crawl", "m365crawl.db"), nil
 }
 
 func fullDiskAccessDoctorCheck(code string, coded *errs.Coded) check {

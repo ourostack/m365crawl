@@ -1,4 +1,4 @@
-// Package render is teamscrawl's terminal presentation layer: a pixel-block
+// Package render is m365crawl's terminal presentation layer: a pixel-block
 // wordmark, doctor screens, aligned tables and generic key/value blocks.
 //
 // It is adapted from slacrawl's internal/cli/render.go
@@ -6,7 +6,7 @@
 // Copyright (c) the slacrawl authors). The banner, the section underline
 // style, the check glyphs, the table layout and the key/value block renderer
 // follow that file; the wordmark, the Teams palette and the width handling
-// are teamscrawl's own.
+// are m365crawl's own.
 package render
 
 import (
@@ -101,7 +101,7 @@ func lavender() string {
 	return "\x1b[38;5;146m"
 }
 
-// wordmark holds one glyph per letter of "teamscrawl", five rows each.
+// wordmark holds one glyph per letter of "m365crawl", five rows each.
 var wordmark = [][5]string{
 	{" ▄▄ ", " ██ ", "▀██▀", " ██ ", " ▀█▄"},                // t
 	{"     ", "     ", "▄███▄", "██▀▀▀", "▀████"},           // e

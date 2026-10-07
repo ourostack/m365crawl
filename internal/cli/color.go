@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ourostack/teamscrawl/internal/render"
+	"github.com/ourostack/m365crawl/internal/render"
 )
 
 // colorEnabled decides ANSI color for stdout. --no-color and NO_COLOR always win. Otherwise color

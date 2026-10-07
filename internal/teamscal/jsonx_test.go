@@ -3,7 +3,7 @@ package teamscal
 import (
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 func TestFlagDistinguishesAbsentFromFalse(t *testing.T) {

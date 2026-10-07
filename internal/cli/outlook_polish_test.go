@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // A root that is not a directory is one coded error with one exit code on every command that takes
@@ -61,8 +61,8 @@ func defaultEnv(t *testing.T, withOutlook bool) *env {
 	for _, k := range []string{"HOME", "USERPROFILE", "LOCALAPPDATA"} {
 		t.Setenv(k, home)
 	}
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "")
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ACCOUNT", "")
+	t.Setenv("M365CRAWL_OUTLOOK_ROOT", "")
+	t.Setenv("M365CRAWL_OUTLOOK_ACCOUNT", "")
 	copyTree(t, e.root, teamsdesktop.DefaultRoot())
 	root, err := outlookdesktop.DefaultRoot()
 	if err != nil {
@@ -97,7 +97,7 @@ func (e *env) outlookRowCount(args ...string) int {
 // a Teams sync or a read command.
 func TestDefaultOutlookNeverStopsASync(t *testing.T) {
 	e := defaultEnv(t, false)
-	t.Setenv("TEAMSCRAWL_OUTLOOK", "1") // accepted, and no different
+	t.Setenv("M365CRAWL_OUTLOOK", "1") // accepted, and no different
 	for _, cmd := range [][]string{{"sync"}, {"calendar"}, {"doctor"}} {
 		if code, _, errOut := e.runDefault(cmd...); code != 0 {
 			t.Fatalf("%v: exit %d %s", cmd, code, errOut)
@@ -132,7 +132,7 @@ func TestDefaultOutlookIsReadAndCanBeTurnedOff(t *testing.T) {
 	if code, _, errOut := off.runDefault("--outlook-root", "none", "sync"); code != 0 {
 		t.Fatalf("exit %d %s", code, errOut)
 	}
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "none")
+	t.Setenv("M365CRAWL_OUTLOOK_ROOT", "none")
 	if n := off.outlookRowCount(); n != 0 {
 		t.Fatalf("Outlook was read with none: %d rows", n)
 	}
@@ -303,7 +303,7 @@ func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 func TestBadOutlookRootDoesNotStopWhoamiStatusVersion(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
+	t.Setenv("M365CRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
 	for _, cmd := range []string{"whoami", "status", "--version"} {
 		code, out, errOut := e.run("--max-age", "0", cmd)
 		if code != 0 || out == "" {
@@ -326,11 +326,11 @@ func TestBadOutlookRootDoesNotStopWhoamiStatusVersion(t *testing.T) {
 		t.Fatalf("text, no archive: %s", out)
 	}
 	// Without the problem the field is absent, and sync still fails hard.
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "")
+	t.Setenv("M365CRAWL_OUTLOOK_ROOT", "")
 	if _, out, _ = e.run("--max-age", "0", "status"); decode(t, out)["outlook"] != nil {
 		t.Fatalf("clean: %s", out)
 	}
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
+	t.Setenv("M365CRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
 	if code, _, _ := e.run("sync"); code != 3 {
 		t.Fatalf("sync exit %d", code)
 	}

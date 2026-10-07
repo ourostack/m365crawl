@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 func TestStoresListsEveryArchivedStore(t *testing.T) {

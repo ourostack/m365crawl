@@ -140,7 +140,7 @@ tap_version() {
   # must not read as "cask missing".
   out="$(gh api "repos/${TAP_REPO:-ourostack/homebrew-tap}" --jq .full_name 2>&1)" \
     || fail "could not read the tap repository ${TAP_REPO:-ourostack/homebrew-tap}: $out"
-  if out="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${TAP_REPO:-ourostack/homebrew-tap}/contents/Casks/teamscrawl.rb?ref=$1" 2>&1)"; then
+  if out="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${TAP_REPO:-ourostack/homebrew-tap}/contents/Casks/m365crawl.rb?ref=$1" 2>&1)"; then
     sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' <<<"$out" | head -n 1
     return 0
   fi
@@ -269,7 +269,7 @@ selftest() {
   mkdir -p "$stub" "$repo/docs/releases"
   cat > "$stub/gh" <<'STUB'
 #!/usr/bin/env bash
-# Stand-in for gh api repos/R/git/ref/tags/TAG --jq ..., gh api repos/T/contents/Casks/teamscrawl.rb?ref=BRANCH
+# Stand-in for gh api repos/R/git/ref/tags/TAG --jq ..., gh api repos/T/contents/Casks/m365crawl.rb?ref=BRANCH
 # and gh release view TAG. STUB_TAGS lists name:object[:type] triples (type commit by default),
 # STUB_RELEASES the releases that exist, STUB_DEMOTED those of them that are prereleases, STUB_TAP
 # branch:version pairs for the cask on the tap.
@@ -280,13 +280,13 @@ case "$1" in
       echo "${2#repos/}"
       exit 0
     fi
-    if [[ "$*" == */contents/Casks/teamscrawl.rb\?ref=* ]]; then
+    if [[ "$*" == */contents/Casks/m365crawl.rb\?ref=* ]]; then
       if [[ -n "${STUB_TAP_ERROR:-}" ]]; then echo "gh: HTTP 502" >&2; exit 1; fi
       args="$*"
       ref="${args##*ref=}"
       for pair in ${STUB_TAP:-}; do
         if [[ "${pair%%:*}" == "$ref" ]]; then
-          printf 'cask "teamscrawl" do\n  version "%s"\nend\n' "${pair#*:}"
+          printf 'cask "m365crawl" do\n  version "%s"\nend\n' "${pair#*:}"
           exit 0
         fi
       done

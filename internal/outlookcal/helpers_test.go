@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 func at(day, hour int) time.Time { return time.Date(2031, 3, day, hour, 0, 0, 0, time.UTC) }

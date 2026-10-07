@@ -1,4 +1,4 @@
-// Package cli implements the teamscrawl command line.
+// Package cli implements the m365crawl command line.
 package cli
 
 import (
@@ -16,13 +16,13 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl"
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/render"
+	"github.com/ourostack/m365crawl"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/render"
 )
 
 // version, commit and date are set at build time with
-// -ldflags "-X github.com/ourostack/teamscrawl/internal/cli.version=..." (and .commit, .date).
+// -ldflags "-X github.com/ourostack/m365crawl/internal/cli.version=..." (and .commit, .date).
 var (
 	version = "dev"
 	commit  = "unknown"
@@ -42,14 +42,14 @@ var panicHook func()
 type Globals struct {
 	Format         string `help:"Output format: text, json or log. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
 	JSON           bool   `name:"json" help:"Alias for --format json."`
-	DB             string `name:"db" env:"TEAMSCRAWL_DB" help:"Archive database path (default ~/.teamscrawl/teamscrawl.db)." placeholder:"PATH"`
-	TeamsRoot      string `name:"teams-root" env:"TEAMSCRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
-	OutlookRoot    string `name:"outlook-root" env:"TEAMSCRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read as a second calendar source. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
-	OutlookAccount string `name:"outlook-account" env:"TEAMSCRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
-	OutlookProfile string `name:"outlook-profile" env:"TEAMSCRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
+	DB             string `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
+	TeamsRoot      string `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
+	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read as a second calendar source. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
+	OutlookAccount string `name:"outlook-account" env:"M365CRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
+	OutlookProfile string `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
 	Account        string `help:"Only this account, as <tenantId>/<userId>. Default: every account." placeholder:"TENANT/USER"`
 	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
-	MaxAge         string `name:"max-age" env:"TEAMSCRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
+	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
 	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated." placeholder:"a,b,c"`
 	MaxText        int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
 }
@@ -67,7 +67,7 @@ type cliApp struct {
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
-	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams cache holds the days Teams has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: teamscrawl calendar agenda --help."`
+	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams cache holds the days Teams has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
 	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
@@ -77,7 +77,7 @@ type cliApp struct {
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
 	Skill         skillCmd         `cmd:"" help:"Print the agent guide (SKILL.md) for this version, as Markdown in every output mode."`
 	Metadata      metadataCmd      `cmd:"" help:"Print the crawlkit app manifest (for crawlctl discovery)."`
-	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the teamscrawl version, commit and build date."`
+	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the m365crawl version, commit and build date."`
 }
 
 // skillCmd prints the agent guide embedded in the binary. It is the documented exception to the
@@ -85,7 +85,7 @@ type cliApp struct {
 type skillCmd struct{}
 
 func (skillCmd) Run(rt *runtime) error {
-	_, err := io.WriteString(rt.stdout, teamscrawl.Skill)
+	_, err := io.WriteString(rt.stdout, m365crawl.Skill)
 	return err
 }
 
@@ -113,7 +113,7 @@ type versionInfo struct {
 // printVersion prints one JSON document, or the human line in text mode.
 func (rt *runtime) printVersion() error {
 	if rt.format == output.Text {
-		_, err := fmt.Fprintf(rt.stdout, "teamscrawl %s (commit %s, built %s)\n", version, commit, date)
+		_, err := fmt.Fprintf(rt.stdout, "m365crawl %s (commit %s, built %s)\n", version, commit, date)
 		return err
 	}
 	return rt.write("version", versionInfo{Version: version, Commit: commit, Date: date})
@@ -156,7 +156,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
 var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources"}
 
-const issuesURL = "https://github.com/ourostack/teamscrawl/issues"
+const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
 // newParser builds the kong parser; a test seam for its construction error.
 var newParser = kong.New
@@ -169,9 +169,9 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 	defer func() {
 		if r := recover(); r != nil {
 			c := errs.Internal(fmt.Errorf("unexpected failure: %v", r))
-			c.Fix = "Re-run with TEAMSCRAWL_DEBUG=1 and report the output at " + issuesURL
+			c.Fix = "Re-run with M365CRAWL_DEBUG=1 and report the output at " + issuesURL
 			rt.printError(c)
-			if os.Getenv("TEAMSCRAWL_DEBUG") == "1" {
+			if os.Getenv("M365CRAWL_DEBUG") == "1" {
 				_, _ = stderr.Write(debug.Stack())
 			}
 			code = c.Exit
@@ -179,7 +179,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 	}()
 	exited := false
 	parser, err := newParser(&app,
-		kong.Name("teamscrawl"),
+		kong.Name("m365crawl"),
 		kong.Description("Mirror the Microsoft Teams desktop cache into local SQLite so agents can read Teams offline."),
 		kong.Writers(stdout, stderr),
 		kong.Bind(rt),
@@ -252,7 +252,7 @@ func (rt *runtime) checkListOnly() error {
 		return nil
 	}
 	c := errs.Usage(fmt.Sprintf("--fields and --max-text apply to list commands only (%s), not %q", strings.Join(listCommands, ", "), rt.cmd))
-	c.Fix = "Drop the flag, or use it with a list command, for example `teamscrawl search <query> --fields id,text`."
+	c.Fix = "Drop the flag, or use it with a list command, for example `m365crawl search <query> --fields id,text`."
 	return c
 }
 
@@ -274,9 +274,9 @@ func (rt *runtime) fail(err error) int {
 	if coded.Code == errs.CodeUsage && strings.HasPrefix(coded.Fix, "Run the command with --help") {
 		// The generic fix becomes command-specific: name the command whose help to read.
 		if rt.cmd != "" {
-			coded.Fix = fmt.Sprintf("Run `teamscrawl %s --help` to see the accepted arguments and flags.", rt.cmd)
+			coded.Fix = fmt.Sprintf("Run `m365crawl %s --help` to see the accepted arguments and flags.", rt.cmd)
 		} else {
-			coded.Fix = "Run `teamscrawl --help` to see the commands and global flags."
+			coded.Fix = "Run `m365crawl --help` to see the commands and global flags."
 		}
 	}
 	rt.printError(coded)

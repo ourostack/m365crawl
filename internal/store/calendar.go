@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/teamscal"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/teamscal"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // The omission codes the calendar derivation counts. A record that cannot be mapped and an event

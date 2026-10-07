@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // EventID is the short id of an event: "ev_" and the first 10 hex characters of the sha256 of
@@ -368,7 +368,7 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 
 func noEvent(ref string) *errs.Coded {
 	c := errs.Usage(fmt.Sprintf("no calendar event matches %q. Events on days Teams never cached are not in the archive, so this does not show that the event does not exist", ref))
-	c.Fix = "List events with `teamscrawl calendar --from <date> --days 7` and pass an event_id (or event_key) from the result."
+	c.Fix = "List events with `m365crawl calendar --from <date> --days 7` and pass an event_id (or event_key) from the result."
 	return c
 }
 

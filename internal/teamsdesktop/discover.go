@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 var (

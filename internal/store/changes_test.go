@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func key(a teamsdesktop.Account, conv, id string) string {

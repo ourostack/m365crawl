@@ -1,8 +1,12 @@
 # Changelog
 
-All notable changes to teamscrawl are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) with the 0.x caveat that the JSON contract in [SPEC.md](SPEC.md) is stable except where an entry below says "Breaking".
+All notable changes to m365crawl (formerly teamscrawl) are recorded here. Entries below this one use the old name. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) with the 0.x caveat that the JSON contract in [SPEC.md](SPEC.md) is stable except where an entry below says "Breaking".
 
 ## [Unreleased]
+
+### Changed
+
+- Breaking: teamscrawl is now m365crawl, with no alias and no migration. The module is `github.com/ourostack/m365crawl`, the binary and Homebrew cask are `m365crawl`, every `TEAMSCRAWL_*` variable is `M365CRAWL_*`, and the default archive is `~/.m365crawl/m365crawl.db` (`%LOCALAPPDATA%\m365crawl\m365crawl.db` on Windows). Move an existing archive by hand. Nothing else changed.
 
 ## [0.4.0] - 2026-10-07
 

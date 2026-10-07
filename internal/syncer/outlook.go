@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/outlookcal"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/outlookcal"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // OutlookMinReadInterval is the least time between two copies of one Outlook store, measured
@@ -283,8 +283,8 @@ func collectOutlook(ctx context.Context, info outlookdesktop.Info, account strin
 	}
 	var guard *outlookcal.GuardError
 	if errors.As(err, &guard) {
-		return outlookcal.Result{}, &errs.Coded{Code: guard.Code, Exit: errs.ExitEnvironment, Message: "the Outlook store cannot be read by this version of teamscrawl: " + guard.Error(),
-			Fix: "Update teamscrawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied."}
+		return outlookcal.Result{}, &errs.Coded{Code: guard.Code, Exit: errs.ExitEnvironment, Message: "the Outlook store cannot be read by this version of m365crawl: " + guard.Error(),
+			Fix: "Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied."}
 	}
 	return outlookcal.Result{}, err
 }

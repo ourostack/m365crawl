@@ -9,8 +9,8 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // renderToString renders v as plain text (no color, UTC times) and returns what was printed.
@@ -74,14 +74,14 @@ func TestWhoamiTextNamesUnnamedAccountsAndSaysWhenThereAreNone(t *testing.T) {
 		t.Fatalf("unnamed account:\n%s", got)
 	}
 	got = renderToString(t, "whoami", &whoamiResult{Accounts: []store.WhoamiRow{}, Archive: &statusResult{}})
-	if !strings.Contains(got, "no accounts archived yet; run teamscrawl sync") {
+	if !strings.Contains(got, "no accounts archived yet; run m365crawl sync") {
 		t.Fatalf("no accounts:\n%s", got)
 	}
 }
 
 func TestStatusTextCoversMissingArchiveOriginsAndEmptyArchive(t *testing.T) {
 	got := renderToString(t, "status", &statusResult{ArchivePath: "/x/a.db"})
-	if !strings.Contains(got, "run teamscrawl sync to create it") || !strings.Contains(got, "/x/a.db") {
+	if !strings.Contains(got, "run m365crawl sync to create it") || !strings.Contains(got, "/x/a.db") {
 		t.Fatalf("missing archive:\n%s", got)
 	}
 	got = renderToString(t, "status", &statusResult{ArchivePath: "/x/a.db", ArchiveExists: true, OtherOrigins: []string{"https_a_0", "https_b_0"}})

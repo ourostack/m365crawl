@@ -15,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxfixture"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxfixture"
 )
 
 var exit = os.Exit

@@ -10,11 +10,11 @@ import (
 )
 
 // TestRealCache runs discovery, snapshot and read against the live Teams cache. It needs Full
-// Disk Access and TEAMSCRAWL_REAL_CACHE=1, and logs counts and timings only, never names, ids
+// Disk Access and M365CRAWL_REAL_CACHE=1, and logs counts and timings only, never names, ids
 // or content, because the cache is private data.
 func TestRealCache(t *testing.T) {
-	if os.Getenv("TEAMSCRAWL_REAL_CACHE") != "1" {
-		t.Skip("set TEAMSCRAWL_REAL_CACHE=1 to run against the real Teams cache")
+	if os.Getenv("M365CRAWL_REAL_CACHE") != "1" {
+		t.Skip("set M365CRAWL_REAL_CACHE=1 to run against the real Teams cache")
 	}
 	srcs, other, err := Discover(DefaultRoot())
 	if err != nil {
@@ -60,8 +60,8 @@ func TestRealCache(t *testing.T) {
 // TestRealCacheMapping maps every record of the live cache and logs only counts and percentages,
 // never names, ids or content.
 func TestRealCacheMapping(t *testing.T) {
-	if os.Getenv("TEAMSCRAWL_REAL_CACHE") != "1" {
-		t.Skip("set TEAMSCRAWL_REAL_CACHE=1 to run against the real Teams cache")
+	if os.Getenv("M365CRAWL_REAL_CACHE") != "1" {
+		t.Skip("set M365CRAWL_REAL_CACHE=1 to run against the real Teams cache")
 	}
 	srcs, _, err := Discover(DefaultRoot())
 	if err != nil {

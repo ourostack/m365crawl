@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func TestSyncJSON(t *testing.T) {
@@ -243,7 +243,7 @@ func TestImplicitSyncNoTeamsEmptyArchive(t *testing.T) {
 	if m["count"].(float64) != 0 || m["sync_error"].(map[string]any)["code"] != "teams_not_installed" {
 		t.Fatalf("result = %v", m)
 	}
-	if strings.Contains(stderr, "hint:") || m["hint"] != "run teamscrawl sync" {
+	if strings.Contains(stderr, "hint:") || m["hint"] != "run m365crawl sync" {
 		t.Fatalf("hint %q stderr %q", m["hint"], stderr)
 	}
 }
@@ -273,10 +273,10 @@ func TestMaxAgeControlsImplicitSync(t *testing.T) {
 	if n := syncRunCount(t, e); n != 2 {
 		t.Fatalf("--max-age 0 must not sync, runs = %d", n)
 	}
-	t.Setenv("TEAMSCRAWL_MAX_AGE", "1ns")
+	t.Setenv("M365CRAWL_MAX_AGE", "1ns")
 	e.run("messages")
 	if n := syncRunCount(t, e); n != 3 {
-		t.Fatalf("TEAMSCRAWL_MAX_AGE must set the default, runs = %d", n)
+		t.Fatalf("M365CRAWL_MAX_AGE must set the default, runs = %d", n)
 	}
 }
 
@@ -496,7 +496,7 @@ func TestStatusEmptyArchive(t *testing.T) {
 	if code != 0 || strings.Contains(stderr, "hint:") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
-	if m := decode(t, stdout); m["archive_exists"] != false || m["hint"] != "run teamscrawl sync" {
+	if m := decode(t, stdout); m["archive_exists"] != false || m["hint"] != "run m365crawl sync" {
 		t.Fatalf("status = %v", m)
 	}
 }
@@ -623,13 +623,13 @@ func TestPanicBecomesInternalError(t *testing.T) {
 		t.Fatalf("exit %d stdout %q", code, stdout)
 	}
 	er := errorOf(t, stderr)
-	if er["code"] != "internal" || !strings.Contains(er["fix"].(string), "TEAMSCRAWL_DEBUG=1") || !strings.Contains(er["fix"].(string), "github.com/ourostack/teamscrawl/issues") {
+	if er["code"] != "internal" || !strings.Contains(er["fix"].(string), "M365CRAWL_DEBUG=1") || !strings.Contains(er["fix"].(string), "github.com/ourostack/m365crawl/issues") {
 		t.Fatalf("error = %v", er)
 	}
 	if strings.Contains(stderr, "goroutine") {
-		t.Fatalf("no stack without TEAMSCRAWL_DEBUG: %s", stderr)
+		t.Fatalf("no stack without M365CRAWL_DEBUG: %s", stderr)
 	}
-	t.Setenv("TEAMSCRAWL_DEBUG", "1")
+	t.Setenv("M365CRAWL_DEBUG", "1")
 	code, _, stderr = e.run("version", "--json")
 	lines := strings.SplitN(stderr, "\n", 2)
 	if code != 1 || !strings.HasPrefix(lines[0], `{"error"`) || !strings.Contains(lines[1], "goroutine") {
@@ -643,8 +643,8 @@ func TestCommandSpecificUsageFix(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"thread"}, []string{"teamscrawl thread --help"}},
-		{[]string{"messages", "--since", "zzz"}, []string{"teamscrawl messages --help"}},
+		{[]string{"thread"}, []string{"m365crawl thread --help"}},
+		{[]string{"messages", "--since", "zzz"}, []string{"m365crawl messages --help"}},
 		{[]string{"--max-age", "0", "sql", "delete from messages"}, []string{"read-only by design", "SELECT"}},
 		{[]string{"--max-age", "0", "messages", "--fields", "bogus"}, []string{"Pick keys from the list in the message"}},
 	}
@@ -708,7 +708,7 @@ func TestNeedsSyncSignalInBand(t *testing.T) {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
 		m := decode(t, stdout)
-		if m["needs_sync"] != true || m["hint"] != "run teamscrawl sync" {
+		if m["needs_sync"] != true || m["hint"] != "run m365crawl sync" {
 			t.Errorf("%v: needs_sync/hint missing: %s", args, stdout)
 		}
 		if stderr != "" {
@@ -866,7 +866,7 @@ func TestSearchEmptyQueryFixPointsToMessages(t *testing.T) {
 		t.Fatalf("exit %d, want 2", code)
 	}
 	body := errorOf(t, stderr)
-	want := "To list messages without a text query, use `teamscrawl messages` with filters (for example `teamscrawl messages --mentions-me --since 24h`)."
+	want := "To list messages without a text query, use `m365crawl messages` with filters (for example `m365crawl messages --mentions-me --since 24h`)."
 	if body["fix"] != want || !strings.Contains(body["message"].(string), "at least one filter") {
 		t.Fatalf("error = %v", body)
 	}

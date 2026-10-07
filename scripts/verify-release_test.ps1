@@ -11,7 +11,7 @@ function gh {
         throw "unexpected gh call: $args"
     }
     $work = $args[[array]::IndexOf($args, '-D') + 1]
-    $zipName = 'teamscrawl_0.2.0_windows_amd64.zip'
+    $zipName = 'm365crawl_0.2.0_windows_amd64.zip'
     $zip = Join-Path $work $zipName
     [System.IO.File]::WriteAllText($zip, 'synthetic release asset')
     $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()

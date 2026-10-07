@@ -1,5 +1,5 @@
 {
-  "name": "teamscrawl-fixture",
+  "name": "m365crawl-fixture",
   "private": true,
   "type": "module",
   "description": "Generates testdata/teams-fixture with Microsoft Edge (Playwright).",

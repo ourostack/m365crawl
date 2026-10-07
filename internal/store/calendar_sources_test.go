@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 func sourcesOf(t *testing.T, s *Store, f CalendarSourcesFilter) map[string]CalendarSource {

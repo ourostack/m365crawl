@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 // putProfile writes the record a Teams account keeps of itself: store profiles, key 8:orgid:<user>.

@@ -1,11 +1,11 @@
 version: 2
 
-project_name: teamscrawl
+project_name: m365crawl
 
 builds:
-  - id: teamscrawl-darwin
-    main: ./cmd/teamscrawl
-    binary: teamscrawl
+  - id: m365crawl-darwin
+    main: ./cmd/m365crawl
+    binary: m365crawl
     env:
       - CGO_ENABLED=0
     goos:
@@ -16,7 +16,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }} -X github.com/ourostack/teamscrawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/teamscrawl/internal/cli.date={{ .Date }}
+      - -s -w -X github.com/ourostack/m365crawl/internal/cli.version={{ .Version }} -X github.com/ourostack/m365crawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/m365crawl/internal/cli.date={{ .Date }}
     # Developer ID sign and notarize each binary before it is archived, so the
     # archives, checksums and cask sha256 all describe the signed binary. The
     # script fails the build unless every Apple secret is set and every gate passes.
@@ -25,9 +25,9 @@ builds:
         # Snapshots (make snapshot, the PR build job) are never published, so they skip signing.
         # A tagged release is never a snapshot, so it always signs.
         - cmd: '{{ if .IsSnapshot }}{{ if eq .Runtime.Goos "windows" }}cmd /c exit 0{{ else }}true{{ end }}{{ else }}scripts/sign-notarize.sh "{{ .Path }}"{{ end }}'
-  - id: teamscrawl-windows
-    main: ./cmd/teamscrawl
-    binary: teamscrawl
+  - id: m365crawl-windows
+    main: ./cmd/m365crawl
+    binary: m365crawl
     env:
       - CGO_ENABLED=0
     goos:
@@ -38,18 +38,18 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/ourostack/teamscrawl/internal/cli.version={{ .Version }} -X github.com/ourostack/teamscrawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/teamscrawl/internal/cli.date={{ .Date }}
+      - -s -w -X github.com/ourostack/m365crawl/internal/cli.version={{ .Version }} -X github.com/ourostack/m365crawl/internal/cli.commit={{ .Commit }} -X github.com/ourostack/m365crawl/internal/cli.date={{ .Date }}
 
 archives:
   - id: darwin-bundles
     ids:
-      - teamscrawl-darwin
+      - m365crawl-darwin
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
   - id: windows-bundles
     ids:
-      - teamscrawl-windows
+      - m365crawl-windows
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
@@ -67,16 +67,16 @@ release:
   make_latest: auto
 
 homebrew_casks:
-  - name: teamscrawl
+  - name: m365crawl
     ids:
       - darwin-bundles
     binaries:
-      - teamscrawl
+      - m365crawl
     directory: Casks
-    homepage: https://github.com/ourostack/teamscrawl
+    homepage: https://github.com/ourostack/m365crawl
     description: Mirror the Microsoft Teams desktop cache into local SQLite for agents. Read-only, offline, no tokens.
     license: MIT
-    # The tap pulls the rendered cask from the release asset teamscrawl.rb
+    # The tap pulls the rendered cask from the release asset m365crawl.rb
     # (uploaded by release.yml), so goreleaser never pushes to the tap.
     skip_upload: true
     commit_author:
@@ -92,5 +92,5 @@ homebrew_casks:
         install: |
           if OS.mac?
             system_command "/usr/bin/xattr",
-                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/teamscrawl"]
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/m365crawl"]
           end

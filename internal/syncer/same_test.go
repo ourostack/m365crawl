@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // sameArchive must see the difference between archives that differ in any one row, and nothing else.

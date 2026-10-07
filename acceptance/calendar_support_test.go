@@ -11,28 +11,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Environment variables of the calendar and Outlook checks (see AGENTS.md, "Real-cache acceptance
 // tests"). Teams and Outlook have their own roots so the checks can run against the fixtures.
 const (
 	// teamsRootEnv is the Teams EBWebView directory; unset means the default location.
-	teamsRootEnv = "TEAMSCRAWL_TEAMS_ROOT"
+	teamsRootEnv = "M365CRAWL_TEAMS_ROOT"
 	// outlookRootEnv is a directory laid out as <root>/<profile>/HxStore.hxd; unset skips the
 	// Outlook checks.
-	outlookRootEnv = "TEAMSCRAWL_OUTLOOK_ROOT"
+	outlookRootEnv = "M365CRAWL_OUTLOOK_ROOT"
 	// accountEnv picks the Teams account (<tenantId>/<userId>) the Outlook profile is linked to
 	// when the archive holds several; unset means the account with the most live events.
-	accountEnv = "TEAMSCRAWL_ACCOUNT"
+	accountEnv = "M365CRAWL_ACCOUNT"
 	// outlookProfileEnv picks the Outlook profile when the root holds several; unset means the
 	// only one, or the one with the largest store.
-	outlookProfileEnv = "TEAMSCRAWL_OUTLOOK_PROFILE"
+	outlookProfileEnv = "M365CRAWL_OUTLOOK_PROFILE"
 	// watchEnv turns on the ten-minute watch simulation of the cost check.
-	watchEnv = "TEAMSCRAWL_ACCEPTANCE_WATCH"
+	watchEnv = "M365CRAWL_ACCEPTANCE_WATCH"
 )
 
 // calendarThresholds is the one place for every number the calendar and Outlook checks compare
@@ -142,7 +142,7 @@ var (
 // directory, never recursively).
 func calendarScratch(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "teamscrawl-acceptance-calendar-")
+	dir, err := os.MkdirTemp("", "m365crawl-acceptance-calendar-")
 	if err != nil {
 		t.Fatal(err)
 	}

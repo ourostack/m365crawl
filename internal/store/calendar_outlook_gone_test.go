@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/outlookcal"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/outlookcal"
 )
 
 // goneEvent is a synthetic Outlook event with its own id, starting at start.

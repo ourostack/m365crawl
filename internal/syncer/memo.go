@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Read memory: skipping records whose stored bytes have not changed.
@@ -40,7 +40,7 @@ var errMemoConflict = errors.New("syncer: read memory conflict")
 // FullReadEnv, set to 1, makes every sync read every record of every source in full, even a
 // source whose fingerprint has not changed (the memory is still refreshed). Options.FullRead does
 // the same for one run.
-const FullReadEnv = "TEAMSCRAWL_FULL_READ"
+const FullReadEnv = "M365CRAWL_FULL_READ"
 
 type typedEffects struct {
 	rows   []store.RowRef

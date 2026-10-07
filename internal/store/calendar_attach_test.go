@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // sharedUID is the id three occurrences carry when Teams reports the series id on each of them.

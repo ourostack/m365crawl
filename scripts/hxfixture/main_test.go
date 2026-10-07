@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxfixture"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxfixture"
 )
 
 func TestWriteThenCheck(t *testing.T) {

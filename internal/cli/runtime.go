@@ -14,10 +14,10 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const defaultMaxAge = 15 * time.Minute
@@ -97,7 +97,7 @@ func parseAccount(s string) (*teamsdesktop.Account, error) {
 	tenant, user, ok := strings.Cut(s, "/")
 	user = strings.TrimPrefix(user, "8:orgid:")
 	if !ok || tenant == "" || user == "" || strings.Contains(user, "/") {
-		return nil, errs.Usage("--account must look like <tenantId>/<userId>; `teamscrawl whoami` lists them")
+		return nil, errs.Usage("--account must look like <tenantId>/<userId>; `m365crawl whoami` lists them")
 	}
 	return &teamsdesktop.Account{TenantID: tenant, UserID: user}, nil
 }
@@ -126,7 +126,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 			return nil, nil
 		}
 		c := errs.Usage("--outlook-account is not applied while --max-age is 0, which turns the implicit sync off")
-		c.Fix = "Run `teamscrawl sync " + rt.linkFlags() + "` to apply it."
+		c.Fix = "Run `m365crawl sync " + rt.linkFlags() + "` to apply it."
 		return nil, c
 	}
 	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge && !pending {
@@ -252,7 +252,7 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 			age = &s
 		}
 	}
-	const syncHint = "run teamscrawl sync"
+	const syncHint = "run m365crawl sync"
 	if age == nil && rt.format == output.Text {
 		rt.hint(syncHint) // JSON mode carries the same hint in the result (needs_sync, hint)
 	}
@@ -312,7 +312,7 @@ func syncNotice(age, maxAge time.Duration) string {
 		}
 		why = "archive is " + compactDuration(age) + " old"
 	}
-	return "teamscrawl: syncing — " + why + " (max-age " + compactDuration(maxAge) + ")"
+	return "m365crawl: syncing — " + why + " (max-age " + compactDuration(maxAge) + ")"
 }
 
 // compactDuration is d without the zero parts Go's String keeps: 15m, 2h14m, 1m30s.
@@ -354,7 +354,7 @@ func (rt *runtime) printSyncNotice(age time.Duration) {
 // outlookChoice says whether the Outlook source runs, where it reads and whether it is on only by
 // default. An explicit root turns it on and "none" turns it off. With neither it is on and reads the
 // default directory, unless a Teams root is set: a run pointed at a Teams fixture never reads a real
-// Outlook profile. TEAMSCRAWL_OUTLOOK=1, which used to turn Outlook on, is read by nothing now: it is accepted and has no effect, so a machine that set it keeps working. A default Outlook is a best effort that never fails a sync (syncer.Options.OutlookImplicit).
+// Outlook profile. M365CRAWL_OUTLOOK=1, which used to turn Outlook on, is read by nothing now: it is accepted and has no effect, so a machine that set it keeps working. A default Outlook is a best effort that never fails a sync (syncer.Options.OutlookImplicit).
 func outlookChoice(root, teamsRoot string) (dir string, on, byDefault bool) {
 	switch {
 	case root == "none":
@@ -432,7 +432,7 @@ func ageText(d time.Duration) string {
 }
 
 // outlookAccountEnv is the environment variable of --outlook-account.
-const outlookAccountEnv = "TEAMSCRAWL_OUTLOOK_ACCOUNT"
+const outlookAccountEnv = "M365CRAWL_OUTLOOK_ACCOUNT"
 
 // checkLink validates --outlook-account and --outlook-profile and, when they are good, turns the
 // link on for this run. Only a command that syncs or reads the calendar calls it, so a stray
@@ -462,7 +462,7 @@ func (rt *runtime) checkLink() error {
 	a, err := parseAccount(account)
 	if err != nil {
 		c := errs.Usage("--outlook-account must be <tenantId>/<userId> of a Teams account, or none")
-		c.Fix = "`teamscrawl whoami` lists the Teams accounts."
+		c.Fix = "`m365crawl whoami` lists the Teams accounts."
 		return c
 	}
 	rt.outlookLink, rt.outlookProfile = a.TenantID+"/"+a.UserID, profile

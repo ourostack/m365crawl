@@ -17,10 +17,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // syncBuf is a bytes.Buffer the watch goroutine and the test can use at once.
@@ -447,7 +447,7 @@ func TestWatchSignal(t *testing.T) {
 	if code := w.stop(); code != 0 {
 		t.Fatalf("exit %d: %s", code, w.errb.String())
 	}
-	left, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	left, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 	if len(left) != 0 {
 		t.Fatalf("snapshot directories left behind: %v", left)
 	}
@@ -458,16 +458,16 @@ func TestWatchSignal(t *testing.T) {
 func TestWatchSignalDuringSync(t *testing.T) {
 	w := newWatchEnv(t)
 	noEvents(t)
-	t.Setenv("TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "30s")
+	t.Setenv("M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "30s")
 	w.start("watch", "--every", "1h")
 	w.waitFor("the snapshot", func() bool {
-		m, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+		m, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 		return len(m) > 0
 	})
 	if code := w.stop(); code != 0 {
 		t.Fatalf("exit %d: %s", code, w.errb.String())
 	}
-	left, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	left, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 	if len(left) != 0 {
 		t.Fatalf("snapshot directories left behind: %v", left)
 	}
@@ -855,7 +855,7 @@ func TestWatchLockedRetryIgnoresMinInterval(t *testing.T) {
 // The pause can be set from the environment, and the environment value is validated like the flag.
 func TestWatchMinIntervalFromEnvironment(t *testing.T) {
 	e := newEnv(t)
-	t.Setenv("TEAMSCRAWL_WATCH_MIN_INTERVAL", "-1s")
+	t.Setenv("M365CRAWL_WATCH_MIN_INTERVAL", "-1s")
 	if code, _, stderr := e.run("watch"); code != 2 {
 		t.Fatalf("exit %d, want 2 (%s)", code, stderr)
 	}

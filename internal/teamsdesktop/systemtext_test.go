@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 // mapOne maps one synthetic message (extra fields appended to the id and conversation) and

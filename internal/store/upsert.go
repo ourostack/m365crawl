@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func hashOf(parts ...any) string {

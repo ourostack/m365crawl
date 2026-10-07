@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 // bigStore builds a store of n events, each with its own detail object whose body is about

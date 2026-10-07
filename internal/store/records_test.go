@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const (
@@ -352,7 +352,7 @@ func writableArchivePath(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		setCurrentUserAndSystemOnly(t, dir)
 	}
-	return filepath.Join(dir, "teamscrawl.db")
+	return filepath.Join(dir, "m365crawl.db")
 }
 
 func TestOpenIgnoresAFileWithoutAVersionTable(t *testing.T) {
@@ -747,7 +747,7 @@ func TestPurgeUnscrubbedKeysFaultsSurface(t *testing.T) {
 // A v3 archive (a records table without the read-memory columns) gains them, keeping its rows.
 func TestSchemaMigratesV3ToV4(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "data", "teamscrawl.db")
+	path := filepath.Join(t.TempDir(), "data", "m365crawl.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -802,7 +802,7 @@ func TestMigrateRepairsAHalfAppliedV4(t *testing.T) {
 		{"redaction count present, digest missing", "raw_digest"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "data", "teamscrawl.db")
+			path := filepath.Join(t.TempDir(), "data", "m365crawl.db")
 			s, err := Open(ctx, path)
 			if err != nil {
 				t.Fatal(err)

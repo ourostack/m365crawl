@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // rangeFix is the usage fix for an unsigned duration given as a calendar bound.
@@ -280,7 +280,7 @@ func checkCalendarFields(rt *runtime) error {
 	for _, f := range rt.fields {
 		if contains(eventOnlyKeys, f) {
 			c := errs.Usage(fmt.Sprintf("--fields key %q is in `calendar event` only: the agenda carries no attendee list, body, recap or recording text", f))
-			c.Fix = "Run `teamscrawl calendar event <event_id> --fields " + f + "`, taking the event_id from the agenda."
+			c.Fix = "Run `m365crawl calendar event <event_id> --fields " + f + "`, taking the event_id from the agenda."
 			return c
 		}
 	}
@@ -316,7 +316,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if agenda.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
 			return out, nil
 		}
 		items := make([]calendarItem, len(agenda.Rows))
@@ -361,7 +361,7 @@ func linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
 	}
 	out := make([]string, len(unlinked))
 	for i, u := range unlinked {
-		out[i] = "teamscrawl sync --outlook-profile " + shellWord(strings.TrimPrefix(u, outlookAccountPrefix)) + " --outlook-account " + teams
+		out[i] = "m365crawl sync --outlook-profile " + shellWord(strings.TrimPrefix(u, outlookAccountPrefix)) + " --outlook-account " + teams
 	}
 	return out
 }
@@ -628,7 +628,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 		d, err := st.CalendarEvent(rt.ctx, rt.account, c.Event)
 		if errors.Is(err, store.ErrNoCalendarTables) {
 			r := &eventResult{}
-			r.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			r.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
 			return r, nil
 		}
 		if err != nil {
@@ -898,7 +898,7 @@ func (calendarSourcesCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if res.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
 			return out, nil
 		}
 		items := make([]calendarSourceItem, len(res.Rows))
@@ -968,7 +968,7 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if res.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run teamscrawl sync")
+			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
 			return out, nil
 		}
 		items := make([]actionItem, len(res.Items))

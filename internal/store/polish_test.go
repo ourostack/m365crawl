@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func person(a teamsdesktop.Account, id, name string) teamsdesktop.Person {
@@ -178,7 +178,7 @@ func TestTeamFilter(t *testing.T) {
 	}
 	// No match: usage error with a fix that says how to find a team.
 	_, _, err = s.Messages(ctx, Filter{Team: "Nope"})
-	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || !strings.Contains(coded.Fix, "teamscrawl teams") {
+	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || !strings.Contains(coded.Fix, "m365crawl teams") {
 		t.Fatalf("no match: %v", err)
 	}
 	// A chat is not a team: its name does not resolve.

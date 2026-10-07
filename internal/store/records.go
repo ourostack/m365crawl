@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // UpsertRecords archives generic records by content hash: a new key is inserted, a changed value

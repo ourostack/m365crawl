@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 )
 
 func TestSnapshotFixtureOpens(t *testing.T) {
@@ -20,7 +20,7 @@ func TestSnapshotFixtureOpens(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if !strings.HasPrefix(filepath.Base(snap), "teamscrawl-snapshot-") {
+	if !strings.HasPrefix(filepath.Base(snap), "m365crawl-snapshot-") {
 		t.Fatalf("snapDir = %q", snap)
 	}
 	o, err := indexeddb.Open(filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
@@ -89,7 +89,7 @@ func TestSnapshotRetryThenFail(t *testing.T) {
 	if err := os.Remove(tabs[0]); err != nil { // manifest now names a missing table
 		t.Fatal(err)
 	}
-	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 
 	attempts := 0
 	old := onSnapshotAttempt
@@ -108,7 +108,7 @@ func TestSnapshotRetryThenFail(t *testing.T) {
 	if attempts != 3 {
 		t.Fatalf("attempts = %d, want 3", attempts)
 	}
-	after, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	after, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 	if len(after) != len(before) {
 		t.Fatalf("snapshot dirs leaked: before %d after %d", len(before), len(after))
 	}
@@ -176,7 +176,7 @@ func TestSnapshotCurrentChangedRetries(t *testing.T) {
 func TestSnapshotCancel(t *testing.T) {
 	privateTempDir(t)
 	// Cancelled before the copy: error, nothing left behind.
-	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	snap, cleanup, err := Snapshot(ctx, fixtureSource(t))
@@ -184,7 +184,7 @@ func TestSnapshotCancel(t *testing.T) {
 		t.Fatalf("snap=%q err=%v", snap, err)
 	}
 	cleanup()
-	after, _ := filepath.Glob(filepath.Join(os.TempDir(), "teamscrawl-snapshot-*"))
+	after, _ := filepath.Glob(filepath.Join(os.TempDir(), "m365crawl-snapshot-*"))
 	if len(after) != len(before) {
 		t.Fatalf("leaked on pre-cancel: %d -> %d", len(before), len(after))
 	}
@@ -211,8 +211,8 @@ func TestSnapshotCancel(t *testing.T) {
 
 func TestSweepStaleSnapshots(t *testing.T) {
 	tmp := t.TempDir()
-	old := filepath.Join(tmp, "teamscrawl-snapshot-old")
-	fresh := filepath.Join(tmp, "teamscrawl-snapshot-fresh")
+	old := filepath.Join(tmp, "m365crawl-snapshot-old")
+	fresh := filepath.Join(tmp, "m365crawl-snapshot-fresh")
 	other := filepath.Join(tmp, "unrelated-old")
 	for _, d := range []string{old, fresh, other} {
 		if err := os.MkdirAll(filepath.Join(d, "leveldb"), 0o700); err != nil {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // seedPolish extends seedReadable so that every list is truncated at Limit 1 and the team,

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxfixture"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxfixture"
 )
 
 var fixtureDir = filepath.Join("..", "..", filepath.FromSlash(hxfixture.Dir))

@@ -52,7 +52,7 @@ if (Test-Path $work) {
 }
 New-Item -ItemType Directory -Path $work | Out-Null
 
-$zipName = "teamscrawl_${version}_windows_${targetArch}.zip"
+$zipName = "m365crawl_${version}_windows_${targetArch}.zip"
 
 Write-Host "==> Downloading $tag from $repo into $work"
 gh release download $tag -R $repo -D $work -p checksums.txt -p $zipName | Out-Null
@@ -72,9 +72,9 @@ if ($actual -ne $expected) {
 Write-Host "==> windows_$targetArch"
 $dir = Join-Path $work $targetArch
 Expand-Archive -LiteralPath (Join-Path $work $zipName) -DestinationPath $dir -Force
-$bin = Get-ChildItem -Path $dir -Filter teamscrawl.exe -Recurse | Select-Object -First 1
+$bin = Get-ChildItem -Path $dir -Filter m365crawl.exe -Recurse | Select-Object -First 1
 if (-not $bin) {
-    throw "teamscrawl.exe not found in $zipName"
+    throw "m365crawl.exe not found in $zipName"
 }
 
 $machine = Get-PeMachine $bin.FullName

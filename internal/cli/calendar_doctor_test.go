@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 func TestOneUnit(t *testing.T) {
@@ -31,10 +31,10 @@ func TestCalendarCacheCheck(t *testing.T) {
 		detail string
 		fix    string
 	}{
-		{"unreadable", store.CalendarCache{}, errors.New("disk on fire"), true, "cannot read the calendar state: disk on fire", "teamscrawl sync"},
+		{"unreadable", store.CalendarCache{}, errors.New("disk on fire"), true, "cannot read the calendar state: disk on fire", "m365crawl sync"},
 		{"no accounts", store.CalendarCache{}, nil, false, "no accounts archived yet", ""},
 		{"no calendar database", store.CalendarCache{Accounts: 2, WithoutDatabase: 1, HasTables: true}, nil, true, "1 of 2 accounts have no Teams calendar database in the archive", "Open the Teams calendar once"},
-		{"old archive", store.CalendarCache{Accounts: 1}, nil, true, "no calendar tables yet", "teamscrawl sync"},
+		{"old archive", store.CalendarCache{Accounts: 1}, nil, true, "no calendar tables yet", "m365crawl sync"},
 		{"nothing derived", store.CalendarCache{Accounts: 1, HasTables: true}, nil, true, "no calendar has been derived yet", "Open the Teams calendar once"},
 		{"stale", store.CalendarCache{Accounts: 1, HasTables: true, FreshAt: now.Add(-8 * 24 * time.Hour)}, nil, true, "was last fresh 192h ago", "Open the Teams calendar once"},
 		{"fresh", store.CalendarCache{Accounts: 1, HasTables: true, FreshAt: now.Add(-3 * time.Hour)}, nil, false, "was fresh 3h ago", ""},

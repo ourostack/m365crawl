@@ -134,7 +134,7 @@ func TestTextDoctorSyncAndBanner(t *testing.T) {
 		t.Errorf("list commands carry no banner: %q", out)
 	}
 	_, out, _ = e.run("--format", "text", "--help")
-	if !strings.Contains(out, "|  help") || !strings.Contains(out, "Usage: teamscrawl") {
+	if !strings.Contains(out, "|  help") || !strings.Contains(out, "Usage: m365crawl") {
 		t.Errorf("help: %q", out)
 	}
 	_, out, _ = e.run("--format", "json", "--help")

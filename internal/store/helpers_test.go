@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 var (
@@ -20,7 +20,7 @@ func selfMRI(a teamsdesktop.Account) string { return "8:orgid:" + a.UserID }
 
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "data", "teamscrawl.db"))
+	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "data", "m365crawl.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

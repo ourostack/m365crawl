@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/outlookcal"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/outlookcal"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // The Outlook real-store checks (plan-calendar-outlook.md, O12). They read the store under
-// TEAMSCRAWL_OUTLOOK_ROOT (<root>/<profile>/HxStore.hxd) and skip without it. They log counts,
+// M365CRAWL_OUTLOOK_ROOT (<root>/<profile>/HxStore.hxd) and skip without it. They log counts,
 // field names, class and tag numbers, durations and sizes only: never a string from the store.
 // Every Outlook check starts with outlookSyncs, so the syncs and their peak RSS come first. The peak
 // RSS is the whole process's, so make acceptance-calendar runs TestRealOutlookCost in a process of
@@ -679,7 +679,7 @@ func TestRealOutlookSafety(t *testing.T) {
 	t.Logf("profile directory entries: %d before, %d after; added %d, removed %d (Outlook's own writes); root entries added %d, removed %d",
 		len(d.profileBefore), len(d.profileAfter), len(added), len(removed), len(rootAdded), len(rootRemoved))
 	for _, n := range append(append([]string{}, added...), rootAdded...) {
-		if strings.HasPrefix(n, "teamscrawl") {
+		if strings.HasPrefix(n, "m365crawl") {
 			t.Errorf("an entry with our prefix appeared next to the original")
 		}
 	}

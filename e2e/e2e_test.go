@@ -26,9 +26,9 @@ var binary string
 
 func testBinaryName() string {
 	if runtime.GOOS == "windows" {
-		return "teamscrawl.exe"
+		return "m365crawl.exe"
 	}
-	return "teamscrawl"
+	return "m365crawl"
 }
 
 func TestMain(m *testing.M) {
@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 }
 
 func run(m *testing.M) int {
-	dir, err := os.MkdirTemp("", "teamscrawl-e2e-*")
+	dir, err := os.MkdirTemp("", "m365crawl-e2e-*")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mkdir temp:", err)
 		return 1
@@ -45,7 +45,7 @@ func run(m *testing.M) int {
 
 	binary = filepath.Join(dir, testBinaryName())
 	build := exec.Command( //nolint:gosec // fixed arguments; binary path is a temp dir we created
-		"go", "build", "-ldflags", "-X github.com/ourostack/teamscrawl/internal/cli.version=e2e", "-o", binary, "../cmd/teamscrawl")
+		"go", "build", "-ldflags", "-X github.com/ourostack/m365crawl/internal/cli.version=e2e", "-o", binary, "../cmd/m365crawl")
 	build.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0")
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build failed: %v\n%s", err, out)
@@ -60,17 +60,17 @@ func TestVersion(t *testing.T) {
 		cmd := exec.Command(binary, args...) //nolint:gosec // G204: binary is the one TestMain built
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err != nil {
-			t.Fatalf("teamscrawl %v: %v\nstderr: %s", args, err, stderr.String())
+			t.Fatalf("m365crawl %v: %v\nstderr: %s", args, err, stderr.String())
 		}
 		m := mustJSON(t, stdout.String()) // piped, so JSON: exactly one document
 		if len(m) != 3 || m["version"] != "e2e" || m["commit"] == "" || m["date"] == "" || stderr.Len() != 0 {
-			t.Fatalf("teamscrawl %v: %s (stderr %q)", args, stdout.String(), stderr.String())
+			t.Fatalf("m365crawl %v: %s (stderr %q)", args, stdout.String(), stderr.String())
 		}
 	}
 	var stdout bytes.Buffer
 	cmd := exec.Command(binary, "version", "--format", "text")
 	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil || !strings.HasPrefix(stdout.String(), "teamscrawl e2e (commit ") {
+	if err := cmd.Run(); err != nil || !strings.HasPrefix(stdout.String(), "m365crawl e2e (commit ") {
 		t.Fatalf("text version: %v %q", err, stdout.String())
 	}
 }
@@ -85,12 +85,12 @@ func TestWatchSIGTERM(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(binary, "watch", "--every", "1h", "--db", filepath.Join(tmp, "a.db"), "--teams-root", root, "--json") //nolint:gosec // G204: binary is the one this test built
-	cmd.Env = append(os.Environ(), "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp, "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=30s")
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp, "M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT=30s")
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	snap := filepath.Join(tmp, "teamscrawl-snapshot-*")
+	snap := filepath.Join(tmp, "m365crawl-snapshot-*")
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if m, _ := filepath.Glob(snap); len(m) > 0 {
@@ -113,9 +113,9 @@ func TestWatchSIGTERM(t *testing.T) {
 	}
 }
 
-// pausedMarker is what the binary prints to stderr when TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT starts
+// pausedMarker is what the binary prints to stderr when M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT starts
 // its pause: the snapshot is complete and the process is waiting, so a signal lands inside the pause.
-const pausedMarker = "teamscrawl-test: paused after snapshot"
+const pausedMarker = "m365crawl-test: paused after snapshot"
 
 const (
 	chat1 = "19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces"
@@ -411,7 +411,7 @@ func TestE2EErrors(t *testing.T) {
 
 	t.Run("archive locked", func(t *testing.T) {
 		e := newEnv(t)
-		holder := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
+		holder := e.start([]string{"M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
 		holder.waitFor("the pause", func() bool { return strings.Contains(holder.stderr.String(), pausedMarker) })
 		errBody := wantError(t, e.cmd("sync"), 4, "locked")
 		if !strings.Contains(errBody["message"].(string), ".lock") {
@@ -438,7 +438,7 @@ func TestE2EErrors(t *testing.T) {
 		}
 		wantError(t, e.cmd("sync"), 1, "snapshot_inconsistent")
 		// The attempt is recorded as failed and the archive is still readable.
-		// (stderr carries the "run teamscrawl sync" hint: no run has succeeded.)
+		// (stderr carries the "run m365crawl sync" hint: no run has succeeded.)
 		if st := lastRunStatuses(t, e); len(st) != 1 || st[0] != "failed" {
 			t.Fatalf("sync_runs statuses = %v, want [failed]", st)
 		}
@@ -493,8 +493,8 @@ func TestE2EDBModes(t *testing.T) {
 	d := newEnv(t)
 	mustExit(t, d.run("sync", "--teams-root", d.root), 0)
 	for path, want := range map[string]os.FileMode{
-		filepath.Join(d.home, ".teamscrawl"):                  0o700,
-		filepath.Join(d.home, ".teamscrawl", "teamscrawl.db"): 0o600,
+		filepath.Join(d.home, ".m365crawl"):                 0o700,
+		filepath.Join(d.home, ".m365crawl", "m365crawl.db"): 0o600,
 	} {
 		fi, err := os.Stat(path)
 		if err != nil {
@@ -538,7 +538,7 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 		e := newEnv(t)
 		// A 10 s pause is far longer than the test needs: it signals as soon as the marker shows
 		// that the snapshot is complete and the process is waiting.
-		s := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
+		s := e.start([]string{"M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT=10s"}, append([]string{"sync"}, e.baseArgs()...)...)
 		s.waitFor("the pause", func() bool { return strings.Contains(s.stderr.String(), pausedMarker) })
 		snaps := snapshots(t, e.tmp)
 		if len(snaps) != 1 {
@@ -587,7 +587,7 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 func lastRunStatuses(t *testing.T, e *env) []string {
 	t.Helper()
 	res := e.cmd("sql", "--max-age", "0", "select status from sync_runs where accounts_json is not null order by id")
-	mustExit(t, res, 0) // stderr may carry the "run teamscrawl sync" hint: no run has succeeded
+	mustExit(t, res, 0) // stderr may carry the "run m365crawl sync" hint: no run has succeeded
 	var out []string
 	for _, r := range mustJSON(t, res.stdout)["rows"].([]any) {
 		out = append(out, r.([]any)[0].(string))
@@ -718,7 +718,7 @@ func TestE2EWhoami(t *testing.T) {
 		t.Fatalf("JSON mode keeps stderr empty (the hint is in the result): %q", res.stderr)
 	}
 	who := mustJSON(t, res.stdout)
-	if who["needs_sync"] != true || who["hint"] != "run teamscrawl sync" {
+	if who["needs_sync"] != true || who["hint"] != "run m365crawl sync" {
 		t.Fatalf("whoami before a sync lacks the in-band hint: %v", who)
 	}
 	if accts, _ := who["accounts"].([]any); len(accts) != 0 {
@@ -795,7 +795,7 @@ func TestE2EMaxAge(t *testing.T) {
 		res := e.cmd("messages", "--max-age", "0")
 		mustExit(t, res, 0)
 		whole := mustJSON(t, res.stdout)
-		if whole["needs_sync"] != true || whole["hint"] != "run teamscrawl sync" || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) {
+		if whole["needs_sync"] != true || whole["hint"] != "run m365crawl sync" || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) {
 			t.Fatalf("never synced with --max-age 0 = %v", whole)
 		}
 		if _, err := os.Stat(e.db); err == nil {
@@ -805,9 +805,9 @@ func TestE2EMaxAge(t *testing.T) {
 			t.Fatalf("no plain-text hint line in JSON mode: %q", res.stderr)
 		}
 		// The same through the environment.
-		res = e.runWith([]string{"TEAMSCRAWL_MAX_AGE=0"}, append([]string{"people"}, e.baseArgs()...)...)
+		res = e.runWith([]string{"M365CRAWL_MAX_AGE=0"}, append([]string{"people"}, e.baseArgs()...)...)
 		if mustExit(t, res, 0); mustJSON(t, res.stdout)["needs_sync"] != true {
-			t.Fatalf("TEAMSCRAWL_MAX_AGE=0: %s", res.stdout)
+			t.Fatalf("M365CRAWL_MAX_AGE=0: %s", res.stdout)
 		}
 	})
 
@@ -1132,7 +1132,7 @@ func TestE2EPolish(t *testing.T) {
 	if len(filtered) != 12 {
 		t.Fatalf("search --mentions-me = %d, want 12", len(filtered))
 	}
-	if res := e.cmd("search"); res.code != 2 || !strings.Contains(res.stderr, "teamscrawl messages") {
+	if res := e.cmd("search"); res.code != 2 || !strings.Contains(res.stderr, "m365crawl messages") {
 		t.Fatalf("bare search: exit %d %s", res.code, res.stderr)
 	}
 	// --team picks one account's team by name.
@@ -1195,7 +1195,7 @@ func TestE2EArchiveNewer(t *testing.T) {
 			t.Fatalf("%v: exit %d, stdout %q, stderr %s", args, res.code, res.stdout, res.stderr)
 		}
 		body, _ := mustJSON(t, res.stderr)["error"].(map[string]any)
-		if body["code"] != "archive_newer" || !strings.Contains(body["message"].(string), "99") || !strings.Contains(body["fix"].(string), "Upgrade teamscrawl to a newer build") {
+		if body["code"] != "archive_newer" || !strings.Contains(body["message"].(string), "99") || !strings.Contains(body["fix"].(string), "Upgrade m365crawl to a newer build") {
 			t.Fatalf("%v: error = %v", args, body)
 		}
 	}
@@ -1277,7 +1277,7 @@ func TestE2EPartialSync(t *testing.T) {
 		t.Errorf("the committed source's messages inserted = %d", n)
 	}
 	body := mustJSON(t, res.stderr)["error"].(map[string]any)
-	if body["code"] != "partial_sync" || !strings.Contains(body["message"].(string), "WV2Profile_second") || !strings.Contains(body["message"].(string), "no_full_disk_access") || !strings.Contains(body["fix"].(string), "teamscrawl doctor") {
+	if body["code"] != "partial_sync" || !strings.Contains(body["message"].(string), "WV2Profile_second") || !strings.Contains(body["message"].(string), "no_full_disk_access") || !strings.Contains(body["fix"].(string), "m365crawl doctor") {
 		t.Fatalf("stderr error: %s", res.stderr)
 	}
 	if got := archiveCount(t, e.db, `select count(*) from messages`); got == 0 {
@@ -1337,7 +1337,7 @@ func TestE2EDoubleSIGINT(t *testing.T) {
 	skipIfWindowsSubprocessSignals(t)
 	e := newEnv(t)
 	// The stubborn pause ignores cancellation, so the graceful stop cannot finish within the test.
-	s := e.start([]string{"TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT=60s", "TEAMSCRAWL_TEST_PAUSE_IGNORES_CANCEL=1"}, append([]string{"sync"}, e.baseArgs()...)...)
+	s := e.start([]string{"M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT=60s", "M365CRAWL_TEST_PAUSE_IGNORES_CANCEL=1"}, append([]string{"sync"}, e.baseArgs()...)...)
 	s.waitFor("the pause", func() bool { return strings.Contains(s.stderr.String(), pausedMarker) })
 	if err := s.cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)
@@ -1388,7 +1388,7 @@ func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
 				}
 				migrated := archiveCount(t, e.db, `select count(*) from pragma_table_info('sync_runs') where name='accounts_json'`) == 1
 				if mode == "max-age-0" {
-					if migrated || whole["needs_sync"] != true || whole["hint"] != "run teamscrawl sync" {
+					if migrated || whole["needs_sync"] != true || whole["hint"] != "run m365crawl sync" {
 						t.Fatalf("--max-age 0 must not sync and must say needs_sync: migrated %v, %s", migrated, res.stdout)
 					}
 					return
@@ -1445,7 +1445,7 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 // skill prints the embedded agent guide as raw Markdown in every output mode, with no archive or
 // Teams cache needed, and it is the same text as the file in the repository.
 func TestSkillPrintsTheGuide(t *testing.T) {
-	want, err := os.ReadFile("../.agents/skills/teamscrawl/SKILL.md")
+	want, err := os.ReadFile("../.agents/skills/m365crawl/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1454,7 +1454,7 @@ func TestSkillPrintsTheGuide(t *testing.T) {
 		res := e.run(args...)
 		mustExit(t, res, 0)
 		if res.stdout != string(want) || res.stderr != "" {
-			t.Fatalf("teamscrawl %v: stdout differs from SKILL.md (%d vs %d bytes), stderr %q", args, len(res.stdout), len(want), res.stderr)
+			t.Fatalf("m365crawl %v: stdout differs from SKILL.md (%d vs %d bytes), stderr %q", args, len(res.stdout), len(want), res.stderr)
 		}
 	}
 }
@@ -1490,7 +1490,7 @@ func TestE2EImplicitSyncNotice(t *testing.T) {
 	archiveExec(t, e.db, `update sync_runs set finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-30 seconds'), started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-134 minutes','-31 seconds')`)
 	res = e.cmd("--format", "text", "unread", "--limit", "1")
 	mustExit(t, res, 0)
-	if res.stderr != "teamscrawl: syncing — archive is 2h14m old (max-age 15m)\n" || strings.Contains(res.stdout, "teamscrawl: syncing") {
+	if res.stderr != "m365crawl: syncing — archive is 2h14m old (max-age 15m)\n" || strings.Contains(res.stdout, "m365crawl: syncing") {
 		t.Fatalf("text: stderr %q stdout %q", res.stderr, res.stdout)
 	}
 }
@@ -1578,7 +1578,7 @@ func TestE2ETeams(t *testing.T) {
 	}
 	res := e.cmd("messages", "--team", "No such team")
 	mustExit(t, res, 2)
-	if !strings.Contains(res.stderr, "teamscrawl teams") {
+	if !strings.Contains(res.stderr, "m365crawl teams") {
 		t.Fatalf("the --team error does not point at `teams`: %s", res.stderr)
 	}
 }

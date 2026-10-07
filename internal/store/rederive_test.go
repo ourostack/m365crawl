@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // seedAlpha1 stores rows the way alpha.1 left them: derived fields blank where this build derives
@@ -121,7 +121,7 @@ func TestRederiveRefusesANewerArchive(t *testing.T) {
 	if m != nil || !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || coded.Exit != errs.ExitEnvironment {
 		t.Fatalf("Rederive = %+v, %v", m, err)
 	}
-	if !strings.Contains(coded.Message, "99") || !strings.Contains(coded.Message, "2") || !strings.Contains(coded.Fix, "Upgrade teamscrawl to a newer build") {
+	if !strings.Contains(coded.Message, "99") || !strings.Contains(coded.Message, "2") || !strings.Contains(coded.Fix, "Upgrade m365crawl to a newer build") {
 		t.Errorf("message %q fix %q", coded.Message, coded.Fix)
 	}
 	if dump(t, s) != before {

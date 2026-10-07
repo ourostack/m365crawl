@@ -3,12 +3,12 @@ DOCTOR
 
 Ready checks
 ------------
-  ● config            /home/u/.config/teamscrawl/config.toml
+  ● config            /home/u/.config/m365crawl/config.toml
   ● cache             Edge profile Default, 2 accounts
   ✖ full disk access  cache not readable
                       fix: grant Full Disk Access to your terminal
   ▲ archive age       last sync 3d ago
-                      fix: run: teamscrawl sync
+                      fix: run: m365crawl sync
   ● fts               -
 
 Snapshot

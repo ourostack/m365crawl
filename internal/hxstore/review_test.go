@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 func TestOpenFileChecksTheOpenedHandle(t *testing.T) {

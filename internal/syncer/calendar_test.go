@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // utcDays makes the sync group days in UTC, so the expected windows do not depend on the machine.

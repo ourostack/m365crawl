@@ -1,19 +1,21 @@
-# teamscrawl 🟣 — Your Teams, readable by your agents.
+# m365crawl 🟣 — Your Teams, readable by your agents.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/teamscrawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/teamscrawl/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ourostack/teamscrawl?include_prereleases&style=flat-square)](https://github.com/ourostack/teamscrawl/releases)
-[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/teamscrawl?style=flat-square)](https://go.dev/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/teamscrawl/releases)
-[![License](https://img.shields.io/github/license/ourostack/teamscrawl?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?include_prereleases&style=flat-square)](https://github.com/ourostack/m365crawl/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/m365crawl/releases)
+[![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
-`teamscrawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and the meeting calendar (with recaps and action items), so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
+m365crawl was called teamscrawl before v0.5.0; it has no alias for the old name.
 
-<p align="center"><img src="screenshot.png" alt="teamscrawl doctor output" width="801"></p>
+`m365crawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and the meeting calendar (with recaps and action items), so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
+
+<p align="center"><img src="screenshot.png" alt="m365crawl doctor output" width="801"></p>
 
 ## Why not a Teams MCP server or the Graph API?
 
-- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. teamscrawl needs a signed-in Teams app and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
+- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. m365crawl needs a signed-in Teams app and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
 - **Built for agent context budgets.** Every item carries stable ids and a deep link; `--fields` and `--max-text` return only what you need, instead of full message payloads eating your context window.
 - **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
 - **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not a file on your disk.
@@ -30,66 +32,66 @@
 Homebrew is the shortest path:
 
 ```sh
-brew install ourostack/tap/teamscrawl
+brew install ourostack/tap/m365crawl
 ```
 
-Published macOS release binaries are always Developer ID signed and notarized by Apple; the release workflow fails instead of shipping an unsigned darwin tarball. The release notes say so explicitly. The Homebrew cask clears the macOS quarantine flag after install. If you built teamscrawl yourself instead of using a published release, you may still need `xattr -dr com.apple.quarantine teamscrawl` once.
+Published macOS release binaries are always Developer ID signed and notarized by Apple; the release workflow fails instead of shipping an unsigned darwin tarball. The release notes say so explicitly. The Homebrew cask clears the macOS quarantine flag after install. If you built m365crawl yourself instead of using a published release, you may still need `xattr -dr com.apple.quarantine m365crawl` once.
 
-[GitHub Releases](https://github.com/ourostack/teamscrawl/releases) has `teamscrawl_<version>_darwin_arm64.tar.gz` and `teamscrawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
+[GitHub Releases](https://github.com/ourostack/m365crawl/releases) has `m365crawl_<version>_darwin_arm64.tar.gz` and `m365crawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
 
 ```sh
-go install github.com/ourostack/teamscrawl/cmd/teamscrawl@latest
+go install github.com/ourostack/m365crawl/cmd/m365crawl@latest
 ```
 
 ### Windows
 
-Download `teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/teamscrawl/releases), unzip it somewhere under your user profile, and run `teamscrawl.exe`. Add that directory to `PATH` if you want to call it without the full path. Windows release assets are intentionally unsigned; verify what you downloaded with `checksums.txt` and `teamscrawl.exe --json version`.
+Download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it somewhere under your user profile, and run `m365crawl.exe`. Add that directory to `PATH` if you want to call it without the full path. Windows release assets are intentionally unsigned; verify what you downloaded with `checksums.txt` and `m365crawl.exe --json version`.
 
-crawlkit's `crawlctl discover --app teamscrawl` finds it.
+crawlkit's `crawlctl discover --app m365crawl` finds it.
 
 ### macOS: Grant Full Disk Access
 
-macOS protects Teams' container, so the app that runs teamscrawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches teamscrawl), then quit and reopen that app. Verify with:
+macOS protects Teams' container, so the app that runs m365crawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches m365crawl), then quit and reopen that app. Verify with:
 
 ```sh
-teamscrawl doctor
+m365crawl doctor
 ```
 
-`doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails. The same grant lets teamscrawl read the new Outlook for Mac calendar, which it does by default when Outlook is installed; without it Outlook is reported as unavailable and the Teams sync is unaffected.
+`doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails. The same grant lets m365crawl read the new Outlook for Mac calendar, which it does by default when Outlook is installed; without it Outlook is reported as unavailable and the Teams sync is unaffected.
 
 ### Windows: no extra permission step
 
-Windows keeps the Teams cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, not behind macOS TCC. Run `teamscrawl doctor`; on Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows`.
+Windows keeps the Teams cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, not behind macOS TCC. Run `m365crawl doctor`; on Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows`.
 
 ## Quick start
 
-The examples below run against the repository's committed test fixture, so every name and message is synthetic. To reproduce them from a clone, point teamscrawl at the fixture and a scratch archive:
+The examples below run against the repository's committed test fixture, so every name and message is synthetic. To reproduce them from a clone, point m365crawl at the fixture and a scratch archive:
 
 ```sh
-export TEAMSCRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
-export TEAMSCRAWL_DB="$(mktemp -d)/teamscrawl.db"
+export M365CRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
+export M365CRAWL_DB="$(mktemp -d)/m365crawl.db"
 ```
 
 ```powershell
-$env:TEAMSCRAWL_TEAMS_ROOT = (Resolve-Path '.\testdata\teams-fixture\EBWebView').Path
-$env:TEAMSCRAWL_DB = Join-Path $env:TEMP 'teamscrawl-fixture.db'
+$env:M365CRAWL_TEAMS_ROOT = (Resolve-Path '.\testdata\teams-fixture\EBWebView').Path
+$env:M365CRAWL_DB = Join-Path $env:TEMP 'm365crawl-fixture.db'
 ```
 
 Against your own Teams, skip those two lines.
 
 ```sh
-teamscrawl doctor
-teamscrawl sync
-teamscrawl search planning
-teamscrawl unread --limit 5
-teamscrawl activity --unread
-teamscrawl thread 19:topicchannel1@thread.tacv2 1700000045000
+m365crawl doctor
+m365crawl sync
+m365crawl search planning
+m365crawl unread --limit 5
+m365crawl activity --unread
+m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
 ```
 
 Output is JSON when stdout is not a terminal and readable text on a terminal. Force either with `--format json|text`.
 
 ```sh
-teamscrawl sync --json
+m365crawl sync --json
 ```
 
 ```json
@@ -97,7 +99,7 @@ teamscrawl sync --json
 ```
 
 ```sh
-teamscrawl search planning --limit 1
+m365crawl search planning --limit 1
 ```
 
 ```json
@@ -105,7 +107,7 @@ teamscrawl search planning --limit 1
 ```
 
 ```sh
-teamscrawl activity --unread --limit 1 --fields at,type,conversation_display_name,text
+m365crawl activity --unread --limit 1 --fields at,type,conversation_display_name,text
 ```
 
 ```json
@@ -115,7 +117,7 @@ teamscrawl activity --unread --limit 1 --fields at,type,conversation_display_nam
 To stream changes as Teams writes them, run `watch`. It prints JSON Lines (one object per line, the one exception to the one-document rule): a `message` or `activity` line per change, then a `sync` line per sync. The first sync is a silent baseline, so only later changes appear; `--emit-initial` prints that one too, as here:
 
 ```sh
-teamscrawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
+m365crawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
 ```
 
 ```json
@@ -126,11 +128,11 @@ teamscrawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
 
 Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with exit 0. A change reaches the output after Teams flushes it to its cache plus a few seconds of debounce; measured against a real cache that was about 12 to 32 seconds from the moment a message was sent.
 
-`--account <tenantId>/<userId>` limits any command to one signed-in account; `teamscrawl whoami` lists them. The archive lives at `~/.teamscrawl/teamscrawl.db` on macOS and `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows (override with `--db` or `TEAMSCRAWL_DB`). On Windows the default path is private by construction; for a custom `--db`, teamscrawl creates missing parent directories as private ones, but an unsafe pre-existing parent or pre-existing archive file fails with `db_error` before SQLite writes anything.
+`--account <tenantId>/<userId>` limits any command to one signed-in account; `m365crawl whoami` lists them. The archive lives at `~/.m365crawl/m365crawl.db` on macOS and `%LOCALAPPDATA%\m365crawl\m365crawl.db` on Windows (override with `--db` or `M365CRAWL_DB`). On Windows the default path is private by construction; for a custom `--db`, m365crawl creates missing parent directories as private ones, but an unsafe pre-existing parent or pre-existing archive file fails with `db_error` before SQLite writes anything.
 
 ## For agents
 
-Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscrawl/SKILL.md), or run `teamscrawl skill` to print the same guide from the installed binary. It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
+Agents should read [`.agents/skills/m365crawl/SKILL.md`](.agents/skills/m365crawl/SKILL.md), or run `m365crawl skill` to print the same guide from the installed binary. It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
 
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
 - Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
@@ -140,24 +142,24 @@ Agents should read [`.agents/skills/teamscrawl/SKILL.md`](.agents/skills/teamscr
 
 Flags that matter for agents:
 
-- `--max-age 15m` (or `TEAMSCRAWL_MAX_AGE`) makes a read command run a sync first when the last successful one is older. `0` disables it. When a read does sync first it prints one line on stderr beforehand (plain text in text mode, `{"notice":"syncing","reason":"stale",...}` as JSON otherwise) and the result gains `synced: {seconds, status}`. If the implicit sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
+- `--max-age 15m` (or `M365CRAWL_MAX_AGE`) makes a read command run a sync first when the last successful one is older. `0` disables it. When a read does sync first it prints one line on stderr beforehand (plain text in text mode, `{"notice":"syncing","reason":"stale",...}` as JSON otherwise) and the result gains `synced: {seconds, status}`. If the implicit sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
 - `--fields a,b,c` keeps only those top-level keys of each item.
 - `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
-- `archive_age_seconds` tells you how stale the answer can be. An archive with no complete sync yet (never synced, only partial or failed syncs, or written by an older teamscrawl) adds `"needs_sync":true` and `"hint":"run teamscrawl sync"` to every read result.
+- `archive_age_seconds` tells you how stale the answer can be. An archive with no complete sync yet (never synced, only partial or failed syncs, or written by an older m365crawl) adds `"needs_sync":true` and `"hint":"run m365crawl sync"` to every read result.
 - System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned; `--direct-mentions` keeps only `person` mentions. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 
 ## Calendar and Outlook
 
-`teamscrawl calendar` reads the meetings Teams cached, with their recaps and action items. Teams caches the days you looked at, not a range, so every calendar result says whether the range is covered (`coverage_gap`, `uncovered_days`, `coverage_as_of`) and how fresh it is; an event missing from an uncovered day is not evidence that it does not exist. Teams fetches attendees, body and rooms only for meetings you opened, so a field the source never stated has no key and its name is in `unknown_fields`: not known is not the same as empty. `teamscrawl calendar sources` shows what the archive holds per account and source, and `teamscrawl doctor` warns when the Teams calendar cache is old or the Outlook store cannot be read.
+`m365crawl calendar` reads the meetings Teams cached, with their recaps and action items. Teams caches the days you looked at, not a range, so every calendar result says whether the range is covered (`coverage_gap`, `uncovered_days`, `coverage_as_of`) and how fresh it is; an event missing from an uncovered day is not evidence that it does not exist. Teams fetches attendees, body and rooms only for meetings you opened, so a field the source never stated has no key and its name is in `unknown_fields`: not known is not the same as empty. `m365crawl calendar sources` shows what the archive holds per account and source, and `m365crawl doctor` warns when the Teams calendar cache is old or the Outlook store cannot be read.
 
 ```sh
-teamscrawl calendar --from tomorrow --days 7
-teamscrawl calendar event <event_id> --max-text 400
-teamscrawl calendar actions --from=-7d --to=tomorrow --mine
-teamscrawl calendar sources
+m365crawl calendar --from tomorrow --days 7
+m365crawl calendar event <event_id> --max-text 400
+m365crawl calendar actions --from=-7d --to=tomorrow --mine
+m365crawl calendar sources
 ```
 
-The new Outlook for Mac store is a second calendar source, read-only and read by default when it is installed (the directory under `~/Library/Group Containers`; it needs the same Full Disk Access grant as Teams, and without it Outlook is reported as unavailable while the Teams sync carries on). Turn it off with `--outlook-root none` or `TEAMSCRAWL_OUTLOOK_ROOT=none`, or point it at another directory with `--outlook-root DIR`. With `--teams-root` set and no `--outlook-root`, Outlook stays off. `TEAMSCRAWL_OUTLOOK=1` still works and does nothing. An Outlook profile joins your Teams account on its own when an address the profile is signed in with is the Teams account's own address (the match ignores case; `teamscrawl calendar sources` shows `link: address`). Otherwise it stays its own account, because two people invited to the same meeting hold the same events and teamscrawl never guesses which account is yours: the agenda lists unlinked profiles with the command that links each one, for example `teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>` (`teamscrawl whoami` lists the Teams accounts by name and id; nothing the tool prints says which one owns an Outlook profile, which is only `outlook/<profile name>`, so ask whoever owns the Mac). The linking `sync` may print `skipped_interval` and `linked: 0` for Outlook: that is not a failure, and `teamscrawl calendar sources` shows `link: config` once the link is in place (`--outlook-account` always wins over the automatic link, and `none` keeps a profile unlinked). Linked, the two copies of a meeting merge into one item with `sources: ["teams","outlook"]`. The flags are in [`docs/commands.md`](docs/commands.md) and the rules in [`SPEC.md`](SPEC.md) section 4.2.
+The new Outlook for Mac store is a second calendar source, read-only and read by default when it is installed (the directory under `~/Library/Group Containers`; it needs the same Full Disk Access grant as Teams, and without it Outlook is reported as unavailable while the Teams sync carries on). Turn it off with `--outlook-root none` or `M365CRAWL_OUTLOOK_ROOT=none`, or point it at another directory with `--outlook-root DIR`. With `--teams-root` set and no `--outlook-root`, Outlook stays off. `M365CRAWL_OUTLOOK=1` still works and does nothing. An Outlook profile joins your Teams account on its own when an address the profile is signed in with is the Teams account's own address (the match ignores case; `m365crawl calendar sources` shows `link: address`). Otherwise it stays its own account, because two people invited to the same meeting hold the same events and m365crawl never guesses which account is yours: the agenda lists unlinked profiles with the command that links each one, for example `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>` (`m365crawl whoami` lists the Teams accounts by name and id; nothing the tool prints says which one owns an Outlook profile, which is only `outlook/<profile name>`, so ask whoever owns the Mac). The linking `sync` may print `skipped_interval` and `linked: 0` for Outlook: that is not a failure, and `m365crawl calendar sources` shows `link: config` once the link is in place (`--outlook-account` always wins over the automatic link, and `none` keeps a profile unlinked). Linked, the two copies of a meeting merge into one item with `sources: ["teams","outlook"]`. The flags are in [`docs/commands.md`](docs/commands.md) and the rules in [`SPEC.md`](SPEC.md) section 4.2.
 
 ## Commands
 
@@ -183,11 +185,11 @@ The new Outlook for Mac store is a second calendar source, read-only and read by
 | `records --database <name or prefix>` | Lists the archived records of one database, newest change first. Flags: `--store`, `--since`, `--include-removed`, `--limit`. `key_json` and `value_json` come back as parsed JSON. |
 | `sql <query>` | Runs one read-only SELECT against the archive. |
 | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync, and one `{"kind":"migrated","from":1,"to":2,"rows":N}` line when an upgrade re-derives an older archive (not a change: no `edited` lines). Flags: `--every` (poll interval, default `60s`), `--min-interval` (least time from the end of one sync to the start of the next, default `60s`, `0` disables), `--emit-initial`; honors `--account`, `--fields` and `--max-text`; system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations) are skipped. |
-| `metadata` | Prints the crawlkit app manifest as JSON in every output mode, so `crawlctl discover --app teamscrawl` finds teamscrawl. Needs no archive and never syncs. |
-| `skill` | Prints the agent guide (the same text as `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary) as raw Markdown in every output mode, so an agent can read the guide that matches the installed version. |
-| `version` | Prints `{"version","commit","date"}` (one JSON document; a human line in text mode). `teamscrawl --version` does the same. |
+| `metadata` | Prints the crawlkit app manifest as JSON in every output mode, so `crawlctl discover --app m365crawl` finds m365crawl. Needs no archive and never syncs. |
+| `skill` | Prints the agent guide (the same text as `.agents/skills/m365crawl/SKILL.md`, embedded in the binary) as raw Markdown in every output mode, so an agent can read the guide that matches the installed version. |
+| `version` | Prints `{"version","commit","date"}` (one JSON document; a human line in text mode). `m365crawl --version` does the same. |
 
-Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--outlook-root`, `--outlook-account`, `--outlook-profile`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `teamscrawl <command> --help` for the rest.
+Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--outlook-root`, `--outlook-account`, `--outlook-profile`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `m365crawl <command> --help` for the rest.
 
 Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off; `CLICOLOR_FORCE=1` turns it on when output is piped (this is how `make screenshot` renders `screenshot.png`). JSON output is never colored and never changes with any of these.
 
@@ -202,7 +204,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 ## How it works
 
-1. **Snapshot.** teamscrawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. On macOS that directory is mode 0700; on Windows it is ACL-restricted to the current user and SYSTEM. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
+1. **Snapshot.** m365crawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. On macOS that directory is mode 0700; on Windows it is ACL-restricted to the current user and SYSTEM. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
 2. **Decode.** A built-in reader parses LevelDB, Chromium's IndexedDB coding and V8's structured-clone format. No Node, Python or browser is needed at runtime.
 3. **Denylist.** The conversation, reply-chain (message) and activity-feed stores become typed tables. Every other database is decoded into a generic `records` table, except anything whose name looks like sign-in credentials, which is counted and never opened.
 4. **Store.** Rows go into SQLite (WAL) with FTS5 indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing. Messages that vanish from Teams' cache stay in the archive; Teams deletions set `deleted_at`.
@@ -211,7 +213,7 @@ On macOS, Full Disk Access is the only extra permission it asks for ([why and ho
 
 ## Privacy
 
-The archive holds your real Teams conversations. It stays on your machine in a private directory (`~/.teamscrawl/` on macOS, `%LOCALAPPDATA%\teamscrawl\` on Windows) and teamscrawl has no network code. On Windows the default archive directory is private by construction, and a custom `--db` parent must already be private or be created by teamscrawl as a new private directory before the archive opens. Treat the database like the chats it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data.
+The archive holds your real Teams conversations. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows) and m365crawl has no network code. On Windows the default archive directory is private by construction, and a custom `--db` parent must already be private or be created by m365crawl as a new private directory before the archive opens. Treat the database like the chats it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data.
 
 ## Limits
 
@@ -228,14 +230,14 @@ The archive holds your real Teams conversations. It stays on your machine in a p
 ## Development
 
 ```sh
-make build      # bin/teamscrawl
+make build      # bin/m365crawl
 make test       # unit tests with the race detector
 make e2e        # end-to-end tests against the committed fixture
 make coverage   # 100% function coverage gate on internal/...
 make check      # every gate CI runs: tidy, fmt, vet, lint, test, coverage, e2e
 ```
 
-The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`TEAMSCRAWL_REAL_CACHE=1 make acceptance`, plus the equivalent direct `go test -tags acceptance ./acceptance/...` if you do not have `make`) runs locally only; it needs Full Disk Access on macOS, a live Teams cache on the current Windows host, Node 22, python3, and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never message content.
+The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`M365CRAWL_REAL_CACHE=1 make acceptance`, plus the equivalent direct `go test -tags acceptance ./acceptance/...` if you do not have `make`) runs locally only; it needs Full Disk Access on macOS, a live Teams cache on the current Windows host, Node 22, python3, and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never message content.
 
 ## Credits
 

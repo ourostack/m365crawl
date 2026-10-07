@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 // Mapping turns decoded records (*v8.Object trees) into the shared types. Teams stores several

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Outlook source statuses of `calendar sources`. A failed read is named by what it says about the

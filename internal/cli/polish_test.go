@@ -28,7 +28,7 @@ func TestSearchWithoutWordsUsesFilters(t *testing.T) {
 	for _, args := range [][]string{{"search"}, {"search", ""}, {"search", "--limit", "3"}} {
 		code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
 		body := errorOf(t, stderr)
-		if code != 2 || !strings.Contains(body["fix"].(string), "teamscrawl messages") {
+		if code != 2 || !strings.Contains(body["fix"].(string), "m365crawl messages") {
 			t.Errorf("%v: exit %d %v", args, code, body)
 		}
 	}
@@ -92,7 +92,7 @@ func TestTeamFlagOnEveryCommand(t *testing.T) {
 	// Unknown team: usage error with a way forward.
 	code, _, stderr := e.run("--max-age", "0", "messages", "--team", "No such team")
 	body := errorOf(t, stderr)
-	if code != 2 || body["code"] != "usage" || !strings.Contains(body["fix"].(string), "teamscrawl teams") {
+	if code != 2 || body["code"] != "usage" || !strings.Contains(body["fix"].(string), "m365crawl teams") {
 		t.Errorf("unknown team: exit %d %v", code, body)
 	}
 }

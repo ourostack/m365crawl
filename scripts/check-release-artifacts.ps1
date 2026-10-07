@@ -11,10 +11,10 @@ if (-not (Test-Path $DistDir)) {
 }
 
 $required = @(
-    'teamscrawl_*_darwin_amd64.tar.gz',
-    'teamscrawl_*_darwin_arm64.tar.gz',
-    'teamscrawl_*_windows_amd64.zip',
-    'teamscrawl_*_windows_arm64.zip'
+    'm365crawl_*_darwin_amd64.tar.gz',
+    'm365crawl_*_darwin_arm64.tar.gz',
+    'm365crawl_*_windows_amd64.zip',
+    'm365crawl_*_windows_arm64.zip'
 )
 
 $artifacts = @()
@@ -28,7 +28,7 @@ foreach ($pattern in $required) {
 
 $version = $null
 foreach ($artifact in $artifacts) {
-    if ($artifact.Name -notmatch '^teamscrawl_(?<version>.+)_(darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)$') {
+    if ($artifact.Name -notmatch '^m365crawl_(?<version>.+)_(darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)$') {
         throw "artifact name has an unexpected shape: $($artifact.Name)"
     }
     if (-not $version) {

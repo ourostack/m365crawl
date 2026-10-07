@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 func TestAcquireLockWindowsContention(t *testing.T) {

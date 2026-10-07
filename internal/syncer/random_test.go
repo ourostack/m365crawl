@@ -16,7 +16,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/journal"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // A LevelDB write-ahead log as the tests edit it: write batches of put and delete entries.
@@ -155,10 +155,10 @@ func logFiles(t *testing.T, root string) []string {
 // change lists and the archives are identical. The changes: a log cut back or forward, a record
 // whose text changes under the same key, a second record that carries the same message (so two
 // records make one row, identical or not), edits that revert, a source that stays still, and a
-// sync of one account only. A failure names the seed; TEAMSCRAWL_TEST_SEED=<n> runs that one.
+// sync of one account only. A failure names the seed; M365CRAWL_TEST_SEED=<n> runs that one.
 func TestRandomCacheMutationsSkipEqualsFull(t *testing.T) {
 	seeds := []int64{1, 2, 3}
-	if s := os.Getenv("TEAMSCRAWL_TEST_SEED"); s != "" {
+	if s := os.Getenv("M365CRAWL_TEST_SEED"); s != "" {
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
 			t.Fatal(err)

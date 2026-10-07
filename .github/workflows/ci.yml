@@ -30,6 +30,13 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: No leftover names from before the rename
+        run: |
+          # The README's one "formerly" note is the only allowed mention outside history.
+          if git grep -nIi 'teamscra[w]l' -- . ':!CHANGELOG.md' ':!docs/releases/' | grep -v '^README.md:[0-9]*:m365crawl was called'; then
+            echo 'the product was renamed to m365crawl; remove the old name (CHANGELOG.md and docs/releases/ keep history)' >&2
+            exit 1
+          fi
       - name: Check tidy, format, vet and lint
         run: make tidy-check fmt-check vet lint
 

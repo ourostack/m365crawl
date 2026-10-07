@@ -1,5 +1,5 @@
 // Package store is the SQLite archive: schema, idempotent upserts, full-text search and the
-// read queries behind every teamscrawl read command. Rows are partitioned by (tenant_id, user_id)
+// read queries behind every m365crawl read command. Rows are partitioned by (tenant_id, user_id)
 // so two accounts never mix, and messages that vanish from Teams' cache are kept.
 package store
 
@@ -17,7 +17,7 @@ import (
 
 	crawlstore "github.com/openclaw/crawlkit/store"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 	_ "modernc.org/sqlite" // the "sqlite" driver; crawlkit registers it too
 )
 
@@ -216,13 +216,13 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 func (s *Store) Close() error { return s.cs.Close() }
 
 // ensureParent creates the archive directory 0700. crawlkit would create it 0755, so this runs
-// first. The default ~/.teamscrawl is tightened to 0700; a custom --db parent is left alone.
+// first. The default ~/.m365crawl is tightened to 0700; a custom --db parent is left alone.
 func ensureParent(path string) error {
 	parent := filepath.Dir(path)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return fmt.Errorf("create archive dir: %w", err)
 	}
-	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(parent) == filepath.Join(home, ".teamscrawl") {
+	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(parent) == filepath.Join(home, ".m365crawl") {
 		if err := chmodFile(parent, 0o700); err != nil { //nolint:gosec // G302: a directory, 0700 is the point
 			return fmt.Errorf("chmod archive dir: %w", err)
 		}

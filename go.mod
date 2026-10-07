@@ -1,4 +1,4 @@
-module github.com/ourostack/teamscrawl
+module github.com/ourostack/m365crawl
 
 go 1.27.0
 

@@ -1,6 +1,6 @@
 package store
 
-import "github.com/ourostack/teamscrawl/internal/calendar"
+import "github.com/ourostack/m365crawl/internal/calendar"
 
 // SchemaVersion is the archive schema version recorded through crawlkit's schema_migrations.
 // Version 3 added the records table. Version 4 added read memory: records.raw_digest and

@@ -1,11 +1,11 @@
 ---
-name: teamscrawl
-description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state, activity feed, meetings or calendar on this Mac or Windows PC, through the local `teamscrawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
+name: m365crawl
+description: Use when an agent needs to read the user's Microsoft Teams messages, chats, channels, mentions, unread state, activity feed, meetings or calendar on this Mac or Windows PC, through the local `m365crawl` CLI, which mirrors the Teams desktop cache into a searchable SQLite archive.
 ---
 
-# teamscrawl
+# m365crawl
 
-Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the teamscrawl repo (https://github.com/ourostack/teamscrawl/blob/main/SPEC.md); this file is the short version. Run `teamscrawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
+Read-only, offline access to the user's Teams history, and to everything else the desktop app cached except sign-in credentials. It copies the new Teams desktop app's local cache into SQLite (`~/.m365crawl/m365crawl.db` on macOS, `%LOCALAPPDATA%\m365crawl\m365crawl.db` on Windows) and answers from there. It cannot send, react or mark read. The full contract is in SPEC.md in the m365crawl repo (https://github.com/ourostack/m365crawl/blob/main/SPEC.md); this file is the short version. Run `m365crawl skill` to print this guide from the installed binary (raw Markdown in every mode), so it always matches the version you are running.
 
 ## When to use
 
@@ -15,13 +15,13 @@ Read-only, offline access to the user's Teams history, and to everything else th
 ## 60-second workflow
 
 ```sh
-teamscrawl doctor                      # once; exit 3 means fix the environment first
-teamscrawl whoami                      # accounts (self_id is the user's own sender id), how fresh
-teamscrawl unread --by-conversation --since 7d   # "what needs my attention": recent unread only
-teamscrawl unread --limit 20 --max-text 300
-teamscrawl activity --unread --limit 20 --max-text 300
-teamscrawl search "quarterly plan" --since 7d --limit 10 --max-text 300
-teamscrawl thread <conversation_id> <root_message_id>   # or: teamscrawl thread "<link>"
+m365crawl doctor                      # once; exit 3 means fix the environment first
+m365crawl whoami                      # accounts (self_id is the user's own sender id), how fresh
+m365crawl unread --by-conversation --since 7d   # "what needs my attention": recent unread only
+m365crawl unread --limit 20 --max-text 300
+m365crawl activity --unread --limit 20 --max-text 300
+m365crawl search "quarterly plan" --since 7d --limit 10 --max-text 300
+m365crawl thread <conversation_id> <root_message_id>   # or: m365crawl thread "<link>"
 ```
 
 No words to search for? `search` also works with filters alone (`search --mentions-me --since 24h`, newest first); with neither words nor a filter it is a usage error whose fix names `messages`.
@@ -30,21 +30,21 @@ Output is JSON when stdout is not a terminal (pass `--json` to be sure). Read co
 
 ## Supported hosts and install
 
-- macOS: install with Homebrew (`brew install ourostack/tap/teamscrawl`) or the darwin release tarballs. Full Disk Access is required for the app that launches `teamscrawl`.
-- Windows: download the release zip (`teamscrawl_<version>_windows_amd64.zip` or `teamscrawl_<version>_windows_arm64.zip`), unzip it, and run `teamscrawl.exe`. Windows release binaries are intentionally unsigned. `teamscrawl doctor` still checks the environment, but `full_disk_access` is `ok: true` / `not applicable on Windows`.
+- macOS: install with Homebrew (`brew install ourostack/tap/m365crawl`) or the darwin release tarballs. Full Disk Access is required for the app that launches `m365crawl`.
+- Windows: download the release zip (`m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip`), unzip it, and run `m365crawl.exe`. Windows release binaries are intentionally unsigned. `m365crawl doctor` still checks the environment, but `full_disk_access` is `ok: true` / `not applicable on Windows`.
 - Linux is not supported because there is no supported Teams desktop cache path to mirror.
 
 ## Global flags
 
-`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`TEAMSCRAWL_DB`), `--teams-root DIR` (`TEAMSCRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`TEAMSCRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`. Platform defaults: macOS `--teams-root ~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`, Windows `--teams-root %LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`; macOS `--db ~/.teamscrawl/teamscrawl.db`, Windows `--db %LOCALAPPDATA%\teamscrawl\teamscrawl.db`.
+`--json` (or `--format text|json|log`), `--no-color`, `--db PATH` (`M365CRAWL_DB`), `--teams-root DIR` (`M365CRAWL_TEAMS_ROOT`), `--account <tenantId>/<userId>` (default every account), `--max-age DURATION` (`M365CRAWL_MAX_AGE`), `--fields a,b,c`, `--max-text N`. Platform defaults: macOS `--teams-root ~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView`, Windows `--teams-root %LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`; macOS `--db ~/.m365crawl/m365crawl.db`, Windows `--db %LOCALAPPDATA%\m365crawl\m365crawl.db`.
 
-On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself. Any pre-existing archive file or SQLite companion file at that path must also already be private to the current user and SYSTEM; otherwise `sync`, `watch`, and any implicit sync fail with `db_error` before SQLite opens the database for writing.
+On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or m365crawl can create that parent itself. Any pre-existing archive file or SQLite companion file at that path must also already be private to the current user and SYSTEM; otherwise `sync`, `watch`, and any implicit sync fail with `db_error` before SQLite opens the database for writing.
 
 List results are `{"items":[...],"count":N,"truncated":bool,"archive_age_seconds":N}`. `truncated: true` means more exist: raise `--limit` (default 50) or narrow the filters. When `truncated` is true the result also has `"total":N`, the exact number of matches ignoring `--limit` (so you can tell 51 from 5,000 before deciding to page); it is omitted when not truncated, because then `count` is the total. `sql` stops reading at `--limit`, so it sets `truncated` but never `total`. Times are RFC3339 UTC. Sort orders: `search` and `unread` are newest first, `messages` is chronological (oldest first; with `--limit` you get the newest matches), `conversations` is sorted by last activity, newest first. Every list stops at `--limit` (default 50), so check `truncated`. Filter time flags accept RFC3339, `YYYY-MM-DD` (local midnight) or relative `90m`, `24h`, `7d`, `2w`.
 
 ## Commands
 
-If the archive has no complete sync yet, every read result also carries `"needs_sync":true` and `"hint":"run teamscrawl sync"` (both omitted otherwise). `needs_sync` means no complete sync yet: the archive has never synced, or only partial or failed syncs so far, or it was written by an older teamscrawl whose next sync upgrades it. An empty result with `needs_sync` means no data yet, not no match: run `teamscrawl sync` and repeat.
+If the archive has no complete sync yet, every read result also carries `"needs_sync":true` and `"hint":"run m365crawl sync"` (both omitted otherwise). `needs_sync` means no complete sync yet: the archive has never synced, or only partial or failed syncs so far, or it was written by an older m365crawl whose next sync upgrades it. An empty result with `needs_sync` means no data yet, not no match: run `m365crawl sync` and repeat.
 
 System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are excluded by default from `search`, `messages`, `unread`, `thread`, the message text in `activity`, and `conversations`, because their messages duplicate real ones with blank sender and conversation names. Pass `--include-system` to bring them back. Your own notes (`48:notes`) stay included.
 
@@ -52,7 +52,7 @@ An @-mention appears in `text` as the person's plain name; `mentions` lists who 
 
 `text` is always readable, never raw card JSON or markup: bot cards give their title, text blocks and facts, call and thread events read like `Call ended · 23m` or `Member added`, and `raw_json` (via `sql`) keeps the original. A few messages have empty `text` (deleted, image- or file-only, meeting notices). Details, and how an alpha.1 archive is upgraded by its first `sync`, are in SPEC.md section 3.
 
-`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name (case-insensitive for ASCII letters only, so `Équipe` and `équipe` differ), or its id (`teamscrawl teams` lists both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
+`--team <name|id>` (on `messages`, `search`, `unread`, `activity`, `conversations`) limits results to one team, meaning the team's own conversation and all of its channels. Give the team's exact name (case-insensitive for ASCII letters only, so `Équipe` and `équipe` differ), or its id (`m365crawl teams` lists both). A name that matches no team, or more than one, is a `usage` error; the ambiguous case lists each match as `name (id)`, so retry with the id.
 
 ### unread
 
@@ -100,7 +100,7 @@ With `--query`, an exact name ranks first, then prefix, then substring, then all
 
 ### stores and records
 
-Besides messages, conversations and activity, teamscrawl mirrors every other Teams database the app cached (pinned messages, contacts, call history, the raw calendar stores and more) into a generic `records` table. The calendar has its own commands (see Calendar); the rest have no typed command yet. Credential-like databases are never read, and token-shaped values inside other records (JWTs, `access_token`-style fields of any type, `Bearer ` strings, `sig=` URL signatures, credentials inside JSON stored as a string) appear as `[redacted]`. Run `teamscrawl stores` to see what exists: items `{database, store, records, removed, last_updated_at}`, one per database and object store (an account's databases carry its tenant and user ids in the name). Then read one with `teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300`: `--database` takes the full name or any prefix (required), plus `--store`, `--since`, `--include-removed` and `--limit`. Items are `{source, database, store, key_json, value_json, first_seen_at, updated_at, removed_at?}`, newest change first; `key_json` and `value_json` are parsed JSON, and `value_json` is absent when the value could not be decoded. A record Teams' cache no longer holds keeps its last value and gets `removed_at`, hidden unless `--include-removed`. `--database` prefix matching spans every signed-in account; `--account <tenantId>/<userId>` narrows it (a database whose name carries no account is hidden by `--account`). The `pinned-manager` store holds Teams' own pin records, while `messages` carries a `pinned` flag per message: use whichever answers the question. The shape of each value is Teams' own and can change without notice, so look at one record before filtering on its fields, and keep `--max-text` low.
+Besides messages, conversations and activity, m365crawl mirrors every other Teams database the app cached (pinned messages, contacts, call history, the raw calendar stores and more) into a generic `records` table. The calendar has its own commands (see Calendar); the rest have no typed command yet. Credential-like databases are never read, and token-shaped values inside other records (JWTs, `access_token`-style fields of any type, `Bearer ` strings, `sig=` URL signatures, credentials inside JSON stored as a string) appear as `[redacted]`. Run `m365crawl stores` to see what exists: items `{database, store, records, removed, last_updated_at}`, one per database and object store (an account's databases carry its tenant and user ids in the name). Then read one with `m365crawl records --database Teams:calendar-manager --limit 10 --max-text 300`: `--database` takes the full name or any prefix (required), plus `--store`, `--since`, `--include-removed` and `--limit`. Items are `{source, database, store, key_json, value_json, first_seen_at, updated_at, removed_at?}`, newest change first; `key_json` and `value_json` are parsed JSON, and `value_json` is absent when the value could not be decoded. A record Teams' cache no longer holds keeps its last value and gets `removed_at`, hidden unless `--include-removed`. `--database` prefix matching spans every signed-in account; `--account <tenantId>/<userId>` narrows it (a database whose name carries no account is hidden by `--account`). The `pinned-manager` store holds Teams' own pin records, while `messages` carries a `pinned` flag per message: use whichever answers the question. The shape of each value is Teams' own and can change without notice, so look at one record before filtering on its fields, and keep `--max-text` low.
 
 ### sql
 
@@ -110,7 +110,7 @@ One read-only SELECT (or WITH/EXPLAIN/VALUES), for counts and joins the commands
 
 `watch [--every 60s] [--min-interval 60s] [--emit-initial]` runs until interrupted (SIGINT or SIGTERM exit 0) and prints JSON Lines, the one exception to the one-document rule. It syncs once at start as a silent baseline (nothing is printed unless `--emit-initial`), then syncs whenever the Teams cache changes (file events, with a poll every `--every` as the safety net; bursts are debounced) and prints one line per change followed by one report line:
 
-Syncs are spaced at least `--min-interval` (`TEAMSCRAWL_WATCH_MIN_INTERVAL`, `0` disables) apart so a busy cache does not keep a CPU core busy: expect changes up to about a minute plus a sync after Teams wrote them, not instantly.
+Syncs are spaced at least `--min-interval` (`M365CRAWL_WATCH_MIN_INTERVAL`, `0` disables) apart so a busy cache does not keep a CPU core busy: expect changes up to about a minute plus a sync after Teams wrote them, not instantly.
 
 Example lines: `{"kind":"message","change":"new","item":{...}}`, `{"kind":"activity","change":"edited","item":{...}}`, `{"kind":"sync","report":{...}}`.
 
@@ -120,13 +120,13 @@ When the first sync after an upgrade re-derives an older archive, watch prints o
 
 ### doctor, sync, status
 
-- `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced", or `last_sync_status` after a partial or failed sync) does not fail it; `archive_newer` fails it when a newer teamscrawl wrote the archive. Follow each failing check's `fix`.
-- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity (including `records`), `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged` (exit 0), or `partial` when some Teams sources committed and others failed (exit 1: the report, with each source's `status` and `error`, is on stdout and a `partial_sync` error is on stderr; run `teamscrawl doctor`, fix the cause, sync again, since the sources that did sync are already in the archive). The first `sync` after upgrading from alpha.1 re-derives older rows and reports `migrated`; read-only commands never migrate (SPEC.md section 3.2). A sync skips records whose stored bytes did not change since the last sync and reports the same counts a full read would; `sync --full-read` (or `TEAMSCRAWL_FULL_READ=1`) reads every record in full, with the same result (SPEC.md section 4.1).
+- `doctor` returns `{"ok":bool,"checks":[{"name","ok","warn"?,"detail","fix"}]}`. A warning (for example `last_sync_age` "never synced", or `last_sync_status` after a partial or failed sync) does not fail it; `archive_newer` fails it when a newer m365crawl wrote the archive. Follow each failing check's `fix`.
+- `sync` returns counts (`seen`, `inserted`, `updated`, `unchanged`) per entity (including `records`), `omissions` by reason, and `status` of `ok`, `ok_with_omissions` or `unchanged` (exit 0), or `partial` when some Teams sources committed and others failed (exit 1: the report, with each source's `status` and `error`, is on stdout and a `partial_sync` error is on stderr; run `m365crawl doctor`, fix the cause, sync again, since the sources that did sync are already in the archive). The first `sync` after upgrading from alpha.1 re-derives older rows and reports `migrated`; read-only commands never migrate (SPEC.md section 3.2). A sync skips records whose stored bytes did not change since the last sync and reports the same counts a full read would; `sync --full-read` (or `M365CRAWL_FULL_READ=1`) reads every record in full, with the same result (SPEC.md section 4.1).
 - `status` shows per-account counts, the last run and other Teams origins seen.
 
 ## Calendar
 
-`teamscrawl calendar` answers questions about the user's meetings from the Teams cache and, the new Outlook for Mac store (read by default when it is installed). Run the commands with `--json`, and read `coverage_gap` and `unknown_fields` before you trust an empty answer.
+`m365crawl calendar` answers questions about the user's meetings from the Teams cache and, the new Outlook for Mac store (read by default when it is installed). Run the commands with `--json`, and read `coverage_gap` and `unknown_fields` before you trust an empty answer.
 
 | Question | Command |
 | --- | --- |
@@ -164,24 +164,24 @@ To tell empty from unknown, read `coverage_gap` and `uncovered_days`. `coverage_
 
 ### Outlook
 
-Outlook is read by default when the new Outlook for Mac is installed; no flag is needed, and it needs the same Full Disk Access grant as Teams. A default Outlook never fails a sync: with no Outlook or no access the report shows the Outlook source as `unavailable` with its error and fix, and Teams is unaffected. `--outlook-root none` (or `TEAMSCRAWL_OUTLOOK_ROOT=none`) turns it off, `--outlook-root DIR` reads another directory, and `--teams-root` without `--outlook-root` keeps it off (`TEAMSCRAWL_OUTLOOK=1` is accepted and does nothing). Events already archived stay readable with it off, but only a run with it on refreshes them.
+Outlook is read by default when the new Outlook for Mac is installed; no flag is needed, and it needs the same Full Disk Access grant as Teams. A default Outlook never fails a sync: with no Outlook or no access the report shows the Outlook source as `unavailable` with its error and fix, and Teams is unaffected. `--outlook-root none` (or `M365CRAWL_OUTLOOK_ROOT=none`) turns it off, `--outlook-root DIR` reads another directory, and `--teams-root` without `--outlook-root` keeps it off (`M365CRAWL_OUTLOOK=1` is accepted and does nothing). Events already archived stay readable with it off, but only a run with it on refreshes them.
 
 A profile with an account signed in under a Teams account's own address, ignoring case, is linked to it by itself (`link: "address"` in `calendar sources`): its twins merge with no step from you. Otherwise an unlinked Outlook profile is its own account: its events are not merged with Teams, and the agenda lists it in `unlinked_accounts` with the exact command to link it in `unlinked_fix`. Linking by hand is explicit and never guessed, because two people invited to one meeting hold the same events, and it always wins over the automatic link (`--outlook-account none` keeps a profile unlinked):
 
 An Outlook event with no location or body has an empty `location` or `body_preview` (older archives show the subject there until the next sync re-derives them). Most online meetings carry the Teams online-meeting label as their `location`; that is not a room (rooms, when known, are in `rooms`). An all-day Outlook event has `start` and `end` at midnight UTC and `time_zone` `UTC`, which is Outlook's own label: use `start_date` and `end_date` (exclusive end) to say which day it is.
 
 ```sh
-teamscrawl whoami --json     # the Teams accounts: tenant_id, user_id, display_name
-teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>
+m365crawl whoami --json     # the Teams accounts: tenant_id, user_id, display_name
+m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>
 ```
 
 If a profile was not linked by itself, which account to link: nothing the tool prints names the Outlook profile's owner. An Outlook account is only `outlook/<profile directory name>` (in `calendar sources` and `unlinked_accounts`), and `whoami` lists Teams accounts by `display_name` and ids with no email address, so the two cannot be matched by the tool. Do not guess from the display name, and do not link by event overlap (two people invited to one meeting hold the same events). If `whoami` lists one account and the user says it is theirs, or the user names their account, use it. Otherwise ask the user which Teams account (by `display_name`) owns the Outlook profile, and ask only once. With several Teams accounts, add `--account <tenantId>/<userId>` to calendar reads to keep to one person's agenda.
 
 `--outlook-profile` is needed only when the root holds several profiles. The link is kept in the archive, and any command given `--outlook-account` writes it there, a read like `calendar` included; `--outlook-account none` ends it the same way. To compare with the Teams-only view, unlink, look, then link again.
 
-What you will see: the linking `sync` can print `skipped_interval` for the Outlook source and `linked: 0`. That is not a failure. The link is applied after the sources are read, and an Outlook read under 5 minutes old is reused, so there was nothing new to count. To confirm the link took effect, run `teamscrawl calendar sources --json`: the Outlook row now has `link: "config"` (or `"address"` when it linked itself) and its `principal` is the Teams account. The agenda confirms it too: `unlinked_accounts` and `unlinked_fix` are gone and twin events have merged, so the agenda gets shorter.
+What you will see: the linking `sync` can print `skipped_interval` for the Outlook source and `linked: 0`. That is not a failure. The link is applied after the sources are read, and an Outlook read under 5 minutes old is reused, so there was nothing new to count. To confirm the link took effect, run `m365crawl calendar sources --json`: the Outlook row now has `link: "config"` (or `"address"` when it linked itself) and its `principal` is the Teams account. The agenda confirms it too: `unlinked_accounts` and `unlinked_fix` are gone and twin events have merged, so the agenda gets shorter.
 
-Linked, twins merge into one item with `sources: ["teams","outlook"]` and `filled_fields`. A linked Outlook-only event gets a new `event_id`; the old one still resolves. A meeting Teams marked gone stays hidden unless the Outlook copy was edited after the removal. A meeting deleted in Outlook is marked gone too (`deletions: "inferred"` in `calendar sources`), but late: Outlook keeps the deleted event in its store until it compacts the file (minutes; 4 to 16 in one test), and teamscrawl marks it only after two syncs at least 5 minutes apart both miss it. So expect a meeting deleted in the last half hour to still be listed; say so rather than promise it is gone.
+Linked, twins merge into one item with `sources: ["teams","outlook"]` and `filled_fields`. A linked Outlook-only event gets a new `event_id`; the old one still resolves. A meeting Teams marked gone stays hidden unless the Outlook copy was edited after the removal. A meeting deleted in Outlook is marked gone too (`deletions: "inferred"` in `calendar sources`), but late: Outlook keeps the deleted event in its store until it compacts the file (minutes; 4 to 16 in one test), and m365crawl marks it only after two syncs at least 5 minutes apart both miss it. So expect a meeting deleted in the last half hour to still be listed; say so rather than promise it is gone.
 
 ### What "mine" means
 
@@ -193,7 +193,7 @@ A recap is Teams' own meeting summary for a call: `headline`, `short_summary`, `
 
 ## Freshness
 
-- Every read result has `archive_age_seconds`: the age of the last fully successful sync, for the accounts the read covers (`--account X` uses X alone; otherwise the stalest account). A partial or failed sync does not refresh it, and `sync --account X` refreshes only X. If it matters that the answer is current, rerun with `--max-age 5m` or run `teamscrawl sync`.
+- Every read result has `archive_age_seconds`: the age of the last fully successful sync, for the accounts the read covers (`--account X` uses X alone; otherwise the stalest account). A partial or failed sync does not refresh it, and `sync --account X` refreshes only X. If it matters that the answer is current, rerun with `--max-age 5m` or run `m365crawl sync`.
 - If the implicit sync fails, the command still answers from the archive, prints a warning on stderr (`{"warning":{"code","message","fix"}}` in JSON mode) and adds a `sync_error` field to the result. Treat the answer as possibly stale and follow the warning's `fix` if freshness matters.
 - Teams evicts old messages from its own cache. The archive keeps them, but only what a sync has seen, so sync regularly (for example `--max-age 1h` in every call).
 
@@ -217,18 +217,18 @@ Exit 0 is success, including a `sync` with status `ok_with_omissions` or `unchan
 | 3 | `teams_not_installed` | The new Teams data directory is missing. Ask the user to install new Teams and sign in. |
 | 3 | `no_full_disk_access` | macOS blocked the read. The `fix` names the app (your terminal or agent host) to grant in System Settings > Privacy & Security > Full Disk Access; it must be restarted. Ask the user. Windows should not return this on the default LocalCache path. |
 | 3 | `no_teams_origin` | Teams has no cache yet. Ask the user to open Teams and sign in, then retry. |
-| 3 | `doctor_failed` | A required `doctor` check failed. Run `teamscrawl doctor` and follow the failing check's `fix`. |
-| 3 | `archive_newer` | The archive was written by a newer teamscrawl, so this build refuses to write it (`sync`, `watch` and the implicit sync fail before any write; reads still work, and an implicit sync becomes a warning plus `sync_error`). Run the `fix`: upgrade teamscrawl, or use another `--db`. |
+| 3 | `doctor_failed` | A required `doctor` check failed. Run `m365crawl doctor` and follow the failing check's `fix`. |
+| 3 | `archive_newer` | The archive was written by a newer m365crawl, so this build refuses to write it (`sync`, `watch` and the implicit sync fail before any write; reads still work, and an implicit sync becomes a warning plus `sync_error`). Run the `fix`: upgrade m365crawl, or use another `--db`. |
 | 4 | `locked` | Another sync is running. Wait and retry. |
 | 1 | `snapshot_inconsistent` | Teams was writing while the cache was copied. Retry once; if it persists, ask the user to quit Teams briefly. |
-| 1 | `unsupported_block_compression` | The cache uses a format this version cannot read. Update teamscrawl and report it with `doctor` output. |
-| 1 | `store_missing` | A Teams store vanished. Ask the user to open Teams until it loads, then retry; if it persists, update teamscrawl. |
+| 1 | `unsupported_block_compression` | The cache uses a format this version cannot read. Update m365crawl and report it with `doctor` output. |
+| 1 | `store_missing` | A Teams store vanished. Ask the user to open Teams until it loads, then retry; if it persists, update m365crawl. |
 | 1 | `db_error` | The archive cannot be read or written. Check `--db` path, permissions and disk space. On Windows, also check that a custom `--db` parent directory and any pre-existing archive file are already private to the current user and SYSTEM. |
-| 1 | `partial_sync` | Some Teams sources synced and others failed; the message names each failed source and its code. The synced sources are in the archive. Run `teamscrawl doctor`, fix the cause and sync again. |
+| 1 | `partial_sync` | Some Teams sources synced and others failed; the message names each failed source and its code. The synced sources are in the archive. Run `m365crawl doctor`, fix the cause and sync again. |
 | 1 | `interrupted` | The command was stopped (Ctrl-C or a signal) before it finished; nothing was half-written. Run it again. A second Ctrl-C or SIGTERM during the stop quits at once with exit 130 and may leave a temporary snapshot, which a later sync removes once it is older than an hour. |
-| 1 | `internal` | A teamscrawl bug. Report the command you ran. |
+| 1 | `internal` | A m365crawl bug. Report the command you ran. |
 
-Recovering from an empty or stale archive: run `teamscrawl sync`, then repeat the read. An empty result after a successful sync means the desktop cache has nothing matching, not that teamscrawl failed.
+Recovering from an empty or stale archive: run `m365crawl sync`, then repeat the read. An empty result after a successful sync means the desktop cache has nothing matching, not that m365crawl failed.
 
 ## Rules
 - Never paste message content into places the user did not expect; the archive is private.

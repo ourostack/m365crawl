@@ -70,29 +70,29 @@ func SnapshotInconsistent(detail string) *Coded {
 // UnsupportedBlockCompression reports a LevelDB block compression this reader cannot decode.
 func UnsupportedBlockCompression(detail string) *Coded {
 	return &Coded{Code: CodeUnsupportedBlockCompression, Exit: ExitRuntime,
-		Message: "the Teams cache uses a block compression teamscrawl cannot read: " + detail,
-		Fix:     "Update teamscrawl; if it is already current, report the issue with the output of `teamscrawl doctor`."}
+		Message: "the Teams cache uses a block compression m365crawl cannot read: " + detail,
+		Fix:     "Update m365crawl; if it is already current, report the issue with the output of `m365crawl doctor`."}
 }
 
-// StoreMissing reports that a Teams store teamscrawl needs disappeared from the cache.
+// StoreMissing reports that a Teams store m365crawl needs disappeared from the cache.
 func StoreMissing(detail string) *Coded {
 	return &Coded{Code: CodeStoreMissing, Exit: ExitRuntime,
 		Message: "a required Teams store is missing: " + detail,
-		Fix:     "Open Teams, let it finish loading, and run again; if it persists Teams changed its storage layout, so update teamscrawl."}
+		Fix:     "Open Teams, let it finish loading, and run again; if it persists Teams changed its storage layout, so update m365crawl."}
 }
 
 // DBError wraps an archive database failure.
 func DBError(err error) *Coded {
 	return &Coded{Code: CodeDBError, Exit: ExitRuntime, cause: err,
 		Message: "archive database error",
-		Fix:     "Check that the archive path is writable and has free space; run `teamscrawl doctor`."}
+		Fix:     "Check that the archive path is writable and has free space; run `m365crawl doctor`."}
 }
 
 // Internal wraps an unexpected failure.
 func Internal(err error) *Coded {
 	return &Coded{Code: CodeInternal, Exit: ExitRuntime, cause: err,
 		Message: "internal error: " + causeText(err),
-		Fix:     "This is a bug in teamscrawl; report it with the command you ran."}
+		Fix:     "This is a bug in m365crawl; report it with the command you ran."}
 }
 
 // Usage reports a command-line usage mistake.
@@ -126,23 +126,23 @@ func NoTeamsOrigin(root string) *Coded {
 // DoctorFailed reports that the environment check found a blocking problem.
 func DoctorFailed(msg string) *Coded {
 	return &Coded{Code: CodeDoctorFailed, Exit: ExitEnvironment, Message: msg,
-		Fix: "Resolve the failing checks listed by `teamscrawl doctor`, then run again."}
+		Fix: "Resolve the failing checks listed by `m365crawl doctor`, then run again."}
 }
 
-// ArchiveNewer reports an archive written by a newer teamscrawl (a higher derivation version). An
+// ArchiveNewer reports an archive written by a newer m365crawl (a higher derivation version). An
 // older build must not write it: it would mix its own derived fields into rows the newer one keeps.
 func ArchiveNewer(found, have int) *Coded {
 	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
-		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (derivation version %d; this build writes version %d)", found, have),
-		Fix:     "Upgrade teamscrawl to a newer build, or point --db at a different archive."}
+		Message: fmt.Sprintf("this archive was written by a newer m365crawl (derivation version %d; this build writes version %d)", found, have),
+		Fix:     "Upgrade m365crawl to a newer build, or point --db at a different archive."}
 }
 
 // ArchiveSchemaNewer reports an archive whose schema version is higher than this build's: a newer
-// teamscrawl created it, and this one does not know its tables.
+// m365crawl created it, and this one does not know its tables.
 func ArchiveSchemaNewer(found, have int) *Coded {
 	return &Coded{Code: CodeArchiveNewer, Exit: ExitEnvironment,
-		Message: fmt.Sprintf("this archive was written by a newer teamscrawl (schema version %d; this build writes version %d)", found, have),
-		Fix:     "Upgrade teamscrawl to a newer build, or point --db at a different archive."}
+		Message: fmt.Sprintf("this archive was written by a newer m365crawl (schema version %d; this build writes version %d)", found, have),
+		Fix:     "Upgrade m365crawl to a newer build, or point --db at a different archive."}
 }
 
 // PartialSync reports a sync in which some sources committed and others failed. detail names the
@@ -150,7 +150,7 @@ func ArchiveSchemaNewer(found, have int) *Coded {
 func PartialSync(detail string) *Coded {
 	return &Coded{Code: CodePartialSync, Exit: ExitRuntime,
 		Message: "some Teams sources synced and others failed: " + detail,
-		Fix:     "Run `teamscrawl doctor` to see what is wrong with the failing source, fix it and run `teamscrawl sync` again; the sources that synced are already in the archive."}
+		Fix:     "Run `m365crawl doctor` to see what is wrong with the failing source, fix it and run `m365crawl sync` again; the sources that synced are already in the archive."}
 }
 
 // Interrupted is a command stopped by SIGINT or SIGTERM. Every write is one transaction per
@@ -161,10 +161,10 @@ func Interrupted() *Coded {
 		Fix:     "Run the command again."}
 }
 
-// Locked reports that another teamscrawl run holds the archive lock.
+// Locked reports that another m365crawl run holds the archive lock.
 func Locked(msg string) *Coded {
 	return &Coded{Code: CodeLocked, Exit: ExitLocked, Message: msg,
-		Fix: "Wait for the other teamscrawl run to finish, then run again."}
+		Fix: "Wait for the other m365crawl run to finish, then run again."}
 }
 
 var _ error = (*Coded)(nil)

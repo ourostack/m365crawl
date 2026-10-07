@@ -9,7 +9,7 @@ export GOWORK=off
 
 modpath="$(go list -m)"
 packages="${COVERAGE_PACKAGES:-./internal/...}"
-tmp_root="${TEAMSCRAWL_TMPDIR:-}"
+tmp_root="${M365CRAWL_TMPDIR:-}"
 if [ -n "$tmp_root" ]; then
 	mkdir -p "$tmp_root"
 	tmp="$(mktemp -d "$tmp_root/check-coverage.XXXXXX")"

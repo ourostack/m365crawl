@@ -1,4 +1,4 @@
-BINARY ?= bin/teamscrawl
+BINARY ?= bin/m365crawl
 GOLANGCI_LINT_VERSION ?= v2.14.0
 GOVULNCHECK_VERSION ?= v1.8.0
 ACTIONLINT_VERSION ?= v1.7.12
@@ -21,8 +21,8 @@ help:
 		'  build          Build the CLI into $(BINARY).' \
 		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
 		'  e2e            Run end-to-end tests (build tag e2e).' \
-		'  acceptance     Run the real-cache acceptance tests (build tag acceptance; needs TEAMSCRAWL_REAL_CACHE=1, Full Disk Access, node, python3).' \
-		'  acceptance-calendar  Run only the calendar and Outlook real-cache checks (TEAMSCRAWL_REAL_CACHE=1; TEAMSCRAWL_OUTLOOK_ROOT enables the Outlook ones).' \
+		'  acceptance     Run the real-cache acceptance tests (build tag acceptance; needs M365CRAWL_REAL_CACHE=1, Full Disk Access, node, python3).' \
+		'  acceptance-calendar  Run only the calendar and Outlook real-cache checks (M365CRAWL_REAL_CACHE=1; M365CRAWL_OUTLOOK_ROOT enables the Outlook ones).' \
 		'  v8vectors      Regenerate testdata/v8 with Node 22 (scripts/v8vectors/gen.mjs).' \
 		'  fixture        Regenerate testdata/teams-fixture with Edge via Playwright (scripts/fixture).' \
 		'  fmt            Apply Go formatting.' \
@@ -37,7 +37,7 @@ help:
 		'  clean          Remove local build output.'
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/teamscrawl/internal/cli.version=$(VERSION) -X github.com/ourostack/teamscrawl/internal/cli.commit=$(COMMIT) -X github.com/ourostack/teamscrawl/internal/cli.date=$(DATE)" -o "$(BINARY)" ./cmd/teamscrawl
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/m365crawl/internal/cli.version=$(VERSION) -X github.com/ourostack/m365crawl/internal/cli.commit=$(COMMIT) -X github.com/ourostack/m365crawl/internal/cli.date=$(DATE)" -o "$(BINARY)" ./cmd/m365crawl
 
 test:
 	go test -race -count=1 -timeout 15m $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"weak"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 func TestDeniedNames(t *testing.T) {

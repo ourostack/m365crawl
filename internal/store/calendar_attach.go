@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // attachedRecap names a recap an event holds. SeriesLevel is true when the recap carries the id
@@ -243,7 +243,7 @@ type CalendarActions struct {
 // noOwnName is the usage error of Mine when no account in scope has its own name in the archive yet.
 func noOwnName() *errs.Coded {
 	c := errs.Usage("--mine needs your own name, which the archive does not hold yet for this account")
-	c.Fix = "Run `teamscrawl sync` so your own user is archived (`teamscrawl whoami` shows display_name), or filter with --owner <name>."
+	c.Fix = "Run `m365crawl sync` so your own user is archived (`m365crawl whoami` shows display_name), or filter with --owner <name>."
 	return c
 }
 

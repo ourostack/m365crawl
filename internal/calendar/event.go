@@ -1,4 +1,4 @@
-// Package calendar is the calendar core shared by teamscrawl and outlookcrawl: the event model,
+// Package calendar is the calendar core shared by m365crawl and outlookcrawl: the event model,
 // the keys that identify one occurrence across sources, the merge that picks the freshest copy,
 // and the append-only capture tables (events, recaps, covered days) behind Agenda. It imports no
 // source adapter and no archive code; callers hand it a *sql.DB opened with SchemaDDL.
@@ -146,7 +146,7 @@ type Window struct {
 }
 
 // timeLayout is fixed width so stored instants compare correctly as text (the layout the
-// teamscrawl archive uses).
+// m365crawl archive uses).
 const timeLayout = "2006-01-02T15:04:05.000Z"
 
 // dateLayout is the all-day date layout.

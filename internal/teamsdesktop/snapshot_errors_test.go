@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 

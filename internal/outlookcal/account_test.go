@@ -3,8 +3,8 @@ package outlookcal
 import (
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 // accountObject builds an account object and reads it back through the reader, as a store would give it.

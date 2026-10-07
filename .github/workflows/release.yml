@@ -177,7 +177,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.decide.outputs.tag }}
         run: |
-          cask="dist/homebrew/Casks/teamscrawl.rb"
+          cask="dist/homebrew/Casks/m365crawl.rb"
           if [ ! -f "$cask" ]; then
             echo "::error::goreleaser did not render ${cask} for ${TAG}; the release has no cask to publish"
             exit 1

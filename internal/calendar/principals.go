@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // linkUsage is a usage-class error that says how to fix the link.

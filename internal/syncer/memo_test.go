@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // archiveQueries are the content tables of an archive, as dumpArchive and sameArchive read them.
@@ -584,7 +584,7 @@ func TestUnreadableEffectsMeanAFullRead(t *testing.T) {
 	}
 }
 
-// TEAMSCRAWL_FULL_READ=1 and Options.FullRead both read every record in full.
+// M365CRAWL_FULL_READ=1 and Options.FullRead both read every record in full.
 func TestFullReadSwitches(t *testing.T) {
 	isolateTmp(t)
 	root, db := syncedStart(t)

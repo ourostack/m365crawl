@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 // head15 is a 15-byte head whose last 11 bytes are the trailer constant (the

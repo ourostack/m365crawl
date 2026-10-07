@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 )
 
 // fakeKV is an in-memory key-value store that satisfies the kv interface.

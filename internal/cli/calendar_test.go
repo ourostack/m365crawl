@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 func TestParseRange(t *testing.T) {
@@ -204,7 +204,7 @@ func TestCalendarAgendaUsageErrors(t *testing.T) {
 	}
 	// The command named in a fields error is the one the reader typed.
 	_, _, errOut := e.run("--max-age", "0", "calendar", "--fields", "attendees")
-	if !strings.Contains(errOut, "teamscrawl calendar event <event_id> --fields attendees") {
+	if !strings.Contains(errOut, "m365crawl calendar event <event_id> --fields attendees") {
 		t.Errorf("fix: %s", errOut)
 	}
 }
@@ -291,7 +291,7 @@ func TestCalendarOldArchiveAndNoArchive(t *testing.T) {
 	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions"}} {
 		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
 		m := decode(t, out)
-		if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run teamscrawl sync") {
+		if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run m365crawl sync") {
 			t.Errorf("%v on an old archive: %d %s %s", args, code, out, errOut)
 		}
 		if _, has := m["items"]; args[len(args)-1] != "ev_x" && !has {

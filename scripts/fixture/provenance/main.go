@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
 )
 
 type result struct {

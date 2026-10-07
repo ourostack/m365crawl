@@ -1,6 +1,6 @@
 # The new Outlook store: container and calendar layout
 
-This page records what teamscrawl knows about `HxStore.hxd`, the block store that new Outlook for Mac keeps its mail and calendar in. It is the layout the reader (`internal/hxstore`) and the test builder (`internal/hxstore/hxbuild`) are written against. It holds structure and counts only: no subject, name, address, link, id or time-zone name seen on a real machine appears here, and none may be added. The one exception is the fixed 16-byte prefix of an iCal UID, which is a public format constant.
+This page records what m365crawl knows about `HxStore.hxd`, the block store that new Outlook for Mac keeps its mail and calendar in. It is the layout the reader (`internal/hxstore`) and the test builder (`internal/hxstore/hxbuild`) are written against. It holds structure and counts only: no subject, name, address, link, id or time-zone name seen on a real machine appears here, and none may be added. The one exception is the fixed 16-byte prefix of an iCal UID, which is a public format constant.
 
 ## Where this comes from
 
@@ -224,7 +224,7 @@ What this means for the reader: an event Outlook deleted can be read, unchanged,
 
 What can make an event absent without a deletion, and the rule that follows:
 
-- **Eviction.** Outlook keeps a rolling window of events: in s5 the earliest non-master event starts 99.4 days before the copy (99.3 days in s0, 6 hours of clock earlier, so the edge moves with the clock) and the latest 358.5 days after it, while 54 of the 78 series masters start more than 90 days back and are kept as long as their series lives. An event that falls off the back of the window is absent without anyone deleting it. teamscrawl therefore judges only events that start within the last 60 days or later (360 of the 3,294 non-master events of s5 start before that and are never judged), and never a master.
+- **Eviction.** Outlook keeps a rolling window of events: in s5 the earliest non-master event starts 99.4 days before the copy (99.3 days in s0, 6 hours of clock earlier, so the edge moves with the clock) and the latest 358.5 days after it, while 54 of the 78 series masters start more than 90 days back and are kept as long as their series lives. An event that falls off the back of the window is absent without anyone deleting it. m365crawl therefore judges only events that start within the last 60 days or later (360 of the 3,294 non-master events of s5 start before that and are never judged), and never a master.
 - **A damaged or unmapped read.** A torn block (59 to 80 of about 17,500 blocks, about 0.4%, on a store copied while Outlook runs, 18 after compaction) or an event the mapper rejects can hide a live event, and the reader counts a loss only above 2% damaged blocks, so a single read cannot be trusted to show every live event. An event is therefore marked gone only when it is missing from two consecutive reads of different copies that lost nothing; the first miss is only remembered, and a read with a loss, or the event seen again, forgets it. A linked Teams twin is hidden by an Outlook removal (merge rule M0), which is why one miss must never mark.
 - **A reset store.** A read that would remember more than 20 events and more than a tenth of the live events it judges remembers none.
 

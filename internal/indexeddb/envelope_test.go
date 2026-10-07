@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 // v8 "hi": version 15 header, one-byte string tag, length 2.
