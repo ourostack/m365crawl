@@ -678,7 +678,7 @@ func TestRealOutlookCost(t *testing.T) {
 	case !d.own.ok:
 		t.Log("peak RSS is not available on this platform; the memory budget is not checked")
 	default:
-		t.Logf("the Outlook read alone, each in a fresh process on a copy of the archive: peak RSS %s when it reads the store, %s when it finds it unchanged: +%s (budget +%s)", mb(d.own.first), mb(d.own.baseline), mb(d.own.over()), mb(c.RSSOverTeamsMax))
+		t.Logf("the Outlook read alone, each in a fresh process on a copy of the archive: peak RSS %s when it reads the store, %s for a fresh process that only opens the archive (Outlook off, no Teams root): +%s (budget +%s)", mb(d.own.first), mb(d.own.baseline), mb(d.own.over()), mb(c.RSSOverTeamsMax))
 		if d.own.over() > c.RSSOverTeamsMax {
 			t.Errorf("the Outlook read adds %s of peak RSS, above the %s budget", mb(d.own.over()), mb(c.RSSOverTeamsMax))
 		}

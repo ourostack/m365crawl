@@ -21,19 +21,23 @@ import (
 // rises: the Teams-only sync has set it before the Outlook sync starts, and on macOS the pages Go
 // frees stay resident and are reused, so a combined run says nothing about what Outlook adds, and
 // anything the Teams pass of a later sync does is charged to Outlook. So the Outlook read is also
-// run alone, twice, each time in a fresh process on a copy of the archive that holds the Teams
-// data: the first run reads the store, the second finds it unchanged and reads nothing. The
-// difference between their peaks is what reading and committing the Outlook store costs.
+// run alone in a fresh process on a copy of the archive that holds the Teams data, and compared
+// with a fresh process that does everything but the Outlook read: it opens the same archive and
+// runs a sync with Outlook off and no Teams root. The difference between their peaks is what
+// reading and committing the Outlook store costs. (A second Outlook sync is no baseline: the live
+// store changes, and a sync with no minimum interval reads it again.)
 
 const (
 	childDBEnv   = "M365CRAWL_ACCEPTANCE_CHILD_DB"
 	childRootEnv = "M365CRAWL_ACCEPTANCE_CHILD_OUTLOOK_ROOT"
+	childModeEnv = "M365CRAWL_ACCEPTANCE_CHILD_MODE" // "baseline": Outlook off
 	childMarker  = "M365CRAWL-CHILD-RSS"
 )
 
 // TestChildOutlookSync is the child process of childPeaks: it runs only when childDBEnv is set. It
 // syncs the Outlook store alone (no Teams root) into the archive and prints its process peak RSS
-// before and after, in bytes, and the error code if the sync failed.
+// before and after, in bytes, and the error code if the sync failed. In baseline mode Outlook is
+// off: the sync opens the archive, brings it up to date and finds no source, which is its error.
 func TestChildOutlookSync(t *testing.T) {
 	db, root := os.Getenv(childDBEnv), os.Getenv(childRootEnv)
 	if db == "" || root == "" {
@@ -42,10 +46,12 @@ func TestChildOutlookSync(t *testing.T) {
 	before := processUsage()
 	_, _, err := syncer.Run(context.Background(), syncer.Options{
 		Root: filepath.Join(t.TempDir(), "no-teams"), DBPath: db,
-		OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1,
+		OutlookEnabled: os.Getenv(childModeEnv) != "baseline", OutlookRoot: root, OutlookMinReadInterval: -1,
 	})
 	code := "none"
-	if err != nil {
+	if err != nil && os.Getenv(childModeEnv) == "baseline" {
+		code = "none" // no Teams root and no Outlook: nothing to sync is the expected end
+	} else if err != nil {
 		code = errCode(err)
 	}
 	after := processUsage()
@@ -53,9 +59,9 @@ func TestChildOutlookSync(t *testing.T) {
 }
 
 // childPeaks runs the child once and returns its peak RSS before and after the sync.
-func childPeaks(db, root string) (before, after int64, ok bool, failure string) {
+func childPeaks(db, root, mode string) (before, after int64, ok bool, failure string) {
 	cmd := osexec.Command(os.Args[0], "-test.run=^TestChildOutlookSync$", "-test.count=1") //nolint:gosec // this test binary
-	cmd.Env = append(os.Environ(), childDBEnv+"="+db, childRootEnv+"="+root)
+	cmd.Env = append(os.Environ(), childDBEnv+"="+db, childRootEnv+"="+root, childModeEnv+"="+mode)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -105,24 +111,26 @@ func copyArchive(src, dst string) error {
 type ownCost struct {
 	ok       bool
 	first    int64 // peak RSS of a fresh process that reads the Outlook store
-	baseline int64 // peak RSS of a fresh process that finds it unchanged
+	baseline int64 // peak RSS of a fresh process that only opens the archive
 	failure  string
 }
 
 func (c ownCost) over() int64 { return max(c.first-c.baseline, 0) }
 
-// measureOwnCost runs the two children on a copy of the archive taken before any Outlook read.
+// measureOwnCost runs the two children, each on its own copy of the archive taken before any
+// Outlook read.
 func measureOwnCost(t *testing.T, archive, root string) ownCost {
 	t.Helper()
-	db := filepath.Join(calendarScratch(t), "own-cost.db")
-	if err := copyArchive(archive, db); err != nil {
+	dir := calendarScratch(t)
+	db, baseDB := filepath.Join(dir, "own-cost.db"), filepath.Join(dir, "own-cost-baseline.db")
+	if copyArchive(archive, db) != nil || copyArchive(archive, baseDB) != nil {
 		return ownCost{failure: "the archive could not be copied for the child processes"}
 	}
-	_, first, ok1, fail := childPeaks(db, root)
+	_, first, ok1, fail := childPeaks(db, root, "outlook")
 	if fail != "" {
 		return ownCost{failure: fail}
 	}
-	_, base, ok2, fail := childPeaks(db, root)
+	_, base, ok2, fail := childPeaks(baseDB, root, "baseline")
 	if fail != "" {
 		return ownCost{failure: fail}
 	}
