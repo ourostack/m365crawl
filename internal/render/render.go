@@ -5,13 +5,14 @@
 // (https://github.com/vincentkoc/slacrawl, MIT License,
 // Copyright (c) the slacrawl authors). The banner, the section underline
 // style, the check glyphs, the table layout and the key/value block renderer
-// follow that file; the wordmark, the Teams palette and the width handling
+// follow that file; the wordmark, the Copilot gradient and the width handling
 // are m365crawl's own.
 package render
 
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"sort"
@@ -86,70 +87,131 @@ func truecolor() bool {
 	return false
 }
 
-// purple is Teams purple (#6264A7); lavender is a lighter accent (#B4B6E4).
-func purple() string {
-	if truecolor() {
-		return "\x1b[38;2;98;100;167m"
-	}
-	return "\x1b[38;5;61m"
+// gradientStops are the Microsoft 365 / Copilot wordmark colours, left to
+// right: blue, indigo, purple, pink, orange.
+var gradientStops = [5][3]int{
+	{0x2E, 0xA7, 0xE8},
+	{0x4F, 0x6B, 0xED},
+	{0x8A, 0x5C, 0xF6},
+	{0xD7, 0x42, 0x9E},
+	{0xF9, 0x8B, 0x43},
 }
 
-func lavender() string {
-	if truecolor() {
-		return "\x1b[38;2;180;182;228m"
+// gradientAt interpolates the stops linearly; t is clamped to [0, 1].
+func gradientAt(t float64) [3]int {
+	t = math.Max(0, math.Min(1, t))
+	n := len(gradientStops) - 1
+	i := int(t * float64(n))
+	if i > n-1 {
+		i = n - 1
 	}
-	return "\x1b[38;5;146m"
+	f := t*float64(n) - float64(i)
+	var out [3]int
+	for k := range out {
+		a, b := float64(gradientStops[i][k]), float64(gradientStops[i+1][k])
+		out[k] = int(math.RoundToEven(a + (b-a)*f))
+	}
+	return out
+}
+
+// cubeLevels are the xterm-256 colour cube channel values (indexes 16-231).
+var cubeLevels = [6]int{0, 95, 135, 175, 215, 255}
+
+func sqDist(a, b [3]int) int {
+	d := 0
+	for k := range a {
+		d += (a[k] - b[k]) * (a[k] - b[k])
+	}
+	return d
+}
+
+// xterm256 returns the xterm-256 index nearest to c, searching the colour
+// cube (16-231) and the grey ramp (232-255). The 16 theme-defined system
+// colours are skipped because their appearance is up to the terminal.
+func xterm256(c [3]int) int {
+	best, bestD := 16, -1
+	for i := 16; i < 256; i++ {
+		var p [3]int
+		if i < 232 {
+			n := i - 16
+			p = [3]int{cubeLevels[n/36], cubeLevels[(n/6)%6], cubeLevels[n%6]}
+		} else {
+			g := 8 + 10*(i-232)
+			p = [3]int{g, g, g}
+		}
+		if d := sqDist(c, p); bestD < 0 || d < bestD {
+			best, bestD = i, d
+		}
+	}
+	return best
+}
+
+// gradientCode is the foreground escape for column col of a width-wide
+// wordmark.
+func gradientCode(col, width int) string {
+	t := 0.0
+	if width > 1 {
+		t = float64(col) / float64(width-1)
+	}
+	c := gradientAt(t)
+	if truecolor() {
+		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c[0], c[1], c[2])
+	}
+	return fmt.Sprintf("\x1b[38;5;%dm", xterm256(c))
 }
 
 // wordmark holds one glyph per letter of "m365crawl", five rows each.
 var wordmark = [][5]string{
-	{" ▄▄ ", " ██ ", "▀██▀", " ██ ", " ▀█▄"},                // t
-	{"     ", "     ", "▄███▄", "██▀▀▀", "▀████"},           // e
-	{"     ", "     ", " ▀▀█▄", "▄█▀██", "▀█▄██"},           // a
 	{"       ", "       ", "██▀█▀██", "██ █ ██", "██   ██"}, // m
-	{"     ", "     ", "▄█▀▀▀", "▀███▄", "▄▄▄█▀"},           // s
-	{"     ", "     ", "▄████", "██    ", "▀████"},          // c
+	{"▄████▄", "    ██", "  ███▀", "    ██", "▀████▀"},      // 3
+	{"▄████▄", "██    ", "█████▄", "██  ██", "▀████▀"},      // 6
+	{"██████", "██    ", "█████▄", "    ██", "▀████▀"},      // 5
+	{"     ", "     ", "▄████", "██   ", "▀████"},           // c
 	{"     ", "     ", "████▄", "██ ▀▀", "██   "},           // r
 	{"     ", "     ", " ▀▀█▄", "▄█▀██", "▀█▄██"},           // a
 	{"       ", "       ", "██   ██", "██ █ ██", " ██▀██ "}, // w
 	{"▄▄", "██", "██", "██", "██"},                          // l
 }
 
-func init() {
-	for i := range wordmark {
-		w := 0
-		for _, row := range wordmark[i] {
-			if n := displayWidth(row); n > w {
-				w = n
-			}
+// wordmarkRows joins the glyphs with one space between letters.
+func wordmarkRows() [5]string {
+	var rows [5]string
+	for r := range rows {
+		parts := make([]string, len(wordmark))
+		for i, g := range wordmark {
+			parts[i] = g[r]
 		}
-		for r := range wordmark[i] {
-			wordmark[i][r] = padRight(wordmark[i][r], w)
-		}
+		rows[r] = strings.Join(parts, " ")
 	}
+	return rows
 }
 
-// Banner writes the wordmark, a dim subtitle and a blank line.
+// Banner writes the wordmark, a dim subtitle and a blank line. With colour on,
+// each column takes its colour from the gradient across the wordmark width.
 func Banner(w io.Writer, subtitle string, color bool) {
 	var b strings.Builder
-	for r := 0; r < 5; r++ {
-		for i, glyph := range wordmark {
-			if i > 0 {
-				b.WriteByte(' ')
+	rows := wordmarkRows()
+	width := displayWidth(rows[0])
+	for _, row := range rows {
+		for i, r := range []rune(row) {
+			if r == ' ' || !color {
+				b.WriteRune(r)
+				continue
 			}
-			accent := purple()
-			if i == 0 {
-				accent = lavender()
-			}
-			b.WriteString(colorize(color, accent, strings.TrimRight(glyph[r], " ")))
-			b.WriteString(strings.Repeat(" ", displayWidth(glyph[r])-displayWidth(strings.TrimRight(glyph[r], " "))))
+			b.WriteString(gradientCode(i, width))
+			b.WriteRune(r)
 		}
-		b.WriteString("\n")
+		if color {
+			b.WriteString(ansiReset)
+		}
+		b.WriteByte('\n')
 	}
-	b.WriteString(colorize(color, ansiDim, "local-first Teams mirror for SQLite"))
+	text := "local-first Microsoft 365 mirror for SQLite"
 	if subtitle != "" {
-		b.WriteString(colorize(color, ansiDim, "  |  "))
+		b.WriteString(colorize(color, ansiDim, text+"  |  "))
 		b.WriteString(colorize(color, ansiCyan, strings.ToLower(subtitle)))
+	} else {
+		b.WriteString(colorize(color, ansiDim, text))
 	}
 	b.WriteString("\n\n")
 	_, _ = io.WriteString(w, trimLineEnds(b.String()))

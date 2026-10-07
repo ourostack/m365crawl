@@ -66,15 +66,65 @@ func TestBannerWidthAndFallback(t *testing.T) {
 		t.Setenv("COLORTERM", ct)
 		b.Reset()
 		Banner(&b, "x", true)
-		if !strings.Contains(b.String(), "\x1b[38;2;98;100;167m") {
-			t.Errorf("COLORTERM=%s: want truecolor purple", ct)
+		if !strings.Contains(b.String(), "\x1b[38;2;249;139;67m") || !strings.Contains(b.String(), "\x1b[38;2;46;167;232m") {
+			t.Errorf("COLORTERM=%s: want truecolor gradient ends", ct)
 		}
 	}
 	t.Setenv("COLORTERM", "")
 	b.Reset()
 	Banner(&b, "x", true)
-	if !strings.Contains(b.String(), "\x1b[38;5;61m") || strings.Contains(b.String(), "38;2;") {
+	if !strings.Contains(b.String(), "\x1b[38;5;38m") || strings.Contains(b.String(), "38;2;") {
 		t.Errorf("want 256-color fallback")
+	}
+}
+
+func TestGradientAt(t *testing.T) {
+	cases := []struct {
+		t    float64
+		want [3]int
+	}{
+		{-1, [3]int{46, 167, 232}},
+		{0, [3]int{46, 167, 232}},
+		{0.125, [3]int{62, 137, 234}},
+		{0.25, [3]int{79, 107, 237}},
+		{0.5, [3]int{138, 92, 246}},
+		{0.75, [3]int{215, 66, 158}},
+		{0.9, [3]int{235, 110, 103}},
+		{1, [3]int{249, 139, 67}},
+		{2, [3]int{249, 139, 67}},
+	}
+	for _, c := range cases {
+		if got := gradientAt(c.t); got != c.want {
+			t.Errorf("gradientAt(%v) = %v, want %v", c.t, got, c.want)
+		}
+	}
+}
+
+func TestXterm256(t *testing.T) {
+	cases := []struct {
+		in   [3]int
+		want int
+	}{
+		{[3]int{0, 0, 0}, 16},
+		{[3]int{255, 255, 255}, 231},
+		{[3]int{255, 0, 0}, 196},
+		{[3]int{128, 128, 128}, 244},
+		{[3]int{8, 8, 8}, 232},
+		{[3]int{238, 238, 238}, 255},
+		{[3]int{46, 167, 232}, 38},
+		{[3]int{249, 139, 67}, 209},
+	}
+	for _, c := range cases {
+		if got := xterm256(c.in); got != c.want {
+			t.Errorf("xterm256(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestGradientCodeSingleColumn(t *testing.T) {
+	t.Setenv("COLORTERM", "truecolor")
+	if got := gradientCode(0, 1); got != "\x1b[38;2;46;167;232m" {
+		t.Errorf("got %q", got)
 	}
 }
 
