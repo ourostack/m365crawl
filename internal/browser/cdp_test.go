@@ -456,3 +456,23 @@ func TestNavigateCancelledDuringLoadWait(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestCallDefaultTimeout(t *testing.T) {
+	s := browsertest.NewServer(t)
+	p := testPage(t, s)
+	release := make(chan struct{})
+	defer close(release)
+	s.Handle("Runtime.evaluate", func(browsertest.Request) (any, *browsertest.Error) {
+		<-release
+		return map[string]any{}, nil
+	})
+	old := callTimeout
+	t.Cleanup(func() { callTimeout = old })
+	callTimeout = 50 * time.Millisecond
+	if err := p.Eval(context.Background(), "x", nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a call with no deadline of its own must time out by itself: %v", err)
+	}
+	if callTimeout == 0 || old != 5*time.Minute {
+		t.Fatalf("default call timeout = %v", old)
+	}
+}

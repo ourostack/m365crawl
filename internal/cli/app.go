@@ -120,13 +120,13 @@ func (rt *runtime) printVersion() error {
 	return rt.write("version", versionInfo{Version: version, Commit: commit, Date: date})
 }
 
-// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT
-// or SIGTERM cancels the context every lower layer cleans up on; a second one force-quits at once
+// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT,
+// SIGTERM or SIGHUP (a closed terminal) cancels the context every lower layer cleans up on; a second one force-quits at once
 // with status 130, in case that cleanup is stuck.
 func Main(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 2)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

@@ -20,3 +20,6 @@ func reclaim(_ string, pid int, started int64) {
 
 // sweepArgv has nothing to do on Windows: the job object is the guarantee.
 func sweepArgv(string, bool) error { return nil }
+
+// groupHasProfileProcs: the job object is private to this launch, so it is always safe to end.
+func groupHasProfileProcs(string) bool { return true }

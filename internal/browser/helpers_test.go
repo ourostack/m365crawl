@@ -25,7 +25,8 @@ func init() {
 // still running with it, so a failing test cannot leak a process.
 func newProfile(t *testing.T) string {
 	t.Helper()
-	profile := filepath.Join(t.TempDir(), "browser")
+	// The archive directory is created by the lock, so on Windows it gets the private ACL the lock demands.
+	profile := filepath.Join(t.TempDir(), "archive", "browser")
 	t.Cleanup(func() { _ = sweepArgv(profile, false) })
 	return profile
 }
@@ -80,6 +81,17 @@ func requireLockFree(t *testing.T, profile string) {
 	release, err := store.AcquireLock(profile)
 	if err != nil {
 		t.Fatalf("the profile lock was not released: %v", err)
+	}
+	release()
+}
+
+// makePrivateParent creates the profile's parent the way the archive does, so a test can put
+// files in the profile before Launch without breaking the Windows ACL rule on the parent.
+func makePrivateParent(t *testing.T, profile string) {
+	t.Helper()
+	release, err := store.AcquireLock(profile)
+	if err != nil {
+		t.Fatal(err)
 	}
 	release()
 }

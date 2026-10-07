@@ -5,6 +5,7 @@ package browser
 import (
 	"errors"
 	"os/exec"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -12,7 +13,7 @@ import (
 // group is the unit the browser's lifetime is built on: the process group the launch created.
 type group struct {
 	pgid     int
-	released bool
+	released atomic.Bool
 }
 
 // prepareCmd makes the child the leader of a new process group.
@@ -29,15 +30,15 @@ func groupAlive(pgid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func (g *group) alive() bool { return !g.released && groupAlive(g.pgid) }
+func (g *group) alive() bool { return !g.released.Load() && groupAlive(g.pgid) }
 func (g *group) term()       { g.signal(syscall.SIGTERM) }
 func (g *group) kill()       { g.signal(syscall.SIGKILL) }
 
 // release ends the group's claim on the process group id, which the system may hand out again.
-func (g *group) release() { g.released = true }
+func (g *group) release() { g.released.Store(true) }
 
 func (g *group) signal(sig syscall.Signal) {
-	if !g.released {
+	if !g.released.Load() {
 		_ = syscall.Kill(-g.pgid, sig)
 	}
 }

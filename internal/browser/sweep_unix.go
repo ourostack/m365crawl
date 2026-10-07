@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -13,30 +14,42 @@ import (
 
 type procInfo struct {
 	pid, pgid int
-	args      string
+	argv      []string
 }
 
 // Test seams.
 var (
-	psCommand = "ps"
+	psCommand = "/bin/ps"
 	listProcs = psList
+	readArgs  = readProcArgs
 )
 
-// psList lists every process with its group and full command line. ps prints the arguments
-// joined by spaces, which is enough to find a --user-data-dir flag.
+// psList lists every process with its group and its argument vector. The vector comes from the
+// kernel (kern.procargs2 on macOS, /proc/<pid>/cmdline on Linux), one element per argument, so
+// a profile path with spaces in it is matched exactly. Processes whose arguments cannot be read
+// (exited meanwhile, or another user's) are left out; they are not ours.
 func psList() ([]procInfo, error) {
-	out, err := exec.Command(psCommand, "-axww", "-o", "pid=,pgid=,args=").Output() //nolint:gosec // G204: fixed arguments
+	out, err := exec.Command(psCommand, "-axo", "pid=,pgid=").Output() //nolint:gosec // G204: fixed arguments
 	if err != nil {
 		return nil, err
 	}
-	return parsePS(string(out)), nil
+	var procs []procInfo
+	for _, p := range parsePS(string(out)) {
+		argv, err := readArgs(p.pid)
+		if err != nil || len(argv) == 0 {
+			continue
+		}
+		p.argv = argv
+		procs = append(procs, p)
+	}
+	return procs, nil
 }
 
 func parsePS(out string) []procInfo {
 	var procs []procInfo
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) < 3 {
+		if len(f) != 2 {
 			continue
 		}
 		pid, err1 := strconv.Atoi(f[0])
@@ -44,29 +57,15 @@ func parsePS(out string) []procInfo {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		rest := strings.TrimSpace(line)
-		rest = strings.TrimSpace(strings.TrimPrefix(rest, f[0]))
-		rest = strings.TrimSpace(strings.TrimPrefix(rest, f[1]))
-		procs = append(procs, procInfo{pid: pid, pgid: pgid, args: rest})
+		procs = append(procs, procInfo{pid: pid, pgid: pgid})
 	}
 	return procs
 }
 
-// ownedBy reports whether args carry this profile's --user-data-dir flag, and not a longer path
-// that merely starts with it.
-func ownedBy(args, profile string) bool {
-	marker := "--user-data-dir=" + profile
-	for from := 0; ; {
-		i := strings.Index(args[from:], marker)
-		if i < 0 {
-			return false
-		}
-		end := from + i + len(marker)
-		if end == len(args) || args[end] == ' ' {
-			return true
-		}
-		from = end
-	}
+// ownedBy reports whether one argument is exactly this profile's --user-data-dir flag. Matching
+// whole arguments means a longer path that merely starts with the profile path does not count.
+func ownedBy(argv []string, profile string) bool {
+	return slices.Contains(argv, "--user-data-dir="+profile)
 }
 
 // profileProcs returns the processes started with this profile, other than this one.
@@ -77,7 +76,7 @@ func profileProcs(profile string) ([]procInfo, error) {
 	}
 	var out []procInfo
 	for _, p := range all {
-		if p.pid != os.Getpid() && ownedBy(p.args, profile) {
+		if p.pid != os.Getpid() && ownedBy(p.argv, profile) {
 			out = append(out, p)
 		}
 	}
@@ -135,4 +134,11 @@ func sweepArgv(profile string, polite bool) error {
 		return fmt.Errorf("%d browser processes survived the kill", len(left))
 	}
 	return nil
+}
+
+// groupHasProfileProcs reports whether any process runs with the profile. When the list cannot
+// be read it answers yes, so the caller errs toward cleaning up.
+func groupHasProfileProcs(profile string) bool {
+	procs, err := profileProcs(profile)
+	return err != nil || len(procs) > 0
 }

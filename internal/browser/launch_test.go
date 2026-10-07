@@ -113,6 +113,7 @@ func TestLaunchDeletesStaleDevToolsActivePort(t *testing.T) {
 	}()
 	stalePort := ln.Addr().(*net.TCPAddr).Port
 	b, profile, err := launchFake(t, nil, func(o *LaunchOptions) {
+		makePrivateParent(t, o.Profile)
 		if err := os.MkdirAll(o.Profile, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -257,6 +258,7 @@ func TestLaunchAdoptFails(t *testing.T) {
 func TestLaunchPidFileWriteFails(t *testing.T) {
 	_, profile, err := launchFake(t, nil, func(o *LaunchOptions) {
 		// A directory with a file in it where the pid file goes: it cannot be removed or written.
+		makePrivateParent(t, o.Profile)
 		dir := pidPath(o.Profile)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)

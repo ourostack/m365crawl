@@ -35,12 +35,15 @@ type Page struct {
 // Page attaches to the initial about:blank tab (or opens one if there is none) and returns it.
 // Every later call carries the session id. The same Page comes back on later calls.
 func (b *Browser) Page(ctx context.Context) (*Page, error) {
+	b.pageMu.Lock()
+	defer b.pageMu.Unlock()
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.page != nil {
-		return b.page, nil
+	existing := b.page
+	b.mu.Unlock()
+	if existing != nil {
+		return existing, nil
 	}
-	c, err := b.connectLocked(ctx)
+	c, err := b.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +78,11 @@ func (b *Browser) Page(ctx context.Context) (*Page, error) {
 	if err := c.call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": id, "flatten": true}, &attached); err != nil {
 		return nil, err
 	}
-	b.page = &Page{c: c, session: attached.SessionID}
-	return b.page, nil
+	p := &Page{c: c, session: attached.SessionID}
+	b.mu.Lock()
+	b.page = p
+	b.mu.Unlock()
+	return p, nil
 }
 
 // Navigate loads url in the tab and waits for the document to finish loading.

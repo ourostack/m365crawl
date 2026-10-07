@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -167,5 +168,75 @@ func TestReleasedGroupIsInert(t *testing.T) {
 	b.group.kill()
 	if b.group.alive() {
 		t.Fatal("a released group must report nothing alive and signal nothing")
+	}
+}
+
+func TestCloseDuringHungPage(t *testing.T) {
+	// The page never answers and the caller set no deadline. Close, from another goroutine, must
+	// still end the browser within its grace periods, and the stuck call must come back.
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvIgnoreClose: "1", browsertest.EnvHangEval: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pids := fakePids(t, profile)
+	page, err := b.Page(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalDone := make(chan error, 1)
+	go func() { evalDone <- page.Eval(context.Background(), "1", nil) }()
+	time.Sleep(200 * time.Millisecond) // let the call reach the browser
+
+	closed := make(chan error, 1)
+	go func() { closed <- b.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("Close did not return while a page call was hung")
+	}
+	requireGone(t, "leader", pids["leader"])
+	requireGone(t, "child", pids["child"])
+	select {
+	case err := <-evalDone:
+		if err == nil {
+			t.Fatal("the hung call must fail once the browser is gone")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the hung call never returned")
+	}
+}
+
+func TestKillAllRacesClose(t *testing.T) {
+	b, _, err := launchFake(t, map[string]string{browsertest.EnvIgnoreClose: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); KillAll() }()
+		go func() { defer wg.Done(); _ = b.Close() }()
+	}
+	wg.Wait()
+}
+
+func TestConnectUsesTheConnectionAnotherCallerMade(t *testing.T) {
+	s := browsertest.NewServer(t)
+	b := testBrowser(s)
+	winner := &client{}
+	old := dialFn
+	t.Cleanup(func() { dialFn = old })
+	dialFn = func(ctx context.Context, u string) (*client, error) {
+		b.mu.Lock()
+		b.conn = winner // another caller connected while this one was dialing
+		b.mu.Unlock()
+		return old(ctx, u)
+	}
+	c, err := b.connect(context.Background())
+	if err != nil || c != winner {
+		t.Fatalf("connect = %p %v, want the first connection %p", c, err, winner)
 	}
 }

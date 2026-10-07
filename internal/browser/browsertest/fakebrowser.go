@@ -21,6 +21,7 @@ const (
 	EnvNoPort      = "FAKE_NO_PORT"      // never write DevToolsActivePort
 	EnvLeaderExits = "FAKE_LEADER_EXITS" // exit the leader once ready, leaving its children
 	EnvEscape      = "FAKE_ESCAPE_CHILD" // start a child in its own session (Unix)
+	EnvHangEval    = "FAKE_HANG_EVAL"    // never answer Runtime.evaluate, like a hung page
 )
 
 // Files the fake writes into the profile directory.
@@ -99,6 +100,13 @@ func runFake(args []string) int {
 		}
 	}
 	srv := Listen()
+	if os.Getenv(EnvHangEval) == "1" {
+		srv.Handle("Runtime.evaluate", func(Request) (any, *Error) {
+			for {
+				time.Sleep(time.Hour)
+			}
+		})
+	}
 	exit := make(chan struct{})
 	srv.OnClose(func() {
 		if os.Getenv(EnvIgnoreClose) == "1" {

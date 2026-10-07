@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -14,6 +15,9 @@ import (
 // readLimit bounds one websocket message. A transcript of tens of thousands of entries is many
 // megabytes of JSON.
 const readLimit = 64 << 20
+
+// callTimeout bounds a call whose context has no deadline of its own. A test seam.
+var callTimeout = 5 * time.Minute
 
 // CDPError is an error response from the browser.
 type CDPError struct {
@@ -109,6 +113,12 @@ func (c *client) fail(err error) {
 // call sends one command, on the given session when sessionID is not empty, and decodes the
 // result into out when out is not nil.
 func (c *client) call(ctx context.Context, sessionID, method string, params, out any) error {
+	if _, ok := ctx.Deadline(); !ok {
+		// A browser that stops answering must not hold the caller forever.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+	}
 	ch := make(chan reply, 1)
 	c.mu.Lock()
 	if c.dead != nil {

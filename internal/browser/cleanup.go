@@ -14,7 +14,7 @@ const (
 	pidFileName   = "m365crawl.pid"
 	devToolsFile  = "DevToolsActivePort"
 	termGrace     = 2 * time.Second
-	waitPollEvery = 20 * time.Millisecond
+	waitPollEvery = 100 * time.Millisecond
 )
 
 // Test seam: how long a stop waits after each signal.

@@ -62,7 +62,8 @@ func TestRealBrowserLeavesNoProcess(t *testing.T) {
 		}
 		t.Skipf("no browser installed: %v", err)
 	}
-	profile := filepath.Join(t.TempDir(), "browser")
+	// The archive directory is created by Launch, with the private access rules Windows demands.
+	profile := filepath.Join(t.TempDir(), "archive", "browser")
 	t.Cleanup(func() { _ = browser.SweepOrphan(profile) }) // a failed assertion must not leak a browser
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

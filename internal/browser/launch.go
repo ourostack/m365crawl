@@ -69,6 +69,8 @@ var (
 	acquireLock     = store.AcquireLock
 	adoptProc       = adopt
 	singletonLiveFn = singletonLive
+	sweepOrphan     = SweepOrphan
+	dialFn          = dialCDP
 	pollEvery       = 25 * time.Millisecond
 	closeWait       = 2 * time.Second
 )
@@ -85,7 +87,8 @@ type Browser struct {
 	release func()
 	wsURL   string
 
-	mu        sync.Mutex
+	mu        sync.Mutex // guards conn and page, never held across a network call
+	pageMu    sync.Mutex // serializes Page()
 	conn      *client
 	page      *Page
 	closeOnce sync.Once
@@ -116,7 +119,7 @@ func launchLocked(ctx context.Context, o LaunchOptions, release func()) (*Browse
 	if err := EnsureProfileDir(o.Profile); err != nil {
 		return nil, errs.BrowserFailed("could not prepare the browser profile: " + err.Error())
 	}
-	if err := SweepOrphan(o.Profile); err != nil {
+	if err := sweepOrphan(o.Profile); err != nil {
 		return nil, errs.BrowserFailed("an earlier browser would not stop: " + err.Error())
 	}
 	if singletonLiveFn(o.Profile) {
@@ -221,14 +224,24 @@ func readDevToolsPort(profile string) (string, bool) {
 	return "ws://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) + path, true
 }
 
-// connectLocked dials the browser endpoint once and keeps the connection. b.mu must be held.
-func (b *Browser) connectLocked(ctx context.Context) (*client, error) {
-	if b.conn != nil {
-		return b.conn, nil
+// connect dials the browser endpoint once and keeps the connection. The mutex guards only the
+// field, never a network call, so Close can always get in.
+func (b *Browser) connect(ctx context.Context) (*client, error) {
+	b.mu.Lock()
+	c := b.conn
+	b.mu.Unlock()
+	if c != nil {
+		return c, nil
 	}
-	c, err := dialCDP(ctx, b.wsURL)
+	c, err := dialFn(ctx, b.wsURL)
 	if err != nil {
 		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn != nil { // another caller connected first
+		c.close()
+		return b.conn, nil
 	}
 	b.conn = c
 	return c, nil
@@ -250,9 +263,7 @@ func (b *Browser) Close() error {
 func (b *Browser) askToClose() {
 	ctx, cancel := context.WithTimeout(context.Background(), closeWait)
 	defer cancel()
-	b.mu.Lock()
-	c, err := b.connectLocked(ctx)
-	b.mu.Unlock()
+	c, err := b.connect(ctx)
 	if err == nil {
 		_ = c.call(ctx, "", "Browser.close", nil, nil)
 	}
@@ -265,15 +276,30 @@ func (b *Browser) askToClose() {
 // stop is the hard part of Close: it ends the group and every leftover, then lets go.
 func (b *Browser) stop() error {
 	b.mu.Lock()
-	if b.conn != nil {
-		b.conn.close()
-	}
+	c := b.conn
 	b.mu.Unlock()
-	stopGroup(b.group)
+	if c != nil {
+		c.close() // ends any call still waiting on a browser that stopped answering
+	}
+	if b.worthSignallingGroup() {
+		stopGroup(b.group)
+	}
 	err := sweepArgv(b.profile, true)
 	b.group.release()
 	_ = os.Remove(pidPath(b.profile))
 	unregister(b)
 	b.release()
 	return err
+}
+
+// worthSignallingGroup says whether to signal the process group. Once the leader has exited and
+// nothing runs with the profile, the group id may already belong to someone else, so the
+// signal is skipped.
+func (b *Browser) worthSignallingGroup() bool {
+	select {
+	case <-b.exited:
+	default:
+		return true
+	}
+	return groupHasProfileProcs(b.profile)
 }
