@@ -57,7 +57,13 @@ var calendarThresholds = struct {
 	// SpikeClassCounts are the spike's object counts for the classes the plan records; SpikeObjects
 	// is its total. The plan names "the top five classes" but records only these three.
 	SpikeClassCounts map[uint16]int
-	SpikeObjects     int
+	// ClassCountRanges are classes checked against an inclusive range instead of the spike's count
+	// (fail); they are left out of the tolerance check on SpikeClassCounts.
+	ClassCountRanges map[uint16][2]int
+	// Class55PerHeaderRange bounds the class 0x55 count per class 0x4f header object (fail, when
+	// the store holds any header).
+	Class55PerHeaderRange [2]float64
+	SpikeObjects          int
 	// UnwalkedFractionWant and UnwalkedFractionBand: the share of payload bytes that is not an
 	// object (unwalked bytes plus recognized framing) is 9%, give or take the band.
 	UnwalkedFractionWant, UnwalkedFractionBand float64
@@ -92,8 +98,13 @@ var calendarThresholds = struct {
 	InvalidBlockRatioMax: 0.005,
 	ClassCountTolerance:  0.25,
 	SpikeClassCounts:     map[uint16]int{0x71: 118767, 0x55: 49272, 0x6b: 8589},
-	SpikeObjects:         264887,
-	UnwalkedFractionWant: 0.09, UnwalkedFractionBand: 0.03,
+	// Class 0x55 holds recipients and attendees, so it grows with the mailbox: a real store now
+	// holds about 68,000 to 72,000 against the spike's 49,272. It is checked as a range and as a
+	// ratio to the mail header class 0x4f (about 21 per header on that store), not as a fixed count.
+	ClassCountRanges:      map[uint16][2]int{0x55: {45000, 110000}},
+	Class55PerHeaderRange: [2]float64{8, 45},
+	SpikeObjects:          264887,
+	UnwalkedFractionWant:  0.09, UnwalkedFractionBand: 0.03,
 
 	TwinRateMin: 1.0, TwinSeriesRateMin: 1.0,
 	SpikeTwinEvents: 148, SpikeTwinSeries: 63,
