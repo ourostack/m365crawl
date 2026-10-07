@@ -57,7 +57,7 @@ macOS protects Teams' container, so the app that runs m365crawl needs Full Disk 
 m365crawl doctor
 ```
 
-`doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails. The same grant lets m365crawl read the new Outlook for Mac calendar, which it does by default when Outlook is installed; without it Outlook is reported as unavailable and the Teams sync is unaffected.
+`doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails. The same grant lets m365crawl read the new Outlook for Mac calendar and, from the profile's `Files` directory, the message bodies Outlook has downloaded (read-only; the mail commands arrive in a later release), which it does by default when Outlook is installed; without it Outlook is reported as unavailable and the Teams sync is unaffected.
 
 ### Windows: no extra permission step
 

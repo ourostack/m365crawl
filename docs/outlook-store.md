@@ -232,6 +232,88 @@ Over the six copies, 3,372 events were stable with no other event appearing or d
 
 Not established: that compaction always drops a deleted event (only one deletion of each kind was observed, both dropped by the first compaction after them); the behaviour for a deleted occurrence of a series (the probes were single events) and for a series master; whether a meeting cancelled by its organizer (the "cancelled" flag at +1082) is dropped the same way, which the 850 events carrying the cancelled prefix in the measured store suggest it is not, because they are still present.
 
+## Mail
+
+Mail objects sit in the same blocks as the calendar. The reader is `internal/outlookmail`, the builders for its tests are in `internal/hxstore/hxbuild/mail.go`. This section holds structure and counts only, measured on one private copy (Outlook 16.115, 100,663,296 bytes); no subject, name, address, id, body or file name from a real store appears here. Offsets count from the first byte of the object envelope; integers are little-endian. Confidence labels are as above. "Latest copy" means, per object key, the copy with the highest change stamp (+112), then the highest block offset.
+
+### Classes
+
+| Class | Tag (= fixed region) | Role | Distinct keys in the copy |
+| --- | --- | --- | --- |
+| 0x4f | 0x430 (1072) | message header (what a list reads) | 2,241 (3,988 copies) |
+| 0xc9 | 0x60f (1551) | message detail: Message-ID, class, In-Reply-To, sent time | 2,564 |
+| 0xca | 0x74e (1870) | body record: inline HTML or the path of a body file | 2,564, same key as the detail |
+| 0x16a | 0x318 (792) | attachment record | 4,269 |
+| 0x4d | 0x4d0 (1232) | folder | 171 (128 named, 43 unnamed) |
+| 0x55 | 0x15e (350) | one recipient | 71,335 (63,702 resolve to a detail object) |
+
+Common words: +20 object key (repeated at +40), +32 parent key, +104 string area lead (the string area base is the fixed region plus this word), +112 u64 change stamp. A class's tag is its fixed size; a mail object with another tag turns mail off for the sync (see the guard in `outlookmail.Collect`).
+
+### Strings
+
+A string is a pair: an offset word at `w` (counted from the string area base: fixed region plus the lead word) and a length word at `w+4`. The length counts bytes, terminator included, and bit 31 is set on most of them (mask it). The string is absent when the length is zero; its offset word is then 0, which points at the first string of the area, so reading it without testing the length returns some other field's text. A present string must have an even length, lie inside the object and end in a UTF-16 NUL (`hxstore.Object.PresentString`). Two exceptions: the invite id at +772 is ASCII hex text with no terminator and a base equal to the tag (no lead word), and a body is UTF-8 or a path (below). Times are .NET ticks; `0x2BCA2875F4373FFF` (the maximum) fills unused slots and is no time.
+
+### Header (class 0x4f)
+
+| Field | Offset | Coding | Confidence |
+| --- | --- | --- | --- |
+| Detail key (the logical message) | +292 | u32 key of a class 0xc9 object; resolves in 2,241 of 2,241 | established |
+| Folder | +532 (copy +552) | u32 key of a class 0x4d object; resolves in 2,241 of 2,241 | established |
+| Received | +224 (copy +672) | ticks, UTC; valid in 2,241 of 2,241 | established |
+| Subject | +900/+904 | string; absent in 1 of 2,241 | established |
+| Sender name | +884/+888 | string | established |
+| Sender address (From) | +940/+944 | string; +912 is the list column's address (sender on received mail, first recipient on sent mail) and is ignored | established (+940), likely (+912) |
+| Preview | +920/+924 | string; absent in 46 of 2,241 | established |
+| Read state | +740 | u32: 1 unread, 0 read; 2 to 7 (22 objects) unknown | established for 0 and 1 |
+| Flag | byte +1033 | 0 none, 2 flagged, 1 complete; no real message in the copy has it set | established by a probe only |
+| Importance | +752 | 0 low, 1 normal (2,188), 2 high (45) | likely |
+| Invite id | +772/+776 | ASCII hex, 112 characters in 244 headers; matches an event id in 208 of 245 | established (join) |
+| Inbox mark | +1040 bit 27 | set on 1,038 of 1,038 inbox copies and on none of the others | established |
+| Conversation id | none found | no word in the 0x4f, 0xc9 or 0xca fixed region is shared across replies | unknown |
+
+A message has one logical identity, its detail key (2,185 distinct in the copy). It can have several header copies, in To Me, Inbox and Sent Items (2,133 detail keys have one header key, 51 have two, 1 has six). Per key the copy with the highest +112 is current, ties by block offset; file order alone is not reliable.
+
+### Detail (class 0xc9, string base 1551 + lead)
+
+| Field | Offset | Notes |
+| --- | --- | --- |
+| Message-ID | +1228/+1232 | angle-bracketed; present in 2,241 of 2,241; 2,184 distinct values over 2,185 detail keys |
+| Message class | +1236/+1240 | `IPM.Note` 1,956, `IPM.Schedule.*` 283, other 2 |
+| In-Reply-To | +1212/+1216 | present in 231 of 2,568 detail objects; equals another message's Message-ID in 147 (likely) |
+| Sent time | +728 | ticks; about one second after the stated send time (likely) |
+| Received time | +288 | equals the header's in 2,192 of 2,241 |
+
+### Body (class 0xca, string base 1870 + lead)
+
+The record has the same key as the detail object. The body is in one of two forms. Inline: UTF-8 text starting with `<` (after whitespace or a byte order mark), a word pair with bit 31 set in the length. File: a UTF-16LE path `~/Files/S0/2/EFMData/<number>.dat`, in a pair whose position varies by variant (+1524 in 85 messages, +1748 in 12, +1784 in 242). The inline offset also varies (+1668 with a second copy at +1660 in the probe). A reader therefore scans every 4-byte-aligned word pair in [0, 1870) for a target inside the object that is one of the two forms. Counts over 2,241 messages with a loose sniff: inline 1,767, path 339, neither 135 (likely). A body file is gzip (the reader requires the `1f 8b` magic and caps the inflated size at 16 MiB); it lives under the profile's `Files` directory and is read only through `outlookdesktop.OpenReadOnly`. 232 of 339 named files existed in the copy.
+
+### Attachment (class 0x16a, string base 792 + lead)
+
+| Field | Offset | Notes |
+| --- | --- | --- |
+| Message | +380 | the message's detail key; resolves in 4,219 of 4,269 |
+| Name | +608/+612 | string, present in 4,269 of 4,269 |
+| Path | +648/+652 | `~/Files/S0/2/Attachments/0/...`; the file exists for 4,027 of 4,269 |
+| Size | +568 | u32; equals the file size for 4,027 of 4,027 |
+| Download state | +624 | 2 when the file exists (4,027), 5 when not (242) |
+
+There is no content type in the store; the reader derives it from the extension with a fixed table. Names that are a bare GUID with no extension (2,467 of 4,269) are embedded items and count as inline: they do not make a message "have attachments". A separate class 0xf7 repeats the path and adds nothing.
+
+### Folder (class 0x4d, string base 1232 + lead)
+
+Name +1088/+1092, parent +32, well-known type +1160: 0x61 Inbox, 0x63 Archive, 0x64 Drafts, 0x65 Sent Items, 0x67 Deleted Items, 0x7a Junk Email and also To Me (likely: the values agreed with the English names in every named folder; no other language was available). Three account roots hold folder sets in the copy; the measured mail is under one. To Me is a folder of its own that holds separate header copies of the same messages (1,109 latest copies). The reader picks the account's folder set as the root (the first parent that is not itself a folder) whose folders hold the most header copies, and lists only those folders. Of the folders of type 0x7a, the ones that hold a header copy whose message also has a copy in an inbox folder are To Me and the rest are Junk.
+
+### Recipients (class 0x55, string base 350 + lead)
+
+One object per recipient. Parent +32 is the message's detail key (63,702 of 71,335 resolve; 2,516 of 2,564 detail keys have at least one). Name +292/+296, address +300/+304 (absent in 16 of 63,702), kind u32 at +316. To versus Cc is not established: kind 2 is the common one (57,098 of 63,702), then 1 (3,913), 3 (1,543) and 7 (1,121), and a probe gave 2 for both a To and a Cc. Only the raw kind is kept.
+
+### What the store does not give, and what the reader does about it
+
+- No stored thread id: threads are rebuilt from In-Reply-To and Message-ID, falling back to the normalized subject plus a shared participant.
+- No has-attachments bit that works (a covariant bit is missing in 274 of 325 messages with named attachments): derived from attachment records.
+- The cache is partial: the UI showed more messages than the store held in every folder compared, and it back-fills older mail while Outlook runs. Counts taken from it are lower bounds.
+- Deleting a message rewrites its header with the Deleted Items folder; the header objects disappear at the next compaction, with no tombstone (one observation).
+
 ## Unlocated fields and the experiment each needs
 
 | Field | What is known | Experiment |

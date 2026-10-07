@@ -130,10 +130,10 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 
 	var okAll = true
 	text := func(wordOff int) string {
-		if !stringPresent(ev, wordOff) {
-			return ""
+		s, present, ok := ev.PresentString(wordOff, base)
+		if !present {
+			return "" // absent: the length word is zero (see hxstore.Object.PresentString)
 		}
-		s, ok := ev.StringUnaligned(wordOff, base)
 		okAll = okAll && ok
 		return r.scrub(s)
 	}
@@ -236,18 +236,6 @@ func (r reader) scrub(s string) string {
 	var back string
 	_ = json.Unmarshal(out, &back) // the scrubber returns a JSON string for a JSON string
 	return back
-}
-
-// stringPresent reports whether the string word at wordOff holds a string. The length word
-// at wordOff+4 (bit 31 masked) is zero exactly when the string is absent, and an absent
-// string's offset word is 0 as well, which points at the first string of the area: reading it
-// anyway returns that text (the subject as first written, which a rename leaves in place)
-// as if it were the field's own. Measured on a real copy: 6,823 of 6,823 id-carrying event
-// objects have a zero length word only with a zero offset word, and every non-zero length
-// word ends in a terminator at its stated end.
-func stringPresent(o hxstore.Object, wordOff int) bool {
-	n, _ := o.U32(wordOff + 4) // inside the fixed region, which MapEvent checked
-	return n&^lengthFlag != 0
 }
 
 // idText decodes the stored id: the upper-case hex text of the iCal UID bytes in UTF-16LE
