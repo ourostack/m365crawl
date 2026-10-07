@@ -301,7 +301,7 @@ There is no content type in the store; the reader derives it from the extension 
 
 ### Folder (class 0x4d, string base 1232 + lead)
 
-Name +1088/+1092, parent +32, well-known type +1160: 0x61 Inbox, 0x63 Archive, 0x64 Drafts, 0x65 Sent Items, 0x67 Deleted Items, 0x7a Junk Email and also To Me (likely: the values agreed with the English names in every named folder; no other language was available). Three account roots hold folder sets in the copy; the measured mail is under one. To Me is a folder of its own that holds separate header copies of the same messages (1,109 latest copies).
+Name +1088/+1092, parent +32, well-known type +1160: 0x61 Inbox, 0x63 Archive, 0x64 Drafts, 0x65 Sent Items, 0x67 Deleted Items, 0x7a Junk Email and also To Me (likely: the values agreed with the English names in every named folder; no other language was available). Three account roots hold folder sets in the copy; the measured mail is under one. To Me is a folder of its own that holds separate header copies of the same messages (1,109 latest copies). The reader picks the account's folder set as the root (the first parent that is not itself a folder) whose folders hold the most header copies, and lists only those folders. Of the folders of type 0x7a, the ones that hold a header copy whose message also has a copy in an inbox folder are To Me and the rest are Junk.
 
 ### Recipients (class 0x55, string base 350 + lead)
 
