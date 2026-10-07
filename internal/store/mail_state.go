@@ -87,6 +87,15 @@ type MailStatus struct {
 func (s *Store) MailStatus(ctx context.Context) (MailStatus, error) {
 	var m MailStatus
 	var oldest, synced sql.NullString
+	// A read-only archive from before mail (or before the meta table) has no mail tables yet: it
+	// holds no mail.
+	var tables int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from sqlite_master where name in ('mail_messages','mail_folders','meta')`).Scan(&tables); err != nil {
+		return MailStatus{}, err
+	}
+	if tables < 3 {
+		return m, nil
+	}
 	err := s.db.QueryRowContext(ctx, `select
   (select count(*) from mail_messages where gone_at is null and evicted_at is null),
   (select count(*) from mail_messages where gone_at is null and evicted_at is null and is_read=0),

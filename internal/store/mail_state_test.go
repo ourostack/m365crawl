@@ -77,6 +77,17 @@ func TestMailStateErrorsOnClosedArchive(t *testing.T) {
 	}
 }
 
+// A mail table that cannot be counted is an error, not an empty archive.
+func TestMailStatusOfAMalformedMailTable(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.db.Exec(`drop table mail_fts; drop table mail_messages; create table mail_messages(x)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MailStatus(context.Background()); err == nil {
+		t.Fatal("a malformed mail table was counted")
+	}
+}
+
 // The status block counts live messages only and reports the newest read marker.
 func TestMailStatus(t *testing.T) {
 	ctx := context.Background()
@@ -116,4 +127,26 @@ func TestMailStateWriteFailuresRollBack(t *testing.T) {
 			return s.SetMailFailure(ctx, mailAcct, OutlookFailure{Code: "c"})
 		})
 	})
+}
+
+// An archive from before mail has no mail tables and reads as an empty mailbox.
+func TestMailStatusOfAnArchiveWithoutMailTables(t *testing.T) {
+	s := newStore(t)
+	for _, tbl := range []string{"mail_fts", "mail_messages", "mail_folders"} {
+		if _, err := s.db.Exec(`drop table ` + tbl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.MailStatus(context.Background())
+	if err != nil || got.Messages != 0 || got.Folders != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// The mail tables are there but the meta table is not (the oldest archives).
+	s = newStore(t)
+	if _, err := s.db.Exec(`drop table meta`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.MailStatus(context.Background()); err != nil || got.Messages != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
 }

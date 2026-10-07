@@ -132,12 +132,26 @@ func TestStatusMailStates(t *testing.T) {
 			t.Fatalf("%v", m)
 		}
 	})
-	t.Run("unreadable mail tables", func(t *testing.T) {
+	t.Run("malformed mail table", func(t *testing.T) {
+		forceMailSupported(t)
 		e := newEnv(t)
 		e.sync()
-		e.exec(`drop table mail_fts; drop table mail_messages`)
+		e.exec(`drop table mail_fts; drop table mail_messages; create table mail_messages(x)`)
 		if code, _, _ := e.run("status"); code == 0 {
-			t.Fatal("status succeeded without the mail table")
+			t.Fatal("status succeeded on a malformed mail table")
+		}
+	})
+	t.Run("archive from before mail", func(t *testing.T) {
+		forceMailSupported(t)
+		e := newEnv(t)
+		e.sync()
+		e.exec(`drop table mail_fts; drop table mail_messages; drop table mail_folders`)
+		code, out, errOut := e.run("status")
+		if code != 0 {
+			t.Fatalf("status exit %d: %s", code, errOut)
+		}
+		if m := mailBlockOf(t, decode(t, out)); m["messages"] != float64(0) || m["folders"] != float64(0) {
+			t.Fatalf("%v", m)
 		}
 	})
 }
@@ -237,6 +251,13 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 // mail_archive_mode warns when other users can read the archive and says nothing of its content.
 func TestDoctorMailArchiveModeCheck(t *testing.T) {
 	rt := &runtime{ctx: context.Background(), dbPath: filepath.Join(t.TempDir(), "m365crawl.db")}
+	if goruntime.GOOS == "windows" {
+		// File modes mean nothing here: the check says so and the mode cases below do not apply.
+		if c := rt.mailArchiveModeCheck(); !c.OK || c.Warn || !strings.Contains(c.Detail, "not applicable on Windows") {
+			t.Fatalf("windows: %+v", c)
+		}
+		return
+	}
 	if c := rt.mailArchiveModeCheck(); !c.OK || c.Warn || !strings.Contains(c.Detail, "no archive yet") {
 		t.Fatalf("no archive: %+v", c)
 	}
