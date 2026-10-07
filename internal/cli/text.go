@@ -241,8 +241,8 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = []string{"last_activity_at", "team", "channels", "unread"}, -1
 			rows = append(rows, []string{stamp(x.LastActivityAt), x.DisplayName, strconv.Itoa(x.ChannelCount), strconv.Itoa(x.UnreadCount)})
 		case personItem:
-			cols, textCol = []string{"name", "id", "last_seen_at"}, -1
-			rows = append(rows, []string{x.DisplayName, x.ID, stamp(x.LastSeenAt)})
+			cols, textCol = []string{"name", "id", "sources", "last_seen_at"}, -1
+			rows = append(rows, []string{x.DisplayName, x.ID, strings.Join(x.Sources, ","), stamp(x.LastSeenAt)})
 		case activityItem:
 			read := "unread"
 			if x.IsRead {
@@ -510,8 +510,27 @@ func (rt *runtime) eventBlock(r *eventResult) {
 		}
 		render.Table(w, []string{"sent_at", "recording", "matched by"}, rows, color)
 	}
+	if ev.Chat != nil && len(ev.Chat.RecentMessages) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.Chat.RecentMessages))
+		for i, m := range ev.Chat.RecentMessages {
+			rows[i] = []string{stamp(m.SentAt), render.Truncate(m.SenderName, 30), render.Truncate(oneLine(m.Text), eventTextWidth)}
+		}
+		render.Table(w, []string{"sent_at", "chat sender", "message"}, rows, color)
+	}
+	if len(ev.RelatedMail) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.RelatedMail))
+		for i, m := range ev.RelatedMail {
+			rows[i] = []string{stamp(m.ReceivedAt), render.Truncate(firstOf(m.FromName, m.FromAddress), 30), render.Truncate(oneLine(m.Subject), eventTextWidth), m.Match}
+		}
+		render.Table(w, []string{"received_at", "mail from", "subject", "match"}, rows, color)
+	}
 	metaLines(w, r.meta, color)
 }
+
+// eventTextWidth caps the free-text columns of an event's chat and mail tables.
+const eventTextWidth = 50
 
 func firstOf(ss ...string) string {
 	for _, s := range ss {

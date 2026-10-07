@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -133,11 +134,15 @@ type ConversationRow struct {
 	CalendarEventCount int    `json:"calendar_event_count,omitempty"`
 }
 
-// PersonRow is someone seen as a sender or member.
+// PersonRow is someone seen as a Teams sender or member, or as a mail sender or recipient. A mail
+// correspondent has the id "mail:<address>", its lower-case address as Email, no tenant and the
+// source "mail"; a Teams person has the source "chats" and no email (Teams keeps none).
 type PersonRow struct {
 	TenantID    string    `json:"tenant_id"`
 	ID          string    `json:"id"`
 	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email,omitempty"`
+	Sources     []string  `json:"sources"`
 	FirstSeenAt time.Time `json:"first_seen_at,omitzero"`
 	LastSeenAt  time.Time `json:"last_seen_at,omitzero"`
 }
@@ -709,9 +714,12 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	return out, trunc, nil
 }
 
-// People lists people by name, matching query as a case-insensitive substring of the display
-// name or as an exact id. f.Account narrows by tenant.
+// People lists the people of Teams and the correspondents of mail, newest seen first, merged by
+// last_seen_at. query matches a case-insensitive part of a display name or mail address, or an
+// exact id. f.Account narrows the Teams people by tenant; mail has no tenant and is not narrowed.
+// The limit applies to the merged list, which is truncated when either source had more.
 func (s *Store) People(ctx context.Context, query string, f Filter) ([]PersonRow, bool, error) {
+	limit := f.limit()
 	var w where
 	if f.Account != nil {
 		w.add(`p.tenant_id=?`, f.Account.TenantID)
@@ -719,15 +727,14 @@ func (s *Store) People(ctx context.Context, query string, f Filter) ([]PersonRow
 	if query != "" {
 		w.add(`(p.id=? or lower(p.display_name) like ? escape '\')`, query, "%"+strings.ToLower(escapeLike(query))+"%")
 	}
-	limit := f.limit()
-	rows, err := s.db.QueryContext(ctx, `select p.tenant_id,p.id,p.display_name,p.first_seen_at,p.last_seen_at from people p`+w.sql()+` order by p.display_name collate nocase, p.id limit ?`, append(w.args, limit+1)...) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, err := s.db.QueryContext(ctx, `select p.tenant_id,p.id,p.display_name,p.first_seen_at,p.last_seen_at from people p`+w.sql()+` order by p.last_seen_at is null, p.last_seen_at desc, p.display_name collate nocase, p.id limit ?`, append(w.args, limit+1)...) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = rows.Close() }()
 	out := []PersonRow{}
 	for rows.Next() {
-		var r PersonRow
+		r := PersonRow{Sources: []string{"chats"}}
 		var first, last sql.NullString
 		if err := rows.Scan(&r.TenantID, &r.ID, &r.DisplayName, &first, &last); err != nil {
 			return nil, false, err
@@ -738,13 +745,98 @@ func (s *Store) People(ctx context.Context, query string, f Filter) ([]PersonRow
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(out) > limit {
-		if err := s.countTotal(ctx, f.Total, ` from people p`, &w); err != nil {
+	trunc := len(out) > limit
+	mail, err := s.mailPeople(ctx, query, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	trunc = trunc || len(mail) > limit
+	out = append(out, mail...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if !a.LastSeenAt.Equal(b.LastSeenAt) {
+			return a.LastSeenAt.After(b.LastSeenAt)
+		}
+		if na, nb := strings.ToLower(a.DisplayName), strings.ToLower(b.DisplayName); na != nb {
+			return na < nb
+		}
+		return a.ID < b.ID
+	})
+	if len(out) <= limit {
+		return out, trunc, nil
+	}
+	if f.Total != nil {
+		var teams, mailN int
+		if err := s.countTotal(ctx, &teams, ` from people p`, &w); err != nil {
 			return nil, false, err
 		}
-		return out[:limit], true, nil
+		if mailN, err = s.mailPeopleCount(ctx, query); err != nil {
+			return nil, false, err
+		}
+		*f.Total = teams + mailN
 	}
-	return out, false, nil
+	return out[:limit], true, nil
+}
+
+// mailPeopleCTE is one row per mail correspondent: the lower-case address, the newest name it was
+// given (an empty name only when it never had one) and the first and last time it was seen. Senders
+// and recipients with an address count; gone messages do not.
+const mailPeopleCTE = `with c(addr, name, at) as (
+  select lower(m.sender_address), m.sender_name, m.received_at from mail_messages m where m.sender_address<>'' and m.gone_at is null
+  union all
+  select lower(r.address), r.name, m.received_at from mail_recipients r join mail_messages m on m.rowid=r.message_rowid where coalesce(r.address,'')<>'' and m.gone_at is null
+), mp as (
+  select addr, name, row_number() over (partition by addr order by name='', at desc, name) rn, min(at) over (partition by addr) first_at, max(at) over (partition by addr) last_at from c
+) `
+
+// mailPeopleWhere matches query as a part of the address or name; "mail:<address>" names an
+// address exactly, which the part match covers.
+func mailPeopleWhere(query string) where {
+	var w where
+	w.add(`mp.rn=1`)
+	if query != "" {
+		q := strings.ToLower(query)
+		q = strings.TrimPrefix(q, "mail:")
+		like := "%" + escapeLike(q) + "%"
+		w.add(`(mp.addr like ? escape '\' or lower(mp.name) like ? escape '\')`, like, like)
+	}
+	return w
+}
+
+// mailPeople lists at most limit mail correspondents, newest seen first. An archive without mail
+// tables has none.
+func (s *Store) mailPeople(ctx context.Context, query string, limit int) ([]PersonRow, error) {
+	out := []PersonRow{}
+	if ok, err := s.hasMail(ctx); err != nil || !ok {
+		return out, err
+	}
+	w := mailPeopleWhere(query)
+	err := mailEach(ctx, s.db, mailPeopleCTE+`select mp.addr, mp.name, mp.first_at, mp.last_at from mp`+w.sql()+` order by mp.last_at desc, mp.addr limit ?`, append(w.args, limit), func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants; values are placeholders
+		var p PersonRow
+		var first, last sql.NullString
+		if err := r.Scan(&p.Email, &p.DisplayName, &first, &last); err != nil {
+			return err
+		}
+		p.ID, p.Sources = "mail:"+p.Email, []string{"mail"}
+		p.FirstSeenAt, p.LastSeenAt = parseTime(first), parseTime(last)
+		if p.DisplayName == "" {
+			p.DisplayName = p.Email
+		}
+		out = append(out, p)
+		return nil
+	})
+	return out, err
+}
+
+// mailPeopleCount counts the mail correspondents query matches.
+func (s *Store) mailPeopleCount(ctx context.Context, query string) (int, error) {
+	if ok, err := s.hasMail(ctx); err != nil || !ok {
+		return 0, err
+	}
+	w := mailPeopleWhere(query)
+	var n int
+	err := s.db.QueryRowContext(ctx, mailPeopleCTE+`select count(*) from mp`+w.sql(), w.args...).Scan(&n) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	return n, err
 }
 
 // Activity lists activity-feed items newest first, joined to their message text and sender (when

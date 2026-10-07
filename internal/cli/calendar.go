@@ -257,7 +257,7 @@ type calendarGroup struct {
 	Agenda  calendarCmd        `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
 	Sources calendarSourcesCmd `cmd:"" help:"Per account and source: the days the archive holds, when each was last verified, event and recap counts, and for Outlook the read status, the read interval and the layouts this version does not know."`
 	Actions calendarActionsCmd `cmd:"" help:"Action items of the meeting recaps held by the events of a range, with owners; --mine keeps yours."`
-	Event   calendarEventCmd   `cmd:"" help:"One event with everything the archive holds about it: attendees, body, recaps, action items and the recordings that belong to this occurrence."`
+	Event   calendarEventCmd   `cmd:"" help:"One event with everything the archive holds about it, to prepare for the meeting: attendees, body, recaps, action items, the recordings that belong to this occurrence, the meeting chat with its newest messages, and the related Outlook mail (the invite, and mail with the same subject around the meeting)."`
 }
 
 type calendarCmd struct {
@@ -274,7 +274,7 @@ type calendarCmd struct {
 
 // eventOnlyKeys are the keys only calendar event has; asking calendar for one says where it is.
 var eventOnlyKeys = []string{"organizer", "attendees", "attendees_as_of", "response_counts", "body_text", "body_html", "body_type",
-	"attachments", "categories", "reminder_minutes", "series", "recaps", "chat", "recordings", "series_recordings", "series_recordings_total"}
+	"attachments", "categories", "reminder_minutes", "series", "recaps", "chat", "recordings", "series_recordings", "series_recordings_total", "related_mail"}
 
 func checkCalendarFields(rt *runtime) error {
 	for _, f := range rt.fields {
@@ -539,10 +539,43 @@ type calendarRecap struct {
 	SeriesLevel bool `json:"series_level,omitempty"`
 }
 
+// calendarChat is the event's Teams meeting chat. RecentMessages is its newest live messages,
+// newest first (at most 20), in the shape the messages command prints.
 type calendarChat struct {
-	ConversationID string `json:"conversation_id"`
-	DisplayName    string `json:"display_name,omitempty"`
-	MessageCount   int    `json:"message_count"`
+	ConversationID string        `json:"conversation_id"`
+	DisplayName    string        `json:"display_name,omitempty"`
+	MessageCount   int           `json:"message_count"`
+	RecentMessages []messageItem `json:"recent_messages"`
+}
+
+// relatedMail is an Outlook message related to the event, with how it matched: "invite" (its
+// invite id is the event's iCalUId) or "subject" (the same subject, without reply and forward
+// prefixes, received from 14 days before to 7 days after the start, and sent or received by an
+// attendee or the organizer when the event names any).
+type relatedMail struct {
+	ID             string    `json:"id"`
+	Match          string    `json:"match"`
+	Account        string    `json:"account"`
+	Folder         string    `json:"folder,omitempty"`
+	FolderKind     string    `json:"folder_kind,omitempty"`
+	Subject        string    `json:"subject"`
+	FromName       string    `json:"from_name,omitempty"`
+	FromAddress    string    `json:"from_address,omitempty"`
+	ReceivedAt     time.Time `json:"received_at,omitzero"`
+	IsRead         *bool     `json:"is_read,omitempty"`
+	HasAttachments bool      `json:"has_attachments"`
+	Preview        string    `json:"preview,omitempty"`
+	ICalUID        string    `json:"ical_uid,omitempty"`
+}
+
+func relatedMailOf(in []store.MailRelated) []relatedMail {
+	out := make([]relatedMail, len(in))
+	for i, m := range in {
+		out[i] = relatedMail{ID: m.ID(), Match: m.Match, Account: m.Account, Folder: m.Folder, FolderKind: m.FolderKind, Subject: m.Subject,
+			FromName: m.SenderName, FromAddress: m.SenderAddress, ReceivedAt: m.ReceivedAt.UTC(), IsRead: m.IsRead, HasAttachments: m.HasAttachments,
+			Preview: m.Preview, ICalUID: m.ICalUID}
+	}
+	return out
 }
 
 type calendarRecording struct {
@@ -588,10 +621,11 @@ type calendarExtras struct {
 	ReminderMinutes       *int                 `json:"reminder_minutes,omitempty"`
 	Series                *calendarSeries      `json:"series,omitempty"`
 	Recaps                []calendarRecap      `json:"recaps,omitempty"`
-	Chat                  *calendarChat        `json:"chat,omitempty"`
+	Chat                  *calendarChat        `json:"chat"`
 	Recordings            []calendarRecording  `json:"recordings,omitempty"`
 	SeriesRecordings      []calendarRecording  `json:"series_recordings,omitempty"`
 	SeriesRecordingsTotal int                  `json:"series_recordings_total,omitempty"`
+	RelatedMail           []relatedMail        `json:"related_mail"`
 	TextTruncated         bool                 `json:"text_truncated,omitempty"`
 }
 
@@ -635,10 +669,18 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		ev := eventOf(d)
+		related, err := st.EventMail(rt.ctx, d.Event, store.EventMailLimit)
+		if err != nil {
+			return nil, err
+		}
+		ev.RelatedMail = relatedMailOf(related)
 		if rt.g.MaxText > 0 {
 			ev.truncate(rt.g.MaxText)
 		}
 		res, _ := rt.eventResult(ev) // never fails
+		if ev.MeetingChatID == "" {
+			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
+		}
 		rt.noteOutlookOff(st, res, slices.Contains(ev.Sources, string(calendar.SourceOutlook)))
 		return res, nil
 	})
@@ -687,8 +729,10 @@ func eventOf(d store.CalendarDetail) *calendarEvent {
 		x.Recaps = append(x.Recaps, recapOf(r))
 	}
 	if d.Chat != nil {
-		x.Chat = &calendarChat{ConversationID: d.Chat.ConversationID, DisplayName: d.Chat.DisplayName, MessageCount: d.Chat.MessageCount}
+		x.Chat = &calendarChat{ConversationID: d.Chat.ConversationID, DisplayName: d.Chat.DisplayName, MessageCount: d.Chat.MessageCount,
+			RecentMessages: messageItems(d.Chat.Recent, 0, nil)}
 	}
+	x.RelatedMail = []relatedMail{}
 	x.Recordings = recordingsOf(d.Recordings)
 	x.SeriesRecordings, x.SeriesRecordingsTotal = recordingsOf(d.SeriesRecordings), d.SeriesRecordingsTotal
 	return ev
@@ -731,6 +775,17 @@ func (ev *calendarEvent) truncate(max int) {
 	cut(&ev.BodyText)
 	cut(&ev.BodyHTML)
 	cut(&ev.BodyPreview)
+	if ev.Chat != nil {
+		for i := range ev.Chat.RecentMessages {
+			m := &ev.Chat.RecentMessages[i]
+			if t, did := truncateRunes(m.Text, max); did {
+				m.Text, m.TextTruncated, ev.TextTruncated = t, true, true
+			}
+		}
+	}
+	for i := range ev.RelatedMail {
+		cut(&ev.RelatedMail[i].Preview)
+	}
 	for i := range ev.Recaps {
 		cut(&ev.Recaps[i].ShortSummary)
 		cut(&ev.Recaps[i].Outline)

@@ -65,7 +65,7 @@ type cliApp struct {
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
-	People        peopleCmd        `cmd:"" help:"List people seen as senders or members."`
+	People        peopleCmd        `cmd:"" help:"List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id mail:<address>)."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
 	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams cache holds the days Teams has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook mail offline: list, show, thread, folders and unread. Mail comes from Outlook for Mac's local cache; every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`

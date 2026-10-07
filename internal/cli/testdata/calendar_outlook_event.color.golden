@@ -10,4 +10,5 @@
 [2mwhen     [0m[2m : [0m2031-03-05 (all day)
 [2munknown: attachments, attendees, body, categories, has_attachments, is_organizer, is_private, recurrence, reminder, rooms, time_zone_iana, utc_offset[0m
 [2moutlook is the only source of this event; not known: attendees, body[0m
+[2mnotice: this event has no Teams meeting chat, so chat is null[0m
 [2marchive age: <age>[0m

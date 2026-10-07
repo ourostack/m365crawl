@@ -259,11 +259,16 @@ type CalendarRecording struct {
 	MatchedBy string
 }
 
-// CalendarChat is the meeting chat shared by every occurrence of the event's series.
+// CalendarChat is the meeting chat shared by every occurrence of the event's series. Recent is
+// its newest live messages, newest first, at most chatRecentShown.
 type CalendarChat struct {
 	ConversationID, DisplayName string
 	MessageCount                int
+	Recent                      []MessageRow
 }
+
+// chatRecentShown is how many of the meeting chat's messages an event carries.
+const chatRecentShown = 20
 
 // CalendarSeries places an occurrence in its series.
 type CalendarSeries struct {
@@ -611,7 +616,7 @@ func (s *Store) series(ctx context.Context, accounts []string, it calendar.Agend
 	err := s.db.QueryRowContext(ctx, `select event_key, recurrence_json from calendar_source_events
 	  where account_id in `+in+` and series_key=? and event_type='master' order by removed_at is not null, event_key limit 1`, args...).Scan(&out.MasterKey, &rule)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return out, nil
 	case err != nil:
 		return out, err
@@ -818,7 +823,7 @@ func (s *Store) chatOf(ctx context.Context, accounts []string, chat string) (*Ca
 	err := s.db.QueryRowContext(ctx, `select tenant_id, user_id, title, display_name from conversations
 	  where id=? and tenant_id||'/'||user_id in `+inList(len(accounts))+` limit 1`, args...).Scan(&tenant, &user, &title, &display)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return nil, nil
 	case err != nil:
 		return nil, err
@@ -830,5 +835,12 @@ func (s *Store) chatOf(ctx context.Context, accounts []string, chat string) (*Ca
 	if err := s.db.QueryRowContext(ctx, `select count(*) from messages where tenant_id=? and user_id=? and conversation_id=?`, tenant, user, chat).Scan(&c.MessageCount); err != nil {
 		return nil, err
 	}
+	var w where
+	w.add(`m.tenant_id=? and m.user_id=? and m.conversation_id=? and m.deleted_at is null`, tenant, user, chat)
+	recent, _, err := s.runMessages(ctx, ` from messages m`+msgJoin, &w, chatRecentShown, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.Recent = recent
 	return &c, nil
 }

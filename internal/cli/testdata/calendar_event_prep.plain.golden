@@ -40,4 +40,9 @@ sent_at           chat sender   message
 2023-11-14 22:13  Alex Fixture  Filler 18 emp6
 2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
 2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
+
+received_at       mail from    subject                      match
+----------------  -----------  ---------------------------  -------
+2023-11-13 09:00  Pat Example  Fixture planning review      invite
+2023-11-19 10:00  Sam Example  RE: Fixture planning review  subject
 archive age: <age>

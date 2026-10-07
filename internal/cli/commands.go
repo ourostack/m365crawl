@@ -88,10 +88,14 @@ type conversationItem struct {
 	CalendarEventCount int    `json:"calendar_event_count,omitempty"`
 }
 
+// personItem is a Teams person (sources ["chats"]) or a mail correspondent (sources ["mail"], id
+// "mail:<address>", email set, tenant_id empty). Teams keeps no email, so the two are never merged.
 type personItem struct {
 	TenantID    string    `json:"tenant_id"`
 	ID          string    `json:"id"`
 	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email,omitempty"`
+	Sources     []string  `json:"sources"`
 	LastSeenAt  time.Time `json:"last_seen_at,omitzero"`
 }
 
@@ -495,7 +499,7 @@ func (c *teamsCmd) Run(rt *runtime) error {
 }
 
 type peopleCmd struct {
-	Query string `help:"Part of a display name, or an exact person id."`
+	Query string `help:"Part of a display name or mail address, or an exact person id (a mail correspondent's id is mail:<address>)."`
 	Limit int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 }
 
@@ -517,7 +521,7 @@ func (c *peopleCmd) Run(rt *runtime) error {
 		}
 		items := make([]personItem, len(rows))
 		for i, r := range rows {
-			items[i] = personItem{TenantID: r.TenantID, ID: r.ID, DisplayName: r.DisplayName, LastSeenAt: r.LastSeenAt}
+			items[i] = personItem{TenantID: r.TenantID, ID: r.ID, DisplayName: r.DisplayName, Email: r.Email, Sources: r.Sources, LastSeenAt: r.LastSeenAt}
 		}
 		return newList(shape(rt, items), trunc).withTotal(total), nil
 	})

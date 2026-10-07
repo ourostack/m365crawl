@@ -44,7 +44,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`messages`](#messages) | List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). |
 | [`conversations`](#conversations) | List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`). |
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
-| [`people`](#people) | List people seen as senders or members. |
+| [`people`](#people) | List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id mail:<address>). |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
 | [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it; `calendar actions` lists the action items of the recaps held by the events of a range; `calendar sources` says what the archive holds per account and source and how fresh it is. |
 | [`mail`](#mail) | Read Outlook mail offline: `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`. |
@@ -247,7 +247,7 @@ m365crawl messages --team "Platform" --since 1d
 
 ## people
 
-List people seen as senders or members.
+List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id mail:<address>).
 
 ```
 m365crawl people [flags]
@@ -257,15 +257,16 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--query=STRING` | Part of a display name, or an exact person id. |
+| `--query=STRING` | Part of a display name or mail address, or an exact person id (a mail correspondent's id is mail:<address>). |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 
-Result: A list of person items.
+Result: A list of person items, newest `last_seen_at` first across both sources; `--limit` applies to the merged list and `truncated` is true when either source had more. Each item carries `tenant_id`, `id`, `display_name`, `sources` and `last_seen_at`. A Teams person has `sources: ["chats"]` and no `email`, because Teams keeps no address for a person. A mail correspondent (a sender or recipient with an address; gone messages do not count) is its own row: `id` is `mail:<address>`, `email` the lower-case address, `sources: ["mail"]`, `tenant_id` empty, and `display_name` the newest name it was given (the address when it never had one). The two are never merged, so the same person can appear once per source. `--account` narrows the Teams people only.
 
 Examples:
 
 ```sh
 m365crawl people --query alex
+m365crawl people --query @example.com
 ```
 
 ## activity
@@ -322,7 +323,7 @@ Flags of the agenda (`m365crawl calendar agenda --help` lists them):
 | `--include-removed` | Also list events a source saw go (`removed` is true on them, `removed_by` names the sources). |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 
-`calendar event <event>` takes an `event_id`, an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates by `event_id`. `--fields` keeps the keys named, in that order; `--max-text` cuts the body, summaries and action-item text and sets `text_truncated`.
+`calendar event <event>` takes an `event_id`, an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates by `event_id`. `--fields` keeps the keys named, in that order; `--max-text` cuts the body, summaries, action-item text, the chat's recent message text and the related mail previews, and sets `text_truncated`.
 
 Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverage_gap", "coverage_as_of"?, "uncovered_days"?, "uncovered_days_total"?, "accounts"?, "range": {"from", "to", "zone"}, "unlinked_accounts"?, "unlinked_fix"?, "unlinked_recaps"?, "unlinked_recaps_total"?, "archive_age_seconds", ...}`.
 
@@ -338,7 +339,7 @@ An agenda item carries, in this order: `event_id` (a short id computed from the 
 
 `detail_level` is `basic` (only the schedule), `full` (attendees, body and rooms from a copy at least as new as the schedule) or `stale` (the detail is older than the schedule, so the attendee list may be out of date; `detail_as_of` says how old). `recording_count` counts the recordings, transcripts and call events of the meeting chat that belong to this occurrence (matched by the recap's recording window, then by the occurrence window plus four hours).
 
-Result of `calendar event`: the item above, plus `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series` (`key`, `rule`, `master_event_id`, `occurrence_count_known`), `recaps` (each with `call_id`, `headline`, `short_summary`, `outline`, `summary_sections`, `action_items`, `mentions`, `speakers`, `topics`, `recording`, `meeting_start`, `meeting_end`, `expires_at`, `link_method`, `attendance_status`, `attendees_count`), `chat` (`conversation_id`, `display_name`, `message_count`), `recordings` (each with `message_id`, `sent_at`, `kind`, `text`, `link` and `matched_by`: `recap` or `window`), `series_recordings` (recordings of the chat that match no occurrence, newest 20) and `series_recordings_total`, then the archive meta. `text_truncated` appears when `--max-text` cut anything.
+Result of `calendar event`: the item above, plus `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series` (`key`, `rule`, `master_event_id`, `occurrence_count_known`), `recaps` (each with `call_id`, `headline`, `short_summary`, `outline`, `summary_sections`, `action_items`, `mentions`, `speakers`, `topics`, `recording`, `meeting_start`, `meeting_end`, `expires_at`, `link_method`, `attendance_status`, `attendees_count`), `chat` (`conversation_id`, `display_name`, `message_count`, and `recent_messages`: its newest 20 live messages, newest first, each in the `messages` item shape; `chat` is null when the archive holds no meeting chat for the event, and an event with no Teams meeting chat at all, such as one only Outlook holds, adds a `notices` entry saying so), `recordings` (each with `message_id`, `sent_at`, `kind`, `text`, `link` and `matched_by`: `recap` or `window`), `series_recordings` (recordings of the chat that match no occurrence, newest 20) and `series_recordings_total`, `related_mail`, then the archive meta. `related_mail` is the Outlook mail about this occurrence, at most 20, always a list (empty when none): first the messages whose invite id (`ical_uid`) is the event's iCalUId, ignoring case (`match: "invite"`), then, newest first, messages with the same subject once reply and forward prefixes are stripped (`re:`, `fw:`, `fwd:`, `aw:`, `wg:`, `sv:`, ignoring case), received from 14 days before to 7 days after the occurrence's start, and, when the event names any attendee or organizer address, sent or received by at least one of them (`match: "subject"`). Each carries `id` (as `mail show` takes it), `match`, `account`, `folder`, `folder_kind`, `subject`, `from_name`, `from_address`, `received_at`, `is_read`, `has_attachments`, `preview` and `ical_uid`. Gone messages are left out. The mailbox owner is usually an attendee, so a subject match can rest on the owner's own address; a very common subject ("Standup") can therefore pull in other meetings' mail from inside the window. `text_truncated` appears when `--max-text` cut anything.
 
 ### calendar actions
 
