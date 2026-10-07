@@ -30,9 +30,9 @@ Merge a notes file named `docs/releases/vX.Y.Z-rc.N.md` (for example `v0.3.0-rc.
 
 The cask for a rehearsal is the one goreleaser renders for the rc tag. It is attached to the rc release like a stable one: its version is the rc version and its URLs point at the rc assets. goreleaser renders it even though `skip_upload: true` (which only skips its own push to the tap); this was checked with a local snapshot build of a prerelease version, and the attach step fails with a clear message if the file is ever missing. That is the simplest honest cask, because it is exactly what the pipeline would publish, and `scripts/publish-cask.sh` checks it names the tag's version.
 
-### The first rehearsal, in this order
+### Rehearsing a pipeline change
 
-The state-based pipeline has not run for real yet (v0.2.0 was released through the old tag trigger, which proved the signing, Windows verification and stable cask push). Do these in order before the first stable release made this way. Every rehearsal version must be above the latest stable release.
+After a change to the release workflow or its scripts, rehearse before the next stable release. Do these steps in order; every rehearsal version must be above the latest stable release.
 
 1. Run "Credential health" by hand (Actions tab, "Run workflow"). It proves the six Apple secrets are set and the tap key authenticates.
 2. Merge one `-rc.1` notes file for a version above the latest stable (for example `v0.3.0-rc.1.md`). Watch every job go green: the tag appears, goreleaser signs and notarizes, the darwin and Windows verification jobs pass, and the tap's `rehearsal` branch gets the commit.
@@ -138,7 +138,7 @@ Pull-request CI runs on every pull request (the required checks include `test`, 
 - `scripts/sign-notarize.sh --selftest`: every signing gate.
 - `scripts/check-release-wiring.sh --selftest`: every job in `release.yml` that runs after `release` states its own `if:` starting from `!cancelled()` or `always()`. A job without one is skipped whenever `release` is, which is what a publish-only resume does on purpose; rehearsal 4 of v0.4.0-rc.3 found `settle`, `publish-homebrew` and `verify-homebrew` skipped that way.
 
-What a pull request cannot prove: the workflow wiring beyond what `check-release-wiring.sh` checks, the token's ability to create the tag, start the workflow and open issues, containment and the tap restore against real GitHub, that a cancelled run still reports, and the Dependabot auto-merge. The first rehearsal exercises all of them. Already proven by the v0.2.0 release: Apple signing and notarization, the darwin and Windows verification jobs, the deploy key and `publish-cask.sh` on the stable path, and the tap's install check.
+What a pull request cannot prove: the workflow wiring beyond what `check-release-wiring.sh` checks, the token's ability to create the tag, start the workflow and open issues, containment and the tap restore against real GitHub, that a cancelled run still reports, and the Dependabot auto-merge. A rehearsal exercises all of them. Already proven by the v0.2.0 release: Apple signing and notarization, the darwin and Windows verification jobs, the deploy key and `publish-cask.sh` on the stable path, and the tap's install check.
 
 ## What a failure means
 

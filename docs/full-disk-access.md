@@ -1,8 +1,8 @@
 # Full Disk Access (macOS only)
 
-This page describes the macOS-only permission step. On Windows, Teams stores its cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, so `m365crawl doctor` reports the `full_disk_access` check as `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
+On macOS, m365crawl needs one permission: Full Disk Access for the app that runs it, such as your terminal or your agent's host app. One grant covers Teams, Outlook mail and the Outlook calendar. Without it, `m365crawl sync` and `m365crawl doctor` fail with `no_full_disk_access` (exit 3), and the `fix` names the app to grant.
 
-m365crawl needs one macOS permission: Full Disk Access for the app that runs it. Without it, `m365crawl sync` and `m365crawl doctor` fail with `no_full_disk_access` (exit 3), and the `fix` names the app to grant.
+Windows has no such step. Teams keeps its cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, so `m365crawl doctor` reports the `full_disk_access` check as `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
 
 ## Why it is needed
 
@@ -10,7 +10,13 @@ The new Teams app keeps its data in an app container, `~/Library/Containers/com.
 
 The permission belongs to the app that started the process, not to m365crawl itself. If you run `m365crawl` in Terminal, Terminal needs it. If an agent host such as an editor, a desktop agent app or a launcher starts m365crawl, that host needs it.
 
-m365crawl uses the permission only to read the Teams cache and, when the new Outlook for Mac is installed, its calendar and mail store (Outlook keeps it in a TCC-protected group container under `~/Library/Group Containers`, and the same grant covers it). Downloaded message bodies are separate files under the profile's `Files` directory, opened read-only and only for messages the sync reads. It never writes to any of them. Without the grant a default Outlook is not a failure: the sync reports the Outlook source as `unavailable` with the fix, and the Teams sync carries on.
+m365crawl uses the permission only to read:
+
+- the Teams cache;
+- the new Outlook for Mac store, `HxStore.hxd`, which holds mail and the calendar (Outlook keeps it in a TCC-protected group container under `~/Library/Group Containers`, and the same grant covers it);
+- the message bodies Outlook has downloaded, which are separate files under the profile's `Files` directory, opened read-only and only for messages the sync reads.
+
+It never writes to any of them. Without the grant a default Outlook is not a failure: the sync reports the Outlook source as `unavailable` with the fix, and the Teams sync carries on.
 
 ## How to grant it
 
@@ -24,7 +30,7 @@ The permission is granted once per app. You do not need to grant it again after 
 
 ## How `doctor` checks it
 
-`doctor` makes the same first read that a sync makes. It lists the Teams data directory. The result decides three checks in order:
+`doctor` makes the same first read that a sync makes. It lists the Teams data directory. The result decides three checks in order (the Outlook store has its own check, `outlook_store`, which warns when access is denied):
 
 | Check | Passes when |
 | --- | --- |

@@ -1,4 +1,4 @@
-# m365crawl 🟣 — Your Teams, readable by your agents.
+# m365crawl — Microsoft 365, readable by your agents
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?include_prereleases&style=flat-square)](https://github.com/ourostack/m365crawl/releases)
@@ -7,37 +7,44 @@
 [![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
-m365crawl was called teamscrawl before v0.5.0; it has no alias for the old name.
-
-`m365crawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and the meeting calendar (with recaps and action items), so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
+`m365crawl` mirrors what Microsoft 365 already keeps on your computer — your **Teams chats and channels**, your **Outlook mail** and your **calendar** — into one SQLite archive, so an AI agent can search, triage and cross-reference your work in milliseconds, offline and read-only. It reads the local caches of the signed-in Teams and Outlook apps. It never talks to a Microsoft service, never reads your credentials and never writes to either app's storage.
 
 <p align="center"><img src="screenshot.png" alt="m365crawl doctor with every check green and a snapshot of the archive: Teams chats, channels, meetings and messages, Outlook mail, and the calendar" width="801"></p>
 
-## Why not a Teams MCP server or the Graph API?
+## What your agent can do with it
 
-- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. m365crawl needs a signed-in Teams app and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
-- **Built for agent context budgets.** Every item carries stable ids and a deep link; `--fields` and `--max-text` return only what you need, instead of full message payloads eating your context window.
-- **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. No paging, no throttling, no round trips.
-- **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not a file on your disk.
-- **Read-only by construction.** There is no write path in the code. It cannot post, react or mark anything read, so handing it to an agent is safe. It mirrors everything Teams cached except sign-in credentials.
-- **Keeps what Teams evicts.** Teams trims its cache as it runs, and its cached message count can drop by thousands between two reads. The archive never deletes a message, so history survives as long as you sync regularly.
-- **Full-text search and SQL over everything.** Messages, the activity feed, unread state and mentions sit in one database that an agent can query with FTS5 or plain SQL.
+| Ask | Command |
+| --- | --- |
+| What needs my attention? | `m365crawl unread` (chats) · `m365crawl mail unread` · `m365crawl mail list --flagged` |
+| Find that thing someone sent me | `m365crawl search "budget review"` — chats and mail together, each hit labelled with its `source` |
+| Show me the whole conversation | `m365crawl thread <link>` (Teams) · `m365crawl mail thread <id>` (the reply chain) |
+| Prep me for my 2 pm | `m365crawl calendar` then `m365crawl calendar event <id>` — attendees, body, the meeting chat and related mail |
+| Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
+| What's in the archive and how fresh is it? | `m365crawl` |
 
-**When you want something else.** Use the Graph API or a Teams MCP server if you need to send or react, need data the desktop app never cached (old history you never scrolled to, other people's chats), run Teams on Linux or classic Teams, or cannot grant Full Disk Access to your terminal or agent host on macOS.
+## Why not Graph, an MCP server or Work IQ?
+
+- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. m365crawl needs the signed-in desktop apps and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
+- **Built for agent context budgets.** Every item carries a stable id, and every Teams item a deep link. `--fields` and `--max-text` return only what you need.
+- **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite.
+- **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not files on your disk.
+- **Read-only by construction.** There is no write path in the code. It cannot send, reply, react, move or mark anything read, so handing it to an agent is safe.
+- **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
+- **One place for everything.** Chats, mail, the activity feed, unread state, mentions and meetings sit in one database that an agent can query with full-text search or plain SQL.
+
+**When you want something else.** Use Graph or an MCP server if you need to send or react, need data the apps never cached (old history, other people's mailboxes), run Linux, classic Teams or classic Outlook, or cannot grant Full Disk Access on macOS.
 
 ## Install
 
 ### macOS
 
-Homebrew is the shortest path:
-
 ```sh
 brew install ourostack/tap/m365crawl
 ```
 
-Published macOS release binaries are always Developer ID signed and notarized by Apple; the release workflow fails instead of shipping an unsigned darwin tarball. The release notes say so explicitly. The Homebrew cask clears the macOS quarantine flag after install. If you built m365crawl yourself instead of using a published release, you may still need `xattr -dr com.apple.quarantine m365crawl` once.
+Published macOS binaries are always Developer ID signed and notarized by Apple; the release workflow fails rather than ship an unsigned build. The Homebrew cask clears the quarantine flag after install. If you built m365crawl yourself, you may need `xattr -dr com.apple.quarantine m365crawl` once.
 
-[GitHub Releases](https://github.com/ourostack/m365crawl/releases) has `m365crawl_<version>_darwin_arm64.tar.gz` and `m365crawl_<version>_darwin_amd64.tar.gz` with a `checksums.txt`. To build from source, install Go 1.27 or newer:
+[GitHub Releases](https://github.com/ourostack/m365crawl/releases) has `m365crawl_<version>_darwin_arm64.tar.gz` and `m365crawl_<version>_darwin_amd64.tar.gz` with `checksums.txt`. To build from source, install Go 1.27 or newer:
 
 ```sh
 go install github.com/ourostack/m365crawl/cmd/m365crawl@latest
@@ -45,112 +52,112 @@ go install github.com/ourostack/m365crawl/cmd/m365crawl@latest
 
 ### Windows
 
-Download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it somewhere under your user profile, and run `m365crawl.exe`. Add that directory to `PATH` if you want to call it without the full path. Windows release assets are intentionally unsigned; verify what you downloaded with `checksums.txt` and `m365crawl.exe --json version`.
+Download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Add that directory to `PATH` to call it without the full path. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`.
+
+On Windows, m365crawl reads Teams chats and the calendar. Outlook mail on Windows is coming next; until then every `mail` command says so and names a command that works.
 
 crawlkit's `crawlctl discover --app m365crawl` finds it.
 
-### macOS: Grant Full Disk Access
+### macOS: grant Full Disk Access
 
-macOS protects Teams' container, so the app that runs m365crawl needs Full Disk Access: open System Settings > Privacy & Security > Full Disk Access, turn it on for your terminal (or the agent host app that launches m365crawl), then quit and reopen that app. Verify with:
+macOS protects the Teams and Outlook containers, so the app that runs m365crawl needs Full Disk Access. Open System Settings › Privacy & Security › Full Disk Access, turn it on for your terminal (or the agent host app that starts m365crawl), then quit and reopen that app. Check with:
 
 ```sh
 m365crawl doctor
 ```
 
-`doctor` checks every prerequisite and prints the exact app to grant when access is missing. It exits 3 if a required check fails. The same grant lets m365crawl read the new Outlook for Mac calendar and, from the profile's `Files` directory, the message bodies Outlook has downloaded (read-only; the mail commands arrive in a later release), which it does by default when Outlook is installed; without it Outlook is reported as unavailable and the Teams sync is unaffected.
+`doctor` checks every prerequisite, prints the exact app to grant when access is missing and exits 3 if a required check fails. One grant covers Teams and Outlook. On Windows the caches live under `%LOCALAPPDATA%` and need no extra step.
 
-### Windows: no extra permission step
-
-Windows keeps the Teams cache under `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView`, not behind macOS TCC. Run `m365crawl doctor`; on Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows`.
+[`docs/install.md`](docs/install.md) covers upgrades, verifying a download and removing m365crawl.
 
 ## Quick start
 
-The examples below run against the repository's committed test fixture, so every name and message is synthetic. To reproduce them from a clone, point m365crawl at the fixture and a scratch archive:
+These examples run against the repository's synthetic fixtures, so every name and message is made up. From a clone, point m365crawl at the fixtures and a scratch archive:
 
 ```sh
+tmp="$(mktemp -d)"
+mkdir -p "$tmp/outlook/Main"
+cp testdata/outlook-fixture/HxStore.hxd "$tmp/outlook/Main/"
 export M365CRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
-export M365CRAWL_DB="$(mktemp -d)/m365crawl.db"
+export M365CRAWL_OUTLOOK_ROOT="$tmp/outlook"
+export M365CRAWL_DB="$tmp/m365crawl.db"
 ```
+
+On Windows, in PowerShell (Teams fixture only):
 
 ```powershell
 $env:M365CRAWL_TEAMS_ROOT = (Resolve-Path '.\testdata\teams-fixture\EBWebView').Path
 $env:M365CRAWL_DB = Join-Path $env:TEMP 'm365crawl-fixture.db'
 ```
 
-Against your own Teams, skip those two lines.
+Against your own Microsoft 365, skip those lines. Then:
 
 ```sh
-m365crawl doctor
 m365crawl sync
+m365crawl
 m365crawl search planning
-m365crawl unread --limit 5
-m365crawl activity --unread
-m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
+m365crawl mail unread
+m365crawl calendar --from 2023-11-20 --days 5
+m365crawl calendar event ev_2da7280856
 ```
+
+`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with. The committed Outlook fixture holds a calendar but no mail yet, so against the fixtures `mail unread` returns an empty list whose `note` says why.
+
+<!-- Example output (overview, a search with one chat and one mail hit, mail show) is generated from the final release build against the fixtures. -->
 
 Output is JSON when stdout is not a terminal and readable text on a terminal. Force either with `--format json|text`.
 
-```sh
-m365crawl sync --json
-```
+## Teams
 
-```json
-{"status":"ok","sources":[{"source":"WV2Profile_fixture|https_teams.microsoft.com_0","status":"ok","omissions":{"calendar_unknown_time_zone":2,"denied_database":3,"denied_store":1},"accounts":["00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1","00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2"],"counts":{"conversations":{"seen":14,"inserted":14,"updated":0,"unchanged":0},"messages":{"seen":120,"inserted":120,"updated":0,"unchanged":0},"people":{"seen":10,"inserted":10,"updated":0,"unchanged":0},"activity":{"seen":22,"inserted":22,"updated":0,"unchanged":0},"records":{"seen":60,"inserted":60,"updated":0,"unchanged":0},"calendar":{"events":{"seen":28,"inserted":28,"updated":0,"unchanged":0},"recaps":{"seen":12,"inserted":10,"updated":2,"unchanged":0},"recap_items":{"seen":16,"inserted":16,"updated":0,"unchanged":0},"gone":0,"linked":2,"refused":0}}}],"conversations":{"seen":14,"inserted":14,"updated":0,"unchanged":0},"messages":{"seen":120,"inserted":120,"updated":0,"unchanged":0},"people":{"seen":10,"inserted":10,"updated":0,"unchanged":0},"activity":{"seen":22,"inserted":22,"updated":0,"unchanged":0},"records":{"seen":60,"inserted":60,"updated":0,"unchanged":0},"calendar":{"events":{"seen":28,"inserted":28,"updated":0,"unchanged":0},"recaps":{"seen":12,"inserted":10,"updated":2,"unchanged":0},"recap_items":{"seen":16,"inserted":16,"updated":0,"unchanged":0},"gone":0,"linked":2,"refused":0},"omissions":{"calendar_unknown_time_zone":2,"denied_database":3,"denied_store":1},"redacted":0,"other_origins":[],"started_at":"2026-10-06T03:31:21.345942Z","finished_at":"2026-10-06T03:31:21.514291Z"}
-```
+m365crawl reads chats, channels, meeting chats, the activity feed, unread state and mentions from the new Teams app's cache. The Teams commands keep their short names: `messages`, `unread`, `thread`, `conversations`, `teams`, `activity` and `people`. `messages`, `thread` and `unread` cover Teams chats and channels only; for Outlook mail use `m365crawl mail …`.
 
 ```sh
-m365crawl search planning --limit 1
+m365crawl unread --since 7d --by-conversation
+m365crawl activity --unread
+m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
+m365crawl messages --team "Fixture team 1" --since 2023-11-14 --max-text 80
 ```
 
-```json
-{"items":[{"tenant_id":"00000000-0000-4000-8000-000000000001","user_id":"00000000-0000-4000-8000-0000000000a1","conversation_id":"19:planningchannel1@thread.tacv2","conversation_display_name":"Fixture team 1 › Planning","id":"1700000047000","reply_chain_id":"1700000047000","parent_message_id":"1700000047000","sender_id":"8:orgid:00000000-0000-4000-8000-0000000000ee","sender_name":"Pat Example","sent_at":"2023-11-14T22:14:07Z","message_type":"RichText/Html","text":"Planning channel message","mentions_me":false,"importance":"normal","pinned":false,"link":"https://teams.microsoft.com/l/message/19:planningchannel1@thread.tacv2/1700000047000?tenantId=00000000-0000-4000-8000-000000000001&context=%7B%22contextType%22%3A%22channel%22%7D","reply_count":0}],"count":1,"truncated":true,"total":2,"archive_age_seconds":0}
-```
+- **Deep links.** Every message and activity item carries a `link`, a Teams deep link you can cite or open. `thread` accepts such a link in place of the conversation and root id.
+- **Mentions.** An @-mention shows in `text` as the person's plain name. `mentions` lists who was mentioned, `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned. `--direct-mentions` keeps only `person` mentions.
+- **System pseudo-conversations.** `48:notifications`, `48:calllogs` and `48:annotations` duplicate real messages, so they are hidden by default; `--include-system` brings them back. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
+- **Unread.** Channels are left out of `unread` by default because their unread counts are noise; `--include-channels` adds them. Use `--since` for "what needs my attention", because old read markers leave stale chats with hundreds of unread messages.
+- **Accounts.** `--account <tenantId>/<userId>` limits any command to one signed-in account; `m365crawl whoami` lists them.
+
+### Watch for changes
+
+`watch` streams changes as Teams writes them. It prints JSON Lines (one object per line, the one exception to the one-document rule): a `message` or `activity` line per change, then a `sync` line per sync. The first sync is a silent baseline, so only later changes appear; `--emit-initial` prints that one too.
 
 ```sh
-m365crawl activity --unread --limit 1 --fields at,type,conversation_display_name,text
+m365crawl watch --fields id,type,text,sender_name --max-text 200
 ```
 
-```json
-{"items":[{"at":"2023-11-14T22:25:00Z","type":"mentionInChat","conversation_display_name":"Pat Example, Sam Example","text":"everyone broadcast everyone"}],"count":1,"truncated":true,"total":14,"archive_age_seconds":0}
-```
+Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with exit 0. A change reaches the output after Teams flushes it to its cache plus a few seconds of debounce. Measured against a real cache, that was about 12 to 32 seconds from the moment a message was sent.
 
-To stream changes as Teams writes them, run `watch`. It prints JSON Lines (one object per line, the one exception to the one-document rule): a `message` or `activity` line per change, then a `sync` line per sync. The first sync is a silent baseline, so only later changes appear; `--emit-initial` prints that one too, as here:
+## Outlook mail
+
+m365crawl reads messages, folders, read and flag state, recipients, attachments (as metadata) and bodies as text from the new Outlook for Mac's local store.
 
 ```sh
-m365crawl watch --emit-initial --fields id,type,text,sender_name --max-text 30
+m365crawl mail list --folder inbox --unread
+m365crawl mail list --from pat --since 7d
+m365crawl mail show <id>
+m365crawl mail thread <id>
+m365crawl mail folders
+m365crawl mail unread
 ```
 
-```json
-{"kind":"message","change":"new","item":{"id":"1700000001000","text":"Hello from Alex Fixture","sender_name":"Alex Fixture"}}
-{"kind":"activity","change":"new","item":{"id":"fixture-activity-1-1","type":"mentionInChat","text":"Alex Fixture and Sam Tag see t…","sender_name":"Pat Example","text_truncated":true}}
-{"kind":"sync","report":{"status":"ok","sources":[{"source":"WV2Profile_fixture|https_teams.microsoft.com_0","status":"ok","omissions":{"calendar_unknown_time_zone":2,"denied_database":3,"denied_store":1},"accounts":["00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1","00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2"],"counts":{"conversations":{"seen":14,"inserted":14,"updated":0,"unchanged":0},"messages":{"seen":120,"inserted":120,"updated":0,"unchanged":0},"people":{"seen":10,"inserted":10,"updated":0,"unchanged":0},"activity":{"seen":22,"inserted":22,"updated":0,"unchanged":0},"records":{"seen":60,"inserted":60,"updated":0,"unchanged":0},"calendar":{"events":{"seen":28,"inserted":28,"updated":0,"unchanged":0},"recaps":{"seen":12,"inserted":10,"updated":2,"unchanged":0},"recap_items":{"seen":16,"inserted":16,"updated":0,"unchanged":0},"gone":0,"linked":2,"refused":0}}}],"conversations":{"seen":14,"inserted":14,"updated":0,"unchanged":0},"messages":{"seen":120,"inserted":120,"updated":0,"unchanged":0},"people":{"seen":10,"inserted":10,"updated":0,"unchanged":0},"activity":{"seen":22,"inserted":22,"updated":0,"unchanged":0},"records":{"seen":60,"inserted":60,"updated":0,"unchanged":0},"calendar":{"events":{"seen":28,"inserted":28,"updated":0,"unchanged":0},"recaps":{"seen":12,"inserted":10,"updated":2,"unchanged":0},"recap_items":{"seen":16,"inserted":16,"updated":0,"unchanged":0},"gone":0,"linked":2,"refused":0},"omissions":{"calendar_unknown_time_zone":2,"denied_database":3,"denied_store":1},"redacted":0,"other_origins":[],"started_at":"2026-10-06T03:31:21.345942Z","finished_at":"2026-10-06T03:31:21.514291Z"}}
-```
+- **What the cache holds.** Outlook keeps a window of recent mail per folder. Every mail result says when mail was last synced and how far back the cache reaches (`cache covers since …`). Mail you synced earlier stays in the archive when Outlook drops it from the cache and is marked `evicted`. A message deleted in Outlook is marked `gone` once two reads in a row miss it. Both are hidden unless you pass `--include-evicted` or `--include-gone`.
+- **Unread counts can be lower than Outlook's**, because the local cache does not hold every message the server knows about. The output says so.
+- **Threads.** Outlook keeps no thread id locally, so `mail thread` follows reply links (In-Reply-To and Message-ID) and falls back to the same subject with a shared participant. The result says which it used (`grouping`: `reply_chain` or `subject`).
+- **Recipients** carry names and addresses. Outlook's local store does not tell To from Cc, so m365crawl does not either.
+- **Attachments** are listed with name, size and content type. Their bytes are not copied into the archive.
+- **Meeting invites** carry the meeting's iCal UID, which links them to their calendar event.
+- **Ids.** A message id is `<account>:<number>`, for example `outlook/Main:12345`, as `mail list` prints it.
 
-Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with exit 0. A change reaches the output after Teams flushes it to its cache plus a few seconds of debounce; measured against a real cache that was about 12 to 32 seconds from the moment a message was sent.
+## Calendar
 
-`--account <tenantId>/<userId>` limits any command to one signed-in account; `m365crawl whoami` lists them. The archive lives at `~/.m365crawl/m365crawl.db` on macOS and `%LOCALAPPDATA%\m365crawl\m365crawl.db` on Windows (override with `--db` or `M365CRAWL_DB`). On Windows the default path is private by construction; for a custom `--db`, m365crawl creates missing parent directories as private ones, but an unsafe pre-existing parent or pre-existing archive file fails with `db_error` before SQLite writes anything.
-
-## For agents
-
-Agents should read [`.agents/skills/m365crawl/SKILL.md`](.agents/skills/m365crawl/SKILL.md), or run `m365crawl skill` to print the same guide from the installed binary. It holds the workflow, every command, every error code and what to do about each. The full normative contract is [`SPEC.md`](SPEC.md). The contract in five bullets:
-
-- Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
-- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50); a truncated list also has `"total": N`, the exact match count. Keys are snake_case and stable; new fields may appear, renames are breaking changes.
-- Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
-- Every message and activity item carries a `link` (a Teams deep link) for citing (a calendar event has its `join_url` instead), and every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts the read covers (a partial or failed sync refreshes nobody).
-- Nothing ever writes to Teams.
-
-Flags that matter for agents:
-
-- `--max-age 15m` (or `M365CRAWL_MAX_AGE`) makes a read command run a sync first when the last successful one is older. `0` disables it. When a read does sync first it prints one line on stderr beforehand (plain text in text mode, `{"notice":"syncing","reason":"stale",...}` as JSON otherwise) and the result gains `synced: {seconds, status}`. If the implicit sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
-- `--fields a,b,c` keeps only those top-level keys of each item.
-- `--max-text N` truncates each item's text to N characters, including the trailing `…` (it may cut mid-word), and sets `text_truncated`.
-- `archive_age_seconds` tells you how stale the answer can be. An archive with no complete sync yet (never synced, only partial or failed syncs, or written by an older m365crawl) adds `"needs_sync":true` and `"hint":"run m365crawl sync"` to every read result.
-- System pseudo-conversations (`48:notifications`, `48:calllogs`, `48:annotations`) are hidden by default because they duplicate real messages; `--include-system` brings them back. An @-mention shows in `text` as the person's plain name, `mentions` lists who was mentioned and `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned; `--direct-mentions` keeps only `person` mentions. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
-
-## Calendar and Outlook
-
-`m365crawl calendar` reads the meetings Teams cached, with their recaps and action items. Teams caches the days you looked at, not a range, so every calendar result says whether the range is covered (`coverage_gap`, `uncovered_days`, `coverage_as_of`) and how fresh it is; an event missing from an uncovered day is not evidence that it does not exist. Teams fetches attendees, body and rooms only for meetings you opened, so a field the source never stated has no key and its name is in `unknown_fields`: not known is not the same as empty. `m365crawl calendar sources` shows what the archive holds per account and source, and `m365crawl doctor` warns when the Teams calendar cache is old or the Outlook store cannot be read.
+`m365crawl calendar` is the agenda for a range (default today), read from two sources: the meetings Teams cached, with their recaps and action items, and the new Outlook for Mac calendar.
 
 ```sh
 m365crawl calendar --from tomorrow --days 7
@@ -159,90 +166,130 @@ m365crawl calendar actions --from=-7d --to=tomorrow --mine
 m365crawl calendar sources
 ```
 
-The new Outlook for Mac store is a second calendar source, read-only and read by default when it is installed (the directory under `~/Library/Group Containers`; it needs the same Full Disk Access grant as Teams, and without it Outlook is reported as unavailable while the Teams sync carries on). Turn it off with `--outlook-root none` or `M365CRAWL_OUTLOOK_ROOT=none`, or point it at another directory with `--outlook-root DIR`. With `--teams-root` set and no `--outlook-root`, Outlook stays off. `M365CRAWL_OUTLOOK=1` still works and does nothing. An Outlook profile joins your Teams account on its own when an address the profile is signed in with is the Teams account's own address (the match ignores case; `m365crawl calendar sources` shows `link: address`). Otherwise it stays its own account, because two people invited to the same meeting hold the same events and m365crawl never guesses which account is yours: the agenda lists unlinked profiles with the command that links each one, for example `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>` (`m365crawl whoami` lists the Teams accounts by name and id; nothing the tool prints says which one owns an Outlook profile, which is only `outlook/<profile name>`, so ask whoever owns the Mac). The linking `sync` may print `skipped_interval` and `linked: 0` for Outlook: that is not a failure, and `m365crawl calendar sources` shows `link: config` once the link is in place (`--outlook-account` always wins over the automatic link, and `none` keeps a profile unlinked). Linked, the two copies of a meeting merge into one item with `sources: ["teams","outlook"]`. The flags are in [`docs/commands.md`](docs/commands.md) and the rules in [`SPEC.md`](SPEC.md) section 4.2.
+- **Meeting prep.** `calendar event` shows one meeting with its attendees, body, recaps and action items, recordings, the meeting chat with its 20 newest messages (`chat.recent_messages`), and related mail (`related_mail`). Related mail is the meeting's invites first (matched by iCal UID, `match: "invite"`), then mail with the same subject from 14 days before to 7 days after the meeting, sent or received by one of its attendees (`match: "subject"`).
+- **Two sources, one item.** When an Outlook profile is linked to your Teams account, the two copies of a meeting merge into one item with `sources: ["teams","outlook"]`. The copy that is more up to date wins for the schedule; attendees and rooms are the union of both; Teams owns the Teams meeting fields (join link, dial-in, meeting chat).
+- **Coverage.** Teams caches the days you looked at, not a range, so every calendar result says whether the range is covered (`coverage_gap`, `uncovered_days`, `coverage_as_of`). An event missing from an uncovered day is not evidence that it does not exist.
+- **Not known is not empty.** Teams fetches attendees, body and rooms only for meetings you opened. A field the source never stated has no key, and its name is in `unknown_fields`.
+- **Recaps and action items.** `calendar actions` lists the action items of the recaps in a range with their owners; `--mine` keeps yours and says how the owner was matched (`mine_basis`).
+- **What the archive holds.** `calendar sources` shows, per account and source, how many days are covered, when each was last read and what could not be read.
+
+**Linking Outlook to Teams.** An Outlook profile joins your Teams account on its own when an address the profile is signed in with is the Teams account's own address (the match ignores case; `calendar sources` shows `link: address`). Otherwise it stays its own account, because two people invited to the same meeting hold the same events and m365crawl never guesses which account is yours. The agenda then lists the unlinked profile with the command that links it, for example `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`. The linking `sync` may print `skipped_interval` and `linked: 0` for Outlook; that is not a failure, and `calendar sources` shows `link: config` once the link is in place. `--outlook-account` always wins over the automatic link, and `none` keeps a profile unlinked.
+
+**Turning Outlook off.** The Outlook store is read by default when it is installed. Turn it off with `--outlook-root none` or `M365CRAWL_OUTLOOK_ROOT=none`, or point it at another directory with `--outlook-root DIR`. With `--teams-root` set and no `--outlook-root`, Outlook stays off. Turning Outlook off turns off both mail and the Outlook calendar.
+
+## For agents
+
+Run `m365crawl` for an overview and `m365crawl --help` for where to start; every command's `--help` is complete. `m365crawl skill` prints a short guide, the same text as [`.agents/skills/m365crawl/SKILL.md`](.agents/skills/m365crawl/SKILL.md). The full contract is [`SPEC.md`](SPEC.md). In five bullets:
+
+- Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
+- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50). A truncated list also has `"total": N` where the exact count is known. An empty list carries a `note` that says why: the archive is empty, the filter matched nothing, the range is outside the cached window, or the source is not read on this system.
+- Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
+- Every item carries an id or link for citing, and every read result carries `archive_age_seconds`.
+- Nothing ever writes to Teams or Outlook.
+
+Flags that matter for agents:
+
+- `--max-age 15m` (or `M365CRAWL_MAX_AGE`) makes a read command sync first when the last successful sync is older. `0` disables it. When a read syncs first it prints one line on stderr beforehand and the result gains `synced: {seconds, status}`. If that sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
+- `--fields a,b,c` keeps only those top-level keys of each item.
+- `--max-text N` truncates each item's text to N characters, including the trailing `…`, and sets `text_truncated`.
+- An archive with no complete sync yet adds `"needs_sync": true` and `"hint": "run m365crawl sync"` to every read result. Check for it before you read an empty result as "no match".
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `doctor` | Checks Teams, platform access prerequisites, origins, the archive and the last sync. Exits 3 on a blocking failure. |
-| `whoami` | Lists the accounts in the archive and the archive's state. |
-| `sync` | Copies the Teams cache into the archive once and prints what changed. The first sync after an upgrade first re-derives older rows' text and names from their stored `raw_json` (report field `migrated`, counted as no update). Each Teams source commits on its own: if one fails and another succeeds the status is `partial`, the report is on stdout, a `partial_sync` error is on stderr and the exit status is 1. |
-| `status` | Shows archive counts per account, the last sync and other Teams origins seen. |
-| `search [query]` | Full-text search over message text, newest first. The query is optional when a filter is given. Filters: `--conversation`, `--team`, `--from`, `--since`, `--until`, `--mentions-me`, `--direct-mentions`, `--include-deleted`, `--include-system`. |
-| `messages` | Lists messages chronologically (oldest first). Same filters as `search`, plus `--unread` and `--include-channels`. Channel thread roots carry `reply_count` and `last_reply_at`. |
-| `unread` | Lists unread messages in chats and meetings, newest first. Flags: `--team`, `--since` (count only recent unread messages; use it for "what needs my attention"), `--include-channels` (channels are off by default because their unread counts are noise; results then carry `"channels_excluded":true`), `--by-conversation` (one item per conversation with its unread count, most unread first), `--include-system`. |
-| `activity` | Lists activity-feed items (mentions, replies, reactions) joined with their messages. Filters: `--unread`, `--type` (comma separated; `mention` and `mentionInChat` are different types), `--direct-mentions`, `--team`, `--since`, `--include-system`. Items carry `actor_id` and `actor_name`: who reacted, replied or mentioned (a reaction's actor is inferred, `actor_inferred: true`). |
-| `thread <conversation> <root-id>` | Shows one thread. Accepts a Teams message link instead of the two arguments, and `--limit` (default 50, check `truncated`). |
-| `conversations` | Lists conversations, sorted by last activity, newest first (default `--limit 50`, check `truncated`). Filters: `--kind`, `--query` (best match first: exact name, then prefix, then substring), `--team`, `--include-system`. Untitled group chats are named after their members (`Ana, Ben, Chao +2`). |
-| `teams` | Lists teams with `channel_count`, `last_activity_at` and `unread_count`; a team's `team_id` or `display_name` is what `--team` takes. |
-| `people` | Lists people seen as senders or members; use it to resolve `--from`. |
-| `calendar` | The agenda for a range (default today): `--from`, `--to`, `--days`, `--query`, `--include-cancelled`, `--include-declined`, `--include-masters`, `--include-removed`. Each item says which sources hold it, how complete it is (`detail_level`, `unknown_fields`, `filled_fields`) and whether it has a recap; the result says whether the range is covered (`coverage_gap`, `uncovered_days`). |
-| `calendar event <event>` | One event with attendees, body, recaps and their action items, the meeting chat, and the recordings and transcripts that belong to this occurrence. |
-| `calendar actions` | Action items from the recaps of the events in a range, with owners. `--mine` keeps yours (`mine_basis` says how the owner was matched), `--owner NAME` filters by name. |
-| `calendar sources` | What the archive holds per account and source (Teams, Outlook), how many days are covered, when each was last verified and read, and what could not be read. |
-| `stores` | Lists every database and object store mirrored into the generic `records` table (calendar, pinned messages, contacts, call history and the rest) with record counts. |
-| `records --database <name or prefix>` | Lists the archived records of one database, newest change first. Flags: `--store`, `--since`, `--include-removed`, `--limit`. `key_json` and `value_json` come back as parsed JSON. |
-| `sql <query>` | Runs one read-only SELECT against the archive. |
-| `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted message or activity item as Teams writes its cache, plus one `{"kind":"sync","report":{...}}` line per sync, and one `{"kind":"migrated","from":1,"to":2,"rows":N}` line when an upgrade re-derives an older archive (not a change: no `edited` lines). Flags: `--every` (poll interval, default `60s`), `--min-interval` (least time from the end of one sync to the start of the next, default `60s`, `0` disables), `--emit-initial`; honors `--account`, `--fields` and `--max-text`; system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations) are skipped. |
-| `metadata` | Prints the crawlkit app manifest as JSON in every output mode, so `crawlctl discover --app m365crawl` finds m365crawl. Needs no archive and never syncs. |
-| `skill` | Prints the agent guide (the same text as `.agents/skills/m365crawl/SKILL.md`, embedded in the binary) as raw Markdown in every output mode, so an agent can read the guide that matches the installed version. |
-| `version` | Prints `{"version","commit","date"}` (one JSON document; a human line in text mode). `m365crawl --version` does the same. |
+| Group | Command | What it does |
+| --- | --- | --- |
+| Overview and health | `m365crawl` | What the archive holds per source, how fresh it is, and the commands to start with. Never syncs. |
+| | `doctor` | Checks every prerequisite, the archive and the last sync. Exits 3 on a blocking failure. |
+| | `status` | Archive counts per account, the last sync, and a mail block. |
+| | `whoami` | The accounts in the archive and the archive's state. |
+| | `sync` | Reads Teams, Outlook mail and the calendar into the archive once and prints what changed. |
+| | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted Teams message or activity item. |
+| Across sources | `search [query]` | Full-text search over Teams chats and Outlook mail, newest first; `--source chats\|mail\|all` picks the sources. |
+| | `people` | People seen in Teams and in mail (one row per mail address); use it to resolve `--from`. |
+| | `sql <query>` | One read-only SELECT against the archive. |
+| Teams | `messages` | Messages in time order, with the same filters as `search`, plus `--unread`. |
+| | `unread` | Unread messages in chats and meetings, newest first; `--by-conversation` for counts. |
+| | `thread <conversation> <root-id>` | One thread. Accepts a Teams message link instead. |
+| | `conversations` | Conversations by last activity; `--query` finds one by name. |
+| | `teams` | Teams with channel count, last activity and unread count. |
+| | `activity` | Activity-feed items (mentions, replies, reactions) with their messages. |
+| | `stores`, `records` | The other Teams databases, mirrored as raw records. |
+| Mail | `mail list` | Outlook mail, newest first. Filters: `--folder`, `--from`, `--since`, `--until`, `--unread`, `--flagged`, `--has-attachments`. |
+| | `mail show <id>` | One message: headers, recipients, attachments and body text. |
+| | `mail thread <id>` | The conversation a message belongs to. |
+| | `mail folders` | Folders with message and unread counts and how far back the cache reaches. |
+| | `mail unread` | Unread mail by folder. |
+| Calendar | `calendar` | The agenda for a range, merged across Teams and Outlook, with coverage. |
+| | `calendar event <id>` | One meeting with attendees, body, recaps, the meeting chat and related mail. |
+| | `calendar actions` | Action items from the recaps in a range, with owners. |
+| | `calendar sources` | What the archive holds per account and source, and how fresh it is. |
+| Tooling | `metadata` | The crawlkit app manifest, for `crawlctl discover`. |
+| | `skill` | The agent guide for this version. |
+| | `version` | Version, commit and build date. |
 
-Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--outlook-root`, `--outlook-account`, `--outlook-profile`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. Run `m365crawl <command> --help` for the rest.
+Every command takes the global flags `--format`, `--json`, `--db`, `--teams-root`, `--outlook-root`, `--outlook-account`, `--outlook-profile`, `--account`, `--no-color`, `--max-age`, `--fields` and `--max-text`. [`docs/commands.md`](docs/commands.md) has every command and flag.
 
-Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off; `CLICOLOR_FORCE=1` turns it on when output is piped (this is how `make screenshot` renders `screenshot.png`). JSON output is never colored and never changes with any of these.
-
-## Documentation
-
-- [`SPEC.md`](SPEC.md): the normative specification (data model, sync, output contract, every error code, `watch`, privacy, known limits).
-- [`docs/commands.md`](docs/commands.md): every command and flag, as `--help` prints them.
-- [`docs/how-it-works.md`](docs/how-it-works.md): from the Teams cache to a SQLite row (LevelDB, IndexedDB, the Blink envelope, V8, the credential denylist, full-text search).
-- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks, how to grant it, how `doctor` checks it, and why Windows does not need that step.
-- [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
-- [`AGENTS.md`](AGENTS.md): development rules for agents working on this repository.
-
-## How it works
-
-1. **Snapshot.** m365crawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. On macOS that directory is mode 0700; on Windows it is ACL-restricted to the current user and SYSTEM. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
-2. **Decode.** A built-in reader parses LevelDB, Chromium's IndexedDB coding and V8's structured-clone format. No Node, Python or browser is needed at runtime.
-3. **Denylist.** The conversation, reply-chain (message) and activity-feed stores become typed tables. Every other database is decoded into a generic `records` table, except anything whose name looks like sign-in credentials, which is counted and never opened.
-4. **Store.** Rows go into SQLite (WAL) with FTS5 indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing. Messages that vanish from Teams' cache stay in the archive; Teams deletions set `deleted_at`.
-
-On macOS, Full Disk Access is the only extra permission it asks for ([why and how](docs/full-disk-access.md)); on Windows the default cache path is readable without an extra OS prompt. If the cache fingerprint has not changed since the last sync, `sync` skips decoding.
+Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off, and `CLICOLOR_FORCE=1` turns it on when output is piped. JSON output is never colored.
 
 ## Privacy
 
-The archive holds your real Teams conversations. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows) and m365crawl has no network code. On Windows the default archive directory is private by construction, and a custom `--db` parent must already be private or be created by m365crawl as a new private directory before the archive opens. Treat the database like the chats it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data.
+The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows), and m365crawl has no network code. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
 
 ## Limits
 
-- It sees only what the desktop app has cached. History you never scrolled to may be missing, and Teams evicts old messages from its cache, so sync regularly.
-- macOS and Windows with the new Teams app are supported. Classic Teams and Linux are not.
-- Full Disk Access is required only for the app that runs it on macOS. Windows uses the LocalCache path and does not require that step.
-- Read-only: no sending, reacting or marking read.
-- Contact stores, call history and pinned-message lists have no typed commands yet: they are mirrored as raw records, readable with `stores` and `records` until typed mappers exist.
-- The calendar holds only the days Teams cached (`coverage_gap` says when a range is not covered), and attendees, body and rooms only for meetings the user opened. A field the source never stated is listed in `unknown_fields`, which is not the same as empty. The new Outlook for Mac source is opt-in and read-only, and merges with Teams only through an explicit link.
-- Attachments and media are not downloaded; files and links are recorded as metadata.
-- Teams can change its storage layout. When it does, `sync` fails with a named error or reports counted omissions instead of guessing.
-- Published macOS release binaries are always signed and notarized; Windows release binaries are intentionally unsigned.
+- It sees only what the desktop apps cached, so sync regularly.
+- Supported: macOS and Windows with the new Teams app, and the new Outlook for Mac for mail and its calendar. Classic Teams, classic Outlook and Linux are not supported. Outlook mail on Windows is coming next.
+- Read-only: no sending, replying, reacting, moving or marking read.
+- Attachments are recorded as metadata; their bytes are not copied into the archive.
+- Outlook's local store does not separate To from Cc and keeps no thread id. Importance is read but not yet verified against Outlook's own display.
+- The calendar holds only the days Teams cached plus what Outlook's store holds, and attendees, body and rooms only for meetings someone opened.
+- Contact stores, call history and pinned-message lists have no typed commands yet; they are mirrored as raw records, readable with `stores` and `records`.
+- The apps can change their storage layout. When they do, `sync` fails with a named error or reports counted omissions instead of guessing.
+
+## Documentation
+
+- [`SPEC.md`](SPEC.md): the normative specification.
+- [`docs/commands.md`](docs/commands.md): every command and flag.
+- [`docs/install.md`](docs/install.md): install, upgrade, verify and remove.
+- [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks and how to grant it.
+- [`docs/privacy.md`](docs/privacy.md): what m365crawl reads, stores and never touches.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md): common problems and their fixes.
+- [`docs/how-it-works.md`](docs/how-it-works.md): from the app caches to a SQLite row.
+- [`docs/outlook-store.md`](docs/outlook-store.md): the Outlook for Mac store layout, structure and counts only.
+- [`docs/releasing.md`](docs/releasing.md): how a release is made.
+- [`CHANGELOG.md`](CHANGELOG.md) and [`docs/releases/`](docs/releases/): what changed in each release.
+- [`AGENTS.md`](AGENTS.md): rules for agents working on this repository.
+
+## How it works
+
+For Teams:
+
+1. **Snapshot.** m365crawl copies the new Teams app's IndexedDB (Chromium LevelDB plus blob files) into a private temp directory, retrying if Teams writes mid-copy. The copy contains Teams' sign-in database, so it is removed on every exit path, including failure and Ctrl-C.
+2. **Decode.** A built-in reader parses LevelDB, Chromium's IndexedDB coding and V8's structured-clone format. No Node, Python or browser is needed at runtime.
+3. **Denylist.** The conversation, message and activity-feed stores become typed tables. Every other database goes into a generic `records` table, except anything whose name looks like sign-in credentials, which is counted and never opened.
+4. **Store.** Rows go into SQLite with full-text indexes, using idempotent upserts. A second sync with no new Teams activity changes nothing.
+
+For Outlook, m365crawl copies the profile's `HxStore.hxd` to a private temp file, reads its block store, and maps mail, folders, recipients, attachments and calendar events. It reads message bodies from the profile's body files, read-only, and deletes the copy on every exit.
+
+If neither cache has changed since the last sync, `sync` skips decoding. [`docs/how-it-works.md`](docs/how-it-works.md) has the details.
 
 ## Development
 
 ```sh
 make build      # bin/m365crawl
 make test       # unit tests with the race detector
-make e2e        # end-to-end tests against the committed fixture
-make coverage   # 100% function coverage gate on internal/...
+make e2e        # end-to-end tests against the committed fixtures
+make coverage   # 100% coverage gate on internal/...
 make check      # every gate CI runs: tidy, fmt, vet, lint, test, coverage, e2e
 ```
 
-The integration tests run against `testdata/teams-fixture/`, an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`. Regenerate it with `make fixture` (needs Node and Edge) and V8 test vectors with `make v8vectors` (needs Node 22). Real-cache acceptance (`M365CRAWL_REAL_CACHE=1 make acceptance`, plus the equivalent direct `go test -tags acceptance ./acceptance/...` if you do not have `make`) runs locally only; it needs Full Disk Access on macOS, a live Teams cache on the current Windows host, Node 22, python3, and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never message content.
+The tests run against two committed synthetic fixtures. `testdata/teams-fixture/` is an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`; regenerate it with `make fixture` (needs Node and Edge) and the V8 test vectors with `make v8vectors` (needs Node 22). `testdata/outlook-fixture/` holds Outlook stores written by `scripts/hxfixture`. Real-cache acceptance (`M365CRAWL_REAL_CACHE=1 make acceptance`) runs locally only; it needs Full Disk Access on macOS, live app caches, Node 22, python3 and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never content.
 
 ## Credits
 
 - [slacrawl](https://github.com/openclaw/slacrawl) (openclaw, MIT) is the model for this tool's design and commands, and the source of the terminal renderer.
 - [ccl_chromium_reader](https://github.com/cclgroupltd/ccl_chromium_reader) (MIT) documented the Chromium IndexedDB and V8 formats and served as the reference decoder.
+- [hxstore-reverse-engineering](https://github.com/ukd1/hxstore-reverse-engineering) (MIT) documented the Outlook store's block container.
 
 ## License
 
