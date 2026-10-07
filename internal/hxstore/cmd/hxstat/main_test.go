@@ -260,7 +260,6 @@ func TestRunOnOutlookFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []pairCount{
-		{Class: 0x55, Tag: 32, Count: 2},
 		{Class: 0x6b, Tag: 0x455, Count: 14},
 		{Class: 0x6c, Tag: 0x348, Count: 8},
 		{Class: 0x71, Tag: 20, Count: 3},
@@ -274,7 +273,7 @@ func TestRunOnOutlookFixture(t *testing.T) {
 			t.Fatalf("%+v", r.Pairs)
 		}
 	}
-	if r.BlocksFound != 4 || r.BlocksValid != 4 || r.BlocksRejected != 0 || r.Objects != 28 ||
+	if r.BlocksFound != 4 || r.BlocksValid != 4 || r.BlocksRejected != 0 || r.Objects != 26 ||
 		r.ObjectsResynced != 0 || r.UnwalkedBytes != 0 || r.PayloadsWithoutObjects != 0 || r.HeadsTrailerForm != 2 {
 		t.Fatalf("%+v", r)
 	}

@@ -113,7 +113,7 @@ func (rt *runtime) archiveChecks() []check {
 			check{Name: "fts", OK: true, Detail: d},
 			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `m365crawl sync`."},
 			check{Name: "calendar_cache", OK: true, Detail: d},
-			rt.outlookStoreCheck(nil))
+			rt.outlookStoreCheck(nil), rt.mailReadableCheck(nil), rt.mailArchiveModeCheck())
 	case isArchiveNewer(err):
 		// A newer schema is refused at open, so no other check can read the archive.
 		var coded *errs.Coded
@@ -172,7 +172,7 @@ func (rt *runtime) archiveChecks() []check {
 	default:
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
-	return append(cs, rt.calendarCacheCheck(st), rt.outlookStoreCheck(st))
+	return append(cs, rt.calendarCacheCheck(st), rt.outlookStoreCheck(st), rt.mailReadableCheck(st), rt.mailArchiveModeCheck())
 }
 
 // staleCalendarAfter is how old the Teams calendar cache may be before doctor warns: Teams

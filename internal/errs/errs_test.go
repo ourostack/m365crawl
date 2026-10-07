@@ -31,6 +31,7 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{NoBrowser(), "transcripts_no_browser", 3},
 		{BrowserBusy(), "transcripts_browser_busy", 4},
 		{BrowserFailed("did not start"), "transcripts_browser_failed", 1},
+		{MailUnsupportedPlatform(), "mail_unsupported_platform", 3},
 	}
 	for _, c := range cases {
 		if c.err.Code != c.code || c.err.Exit != c.exit {

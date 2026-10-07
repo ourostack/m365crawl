@@ -22,6 +22,8 @@ Ready checks
   ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
                        fix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.
   ● outlook_store      the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on
+  ● mail_readable      mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`
+  ● mail_archive_mode  not applicable on Windows
 
 Snapshot
 --------

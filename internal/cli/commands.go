@@ -601,6 +601,8 @@ type statusResult struct {
 	// Outlook is the Outlook root's problem (the same code, message and fix as the error sync gives),
 	// present only when the Outlook source is on and its root is not a readable directory.
 	Outlook *errorBody `json:"outlook,omitempty"`
+	// Mail is the archive's mail in numbers and whether mail is being read.
+	Mail *mailStatusBlock `json:"mail,omitempty"`
 	meta
 }
 
@@ -616,6 +618,10 @@ func (statusCmd) Run(rt *runtime) error {
 				return nil, err
 			}
 			res.StatusRow = row
+		}
+		var err error
+		if res.Mail, err = rt.mailStatus(st); err != nil {
+			return nil, err
 		}
 		root := rt.root
 		if root == "" {

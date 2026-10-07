@@ -33,6 +33,7 @@ const (
 	CodeNoBrowser                   = "transcripts_no_browser"
 	CodeBrowserBusy                 = "transcripts_browser_busy"
 	CodeBrowserFailed               = "transcripts_browser_failed"
+	CodeMailUnsupportedPlatform     = "mail_unsupported_platform"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -191,6 +192,14 @@ func BrowserFailed(detail string) *Coded {
 	return &Coded{Code: CodeBrowserFailed, Exit: ExitRuntime,
 		Message: "the browser failed: " + detail,
 		Fix:     "The browser did not start with remote debugging. A managed policy can block remote debugging; try --browser chrome, or pass --browser with the path to another Edge or Chrome."}
+}
+
+// MailUnsupportedPlatform reports that mail is not read on this operating system. Sync notes it
+// without failing and every `mail` command returns it.
+func MailUnsupportedPlatform() *Coded {
+	return &Coded{Code: CodeMailUnsupportedPlatform, Exit: ExitEnvironment,
+		Message: "mail is not yet read on Windows; Teams chats and the calendar work here \u2014 try `m365crawl calendar`",
+		Fix:     "Use `m365crawl calendar`, or run the mail commands on a Mac with the new Outlook."}
 }
 
 var _ error = (*Coded)(nil)

@@ -220,7 +220,7 @@ func TestSyncOutlookImplicitWithoutTeams(t *testing.T) {
 	root := outlookRoot(t, "HxStore.hxd")
 	o := implicitOpts(newDB(t), root)
 	o.Root = t.TempDir()
-	if r, _ := run(t, o); len(r.Sources) != 1 || r.Sources[0].Status != StatusOK {
+	if r, _ := run(t, o); len(r.Sources) != 2 || r.Sources[0].Status != StatusOK || r.Sources[1].Status != StatusOK {
 		t.Fatalf("%+v", r.Sources)
 	}
 	o = implicitOpts(newDB(t), t.TempDir())

@@ -15,6 +15,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/hxstore"
 	"github.com/ourostack/m365crawl/internal/outlookcal"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/outlookmail"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -42,17 +43,18 @@ func outlookAccount(profile string) string { return "outlook/" + profile }
 // outlookVersions are the version inputs of the Outlook fingerprint: the mapper version is one of
 // them, so a mapper change reads an unchanged store again.
 func outlookVersions() outlookdesktop.Versions {
-	return outlookdesktop.Versions{Store: string(rune(hxstore.KnownStoreVersions[0])), Reader: hxstore.ReaderVersion, Mapper: outlookMapperVersion, Rules: teamsdesktop.RulesVersion}
+	return outlookdesktop.Versions{Store: string(rune(hxstore.KnownStoreVersions[0])), Reader: hxstore.ReaderVersion, Mapper: outlookMapperVersion, Rules: teamsdesktop.RulesVersion, Mail: outlookMailMapperVersion}
 }
 
 // Test seams: the clock, the profile discovery, the copy and the mapper version (a test raises it
 // to see a bump read an unchanged store again).
 var (
-	outlookMapperVersion = outlookcal.MapperVersion
-	outlookNow           = func() time.Time { return time.Now().UTC() }
-	outlookDefaultRoot   = outlookdesktop.DefaultRoot
-	outlookDiscover      = outlookdesktop.Discover
-	outlookSnapshot      = outlookdesktop.Snapshot
+	outlookMapperVersion     = outlookcal.MapperVersion
+	outlookMailMapperVersion = outlookmail.MapperVersion
+	outlookNow               = func() time.Time { return time.Now().UTC() }
+	outlookDefaultRoot       = outlookdesktop.DefaultRoot
+	outlookDiscover          = outlookdesktop.Discover
+	outlookSnapshot          = outlookdesktop.Snapshot
 )
 
 // outlookOutcome is one profile's result, or the failure of finding profiles at all (key "outlook").
@@ -61,6 +63,9 @@ type outlookOutcome struct {
 	report  SourceReport
 	decoded bool
 	err     error
+	// note marks a row that only says something (mail on a platform that does not read it): it is
+	// neither a committed source nor a failure.
+	note bool
 }
 
 // outlookSources runs after the Teams sources have finished (memory: the two never hold their
@@ -90,13 +95,15 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 	}
 	for _, p := range profiles {
 		o := outlookOutcome{key: outlookKey(p.Name)}
-		o.report, o.decoded, o.err = r.safeOutlook(ctx, p, rep)
+		var mail []outlookOutcome
+		o.report, o.decoded, mail, o.err = r.safeOutlook(ctx, p, rep)
 		if o.err != nil && ctx.Err() == nil {
 			// Remembered, so a skipped read reports it instead of reading as a success.
 			c := codedOf(o.err)
 			_ = r.st.SetOutlookFailure(ctx, outlookAccount(p.Name), &store.OutlookFailure{Code: c.Code, Message: bodyMessage(c), Fix: c.Fix, Exit: c.Exit})
 		}
 		out = append(out, o)
+		out = append(out, mail...)
 	}
 	return out
 }
@@ -173,7 +180,7 @@ func skippedProfileError(sp outlookdesktop.SkippedProfile) *errs.Coded {
 		Fix: "Check that the profile directory is readable, then run again."}
 }
 
-func (r *runner) safeOutlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (sr SourceReport, decoded bool, err error) {
+func (r *runner) safeOutlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (sr SourceReport, decoded bool, mail []outlookOutcome, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			sr, decoded, err = SourceReport{}, false, errs.Internal(fmt.Errorf("panic while syncing: %v", rec))
@@ -182,15 +189,18 @@ func (r *runner) safeOutlook(ctx context.Context, p outlookdesktop.Profile, rep 
 	return r.outlook(ctx, p, rep)
 }
 
-// outlook reads one profile. The order is the cheap checks first: the minimum interval, then the
-// fingerprint, then the copy, the guard and one transaction.
-func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (SourceReport, bool, error) {
+// outlook reads one profile: the calendar and, after it, the mail, from one copy of the store.
+// The order is the cheap checks first: the minimum interval, then the fingerprint, then the copy,
+// the guard and one transaction per kind of data. The mail outcomes are rows of their own; a
+// refusal or failure of one kind never stops the other.
+func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (SourceReport, bool, []outlookOutcome, error) {
 	begun := outlookNow()
 	key, account := outlookKey(p.Name), outlookAccount(p.Name)
 	prior, err := r.st.OutlookState(ctx, p.Name, key, account)
 	if err != nil {
-		return SourceReport{}, false, errs.DBError(err)
+		return SourceReport{}, false, nil, errs.DBError(err)
 	}
+	mailOn := outlookMailSupported()
 	if gap := r.o.OutlookMinReadInterval; gap >= 0 {
 		if gap == 0 {
 			gap = OutlookMinReadInterval
@@ -199,38 +209,71 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 		if next := prior.LastAttempt.Add(gap); begun.Before(next) && !prior.LastAttempt.After(begun) {
 			if f := prior.Failure; f != nil {
 				// A skip after a failed read is still that failure, not a success.
-				return SourceReport{}, false, &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
+				return SourceReport{}, false, nil, &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
 			}
 			_ = r.st.SetOutlookSkipped(ctx, p.Name)
 			r.progress("%s: %s", key, StatusSkippedInterval)
-			return SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}, false, nil
+			skipped := SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}
+			return skipped, false, r.mailRowOf(mailOn, SourceReport{Status: StatusSkippedInterval, NextReadAfter: &next}, key), nil
 		}
 	}
 	_ = r.st.SetOutlookChecked(ctx, p.Name, begun) // the store is looked at from here on; a skip never gets here
 	fp, err := outlookdesktop.FingerprintOf(p.StorePath, outlookVersions())
 	if err != nil {
-		return SourceReport{}, false, err
+		return SourceReport{}, false, nil, err
 	}
-	if prior.Fingerprint == fp && !r.o.FullRead && prior.IdentityRead {
+	mailState, err := r.st.MailState(ctx, account)
+	if err != nil {
+		return SourceReport{}, false, nil, errs.DBError(err)
+	}
+	// An archive that never read the account's mail (an upgrade, or a failed read) reads it even
+	// when the store did not change.
+	if prior.Fingerprint == fp && !r.o.FullRead && prior.IdentityRead && (!mailOn || mailState.Read) {
 		status := StatusUnchanged
 		if lost(prior.Omissions) > 0 {
 			status = StatusOmissions
 		}
 		if err := r.st.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: outlookNow(), Source: key, Fingerprint: fp, Status: status, Omissions: prior.Omissions}); err != nil {
-			return SourceReport{}, false, errs.DBError(err)
+			return SourceReport{}, false, nil, errs.DBError(err)
 		}
 		_ = r.st.SetOutlookFailure(ctx, account, nil) // the store is what the last good read saw
 		r.progress("%s: %s", key, status)
-		return SourceReport{Source: key, Status: status, Omissions: prior.Omissions}, false, nil
+		return SourceReport{Source: key, Status: status, Omissions: prior.Omissions}, false, r.mailRowOf(mailOn, SourceReport{Status: StatusUnchanged}, key), nil
 	}
 	if err := r.st.SetOutlookLastAttempt(ctx, p.Name, begun); err != nil {
-		return SourceReport{}, false, errs.DBError(err)
+		return SourceReport{}, false, nil, errs.DBError(err)
 	}
 	info, cleanup, err := outlookSnapshot(ctx, p.StorePath)
 	defer cleanup()
 	if err != nil {
-		return SourceReport{}, false, err
+		return SourceReport{}, false, nil, err
 	}
+	if mailOn {
+		// The calendar commit records the new fingerprint. If the sync stops before the mail is
+		// committed, the old marker must not stand, or the mail would be skipped until the store
+		// changes again.
+		if err := r.st.ClearMailRead(ctx, account); err != nil {
+			return SourceReport{}, false, nil, errs.DBError(err)
+		}
+	}
+	sr, decoded, calErr := r.outlookCalendar(ctx, info, rep, prior, key, account, fp, begun)
+	afterCalendar()
+	if ctx.Err() != nil {
+		return sr, decoded, nil, calErr
+	}
+	if !mailOn {
+		return sr, decoded, r.mailRowOf(false, SourceReport{}, key), calErr
+	}
+	// The calendar's result is out of scope here: the mail read starts with the heap the calendar
+	// read gave back (A19).
+	return sr, decoded, []outlookOutcome{r.outlookMail(ctx, p, info, fp, begun)}, calErr
+}
+
+// afterCalendar is a seam for a test that stops the sync between the calendar commit and the mail.
+var afterCalendar = func() {}
+
+// outlookCalendar reads the calendar from the private copy and commits it in one transaction.
+func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp string, begun time.Time) (SourceReport, bool, error) {
 	res, err := collectOutlook(ctx, info, account, prior.HoldsEvents)
 	if err != nil {
 		return SourceReport{}, false, err
