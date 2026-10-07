@@ -20,6 +20,7 @@ const (
 	CodeBlocksDamaged         = "outlook_blocks_damaged"
 	CodeMailUnmapped          = "outlook_mail_unmapped"
 	CodeMailLayoutPartial     = "outlook_mail_layout_partial"
+	CodeMailFolderMissing     = "outlook_mail_folder_missing"
 
 	detailNoMailObjects = "no_mail_objects"
 	detailWalkCoverage  = "walk_coverage"
@@ -77,7 +78,7 @@ type Notes struct {
 	HeadersSeen   int // header objects with the known tag, every copy
 	Messages      int
 	MissingDetail int // detail keys with a header and no detail object
-	MissingFolder int // detail keys whose header names no folder
+	MissingFolder int // messages kept without a folder: every header copy names a folder the store does not hold
 	OtherRoot     int // detail keys in a folder set that is not the account's
 	// OrphanAttachments and OrphanRecipients count objects whose parent key is no detail object
 	// at all. Children of a message that was skipped (no folder, other account, unmapped) are
@@ -86,7 +87,8 @@ type Notes struct {
 	OrphanRecipients  int
 	BadString         int // string fields that were present but unreadable, left blank (not a loss)
 	Unmapped          int // objects that failed to map
-	ResyncedSkipped   int // objects reached after unknown bytes, skipped
+	ResyncedKept      int // objects reached after unknown bytes that mapped cleanly and were kept
+	ResyncedSkipped   int // objects reached after unknown bytes that did not map, skipped
 	OtherTagSkipped   int // attachment, folder and recipient objects with an unknown tag, skipped
 	BodiesInline      int
 	BodiesFile        int // file bodies read and inflated
@@ -110,11 +112,10 @@ type Result struct {
 	// Doubtful says a header object reached after unknown bytes did not map, so the read cannot
 	// tell which message it named. It makes the read untrusted for marking messages gone or
 	// evicted, and for nothing else (it is no loss).
-	Doubtful     bool
-	resyncedKeys []uint32 // detail keys named by resynced headers that mapped
-	Notes        Notes
-	Losses       []Loss
-	Stats        hxstore.Stats
+	Doubtful bool
+	Notes    Notes
+	Losses   []Loss
+	Stats    hxstore.Stats
 }
 
 // version orders the copies of one object key: the highest change stamp, then the highest block
@@ -146,6 +147,8 @@ type class struct {
 	refuse  bool // a tag other than the known one refuses the read
 	wins    map[uint32]winner
 	badTags map[uint16]int
+	// fits says whether an object of the class maps cleanly (a resynced object is kept only then).
+	fits func(hxstore.Object) bool
 }
 
 func newClass(id, tag uint16, refuse bool) *class {
@@ -190,6 +193,12 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 	folders := newClass(ClassFolder, TagFolder, false)
 	recipients := newClass(ClassRecipient, TagRecipient, false)
 	classes := []*class{headers, details, bodies, attachments, folders, recipients}
+	headers.fits = func(o hxstore.Object) bool { _, err := mapHeader(o); return err == nil }
+	details.fits = func(o hxstore.Object) bool { _, err := mapDetail(o); return err == nil }
+	bodies.fits = func(hxstore.Object) bool { return true } // MapBody cannot fail
+	attachments.fits = func(o hxstore.Object) bool { _, err := mapAttachment(o); return err == nil }
+	folders.fits = func(o hxstore.Object) bool { _, err := mapFolder(o); return err == nil }
+	recipients.fits = func(o hxstore.Object) bool { _, _, err := mapRecipient(o); return err == nil }
 	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
 		for _, c := range classes {
 			switch {
@@ -198,14 +207,17 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 			case o.Tag != c.tag:
 				c.badTags[o.Tag]++
 			case o.Resynced:
+				// An object reached after unknown bytes is a real object: when it maps cleanly it
+				// competes under the version rule like any other copy. Only one that does not map
+				// is skipped, and a header that does not map leaves the read doubtful.
+				if c.fits(o) {
+					res.Notes.ResyncedKept++
+					c.keep(o)
+					break
+				}
 				res.Notes.ResyncedSkipped++
 				if o.Class == ClassHeader {
-					// Not used as a header, but it still names a detail key: that key is not absent.
-					if h, err := mapHeader(o); err == nil {
-						res.resyncedKeys = append(res.resyncedKeys, h.DetailKey)
-					} else {
-						res.Doubtful = true
-					}
+					res.Doubtful = true
 				}
 			default:
 				c.keep(o)
@@ -238,13 +250,26 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 	}
 	n := res.Notes
 	for _, l := range []Loss{
-		{CodeMailUnmapped, n.Unmapped}, {CodeMailLayoutPartial, n.OtherTagSkipped},
+		{CodeMailUnmapped, n.Unmapped}, {CodeMailLayoutPartial, n.OtherTagSkipped}, {CodeMailFolderMissing, missingFolderLoss(n)},
 	} {
 		if l.Count > 0 {
 			res.Losses = append(res.Losses, l)
 		}
 	}
 	return res, nil
+}
+
+// missingFolderPercent is the share of messages without a readable folder above which the read
+// is incomplete: a few are folders Outlook has not written yet, many are a layout the reader misses.
+const missingFolderPercent = 5
+
+// missingFolderLoss is the loss count for messages kept without a folder: all of them, once they
+// are more than missingFolderPercent of the messages.
+func missingFolderLoss(n Notes) int {
+	if n.MissingFolder*100 > n.Messages*missingFolderPercent {
+		return n.MissingFolder
+	}
+	return 0
 }
 
 // The mappers Collect calls, as variables so a test can make one fail: a walked object is never
@@ -315,12 +340,6 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		all = append(all, h)
 	}
 	seenKeys := map[uint32]bool{}
-	for _, k := range res.resyncedKeys {
-		if !seenKeys[k] {
-			seenKeys[k] = true
-			res.SeenDetailKeys = append(res.SeenDetailKeys, k)
-		}
-	}
 	for _, h := range all {
 		if !seenKeys[h.DetailKey] {
 			seenKeys[h.DetailKey] = true
@@ -340,18 +359,18 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	for _, k := range sortedFolderKeys(inRoot) {
 		res.Folders = append(res.Folders, inRoot[k])
 	}
-	// Join the copies by detail key.
+	// Join the copies by detail key. A copy in a folder the store does not hold (every copy of the
+	// folder object may be unreadable) is kept apart: the message is shown from it, in a folder of
+	// kind unknown, only when it has no copy in a known folder.
 	copies := map[uint32][]Header{}
+	orphans := map[uint32][]Header{}
 	seen := map[uint32]bool{} // detail keys counted in the notes, so each counts once
 	for _, h := range all {
 		_, known := byKey[h.FolderKey]
 		_, mine := inRoot[h.FolderKey]
 		switch {
 		case !known:
-			if !seen[h.DetailKey] {
-				seen[h.DetailKey] = true
-				n.MissingFolder++
-			}
+			orphans[h.DetailKey] = append(orphans[h.DetailKey], h)
 		case !mine:
 			if !seen[h.DetailKey] {
 				seen[h.DetailKey] = true
@@ -360,6 +379,14 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		default:
 			copies[h.DetailKey] = append(copies[h.DetailKey], h)
 		}
+	}
+	unknown := map[uint32]bool{}
+	for dk, hs := range orphans {
+		if _, has := copies[dk]; has || seen[dk] {
+			continue
+		}
+		copies[dk] = hs
+		unknown[dk] = true
 	}
 	// Recipients and attachments, by the message they belong to.
 	recByMsg := map[uint32][]Recipient{}
@@ -400,8 +427,13 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		}
 		n.BadString += d.BadStrings
 		cur, toMe := currentCopy(copies[dk], inRoot)
+		folder := inRoot[cur.FolderKey]
+		if unknown[dk] {
+			folder = Folder{Key: cur.FolderKey, Kind: KindUnknown}
+			n.MissingFolder++
+		}
 		m := Message{
-			Account: account, Header: cur, Detail: d, Folder: inRoot[cur.FolderKey], ToMe: toMe,
+			Account: account, Header: cur, Detail: d, Folder: folder, ToMe: toMe,
 			Copies: len(copies[dk]), Attachments: attByMsg[dk],
 		}
 		m.Recipients = recByMsg[dk]

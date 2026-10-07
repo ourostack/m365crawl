@@ -23,6 +23,9 @@ type Folder struct {
 // KindJunkOrToMe is the kind the mapper gives type 0x7a.
 const KindJunkOrToMe = "junk_or_to_me"
 
+// KindUnknown is the kind of a message whose folder object the store does not hold.
+const KindUnknown = "unknown"
+
 var folderKinds = map[uint32]string{
 	0x61: "inbox", 0x63: "archive", 0x64: "drafts", 0x65: "sent", 0x67: "deleted", 0x7a: KindJunkOrToMe,
 }

@@ -238,7 +238,7 @@ on conflict(account, folder_key) do update set parent_key=excluded.parent_key, n
 func loadMailExisting(ctx context.Context, tx *sql.Tx, account string) (map[uint32]*mailExisting, error) {
 	byKey := map[uint32]*mailExisting{}
 	byRow := map[int64]*mailExisting{}
-	err := eachRow(ctx, tx, `select m.rowid, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.kind,''), m.to_me, m.is_read, m.read_state, m.flag, m.importance,
+	err := eachRow(ctx, tx, `select m.rowid, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.kind,'unknown'), m.to_me, m.is_read, m.read_state, m.flag, m.importance,
   m.has_attachments, m.body_state, m.gone_at is not null, m.evicted_at is not null, m.received_at,
   exists(select 1 from mail_recipients r where r.message_rowid=m.rowid)
 from mail_messages m left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key where m.account=? order by m.rowid`, []any{account}, func(r *sql.Rows) error {
@@ -280,28 +280,38 @@ func rekeyMail(ctx context.Context, tx *sql.Tx, account string, ex *mailExisting
 
 // mailDerived is what is computed from a message before it is stored.
 type mailDerived struct {
-	norm   string
-	state  string
-	gz     []byte // nil when the message has no HTML
-	text   string
-	hasAtt bool
+	norm    string
+	state   string
+	hasHTML bool   // the read holds the message's HTML
+	gz      []byte // nil until body() runs, and when the message has no HTML
+	text    string
+	hasAtt  bool
+}
+
+// htmlText is the HTML-to-text conversion (a test seam: an unchanged message must not call it).
+var htmlText = outlookmail.HTMLText
+
+// body compresses the HTML and converts it to text. It runs only for a message that is stored or
+// whose body is filled in: the read of an unchanged message costs neither.
+func (d *mailDerived) body(m outlookmail.Message) {
+	if !d.hasHTML || d.gz != nil {
+		return
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write(m.Body.HTML) // a bytes.Buffer cannot fail
+	_ = zw.Close()
+	d.gz, d.text = buf.Bytes(), htmlText(m.Body.HTML)
 }
 
 func deriveMail(m outlookmail.Message) mailDerived {
-	d := mailDerived{norm: NormalizeSubject(m.Subject), state: m.Body.State}
+	d := mailDerived{norm: NormalizeSubject(m.Subject), state: m.Body.State, hasHTML: len(m.Body.HTML) > 0}
 	for _, a := range m.Attachments {
 		if !a.Inline {
 			d.hasAtt = true
 		}
 	}
-	switch {
-	case len(m.Body.HTML) > 0:
-		var buf bytes.Buffer
-		zw := gzip.NewWriter(&buf)
-		_, _ = zw.Write(m.Body.HTML) // a bytes.Buffer cannot fail
-		_ = zw.Close()
-		d.gz, d.text = buf.Bytes(), outlookmail.HTMLText(m.Body.HTML)
-	case d.state == outlookmail.BodyNotRead:
+	if !d.hasHTML && d.state == outlookmail.BodyNotRead {
 		d.state = bodyPending // the body file was not read
 	}
 	return d
@@ -322,6 +332,7 @@ func readFlag(m outlookmail.Message) any {
 }
 
 func insertMail(ctx context.Context, tx *sql.Tx, account string, m outlookmail.Message, d mailDerived, at string) error {
+	d.body(m)
 	r, err := tx.ExecContext(ctx, `insert into mail_messages(account, detail_key, internet_message_id, folder_key, to_me, subject, subject_norm, sender_name, sender_address, preview,
   in_reply_to, received_at, sent_at, class, importance, ical_uid, is_read, read_state, flag, has_attachments, body_state, body_html_gz, body_text, body_text_version, first_seen_at, state_seen_at)
 values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -342,6 +353,7 @@ values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 
 // replaceMail rewrites a stored message with the content of a different one that took its key.
 func replaceMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail.Message, d mailDerived, at string) error {
+	d.body(m)
 	if _, err := tx.ExecContext(ctx, `update mail_messages set internet_message_id=?, folder_key=?, to_me=?, subject=?, subject_norm=?, sender_name=?, sender_address=?, preview=?,
   in_reply_to=?, received_at=?, sent_at=?, class=?, importance=?, ical_uid=?, is_read=?, read_state=?, flag=?, has_attachments=?, body_state=?, body_html_gz=?, body_text=?, body_text_version=?,
   state_seen_at=?, gone_at=null, evicted_at=null where rowid=?`,
@@ -431,6 +443,9 @@ func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail
 		changed = true
 	}
 	fill := ex.body != outlookmail.BodyInline && ex.body != outlookmail.BodyFile
+	if fill {
+		d.body(m)
+	}
 	switch {
 	case fill && d.gz != nil:
 		set("body_state", d.state)
