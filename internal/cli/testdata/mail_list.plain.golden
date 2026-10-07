@@ -1,0 +1,12 @@
+id                received          state                 from              subject               folder
+----------------  ----------------  --------------------  ----------------  --------------------  ----------
+outlook/Main:106  2026-09-09 08:00  -                     Ann Sender        Lunch on Friday       Inbox
+outlook/Main:104  2026-09-08 08:00  ?                     ann@example.test  Lunch on Friday       Inbox
+outlook/Main:103  2026-09-07 08:00  -                     Ann Sender        Re: Re: Quarterly...  Sent Items
+outlook/Main:102  2026-09-06 08:00  -                     Bob Reader        Re: Quarterly plan    Inbox
+outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender        Quarterly plan        Inbox
+outlook/Main:105  2026-08-01 08:00  unread                Ann Sender        Old report            Projects
+
+6 items
+archive age: <age>
+synced 2026-09-10 09:00 · cache covers since 2026-08-01

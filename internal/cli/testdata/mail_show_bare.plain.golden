@@ -1,0 +1,16 @@
+LUNCH ON FRIDAY
+===============
+
+body                : none
+flag                : none
+folder              : Inbox
+from                : ann@example.test
+id                  : outlook/Main:104
+importance (likely) : normal
+received            : 2026-09-08 08:00
+state               : unknown
+
+recipient (To and Cc not yet told apart)  address           kind_raw
+----------------------------------------  ----------------  --------
+Bob Reader                                bob@example.test  1
+archive age: <age>

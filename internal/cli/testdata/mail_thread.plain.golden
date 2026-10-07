@@ -1,0 +1,13 @@
+thread: reply chain
+
+id                received          state                 from        subject               folder
+----------------  ----------------  --------------------  ----------  --------------------  ----------
+outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender  Quarterly plan        Inbox
+outlook/Main:102  2026-09-06 08:00  -                     Bob Reader  Re: Quarterly plan    Inbox
+outlook/Main:103  2026-09-07 08:00  -                     Ann Sender  Re: Re: Quarterly...  Sent Items
+
+participants: Ann Sender <ann@example.test>, Bob Reader <bob@example.test>, Cy Copy <cy@example.test>, Di Dee <di@example.test>, eve@example.test, No Address
+
+3 items
+archive age: <age>
+synced 2026-09-10 09:00 · cache covers since 2026-08-01

@@ -1,0 +1,15 @@
+[2mfolder[0m      [2mkind[0m   [2munread[0m  [2mcached[0m
+[2m----------[0m  [2m-----[0m  [2m------[0m  [2m------[0m
+Inbox       inbox  1       4
+Sent Items  sent   0       1
+Projects    other  1       1
+
+[2mid[0m                [2mreceived[0m          [2mstate[0m                 [2mfrom[0m        [2msubject[0m         [2mfolder[0m
+[2m----------------[0m  [2m----------------[0m  [2m--------------------[0m  [2m----------[0m  [2m--------------[0m  [2m--------[0m
+outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender  Quarterly plan  Inbox
+outlook/Main:105  2026-08-01 08:00  unread                Ann Sender  Old report      Projects
+
+[2m2 items[0m
+[2mnote: Inbox: the local cache holds 4 messages in this folder; Outlook may show more; Projects: the local cache holds 1 messages in this folder; Outlook may show more[0m
+[2marchive age: <age>[0m
+[2msynced 2026-09-10 09:00 · cache covers since 2026-08-01[0m

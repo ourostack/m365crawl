@@ -1,0 +1,8 @@
+[2mid[0m                [2mreceived[0m          [2mstate[0m  [2mfrom[0m              [2msubject[0m          [2mfolder[0m
+[2m----------------[0m  [2m----------------[0m  [2m-----[0m  [2m----------------[0m  [2m---------------[0m  [2m------[0m
+outlook/Main:106  2026-09-09 08:00  [2m-[0m      Ann Sender        Lunch on Friday  Inbox
+outlook/Main:104  2026-09-08 08:00  ?      ann@example.test  Lunch on Friday  Inbox
+
+[2m2 items (more exist; raise --limit)[0m
+[2marchive age: <age>[0m
+[2msynced 2026-09-10 09:00 · cache covers since 2026-08-01[0m

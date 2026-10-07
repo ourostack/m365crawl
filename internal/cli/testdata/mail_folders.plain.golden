@@ -1,0 +1,10 @@
+folder      kind    messages  unread  oldest cached     newest
+----------  ------  --------  ------  ----------------  ----------------
+Inbox       inbox   4         1       2026-09-05 08:00  2026-09-09 08:00
+Drafts      drafts  0         0       -                 -
+Sent Items  sent    1         0       2026-09-07 08:00  2026-09-07 08:00
+Projects    other   1         1       2026-08-01 08:00  2026-08-01 08:00
+
+4 items
+archive age: <age>
+synced 2026-09-10 09:00 · cache covers since 2026-08-01

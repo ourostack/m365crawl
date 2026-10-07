@@ -1,0 +1,27 @@
+QUARTERLY PLAN
+==============
+
+body                : inline
+flag                : flagged
+folder              : Inbox
+from                : Ann Sender <ann@example.test>
+id                  : outlook/Main:101
+importance (likely) : high
+received            : 2026-09-05 08:00
+sent                : 2026-09-05 07:59
+state               : unread
+
+recipient (To and Cc not yet told apart)  address           kind_raw
+----------------------------------------  ----------------  --------
+Bob Reader                                bob@example.test  1
+Cy Copy                                   cy@example.test   2
+Di Dee                                    di@example.test   2
+-                                         eve@example.test  2
+No Address                                -                 2
+
+attachment  bytes  type
+----------  -----  ---------------
+plan.pdf    2048   application/pdf
+
+body of Quarterly plan
+archive age: <age>

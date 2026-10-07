@@ -28,6 +28,9 @@ func stamp(t time.Time) string {
 }
 
 func metaLines(w io.Writer, m meta, color bool) {
+	if m.Note != "" {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("note: "+m.Note, color))
+	}
 	for _, n := range m.Notices {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
 	}
@@ -51,6 +54,10 @@ func (rt *runtime) renderText(label string, v any) error {
 	w, color := rt.stdout, rt.color
 	if textBanners[label] {
 		render.Banner(w, label, color)
+	}
+	if m, ok := v.(mailRenderer); ok {
+		m.renderMail(rt)
+		return nil
 	}
 	switch r := v.(type) {
 	case *listResult:
