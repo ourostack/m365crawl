@@ -11,7 +11,7 @@ STATUS
 archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp>
-schema version : 5
+schema version : 6
 
 account                                                                    conversations  messages  people  activity  newest
 -------------------------------------------------------------------------  -------------  --------  ------  --------  ----------------
