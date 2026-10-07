@@ -105,11 +105,13 @@ func gradientAt(t float64) [3]int {
 	if i > n-1 {
 		i = n - 1
 	}
-	f := t*float64(n) - float64(i)
+	// The explicit conversions stop arm64 from fusing multiply-add, so every
+	// platform rounds identically.
+	f := float64(t*float64(n)) - float64(i)
 	var out [3]int
 	for k := range out {
 		a, b := float64(gradientStops[i][k]), float64(gradientStops[i+1][k])
-		out[k] = int(math.RoundToEven(a + (b-a)*f))
+		out[k] = int(math.RoundToEven(a + float64((b-a)*f)))
 	}
 	return out
 }
