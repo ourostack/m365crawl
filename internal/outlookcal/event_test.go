@@ -1,6 +1,7 @@
 package outlookcal
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -427,5 +428,39 @@ func TestMapEventRejectsBadIDText(t *testing.T) {
 func putBytes(o *hxbuild.Object, off int, b []byte) {
 	for i, v := range b {
 		o.PutU8(off+i, v)
+	}
+}
+
+// An absent string is stored as offset word 0 and length word 0, and the word 0 then points
+// at the first string of the area. Reading it as text gave a field with no value the text of
+// whatever came first: the subject as first written, which a rename leaves behind.
+func TestMapEventAbsentStringsAreEmpty(t *testing.T) {
+	spec := baseSpec(1)
+	spec.Location, spec.Preview = "", ""
+	e, _ := mapOK(t, ev(spec), nil)
+	if e.Location != "" || e.BodyPreview != "" {
+		t.Fatalf("absent strings read as text: location %q preview %q", e.Location, e.BodyPreview)
+	}
+	if e.Subject != "Fixture subject" || e.Organizer != "Fixture Organizer" {
+		t.Fatalf("present strings changed: %q %q", e.Subject, e.Organizer)
+	}
+
+	// A renamed event: the area keeps the first subject at offset 0, the subject word points
+	// at the new text, and location and preview stay absent.
+	spec.StaleSubject, spec.Subject, spec.SubjectBare = "Fixture original", "Fixture renamed", "Fixture renamed"
+	e, _ = mapOK(t, ev(spec), nil)
+	if e.Subject != "Fixture renamed" || e.Location != "" || e.BodyPreview != "" {
+		t.Fatalf("renamed event: subject %q location %q preview %q", e.Subject, e.Location, e.BodyPreview)
+	}
+
+	// A present string that sits at offset 0 (a preview identical to the first string, kept
+	// once by the store) still reads: only a zero length word means absent.
+	spec = baseSpec(1)
+	o := ev(spec)
+	binary.LittleEndian.PutUint32(o.Raw[evLocation:], 0)
+	subjectLen, _ := o.U32(evSubject + 4)
+	binary.LittleEndian.PutUint32(o.Raw[evLocation+4:], subjectLen)
+	if e, _ = mapOK(t, o, nil); e.Location != "Fixture subject" {
+		t.Fatalf("a present string at offset 0 was dropped: %q", e.Location)
 	}
 }

@@ -258,6 +258,10 @@ func (g *gen) cancelled() event {
 	s.Subject, s.SubjectBare = "Canceled: Fixture cancelled event", "Fixture cancelled event"
 	s.Cancelled, s.Response, s.ZoneID = true, 3, 99 // an unmapped response and an unknown zone code
 	s.ZoneName = "Fixture Unknown Time"
+	// No location and no preview, as the store writes an event that has none (offset word 0,
+	// length word 0), and a renamed subject: the area still holds the first one at offset 0,
+	// which an absent string's word 0 points at.
+	s.Location, s.Preview, s.StaleSubject = "", "", "Fixture cancelled original"
 	return event{s, hxbuild.DetailSpec{Key: s.DetailKey, SeriesKey: s.SeriesKey, BodyHTML: body(4)}}
 }
 

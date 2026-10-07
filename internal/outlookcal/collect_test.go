@@ -126,7 +126,7 @@ func TestCollectFixtureReadsEveryFieldOfEveryEvent(t *testing.T) {
 		}
 		expectAgainst(t, e, c)
 		delete(current, e.SourceID)
-		calendar.AssertEveryFieldClassified(t, e, calendar.FieldMeetingChatID, calendar.FieldDialIn, calendar.FieldJoinURL, calendar.FieldBody)
+		calendar.AssertEveryFieldClassified(t, e, calendar.FieldMeetingChatID, calendar.FieldDialIn, calendar.FieldJoinURL, calendar.FieldBody, calendar.FieldLocation, calendar.FieldBodyPreview) // an event may have no location or preview
 	}
 	if len(current) != 0 {
 		t.Fatalf("events missing from the result: %d", len(current))

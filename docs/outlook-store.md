@@ -78,6 +78,7 @@ Pinned pairs: class 0x6b with tag 0x455 (1109 bytes, the event) and class 0x6c w
 
 - A string field is a 4-byte offset word, relative to a base that depends on the field, and (by the convention of the second research pass) a 4-byte length word right after it: the byte length including the terminator, often with bit 31 set. The earlier pass found no length word after the string-area offsets; length words were recorded by the research only at +824, +1028 and +784 in the event and +604 and +704 in the detail object; every other length word in the tables below is inferred at the same distance and marked with a dagger (†).
 - Text is NUL-terminated UTF-16LE. Strings are not 2-byte aligned: 163 of 546 join links start at an odd offset. A reader scans bytes, and bounds the scan by the object length.
+- **A string can be absent.** The length word at the offset word + 4 (bit 31 masked) is zero exactly when the string is absent, and then the offset word is 0 too, with no text stored for it. Offset 0 is the first string of the string area, so reading an absent string by its offset word returns that first string: the subject as first written (the area only grows, so a rename leaves the old subject at offset 0 and appends the new one). A reader must test the length word before it reads. Measured on the copy taken 2026-10-07 after the first rename (6,823 id-carrying event objects, all copies counted): the length word is zero in 230 objects for the body preview (+700), 730 for the location (+836), 14 for the bare subject (+876) and none for the organizer name, organizer address and subject; in every one of those the offset word is 0, and in no object is a zero length word paired with a non-zero offset. Every non-zero length word is the string's byte length including the terminator (the terminator sits at the stated end in 6,593 of 6,593 previews, 6,093 of 6,093 locations, 6,809 of 6,809 bare subjects, and all organizer names, addresses and subjects). A present string can also have offset 0 (the subject in 5,786 objects, the preview in 1,006), so the offset word cannot say "absent"; only the length word can. Known cause of an earlier error in this page: the location and preview rows below were first matched against Teams on objects where both had text, and the "Outlook holds text where Teams has none" counts included absent strings read as the subject.
 - Times are 8-byte .NET ticks (100 ns since 0001-01-01), UTC.
 
 ## Event object (class 0x6b, tag 0x455)
@@ -108,12 +109,12 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 | Reminder lead | +448 | 8 | ticks; 600,000,000 per minute | likely | 12 of 12 vs Teams; present even with no reminder, so not the on/off flag |
 | Start | +584 | 8 | ticks, UTC | established | 460 of 460 vs Teams |
 | End | +592 | 8 | ticks, UTC | established | 460 of 460 vs Teams |
-| Body preview | word +700 (length +704 †) | 4 + 4 | base T; at most 255 characters | established | exact match in all 106 objects where Teams has a preview; Outlook holds one in the other 354 as well |
+| Body preview | word +700, length +704 | 4 + 4 | base T; at most 255 characters; absent when the length word is 0 | established | exact match in all 106 objects where Teams has a preview; absent (length 0) in 230 of 6,823 objects on the 2026-10-07 copy, and equal to the subject in none of the 6,593 that hold one. The earlier "Outlook holds one in the other 354" read absent previews as the subject |
 | Zone id | +776 (repeated at +1012) | 4 † | numeric | established | 12 values; present in all 3,366 distinct events |
 | Zone name | word +780 (length +784); again at +1016 | 4 + 4 | base +1109 for +780; the base of the copy at +1016 is not recorded; Windows zone-name text | established | present in all 3,366 distinct events |
 | Show-as | +816 | 4 | 0 free, 1 tentative, 2 busy (only these three observed) | established | 148 of 148 vs Teams |
-| Location | word +836 (length +840 †) | 4 + 4 | base T | established | exact match in 397 of the 399 objects where Teams has one, and 20 of 20 against Teams' structured meeting locations; Outlook holds text in 61 objects where Teams has none |
-| Subject without cancelled prefix | word +876 (length +880 †) | 4 + 4 | base T | likely | not compared with an independent value |
+| Location | word +836, length +840 | 4 + 4 | base T; absent when the length word is 0 | established | exact match in 397 of the 399 objects where Teams has one, and 20 of 20 against Teams' structured meeting locations; absent (length 0) in 730 of 6,823 objects on the 2026-10-07 copy, and equal to the subject in none of the 6,093 that hold one. The earlier "Outlook holds text in 61 objects where Teams has none" read absent locations as the subject |
+| Subject without cancelled prefix | word +876 (length +880; 0 when absent, 14 of 6,823 objects) | 4 + 4 | base T | likely | not compared with an independent value |
 | Organizer name | word +884 (length +888 †) | 4 + 4 | base T | established | 460 of 460 |
 | Organizer address | word +892 (length +896 †) | 4 + 4 | base T | established | 460 of 460 |
 | Event type | +904 | 4 † | 0 single, 1 occurrence, 2 exception, 3 master | established | 148 of 148 vs Teams; store-wide 144, 2,785, 360 and 77 |
@@ -122,7 +123,7 @@ The id word at +820 is relative to +1109 (area one). The subject, location, orga
 | Second copy of the UID | +996 | not recorded | text | likely | |
 | Subject | word +1024 (length +1028) | 4 + 4 | base T | established | exact full-text match 460 of 460 |
 | Flag word | +1076 | 4 † | bit 4 meaning unknown | not found | differs between versions of one event in 54 pairs |
-| All-day | +1082 bit 3 | 1 byte † | bit set | likely | set in 174 of 177 whole-day objects and in 0 of the other 8,412; all-day events sit at midnight UTC; Teams has none to test |
+| All-day | +1082 bit 3 | 1 byte † | bit set | likely | set in 174 of 177 whole-day objects and in 0 of the other 8,412; all-day events sit at midnight UTC and name the zone `UTC` (89 of 89 archived all-day Outlook events, so the zone name says nothing about the owner's zone); the 2026-10-07 all-day probe confirms the bit; Teams has none to test |
 | Cancelled | +1082 bit 4 | 1 byte † | bit set | likely | set in 1,964 of 1,964 objects whose subject carries the cancelled prefix, and in 3 others; 850 distinct events |
 | Online meeting | +1083 bit 4 | 1 byte † | bit set | established | set in 2,931 distinct events and clear in 435 (of 3,366); agrees with "the detail object has a join link" with 0 disagreements |
 
@@ -193,4 +194,5 @@ The working rule, **likely and not established**: the current version is the cop
 
 ## Revisions
 
+- Probe of 2026-10-07 (Outlook 16.115): two appointments with no location and no body were created, one of them renamed twice, and the store was copied after each step (synthetic subjects only, no real content). It located the absent-string rule above: for both probes the offset words at +700, +836 and +980 were 0 with length 0, and the subject word at +1024 was 0 with the length of the probe subject. After the first rename the string area held the original subject at offset 0 and the new subject appended at area offset 142 (+1024 then pointed there, the bare subject at +876 followed in a later copy), while the absent strings still read as the original subject. The all-day probe has the all-day bit set, start and end at midnight UTC and the zone name `UTC`.
 - Research of 2026-10-05, Outlook 16.115, one store, one machine. Supersedes the first pass where they differ: the +20 word is a series key and the per-event detail link is +180; the zone is also a name string at +780; the distinct event count is 3,366 plus 729 stubs; last modified is preferred to file order.
