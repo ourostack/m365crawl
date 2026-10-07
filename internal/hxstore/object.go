@@ -172,6 +172,38 @@ func (o Object) String(wordOff, base int) (string, bool) {
 	return o.StringAt(int(pos))
 }
 
+// PresentString reads the string whose offset word is at wordOff and whose length word follows
+// at wordOff+4. base is the string area base (the class's fixed region plus its area word), added
+// to the offset word. The length word counts bytes, terminator included, and bit 31 is a flag
+// that is masked off. present is false when the length is zero: the field is absent, and its
+// offset word (0) would point at the first string of the area, which is some other field's
+// text. For a present string, ok is true only when the length is even and at least two, the
+// range lies inside the object, it ends in a UTF-16 NUL with no NUL before it, and the text has
+// no unpaired surrogate. ok is false, with present false, when the words cannot be read.
+func (o Object) PresentString(wordOff, base int) (s string, present, ok bool) {
+	w, okW := o.U32(wordOff)
+	l, okL := o.U32(wordOff + 4)
+	if !okW || !okL {
+		return "", false, false
+	}
+	n := int64(l &^ (1 << 31))
+	if n == 0 {
+		return "", false, true
+	}
+	pos := int64(w) + int64(base)
+	if base < 0 || n%2 != 0 || pos+n > int64(len(o.Raw)) {
+		return "", true, false
+	}
+	raw := o.Raw[pos : pos+n]
+	for i := 0; i+1 < len(raw); i += 2 {
+		if (raw[i] == 0 && raw[i+1] == 0) != (i == len(raw)-2) {
+			return "", true, false
+		}
+	}
+	s, ok = Object{Raw: raw}.StringAtUnaligned(0)
+	return s, true, ok
+}
+
 // StringUnaligned is String for a string that may start at an odd offset: it
 // reads the offset word at wordOff, adds base and reads as StringAtUnaligned.
 func (o Object) StringUnaligned(wordOff, base int) (string, bool) {

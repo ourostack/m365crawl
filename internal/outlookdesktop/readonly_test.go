@@ -154,17 +154,18 @@ var seams = map[string]bool{"removeFile": true, "openFile": true}
 // allowed lists "<file>:<top-level declaration>:<name>" uses that are the temp-directory
 // helper, the single read-only open of the original, or a write to our own copy.
 var allowed = map[string]bool{
-	"snapshot.go:Snapshot:MkdirTemp":  true, // the private snapshot directory
-	"snapshot.go:Snapshot:RemoveAll":  true, // removing that directory
-	"snapshot.go:removeFile:Remove":   true, // removing the stale copy inside it
-	"snapshot.go:copyOnce:removeFile": true, // the seam, called on dst: the path inside our snapshot directory
-	"snapshot.go:openFile:OpenFile":   true, // the original, opened with sourceOpenFlags (read-only; checked by TestSnapshotOpensReadOnly...)
-	"snapshot.go:copyOnce:openFile":   true, // the seam, called with sourceOpenFlags on the original
-	"snapshot.go:createFile:OpenFile": true, // the copy inside the snapshot directory
-	"snapshot.go:createFile:O_WRONLY": true,
-	"snapshot.go:createFile:O_CREATE": true,
-	"snapshot.go:createFile:O_EXCL":   true,
-	"snapshot.go:copyStream:Write":    true, // writes to the io.Writer for our copy, never to the original
+	"snapshot.go:Snapshot:MkdirTemp":    true, // the private snapshot directory
+	"snapshot.go:Snapshot:RemoveAll":    true, // removing that directory
+	"snapshot.go:removeFile:Remove":     true, // removing the stale copy inside it
+	"snapshot.go:copyOnce:removeFile":   true, // the seam, called on dst: the path inside our snapshot directory
+	"snapshot.go:openFile:OpenFile":     true, // the original, opened with sourceOpenFlags (read-only; checked by TestSnapshotOpensReadOnly...)
+	"snapshot.go:copyOnce:openFile":     true, // the seam, called with sourceOpenFlags on the original
+	"readfile.go:OpenReadOnly:openFile": true, // the seam, called with sourceOpenFlags on a file in the profile
+	"snapshot.go:createFile:OpenFile":   true, // the copy inside the snapshot directory
+	"snapshot.go:createFile:O_WRONLY":   true,
+	"snapshot.go:createFile:O_CREATE":   true,
+	"snapshot.go:createFile:O_EXCL":     true,
+	"snapshot.go:copyStream:Write":      true, // writes to the io.Writer for our copy, never to the original
 }
 
 // scanSource returns the denied uses in one Go source file as "<file>:<decl>:<name>". Imports

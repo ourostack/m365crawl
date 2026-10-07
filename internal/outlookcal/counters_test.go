@@ -247,6 +247,7 @@ func TestAttendeeListFollowsTheLastString(t *testing.T) {
 	endAt := len(obj(o).Raw) - 14 - 1109 - 812 // inside the last record, as an offset from T
 	o.PutU32(1024, uint32(endAt))              //nolint:gosec // a small test offset
 	o.PutU32(1028, 2)
+	o.PutU16(1109+812+endAt, 0) // the two bytes the subject word names are an empty string: its length word must hold
 	if e, n := mapOK(t, obj(o), nil); n.AttendeesUnparsed || strings.Count(e.AttendeesJSON, `"name"`) != 2 {
 		t.Errorf("%+v", n)
 	}
