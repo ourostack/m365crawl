@@ -126,7 +126,7 @@ func TestTextGoldens(t *testing.T) {
 func TestTextDoctorSyncAndBanner(t *testing.T) {
 	e := textEnv(t)
 	code, out, _ := e.run("--format", "text", "sync")
-	if code != 0 || !strings.Contains(out, "local-first Teams mirror for SQLite  |  sync") {
+	if code != 0 || !strings.Contains(out, "local-first Microsoft 365 mirror for SQLite  |  sync") {
 		t.Fatalf("sync banner: %d %q", code, out)
 	}
 	_, out, _ = e.run("--format", "text", "--max-age", "0", "search", "Hello")
