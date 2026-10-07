@@ -179,7 +179,7 @@ The working rule, **likely and not established**: the current version is the cop
 
 ## Deleted events
 
-Experiment E11, 2026-10-07, Outlook 16.115, one store, one machine. Two test appointments (no attendees, no body) were created in the live calendar, one timed and one all-day, one of them renamed twice, and both were deleted in Outlook's interface (Delete, confirm). The store file was copied before the creation (s0), after the creation (s1), after each rename (s2, s3), about 4 minutes after the deletion (s4) and about 12 minutes after that (s5). The objects of a probe are found by the global object id text (UTF-16LE hex), the series key at +20 and the detail key; those three reach every class that mentions the event.
+Experiment E11, 2026-10-07, Outlook 16.115, one store, one machine. Two test appointments (no attendees, no body) were created in the live calendar, one timed and one all-day, one of them renamed twice, and both were deleted in Outlook's interface (Delete, confirm). The store file was copied before the creation (s0), after the creation (s1), after each rename (s2, s3), about 4 minutes after the deletion (s4), about 12 minutes after that (s5) and about 30 minutes after s5 (s6). The objects of a probe are found by the global object id text (UTF-16LE hex), the series key at +20 and the detail key; those three reach every class that mentions the event.
 
 **Result: Outlook writes no deletion marker anywhere the reader looks. A deleted event's objects stay in the store, byte for byte, until Outlook compacts the file, and then every object of the event is gone. The only signal is absence.**
 
@@ -191,8 +191,9 @@ Experiment E11, 2026-10-07, Outlook 16.115, one store, one machine. Two test app
 | s3 renamed twice, before the deletion | 3,374 | 26, 81 | 20, 50 |
 | s4 4 minutes after the deletion | 3,374 | 18, 61 | 10, 27 |
 | s5 16 minutes after the deletion | 3,372 | 0, 0 | 0, 0 |
+| s6 46 minutes after the deletion | 3,372 | 0, 0 | 0, 0 |
 
-(Counts are objects, old versions included, so they rise with every edit; the s3 to s4 fall is Outlook discarding old copies, not the deletion.) In s5 no object of any class contains the probe's id text, series key or detail key, and the reader's id set differs from s0 by nothing: 3,372 events, the same ids. Between s0 and s4 the id set gained exactly the two probes and lost nothing; between s4 and s5 it lost exactly the two probes and gained nothing.
+(Counts are objects, old versions included, so they rise with every edit; the s3 to s4 fall is Outlook discarding old copies, not the deletion.) In s5 and again in s6 (which was written after more edits: 16,802 blocks, 43 damaged) no object of any class contains the probe's id text, series key or detail key, and the reader's id set differs from s0 by nothing: 3,372 events, the same ids. Between s0 and s4 the id set gained exactly the two probes and lost nothing; between s4 and s5 it lost exactly the two probes and gained nothing. Between s5 and s6 it did not change.
 
 What was ruled out, by comparing s3 (before the deletion) with s4 (after it) object by object, with the objects hashed by class and bytes:
 
