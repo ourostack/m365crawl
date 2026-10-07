@@ -173,7 +173,7 @@ func TestAnUntrustedReadNeverMarks(t *testing.T) {
 	anchor := mailMsg(1, fInbox, "<1@x>", "Anchor", 30)
 	target := mailMsg(2, fInbox, "<2@x>", "Target", 10)
 	mustCommitMail(t, s, mailBatch(hr(0), anchor, target))
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 3; i++ { // the first read notes the miss, the second confirms it
 		b := mailBatch(hr(i), anchor)
 		b.Trusted = false
 		mustCommitMail(t, s, b)
@@ -192,7 +192,7 @@ func TestAReadWithNoAgeNeverConfirms(t *testing.T) {
 	anchor := mailMsg(1, fInbox, "<1@x>", "Anchor", 30)
 	target := mailMsg(2, fInbox, "<2@x>", "Target", 10)
 	mustCommitMail(t, s, mailBatch(hr(0), anchor, target))
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 3; i++ { // the first read notes the miss, the second confirms it
 		b := mailBatch(hr(i), anchor)
 		b.FreshAt = time.Time{}
 		mustCommitMail(t, s, b)
@@ -286,5 +286,28 @@ func TestEvictionCandidatesDoNotCountTowardWithholding(t *testing.T) {
 	mustCommitMail(t, s, mailBatch(hr(1), all[30:]...))
 	if r := mustCommitMail(t, s, mailBatch(hr(2), all[30:]...)); r != (MailResult{Evicted: 30}) {
 		t.Fatalf("evicted: %+v", r)
+	}
+}
+
+// A message whose header is still in the store but whose detail is missing for now is not mapped,
+// and is still not absent: the read is trusted, and no absence is recorded for its key.
+func TestAKeyNamedByASeenHeaderIsNeverAbsent(t *testing.T) {
+	s := newStore(t)
+	anchor := mailMsg(1, fInbox, "<1@x>", "Anchor", 30)
+	pending := mailMsg(2, fInbox, "<2@x>", "Detail missing for now", 10)
+	other := mailMsg(3, fInbox, "<3@x>", "Really gone", 9)
+	mustCommitMail(t, s, mailBatch(hr(0), anchor, pending, other))
+	for i := 1; i <= 3; i++ { // the first read notes the miss, the second confirms it
+		b := mailBatch(hr(i), anchor)
+		b.Result.SeenDetailKeys = []uint32{1, 2}
+		if r := mustCommitMail(t, s, b); i == 2 && r != (MailResult{Gone: 1}) {
+			t.Fatalf("read %d: %+v", i, r)
+		}
+	}
+	if g, e, n := goneState(t, s, 2); g || e || n != 0 {
+		t.Fatalf("a named key: gone=%v evicted=%v misses=%d", g, e, n)
+	}
+	if g, _, _ := goneState(t, s, 3); !g {
+		t.Fatal("an unnamed missing key was not judged")
 	}
 }

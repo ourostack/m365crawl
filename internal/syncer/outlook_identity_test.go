@@ -150,7 +150,7 @@ func TestSyncOutlookImplicit(t *testing.T) {
 	db := newDB(t)
 	root := outlookRoot(t, "HxStore.hxd")
 	r, _ := run(t, implicitOpts(db, root))
-	if sourceKeyed(t, r, "outlook|Main").Status != StatusOK || r.Status != StatusOmissions { // the fixture holds two objects of an unknown tag: the mail source's own omissions
+	if sourceKeyed(t, r, "outlook|Main").Status != StatusOK || r.Status != StatusOK {
 		t.Fatalf("%s %+v", r.Status, r.Sources)
 	}
 	for name, dir := range map[string]string{"no directory": filepath.Join(root, "missing"), "no profile": t.TempDir()} {
@@ -193,7 +193,7 @@ func TestSyncOutlookImplicitNeverFails(t *testing.T) {
 	}
 	db := newDB(t)
 	r, _, err = Run(context.Background(), implicitOpts(db, root))
-	if err != nil || r.Status != StatusOmissions || sourceKeyed(t, r, "outlook|Locked").Status != StatusUnavailable || sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
+	if err != nil || r.Status != StatusOK || sourceKeyed(t, r, "outlook|Locked").Status != StatusUnavailable || sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
 		t.Fatalf("%v %s %+v", err, r.Status, r.Sources)
 	}
 
@@ -220,7 +220,7 @@ func TestSyncOutlookImplicitWithoutTeams(t *testing.T) {
 	root := outlookRoot(t, "HxStore.hxd")
 	o := implicitOpts(newDB(t), root)
 	o.Root = t.TempDir()
-	if r, _ := run(t, o); len(r.Sources) != 2 || r.Sources[0].Status != StatusOK {
+	if r, _ := run(t, o); len(r.Sources) != 2 || r.Sources[0].Status != StatusOK || r.Sources[1].Status != StatusOK {
 		t.Fatalf("%+v", r.Sources)
 	}
 	o = implicitOpts(newDB(t), t.TempDir())

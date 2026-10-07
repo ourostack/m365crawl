@@ -17,7 +17,7 @@
   [32m●[0m [2mschema_version   [0m  schema v6
   [32m●[0m [2mfts              [0m  full-text indexes present
   [32m●[0m [2marchive_newer    [0m  the archive was written by this or an older m365crawl (derivation version 2)
-  [32m●[0m [2mlast_sync_status [0m  the last sync was ok_with_omissions
+  [32m●[0m [2mlast_sync_status [0m  the last sync was ok
   [32m●[0m [2mlast_sync_age    [0m  last successful sync <age> ago
   [33m▲[0m [2mcalendar_cache   [0m  the Teams calendar cache was last fresh <age> ago
                        [33mfix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.[0m

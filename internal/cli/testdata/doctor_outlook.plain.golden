@@ -17,7 +17,7 @@ Ready checks
   ● schema_version     schema v6
   ● fts                full-text indexes present
   ● archive_newer      the archive was written by this or an older m365crawl (derivation version 2)
-  ● last_sync_status   the last sync was ok_with_omissions
+  ● last_sync_status   the last sync was ok
   ● last_sync_age      last successful sync <age> ago
   ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
                        fix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.

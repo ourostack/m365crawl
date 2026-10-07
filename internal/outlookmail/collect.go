@@ -19,9 +19,6 @@ const (
 	CodeMailLayoutUnsupported = "outlook_mail_layout_unsupported"
 	CodeBlocksDamaged         = "outlook_blocks_damaged"
 	CodeMailUnmapped          = "outlook_mail_unmapped"
-	CodeMailDetailMissing     = "outlook_mail_detail_missing"
-	CodeMailFolderMissing     = "outlook_mail_folder_missing"
-	CodeMailResynced          = "outlook_mail_resynced"
 	CodeMailLayoutPartial     = "outlook_mail_layout_partial"
 
 	detailNoMailObjects = "no_mail_objects"
@@ -106,9 +103,13 @@ type Result struct {
 	Messages []Message // sorted by detail key
 	Folders  []Folder  // the account's folders, sorted by key
 	Coverage []Coverage
-	Notes    Notes
-	Losses   []Loss
-	Stats    hxstore.Stats
+	// SeenDetailKeys is every detail key a seen header names, whether or not the message mapped
+	// (a header with no detail object or no folder is seen all the same), sorted. The archive
+	// never records such a key as absent: the store still holds it.
+	SeenDetailKeys []uint32
+	Notes          Notes
+	Losses         []Loss
+	Stats          hxstore.Stats
 }
 
 // version orders the copies of one object key: the highest change stamp, then the highest block
@@ -224,8 +225,7 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 	}
 	n := res.Notes
 	for _, l := range []Loss{
-		{CodeMailUnmapped, n.Unmapped}, {CodeMailDetailMissing, n.MissingDetail}, {CodeMailFolderMissing, n.MissingFolder},
-		{CodeMailResynced, n.ResyncedSkipped}, {CodeMailLayoutPartial, n.OtherTagSkipped},
+		{CodeMailUnmapped, n.Unmapped}, {CodeMailLayoutPartial, n.OtherTagSkipped},
 	} {
 		if l.Count > 0 {
 			res.Losses = append(res.Losses, l)
@@ -301,6 +301,14 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		h.Offset = headers.wins[k].v.block
 		all = append(all, h)
 	}
+	seenKeys := map[uint32]bool{}
+	for _, h := range all {
+		if !seenKeys[h.DetailKey] {
+			seenKeys[h.DetailKey] = true
+			res.SeenDetailKeys = append(res.SeenDetailKeys, h.DetailKey)
+		}
+	}
+	sort.Slice(res.SeenDetailKeys, func(i, j int) bool { return res.SeenDetailKeys[i] < res.SeenDetailKeys[j] })
 	rootKey := accountRoot(byKey, all)
 	res.RootKey = rootKey
 	inRoot := map[uint32]Folder{}

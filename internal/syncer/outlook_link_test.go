@@ -97,7 +97,7 @@ func TestSyncOutlookLinkUnknownTeamsAccount(t *testing.T) {
 	if !strings.Contains(msg, "unknown principal") {
 		t.Fatal(msg)
 	}
-	if rep.Status != StatusOmissions || sourceKeyed(t, rep, "outlook|Main").Status != StatusOK {
+	if rep.Status != StatusOK || sourceKeyed(t, rep, "outlook|Main").Status != StatusOK {
 		t.Fatalf("the sources are committed whatever the link does: %s %+v", rep.Status, rep.Sources)
 	}
 	if got := activeLinks(t, db); got != "" {

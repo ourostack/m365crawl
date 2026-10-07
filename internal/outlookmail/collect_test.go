@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -216,10 +217,10 @@ func TestCollectVersionTiesBreakByBlockThenPosition(t *testing.T) {
 	}
 }
 
-func TestCollectMissingDetailSkipsTheMessage(t *testing.T) {
+func TestCollectMissingDetailSkipsTheMessageAndIsNoLoss(t *testing.T) {
 	objs := append(folderObjs(), hdr(11, 21, fInbox, 1, "x", 2), hdr(12, 21, fSent, 1, "x", 2), hdr(13, 22, fInbox, 1, "y", 2), det(22, "<b@example.invalid>"))
 	r := collect(t, storeOf(t, framed(objs...)), Options{})
-	if len(r.Messages) != 1 || r.Messages[0].DetailKey != 22 || r.Notes.MissingDetail != 1 || lossOf(r, CodeMailDetailMissing) != 1 {
+	if len(r.Messages) != 1 || r.Messages[0].DetailKey != 22 || r.Notes.MissingDetail != 1 || len(r.Losses) != 0 || !slices.Equal(r.SeenDetailKeys, []uint32{21, 22}) {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
 	}
 }
@@ -292,10 +293,10 @@ func TestAccountRootChoice(t *testing.T) {
 	_ = rootOf(loop, 1)
 }
 
-func TestCollectMissingFolderIsALoss(t *testing.T) {
+func TestCollectMissingFolderIsANoteNotALoss(t *testing.T) {
 	objs := append(folderObjs(), hdr(11, 21, 999, 1, "x", 2), det(21, "<a@example.invalid>"), hdr(12, 22, fInbox, 1, "y", 2), det(22, "<b@example.invalid>"))
 	r := collect(t, storeOf(t, framed(objs...)), Options{})
-	if len(r.Messages) != 1 || r.Notes.MissingFolder != 1 || lossOf(r, CodeMailFolderMissing) != 1 {
+	if len(r.Messages) != 1 || r.Notes.MissingFolder != 1 || len(r.Losses) != 0 || !slices.Equal(r.SeenDetailKeys, []uint32{21, 22}) {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
 	}
 }
@@ -428,12 +429,12 @@ func TestCollectUnmappedObjectsAreALoss(t *testing.T) {
 	}
 }
 
-func TestCollectResyncedObjectsAreSkippedAndALoss(t *testing.T) {
+func TestCollectResyncedObjectsAreSkippedAndNoLoss(t *testing.T) {
 	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
 	// One object follows three stray bytes: it is reached after unknown framing and is skipped.
 	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 22, FolderKey: fInbox}).Encode()...)
 	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
-	if len(r.Messages) != 1 || r.Messages[0].Copies != 1 || r.Notes.ResyncedSkipped != 1 || lossOf(r, CodeMailResynced) != 1 {
+	if len(r.Messages) != 1 || r.Messages[0].Copies != 1 || r.Notes.ResyncedSkipped != 1 || len(r.Losses) != 0 {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
 	}
 }
