@@ -32,8 +32,21 @@ jobs:
           go-version-file: go.mod
       - name: No leftover names from before the rename
         run: |
-          # The README's one "formerly" note is the only allowed mention outside history.
-          if git grep -nIi 'teamscra[w]l' -- . ':!CHANGELOG.md' ':!docs/releases/' | grep -v '^README.md:[0-9]*:m365crawl was called'; then
+          old='teamscra''wl'
+          fail=0
+          # The README's one "formerly" note, matched as the whole line, is the only allowed mention outside history.
+          allowed="m365crawl was called ${old} before v0.5.0; it has no alias for the old name."
+          hits="$(git grep -nIi "$old" -- . ':!CHANGELOG.md' ':!docs/releases/' | awk -v allowed="$allowed" '{ line = $0; sub(/^README\.md:[0-9]+:/, "") } line !~ /^README\.md:[0-9]+:/ || $0 != allowed { print line }')"
+          if [ -n "$hits" ]; then
+            echo "$hits" >&2
+            fail=1
+          fi
+          paths="$(git ls-files | grep -i "$old" | grep -v '^docs/releases/' || true)"
+          if [ -n "$paths" ]; then
+            echo "$paths" >&2
+            fail=1
+          fi
+          if [ "$fail" = 1 ]; then
             echo 'the product was renamed to m365crawl; remove the old name (CHANGELOG.md and docs/releases/ keep history)' >&2
             exit 1
           fi
