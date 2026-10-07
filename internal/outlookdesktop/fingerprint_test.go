@@ -38,6 +38,7 @@ func TestFingerprintChangesWithEachInput(t *testing.T) {
 		"reader version": {Store: "i", Reader: 9, Mapper: 2, Rules: 3},
 		"mapper version": {Store: "i", Reader: 1, Mapper: 9, Rules: 3},
 		"rules version":  {Store: "i", Reader: 1, Mapper: 2, Rules: 9},
+		"mail version":   {Store: "i", Reader: 1, Mapper: 2, Rules: 3, Mail: 9},
 	} {
 		fp, err := FingerprintOf(store, v)
 		if err != nil {

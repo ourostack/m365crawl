@@ -3,31 +3,19 @@
 [38;2;46;167;232m█[38;2;48;163;232m█[38;2;51;158;233m▀[38;2;53;154;233m█[38;2;55;150;233m▀[38;2;58;146;234m█[38;2;60;141;234m█   [38;2;70;124;236m█[38;2;72;120;236m█[38;2;74;116;236m█[38;2;77;111;237m▀ [38;2;83;106;238m█[38;2;87;105;238m█[38;2;92;104;239m█[38;2;96;103;240m█[38;2;100;102;240m█[38;2;104;101;241m▄ [38;2;113;98;242m█[38;2;117;97;243m█[38;2;121;96;243m█[38;2;125;95;244m█[38;2;130;94;245m█[38;2;134;93;245m▄ [38;2;144;90;240m▄[38;2;149;88;233m█[38;2;154;86;227m█[38;2;160;85;221m█[38;2;166;83;215m█ [38;2;176;79;202m█[38;2;182;77;196m█[38;2;188;75;189m█[38;2;193;73;183m█[38;2;198;72;177m▄  [38;2;215;66;158m▀[38;2;217;71;151m▀[38;2;220;76;145m█[38;2;222;82;138m▄ [38;2;227;92;126m█[38;2;230;97;119m█   [38;2;239;118;93m█[38;2;242;123;87m█ [38;2;247;134;74m█[38;2;249;139;67m█[0m
 [38;2;46;167;232m█[38;2;48;163;232m█ [38;2;53;154;233m█ [38;2;58;146;234m█[38;2;60;141;234m█     [38;2;74;116;236m█[38;2;77;111;237m█ [38;2;83;106;238m█[38;2;87;105;238m█  [38;2;100;102;240m█[38;2;104;101;241m█     [38;2;130;94;245m█[38;2;134;93;245m█ [38;2;144;90;240m█[38;2;149;88;233m█    [38;2;176;79;202m█[38;2;182;77;196m█ [38;2;193;73;183m▀[38;2;198;72;177m▀ [38;2;210;68;164m▄[38;2;215;66;158m█[38;2;217;71;151m▀[38;2;220;76;145m█[38;2;222;82;138m█ [38;2;227;92;126m█[38;2;230;97;119m█ [38;2;234;108;106m█ [38;2;239;118;93m█[38;2;242;123;87m█ [38;2;247;134;74m█[38;2;249;139;67m█[0m
 [38;2;46;167;232m█[38;2;48;163;232m█   [38;2;58;146;234m█[38;2;60;141;234m█ [38;2;65;133;235m▀[38;2;67;128;235m█[38;2;70;124;236m█[38;2;72;120;236m█[38;2;74;116;236m█[38;2;77;111;237m▀ [38;2;83;106;238m▀[38;2;87;105;238m█[38;2;92;104;239m█[38;2;96;103;240m█[38;2;100;102;240m█[38;2;104;101;241m▀ [38;2;113;98;242m▀[38;2;117;97;243m█[38;2;121;96;243m█[38;2;125;95;244m█[38;2;130;94;245m█[38;2;134;93;245m▀ [38;2;144;90;240m▀[38;2;149;88;233m█[38;2;154;86;227m█[38;2;160;85;221m█[38;2;166;83;215m█ [38;2;176;79;202m█[38;2;182;77;196m█    [38;2;210;68;164m▀[38;2;215;66;158m█[38;2;217;71;151m▄[38;2;220;76;145m█[38;2;222;82;138m█  [38;2;230;97;119m█[38;2;232;102;112m█[38;2;234;108;106m▀[38;2;237;113;100m█[38;2;239;118;93m█  [38;2;247;134;74m█[38;2;249;139;67m█[0m
-[2mlocal-first Microsoft 365 mirror for SQLite  |  [0m[36mdoctor[0m
+[2mlocal-first Microsoft 365 mirror for SQLite  |  [0m[36mstatus[0m
 
-[1m[36mDOCTOR[0m
+[1m[36mSTATUS[0m
 [2m======[0m
 
-[36mReady checks[0m
-[2m------------[0m
-  [32m●[0m [2mteams_installed  [0m  Teams data found at <teams-root>
-  [32m●[0m [2mfull_disk_access [0m  the Teams container is readable
-  [32m●[0m [2mteams_origin     [0m  1 Teams origin(s) found
-  [32m●[0m [2mdatabase_writable[0m  <db> is writable
-  [32m●[0m [2mschema_version   [0m  schema v6
-  [32m●[0m [2mfts              [0m  full-text indexes present
-  [32m●[0m [2marchive_newer    [0m  the archive was written by this or an older m365crawl (derivation version 2)
-  [32m●[0m [2mlast_sync_status [0m  the last sync was ok
-  [32m●[0m [2mlast_sync_age    [0m  last successful sync <age> ago
-  [33m▲[0m [2mcalendar_cache   [0m  the Teams calendar cache was last fresh <age> ago
-                       [33mfix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.[0m
-  [33m▲[0m [2moutlook_store    [0m  profile Main: store version readable; the last read failed (unsupported_layout): outlook_layout_unsupported: the Outlook store cannot be read by this version of m365crawl: class 0x6b tag 0x456 x3, known 0x455
-                       [33mfix: Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.[0m
-  [32m●[0m [2mmail_readable    [0m  profile Main: mail read <age> ago
-  [32m●[0m [2mmail_archive_mode[0m  the archive is readable by its owner only (0600)
+[2marchive path  [0m[2m : [0m<db>
+[2mfts present   [0m[2m : [0m[32myes[0m
+[2mlast run      [0m[2m : [0mok at <stamp>
+[2mmail          [0m[2m : [0munsupported_platform
+[2mschema version[0m[2m : [0m6
 
-[36mSnapshot[0m
-[2m--------[0m
-  [2maccounts=[0m2[2m  |  [0m[2mconversations=[0m14[2m  |  [0m[2mmessages=[0m120[2m  |  [0m[2mpeople=[0m10[2m  |  [0m[2mactivity=[0m22
-  [2mlast sync  [0m  <stamp>
-  [2marchive age[0m  <age>
+[2maccount[0m                                                                    [2mconversations[0m  [2mmessages[0m  [2mpeople[0m  [2mactivity[0m  [2mnewest[0m
+[2m-------------------------------------------------------------------------[0m  [2m-------------[0m  [2m--------[0m  [2m------[0m  [2m--------[0m  [2m----------------[0m
+00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1  7              60        5       11        2023-12-05 18:31
+00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2  7              60        5       11        2023-12-05 18:31
+[2marchive age: <age>[0m

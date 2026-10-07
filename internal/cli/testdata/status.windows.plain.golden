@@ -11,7 +11,7 @@ STATUS
 archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp>
-mail           : skipped
+mail           : unsupported_platform
 schema version : 6
 
 account                                                                    conversations  messages  people  activity  newest

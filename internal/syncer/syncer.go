@@ -221,6 +221,11 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	}
 	if stopped == nil && r.outlookOn() {
 		for _, o := range r.outlookSources(ctx, &rep) {
+			if o.note {
+				rep.Sources = append(rep.Sources, o.report)
+				r.progress("%s: %s", o.key, o.report.Status)
+				continue
+			}
 			if o.err != nil && r.o.OutlookImplicit && ctx.Err() == nil {
 				rep.Sources = append(rep.Sources, unavailableSource(o.key, codedOf(o.err)))
 				r.progress("%s: %s", o.key, StatusUnavailable)
@@ -405,7 +410,7 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	rep.Redacted += redacted
 	*changes = append(*changes, w.changes...)
 	r.progress("%s: %s (%d messages, %d conversations, %d activity items, %d records)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen, w.counts.Records.Seen)
-	counts := SourceCounts(w.counts)
+	counts := SourceCounts{Conversations: w.counts.Conversations, Messages: w.counts.Messages, People: w.counts.People, Activity: w.counts.Activity, Records: w.counts.Records, Calendar: w.counts.Calendar}
 	return SourceReport{Source: src.Key(), Status: status, Omissions: omissions, Redacted: redacted, Accounts: w.accounts(), Counts: &counts}, true, nil
 }
 

@@ -22,6 +22,8 @@
   [33m▲[0m [2mcalendar_cache   [0m  the Teams calendar cache was last fresh <age> ago
                        [33mfix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.[0m
   [32m●[0m [2moutlook_store    [0m  the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on
+  [32m●[0m [2mmail_readable    [0m  mail is not read: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)
+  [32m●[0m [2mmail_archive_mode[0m  the archive is readable by its owner only (0600)
 
 [36mSnapshot[0m
 [2m--------[0m

@@ -28,6 +28,7 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{DoctorFailed("x"), "doctor_failed", 3},
 		{PartialSync("x"), "partial_sync", 1},
 		{Locked("x"), "locked", 4},
+		{MailUnsupportedPlatform(), "mail_unsupported_platform", 3},
 	}
 	for _, c := range cases {
 		if c.err.Code != c.code || c.err.Exit != c.exit {

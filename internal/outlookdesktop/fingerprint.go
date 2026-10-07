@@ -15,6 +15,7 @@ type Versions struct {
 	Reader int    // hxstore.ReaderVersion
 	Mapper int    // outlookcal.MapperVersion
 	Rules  int    // teamsdesktop.RulesVersion
+	Mail   int    // outlookmail.MapperVersion: a changed mail mapper reads an unchanged store again
 }
 
 // FingerprintOf summarizes the live store file at storePath: a sha256 over the versions and the
@@ -36,7 +37,7 @@ func FingerprintOf(storePath string, v Versions) (string, error) {
 // hand, for example the ones an Info from Snapshot carries.
 func FingerprintFor(size int64, mod time.Time, v Versions) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "store_version=%s\nreader_version=%d\nmapper_version=%d\nrules_version=%d\nsize=%d\nmtime_ns=%d\n",
-		v.Store, v.Reader, v.Mapper, v.Rules, size, mod.UnixNano())
+	_, _ = fmt.Fprintf(h, "store_version=%s\nreader_version=%d\nmapper_version=%d\nrules_version=%d\nmail_version=%d\nsize=%d\nmtime_ns=%d\n",
+		v.Store, v.Reader, v.Mapper, v.Rules, v.Mail, size, mod.UnixNano())
 	return hex.EncodeToString(h.Sum(nil))
 }

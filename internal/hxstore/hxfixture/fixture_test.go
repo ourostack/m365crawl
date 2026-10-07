@@ -118,7 +118,7 @@ func walk(t *testing.T, data []byte, fn func(hxstore.Object)) hxstore.Stats {
 // the generator wrote, with no object reached after unknown bytes.
 func TestMainStoreCensus(t *testing.T) {
 	st := walk(t, byName(t)["HxStore.hxd"], nil)
-	want := map[Pair]int{{0x6b, 0x455}: 14, {0x6c, 0x348}: 8, {0x71, 20}: 3, {0x55, 32}: 2, {0xd7, 40}: 1}
+	want := map[Pair]int{{0x6b, 0x455}: 14, {0x6c, 0x348}: 8, {0x71, 20}: 3, {0xd7, 40}: 1}
 	if len(MainCounts()) != len(want) {
 		t.Fatalf("%v", MainCounts())
 	}
@@ -127,7 +127,7 @@ func TestMainStoreCensus(t *testing.T) {
 			t.Fatalf("%v: generator %d, reader %d, want %d", p, MainCounts()[p], st.Pairs[hxstore.Pair{Class: p.Class, Tag: p.Tag}], n)
 		}
 	}
-	if st.BlocksValid != 4 || st.BlocksRejected() != 0 || st.Objects != 28 || st.ObjectsResynced != 0 || st.UnwalkedBytes != 0 {
+	if st.BlocksValid != 4 || st.BlocksRejected() != 0 || st.Objects != 26 || st.ObjectsResynced != 0 || st.UnwalkedBytes != 0 {
 		t.Fatalf("%+v", st)
 	}
 }
@@ -214,7 +214,7 @@ func TestGuardStores(t *testing.T) {
 		t.Fatalf("%+v", st.Pairs)
 	}
 	st = walk(t, files["store-unknown-classes-only.hxd"], nil)
-	if st.Objects != 6 || st.Pairs[hxstore.Pair{Class: 0x6b, Tag: 0x455}] != 0 {
+	if st.Objects != 4 || st.Pairs[hxstore.Pair{Class: 0x6b, Tag: 0x455}] != 0 {
 		t.Fatalf("%+v", st.Pairs)
 	}
 	// Low coverage: objects cover well under 80% of the payload.

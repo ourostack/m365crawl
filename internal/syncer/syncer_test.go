@@ -185,6 +185,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	syncedTemplate.dir = dir
+	// Mail is read on every platform here, so the tests do not depend on the one they run on; the
+	// test of the platform that does not read mail sets the seam itself.
+	outlookMailSupported = func() bool { return true }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

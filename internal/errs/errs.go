@@ -30,6 +30,7 @@ const (
 	CodeLocked                      = "locked"
 	CodeArchiveNewer                = "archive_newer"
 	CodePartialSync                 = "partial_sync"
+	CodeMailUnsupportedPlatform     = "mail_unsupported_platform"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -165,6 +166,14 @@ func Interrupted() *Coded {
 func Locked(msg string) *Coded {
 	return &Coded{Code: CodeLocked, Exit: ExitLocked, Message: msg,
 		Fix: "Wait for the other m365crawl run to finish, then run again."}
+}
+
+// MailUnsupportedPlatform reports that mail is not read on this operating system. Sync notes it
+// without failing and every `mail` command returns it.
+func MailUnsupportedPlatform() *Coded {
+	return &Coded{Code: CodeMailUnsupportedPlatform, Exit: ExitEnvironment,
+		Message: "mail is not yet read on Windows; Teams chats and the calendar work here \u2014 try `m365crawl calendar`",
+		Fix:     "Use `m365crawl calendar`, or run the mail commands on a Mac with the new Outlook."}
 }
 
 var _ error = (*Coded)(nil)

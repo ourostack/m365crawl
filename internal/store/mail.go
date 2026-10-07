@@ -518,8 +518,13 @@ type mailAbsent struct {
 // judgeMissing applies the two-read rule to the messages a trusted read did not hold.
 func judgeMissing(ctx context.Context, tx *sql.Tx, b MailBatch, at string, byKey map[uint32]*mailExisting, absent map[uint32]mailAbsent, live int, res MailResult) (MailResult, error) {
 	var missing []*mailExisting
+	named := make(map[uint32]bool, len(b.Result.SeenDetailKeys))
+	for _, k := range b.Result.SeenDetailKeys {
+		named[k] = true
+	}
 	for _, k := range sortedMailKeys(byKey) {
-		if ex := byKey[k]; !ex.seen && !ex.gone && !ex.evicted {
+		// A header still names the key (its detail or folder may be missing for now): not absent.
+		if ex := byKey[k]; !ex.seen && !ex.gone && !ex.evicted && !named[k] {
 			missing = append(missing, ex)
 		}
 	}

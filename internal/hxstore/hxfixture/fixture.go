@@ -330,7 +330,7 @@ func (g *gen) unknownObjects() []*hxbuild.Object {
 	withText.AppendString("Fixture unknown-class text")
 	return []*hxbuild.Object{
 		hxbuild.NewObject(0x71, 20, 20), hxbuild.NewObject(0x71, 20, 20), hxbuild.NewObject(0x71, 20, 20),
-		hxbuild.NewObject(0x55, 32, 32), hxbuild.NewObject(0x55, 32, 32), withText,
+		withText,
 	}
 }
 
