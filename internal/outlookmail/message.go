@@ -88,9 +88,10 @@ func unmapped(reason string) error { return &UnmappedError{Reason: reason} }
 // Recipient is one recipient of a message. To versus Cc is not established, so only the raw kind
 // word is kept.
 type Recipient struct {
-	Name    string
-	Address string
-	KindRaw uint32
+	Name       string
+	Address    string
+	KindRaw    uint32
+	BadStrings int // see Header.BadStrings
 }
 
 // Header is a message header. Offset is the file offset of the block that held the copy.
@@ -109,7 +110,10 @@ type Header struct {
 	ReadState  string // read, unread or unknown
 	Flag       string // none, complete, flagged or unknown
 	Importance string // low, normal, high or unknown
+	// Recipients is filled only by Collect; MapHeader leaves it nil.
 	Recipients []Recipient
+	// BadStrings counts string fields that were present but unreadable and were left blank.
+	BadStrings int
 }
 
 // Detail is a message detail object.
@@ -117,13 +121,14 @@ type Detail struct {
 	Key                         uint32
 	MessageID, InReplyTo, Class string
 	Sent                        time.Time
+	BadStrings                  int // see Header.BadStrings
 }
 
 // fields reads the string words of one object. The first out-of-range string is remembered.
 type fields struct {
 	o    hxstore.Object
 	base int
-	bad  bool
+	bad  int // strings that were present and unreadable; each is left blank
 }
 
 // newFields checks that the object is at least as long as its fixed region and sets the string
@@ -137,21 +142,13 @@ func newFields(o hxstore.Object, fixed int) (*fields, error) {
 }
 
 // text reads the string whose word pair is at wordOff. An absent string is empty. A present one
-// that is out of range, unterminated or not valid text marks the object bad.
+// that is out of range, unterminated or not valid text is left blank and counted: the object still maps.
 func (f *fields) text(wordOff int) string {
 	s, present, ok := f.o.PresentString(wordOff, f.base)
 	if present && !ok {
-		f.bad = true
+		f.bad++
 	}
 	return s
-}
-
-// err is the mapping error, or nil when every string read fine.
-func (f *fields) err() error {
-	if f.bad {
-		return unmapped("a string is out of range")
-	}
-	return nil
 }
 
 // word reads a u32 inside the fixed region, which newFields checked.
@@ -175,9 +172,7 @@ func MapHeader(o hxstore.Object) (Header, error) {
 		Subject: f.text(hdSubject), SenderName: f.text(hdSenderNm), SenderAddress: f.text(hdSenderAd), Preview: f.text(hdPreview),
 		ICalUID: inviteID(o),
 	}
-	if err := f.err(); err != nil {
-		return Header{}, err
-	}
+	h.BadStrings = f.bad
 	h.Received, _ = o.Ticks(hdReceived)
 	switch word(o, hdRead) {
 	case 0:
@@ -229,9 +224,7 @@ func MapDetail(o hxstore.Object) (Detail, error) {
 		Key:       word(o, offKey),
 		MessageID: f.text(dtMessageID), Class: f.text(dtClass), InReplyTo: f.text(dtInReplyTo),
 	}
-	if err := f.err(); err != nil {
-		return Detail{}, err
-	}
+	d.BadStrings = f.bad
 	d.Sent, _ = o.Ticks(dtSent)
 	return d, nil
 }
@@ -244,8 +237,6 @@ func MapRecipient(o hxstore.Object) (parent uint32, r Recipient, err error) {
 		return 0, Recipient{}, err
 	}
 	r = Recipient{Name: f.text(rcName), Address: f.text(rcAddress), KindRaw: word(o, rcKind)}
-	if err := f.err(); err != nil {
-		return 0, Recipient{}, err
-	}
+	r.BadStrings = f.bad
 	return word(o, offLink), r, nil
 }

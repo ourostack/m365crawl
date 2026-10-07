@@ -60,8 +60,9 @@ func TestMapAttachmentErrors(t *testing.T) {
 	for _, word := range []int{612, 652} {
 		o := hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 1, MessageKey: 2, Name: "fixture.txt", Path: "~/Files/x"})
 		o.PutU32(word, 4|1<<31)
-		if _, err := MapAttachment(obj(o)); err == nil {
-			t.Errorf("+%d: bad string accepted", word)
+		a, err := MapAttachment(obj(o))
+		if err != nil || a.BadStrings != 1 || (word == 612 && a.Name != "") || (word == 652 && a.Path != "") {
+			t.Errorf("+%d: %+v %v", word, a, err)
 		}
 	}
 	short := obj(hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 1}))

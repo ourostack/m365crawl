@@ -16,6 +16,8 @@ type Folder struct {
 	Parent uint32
 	Name   string
 	Kind   string
+	// BadStrings counts string fields that were present but unreadable and were left blank.
+	BadStrings int
 }
 
 // KindJunkOrToMe is the kind the mapper gives type 0x7a.
@@ -33,9 +35,7 @@ func MapFolder(o hxstore.Object) (Folder, error) {
 		return Folder{}, err
 	}
 	fd := Folder{Key: word(o, offKey), Parent: word(o, offLink), Name: f.text(fdName), Kind: "other"}
-	if err := f.err(); err != nil {
-		return Folder{}, err
-	}
+	fd.BadStrings = f.bad
 	if k, ok := folderKinds[word(o, fdType)]; ok {
 		fd.Kind = k
 	}

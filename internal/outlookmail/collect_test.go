@@ -360,28 +360,116 @@ func TestCollectContextCancelledAfterTheWalk(t *testing.T) {
 	}
 }
 
-func TestCollectUnmappedAndResynced(t *testing.T) {
+func TestCollectBadStringsAreBlankedAndCounted(t *testing.T) {
 	bad := hdr(11, 21, fInbox, 1, "x", 2)
 	bad.PutU32(904, 2|1<<31) // a subject that does not end in a terminator
 	badFolder := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 150, Parent: rootKey, Name: "x"})
 	badFolder.PutU32(1092, 2|1<<31)
-	badRec := hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 60, Parent: 22, Name: "x"})
+	badRec := hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 60, Parent: 21, Name: "x"})
 	badRec.PutU32(296, 2|1<<31)
-	badAtt := hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 61, MessageKey: 22, Name: "x"})
+	badAtt := hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 61, MessageKey: 21, Name: "x"})
 	badAtt.PutU32(612, 2|1<<31)
-	badDet := hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 23, MessageID: "<c@example.invalid>"})
+	badDet := hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 21, MessageID: "<c@example.invalid>"})
 	badDet.PutU32(1232, 2|1<<31)
-	objs := append(folderObjs(), badFolder, bad, hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"), badRec, badAtt,
-		hdr(13, 23, fInbox, 1, "bad detail", 2), badDet)
+	objs := append(folderObjs(), badFolder, bad, badDet, badRec, badAtt)
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Messages) != 1 || r.Notes.BadString != 5 || r.Notes.Unmapped != 0 || len(r.Losses) != 0 {
+		t.Fatalf("%d messages %+v %+v", len(r.Messages), r.Notes, r.Losses)
+	}
+	m := r.Messages[0]
+	if m.Subject != "" || m.MessageID != "" || m.Header.Key != 11 || len(m.Recipients) != 1 || m.Recipients[0].Name != "" || len(m.Attachments) != 1 || m.Attachments[0].Name != "" {
+		t.Fatalf("%+v", m)
+	}
+}
+
+func TestCollectUnmappedObjectsAreALoss(t *testing.T) {
+	objs := append(folderObjs(), hdr(11, 21, fInbox, 1, "x", 2), det(21, "<a@example.invalid>"),
+		hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 60, Parent: 21}),
+		hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 61, MessageKey: 21}))
+	s := storeOf(t, framed(objs...))
+	fail := func(string) error { return unmapped("test") }
+	type seam struct {
+		name string
+		swap func() func()
+	}
+	for _, sm := range []seam{
+		{"folder", func() func() {
+			o := mapFolder
+			mapFolder = func(hxstore.Object) (Folder, error) { return Folder{}, fail("") }
+			return func() { mapFolder = o }
+		}},
+		{"header", func() func() {
+			o := mapHeader
+			mapHeader = func(hxstore.Object) (Header, error) { return Header{}, fail("") }
+			return func() { mapHeader = o }
+		}},
+		{"recipient", func() func() {
+			o := mapRecipient
+			mapRecipient = func(hxstore.Object) (uint32, Recipient, error) { return 0, Recipient{}, fail("") }
+			return func() { mapRecipient = o }
+		}},
+		{"attachment", func() func() {
+			o := mapAttachment
+			mapAttachment = func(hxstore.Object) (Attachment, error) { return Attachment{}, fail("") }
+			return func() { mapAttachment = o }
+		}},
+		{"detail", func() func() {
+			o := mapDetail
+			mapDetail = func(hxstore.Object) (Detail, error) { return Detail{}, fail("") }
+			return func() { mapDetail = o }
+		}},
+	} {
+		restore := sm.swap()
+		r := collect(t, s, Options{})
+		restore()
+		if r.Notes.Unmapped == 0 || lossOf(r, CodeMailUnmapped) != r.Notes.Unmapped {
+			t.Errorf("%s: %+v %+v", sm.name, r.Notes, r.Losses)
+		}
+	}
+}
+
+func TestCollectResyncedObjectsAreSkippedAndALoss(t *testing.T) {
+	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
 	// One object follows three stray bytes: it is reached after unknown framing and is skipped.
 	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 22, FolderKey: fInbox}).Encode()...)
-	p := append(framed(objs...), stray...)
-	r := collect(t, storeOf(t, p), Options{})
-	if len(r.Messages) != 1 || r.Notes.Unmapped != 5 || r.Notes.ResyncedSkipped != 1 {
-		t.Fatalf("%d messages %+v", len(r.Messages), r.Notes)
+	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Copies != 1 || r.Notes.ResyncedSkipped != 1 || lossOf(r, CodeMailResynced) != 1 {
+		t.Fatalf("%+v %+v", r.Notes, r.Losses)
 	}
-	if lossOf(r, CodeMailUnmapped) != 5 || lossOf(r, CodeMailResynced) != 1 {
-		t.Fatalf("%+v", r.Losses)
+}
+
+func TestCollectToMeWithTheHighestStampStillShowsTheInbox(t *testing.T) {
+	// The To Me copy is the newest, the Inbox and Sent copies are older: the message is shown
+	// from the Inbox (the newest copy outside To Me) and is marked to_me.
+	objs := append(folderObjs(),
+		hdr(11, 21, fToMe, 99, "x", 2), hdr(12, 21, fInbox, 7, "x", 2), hdr(13, 21, fSent, 3, "x", 2), det(21, "<a@example.invalid>"))
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	m := r.Messages[0]
+	if m.Folder.Key != fInbox || m.Folder.Kind != "inbox" || !m.ToMe || m.Copies != 3 || m.Header.Key != 12 {
+		t.Fatalf("%+v", m)
+	}
+}
+
+func TestCollectRootKey(t *testing.T) {
+	objs := append(folderObjs(), hdr(11, 21, fInbox, 1, "x", 2), det(21, "<a@example.invalid>"))
+	if r := collect(t, storeOf(t, framed(objs...)), Options{}); r.RootKey != rootKey {
+		t.Fatalf("%d", r.RootKey)
+	}
+}
+
+func TestCollectOrphansAreOnlyUnknownParents(t *testing.T) {
+	// The message in another account's folder is skipped; its children are not orphans, because
+	// their parent exists. Children of a key with no detail object are.
+	objs := append(folderObjs(), hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: fOtherBox, Parent: otherRoot, Name: "Other", Type: 0x61}),
+		hdr(11, 21, fInbox, 1, "x", 2), det(21, "<a@example.invalid>"),
+		hdr(12, 22, fOtherBox, 1, "theirs", 2), det(22, "<b@example.invalid>"),
+		hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 61, MessageKey: 22, Name: "kept.txt"}),
+		hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 62, Parent: 22, Name: "Kept"}),
+		hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 63, MessageKey: 999, Name: "lost.txt"}),
+		hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 64, Parent: 999, Name: "Lost"}))
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if r.Notes.OtherRoot != 1 || r.Notes.OrphanAttachments != 1 || r.Notes.OrphanRecipients != 1 {
+		t.Fatalf("%+v", r.Notes)
 	}
 }
 
@@ -501,7 +589,7 @@ func TestCollectBodies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m := byDetail(r)[21]; m.Body.State != BodyFile || m.Body.HTML != nil || m.Body.Path != file("1") || r.Notes.BodiesNotRead != 5 {
+	if m := byDetail(r)[21]; m.Body.State != BodyNotRead || m.Body.HTML != nil || m.Body.Path != file("1") || r.Notes.BodiesNotRead != 5 {
 		t.Fatalf("%+v %+v", m.Body, r.Notes)
 	}
 	// Asked to read, with a cap of 100 bytes.
@@ -529,6 +617,10 @@ func TestCollectBodies(t *testing.T) {
 	}
 	if r.Notes.BodiesFile != 1 || r.Notes.BodiesNotRead != 4 || r.Notes.BodiesMissing != 0 {
 		t.Fatalf("%+v", r.Notes)
+	}
+	// A body that was read and one that was not are told apart by state, not by empty bytes.
+	if got := byDetail(r); got[21].Body.State != BodyFile || got[21].Body.HTML == nil || got[22].Body.State != BodyNotRead || got[22].Body.HTML != nil {
+		t.Fatalf("%+v %+v", got[21].Body, got[22].Body)
 	}
 }
 

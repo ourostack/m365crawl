@@ -40,6 +40,9 @@ const datPath = "~/Files/S0/2/EFMData/1.dat"
 func TestReadDat(t *testing.T) {
 	root := t.TempDir()
 	writeDat(t, root, "S0/2/EFMData/1.dat", gz(t, []byte("<html>fixture</html>")))
+	if _, err := ReadDat("", datPath, MaxBodyBytes); !errors.Is(err, ErrBodyPath) {
+		t.Fatalf("empty root: %v", err)
+	}
 	got, err := ReadDat(root, datPath, MaxBodyBytes)
 	if err != nil || string(got) != "<html>fixture</html>" {
 		t.Fatalf("%q %v", got, err)
@@ -80,7 +83,7 @@ func TestReadDatBadFiles(t *testing.T) {
 	}
 	for _, name := range []string{"truncated", "plain", "one", "empty", "badheader", "dir"} {
 		_, err := ReadDat(root, "~/Files/a/"+name+".dat", MaxBodyBytes)
-		if err == nil || errors.Is(err, ErrBodyMissing) || errors.Is(err, ErrBodyTooLarge) || errors.Is(err, ErrBodyPath) {
+		if !errors.Is(err, ErrBodyFormat) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

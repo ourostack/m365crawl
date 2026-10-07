@@ -17,9 +17,9 @@ var blockTags = map[string]bool{
 // HTMLText turns an HTML body into plain text: tags are dropped, script and style content is
 // dropped, comments are dropped, entities are decoded and whitespace (the no-break space
 // included) is collapsed to single spaces. It only reads the bytes it is given; an image, link
-// or frame in the HTML is never fetched. Bytes that are not valid UTF-8 become U+FFFD.
+// or frame in the HTML is never fetched. NUL bytes are dropped. Bytes that are not valid UTF-8 become U+FFFD.
 func HTMLText(src []byte) string {
-	s := strings.ToValidUTF8(string(src), "\ufffd")
+	s := strings.ToValidUTF8(strings.ReplaceAll(string(src), "\x00", ""), "\ufffd")
 	lower := asciiLower(s)
 	var out strings.Builder
 	for i := 0; i < len(s); {

@@ -22,6 +22,11 @@ const (
 	BodyMissing    = "missing"
 	BodyUnreadable = "unreadable"
 	BodyNone       = "none"
+	// BodyNotRead is a file body that Collect left unread (Options.ReadBodies off, or NeedBody
+	// said no). MapBody itself reports such a body as BodyFile with its Path; after Collect,
+	// BodyFile means the file was read and HTML holds its text, and BodyNotRead means HTML is nil
+	// because nothing was read, which says nothing about the file.
+	BodyNotRead = "not_read"
 )
 
 // MaxBodyBytes caps the inflated size of one body file.
@@ -88,10 +93,12 @@ func MapBody(o hxstore.Object) Body {
 	switch {
 	case html.ok:
 		raw, _ := o.Bytes(html.pos, html.n) // checked above
+		raw = bytes.TrimRight(raw, "\x00")  // the stated length can count terminating NULs
 		if !utf8.Valid(raw) {
 			return Body{State: BodyUnreadable}
 		}
-		return Body{HTML: append([]byte(nil), raw...), State: BodyInline}
+		html := append([]byte(nil), raw...)
+		return Body{HTML: html, State: BodyInline}
 	case path.ok:
 		raw, _ := o.Bytes(path.pos, path.n)
 		return Body{Path: filePath(raw), State: BodyFile}
@@ -135,11 +142,11 @@ var openDat = outlookdesktop.OpenReadOnly
 // directory root, inflates it up to limit bytes and returns the bytes. It never writes: the file
 // is opened read-only through outlookdesktop. The path must start with ~/Files/ and have no
 // backslash, colon, NUL, empty, "." or ".." element; the resolved file (symbolic links followed)
-// must lie inside root/Files. A file that is gone is ErrBodyMissing; the file must start with
+// must lie inside root/Files. An empty root is ErrBodyPath. A file that is gone is ErrBodyMissing; the file must start with
 // the gzip magic; an inflated size over limit is ErrBodyTooLarge.
 func ReadDat(root, path string, limit int64) ([]byte, error) {
 	rel, ok := strings.CutPrefix(path, bodyFilesPrefix)
-	if !ok || !cleanRel(rel) {
+	if root == "" || !ok || !cleanRel(rel) {
 		return nil, ErrBodyPath
 	}
 	base, err := filepath.EvalSymlinks(filepath.Join(root, "Files"))

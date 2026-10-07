@@ -130,3 +130,10 @@ func TestMapBodyPairChoice(t *testing.T) {
 		t.Fatalf("%+v", b)
 	}
 }
+
+func TestMapBodyStripsTrailingNULs(t *testing.T) {
+	b := MapBody(obj(hxbuild.NewMailBody(hxbuild.MailBodySpec{Key: 1, HTML: []byte("<p>fixture</p>\x00\x00")})))
+	if b.State != "inline" || string(b.HTML) != "<p>fixture</p>" {
+		t.Fatalf("%+v %q", b, b.HTML)
+	}
+}

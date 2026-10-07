@@ -31,6 +31,8 @@ type Attachment struct {
 	Inline      bool
 	Downloaded  bool
 	Path        string // ~/Files/... under the profile, empty when the store names none
+	// BadStrings counts string fields that were present but unreadable and were left blank.
+	BadStrings int
 }
 
 // MapAttachment maps a class 0x16a object.
@@ -43,9 +45,7 @@ func MapAttachment(o hxstore.Object) (Attachment, error) {
 		Key: word(o, offKey), MessageKey: word(o, atMessage), Size: int64(word(o, atSize)),
 		Name: f.text(atName), Path: f.text(atPath), Downloaded: word(o, atState) == downloadedState,
 	}
-	if err := f.err(); err != nil {
-		return Attachment{}, err
-	}
+	a.BadStrings = f.bad
 	a.ContentType, a.Inline = contentType(a.Name), bareGUID(a.Name)
 	return a, nil
 }

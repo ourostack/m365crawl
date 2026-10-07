@@ -1,7 +1,6 @@
 package outlookmail
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
@@ -20,8 +19,8 @@ func TestMapFolderKinds(t *testing.T) {
 	}
 	o := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 6, Name: "Fixture Folder"})
 	o.PutU32(1092, 4|1<<31)
-	if _, err := MapFolder(obj(o)); err == nil || !strings.Contains(err.Error(), "string") {
-		t.Fatal(err)
+	if f, err := MapFolder(obj(o)); err != nil || f.Name != "" || f.BadStrings != 1 || f.Key != 6 {
+		t.Fatalf("%+v %v", f, err)
 	}
 	short := obj(hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 6}))
 	short.Raw = short.Raw[:1000]

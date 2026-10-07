@@ -1,7 +1,6 @@
 package outlookmail
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -54,10 +53,13 @@ func TestMapHeaderStringsAbsentAndPresent(t *testing.T) {
 	for _, word := range []int{904, 888, 944, 924} {
 		o := hxbuild.NewMailHeader(headerSpec())
 		o.PutU32(word, 4|1<<31)
-		_, err := MapHeader(obj(o))
-		var ue *UnmappedError
-		if !errors.As(err, &ue) || !strings.Contains(err.Error(), "string") {
-			t.Fatalf("+%d: %v", word, err)
+		h, err := MapHeader(obj(o))
+		if err != nil || h.BadStrings != 1 || h.Key != 11 {
+			t.Fatalf("+%d: %+v %v", word, h, err)
+		}
+		blank := map[int]string{904: h.Subject, 888: h.SenderName, 944: h.SenderAddress, 924: h.Preview}[word]
+		if blank != "" {
+			t.Fatalf("+%d: field not blank", word)
 		}
 	}
 }
@@ -136,8 +138,8 @@ func TestMapHeaderShortObject(t *testing.T) {
 	o = obj(hxbuild.NewMailHeader(headerSpec()))
 	o.Raw = o.Raw[:hxbuild.MailHeaderSize]
 	o.Raw[104], o.Raw[105], o.Raw[106], o.Raw[107] = 0xff, 0xff, 0xff, 0x7f // lead past the object
-	if _, err := MapHeader(o); err == nil {
-		t.Fatal("a string area past the object must not map")
+	if h, err := MapHeader(o); err != nil || h.BadStrings != 4 || h.Subject != "" {
+		t.Fatalf("a string area past the object leaves the strings blank: %+v %v", h, err)
 	}
 }
 
@@ -154,8 +156,8 @@ func TestMapDetail(t *testing.T) {
 	for _, word := range []int{1216, 1232, 1240} {
 		o := hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 1, MessageID: "<c@example.invalid>", Class: "IPM.Note", InReplyTo: "<d@example.invalid>"})
 		o.PutU32(word, 4|1<<31)
-		if _, err := MapDetail(obj(o)); err == nil {
-			t.Errorf("+%d: bad string accepted", word)
+		if d, err := MapDetail(obj(o)); err != nil || d.BadStrings != 1 || d.Key != 1 {
+			t.Errorf("+%d: %+v %v", word, d, err)
 		}
 	}
 	short := obj(hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 1}))
@@ -177,8 +179,8 @@ func TestMapRecipient(t *testing.T) {
 	for _, word := range []int{296, 304} {
 		o := hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 2, Parent: 21, Name: "Fixture Person", Address: "person@example.invalid"})
 		o.PutU32(word, 4|1<<31)
-		if _, _, err := MapRecipient(obj(o)); err == nil {
-			t.Errorf("+%d: bad string accepted", word)
+		if _, r, err := MapRecipient(obj(o)); err != nil || r.BadStrings != 1 {
+			t.Errorf("+%d: %+v %v", word, r, err)
 		}
 	}
 	short := obj(hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 2}))

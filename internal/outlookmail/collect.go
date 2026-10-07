@@ -55,6 +55,9 @@ type Loss struct {
 // attachments and body. Copies counts the header objects (To Me, Inbox, Sent ...) that hold it.
 type Message struct {
 	Account string
+	// Header and Detail are embedded and both have a Key field, so m.Key is ambiguous: use
+	// m.Header.Key (the header object's key) or m.Detail.Key (the logical message, equal to
+	// m.DetailKey). Header.Recipients is filled only by Collect.
 	Header
 	Detail
 	Folder      Folder
@@ -74,13 +77,17 @@ type Coverage struct {
 
 // Notes counts what the read did, numbers only.
 type Notes struct {
-	HeadersSeen       int // header objects with the known tag, every copy
-	Messages          int
-	MissingDetail     int // detail keys with a header and no detail object
-	MissingFolder     int // detail keys whose header names no folder
-	OtherRoot         int // detail keys in a folder set that is not the account's
+	HeadersSeen   int // header objects with the known tag, every copy
+	Messages      int
+	MissingDetail int // detail keys with a header and no detail object
+	MissingFolder int // detail keys whose header names no folder
+	OtherRoot     int // detail keys in a folder set that is not the account's
+	// OrphanAttachments and OrphanRecipients count objects whose parent key is no detail object
+	// at all. Children of a message that was skipped (no folder, other account, unmapped) are
+	// not counted: their parent exists.
 	OrphanAttachments int
 	OrphanRecipients  int
+	BadString         int // string fields that were present but unreadable, left blank (not a loss)
 	Unmapped          int // objects that failed to map
 	ResyncedSkipped   int // objects reached after unknown bytes, skipped
 	OtherTagSkipped   int // attachment, folder and recipient objects with an unknown tag, skipped
@@ -89,11 +96,13 @@ type Notes struct {
 	BodiesMissing     int
 	BodiesUnreadable  int
 	BodiesNone        int
-	BodiesNotRead     int // file bodies left unread because they were not needed
+	BodiesNotRead     int // file bodies left unread (state not_read)
 }
 
 // Result is what Collect read.
 type Result struct {
+	// RootKey is the account root Collect chose: the key its folders hang from.
+	RootKey  uint32
 	Messages []Message // sorted by detail key
 	Folders  []Folder  // the account's folders, sorted by key
 	Coverage []Coverage
@@ -225,6 +234,16 @@ func Collect(ctx context.Context, s *hxstore.Store, root, account string, opt Op
 	return res, nil
 }
 
+// The mappers Collect calls, as variables so a test can make one fail: a walked object is never
+// shorter than its tag, so the only error a mapper has cannot happen on a real walk.
+var (
+	mapFolder     = MapFolder
+	mapHeader     = MapHeader
+	mapRecipient  = MapRecipient
+	mapAttachment = MapAttachment
+	mapDetail     = MapDetail
+)
+
 // afterWalk is a seam for a test that cancels the context between the walk and the mapping.
 var afterWalk = func() {}
 
@@ -262,25 +281,28 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	// Folders.
 	byKey := map[uint32]Folder{}
 	for _, k := range folders.keys() {
-		f, err := MapFolder(folders.wins[k].obj)
+		f, err := mapFolder(folders.wins[k].obj)
 		if err != nil {
 			n.Unmapped++
 			continue
 		}
+		n.BadString += f.BadStrings
 		byKey[f.Key] = f
 	}
 	// Headers, each tagged with its folder.
 	var all []Header
 	for _, k := range headers.keys() {
-		h, err := MapHeader(headers.wins[k].obj)
+		h, err := mapHeader(headers.wins[k].obj)
 		if err != nil {
 			n.Unmapped++
 			continue
 		}
+		n.BadString += h.BadStrings
 		h.Offset = headers.wins[k].v.block
 		all = append(all, h)
 	}
 	rootKey := accountRoot(byKey, all)
+	res.RootKey = rootKey
 	inRoot := map[uint32]Folder{}
 	for k, f := range byKey {
 		if rootOf(byKey, k) == rootKey {
@@ -315,20 +337,22 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 	// Recipients and attachments, by the message they belong to.
 	recByMsg := map[uint32][]Recipient{}
 	for _, k := range recipients.keys() {
-		parent, r, err := MapRecipient(recipients.wins[k].obj)
+		parent, r, err := mapRecipient(recipients.wins[k].obj)
 		if err != nil {
 			n.Unmapped++
 			continue
 		}
+		n.BadString += r.BadStrings
 		recByMsg[parent] = append(recByMsg[parent], r)
 	}
 	attByMsg := map[uint32][]Attachment{}
 	for _, k := range attachments.keys() {
-		a, err := MapAttachment(attachments.wins[k].obj)
+		a, err := mapAttachment(attachments.wins[k].obj)
 		if err != nil {
 			n.Unmapped++
 			continue
 		}
+		n.BadString += a.BadStrings
 		attByMsg[a.MessageKey] = append(attByMsg[a.MessageKey], a)
 	}
 	detailKeys := make([]uint32, 0, len(copies))
@@ -342,11 +366,12 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 			n.MissingDetail++
 			continue
 		}
-		d, err := MapDetail(dw.obj)
+		d, err := mapDetail(dw.obj)
 		if err != nil {
 			n.Unmapped++
 			continue
 		}
+		n.BadString += d.BadStrings
 		cur, toMe := currentCopy(copies[dk], inRoot)
 		m := Message{
 			Account: account, Header: cur, Detail: d, Folder: inRoot[cur.FolderKey], ToMe: toMe,
@@ -363,11 +388,15 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		res.Messages = append(res.Messages, m)
 	}
 	n.Messages = len(res.Messages)
-	for _, a := range attByMsg {
-		n.OrphanAttachments += len(a)
+	for k, a := range attByMsg {
+		if _, parent := details.wins[k]; !parent {
+			n.OrphanAttachments += len(a)
+		}
 	}
-	for _, r := range recByMsg {
-		n.OrphanRecipients += len(r)
+	for k, r := range recByMsg {
+		if _, parent := details.wins[k]; !parent {
+			n.OrphanRecipients += len(r)
+		}
 	}
 	res.Coverage = coverage(res.Messages, copies)
 	return readBodies(ctx, res, root, opt)
@@ -540,6 +569,7 @@ func readBodies(ctx context.Context, res *Result, root string, opt Options) erro
 			n.BodiesNone++
 		case BodyFile:
 			if !opt.ReadBodies || opt.NeedBody != nil && !opt.NeedBody(m.DetailKey) {
+				m.Body.State = BodyNotRead
 				n.BodiesNotRead++
 				continue
 			}
