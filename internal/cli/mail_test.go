@@ -120,8 +120,17 @@ func seedMail(t *testing.T, e *env, msgs []outlookmail.Message) {
 	}
 }
 
+// pinMailPlatform makes the mail commands run as on a Mac, whatever the host is.
+func pinMailPlatform(t *testing.T) {
+	t.Helper()
+	old := mailPlatform
+	mailPlatform = "darwin"
+	t.Cleanup(func() { mailPlatform = old })
+}
+
 func mailEnv(t *testing.T) *env {
 	t.Helper()
+	pinMailPlatform(t)
 	e := textEnv(t)
 	seedMail(t, e, seedMessages())
 	return e
@@ -426,6 +435,7 @@ func TestMailAccountFlag(t *testing.T) {
 }
 
 func TestMailEmptyNotes(t *testing.T) {
+	pinMailPlatform(t)
 	old := mailProfileCount
 	t.Cleanup(func() { mailProfileCount = old })
 	note := func(e *env, args ...string) string {
@@ -640,7 +650,7 @@ func TestMailDamagedArchive(t *testing.T) {
 			code, _, errOut := e.mail(append([]string{"--json"}, args...)...)
 			if code == 0 {
 				// folders reads no recipients, and show reads no coverage.
-				if !(table == "mail_recipients" && args[1] == "folders") && !(table == "mail_coverage" && args[1] == "show") {
+				if (table != "mail_recipients" || args[1] != "folders") && (table != "mail_coverage" || args[1] != "show") {
 					t.Errorf("%s dropped, %v: exit 0", table, args)
 				}
 				continue
