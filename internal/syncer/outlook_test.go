@@ -187,7 +187,7 @@ func TestSyncOutlookAlone(t *testing.T) {
 	root := outlookRoot(t, "HxStore.hxd")
 	o := outlookOpts(db, root)
 	o.Root = t.TempDir()
-	if r, _ := run(t, o); r.Status != StatusOK || len(r.Sources) != 1 {
+	if r, _ := run(t, o); r.Status != StatusOmissions || len(r.Sources) != 2 {
 		t.Fatalf("%s %+v", r.Status, r.Sources)
 	}
 	o.OutlookRoot = filepath.Join(root, "missing")

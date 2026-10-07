@@ -186,6 +186,9 @@ func (rt *runtime) statusBlock(title string, r *statusResult) {
 	if len(r.OtherOrigins) > 0 {
 		m["other_origins"] = strings.Join(r.OtherOrigins, ", ")
 	}
+	if r.Mail != nil {
+		m["mail"] = r.Mail.text()
+	}
 	render.Block(w, title, m, rt.color)
 	if len(r.Accounts) == 0 {
 		return

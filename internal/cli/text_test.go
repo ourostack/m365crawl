@@ -29,7 +29,8 @@ func (e *env) scrub(s string) string {
 		`(last sync *(?:\x1b\[0m)? +)\d{4}-\d\d-\d\d \d\d:\d\d`:   "${1}<stamp>",
 		`(archive age *(?:\x1b\[0m)?  +)[0-9.a-zµ]+`:              "${1}<age>",
 		`archive age: [0-9.a-zµ]+`:                                "archive age: <age>",
-		`ok at \d{4}-\d\d-\d\d \d\d:\d\d`:                         "ok at <stamp>",
+		`(ok|ok_with_omissions) at \d{4}-\d\d-\d\d \d\d:\d\d`:     "${1} at <stamp>",
+		`synced \d{4}-\d\d-\d\d \d\d:\d\d`:                        "synced <stamp>",
 		`(?m)^(\S+ Fixture +\S+ +\S+ +)\d{4}-\d\d-\d\d \d\d:\d\d`: "${1}<stamp>",
 	} {
 		s = regexp.MustCompile(re).ReplaceAllString(s, to)
@@ -59,7 +60,7 @@ func checkGolden(t *testing.T, name, got string) {
 }
 
 func textGoldenName(name string) string {
-	if name == "doctor" && goruntime.GOOS == "windows" {
+	if (name == "doctor" || name == "status") && goruntime.GOOS == "windows" {
 		return name + ".windows"
 	}
 	return name

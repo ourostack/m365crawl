@@ -76,6 +76,8 @@ type SourceCounts struct {
 	Records       store.Counts `json:"records"`
 	// Calendar is what the calendar derivation did in the source's transaction.
 	Calendar store.CalendarCounts `json:"calendar"`
+	// Mail is what the mail commit did; set only on an Outlook mail source.
+	Mail *store.MailResult `json:"mail,omitempty"`
 }
 
 // SourceError is why a source failed: an error code from the output contract and its message.

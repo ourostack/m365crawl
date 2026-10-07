@@ -1,9 +1,9 @@
-        ▄████▄ ▄████▄ ██████                           ▄▄
-            ██ ██     ██                               ██
-██▀█▀██   ███▀ █████▄ █████▄ ▄████ ████▄  ▀▀█▄ ██   ██ ██
-██ █ ██     ██ ██  ██     ██ ██    ██ ▀▀ ▄█▀██ ██ █ ██ ██
-██   ██ ▀████▀ ▀████▀ ▀████▀ ▀████ ██    ▀█▄██  ██▀██  ██
-local-first Microsoft 365 mirror for SQLite  |  status
+ ▄▄                                                       ▄▄
+ ██                                                       ██
+▀██▀ ▄███▄  ▀▀█▄ ██▀█▀██ ▄█▀▀▀ ▄████  ████▄  ▀▀█▄ ██   ██ ██
+ ██  ██▀▀▀ ▄█▀██ ██ █ ██ ▀███▄ ██     ██ ▀▀ ▄█▀██ ██ █ ██ ██
+ ▀█▄ ▀████ ▀█▄██ ██   ██ ▄▄▄█▀ ▀████  ██    ▀█▄██  ██▀██  ██
+local-first Teams mirror for SQLite  |  status
 
 STATUS
 ======
@@ -11,7 +11,7 @@ STATUS
 archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp>
-mail           : skipped
+mail           : unsupported_platform
 schema version : 6
 
 account                                                                    conversations  messages  people  activity  newest

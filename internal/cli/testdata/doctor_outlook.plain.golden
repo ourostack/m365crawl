@@ -17,12 +17,14 @@ Ready checks
   ● schema_version     schema v6
   ● fts                full-text indexes present
   ● archive_newer      the archive was written by this or an older m365crawl (derivation version 2)
-  ● last_sync_status   the last sync was ok
+  ● last_sync_status   the last sync was ok_with_omissions
   ● last_sync_age      last successful sync <age> ago
   ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
                        fix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.
   ▲ outlook_store      profile Main: store version readable; the last read failed (unsupported_layout): outlook_layout_unsupported: the Outlook store cannot be read by this version of m365crawl: class 0x6b tag 0x456 x3, known 0x455
                        fix: Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.
+  ● mail_readable      profile Main: mail read <age> ago
+  ● mail_archive_mode  the archive is readable by its owner only (0600)
 
 Snapshot
 --------

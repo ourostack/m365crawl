@@ -68,7 +68,7 @@ m365crawl doctor [flags]
 
 No flags beyond the global ones.
 
-Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade`, `last_sync_status`, `calendar_cache` and `outlook_store` (warnings; `calendar_cache` fires when an account has no Teams calendar database in the archive or the newest Teams calendar cache time is more than 7 days old; `outlook_store` says the Outlook source is off, or lists each profile with whether its store header is a version this build reads, what the last sync recorded and how it is linked to Teams; with Outlook on by default, no Outlook on the machine, no profile and a normal profile are plain passes, and it warns when a named root has no profile, access is denied, a store version is unknown or the last read failed, with the same fix a sync gives). On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
+Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (`doctor_failed`) when a required check fails; warnings do not fail it. Does not run an implicit sync. Checks include `archive_newer` (fails), `archive_upgrade`, `last_sync_status`, `calendar_cache` and `outlook_store` (warnings; `calendar_cache` fires when an account has no Teams calendar database in the archive or the newest Teams calendar cache time is more than 7 days old; `outlook_store` says the Outlook source is off, or lists each profile with whether its store header is a version this build reads, what the last sync recorded and how it is linked to Teams; with Outlook on by default, no Outlook on the machine, no profile and a normal profile are plain passes, and it warns when a named root has no profile, access is denied, a store version is unknown or the last read failed, with the same fix a sync gives). `mail_readable` (a warning) says, per Outlook profile, when its mail was last read or why the last read failed, and that mail is not read when the Outlook source is off or on Windows; `mail_archive_mode` warns when other users can read the archive file, which holds mail (it is created with mode 0600; not applicable on Windows). On Windows the `full_disk_access` check is `ok: true` with detail `not applicable on Windows; Teams cache is under LocalCache, not TCC-protected.`
 
 Examples:
 
@@ -110,7 +110,7 @@ m365crawl status [flags]
 
 No flags beyond the global ones.
 
-Result: Archive path, schema version, per-account counts, the last run and other Teams origins seen.
+Result: Archive path, schema version, per-account counts, the last run and other Teams origins seen, and a `mail` block: `{"messages", "unread", "folders", "oldest_at", "synced_at", "state"}`. `messages` counts mail that is not gone or evicted; `state` is `ok` once a sync has read the mail, `skipped` when the Outlook source is off for this run or no sync has read mail yet, `no_profile` when this machine has no Outlook profile, and `unsupported_platform` on Windows, where mail is not read yet.
 
 Examples:
 
