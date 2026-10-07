@@ -17,6 +17,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl"
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/render"
 )
@@ -140,8 +141,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	return runCLI(ctx, args, stdout, stderr)
 }
 
-// watchSignals cancels on the first signal and calls exit(exitForced) on the second. It returns
-// when sigs is closed.
+// killBrowsers force-kills every browser this process launched. The force-quit path runs it
+// before exiting, because os.Exit skips every deferred Close. A test seam.
+var killBrowsers = browser.KillAll
+
+// watchSignals cancels on the first signal and, on the second, kills every browser this process
+// started and calls exit(exitForced). It returns when sigs is closed.
 func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
@@ -150,6 +155,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
 	}
+	killBrowsers()
 	exit(exitForced)
 }
 

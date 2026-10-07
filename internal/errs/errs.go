@@ -30,6 +30,9 @@ const (
 	CodeLocked                      = "locked"
 	CodeArchiveNewer                = "archive_newer"
 	CodePartialSync                 = "partial_sync"
+	CodeNoBrowser                   = "transcripts_no_browser"
+	CodeBrowserBusy                 = "transcripts_browser_busy"
+	CodeBrowserFailed               = "transcripts_browser_failed"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -165,6 +168,29 @@ func Interrupted() *Coded {
 func Locked(msg string) *Coded {
 	return &Coded{Code: CodeLocked, Exit: ExitLocked, Message: msg,
 		Fix: "Wait for the other m365crawl run to finish, then run again."}
+}
+
+// NoBrowser reports that neither Edge nor Chrome (nor the browser the caller named) was found.
+func NoBrowser() *Coded {
+	return &Coded{Code: CodeNoBrowser, Exit: ExitEnvironment,
+		Message: "no Microsoft Edge or Google Chrome was found",
+		Fix:     "Install Microsoft Edge, or pass --browser with the path to Edge or Chrome."}
+}
+
+// BrowserBusy reports that the m365crawl browser profile is in use: a sign-in window is open,
+// another fetch is running, or a browser from an earlier run still holds the profile.
+func BrowserBusy() *Coded {
+	return &Coded{Code: CodeBrowserBusy, Exit: ExitLocked,
+		Message: "the m365crawl browser profile is already in use",
+		Fix:     "Close the m365crawl sign-in window or wait for the other fetch, then run again."}
+}
+
+// BrowserFailed reports a browser that started badly or stopped answering. detail says what
+// happened and never carries page content.
+func BrowserFailed(detail string) *Coded {
+	return &Coded{Code: CodeBrowserFailed, Exit: ExitRuntime,
+		Message: "the browser failed: " + detail,
+		Fix:     "The browser did not start with remote debugging. A managed policy can block remote debugging; try --browser chrome, or pass --browser with the path to another Edge or Chrome."}
 }
 
 var _ error = (*Coded)(nil)
