@@ -56,7 +56,7 @@ func NewAccount(s AccountSpec) *Object {
 		}
 		at := o.AppendString(text)
 		o.PutU32(w, clampU32(at-base))
-		n := uint32(len(UTF16Z(text)))
+		n := clampU32(len(UTF16Z(text)))
 		if s.LengthBytes != 0 {
 			n = s.LengthBytes
 		}

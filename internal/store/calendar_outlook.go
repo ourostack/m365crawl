@@ -466,9 +466,9 @@ const (
 // another Outlook account) comes back as its usage-class error and nothing changes.
 func (s *Store) SetOutlookLink(ctx context.Context, account, principal string, at time.Time) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		var method string
+		var method, linked string
 		var ended sql.NullString
-		err := tx.QueryRowContext(ctx, `select method, unlinked_at from calendar_account_links where source=? and account_id=?`, string(calendar.SourceOutlook), account).Scan(&method, &ended)
+		err := tx.QueryRowContext(ctx, `select method, principal_id, unlinked_at from calendar_account_links where source=? and account_id=?`, string(calendar.SourceOutlook), account).Scan(&method, &linked, &ended)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -482,11 +482,7 @@ func (s *Store) SetOutlookLink(ctx context.Context, account, principal string, a
 				string(calendar.SourceOutlook), account, OutlookLinkMethod, at.UTC().Format(timeLayout), at.UTC().Format(timeLayout))
 			return err
 		}
-		p, err := calendar.LoadPrincipals(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if p.Of(account) == principal {
+		if held && !ended.Valid && linked == principal {
 			if method == OutlookLinkMethod {
 				return nil
 			}

@@ -356,3 +356,30 @@ func TestAutoLinkWithSeveralAccountsInTheProfile(t *testing.T) {
 		t.Fatalf("an address two profiles hold is no evidence: %+v", r)
 	}
 }
+
+// A database that refuses the writes of a link is an error of the step and not a silent miss.
+func TestAutoLinkWriteFailures(t *testing.T) {
+	s := newStore(t)
+	addTeamsAccount(t, s, "t1/u1")
+	addTeamsAccount(t, s, "t2/u2")
+	putProfile(t, s, "t1", "u1", map[string]string{"userPrincipalName": "a@example.com"})
+	putProfile(t, s, "t2", "u2", map[string]string{"userPrincipalName": "b@example.com"})
+	putIdentity(t, s, "outlook/Main", "a@example.com")
+	if _, err := s.db.Exec(`create trigger no_insert before insert on calendar_account_links begin select raise(abort, 'no'); end`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AutoLinkOutlook(context.Background(), base); err == nil {
+		t.Fatal("a refused insert was not an error")
+	}
+	if _, err := s.db.Exec(`drop trigger no_insert`); err != nil {
+		t.Fatal(err)
+	}
+	autoLink(t, s)
+	if _, err := s.db.Exec(`create trigger no_update before update on calendar_account_links begin select raise(abort, 'no'); end`); err != nil {
+		t.Fatal(err)
+	}
+	putIdentity(t, s, "outlook/Main", "b@example.com")
+	if _, err := s.AutoLinkOutlook(context.Background(), base); err == nil {
+		t.Fatal("a refused unlink was not an error")
+	}
+}

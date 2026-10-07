@@ -422,6 +422,11 @@ func TestDoctorOutlookStoreCheckReadsTheArchive(t *testing.T) {
 	if c := doctor(); !c.OK || !c.Warn || !strings.Contains(c.Detail, "the last read failed (unsupported_layout): outlook_layout_unsupported: class 0x6b tag 0x456") || !strings.Contains(c.Fix, "teamscrawl sync") {
 		t.Fatalf("after a failure: %+v", c)
 	}
+	e.exec(`delete from meta where key like 'outlook_failure:%'`)
+	e.exec(`insert into calendar_account_links(source, account_id, principal_id, method, linked_at) values('outlook', 'outlook/Main', 'x/y', 'address', '2026-10-06T00:00:00.000Z')`)
+	if c := doctor(); !strings.Contains(c.Detail, "linked to a Teams account (address)") {
+		t.Fatalf("a linked profile: %+v", c)
+	}
 	// doctor never fails because of Outlook.
 	if code, _, _ := e.run("--outlook-root", root, "doctor"); code != 0 {
 		t.Fatalf("doctor exit %d", code)

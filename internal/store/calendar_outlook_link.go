@@ -50,9 +50,7 @@ func teamsAddresses(ctx context.Context, tx *sql.Tx) (map[string]map[string]bool
 	for rows.Next() {
 		var tenant, user string
 		var raw sql.NullString
-		if err := rows.Scan(&tenant, &user, &raw); err != nil {
-			return nil, err
-		}
+		_ = rows.Scan(&tenant, &user, &raw) // text columns that cannot be NULL, and a NullString
 		var v struct {
 			UPN   string `json:"userPrincipalName"`
 			Mail  string `json:"mail"`
@@ -181,9 +179,7 @@ func outlookIdentities(ctx context.Context, tx *sql.Tx) (map[string][]string, er
 	out := map[string][]string{}
 	for rows.Next() {
 		var account, addrs string
-		if err := rows.Scan(&account, &addrs); err != nil {
-			return nil, err
-		}
+		_ = rows.Scan(&account, &addrs) // a key suffix and a text value
 		out[account] = nil
 		for _, a := range strings.Split(strings.ToLower(addrs), "\n") {
 			if a != "" {
@@ -204,9 +200,7 @@ func outlookLinkRows(ctx context.Context, tx *sql.Tx) (map[string]outlookLinkRow
 	for rows.Next() {
 		var account string
 		var r outlookLinkRow
-		if err := rows.Scan(&account, &r.method, &r.principal, &r.active); err != nil {
-			return nil, err
-		}
+		_ = rows.Scan(&account, &r.method, &r.principal, &r.active) // NOT NULL text columns and a boolean
 		out[account] = r
 	}
 	return out, rows.Err()

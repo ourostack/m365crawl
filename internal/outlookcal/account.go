@@ -32,7 +32,7 @@ func AccountAddress(o hxstore.Object) (addr string, ok bool) {
 		return "", false
 	}
 	lead, _ := o.U32(acAreaOne)
-	if lead > uint32(len(o.Raw)) {
+	if int64(lead) > int64(len(o.Raw)) {
 		return "", false
 	}
 	first, ok := accountString(o, acAddress, tagAccount+int(lead))
