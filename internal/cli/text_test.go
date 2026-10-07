@@ -80,6 +80,10 @@ func textEnv(t *testing.T) *env {
 
 func TestTextGoldens(t *testing.T) {
 	e := textEnv(t)
+	// The search golden carries the note about mail, which differs on Windows; pin the platform.
+	oldPlatform := searchMailPlatform
+	searchMailPlatform = "darwin"
+	t.Cleanup(func() { searchMailPlatform = oldPlatform })
 	e.sync()
 	cases := []struct {
 		name string
