@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,6 +44,7 @@ func TestOutlookCalendarReleasedBeforeMail(t *testing.T) {
 	root, mix := mixRoot(t)
 	var base, held uint64
 	gcAtCalendar, gcAtCommit := 0, 0
+	limitAtCommit := int64(0)
 	old := afterCalendar
 	afterCalendar = func() { held = liveHeap() - base; gcAtCalendar = gcPercent() }
 	t.Cleanup(func() { afterCalendar = old })
@@ -50,6 +52,7 @@ func TestOutlookCalendarReleasedBeforeMail(t *testing.T) {
 	outlookNow = func() time.Time {
 		if gcAtCalendar != 0 { // the clock is read after the calendar commit, when the mail run record is written
 			gcAtCommit = max(gcAtCommit, gcPercent())
+			limitAtCommit = memoryLimit()
 		}
 		return oldNow()
 	}
@@ -63,6 +66,9 @@ func TestOutlookCalendarReleasedBeforeMail(t *testing.T) {
 	// at the caller's setting after.
 	if gcAtCalendar != outlookGCPercent || gcAtCommit != outlookGCPercent || gcPercent() != 100 {
 		t.Fatalf("GC percent %d after the calendar, %d at the mail commit, %d after the sync; want %d, %d, 100", gcAtCalendar, gcAtCommit, gcPercent(), outlookGCPercent, outlookGCPercent)
+	}
+	if limitAtCommit <= 0 || limitAtCommit == math.MaxInt64 || memoryLimit() != math.MaxInt64 {
+		t.Fatalf("memory limit %d at the mail commit and %d after the sync; want a limit during and none after", limitAtCommit, memoryLimit())
 	}
 	t.Logf("reachable when the calendar is committed: %d B", held)
 	if held > 1<<20 {
@@ -98,4 +104,10 @@ func TestOutlookSyncAllocations(t *testing.T) {
 	if got > uint64(info.Size())*30 { //nolint:gosec // a store file size is not negative
 		t.Fatalf("%d B allocated, more than 30 times the %d B store file", got, info.Size())
 	}
+}
+
+// memoryLimit reads the runtime's soft memory limit.
+func memoryLimit() int64 {
+	l := debug.SetMemoryLimit(-1)
+	return l
 }

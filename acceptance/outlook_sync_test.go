@@ -187,6 +187,9 @@ func outlookSyncs(t *testing.T) outlookRunData {
 			OutlookLink: d.account, OutlookLinkProfile: d.profile.Name,
 		}
 		stopProfile := startProfile(t)
+		if os.Getenv(profileEnv) != "" {
+			opts.Progress = &trace // the phase lines of the sync, stamped into the memory trace
+		}
 		d.first, outlookErr = measure(opts)
 		stopProfile()
 		if outlookErr != "" {

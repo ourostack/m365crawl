@@ -17,19 +17,24 @@ const (
 // MixOptions sizes a synthetic store whose object mix has the shape of a real one: many objects
 // the readers ignore, many recipients, fewer messages and fewer events, 16 objects to a block.
 type MixOptions struct {
-	Events      int // event objects, including older copies of the same event
-	EventIDs    int // distinct events among them; zero means Events
-	Details     int // detail objects, which the events link to in turn; zero means Events
-	Messages    int // mail messages: a header, a detail and an inline body each
-	Recipients  int // recipient objects, spread over the messages
-	Filler      int // objects of ClassFiller
-	FillerNoise int // incompressible bytes in each filler object
-	BodyBytes   int // about this many bytes of body text per event detail and per message
+	Events      int  // event objects, including older copies of the same event
+	EventIDs    int  // distinct events among them; zero means Events
+	Details     int  // detail objects, which the events link to in turn; zero means Events
+	Messages    int  // mail messages: a header, a detail and an inline body each
+	Recipients  int  // recipient objects, spread over the messages
+	Filler      int  // objects of ClassFiller
+	FillerNoise int  // incompressible bytes in each filler object
+	FileBodies  bool // every other message keeps its body in a file, named by MixBodyPath
+	DetailBytes int  // about this many bytes of body text per event detail; zero means BodyBytes
+	BodyBytes   int  // about this many bytes of body text per message (and per event detail, unless DetailBytes says otherwise)
 	Codec       Codec
 }
 
 // MixBlockObjects is the number of objects Mix puts in one block.
 const MixBlockObjects = 16
+
+// MixBodyPath is the store path of the body file of message i when MixOptions.FileBodies is set.
+func MixBodyPath(i int) string { return fmt.Sprintf("~/Files/mix-%d.dat", i) }
 
 // MixObjects is the number of objects a store built with o holds.
 func (o MixOptions) MixObjects() int {
@@ -48,6 +53,10 @@ func (o MixOptions) details() int {
 func Mix(o MixOptions) []byte {
 	b := New(Options{})
 	body := "<p>" + strings.Repeat("Fixture body text. ", max(o.BodyBytes, 19)/19) + "</p>"
+	detailBody := body
+	if o.DetailBytes > 0 {
+		detailBody = "<p>" + strings.Repeat("Fixture body text. ", max(o.DetailBytes, 19)/19) + "</p>"
+	}
 	var objs []*Object
 	flush := func() {
 		if len(objs) > 0 {
@@ -79,14 +88,18 @@ func Mix(o MixOptions) []byte {
 		}))
 	}
 	for i := 0; i < details; i++ {
-		add(NewDetail(DetailSpec{Key: uint32(2_000_000 + i), JoinLink: "https://example.invalid/join", DialIn: "Fixture dial-in", BodyHTML: body, Lead: 3})) //nolint:gosec // small test counts
+		add(NewDetail(DetailSpec{Key: uint32(2_000_000 + i), JoinLink: "https://example.invalid/join", DialIn: "Fixture dial-in", BodyHTML: detailBody, Lead: 3})) //nolint:gosec // small test counts
 	}
 	for i := 0; i < o.Messages; i++ {
 		k := uint32(10_000 + i) //nolint:gosec // small test counts
 		add(NewMailHeader(MailHeaderSpec{Key: k, Stamp: 1, DetailKey: k + 5_000_000, FolderKey: 101, Received: day.Add(time.Duration(i) * time.Minute), Subject: fmt.Sprintf("Fixture message %d", i),
 			SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1, Preview: "Fixture preview"}))
 		add(NewMailDetail(MailDetailSpec{Key: k + 5_000_000, Stamp: 1, MessageID: fmt.Sprintf("<%d@example.invalid>", i), Class: "IPM.Note", Sent: day}))
-		add(NewMailBody(MailBodySpec{Key: k + 5_000_000, Stamp: 1, HTML: []byte(body)}))
+		if o.FileBodies && i%2 == 1 {
+			add(NewMailBody(MailBodySpec{Key: k + 5_000_000, Stamp: 1, Path: MixBodyPath(i)}))
+		} else {
+			add(NewMailBody(MailBodySpec{Key: k + 5_000_000, Stamp: 1, HTML: []byte(body)}))
+		}
 	}
 	for i := 0; i < o.Recipients; i++ {
 		parent := uint32(5_000_000)

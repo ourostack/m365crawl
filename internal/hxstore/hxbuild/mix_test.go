@@ -46,3 +46,23 @@ func TestMixObjectMix(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// With FileBodies every other body names a file and a detail body can be of its own size.
+func TestMixFileBodiesAndDetailBytes(t *testing.T) {
+	mix := MixOptions{Events: 2, Messages: 4, FileBodies: true, BodyBytes: 4000, DetailBytes: 100}
+	data := Mix(mix)
+	if want := Mix(MixOptions{Events: 2, Messages: 4, BodyBytes: 4000, DetailBytes: 100}); len(data) >= len(want) {
+		t.Fatalf("a mix with file bodies is %d B, one with inline bodies %d B", len(data), len(want))
+	}
+	if MixBodyPath(3) != "~/Files/mix-3.dat" {
+		t.Fatal(MixBodyPath(3))
+	}
+	s, err := hxstore.Open(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Walk(context.Background(), hxstore.WalkOptions{}, nil)
+	if err != nil || st.Objects != mix.MixObjects() {
+		t.Fatalf("%d objects, %v", st.Objects, err)
+	}
+}

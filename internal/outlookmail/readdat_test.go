@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -185,5 +186,24 @@ func TestReadDatSymlinkOutside(t *testing.T) {
 	}
 	if b, err := ReadDat(root, "~/Files/alias/1.dat", MaxBodyBytes); err != nil || string(b) != "inside" {
 		t.Fatalf("%q %v", b, err)
+	}
+}
+
+// A body read from a file holds no more memory than its text.
+func TestReadDatKeepsNoSpareCapacity(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Files"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	_, _ = zw.Write([]byte(strings.Repeat("<p>body</p>", 3000)))
+	_ = zw.Close()
+	if err := os.WriteFile(filepath.Join(root, "Files", "a.dat"), gz.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadDat(root, "~/Files/a.dat", MaxBodyBytes)
+	if err != nil || len(got) != 33000 || cap(got) != len(got) {
+		t.Fatalf("%d bytes with room for %d, %v", len(got), cap(got), err)
 	}
 }
