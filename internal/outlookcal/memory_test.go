@@ -112,6 +112,9 @@ func BenchmarkCollectMeetingBodies(b *testing.B) {
 // something was removed, and the plain text. A scrub that copied the body once per rule, or
 // encoded it twice, was several times that.
 func TestCollectMeetingBodiesAllocation(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector allocates for every access; the count means nothing under it")
+	}
 	const n, size = 200, 20_000
 	for _, c := range []struct {
 		name  string

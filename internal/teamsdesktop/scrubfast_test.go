@@ -117,6 +117,7 @@ func TestMayRedactEdges(t *testing.T) {
 		bs + "n " + bs + "t " + bs + bs: false,
 		esc("003c") + esc("003e"):       false,
 		esc("00e9"):                     false, // above ASCII, not a folding character
+		esc("d835") + esc("dc00"):       false, // a surrogate pair: no folding character lies beyond the BMP
 		esc("0070"):                     true,  // p
 		esc("0039"):                     true,  // 9
 		esc("005f"):                     true,  // _

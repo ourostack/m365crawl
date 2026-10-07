@@ -187,4 +187,3 @@ func TestReadDatSymlinkOutside(t *testing.T) {
 		t.Fatalf("%q %v", b, err)
 	}
 }
-
