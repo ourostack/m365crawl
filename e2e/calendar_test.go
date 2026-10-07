@@ -79,7 +79,7 @@ func TestE2ECalendarSources(t *testing.T) {
 			outlook = m
 		}
 	}
-	if outlook == nil || outlook["status"] == nil || outlook["deletions"] != "unverified" || outlook["read_interval_seconds"] != float64(300) || outlook["covered_days"] == float64(0) {
+	if outlook == nil || outlook["status"] == nil || outlook["deletions"] != "inferred" || outlook["read_interval_seconds"] != float64(300) || outlook["covered_days"] == float64(0) {
 		t.Fatalf("outlook row: %v", all)
 	}
 	doc := ok(t, e.cmd("--outlook-root", root, "doctor"))

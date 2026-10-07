@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
 	"github.com/ourostack/teamscrawl/internal/outlookcal"
 	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
 	"github.com/ourostack/teamscrawl/internal/store"
@@ -568,5 +570,97 @@ func TestSyncOutlookMarkerLifecycle(t *testing.T) {
 	r, _ := run(t, o)
 	if marker(t, db, "outlook_skipped:Main") != 0 || sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
 		t.Fatalf("%+v", r.Sources)
+	}
+}
+
+// syntheticStore writes a one-block store of plain future events named by n (their ids and times
+// follow n) into the profile "Main" of root.
+func syntheticStore(t *testing.T, root string, ns ...int) {
+	t.Helper()
+	var objs []*hxbuild.Object
+	for _, n := range ns {
+		start := time.Date(2031, 3, 1+n, 9, 0, 0, 0, time.UTC)
+		objs = append(objs, hxbuild.NewEvent(hxbuild.EventSpec{
+			ID: hxbuild.GlobalObjectID(0, 0, 0, fmt.Sprintf("GONE-TEST-%04d", n)), SeriesKey: 0xf1c7_0000_0000_0000 | uint64(n), //nolint:gosec // small counter
+			DetailKey: uint32(2000 + n), LastModified: start.Add(-time.Hour), Start: start, End: start.Add(time.Hour), //nolint:gosec // small counter
+			ZoneID: 2, ZoneName: "Fixture Standard Time", ShowAs: 2, Subject: fmt.Sprintf("Synthetic %d", n), SubjectBare: fmt.Sprintf("Synthetic %d", n),
+			OrganizerName: "Fixture Organizer", OrganizerAddr: "fixture.organizer@example.invalid", AreaOneSize: 813,
+		}))
+	}
+	b := hxbuild.New(hxbuild.Options{})
+	b.BlockCodec(hxbuild.FramedPayload(hxbuild.Head(15), objs...), hxbuild.CodecLiteral)
+	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), b.Bytes(), 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+}
+
+// touchStore gives the profile's store a modification time of its own, so each read is of a distinct
+// copy whatever the file system's timestamp resolution.
+func touchStore(t *testing.T, root string, n int) {
+	t.Helper()
+	at := time.Date(2026, 10, 1, 12, n, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(root, "Main", "HxStore.hxd"), at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An event the store held and no longer holds is marked gone (and keeps its data) by the second read that misses it;
+// the run counts it; an event still held stays live. Outlook writes no tombstone, so absence is the signal.
+func TestSyncOutlookMarksAnEventTheStoreDroppedGone(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	syntheticStore(t, root, 1, 2, 3)
+	touchStore(t, root, 3)
+	if r, _ := run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Counts.Calendar.Events.Inserted != 3 {
+		t.Fatalf("%+v", r.Sources)
+	}
+	syntheticStore(t, root, 1, 3)
+	touchStore(t, root, 1)
+	r, _ := run(t, outlookOpts(db, root))
+	if g := sourceKeyed(t, r, "outlook|Main").Counts.Calendar.Gone; g != 0 {
+		t.Fatalf("one miss marked %d events gone", g)
+	}
+	touchStore(t, root, 2)
+	r, _ = run(t, outlookOpts(db, root))
+	o := sourceKeyed(t, r, "outlook|Main")
+	if o.Status != StatusOK || o.Counts.Calendar.Gone != 1 || r.Calendar.Gone != 1 {
+		t.Fatalf("%+v %+v", o, *o.Counts)
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is not null and subject='Synthetic 2'`); n != 1 {
+		t.Fatalf("%d rows of the dropped event are marked gone", n)
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is null`); n != 2 {
+		t.Fatalf("%d live Outlook rows, want 2", n)
+	}
+	syntheticStore(t, root, 1, 2, 3)
+	touchStore(t, root, 3)
+	if r, _ := run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Counts.Calendar.Gone != 0 ||
+		count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is null`) != 3 {
+		t.Fatalf("an event that returned stayed gone: %+v", r.Sources)
+	}
+}
+
+// A read that lost blocks may have missed live events, so it marks nothing.
+func TestSyncOutlookDamagedReadMarksNothingGone(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	run(t, outlookOpts(db, root))
+	live := count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is null`)
+	putOutlookStore(t, root, "store-damaged-blocks.hxd")
+	touchStore(t, root, 1)
+	r, _ := run(t, outlookOpts(db, root))
+	if s := sourceKeyed(t, r, "outlook|Main"); s.Omissions[outlookcal.CodeBlocksDamaged] == 0 || s.Counts.Calendar.Gone != 0 {
+		t.Fatalf("%+v", s)
+	}
+	touchStore(t, root, 2)
+	if r, _ = run(t, outlookOpts(db, root)); sourceKeyed(t, r, "outlook|Main").Counts.Calendar.Gone != 0 {
+		t.Fatalf("a second damaged read marked events gone: %+v", sourceKeyed(t, r, "outlook|Main"))
+	}
+	if n := count(t, db, `select count(*) from calendar_source_events where source='outlook' and removed_at is null`); n < live {
+		t.Fatalf("live Outlook rows went from %d to %d on a damaged read", live, n)
 	}
 }

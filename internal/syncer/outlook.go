@@ -189,9 +189,12 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 		return SourceReport{}, false, err
 	}
 	zone := calendarZone()
+	// An event Outlook deleted leaves the store, with no tombstone, once Outlook compacts (docs/outlook-store.md).
+	// Absence is read as deletion only from a read that lost nothing: a damaged block or an event that
+	// would not map could hide a live event, and then every unseen event stays.
 	var omissions map[string]int
 	status := StatusOK
-	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res)},
+	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0},
 		func(cal store.CalendarResult) store.Run {
 			if omissions = outlookOmissions(res, cal); lost(omissions) > 0 {
 				status = StatusOmissions

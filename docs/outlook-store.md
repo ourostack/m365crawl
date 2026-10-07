@@ -177,11 +177,49 @@ The store keeps several copies of most objects and leaves old versions in place.
 
 The working rule, **likely and not established**: the current version is the copy with the highest last-modified (+288), then the highest +112, then the highest file offset (a deterministic tie-break only). Last modified picks the same copy as file order in 78 of 80 groups where it separates copies. "The copy at the highest file offset is current" held in 3,291 of 3,293 calendar groups, but an experiment on mail objects showed new versions written at lower offsets than old ones, so file order is not the primary rule. An edit experiment on a test appointment is needed to establish the rule.
 
+## Deleted events
+
+Experiment E11, 2026-10-07, Outlook 16.115, one store, one machine. Two test appointments (no attendees, no body) were created in the live calendar, one timed and one all-day, one of them renamed twice, and both were deleted in Outlook's interface (Delete, confirm). The store file was copied before the creation (s0), after the creation (s1), after each rename (s2, s3), about 4 minutes after the deletion (s4), about 12 minutes after that (s5) and about 30 minutes after s5 (s6). The objects of a probe are found by the global object id text (UTF-16LE hex), the series key at +20 and the detail key; those three reach every class that mentions the event.
+
+**Result: Outlook writes no deletion marker anywhere the reader looks. A deleted event's objects stay in the store, byte for byte, until Outlook compacts the file, and then every object of the event is gone. The only signal is absence.**
+
+| Snapshot | Reader's events | Probe A (timed) | Probe B (all-day) |
+| --- | --- | --- | --- |
+| s0 before | 3,372 | no object | no object |
+| s1 created | 3,374 | 16 event objects, 52 objects in 9 classes | 13 event objects, 38 objects in 9 classes |
+| s2 renamed once | 3,374 | 22, 67 | 15, 42 |
+| s3 renamed twice, before the deletion | 3,374 | 26, 81 | 20, 50 |
+| s4 4 minutes after the deletion | 3,374 | 18, 61 | 10, 27 |
+| s5 16 minutes after the deletion | 3,372 | 0, 0 | 0, 0 |
+| s6 46 minutes after the deletion | 3,372 | 0, 0 | 0, 0 |
+
+(Counts are objects, old versions included, so they rise with every edit; the s3 to s4 fall is Outlook discarding old copies, not the deletion.) In s5 and again in s6 (which was written after more edits: 16,802 blocks, 43 damaged) no object of any class contains the probe's id text, series key or detail key, and the reader's id set differs from s0 by nothing: 3,372 events, the same ids. Between s0 and s4 the id set gained exactly the two probes and lost nothing; between s4 and s5 it lost exactly the two probes and gained nothing. Between s5 and s6 it did not change.
+
+What was ruled out, by comparing s3 (before the deletion) with s4 (after it) object by object, with the objects hashed by class and bytes:
+
+- **The event object does not change.** The current copy of each probe's class 0x6b object (the one with the highest last-modified, +288) is byte-identical in s3 and s4, so the fixed region (change stamp +112, last modified +288, flag word +1076, flag bytes +1082 and +1083, type, response), the subject and the series key are the same. No deleted flag and no parent or folder change is stored in the object. In s4 the reader returns both probes with the same subject and last-modified time, which is why gone detection cannot read a flag.
+- **There is no tombstone or change record of another class that names the event.** Between s3 and s4 the store gained objects in many classes (86 new class 0x4d objects, 45 class 0x55 and others), but none that mentions probe A in any class, and new objects that mention probe B only in classes 0x76 and 0x4008, described next.
+- **Some bookkeeping objects change, for one probe only, and are not a usable signal.** Probe B's class 0x4008 objects (tag 0xd6, a per-item header that holds the item's subject, zone and reminder text) were replaced by a shorter form of 833 bytes with the same id and no text, probe B's class 0x76 object (tag 0xd5) grew from 230 to 297 bytes, and its class 0x4005 objects (tag 0xac) disappeared. Probe A's did not change in s4 in any class (its old copies were discarded as for any edit). These classes hold only 7 objects of class 0x4008 and 20 of class 0x76 in the whole store: they track items touched in the last minutes, not events in general, so they do not exist for an event deleted last week.
+- **No index drops the event before compaction.** The class 0x6e objects (the calendar-view index, with start and end) of both probes are still present in s4 and none was added; only older copies were discarded.
+- **Compaction is what removes it.** The file shrank from 104,857,600 to 88,080,384 bytes between s4 and s5 and the block count from 17,990 to 16,250 (damaged blocks from 80 to 18). The 11 distinct event objects, 6 detail objects and 5 class 0x6e objects that left the store in that step all carry a probe's keys; no object of another event left (older versions of other events were not among them in this step).
+
+What this means for the reader: an event Outlook deleted can be read, unchanged, from a copy taken minutes after the deletion, and is absent from a copy taken after the next compaction. The 12 minutes between s4 and s5 are the most the experiment narrows the compaction to; it was not observed in between, and how often Outlook compacts is not known. A reader marks an event gone only from stores read in which it is missing, so a deletion shows up late, never early.
+
+What can make an event absent without a deletion, and the rule that follows:
+
+- **Eviction.** Outlook keeps a rolling window of events: in s5 the earliest non-master event starts 99.4 days before the copy (99.3 days in s0, 6 hours of clock earlier, so the edge moves with the clock) and the latest 358.5 days after it, while 54 of the 78 series masters start more than 90 days back and are kept as long as their series lives. An event that falls off the back of the window is absent without anyone deleting it. teamscrawl therefore judges only events that start within the last 60 days or later (360 of the 3,294 non-master events of s5 start before that and are never judged), and never a master.
+- **A damaged or unmapped read.** A torn block (59 to 80 of about 17,500 blocks, about 0.4%, on a store copied while Outlook runs, 18 after compaction) or an event the mapper rejects can hide a live event, and the reader counts a loss only above 2% damaged blocks, so a single read cannot be trusted to show every live event. An event is therefore marked gone only when it is missing from two consecutive reads of different copies that lost nothing; the first miss is only remembered, and a read with a loss, or the event seen again, forgets it. A linked Teams twin is hidden by an Outlook removal (merge rule M0), which is why one miss must never mark.
+- **A reset store.** A read that would remember more than 20 events and more than a tenth of the live events it judges remembers none.
+
+Over the six copies, 3,372 events were stable with no other event appearing or disappearing, so the rule marked no ordinary event; one live window of 16 minutes is not a measure of how often a live event is missing from a healthy read, which is why a marked event is not final: it is live again when a later read holds it.
+
+Not established: that compaction always drops a deleted event (only one deletion of each kind was observed, both dropped by the first compaction after them); the behaviour for a deleted occurrence of a series (the probes were single events) and for a series master; whether a meeting cancelled by its organizer (the "cancelled" flag at +1082) is dropped the same way, which the 850 events carrying the cancelled prefix in the measured store suggest it is not, because they are still present.
+
 ## Unlocated fields and the experiment each needs
 
 | Field | What is known | Experiment |
 | --- | --- | --- |
-| Deleted events | no tombstone class and no deleted flag found | create an appointment, delete it, copy the store before and after, compare |
+| Deleted events | **resolved, see "Deleted events"**: no tombstone, no flag, no parent change; the event's objects vanish when Outlook compacts the store | done (experiment E11) |
 | Recurrence rule | ticks at +456 and +472 in masters look like a range but did not match the three masters available | a master with a known rule, copied once, compared with the ticks and the objects around them |
 | Private flag, reminder on/off | not found | toggle each on a test appointment, copy before and after, diff the fixed region |
 | Categories, separate room address, web link | not found | add a category to a test appointment, copy before and after |
