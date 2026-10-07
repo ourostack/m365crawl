@@ -752,3 +752,44 @@ func TestCollectResyncedHeaderNamesItsKey(t *testing.T) {
 		t.Fatal("an unmappable resynced header did not make the read doubtful")
 	}
 }
+
+// A copy reached after unknown bytes is used only when no clean copy of the key exists: a
+// high-stamp one never displaces the clean header or folder, and a clean copy replaces it.
+func TestCollectResyncedCopyNeverDisplacesACleanOne(t *testing.T) {
+	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "clean subject", 2), det(22, "<b@example.invalid>"))
+	garbageHdr := hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 12, Stamp: 99, DetailKey: 22, FolderKey: fSent, Subject: "garbage subject"}).Encode()
+	garbageFolder := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: rootKey, Name: "Garbage Name", Type: 0x65, Stamp: 99}).Encode()
+	stray := append([]byte{1, 2, 3}, append(garbageHdr, append([]byte{9, 9, 9}, garbageFolder...)...)...)
+	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Subject != "clean subject" || r.Messages[0].Folder.Name != "Fixture Inbox" || r.Messages[0].Folder.Kind != "inbox" || r.Messages[0].Copies != 1 {
+		t.Fatalf("%+v", r.Messages)
+	}
+	// The resynced copy comes first in the store: the clean one replaces it.
+	first := append([]byte{1, 2, 3}, garbageHdr...)
+	r = collect(t, storeOf(t, append(framed(), first...), framed(objs...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Subject != "clean subject" {
+		t.Fatalf("%+v", r.Messages)
+	}
+}
+
+// A message in a folder the store does not hold is counted as unattributed to an account: nothing
+// in the header or the detail names the account. One that also has a copy in another account's
+// folder is that account's, and is skipped.
+func TestCollectUnknownFolderMessagesAreUnattributed(t *testing.T) {
+	other := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: fOtherBox, Parent: otherRoot, Name: "Other Inbox", Type: 0x61})
+	objs := append(folderObjs(), other,
+		hdr(11, 21, 999, 1, "no folder anywhere", 2), det(21, "<a@example.invalid>"),
+		hdr(12, 22, 999, 1, "theirs", 2), hdr(13, 22, fOtherBox, 1, "theirs", 2), det(22, "<b@example.invalid>"))
+	for i := uint32(0); i < 40; i++ {
+		objs = append(objs, hdr(100+i, 200+i, fInbox, 1, "y", 2), det(200+i, "<y@example.invalid>"))
+	}
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Messages) != 41 || r.Notes.MissingFolder != 1 || r.Notes.UnknownFolderUnattributed != 1 || r.Notes.OtherRoot != 1 {
+		t.Fatalf("%d messages %+v", len(r.Messages), r.Notes)
+	}
+	for _, m := range r.Messages {
+		if m.DetailKey == 22 {
+			t.Fatal("a message of another account was kept")
+		}
+	}
+}

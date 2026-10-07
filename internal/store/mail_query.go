@@ -453,6 +453,20 @@ from mail_folders f left join mail_coverage c on c.account=f.account and c.folde
 	if err != nil {
 		return nil, err
 	}
+	// Messages in a folder the store holds no object of have no folder row: one bucket per account.
+	err = mailEach(ctx, s.db, `select m.account, count(*), sum(coalesce(m.is_read=0, 0))
+from mail_messages m where m.gone_at is null and m.evicted_at is null
+  and not exists(select 1 from mail_folders f where f.account=m.account and f.folder_key=m.folder_key) group by m.account`, nil, func(r *sql.Rows) error {
+		f := MailFolderRow{Kind: outlookmail.KindUnknown}
+		if err := r.Scan(&f.Account, &f.Messages, &f.Unread); err != nil {
+			return err
+		}
+		out = append(out, f)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Account != b.Account {
@@ -474,6 +488,9 @@ func mailKindRank(kind string) int {
 		if k == kind {
 			return i
 		}
+	}
+	if kind == outlookmail.KindUnknown {
+		return 8
 	}
 	return 7
 }

@@ -225,7 +225,27 @@ func sortedMailKeys(m map[uint32]*mailExisting) []uint32 {
 }
 
 func upsertMailFolders(ctx context.Context, tx *sql.Tx, b MailBatch) error {
+	type row struct {
+		parent    uint32
+		name, kin string
+	}
+	held := map[uint32]row{}
+	err := eachRow(ctx, tx, `select folder_key, parent_key, name, kind from mail_folders where account=?`, []any{b.Account}, func(r *sql.Rows) error {
+		var k uint32
+		var x row
+		if err := r.Scan(&k, &x.parent, &x.name, &x.kin); err != nil {
+			return err
+		}
+		held[k] = x
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 	for _, f := range b.Result.Folders {
+		if x, had := held[f.Key]; had && x == (row{f.Parent, f.Name, f.Kind}) {
+			continue // the folder is stored as it is: an unchanged read writes nothing
+		}
 		if _, err := tx.ExecContext(ctx, `insert into mail_folders(account, folder_key, parent_key, name, kind) values(?,?,?,?,?)
 on conflict(account, folder_key) do update set parent_key=excluded.parent_key, name=excluded.name, kind=excluded.kind`,
 			b.Account, f.Key, f.Parent, f.Name, f.Kind); err != nil {
@@ -495,10 +515,33 @@ func insertNewAttachments(ctx context.Context, tx *sql.Tx, ex *mailExisting, m o
 }
 
 func writeMailCoverage(ctx context.Context, tx *sql.Tx, b MailBatch, at string) error {
+	type line struct {
+		oldest, newest sql.NullString
+		count          int
+	}
+	held := map[uint32]line{}
+	err := eachRow(ctx, tx, `select folder_key, oldest_at, newest_at, count from mail_coverage where account=?`, []any{b.Account}, func(r *sql.Rows) error {
+		var k uint32
+		var l line
+		if err := r.Scan(&k, &l.oldest, &l.newest, &l.count); err != nil {
+			return err
+		}
+		held[k] = l
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	in := make(map[uint32]bool, len(b.Result.Coverage))
 	for _, c := range b.Result.Coverage {
+		in[c.FolderKey] = true
+		want := line{sqlTime(c.Oldest), sqlTime(c.Newest), c.Count}
+		if l, had := held[c.FolderKey]; had && l == want {
+			continue // the same range and count: an unchanged read writes nothing
+		}
 		if _, err := tx.ExecContext(ctx, `insert into mail_coverage(account, folder_key, oldest_at, newest_at, count, read_at) values(?,?,?,?,?,?)
 on conflict(account, folder_key) do update set oldest_at=excluded.oldest_at, newest_at=excluded.newest_at, count=excluded.count, read_at=excluded.read_at`,
-			b.Account, c.FolderKey, fmtTime(c.Oldest), fmtTime(c.Newest), c.Count, at); err != nil {
+			b.Account, c.FolderKey, want.oldest, want.newest, c.Count, at); err != nil {
 			return err
 		}
 	}
@@ -506,8 +549,23 @@ on conflict(account, folder_key) do update set oldest_at=excluded.oldest_at, new
 		return nil
 	}
 	// A trusted read that holds nothing of a folder says the folder is empty now.
-	_, err := tx.ExecContext(ctx, `delete from mail_coverage where account=? and read_at<>?`, b.Account, at)
-	return err
+	for k := range held {
+		if in[k] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `delete from mail_coverage where account=? and folder_key=?`, b.Account, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sqlTime is a time as the archive stores it: NULL when unset.
+func sqlTime(t time.Time) sql.NullString {
+	if t.IsZero() {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: t.UTC().Format(timeLayout), Valid: true}
 }
 
 func loadMailAbsent(ctx context.Context, tx *sql.Tx, account string) (map[uint32]mailAbsent, error) {

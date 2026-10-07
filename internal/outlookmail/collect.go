@@ -79,7 +79,11 @@ type Notes struct {
 	Messages      int
 	MissingDetail int // detail keys with a header and no detail object
 	MissingFolder int // messages kept without a folder: every header copy names a folder the store does not hold
-	OtherRoot     int // detail keys in a folder set that is not the account's
+	// UnknownFolderUnattributed counts those messages too: nothing in the header or the detail
+	// names the account they belong to, so one of another account could be among them when that
+	// account's folder object is also missing.
+	UnknownFolderUnattributed int
+	OtherRoot                 int // detail keys in a folder set that is not the account's
 	// OrphanAttachments and OrphanRecipients count objects whose parent key is no detail object
 	// at all. Children of a message that was skipped (no folder, other account, unmapped) are
 	// not counted: their parent exists.
@@ -139,6 +143,9 @@ func (a version) newer(b version) bool {
 type winner struct {
 	v   version
 	obj hxstore.Object
+	// resynced says the copy was reached after unknown bytes: it stands in only while no clean
+	// copy of the key exists.
+	resynced bool
 }
 
 // class collects the current copy of every object key of one class.
@@ -160,10 +167,17 @@ func (c *class) keep(o hxstore.Object) {
 	key, _ := o.U32(offKey) // every known tag is longer than the key word
 	stamp, _ := o.U64(offStamp)
 	v := version{stamp: stamp, block: o.BlockOffset, pos: o.PayloadPos}
-	if old, held := c.wins[key]; held && !v.newer(old.v) {
-		return
+	if old, held := c.wins[key]; held {
+		switch {
+		case old.resynced != o.Resynced:
+			if o.Resynced {
+				return // a resynced copy never replaces a clean one, whatever its stamp
+			}
+		case !v.newer(old.v):
+			return
+		}
 	}
-	c.wins[key] = winner{v: v, obj: o.Clone()}
+	c.wins[key] = winner{v: v, obj: o.Clone(), resynced: o.Resynced}
 }
 
 // keys returns the object keys in ascending order.
@@ -431,6 +445,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		if unknown[dk] {
 			folder = Folder{Key: cur.FolderKey, Kind: KindUnknown}
 			n.MissingFolder++
+			n.UnknownFolderUnattributed++
 		}
 		m := Message{
 			Account: account, Header: cur, Detail: d, Folder: folder, ToMe: toMe,
