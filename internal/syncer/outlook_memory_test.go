@@ -44,7 +44,7 @@ func TestOutlookCalendarReleasedBeforeMail(t *testing.T) {
 	root, mix := mixRoot(t)
 	var base, held uint64
 	gcAtCalendar, gcAtCommit := 0, 0
-	limitAtCommit := int64(0)
+	limitAtCommit, limitBefore := int64(0), memoryLimit()
 	old := afterCalendar
 	afterCalendar = func() { held = liveHeap() - base; gcAtCalendar = gcPercent() }
 	t.Cleanup(func() { afterCalendar = old })
@@ -67,8 +67,8 @@ func TestOutlookCalendarReleasedBeforeMail(t *testing.T) {
 	if gcAtCalendar != outlookGCPercent || gcAtCommit != outlookGCPercent || gcPercent() != 100 {
 		t.Fatalf("GC percent %d after the calendar, %d at the mail commit, %d after the sync; want %d, %d, 100", gcAtCalendar, gcAtCommit, gcPercent(), outlookGCPercent, outlookGCPercent)
 	}
-	if limitAtCommit <= 0 || limitAtCommit == math.MaxInt64 || memoryLimit() != math.MaxInt64 {
-		t.Fatalf("memory limit %d at the mail commit and %d after the sync; want a limit during and none after", limitAtCommit, memoryLimit())
+	if limitAtCommit <= 0 || (limitBefore == math.MaxInt64 && limitAtCommit == math.MaxInt64) || memoryLimit() != limitBefore {
+		t.Fatalf("memory limit %d before the sync, %d at the mail commit and %d after; want a limit during, and the caller's after", limitBefore, limitAtCommit, memoryLimit())
 	}
 	t.Logf("reachable when the calendar is committed: %d B", held)
 	if held > 1<<20 {
@@ -87,6 +87,9 @@ func gcPercent() int {
 // a new gzip writer once allocated over a megabyte a message: about 17 GB for a real mailbox,
 // where the store file is 88 MB.
 func TestOutlookSyncAllocations(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector allocates for every access; the count means nothing under it")
+	}
 	isolateTmp(t)
 	utcDays(t)
 	db := newDB(t)
@@ -110,4 +113,26 @@ func TestOutlookSyncAllocations(t *testing.T) {
 func memoryLimit() int64 {
 	l := debug.SetMemoryLimit(-1)
 	return l
+}
+
+// A limit the caller has set is never raised: the read keeps the lower of it and its own, and the
+// caller's is back after the sync.
+func TestOutlookKeepsALowerCallerMemoryLimit(t *testing.T) {
+	if limitFor(math.MaxInt64, 100) != 100+outlookHeadroom || limitFor(1<<20, 100) != 1<<20 || limitFor(1<<62, 100) != 100+outlookHeadroom {
+		t.Fatalf("limitFor: %d %d %d", limitFor(math.MaxInt64, 100), limitFor(1<<20, 100), limitFor(1<<62, 100))
+	}
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root, _ := mixRoot(t)
+	const user = 100 << 20 // under the headroom alone, so the read's own limit is the higher one
+	defer debug.SetMemoryLimit(debug.SetMemoryLimit(user))
+	var atCommit int64
+	oldNow := outlookNow
+	outlookNow = func() time.Time { atCommit = memoryLimit(); return oldNow() }
+	t.Cleanup(func() { outlookNow = oldNow })
+	run(t, outlookOpts(db, root))
+	if atCommit != user || memoryLimit() != user {
+		t.Fatalf("limit %d at the commit and %d after the sync, the caller's was %d", atCommit, memoryLimit(), user)
+	}
 }

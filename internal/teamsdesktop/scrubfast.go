@@ -1,14 +1,62 @@
 package teamsdesktop
 
-import "strings"
+import (
+	"strings"
+	"sync"
+	"unicode"
+	"unicode/utf8"
+)
 
 // MayRedact reports whether Scrub could change s, which is JSON text or the plain text a JSON string
 // is made from. A false answer is a promise: Scrub would remove nothing and return the same bytes.
 // It is a cheap scan, so a caller with a long body of ordinary text can skip the scrub and the
-// encoding around it. Every rule needs a credential name, "bearer", "eyJ" or "sig=" in the text
-// (the matching is case-insensitive, and Unicode folding also lets the Kelvin sign stand for k and
-// the long s for s), or an escape that spells one of those letters; any of them answers true.
+// encoding around it. Every rule needs a credential name, "bearer", "eyJ" or "sig=" in the text,
+// or an escape or a non-ASCII character that spells one of their letters; any of them answers true.
+// The matching is case-insensitive, and the characters that count are not listed by hand: they are
+// every character that lower-cases to one of the letters, or folds with one (the Kelvin sign for
+// k, the long s for s, the dotted capital I for i), found once from the Unicode tables.
 func MayRedact[T ~string | ~[]byte](s T) bool { return mayContain(s, redactNeedles()) }
+
+// foldTriggers are the non-ASCII characters that can stand for a letter of a rule's text.
+type foldTriggers struct {
+	runes map[rune]bool
+	lead  [256]bool // the first byte of each, in UTF-8
+	wide  bool      // one of them is outside the Basic Multilingual Plane
+}
+
+var (
+	triggersOnce sync.Once
+	triggersSet  foldTriggers
+)
+
+// nonASCIITriggers finds, over every character, those whose lower case or case-folding orbit holds
+// a letter (or the underscore or equals sign) of a rule's text. It runs once.
+func nonASCIITriggers() *foldTriggers {
+	triggersOnce.Do(func() {
+		alphabet := map[rune]bool{}
+		for _, n := range redactNeedles() {
+			for _, c := range strings.ToLower(n) {
+				alphabet[c] = true
+			}
+		}
+		spelled := func(r rune) bool { return r < utf8.RuneSelf && alphabet[unicode.ToLower(r)] }
+		triggersSet.runes = map[rune]bool{}
+		for r := rune(utf8.RuneSelf); r <= unicode.MaxRune; r++ {
+			hit := spelled(unicode.ToLower(r))
+			for f := unicode.SimpleFold(r); f != r && !hit; f = unicode.SimpleFold(f) {
+				hit = spelled(f)
+			}
+			if hit {
+				triggersSet.runes[r] = true
+				var buf [4]byte
+				n := utf8.EncodeRune(buf[:], r)
+				triggersSet.lead[buf[0]] = true
+				triggersSet.wide = triggersSet.wide || n == 4
+			}
+		}
+	})
+	return &triggersSet
+}
 
 // mayContain reports whether s holds one of needles (see MayRedact for how it reads s) or could,
 // through an escape or a folding character, spell one.
@@ -20,25 +68,24 @@ func mayContain[T ~string | ~[]byte](s T, needles []string) bool {
 			first[n[0]-'a'+'A'] = true
 		}
 	}
-	first['\\'], first[0xc5], first[0xe2] = true, true, true
+	tr := nonASCIITriggers()
+	for b, on := range tr.lead {
+		first[b] = first[b] || on
+	}
+	first['\\'] = true
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if !first[c] {
 			continue
 		}
-		switch c {
-		case '\\':
-			if escapeSpellsName(s, i) {
+		switch {
+		case c == '\\':
+			if escapeSpellsName(s, i, tr) {
 				return true
 			}
 			continue
-		case 0xc5:
-			if i+1 < len(s) && s[i+1] == 0xbf { // the long s
-				return true
-			}
-			continue
-		case 0xe2:
-			if i+2 < len(s) && s[i+1] == 0x84 && s[i+2] == 0xaa { // the Kelvin sign
+		case c >= utf8.RuneSelf:
+			if r, _ := utf8.DecodeRuneInString(string(s[i:min(i+utf8.UTFMax, len(s))])); tr.runes[r] {
 				return true
 			}
 			continue
@@ -81,10 +128,11 @@ func foldHas[T ~string | ~[]byte](s T, needle string) bool {
 }
 
 // escapeSpellsName reports whether the backslash at s[i] starts a \u escape of a character that
-// could be part of a needle (a letter, digit, underscore, hyphen or equals sign) or the long s or
-// Kelvin sign. The escapes encoding/json writes for text (<, > and & as <, >, &)
-// are not such characters.
-func escapeSpellsName[T ~string | ~[]byte](s T, i int) bool {
+// could be part of a needle: a letter, digit, underscore, hyphen or equals sign, or a character in
+// tr. A surrogate escape counts when any such character lies beyond the Basic Multilingual Plane.
+// The escapes encoding/json writes for text (<, > and & as \u003c, \u003e, \u0026) are not such
+// characters.
+func escapeSpellsName[T ~string | ~[]byte](s T, i int, tr *foldTriggers) bool {
 	if i+5 >= len(s) || s[i+1] != 'u' {
 		return false
 	}
@@ -102,10 +150,10 @@ func escapeSpellsName[T ~string | ~[]byte](s T, i int) bool {
 		}
 	}
 	switch {
-	case v == 0x17f, v == 0x212a:
-		return true
-	case v >= 0x80:
-		return false
+	case v >= 0xd800 && v <= 0xdfff:
+		return tr.wide
+	case v >= utf8.RuneSelf:
+		return tr.runes[rune(v)]
 	}
 	c := byte(v)
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '-' || c == '='

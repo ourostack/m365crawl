@@ -189,7 +189,7 @@ func siblingValues(obj []byte) map[int]int {
 		var key string
 		_ = json.Unmarshal(obj[i:ke], &key)
 		vs := skipSpace(obj, ke)
-		vs = skipSpace(obj, vs+1)
+		vs = min(skipSpace(obj, vs+1), len(obj)) // a key with nothing after it (truncated JSON) has an empty value
 		ve := valueEnd(obj, vs)
 		switch lk := strings.ToLower(key); {
 		case slices.Contains(rules.SiblingNameFields, lk):

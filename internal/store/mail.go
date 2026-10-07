@@ -328,6 +328,7 @@ func (d *mailDerived) body(m outlookmail.Message) {
 	zw.Reset(&buf)
 	_, _ = zw.Write(m.Body.HTML) // a bytes.Buffer cannot fail
 	_ = zw.Close()
+	zw.Reset(io.Discard) // the pool must not keep the last body's buffer alive
 	gzipWriters.Put(zw)
 	d.gz, d.text = buf.Bytes(), htmlText(m.Body.HTML)
 }

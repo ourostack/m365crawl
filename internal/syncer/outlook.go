@@ -317,12 +317,18 @@ func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, 
 // the collector works harder.
 const outlookHeadroom = 192 << 20
 
-// outlookMemoryLimit is the soft memory limit for the read: what the runtime holds now, plus the headroom.
+// outlookMemoryLimit is the soft memory limit for the read: what the runtime holds now, plus the
+// headroom, unless the caller has set a lower limit (GOMEMLIMIT or debug.SetMemoryLimit), which
+// stays: the read never raises a limit.
 func outlookMemoryLimit() int64 {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	return int64(ms.Sys-ms.HeapReleased) + outlookHeadroom //nolint:gosec // the runtime's own byte counts
+	return limitFor(debug.SetMemoryLimit(-1), int64(ms.Sys-ms.HeapReleased)) //nolint:gosec // the runtime's own byte counts
 }
+
+// limitFor is the limit to run the read under, given the caller's (math.MaxInt64 when none) and
+// the bytes the runtime holds.
+func limitFor(current, held int64) int64 { return min(current, held+outlookHeadroom) }
 
 // outlookGCPercent is the GC target while the Outlook store is read and committed.
 const outlookGCPercent = 25

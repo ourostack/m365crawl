@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -181,9 +180,7 @@ func ReadDat(root, path string, limit int64) ([]byte, error) {
 	if int64(len(data)) > limit {
 		return nil, ErrBodyTooLarge
 	}
-	// ReadAll grows by doubling, so its result can hold up to twice the text. The body stays in the
-	// result until the commit, for every message at once: keep only what it needs.
-	return slices.Clip(bytes.Clone(data)), nil
+	return data, nil
 }
 
 // fileError maps an operating system error to ErrBodyMissing for a file that is gone, and to a

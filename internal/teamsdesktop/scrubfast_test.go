@@ -3,8 +3,10 @@ package teamsdesktop
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // scrubCases mixes text that must be scrubbed with text that looks close to it.
@@ -49,6 +51,13 @@ func init() {
 		`<a href="?`+bs+`u0073ig=ABC">`, `{"pass`+bs+`u212aword":"x"}`, `{"pas`+bs+`u017fword":"x"}`, `a `+bs+`u003cb`+bs+`u003e `+bs+`u0026 c`)
 }
 
+func init() {
+	bs := string(rune(92))
+	scrubCases = append(scrubCases,
+		`0{"nAme"`, `{"name"`, `{"name":`, `{"İd_token":"x"}`, `{"authorİzation":"x"}`, `{"clİent_secret":"x"}`, `{"name":"clİent_secret","value":"x"}`,
+		`{"a":"{`+bs+`"İd_token`+bs+`":`+bs+`"x`+bs+`"}"}`, `{"`+bs+`u0130d_token":"x"}`, `{"authorizat`+bs+`u0130on":"x"}`, `"BEARER x"`, `?SİG=x`, `eyJ`)
+}
+
 func TestScrubFastPathMatchesFullScrub(t *testing.T) {
 	for _, c := range scrubCases {
 		checkFast(t, []byte(c))
@@ -73,6 +82,10 @@ func TestScrubFastPathMatchesFullScrub(t *testing.T) {
 }
 
 func FuzzScrubFastPath(f *testing.F) {
+	for _, r := range []rune{0x130, 0x212a, 0x17f} {
+		f.Add([]byte(`{"` + string(r) + `d_token":"x"}`))
+		f.Add([]byte(`{"pa` + string(r) + `sword":"x"}`))
+	}
 	for _, c := range scrubCases {
 		f.Add([]byte(c))
 		enc, _ := json.Marshal(c)
@@ -117,5 +130,54 @@ func TestMayRedactEdges(t *testing.T) {
 		if got := MayRedact(in); got != want {
 			t.Errorf("MayRedact(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+// For every non-ASCII character that lower-cases or folds to a letter of a rule's text, a name
+// spelled with it is scrubbed the same with and without the shortcut, and MayRedact never says
+// false for one the full scrub changes. The characters are found from the Unicode tables, not listed.
+func TestMayRedactEveryFoldingCharacter(t *testing.T) {
+	bs := string(rune(92))
+	checked := 0
+	for r := rune(0x80); r <= unicode.MaxRune; r++ {
+		if r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		lower := unicode.ToLower(r)
+		spelling := lower < 0x80
+		for f := unicode.SimpleFold(r); f != r && !spelling; f = unicode.SimpleFold(f) {
+			spelling = f < 0x80
+		}
+		if !spelling {
+			continue
+		}
+		for key := range rules.SecretKeys {
+			for _, c := range []rune{lower, unicode.ToUpper(lower), unicode.SimpleFold(r)} {
+				if c >= 0x80 || !strings.ContainsRune(key, c) {
+					continue
+				}
+				name := strings.Replace(key, string(c), string(r), 1)
+				escaped := strings.Replace(key, string(c), fmt.Sprintf(bs+"u%04x", r), 1)
+				if r > 0xffff {
+					escaped = name
+				}
+				for _, in := range []string{`{"` + name + `":"x"}`, `{"` + escaped + `":"x"}`, `{"name":"` + name + `","value":"x"}`, `{"a":"{` + bs + `"` + name + bs + `":` + bs + `"x` + bs + `"}"}`} {
+					checkFast(t, []byte(in))
+					checked++
+				}
+			}
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("only %d inputs checked", checked)
+	}
+	// The three the review found by hand.
+	for _, r := range []rune{0x130, 0x212a, 0x17f} {
+		if !nonASCIITriggers().runes[r] {
+			t.Errorf("U+%04X is not a trigger", r)
+		}
+	}
+	if bad := MayRedact(`{"` + string(rune(0x130)) + `d_token":"x"}`); !bad {
+		t.Error("the dotted capital I in a key name is not flagged")
 	}
 }
