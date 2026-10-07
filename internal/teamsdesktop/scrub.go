@@ -22,17 +22,30 @@ import (
 // scrubbed inside and written back as a string; one that is truncated or nested deeper has the
 // whole string redacted if it names a credential key. A value with nothing to scrub comes back as is,
 // and the output stays valid JSON.
-func Scrub(valueJSON []byte) ([]byte, int) { return scrub(valueJSON, 0) }
+func Scrub(valueJSON []byte) ([]byte, int) {
+	if !MayRedact(valueJSON) {
+		return valueJSON, 0
+	}
+	return scrub(valueJSON, 0)
+}
 
 func scrub(valueJSON []byte, depth int) ([]byte, int) {
 	out, n := redactKeyed(valueJSON, depth)
-	out = rules.Bearer.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
-	out = rules.JWT.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
-	out = rules.Sig.ReplaceAllFunc(out, func(m []byte) []byte {
-		n++
-		i := rules.Sig.FindSubmatchIndex(m)[3]
-		return append(append([]byte(nil), m[:i]...), redacted...)
-	})
+	// A regular expression copies its whole input even when it matches nothing, so each runs only
+	// when the text can hold what it looks for.
+	if mayContain(out, []string{"bearer"}) {
+		out = rules.Bearer.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(`"` + redacted + `"`) })
+	}
+	if mayContain(out, []string{"eyJ"}) {
+		out = rules.JWT.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
+	}
+	if mayContain(out, []string{"sig="}) {
+		out = rules.Sig.ReplaceAllFunc(out, func(m []byte) []byte {
+			n++
+			i := rules.Sig.FindSubmatchIndex(m)[3]
+			return append(append([]byte(nil), m[:i]...), redacted...)
+		})
+	}
 	return out, n
 }
 
@@ -42,8 +55,9 @@ func scrub(valueJSON []byte, depth int) ([]byte, int) {
 // object named by a sibling field, and scrubs strings that hold JSON.
 func redactKeyed(in []byte, depth int) ([]byte, int) {
 	var out bytes.Buffer
+	out.Grow(len(in) + len(in)/8)
 	n := 0
-	siblings := map[int]int{} // start of a "value" field's value -> its end
+	var siblings map[int]int // start of a "value" field's value -> its end; made when a span is found
 	for i := 0; i < len(in); {
 		if end, ok := siblings[i]; ok {
 			out.WriteString(`"` + redacted + `"`)
@@ -53,6 +67,9 @@ func redactKeyed(in []byte, depth int) ([]byte, int) {
 		}
 		if in[i] == '{' {
 			for start, end := range siblingValues(in[i:valueEnd(in, i)]) {
+				if siblings == nil {
+					siblings = map[int]int{}
+				}
 				siblings[i+start] = i + end
 			}
 		}
@@ -90,6 +107,15 @@ func redactKeyed(in []byte, depth int) ([]byte, int) {
 
 // secretKeyLiteral reports whether a JSON string literal (quotes included) names a credential.
 func secretKeyLiteral(lit []byte) bool {
+	// A decoded character takes at least a sixth of the escape that spells it, so a literal far
+	// longer than the longest credential name cannot decode to one. Decoding it would copy it.
+	longest := 0
+	for k := range rules.SecretKeys {
+		longest = max(longest, len(k))
+	}
+	if len(lit) > 6*longest+2 {
+		return false
+	}
 	var s string
 	if json.Unmarshal(lit, &s) != nil {
 		return false
@@ -185,6 +211,11 @@ func siblingValues(obj []byte) map[int]int {
 // scrubStringified scrubs a string literal that holds a JSON object or array and returns the
 // literal re-encoded with the redactions, or the literal and 0 when there is nothing to change.
 func scrubStringified(lit []byte, depth int) ([]byte, int) {
+	// The text must start, after any white space, with { or [. Decoding a long literal copies it, so
+	// a literal whose first character is plainly something else (HTML starts with <) is left alone.
+	if len(lit) > 1 && lit[1] < 0x80 && lit[1] != ' ' && lit[1] != '\\' && lit[1] != '{' && lit[1] != '[' {
+		return lit, 0
+	}
 	var text string
 	if json.Unmarshal(lit, &text) != nil {
 		return lit, 0
