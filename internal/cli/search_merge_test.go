@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,10 +105,73 @@ func searchSeed(t *testing.T, e *env, msgs []outlookmail.Message) {
 	}
 }
 
+// searchTemplates holds, per kind, a synced archive that tests copy instead of syncing again: a
+// sync of the fixtures is the slow part of these tests, most of all on Windows under -race.
+// searchTempBase is the temp directory before any test points TMPDIR at its own.
+var searchTempBase = os.TempDir()
+
+var searchTemplates struct {
+	sync.Mutex
+	dirs map[bool]string
+}
+
+// removeSearchTemplates deletes the shared archives; TestMain calls it.
+func removeSearchTemplates() {
+	for _, d := range searchTemplates.dirs {
+		_ = os.RemoveAll(d)
+	}
+}
+
+func copyFlat(t *testing.T, from, to string) {
+	t.Helper()
+	if err := os.MkdirAll(to, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := os.ReadDir(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ent := range ents {
+		b, err := os.ReadFile(filepath.Join(from, ent.Name())) //nolint:gosec // a test temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(to, ent.Name()), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// searchArchive puts a synced archive into e: the fixtures alone, or with the synthetic mailbox.
+func searchArchive(t *testing.T, e *env, withMail bool) {
+	t.Helper()
+	searchTemplates.Lock()
+	defer searchTemplates.Unlock()
+	dir, ok := searchTemplates.dirs[withMail]
+	if !ok {
+		builder := searchEnv(t)
+		if withMail {
+			searchSeed(t, builder, searchMessages())
+		} else {
+			builder.sync()
+		}
+		var err error
+		if dir, err = os.MkdirTemp(searchTempBase, "m365crawl-search-template-"); err != nil {
+			t.Fatal(err)
+		}
+		copyFlat(t, filepath.Dir(builder.db), dir)
+		if searchTemplates.dirs == nil {
+			searchTemplates.dirs = map[bool]string{}
+		}
+		searchTemplates.dirs[withMail] = dir
+	}
+	copyFlat(t, dir, filepath.Dir(e.db))
+}
+
 func searchMailEnv(t *testing.T) *env {
 	t.Helper()
 	e := searchEnv(t)
-	searchSeed(t, e, searchMessages())
+	searchArchive(t, e, true)
 	return e
 }
 
@@ -361,7 +427,7 @@ func TestSearchFolderNarrowsToMailAndSaysWhy(t *testing.T) {
 
 func TestSearchWithoutMailInTheArchiveReturnsChatsWithANote(t *testing.T) {
 	e := searchEnv(t)
-	e.sync()
+	searchArchive(t, e, false)
 	m := searchJSON(t, e, "Hello")
 	if m["note"] != "mail is not in the archive yet; run m365crawl sync" || m["count"] != float64(2) {
 		t.Fatalf("note/count = %v / %v", m["note"], m["count"])

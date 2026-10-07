@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 		_ = os.Setenv(k, home)
 	}
 	code := m.Run()
+	removeSearchTemplates()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
