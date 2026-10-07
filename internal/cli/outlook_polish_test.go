@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
 	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
 )
 
 // A root that is not a directory is one coded error with one exit code on every command that takes
@@ -48,34 +51,98 @@ func TestOutlookRootMissingIsOneCodedError(t *testing.T) {
 	}
 }
 
-// TEAMSCRAWL_OUTLOOK=1 with a default directory that is missing is the same error, worded for the default.
-func TestOutlookDefaultRootMissingIsTheSameError(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "Outlook")
-	old := outlookDefaultRoot
-	t.Cleanup(func() { outlookDefaultRoot = old })
-	outlookDefaultRoot = func() (string, error) { return missing, nil }
-	t.Setenv("TEAMSCRAWL_OUTLOOK", "1")
+// defaultEnv is an environment with no --teams-root: the Teams fixture sits at the default Teams
+// location of a home directory of its own and, when withOutlook is set, the Outlook fixture store sits
+// at the default Outlook location. It skips on a platform that has no default Outlook location.
+func defaultEnv(t *testing.T, withOutlook bool) *env {
+	t.Helper()
+	e := textEnv(t)
+	home := t.TempDir()
+	for _, k := range []string{"HOME", "USERPROFILE", "LOCALAPPDATA"} {
+		t.Setenv(k, home)
+	}
 	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "")
 	t.Setenv("TEAMSCRAWL_OUTLOOK_ACCOUNT", "")
-	db := filepath.Join(t.TempDir(), "x.db")
-	for _, cmd := range [][]string{{"sync"}, {"calendar"}} {
-		var out, errb strings.Builder
-		code := Main(append([]string{"--db", db}, cmd...), &out, &errb)
-		body := usageBody(t, errb.String())
-		if code != 3 || body["code"] != "outlook_root_missing" || !strings.Contains(body["message"].(string), "default Outlook directory") || !strings.Contains(body["fix"].(string), "TEAMSCRAWL_OUTLOOK") {
-			t.Fatalf("%v: exit %d %s", cmd, code, errb.String())
+	copyTree(t, e.root, teamsdesktop.DefaultRoot())
+	root, err := outlookdesktop.DefaultRoot()
+	if err != nil {
+		t.Skip("this platform has no default Outlook directory")
+	}
+	if withOutlook {
+		copyTree(t, filepath.Join(outlookStoreRoot(t, "HxStore.hxd"), "Main"), filepath.Join(root, "Main"))
+	}
+	return e
+}
+
+// runDefault runs a command with the default roots: no --teams-root.
+func (e *env) runDefault(args ...string) (code int, stdout, stderr string) {
+	e.t.Helper()
+	var out, errb strings.Builder
+	code = Main(append([]string{"--db", e.db}, args...), &out, &errb)
+	return code, out.String(), errb.String()
+}
+
+// outlookRowCount is the number of Outlook events the archive holds.
+func (e *env) outlookRowCount(args ...string) int {
+	e.t.Helper()
+	_, out, errOut := e.runDefault(append(args, "--max-age", "0", "sql", "select count(*) from calendar_source_events where source='outlook'")...)
+	var doc struct{ Rows [][]int }
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc.Rows) != 1 {
+		e.t.Fatalf("sql: %v %s %s", err, out, errOut)
+	}
+	return doc.Rows[0][0]
+}
+
+// Outlook is read by default; a default Outlook that is not there, or cannot be read, never stops
+// a Teams sync or a read command.
+func TestDefaultOutlookNeverStopsASync(t *testing.T) {
+	e := defaultEnv(t, false)
+	t.Setenv("TEAMSCRAWL_OUTLOOK", "1") // accepted, and no different
+	for _, cmd := range [][]string{{"sync"}, {"calendar"}, {"doctor"}} {
+		if code, _, errOut := e.runDefault(cmd...); code != 0 {
+			t.Fatalf("%v: exit %d %s", cmd, code, errOut)
 		}
 	}
-	// A Teams root turns the default off, so a missing default is not looked at.
-	e := textEnv(t)
-	if code, _, errOut := e.run("sync"); code != 0 {
-		t.Fatalf("%d %s", code, errOut)
+	// A directory with no profile says nothing either.
+	root, _ := outlookdesktop.DefaultRoot()
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
 	}
-	// A default root that cannot be worked out is an internal fault, as it is for sync.
-	outlookDefaultRoot = func() (string, error) { return "", errors.New("no home") }
-	var out, errb strings.Builder
-	if code := Main([]string{"--db", db, "calendar"}, &out, &errb); code == 0 || !strings.Contains(errb.String(), "internal") {
-		t.Fatalf("exit %d %s", code, errb.String())
+	if code, _, errOut := e.runDefault("--max-age", "0", "sync"); code != 0 {
+		t.Fatalf("empty: exit %d %s", code, errOut)
+	}
+	// Named, a directory that is not there is the error it always was.
+	if code, _, errOut := e.runDefault("--outlook-root", filepath.Join(t.TempDir(), "gone"), "sync"); code != 3 || !strings.Contains(errOut, "outlook_root_missing") {
+		t.Fatalf("named: exit %d %s", code, errOut)
+	}
+}
+
+// The default Outlook is read with no flag, "none" (flag and environment) turns it off, and a Teams
+// root without an Outlook root keeps it off.
+func TestDefaultOutlookIsReadAndCanBeTurnedOff(t *testing.T) {
+	e := defaultEnv(t, true)
+	if code, _, errOut := e.runDefault("sync"); code != 0 {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	if n := e.outlookRowCount(); n == 0 {
+		t.Fatal("Outlook was not read by default")
+	}
+
+	off := defaultEnv(t, true)
+	if code, _, errOut := off.runDefault("--outlook-root", "none", "sync"); code != 0 {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	t.Setenv("TEAMSCRAWL_OUTLOOK_ROOT", "none")
+	if n := off.outlookRowCount(); n != 0 {
+		t.Fatalf("Outlook was read with none: %d rows", n)
+	}
+
+	hermetic := defaultEnv(t, true)
+	if code, _, errOut := hermetic.run("sync"); code != 0 { // run names --teams-root
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	if n := hermetic.outlookRowCount("--teams-root", hermetic.root); n != 0 {
+		t.Fatalf("--teams-root without an Outlook root read Outlook: %d rows", n)
 	}
 }
 

@@ -41,7 +41,7 @@ type CalendarSource struct {
 	Source         string
 	AccountID      string
 	Principal      string
-	Link           string // "config" when an Outlook account is linked to a Teams account, else "none"
+	Link           string // how an Outlook account is linked to a Teams account: "config" (the operator's say) or "address" (an address signed in to the profile is the Teams account's own), else "none"
 	WindowStart    time.Time
 	WindowEnd      time.Time
 	SyncedAt       time.Time

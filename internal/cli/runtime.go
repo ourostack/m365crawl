@@ -38,6 +38,7 @@ type runtime struct {
 	root           string
 	outlookRoot    string // the Outlook profiles directory; empty means the default
 	outlookOn      bool
+	outlookDefault bool   // on because it is the default, not because a root was named
 	outlookLink    string // --outlook-account: a Teams account as <tenantId>/<userId>, "none", or empty
 	outlookProfile string // --outlook-profile
 	account        *teamsdesktop.Account
@@ -83,7 +84,7 @@ func (rt *runtime) setup() error {
 		}
 	}
 	rt.root = g.TeamsRoot
-	rt.outlookRoot, rt.outlookOn = outlookChoice(g.OutlookRoot, g.TeamsRoot, os.Getenv(outlookEnv))
+	rt.outlookRoot, rt.outlookOn, rt.outlookDefault = outlookChoice(g.OutlookRoot, g.TeamsRoot)
 	if g.Account != "" {
 		if rt.account, err = parseAccount(g.Account); err != nil {
 			return err
@@ -350,21 +351,18 @@ func (rt *runtime) printSyncNotice(age time.Duration) {
 	rt.writeJSONLine(doc)
 }
 
-// outlookEnv turns the Outlook source on with the default profiles directory when set to 1.
-const outlookEnv = "TEAMSCRAWL_OUTLOOK"
-
-// outlookChoice says whether the Outlook source runs and where it reads. An explicit root turns it
-// on, and "none" turns it off. Otherwise TEAMSCRAWL_OUTLOOK=1 turns it on with the default
-// directory, unless a Teams root is set: a run pointed at a Teams fixture never reads a real
-// Outlook profile.
-func outlookChoice(root, teamsRoot, env string) (dir string, on bool) {
+// outlookChoice says whether the Outlook source runs, where it reads and whether it is on only by
+// default. An explicit root turns it on and "none" turns it off. With neither it is on and reads the
+// default directory, unless a Teams root is set: a run pointed at a Teams fixture never reads a real
+// Outlook profile. TEAMSCRAWL_OUTLOOK=1, which used to turn Outlook on, is read by nothing now: it is accepted and has no effect, so a machine that set it keeps working. A default Outlook is a best effort that never fails a sync (syncer.Options.OutlookImplicit).
+func outlookChoice(root, teamsRoot string) (dir string, on, byDefault bool) {
 	switch {
 	case root == "none":
-		return "", false
+		return "", false, false
 	case root != "":
-		return root, true
+		return root, true, false
 	}
-	return "", env == "1" && teamsRoot == ""
+	return "", teamsRoot == "", teamsRoot == ""
 }
 
 // CodeOutlookRootMissing is the failure of an Outlook root that is not a directory.
@@ -372,20 +370,13 @@ const CodeOutlookRootMissing = "outlook_root_missing"
 
 // checkOutlookRoot refuses an Outlook root that is not a directory, the same way on every command
 // that takes --outlook-root, before any sync starts. It does nothing while the Outlook source is
-// off. A root that
-// exists but holds no profiles is the sync's own failure (no_outlook_profiles).
+// off, and nothing while it is on only by default: a default Outlook that is not there is not an
+// error. A root that exists but holds no profiles is the sync's own failure (no_outlook_profiles).
 func (rt *runtime) checkOutlookRoot() *errs.Coded {
-	if !rt.outlookOn {
+	if !rt.outlookOn || rt.outlookDefault {
 		return nil
 	}
 	root, how := rt.outlookRoot, "--outlook-root "
-	if root == "" {
-		var err error
-		if root, err = outlookDefaultRoot(); err != nil {
-			return errs.Internal(err)
-		}
-		how = "the default Outlook directory (TEAMSCRAWL_OUTLOOK=1) "
-	}
 	info, err := os.Stat(root)
 	if err == nil && info.IsDir() {
 		return nil
@@ -396,9 +387,6 @@ func (rt *runtime) checkOutlookRoot() *errs.Coded {
 		c.Message = how + root + " cannot be read: " + oneLine(err.Error())
 	}
 	c.Fix = "Point --outlook-root at the directory of Outlook profiles (one directory per profile, each holding HxStore.hxd), or turn the Outlook source off with --outlook-root none."
-	if rt.outlookRoot == "" {
-		c.Fix = "Install the new Outlook for Mac, point --outlook-root at the directory of Outlook profiles, or unset TEAMSCRAWL_OUTLOOK to turn the Outlook source off."
-	}
 	return c
 }
 
@@ -420,11 +408,11 @@ func (rt *runtime) noteOutlookOff(st *store.Store, res result, has bool) {
 	for _, a := range accounts {
 		ages = append(ages, a+" "+ageText(rt.now().Sub(reads[a])))
 	}
-	msg := "the Outlook source is off for this run, so the Outlook events in this result are archived data that is not being refreshed"
+	msg := "the Outlook source is off for this run (--outlook-root none, or --teams-root without --outlook-root), so the Outlook events in this result are archived data that is not being refreshed"
 	if len(ages) > 0 {
 		msg += "; last read " + strings.Join(ages, ", ")
 	}
-	res.addNotice(msg + ". Add --outlook-root DIR or set TEAMSCRAWL_OUTLOOK=1 to read Outlook again.")
+	res.addNotice(msg + ". Name --outlook-root DIR (and not none) to read Outlook again.")
 }
 
 // outlookReadTimes is the test seam of the read times.
@@ -461,7 +449,7 @@ func (rt *runtime) checkLink() error {
 		return errs.Usage("--outlook-profile names the profile --outlook-account applies to; give --outlook-account too")
 	case !rt.outlookOn:
 		c := errs.Usage("--outlook-account needs the Outlook source, which is off")
-		c.Fix = "Add --outlook-root DIR, or set TEAMSCRAWL_OUTLOOK=1 (which is ignored when --teams-root is set)."
+		c.Fix = "Add --outlook-root DIR (Outlook is off here because of --outlook-root none, or because --teams-root is set without --outlook-root)."
 		if os.Getenv(outlookAccountEnv) == account {
 			rt.printWarning(c) // from the environment only: ignored
 			return nil
@@ -516,6 +504,6 @@ func (rt *runtime) linkPending(st *store.Store) bool {
 
 // syncOptions adds the Outlook choice to a run's options.
 func (rt *runtime) syncOptions(o syncer.Options) syncer.Options {
-	o.OutlookEnabled, o.OutlookRoot = rt.outlookOn, rt.outlookRoot
+	o.OutlookEnabled, o.OutlookRoot, o.OutlookImplicit = rt.outlookOn, rt.outlookRoot, rt.outlookDefault
 	return o
 }

@@ -309,7 +309,7 @@ func TestShortAccountAndWindow(t *testing.T) {
 func TestDoctorOutlookStoreCheck(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	rt := &runtime{ctx: context.Background(), now: func() time.Time { return now }}
-	if c := rt.outlookStoreCheck(nil); !c.OK || c.Warn || !strings.Contains(c.Detail, "Outlook source is off") {
+	if c := rt.outlookStoreCheck(nil); !c.OK || c.Warn || !strings.Contains(c.Detail, "Outlook source is off") || !strings.Contains(c.Detail, "--outlook-root none") {
 		t.Fatalf("off: %+v", c)
 	}
 	rt.outlookOn = true
@@ -318,7 +318,31 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		old := outlookDefaultRoot
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		outlookDefaultRoot = func() (string, error) { return "", errors.New("not here") }
-		if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || !strings.Contains(c.Detail, "not here") || !strings.Contains(c.Fix, "--outlook-root") {
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not here") || c.Fix != "" {
+			t.Fatalf("a machine that has no Outlook directory is not a problem: %+v", c)
+		}
+	})
+	t.Run("on by default", func(t *testing.T) {
+		rt := *rt
+		rt.outlookDefault = true
+		absent := filepath.Join(t.TempDir(), "absent")
+		old := outlookDefaultRoot
+		t.Cleanup(func() { outlookDefaultRoot = old })
+		outlookDefaultRoot = func() (string, error) { return absent, nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not installed") {
+			t.Fatalf("no Outlook: %+v", c)
+		}
+		outlookDefaultRoot = func() (string, error) { return t.TempDir(), nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "no profile") {
+			t.Fatalf("no profile: %+v", c)
+		}
+		outlookDefaultRoot = func() (string, error) { return outlookStoreRoot(t, "HxStore.hxd"), nil }
+		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "profile Main: store version readable; not read yet") {
+			t.Fatalf("a normal state is a plain pass: %+v", c)
+		}
+		// Named by the operator, the same missing directory is a warning.
+		rt.outlookDefault, rt.outlookRoot = false, absent
+		if c := rt.outlookStoreCheck(nil); !c.Warn {
 			t.Fatalf("%+v", c)
 		}
 	})

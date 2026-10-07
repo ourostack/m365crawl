@@ -514,7 +514,7 @@ func TestGuardErrorText(t *testing.T) {
 }
 
 func TestKnownLayouts(t *testing.T) {
-	if len(KnownLayouts) != 2 || EventLayout.Class != 0x6b || EventLayout.Tag != 0x455 || DetailLayout.Class != 0x6c || DetailLayout.Tag != 0x348 {
+	if len(KnownLayouts) != 3 || AccountLayout.Class != 0x49 || AccountLayout.Tag != 0x19d0 || EventLayout.Class != 0x6b || EventLayout.Tag != 0x455 || DetailLayout.Class != 0x6c || DetailLayout.Tag != 0x348 {
 		t.Fatal("pinned layouts")
 	}
 }

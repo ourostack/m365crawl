@@ -171,6 +171,23 @@ The word at +180 of the event equals the word at +20 of exactly one detail objec
 
 The research states the join link as "at +700 (length +704)" and the dial-in at +728; both are read here as offset words on the same base as the body. That reading is unverified. Whether the join link is NUL-terminated in the length is recorded only as "length including the terminator" for string fields in general.
 
+## Account object (class 0x49, tag 0x19d0)
+
+The account object is read for one field, the address of an account signed in to the profile, which links the profile to a Teams account (SPEC.md section 4.2). It is not a calendar object and nothing else of it is mapped.
+
+The fixed region is 6,608 bytes, equal to the tag. The string area starts at `6608 + u32@104` (the word at +104 was 317 in the larger records and 208 in the smaller one). The object's other strings (a version string, the service host names Outlook talks to, a list of file extensions) are packed after it; the reader does not use them.
+
+| Field | Offset | Width | Coding | Confidence | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Account address | word +5532, length word +5536 | 4 + 4 | base T = tag + u32@104; UTF-16LE with a terminator, the length word counts bytes including it | established | on the 2026-10-07 copy the class holds 26 objects of this tag, in two records (two keys at +20): 25 copies of one account of 29,666 bytes, whose address equals the Teams profile record's `userPrincipalName`, `mail` and `email` in 25 of 25 (case ignored), and one object of 7,156 bytes that holds the address of another account (a different domain). Both read through the same two words, and the length word equals the text in 26 of 26 |
+| Account address, second copy | word +5556, length word +5560 | 4 + 4 | the same text again, written separately | established | equal to the address at +5532 in 26 of 26 objects |
+
+- **One record per account, many versions.** The 25 copies are one record rewritten as the store changes; the other account has one object. Three earlier copies of the store hold 44, 46 and 4 objects of the class, again in two records. The reader keeps the distinct addresses of all the objects that carry a valid one, lower case, and the sync matches them against the Teams profile records.
+- **Resynced.** All 26 objects were reached after unknown bytes (the walk's `Resynced` flag), as these large records follow gaps that the framing does not explain. The account reader takes them anyway: the tag is pinned, both copies of the address must agree and each length word must equal its text, which a stray envelope inside another object does not satisfy.
+- **A record of the same class and tag can carry no address.** Its string word and length word are both 0, and a string word of 0 reads the first string of the string area (see "A string can be absent"). The reader therefore believes the text only when the length word equals the text's byte length with its terminator, and when the text has exactly one `@` with something on both sides and no space.
+- **Account addresses are not the event organizer.** The organizer address of an event (+892) is the address of whoever organized it. The address was located by searching every object of the store for the address of the signed-in Teams user: it also occurs in message and recipient objects, which are many and carry other people's addresses beside it, so the class was chosen by its shape: records rewritten as the store changes, with the service host names beside the address.
+- **Not yet known:** what the second account of the measured store is (an account of another kind, or another mailbox of the same sign-in), and what the two copies are each for. Neither changes the link, which needs one Teams account to match.
+
 ## Versions of one event
 
 The store keeps several copies of most objects and leaves old versions in place. 3,263 ids have one distinct content; 103 have more than one. Between versions, last modified (+288) differs in 127 pairs, the +112 stamp in 41 and the flag word at +1076 in 54; start and end never differ.

@@ -10,7 +10,7 @@ The new Teams app keeps its data in an app container, `~/Library/Containers/com.
 
 The permission belongs to the app that started the process, not to teamscrawl itself. If you run `teamscrawl` in Terminal, Terminal needs it. If an agent host such as an editor, a desktop agent app or a launcher starts teamscrawl, that host needs it.
 
-teamscrawl uses the permission only to read the Teams cache. It never writes to the container.
+teamscrawl uses the permission only to read the Teams cache and, when the new Outlook for Mac is installed, its calendar store (Outlook keeps it in a TCC-protected group container under `~/Library/Group Containers`, and the same grant covers it). It never writes to either. Without the grant a default Outlook is not a failure: the sync reports the Outlook source as `unavailable` with the fix, and the Teams sync carries on.
 
 ## How to grant it
 
