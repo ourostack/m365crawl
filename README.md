@@ -233,7 +233,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 ## Privacy
 
-The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows), and m365crawl has no network code. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
+The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
 
 ## Limits
 
