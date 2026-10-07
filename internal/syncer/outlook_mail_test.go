@@ -428,3 +428,46 @@ func TestSyncMarkerClearFailure(t *testing.T) {
 		t.Fatal("the calendar committed past a marker it could not clear")
 	}
 }
+
+// A folder whose only copy is reached after unknown bytes still holds its messages, and messages
+// whose folder is nowhere in the store are kept in a folder of kind unknown. Neither is a loss
+// while few, and the sync stays ok.
+func TestSyncMailKeepsMessagesOfResyncedAndMissingFolders(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := outlookRoot(t, "HxStore.hxd")
+	objs := mailObjects("")
+	folder := objs[0]
+	var rest []*hxbuild.Object
+	rest = append(rest, objs[1:]...)
+	// Forty more messages in the resynced folder, so the one without a folder stays under 5%.
+	for i := uint32(0); i < 40; i++ {
+		rest = append(rest,
+			hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 100 + i, Stamp: 1, DetailKey: 200 + i, FolderKey: 101, Received: mailDay, Subject: "Fixture bulk", SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
+			hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 200 + i, Stamp: 1, MessageID: "<bulk@example.invalid>", Class: "IPM.Note", Sent: mailDay}))
+	}
+	rest = append(rest,
+		hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 90, Stamp: 1, DetailKey: 80, FolderKey: 999, Received: mailDay, Subject: "Fixture lost folder", SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
+		hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 80, Stamp: 1, MessageID: "<lost@example.invalid>", Class: "IPM.Note", Sent: mailDay}))
+	path := filepath.Join(root, "Main", "HxStore.hxd")
+	b, err := os.ReadFile(path) //nolint:gosec // a test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := append(hxbuild.FramedPayload(hxbuild.Head(15), rest...), append([]byte{1, 2, 3}, folder.Encode()...)...)
+	b = append(b, hxbuild.EncodeBlock(hxbuild.BlockTypeData, payload)...)
+	if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // a test temp dir
+		t.Fatal(err)
+	}
+	r, _ := run(t, outlookOpts(db, root))
+	if r.Status != StatusOK || sourceKeyed(t, r, "outlook|Main|mail").Counts.Mail.Added != 43 {
+		t.Fatalf("%s %+v", r.Status, sourceKeyed(t, r, "outlook|Main|mail"))
+	}
+	if n := count(t, db, `select count(*) from mail_messages m join mail_folders f on f.folder_key=m.folder_key where f.name='Fixture Inbox'`); n != 42 {
+		t.Fatalf("%d messages in the resynced folder", n)
+	}
+	if n := count(t, db, `select count(*) from mail_messages m where not exists(select 1 from mail_folders f where f.folder_key=m.folder_key)`); n != 1 {
+		t.Fatalf("%d messages without a folder", n)
+	}
+}
