@@ -13,10 +13,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Test seams.
@@ -39,7 +39,7 @@ var (
 
 type watchCmd struct {
 	Every       time.Duration `default:"60s" help:"Poll interval: the safety net when file events are missed. Syncs run only when the cache changed." placeholder:"DURATION"`
-	MinInterval time.Duration `name:"min-interval" env:"TEAMSCRAWL_WATCH_MIN_INTERVAL" default:"60s" help:"Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause." placeholder:"DURATION"`
+	MinInterval time.Duration `name:"min-interval" env:"M365CRAWL_WATCH_MIN_INTERVAL" default:"60s" help:"Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause." placeholder:"DURATION"`
 	EmitInitial bool          `name:"emit-initial" help:"Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted)."`
 }
 
@@ -305,7 +305,7 @@ func (w *watcher) sync() (done bool, err error) {
 			// The first attempts failed, so this sync's changes are not emitted.
 			w.rt.printWarning(&errs.Coded{Code: "baseline_delayed", Exit: errs.ExitRuntime,
 				Message: "the first sync failed, so the sync that finally succeeded was taken as the baseline and its changes are not emitted",
-				Fix:     "Read the archive (for example `teamscrawl messages --since 1h`) to catch up on what arrived meanwhile, or restart watch with --emit-initial."})
+				Fix:     "Read the archive (for example `m365crawl messages --since 1h`) to catch up on what arrived meanwhile, or restart watch with --emit-initial."})
 		}
 		return true, nil
 	}

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // seedAll fills an archive with one of everything, so a second Apply of changed data takes the

@@ -75,7 +75,7 @@ func responsibleApp(lookup func(pid int) (int, string, error), start int, termPr
 		}
 		return termProgram
 	}
-	return "the app that runs teamscrawl (your terminal app; under launchd, the teamscrawl program itself)"
+	return "the app that runs m365crawl (your terminal app; under launchd, the m365crawl program itself)"
 }
 
 // fdaFix is the remedy for no_full_disk_access, naming the app that needs the grant.

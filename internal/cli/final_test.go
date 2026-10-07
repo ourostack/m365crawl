@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // stubSync replaces the sync with fn for the test and counts the calls.
@@ -65,7 +65,7 @@ func TestVersionIsOneJSONDocumentAndAFlag(t *testing.T) {
 		if code := Main(args, &out, &errb); code != 0 {
 			t.Fatalf("%v: exit %d", args, code)
 		}
-		if got := strings.TrimSpace(out.String()); got != "teamscrawl 1.2.3 (commit abc1234, built 2026-10-01T00:00:00Z)" {
+		if got := strings.TrimSpace(out.String()); got != "m365crawl 1.2.3 (commit abc1234, built 2026-10-01T00:00:00Z)" {
 			t.Fatalf("%v: %q", args, got)
 		}
 	}
@@ -92,7 +92,7 @@ func TestSyncPartialPrintsTheReportAndAPartialSyncError(t *testing.T) {
 		t.Fatalf("failed source: %v", failed)
 	}
 	body := errorOf(t, stderr)
-	if body["code"] != errs.CodePartialSync || !strings.Contains(body["message"].(string), "p2|o (no_full_disk_access)") || !strings.Contains(body["fix"].(string), "teamscrawl doctor") {
+	if body["code"] != errs.CodePartialSync || !strings.Contains(body["message"].(string), "p2|o (no_full_disk_access)") || !strings.Contains(body["fix"].(string), "m365crawl doctor") {
 		t.Fatalf("error: %v", body)
 	}
 	// Text mode prints the report, names the failed source and still ends with the error.
@@ -197,7 +197,7 @@ func TestNoPlainHintLineInJSONMode(t *testing.T) {
 		t.Fatalf("the hint stays in the JSON: %v", m)
 	}
 	_, _, stderr = e.run("people", "--format", "text")
-	if !strings.Contains(stderr, "hint: run teamscrawl sync") {
+	if !strings.Contains(stderr, "hint: run m365crawl sync") {
 		t.Fatalf("text mode keeps the hint line: %q", stderr)
 	}
 }
@@ -320,7 +320,7 @@ func TestDoctorReportsAnArchiveFromANewerBuild(t *testing.T) {
 	e.exec(`update meta set value='99' where key='derivation_version'`)
 	code, stdout, _ := e.run("doctor", "--json")
 	c := checks(t, decode(t, stdout))["archive_newer"]
-	if code != 3 || c["ok"] != false || !strings.Contains(c["detail"].(string), "99") || !strings.Contains(c["fix"].(string), "Upgrade teamscrawl to a newer build") {
+	if code != 3 || c["ok"] != false || !strings.Contains(c["detail"].(string), "99") || !strings.Contains(c["fix"].(string), "Upgrade m365crawl to a newer build") {
 		t.Fatalf("exit %d: %v", code, c)
 	}
 	e.exec(`update meta set value='1' where key='derivation_version'`)
@@ -346,7 +346,7 @@ func TestDoctorFlagsAPartialOrFailedLastSync(t *testing.T) {
 		e.exec(`insert into sync_runs(started_at, finished_at, source, status, accounts_json) values('2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z','','` + status + `','["*"]')`)
 		code, stdout, _ = e.run("doctor", "--json")
 		c := checks(t, decode(t, stdout))["last_sync_status"]
-		if code != 0 || c["ok"] != true || c["warn"] != true || !strings.Contains(c["detail"].(string), status) || !strings.Contains(c["fix"].(string), "teamscrawl sync") {
+		if code != 0 || c["ok"] != true || c["warn"] != true || !strings.Contains(c["detail"].(string), status) || !strings.Contains(c["fix"].(string), "m365crawl sync") {
 			t.Fatalf("%s: exit %d, %v", status, code, c)
 		}
 	}
@@ -708,7 +708,7 @@ func TestDoctorWarnsAboutAnArchiveFromAnOlderVersion(t *testing.T) {
 	}
 }
 
-// sync --full-read (and TEAMSCRAWL_FULL_READ) asks the syncer to read every record in full.
+// sync --full-read (and M365CRAWL_FULL_READ) asks the syncer to read every record in full.
 func TestSyncFullReadFlag(t *testing.T) {
 	var got []bool
 	stubSync(t, func(_ context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
@@ -721,7 +721,7 @@ func TestSyncFullReadFlag(t *testing.T) {
 			t.Fatalf("%v: exit %d\n%s", args, code, stderr)
 		}
 	}
-	t.Setenv("TEAMSCRAWL_FULL_READ", "1")
+	t.Setenv("M365CRAWL_FULL_READ", "1")
 	if code, _, stderr := e.run("sync", "--json"); code != 0 {
 		t.Fatalf("env: exit %d\n%s", code, stderr)
 	}

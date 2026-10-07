@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 const teamsAccount = tenantA + "/" + userA
@@ -134,7 +134,7 @@ func TestCalendarOutlookOnlyEvents(t *testing.T) {
 	}
 	// The envelope names the exact command to link the profile. Two Teams accounts are in the
 	// archive, so the Teams account is a placeholder.
-	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || got[0] != "teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>" {
+	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || got[0] != "m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>" {
 		t.Fatalf("unlinked_fix %v", got)
 	}
 
@@ -221,11 +221,11 @@ func TestLinkFixes(t *testing.T) {
 	}
 	// With one Teams account in scope the hint names it; with two it keeps the placeholder.
 	one := []calendar.AccountCoverage{{AccountID: teamsAccount}, {AccountID: "outlook/Main"}}
-	if got := linkFixes([]string{"outlook/Main"}, one); got[0] != "teamscrawl sync --outlook-profile Main --outlook-account "+teamsAccount {
+	if got := linkFixes([]string{"outlook/Main"}, one); got[0] != "m365crawl sync --outlook-profile Main --outlook-account "+teamsAccount {
 		t.Fatal(got)
 	}
 	two := append(slices.Clone(one), calendar.AccountCoverage{AccountID: tenantA + "/other"})
-	if got := linkFixes([]string{"outlook/My Mail"}, two); got[0] != "teamscrawl sync --outlook-profile 'My Mail' --outlook-account <tenantId>/<userId>" {
+	if got := linkFixes([]string{"outlook/My Mail"}, two); got[0] != "m365crawl sync --outlook-profile 'My Mail' --outlook-account <tenantId>/<userId>" {
 		t.Fatal(got)
 	}
 	if got := shellWord("Main"); got != "Main" {
@@ -420,8 +420,8 @@ func TestOutlookLinkNeedsOutlookOn(t *testing.T) {
 			t.Fatalf("%v: %d %s", args, code, stderr)
 		}
 	}
-	// TEAMSCRAWL_OUTLOOK=1 is ignored beside a Teams root, so the link is refused there too.
-	t.Setenv("TEAMSCRAWL_OUTLOOK", "1")
+	// M365CRAWL_OUTLOOK=1 is ignored beside a Teams root, so the link is refused there too.
+	t.Setenv("M365CRAWL_OUTLOOK", "1")
 	if code, _, _ := e.run("sync", "--outlook-account", teamsAccount); code != 2 {
 		t.Fatalf("exit %d", code)
 	}
@@ -438,7 +438,7 @@ func TestTwoProfilesLinkOnlyOne(t *testing.T) {
 	if got := asStrings(m["unlinked_accounts"]); len(got) != 1 || got[0] != "outlook/Second" {
 		t.Fatalf("unlinked_accounts %v", got)
 	}
-	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || !strings.HasPrefix(got[0], "teamscrawl sync --outlook-profile Second --outlook-account ") {
+	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || !strings.HasPrefix(got[0], "m365crawl sync --outlook-profile Second --outlook-account ") {
 		t.Fatalf("unlinked_fix %v", got)
 	}
 	var second []string
@@ -612,7 +612,7 @@ func TestOutlookLinkWithMaxAgeZero(t *testing.T) {
 	_, run := syncedWithOutlook(t, "Main")
 	code, _, stderr := run("--max-age", "0", "--outlook-profile", "Main", "--outlook-account", teamsAccount, "calendar", "--days", "1")
 	body := usageBody(t, stderr)
-	if code != 2 || !strings.Contains(body["fix"].(string), "teamscrawl sync --outlook-profile Main --outlook-account "+teamsAccount) {
+	if code != 2 || !strings.Contains(body["fix"].(string), "m365crawl sync --outlook-profile Main --outlook-account "+teamsAccount) {
 		t.Fatalf("%d %v", code, body)
 	}
 	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
@@ -628,12 +628,12 @@ func TestOutlookLinkWithMaxAgeZero(t *testing.T) {
 	}
 }
 
-// An ambient TEAMSCRAWL_OUTLOOK_ACCOUNT never breaks a command that neither syncs nor reads the
+// An ambient M365CRAWL_OUTLOOK_ACCOUNT never breaks a command that neither syncs nor reads the
 // calendar, and with the Outlook source off it is a warning where a flag would be an error.
 func TestOutlookAccountEnvironment(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
-	t.Setenv("TEAMSCRAWL_OUTLOOK_ACCOUNT", "not-an-account")
+	t.Setenv("M365CRAWL_OUTLOOK_ACCOUNT", "not-an-account")
 	for _, cmd := range [][]string{{"whoami"}, {"status"}, {"--version"}} {
 		if code, _, errOut := e.run(append([]string{"--max-age", "0"}, cmd...)...); code != 0 {
 			t.Fatalf("%v: exit %d: %s", cmd, code, errOut)

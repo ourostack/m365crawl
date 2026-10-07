@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
-	"github.com/ourostack/teamscrawl/internal/outlookcal"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/outlookcal"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 const outlookFixture = "../../testdata/outlook-fixture"

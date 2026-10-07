@@ -3,7 +3,7 @@
 
 usage: ccl_count.py <snapshot dir> [--keys-out FILE]
 
-Prints one JSON object of counts. The snapshot holds leveldb/ and blob/ as teamscrawl copies
+Prints one JSON object of counts. The snapshot holds leveldb/ and blob/ as m365crawl copies
 them. ccl_chromium_reader comes from CCL_READER (default ~/code/_refs/ccl_chromium_reader) and
 ccl_simplesnappy from CCL_SNAPPY (default ~/code/_refs/ccl_simplesnappy), both put on sys.path;
 pip needs neither. brotli and zstd are only used for compressed Chromium caches, never for

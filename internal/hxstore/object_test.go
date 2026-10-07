@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 func obj(raw []byte) Object { return Object{Raw: raw} }

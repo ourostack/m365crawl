@@ -18,7 +18,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore"
 )
 
 // Seams for tests: exit so a test can run main, walk so the walk failure path

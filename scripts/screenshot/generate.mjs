@@ -1,5 +1,5 @@
-// Regenerates screenshot.png: builds teamscrawl, syncs the committed fixture into a throwaway
-// archive, renders `teamscrawl doctor --format text` in color, and screenshots it in a framed
+// Regenerates screenshot.png: builds m365crawl, syncs the committed fixture into a throwaway
+// archive, renders `m365crawl doctor --format text` in color, and screenshots it in a framed
 // dark terminal window with Playwright and Microsoft Edge. Run through `make screenshot`.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -16,12 +16,12 @@ const go = process.env.GO || 'go';
 
 // A neutral home: the fixture and the archive live under it, and the output shows it as "~",
 // so no real user name or temp path reaches the image.
-const base = fs.mkdtempSync(path.join(os.tmpdir(), 'teamscrawl-shot-'));
-const bin = path.join(base, 'teamscrawl');
+const base = fs.mkdtempSync(path.join(os.tmpdir(), 'm365crawl-shot-'));
+const bin = path.join(base, 'm365crawl');
 const root = path.join(base, 'Teams', 'EBWebView');
-const db = path.join(base, '.teamscrawl', 'teamscrawl.db');
+const db = path.join(base, '.m365crawl', 'm365crawl.db');
 try {
-  execFileSync(go, ['build', '-trimpath', '-o', bin, './cmd/teamscrawl'], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } });
+  execFileSync(go, ['build', '-trimpath', '-o', bin, './cmd/m365crawl'], { cwd: repo, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } });
   fs.cpSync(path.join(repo, 'testdata/teams-fixture/EBWebView'), root, { recursive: true });
   const env = { ...process.env, HOME: base, CLICOLOR_FORCE: '1', COLORTERM: 'truecolor', COLUMNS: '100', NO_COLOR: '' };
   delete env.NO_COLOR;

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func TestUnreadDefaultsToNonChannelKinds(t *testing.T) {

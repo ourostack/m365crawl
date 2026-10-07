@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // TestRealOutlookDeletionProbe pins what the deletion experiment found (docs/outlook-store.md,
@@ -17,11 +17,11 @@ import (
 // drops it, and a sync marks the event gone only when two consecutive reads of different copies both miss it. It needs copies of one real store
 // taken around a deletion of test appointments, each laid out as <root>/<profile>/HxStore.hxd:
 //
-//	TEAMSCRAWL_OUTLOOK_PROBE_BEFORE   a copy taken before the deletion
-//	TEAMSCRAWL_OUTLOOK_PROBE_LINGER   optional: a copy taken after the deletion, before compaction
-//	TEAMSCRAWL_OUTLOOK_PROBE_AFTER    a copy taken after compaction
-//	TEAMSCRAWL_OUTLOOK_PROBE_CONFIRM  a later copy, also without the events: the second miss
-//	TEAMSCRAWL_OUTLOOK_PROBE_IDS      comma-separated distinguishing suffixes of the lower-case ids of the
+//	M365CRAWL_OUTLOOK_PROBE_BEFORE   a copy taken before the deletion
+//	M365CRAWL_OUTLOOK_PROBE_LINGER   optional: a copy taken after the deletion, before compaction
+//	M365CRAWL_OUTLOOK_PROBE_AFTER    a copy taken after compaction
+//	M365CRAWL_OUTLOOK_PROBE_CONFIRM  a later copy, also without the events: the second miss
+//	M365CRAWL_OUTLOOK_PROBE_IDS      comma-separated distinguishing suffixes of the lower-case ids of the
 //	                                  deleted events (the ids are the experiment's own appointments)
 //
 // It skips unless the first, third, fourth and fifth are set. The archive is a scratch one; the copies are
@@ -29,15 +29,15 @@ import (
 // probes may be marked gone by the pass from the first copy to the last.
 func TestRealOutlookDeletionProbe(t *testing.T) {
 	requireReal(t)
-	before, linger, after, confirm := os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_BEFORE"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_LINGER"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_AFTER"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_CONFIRM")
+	before, linger, after, confirm := os.Getenv("M365CRAWL_OUTLOOK_PROBE_BEFORE"), os.Getenv("M365CRAWL_OUTLOOK_PROBE_LINGER"), os.Getenv("M365CRAWL_OUTLOOK_PROBE_AFTER"), os.Getenv("M365CRAWL_OUTLOOK_PROBE_CONFIRM")
 	var ids []string
-	for _, id := range strings.Split(os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_IDS"), ",") {
+	for _, id := range strings.Split(os.Getenv("M365CRAWL_OUTLOOK_PROBE_IDS"), ",") {
 		if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
 			ids = append(ids, id)
 		}
 	}
 	if before == "" || after == "" || confirm == "" || len(ids) == 0 {
-		t.Skip("set TEAMSCRAWL_OUTLOOK_PROBE_BEFORE, _AFTER, _CONFIRM and TEAMSCRAWL_OUTLOOK_PROBE_IDS (and optionally TEAMSCRAWL_OUTLOOK_PROBE_LINGER)")
+		t.Skip("set M365CRAWL_OUTLOOK_PROBE_BEFORE, _AFTER, _CONFIRM and M365CRAWL_OUTLOOK_PROBE_IDS (and optionally M365CRAWL_OUTLOOK_PROBE_LINGER)")
 	}
 	dir := calendarScratch(t)
 	db := filepath.Join(dir, "probe.db")

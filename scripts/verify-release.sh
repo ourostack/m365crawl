@@ -12,7 +12,7 @@
 #
 # Checks, failing on the first mismatch: checksums, architecture of each
 # tarball, every sign-notarize.sh gate on each downloaded binary, Gatekeeper
-# acceptance after a quarantine attribute is added, and `teamscrawl --json version`
+# acceptance after a quarantine attribute is added, and `m365crawl --json version`
 # on the arm64 binary. The release flags are settled by the settle job (scripts/release-flags.sh
 # settle), after this job and the Windows jobs have passed.
 set -euo pipefail
@@ -33,13 +33,13 @@ version="${TAG#v}"
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/verify-release.XXXXXX")"
 echo "==> Downloading $TAG from $REPO into $work"
 gh release download "$TAG" -R "$REPO" -D "$work" -p 'checksums.txt' \
-  -p "teamscrawl_${version}_darwin_arm64.tar.gz" -p "teamscrawl_${version}_darwin_amd64.tar.gz"
+  -p "m365crawl_${version}_darwin_arm64.tar.gz" -p "m365crawl_${version}_darwin_amd64.tar.gz"
 
 echo "==> Checksums"
 (
   cd "$work"
   for arch in arm64 amd64; do
-    line="$(grep -F "  teamscrawl_${version}_darwin_${arch}.tar.gz" checksums.txt || true)"
+    line="$(grep -F "  m365crawl_${version}_darwin_${arch}.tar.gz" checksums.txt || true)"
     [[ -n "$line" ]] || fail "checksums.txt has no entry for darwin_${arch}"
     printf '%s\n' "$line" | shasum -a 256 -c - || fail "checksum mismatch for darwin_${arch}"
   done
@@ -49,8 +49,8 @@ for arch in arm64 amd64; do
   echo "==> darwin_${arch}"
   dir="$work/$arch"
   mkdir "$dir"
-  tar -xzf "$work/teamscrawl_${version}_darwin_${arch}.tar.gz" -C "$dir" teamscrawl
-  bin="$dir/teamscrawl"
+  tar -xzf "$work/m365crawl_${version}_darwin_${arch}.tar.gz" -C "$dir" m365crawl
+  bin="$dir/m365crawl"
   want="$arch"
   [[ "$arch" == amd64 ]] && want=x86_64
   file "$bin" | grep -Fq "$want" || fail "file(1) does not report $want for the $arch tarball"
@@ -61,7 +61,7 @@ for arch in arm64 amd64; do
 done
 
 echo "==> Running the arm64 binary"
-out="$("$work/arm64/teamscrawl" --json version)"
+out="$("$work/arm64/m365crawl" --json version)"
 got_version="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
 got_commit="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
 [[ "$got_version" == "$version" ]] || fail "version is '$got_version', expected '$version'"

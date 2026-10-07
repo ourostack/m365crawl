@@ -1,15 +1,15 @@
 # Command reference
 
-This reference reproduces the output of `teamscrawl --help` and `teamscrawl <command> --help` for v0.2.0: every flag and help text below is what the binary prints. The normative behavior is in [SPEC.md](../SPEC.md). Run any command with `--help` for the same text.
+This reference reproduces the output of `m365crawl --help` and `m365crawl <command> --help` for v0.2.0: every flag and help text below is what the binary prints. The normative behavior is in [SPEC.md](../SPEC.md). Run any command with `--help` for the same text.
 
 ## Platform defaults
 
 | Host | Default `--teams-root` | Default `--db` |
 | --- | --- | --- |
-| macOS | `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` | `~/.teamscrawl/teamscrawl.db` |
-| Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` |
+| macOS | `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` | `~/.m365crawl/m365crawl.db` |
+| Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | `%LOCALAPPDATA%\m365crawl\m365crawl.db` |
 
-On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or teamscrawl can create that parent itself as a new private directory. If that direct parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite writes anything.
+On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM or m365crawl can create that parent itself as a new private directory. If that direct parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite writes anything.
 
 ## Global flags
 
@@ -19,14 +19,14 @@ Every command accepts these. `--fields` and `--max-text` apply to the list comma
 | --- | --- |
 | `--format=text\|json\|log` | Output format: text, json or log. Default: text on a terminal, json otherwise. |
 | `--json` | Alias for --format json. |
-| `--db=PATH` | Archive database path (default `~/.teamscrawl/teamscrawl.db` on macOS, `%LOCALAPPDATA%\teamscrawl\teamscrawl.db` on Windows) (`$TEAMSCRAWL_DB`). On Windows the default path is private by construction; a custom path must use a private existing parent, let teamscrawl create a new private parent, and any pre-existing archive file must already be private, or open fails with `db_error` before SQLite writes anything. |
-| `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($TEAMSCRAWL_TEAMS_ROOT). |
-| `--outlook-root=DIR` | New Outlook for Mac profiles directory, read as a second calendar source ($TEAMSCRAWL_OUTLOOK_ROOT). Default: the new Outlook's own directory, read when it is there, with no flag; `none` turns it off. Off when `--teams-root` is set without it. `TEAMSCRAWL_OUTLOOK=1` is accepted and does nothing. The default Outlook never fails a sync: a missing directory, no Full Disk Access or an unreadable store is reported (status `unavailable`) and the Teams sync carries on. A named directory that does not exist is the error `outlook_root_missing` (exit 3) on `sync` and on every read command except `whoami` and `status` (which stay exit 0; `status` reports it in an `outlook` field) and `version`. |
-| `--outlook-account=TENANT/USER\|none` | Link the Outlook profile to this Teams account so their events merge; `none` ends the link and keeps it ended. A profile with an account signed in under a Teams account's own address is linked automatically (method `address`); this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on ($TEAMSCRAWL_OUTLOOK_ACCOUNT). |
-| `--outlook-profile=NAME` | The Outlook profile `--outlook-account` applies to: required when more than one profile is under the Outlook root ($TEAMSCRAWL_OUTLOOK_PROFILE). |
+| `--db=PATH` | Archive database path (default `~/.m365crawl/m365crawl.db` on macOS, `%LOCALAPPDATA%\m365crawl\m365crawl.db` on Windows) (`$M365CRAWL_DB`). On Windows the default path is private by construction; a custom path must use a private existing parent, let m365crawl create a new private parent, and any pre-existing archive file must already be private, or open fails with `db_error` before SQLite writes anything. |
+| `--teams-root=DIR` | Teams EBWebView directory (default: the new Teams container) ($M365CRAWL_TEAMS_ROOT). |
+| `--outlook-root=DIR` | New Outlook for Mac profiles directory, read as a second calendar source ($M365CRAWL_OUTLOOK_ROOT). Default: the new Outlook's own directory, read when it is there, with no flag; `none` turns it off. Off when `--teams-root` is set without it. `M365CRAWL_OUTLOOK=1` is accepted and does nothing. The default Outlook never fails a sync: a missing directory, no Full Disk Access or an unreadable store is reported (status `unavailable`) and the Teams sync carries on. A named directory that does not exist is the error `outlook_root_missing` (exit 3) on `sync` and on every read command except `whoami` and `status` (which stay exit 0; `status` reports it in an `outlook` field) and `version`. |
+| `--outlook-account=TENANT/USER\|none` | Link the Outlook profile to this Teams account so their events merge; `none` ends the link and keeps it ended. A profile with an account signed in under a Teams account's own address is linked automatically (method `address`); this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on ($M365CRAWL_OUTLOOK_ACCOUNT). |
+| `--outlook-profile=NAME` | The Outlook profile `--outlook-account` applies to: required when more than one profile is under the Outlook root ($M365CRAWL_OUTLOOK_PROFILE). |
 | `--account=TENANT/USER` | Only this account, as &lt;tenantId&gt;/&lt;userId&gt;. Default: every account. |
 | `--no-color` | Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color. |
-| `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($TEAMSCRAWL_MAX_AGE). When a read does sync first, stderr gets one line before it starts (plain text in text mode, `teamscrawl: syncing — archive is 2h14m old (max-age 15m)`; one JSON line in json and log mode, `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}`) and the result gains `synced: {seconds, status}`. |
+| `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync ($M365CRAWL_MAX_AGE). When a read does sync first, stderr gets one line before it starts (plain text in text mode, `m365crawl: syncing — archive is 2h14m old (max-age 15m)`; one JSON line in json and log mode, `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}`) and the result gains `synced: {seconds, status}`. |
 | `--fields=a,b,c` | List commands only: keep only these top-level keys of each item, comma separated. |
 | `--max-text=N` | List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it. |
 | `--version` | Print the version, commit and build date, then exit. |
@@ -56,14 +56,14 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`sql`](#sql) | Run a read-only SQL query against the archive. |
 | [`skill`](#skill) | Print the agent guide (SKILL.md) for this version, as Markdown in every output mode. |
 | [`metadata`](#metadata) | Print the crawlkit app manifest (for crawlctl discovery). |
-| [`version`](#version) | Print the teamscrawl version, commit and build date. |
+| [`version`](#version) | Print the m365crawl version, commit and build date. |
 
 ## doctor
 
 Check that Teams, platform access prerequisites and the archive are ready.
 
 ```
-teamscrawl doctor [flags]
+m365crawl doctor [flags]
 ```
 
 No flags beyond the global ones.
@@ -73,7 +73,7 @@ Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (
 Examples:
 
 ```sh
-teamscrawl doctor
+m365crawl doctor
 ```
 
 ## sync
@@ -81,23 +81,23 @@ teamscrawl doctor
 Copy the Teams cache into the archive once and print what changed.
 
 ```
-teamscrawl sync [flags]
+m365crawl sync [flags]
 ```
 
 | Flag | Meaning |
 | --- | --- |
-| `--full-read` | Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair ($TEAMSCRAWL_FULL_READ). |
+| `--full-read` | Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair ($M365CRAWL_FULL_READ). |
 
-Result: The sync report (see SPEC.md sections 4 and 5). It carries `calendar` counts (`events`, `recaps`, `recap_items`, `gone`, `linked`, `linked_by_start`, `unlinked_no_event`, `unlinked_ambiguous`, `refused`) for the calendar tables the sync filled from the calendar and recap records; there is no calendar command yet, so read them with `teamscrawl sql "select count(*) from calendar_source_events"`. Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
+Result: The sync report (see SPEC.md sections 4 and 5). It carries `calendar` counts (`events`, `recaps`, `recap_items`, `gone`, `linked`, `linked_by_start`, `unlinked_no_event`, `unlinked_ambiguous`, `refused`) for the calendar tables the sync filled from the calendar and recap records; there is no calendar command yet, so read them with `m365crawl sql "select count(*) from calendar_source_events"`. Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
 `--outlook-account` and `--outlook-profile` link an Outlook profile to a Teams account (SPEC.md section 4.2): the link is applied after the sources, a refused link exits 2 with the report on stdout, and `--account` cannot be combined with it. Nothing in the output identifies which Teams account owns an Outlook profile (an Outlook account is `outlook/<profile name>`, and `whoami` has no email), so the caller must know it or ask. The link is applied after the sources are read, so the report can show the Outlook source as `skipped_interval` (a read under 5 minutes old was reused) and `linked: 0` while the link took effect: confirm with `calendar sources`, whose Outlook row then has `link: "config"` (or `"address"` when the sync linked it by an address signed in to the profile) and the Teams account as `principal`.
 
 Examples:
 
 ```sh
-teamscrawl sync
-teamscrawl sync --json
-teamscrawl sync --outlook-root ~/outlook --outlook-profile Main --outlook-account <tenantId>/<userId>
+m365crawl sync
+m365crawl sync --json
+m365crawl sync --outlook-root ~/outlook --outlook-profile Main --outlook-account <tenantId>/<userId>
 ```
 
 ## status
@@ -105,7 +105,7 @@ teamscrawl sync --outlook-root ~/outlook --outlook-profile Main --outlook-accoun
 Show archive counts per account, the last sync and other Teams origins.
 
 ```
-teamscrawl status [flags]
+m365crawl status [flags]
 ```
 
 No flags beyond the global ones.
@@ -115,7 +115,7 @@ Result: Archive path, schema version, per-account counts, the last run and other
 Examples:
 
 ```sh
-teamscrawl status
+m365crawl status
 ```
 
 ## search
@@ -123,7 +123,7 @@ teamscrawl status
 Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).
 
 ```
-teamscrawl search [<query>] [flags]
+m365crawl search [<query>] [flags]
 ```
 
 Arguments:
@@ -153,8 +153,8 @@ Result: A list of message items, newest first. Items that mention you carry `men
 Examples:
 
 ```sh
-teamscrawl search planning --limit 1
-teamscrawl search --mentions-me --since 7d --max-text 200
+m365crawl search planning --limit 1
+m365crawl search --mentions-me --since 7d --max-text 200
 ```
 
 ## messages
@@ -162,7 +162,7 @@ teamscrawl search --mentions-me --since 7d --max-text 200
 List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).
 
 ```
-teamscrawl messages [flags]
+m365crawl messages [flags]
 ```
 
 Flags:
@@ -188,8 +188,8 @@ Result: A list of message items, oldest first. Channel thread roots carry `reply
 Examples:
 
 ```sh
-teamscrawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text 80
-teamscrawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
+m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text 80
+m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
 ```
 
 ## conversations
@@ -197,7 +197,7 @@ teamscrawl messages --unread --include-channels --limit 5 --fields id,sender_nam
 List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).
 
 ```
-teamscrawl conversations [flags]
+m365crawl conversations [flags]
 ```
 
 Flags:
@@ -210,13 +210,13 @@ Flags:
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
 
-Result: A list of conversation items, newest activity first (best match first with `--query`). A Meeting conversation that calendar events name as their chat also carries `calendar_series_key` (the series those events share; absent when they belong to several series or are all single events) and `calendar_event_count` (how many live, non-master occurrences of the account hold this chat; a cancelled one is not counted, a declined one is, because the meeting happened). A chat no event names has neither key. Go from the chat to its events with `teamscrawl calendar --query <subject>` or `sql` on `calendar_source_events.series_key`.
+Result: A list of conversation items, newest activity first (best match first with `--query`). A Meeting conversation that calendar events name as their chat also carries `calendar_series_key` (the series those events share; absent when they belong to several series or are all single events) and `calendar_event_count` (how many live, non-master occurrences of the account hold this chat; a cancelled one is not counted, a declined one is, because the meeting happened). A chat no event names has neither key. Go from the chat to its events with `m365crawl calendar --query <subject>` or `sql` on `calendar_source_events.series_key`.
 
 Examples:
 
 ```sh
-teamscrawl conversations --kind Space
-teamscrawl conversations --query planning
+m365crawl conversations --kind Space
+m365crawl conversations --query planning
 ```
 
 ## teams
@@ -224,7 +224,7 @@ teamscrawl conversations --query planning
 List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes.
 
 ```
-teamscrawl teams [flags]
+m365crawl teams [flags]
 ```
 
 Flags:
@@ -240,8 +240,8 @@ Result: A list of team items `{tenant_id, user_id, team_id, display_name, channe
 Examples:
 
 ```sh
-teamscrawl teams --fields team_id,display_name,unread_count
-teamscrawl messages --team "Platform" --since 1d
+m365crawl teams --fields team_id,display_name,unread_count
+m365crawl messages --team "Platform" --since 1d
 ```
 
 ## people
@@ -249,7 +249,7 @@ teamscrawl messages --team "Platform" --since 1d
 List people seen as senders or members.
 
 ```
-teamscrawl people [flags]
+m365crawl people [flags]
 ```
 
 Flags:
@@ -264,7 +264,7 @@ Result: A list of person items.
 Examples:
 
 ```sh
-teamscrawl people --query alex
+m365crawl people --query alex
 ```
 
 ## activity
@@ -272,7 +272,7 @@ teamscrawl people --query alex
 List activity-feed items (mentions, replies, reactions) with their messages.
 
 ```
-teamscrawl activity [flags]
+m365crawl activity [flags]
 ```
 
 Flags:
@@ -292,8 +292,8 @@ Result: A list of activity items joined with their messages. `actor_id` and `act
 Examples:
 
 ```sh
-teamscrawl activity --unread --limit 5 --fields at,type,conversation_display_name,text
-teamscrawl activity --type mention,mentionInChat
+m365crawl activity --unread --limit 5 --fields at,type,conversation_display_name,text
+m365crawl activity --type mention,mentionInChat
 ```
 
 ## calendar
@@ -301,13 +301,13 @@ teamscrawl activity --type mention,mentionInChat
 Read the calendar offline: the agenda for a range (default today), or one event with everything the archive holds about it. The Teams cache holds the days Teams has loaded, so `coverage_gap` says when part of the range is not covered: an absent event is then not evidence that there was none.
 
 ```
-teamscrawl calendar [flags]
-teamscrawl calendar event <event> [flags]
-teamscrawl calendar actions [flags]
-teamscrawl calendar sources [flags]
+m365crawl calendar [flags]
+m365crawl calendar event <event> [flags]
+m365crawl calendar actions [flags]
+m365crawl calendar sources [flags]
 ```
 
-Flags of the agenda (`teamscrawl calendar agenda --help` lists them):
+Flags of the agenda (`m365crawl calendar agenda --help` lists them):
 
 | Flag | Meaning |
 | --- | --- |
@@ -327,7 +327,7 @@ Result of the agenda: a list `{"items", "count", "truncated", "total"?, "coverag
 
 - `coverage_gap` is true when some day of the range is not covered by any cached data. `coverage_as_of` is the oldest time a covered day of the range was verified (so "as of three weeks ago" can be said). `uncovered_days` lists the dates of the range some account does not cover (at most 31; `uncovered_days_total` gives the count when it is longer), and `accounts` lists, for each account (an unlinked Outlook profile is its own), `account_id`, `synced_at` and its own `coverage_as_of`, so an agent can tell which account to distrust. When several accounts are in scope, an entry also says which uncovered days it lacks without repeating the list: `"uncovered_all": true` when it lacks every day of `uncovered_days`, or its own `"uncovered_days": ["2031-03-05", ...]` (with `uncovered_days_total` past 31 days) when it lacks fewer. An entry with neither covers the whole range. Example: `"accounts": [{"account_id": "outlook/Main", "uncovered_days": ["2031-03-05", "2031-03-06"]}, {"account_id": "tenant-1/user-1", "uncovered_all": true}]`.
 - `range` is the range read, in this machine's zone.
-- `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged). `unlinked_fix` has, in the same order, the exact command that links each one: `teamscrawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`, with the Teams account written out when the agenda holds only one. A profile is linked by the operator (`--outlook-account`) or automatically when its own address is the Teams account's own address; nothing links by overlap.
+- `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged). `unlinked_fix` has, in the same order, the exact command that links each one: `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`, with the Teams account written out when the agenda holds only one. A profile is linked by the operator (`--outlook-account`) or automatically when its own address is the Teams account's own address; nothing links by overlap.
 
 - `notices` (here, in `calendar event` and in `calendar actions`) says when the result holds an event that Outlook holds while the Outlook source is off for this run, so the Outlook data is archived and not refreshed: `"notices": ["the Outlook source is off for this run (--outlook-root none, or --teams-root without --outlook-root), so the Outlook events in this result are archived data that is not being refreshed; last read outlook/Main 3 days ago. Name --outlook-root DIR (and not none) to read Outlook again."]`. The age is from the account's last good read. Text output prints it as one dim `notice:` line. It is absent when the source is on or no Outlook event is in the result.
 - `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event of the archive (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions; `unlinked_recaps_total` appears only when the limit cut the list. Each carries `placed_at` and `placed_by`: `meeting_start` when the recap has its own meeting start, `recording_start` when it has none and the recording's start stands in for it (then `meeting_start` is absent, and the text says "meeting start unknown"). A recap with neither time cannot be placed in a range and is not listed.
@@ -346,8 +346,8 @@ The action items of the recaps held by the events that start in a range, with th
 Result: a list sorted by event start, then recap, then the order of the items in the recap. Each item carries `event_id`, `event_key`, `subject`, `event_start`, `call_id`, `title`, `text`, `owner`, `speaker`, `at`, `origin` (`recap` or `catchup`; the recap's own items win over the catch-up's for the same call), `mine`, `mine_basis`, `expires_at` and, when true, `series_level`. Recap owners are mostly a first name alone, so `mine` is decided like this: `mine_basis: full_name` when the owner equals your display name (ignoring case); `first_name` when the owner is one word equal to your first name and no other attendee of the event has that first word (the recap's speakers are used when the event has no attendee list); `ambiguous` when someone else in the meeting shares your first name, and then `mine` is absent and `unknown_fields` is `["mine"]`, because the item may or may not be yours. Any other owner has `mine: false` and no basis. `--mine` keeps `full_name` and `first_name` items and reports how many ambiguous ones it left out as `mine_ambiguous_omitted` (omitted when zero), and names the accounts whose own name is not archived in `mine_unknown_accounts` (an error only when no account has a name). `mine` needs the owner to be your display name or a unique first name, so an owner written "Last, First" does not match; run without `--mine` and read `mine_basis` to see them. The list also carries the agenda's coverage keys (`coverage_gap`, `coverage_as_of`, `uncovered_days`, `accounts`, `range`), so an empty list on an uncovered day is not read as "no action items". Only action items are listed (mentions are in `calendar event`), items a newer copy of the recap dropped are hidden, and an expired recap is still listed, with its `expires_at`. A recap whose occurrence cannot be told (`series_level: true`, see `link_method` above) is listed once, under the first occurrence of the range that holds it, not once per occurrence. `--mine` on an account whose own name is not archived yet is a `usage` error; run `sync`, or use `--owner`. Recaps that no event holds are not listed here; they are in the agenda's `unlinked_recaps`.
 
 ```sh
-teamscrawl calendar actions --from yesterday --to today --mine
-teamscrawl calendar actions --days 7 --owner pat
+m365crawl calendar actions --from yesterday --to today --mine
+m365crawl calendar actions --days 7 --owner pat
 ```
 
 `calendar sources` answers "what does the archive hold, and how fresh is it", one row per account and source (Teams first). `--account` keeps that Teams account and the Outlook profiles linked to it. A Teams row: `covered_days` (days the cache ever showed, cumulative), `last_verified_at`, `window_start`, `window_end`, `synced_at`, `cache_fresh_at`, `events_live`, `events_removed`, `events_with_detail`, `events_with_attendees`, `events_with_body`, `events_online`, `recaps_total` (all recap rows), `recaps_with_content` (placeholders create no row; a row with neither text nor a live item is not counted), `recaps_linked` (rows with an iCalUID, content or not), `recap_action_items`, `unknown_time_zones` (zone names with no known IANA id, at most 50). Every row also has `principal` and `link` (`config` or `none`; a Teams row is always `none`, and a link shows on the Outlook rows pointing to its principal). The window is a span, not a coverage claim: `covered_days` is. An Outlook row adds `status` (`ok`, `skipped_interval`, `unsupported_version`, `unsupported_layout`, `unreadable`), `error` (`code`, `message`, `fix`) when the last read failed, `last_read_at` (last good read), `last_attempt_at` (last copy), `last_checked_at` (latest sync that looked at the store, even when it was unchanged and read nothing), `census_as_of` (when the read behind the census fields happened; they stay from the last good read on a failure row), `next_read_after` and `read_interval_seconds` (the Outlook store is copied at most once per interval), `unknown_layouts` (`class`, `tag`, `count`: event or detail objects of a tag this build does not know; other classes are not calendar and are not listed), `blocks_invalid_ratio`, `unmapped_values` and `deletions: "unverified"`. A status other than `ok` means Outlook is not being read, and `error` says why; a `skipped_interval` row is healthy.
@@ -357,11 +357,11 @@ On an archive from before the calendar tables, all three commands return an empt
 Examples:
 
 ```sh
-teamscrawl calendar --days 7
-teamscrawl calendar --from=-7d --to=tomorrow --query planning
-teamscrawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
-teamscrawl calendar event ev_2da7280856 --max-text 400
-teamscrawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1
+m365crawl calendar --days 7
+m365crawl calendar --from=-7d --to=tomorrow --query planning
+m365crawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
+m365crawl calendar event ev_2da7280856 --max-text 400
+m365crawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1
 ```
 
 ## stores
@@ -369,7 +369,7 @@ teamscrawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000
 List every database and object store archived without a typed table, with record counts; the database name is what records --database takes.
 
 ```
-teamscrawl stores [flags]
+m365crawl stores [flags]
 ```
 
 Flags:
@@ -384,8 +384,8 @@ Result: A list of store items `{database, store, records, removed, last_updated_
 Examples:
 
 ```sh
-teamscrawl stores
-teamscrawl stores --fields database,store,records
+m365crawl stores
+m365crawl stores --fields database,store,records
 ```
 
 ## records
@@ -393,7 +393,7 @@ teamscrawl stores --fields database,store,records
 List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated).
 
 ```
-teamscrawl records --database=STRING [flags]
+m365crawl records --database=STRING [flags]
 ```
 
 Flags:
@@ -414,8 +414,8 @@ Result: A list of record items `{source, tenant_id?, user_id?, database, store, 
 Examples:
 
 ```sh
-teamscrawl records --database Teams:calendar-manager --limit 10 --max-text 300
-teamscrawl records --database Teams:pinned-manager --store pins --since 7d
+m365crawl records --database Teams:calendar-manager --limit 10 --max-text 300
+m365crawl records --database Teams:pinned-manager --store pins --since 7d
 ```
 
 ## unread
@@ -423,7 +423,7 @@ teamscrawl records --database Teams:pinned-manager --store pins --since 7d
 List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts.
 
 ```
-teamscrawl unread [flags]
+m365crawl unread [flags]
 ```
 
 Flags:
@@ -444,9 +444,9 @@ Result: A list of message items, newest first; with `--by-conversation`, one ove
 Examples:
 
 ```sh
-teamscrawl unread --limit 5
-teamscrawl unread --by-conversation --include-channels
-teamscrawl unread --by-conversation --since 7d
+m365crawl unread --limit 5
+m365crawl unread --by-conversation --include-channels
+m365crawl unread --by-conversation --since 7d
 ```
 
 ## thread
@@ -454,7 +454,7 @@ teamscrawl unread --by-conversation --since 7d
 Show one thread: &lt;conversation&gt; &lt;root-message-id&gt;, or a Teams message link.
 
 ```
-teamscrawl thread <target> [<root>] [flags]
+m365crawl thread <target> [<root>] [flags]
 ```
 
 Arguments:
@@ -478,8 +478,8 @@ Result: A list of message items, root first.
 Examples:
 
 ```sh
-teamscrawl thread 19:topicchannel1@thread.tacv2 1700000045000
-teamscrawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
+m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
+m365crawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
 ```
 
 ## watch
@@ -487,7 +487,7 @@ teamscrawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread
 Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted).
 
 ```
-teamscrawl watch [flags]
+m365crawl watch [flags]
 ```
 
 Flags:
@@ -495,7 +495,7 @@ Flags:
 | Flag | Meaning |
 | --- | --- |
 | `--every=DURATION` | Poll interval: the safety net when file events are missed. Syncs run only when the cache changed. |
-| `--min-interval=DURATION` | Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause ($TEAMSCRAWL_WATCH_MIN_INTERVAL). |
+| `--min-interval=DURATION` | Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause ($M365CRAWL_WATCH_MIN_INTERVAL). |
 | `--emit-initial` | Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted). |
 
 Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 7). Exits 0 on SIGINT or SIGTERM.
@@ -503,7 +503,7 @@ Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 
 Examples:
 
 ```sh
-teamscrawl watch --every 30s --fields id,type,text --max-text 200
+m365crawl watch --every 30s --fields id,type,text --max-text 200
 ```
 
 ## whoami
@@ -511,7 +511,7 @@ teamscrawl watch --every 30s --fields id,type,text --max-text 200
 Show the accounts in the archive and the archive's state.
 
 ```
-teamscrawl whoami [flags]
+m365crawl whoami [flags]
 ```
 
 No flags beyond the global ones.
@@ -521,7 +521,7 @@ Result: The accounts in the archive (with `self_id`) and the archive's state.
 Examples:
 
 ```sh
-teamscrawl whoami
+m365crawl whoami
 ```
 
 ## sql
@@ -529,7 +529,7 @@ teamscrawl whoami
 Run a read-only SQL query against the archive.
 
 ```
-teamscrawl sql <query> [flags]
+m365crawl sql <query> [flags]
 ```
 
 Arguments:
@@ -549,7 +549,7 @@ Result: `{"columns", "rows", "count", "truncated"}`; it stops reading at `--limi
 Examples:
 
 ```sh
-teamscrawl sql "select kind, count(*) as n from conversations group by kind"
+m365crawl sql "select kind, count(*) as n from conversations group by kind"
 ```
 
 ## skill
@@ -557,17 +557,17 @@ teamscrawl sql "select kind, count(*) as n from conversations group by kind"
 Print the agent guide (SKILL.md) for this version, as Markdown in every output mode.
 
 ```
-teamscrawl skill [flags]
+m365crawl skill [flags]
 ```
 
 No flags beyond the global ones.
 
-Result: Raw Markdown on stdout in every output mode (the one exception to the JSON default, like `--help`); the same text as `.agents/skills/teamscrawl/SKILL.md`, embedded in the binary. Needs no archive or Teams cache.
+Result: Raw Markdown on stdout in every output mode (the one exception to the JSON default, like `--help`); the same text as `.agents/skills/m365crawl/SKILL.md`, embedded in the binary. Needs no archive or Teams cache.
 
 Examples:
 
 ```sh
-teamscrawl skill
+m365crawl skill
 ```
 
 ## metadata
@@ -575,7 +575,7 @@ teamscrawl skill
 Print the crawlkit app manifest (for crawlctl discovery).
 
 ```
-teamscrawl metadata [flags]
+m365crawl metadata [flags]
 ```
 
 No flags beyond the global ones.
@@ -585,24 +585,24 @@ Result: One crawlkit `control.Manifest` JSON document on stdout, indented in eve
 Examples:
 
 ```sh
-teamscrawl metadata --json
+m365crawl metadata --json
 ```
 
 ## version
 
-Print the teamscrawl version, commit and build date.
+Print the m365crawl version, commit and build date.
 
 ```
-teamscrawl version [flags]
+m365crawl version [flags]
 ```
 
 No flags beyond the global ones.
 
-Result: `{"version", "commit", "date"}` as one JSON document, or one human line in text mode. `teamscrawl --version` prints the same.
+Result: `{"version", "commit", "date"}` as one JSON document, or one human line in text mode. `m365crawl --version` prints the same.
 
 Examples:
 
 ```sh
-teamscrawl version
-teamscrawl --version
+m365crawl version
+m365crawl --version
 ```

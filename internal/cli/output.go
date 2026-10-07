@@ -15,7 +15,7 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // meta is embedded last in every read result so its keys come after the command's own.

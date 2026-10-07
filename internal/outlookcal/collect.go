@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/hxstore"
 )
 
 // The codes a refused or lossy read carries. The first three, when returned in a

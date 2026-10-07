@@ -11,8 +11,8 @@ import (
 
 	crawlstore "github.com/openclaw/crawlkit/store"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Filter narrows message, search, unread and listing queries.
@@ -959,6 +959,6 @@ func buildFTSQuery(in string) string {
 // searchUsage is a usage error for an empty search that points at messages for filter-only listing.
 func searchUsage(msg string) *errs.Coded {
 	c := errs.Usage(msg)
-	c.Fix = "To list messages without a text query, use `teamscrawl messages` with filters (for example `teamscrawl messages --mentions-me --since 24h`)."
+	c.Fix = "To list messages without a text query, use `m365crawl messages` with filters (for example `m365crawl messages --mentions-me --since 24h`)."
 	return c
 }

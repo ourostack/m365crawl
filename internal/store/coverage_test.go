@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func codedAs(t *testing.T, err error, code string) {
@@ -76,7 +76,7 @@ func TestOpenFailures(t *testing.T) {
 		old := chmodFile
 		chmodFile = func(string, os.FileMode) error { return boom }
 		t.Cleanup(func() { chmodFile = old })
-		err := ensureParent(filepath.Join(home, ".teamscrawl", "x.db"))
+		err := ensureParent(filepath.Join(home, ".m365crawl", "x.db"))
 		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "chmod archive dir") {
 			t.Fatalf("err = %v", err)
 		}

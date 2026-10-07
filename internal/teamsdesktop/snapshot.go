@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 )
 
 const (
-	snapshotPrefix   = "teamscrawl-snapshot-"
+	snapshotPrefix   = "m365crawl-snapshot-"
 	snapshotAttempts = 3
 )
 
@@ -277,7 +277,7 @@ func mapFSError(path string, err error) error {
 	}
 }
 
-// SweepStaleSnapshots removes teamscrawl-snapshot-* directories in tmp that were last modified
+// SweepStaleSnapshots removes m365crawl-snapshot-* directories in tmp that were last modified
 // more than olderThan ago (left by a killed process) and returns how many it removed.
 func SweepStaleSnapshots(tmp string, olderThan time.Duration) int {
 	ents, err := os.ReadDir(tmp)

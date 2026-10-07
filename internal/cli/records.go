@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // storeItem is one object store of one database in the generic archive.

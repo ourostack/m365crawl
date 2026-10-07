@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 var baseVersions = Versions{Store: "i", Reader: 1, Mapper: 2, Rules: 3}

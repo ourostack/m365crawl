@@ -10,7 +10,7 @@
 // the object's envelope.
 package outlookcal
 
-import "github.com/ourostack/teamscrawl/internal/calendar"
+import "github.com/ourostack/m365crawl/internal/calendar"
 
 // MapperVersion is raised whenever a mapping change alters derived calendar data, so
 // the archive can re-read the store.

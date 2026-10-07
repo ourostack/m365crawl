@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 func TestCommandsRejectBadFlagsBeforeReadingTheArchive(t *testing.T) {

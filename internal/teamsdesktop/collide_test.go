@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const fixtureRoot = "../../testdata/teams-fixture/EBWebView"
@@ -131,7 +131,7 @@ func syncBothWays(t *testing.T, root, skipDB, fullDB, label string) {
 func newPaths(t *testing.T) (skipDB, fullDB string) {
 	t.Helper()
 	d := t.TempDir()
-	return filepath.Join(d, "skip", "teamscrawl.db"), filepath.Join(d, "full", "teamscrawl.db")
+	return filepath.Join(d, "skip", "m365crawl.db"), filepath.Join(d, "full", "m365crawl.db")
 }
 
 // Two generic records whose keys scrub to the same key share one row. A skipping sync and a full
@@ -202,10 +202,10 @@ func TestRedactedAndChangingGenericValuesMatchAFullRead(t *testing.T) {
 
 // A seeded random series of generic states drawn from a pool that holds colliding scrubbed keys,
 // redacted values and changing values, in random order, over two databases (two accounts): every
-// sync equals a full read. A failure names the seed; TEAMSCRAWL_TEST_SEED=<n> runs that one.
+// sync equals a full read. A failure names the seed; M365CRAWL_TEST_SEED=<n> runs that one.
 func TestRandomGenericStatesSkipEqualsFull(t *testing.T) {
 	seeds := []int64{1, 2, 3}
-	if s := os.Getenv("TEAMSCRAWL_TEST_SEED"); s != "" {
+	if s := os.Getenv("M365CRAWL_TEST_SEED"); s != "" {
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
 			t.Fatal(err)

@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func TestSchemaModes(t *testing.T) {
 	ctx := context.Background()
 	t.Run("custom parent is created 0700 and file 0600", func(t *testing.T) {
-		p := filepath.Join(t.TempDir(), "new", "teamscrawl.db")
+		p := filepath.Join(t.TempDir(), "new", "m365crawl.db")
 		s := must(Open(ctx, p))
 		defer func() { _ = s.Close() }()
 		di := must(os.Stat(filepath.Dir(p)))
@@ -47,19 +47,19 @@ func TestSchemaModes(t *testing.T) {
 	t.Run("existing default dir is tightened", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
-		def := filepath.Join(home, ".teamscrawl")
+		def := filepath.Join(home, ".m365crawl")
 		if runtime.GOOS == "windows" {
 			t.Setenv("LOCALAPPDATA", home)
-			def = filepath.Join(home, "teamscrawl")
+			def = filepath.Join(home, "m365crawl")
 		}
 		if err := os.Mkdir(def, 0o755); err != nil { //nolint:gosec // G301: test needs a loose dir
 			t.Fatal(err)
 		}
-		s := must(Open(ctx, filepath.Join(def, "teamscrawl.db")))
+		s := must(Open(ctx, filepath.Join(def, "m365crawl.db")))
 		defer func() { _ = s.Close() }()
 		if runtime.GOOS == "windows" {
 			assertCurrentUserAndSystemOnly(t, def)
-			assertCurrentUserAndSystemOnly(t, filepath.Join(def, "teamscrawl.db"))
+			assertCurrentUserAndSystemOnly(t, filepath.Join(def, "m365crawl.db"))
 			return
 		}
 		if m := must(os.Stat(def)).Mode().Perm(); m != 0o700 {

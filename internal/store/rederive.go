@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Migration says an archive's derived fields were recomputed from their stored raw_json because a

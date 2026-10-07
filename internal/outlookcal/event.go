@@ -11,9 +11,9 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // UnmappedError reports an event object that cannot be mapped: a field the layout says

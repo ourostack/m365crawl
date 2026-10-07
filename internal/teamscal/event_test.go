@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 var testAcct = teamsdesktop.Account{TenantID: "tenant-1", UserID: "user-1", Locale: "en-us"}

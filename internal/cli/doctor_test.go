@@ -13,9 +13,9 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func checks(t *testing.T, m map[string]any) map[string]map[string]any {
@@ -147,7 +147,7 @@ func TestDoctorFallsBackToTheDefaultRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())
 	t.Setenv("LOCALAPPDATA", filepath.Join(t.TempDir(), "AppData", "Local"))
-	t.Setenv("TEAMSCRAWL_DB", filepath.Join(t.TempDir(), "a.db"))
+	t.Setenv("M365CRAWL_DB", filepath.Join(t.TempDir(), "a.db"))
 	var out, errb bytes.Buffer
 	code := Main([]string{"doctor", "--json"}, &out, &errb)
 	if code != 3 {
@@ -270,7 +270,7 @@ func TestDoctorFlagsANewerStatusRowEvenIfOpenSucceeded(t *testing.T) {
 	t.Cleanup(func() { readArchiveStatus = oldStatus })
 	code, cs, _ := doctorChecksFor(t, e)
 	d := cs["schema_version"]
-	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version") || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") {
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), "schema version") || !strings.Contains(d["fix"].(string), "Upgrade m365crawl") {
 		t.Fatalf("newer status row: exit %d, %v", code, d)
 	}
 }
@@ -296,7 +296,7 @@ func TestDoctorFlagsASchemaVersionMismatchEitherWay(t *testing.T) {
 	e.exec("update schema_migrations set version = version + 100")
 	code, cs, _ := doctorChecksFor(t, e)
 	d := cs["schema_version"]
-	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), fmt.Sprintf("schema version %d", store.SchemaVersion+100)) || !strings.Contains(d["fix"].(string), "Upgrade teamscrawl") || cs["fts"]["ok"] != false {
+	if code != 3 || d["ok"] != false || !strings.Contains(d["detail"].(string), fmt.Sprintf("schema version %d", store.SchemaVersion+100)) || !strings.Contains(d["fix"].(string), "Upgrade m365crawl") || cs["fts"]["ok"] != false {
 		t.Fatalf("newer archive: exit %d, %v", code, d)
 	}
 	e.exec("update schema_migrations set version = 1")

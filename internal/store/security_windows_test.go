@@ -12,7 +12,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 	"golang.org/x/sys/windows"
 )
 
@@ -95,7 +95,7 @@ func TestOpenRejectsUnsafeMacStyleCustomParentOnWindows(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	parent := filepath.Join(home, ".teamscrawl")
+	parent := filepath.Join(home, ".m365crawl")
 	must0(os.Mkdir(parent, 0o700))
 	setBroadACL(t, parent)
 	dbPath := filepath.Join(parent, "archive.db")
@@ -115,7 +115,7 @@ func TestOpenSecuresExistingWindowsDefaultParent(t *testing.T) {
 			} else {
 				t.Setenv("LOCALAPPDATA", base)
 			}
-			parent := filepath.Join(base, "teamscrawl")
+			parent := filepath.Join(base, "m365crawl")
 			must0(os.MkdirAll(parent, 0o700))
 			setBroadACL(t, parent)
 			st, err := Open(context.Background(), filepath.Join(parent, "archive.db"))
@@ -133,7 +133,7 @@ func TestOpenRejectsUnsafeInheritedFilesInWindowsDefaultParent(t *testing.T) {
 		t.Run(suffix, func(t *testing.T) {
 			base := t.TempDir()
 			t.Setenv("LOCALAPPDATA", base)
-			parent := filepath.Join(base, "teamscrawl")
+			parent := filepath.Join(base, "m365crawl")
 			must0(os.Mkdir(parent, 0o700))
 			setACL(t, parent,
 				aceForSIDWithInheritance(t, mustCurrentUserSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),

@@ -1,7 +1,7 @@
 //go:build acceptance
 
-// Package acceptance checks teamscrawl against the real Teams cache on this Mac. The tests run
-// only with TEAMSCRAWL_REAL_CACHE=1 and Full Disk Access (make acceptance). The cache is private
+// Package acceptance checks m365crawl against the real Teams cache on this Mac. The tests run
+// only with M365CRAWL_REAL_CACHE=1 and Full Disk Access (make acceptance). The cache is private
 // data: every log line and failure message here carries counts, timings, field paths and short
 // hashes only, never a name, id or content.
 //
@@ -32,12 +32,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 // allowlist mirrors the databases and stores teamsdesktop.Read is allowed to decode.
@@ -95,8 +95,8 @@ func TestMain(m *testing.M) {
 
 func requireReal(t *testing.T) {
 	t.Helper()
-	if os.Getenv("TEAMSCRAWL_REAL_CACHE") != "1" {
-		t.Skip("set TEAMSCRAWL_REAL_CACHE=1 to run against the real Teams cache")
+	if os.Getenv("M365CRAWL_REAL_CACHE") != "1" {
+		t.Skip("set M365CRAWL_REAL_CACHE=1 to run against the real Teams cache")
 	}
 }
 
@@ -132,7 +132,7 @@ func synced(t *testing.T) (syncer.Report, string) {
 	t.Helper()
 	requireReal(t)
 	syncOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "teamscrawl-acceptance-")
+		dir, err := os.MkdirTemp("", "m365crawl-acceptance-")
 		if err != nil {
 			syncErr = err
 			return
@@ -383,7 +383,7 @@ func requireReference(t *testing.T) {
 
 func runCCL(t *testing.T, snapDir string) refCounts {
 	t.Helper()
-	py := os.Getenv("TEAMSCRAWL_PYTHON")
+	py := os.Getenv("M365CRAWL_PYTHON")
 	if py == "" {
 		py = "python3"
 	}
@@ -404,7 +404,7 @@ func runCCL(t *testing.T, snapDir string) refCounts {
 	return rc
 }
 
-// ours holds what teamscrawl's own reader and mapper produce from one snapshot.
+// ours holds what m365crawl's own reader and mapper produce from one snapshot.
 type ours struct {
 	convKeys      map[string]bool     // hashes of the record keys of the conversations store
 	convIDs       map[string]bool     // hashes of the mapped conversation ids
@@ -537,8 +537,8 @@ func missing(want []string, have map[string]bool) int {
 // TestRealConversationAccounting accounts for every stored version of a conversation record:
 // each is superseded by a newer version of its key, a tombstone, undecodable, unmapped, mapped
 // under another id, or mapped. Nothing may be left over, and the reference decoder must see
-// exactly the keys teamscrawl maps, except for records only the reference fails to decode
-// (ccl_chromium_reader cannot decode a few values that teamscrawl reads; the volumes check allows
+// exactly the keys m365crawl maps, except for records only the reference fails to decode
+// (ccl_chromium_reader cannot decode a few values that m365crawl reads; the volumes check allows
 // for the same records). Those are counted and reported, never silently ignored.
 func TestRealConversationAccounting(t *testing.T) {
 	for _, snap := range snapshots(t) {
@@ -554,7 +554,7 @@ func TestRealConversationAccounting(t *testing.T) {
 	}
 }
 
-// conversationAccounting compares the reference's conversation counts with teamscrawl's for one
+// conversationAccounting compares the reference's conversation counts with m365crawl's for one
 // snapshot. It returns log lines and the problems found. Counts only; no record content.
 func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
 	superseded := rc.Conversations.RecordVersions - rc.Conversations.DistinctKeys
@@ -573,9 +573,9 @@ func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
 		fmt.Sprintf("  mapped under a different id than the record key: %d", us.keyMismatches),
 		fmt.Sprintf("  mapped as conversations: %d (reference newest live: %d)", len(us.convIDs), rc.Conversations.LatestLive))
 	droppedFromRef := missing(rc.Hashes.Conversations, us.convIDs)
-	notes = append(notes, fmt.Sprintf("  reference conversations teamscrawl does not map (genuinely dropped): %d", droppedFromRef))
+	notes = append(notes, fmt.Sprintf("  reference conversations m365crawl does not map (genuinely dropped): %d", droppedFromRef))
 
-	// Conversations teamscrawl maps that the reference lacks are justified only when the record
+	// Conversations m365crawl maps that the reference lacks are justified only when the record
 	// is one the reference could not decode.
 	ref := toSet(rc.Hashes.Conversations)
 	extra, extraInRefFailed := 0, 0
@@ -588,7 +588,7 @@ func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
 			extraInRefFailed++
 		}
 	}
-	notes = append(notes, fmt.Sprintf("  teamscrawl-only conversations: %d, of which in %d records the reference could not decode: %d", extra, len(refFailed), extraInRefFailed))
+	notes = append(notes, fmt.Sprintf("  m365crawl-only conversations: %d, of which in %d records the reference could not decode: %d", extra, len(refFailed), extraInRefFailed))
 
 	if want := rc.Conversations.RecordVersions + rc.Undecodable.ConversationVersions; us.rawVersions != want {
 		problems = append(problems, fmt.Sprintf("LevelDB reader sees %d conversation record versions, reference %d plus %d it could not decode", us.rawVersions, rc.Conversations.RecordVersions, rc.Undecodable.ConversationVersions))
@@ -597,9 +597,9 @@ func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
 		problems = append(problems, fmt.Sprintf("%d reference conversations are not mapped", droppedFromRef))
 	}
 	if extra != extraInRefFailed {
-		problems = append(problems, fmt.Sprintf("teamscrawl maps %d conversations the reference does not have and could not explain by records it failed to decode", extra-extraInRefFailed))
+		problems = append(problems, fmt.Sprintf("m365crawl maps %d conversations the reference does not have and could not explain by records it failed to decode", extra-extraInRefFailed))
 	}
-	// The reference never sees a teamscrawl-only conversation, so it is outside this identity.
+	// The reference never sees a m365crawl-only conversation, so it is outside this identity.
 	accounted := superseded + rc.Conversations.LatestTombstoned + undecodable + us.keyMismatches + len(us.convIDs) - extraInRefFailed
 	if accounted != rc.Conversations.RecordVersions {
 		problems = append(problems, fmt.Sprintf("%d of %d conversation record versions are unaccounted for", rc.Conversations.RecordVersions-accounted, rc.Conversations.RecordVersions))
@@ -607,9 +607,9 @@ func conversationAccounting(rc refCounts, us ours) (problems, notes []string) {
 	return problems, notes
 }
 
-// TestRealVolumes compares teamscrawl's counts with the reference decoder's on the same
+// TestRealVolumes compares m365crawl's counts with the reference decoder's on the same
 // snapshot. The reference counts only the newest version of each record and drops tombstones
-// (superseded versions and deletions are correct to omit); teamscrawl must map at least 99% of
+// (superseded versions and deletions are correct to omit); m365crawl must map at least 99% of
 // that. It then checks the archive built from the live cache holds at least 99% too.
 func TestRealVolumes(t *testing.T) {
 	var refConvs, refMsgs, ourConvs, ourMsgs int
@@ -621,7 +621,7 @@ func TestRealVolumes(t *testing.T) {
 		ourConvs += len(us.convIDs) - missing(keys(us.convIDs), toSet(rc.Hashes.Conversations))
 		ourMsgs += messageAccounting(t, rc, us)
 	}
-	t.Logf("reference (newest live versions): conversations=%d messages=%d; teamscrawl matching: conversations=%d messages=%d", refConvs, refMsgs, ourConvs, ourMsgs)
+	t.Logf("reference (newest live versions): conversations=%d messages=%d; m365crawl matching: conversations=%d messages=%d", refConvs, refMsgs, ourConvs, ourMsgs)
 	atLeast99(t, "conversations", ourConvs, refConvs)
 	atLeast99(t, "messages", ourMsgs, refMsgs)
 
@@ -637,10 +637,10 @@ func TestRealVolumes(t *testing.T) {
 	atLeast99(t, "archive messages", archMsgs, refMsgs)
 }
 
-// messageAccounting compares teamscrawl's messages with the reference's. Reference messages that
-// teamscrawl lacks are defects. Messages only teamscrawl has are fine when they sit in a record
+// messageAccounting compares m365crawl's messages with the reference's. Reference messages that
+// m365crawl lacks are defects. Messages only m365crawl has are fine when they sit in a record
 // the reference could not decode (ccl_chromium_reader fails on a few large blob-backed values
-// that teamscrawl reads); any other difference is a defect.
+// that m365crawl reads); any other difference is a defect.
 func messageAccounting(t *testing.T, rc refCounts, us ours) (matching int) {
 	t.Helper()
 	ref := toSet(rc.Hashes.Messages)
@@ -665,13 +665,13 @@ func messageAccounting(t *testing.T, rc refCounts, us ours) (matching int) {
 			}
 		}
 	}
-	t.Logf("messages: reference %d, teamscrawl %d; reference messages teamscrawl lacks: %d; teamscrawl-only: %d, of which in %d records the reference could not decode: %d",
+	t.Logf("messages: reference %d, m365crawl %d; reference messages m365crawl lacks: %d; m365crawl-only: %d, of which in %d records the reference could not decode: %d",
 		len(ref), len(us.messages), lacking, extra, len(refFailed), extraInRefFailed)
 	if lacking != 0 {
-		t.Errorf("teamscrawl lacks %d messages the reference has", lacking)
+		t.Errorf("m365crawl lacks %d messages the reference has", lacking)
 	}
 	if extra != extraInRefFailed {
-		t.Errorf("%d teamscrawl-only messages are not explained by records the reference could not decode", extra-extraInRefFailed)
+		t.Errorf("%d m365crawl-only messages are not explained by records the reference could not decode", extra-extraInRefFailed)
 	}
 	return len(ref) - lacking
 }

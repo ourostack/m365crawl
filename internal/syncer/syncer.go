@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Options configure one sync.
@@ -26,7 +26,7 @@ type Options struct {
 	// Progress receives one human-readable line per source; nil discards them.
 	Progress io.Writer
 	// FullRead reads every record of every source in full, instead of skipping the records whose
-	// bytes are unchanged since the last committed sync (also: TEAMSCRAWL_FULL_READ=1). It does
+	// bytes are unchanged since the last committed sync (also: M365CRAWL_FULL_READ=1). It does
 	// not stop at the fingerprint shortcut either: a source whose files have not changed since
 	// the last sync is read in full too, so the check works exactly when the cache is stable.
 	// The archive comes out the same either way; this is the check, not a repair. The read

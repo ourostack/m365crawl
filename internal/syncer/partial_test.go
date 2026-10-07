@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // failNthSource makes the n-th source that reaches its snapshot fail with a coded error while it
@@ -56,7 +56,7 @@ func TestPartialSyncKeepsTheCommittedSourcesChanges(t *testing.T) {
 	codedErr(t, err, errs.CodePartialSync)
 	var coded *errs.Coded
 	_ = errors.As(err, &coded)
-	if coded.Exit != errs.ExitRuntime || !strings.Contains(coded.Message, "https_teams.microsoft.com_0") || !strings.Contains(coded.Message, errs.CodeStoreMissing) || !strings.Contains(coded.Fix, "teamscrawl doctor") {
+	if coded.Exit != errs.ExitRuntime || !strings.Contains(coded.Message, "https_teams.microsoft.com_0") || !strings.Contains(coded.Message, errs.CodeStoreMissing) || !strings.Contains(coded.Fix, "m365crawl doctor") {
 		t.Fatalf("partial error: %+v", coded)
 	}
 	if rep.Status != StatusPartial || len(rep.Sources) != 2 {

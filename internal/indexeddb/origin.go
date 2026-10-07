@@ -16,7 +16,7 @@
 package indexeddb
 
 import (
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 )
 
 // kv is the read-only view of the LevelDB the package needs.

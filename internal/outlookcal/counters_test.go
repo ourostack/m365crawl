@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 )
 
 func TestCancelledSubjectCounters(t *testing.T) {

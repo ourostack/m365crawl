@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 const (
 	// snapshotPrefix is the same prefix the Teams snapshot uses, so
 	// teamsdesktop.SweepStaleSnapshots also removes leftovers of a killed Outlook copy.
-	snapshotPrefix = "teamscrawl-snapshot-"
+	snapshotPrefix = "m365crawl-snapshot-"
 
 	// SnapshotAttempts is how many times Snapshot copies a store that keeps changing before it
 	// gives up with a *StoreBusyError.

@@ -23,7 +23,7 @@ for name in TAG APPLE_TEAM_ID; do
 done
 [[ "$TAG" != *-* ]] || fail "$TAG is a prerelease; prereleases never reach the tap"
 version="${TAG#v}"
-cask="ourostack/tap/teamscrawl"
+cask="ourostack/tap/m365crawl"
 
 brew tap ourostack/tap
 deadline=$((SECONDS + ${POLL_TIMEOUT_MINUTES:-10} * 60))
@@ -38,7 +38,7 @@ while :; do
 done
 
 brew install --cask "$cask"
-bin="$(realpath "$(brew --prefix)/bin/teamscrawl")"
+bin="$(realpath "$(brew --prefix)/bin/m365crawl")"
 got="$("$bin" --json version | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
 [[ "$got" == "$version" ]] || fail "installed version is '$got', expected '$version'"
 "$here/sign-notarize.sh" --verify "$bin"

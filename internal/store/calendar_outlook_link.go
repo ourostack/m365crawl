@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // joinAddresses is the stored form of a profile's addresses: lower case, distinct, sorted, one per line.

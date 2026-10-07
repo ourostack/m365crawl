@@ -4,8 +4,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
-	"github.com/ourostack/teamscrawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
 )
 
 // FakeRecord is one record of a scripted generic object store: the key and the value bytes.

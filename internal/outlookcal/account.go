@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore"
 )
 
 // The account object (docs/outlook-store.md): the record of an account signed in to the profile.

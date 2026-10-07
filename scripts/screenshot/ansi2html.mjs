@@ -1,4 +1,4 @@
-// Converts the SGR subset teamscrawl emits (reset, bold, dim, 16-color foregrounds,
+// Converts the SGR subset m365crawl emits (reset, bold, dim, 16-color foregrounds,
 // 38;5;n and 38;2;r;g;b) to HTML spans.
 const PALETTE = { 31: '#f7768e', 32: '#9ece6a', 33: '#e0af68', 36: '#7dcfff' };
 

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata/teams-fixture/expected/*.json")

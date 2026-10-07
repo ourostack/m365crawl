@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 // GeneratorVersion changes whenever the fixture's content changes on purpose.

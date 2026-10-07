@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // snap applies one source's snapshot for one account at the given time (all of November 2026).

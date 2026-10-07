@@ -335,9 +335,9 @@ func randomCopy(t *testing.T, r *rand.Rand) Event {
 	return e
 }
 
-// sweepSize is n sets, or many more with TEAMSCRAWL_SWEEP set (a local soak, not run in CI).
+// sweepSize is n sets, or many more with M365CRAWL_SWEEP set (a local soak, not run in CI).
 func sweepSize(n int) int {
-	if os.Getenv("TEAMSCRAWL_SWEEP") != "" {
+	if os.Getenv("M365CRAWL_SWEEP") != "" {
 		return n * 40
 	}
 	return n

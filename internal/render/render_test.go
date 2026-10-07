@@ -80,10 +80,10 @@ func TestBannerWidthAndFallback(t *testing.T) {
 
 func fakeChecks() []Check {
 	return []Check{
-		{Name: "config", Detail: "/home/u/.config/teamscrawl/config.toml", Status: OK},
+		{Name: "config", Detail: "/home/u/.config/m365crawl/config.toml", Status: OK},
 		{Name: "cache", Detail: "Edge profile Default, 2 accounts", Status: OK},
 		{Name: "full disk access", Detail: "cache not readable", Fix: "grant Full Disk Access to your terminal", Status: Fail},
-		{Name: "archive age", Detail: "last sync 3d ago", Fix: "run: teamscrawl sync", Status: Warn},
+		{Name: "archive age", Detail: "last sync 3d ago", Fix: "run: m365crawl sync", Status: Warn},
 		{Name: "fts", Detail: "", Status: OK},
 	}
 }

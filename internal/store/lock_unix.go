@@ -8,7 +8,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // flock is syscall.Flock; tests replace it to force a failure other than contention.
@@ -28,7 +28,7 @@ func AcquireLock(dbPath string) (release func(), err error) {
 	if err := flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return nil, errs.Locked("another teamscrawl run holds the archive lock " + lockPath(dbPath))
+			return nil, errs.Locked("another m365crawl run holds the archive lock " + lockPath(dbPath))
 		}
 		return nil, errs.DBError(err)
 	}

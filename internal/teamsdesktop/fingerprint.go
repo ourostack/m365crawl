@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 // DecoderVersion is part of every fingerprint. Bump it whenever decoding or mapping output

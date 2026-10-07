@@ -11,10 +11,10 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
-	"github.com/ourostack/teamscrawl/internal/render"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/render"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // displayZone is the zone text output shows times in; tests pin it.
@@ -128,7 +128,7 @@ func (rt *runtime) renderText(label string, v any) error {
 			rows = append(rows, []string{name, a.TenantID, a.UserID, stamp(a.LastSyncedAt)})
 		}
 		if len(rows) == 0 {
-			_, _ = fmt.Fprintln(w, "no accounts archived yet; run teamscrawl sync")
+			_, _ = fmt.Fprintln(w, "no accounts archived yet; run m365crawl sync")
 		} else {
 			render.Table(w, []string{"name", "tenant", "user", "last synced"}, rows, color)
 			_, _ = fmt.Fprintln(w)
@@ -173,7 +173,7 @@ func (rt *runtime) statusBlock(title string, r *statusResult) {
 			m["outlook"] = r.Outlook.Code + ": " + r.Outlook.Message
 		}
 		render.Block(w, title, m, rt.color)
-		_, _ = fmt.Fprintln(w, "run teamscrawl sync to create it")
+		_, _ = fmt.Fprintln(w, "run m365crawl sync to create it")
 		return
 	}
 	m := map[string]any{"archive_path": r.ArchivePath, "schema_version": r.SchemaVersion, "fts_present": r.FTSPresent}
@@ -428,7 +428,7 @@ func outlookOnlyNote(sources, unknown []string) string {
 func (rt *runtime) eventBlock(r *eventResult) {
 	w, color, ev := rt.stdout, rt.color, r.event
 	if ev == nil {
-		_, _ = fmt.Fprintln(w, "no calendar event to show: the archive has no calendar yet; run teamscrawl sync")
+		_, _ = fmt.Fprintln(w, "no calendar event to show: the archive has no calendar yet; run m365crawl sync")
 		metaLines(w, r.meta, color)
 		return
 	}

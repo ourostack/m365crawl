@@ -102,7 +102,7 @@ verify_quarantined() {
 # created once under a mkdir lock and reused by later calls.
 prepare_keychain() {
   local base="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-  base="${base%/}/teamscrawl-signing"
+  base="${base%/}/m365crawl-signing"
   mkdir -p "$base"
   local lock="$base/lock" waited=0
   until mkdir "$lock" 2>/dev/null; do
@@ -182,7 +182,7 @@ if [[ "$1" == "--verify" ]]; then
   exit 0
 fi
 echo "Executable=/stub" >&2
-echo "Identifier=teamscrawl" >&2
+echo "Identifier=m365crawl" >&2
 echo "CodeDirectory v=20500 size=1 flags=${STUB_FLAGS:-0x10000(runtime)} hashes=1 location=embedded" >&2
 echo "Authority=${STUB_AUTHORITY:-Developer ID Application: Stub (TEAMID)}" >&2
 [[ "${STUB_TIMESTAMP:-yes}" == "yes" ]] && echo "Timestamp=Oct 1, 2026 at 12:00:00" >&2
@@ -324,7 +324,7 @@ prepare_keychain
 echo "==> Developer ID signing $BINARY"
 codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" --sign "$APPLE_DEVELOPER_ID_CERTIFICATE_IDENTITY" "$BINARY"
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/teamscrawl-notary.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/m365crawl-notary.XXXXXX")"
 trap 'rm -f "$work/notary.zip"; rmdir "$work" 2>/dev/null || true' EXIT
 echo "==> Submitting to Apple notary service"
 ditto -c -k "$BINARY" "$work/notary.zip"

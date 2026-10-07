@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/v8"
+	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 func TestFirstDifference(t *testing.T) {

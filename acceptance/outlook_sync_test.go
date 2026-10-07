@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // The syncs of the Outlook checks. They run once, in a fixed order, and every Outlook check reads
@@ -91,7 +91,7 @@ var (
 	outlookErr  string
 )
 
-const snapshotDirPrefix = "teamscrawl-snapshot-"
+const snapshotDirPrefix = "m365crawl-snapshot-"
 
 func namesIn(dir string) []string {
 	ents, _ := os.ReadDir(dir)

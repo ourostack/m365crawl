@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamscal"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamscal"
 )
 
 // The Teams calendar checks (plan-calendar-teams.md, "Real-cache acceptance"). They run against the
-// calendar, catch-up and recap stores of the Teams root (TEAMSCRAWL_TEAMS_ROOT, or the default),
+// calendar, catch-up and recap stores of the Teams root (M365CRAWL_TEAMS_ROOT, or the default),
 // synced once into a scratch archive. They log counts, field names, zone labels and durations only:
 // never a subject, name, address, URL, id or body. A check fails only where its text says it must
 // (every record maps, field parity, no redacted join URL, append-only); the others report.

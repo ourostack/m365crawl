@@ -10,7 +10,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 func TestVersionCommand(t *testing.T) {

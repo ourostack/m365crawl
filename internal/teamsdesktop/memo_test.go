@@ -14,7 +14,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
 )
 
 // changesSignature applies change to the live rule tables, reports whether the signature moved,

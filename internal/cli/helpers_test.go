@@ -29,14 +29,14 @@ func newEnv(t *testing.T) *env {
 	t.Setenv("TMPDIR", tmp)
 	t.Setenv("TMP", tmp)
 	t.Setenv("TEMP", tmp)
-	t.Setenv("TEAMSCRAWL_MAX_AGE", "")
-	t.Setenv("TEAMSCRAWL_DB", "")
-	t.Setenv("TEAMSCRAWL_TEAMS_ROOT", "")
+	t.Setenv("M365CRAWL_MAX_AGE", "")
+	t.Setenv("M365CRAWL_DB", "")
+	t.Setenv("M365CRAWL_TEAMS_ROOT", "")
 	root, err := filepath.Abs(fixtureRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, root: root, db: filepath.Join(t.TempDir(), "data", "teamscrawl.db")}
+	return &env{t: t, root: root, db: filepath.Join(t.TempDir(), "data", "m365crawl.db")}
 }
 
 // run invokes Main in-process with the env's root and db; stdout is a buffer, so it is not a TTY.

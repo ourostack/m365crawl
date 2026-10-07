@@ -1,6 +1,6 @@
 # Coverage allow-lists
 
-`make coverage` requires every function in `internal/...` to be 100% statement-covered by `go test`. It runs `scripts/check-coverage.sh`, and the CI `coverage` job keeps that 100% function rule on macOS. `scripts/check-coverage.ps1` is the additive Windows companion gate used by the CI `coverage-windows` job: it runs `go test -coverprofile` on Windows and fails unless every Windows-only file shows executed coverage. The e2e and acceptance build tags do not count, and neither do `cmd/teamscrawl`, `scripts/...`, `acceptance` and `e2e`, which the Unix gate leaves out. Go measures statements only, so statement coverage is the measure.
+`make coverage` requires every function in `internal/...` to be 100% statement-covered by `go test`. It runs `scripts/check-coverage.sh`, and the CI `coverage` job keeps that 100% function rule on macOS. `scripts/check-coverage.ps1` is the additive Windows companion gate used by the CI `coverage-windows` job: it runs `go test -coverprofile` on Windows and fails unless every Windows-only file shows executed coverage. The e2e and acceptance build tags do not count, and neither do `cmd/m365crawl`, `scripts/...`, `acceptance` and `e2e`, which the Unix gate leaves out. Go measures statements only, so statement coverage is the measure.
 
 A function may be carved out only through a file here, one file per Go package, named after the package path with `/` replaced by `-` (for example `internal/leveldb` is `internal-leveldb.txt`). One entry per line:
 

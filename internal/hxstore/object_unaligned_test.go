@@ -3,7 +3,7 @@ package hxstore
 import (
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore/hxbuild"
+	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 )
 
 // TestStringAtUnaligned reads text that starts at an odd offset, the way the

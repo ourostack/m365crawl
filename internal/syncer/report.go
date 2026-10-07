@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // Report statuses.
@@ -18,11 +18,11 @@ const (
 	StatusFailed  = "failed"
 	kindMessage   = "message"
 	kindActivity  = "activity"
-	testPauseEnv  = "TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
+	testPauseEnv  = "M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT"
 	// testPauseStubbornEnv=1 makes that pause ignore cancellation (the e2e test of the forced exit).
-	testPauseStubbornEnv = "TEAMSCRAWL_TEST_PAUSE_IGNORES_CANCEL"
+	testPauseStubbornEnv = "M365CRAWL_TEST_PAUSE_IGNORES_CANCEL"
 	// testPauseMarker is the stderr line printed when the test pause starts (e2e tests wait for it).
-	testPauseMarker    = "teamscrawl-test: paused after snapshot"
+	testPauseMarker    = "m365crawl-test: paused after snapshot"
 	staleSnapshotAfter = time.Hour
 )
 

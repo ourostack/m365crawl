@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // Item shapes. JSON names are snake_case and stable; optional fields are omitted when empty.
@@ -378,14 +378,14 @@ func badLink(why string) *errs.Coded {
 // sqlUsage is a usage error for sql that says why the archive rejects writes.
 func sqlUsage(msg string) *errs.Coded {
 	c := errs.Usage(msg)
-	c.Fix = "The archive is read-only by design. Run `teamscrawl sql --help`; sql accepts one SELECT, WITH, EXPLAIN or VALUES statement."
+	c.Fix = "The archive is read-only by design. Run `m365crawl sql --help`; sql accepts one SELECT, WITH, EXPLAIN or VALUES statement."
 	return c
 }
 
 // sqlEngineError is a usage error for a query SQLite itself rejected (a typo, a missing table).
 func sqlEngineError(err error) *errs.Coded {
 	c := errs.Usage("sql: " + err.Error())
-	c.Fix = "Fix the query. List the tables with `teamscrawl sql \"select name from sqlite_master where type = 'table'\"` and a table's columns with `teamscrawl sql \"select name from pragma_table_info('messages')\"`."
+	c.Fix = "Fix the query. List the tables with `m365crawl sql \"select name from sqlite_master where type = 'table'\"` and a table's columns with `m365crawl sql \"select name from pragma_table_info('messages')\"`."
 	return c
 }
 
@@ -562,7 +562,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 // --- sync, status, whoami, sql ---
 
 type syncCmd struct {
-	FullRead bool `name:"full-read" env:"TEAMSCRAWL_FULL_READ" help:"Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair."`
+	FullRead bool `name:"full-read" env:"M365CRAWL_FULL_READ" help:"Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair."`
 }
 
 func (c syncCmd) Run(rt *runtime) error {

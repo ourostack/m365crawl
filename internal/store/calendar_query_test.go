@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 const (
@@ -267,7 +267,7 @@ func TestCalendarEventUsageErrors(t *testing.T) {
 	ctx := context.Background()
 	_, err := s.CalendarEvent(ctx, nil, "ev_nothing")
 	var c *errs.Coded
-	if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "teamscrawl calendar") {
+	if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "m365crawl calendar") {
 		t.Fatalf("%v", err)
 	}
 	_, err = s.CalendarEvent(ctx, nil, "uid-")

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 func mentionKinds(t *testing.T, its []map[string]any) map[string]int {
@@ -199,7 +199,7 @@ func TestUnknownTeamErrorPointsAtTeams(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	code, _, stderr := e.run("--max-age", "0", "messages", "--team", "no such team")
-	if code != errs.ExitUsage || !strings.Contains(errorOf(t, stderr)["fix"].(string), "teamscrawl teams") {
+	if code != errs.ExitUsage || !strings.Contains(errorOf(t, stderr)["fix"].(string), "m365crawl teams") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 }
@@ -249,7 +249,7 @@ func TestUnreadSince(t *testing.T) {
 	}
 }
 
-var notice = regexp.MustCompile(`(?m)^teamscrawl: syncing — (.+)$`)
+var notice = regexp.MustCompile(`(?m)^m365crawl: syncing — (.+)$`)
 
 func TestImplicitSyncNotice(t *testing.T) {
 	e := newEnv(t)
@@ -299,7 +299,7 @@ func TestImplicitSyncNotice(t *testing.T) {
 	if m := notice.FindStringSubmatch(stderr); m == nil || m[1] != "archive is 1m old (max-age 1m)" {
 		t.Fatalf("text stderr = %q", stderr)
 	}
-	if strings.Contains(stdout, "teamscrawl: syncing") {
+	if strings.Contains(stdout, "m365crawl: syncing") {
 		t.Fatalf("text stdout: %s", stdout)
 	}
 }
@@ -316,7 +316,7 @@ func TestImplicitSyncNoticeFormats(t *testing.T) {
 		{0, 15 * time.Minute, "no complete sync yet (max-age 15m)"},
 		{500 * time.Millisecond, time.Millisecond, "archive is 0s old (max-age 1ms)"},
 	} {
-		if got := syncNotice(tc.age, tc.max); got != "teamscrawl: syncing — "+tc.want {
+		if got := syncNotice(tc.age, tc.max); got != "m365crawl: syncing — "+tc.want {
 			t.Errorf("syncNotice(%v, %v) = %q", tc.age, tc.max, got)
 		}
 	}

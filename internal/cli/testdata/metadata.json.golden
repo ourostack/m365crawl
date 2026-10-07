@@ -1,20 +1,20 @@
 {
   "schema_version": "crawlkit.control.v1",
-  "id": "teamscrawl",
-  "display_name": "teamscrawl",
+  "id": "m365crawl",
+  "display_name": "m365crawl",
   "description": "Mirrors the Microsoft Teams desktop app's local cache, and optionally the new Outlook for Mac's calendar, into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and a calendar with meeting recaps, so an AI agent can read your Teams history and agenda in milliseconds, offline and read-only.",
   "binary": {
-    "name": "teamscrawl"
+    "name": "m365crawl"
   },
   "branding": {},
   "paths": {
-    "config_env": "TEAMSCRAWL_DB",
-    "default_database": "~/.teamscrawl/teamscrawl.db"
+    "config_env": "M365CRAWL_DB",
+    "default_database": "~/.m365crawl/m365crawl.db"
   },
   "commands": {
     "calendar": {
       "argv": [
-        "teamscrawl",
+        "m365crawl",
         "--json",
         "calendar"
       ],
@@ -22,7 +22,7 @@
     },
     "doctor": {
       "argv": [
-        "teamscrawl",
+        "m365crawl",
         "--json",
         "doctor"
       ],
@@ -30,7 +30,7 @@
     },
     "search": {
       "argv": [
-        "teamscrawl",
+        "m365crawl",
         "--json",
         "search"
       ],
@@ -38,7 +38,7 @@
     },
     "status": {
       "argv": [
-        "teamscrawl",
+        "m365crawl",
         "--json",
         "status"
       ],
@@ -46,7 +46,7 @@
     },
     "sync": {
       "argv": [
-        "teamscrawl",
+        "m365crawl",
         "--json",
         "sync"
       ],

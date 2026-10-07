@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const fixtureRoot = "../../testdata/teams-fixture/EBWebView"
@@ -37,7 +37,7 @@ const (
 	fixtureRecords = 60
 )
 
-func newDB(t *testing.T) string { return filepath.Join(t.TempDir(), "data", "teamscrawl.db") }
+func newDB(t *testing.T) string { return filepath.Join(t.TempDir(), "data", "m365crawl.db") }
 
 // isolateTmp points snapshots at a private temp dir so leaks are detectable.
 func isolateTmp(t *testing.T) string {
@@ -56,7 +56,7 @@ func setTempDirEnv(t *testing.T, tmp string) {
 
 func snapshotDirs(t *testing.T, tmp string) []string {
 	t.Helper()
-	m, err := filepath.Glob(filepath.Join(tmp, "teamscrawl-snapshot-*"))
+	m, err := filepath.Glob(filepath.Join(tmp, "m365crawl-snapshot-*"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ var syncedTemplate struct {
 func syncedStart(t *testing.T) (root, db string) {
 	t.Helper()
 	syncedTemplate.Do(func() {
-		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db")})
+		_, _, syncedTemplate.err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: filepath.Join(syncedTemplate.dir, "data", "m365crawl.db")})
 	})
 	if syncedTemplate.err != nil {
 		t.Fatalf("syncing the fixture once: %v", syncedTemplate.err)
@@ -162,7 +162,7 @@ func syncedStart(t *testing.T) (root, db string) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "data", "teamscrawl.db*"))
+	files, err := filepath.Glob(filepath.Join(syncedTemplate.dir, "data", "m365crawl.db*"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("template archive: %v %v", files, err)
 	}
@@ -171,7 +171,7 @@ func syncedStart(t *testing.T) (root, db string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(db+strings.TrimPrefix(filepath.Base(f), "teamscrawl.db"), b, 0o600); err != nil { //nolint:gosec // G703: a copy into a temp dir
+		if err := os.WriteFile(db+strings.TrimPrefix(filepath.Base(f), "m365crawl.db"), b, 0o600); err != nil { //nolint:gosec // G703: a copy into a temp dir
 			t.Fatal(err)
 		}
 	}
@@ -179,7 +179,7 @@ func syncedStart(t *testing.T) (root, db string) {
 }
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "teamscrawl-syncer-template-")
+	dir, err := os.MkdirTemp("", "m365crawl-syncer-template-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -478,7 +478,7 @@ func TestFailedRunRecorded(t *testing.T) {
 func TestPauseHookAndCancel(t *testing.T) {
 	tmp := isolateTmp(t)
 	db := newDB(t)
-	t.Setenv("TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "150ms")
+	t.Setenv("M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "150ms")
 	start := time.Now()
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	if time.Since(start) < 150*time.Millisecond {
@@ -486,7 +486,7 @@ func TestPauseHookAndCancel(t *testing.T) {
 	}
 
 	// A cancelled run stops during the pause, removes its snapshot and records a failure.
-	t.Setenv("TEAMSCRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "30s")
+	t.Setenv("M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT", "30s")
 	// Cancel on the observable signal (the pause marker on stderr), not after a wall-clock delay:
 	// under load a fixed deadline can expire before the run ever reaches the pause.
 	paused := captureStderrMarker(t, testPauseMarker)
@@ -541,7 +541,7 @@ func captureStderrMarker(t *testing.T, marker string) <-chan struct{} {
 
 func TestSweepsStaleSnapshots(t *testing.T) {
 	tmp := isolateTmp(t)
-	stale := filepath.Join(tmp, "teamscrawl-snapshot-stale")
+	stale := filepath.Join(tmp, "m365crawl-snapshot-stale")
 	if err := os.MkdirAll(stale, 0o700); err != nil {
 		t.Fatal(err)
 	}

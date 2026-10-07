@@ -28,7 +28,7 @@ func TestMetadataParsesAsManifest(t *testing.T) {
 		if err := json.Unmarshal([]byte(stdout), &m); err != nil {
 			t.Fatalf("%v: not a manifest: %v\n%s", args, err, stdout)
 		}
-		if m.ID != "teamscrawl" || !m.Commands["sync"].Mutates {
+		if m.ID != "m365crawl" || !m.Commands["sync"].Mutates {
 			t.Fatalf("%v: manifest = %+v", args, m)
 		}
 		if m.Commands["status"].Mutates || !m.Commands["status"].JSON {
@@ -39,7 +39,7 @@ func TestMetadataParsesAsManifest(t *testing.T) {
 
 func TestMetadataCommandsResolve(t *testing.T) {
 	for name, c := range manifest().Commands {
-		if len(c.Argv) < 2 || c.Argv[0] != "teamscrawl" {
+		if len(c.Argv) < 2 || c.Argv[0] != "m365crawl" {
 			t.Fatalf("%s: argv = %v", name, c.Argv)
 		}
 		var app cliApp

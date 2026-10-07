@@ -85,7 +85,7 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	e.db = filepath.Join(base, "archive", "teamscrawl.db")
+	e.db = filepath.Join(base, "archive", "m365crawl.db")
 	return e
 }
 
@@ -96,19 +96,19 @@ func (e *env) localAppData() string { return filepath.Join(e.home, "AppData", "L
 
 func (e *env) defaultArchivePath() string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(e.localAppData(), "teamscrawl", "teamscrawl.db")
+		return filepath.Join(e.localAppData(), "m365crawl", "m365crawl.db")
 	}
-	return filepath.Join(e.home, ".teamscrawl", "teamscrawl.db")
+	return filepath.Join(e.home, ".m365crawl", "m365crawl.db")
 }
 
 // environ is the process environment for a run: inherited, minus anything that would change
-// teamscrawl's behavior, plus the isolated home and temp roots. extra entries win.
+// m365crawl's behavior, plus the isolated home and temp roots. extra entries win.
 func (e *env) environ(extra ...string) []string {
 	var out []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch {
-		case strings.HasPrefix(k, "TEAMSCRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA":
+		case strings.HasPrefix(k, "M365CRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA":
 			continue
 		}
 		out = append(out, kv)
@@ -263,10 +263,10 @@ func wantError(t *testing.T, res result, exit int, code string) map[string]any {
 	return e
 }
 
-// snapshots lists teamscrawl-snapshot-* directories left in dir.
+// snapshots lists m365crawl-snapshot-* directories left in dir.
 func snapshots(t *testing.T, dir string) []string {
 	t.Helper()
-	m, err := filepath.Glob(filepath.Join(dir, "teamscrawl-snapshot-*"))
+	m, err := filepath.Glob(filepath.Join(dir, "m365crawl-snapshot-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

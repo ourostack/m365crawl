@@ -8,7 +8,7 @@ import (
 
 // The embedded guide is the repository's SKILL.md, printed raw in every output mode.
 func TestSkillPrintsTheEmbeddedGuide(t *testing.T) {
-	want, err := os.ReadFile("../../.agents/skills/teamscrawl/SKILL.md")
+	want, err := os.ReadFile("../../.agents/skills/m365crawl/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
 	}

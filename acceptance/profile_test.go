@@ -20,7 +20,7 @@ import (
 //	heap-at-outlook-peak.pprof     heap profile taken when the live heap was largest during it
 //	                               (sample indexes inuse_space and alloc_space are both in the file:
 //	                               go tool pprof -sample_index=inuse_space heap-at-outlook-peak.pprof)
-const profileEnv = "TEAMSCRAWL_ACCEPTANCE_PROFILE"
+const profileEnv = "M365CRAWL_ACCEPTANCE_PROFILE"
 
 // profileSampleEvery is how often the live heap is read to find the peak.
 const profileSampleEvery = 20 * time.Millisecond

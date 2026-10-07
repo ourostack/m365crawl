@@ -13,7 +13,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 	"golang.org/x/sys/windows"
 )
 
@@ -293,5 +293,5 @@ func isDefaultArchiveDir(parent string) bool {
 		}
 		base = filepath.Join(home, "AppData", "Local")
 	}
-	return strings.EqualFold(absPath(parent), absPath(filepath.Join(base, "teamscrawl")))
+	return strings.EqualFold(absPath(parent), absPath(filepath.Join(base, "m365crawl")))
 }

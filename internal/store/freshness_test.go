@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func twoAccountStore(t *testing.T) *Store {
@@ -155,7 +155,7 @@ func TestCheckTeam(t *testing.T) {
 	s := newStore(t)
 	err := s.CheckTeam(ctx, nil, "nothing")
 	var c *errs.Coded
-	if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "teamscrawl sync") {
+	if !errors.As(err, &c) || c.Code != errs.CodeUsage || !strings.Contains(c.Fix, "m365crawl sync") {
 		t.Fatalf("unknown team: %v", err)
 	}
 	team := conv(acctA, "19:t@thread.v2", "Space", "Alpha team")

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/hxstore"
 )
 
 // committedDir is the committed fixture, from this package's directory.

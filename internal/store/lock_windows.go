@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/errs"
 	"golang.org/x/sys/windows"
 )
 
@@ -29,7 +29,7 @@ func AcquireLock(dbPath string) (release func(), err error) {
 	if err := lockFileEx(f); err != nil {
 		_ = f.Close()
 		if isLockContention(err) {
-			return nil, errs.Locked("another teamscrawl run holds the archive lock " + lockPath(dbPath))
+			return nil, errs.Locked("another m365crawl run holds the archive lock " + lockPath(dbPath))
 		}
 		return nil, errs.DBError(err)
 	}

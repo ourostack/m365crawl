@@ -3,7 +3,7 @@ package outlookcal
 import (
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/teamscal"
+	"github.com/ourostack/m365crawl/internal/teamscal"
 )
 
 // windowsZones maps the Windows zone-name strings the event object holds (+780) to IANA

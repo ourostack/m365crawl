@@ -12,8 +12,8 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // garbageArchive writes a file that is not a SQLite database where the env's archive lives.
@@ -81,9 +81,9 @@ func TestSetupNeedsAHomeDirectoryWhenNoDatabaseIsGiven(t *testing.T) {
 	t.Setenv("USERPROFILE", filepath.Join(string(filepath.Separator), "Users", "someone"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(string(filepath.Separator), "Users", "someone", "AppData", "Local"))
 	rt, err := setupRuntime(t, Globals{}, false)
-	want := filepath.Join(string(filepath.Separator), "home", "someone", ".teamscrawl", "teamscrawl.db")
+	want := filepath.Join(string(filepath.Separator), "home", "someone", ".m365crawl", "m365crawl.db")
 	if goruntime.GOOS == "windows" {
-		want = filepath.Join(string(filepath.Separator), "Users", "someone", "AppData", "Local", "teamscrawl", "teamscrawl.db")
+		want = filepath.Join(string(filepath.Separator), "Users", "someone", "AppData", "Local", "m365crawl", "m365crawl.db")
 	}
 	if err != nil || rt.dbPath != want {
 		t.Fatalf("dbPath = %q, err = %v", rt.dbPath, err)
@@ -98,9 +98,9 @@ func TestRuntimeDefaultArchivePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupRuntime: %v", err)
 	}
-	want := filepath.Join(string(filepath.Separator), "home", "someone", ".teamscrawl", "teamscrawl.db")
+	want := filepath.Join(string(filepath.Separator), "home", "someone", ".m365crawl", "m365crawl.db")
 	if goruntime.GOOS == "windows" {
-		want = filepath.Join(string(filepath.Separator), "Users", "someone", "AppData", "Local", "teamscrawl", "teamscrawl.db")
+		want = filepath.Join(string(filepath.Separator), "Users", "someone", "AppData", "Local", "m365crawl", "m365crawl.db")
 	}
 	if rt.dbPath != want {
 		t.Fatalf("dbPath = %q, want %q", rt.dbPath, want)

@@ -52,7 +52,7 @@ Get-Content $profile | Select-Object -Skip 1 | ForEach-Object {
     }
     $path = ($parts[0] -split ':')[0]
     $count = [int]$parts[-1]
-    if ($path -match 'github\.com/ourostack/teamscrawl/(?<rel>internal/.+)$' -and $count -gt 0) {
+    if ($path -match 'github\.com/ourostack/m365crawl/(?<rel>internal/.+)$' -and $count -gt 0) {
         $coveredFiles[$Matches.rel] = $true
     }
 }

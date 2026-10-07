@@ -22,7 +22,7 @@ const accounts = [
 
 function fail(msg) { console.error('FIXTURE GENERATION FAILED: ' + msg); process.exit(1); }
 
-const tmp = await mkdtemp(path.join(os.tmpdir(), 'teamscrawl-fixture-'));
+const tmp = await mkdtemp(path.join(os.tmpdir(), 'm365crawl-fixture-'));
 let version = '';
 try {
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { channel: 'msedge', headless: true });

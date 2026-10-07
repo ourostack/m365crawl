@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // outlookStoreRoot is a profiles directory holding one profile, Main, whose store is the named
@@ -106,7 +106,7 @@ func TestCalendarSourcesOldArchiveAndNoArchive(t *testing.T) {
 	e.exec(`drop table calendar_recaps`)
 	code, out, errOut := e.run("--max-age", "0", "calendar", "sources")
 	m := decode(t, out)
-	if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run teamscrawl sync") || len(items(t, m)) != 0 {
+	if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run m365crawl sync") || len(items(t, m)) != 0 {
 		t.Errorf("an old archive: %d %s %s", code, out, errOut)
 	}
 	code, out, errOut = newEnv(t).run("--max-age", "0", "calendar", "sources")
@@ -276,7 +276,7 @@ func TestDoctorOutlookGolden(t *testing.T) {
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("sync exit %d: %s", code, stderr)
 	}
-	e.exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{"code":"outlook_layout_unsupported","message":"the Outlook store cannot be read by this version of teamscrawl: class 0x6b tag 0x456 x3, known 0x455","fix":"Update teamscrawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.","exit":3}')`)
+	e.exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{"code":"outlook_layout_unsupported","message":"the Outlook store cannot be read by this version of m365crawl: class 0x6b tag 0x456 x3, known 0x455","fix":"Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.","exit":3}')`)
 	for _, color := range []bool{false, true} {
 		t.Setenv("CLICOLOR_FORCE", "")
 		suffix := "plain"
@@ -375,7 +375,7 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		}
 		bad := outlookStoreRoot(t, "store-version-j.hxd")
 		rt.outlookRoot = bad
-		if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || !strings.Contains(c.Detail, `store is version 'j'`) || !strings.Contains(c.Detail, "unsupported_version") || !strings.Contains(c.Fix, "Update teamscrawl") {
+		if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || !strings.Contains(c.Detail, `store is version 'j'`) || !strings.Contains(c.Detail, "unsupported_version") || !strings.Contains(c.Fix, "Update m365crawl") {
 			t.Fatalf("version: %+v", c)
 		}
 		rt.outlookRoot = outlookStoreRoot(t, "store-short.hxd")
@@ -419,7 +419,7 @@ func TestDoctorOutlookStoreCheckReadsTheArchive(t *testing.T) {
 		t.Fatalf("after a read: %+v", c)
 	}
 	e.exec(`insert into meta(key, value) values('outlook_failure:outlook/Main', '{"code":"outlook_layout_unsupported","message":"class 0x6b tag 0x456","fix":"","exit":3}')`)
-	if c := doctor(); !c.OK || !c.Warn || !strings.Contains(c.Detail, "the last read failed (unsupported_layout): outlook_layout_unsupported: class 0x6b tag 0x456") || !strings.Contains(c.Fix, "teamscrawl sync") {
+	if c := doctor(); !c.OK || !c.Warn || !strings.Contains(c.Detail, "the last read failed (unsupported_layout): outlook_layout_unsupported: class 0x6b tag 0x456") || !strings.Contains(c.Fix, "m365crawl sync") {
 		t.Fatalf("after a failure: %+v", c)
 	}
 	e.exec(`delete from meta where key like 'outlook_failure:%'`)
@@ -440,7 +440,7 @@ func TestDoctorOutlookStateReadFailureWarns(t *testing.T) {
 	readCalendarSources = func(*store.Store, context.Context, store.CalendarSourcesFilter) (store.CalendarSources, error) {
 		return store.CalendarSources{}, errors.New("disk on fire")
 	}
-	if c := rt.outlookStoreCheck(&store.Store{}); !c.Warn || !strings.Contains(c.Detail, "cannot read the Outlook state: disk on fire") || !strings.Contains(c.Fix, "teamscrawl sync") {
+	if c := rt.outlookStoreCheck(&store.Store{}); !c.Warn || !strings.Contains(c.Detail, "cannot read the Outlook state: disk on fire") || !strings.Contains(c.Fix, "m365crawl sync") {
 		t.Fatalf("%+v", c)
 	}
 }

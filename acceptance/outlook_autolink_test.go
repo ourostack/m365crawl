@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ourostack/teamscrawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // TestRealOutlookAutoLink syncs a fresh archive from the real Teams copy and the real Outlook copy with

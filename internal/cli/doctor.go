@@ -11,13 +11,13 @@ import (
 
 	"github.com/openclaw/crawlkit/output"
 
-	"github.com/ourostack/teamscrawl/internal/errs"
-	"github.com/ourostack/teamscrawl/internal/hxstore"
-	"github.com/ourostack/teamscrawl/internal/outlookdesktop"
-	"github.com/ourostack/teamscrawl/internal/render"
-	"github.com/ourostack/teamscrawl/internal/store"
-	"github.com/ourostack/teamscrawl/internal/syncer"
-	"github.com/ourostack/teamscrawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/render"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const staleSyncAfter = 24 * time.Hour
@@ -111,7 +111,7 @@ func (rt *runtime) archiveChecks() []check {
 		return append(cs,
 			check{Name: "schema_version", OK: true, Detail: d},
 			check{Name: "fts", OK: true, Detail: d},
-			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `teamscrawl sync`."},
+			check{Name: "last_sync_age", OK: true, Warn: true, Detail: "never synced", Fix: "Run `m365crawl sync`."},
 			check{Name: "calendar_cache", OK: true, Detail: d},
 			rt.outlookStoreCheck(nil))
 	case isArchiveNewer(err):
@@ -120,10 +120,10 @@ func (rt *runtime) archiveChecks() []check {
 		_ = errors.As(err, &coded)
 		return append(cs,
 			check{Name: "schema_version", Detail: coded.Message, Fix: coded.Fix},
-			check{Name: "fts", Detail: "cannot read an archive written by a newer teamscrawl", Fix: coded.Fix},
-			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer teamscrawl", Fix: coded.Fix})
+			check{Name: "fts", Detail: "cannot read an archive written by a newer m365crawl", Fix: coded.Fix},
+			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer m365crawl", Fix: coded.Fix})
 	case err != nil:
-		fix := "Check that " + rt.dbPath + " is a teamscrawl archive; move it aside and run `teamscrawl sync` to rebuild it."
+		fix := "Check that " + rt.dbPath + " is a m365crawl archive; move it aside and run `m365crawl sync` to rebuild it."
 		return append(cs,
 			check{Name: "schema_version", Detail: "cannot open the archive: " + err.Error(), Fix: fix},
 			check{Name: "fts", Detail: "cannot open the archive", Fix: fix},
@@ -132,7 +132,7 @@ func (rt *runtime) archiveChecks() []check {
 	defer func() { _ = st.Close() }()
 	row, err := readArchiveStatus(st, rt.ctx)
 	if err != nil {
-		fix := "Run `teamscrawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."
+		fix := "Run `m365crawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."
 		return append(cs, check{Name: "schema_version", Detail: "cannot read the archive: " + err.Error(), Fix: fix},
 			check{Name: "fts", Detail: "cannot read the archive", Fix: fix}, check{Name: "last_sync_age", Detail: "cannot read the archive", Fix: fix})
 	}
@@ -140,24 +140,24 @@ func (rt *runtime) archiveChecks() []check {
 		e := errs.ArchiveSchemaNewer(row.SchemaVersion, store.SchemaVersion)
 		return append(cs,
 			check{Name: "schema_version", Detail: e.Message, Fix: e.Fix},
-			check{Name: "fts", Detail: "cannot read an archive written by a newer teamscrawl", Fix: e.Fix},
-			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer teamscrawl", Fix: e.Fix})
+			check{Name: "fts", Detail: "cannot read an archive written by a newer m365crawl", Fix: e.Fix},
+			check{Name: "last_sync_age", Detail: "cannot read an archive written by a newer m365crawl", Fix: e.Fix})
 	}
 	if row.SchemaVersion == store.SchemaVersion {
 		cs = append(cs, check{Name: "schema_version", OK: true, Detail: fmt.Sprintf("schema v%d", row.SchemaVersion)})
 	} else { // older: a newer archive is refused when it is opened
-		cs = append(cs, check{Name: "schema_version", Detail: fmt.Sprintf("archive is schema v%d, expected v%d", row.SchemaVersion, store.SchemaVersion), Fix: "Run `teamscrawl sync` to migrate the archive."})
+		cs = append(cs, check{Name: "schema_version", Detail: fmt.Sprintf("archive is schema v%d, expected v%d", row.SchemaVersion, store.SchemaVersion), Fix: "Run `m365crawl sync` to migrate the archive."})
 	}
 	if row.FTSPresent {
 		cs = append(cs, check{Name: "fts", OK: true, Detail: "full-text indexes present"})
 	} else {
-		cs = append(cs, check{Name: "fts", Detail: "full-text indexes are missing", Fix: "Run `teamscrawl sync`; if they stay missing, move " + rt.dbPath + " aside and sync again."})
+		cs = append(cs, check{Name: "fts", Detail: "full-text indexes are missing", Fix: "Run `m365crawl sync`; if they stay missing, move " + rt.dbPath + " aside and sync again."})
 	}
 	cs = append(cs, rt.archiveNewerCheck(st))
 	// Status just read the archive, so the probe cannot fail here; a failure would only hide the warning.
 	old, _ := needsArchiveUpgrade(st, rt.ctx)
 	if old {
-		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `teamscrawl sync`."})
+		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `m365crawl sync`."})
 	}
 	if c, ok := lastSyncStatusCheck(row.LastRun); ok {
 		cs = append(cs, c)
@@ -166,9 +166,9 @@ func (rt *runtime) archiveChecks() []check {
 	case old: // the archive_upgrade warning already says to sync
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "no per-account sync record yet (archive from an older version)"})
 	case row.LastSuccessAt.IsZero():
-		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "no successful sync yet", Fix: "Run `teamscrawl sync`."})
+		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "no successful sync yet", Fix: "Run `m365crawl sync`."})
 	case rt.now().Sub(row.LastSuccessAt) > staleSyncAfter:
-		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Minute).String() + " ago", Fix: "Run `teamscrawl sync`."})
+		cs = append(cs, check{Name: "last_sync_age", OK: true, Warn: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Minute).String() + " ago", Fix: "Run `m365crawl sync`."})
 	default:
 		cs = append(cs, check{Name: "last_sync_age", OK: true, Detail: "last successful sync " + rt.now().Sub(row.LastSuccessAt).Round(time.Second).String() + " ago"})
 	}
@@ -193,17 +193,17 @@ func oneUnit(d time.Duration) string {
 // calendarCacheCheck warns, never fails, when the archive's calendar is missing or old. Its detail
 // says nothing about event content.
 func (rt *runtime) calendarCacheCheck(st *store.Store) check {
-	open := "Open the Teams calendar once so Teams caches it, then run `teamscrawl sync`."
+	open := "Open the Teams calendar once so Teams caches it, then run `m365crawl sync`."
 	c, err := readCalendarCache(st, rt.ctx)
 	switch {
 	case err != nil:
-		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "cannot read the calendar state: " + err.Error(), Fix: "Run `teamscrawl sync`."}
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "cannot read the calendar state: " + err.Error(), Fix: "Run `m365crawl sync`."}
 	case c.Accounts == 0:
 		return check{Name: "calendar_cache", OK: true, Detail: "no accounts archived yet"}
 	case c.WithoutDatabase > 0:
 		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: fmt.Sprintf("%d of %d accounts have no Teams calendar database in the archive", c.WithoutDatabase, c.Accounts), Fix: open}
 	case !c.HasTables:
-		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "the archive has no calendar tables yet", Fix: "Run `teamscrawl sync`."}
+		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "the archive has no calendar tables yet", Fix: "Run `m365crawl sync`."}
 	case c.FreshAt.IsZero():
 		return check{Name: "calendar_cache", OK: true, Warn: true, Detail: "no calendar has been derived yet", Fix: open}
 	case rt.now().Sub(c.FreshAt) > staleCalendarAfter:
@@ -224,12 +224,12 @@ func (rt *runtime) archiveNewerCheck(st *store.Store) check {
 	have, err := st.DerivationVersion(rt.ctx)
 	switch {
 	case err != nil:
-		return check{Name: "archive_newer", Detail: "cannot read the archive's derivation version: " + err.Error(), Fix: "Run `teamscrawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."}
+		return check{Name: "archive_newer", Detail: "cannot read the archive's derivation version: " + err.Error(), Fix: "Run `m365crawl sync`; if it fails, move " + rt.dbPath + " aside and sync again."}
 	case have > store.DerivationVersion:
 		e := errs.ArchiveNewer(have, store.DerivationVersion)
 		return check{Name: "archive_newer", Detail: e.Message, Fix: e.Fix}
 	}
-	return check{Name: "archive_newer", OK: true, Detail: fmt.Sprintf("the archive was written by this or an older teamscrawl (derivation version %d)", have)}
+	return check{Name: "archive_newer", OK: true, Detail: fmt.Sprintf("the archive was written by this or an older m365crawl (derivation version %d)", have)}
 }
 
 // lastSyncStatusCheck warns when the last sync did not finish cleanly. A partial or failed sync is
@@ -242,10 +242,10 @@ func lastSyncStatusCheck(r *store.RunRow) (check, bool) {
 	switch r.Status {
 	case "partial":
 		return check{Name: "last_sync_status", OK: true, Warn: true, Detail: "the last sync was partial: some Teams sources synced and others failed",
-			Fix: "Run `teamscrawl sync` to see which sources failed and why, fix them (the checks above name the usual causes) and sync again."}, true
+			Fix: "Run `m365crawl sync` to see which sources failed and why, fix them (the checks above name the usual causes) and sync again."}, true
 	case "failed":
 		return check{Name: "last_sync_status", OK: true, Warn: true, Detail: "the last sync failed",
-			Fix: "Run `teamscrawl sync` to see the error; the checks above name the usual causes."}, true
+			Fix: "Run `m365crawl sync` to see the error; the checks above name the usual causes."}, true
 	}
 	return check{Name: "last_sync_status", OK: true, Detail: "the last sync was " + r.Status}, true
 }
@@ -261,7 +261,7 @@ func (rt *runtime) writableCheck() check {
 		dir = filepath.Dir(dir)
 	}
 	fix := "Make " + dir + " writable, or pass --db with a path you can write."
-	f, err := os.CreateTemp(dir, ".teamscrawl-doctor-*")
+	f, err := os.CreateTemp(dir, ".m365crawl-doctor-*")
 	if err != nil {
 		return check{Name: "database_writable", Detail: "cannot write in " + dir + ": " + err.Error(), Fix: fix}
 	}
@@ -314,7 +314,7 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 	if st != nil {
 		res, err := readCalendarSources(st, rt.ctx, store.CalendarSourcesFilter{Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
 		if err != nil {
-			details, fixes = append(details, "cannot read the Outlook state: "+err.Error()), append(fixes, "Run `teamscrawl sync`.")
+			details, fixes = append(details, "cannot read the Outlook state: "+err.Error()), append(fixes, "Run `m365crawl sync`.")
 		}
 		state = map[string]store.CalendarSource{}
 		for _, r := range res.Rows {
@@ -322,7 +322,7 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 		}
 	}
 	for _, sp := range skipped {
-		details, fixes = append(details, "profile "+sp.Name+" cannot be examined ("+sp.Reason+")"), append(fixes, "Give teamscrawl access to the profile directory "+sp.Dir+" (Full Disk Access on macOS).")
+		details, fixes = append(details, "profile "+sp.Name+" cannot be examined ("+sp.Reason+")"), append(fixes, "Give m365crawl access to the profile directory "+sp.Dir+" (Full Disk Access on macOS).")
 	}
 	for _, p := range profiles {
 		row := state["outlook/"+p.Name]
@@ -352,14 +352,14 @@ func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, now
 	var version hxstore.ErrStoreVersion
 	switch {
 	case errors.As(err, &version):
-		return detail + fmt.Sprintf("the store is version %q and this teamscrawl reads %q (unsupported_version)", rune(version.Found), rune(hxstore.KnownStoreVersions[0])), "Update teamscrawl: this version cannot read the store."
+		return detail + fmt.Sprintf("the store is version %q and this m365crawl reads %q (unsupported_version)", rune(version.Found), rune(hxstore.KnownStoreVersions[0])), "Update m365crawl: this version cannot read the store."
 	case err != nil:
-		return detail + "the store cannot be read (unreadable): " + err.Error(), "Check that " + p.StorePath + " exists and is readable; on macOS give teamscrawl Full Disk Access."
+		return detail + "the store cannot be read (unreadable): " + err.Error(), "Check that " + p.StorePath + " exists and is readable; on macOS give m365crawl Full Disk Access."
 	}
 	detail += "store version readable"
 	if o := row.Outlook; o != nil {
 		if f := o.Failure; f != nil {
-			return detail + "; the last read failed (" + o.Status + "): " + f.Code + ": " + f.Message, firstOf(f.Fix, "Run `teamscrawl sync` and read its error.")
+			return detail + "; the last read failed (" + o.Status + "): " + f.Code + ": " + f.Message, firstOf(f.Fix, "Run `m365crawl sync` and read its error.")
 		}
 		if !o.LastReadAt.IsZero() {
 			return detail + "; last read " + oneUnit(now.Sub(o.LastReadAt)) + " ago, " + o.Status, ""

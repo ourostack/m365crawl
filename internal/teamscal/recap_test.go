@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/teamscrawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 const catchUpTwoCalls = `{

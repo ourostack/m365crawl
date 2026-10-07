@@ -1,6 +1,6 @@
 # Build output only. Do not ignore *.log, LOG, LOCK or MANIFEST-*: they are fixture data.
 /bin/
 /dist/
-/teamscrawl
+/m365crawl
 /coverage.out
 evidence/

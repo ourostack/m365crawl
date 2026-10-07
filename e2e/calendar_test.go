@@ -136,7 +136,7 @@ func TestE2ECalendarOutlook(t *testing.T) {
 	if got := m["unlinked_accounts"].([]any); len(got) != 2 {
 		t.Fatalf("unlinked_accounts %v", got)
 	}
-	if fix := m["unlinked_fix"].([]any); len(fix) != 2 || !strings.HasPrefix(fix[0].(string), "teamscrawl sync --outlook-profile Main --outlook-account ") {
+	if fix := m["unlinked_fix"].([]any); len(fix) != 2 || !strings.HasPrefix(fix[0].(string), "m365crawl sync --outlook-profile Main --outlook-account ") {
 		t.Fatalf("unlinked_fix %v", fix)
 	}
 	only := 0
