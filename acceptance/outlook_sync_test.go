@@ -74,7 +74,8 @@ type outlookRunData struct {
 
 	teams                syncMeasure // the Teams-only baseline (calendarArchive), wall and peak only
 	first, again, forced syncMeasure
-	forcedErr            string // error code of the forced re-read, empty when it ran
+	forcedErr            string  // error code of the forced re-read, empty when it ran
+	own                  ownCost // the Outlook read alone, in fresh processes
 	rowsFirst, rowsAgain rowState
 	rowsForced           rowState
 
@@ -186,6 +187,7 @@ func outlookSyncs(t *testing.T) outlookRunData {
 			OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1,
 			OutlookLink: d.account, OutlookLinkProfile: d.profile.Name,
 		}
+		d.own = measureOwnCost(t, teams.db, root) // on a copy of the archive, before the Outlook read below
 		stopProfile := startProfile(t)
 		if os.Getenv(profileEnv) != "" {
 			opts.Progress = &trace // the phase lines of the sync, stamped into the memory trace
