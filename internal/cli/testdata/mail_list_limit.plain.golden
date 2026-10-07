@@ -4,5 +4,5 @@ outlook/Main:106  2026-09-09 08:00  -      Ann Sender        Lunch on Friday  In
 outlook/Main:104  2026-09-08 08:00  ?      ann@example.test  Lunch on Friday  Inbox
 
 2 items (more exist; raise --limit)
-archive age: <age>
-synced 2026-09-10 09:00 · cache covers since 2026-08-01
+archive age: <age> synced
+synced <stamp> · cache covers since 2026-08-01

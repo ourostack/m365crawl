@@ -9,5 +9,5 @@ outlook/Main:103  2026-09-07 08:00  [2m-[0m                     Ann Sender  Re
 participants: Ann Sender <ann@example.test>, Bob Reader <bob@example.test>, Cy Copy <cy@example.test>, Di Dee <di@example.test>, eve@example.test, No Address
 
 [2m3 items[0m
-[2marchive age: <age>[0m
-[2msynced 2026-09-10 09:00 · cache covers since 2026-08-01[0m
+[2marchive age: <age> synced[0m
+[2msynced <stamp> · cache covers since 2026-08-01[0m

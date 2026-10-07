@@ -85,10 +85,21 @@ func seedMessages() []outlookmail.Message {
 	return []outlookmail.Message{plan, reply, sent, lone, old, lunch2}
 }
 
-// seedMail syncs the fixture and then commits the synthetic mailbox into the archive.
+// emptyArchive creates the archive without a sync: a Teams sync costs seconds on Windows, and the
+// mail commands do not need one.
+func (e *env) emptyArchive() {
+	e.t.Helper()
+	st, err := store.Open(context.Background(), e.db)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	_ = st.Close()
+}
+
+// seedMail creates the archive and then commits the synthetic mailbox into the archive.
 func seedMail(t *testing.T, e *env, msgs []outlookmail.Message) {
 	t.Helper()
-	e.sync()
+	e.emptyArchive()
 	st, err := store.Open(context.Background(), e.db)
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +273,7 @@ func TestMailUnknownFolder(t *testing.T) {
 		}
 	}
 	e2 := textEnv(t)
-	e2.sync()
+	e2.emptyArchive()
 	er := mailFails(t, e2, "unknown_folder", 2, "mail", "list", "--folder", "x")
 	if !strings.Contains(er["fix"].(string), "sync") {
 		t.Fatalf("fix = %v", er)
@@ -458,7 +469,7 @@ func TestMailEmptyNotes(t *testing.T) {
 	if n := note(e, "mail", "folders"); !strings.Contains(n, "no archive yet") {
 		t.Fatalf("no archive folders: %q", n)
 	}
-	e.sync()
+	e.emptyArchive()
 	if n := note(e, "mail", "list"); !strings.Contains(n, "the Outlook source is off") {
 		t.Fatalf("source off: %q", n)
 	}
