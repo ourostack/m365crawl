@@ -127,7 +127,7 @@ func TestCalendarSourcesShowsOutlook(t *testing.T) {
 	}
 	rows := sourceRows(t, e)
 	o := rows["outlook/Main"]
-	if o == nil || o["source"] != "outlook" || o["status"] != "ok" || o["link"] != "none" || o["principal"] != "outlook/Main" || o["deletions"] != "unverified" {
+	if o == nil || o["source"] != "outlook" || o["status"] != "ok" || o["link"] != "none" || o["principal"] != "outlook/Main" || o["deletions"] != "inferred" {
 		t.Fatalf("outlook row %v", o)
 	}
 	if num(t, o, "events_live") == 0 || num(t, o, "covered_days") == 0 || num(t, o, "read_interval_seconds") != 300 {

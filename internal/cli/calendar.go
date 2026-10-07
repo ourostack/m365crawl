@@ -870,7 +870,7 @@ func sourceItemOf(r store.CalendarSource) calendarSourceItem {
 	if o := r.Outlook; o != nil {
 		it.Status, it.LastReadAt, it.LastAttemptAt, it.NextReadAfter = o.Status, o.LastReadAt, o.LastAttemptAt, o.NextReadAfter
 		it.LastCheckedAt, it.CensusAsOf = o.LastCheckedAt, o.CensusAsOf
-		it.ReadIntervalSecs, it.UnmappedValues, it.Deletions = o.IntervalSecond, o.UnmappedValues, "unverified"
+		it.ReadIntervalSecs, it.UnmappedValues, it.Deletions = o.IntervalSecond, o.UnmappedValues, "inferred"
 		it.BlocksInvalid = o.BlocksRatio
 		for _, l := range o.UnknownLayouts {
 			it.UnknownLayouts = append(it.UnknownLayouts, outlookLayout{Class: fmt.Sprintf("0x%x", l.Class), Tag: fmt.Sprintf("0x%x", l.Tag), Count: l.Count})

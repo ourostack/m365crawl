@@ -33,7 +33,25 @@ type OutlookBatch struct {
 	Stamp string
 	// Read is what the read saw beyond the events, kept for `calendar sources`.
 	Read OutlookRead
+	// InferGone says the read can be trusted to be complete (no damaged block, so no event can
+	// have been missed): an event the archive holds live that this read no longer holds is then
+	// marked gone (see unseenOutlookIDs). Without it nothing is inferred and an unseen event stays.
+	InferGone bool
 }
+
+const (
+	// OutlookGoneHorizon is how far back from a read an archived event can start and still be
+	// judged gone by its absence. Outlook keeps a rolling window that reaches about 99 days behind now (the
+	// earliest non-master event of the measured store started 99.4 days back), and drops older
+	// events without anyone deleting them, so an unseen event that starts earlier is eviction and
+	// stays live. The horizon is well inside the window.
+	OutlookGoneHorizon = 60 * 24 * time.Hour
+	// OutlookGoneWithholdMin and OutlookGoneWithholdPercent say when a read lost too much to be
+	// deletions: more than OutlookGoneWithholdMin unseen events that are also more than
+	// OutlookGoneWithholdPercent percent of the live events the rule judges. Nothing is marked then.
+	OutlookGoneWithholdMin     = 20
+	OutlookGoneWithholdPercent = 10
+)
 
 // OutlookLayout is one (class, tag) pair the reader does not know, with how many objects of it the
 // store holds. It is shown so a layout change reads as "tag 0x456 appeared for class 0x6b".
@@ -63,8 +81,8 @@ func OutlookStamp(mapper int, zone *time.Location) string {
 
 // CommitOutlook writes one profile's batch through the core and records the source's run, in one
 // transaction. The batch is applied in the calendar savepoint; a failure rolls everything back and
-// is returned. run builds the run row from what the batch did. Gone detection is
-// off (no gone ids, no inference of unseen rows), so an event Outlook stops holding stays; past
+// is returned. run builds the run row from what the batch did. When the batch says InferGone, an
+// event Outlook no longer holds is marked gone (see unseenOutlookIDs); otherwise it stays. Past
 // days stay covered, cumulatively.
 //
 // When the stored stamp is not b.Stamp (a changed mapper, time zone or rule set, or none) each
@@ -122,7 +140,14 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 		hi, _ := time.ParseInLocation(time.DateOnly, days[len(days)-1], b.Zone)
 		w.Start, w.End = lo, hi.AddDate(0, 0, 1)
 	}
-	bc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, Events: b.Events, CoveredDays: days}, calendar.ApplyOptions{SkipMatches: true}, b.At)
+	var goneIDs []string
+	if b.InferGone {
+		var err error
+		if goneIDs, err = unseenOutlookIDs(ctx, tx, b); err != nil {
+			return res, err
+		}
+	}
+	bc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, Events: b.Events, CoveredDays: days, GoneSourceIDs: goneIDs}, calendar.ApplyOptions{SkipMatches: true}, b.At)
 	if err != nil {
 		return res, err
 	}
@@ -133,12 +158,60 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 			return res, err
 		}
 	}
-	res.Counts = CalendarCounts{Events: toCounts(bc.Events), Refused: len(bc.Refused)}
+	res.Counts = CalendarCounts{Events: toCounts(bc.Events), Gone: bc.Gone, Refused: len(bc.Refused)}
 	res.omit(OmitCalendarRefused, len(bc.Refused))
 	if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookStampKey+b.Account, b.Stamp); err != nil {
 		return res, err
 	}
 	return res, nil
+}
+
+// unseenOutlookIDs are the source ids of the account's live archived events that the batch does not
+// hold and that Outlook can be said to have deleted. Outlook writes no tombstone: the deleted
+// event's objects stay readable for a while and then vanish from the store when it compacts
+// (docs/outlook-store.md, "Deleted events"). So absence from a complete read is the only signal,
+// and it is judged only where the read can speak: series masters are left out (never marked, and
+// they outlive their occurrences), and so is every event that starts before OutlookGoneHorizon
+// ago, which Outlook may have evicted from its rolling window. When the unseen events are more than
+// OutlookGoneWithholdPercent percent of the live events judged, and more than
+// OutlookGoneWithholdMin, the store looks reset and nothing is returned. An event that returns
+// clears its mark the next time it is captured.
+func unseenOutlookIDs(ctx context.Context, tx *sql.Tx, b OutlookBatch) ([]string, error) {
+	held := make(map[string]bool, len(b.Events))
+	for _, e := range b.Events {
+		held[e.SourceID] = true
+	}
+	horizon := b.At.Add(-OutlookGoneHorizon)
+	horizonDate := horizon.In(b.Zone).Format(time.DateOnly)
+	var unseen []string
+	judged := 0
+	err := eachRow(ctx, tx, `select source_id, start_at, coalesce(all_day,0), start_date from calendar_source_events where source=? and account_id=? and removed_at is null and event_type<>?`,
+		[]any{string(calendar.SourceOutlook), b.Account, calendar.EventMaster}, func(r *sql.Rows) error {
+			var id, start, startDate string
+			var allDay int
+			if err := r.Scan(&id, &start, &allDay, &startDate); err != nil {
+				return err
+			}
+			if allDay == 1 && startDate != "" {
+				if startDate < horizonDate {
+					return nil
+				}
+			} else if t, err := time.Parse(timeLayout, start); err != nil || t.Before(horizon) {
+				return nil
+			}
+			judged++
+			if !held[id] {
+				unseen = append(unseen, id)
+			}
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	if len(unseen) > OutlookGoneWithholdMin && len(unseen)*100 > judged*OutlookGoneWithholdPercent {
+		return nil, nil
+	}
+	return unseen, nil
 }
 
 // retakeOutlookDays records the days, in the batch's zone, of every live archived event of the
