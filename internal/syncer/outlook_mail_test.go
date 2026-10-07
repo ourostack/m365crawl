@@ -369,10 +369,7 @@ func TestSyncMailResyncedHeaderIsNotAbsence(t *testing.T) {
 	// bytes of unknown framing. Its detail object is still there.
 	path := filepath.Join(root, "Main", "HxStore.hxd")
 	putOutlookStore(t, root, "HxStore.hxd")
-	var keep []*hxbuild.Object
-	for _, o := range mailObjects("~/Files/two.dat") {
-		keep = append(keep, o)
-	}
+	keep := mailObjects("~/Files/two.dat")
 	stray := hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 11, Stamp: 1, DetailKey: 21, FolderKey: 101, Received: mailDay, Subject: "Fixture one"}).Encode()
 	payload := append(hxbuild.FramedPayload(hxbuild.Head(15), keep[0], keep[2], keep[3], keep[4], keep[5], keep[6]), append([]byte{1, 2, 3}, stray...)...) // no clean header 11
 	b, err := os.ReadFile(path)                                                                                                                            //nolint:gosec // a test temp dir
