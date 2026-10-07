@@ -61,7 +61,7 @@ type cliApp struct {
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Copy the Teams cache into the archive once and print what changed."`
 	Status        statusCmd        `cmd:"" help:"Show archive counts per account, the last sync and other Teams origins."`
-	Search        searchCmd        "cmd:\"\" help:\"Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).\""
+	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats and Outlook mail, newest first, each item marked with its source; default --limit 50 (check `truncated`).\""
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`

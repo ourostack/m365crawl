@@ -1,7 +1,8 @@
-[2msent_at[0m           [2mconversation[0m    [2msender[0m         [2mtext[0m
-[2m----------------[0m  [2m--------------[0m  [2m-------------[0m  [2m------------------------[0m
-2023-11-14 22:13  Fixture chat 1  Alex Fixture   Hello from Alex Fixture
-2023-11-14 22:13  Fixture chat 2  Blair Fixture  Hello from Blair Fixture
+[2mat[0m                [2msource[0m  [2mwhere[0m           [2mwho[0m            [2mtext[0m
+[2m----------------[0m  [2m------[0m  [2m--------------[0m  [2m-------------[0m  [2m------------------------[0m
+2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   Hello from Alex Fixture
+2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  Hello from Blair Fixture
 
 [2m2 items[0m
+[2mnote: mail is not in the archive yet; run m365crawl sync[0m
 [2marchive age: <age>[0m

@@ -40,7 +40,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`doctor`](#doctor) | Check that Teams, platform access prerequisites and the archive are ready. |
 | [`sync`](#sync) | Copy the Teams cache into the archive once and print what changed. |
 | [`status`](#status) | Show archive counts per account, the last sync and other Teams origins. |
-| [`search`](#search) | Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`). |
+| [`search`](#search) | Full-text search over Teams chats and Outlook mail, newest first, each item marked with its source; default --limit 50 (check `truncated`). |
 | [`messages`](#messages) | List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). |
 | [`conversations`](#conversations) | List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`). |
 | [`teams`](#teams) | List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes. |
@@ -121,7 +121,7 @@ m365crawl status
 
 ## search
 
-Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).
+Full-text search over Teams chats and Outlook mail, newest first, each item marked with its source; default --limit 50 (check `truncated`).
 
 ```
 m365crawl search [<query>] [flags]
@@ -131,7 +131,7 @@ Arguments:
 
 | Argument | Meaning |
 | --- | --- |
-| `[&lt;query&gt;]` | Words to find; "quoted phrases" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --since, --until) is given: then the filters alone select the messages. |
+| `[&lt;query&gt;]` | Words to find; "quoted phrases" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages. |
 
 Flags:
 
@@ -144,12 +144,16 @@ Flags:
 | `--team=STRING` | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
 | `--limit=50` | Maximum items to return; truncated says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
-| `--include-deleted` | Also search deleted messages. |
-| `--mentions-me` | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). |
-| `--direct-mentions` | Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts. |
-| `--html` | Add each message's HTML body as html. |
+| `--source=all` | What to search: chats (Teams), mail (Outlook) or all (both, the default). |
+| `--folder=STRING` | Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out. |
+| `--include-deleted` | Also search deleted messages (Teams chats only). |
+| `--mentions-me` | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only. |
+| `--direct-mentions` | Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts. Teams chats only. |
+| `--html` | Add each message's HTML body as html (Teams chats only). |
 
-Result: A list of message items, newest first. Items that mention you carry `mention_kind`: `person` (you by name), `channel`, `team`, `tag`, `everyone` or `other`.
+Teams chats and Outlook mail are searched together. Every item has a `source` (`chats` or `mail`) and the result's `sources` says how many items each source gave and whether it had more. Items are newest first across both sources, by `sent_at` for chats and `received_at` for mail. `--mentions-me`, `--direct-mentions`, `--conversation`, `--team`, `--include-system`, `--include-deleted` and `--html` belong to Teams chats; `--folder` belongs to mail. With `--source all`, such a flag narrows the search to its own source and `note` says so; with the other `--source` it is a usage error (`flag_source_conflict`). `--from`, `--since`, `--until`, `--limit` and `--fields` apply to both, and `--fields` accepts the keys of both kinds of item. `note` also says when mail is left out because it is not in the archive yet or not yet read on this platform. `--account` names a Teams account, so it narrows chats only.
+
+Result: A list of items, newest first, chat items as before plus `source`; mail items have the shape of the `mail list` items plus `source`. Items that mention you carry `mention_kind`: `person` (you by name), `channel`, `team`, `tag`, `everyone` or `other`.
 
 Examples:
 
