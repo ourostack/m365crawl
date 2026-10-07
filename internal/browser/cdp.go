@@ -144,12 +144,12 @@ func (c *client) call(ctx context.Context, sessionID, method string, params, out
 	}
 	if err != nil {
 		c.forget(id)
-		return err
+		return ctxErr(ctx, err)
 	}
 	select {
 	case r := <-ch:
 		if r.err != nil {
-			return r.err
+			return ctxErr(ctx, r.err)
 		}
 		if out == nil {
 			return nil
@@ -159,6 +159,16 @@ func (c *client) call(ctx context.Context, sessionID, method string, params, out
 		c.forget(id)
 		return ctx.Err()
 	}
+}
+
+// ctxErr prefers the context's error. When a context ends, the websocket library closes the
+// connection under a pending read or write, and that "closed connection" error can arrive
+// before the context's own; the caller asked to stop, so that is the error to report.
+func ctxErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func (c *client) forget(id int) {

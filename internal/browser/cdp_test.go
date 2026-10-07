@@ -476,3 +476,15 @@ func TestCallDefaultTimeout(t *testing.T) {
 		t.Fatalf("default call timeout = %v", old)
 	}
 }
+
+func TestCtxErrPrefersContext(t *testing.T) {
+	boom := errors.New("closed network connection")
+	if got := ctxErr(context.Background(), boom); got != boom {
+		t.Fatalf("live context: %v", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := ctxErr(ctx, boom); !errors.Is(got, context.Canceled) {
+		t.Fatalf("done context: %v", got)
+	}
+}
