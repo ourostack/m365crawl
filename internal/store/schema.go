@@ -7,7 +7,9 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // records.value_redacted, and the typed_memo table (see memo.go). Version 5 added the calendar
 // tables (internal/calendar's SchemaDDL), which a sync fills from the calendar and meeting-recap
 // records (see calendar.go); an archive at version 4 gains them, empty, on its next writable open.
-const SchemaVersion = 5
+// Version 6 added the mail tables (mail_schema.go), which a sync fills from Outlook for Mac's store
+// (see mail.go); an archive at version 5 gains them, empty, on its next writable open.
+const SchemaVersion = 6
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -179,5 +181,6 @@ create table if not exists calendar_losses(
 );
 `
 
-// schemaDDL is every table the archive has: the Teams tables above and the calendar tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL
+// schemaDDL is every table the archive has: the Teams tables above, the calendar tables and the
+// mail tables.
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL

@@ -595,7 +595,7 @@ func TestArchiveUpgradeAddsCalendarTables(t *testing.T) {
 		t.Fatalf("open v4 archive: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != 5 {
+	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
 		t.Fatalf("version %d", v)
 	}
 	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('calendar_source_events','calendar_sources','calendar_covered_days','calendar_account_links','calendar_matches','calendar_recaps','calendar_recap_items')`); n != 7 {
