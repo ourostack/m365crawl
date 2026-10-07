@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -16,8 +15,8 @@ import (
 // The codes a refused or lossy read carries. The first three, when returned in a
 // GuardError, turn the source off for the sync: nothing is applied.
 const (
-	CodeStoreUnrecognized = "outlook_store_unrecognized"
-	CodeStoreVersion      = "outlook_store_version"
+	CodeStoreUnrecognized = hxstore.CodeStoreUnrecognized
+	CodeStoreVersion      = hxstore.CodeStoreVersion
 	CodeLayoutUnsupported = "outlook_layout_unsupported"
 	CodeBlocksDamaged     = "outlook_blocks_damaged"
 	CodeEventUnmapped     = "outlook_event_unmapped"
@@ -27,48 +26,12 @@ const (
 	damagedBlocksPercent  = 2
 )
 
-// GuardError is a refusal: the store is not one this reader can read, or it changed layout.
-// Code is one of the Code constants and Detail holds numbers and format names only, never
-// text from the store.
-type GuardError struct {
-	Code   string
-	Detail string
-}
+// GuardError and OpenStore are shared with the mail reader and live in internal/hxstore.
+type GuardError = hxstore.GuardError
 
-func (e *GuardError) Error() string {
-	if e.Detail == "" {
-		return e.Code
-	}
-	return e.Code + ": " + e.Detail
-}
-
-// OpenStore opens the store and maps the container's errors to coded refusals: a file that
-// is not an HxStore, a version byte or a page size that is not the known one. Other errors
-// (a read failure) are returned as they are.
-func OpenStore(r io.ReaderAt, size int64) (*hxstore.Store, error) {
-	s, err := hxstore.Open(r, size)
-	var ev hxstore.ErrStoreVersion
-	var ep hxstore.ErrPageSize
-	switch {
-	case err == nil:
-		return s, nil
-	case errors.Is(err, hxstore.ErrNotHxStore):
-		return nil, &GuardError{Code: CodeStoreUnrecognized}
-	case errors.As(err, &ev):
-		return nil, &GuardError{Code: CodeStoreVersion, Detail: fmt.Sprintf("version byte 0x%02x, known %s", ev.Found, knownVersions())}
-	case errors.As(err, &ep):
-		return nil, &GuardError{Code: CodeStoreVersion, Detail: fmt.Sprintf("page size %d, known %d", ep.Found, hxstore.KnownPageSize)}
-	}
-	return nil, err
-}
-
-func knownVersions() string {
-	var parts []string
-	for _, v := range hxstore.KnownStoreVersions {
-		parts = append(parts, fmt.Sprintf("0x%02x", v))
-	}
-	return strings.Join(parts, ",")
-}
+// OpenStore opens the store and maps the container's errors to coded refusals (see
+// hxstore.OpenStore).
+var OpenStore = hxstore.OpenStore
 
 // Options tunes Collect.
 type Options struct {
