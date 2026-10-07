@@ -6,9 +6,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/outlookmail"
@@ -311,6 +313,10 @@ type mailDerived struct {
 // htmlText is the HTML-to-text conversion (a test seam: an unchanged message must not call it).
 var htmlText = outlookmail.HTMLText
 
+// gzipWriters holds the compressors body uses: a new gzip writer allocates over a megabyte of
+// tables, and a mailbox compresses one body per message, so the read's garbage was most of its heap.
+var gzipWriters = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
+
 // body compresses the HTML and converts it to text. It runs only for a message that is stored or
 // whose body is filled in: the read of an unchanged message costs neither.
 func (d *mailDerived) body(m outlookmail.Message) {
@@ -318,9 +324,11 @@ func (d *mailDerived) body(m outlookmail.Message) {
 		return
 	}
 	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
+	zw := gzipWriters.Get().(*gzip.Writer)
+	zw.Reset(&buf)
 	_, _ = zw.Write(m.Body.HTML) // a bytes.Buffer cannot fail
 	_ = zw.Close()
+	gzipWriters.Put(zw)
 	d.gz, d.text = buf.Bytes(), htmlText(m.Body.HTML)
 }
 
