@@ -4,6 +4,8 @@ All notable changes to teamscrawl are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-07
+
 ### Changed
 
 - The new Outlook for Mac calendar source is read by default. When the default Outlook directory exists and holds a profile, `sync` and the read commands read it with no flag. `--outlook-root none` (or `TEAMSCRAWL_OUTLOOK_ROOT=none`) turns it off, and `--teams-root` without `--outlook-root` still keeps it off, so tests and fixtures stay hermetic. `TEAMSCRAWL_OUTLOOK=1` is still accepted and now does nothing. A default Outlook never fails or holds up a Teams sync: no Outlook directory or profile says nothing, and a profile that cannot be read (no Full Disk Access, a store this build does not read) is a source with the new status `unavailable` and its `error`, with no change to the run's status or exit code. A named `--outlook-root` keeps its failures (`no_outlook_profiles`, `outlook_root_missing`, a failed source). The `doctor` `outlook_store` check passes when there is no Outlook or no profile and when a profile reads normally; it warns only for a named root with no profile, denied access, an unknown store version or a failed read.
