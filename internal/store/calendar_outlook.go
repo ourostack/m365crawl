@@ -20,6 +20,7 @@ const (
 	outlookReadKey    = "outlook_read:"
 	outlookSkippedKey = "outlook_skipped:"
 	outlookCheckedKey = "outlook_checked:"
+	outlookAbsentKey  = "outlook_absent:"
 )
 
 // OutlookBatch is one Outlook profile's events, read whole from its store copy.
@@ -35,7 +36,7 @@ type OutlookBatch struct {
 	Read OutlookRead
 	// InferGone says the read can be trusted to be complete (no damaged block, so no event can
 	// have been missed): an event the archive holds live that this read no longer holds is then
-	// marked gone (see unseenOutlookIDs). Without it nothing is inferred and an unseen event stays.
+	// remembered, and marked gone when the next trusted read also misses it (see confirmedGone). Without it nothing is inferred and an unseen event stays.
 	InferGone bool
 }
 
@@ -82,7 +83,7 @@ func OutlookStamp(mapper int, zone *time.Location) string {
 // CommitOutlook writes one profile's batch through the core and records the source's run, in one
 // transaction. The batch is applied in the calendar savepoint; a failure rolls everything back and
 // is returned. run builds the run row from what the batch did. When the batch says InferGone, an
-// event Outlook no longer holds is marked gone (see unseenOutlookIDs); otherwise it stays. Past
+// event Outlook no longer holds is marked gone once two consecutive trusted reads miss it (see confirmedGone); otherwise it stays. Past
 // days stay covered, cumulatively.
 //
 // When the stored stamp is not b.Stamp (a changed mapper, time zone or rule set, or none) each
@@ -140,12 +141,9 @@ func applyOutlook(ctx context.Context, tx *sql.Tx, b OutlookBatch) (CalendarResu
 		hi, _ := time.ParseInLocation(time.DateOnly, days[len(days)-1], b.Zone)
 		w.Start, w.End = lo, hi.AddDate(0, 0, 1)
 	}
-	var goneIDs []string
-	if b.InferGone {
-		var err error
-		if goneIDs, err = unseenOutlookIDs(ctx, tx, b); err != nil {
-			return res, err
-		}
+	goneIDs, err := confirmedGone(ctx, tx, b)
+	if err != nil {
+		return res, err
 	}
 	bc, err := calendar.ApplyBatch(ctx, tx, calendar.Batch{Window: w, Events: b.Events, CoveredDays: days, GoneSourceIDs: goneIDs}, calendar.ApplyOptions{SkipMatches: true}, b.At)
 	if err != nil {
@@ -212,6 +210,59 @@ func unseenOutlookIDs(ctx context.Context, tx *sql.Tx, b OutlookBatch) ([]string
 		return nil, nil
 	}
 	return unseen, nil
+}
+
+// absentSet is what a trusted read found missing, kept per account until the next read: the ids and the
+// modification time of the store copy it came from.
+type absentSet struct {
+	FreshAt time.Time `json:"fresh_at"`
+	IDs     []string  `json:"ids"`
+}
+
+// confirmedGone applies the two-read rule. An event is returned (to be marked gone) only when it is
+// missing from this trusted read and was also missing from the previous trusted read, taken from a
+// different copy of the store (a newer modification time). The first miss is only remembered, so one
+// torn copy, which can hide a live event for a single read, changes nothing visible. A read that is not
+// trusted (b.InferGone false), or that the withhold rule refuses, forgets what was remembered, so the
+// two misses must be consecutive complete reads. An event that is seen again is no longer remembered.
+// The memory is a meta row per account, independent of the derivation stamp.
+func confirmedGone(ctx context.Context, tx *sql.Tx, b OutlookBatch) ([]string, error) {
+	key := outlookAbsentKey + b.Account
+	var raw sql.NullString
+	if err := tx.QueryRowContext(ctx, `select value from meta where key=?`, key).Scan(&raw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	var prev absentSet
+	if raw.Valid {
+		_ = json.Unmarshal([]byte(raw.String), &prev) // an unreadable memory is no memory
+	}
+	var unseen []string
+	if b.InferGone {
+		var err error
+		if unseen, err = unseenOutlookIDs(ctx, tx, b); err != nil {
+			return nil, err
+		}
+	}
+	var gone []string
+	if prev.FreshAt.Before(b.FreshAt) {
+		pending := make(map[string]bool, len(prev.IDs))
+		for _, id := range prev.IDs {
+			pending[id] = true
+		}
+		for _, id := range unseen {
+			if pending[id] {
+				gone = append(gone, id)
+			}
+		}
+	}
+	next := absentSet{FreshAt: b.FreshAt, IDs: unseen}
+	if len(unseen) == 0 {
+		_, err := tx.ExecContext(ctx, `delete from meta where key=?`, key)
+		return gone, err
+	}
+	enc, _ := json.Marshal(next) // plain strings and a time
+	_, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, key, string(enc))
+	return gone, err
 }
 
 // retakeOutlookDays records the days, in the batch's zone, of every live archived event of the

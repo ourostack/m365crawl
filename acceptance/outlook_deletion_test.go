@@ -14,29 +14,30 @@ import (
 
 // TestRealOutlookDeletionProbe pins what the deletion experiment found (docs/outlook-store.md,
 // "Deleted events"): Outlook leaves a deleted event in its store, unchanged, until it compacts, and then
-// drops it, and a sync marks the event gone only after it has dropped it. It needs copies of one real store
+// drops it, and a sync marks the event gone only when two consecutive reads of different copies both miss it. It needs copies of one real store
 // taken around a deletion of test appointments, each laid out as <root>/<profile>/HxStore.hxd:
 //
 //	TEAMSCRAWL_OUTLOOK_PROBE_BEFORE   a copy taken before the deletion
 //	TEAMSCRAWL_OUTLOOK_PROBE_LINGER   optional: a copy taken after the deletion, before compaction
 //	TEAMSCRAWL_OUTLOOK_PROBE_AFTER    a copy taken after compaction
+//	TEAMSCRAWL_OUTLOOK_PROBE_CONFIRM  a later copy, also without the events: the second miss
 //	TEAMSCRAWL_OUTLOOK_PROBE_IDS      comma-separated distinguishing suffixes of the lower-case ids of the
 //	                                  deleted events (the ids are the experiment's own appointments)
 //
-// It skips unless the first, third and fourth are set. The archive is a scratch one; the copies are
+// It skips unless the first, third, fourth and fifth are set. The archive is a scratch one; the copies are
 // only read. It logs counts only. The population check is the second half: no event other than the
 // probes may be marked gone by the pass from the first copy to the last.
 func TestRealOutlookDeletionProbe(t *testing.T) {
 	requireReal(t)
-	before, linger, after := os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_BEFORE"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_LINGER"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_AFTER")
+	before, linger, after, confirm := os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_BEFORE"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_LINGER"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_AFTER"), os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_CONFIRM")
 	var ids []string
 	for _, id := range strings.Split(os.Getenv("TEAMSCRAWL_OUTLOOK_PROBE_IDS"), ",") {
 		if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
 			ids = append(ids, id)
 		}
 	}
-	if before == "" || after == "" || len(ids) == 0 {
-		t.Skip("set TEAMSCRAWL_OUTLOOK_PROBE_BEFORE, TEAMSCRAWL_OUTLOOK_PROBE_AFTER and TEAMSCRAWL_OUTLOOK_PROBE_IDS (and optionally TEAMSCRAWL_OUTLOOK_PROBE_LINGER)")
+	if before == "" || after == "" || confirm == "" || len(ids) == 0 {
+		t.Skip("set TEAMSCRAWL_OUTLOOK_PROBE_BEFORE, _AFTER, _CONFIRM and TEAMSCRAWL_OUTLOOK_PROBE_IDS (and optionally TEAMSCRAWL_OUTLOOK_PROBE_LINGER)")
 	}
 	dir := calendarScratch(t)
 	db := filepath.Join(dir, "probe.db")
@@ -76,9 +77,12 @@ func TestRealOutlookDeletionProbe(t *testing.T) {
 			t.Errorf("a copy taken after the deletion and before compaction marked %d gone, %d probes live of %d: Outlook has not dropped them yet, so the signal must not fire", g, probeRows(false), len(ids))
 		}
 	}
-	g := step("after", after)
+	if g := step("after", after); g != 0 || probeRows(false) != len(ids) {
+		t.Errorf("the first copy without the events marked %d gone and left %d of %d probes live: one miss must change nothing", g, probeRows(false), len(ids))
+	}
+	g := step("confirm", confirm)
 	if n := probeRows(true); n != len(ids) || g != len(ids) {
-		t.Errorf("after compaction %d of %d probe events are marked gone and the run counted %d", n, len(ids), g)
+		t.Errorf("after the second miss %d of %d probe events are marked gone and the run counted %d", n, len(ids), g)
 	}
 	if n := removedRows(); n != len(ids) {
 		t.Errorf("%d events are marked gone, want exactly the %d probes", n, len(ids))

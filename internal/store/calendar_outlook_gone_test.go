@@ -39,14 +39,21 @@ func removedAt(t *testing.T, s *Store, id string) (removed bool, subject string)
 }
 
 // An event the store held and no longer holds is deleted: Outlook leaves no tombstone and drops the
-// event's objects when it compacts (docs/outlook-store.md, "Deleted events"). It is marked gone, keeps
-// its data, is counted once, and comes back live when the store holds it again.
-func TestOutlookEventAbsentFromAHealthyReadIsGone(t *testing.T) {
+// event's objects when it compacts (docs/outlook-store.md, "Deleted events"). One miss changes nothing
+// visible; the second consecutive trusted miss, from a newer copy, marks it gone, keeping its data and
+// counting it once. It comes back live when the store holds it again.
+func TestOutlookEventAbsentFromTwoReadsIsGone(t *testing.T) {
 	s := newStore(t)
 	soon := base.Add(48 * time.Hour)
 	keep, drop := goneEvent("KEEP", soon, calendar.EventSingle), goneEvent("DROP", soon.Add(time.Hour), calendar.EventSingle)
 	commitGone(t, s, base, true, keep, drop)
-	res := commitGone(t, s, base.Add(time.Hour), true, keep)
+	if res := commitGone(t, s, base.Add(time.Hour), true, keep); res.Counts.Gone != 0 {
+		t.Fatalf("one miss marked %d events gone", res.Counts.Gone)
+	}
+	if gone, _ := removedAt(t, s, "DROP"); gone {
+		t.Fatal("one miss marked the event gone")
+	}
+	res := commitGone(t, s, base.Add(2*time.Hour), true, keep)
 	if res.Counts.Gone != 1 {
 		t.Fatalf("gone count %d, want 1", res.Counts.Gone)
 	}
@@ -56,13 +63,67 @@ func TestOutlookEventAbsentFromAHealthyReadIsGone(t *testing.T) {
 	if gone, _ := removedAt(t, s, "KEEP"); gone {
 		t.Fatal("an event the store still holds was marked gone")
 	}
-	if res = commitGone(t, s, base.Add(2*time.Hour), true, keep); res.Counts.Gone != 0 {
+	if res = commitGone(t, s, base.Add(3*time.Hour), true, keep); res.Counts.Gone != 0 {
 		t.Fatalf("an event already gone was counted again: %d", res.Counts.Gone)
 	}
-	commitGone(t, s, base.Add(3*time.Hour), true, keep, drop)
+	commitGone(t, s, base.Add(4*time.Hour), true, keep, drop)
 	if gone, _ := removedAt(t, s, "DROP"); gone {
 		t.Fatal("an event the store holds again stayed gone")
 	}
+}
+
+// A torn copy that hides a live event for one read must never mark it: miss then seen, miss then a damaged
+// read then miss, and two misses from the same copy all leave the event live.
+func TestOutlookOneMissIsNeverEnough(t *testing.T) {
+	keep, drop := goneEvent("KEEP", base.Add(48*time.Hour), calendar.EventSingle), goneEvent("DROP", base.Add(49*time.Hour), calendar.EventSingle)
+	live := func(t *testing.T, s *Store) {
+		t.Helper()
+		if gone, _ := removedAt(t, s, "DROP"); gone {
+			t.Fatal("the event was marked gone")
+		}
+	}
+	t.Run("miss then seen then miss", func(t *testing.T) {
+		s := newStore(t)
+		commitGone(t, s, base, true, keep, drop)
+		commitGone(t, s, base.Add(time.Hour), true, keep)
+		commitGone(t, s, base.Add(2*time.Hour), true, keep, drop)
+		if res := commitGone(t, s, base.Add(3*time.Hour), true, keep); res.Counts.Gone != 0 {
+			t.Fatalf("gone %d", res.Counts.Gone)
+		}
+		live(t, s)
+	})
+	t.Run("miss then damaged read then miss", func(t *testing.T) {
+		s := newStore(t)
+		commitGone(t, s, base, true, keep, drop)
+		commitGone(t, s, base.Add(time.Hour), true, keep)
+		commitGone(t, s, base.Add(2*time.Hour), false, keep)
+		if res := commitGone(t, s, base.Add(3*time.Hour), true, keep); res.Counts.Gone != 0 {
+			t.Fatalf("gone %d", res.Counts.Gone)
+		}
+		live(t, s)
+	})
+	t.Run("two misses from one copy", func(t *testing.T) {
+		s := newStore(t)
+		commitGone(t, s, base, true, keep, drop)
+		at := base.Add(time.Hour)
+		for range 2 {
+			b := OutlookBatch{Account: "outlook/Main", Events: []calendar.Event{keep}, FreshAt: at, At: at, Zone: time.UTC, Stamp: OutlookStamp(outlookcal.MapperVersion, time.UTC), InferGone: true}
+			if _, err := s.CommitOutlook(context.Background(), b, outlookRun); err != nil {
+				t.Fatal(err)
+			}
+		}
+		live(t, s)
+	})
+	t.Run("a changed stamp keeps the memory", func(t *testing.T) {
+		s := newStore(t)
+		commitGone(t, s, base, true, keep, drop)
+		commitGone(t, s, base.Add(time.Hour), true, keep)
+		b := OutlookBatch{Account: "outlook/Main", Events: []calendar.Event{keep}, FreshAt: base.Add(2 * time.Hour), At: base.Add(2 * time.Hour), Zone: time.UTC, Stamp: OutlookStamp(1, time.UTC), InferGone: true}
+		res, err := s.CommitOutlook(context.Background(), b, outlookRun)
+		if err != nil || res.Counts.Gone != 1 {
+			t.Fatalf("gone %d, err %v", res.Counts.Gone, err)
+		}
+	})
 }
 
 // The rule is not applied to a read that may have missed events (damaged blocks), nor to events that left
@@ -80,6 +141,7 @@ func TestOutlookGoneDetectionLeavesWhatItCannotJudge(t *testing.T) {
 	commitGone(t, s, at, true, events...)
 
 	commitGone(t, s, at.Add(time.Hour), false, events[4]) // not trusted: a damaged read
+	commitGone(t, s, at.Add(90*time.Minute), true, events[4])
 	for _, id := range []string{"FUTURE", "EDGE", "OLD", "MASTER"} {
 		if gone, _ := removedAt(t, s, id); gone {
 			t.Fatalf("%s marked gone by a read that is not trusted", id)
@@ -109,7 +171,8 @@ func TestOutlookGoneHorizonUsesTheStatedDateOfAnAllDayEvent(t *testing.T) {
 	}
 	keep := goneEvent("KEEP", at.Add(72*time.Hour), calendar.EventSingle)
 	commitGone(t, s, at, true, inside, outside, keep)
-	res := commitGone(t, s, at.Add(time.Hour), true, keep)
+	commitGone(t, s, at.Add(time.Hour), true, keep)
+	res := commitGone(t, s, at.Add(2*time.Hour), true, keep)
 	if res.Counts.Gone != 1 {
 		t.Fatalf("gone %d, want 1", res.Counts.Gone)
 	}
@@ -135,7 +198,8 @@ func TestOutlookGoneDetectionWithholdsAMassDisappearance(t *testing.T) {
 		t.Fatalf("a mass disappearance marked %d events gone", res.Counts.Gone)
 	}
 	// A handful of deletions in a large calendar is still detected.
-	res = commitGone(t, s, base.Add(2*time.Hour), true, events[:len(events)-1]...)
+	commitGone(t, s, base.Add(2*time.Hour), true, events[:len(events)-1]...)
+	res = commitGone(t, s, base.Add(3*time.Hour), true, events[:len(events)-1]...)
 	if res.Counts.Gone != 1 {
 		t.Fatalf("gone %d, want the one deleted event", res.Counts.Gone)
 	}
