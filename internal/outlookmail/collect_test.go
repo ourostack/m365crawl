@@ -293,11 +293,60 @@ func TestAccountRootChoice(t *testing.T) {
 	_ = rootOf(loop, 1)
 }
 
-func TestCollectMissingFolderIsANoteNotALoss(t *testing.T) {
+func TestCollectMissingFolderKeepsTheMessageInKindUnknown(t *testing.T) {
+	objs := folderObjs()
+	// One message in a folder the store does not hold, among forty in the inbox: under the share
+	// that makes the read incomplete.
+	objs = append(objs, hdr(11, 21, 999, 1, "x", 2), det(21, "<a@example.invalid>"))
+	for i := uint32(0); i < 40; i++ {
+		objs = append(objs, hdr(100+i, 200+i, fInbox, 1, "y", 2), det(200+i, "<y@example.invalid>"))
+	}
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	var kept *Message
+	for i := range r.Messages {
+		if r.Messages[i].DetailKey == 21 {
+			kept = &r.Messages[i]
+		}
+	}
+	if kept == nil || len(r.Messages) != 41 || kept.Folder.Kind != KindUnknown || kept.FolderKey != 999 || kept.Folder.Name != "" || r.Notes.MissingFolder != 1 || len(r.Losses) != 0 {
+		t.Fatalf("%+v %+v %+v", kept, r.Notes, r.Losses)
+	}
+	if !slices.Equal(r.SeenDetailKeys[:2], []uint32{21, 200}) {
+		t.Fatalf("%v", r.SeenDetailKeys[:2])
+	}
+	var cov bool
+	for _, c := range r.Coverage {
+		cov = cov || c.FolderKey == 999 && c.Count == 1
+	}
+	if !cov {
+		t.Fatalf("no coverage row for the unknown folder: %+v", r.Coverage)
+	}
+}
+
+// A message with a copy in a known folder is shown from it, whatever the other copy says.
+func TestCollectKnownFolderCopyBeatsAnUnknownOne(t *testing.T) {
+	objs := append(folderObjs(), hdr(11, 21, 999, 9, "x", 2), hdr(12, 21, fInbox, 1, "x", 2), det(21, "<a@example.invalid>"))
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Folder.Kind != "inbox" || r.Notes.MissingFolder != 0 {
+		t.Fatalf("%+v %+v", r.Messages, r.Notes)
+	}
+}
+
+// Many messages without a folder are a loss: the layout, not a lag, is the likely cause.
+func TestCollectManyMissingFoldersAreALoss(t *testing.T) {
 	objs := append(folderObjs(), hdr(11, 21, 999, 1, "x", 2), det(21, "<a@example.invalid>"), hdr(12, 22, fInbox, 1, "y", 2), det(22, "<b@example.invalid>"))
 	r := collect(t, storeOf(t, framed(objs...)), Options{})
-	if len(r.Messages) != 1 || r.Notes.MissingFolder != 1 || len(r.Losses) != 0 || !slices.Equal(r.SeenDetailKeys, []uint32{21, 22}) {
+	if len(r.Messages) != 2 || r.Notes.MissingFolder != 1 || lossOf(r, CodeMailFolderMissing) != 1 {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
+	}
+}
+
+// A message whose detail is missing as well is dropped, and not counted as missing its folder.
+func TestCollectMissingFolderAndDetailIsNotCounted(t *testing.T) {
+	objs := append(folderObjs(), hdr(11, 21, 999, 1, "x", 2))
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Messages) != 0 || r.Notes.MissingFolder != 0 || r.Notes.MissingDetail != 1 {
+		t.Fatalf("%+v", r.Notes)
 	}
 }
 
@@ -429,13 +478,64 @@ func TestCollectUnmappedObjectsAreALoss(t *testing.T) {
 	}
 }
 
-func TestCollectResyncedObjectsAreSkippedAndNoLoss(t *testing.T) {
+// An object reached after unknown bytes that maps cleanly is kept and competes under the version
+// rule: here a header copy with the highest stamp wins.
+func TestCollectResyncedObjectsThatMapAreKept(t *testing.T) {
 	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
-	// One object follows three stray bytes: it is reached after unknown framing and is skipped.
-	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 22, FolderKey: fInbox}).Encode()...)
+	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, Stamp: 5, DetailKey: 22, FolderKey: fSent, Subject: "newer copy"}).Encode()...)
 	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
-	if len(r.Messages) != 1 || r.Messages[0].Copies != 1 || r.Notes.ResyncedSkipped != 1 || len(r.Losses) != 0 {
+	if len(r.Messages) != 1 || r.Messages[0].Copies != 2 || r.Messages[0].Subject != "newer copy" || r.Notes.ResyncedKept != 1 || r.Notes.ResyncedSkipped != 0 || len(r.Losses) != 0 || r.Doubtful {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
+	}
+}
+
+// A folder whose every copy was reached after unknown bytes is not lost: its messages keep their folder.
+func TestCollectResyncedFolderKeepsItsMessages(t *testing.T) {
+	objs := append([]*hxbuild.Object{folderObjs()[0]}, hdr(12, 22, 150, 1, "ok", 2), det(22, "<b@example.invalid>"))
+	stray := append([]byte{1, 2, 3}, hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 150, Parent: rootKey, Name: "Resynced Archive", Type: 0x63}).Encode()...)
+	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Folder.Name != "Resynced Archive" || r.Messages[0].Folder.Kind != "archive" || r.Notes.MissingFolder != 0 || r.Notes.ResyncedKept != 1 {
+		t.Fatalf("%+v %+v", r.Messages, r.Notes)
+	}
+}
+
+// One that does not map is skipped, and an unmappable header leaves the read doubtful.
+func TestCollectResyncedObjectsThatDoNotMapAreSkipped(t *testing.T) {
+	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
+	strays := []byte{1, 2, 3}
+	for _, o := range []*hxbuild.Object{
+		hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 23, FolderKey: fInbox}),
+		hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 24}),
+		hxbuild.NewMailBody(hxbuild.MailBodySpec{Key: 24}),
+		hxbuild.NewAttachment(hxbuild.AttachmentSpec{Key: 41, MessageKey: 22}),
+		hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 150, Parent: rootKey}),
+		hxbuild.NewRecipient(hxbuild.RecipientSpec{Key: 61, Parent: 22}),
+	} {
+		strays = append(strays, o.Encode()...)
+		strays = append(strays, 9, 9, 9) // each follows unknown bytes
+	}
+	fail := errors.New("unmappable")
+	oh, od, oa, of, or := mapHeader, mapDetail, mapAttachment, mapFolder, mapRecipient
+	mapHeader, mapDetail, mapAttachment, mapFolder, mapRecipient = func(o hxstore.Object) (Header, error) {
+		if k, _ := o.U32(offKey); k == 14 {
+			return Header{}, fail
+		}
+		return oh(o)
+	}, func(o hxstore.Object) (Detail, error) {
+		if k, _ := o.U32(offKey); k == 24 {
+			return Detail{}, fail
+		}
+		return od(o)
+	}, func(o hxstore.Object) (Attachment, error) { return Attachment{}, fail }, func(o hxstore.Object) (Folder, error) {
+		if k, _ := o.U32(offKey); k == 150 {
+			return Folder{}, fail
+		}
+		return of(o)
+	}, func(o hxstore.Object) (uint32, Recipient, error) { return 0, Recipient{}, fail }
+	t.Cleanup(func() { mapHeader, mapDetail, mapAttachment, mapFolder, mapRecipient = oh, od, oa, of, or })
+	r := collect(t, storeOf(t, append(framed(objs...), strays...)), Options{})
+	if len(r.Messages) != 1 || r.Notes.ResyncedKept != 1 || r.Notes.ResyncedSkipped != 5 || !r.Doubtful || len(r.Losses) != 0 {
+		t.Fatalf("%+v %+v doubtful=%v", r.Notes, r.Losses, r.Doubtful)
 	}
 }
 
@@ -641,7 +741,7 @@ func TestCollectResyncedHeaderNamesItsKey(t *testing.T) {
 	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "ok", 2), det(22, "<b@example.invalid>"))
 	stray := append([]byte{1, 2, 3}, hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 14, DetailKey: 23, FolderKey: fInbox}).Encode()...)
 	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
-	if !slices.Equal(r.SeenDetailKeys, []uint32{22, 23}) || r.Doubtful || len(r.Messages) != 1 {
+	if !slices.Equal(r.SeenDetailKeys, []uint32{22, 23}) || r.Doubtful || len(r.Messages) != 1 || r.Notes.MissingDetail != 1 {
 		t.Fatalf("%+v doubtful=%v", r.SeenDetailKeys, r.Doubtful)
 	}
 	old := mapHeader
@@ -650,5 +750,46 @@ func TestCollectResyncedHeaderNamesItsKey(t *testing.T) {
 	r = collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
 	if !r.Doubtful {
 		t.Fatal("an unmappable resynced header did not make the read doubtful")
+	}
+}
+
+// A copy reached after unknown bytes is used only when no clean copy of the key exists: a
+// high-stamp one never displaces the clean header or folder, and a clean copy replaces it.
+func TestCollectResyncedCopyNeverDisplacesACleanOne(t *testing.T) {
+	objs := append(folderObjs(), hdr(12, 22, fInbox, 1, "clean subject", 2), det(22, "<b@example.invalid>"))
+	garbageHdr := hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 12, Stamp: 99, DetailKey: 22, FolderKey: fSent, Subject: "garbage subject"}).Encode()
+	garbageFolder := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: rootKey, Name: "Garbage Name", Type: 0x65, Stamp: 99}).Encode()
+	stray := append([]byte{1, 2, 3}, append(garbageHdr, append([]byte{9, 9, 9}, garbageFolder...)...)...)
+	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Subject != "clean subject" || r.Messages[0].Folder.Name != "Fixture Inbox" || r.Messages[0].Folder.Kind != "inbox" || r.Messages[0].Copies != 1 {
+		t.Fatalf("%+v", r.Messages)
+	}
+	// The resynced copy comes first in the store: the clean one replaces it.
+	first := append([]byte{1, 2, 3}, garbageHdr...)
+	r = collect(t, storeOf(t, append(framed(), first...), framed(objs...)), Options{})
+	if len(r.Messages) != 1 || r.Messages[0].Subject != "clean subject" {
+		t.Fatalf("%+v", r.Messages)
+	}
+}
+
+// A message in a folder the store does not hold is counted as unattributed to an account: nothing
+// in the header or the detail names the account. One that also has a copy in another account's
+// folder is that account's, and is skipped.
+func TestCollectUnknownFolderMessagesAreUnattributed(t *testing.T) {
+	other := hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: fOtherBox, Parent: otherRoot, Name: "Other Inbox", Type: 0x61})
+	objs := append(folderObjs(), other,
+		hdr(11, 21, 999, 1, "no folder anywhere", 2), det(21, "<a@example.invalid>"),
+		hdr(12, 22, 999, 1, "theirs", 2), hdr(13, 22, fOtherBox, 1, "theirs", 2), det(22, "<b@example.invalid>"))
+	for i := uint32(0); i < 40; i++ {
+		objs = append(objs, hdr(100+i, 200+i, fInbox, 1, "y", 2), det(200+i, "<y@example.invalid>"))
+	}
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Messages) != 41 || r.Notes.MissingFolder != 1 || r.Notes.UnknownFolderUnattributed != 1 || r.Notes.OtherRoot != 1 {
+		t.Fatalf("%d messages %+v", len(r.Messages), r.Notes)
+	}
+	for _, m := range r.Messages {
+		if m.DetailKey == 22 {
+			t.Fatal("a message of another account was kept")
+		}
 	}
 }

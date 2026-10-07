@@ -16,7 +16,7 @@ func seedMailForFaults(t *testing.T, s *Store) {
 	pending := mailMsg(3, fInbox, "<3@x>", "Pending", 3)
 	pending.Body = outlookmail.Body{State: outlookmail.BodyNotRead}
 	pending.Attachments = []outlookmail.Attachment{{Key: 1, Name: "a.txt"}}
-	mustCommitMail(t, s, mailBatch(mailT0, faultMail(1)[0], faultMail(1)[1], pending, mailMsg(4, fInbox, "<4@x>", "Gone later", 10), mailMsg(5, fInbox, "<5@x>", "Rekeyed", 8), mailMsg(6, fInbox, "<6@x>", "Replaced", 7), mailMsg(7, fInbox, "<7@x>", "Stays missing", 9)))
+	mustCommitMail(t, s, mailBatch(mailT0, faultMail(1)[0], faultMail(1)[1], pending, mailMsg(4, fInbox, "<4@x>", "Gone later", 10), mailMsg(5, fInbox, "<5@x>", "Rekeyed", 8), mailMsg(6, fInbox, "<6@x>", "Replaced", 7), mailMsg(7, fInbox, "<7@x>", "Stays missing", 9), mailMsg(8, fSent, "<8@x>", "Only in Sent", 6)))
 	if _, err := s.db.Exec(`insert into mail_absent(account, detail_key, first_missed_at, misses, fresh_at) values(?,4,'x',1,'2026-09-10T08:00:00.000Z'),(?,7,'x',1,'2026-09-10T08:00:00.000Z'),(?,1,'x',1,'')`, mailAcct, mailAcct, mailAcct); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,8 @@ func TestMailQueriesFail(t *testing.T) {
 		c := mailMsg(3, fSent, "<3@x>", "Lone", 3)
 		d := mailMsg(4, fSent, "<4@x>", "Lone", 2)
 		d.Attachments = []outlookmail.Attachment{{Key: 1, Name: "d.txt"}}
-		mustCommitMail(t, s, mailBatch(mailT0, a, b, c, d))
+		lost := mailMsg(5, 999, "<5@x>", "No folder row", 1)
+		mustCommitMail(t, s, mailBatch(mailT0, a, b, c, d, lost))
 	}
 	run := func(name string, op func(ctx context.Context, s *Store) error) {
 		t.Run(name, func(t *testing.T) { sweepReadFaults(t, setup, op) })

@@ -570,7 +570,7 @@ func TestMailRowsWithoutAFolderRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := s.MailList(ctx, MailFilter{})
-	if err != nil || len(rows) != 1 || rows[0].Folder != "" || rows[0].FolderKind != "" {
+	if err != nil || len(rows) != 1 || rows[0].Folder != "" || rows[0].FolderKind != "unknown" {
 		t.Fatalf("no folder row: %+v %v", rows, err)
 	}
 	// An unlabelled message that moves in the same read can still be re-keyed or compared.

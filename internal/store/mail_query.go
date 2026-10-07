@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/outlookmail"
 )
 
 // ErrMailNotFound is returned by MailGet and MailThread for a message the archive does not hold.
@@ -120,7 +122,7 @@ func mailEach(ctx context.Context, q mailQuerier, query string, args []any, fn f
 	return rows.Err()
 }
 
-const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.name,''), coalesce(f.kind,''), m.to_me,
+const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), m.to_me,
   m.subject, m.subject_norm, m.sender_name, m.sender_address, m.preview, m.in_reply_to, m.received_at, m.sent_at, m.class, m.importance, m.ical_uid,
   m.is_read, m.read_state, m.flag, m.has_attachments, m.body_state, %s, m.first_seen_at, m.state_seen_at, m.gone_at, m.evicted_at`
 
@@ -272,6 +274,11 @@ func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) err
 	keys := byName
 	if len(keys) == 0 {
 		keys = byKind
+	}
+	if len(keys) == 0 && strings.EqualFold(f.Folder, outlookmail.KindUnknown) {
+		// Messages whose folder object the store does not hold have no folder row to match.
+		w.add(`not exists(select 1 from mail_folders f2 where f2.account=m.account and f2.folder_key=m.folder_key)`)
+		return nil
 	}
 	if len(keys) == 0 {
 		return ErrUnknownMailFolder
@@ -446,6 +453,20 @@ from mail_folders f left join mail_coverage c on c.account=f.account and c.folde
 	if err != nil {
 		return nil, err
 	}
+	// Messages in a folder the store holds no object of have no folder row: one bucket per account.
+	err = mailEach(ctx, s.db, `select m.account, count(*), sum(coalesce(m.is_read=0, 0))
+from mail_messages m where m.gone_at is null and m.evicted_at is null
+  and not exists(select 1 from mail_folders f where f.account=m.account and f.folder_key=m.folder_key) group by m.account`, nil, func(r *sql.Rows) error {
+		f := MailFolderRow{Kind: outlookmail.KindUnknown}
+		if err := r.Scan(&f.Account, &f.Messages, &f.Unread); err != nil {
+			return err
+		}
+		out = append(out, f)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Account != b.Account {
@@ -468,13 +489,16 @@ func mailKindRank(kind string) int {
 			return i
 		}
 	}
+	if kind == outlookmail.KindUnknown {
+		return 8
+	}
 	return 7
 }
 
 // MailCoverage lists, per folder, how far back the cache reached at the last read.
 func (s *Store) MailCoverage(ctx context.Context) ([]CoverageRow, error) {
 	out := []CoverageRow{}
-	err := mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,''), c.oldest_at, c.newest_at, c.count, c.read_at
+	err := mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), c.oldest_at, c.newest_at, c.count, c.read_at
 from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key order by c.account, c.folder_key`, nil, func(r *sql.Rows) error {
 		var c CoverageRow
 		var oldest, newest, read sql.NullString
