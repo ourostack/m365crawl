@@ -44,12 +44,9 @@ func checkFast(t *testing.T, in []byte) {
 
 func init() {
 	bs := string(rune(92))
-	for _, c := range []string{
-		`{"a":"{` + bs + `"pass` + bs + `u0077ord` + bs + `":` + bs + `"x` + bs + `"}"}`, `{"` + bs + `u0070assword":"x"}`, `{"` + bs + `u0050ASSWORD":"x"}`,
-		`<a href="?` + bs + `u0073ig=ABC">`, `{"pass` + bs + `u212aword":"x"}`, `{"pas` + bs + `u017fword":"x"}`, `a ` + bs + `u003cb` + bs + `u003e ` + bs + `u0026 c`,
-	} {
-		scrubCases = append(scrubCases, c)
-	}
+	scrubCases = append(scrubCases,
+		`{"a":"{`+bs+`"pass`+bs+`u0077ord`+bs+`":`+bs+`"x`+bs+`"}"}`, `{"`+bs+`u0070assword":"x"}`, `{"`+bs+`u0050ASSWORD":"x"}`,
+		`<a href="?`+bs+`u0073ig=ABC">`, `{"pass`+bs+`u212aword":"x"}`, `{"pas`+bs+`u017fword":"x"}`, `a `+bs+`u003cb`+bs+`u003e `+bs+`u0026 c`)
 }
 
 func TestScrubFastPathMatchesFullScrub(t *testing.T) {
