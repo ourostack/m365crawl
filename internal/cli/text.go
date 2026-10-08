@@ -234,6 +234,28 @@ func (rt *runtime) listTable(r *listResult) {
 				text += " (deleted)"
 			}
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
+		case searchChatItem:
+			cols, textCol = searchColumns, 4
+			text := oneLine(x.Text)
+			if !x.DeletedAt.IsZero() {
+				text += " (deleted)"
+			}
+			rows = append(rows, []string{stamp(x.SentAt), x.Source, x.ConversationDisplayName, x.SenderName, text})
+		case searchMailItem:
+			cols, textCol = searchColumns, 4
+			var at time.Time
+			if x.ReceivedAt != nil {
+				at = *x.ReceivedAt
+			}
+			from := searchVal(x.FromName)
+			if from == "" {
+				from = searchVal(x.FromAddress)
+			}
+			text := oneLine(searchVal(x.Subject))
+			if p := oneLine(searchVal(x.Preview)); p != "" {
+				text += " - " + p
+			}
+			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, text})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})

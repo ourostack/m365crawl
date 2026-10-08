@@ -4,6 +4,11 @@ GOVULNCHECK_VERSION ?= v1.8.0
 ACTIONLINT_VERSION ?= v1.7.12
 GORELEASER_VERSION ?= v2.18.2
 POWERSHELL ?= powershell
+# The race detector instruments every package it builds. modernc.org/sqlite is SQLite translated
+# from C into Go: instrumenting it doubles the cost of every test that touches an archive, and it
+# is no more ours to race-check than the C SQLite a cgo driver would link. Our own code, and the
+# database/sql layer we call it through, stay instrumented.
+RACE_FLAGS ?= -race -gcflags=modernc.org/...=-race=false
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -12,7 +17,7 @@ export GOWORK := off
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e acceptance acceptance-calendar v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint script-lint tidy-check check coverage snapshot screenshot clean
+.PHONY: help build test test-shard e2e acceptance acceptance-calendar v8vectors fixture fmt fmt-check vet lint golangci vulncheck workflow-lint script-lint tidy-check check coverage snapshot screenshot clean
 
 help:
 	@printf '%s\n' \
@@ -20,6 +25,7 @@ help:
 		'  help           Print available targets (default).' \
 		'  build          Build the CLI into $(BINARY).' \
 		'  test           Run unit tests with the race detector (COVERPROFILE=path to write coverage).' \
+		'  test-shard     Run shard SHARD of SHARDS of the unit tests with the race detector (what CI runs on Linux).' \
 		'  e2e            Run end-to-end tests (build tag e2e).' \
 		'  acceptance     Run the real-cache acceptance tests (build tag acceptance; needs M365CRAWL_REAL_CACHE=1, Full Disk Access, node, python3).' \
 		'  acceptance-calendar  Run only the calendar and Outlook real-cache checks (M365CRAWL_REAL_CACHE=1; M365CRAWL_OUTLOOK_ROOT enables the Outlook ones).' \
@@ -40,7 +46,10 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ourostack/m365crawl/internal/cli.version=$(VERSION) -X github.com/ourostack/m365crawl/internal/cli.commit=$(COMMIT) -X github.com/ourostack/m365crawl/internal/cli.date=$(DATE)" -o "$(BINARY)" ./cmd/m365crawl
 
 test:
-	go test -race -count=1 -timeout 15m $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...
+	go test $(RACE_FLAGS) -count=1 -timeout 15m $(if $(COVERPROFILE),-coverprofile=$(COVERPROFILE)) ./...
+
+test-shard:
+	scripts/test-shard.sh $(SHARD) $(SHARDS) $(RACE_FLAGS) -count=1 -timeout 15m
 
 e2e:
 	go test -count=1 -tags e2e ./e2e/...
@@ -99,6 +108,7 @@ script-lint:
 	scripts/automerge-eligible.sh --selftest
 	scripts/retry.sh --selftest
 	scripts/check-release-wiring.sh --selftest
+	scripts/test-shard.sh --selftest
 
 tidy-check:
 	go mod verify
