@@ -18,19 +18,45 @@ func TestTeamsBreadth(t *testing.T) {
 		}
 	}
 	exec(`insert into accounts(tenant_id, user_id) values ('t','u1'), ('t','u2')`)
-	for i, kind := range []string{"Space", "Topic", "Topic", "Chat", "Chat", "Chat", "Meeting", "OneOnOne"} {
-		exec(`insert into conversations(tenant_id, user_id, id, kind, updated_at) values ('t','u1',?,?,'x')`, string(rune('a'+i)), kind)
+	conv := func(user, id, kind string) {
+		exec(`insert into conversations(tenant_id, user_id, id, kind, updated_at) values ('t',?,?,?,'x')`, user, id, kind)
 	}
-	for i, typ := range []string{"RichText/Html", "RichText/Html", "RichText/Media_CallRecording", "RichText/Media_CallTranscript"} {
-		exec(`insert into messages(tenant_id, user_id, conversation_id, id, sent_at, message_type, updated_at) values ('t','u1','g',?, 'x', ?, 'x')`, string(rune('a'+i)), typ)
+	msg := func(user, conv, id, typ string, deleted bool) {
+		var del any
+		if deleted {
+			del = "x"
+		}
+		exec(`insert into messages(tenant_id, user_id, conversation_id, id, sent_at, deleted_at, message_type, updated_at) values ('t',?,?,?,'x',?,?,'x')`, user, conv, id, del, typ)
 	}
-	// A deleted recording is no recording.
-	exec(`insert into messages(tenant_id, user_id, conversation_id, id, sent_at, deleted_at, message_type, updated_at) values ('t','u1','g','z','x','x','RichText/Media_CallRecording','x')`)
-	exec(`insert into people(tenant_id, id) values ('t','p1'), ('t','p2'), ('t','p3')`)
+	conv("u1", "19:team@thread.v2", "Space")
+	conv("u1", "19:general@thread.tacv2", "Topic")
+	conv("u1", "19:legacy@thread.skype", "Chat")    // a channel by its id, whatever its kind says
+	conv("u1", "19:planning@thread.tacv2", "topic") // kinds compare without case
+	conv("u1", "19:group@thread.v2", "Chat")
+	conv("u1", "19:a_b@unq.gbl.spaces", "OneOnOne")
+	conv("u1", "19:meeting_x@thread.v2", "meeting")
+	conv("u1", "48:notes", "Chat")
+	conv("u1", "48:notifications", "Chat") // a system pseudo-conversation: never counted
+	conv("u1", "48:calllogs", "Chat")
+	// A conversation both accounts hold counts once.
+	conv("u1", "19:shared@thread.v2", "Chat")
+	conv("u2", "19:shared@thread.v2", "Chat")
+	conv("u2", "19:team2@thread.v2", "Space")
+
+	msg("u1", "19:group@thread.v2", "1", "RichText/Html", false)
+	msg("u1", "19:meeting_x@thread.v2", "2", "RichText/Media_CallRecording", false)
+	msg("u1", "19:meeting_x@thread.v2", "3", "RichText/Media_CallTranscript", false)
+	msg("u1", "19:meeting_x@thread.v2", "4", "RichText/Media_CallRecording", true) // a deleted recording is no recording
+	msg("u1", "19:shared@thread.v2", "5", "RichText/Html", false)
+	msg("u2", "19:shared@thread.v2", "5", "RichText/Html", false)             // the same message in the other account
+	msg("u1", "48:notifications", "1", "RichText/Html", false)                // mirrors a real message
+	msg("u1", "48:notifications", "9", "RichText/Media_CallRecording", false) // and is never counted
+	exec(`insert into people(tenant_id, id) values ('t','p1'), ('t','p2'), ('t2','p2')`)
+
 	got := must(s.TeamsBreadth(ctx))
-	want := TeamsBreadth{Accounts: 2, Teams: 1, Channels: 2, Chats: 3, Meetings: 1, Conversations: 8, Messages: 5, People: 3, Recordings: 1, Transcripts: 1}
+	want := TeamsBreadth{Accounts: 2, Teams: 2, Channels: 3, Chats: 4, Meetings: 1, Messages: 4, People: 2, Recordings: 1, Transcripts: 1}
 	if got != want {
-		t.Fatalf("got %+v\nwant %+v", got, want)
+		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
 	exec(`drop table people`)
 	if _, err := s.TeamsBreadth(ctx); err == nil {

@@ -28,7 +28,7 @@ Ready checks
 
 Snapshot
 --------
-  Teams        accounts=2  chats=6  channels=4  teams=2  meetings=2  messages=120  people=10  recordings=6  transcripts=2
+  Teams        accounts=2  chats=5  channels=4  teams=2  meetings=2  messages=113  people=7  recordings=6  transcripts=2
   Mail         messages=0  unread=0  folders=0
   Calendar     teams=28  outlook=10  window=2023-11-20..2031-03-11
   last sync    <stamp>

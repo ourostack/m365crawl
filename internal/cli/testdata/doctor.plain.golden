@@ -27,7 +27,7 @@ Ready checks
 
 Snapshot
 --------
-  Teams        accounts=2  chats=6  channels=4  teams=2  meetings=2  messages=120  people=10  recordings=6  transcripts=2
+  Teams        accounts=2  chats=5  channels=4  teams=2  meetings=2  messages=113  people=7  recordings=6  transcripts=2
   Calendar     teams=28  window=2023-11-20..2023-11-28
   last sync    <stamp>
   archive age  <age>

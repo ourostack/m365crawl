@@ -115,6 +115,7 @@ endif
 
 screenshot:
 	cd scripts/fixture && npm ci --no-audit --no-fund
+	node --test scripts/screenshot/scrub.test.mjs
 	GO="$$(command -v go)" node scripts/screenshot/generate.mjs
 
 snapshot:

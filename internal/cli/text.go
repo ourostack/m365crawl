@@ -374,8 +374,9 @@ func (rt *runtime) doctorSnapshot() *render.Snapshot {
 	return snap
 }
 
-// calendarSnapshot counts the live events of each source and the days the archive covers, as in
-// teams=28 outlook=16 window=2026-09-24..2026-10-22. It is nil when the archive holds no event or
+// calendarSnapshot counts the live events of each source and gives a window from the earliest to
+// the latest day any source covers (days in between need not be covered), as in teams=28
+// outlook=16 window=2026-09-24..2026-10-22. It is nil when the archive holds no event or
 // cannot say. A meeting both sources hold counts once in each.
 func (rt *runtime) calendarSnapshot(st *store.Store) [][2]string {
 	src, err := st.CalendarSources(rt.ctx, store.CalendarSourcesFilter{Now: rt.now()})

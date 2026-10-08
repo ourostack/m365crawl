@@ -11,8 +11,12 @@
 //
 // Real mode (M365CRAWL_SHOT_REAL=1) renders `m365crawl doctor` from the m365crawl on PATH, or
 // $M365CRAWL_BIN, with the user's own archive and default roots, and passes no --db or root. It
-// prints the rendered text to stdout for review before the PNG is used, and fails when the text
-// holds the user name, the home or temp directory, an "@" or "http".
+// rewrites the home directory to "~", Outlook profile names to "Main" or "Profile N" and non-Teams
+// origin names to a count, then fails if the text still holds the user name, the full name or its
+// parts, an entry of M365CRAWL_SHOT_DENY (comma-separated), the home or temp directory, "@",
+// "http" or an absolute path outside "~" (scrub.mjs). It prints the text to stdout for review and
+// writes the PNG to a new temp file, never over screenshot.png, unless M365CRAWL_SHOT_OUT names
+// the output.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { ansiToHtml } from './ansi2html.mjs';
+import { scrub } from './scrub.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -79,39 +84,48 @@ async function fixtureHome(base) {
   Object.assign(env, colorEnv, { HOME: base, M365CRAWL_TEAMS_ROOT: teamsRoot, M365CRAWL_OUTLOOK_ROOT: outlookRoot });
   const run = runner(bin, env);
   run(['--format', 'json', 'sync']);
-  return { run, home: base };
+  return { run, home: base, profiles: outlookProfiles(outlookRoot) };
+}
+
+// outlookProfiles lists the directory names under the Outlook root this run reads: the profile
+// names doctor can print. Only names are read, never a store.
+function outlookProfiles(root) {
+  if (!root || root === 'none') return [];
+  try {
+    return fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+// fullName is the account's full name (macOS `id -F`), or empty.
+function fullName() {
+  try {
+    return execFileSync('id', ['-F'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
 }
 
 function realHome() {
   const bin = process.env.M365CRAWL_BIN || 'm365crawl';
   const env = { ...process.env, ...colorEnv };
   delete env.NO_COLOR;
-  return { run: runner(bin, env), home: os.homedir() };
+  const home = os.homedir();
+  const root = process.env.M365CRAWL_OUTLOOK_ROOT || path.join(home, ...OUTLOOK_REL);
+  return { run: runner(bin, env), home, profiles: outlookProfiles(root) };
+}
+
+function scrubOptions(home, profiles) {
+  const homes = [home, os.homedir()].flatMap((h) => { try { return [h, fs.realpathSync(h)]; } catch { return [h]; } });
+  return {
+    homes, profiles, user: os.userInfo().username, fullName: fullName(),
+    deny: (process.env.M365CRAWL_SHOT_DENY || '').split(','),
+    tmpdirs: [os.tmpdir(), fs.realpathSync(os.tmpdir())],
+  };
 }
 
 const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
-
-// scrub replaces the home directory with "~" and fails on anything that identifies the user.
-function scrub(text, home) {
-  for (const h of new Set([fs.realpathSync(home), home])) text = text.split(h).join('~');
-  const plain = strip(text);
-  const user = os.userInfo().username;
-  const problems = [];
-  // The user name as a word of its own: "jane" in "/Users/jane" or "jane's", not in "com.janeco.app".
-  if (user && user.length > 2) {
-    const esc = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`(^|[^A-Za-z0-9._-])${esc}($|[^A-Za-z0-9._-])`).test(plain)) problems.push('the user name');
-  }
-  for (const p of [os.homedir(), os.tmpdir(), fs.realpathSync(os.tmpdir())]) {
-    if (p && p.length > 3 && plain.includes(p)) problems.push(p);
-  }
-  plain.split('\n').forEach((l, i) => {
-    if (l.includes('@')) problems.push(`"@" on line ${i + 1}`);
-    if (/http/i.test(l)) problems.push(`"http" on line ${i + 1}`);
-  });
-  if (problems.length) throw new Error('the output identifies the user: ' + problems.join(', '));
-  return text;
-}
 
 // The column a wrapped line continues at: after the leading spaces and, when the line has a label
 // (a check name, a snapshot label), after the label and the run of spaces that follows it.
@@ -143,11 +157,12 @@ function panel(argv, text) {
 
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'm365crawl-shot-'));
 try {
-  const { run, home } = real ? realHome() : await fixtureHome(base);
+  const { run, home, profiles } = real ? realHome() : await fixtureHome(base);
+  const opts = scrubOptions(home, profiles);
   const panels = [];
   const texts = [];
   for (const argv of COMMANDS) {
-    const text = scrub(run(['--format', 'text', ...argv], [0, 3]), home);
+    const text = scrub(run(['--format', 'text', ...argv], [0, 3]), opts);
     texts.push(`$ m365crawl ${argv.join(' ')}\n${strip(text)}`);
     panels.push(panel(argv, text));
   }
@@ -176,12 +191,15 @@ try {
     const ctx = await browser.newContext({ deviceScaleFactor: 2, viewport: { width: 900, height: 900 } });
     const p = await ctx.newPage();
     await p.goto('file://' + page);
-    // Nothing may run past the window's right edge.
+    // Output lines wrap inside the window by design. What must not happen is a run with no break
+    // opportunity (a long path or word) that is wider than the window: the element then scrolls
+    // sideways and the screenshot clips it. The wordmark and the prompt never wrap, so they must fit.
     const over = await p.evaluate(() => [...document.querySelectorAll('.l, pre.mark, .prompt')].filter((e) => e.scrollWidth > e.clientWidth + 1).length);
-    if (over) throw new Error(`${over} line(s) are wider than the window`);
-    const out = process.env.M365CRAWL_SHOT_OUT || path.join(repo, 'screenshot.png');
+    if (over) throw new Error(`${over} line(s) have text wider than the window that cannot wrap`);
+    const out = process.env.M365CRAWL_SHOT_OUT
+      || (real ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'm365crawl-doctor-')), 'doctor.png') : path.join(repo, 'screenshot.png'));
     await p.locator('.win').screenshot({ path: out, omitBackground: true });
-    console.error('wrote ' + path.relative(process.cwd(), out));
+    console.error('wrote ' + (real ? out : path.relative(process.cwd(), out)));
   } finally {
     await browser.close();
   }
