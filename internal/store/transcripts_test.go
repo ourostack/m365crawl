@@ -177,7 +177,7 @@ const tSeedParts = `call-1#1 d:b!d1/ITEM1 drive_item 103 true
 call-1#2 d:b!d1/ITEM2 drive_item 102 false
 call-2#1 u:%s share_only 200 false
 call-3#1 m:300 ams_only 300 false
-call-4#1 call:call-4 unresolved 400 true
+call-4#1 call:call-4 unresolved 400 false
 call-5#1 d:b!d1/ITEM5 drive_item 501 false`
 
 func tShareKey(t *testing.T) string {
@@ -495,6 +495,36 @@ func TestResolveMeetingByEvent(t *testing.T) {
 	unknownMeeting(t, s, nil, o1)
 }
 
+// Teams re-posts a recording notice, sometimes days later. The part keeps the newest notice of its
+// file, which falls outside the occurrence's window; the call still belongs to the occurrence its
+// first notice fell in, for ResolveMeeting and for the event key the list prints.
+func TestResolveMeetingSurvivesARepostedNotice(t *testing.T) {
+	ctx := context.Background()
+	s := tEventSeed(t)
+	o1 := calendar.Key(qEvent("o1", 3))
+	s.tMessage(t, acctA, qChat, "t-1b-again", transcripts.TypeRecording, "2026-11-05T11:40:00.000Z", tNotice("call-1b", "0", "Success", "Recording+Transcript", "2026-11-03T10:30:00Z", "drive:E1B"))
+	tDerive(t, s, qTeams)
+	if n := rowCount(t, s, `select count(*) from transcript_parts where call_id='call-1b' and message_id='t-1b-again'`); n != 1 {
+		t.Fatalf("the part keeps the newest notice: %d", n)
+	}
+	for _, acct := range []*teamsdesktop.Account{nil, &acctA} {
+		if calls, kind := resolve(t, s, acct, o1); calls != "call-1b,call-1" || kind != MeetingByEvent {
+			t.Fatalf("o1: %q %q", calls, kind)
+		}
+	}
+	calls, _, err := s.TranscriptCalls(ctx, TranscriptFilter{Calls: []string{"call-1b"}})
+	if err != nil || len(calls) != 1 || calls[0].EventKey != o1 {
+		t.Fatalf("call-1b's event: %+v, %v", calls, err)
+	}
+	// A transcript notice of the call counts as one of its notices too.
+	s.qExec(t, `update messages set sent_at='2026-11-05T11:41:00.000Z' where id='t-1b'`)
+	s.tMessage(t, acctA, qChat, "t-1b-tr", transcripts.TypeTranscript, "2026-11-03T11:41:00.000Z", tTranscriptNotice("call-1b"))
+	tDerive(t, s, qTeams)
+	if calls, _ := resolve(t, s, nil, o1); calls != "call-1b,call-1" {
+		t.Fatalf("by the transcript notice: %q", calls)
+	}
+}
+
 func TestResolveMeetingByEventPrefix(t *testing.T) {
 	s := tEventSeed(t)
 	id := EventID(qTeams, calendar.Key(qEvent("o2", 10)))
@@ -651,8 +681,8 @@ func TestTranscriptCallsNameTheEvent(t *testing.T) {
 func TestEventOfCallPrefersTheSmallestKey(t *testing.T) {
 	cr := &chatRecordings{matched: map[string][]CalendarRecording{
 		"k2": {{MessageID: "a"}}, "k1": {{MessageID: "b"}}, "k0": {{MessageID: "other"}},
-	}}
-	c := TranscriptCall{Parts: []TranscriptPart{{Part: transcripts.Part{MessageID: "a"}}, {Part: transcripts.Part{MessageID: "b"}}}}
+	}, calls: map[string]string{"a": "call-x", "b": "call-x", "other": "call-z"}}
+	c := TranscriptCall{CallID: "call-x"}
 	for i := 0; i < 20; i++ { // map order must not decide
 		if got := eventOfCall(cr, c); got != "k1" {
 			t.Fatalf("event %q", got)

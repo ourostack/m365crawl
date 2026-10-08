@@ -44,7 +44,7 @@ func Assemble(parts []Part, notices map[string]Notice) []Part {
 		}
 		if !has {
 			byCall[call] = append(byCall[call], Part{CallID: call, ThreadID: n.ThreadID, MessageID: n.MessageID, SentAt: n.SentAt,
-				PartKey: "call:" + call, RefQuality: RefUnresolved, ContentTypes: "Transcript", TranscribeOnly: true})
+				PartKey: "call:" + call, RefQuality: RefUnresolved, ContentTypes: "Transcript"}) // whether it was recorded is not known
 		}
 	}
 	calls := make([]string, 0, len(byCall))

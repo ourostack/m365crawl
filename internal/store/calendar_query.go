@@ -650,6 +650,7 @@ type chatRecordings struct {
 	matched map[string][]CalendarRecording
 	series  []CalendarRecording // newest first
 	chat    *CalendarChat
+	calls   map[string]string // message id to call id, for the recording and transcript notices that name one
 }
 
 // cached is the recordings of a chat that of has already loaded.
@@ -737,10 +738,11 @@ func (s *Store) matchRecordings(ctx context.Context, accounts []string, chat str
 		}
 		_ = wr.Close()
 	}
-	msgs, err := s.chatMessages(ctx, accounts, chat)
+	msgs, calls, err := s.chatMessages(ctx, accounts, chat)
 	if err != nil {
 		return nil, err
 	}
+	out.calls = calls
 	for _, m := range msgs {
 		if key, by := matchOccurrence(occs, m.SentAt); key != "" {
 			m.MatchedBy = by
@@ -802,26 +804,30 @@ func matchOccurrence(occs []occurrence, t time.Time) (key, by string) {
 	return "", ""
 }
 
-func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, error) {
+func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, map[string]string, error) {
 	args := append([]any{chat}, stringArgs(accounts)...)
-	rows, err := s.query(ctx, `select id, conversation_id, sent_at, message_type, content_text, link from messages
+	rows, err := s.query(ctx, `select id, conversation_id, sent_at, message_type, content_text, link, content_html from messages
 	  where conversation_id=? and tenant_id||'/'||user_id in `+inList(len(accounts))+` and deleted_at is null
 	  and message_type in ('RichText/Media_CallRecording','RichText/Media_CallTranscript','Event/Call') order by sent_at, id`, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []CalendarRecording
+	calls := map[string]string{}
 	for rows.Next() {
 		var m CalendarRecording
-		var sent, typ string
-		if err := rows.Scan(&m.MessageID, &m.ConversationID, &sent, &typ, &m.Text, &m.Link); err != nil {
-			return nil, err
+		var sent, typ, html string
+		if err := rows.Scan(&m.MessageID, &m.ConversationID, &sent, &typ, &m.Text, &m.Link, &html); err != nil {
+			return nil, nil, err
 		}
 		m.SentAt, m.Kind = parseTime(sql.NullString{String: sent, Valid: true}), recordingKinds[typ]
+		if call := noticeCall(typ, html); call != "" {
+			calls[m.MessageID] = call
+		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	return out, calls, rows.Err()
 }
 
 func (s *Store) chatOf(ctx context.Context, accounts []string, chat string) (*CalendarChat, error) {

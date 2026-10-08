@@ -272,9 +272,12 @@ func (s *Store) ResolveMeeting(ctx context.Context, acct *teamsdesktop.Account, 
 	case !found || d.TeamsThreadID == "":
 		return nil, "", errs.UnknownMeeting(ref)
 	}
+	// The occurrence names its calls through the notices that fell in its window and its recaps.
+	// A part keeps only the newest notice of its file, which Teams may re-post days later, so the
+	// parts are matched by call id, never by the message id they kept.
 	var ids []any
-	for _, r := range d.Recordings {
-		ids = append(ids, r.MessageID)
+	if ids, err = s.recordingCalls(ctx, acct, d.TeamsThreadID, d.Recordings); err != nil {
+		return nil, "", err
 	}
 	for _, r := range d.Recaps {
 		if !r.SeriesLevel { // a recap of the whole series is no call of this occurrence
@@ -284,15 +287,62 @@ func (s *Store) ResolveMeeting(ctx context.Context, acct *teamsdesktop.Account, 
 	if len(ids) == 0 {
 		return nil, "", errs.UnknownMeeting(ref)
 	}
-	in := inList(len(ids))
-	q := `select call_id from transcript_parts where thread_id=? and (message_id in ` + in + ` or call_id in ` + in + `)` + scope + newestFirst
-	if calls, err = s.callIDs(ctx, q, append(append(append([]any{d.TeamsThreadID}, ids...), ids...), args...)...); err != nil {
+	q := `select call_id from transcript_parts where thread_id=? and call_id in ` + inList(len(ids)) + scope + newestFirst
+	if calls, err = s.callIDs(ctx, q, append(append([]any{d.TeamsThreadID}, ids...), args...)...); err != nil {
 		return nil, "", err
 	}
 	if len(calls) == 0 {
 		return nil, "", errs.UnknownMeeting(ref)
 	}
 	return calls, MeetingByEvent, nil
+}
+
+// noticeCall is the call a recording notice (with status Success) or a transcript notice names;
+// empty for any other message.
+func noticeCall(typ, html string) string {
+	switch typ {
+	case transcripts.TypeRecording:
+		if p, ok, _ := transcripts.ParseRecording("", "", html, time.Time{}); ok {
+			return p.CallID
+		}
+	case transcripts.TypeTranscript:
+		call, _ := transcripts.ParseTranscriptNotice(html)
+		return call
+	}
+	return ""
+}
+
+// recordingCalls is the distinct calls the notices among recs name, read from their messages.
+func (s *Store) recordingCalls(ctx context.Context, acct *teamsdesktop.Account, thread string, recs []CalendarRecording) ([]any, error) {
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	args := []any{thread}
+	for _, r := range recs {
+		args = append(args, r.MessageID)
+	}
+	q := `select message_type, content_html from messages where conversation_id=? and id in ` + inList(len(recs)) + ` and deleted_at is null`
+	if acct != nil {
+		q, args = q+` and tenant_id=? and user_id=?`, append(args, acct.TenantID, acct.UserID)
+	}
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []any
+	seen := map[string]bool{}
+	for rows.Next() {
+		var typ, html string
+		if err := rows.Scan(&typ, &html); err != nil {
+			return nil, err
+		}
+		if call := noticeCall(typ, html); call != "" && !seen[call] {
+			seen[call] = true
+			out = append(out, call)
+		}
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) callIDs(ctx context.Context, q string, args ...any) ([]string, error) {
@@ -536,16 +586,13 @@ func (s *Store) nameCalls(ctx context.Context, calls []TranscriptCall) error {
 }
 
 // eventOfCall is the key of the occurrence that holds one of the call's notices; the smallest key
-// when its parts' notices fell to more than one occurrence.
+// when its notices fell to more than one occurrence. Any notice of the call counts, not only the
+// one its parts kept: Teams may re-post a notice outside the occurrence's window.
 func eventOfCall(cr *chatRecordings, c TranscriptCall) string {
-	mine := map[string]bool{}
-	for _, p := range c.Parts {
-		mine[p.MessageID] = true
-	}
 	best := ""
 	for key, msgs := range cr.matched {
 		for _, m := range msgs {
-			if mine[m.MessageID] && (best == "" || key < best) {
+			if cr.calls[m.MessageID] == c.CallID && (best == "" || key < best) {
 				best = key
 			}
 		}

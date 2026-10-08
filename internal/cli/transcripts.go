@@ -473,7 +473,10 @@ func (rt *runtime) callBlock(c store.TranscriptCall) {
 	rows := make([][]string, len(c.Parts))
 	for i, p := range c.Parts {
 		kind, entries, when := "recorded", "", ""
-		if p.TranscribeOnly {
+		switch {
+		case p.RefQuality == transcripts.RefUnresolved: // only a transcript notice: no evidence either way
+			kind = "unknown"
+		case p.TranscribeOnly:
 			kind = "transcribe only"
 		}
 		if p.HasText() {
@@ -495,9 +498,12 @@ func seamLine(seg transcriptSegment, of int) string {
 		at = *seg.StartsAt
 	}
 	s += " · " + clock(at)
-	if seg.FetchedAt != nil {
+	switch {
+	case seg.FetchedAt != nil:
 		s += " · fetched " + stamp(*seg.FetchedAt)
-	} else {
+	case seg.State == transcripts.StateNotFetched: // the reason already says it is not fetched yet
+		s += " · " + sv(seg.Reason)
+	default:
 		s += " · not fetched: " + sv(seg.Reason)
 	}
 	return s + " ──"

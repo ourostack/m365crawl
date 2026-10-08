@@ -713,7 +713,7 @@ m365crawl transcripts show <meeting>
 
 Result: `{"call_id", "event_key", "title", "source": "archive", "complete", "segments": [{"ordinal", "transcribe_only", "starts_at", "fetched_at", "state", "reason", "entries": [{"speaker", "start", "end", "offset", "text"}]}], "text_truncated"?}`. A part with no text keeps its place as a segment with no entries and its `reason`, and `complete` is false. `start` and `end` are absolute times; `offset` (h:mm:ss) is from the start of the part. When `<meeting>` names several recorded calls the newest is shown and a notice says how to pick another. `--max-text` cuts each entry's text and sets `text_truncated`.
 
-In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──` or `── part 3 of 3 · 10:40 · not fetched: <reason> ──`, consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
+In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──`, `── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
 
 ## metadata
 

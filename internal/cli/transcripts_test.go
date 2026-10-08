@@ -382,7 +382,7 @@ func TestShowMarksMissingPartAtSeam(t *testing.T) {
 		t.Fatalf("segment 2 %v", s2)
 	}
 	_, out, _ := e.tr("--format", "text", "transcripts", "show", "call-1")
-	if !strings.Contains(out, "── part 2 of 3 · 10:02 · not fetched: SharePoint refused access (HTTP 403); you may have lost access to this file ──\n── part 3 of 3") {
+	if !strings.Contains(out, "── part 2 of 3 · 10:02 · not fetched: SharePoint refused access (HTTP 403); you may have lost access to this file ──\n── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch call-1 ──") {
 		t.Fatalf("the gap is not marked at its seam:\n%s", out)
 	}
 	if !strings.Contains(out, "source: archive · 1 of 3 parts fetched") {
@@ -631,4 +631,39 @@ func TestTranscriptsReadFailuresSurface(t *testing.T) {
 	// The entries of a fetched part cannot be read.
 	e.exec(`alter table transcript_entries rename column text to body`)
 	trFails(t, e, "db_error", 1, "transcripts", "show", "call-1")
+}
+
+// A call with only a transcript notice has a placeholder part whose kind is unknown: nothing says
+// whether it was recorded or only transcribed.
+func TestTranscriptsUnresolvedKindIsUnknown(t *testing.T) {
+	e := trEnv(t)
+	e.exec(`insert into messages(tenant_id,user_id,conversation_id,id,sent_at,message_type,content_html,updated_at) values('` + tenantA + `','` + userA + `','` + trAdhoc + `','5001','2026-11-13T15:05:00.000Z','` + transcripts.TypeTranscript + `','{\"callId\":\"call-5\"}','2026-11-13T15:05:00.000Z')`)
+	ctx := context.Background()
+	st, err := store.Open(ctx, e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.DeriveTranscriptParts(ctx, []string{trAccount}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	p := items(t, trJSON(t, e, "transcripts", "call-5"))[0]["parts"].([]any)[0].(map[string]any)
+	if p["transcribe_only"] != false || p["ref_quality"] != "unresolved" || p["state"] != "unfetchable" {
+		t.Fatalf("placeholder %v", p)
+	}
+	_, out, _ := e.tr("--format", "text", "transcripts", "call-5")
+	if !regexp.MustCompile(`(?m)^1\s+-\s+unknown\s+unfetchable`).MatchString(out) {
+		t.Fatalf("kind:\n%s", out)
+	}
+	_, out, _ = e.tr("--format", "text", "transcripts", "show", "call-5")
+	if !strings.Contains(out, "── part 1 of 1 · - · not fetched: Teams posted a transcript notice but no file reference ──") {
+		t.Fatalf("seam:\n%s", out)
+	}
 }

@@ -252,8 +252,11 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	if stopped == nil && linkErr == nil && r.outlookOn() {
 		r.autoLinkOutlook(ctx)
 	}
-	for _, c := range r.transcripts {
-		rep.Transcripts.Add(c)
+	if len(r.transcripts) > 0 {
+		rep.Transcripts = &store.TranscriptCounts{}
+		for _, c := range r.transcripts {
+			rep.Transcripts.Add(c)
+		}
 	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {

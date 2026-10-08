@@ -39,9 +39,10 @@ type Report struct {
 	Calendar store.CalendarCounts `json:"calendar"`
 	// Transcripts counts the meeting transcript parts of the accounts this run derived them for:
 	// the calls with a recording or transcript notice, their parts by the kind of reference each
-	// carries, and the notices that could not be read. All zero when no source changed.
-	Transcripts store.TranscriptCounts `json:"transcripts"`
-	Omissions   map[string]int         `json:"omissions"`
+	// carries, and the notices that could not be read. Absent when the run derived no account's
+	// parts (no source changed), so all-zero counts never read as "no recorded meetings".
+	Transcripts *store.TranscriptCounts `json:"transcripts,omitempty"`
+	Omissions   map[string]int          `json:"omissions"`
 	// Redacted counts the credential-looking fragments removed from generic records before they
 	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
 	Redacted     int      `json:"redacted"`

@@ -87,7 +87,7 @@ func TestSyncReportsTranscriptCounts(t *testing.T) {
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
 	// The rebuild at the start of the run and the fixture source's own derivation both cover the
 	// account; its parts are counted once.
-	if r.Transcripts != seededTranscripts {
+	if r.Transcripts == nil || *r.Transcripts != seededTranscripts {
 		t.Fatalf("transcripts %+v, want %+v", r.Transcripts, seededTranscripts)
 	}
 	if *derives == 0 {
@@ -119,8 +119,11 @@ func TestSyncUnchangedSourceSkipsDerive(t *testing.T) {
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	derives := countDerives(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
-	if r.Status != StatusUnchanged || *derives != 0 || r.Transcripts != (store.TranscriptCounts{}) {
+	if r.Status != StatusUnchanged || *derives != 0 || r.Transcripts != nil {
 		t.Fatalf("status %s, %d derivations, transcripts %+v", r.Status, *derives, r.Transcripts)
+	}
+	if raw, err := json.Marshal(r); err != nil || strings.Contains(string(raw), `"transcripts"`) {
+		t.Fatalf("an unchanged sync carries no transcripts block: %s, %v", raw, err)
 	}
 	if got := partRows(t, db); got != "call-a#1 drive_item; call-a#2 drive_item; call-b#1 ams_only; call-c#1 unresolved" {
 		t.Fatalf("parts changed: %s", got)
@@ -138,7 +141,7 @@ func TestSyncRebuildsPartsOfAnOlderMapper(t *testing.T) {
 	exec(t, d, `delete from meta where key='transcript_parts_mapper'`)
 	derives := countDerives(t)
 	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
-	if r.Status != StatusUnchanged || *derives != 0 || r.Transcripts != seededTranscripts {
+	if r.Status != StatusUnchanged || *derives != 0 || r.Transcripts == nil || *r.Transcripts != seededTranscripts {
 		t.Fatalf("status %s, %d derivations, transcripts %+v", r.Status, *derives, r.Transcripts)
 	}
 	if got := partRows(t, db); got != "call-a#1 drive_item; call-a#2 drive_item; call-b#1 ams_only; call-c#1 unresolved" {

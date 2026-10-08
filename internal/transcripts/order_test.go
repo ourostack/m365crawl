@@ -87,7 +87,7 @@ func TestAssembleUnresolvedCall(t *testing.T) {
 		t.Fatalf("got %s", brief(got))
 	}
 	u := got[0]
-	if u.RefQuality != RefUnresolved || u.ThreadID != "19:a@thread.v2" || !u.SentAt.Equal(at(8, 0)) || !u.StartsAt.IsZero() || u.Fetchable() {
+	if u.RefQuality != RefUnresolved || u.TranscribeOnly || u.ThreadID != "19:a@thread.v2" || !u.SentAt.Equal(at(8, 0)) || !u.StartsAt.IsZero() || u.Fetchable() {
 		t.Fatalf("unresolved row %+v", u)
 	}
 }
