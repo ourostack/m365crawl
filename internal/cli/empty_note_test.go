@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,7 +92,7 @@ func TestEmptyTeamsListsSayWhy(t *testing.T) {
 		{[]string{"records", "--database", "nothing"}, "nothing matched the filters"},
 		{[]string{"unread"}, "nothing is unread in chats and meetings; --include-channels adds channels"},
 		{[]string{"unread", "--include-channels"}, "nothing is unread"},
-		{[]string{"thread", "19:chat", "404"}, "no message of this thread is archived: check the conversation id and root message id (search and messages print both), or pass a Teams message link"},
+		{[]string{"thread", "19:chat", "404"}, "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"},
 	} {
 		if got := noteOf(t, e, c.args...); got != c.want {
 			t.Errorf("%v: note %q, want %q", c.args, got, c.want)
@@ -101,6 +102,11 @@ func TestEmptyTeamsListsSayWhy(t *testing.T) {
 	old := teamsReadHere
 	teamsReadHere = func() bool { return false }
 	t.Cleanup(func() { teamsReadHere = old })
+	if got := noteOf(t, e, "messages", "--from", "nobody"); got != "nothing matched the filters" {
+		t.Errorf("data on a platform without Teams: %q", got)
+	}
+	e = newEnv(t)
+	e.emptyArchive()
 	if got := noteOf(t, e, "messages", "--from", "nobody"); got != "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system" {
 		t.Errorf("unsupported platform: %q", got)
 	}
@@ -161,5 +167,27 @@ func TestCalendarEmptyNoteReportsAFailure(t *testing.T) {
 		if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
 			t.Fatalf("%v: exit %d, stderr %q", args, code, errOut)
 		}
+	}
+}
+
+// The thread column of search and messages text output is what `thread` takes, whole.
+func TestTextThreadColumnRunsThread(t *testing.T) {
+	e := newEnv(t)
+	teamsArchive(t, e)
+	for _, args := range [][]string{{"messages"}, {"search", "hello"}} {
+		_, out, _ := e.run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+		if !strings.Contains(out, "thread") || !strings.Contains(out, "19:chat 1") {
+			t.Fatalf("%v: no thread target:\n%s", args, out)
+		}
+	}
+	code, out, _ := e.run("--json", "--max-age", "0", "thread", "19:chat", "1")
+	if m := decode(t, out); code != 0 || m["count"] != float64(1) {
+		t.Fatalf("thread: %d %v", code, m)
+	}
+	if got := threadTarget("19:c", "", "5"); got != "19:c 5" {
+		t.Fatalf("no reply chain: %q", got)
+	}
+	if got := threadTarget("19:c", "4", "5"); got != "19:c 4" {
+		t.Fatalf("reply chain: %q", got)
 	}
 }

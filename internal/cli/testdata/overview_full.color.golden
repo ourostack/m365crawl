@@ -10,6 +10,7 @@
 chats     ok     1 message in 1 conversation, newest 2026-03-10 12:00    -
 mail      ok     6 messages from 2026-08-01, newest 2026-09-09 08:00     -
 calendar  ok     42 events from 2026-02-08 to 2026-03-24; today covered  2026-03-10 13:00
+[2mmail: the Outlook source is off for this run, so this archived mail is not being refreshed[0m
 
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive

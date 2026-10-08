@@ -119,8 +119,12 @@ func (overviewCmd) Run(rt *runtime) error {
 	}
 	defer func() { _ = st.Close() }()
 	res.ArchiveExists = true
-	for _, fill := range []func(*store.Store) (overviewSource, error){rt.overviewChats, rt.overviewMail, rt.overviewCalendar} {
-		src, err := fill(st)
+	note, err := rt.unknownAccountNote(st) // what chats and the calendar say for an account the archive lacks
+	if err != nil {
+		return asCoded(err)
+	}
+	for _, fill := range []func(*store.Store, string) (overviewSource, error){rt.overviewChats, rt.overviewMail, rt.overviewCalendar} {
+		src, err := fill(st, note)
 		if err != nil {
 			return asCoded(err)
 		}
@@ -138,33 +142,65 @@ func at(t time.Time) *time.Time {
 	return &t
 }
 
-func (rt *runtime) overviewChats(st *store.Store) (overviewSource, error) {
+func (rt *runtime) overviewChats(st *store.Store, accountNote string) (overviewSource, error) {
 	row, err := st.Status(rt.ctx)
 	if err != nil {
 		return overviewSource{}, err
 	}
 	var conv, msgs int
-	for _, a := range row.Accounts {
-		conv, msgs = conv+a.Conversations, msgs+a.Messages
+	newest, last := time.Time{}, row.LastSuccessAt
+	if rt.account != nil {
+		last = time.Time{}
 	}
-	src := overviewSource{Source: "chats", State: overviewOK, Conversations: &conv, Messages: &msgs, NewestAt: at(row.NewestSentAt), LastSyncAt: at(row.LastSuccessAt)}
+	for _, a := range row.Accounts {
+		if rt.account != nil && (a.TenantID != rt.account.TenantID || a.UserID != rt.account.UserID) {
+			continue
+		}
+		conv, msgs = conv+a.Conversations, msgs+a.Messages
+		if a.NewestSentAt.After(newest) {
+			newest = a.NewestSentAt
+		}
+		if rt.account != nil {
+			last = a.LastSyncedAt
+		}
+	}
+	src := overviewSource{Source: "chats", State: overviewOK, Conversations: &conv, Messages: &msgs, NewestAt: at(newest), LastSyncAt: at(last)}
 	if msgs == 0 {
-		src.State, src.Note = overviewEmpty, "no Teams messages archived yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+		src.State, src.Note = overviewEmpty, firstOf(accountNote, "no Teams messages archived yet: run m365crawl sync, and m365crawl doctor if it stays empty")
 	}
 	return src, nil
 }
 
-func (rt *runtime) overviewMail(st *store.Store) (overviewSource, error) {
-	if !mailSupported() {
-		return overviewSource{Source: "mail", State: overviewUnsupported, Note: errs.MailUnsupportedPlatform().Message}, nil
-	}
-	ms, err := st.MailStatus(rt.ctx)
+// Mail states of the overview beyond the shared ones: the Outlook source is off for this run, or
+// this machine has no Outlook profile.
+const (
+	overviewOff       = "off"
+	overviewNoProfile = "no_profile"
+)
+
+// overviewMail says what the archive holds of mail and, when it holds none, why: mail is not read
+// on this platform, the Outlook source is off, there is no Outlook profile, it was read and is
+// empty, or it was never read. Only the last is fixed by a sync.
+func (rt *runtime) overviewMail(st *store.Store, _ string) (overviewSource, error) {
+	b, err := rt.mailStatus(st)
 	if err != nil {
 		return overviewSource{}, err
 	}
-	src := overviewSource{Source: "mail", State: overviewOK, Messages: &ms.Messages, NewestAt: at(ms.NewestAt), OldestAt: at(ms.OldestAt), LastSyncAt: at(ms.SyncedAt)}
-	if ms.Messages == 0 {
-		src.State, src.Note = overviewEmpty, "no mail archived yet: run m365crawl sync; m365crawl status says whether mail is being read"
+	src := overviewSource{Source: "mail", State: overviewOK, Messages: &b.Messages, NewestAt: at(b.NewestAt), OldestAt: at(b.OldestAt), LastSyncAt: at(b.SyncedAt)}
+	switch {
+	case b.State == mailStateUnsupportedPlatform:
+		return overviewSource{Source: "mail", State: overviewUnsupported, Note: errs.MailUnsupportedPlatform().Message}, nil
+	case b.Messages > 0 && !rt.outlookOn:
+		src.Note = "the Outlook source is off for this run, so this archived mail is not being refreshed"
+	case b.Messages > 0:
+	case !rt.outlookOn:
+		src.State, src.Note = overviewOff, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
+	case b.State == mailStateNoProfile:
+		src.State, src.Note = overviewNoProfile, "no new Outlook for Mac profile on this machine, so there is no mail to read"
+	case b.State == mailStateOK:
+		src.State, src.Note = overviewEmpty, "mail was read and the Outlook cache holds no messages"
+	default:
+		src.State, src.Note = overviewEmpty, "no mail has been read yet: run m365crawl sync; m365crawl doctor says why if it stays empty"
 	}
 	return src, nil
 }
@@ -172,14 +208,14 @@ func (rt *runtime) overviewMail(st *store.Store) (overviewSource, error) {
 // calendarAgendaOf is the test seam of the agenda the overview reads today's coverage from.
 var calendarAgendaOf = (*store.Store).CalendarAgenda
 
-func (rt *runtime) overviewCalendar(st *store.Store) (overviewSource, error) {
+func (rt *runtime) overviewCalendar(st *store.Store, accountNote string) (overviewSource, error) {
 	start, end, events, err := rt.calendarWindow(st)
 	if err != nil {
 		return overviewSource{}, err
 	}
 	src := overviewSource{Source: "calendar", State: overviewOK, Events: &events, WindowStart: at(start), WindowEnd: at(end)}
 	if start.IsZero() {
-		src.State, src.Note = overviewEmpty, "no calendar archived yet: run m365crawl sync"
+		src.State, src.Note = overviewEmpty, firstOf(accountNote, "no calendar archived yet: run m365crawl sync")
 		return src, nil
 	}
 	y, m, d := rt.now().In(displayZone).Date()
@@ -240,6 +276,12 @@ func overviewDay(t *time.Time) string {
 // overviewHolds is a source's counts and span in one phrase.
 func overviewHolds(s overviewSource) string {
 	switch {
+	case s.Messages != nil && *s.Messages == 0 && s.Conversations != nil:
+		return "no messages"
+	case s.Messages != nil && *s.Messages == 0:
+		return "no mail"
+	case s.Events != nil && *s.Events == 0:
+		return "no events"
 	case s.Conversations != nil:
 		return fmt.Sprintf("%s in %s, newest %s", plural(*s.Messages, "message", "messages"), plural(*s.Conversations, "conversation", "conversations"), overviewTime(s.NewestAt))
 	case s.Messages != nil:

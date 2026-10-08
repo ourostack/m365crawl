@@ -8,9 +8,9 @@
 [2msource[0m    [2mstate[0m  [2mholds[0m                                                 [2mlast sync[0m
 [2m--------[0m  [2m-----[0m  [2m----------------------------------------------------[0m  [2m---------[0m
 chats     ok     1 message in 1 conversation, newest 2026-03-10 12:00  -
-mail      empty  0 messages from -, newest -                           -
-calendar  empty  0 events from - to -                                  -
-[2mmail: no mail archived yet: run m365crawl sync; m365crawl status says whether mail is being read[0m
+mail      off    no mail                                               -
+calendar  empty  no events                                             -
+[2mmail: mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)[0m
 [2mcalendar: no calendar archived yet: run m365crawl sync[0m
 
 Start here:

@@ -43,6 +43,7 @@
       "last_sync_at": null,
       "messages": 6,
       "newest_at": "2026-09-09T08:00:00Z",
+      "note": "the Outlook source is off for this run, so this archived mail is not being refreshed",
       "oldest_at": "2026-08-01T08:00:00Z",
       "source": "mail",
       "state": "ok"

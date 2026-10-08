@@ -45,7 +45,7 @@ type Globals struct {
 	JSON           bool   `name:"json" help:"Alias for --format json."`
 	DB             string `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
 	TeamsRoot      string `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
-	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read as a second calendar source. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
+	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read for mail and the calendar. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
 	OutlookAccount string `name:"outlook-account" env:"M365CRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
 	OutlookProfile string `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
 	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
@@ -202,7 +202,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 			}
 			if n := kctx.Selected(); n == nil || n.Name == "overview" {
 				// The root help opens with where to start, before the usage line and the flags.
-				_, _ = io.WriteString(kctx.Stdout, startHereText(startHere)+"\n")
+				_, _ = io.WriteString(kctx.Stdout, startHereText(stepsHere())+"\n")
 			}
 			return kong.DefaultHelpPrinter(opts, kctx)
 		}),
@@ -268,6 +268,17 @@ func (rt *runtime) checkListOnly() error {
 	return c
 }
 
+// unknownCommand words kong's complaint about a stray word: the word quoted alone, and kong's
+// suggestion, when it has one, after it.
+func unknownCommand(rest string) string {
+	word, suggestion, _ := strings.Cut(rest, ", did you mean ")
+	msg := fmt.Sprintf("unknown command %q", word)
+	if suggestion != "" {
+		msg += ", did you mean " + suggestion
+	}
+	return msg
+}
+
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
 	var coded *errs.Coded
@@ -279,7 +290,7 @@ func (rt *runtime) fail(err error) int {
 		switch {
 		case errors.As(err, &pe) && (rt.cmd == "" || rt.cmd == "overview") && strings.HasPrefix(pe.Error(), "unexpected argument "):
 			// A word that is no command lands on the default command as a stray argument.
-			coded = errs.Usage(fmt.Sprintf("unknown command %q", strings.TrimPrefix(pe.Error(), "unexpected argument ")))
+			coded = errs.Usage(unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument ")))
 		case errors.As(err, &pe):
 			coded = errs.Usage(pe.Error())
 		default:

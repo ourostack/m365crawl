@@ -381,7 +381,7 @@ func (c *threadCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
-	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (search and messages print both), or pass a Teams message link"}
+	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"}
 	return rt.read("thread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil

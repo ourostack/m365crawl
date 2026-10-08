@@ -972,7 +972,10 @@ func (calendarSourcesCmd) Run(rt *runtime) error {
 		}
 		list := newList(shape(rt, items), false)
 		if len(items) == 0 {
-			list.Note = "the archive holds no calendar yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+			if list.Note, err = rt.unknownAccountNote(st); err != nil {
+				return nil, err
+			}
+			list.Note = firstOf(list.Note, "the archive holds no calendar yet: run m365crawl sync, and m365crawl doctor if it stays empty")
 		}
 		return list, nil
 	})

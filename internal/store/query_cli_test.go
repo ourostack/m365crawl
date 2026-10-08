@@ -60,3 +60,19 @@ func TestMessageWindow(t *testing.T) {
 		t.Fatal("a closed archive must fail")
 	}
 }
+
+func TestHasAccount(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must0(s.ApplyAccount(ctx, acctA))
+	if ok, err := s.HasAccount(ctx, acctA); err != nil || !ok {
+		t.Fatalf("held account: %v %v", ok, err)
+	}
+	if ok, err := s.HasAccount(ctx, acctB); err != nil || ok {
+		t.Fatalf("other account: %v %v", ok, err)
+	}
+	_ = s.Close()
+	if _, err := s.HasAccount(ctx, acctA); err == nil {
+		t.Fatal("a closed archive must fail")
+	}
+}

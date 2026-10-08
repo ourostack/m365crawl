@@ -37,11 +37,11 @@ func (rt *runtime) noteEmpty(st *store.Store, res result) error {
 
 func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	q := rt.query
-	switch {
-	case st == nil:
+	if st == nil {
 		return "no archive yet: run m365crawl sync", nil
-	case !teamsReadHere():
-		return "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system", nil
+	}
+	if note, err := rt.unknownAccountNote(st); note != "" || err != nil {
+		return note, err
 	}
 	oldest, newest, err := st.MessageWindow(rt.ctx, rt.account)
 	if err != nil {
@@ -49,6 +49,8 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	}
 	day := func(t time.Time) string { return t.In(displayZone).Format("2006-01-02") }
 	switch {
+	case newest.IsZero() && !teamsReadHere():
+		return "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system", nil
 	case newest.IsZero():
 		return "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty", nil
 	case !q.since.IsZero() && q.since.After(newest), !q.until.IsZero() && q.until.Before(oldest):
@@ -59,6 +61,19 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 		return q.none, nil
 	}
 	return noneOfThisKind, nil
+}
+
+// unknownAccountNote is the note of a read whose --account names a Teams account the archive does
+// not hold; empty when there is no --account or the archive holds it.
+func (rt *runtime) unknownAccountNote(st *store.Store) (string, error) {
+	if rt.account == nil {
+		return "", nil
+	}
+	ok, err := st.HasAccount(rt.ctx, *rt.account)
+	if err != nil || ok {
+		return "", err
+	}
+	return "the archive holds no data for account " + rt.account.TenantID + "/" + rt.account.UserID + ": m365crawl whoami lists the accounts it holds", nil
 }
 
 // calendarSourcesOf is the test seam of the calendar sources an empty calendar list is explained by.
@@ -87,6 +102,9 @@ func (rt *runtime) calendarWindow(st *store.Store) (start, end time.Time, events
 // archived, a range outside the archived window, a range partly uncovered, filters, or a range
 // with nothing in it. what names the items: "event" or "action item".
 func (rt *runtime) calendarEmptyNote(st *store.Store, from, to time.Time, gap, filtered bool, what string) (string, error) {
+	if note, err := rt.unknownAccountNote(st); note != "" || err != nil {
+		return note, err
+	}
 	start, end, _, err := rt.calendarWindow(st)
 	if err != nil {
 		return "", err

@@ -42,9 +42,9 @@
     {
       "last_sync_at": null,
       "messages": 0,
-      "note": "no mail archived yet: run m365crawl sync; m365crawl status says whether mail is being read",
+      "note": "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)",
       "source": "mail",
-      "state": "empty"
+      "state": "off"
     },
     {
       "events": 0,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
@@ -36,6 +37,7 @@ func pinMailSupported(t *testing.T, on bool) {
 
 // The root help opens with the Start here block, verbatim, before the usage line, in every format.
 func TestRootHelpStartsWithStartHere(t *testing.T) {
+	pinMailSupported(t, true)
 	e := newEnv(t)
 	for _, args := range [][]string{{"--format", "text", "--no-color", "--help"}, {"--json", "--help"}, {"-h"}} {
 		_, out, _ := e.run(args...)
@@ -46,6 +48,11 @@ func TestRootHelpStartsWithStartHere(t *testing.T) {
 		if !strings.Contains(strings.Join(strings.Fields(out), " "), appDescription) {
 			t.Fatalf("%v: help lacks the description", args)
 		}
+	}
+	// Where mail is not read, the help leaves the mail lines out, like the overview.
+	pinMailSupported(t, false)
+	if _, out, _ := e.run("--help"); strings.Contains(out, "  m365crawl mail unread       unread mail by folder") || !strings.Contains(out, startHereText(stepsHere())) {
+		t.Fatalf("help without mail:\n%s", out)
 	}
 	// A command's own help does not repeat it.
 	if _, out, _ := e.run("calendar", "--help"); strings.Contains(out, "Start here:") {
@@ -202,9 +209,14 @@ func TestOverviewWhereMailIsNotRead(t *testing.T) {
 // A word that is no command is an unknown command, not a stray argument of the overview.
 func TestUnknownCommandIsNamed(t *testing.T) {
 	e := newEnv(t)
-	code, _, errOut := e.run("--json", "nope")
-	if code != 2 || errorOf(t, errOut)["message"] != `unknown command "nope"` {
-		t.Fatalf("exit %d, stderr %q", code, errOut)
+	for word, want := range map[string]string{
+		"nope":  `unknown command "nope"`,
+		"serch": `unknown command "serch", did you mean "search"?`,
+	} {
+		code, _, errOut := e.run("--json", word)
+		if code != 2 || errorOf(t, errOut)["message"] != want {
+			t.Fatalf("%s: exit %d, stderr %q", word, code, errOut)
+		}
 	}
 }
 
@@ -261,6 +273,16 @@ func TestOverviewHolds(t *testing.T) {
 	if got := overviewHolds(overviewSource{Events: &n}); got != "2 events from - to -" {
 		t.Fatalf("events without coverage: %q", got)
 	}
+	zero := 0
+	for want, src := range map[string]overviewSource{
+		"no messages": {Messages: &zero, Conversations: &zero},
+		"no mail":     {Messages: &zero},
+		"no events":   {Events: &zero},
+	} {
+		if got := overviewHolds(src); got != want {
+			t.Fatalf("%s: %q", want, got)
+		}
+	}
 	if got := overviewHolds(overviewSource{}); got != "-" {
 		t.Fatalf("nothing: %q", got)
 	}
@@ -276,4 +298,79 @@ func TestOverviewEmptyArchive(t *testing.T) {
 	if chats["state"] != "empty" || chats["messages"] != float64(0) || !strings.HasPrefix(chats["note"].(string), "no Teams messages archived yet") {
 		t.Fatalf("chats = %v", chats)
 	}
+}
+
+// overviewSourceOf runs the overview with extra flags and returns one of its sources.
+func overviewSourceOf(t *testing.T, e *env, i int, flags ...string) map[string]any {
+	t.Helper()
+	code, out, errOut := e.run(append(flags, "--json")...)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	return decode(t, out)["sources"].([]any)[i].(map[string]any)
+}
+
+// The overview says why there is no mail, and only says to sync when a sync would read some.
+func TestOverviewSaysWhyThereIsNoMail(t *testing.T) {
+	pinMailSupported(t, true)
+	e := newEnv(t)
+	teamsArchive(t, e)
+	empty := t.TempDir()
+	if m := overviewSourceOf(t, e, 1); m["state"] != "off" || !strings.Contains(m["note"].(string), "Outlook source is off") {
+		t.Errorf("off: %v", m)
+	}
+	if m := overviewSourceOf(t, e, 1, "--outlook-root", empty); m["state"] != "no_profile" || !strings.Contains(m["note"].(string), "no new Outlook for Mac profile") {
+		t.Errorf("no profile: %v", m)
+	}
+	old := outlookDiscover
+	outlookDiscover = func(string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+		return []outlookdesktop.Profile{{Name: "Main"}}, nil, nil, nil
+	}
+	t.Cleanup(func() { outlookDiscover = old })
+	if m := overviewSourceOf(t, e, 1, "--outlook-root", empty); m["state"] != "empty" || !strings.Contains(m["note"].(string), "run m365crawl sync") {
+		t.Errorf("never read: %v", m)
+	}
+	e.exec(`insert into meta(key, value) values('outlook_mail_read:outlook/Main', '2026-03-10T12:00:00.000Z')`)
+	if m := overviewSourceOf(t, e, 1, "--outlook-root", empty); m["state"] != "empty" || m["note"] != "mail was read and the Outlook cache holds no messages" {
+		t.Errorf("read and empty: %v", m)
+	}
+}
+
+// --account limits the overview's chats and calendar, and an account the archive does not hold
+// says so, in the overview and in an empty list, instead of asking for a sync.
+func TestAccountTheArchiveDoesNotHold(t *testing.T) {
+	pinMailSupported(t, true)
+	e := newEnv(t)
+	teamsArchive(t, e)
+	if m := overviewSourceOf(t, e, 0, "--account", tenantA+"/"+userA); m["messages"] != float64(1) {
+		t.Errorf("held account: %v", m)
+	}
+	const other = "00000000-0000-4000-8000-0000000000ee/00000000-0000-4000-8000-0000000000ee"
+	want := "the archive holds no data for account " + other + ": m365crawl whoami lists the accounts it holds"
+	for i := range []int{0, 2} {
+		if m := overviewSourceOf(t, e, []int{0, 2}[i], "--account", other); m["state"] != "empty" || m["note"] != want {
+			t.Errorf("source %d: %v", i, m)
+		}
+	}
+	for _, args := range [][]string{{"messages"}, {"calendar"}, {"calendar", "sources"}} {
+		if got := noteOf(t, e, append([]string{"--account", other}, args...)...); got != want {
+			t.Errorf("%v: %q", args, got)
+		}
+	}
+	failing := func(name string, args ...string) {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			teamsArchive(t, e)
+			e.exec("drop table accounts")
+			e.exec("create table accounts (x)")
+			code, _, errOut := e.run(append([]string{"--json", "--max-age", "0", "--account", other}, args...)...)
+			if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
+				t.Fatalf("exit %d, stderr %q", code, errOut)
+			}
+		})
+	}
+	failing("overview")
+	failing("list", "stores")
+	failing("calendar sources", "calendar", "sources")
+	failing("calendar", "calendar")
 }

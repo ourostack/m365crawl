@@ -221,6 +221,12 @@ func databaseLabel(name string) (label, account string) {
 	return "Teams:" + manager, shortID(acct.TenantID) + "/" + shortID(acct.UserID)
 }
 
+// threadTarget is the arguments of `m365crawl thread` that read the thread a message is in: the
+// conversation id, then the thread's root (the reply chain's, or the message's own id).
+func threadTarget(conversationID, replyChainID, id string) string {
+	return conversationID + " " + firstOf(replyChainID, id)
+}
+
 // listTable prints a list result as an aligned table with a column subset per item type; the
 // free-text column is clipped so a row fits the terminal.
 func (rt *runtime) listTable(r *listResult) {
@@ -235,9 +241,9 @@ func (rt *runtime) listTable(r *listResult) {
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
-			if rt.cmd == "search" { // the id is what a follow-up (thread, sql) needs
-				cols, textCol = []string{"sent_at", "conversation", "sender", "id", "text"}, 4
-				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, x.ID, text})
+			if rt.cmd == "search" || rt.cmd == "messages" { // what `m365crawl thread` takes to read on
+				cols, textCol = []string{"sent_at", "conversation", "sender", "thread", "text"}, 4
+				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
 				continue
 			}
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
@@ -333,7 +339,7 @@ func (rt *runtime) listTable(r *listResult) {
 	}
 	for _, row := range rows {
 		for i := range row {
-			if i != textCol && cols[i] != "database" {
+			if i != textCol && cols[i] != "database" && cols[i] != "thread" { // a cut id is no use
 				row[i] = render.Truncate(row[i], 40)
 			}
 		}

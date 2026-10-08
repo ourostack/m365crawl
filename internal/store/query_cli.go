@@ -92,3 +92,10 @@ func (s *Store) MessageWindow(ctx context.Context, a *teamsdesktop.Account) (old
 	}
 	return parseTime(lo), parseTime(hi), nil
 }
+
+// HasAccount says whether the archive holds the Teams account a.
+func (s *Store) HasAccount(ctx context.Context, a teamsdesktop.Account) (bool, error) {
+	var ok bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from accounts where tenant_id=? and user_id=?)`, a.TenantID, a.UserID).Scan(&ok)
+	return ok, err
+}
