@@ -273,6 +273,14 @@ func TestMailUnknownFolder(t *testing.T) {
 			t.Fatalf("fix does not list the folders: %v", er)
 		}
 	}
+	// junk is not a kind any more: the fix says so and points at the folder names.
+	for _, v := range []string{"junk", "JUNK"} {
+		er := mailFails(t, e, "unknown_folder", 2, "mail", "list", "--folder", v)
+		fix := er["fix"].(string)
+		if !strings.Contains(fix, "not detected by kind") || !strings.Contains(fix, `--folder "<name>"`) || !strings.Contains(fix, "m365crawl mail folders") || !strings.Contains(fix, "Projects") {
+			t.Fatalf("junk fix = %q", fix)
+		}
+	}
 	e2 := textEnv(t)
 	e2.emptyArchive()
 	er := mailFails(t, e2, "unknown_folder", 2, "mail", "list", "--folder", "x")

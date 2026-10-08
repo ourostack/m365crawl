@@ -481,7 +481,7 @@ m365crawl mail list [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `--folder=NAME\|KIND` | Only this folder, by name (checked first, ignoring case) or kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me`, `other`. An unknown folder is the `unknown_folder` error, which lists the folders. |
+| `--folder=NAME\|KIND` | Only this folder, by name (checked first, ignoring case) or kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me`, `other`. An unknown folder is the `unknown_folder` error, which lists the folders; for `junk` it says junk folders are not detected by kind and to pass the junk folder's name instead. |
 | `--from=TEXT` | Only messages whose sender name or address contains this text, ignoring case. |
 | `--since=DATE` | Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as `7d`). |
 | `--until=DATE` | Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive. |

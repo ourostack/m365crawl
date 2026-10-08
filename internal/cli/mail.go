@@ -346,6 +346,9 @@ func unknownFolder(name string, all []store.MailFolderRow) *errs.Coded {
 		return c
 	}
 	c.Fix = "Pick a folder name or kind that `m365crawl mail folders` lists. The folders are: " + strings.Join(names, ", ") + "."
+	if strings.EqualFold(name, "junk") {
+		c.Fix = "Junk mail folders are not detected by kind, so no folder has kind junk. Pass the junk folder's name as `m365crawl mail folders` lists it, for example `--folder \"<name>\"`. The folders are: " + strings.Join(names, ", ") + "."
+	}
 	return c
 }
 
