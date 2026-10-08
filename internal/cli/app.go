@@ -17,6 +17,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl"
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/render"
 )
@@ -61,7 +62,7 @@ type cliApp struct {
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Copy the Teams cache into the archive once and print what changed."`
 	Status        statusCmd        `cmd:"" help:"Show archive counts per account, the last sync and other Teams origins."`
-	Search        searchCmd        "cmd:\"\" help:\"Full-text search over message text, sorted newest first; default --limit 50 (check `truncated`).\""
+	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats and Outlook mail, newest first, each item marked with its source; default --limit 50 (check `truncated`).\""
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
@@ -120,13 +121,13 @@ func (rt *runtime) printVersion() error {
 	return rt.write("version", versionInfo{Version: version, Commit: commit, Date: date})
 }
 
-// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT
-// or SIGTERM cancels the context every lower layer cleans up on; a second one force-quits at once
+// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT,
+// SIGTERM or SIGHUP (a closed terminal) cancels the context every lower layer cleans up on; a second one force-quits at once
 // with status 130, in case that cleanup is stuck.
 func Main(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 2)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -141,8 +142,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	return runCLI(ctx, args, stdout, stderr)
 }
 
-// watchSignals cancels on the first signal and calls exit(exitForced) on the second. It returns
-// when sigs is closed.
+// killBrowsers force-kills every browser this process launched. The force-quit path runs it
+// before exiting, because os.Exit skips every deferred Close. A test seam.
+var killBrowsers = browser.KillAll
+
+// watchSignals cancels on the first signal and, on the second, kills every browser this process
+// started and calls exit(exitForced). It returns when sigs is closed.
 func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
@@ -151,6 +156,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
 	}
+	killBrowsers()
 	exit(exitForced)
 }
 

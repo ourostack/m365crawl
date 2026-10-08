@@ -147,10 +147,13 @@ jobs:
         include:
           - os: macos-latest
             e2e-command: make e2e
+            require-browser: "1"
           - os: ubuntu-latest
             e2e-command: make e2e
+            require-browser: ""
           - os: windows-latest
             e2e-command: go test -count=1 -tags e2e ./e2e/...
+            require-browser: "1"
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -165,6 +168,9 @@ jobs:
           go-version-file: go.mod
       - name: End-to-end tests
         shell: bash
+        env:
+          # macOS and Windows runners have Edge: the real-browser test must run there, not skip.
+          M365CRAWL_REQUIRE_BROWSER: ${{ matrix.require-browser }}
         run: ${{ matrix.e2e-command }}
 
   release-check:

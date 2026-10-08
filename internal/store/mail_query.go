@@ -247,6 +247,47 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	return s.mailRows(ctx, false, from+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit))
 }
 
+// narrowed reports whether f selects messages by anything but the account and the listing
+// switches: the filters that make a search with no words meaningful.
+func (f MailFilter) narrowed() bool {
+	return f.Folder != "" || f.From != "" || !f.Since.IsZero() || !f.Until.IsZero() || f.Unread || f.Flagged || f.HasAttachments
+}
+
+// MailSearch is MailList with Query set, plus whether more messages matched than f.Limit allows
+// (zero means DefaultLimit). It is newest first, like Search. With no words at all it lists what
+// the filters select; no words and no filter is a usage error, as for Search.
+func (s *Store) MailSearch(ctx context.Context, query string, f MailFilter) ([]MailRow, bool, error) {
+	f.Query = query
+	if strings.TrimSpace(query) == "" && !f.narrowed() {
+		return nil, false, searchUsage("search needs words to find or at least one filter (--from, --folder, --since, --until)")
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
+	f.Limit = limit + 1
+	rows, err := s.MailList(ctx, f)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rows) > limit {
+		return rows[:limit], true, nil
+	}
+	return rows, false, nil
+}
+
+// HasMail reports whether the archive holds any mail: a message or a folder. An archive written
+// before schema 6 has no mail tables and holds none.
+func (s *Store) HasMail(ctx context.Context) (bool, error) {
+	var tables int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table' and name='mail_messages'`).Scan(&tables); err != nil || tables == 0 {
+		return false, err
+	}
+	var has bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from mail_messages) or exists(select 1 from mail_folders)`).Scan(&has)
+	return has, err
+}
+
 // mailFolderWhere limits the list to the folders the filter names: by name first, then by kind.
 func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) error {
 	type fk struct {
