@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // LastSuccess is when the archive was last fully synced, or the zero time when it has never been.
@@ -75,4 +77,25 @@ func (s *Store) MessageHTML(ctx context.Context, keys []MessageKey) (map[Message
 		}
 	}
 	return out, nil
+}
+
+// MessageWindow is the sent time of the oldest and newest archived message, of one account when a
+// is set; both are zero when the archive holds none.
+func (s *Store) MessageWindow(ctx context.Context, a *teamsdesktop.Account) (oldest, newest time.Time, err error) {
+	q, args := `select min(sent_at), max(sent_at) from messages`, []any{}
+	if a != nil {
+		q, args = q+` where tenant_id=? and user_id=?`, []any{a.TenantID, a.UserID}
+	}
+	var lo, hi sql.NullString
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&lo, &hi); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return parseTime(lo), parseTime(hi), nil
+}
+
+// HasAccount says whether the archive holds the Teams account a.
+func (s *Store) HasAccount(ctx context.Context, a teamsdesktop.Account) (bool, error) {
+	var ok bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from accounts where tenant_id=? and user_id=?)`, a.TenantID, a.UserID).Scan(&ok)
+	return ok, err
 }

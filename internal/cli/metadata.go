@@ -7,19 +7,17 @@ import (
 	"github.com/openclaw/crawlkit/control"
 )
 
-// manifestDescription is the README's pitch sentence.
-const manifestDescription = "Mirrors the Microsoft Teams desktop app's local cache, and optionally the new Outlook for Mac's calendar, into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and a calendar with meeting recaps, so an AI agent can read your Teams history and agenda in milliseconds, offline and read-only."
-
 // manifest is the crawlkit app manifest that `crawlctl discover` reads from `m365crawl metadata --json`.
 func manifest() control.Manifest {
 	m := control.NewManifest("m365crawl", "m365crawl", "m365crawl")
-	m.Description = manifestDescription
+	m.Description = appDescription // the root help's sentence
 	m.Paths.DefaultDatabase = "~/.m365crawl/m365crawl.db"
 	m.Paths.ConfigEnv = "M365CRAWL_DB"
 	for _, name := range []string{"status", "sync", "doctor", "search"} {
 		m.Commands[name] = control.Command{Argv: []string{"m365crawl", "--json", name}, JSON: true, Mutates: name == "sync"}
 	}
 	m.Commands["calendar"] = control.Command{Argv: []string{"m365crawl", "--json", "calendar"}, JSON: true}
+	m.Commands["overview"] = control.Command{Argv: []string{"m365crawl", "--json"}, JSON: true, Title: "overview (m365crawl with no command): what the archive holds per source and where to start"}
 	for _, name := range []string{"mail list", "mail show", "mail thread", "mail folders", "mail unread"} {
 		argv := append([]string{"m365crawl", "--json"}, strings.Fields(name)...)
 		if name == "mail show" || name == "mail thread" {
@@ -31,7 +29,7 @@ func manifest() control.Manifest {
 		}
 		m.Commands[name] = c
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar", "mail"}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}
 	return m
 }

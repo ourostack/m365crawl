@@ -80,13 +80,14 @@ type MailStatus struct {
 	Unread   int       `json:"unread"`
 	Folders  int       `json:"folders"`
 	OldestAt time.Time `json:"oldest_at,omitzero"`
+	NewestAt time.Time `json:"newest_at,omitzero"`
 	SyncedAt time.Time `json:"synced_at,omitzero"`
 }
 
 // MailStatus counts the archive's live mail and finds when it was last read.
 func (s *Store) MailStatus(ctx context.Context) (MailStatus, error) {
 	var m MailStatus
-	var oldest, synced sql.NullString
+	var oldest, newest, synced sql.NullString
 	// A read-only archive from before mail (or before the meta table) has no mail tables yet: it
 	// holds no mail.
 	var tables int
@@ -101,11 +102,12 @@ func (s *Store) MailStatus(ctx context.Context) (MailStatus, error) {
   (select count(*) from mail_messages where gone_at is null and evicted_at is null and is_read=0),
   (select count(*) from mail_folders),
   (select min(received_at) from mail_messages where gone_at is null and evicted_at is null),
+  (select max(received_at) from mail_messages where gone_at is null and evicted_at is null),
   (select max(value) from meta where key like 'outlook\_mail\_read:%' escape '\')`).
-		Scan(&m.Messages, &m.Unread, &m.Folders, &oldest, &synced)
+		Scan(&m.Messages, &m.Unread, &m.Folders, &oldest, &newest, &synced)
 	if err != nil {
 		return MailStatus{}, err
 	}
-	m.OldestAt, m.SyncedAt = parseTime(oldest), parseTime(synced)
+	m.OldestAt, m.NewestAt, m.SyncedAt = parseTime(oldest), parseTime(newest), parseTime(synced)
 	return m, nil
 }

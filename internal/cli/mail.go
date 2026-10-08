@@ -30,9 +30,6 @@ const (
 // mailPlatform is the operating system the mail commands believe they run on; tests set it.
 var mailPlatform = goruntime.GOOS
 
-// mailThreadMax is the most messages a thread holds (the store's cap).
-const mailThreadMax = 200
-
 // mailGuard stops every mail command on a platform that cannot read mail.
 func mailGuard() error {
 	if mailPlatform != "windows" {
@@ -46,7 +43,7 @@ func mailGuard() error {
 // mailGroup is the mail command group.
 type mailGroup struct {
 	List    mailListCmd    `cmd:"" help:"List archived Outlook mail, newest first."`
-	Show    mailShowCmd    `cmd:"" help:"Show one message: headers, recipients, attachments and body text."`
+	Show    mailShowCmd    `cmd:"" help:"Show one message: headers, recipients, body text and each attachment's name, size and type."`
 	Thread  mailThreadCmd  `cmd:"" help:"Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link."`
 	Folders mailFoldersCmd `cmd:"" help:"List mail folders with message and unread counts and how far back the cache reaches."`
 	Unread  mailUnreadCmd  `cmd:"" help:"Unread mail by folder."`
@@ -912,7 +909,7 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 		if st == nil {
 			return nil, mailNotFound(c.ID)
 		}
-		rows, grouping, err := st.MailThread(rt.ctx, account, key)
+		rows, grouping, truncated, err := st.MailThread(rt.ctx, account, key)
 		if errors.Is(err, store.ErrMailNotFound) {
 			return nil, mailNotFound(c.ID)
 		}
@@ -923,7 +920,7 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		res := &mailThreadResult{Grouping: grouping, Participants: []mailPersonOut{}, mailListResult: *rt.newMailList(rows, len(rows) > mailThreadMax, sc)}
+		res := &mailThreadResult{Grouping: grouping, Participants: []mailPersonOut{}, mailListResult: *rt.newMailList(rows, truncated, sc)}
 		if len(rows) == 1 {
 			res.Note = "no other message shares its subject and a participant"
 		}

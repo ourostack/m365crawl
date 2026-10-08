@@ -47,7 +47,7 @@ func metaLines(w io.Writer, m meta, color bool) {
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // textBanners are the commands whose text output opens with the wordmark.
-var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, "whoami": true}
+var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, "whoami": true, "overview": true}
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
@@ -60,6 +60,8 @@ func (rt *runtime) renderText(label string, v any) error {
 		return nil
 	}
 	switch r := v.(type) {
+	case *overviewResult:
+		rt.renderOverview(r)
 	case *listResult:
 		rt.listTable(r)
 		_, _ = fmt.Fprintln(w)
@@ -219,6 +221,12 @@ func databaseLabel(name string) (label, account string) {
 	return "Teams:" + manager, shortID(acct.TenantID) + "/" + shortID(acct.UserID)
 }
 
+// threadTarget is the arguments of `m365crawl thread` that read the thread a message is in: the
+// conversation id, then the thread's root (the reply chain's, or the message's own id).
+func threadTarget(conversationID, replyChainID, id string) string {
+	return conversationID + " " + firstOf(replyChainID, id)
+}
+
 // listTable prints a list result as an aligned table with a column subset per item type; the
 // free-text column is clipped so a row fits the terminal.
 func (rt *runtime) listTable(r *listResult) {
@@ -233,16 +241,21 @@ func (rt *runtime) listTable(r *listResult) {
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
+			if rt.cmd == "messages" { // what `m365crawl thread` takes to read on
+				cols, textCol = []string{"sent_at", "conversation", "sender", "thread", "text"}, 4
+				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
+				continue
+			}
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
-			cols, textCol = searchColumns, 4
+			cols, textCol = searchColumns, 5
 			text := oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
-			rows = append(rows, []string{stamp(x.SentAt), x.Source, x.ConversationDisplayName, x.SenderName, text})
+			rows = append(rows, []string{stamp(x.SentAt), x.Source, x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
 		case searchMailItem:
-			cols, textCol = searchColumns, 4
+			cols, textCol = searchColumns, 5
 			var at time.Time
 			if x.ReceivedAt != nil {
 				at = *x.ReceivedAt
@@ -255,7 +268,7 @@ func (rt *runtime) listTable(r *listResult) {
 			if p := oneLine(searchVal(x.Preview)); p != "" {
 				text += " - " + p
 			}
-			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, text})
+			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, x.ID, text})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})
@@ -326,7 +339,7 @@ func (rt *runtime) listTable(r *listResult) {
 	}
 	for _, row := range rows {
 		for i := range row {
-			if i != textCol && cols[i] != "database" {
+			if i != textCol && cols[i] != "database" && cols[i] != "thread" { // a cut id is no use
 				row[i] = render.Truncate(row[i], 40)
 			}
 		}

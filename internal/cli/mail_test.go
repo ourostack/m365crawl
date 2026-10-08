@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -384,6 +385,32 @@ func TestMailThread(t *testing.T) {
 	}
 }
 
+// mail thread says truncated only when the thread holds more messages than it printed: a chain of
+// exactly the cap is whole, one more is cut.
+func TestMailThreadTruncatedOnlyWhenMoreExist(t *testing.T) {
+	const capacity = 200
+	for _, c := range []struct {
+		n         int
+		truncated bool
+	}{{capacity, false}, {capacity + 1, true}} {
+		pinMailPlatform(t)
+		e := textEnv(t)
+		var msgs []outlookmail.Message
+		for i := 1; i <= c.n; i++ {
+			reply := ""
+			if i > 1 {
+				reply = fmt.Sprintf("<t%d@x.test>", i-1)
+			}
+			msgs = append(msgs, mailMsg(uint32(i), fInbox, fmt.Sprintf("<t%d@x.test>", i), reply, "Long thread", 1, false))
+		}
+		seedMail(t, e, msgs)
+		m := mailJSON(t, e, "mail", "thread", "outlook/Main:1")
+		if len(items(t, m)) != capacity || m["truncated"] != c.truncated {
+			t.Fatalf("chain of %d: %d items, truncated %v", c.n, len(items(t, m)), m["truncated"])
+		}
+	}
+}
+
 func TestMailFolders(t *testing.T) {
 	e := mailEnv(t)
 	m := mailJSON(t, e, "mail", "folders")
@@ -595,7 +622,7 @@ func TestMailHelpIsTheContract(t *testing.T) {
 	e := textEnv(t)
 	for cmd, want := range map[string]string{
 		"list":    "List archived Outlook mail, newest first.",
-		"show":    "Show one message: headers, recipients, attachments and body text.",
+		"show":    "Show one message: headers, recipients, body text and each attachment's name, size and type.",
 		"thread":  "Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.",
 		"folders": "List mail folders with message and unread counts and how far back the cache reaches.",
 		"unread":  "Unread mail by folder.",

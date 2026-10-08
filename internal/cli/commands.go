@@ -197,6 +197,11 @@ type msgFlags struct {
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
 
+// filtered says a filter of msgFlags narrows the result.
+func (f msgFlags) filtered() bool {
+	return f.Conversation != "" || f.From != "" || f.Since != "" || f.Until != "" || f.Team != ""
+}
+
 func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 	if err := checkLimit(f.Limit); err != nil {
 		return store.Filter{}, err
@@ -246,6 +251,7 @@ func (c *searchCmd) Run(rt *runtime) error {
 	}
 	f.IncludeDeleted, f.MentionsMe, f.DirectMentions = c.IncludeDeleted, c.MentionsMe, c.DirectMentions
 	f.Total = new(int)
+	rt.query = listQuery{since: f.Since, until: f.Until, none: searchNoMatch}
 	return rt.read("search", func(st *store.Store) (result, error) { return c.search(rt, p, f, st) })
 }
 
@@ -269,6 +275,7 @@ func (c *messagesCmd) Run(rt *runtime) error {
 	}
 	f.IncludeDeleted, f.MentionsMe, f.DirectMentions, f.Unread, f.IncludeChannels = c.IncludeDeleted, c.MentionsMe, c.DirectMentions, c.Unread, c.IncludeChannels
 	f.Total = new(int)
+	rt.query = listQuery{filtered: c.filtered() || c.MentionsMe || c.DirectMentions || c.Unread, since: f.Since, until: f.Until}
 	return rt.read("messages", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -326,6 +333,10 @@ func (c *unreadCmd) Run(rt *runtime) error {
 	}
 	f.IncludeChannels = c.IncludeChannels
 	f.Total = new(int)
+	rt.query = listQuery{filtered: c.Conversation != "" || c.Team != "" || c.Since != "", since: f.Since, none: "nothing is unread"}
+	if !c.IncludeChannels {
+		rt.query.none = "nothing is unread in chats and meetings; --include-channels adds channels"
+	}
 	return rt.read("unread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -370,6 +381,7 @@ func (c *threadCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"}
 	return rt.read("thread", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -451,6 +463,7 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 		return err
 	}
 	rt.team = c.Team
+	rt.query = listQuery{filtered: c.Kind != "" || c.Query != "" || c.Team != ""}
 	return rt.read("conversations", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -491,6 +504,7 @@ func (c *teamsCmd) Run(rt *runtime) error {
 	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
+	rt.query = listQuery{none: "the archive holds no teams: this account's Teams cache lists none"}
 	return rt.read("teams", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -520,6 +534,7 @@ func (c *peopleCmd) Run(rt *runtime) error {
 	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
+	rt.query = listQuery{filtered: c.Query != ""}
 	return rt.read("people", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -559,6 +574,7 @@ func (c *activityCmd) Run(rt *runtime) error {
 		return err
 	}
 	rt.team = c.Team
+	rt.query = listQuery{filtered: c.Unread || c.Type != "" || c.Team != "" || c.DirectMentions, since: since}
 	return rt.read("activity", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil

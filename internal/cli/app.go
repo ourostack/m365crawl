@@ -45,7 +45,7 @@ type Globals struct {
 	JSON           bool   `name:"json" help:"Alias for --format json."`
 	DB             string `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
 	TeamsRoot      string `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
-	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read as a second calendar source. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
+	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"The new Outlook for Mac profiles directory, read for mail and the calendar. Default: the new Outlook's own directory, read when it is there ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
 	OutlookAccount string `name:"outlook-account" env:"M365CRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
 	OutlookProfile string `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
 	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
@@ -59,21 +59,22 @@ type cliApp struct {
 	Globals
 	Version versionFlag `name:"version" help:"Print the version, commit and build date, then exit."`
 
-	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Full Disk Access and the archive are ready."`
-	Sync          syncCmd          `cmd:"" help:"Copy the Teams cache into the archive once and print what changed."`
-	Status        statusCmd        `cmd:"" help:"Show archive counts per account, the last sync and other Teams origins."`
+	Overview      overviewCmd      `cmd:"" default:"1" hidden:"" help:"What the archive holds per source and how fresh it is, then where to start; what m365crawl does with no command."`
+	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Outlook, Full Disk Access and the archive are ready."`
+	Sync          syncCmd          `cmd:"" help:"Read Teams chats, Outlook mail and the calendar into the archive once and print what changed."`
+	Status        statusCmd        `cmd:"" help:"Show archive counts per account for chats and mail, the last sync and other Teams origins."`
 	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats and Outlook mail, newest first, each item marked with its source; default --limit 50 (check `truncated`).\""
-	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`).\""
+	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). Teams chats and channels; for Outlook mail use `m365crawl mail list`.\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleCmd        `cmd:"" help:"List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id mail:<address>)."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
-	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams cache holds the days Teams has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
+	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams and Outlook caches hold the days each app has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook mail offline: list, show, thread, folders and unread. Mail comes from Outlook for Mac's local cache; every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
-	Unread        unreadCmd        `cmd:"" help:"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts."`
-	Thread        threadCmd        `cmd:"" help:"Show one thread: <conversation> <root-message-id>, or a Teams message link."`
+	Unread        unreadCmd        "cmd:\"\" help:\"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. Teams chats and channels; for Outlook mail use `m365crawl mail unread`.\""
+	Thread        threadCmd        "cmd:\"\" help:\"Show one thread: <conversation> <root-message-id>, or a Teams message link. Teams chats and channels; for Outlook mail use `m365crawl mail thread <id>`.\""
 	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
@@ -187,7 +188,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 	exited := false
 	parser, err := newParser(&app,
 		kong.Name("m365crawl"),
-		kong.Description("Mirror the Microsoft Teams desktop cache into local SQLite so agents can read Teams offline."),
+		kong.Description(appDescription),
 		kong.Writers(stdout, stderr),
 		kong.Bind(rt),
 		kong.Exit(func(int) { exited = true }),
@@ -198,6 +199,10 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 				rt.g.NoColor = rt.g.NoColor || contains(args, "--no-color")
 				rt.color = rt.colorEnabled()
 				render.Banner(kctx.Stdout, "help", rt.color)
+			}
+			if n := kctx.Selected(); n == nil || n.Name == "overview" {
+				// The root help opens with where to start, before the usage line and the flags.
+				_, _ = io.WriteString(kctx.Stdout, startHereText(stepsHere())+"\n")
 			}
 			return kong.DefaultHelpPrinter(opts, kctx)
 		}),
@@ -263,6 +268,17 @@ func (rt *runtime) checkListOnly() error {
 	return c
 }
 
+// unknownCommand words kong's complaint about a stray word: the word quoted alone, and kong's
+// suggestion, when it has one, after it.
+func unknownCommand(rest string) string {
+	word, suggestion, _ := strings.Cut(rest, ", did you mean ")
+	msg := fmt.Sprintf("unknown command %q", word)
+	if suggestion != "" {
+		msg += ", did you mean " + suggestion
+	}
+	return msg
+}
+
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
 	var coded *errs.Coded
@@ -272,6 +288,9 @@ func (rt *runtime) fail(err error) int {
 	} else if !errors.As(err, &coded) {
 		var pe *kong.ParseError
 		switch {
+		case errors.As(err, &pe) && (rt.cmd == "" || rt.cmd == "overview") && strings.HasPrefix(pe.Error(), "unexpected argument "):
+			// A word that is no command lands on the default command as a stray argument.
+			coded = errs.Usage(unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument ")))
 		case errors.As(err, &pe):
 			coded = errs.Usage(pe.Error())
 		default:

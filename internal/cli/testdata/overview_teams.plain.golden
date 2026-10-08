@@ -1,0 +1,23 @@
+        ▄████▄ ▄████▄ ██████                           ▄▄
+            ██ ██     ██                               ██
+██▀█▀██   ███▀ █████▄ █████▄ ▄████ ████▄  ▀▀█▄ ██   ██ ██
+██ █ ██     ██ ██  ██     ██ ██    ██ ▀▀ ▄█▀██ ██ █ ██ ██
+██   ██ ▀████▀ ▀████▀ ▀████▀ ▀████ ██    ▀█▄██  ██▀██  ██
+local-first Microsoft 365 mirror for SQLite  |  overview
+
+source    state  holds                                                 last sync
+--------  -----  ----------------------------------------------------  ---------
+chats     ok     1 message in 1 conversation, newest 2026-03-10 12:00  -
+mail      off    no mail                                               -
+calendar  empty  no events                                             -
+mail: mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)
+calendar: no calendar archived yet: run m365crawl sync
+
+Start here:
+  m365crawl sync              read Teams, Outlook mail and the calendar into the archive
+  m365crawl                   what the archive holds and how fresh it is
+  m365crawl search "words"    find anything across chats and mail
+  m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
+  m365crawl mail unread       unread mail by folder
+  m365crawl unread            unread Teams chats
+  m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type

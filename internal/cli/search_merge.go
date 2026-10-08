@@ -29,8 +29,10 @@ const (
 // mail can be read; tests set it.
 var searchMailPlatform = goruntime.GOOS
 
-// searchColumns are the columns of a text search result, whichever source an item came from.
-var searchColumns = []string{"at", "source", "where", "who", "text"}
+// searchColumns are the columns of a text search result, whichever source an item came from. thread
+// holds the arguments that read the item's thread: `m365crawl thread <conversation> <root>` for a
+// chat message, `m365crawl mail thread <id>` (or mail show) for mail.
+var searchColumns = []string{"at", "source", "where", "who", "thread", "text"}
 
 const (
 	searchChats = "chats"
@@ -262,8 +264,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			}
 		}
 		if !has {
-			notes = append(notes, "mail is not in the archive yet; run m365crawl sync")
 			searchMailNow = false
+			if st != nil || !p.chats { // with no archive and chats searched, the empty note says to sync
+				notes = append(notes, "mail is not in the archive yet; run m365crawl sync")
+			}
 		}
 	}
 	var hits []searchHit
@@ -333,8 +337,41 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	} else {
 		res.withTotal(*f.Total)
 	}
+	if len(hits) == 0 {
+		cause, err := rt.searchEmptyNote(st, p.chats, searchMailNow)
+		if err != nil {
+			return nil, err
+		}
+		if cause != "" {
+			notes = append(notes, cause)
+		}
+	}
 	res.Note = strings.Join(notes, "; ")
 	return res, nil
+}
+
+// searchNoMatch is the note of a search that read its sources and found nothing.
+const searchNoMatch = "no message matched the search words and filters"
+
+// searchEmptyNote says why a search found nothing, naming only the sources it read: the Teams
+// cause (no archive, no Teams data, an unknown account, a range outside the archived window, or no match), and for mail
+// that nothing matched. Empty when neither source was read: the plan's notes already say why.
+func (rt *runtime) searchEmptyNote(st *store.Store, chats, mail bool) (string, error) {
+	const noMail = "no mail matched the search words and filters"
+	if !chats {
+		if mail {
+			return noMail, nil
+		}
+		return "", nil
+	}
+	cause, err := rt.emptyListNote(st)
+	switch {
+	case err != nil || !mail:
+		return cause, err
+	case cause == searchNoMatch:
+		return "no chat message or mail matched the search words and filters", nil
+	}
+	return "Teams chats: " + cause + "; " + noMail, nil
 }
 
 // mailAccountOf is the mail account an --account value names, or "" for a Teams account or none.

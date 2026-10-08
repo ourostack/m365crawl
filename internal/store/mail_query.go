@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +21,8 @@ var ErrMailNotFound = errors.New("no such mail message")
 // kind. MailFolders lists the folders there are.
 var ErrUnknownMailFolder = errors.New("no such mail folder")
 
-// mailThreadCap bounds a reply chain and a subject group.
+// mailThreadCap bounds a reply chain and a subject group; MailThread reads one more to know whether
+// the thread was cut.
 const mailThreadCap = 200
 
 // MailFilter selects messages for MailList. Folder matches a folder name first (ignoring case),
@@ -350,25 +353,30 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 // MailThread returns the conversation a message belongs to, oldest first, and how it was grouped:
 // "reply_chain" when In-Reply-To links join the message to at least one other Message-ID, else
 // "subject" (messages with the same normalised subject that share a participant with the seed; an
-// empty subject gives the seed alone). Gone and evicted messages are included.
-func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32) ([]MailRow, string, error) {
+// empty subject gives the seed alone). Gone and evicted messages are included. A thread holds at
+// most mailThreadCap messages, the seed always among them; truncated says more belong to it.
+func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32) (rows []MailRow, grouping string, truncated bool, err error) {
 	seed, err := s.MailGet(ctx, account, detailKey)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	ids, linked, err := s.replyChain(ctx, seed)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
-	grouping := "reply_chain"
+	grouping = "reply_chain"
 	if !linked {
 		grouping = "subject"
 		if ids, err = s.subjectGroup(ctx, seed); err != nil {
-			return nil, "", err
+			return nil, "", false, err
 		}
 	}
-	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
-	return rows, grouping, err
+	// Both groupings gather one message past the cap, so a thread of exactly the cap is not truncated.
+	if truncated = len(ids) > mailThreadCap; truncated {
+		ids = ids[:mailThreadCap] // the seed is first, so it stays
+	}
+	rows, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
+	return rows, grouping, truncated, err
 }
 
 func joinIDs(ids []int64) string {
@@ -386,7 +394,7 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 	have := map[int64]bool{seed.Rowid: true}
 	ids = []int64{seed.Rowid}
 	ownIDs := map[string]bool{}
-	for queue := []MailRow{seed}; len(queue) > 0 && len(ids) < mailThreadCap; queue = queue[1:] {
+	for queue := []MailRow{seed}; len(queue) > 0 && len(ids) <= mailThreadCap; queue = queue[1:] {
 		cur := queue[0]
 		if cur.InternetMessageID != "" {
 			ownIDs[cur.InternetMessageID] = true
@@ -398,7 +406,7 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 			return nil, false, err
 		}
 		for _, n := range near {
-			if have[n.Rowid] || len(ids) >= mailThreadCap {
+			if have[n.Rowid] || len(ids) > mailThreadCap {
 				continue
 			}
 			have[n.Rowid] = true
@@ -412,28 +420,26 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 	return ids, linked, nil
 }
 
-// subjectGroup returns the seed and the messages of its account with the same normalised subject
-// that share an address (sender or recipient) with it.
+// subjectGroup returns the seed and the newest messages of its account with the same normalised
+// subject that share an address (sender or recipient, ignoring case) with it, at most
+// mailThreadCap+1 in all. The address check runs in the query, before the limit, so a match is
+// never lost behind newer same-subject mail between other people.
 func (s *Store) subjectGroup(ctx context.Context, seed MailRow) ([]int64, error) {
-	if seed.SubjectNorm == "" {
-		return []int64{seed.Rowid}, nil
+	ids := []int64{seed.Rowid}
+	mine := slices.Sorted(maps.Keys(addressSet(seed)))
+	if seed.SubjectNorm == "" || len(mine) == 0 {
+		return ids, nil
 	}
-	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and m.subject_norm=? order by m.received_at desc, m.rowid desc limit ?`, []any{seed.Account, seed.SubjectNorm, mailThreadCap})
+	in, args := inList(len(mine)), stringArgs(mine)
+	w := where{}
+	w.add(`m.account=? and m.subject_norm=? and m.rowid<>?`, seed.Account, seed.SubjectNorm, seed.Rowid)
+	w.add(`(lower(m.sender_address) in `+in+` or exists(select 1 from mail_recipients r where r.message_rowid=m.rowid and lower(r.address) in `+in+`))`, append(args, args...)...)
+	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, mailThreadCap)) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
 		return nil, err
 	}
-	mine := addressSet(seed)
-	ids := []int64{seed.Rowid}
 	for _, m := range same {
-		if m.Rowid == seed.Rowid {
-			continue
-		}
-		for a := range addressSet(m) {
-			if mine[a] {
-				ids = append(ids, m.Rowid)
-				break
-			}
-		}
+		ids = append(ids, m.Rowid)
 	}
 	return ids, nil
 }

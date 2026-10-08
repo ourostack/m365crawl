@@ -1,7 +1,7 @@
-[2mat[0m                [2msource[0m  [2mwhere[0m           [2mwho[0m            [2mtext[0m
-[2m----------------[0m  [2m------[0m  [2m--------------[0m  [2m-------------[0m  [2m------------------------[0m
-2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   Hello from Alex Fixture
-2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  Hello from Blair Fixture
+[2mat[0m                [2msource[0m  [2mwhere[0m           [2mwho[0m            [2mthread[0m                                                                                                     [2mtext[0m
+[2m----------------[0m  [2m------[0m  [2m--------------[0m  [2m-------------[0m  [2m---------------------------------------------------------------------------------------------------------[0m  [2m--------------------[0m
+2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000001000  Hello from Alex F...
+2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000001000  Hello from Blair ...
 
 [2m2 items[0m
 [2mnote: mail is not in the archive yet; run m365crawl sync[0m

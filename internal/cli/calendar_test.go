@@ -174,6 +174,20 @@ func TestCalendarAgendaFlags(t *testing.T) {
 			t.Errorf("%s: %v", f, got)
 		}
 	}
+	// An empty agenda says why: nothing that day, a filter, or a day no cached data covers.
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--from", "2023-11-27", "--days", "1"}, "no event in the range"},
+		{[]string{"--from", "2023-11-22", "--days", "1", "--query", "absent"}, "no event in the range matched the filters"},
+		{[]string{"--from", "2023-11-25", "--days", "1"}, "no event in the covered part of the range, and part of it is not covered (uncovered_days), so a missing event is not evidence"},
+		{[]string{"actions", "--from", "2023-11-22", "--days", "1", "--owner", "absent"}, "no action item in the range matched the filters"},
+	} {
+		if got := agenda(t, e, c.args...); got["count"] != float64(0) || got["note"] != c.want {
+			t.Errorf("%v: count %v note %q, want %q", c.args, got["count"], got["note"], c.want)
+		}
+	}
 	// Another zone's range prints its own zone and bounds.
 	rng := agenda(t, e, "--from", "2023-11-22T00:00:00-08:00", "--to", "2023-11-23T00:00:00-08:00")["range"].(map[string]any)
 	if rng["from"] != "2023-11-22T08:00:00Z" {

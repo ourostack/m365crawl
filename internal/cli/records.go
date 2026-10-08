@@ -22,6 +22,7 @@ func (c *storesCmd) Run(rt *runtime) error {
 	if err := checkFields[storeItem](rt); err != nil {
 		return err
 	}
+	rt.query = listQuery{none: "the archive holds no generic stores yet: run m365crawl sync"}
 	return rt.read("stores", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
@@ -92,6 +93,7 @@ func (c *recordsCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	rt.query = listQuery{filtered: true}
 	return rt.read("records", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil
