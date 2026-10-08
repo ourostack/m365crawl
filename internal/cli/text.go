@@ -263,8 +263,8 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = []string{"last_activity_at", "team", "channels", "unread"}, -1
 			rows = append(rows, []string{stamp(x.LastActivityAt), x.DisplayName, strconv.Itoa(x.ChannelCount), strconv.Itoa(x.UnreadCount)})
 		case personItem:
-			cols, textCol = []string{"name", "id", "last_seen_at"}, -1
-			rows = append(rows, []string{x.DisplayName, x.ID, stamp(x.LastSeenAt)})
+			cols, textCol = []string{"name", "id", "sources", "last_seen_at"}, -1
+			rows = append(rows, []string{x.DisplayName, x.ID, strings.Join(x.Sources, ","), stamp(x.LastSeenAt)})
 		case activityItem:
 			read := "unread"
 			if x.IsRead {
@@ -351,31 +351,85 @@ func (rt *runtime) listTable(r *listResult) {
 	render.Table(rt.stdout, cols, rows, rt.color)
 }
 
-// doctorSnapshot summarizes the archive for the doctor screen; nil when there is no archive.
+// doctorSnapshot summarizes the archive for the doctor screen, one line per source: Teams, then
+// mail, then the calendar. It is nil when there is no archive or its Teams data cannot be read; a
+// mail or calendar line that cannot be read is left out.
 func (rt *runtime) doctorSnapshot() *render.Snapshot {
 	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = st.Close() }()
-	row, err := st.Status(rt.ctx)
+	t, err := st.TeamsBreadth(rt.ctx)
 	if err != nil {
 		return nil
 	}
-	var conv, msgs, people, act int
-	for _, a := range row.Accounts {
-		conv, msgs, people, act = conv+a.Conversations, msgs+a.Messages, people+a.People, act+a.Activity
+	last, err := st.LastSuccess(rt.ctx)
+	if err != nil {
+		return nil
 	}
-	snap := &render.Snapshot{Pairs: [][2]string{
-		{"accounts", strconv.Itoa(len(row.Accounts))}, {"conversations", strconv.Itoa(conv)}, {"messages", strconv.Itoa(msgs)},
-		{"people", strconv.Itoa(people)}, {"activity", strconv.Itoa(act)},
-	}}
+	teams := [][2]string{
+		{"accounts", strconv.Itoa(t.Accounts)}, {"chats", strconv.Itoa(t.Chats)}, {"channels", strconv.Itoa(t.Channels)},
+		{"teams", strconv.Itoa(t.Teams)}, {"meetings", strconv.Itoa(t.Meetings)}, {"messages", strconv.Itoa(t.Messages)},
+		{"people", strconv.Itoa(t.People)},
+	}
+	if t.Recordings > 0 {
+		teams = append(teams, [2]string{"recordings", strconv.Itoa(t.Recordings)})
+	}
+	if t.Transcripts > 0 {
+		teams = append(teams, [2]string{"transcripts", strconv.Itoa(t.Transcripts)})
+	}
+	snap := &render.Snapshot{Groups: []render.SnapshotGroup{{Label: "Teams", Pairs: teams}}}
+	if m, err := st.MailStatus(rt.ctx); err == nil && !m.SyncedAt.IsZero() {
+		snap.Groups = append(snap.Groups, render.SnapshotGroup{Label: "Mail", Pairs: [][2]string{
+			{"messages", strconv.Itoa(m.Messages)}, {"unread", strconv.Itoa(m.Unread)}, {"folders", strconv.Itoa(m.Folders)},
+		}})
+	}
+	if c := rt.calendarSnapshot(st); c != nil {
+		snap.Groups = append(snap.Groups, render.SnapshotGroup{Label: "Calendar", Pairs: c})
+	}
 	age := "never synced"
-	if !row.LastSuccessAt.IsZero() {
-		age = max(rt.now().Sub(row.LastSuccessAt), 0).Round(time.Second).String()
+	if !last.IsZero() {
+		age = max(rt.now().Sub(last), 0).Round(time.Second).String()
 	}
-	snap.Lines = [][2]string{{"last sync", stamp(row.LastSuccessAt)}, {"archive age", age}}
+	snap.Lines = [][2]string{{"last sync", stamp(last)}, {"archive age", age}}
 	return snap
+}
+
+// calendarSnapshot counts the live events of each source and gives a window from the earliest to
+// the latest day any source covers (days in between need not be covered), as in teams=28
+// outlook=16 window=2026-09-24..2026-10-22. It is nil when the archive holds no event or
+// cannot say. A meeting both sources hold counts once in each.
+func (rt *runtime) calendarSnapshot(st *store.Store) [][2]string {
+	src, err := st.CalendarSources(rt.ctx, store.CalendarSourcesFilter{Now: rt.now()})
+	if err != nil {
+		return nil
+	}
+	live := map[string]int{}
+	var from, to time.Time
+	for _, r := range src.Rows {
+		live[r.Source] += r.EventsLive
+		if !r.WindowStart.IsZero() && (from.IsZero() || r.WindowStart.Before(from)) {
+			from = r.WindowStart
+		}
+		if r.WindowEnd.After(to) {
+			to = r.WindowEnd
+		}
+	}
+	var out [][2]string
+	for _, s := range []string{"teams", "outlook"} {
+		if n := live[s]; n > 0 {
+			out = append(out, [2]string{s, strconv.Itoa(n)})
+		}
+	}
+	if out == nil {
+		return nil
+	}
+	if !from.IsZero() && to.After(from) {
+		// The window's end is the first day it does not cover.
+		out = append(out, [2]string{"window", from.Format(time.DateOnly) + ".." + to.AddDate(0, 0, -1).Format(time.DateOnly)})
+	}
+	return out
 }
 
 // unlinkedRecapTable lists the recaps that belong to no event, with their action items, so a
@@ -532,8 +586,27 @@ func (rt *runtime) eventBlock(r *eventResult) {
 		}
 		render.Table(w, []string{"sent_at", "recording", "matched by"}, rows, color)
 	}
+	if ev.Chat != nil && len(ev.Chat.RecentMessages) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.Chat.RecentMessages))
+		for i, m := range ev.Chat.RecentMessages {
+			rows[i] = []string{stamp(m.SentAt), render.Truncate(m.SenderName, 30), render.Truncate(oneLine(m.Text), eventTextWidth)}
+		}
+		render.Table(w, []string{"sent_at", "chat sender", "message"}, rows, color)
+	}
+	if len(ev.RelatedMail) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.RelatedMail))
+		for i, m := range ev.RelatedMail {
+			rows[i] = []string{stamp(m.ReceivedAt), render.Truncate(firstOf(m.FromName, m.FromAddress), 30), render.Truncate(oneLine(m.Subject), eventTextWidth), m.Match}
+		}
+		render.Table(w, []string{"received_at", "mail from", "subject", "match"}, rows, color)
+	}
 	metaLines(w, r.meta, color)
 }
+
+// eventTextWidth caps the free-text columns of an event's chat and mail tables.
+const eventTextWidth = 50
 
 func firstOf(ss ...string) string {
 	for _, s := range ss {

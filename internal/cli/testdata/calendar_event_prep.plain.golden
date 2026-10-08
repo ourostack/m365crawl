@@ -1,0 +1,48 @@
+FIXTURE PLANNING REVIEW
+=======================
+
+chat      : Fixture standup (9 messages)
+detail    : full
+event id  : ev_2da7280856
+join link : https://teams.example.invalid/l/meetup-join/19%3Ameeting_FIXTURE1%40thread.v2/0?context=%7B%22Tid%22%3A%2200000000-0000-4000-8000-000000000001%22%2C%22Oid%22%3A%2200000000-0000-4000-8000-0000000000a1%22%7D
+location  : Fixture Room Alpha; Fixture Room Beta
+organizer : Pat Example
+response  : accepted
+rooms     : Fixture Room Alpha, Fixture Room Beta
+status    : confirmed
+when      : 2023-11-20 17:00 to 2023-11-20 18:00
+unknown: recurrence
+
+attendee            role      response
+------------------  --------  ---------
+Pat Example         Chair     organizer
+Alex Fixture        Attendee  accepted
+Sam Example         Attendee  none
+Jordan Fixture      Attendee  tentative
+Casey Fixture       Attendee  declined
+Fixture Room Alpha  Attendee  accepted
+
+owner         action item
+------------  ----------------------
+Pat Example   Send the fixture plan
+Alex Fixture  Book Fixture Room Beta
+
+Fixture summary: the plan was reviewed.
+
+sent_at           chat sender   message
+----------------  ------------  --------------------------------------
+2023-12-05 18:31  Alex Fixture  Fixture standup recording 3Recording 3
+2023-11-23 18:31  Alex Fixture  Fixture standup recording 2Recording 2
+2023-11-22 18:32  Alex Fixture  Fixture standup transcript
+2023-11-22 18:31  Alex Fixture  Fixture standup recording 1Recording 1
+2023-11-22 18:00  Alex Fixture  Call ended
+2023-11-14 22:13  Alex Fixture  Filler 23 6u1s
+2023-11-14 22:13  Alex Fixture  Filler 18 emp6
+2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
+2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
+
+received_at       mail from    subject                      match
+----------------  -----------  ---------------------------  -------
+2023-11-13 09:00  Pat Example  Fixture planning review      invite
+2023-11-19 10:00  Sam Example  RE: Fixture planning review  subject
+archive age: <age>

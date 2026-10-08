@@ -175,16 +175,38 @@ func attrValue(attrs, key string) string {
 }
 
 // indexFold is strings.Index with ASCII case folding, so byte offsets stay valid for any input.
+// It copies nothing: it compares in place, byte by byte.
 func indexFold(s, sub string) int {
-	return strings.Index(asciiLower(s), asciiLower(sub))
+	if sub == "" {
+		return 0
+	}
+	lo := lowerByte(sub[0])
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if lowerByte(s[i]) != lo {
+			continue
+		}
+		j := 1
+		for j < len(sub) && lowerByte(s[i+j]) == lowerByte(sub[j]) {
+			j++
+		}
+		if j == len(sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+func lowerByte(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }
 
 func asciiLower(s string) string {
 	b := []byte(s)
 	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 'a' - 'A'
-		}
+		b[i] = lowerByte(c)
 	}
 	return string(b)
 }

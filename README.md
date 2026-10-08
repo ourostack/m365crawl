@@ -11,7 +11,7 @@ m365crawl was called teamscrawl before v0.5.0; it has no alias for the old name.
 
 `m365crawl` mirrors the Microsoft Teams desktop app's local cache into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and the meeting calendar (with recaps and action items), so an AI agent can read your Teams history in milliseconds, offline and read-only. It reads the local cache of the signed-in desktop app. It never talks to the Teams service, never reads your Teams credentials and never writes to Teams' storage.
 
-<p align="center"><img src="screenshot.png" alt="m365crawl doctor output" width="801"></p>
+<p align="center"><img src="screenshot.png" alt="m365crawl doctor with every check green and a snapshot of the archive: Teams chats, channels, meetings and messages, Outlook mail, and the calendar" width="801"></p>
 
 ## Why not a Teams MCP server or the Graph API?
 

@@ -28,6 +28,8 @@
 
 [36mSnapshot[0m
 [2m--------[0m
-  [2maccounts=[0m2[2m  |  [0m[2mconversations=[0m14[2m  |  [0m[2mmessages=[0m120[2m  |  [0m[2mpeople=[0m10[2m  |  [0m[2mactivity=[0m22
+  [1mTeams      [0m  [2maccounts=[0m2  [2mchats=[0m5  [2mchannels=[0m4  [2mteams=[0m2  [2mmeetings=[0m2  [2mmessages=[0m113  [2mpeople=[0m7  [2mrecordings=[0m6  [2mtranscripts=[0m2
+  [1mMail       [0m  [2mmessages=[0m0  [2munread=[0m0  [2mfolders=[0m0
+  [1mCalendar   [0m  [2mteams=[0m28  [2moutlook=[0m10  [2mwindow=[0m2023-11-20..2031-03-11
   [2mlast sync  [0m  <stamp>
   [2marchive age[0m  <age>

@@ -100,7 +100,7 @@ func (r *runner) readMail(ctx context.Context, p outlookdesktop.Profile, info ou
 }
 
 // collectMail opens the private copy and reads its mail, with the same memory care as the
-// calendar read. A guard refusal comes back as a coded error that carries the guard's code.
+// calendar read (the caller sets the GC target). A guard refusal comes back as a coded error that carries the guard's code.
 func collectMail(ctx context.Context, info outlookdesktop.Info, profileDir, account string, opt outlookmail.Options) (outlookmail.Result, error) {
 	f, err := os.Open(info.Path)
 	if err != nil {
@@ -112,7 +112,6 @@ func collectMail(ctx context.Context, info outlookdesktop.Info, profileDir, acco
 	if err == nil {
 		debug.FreeOSMemory()
 		defer debug.FreeOSMemory()
-		defer debug.SetGCPercent(debug.SetGCPercent(outlookGCPercent))
 		if res, err = outlookmail.Collect(ctx, s, profileDir, account, opt); err == nil {
 			return res, nil
 		}

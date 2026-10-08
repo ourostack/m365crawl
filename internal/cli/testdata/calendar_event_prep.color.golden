@@ -1,0 +1,48 @@
+[1m[36mFIXTURE PLANNING REVIEW[0m
+[2m=======================[0m
+
+[2mchat     [0m[2m : [0mFixture standup (9 messages)
+[2mdetail   [0m[2m : [0mfull
+[2mevent id [0m[2m : [0mev_2da7280856
+[2mjoin link[0m[2m : [0mhttps://teams.example.invalid/l/meetup-join/19%3Ameeting_FIXTURE1%40thread.v2/0?context=%7B%22Tid%22%3A%2200000000-0000-4000-8000-000000000001%22%2C%22Oid%22%3A%2200000000-0000-4000-8000-0000000000a1%22%7D
+[2mlocation [0m[2m : [0mFixture Room Alpha; Fixture Room Beta
+[2morganizer[0m[2m : [0mPat Example
+[2mresponse [0m[2m : [0maccepted
+[2mrooms    [0m[2m : [0mFixture Room Alpha, Fixture Room Beta
+[2mstatus   [0m[2m : [0mconfirmed
+[2mwhen     [0m[2m : [0m2023-11-20 17:00 to 2023-11-20 18:00
+[2munknown: recurrence[0m
+
+[2mattendee[0m            [2mrole[0m      [2mresponse[0m
+[2m------------------[0m  [2m--------[0m  [2m---------[0m
+Pat Example         Chair     organizer
+Alex Fixture        Attendee  accepted
+Sam Example         Attendee  none
+Jordan Fixture      Attendee  tentative
+Casey Fixture       Attendee  declined
+Fixture Room Alpha  Attendee  accepted
+
+[2mowner[0m         [2maction item[0m
+[2m------------[0m  [2m----------------------[0m
+Pat Example   Send the fixture plan
+Alex Fixture  Book Fixture Room Beta
+
+Fixture summary: the plan was reviewed.
+
+[2msent_at[0m           [2mchat sender[0m   [2mmessage[0m
+[2m----------------[0m  [2m------------[0m  [2m--------------------------------------[0m
+2023-12-05 18:31  Alex Fixture  Fixture standup recording 3Recording 3
+2023-11-23 18:31  Alex Fixture  Fixture standup recording 2Recording 2
+2023-11-22 18:32  Alex Fixture  Fixture standup transcript
+2023-11-22 18:31  Alex Fixture  Fixture standup recording 1Recording 1
+2023-11-22 18:00  Alex Fixture  Call ended
+2023-11-14 22:13  Alex Fixture  Filler 23 6u1s
+2023-11-14 22:13  Alex Fixture  Filler 18 emp6
+2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
+2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
+
+[2mreceived_at[0m       [2mmail from[0m    [2msubject[0m                      [2mmatch[0m
+[2m----------------[0m  [2m-----------[0m  [2m---------------------------[0m  [2m-------[0m
+2023-11-13 09:00  Pat Example  Fixture planning review      invite
+2023-11-19 10:00  Sam Example  RE: Fixture planning review  subject
+[2marchive age: <age>[0m

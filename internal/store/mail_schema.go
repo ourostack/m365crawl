@@ -54,6 +54,7 @@ create index if not exists mail_messages_folder on mail_messages(account, folder
 create index if not exists mail_messages_message_id on mail_messages(account, internet_message_id);
 create index if not exists mail_messages_in_reply_to on mail_messages(account, in_reply_to);
 create index if not exists mail_messages_subject_norm on mail_messages(account, subject_norm);
+create index if not exists mail_messages_ical_uid on mail_messages(ical_uid);
 create table if not exists mail_recipients(
   message_rowid integer not null,
   ord integer not null,

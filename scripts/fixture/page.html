@@ -13,15 +13,21 @@ const open = (name, stores) => new Promise((res, rej) => {
 });
 
 // Deterministic PRNG so regeneration is stable apart from browser-side timestamps.
+// SHIFT moves every date by whole days. The committed fixture is built with 0; make screenshot builds
+// a throwaway copy with a shift that makes its times recent. T0 is the fixture's base instant.
+let SHIFT = 0;
+const T0 = () => 1700000000000 + SHIFT;
+const UTC = (...a) => Date.UTC(...a) + SHIFT;
+
 function rng(seed) { let s = seed >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
 
 function msg(acct, convId, n, over) {
-  const id = String(1700000000000 + n * 1000);
+  const id = String(T0() + n * 1000);
   return Object.assign({
     id, conversationId: convId, parentMessageId: id, clientMessageId: String(9000000000 + n),
-    version: 1700000000000 + n * 1000, sequenceId: n, messageType: 'RichText/Html', contentType: 'Text',
+    version: T0() + n * 1000, sequenceId: n, messageType: 'RichText/Html', contentType: 'Text',
     content: '<p>Fixture message ' + n + '</p>', imDisplayName: acct.name, creator: '8:orgid:' + acct.user,
-    originalArrivalTime: 1700000000000 + n * 1000, clientArrivalTime: 1700000000000 + n * 1000 + 5,
+    originalArrivalTime: T0() + n * 1000, clientArrivalTime: T0() + n * 1000 + 5,
     deletionInfo: null, properties: { importance: 'normal', subject: '' },
   }, over);
 }
@@ -34,7 +40,7 @@ function chain(convId, m) {
 // optional flag keys (isAllDayEvent, isCancelled, isPrivate, isOrganizer, hasAttachments) are
 // present on most records and absent on thin ones.
 async function buildCalendar(acct, suffix, meetingConv) {
-  const D = (d, h, mi) => new Date(Date.UTC(2023, 10, d, h, mi || 0));
+  const D = (d, h, mi) => new Date(UTC(2023, 10, d, h, mi || 0));
   const hex = (t) => Array.from(t).map((c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
   const pad = (n, w) => String(n).padStart(w, '0');
   // An Exchange-style global object id as lower-case hex, the way Teams' iCalUID has it (Outlook's
@@ -44,7 +50,7 @@ async function buildCalendar(acct, suffix, meetingConv) {
   const gid = (label, date) => ('040000008200E00074C5B7101A82E008'
     + (date ? pad(date[0].toString(16).toUpperCase(), 4) + pad(date[1].toString(16).toUpperCase(), 2) + pad(date[2].toString(16).toUpperCase(), 2) : '00000000')
     + hex('FIXTURE-' + label).padEnd(72, '0')).toLowerCase();
-  const dayOf = (d) => [2023, 11, d];
+  const dayOf = (d) => { const t = D(d, 0); return [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()]; };
   const who = { name: 'Pat Example', address: 'pat@example.invalid' };
   const joinURL = (conv) => 'https://teams.example.invalid/l/meetup-join/' + encodeURIComponent(conv) + '/0?context=' + encodeURIComponent(JSON.stringify({ Tid: acct.tenant, Oid: acct.user }));
   const modified = D(14, 9);
@@ -105,7 +111,7 @@ async function buildCalendar(acct, suffix, meetingConv) {
   events.push(series('standup-master', {
     eventType: 'RecurringMaster', iCalUID: seriesID, startTime: D(22, 18), endTime: D(22, 18, 30),
     recurrencePattern: 'Weekly', eventRecurrencePattern: { type: 'weekly', interval: 1, daysOfWeek: ['wednesday', 'thursday', 'friday'] },
-    eventRecurrenceRange: { type: 'endDate', startDate: '2023-11-22', endDate: '2023-12-29' }, recurrenceEnd: D(29, 18),
+    eventRecurrenceRange: { type: 'endDate', startDate: D(22, 0).toISOString().slice(0, 10), endDate: D(59, 0).toISOString().slice(0, 10) }, recurrenceEnd: D(29, 18),
   }));
   events.push(series('standup-occ-22', { eventType: 'Occurrence', iCalUID: gid('STANDUP-' + acct.seed, dayOf(22)), startTime: D(22, 18), endTime: D(22, 18, 30) }));
   events.push(series('standup-occ-23', { eventType: 'Occurrence', iCalUID: gid('STANDUP-' + acct.seed, dayOf(23)), startTime: D(23, 18), endTime: D(23, 18, 30) }));
@@ -207,6 +213,7 @@ async function buildCalendar(acct, suffix, meetingConv) {
 }
 
 window.buildAccount = async function (acct) {
+  SHIFT = (acct.shiftDays || 0) * 86400000;
   const suffix = acct.tenant + ':' + acct.user + ':en-us';
   const r = rng(acct.seed);
   const convs = {
@@ -219,7 +226,7 @@ window.buildAccount = async function (acct) {
   };
   const other = '8:orgid:00000000-0000-4000-8000-0000000000ee';
   const me = '8:orgid:' + acct.user;
-  const ts = (n) => 1700000000000 + n * 1000;
+  const ts = (n) => T0() + n * 1000;
   // Same conversation id in both accounts.
   const shared = '19:shared-fixture-conversation@thread.v2';
 
@@ -242,10 +249,10 @@ window.buildAccount = async function (acct) {
   add(convs.chat, { content: '<p><span itemscope itemtype="http://schema.skype.com/Mention" itemid="0">Pat Example</span> please review</p>', properties: { mentions: [{ id: 0, mentionType: 'person', mri: '8:orgid:' + acct.user, displayName: 'Pat Example' }] } });
   add(convs.chat, { content: '<p><img src="https://teams.microsoft.com/api/v1/objects/0-fixture/views/imgo" itemtype="http://schema.skype.com/AMSImage" alt="image"></p>' });
   add(convs.chat, { contentType: 'Text', messageType: 'RichText/Html', content: '<attachment id="card-1"></attachment>', properties: { cards: '[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"type":"AdaptiveCard","body":[{"type":"TextBlock","text":"Adaptive fixture card"}]}}]' } });
-  add(convs.chat, { messageType: 'ThreadActivity/AddMember', content: '<addmember><eventtime>1700000100000</eventtime><initiator>8:orgid:' + acct.user + '</initiator><target>8:orgid:00000000-0000-4000-8000-0000000000ee</target></addmember>' });
+  add(convs.chat, { messageType: 'ThreadActivity/AddMember', content: '<addmember><eventtime>' + (T0() + 100000) + '</eventtime><initiator>8:orgid:' + acct.user + '</initiator><target>8:orgid:00000000-0000-4000-8000-0000000000ee</target></addmember>' });
   add(convs.chat, { messageType: 'Event/Call', content: '<ended/><partlist type="ended" alt=""><part identity="' + acct.user + '"><name>' + acct.name + '</name></part></partlist>' });
   const edited = add(convs.space, { content: '<p>Original text</p>' });
-  const deleted = add(convs.space, { content: '<p>Will be deleted</p>', deletionInfo: { deleteTime: 1700000500000, deletedBy: '8:orgid:' + acct.user } });
+  const deleted = add(convs.space, { content: '<p>Will be deleted</p>', deletionInfo: { deleteTime: T0() + 500000, deletedBy: '8:orgid:' + acct.user } });
   for (let i = 0; i < 26; i++) {
     const conv = [convs.chat, convs.topic, convs.space, convs.meeting, shared][i % 5];
     add(conv, { content: '<p>Filler ' + i + ' ' + Math.floor(r() * 1e6).toString(36) + '</p>' });
@@ -317,7 +324,7 @@ window.buildAccount = async function (acct) {
   const gone = c1[20];
   await put([editedChain], [gone.replyChainId]);
   const over = c1[1];
-  await put([chain(over.conversationId, Object.assign({}, over.messageMap[over.replyChainId], { content: '<p>Overwritten twice</p>', version: 1700000999000 }))]);
+  await put([chain(over.conversationId, Object.assign({}, over.messageMap[over.replyChainId], { content: '<p>Overwritten twice</p>', version: T0() + 999000 }))]);
   // Broadcast mentions of the account (no person mention of it): a team, a tag and @everyone. The
   // activity feed below says why each reached the account. They sit in the untitled group chat,
   // which has no read marker, so they never count as unread.
@@ -340,11 +347,11 @@ window.buildAccount = async function (acct) {
     return m;
   };
   const recording = (k) => '<URIObject type="Video.1/Message.1" uri="https://fixture.sharepoint.example/recordings/standup-' + k + '"><Title>Fixture standup recording ' + k + '</Title><a href="https://fixture.sharepoint.example/recordings/standup-' + k + '">Recording ' + k + '</a></URIObject>';
-  meetMsg('Event/Call', Date.UTC(2023, 10, 22, 18, 0, 30), '<ended/><partlist type="ended" alt=""><part identity="' + acct.user + '"><name>' + acct.name + '</name></part></partlist>');
-  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 10, 22, 18, 31), recording(1));
-  meetMsg('RichText/Media_CallTranscript', Date.UTC(2023, 10, 22, 18, 32), '<URIObject type="Video.1/Message.1" uri="https://fixture.sharepoint.example/transcripts/standup-1"><Title>Fixture standup transcript</Title></URIObject>');
-  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 10, 23, 18, 31), recording(2));
-  meetMsg('RichText/Media_CallRecording', Date.UTC(2023, 11, 5, 18, 31), recording(3));
+  meetMsg('Event/Call', UTC(2023, 10, 22, 18, 0, 30), '<ended/><partlist type="ended" alt=""><part identity="' + acct.user + '"><name>' + acct.name + '</name></part></partlist>');
+  meetMsg('RichText/Media_CallRecording', UTC(2023, 10, 22, 18, 31), recording(1));
+  meetMsg('RichText/Media_CallTranscript', UTC(2023, 10, 22, 18, 32), '<URIObject type="Video.1/Message.1" uri="https://fixture.sharepoint.example/transcripts/standup-1"><Title>Fixture standup transcript</Title></URIObject>');
+  meetMsg('RichText/Media_CallRecording', UTC(2023, 10, 23, 18, 31), recording(2));
+  meetMsg('RichText/Media_CallRecording', UTC(2023, 11, 5, 18, 31), recording(3));
   await put(c4);
   rdb.close();
 
@@ -354,7 +361,7 @@ window.buildAccount = async function (acct) {
   const mk = (id, type, title, tp, extra) => Object.assign({
     id, type, chatTitle: { shortTitle: title, longTitle: title + ' (long)' }, threadProperties: Object.assign({ topic: title, threadType: type.toLowerCase() }, tp || {}),
     members: [{ id: me, role: 'Admin' }, { id: other, role: 'User' }],
-    lastMessageTimeUtc: 1700000100000, parentId: null, teamId: '',
+    lastMessageTimeUtc: T0() + 100000, parentId: null, teamId: '',
     properties: { consumptionhorizon: '', favorite: 'false' },
   }, extra);
   const horizon = (n0) => ts(n0) + ';' + (ts(n0) + 5000) + ';' + ts(n0);
@@ -399,15 +406,15 @@ window.buildAccount = async function (acct) {
   // which must be skipped.
   const kdb = await open('Teams:calendar-manager:react-web-client:' + suffix, [['events', 'id']].concat(acct.big ? [['sessionTokens', 'id']] : []));
   const ktx = kdb.transaction(acct.big ? ['events', 'sessionTokens'] : ['events'], 'readwrite');
-  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-1', subject: 'Fixture planning', start: new Date(1700000000000), allDay: false });
-  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-2', subject: 'Fixture holiday', start: new Date(1700006400000), allDay: true });
+  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-1', subject: 'Fixture planning', start: new Date(T0()), allDay: false });
+  ktx.objectStore('events').put({ id: 'fixture-event-' + acct.seed + '-2', subject: 'Fixture holiday', start: new Date(T0() + 6400000), allDay: true });
   if (acct.big) ktx.objectStore('sessionTokens').put({ id: 'decoy', value: 'FIXTURE-SESSION-DECOY' });
   await done(ktx);
   kdb.close();
   const pdb = await open('Teams:pinned-manager:react-web-client:' + suffix, [['pins', 'pinKey']]);
   const ptx = pdb.transaction('pins', 'readwrite');
   ptx.objectStore('pins').put({ pinKey: 'fixture-pin-' + acct.seed, label: 'Fixture pin' });
-  ptx.objectStore('pins').put({ pinKey: new Date(1700000000000 + acct.seed * 1000), label: 'Date-keyed pin' });
+  ptx.objectStore('pins').put({ pinKey: new Date(T0() + acct.seed * 1000), label: 'Date-keyed pin' });
   ptx.objectStore('pins').put({ pinKey: new Uint8Array([1, 2, 3, acct.seed]), label: 'Binary-keyed pin' });
   ptx.objectStore('pins').put({ pinKey: ['fixture', acct.seed, 'array'], label: 'Array-keyed pin' });
   await done(ptx);

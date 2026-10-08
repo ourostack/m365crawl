@@ -28,4 +28,16 @@ Pat Example   Send the fixture plan
 Alex Fixture  Book Fixture Room Beta
 
 Fixture summary: the plan was reviewed.
+
+[2msent_at[0m           [2mchat sender[0m   [2mmessage[0m
+[2m----------------[0m  [2m------------[0m  [2m--------------------------------------[0m
+2023-12-05 18:31  Alex Fixture  Fixture standup recording 3Recording 3
+2023-11-23 18:31  Alex Fixture  Fixture standup recording 2Recording 2
+2023-11-22 18:32  Alex Fixture  Fixture standup transcript
+2023-11-22 18:31  Alex Fixture  Fixture standup recording 1Recording 1
+2023-11-22 18:00  Alex Fixture  Call ended
+2023-11-14 22:13  Alex Fixture  Filler 23 6u1s
+2023-11-14 22:13  Alex Fixture  Filler 18 emp6
+2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
+2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
 [2marchive age: <age>[0m

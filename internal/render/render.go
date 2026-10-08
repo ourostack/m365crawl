@@ -49,10 +49,19 @@ type Check struct {
 }
 
 // Snapshot is the generic summary section of a doctor screen. Pairs render
-// on one "|"-separated line as key=value; Lines render as aligned rows.
+// on one "|"-separated line as key=value; each Group renders as its label and
+// its pairs as key=value; Lines render as aligned rows. Group labels and Line
+// labels share one column.
 type Snapshot struct {
+	Pairs  [][2]string
+	Groups []SnapshotGroup
+	Lines  [][2]string
+}
+
+// SnapshotGroup is one labelled line of key=value pairs, such as one source's counts.
+type SnapshotGroup struct {
+	Label string
 	Pairs [][2]string
-	Lines [][2]string
 }
 
 // cond pins ambiguous-width glyphs to one column so output does not depend
@@ -286,7 +295,7 @@ func Doctor(w io.Writer, heading string, checks []Check, snap *Snapshot, color b
 			b.WriteByte('\n')
 		}
 	}
-	if snap != nil && (len(snap.Pairs) > 0 || len(snap.Lines) > 0) {
+	if snap != nil && (len(snap.Pairs) > 0 || len(snap.Groups) > 0 || len(snap.Lines) > 0) {
 		b.WriteByte('\n')
 		group(&b, color, "Snapshot", 0)
 		if len(snap.Pairs) > 0 {
@@ -301,10 +310,21 @@ func Doctor(w io.Writer, heading string, checks []Check, snap *Snapshot, color b
 			b.WriteByte('\n')
 		}
 		labelWidth := 0
+		for _, g := range snap.Groups {
+			labelWidth = max(labelWidth, displayWidth(g.Label))
+		}
 		for _, l := range snap.Lines {
-			if n := displayWidth(l[0]); n > labelWidth {
-				labelWidth = n
+			labelWidth = max(labelWidth, displayWidth(l[0]))
+		}
+		for _, g := range snap.Groups {
+			b.WriteString("  " + colorize(color, ansiBold, padRight(g.Label, labelWidth)))
+			if len(g.Pairs) == 0 {
+				b.WriteString("  -")
 			}
+			for _, p := range g.Pairs {
+				b.WriteString("  " + colorize(color, ansiDim, p[0]+"=") + cell(p[1]))
+			}
+			b.WriteByte('\n')
 		}
 		for _, l := range snap.Lines {
 			b.WriteString("  " + colorize(color, ansiDim, padRight(l[0], labelWidth)) + "  " + cell(l[1]) + "\n")

@@ -10,4 +10,5 @@ status    : confirmed
 when      : 2031-03-05 (all day)
 unknown: attachments, attendees, body, categories, has_attachments, is_organizer, is_private, recurrence, reminder, rooms, time_zone_iana, utc_offset
 outlook is the only source of this event; not known: attendees, body
+notice: this event has no Teams meeting chat, so chat is null
 archive age: <age>

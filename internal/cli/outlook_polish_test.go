@@ -178,7 +178,8 @@ func TestOutlookOffNotice(t *testing.T) {
 		t.Fatal("the fixture window has no Outlook-only event")
 	}
 	ev := off("calendar", "event", outlookOnly["event_id"].(string))
-	if got := asStrings(ev["notices"]); len(got) != 1 || !strings.Contains(got[0], "outlook/Main") {
+	// An Outlook-only event has no Teams meeting chat, which its first notice says.
+	if got := asStrings(ev["notices"]); len(got) != 2 || !strings.Contains(got[0], "no Teams meeting chat") || !strings.Contains(got[1], "outlook/Main") {
 		t.Fatalf("event notices %v", got)
 	}
 	// Absent: a result with no Outlook event, a run with the source on, and the Teams-only account.
@@ -186,7 +187,7 @@ func TestOutlookOffNotice(t *testing.T) {
 	if teams["notices"] != nil {
 		t.Fatalf("a Teams-only result: %v", teams["notices"])
 	}
-	if code, out, _ := run("--max-age", "0", "calendar", "event", outlookOnly["event_id"].(string)); code != 0 || decode(t, out)["notices"] != nil {
+	if code, out, _ := run("--max-age", "0", "calendar", "event", outlookOnly["event_id"].(string)); code != 0 || len(asStrings(decode(t, out)["notices"])) != 1 {
 		t.Fatalf("source on: %d %s", code, out)
 	}
 	// The text output prints it as one dim line.
