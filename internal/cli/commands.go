@@ -161,18 +161,23 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 	return out
 }
 
+// chatHTML fetches the HTML bodies of rows when asked; nil otherwise.
+func (rt *runtime) chatHTML(st *store.Store, rows []store.MessageRow, withHTML bool) (map[store.MessageKey]string, error) {
+	if !withHTML {
+		return nil, nil
+	}
+	keys := make([]store.MessageKey, len(rows))
+	for i, r := range rows {
+		keys[i] = store.MessageKey{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ID: r.ID}
+	}
+	return st.MessageHTML(rt.ctx, keys)
+}
+
 // messageList turns message rows into a list result, adding html when asked.
-func (rt *runtime) messageList(ctx context.Context, st *store.Store, rows []store.MessageRow, truncated bool, total int, withHTML bool) (result, error) {
-	var html map[store.MessageKey]string
-	if withHTML {
-		keys := make([]store.MessageKey, len(rows))
-		for i, r := range rows {
-			keys[i] = store.MessageKey{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ID: r.ID}
-		}
-		var err error
-		if html, err = st.MessageHTML(ctx, keys); err != nil {
-			return nil, err
-		}
+func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.MessageRow, truncated bool, total int, withHTML bool) (result, error) {
+	html, err := rt.chatHTML(st, rows, withHTML)
+	if err != nil {
+		return nil, err
 	}
 	return newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated).withTotal(total), nil
 }
@@ -205,16 +210,30 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 }
 
 type searchCmd struct {
-	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --since, --until) is given: then the filters alone select the messages."`
+	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
-	IncludeDeleted bool `name:"include-deleted" help:"Also search deleted messages."`
-	MentionsMe     bool `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind)."`
-	DirectMentions bool `name:"direct-mentions" help:"Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts."`
-	HTML           bool `name:"html" help:"Add each message's HTML body as html."`
+	Source         string `default:"all" enum:"chats,mail,all" help:"What to search: chats (Teams), mail (Outlook) or all (both, the default)."`
+	Folder         string `help:"Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out."`
+	IncludeDeleted bool   `name:"include-deleted" help:"Also search deleted messages (Teams chats only)."`
+	MentionsMe     bool   `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only."`
+	DirectMentions bool   `name:"direct-mentions" help:"Only messages that mention you by name (mention_kind person), not channel, team, tag or @everyone broadcasts. Teams chats only."`
+	HTML           bool   `name:"html" help:"Add each message's HTML body as html (Teams chats only)."`
+}
+
+// Help is the long help of search.
+func (searchCmd) Help() string {
+	return "Searches Teams chats and Outlook mail together; every item has a source (chats or mail) and the result's sources says how many items each source gave and whether it had more. Items are newest first across both sources, by sent_at for chats and received_at for mail.\n" +
+		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with the other --source it is a usage error (flag_source_conflict). --from, --since, --until, --limit and --fields apply to both; --fields accepts the keys of both kinds of item.\n" +
+		"note also says when mail is left out because it is not in the archive yet or not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
+		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only."
 }
 
 func (c *searchCmd) Run(rt *runtime) error {
-	if err := checkFields[messageItem](rt); err != nil {
+	if err := checkKeys(rt, searchKeys()); err != nil {
+		return err
+	}
+	p, err := c.plan(rt)
+	if err != nil {
 		return err
 	}
 	f, err := rt.filter(c.msgFlags)
@@ -223,16 +242,7 @@ func (c *searchCmd) Run(rt *runtime) error {
 	}
 	f.IncludeDeleted, f.MentionsMe, f.DirectMentions = c.IncludeDeleted, c.MentionsMe, c.DirectMentions
 	f.Total = new(int)
-	return rt.read("search", func(st *store.Store) (result, error) {
-		if st == nil {
-			return newList(nil, false), nil
-		}
-		rows, trunc, err := st.Search(rt.ctx, c.Query, f)
-		if err != nil {
-			return nil, err
-		}
-		return rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML)
-	})
+	return rt.read("search", func(st *store.Store) (result, error) { return c.search(rt, p, f, st) })
 }
 
 type messagesCmd struct {

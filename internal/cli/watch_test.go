@@ -168,15 +168,23 @@ func (w *watchEnv) stop() int {
 	}
 }
 
-func (w *watchEnv) waitFor(what string, cond func() bool) {
-	w.t.Helper()
-	deadline := time.Now().Add(watchTestWaitTimeout)
-	if testDeadline, ok := w.t.Deadline(); ok {
+// waitDeadline is when waitFor gives up: watchTestWaitTimeout from now, or a second before the test
+// binary's own deadline when that comes first, so a timeout still fails with waitFor's message.
+func waitDeadline(now time.Time, testDeadline time.Time, hasDeadline bool) time.Time {
+	deadline := now.Add(watchTestWaitTimeout)
+	if hasDeadline {
 		latest := testDeadline.Add(-time.Second)
 		if latest.Before(deadline) {
 			deadline = latest
 		}
 	}
+	return deadline
+}
+
+func (w *watchEnv) waitFor(what string, cond func() bool) {
+	w.t.Helper()
+	testDeadline, ok := w.t.Deadline()
+	deadline := waitDeadline(time.Now(), testDeadline, ok)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -368,6 +376,27 @@ func TestWatchFieldsExplicitTextTruncated(t *testing.T) {
 	}
 }
 
+// A Windows runner once took over ten seconds for one watch sync, longer than waitFor then waited.
+// waitFor now waits far longer than any sync takes, unless the test binary's own deadline is near.
+func TestWatchWaitOutlastsASlowSync(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	slowSync := 11 * time.Second
+	if got := waitDeadline(now, time.Time{}, false); got.Sub(now) <= slowSync {
+		t.Fatalf("without a test deadline waitFor waits %v, not past a %v sync", got.Sub(now), slowSync)
+	}
+	if got := waitDeadline(now, now.Add(15*time.Minute), true); got.Sub(now) <= slowSync {
+		t.Fatalf("with a distant test deadline waitFor waits %v, not past a %v sync", got.Sub(now), slowSync)
+	}
+	if got := waitDeadline(now, now.Add(5*time.Second), true); !got.Equal(now.Add(4 * time.Second)) {
+		t.Fatalf("with a near test deadline waitFor stops at %v, want a second before it", got.Sub(now))
+	}
+}
+
+// watchDelayedSync is how long the delayed sync below sleeps: long against the 30 ms poll, so
+// watch sees many ticks while the sync is still running, and short against waitFor's patience,
+// which TestWatchWaitOutlastsASlowSync checks without sleeping.
+const watchDelayedSync = time.Second
+
 func TestWatchFieldsExplicitTextTruncatedWaitsForDelayedSync(t *testing.T) {
 	w := newWatchEnv(t)
 	noEvents(t)
@@ -375,7 +404,7 @@ func TestWatchFieldsExplicitTextTruncatedWaitsForDelayedSync(t *testing.T) {
 	old := runSync
 	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
 		if calls.Add(1) == 2 {
-			time.Sleep(11 * time.Second)
+			time.Sleep(watchDelayedSync)
 		}
 		return old(ctx, o)
 	}

@@ -360,6 +360,21 @@ func TestDoctorFlagsAPartialOrFailedLastSync(t *testing.T) {
 
 // --- signals ---
 
+func TestKillAllOnForceExit(t *testing.T) {
+	var order []string
+	old := killBrowsers
+	t.Cleanup(func() { killBrowsers = old })
+	killBrowsers = func() { order = append(order, "kill") }
+	sigs := make(chan os.Signal, 2)
+	sigs <- syscall.SIGINT
+	sigs <- syscall.SIGINT
+	// Both signals are buffered, so watchSignals runs to its forced exit and returns.
+	watchSignals(sigs, func() { order = append(order, "cancel") }, func(int) { order = append(order, "exit") })
+	if got := strings.Join(order, ","); got != "cancel,kill,exit" {
+		t.Fatalf("order = %s, want cancel,kill,exit (the browsers die before the process exits)", got)
+	}
+}
+
 func TestSecondSignalForcesAnExit(t *testing.T) {
 	sigs := make(chan os.Signal, 2)
 	cancelled := make(chan struct{})

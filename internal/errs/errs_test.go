@@ -28,6 +28,9 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{DoctorFailed("x"), "doctor_failed", 3},
 		{PartialSync("x"), "partial_sync", 1},
 		{Locked("x"), "locked", 4},
+		{NoBrowser(), "transcripts_no_browser", 3},
+		{BrowserBusy(), "transcripts_browser_busy", 4},
+		{BrowserFailed("did not start"), "transcripts_browser_failed", 1},
 		{MailUnsupportedPlatform(), "mail_unsupported_platform", 3},
 	}
 	for _, c := range cases {
