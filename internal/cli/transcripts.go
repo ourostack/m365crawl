@@ -261,6 +261,13 @@ func unfetchedCalls(calls []store.TranscriptCall) int {
 // transcriptCallsOf is the test seam of the archive's recorded calls.
 var transcriptCallsOf = (*store.Store).TranscriptCalls
 
+// Test seams of the two questions search, status and calendar event ask before they read
+// transcripts: whether the archive has the tables, and whether it holds any text.
+var (
+	transcriptTablesOf = (*store.Store).HasTranscriptTables
+	transcriptTextOf   = (*store.Store).HasTranscriptText
+)
+
 // transcriptsEmptyNote says why the list is empty: an account the archive does not hold, an
 // archive with no recorded meeting, or filters that matched none.
 func (rt *runtime) transcriptsEmptyNote(st *store.Store, filtered bool) (string, error) {

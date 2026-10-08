@@ -23,7 +23,6 @@ import (
 
 // Test seams of the two commands that run a browser.
 var (
-	findBrowser = browser.Find
 	// launchBrowser starts the browser; tests replace it to reach the failures of the tab.
 	launchBrowser = func(ctx context.Context, o browser.LaunchOptions) (launchedBrowser, error) {
 		b, err := browser.Launch(ctx, o)

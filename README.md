@@ -26,7 +26,7 @@
 
 - **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. m365crawl needs the signed-in desktop apps and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
 - **Built for agent context budgets.** Every item carries a stable id, and every Teams item a deep link. `--fields` and `--max-text` return only what you need.
-- **No network, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite.
+- **Offline, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token.
 - **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not files on your disk.
 - **Read-only by construction.** There is no write path in the code. It cannot send, reply, react, move or mark anything read, so handing it to an agent is safe.
 - **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
@@ -281,7 +281,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 ## Privacy
 
-The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
+The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token. Everything else comes from files Teams and Outlook already keep on this machine. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
 
 ## Limits
 
