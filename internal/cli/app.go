@@ -17,6 +17,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl"
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/render"
 )
@@ -120,13 +121,13 @@ func (rt *runtime) printVersion() error {
 	return rt.write("version", versionInfo{Version: version, Commit: commit, Date: date})
 }
 
-// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT
-// or SIGTERM cancels the context every lower layer cleans up on; a second one force-quits at once
+// Main runs the CLI and returns the process exit code. It owns signal handling: the first SIGINT,
+// SIGTERM or SIGHUP (a closed terminal) cancels the context every lower layer cleans up on; a second one force-quits at once
 // with status 130, in case that cleanup is stuck.
 func Main(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 2)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -141,8 +142,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	return runCLI(ctx, args, stdout, stderr)
 }
 
-// watchSignals cancels on the first signal and calls exit(exitForced) on the second. It returns
-// when sigs is closed.
+// killBrowsers force-kills every browser this process launched. The force-quit path runs it
+// before exiting, because os.Exit skips every deferred Close. A test seam.
+var killBrowsers = browser.KillAll
+
+// watchSignals cancels on the first signal and, on the second, kills every browser this process
+// started and calls exit(exitForced). It returns when sigs is closed.
 func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
@@ -151,6 +156,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 	if _, ok := <-sigs; !ok {
 		return
 	}
+	killBrowsers()
 	exit(exitForced)
 }
 

@@ -6,6 +6,7 @@ toolchain go1.27.1
 
 require (
 	github.com/alecthomas/kong v1.16.1
+	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/golang/snappy v1.0.0
 	github.com/mattn/go-isatty v0.0.24
