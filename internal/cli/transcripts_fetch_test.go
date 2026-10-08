@@ -33,6 +33,7 @@ type trPage struct {
 	host       string
 	landOn     string
 	hostErr    error
+	hostFails  []error // errors of the first Host calls; errHang blocks until the call's context ends
 	hosts      []string // successive answers of Host, then host
 	paths      []string // successive answers of location.pathname, then "/"
 	probes     []bool   // successive answers of the sign-in probe, then true
@@ -59,6 +60,17 @@ func (p *trPage) Host(ctx context.Context) (string, error) {
 	defer p.mu.Unlock()
 	if _, ok := ctx.Deadline(); !ok {
 		p.noDeadline++
+	}
+	if len(p.hostFails) > 0 {
+		err := p.hostFails[0]
+		p.hostFails = p.hostFails[1:]
+		if err == errHang {
+			p.mu.Unlock()
+			<-ctx.Done()
+			p.mu.Lock()
+			return "", ctx.Err()
+		}
+		return "", err
 	}
 	if len(p.hosts) > 0 {
 		h := p.hosts[0]
@@ -658,14 +670,37 @@ func TestSigninInterruptedAtThePrompt(t *testing.T) {
 	}
 }
 
+var errHang = errors.New("hang")
+
 func TestSigninWindowClosed(t *testing.T) {
 	e := trEnv(t)
 	page := newTrPage()
-	page.hostErr = errors.New("websocket closed")
+	page.hostErr = fmt.Errorf("%w: websocket closed", browser.ErrDisconnected)
 	closer, _ := fakeBrowser(t, page)
 	er := trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
 	if er["message"] != "the browser failed: the sign-in window was closed before sign-in finished" || !strings.Contains(er["fix"].(string), "signin") || closer.n.Load() != 1 {
 		t.Fatalf("error %v", er)
+	}
+}
+
+func TestSigninRetriesAFailedOrHungHostCall(t *testing.T) {
+	e := trEnv(t)
+	page := newTrPage()
+	// A Host error that is not a dropped connection, then a call that never answers: both are
+	// asked again, and the hung one gives up after its own short timeout, not the whole wait.
+	page.hostFails = []error{errors.New("target busy"), errHang}
+	page.hosts = []string{trHost}
+	closer, _ := fakeBrowser(t, page)
+	oldWait, oldCall, oldPoll := signinWait, signinCallTimeout, signinPoll
+	signinWait, signinCallTimeout, signinPoll = 3*time.Second, 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { signinWait, signinCallTimeout, signinPoll = oldWait, oldCall, oldPoll })
+	start := time.Now()
+	code, out, errOut := e.tr("transcripts", "signin", "--user-agreed")
+	if code != 0 || decode(t, out)["signed_in"] != true || closer.n.Load() != 1 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("a hung call held the wait for %s", d)
 	}
 }
 
@@ -782,7 +817,7 @@ func TestSigninGolden(t *testing.T) {
 func TestOpenBrowserFakeExecutable(t *testing.T) {
 	// The real launch path with the fake browser: a page comes back, and Close ends it.
 	exe := browsertest.FakeBrowser(t)
-	profile := filepath.Join(t.TempDir(), "browser")
+	profile := filepath.Join(t.TempDir(), "archive", "browser")
 	page, closer, err := openBrowser(context.Background(), browser.LaunchOptions{Exe: exe, Kind: browser.KindCustom, Profile: profile, Headless: true, Timeout: 20 * time.Second})
 	if err != nil {
 		t.Fatal(err)
