@@ -233,6 +233,11 @@ func (rt *runtime) listTable(r *listResult) {
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
+			if rt.cmd == "search" { // the id is what a follow-up (thread, sql) needs
+				cols, textCol = []string{"sent_at", "conversation", "sender", "id", "text"}, 4
+				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, x.ID, text})
+				continue
+			}
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
 			cols, textCol = searchColumns, 4
