@@ -40,4 +40,9 @@ Fixture summary: the plan was reviewed.
 2023-11-14 22:13  Alex Fixture  Filler 18 emp6
 2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
 2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
+
+[2mreceived_at[0m       [2mmail from[0m    [2msubject[0m                      [2mmatch[0m
+[2m----------------[0m  [2m-----------[0m  [2m---------------------------[0m  [2m-------[0m
+2023-11-13 09:00  Pat Example  Fixture planning review      invite
+2023-11-19 10:00  Sam Example  RE: Fixture planning review  subject
 [2marchive age: <age>[0m
