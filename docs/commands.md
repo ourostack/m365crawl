@@ -209,7 +209,7 @@ m365crawl search [<query>] [flags]
 | `--until=STRING` | both | Only messages at or before this time (same formats as `--since`). |
 | `--limit=50` | both | Maximum items in the merged list; `truncated` says whether either source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
-| `-c, --conversation=STRING` | chats | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--team=STRING` | chats | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
 | `--mentions-me` | chats | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see `mention_kind`). |
 | `--direct-mentions` | chats | Only messages that mention you by name (`mention_kind` `person`). |
@@ -292,7 +292,7 @@ m365crawl messages [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `-c, --conversation=STRING` | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--from=STRING` | Sender: a person id, or a case-insensitive part of the name. |
 | `--since=STRING` | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). |
 | `--until=STRING` | Only messages at or before this time (same formats as `--since`). |
@@ -323,7 +323,7 @@ m365crawl unread [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `-c, --conversation=STRING` | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--team=STRING` | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. |
 | `--since=STRING` | Count only unread messages sent at or after this time. Use it for "what needs my attention": old read markers leave stale conversations with hundreds of unread messages. |
 | `--limit=50` | Maximum items to return; `truncated` says whether more exist. |
@@ -349,7 +349,7 @@ m365crawl thread <target> [<root>] [flags]
 
 | Argument or flag | Meaning |
 | --- | --- |
-| `<target>` | Conversation id, or a Teams message link. |
+| `<target>` | Conversation id, or a Teams message link (a channel or chat link names no message: read it with messages --conversation). |
 | `[<root>]` | Root message id (not needed with a link). |
 | `--limit=50` | Maximum items to return; `truncated` says whether more exist. |
 | `--include-deleted` | Also show deleted messages. |

@@ -23,6 +23,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 - Unknown is not none. `coverage_gap` on a calendar result means some days are not cached, so a missing meeting is not evidence; a field named in `unknown_fields` was never stated.
 - `unread` and `messages --unread` cover chats and meetings; channels are left out (`channels_excluded`) because most are never opened. Add `--include-channels` to count them; channel mentions and replies reach you through `activity`.
 - `messages` and `search` text output has a `thread` column that names the whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, where the root is the message's `reply_chain_id`, else `id` (a channel reply's own id reads only that reply); for mail the id for `m365crawl mail thread <id>`.
+- Any Teams link the user pastes (channel, chat, message or meeting) can be passed where a conversation or thread is expected: `--conversation '<link>'`, `thread '<message link>'`, `transcripts '<meeting link>'`.
 - `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields source,id,sent_at,subject,text --max-text 300`.
 
 ## Jobs

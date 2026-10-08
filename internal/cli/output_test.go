@@ -103,7 +103,6 @@ func TestParseThreadTargetMalformedLinks(t *testing.T) {
 		"https://teams.microsoft.com/l/message/",
 		"https://teams.microsoft.com/l/message/19%3Aabc",
 		"https://teams.microsoft.com/l/message//1",
-		"https://teams.microsoft.com/l/chat/19%3Aabc/1",
 		"https://evil.example/l/message/19%3Aabc/1",
 		"https://[::1",
 		"http://%",

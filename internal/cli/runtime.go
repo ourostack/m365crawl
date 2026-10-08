@@ -48,6 +48,7 @@ type runtime struct {
 	team           string      // --team of the running read command, validated before any implicit sync
 	synced         *syncedInfo // the implicit sync this read ran, if any
 	query          listQuery   // what the running list command asked for, to explain an empty result
+	link           *convLink   // the Teams link the running read's conversation came from, if any
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
