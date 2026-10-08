@@ -108,11 +108,11 @@ func TestMailQueriesFail(t *testing.T) {
 		return err
 	})
 	run("thread chain", func(ctx context.Context, s *Store) error {
-		_, _, err := s.MailThread(ctx, mailAcct, 2)
+		_, _, _, err := s.MailThread(ctx, mailAcct, 2)
 		return err
 	})
 	run("thread subject", func(ctx context.Context, s *Store) error {
-		_, _, err := s.MailThread(ctx, mailAcct, 3)
+		_, _, _, err := s.MailThread(ctx, mailAcct, 3)
 		return err
 	})
 	run("folders", func(ctx context.Context, s *Store) error {

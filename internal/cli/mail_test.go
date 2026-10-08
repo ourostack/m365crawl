@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -381,6 +382,32 @@ func TestMailThread(t *testing.T) {
 	m = mailJSON(t, e, "mail", "thread", "outlook/Main:104")
 	if m["grouping"] != "subject" {
 		t.Fatalf("grouping = %v", m["grouping"])
+	}
+}
+
+// mail thread says truncated only when the thread holds more messages than it printed: a chain of
+// exactly the cap is whole, one more is cut.
+func TestMailThreadTruncatedOnlyWhenMoreExist(t *testing.T) {
+	const capacity = 200
+	for _, c := range []struct {
+		n         int
+		truncated bool
+	}{{capacity, false}, {capacity + 1, true}} {
+		pinMailPlatform(t)
+		e := textEnv(t)
+		var msgs []outlookmail.Message
+		for i := 1; i <= c.n; i++ {
+			reply := ""
+			if i > 1 {
+				reply = fmt.Sprintf("<t%d@x.test>", i-1)
+			}
+			msgs = append(msgs, mailMsg(uint32(i), fInbox, fmt.Sprintf("<t%d@x.test>", i), reply, "Long thread", 1, false))
+		}
+		seedMail(t, e, msgs)
+		m := mailJSON(t, e, "mail", "thread", "outlook/Main:1")
+		if len(items(t, m)) != capacity || m["truncated"] != c.truncated {
+			t.Fatalf("chain of %d: %d items, truncated %v", c.n, len(items(t, m)), m["truncated"])
+		}
 	}
 }
 

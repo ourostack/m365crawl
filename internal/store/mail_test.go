@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -455,25 +457,25 @@ func TestMailThread(t *testing.T) {
 		return out
 	}
 	for _, seed := range []uint32{1, 2, 3, 4} {
-		rows, grouping, err := s.MailThread(ctx, mailAcct, seed)
+		rows, grouping, _, err := s.MailThread(ctx, mailAcct, seed)
 		if err != nil || grouping != "reply_chain" || len(rows) != 4 || rows[0].DetailKey != 1 {
 			t.Fatalf("seed %d: %v %q %v", seed, keys(rows), grouping, err)
 		}
 	}
-	rows, grouping, err := s.MailThread(ctx, mailAcct, 10)
-	if err != nil || grouping != "subject" || len(keys(rows)) != 2 || rows[0].DetailKey != 10 || rows[1].DetailKey != 11 {
+	rows, grouping, trunc, err := s.MailThread(ctx, mailAcct, 10)
+	if err != nil || grouping != "subject" || trunc || len(keys(rows)) != 2 || rows[0].DetailKey != 10 || rows[1].DetailKey != 11 {
 		t.Fatalf("subject fallback: %v %q %v", keys(rows), grouping, err)
 	}
 	for _, seed := range []uint32{13, 14, 15} {
-		rows, grouping, err = s.MailThread(ctx, mailAcct, seed)
+		rows, grouping, _, err = s.MailThread(ctx, mailAcct, seed)
 		if err != nil || grouping != "subject" || len(rows) < 1 || rows[0].DetailKey != seed && seed == 13 {
 			t.Fatalf("seed %d: %v %q %v", seed, keys(rows), grouping, err)
 		}
 	}
-	if rows, _, _ := s.MailThread(ctx, mailAcct, 13); len(rows) != 1 {
+	if rows, _, _, _ := s.MailThread(ctx, mailAcct, 13); len(rows) != 1 {
 		t.Fatalf("empty subject_norm: %d rows", len(rows))
 	}
-	if _, _, err := s.MailThread(ctx, mailAcct, 999); !errors.Is(err, ErrMailNotFound) {
+	if _, _, _, err := s.MailThread(ctx, mailAcct, 999); !errors.Is(err, ErrMailNotFound) {
 		t.Fatalf("missing seed: %v", err)
 	}
 	people := MailParticipants(must(s.MailList(ctx, MailFilter{Folder: "inbox", Limit: 2})))
@@ -485,21 +487,58 @@ func TestMailThread(t *testing.T) {
 	}
 }
 
-func TestMailThreadCap(t *testing.T) {
-	ctx := context.Background()
-	s := newStore(t)
+// longChain is a reply chain of n messages, each answering the one before.
+func longChain(n int, subject string) []outlookmail.Message {
 	var msgs []outlookmail.Message
-	for i := 1; i <= mailThreadCap+30; i++ {
-		m := mailMsg(uint32(i), fInbox, "<c"+string(rune('a'+i%26))+strings.Repeat("z", i/26)+"@x>", "Long thread", 1)
+	for i := 1; i <= n; i++ {
+		m := mailMsg(uint32(i), fInbox, fmt.Sprintf("<c%d@x>", i), subject, 1)
 		if i > 1 {
 			m.InReplyTo = msgs[i-2].MessageID
 		}
 		msgs = append(msgs, m)
 	}
-	mustCommitMail(t, s, mailBatch(mailT0, msgs...))
-	rows, grouping, err := s.MailThread(ctx, mailAcct, 1)
-	if err != nil || grouping != "reply_chain" || len(rows) < mailThreadCap || len(rows) > mailThreadCap+10 {
-		t.Fatalf("capped chain: %d rows %q %v", len(rows), grouping, err)
+	return msgs
+}
+
+// A thread is cut at the cap, and truncated says so only when a message was left out.
+func TestMailThreadCap(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		n         int
+		truncated bool
+	}{{mailThreadCap, false}, {mailThreadCap + 1, true}, {mailThreadCap + 30, true}} {
+		s := newStore(t)
+		mustCommitMail(t, s, mailBatch(mailT0, longChain(c.n, "Long thread")...))
+		rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, 1)
+		if err != nil || grouping != "reply_chain" || len(rows) != min(c.n, mailThreadCap) || truncated != c.truncated {
+			t.Fatalf("chain of %d: %d rows %q truncated=%v %v", c.n, len(rows), grouping, truncated, err)
+		}
+		if !slices.ContainsFunc(rows, func(r MailRow) bool { return r.DetailKey == 1 }) {
+			t.Fatalf("chain of %d: the seed was cut", c.n)
+		}
+	}
+}
+
+// A subject group is cut at the cap the same way, and keeps its seed.
+func TestMailThreadSubjectCap(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		n         int
+		truncated bool
+	}{{mailThreadCap, false}, {mailThreadCap + 1, true}} {
+		s := newStore(t)
+		var msgs []outlookmail.Message
+		for i := 1; i <= c.n; i++ {
+			msgs = append(msgs, mailMsg(uint32(i), fInbox, fmt.Sprintf("<s%d@x>", i), "Standup", i))
+		}
+		mustCommitMail(t, s, mailBatch(mailT0, msgs...))
+		rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, uint32(c.n)) // the oldest message
+		if err != nil || grouping != "subject" || len(rows) != min(c.n, mailThreadCap) || truncated != c.truncated {
+			t.Fatalf("group of %d: %d rows %q truncated=%v %v", c.n, len(rows), grouping, truncated, err)
+		}
+		if rows[0].DetailKey != uint32(c.n) {
+			t.Fatalf("group of %d: the seed was cut, first row %d", c.n, rows[0].DetailKey)
+		}
 	}
 }
 
