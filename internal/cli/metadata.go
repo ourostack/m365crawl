@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/openclaw/crawlkit/control"
 )
@@ -19,7 +20,18 @@ func manifest() control.Manifest {
 		m.Commands[name] = control.Command{Argv: []string{"m365crawl", "--json", name}, JSON: true, Mutates: name == "sync"}
 	}
 	m.Commands["calendar"] = control.Command{Argv: []string{"m365crawl", "--json", "calendar"}, JSON: true}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar"}
+	for _, name := range []string{"mail list", "mail show", "mail thread", "mail folders", "mail unread"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(name)...)
+		if name == "mail show" || name == "mail thread" {
+			argv = append(argv, "<id>")
+		}
+		c := control.Command{Argv: argv, JSON: true}
+		if name == "mail show" || name == "mail thread" {
+			c.Title = name + " (<id> is a placeholder: use an id printed by mail list)"
+		}
+		m.Commands[name] = c
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "calendar", "mail"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}
 	return m
 }

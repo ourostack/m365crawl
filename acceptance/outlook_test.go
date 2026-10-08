@@ -133,8 +133,24 @@ func TestRealOutlookContainer(t *testing.T) {
 		}
 	}
 	for class, want := range c.SpikeClassCounts {
+		if _, ranged := c.ClassCountRanges[class]; ranged {
+			continue
+		}
 		if got := perClass[class]; !within(got, want, c.ClassCountTolerance) {
 			t.Errorf("class 0x%x has %d objects, not within %.2f%% of the spike's %d", class, got, 100*c.ClassCountTolerance, want)
+		}
+	}
+
+	for class, r := range c.ClassCountRanges {
+		if got := perClass[class]; got < r[0] || got > r[1] {
+			t.Errorf("class 0x%x has %d objects, outside the range %d to %d", class, got, r[0], r[1])
+		}
+	}
+	if headers := perClass[0x4f]; headers > 0 {
+		per := float64(perClass[0x55]) / float64(headers)
+		t.Logf("class 0x55 per class 0x4f header: %.1f (want %.0f to %.0f)", per, c.Class55PerHeaderRange[0], c.Class55PerHeaderRange[1])
+		if per < c.Class55PerHeaderRange[0] || per > c.Class55PerHeaderRange[1] {
+			t.Errorf("class 0x55 holds %.1f objects per header, outside %.0f to %.0f", per, c.Class55PerHeaderRange[0], c.Class55PerHeaderRange[1])
 		}
 	}
 

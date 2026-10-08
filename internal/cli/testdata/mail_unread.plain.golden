@@ -1,0 +1,15 @@
+folder      kind   unread  cached
+----------  -----  ------  ------
+Inbox       inbox  1       4
+Sent Items  sent   0       1
+Projects    other  1       1
+
+id                received          state                 from        subject         folder
+----------------  ----------------  --------------------  ----------  --------------  --------
+outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender  Quarterly plan  Inbox
+outlook/Main:105  2026-08-01 08:00  unread                Ann Sender  Old report      Projects
+
+2 items
+note: the local cache holds 4 messages in Inbox, 1 message in Projects; Outlook may show more
+archive age: <age> synced
+synced <stamp> · cache covers since 2026-08-01

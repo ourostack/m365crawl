@@ -28,6 +28,55 @@
       ],
       "json": true
     },
+    "mail folders": {
+      "argv": [
+        "m365crawl",
+        "--json",
+        "mail",
+        "folders"
+      ],
+      "json": true
+    },
+    "mail list": {
+      "argv": [
+        "m365crawl",
+        "--json",
+        "mail",
+        "list"
+      ],
+      "json": true
+    },
+    "mail show": {
+      "title": "mail show (\u003cid\u003e is a placeholder: use an id printed by mail list)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "mail",
+        "show",
+        "\u003cid\u003e"
+      ],
+      "json": true
+    },
+    "mail thread": {
+      "title": "mail thread (\u003cid\u003e is a placeholder: use an id printed by mail list)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "mail",
+        "thread",
+        "\u003cid\u003e"
+      ],
+      "json": true
+    },
+    "mail unread": {
+      "argv": [
+        "m365crawl",
+        "--json",
+        "mail",
+        "unread"
+      ],
+      "json": true
+    },
     "search": {
       "argv": [
         "m365crawl",
@@ -61,7 +110,8 @@
     "watch",
     "search",
     "sql",
-    "calendar"
+    "calendar",
+    "mail"
   ],
   "privacy": {
     "contains_private_messages": true,
