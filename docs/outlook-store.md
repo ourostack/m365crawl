@@ -1,6 +1,6 @@
-# The new Outlook store: container and calendar layout
+# The Outlook for Mac store: container, calendar and mail layout
 
-This page records what m365crawl knows about `HxStore.hxd`, the block store that new Outlook for Mac keeps its mail and calendar in. It is the layout the reader (`internal/hxstore`) and the test builder (`internal/hxstore/hxbuild`) are written against. It holds structure and counts only: no subject, name, address, link, id or time-zone name seen on a real machine appears here, and none may be added. The one exception is the fixed 16-byte prefix of an iCal UID, which is a public format constant.
+This page is for people working on m365crawl's Outlook reader; you do not need it to use m365crawl. It records what m365crawl knows about `HxStore.hxd`, the block store that the new Outlook for Mac keeps its mail and calendar in, section by section: the container, calendar events, accounts, deleted events and mail. It is the layout the reader (`internal/hxstore`) and the test builder (`internal/hxstore/hxbuild`) are written against. It holds structure and counts only: no subject, name, address, link, id or time-zone name seen on a real machine appears here, and none may be added. The one exception is the fixed 16-byte prefix of an iCal UID, which is a public format constant.
 
 ## Where this comes from
 
