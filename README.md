@@ -72,12 +72,11 @@ m365crawl doctor
 
 ## Quick start
 
-These examples run against the repository's synthetic fixtures, so every name and message is made up. From a clone, point m365crawl at the fixtures and a scratch archive:
+These examples run against synthetic data from the repository, so every name and message is made up: the committed Teams fixture, and a showcase Outlook store with mail and meetings that `scripts/hxshowcase` writes (the same store `make screenshot` uses). From a clone, build that store and point m365crawl at both and at a scratch archive:
 
 ```sh
 tmp="$(mktemp -d)"
-mkdir -p "$tmp/outlook/Main"
-cp testdata/outlook-fixture/HxStore.hxd "$tmp/outlook/Main/"
+go run ./scripts/hxshowcase -out "$tmp/outlook"
 export M365CRAWL_TEAMS_ROOT="$PWD/testdata/teams-fixture/EBWebView"
 export M365CRAWL_OUTLOOK_ROOT="$tmp/outlook"
 export M365CRAWL_DB="$tmp/m365crawl.db"
@@ -97,11 +96,12 @@ m365crawl sync
 m365crawl
 m365crawl search planning
 m365crawl mail unread
-m365crawl calendar --from 2023-11-20 --days 5
+m365crawl mail show outlook/Main:3001
+m365crawl calendar --days 14
 m365crawl calendar event ev_2da7280856
 ```
 
-`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with. The committed Outlook fixture holds a calendar but no mail yet, so against the fixtures `mail unread` returns an empty list whose `note` says why.
+`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with.
 
 <!-- Example output (overview, a search with one chat and one mail hit, mail show) is generated from the final release build against the fixtures. -->
 
@@ -283,7 +283,7 @@ make coverage   # 100% coverage gate on internal/...
 make check      # every gate CI runs: tidy, fmt, vet, lint, test, coverage, e2e
 ```
 
-The tests run against two committed synthetic fixtures. `testdata/teams-fixture/` is an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`; regenerate it with `make fixture` (needs Node and Edge) and the V8 test vectors with `make v8vectors` (needs Node 22). `testdata/outlook-fixture/` holds Outlook stores written by `scripts/hxfixture`. Real-cache acceptance (`M365CRAWL_REAL_CACHE=1 make acceptance`) runs locally only; it needs Full Disk Access on macOS, live app caches, Node 22, python3 and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never content.
+The tests run against two committed synthetic fixtures. `testdata/teams-fixture/` is an IndexedDB cache written by a real Microsoft Edge through `scripts/fixture/`; regenerate it with `make fixture` (needs Node and Edge) and the V8 test vectors with `make v8vectors` (needs Node 22). `testdata/outlook-fixture/` holds Outlook stores written by `scripts/hxfixture`, and `scripts/hxshowcase` writes the showcase store with mail that `make screenshot` syncs. Real-cache acceptance (`M365CRAWL_REAL_CACHE=1 make acceptance`) runs locally only; it needs Full Disk Access on macOS, live app caches, Node 22, python3 and the reference-reader clones documented in [`AGENTS.md`](AGENTS.md). Its results are recorded as counts, timings and pass/fail only, never content.
 
 ## Credits
 

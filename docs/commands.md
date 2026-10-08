@@ -104,6 +104,14 @@ Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (
 | `mail_readable` | A warning. Per Outlook profile, when its mail was last read or why the last read failed; also that mail is not read when the Outlook source is off or on Windows. |
 | `mail_archive_mode` | Warns when other users can read the archive file, which holds mail. The file is created with mode 0600. Not applicable on Windows. |
 
+In text mode the checks are followed by a Snapshot of the archive, one line per source, then the last sync and the archive's age:
+
+- `Teams`: accounts, chats, channels, teams, meeting chats, messages and people, plus recordings and transcripts when the archive holds any. Each is counted once across accounts, without Teams' notification, call-log and annotation feeds or deleted messages.
+- `Mail`: messages, unread and folders, once mail has been read.
+- `Calendar`: the live events of each source, and a window from the earliest to the latest day any source covers.
+
+The JSON result does not carry the Snapshot.
+
 ```sh
 m365crawl doctor
 ```
@@ -213,7 +221,7 @@ How the sources combine:
 - The result's `sources` says, per source, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}}`.
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail was not searched`. With the other `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
-- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats.
+- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats (`note` says so). The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
 - `--fields` accepts the keys of both kinds of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 
@@ -450,8 +458,9 @@ m365crawl records --database Teams:pinned-manager --store pins --since 7d
 The `mail` commands read Outlook for Mac mail from the archive. Mail comes from Outlook's local cache, so the archive holds what Outlook has cached plus what earlier syncs kept. Every result says when mail was last synced and how far back the cache reaches.
 
 - **Ids.** A message id is `<account>:<detail_key>`, split on the last colon, as `mail list` prints it (for example `outlook/Main:12345`). `--account` takes the mail account as it appears in the ids (`outlook/<profile>`), not a Teams account.
-- **List results** are `{"items": [...], "count", "truncated", "synced_at", "coverage": [{"account", "folder", "kind", "oldest_at", "newest_at", "count"}], "note"}`. `note` explains an empty result (no archive yet, Outlook source off, no Outlook profile, mail not read yet, filters matched nothing, or the cache covers only since a date). For unread results it says "the local cache holds N messages in this folder; Outlook may show more". Text output of every `mail` list ends with `synced <time> · cache covers since <date>`.
-- **Limits.** `--limit` is at most 1000 on every `mail` command.
+- **List results** are `{"items": [...], "count", "truncated", "synced_at", "coverage": [{"account", "folder", "kind", "oldest_at", "newest_at", "count"}], "note"}`. `note` explains an empty result (no archive yet, Outlook source off, no Outlook profile, mail not read yet, filters matched nothing, or the cache covers only since a date). For unread results it says how many messages the cache holds in each folder, for example "the local cache holds 17 messages in Inbox; Outlook may show more", or "no unread mail in the cache; Outlook may show more". Text output of every `mail` list ends with `synced <time> · cache covers since <date>`.
+- **Limits.** `--limit` is at most 1000 on every `mail` command; a larger value is a `usage` error.
+- **Missing folders.** A message whose folder Outlook's store no longer holds is kept, with `folder` null and `folder_kind` `unknown`. `--folder unknown` lists those messages.
 - **Not known is null.** A field the archive does not hold is `null`, never guessed: `subject`, `from_name`, `from_address`, `in_reply_to`, `ical_uid` and `internet_message_id` when Outlook stored none; `is_read` when the read state is not known; `sent_at` when the store has no send time; `address` on a recipient without one; and `gone_at` and `evicted_at` while the message is present.
 - **Recipients.** To and Cc are not yet told apart. A recipient carries only `name`, `address` and `kind_raw` (the store's own number); there is no `to` or `cc` field.
 - **Importance** (`low`, `normal`, `high`) is likely right, but it is read from one store field that is not fully confirmed.
@@ -495,7 +504,7 @@ Show one message: headers, recipients, attachments and body text.
 m365crawl mail show <id>
 ```
 
-Keys are those of `mail list`, with `recipients` (every recipient, each `{name, address, kind_raw}`) in place of the count and preview, plus `read_state`, `attachments` (each `{name, size, content_type, inline, downloaded}`), `body_text` and `body_state`. `content_type` comes from the file extension. `inline: true` marks an embedded item, which does not count toward `has_attachments`; `downloaded` says whether Outlook's cache holds the file. `--max-text N` cuts `body_text` and sets `text_truncated`. A malformed id is `bad_mail_id`; an id the archive does not hold is `mail_not_found`.
+Keys are those of `mail list`, with `recipients` (every recipient, each `{name, address, kind_raw}`) in place of the count and preview, plus `read_state`, `attachments` (each `{name, size, content_type, inline, downloaded}`), `body_text` and `body_state`. `content_type` comes from the file extension. `inline: true` marks an embedded item, which does not count toward `has_attachments`; `downloaded` says whether Outlook's cache holds the file. `--max-text N` cuts `body_text` and sets `text_truncated`. A malformed id is `bad_mail_id`; an id the archive does not hold is `mail_not_found`; an `--account` that differs from the id's account is `account_mismatch` (the id already names the account, so `--account` is not needed).
 
 ```sh
 m365crawl mail show outlook/Main:12345 --max-text 2000
@@ -509,7 +518,7 @@ Show the conversation a message belongs to: its reply chain, or messages with th
 m365crawl mail thread <id>
 ```
 
-Items have the shape of `mail list`, oldest first. `grouping` is `reply_chain` (In-Reply-To and Message-ID links followed in both directions) or `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`).
+Items have the shape of `mail list`, oldest first. `grouping` is `reply_chain` (In-Reply-To and Message-ID links followed in both directions) or `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When nothing shares the message's reply chain or subject, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
 
 ### mail folders
 

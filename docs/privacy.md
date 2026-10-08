@@ -1,6 +1,6 @@
 # Privacy
 
-m365crawl reads the Teams and Outlook caches already on your computer and writes one private archive on the same computer. Nothing leaves the machine: m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. The archive holds your real chats, mail and meetings, so protect it like the mailbox it contains. [SPEC.md](../SPEC.md) section 8 is the normative version of this page.
+m365crawl reads the Teams and Outlook caches already on your computer and writes one private archive on the same computer. Nothing leaves the machine. m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. The archive holds your real chats, mail and meetings, so protect it like the mailbox it contains. [SPEC.md](../SPEC.md) section 8 is the normative version of this page.
 
 ## What m365crawl reads
 
