@@ -7,9 +7,9 @@ import (
 )
 
 func TestMapFolderKinds(t *testing.T) {
-	for typ, want := range map[uint32]string{0x61: "inbox", 0x63: "archive", 0x64: "drafts", 0x65: "sent", 0x67: "deleted", 0x7a: "junk_or_to_me", 0x70: "other", 0: "other"} {
+	for typ, want := range map[uint32]string{0x61: "inbox", 0x63: "archive", 0x64: "drafts", 0x65: "sent", 0x67: "deleted", 0x7a: "other", 0x70: "other", 0: "other"} {
 		f, err := MapFolder(obj(hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 5, Parent: 3, Name: "Fixture Folder", Type: typ, Lead: 79})))
-		if err != nil || f.Key != 5 || f.Parent != 3 || f.Name != "Fixture Folder" || f.Kind != want {
+		if err != nil || f.Key != 5 || f.Parent != 3 || f.Name != "Fixture Folder" || f.Kind != want || f.Generic != (typ == 0x7a) {
 			t.Errorf("type %#x: %+v %v", typ, f, err)
 		}
 	}

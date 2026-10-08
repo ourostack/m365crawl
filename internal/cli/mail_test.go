@@ -431,6 +431,13 @@ func TestMailUnread(t *testing.T) {
 	if len(fs) != 3 || fs[0].(map[string]any)["folder"] != "Inbox" || fs[0].(map[string]any)["unread"] != float64(1) || fs[0].(map[string]any)["cached"] != float64(4) {
 		t.Fatalf("folders = %v", fs)
 	}
+	sum := 0.0
+	for _, f := range fs {
+		sum += f.(map[string]any)["unread"].(float64)
+	}
+	if m["unread_total"] != sum || sum < 2 {
+		t.Fatalf("unread_total = %v, folders sum to %v", m["unread_total"], sum)
+	}
 	if got := ids(items(t, m)); strings.Join(got, " ") != "outlook/Main:101 outlook/Main:105" && strings.Join(got, " ") != "outlook/Main:101" {
 		t.Fatalf("items = %v", got)
 	}
@@ -456,8 +463,8 @@ func TestMailUnread(t *testing.T) {
 	// nothing unread
 	e.exec(`update mail_messages set is_read=1`)
 	m = mailJSON(t, e, "mail", "unread")
-	if m["note"] != "no unread mail in the cache; Outlook may show more" {
-		t.Fatalf("note = %v", m["note"])
+	if m["note"] != "no unread mail in the cache; Outlook may show more" || m["unread_total"] != float64(0) {
+		t.Fatalf("note = %v, unread_total = %v", m["note"], m["unread_total"])
 	}
 }
 

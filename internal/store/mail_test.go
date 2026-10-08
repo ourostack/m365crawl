@@ -22,7 +22,7 @@ const (
 	fInbox   = 10
 	fSent    = 11
 	fDeleted = 12
-	fJunk    = 13
+	fProject = 13
 	fToMe    = 14
 )
 
@@ -31,7 +31,7 @@ func mailFolders() []outlookmail.Folder {
 		{Key: fInbox, Parent: 1, Name: "Inbox", Kind: "inbox"},
 		{Key: fSent, Parent: 1, Name: "Sent Items", Kind: "sent"},
 		{Key: fDeleted, Parent: 1, Name: "Deleted Items", Kind: "deleted"},
-		{Key: fJunk, Parent: 1, Name: "Junk Email", Kind: "junk"},
+		{Key: fProject, Parent: 1, Name: "Projects", Kind: "other", Generic: true},
 		{Key: fToMe, Parent: 1, Name: "To Me", Kind: "to_me"},
 	}
 }
@@ -435,7 +435,7 @@ func TestMailThread(t *testing.T) {
 	mid.InReplyTo = "<r1@x>"
 	leaf := mailMsg(3, fSent, "<r3@x>", "RE: RE: Project kickoff", 4)
 	leaf.InReplyTo = "<r2@x>"
-	dupOfMid := mailMsg(4, fJunk, "<r2@x>", "Re: Project kickoff", 5)
+	dupOfMid := mailMsg(4, fProject, "<r2@x>", "Re: Project kickoff", 5)
 	// No links: same subject with a shared participant, same subject with none, other subject.
 	lone := mailMsg(10, fInbox, "<l1@x>", "Offsite plans", 3)
 	sameShared := mailMsg(11, fInbox, "<l2@x>", "Fwd: Offsite plans", 2)
@@ -595,19 +595,19 @@ func TestMailFoldersAndCoverage(t *testing.T) {
 	for _, f := range folders {
 		kinds = append(kinds, f.Kind)
 	}
-	if strings.Join(kinds, ",") != "inbox,to_me,sent,junk,deleted" {
+	if strings.Join(kinds, ",") != "inbox,to_me,sent,other,deleted" {
 		t.Fatalf("order: %v", kinds)
 	}
 	cov, err := s.MailCoverage(ctx)
 	if err != nil || len(cov) != 2 || cov[0].Folder != "Inbox" || cov[0].Count != 2 || cov[1].Kind != "sent" || !cov[0].OldestAt.Equal(a.Received) {
 		t.Fatalf("coverage: %+v %v", cov, err)
 	}
-	// Equal-kind folders order by name, then key; an unknown kind sorts last.
+	// Equal-kind folders order by name, then key; other folders come before deleted.
 	if _, err := s.db.Exec(`insert into mail_folders(account, folder_key, name, kind) values(?,20,'b','other'),(?,21,'A','other'),(?,22,'A','other'),('outlook/aaa',1,'x','inbox')`, mailAcct, mailAcct, mailAcct); err != nil {
 		t.Fatal(err)
 	}
 	folders, _ = s.MailFolders(ctx)
-	if len(folders) != 9 || folders[0].Account != "outlook/aaa" || folders[6].FolderKey != 21 || folders[7].FolderKey != 22 || folders[8].Name != "b" {
+	if len(folders) != 9 || folders[0].Account != "outlook/aaa" || folders[4].FolderKey != 21 || folders[5].FolderKey != 22 || folders[6].Name != "b" || folders[7].FolderKey != fProject || folders[8].Kind != "deleted" {
 		t.Fatalf("tie order: %+v", folders)
 	}
 }

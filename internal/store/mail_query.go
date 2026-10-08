@@ -530,16 +530,21 @@ from mail_messages m where m.gone_at is null and m.evicted_at is null
 	return out, nil
 }
 
+// mailKindRank orders folder kinds: the well-known folders, then other (user folders and the
+// system folders the store does not tell apart), then deleted, then unknown.
 func mailKindRank(kind string) int {
-	for i, k := range []string{"inbox", "to_me", "drafts", "sent", "archive", "junk", "deleted"} {
+	for i, k := range []string{"inbox", "to_me", "drafts", "sent", "archive"} {
 		if k == kind {
 			return i
 		}
 	}
-	if kind == outlookmail.KindUnknown {
-		return 8
+	switch kind {
+	case "deleted":
+		return 6
+	case outlookmail.KindUnknown:
+		return 7
 	}
-	return 7
+	return 5
 }
 
 // MailCoverage lists, per folder, how far back the cache reached at the last read.

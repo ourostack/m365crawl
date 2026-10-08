@@ -600,8 +600,10 @@ func accountRoot(folders map[uint32]Folder, headers []Header) uint32 {
 	return best
 }
 
-// classifyToMe settles the folders of the shared type 0x7a: one that holds a header copy whose
-// detail key also has a copy in an inbox folder is To Me, every other one is Junk.
+// classifyToMe finds the To Me folder among the folders of the generic type 0x7a: one that holds a
+// header copy whose detail key also has a copy in an inbox folder is To Me. Every other one stays
+// other; user folders, Junk Email and several system folders share the type, and no marker that
+// tells Junk Email apart is established.
 func classifyToMe(folders map[uint32]Folder, headers []Header) {
 	inInbox := map[uint32]bool{}
 	for _, h := range headers {
@@ -611,18 +613,13 @@ func classifyToMe(folders map[uint32]Folder, headers []Header) {
 	}
 	shares := map[uint32]bool{}
 	for _, h := range headers {
-		if folders[h.FolderKey].Kind == KindJunkOrToMe && inInbox[h.DetailKey] {
+		if folders[h.FolderKey].Generic && inInbox[h.DetailKey] {
 			shares[h.FolderKey] = true
 		}
 	}
-	for k, f := range folders {
-		if f.Kind != KindJunkOrToMe {
-			continue
-		}
-		f.Kind = "junk"
-		if shares[k] {
-			f.Kind = "to_me"
-		}
+	for k := range shares {
+		f := folders[k]
+		f.Kind = "to_me"
 		folders[k] = f
 	}
 }
