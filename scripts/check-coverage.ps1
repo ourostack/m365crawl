@@ -21,18 +21,33 @@ $profile = Join-Path $tmpRoot 'cover.out'
 $log = Join-Path $tmpRoot 'go-test.log'
 $stderrLog = Join-Path $tmpRoot 'go-test.stderr.log'
 
+# COVERAGE_PROFILE names a coverage profile a test run already wrote (CI's own Windows test run), so
+# the gate reads it instead of running the tests again. Only the Windows-only files below count.
+# A relative path is taken from the caller's directory.
+$givenProfile = $null
+if (-not [string]::IsNullOrWhiteSpace($env:COVERAGE_PROFILE)) {
+    $givenProfile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COVERAGE_PROFILE)
+}
+
 Set-Location $repoRoot
 $env:GOWORK = 'off'
 
-$packageArgs = $packages -split '\s+' | Where-Object { $_ }
-$argList = @('test', '-count=1', "-coverprofile=$profile") + $packageArgs
-$proc = Start-Process -FilePath $goExe -ArgumentList $argList -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $stderrLog
-if ($proc.ExitCode -ne 0) {
-    Get-Content $log
-    if (Test-Path $stderrLog) {
-        Get-Content $stderrLog
+if ($givenProfile) {
+    $profile = $givenProfile
+    if (-not (Test-Path $profile) -or (Get-Item $profile).Length -eq 0) {
+        throw "check-coverage: COVERAGE_PROFILE $profile is missing or empty"
     }
-    throw 'check-coverage: go test failed'
+} else {
+    $packageArgs = $packages -split '\s+' | Where-Object { $_ }
+    $argList = @('test', '-count=1', "-coverprofile=$profile") + $packageArgs
+    $proc = Start-Process -FilePath $goExe -ArgumentList $argList -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $stderrLog
+    if ($proc.ExitCode -ne 0) {
+        Get-Content $log
+        if (Test-Path $stderrLog) {
+            Get-Content $stderrLog
+        }
+        throw 'check-coverage: go test failed'
+    }
 }
 
 $requiredFiles = @(
