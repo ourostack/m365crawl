@@ -61,6 +61,30 @@ func TestMessageWindow(t *testing.T) {
 	}
 }
 
+func TestHasConversation(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must(s.ApplyConversations(ctx, []teamsdesktop.Conversation{conv(acctA, "19:held@thread.v2", "Chat", "Held")}))
+	for _, c := range []struct {
+		acct *teamsdesktop.Account
+		id   string
+		want bool
+	}{
+		{nil, "19:held@thread.v2", true},
+		{&acctA, "19:held@thread.v2", true},
+		{&acctB, "19:held@thread.v2", false},
+		{nil, "19:other@thread.v2", false},
+	} {
+		if ok, err := s.HasConversation(ctx, c.acct, c.id); err != nil || ok != c.want {
+			t.Errorf("%v %s: %v %v", c.acct, c.id, ok, err)
+		}
+	}
+	_ = s.Close()
+	if _, err := s.HasConversation(ctx, nil, "x"); err == nil {
+		t.Fatal("a closed archive must fail")
+	}
+}
+
 func TestHasAccount(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

@@ -113,8 +113,8 @@ func TestSmallFoldersUseTheCombinedRange(t *testing.T) {
 	deletedKeep := mailMsg(3, fDeleted, "<3@x>", "Deleted keep", 5)
 	deletedInside := mailMsg(4, fDeleted, "<4@x>", "Deleted inside", 25)
 	deletedOlder := mailMsg(5, fDeleted, "<5@x>", "Deleted older", 45)
-	junk := mailMsg(6, fJunk, "<6@x>", "Junk inside", 10)
-	mustCommitMail(t, s, mailBatch(hr(0), inbox, sent, deletedKeep, deletedInside, deletedOlder, junk))
+	project := mailMsg(6, fProject, "<6@x>", "Project inside", 10)
+	mustCommitMail(t, s, mailBatch(hr(0), inbox, sent, deletedKeep, deletedInside, deletedOlder, project))
 	keep := []outlookmail.Message{inbox, sent, deletedKeep}
 	mustCommitMail(t, s, mailBatch(hr(1), keep...))
 	r := mustCommitMail(t, s, mailBatch(hr(2), keep...))

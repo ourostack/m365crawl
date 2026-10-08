@@ -209,7 +209,7 @@ m365crawl search [<query>] [flags]
 | `--until=STRING` | both | Only messages at or before this time (same formats as `--since`). |
 | `--limit=50` | both | Maximum items in the merged list; `truncated` says whether either source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
-| `-c, --conversation=STRING` | chats | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--team=STRING` | chats | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
 | `--mentions-me` | chats | Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see `mention_kind`). |
 | `--direct-mentions` | chats | Only messages that mention you by name (`mention_kind` `person`). |
@@ -292,7 +292,7 @@ m365crawl messages [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `-c, --conversation=STRING` | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--from=STRING` | Sender: a person id, or a case-insensitive part of the name. |
 | `--since=STRING` | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). |
 | `--until=STRING` | Only messages at or before this time (same formats as `--since`). |
@@ -323,7 +323,7 @@ m365crawl unread [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `-c, --conversation=STRING` | Conversation id, or its exact title or display name. |
+| `-c, --conversation=STRING` | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--team=STRING` | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. |
 | `--since=STRING` | Count only unread messages sent at or after this time. Use it for "what needs my attention": old read markers leave stale conversations with hundreds of unread messages. |
 | `--limit=50` | Maximum items to return; `truncated` says whether more exist. |
@@ -349,7 +349,7 @@ m365crawl thread <target> [<root>] [flags]
 
 | Argument or flag | Meaning |
 | --- | --- |
-| `<target>` | Conversation id, or a Teams message link. |
+| `<target>` | Conversation id, or a Teams message link (a channel or chat link names no message: read it with messages --conversation). |
 | `[<root>]` | Root message id (not needed with a link). |
 | `--limit=50` | Maximum items to return; `truncated` says whether more exist. |
 | `--include-deleted` | Also show deleted messages. |
@@ -481,7 +481,7 @@ m365crawl mail list [flags]
 
 | Flag | Meaning |
 | --- | --- |
-| `--folder=NAME\|KIND` | Only this folder, by name (checked first, ignoring case) or kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `junk`, `to_me`. An unknown folder is the `unknown_folder` error, which lists the folders. |
+| `--folder=NAME\|KIND` | Only this folder, by name (checked first, ignoring case) or kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me`, `other`. An unknown folder is the `unknown_folder` error, which lists the folders; for `junk` it says junk folders are not detected by kind and to pass the junk folder's name instead. |
 | `--from=TEXT` | Only messages whose sender name or address contains this text, ignoring case. |
 | `--since=DATE` | Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as `7d`). |
 | `--until=DATE` | Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive. |
@@ -532,7 +532,7 @@ List mail folders with message and unread counts and how far back the cache reac
 m365crawl mail folders
 ```
 
-Item keys: `account`, `folder`, `kind`, `messages`, `unread`, `oldest_at`, `newest_at`, `read_at`. Counts leave out gone and evicted messages.
+Item keys: `account`, `folder`, `kind`, `messages`, `unread`, `oldest_at`, `newest_at`, `read_at`. Counts leave out gone and evicted messages. `kind` is `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me` or `other`. Folders you created are `other`, and so are the system folders the store does not tell apart, Junk Email among them: m365crawl does not detect junk mail. `to_me` is the folder that shares messages with the Inbox; when it shares none it is `other`.
 
 ### mail unread
 
@@ -542,7 +542,7 @@ Unread mail by folder.
 m365crawl mail unread [--folder NAME|KIND] [--limit N]
 ```
 
-`folders` holds one `{account, folder, kind, unread, cached}` per folder that holds messages. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
+`folders` holds one `{account, folder, kind, unread, cached}` per folder that holds messages. `unread_total` is the sum of the folders' `unread`, every folder included. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
 
 ## calendar
 
@@ -579,7 +579,7 @@ Result of the agenda: `{"items", "count", "truncated", "total"?, "coverage_gap",
 - `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions. Each carries `placed_at` and `placed_by` (`meeting_start`, or `recording_start` when the recap has no meeting start).
 - A recap's `link_method` says how it reached its event: `ical_uid` (the recap carries the event's id: certain), `time` (no id, but its start and end each match the event's within a minute) or `start_time` (no id, and exactly one event starts within five minutes of the meeting start: weigh it accordingly). When several occurrences of a series carry the same id, a recap belongs to the occurrence whose start is nearest its `meeting_start` within five minutes; a recap that no occurrence matches stays on every occurrence with `series_level: true`.
 
-An agenda item carries `event_id` (a short id, stable when another source is linked), `event_key`, `account_id`, `tenant_id` and `user_id` (when a Teams account is the principal), `sources` (`["teams"]`, `["outlook"]` or both), `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end` (UTC), `start_local` and `end_local`, `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status` (`confirmed`, `cancelled` or `declined`), `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of`, `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields`, `filled_fields` and `overridden_fields`.
+An agenda item carries `id` and `event_id` (the same short id, stable when another source is linked; `id` is there because every other command's items use it, and `m365crawl calendar event <id>` takes either), `event_key`, `account_id`, `tenant_id` and `user_id` (when a Teams account is the principal), `sources` (`["teams"]`, `["outlook"]` or both), `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end` (UTC), `start_local` and `end_local`, `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status` (`confirmed`, `cancelled` or `declined`), `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of`, `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields`, `filled_fields` and `overridden_fields`.
 
 - **Not known is not false.** Empty strings and false flags are omitted, with one exception that matters: a flag the source stated is printed `true` or `false`, and a flag it did not state has no key and its name is in `unknown_fields`. So a missing `cancelled` means "not known", never "no".
 - **Merged twins.** `filled_fields` lists fields taken from another source (`{"field", "from", "as_of"}`). `overridden_fields` lists each field both copies stated with different values and where the merged value came from (`from` is the source whose value stands, or `union` for `attendees` and `rooms`). Teams owns the Teams meeting fields (`join_url`, `short_join_url`, dial-in, `meeting_chat_id`); the Outlook copy fills them only when Teams lacks them. Attendee and room lists are the union of both copies, with the newer copy's response for an entry both hold.
@@ -602,7 +602,7 @@ One meeting with everything the archive holds about it, ready for meeting prep.
 m365crawl calendar event <event> [flags]
 ```
 
-`<event>` is an `event_id`, an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates. `--fields` keeps the keys named, in that order; a nested key comes with its parent, so `--fields chat` brings `chat.recent_messages`. `--max-text` cuts the body, summaries, action-item text, the chat's recent message text and the related mail previews, and sets `text_truncated`.
+`<event>` is an item's `id` (the same as its `event_id`), an `event_key`, or an unambiguous prefix of either. An id an earlier state printed (before a source was linked, or before a timed key joined its all-day twin) still resolves. An unknown or ambiguous reference is a `usage` error; the ambiguous one lists up to ten candidates. `--fields` keeps the keys named, in that order; a nested key comes with its parent, so `--fields chat` brings `chat.recent_messages`. `--max-text` cuts the body, summaries, action-item text, the chat's recent message text and the related mail previews, and sets `text_truncated`.
 
 Result: the agenda item, plus:
 

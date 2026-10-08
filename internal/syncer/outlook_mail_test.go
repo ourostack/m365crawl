@@ -149,6 +149,47 @@ func TestSyncMailReadAfterUpgradeAndMapperBump(t *testing.T) {
 	}
 }
 
+// An archive written by mail mapper version 1 holds kind junk for a folder of the generic type
+// 0x7a. A sync under the current mapper relabels it other and keeps its messages: the same count,
+// none marked gone or evicted.
+func TestSyncMailRelabelsJunkFromVersionOne(t *testing.T) {
+	isolateTmp(t)
+	utcDays(t)
+	db := newDB(t)
+	root := mailRoot(t)
+	appendBlock(t, root,
+		hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 102, Parent: 1000, Name: "Fixture Project", Type: 0x7a}),
+		hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 13, Stamp: 1, DetailKey: 23, FolderKey: 102, Received: mailDay, Subject: "Fixture three",
+			SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
+		hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 23, Stamp: 1, MessageID: "<three@example.invalid>", Class: "IPM.Note", Sent: mailDay}),
+	)
+	cur := outlookMailMapperVersion
+	outlookMailMapperVersion = 1
+	t.Cleanup(func() { outlookMailMapperVersion = cur })
+	run(t, outlookOpts(db, root))
+	raw := openRaw(t, db)
+	if _, err := raw.Exec(`update mail_folders set kind='junk' where folder_key=102`); err != nil {
+		t.Fatal(err)
+	}
+	before := count(t, db, `select count(*) from mail_messages`)
+	if before != 3 || count(t, db, `select count(*) from mail_folders where kind='junk'`) != 1 {
+		t.Fatalf("seed: %d messages", before)
+	}
+
+	outlookMailMapperVersion = cur
+	r, _ := run(t, outlookOpts(db, root))
+	if mail := sourceKeyed(t, r, "outlook|Main|mail"); mail.Status == StatusUnchanged || mail.Counts.Mail.Gone != 0 || mail.Counts.Mail.Evicted != 0 {
+		t.Fatalf("the mapper bump did not read the store cleanly: %+v", mail)
+	}
+	if k := count(t, db, `select count(*) from mail_folders where folder_key=102 and kind='other'`); k != 1 {
+		t.Fatal("the 0x7a folder was not relabelled other")
+	}
+	if count(t, db, `select count(*) from mail_folders where kind='junk'`) != 0 || count(t, db, `select count(*) from mail_messages`) != before ||
+		count(t, db, `select count(*) from mail_messages where gone_at is not null or evicted_at is not null`) != 0 {
+		t.Fatal("the relabel changed the messages")
+	}
+}
+
 // A mail layout refusal fails the mail source alone: the calendar commits, the marker is gone and
 // the failure is remembered. A calendar refusal leaves the mail read alone.
 func TestSyncMailAndCalendarFailApart(t *testing.T) {

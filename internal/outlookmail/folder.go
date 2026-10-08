@@ -8,30 +8,35 @@ const (
 	fdType = 1160
 )
 
-// Folder is a mail folder. Kind is inbox, archive, drafts, sent, deleted, junk, to_me or other.
-// The mapper emits junk_or_to_me for the well-known type shared by Junk Email and To Me, which
-// Collect resolves.
+// Folder is a mail folder. Kind is inbox, archive, drafts, sent, deleted, to_me or other. Junk
+// Email is not detected: the store gives it the generic folder type 0x7a that user-created
+// folders and several other system folders also have, so it is other.
 type Folder struct {
 	Key    uint32
 	Parent uint32
 	Name   string
 	Kind   string
+	// Generic is true for the generic folder type 0x7a. Collect gives such a folder kind to_me
+	// when it shares messages with an inbox folder.
+	Generic bool
 	// BadStrings counts string fields that were present but unreadable and were left blank.
 	BadStrings int
 }
 
-// KindJunkOrToMe is the kind the mapper gives type 0x7a.
-const KindJunkOrToMe = "junk_or_to_me"
+// typeGeneric is the folder type of user-created folders and of several system folders, Junk
+// Email and To Me among them.
+const typeGeneric = 0x7a
 
 // KindUnknown is the kind of a message whose folder object the store does not hold.
 const KindUnknown = "unknown"
 
 var folderKinds = map[uint32]string{
-	0x61: "inbox", 0x63: "archive", 0x64: "drafts", 0x65: "sent", 0x67: "deleted", 0x7a: KindJunkOrToMe,
+	0x61: "inbox", 0x63: "archive", 0x64: "drafts", 0x65: "sent", 0x67: "deleted",
 }
 
-// MapFolder maps a class 0x4d object. An unknown well-known type is kind other. The type values
-// are likely, not established, outside the English folder names they were measured on.
+// MapFolder maps a class 0x4d object. The generic type 0x7a and an unknown well-known type are
+// kind other. The type values are likely, not established, outside the English folder names they
+// were measured on.
 func MapFolder(o hxstore.Object) (Folder, error) {
 	f, err := newFields(o, TagFolder)
 	if err != nil {
@@ -39,6 +44,7 @@ func MapFolder(o hxstore.Object) (Folder, error) {
 	}
 	fd := Folder{Key: word(o, offKey), Parent: word(o, offLink), Name: f.text(fdName), Kind: "other"}
 	fd.BadStrings = f.bad
+	fd.Generic = word(o, fdType) == typeGeneric
 	if k, ok := folderKinds[word(o, fdType)]; ok {
 		fd.Kind = k
 	}

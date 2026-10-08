@@ -160,6 +160,25 @@ func TestCalendarOutlookOnlyEvents(t *testing.T) {
 	}
 }
 
+// An agent reads id from an agenda item, as it does from every other command's items, and passes it
+// to calendar event.
+func TestCalendarItemIDResolves(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main")
+	its := agendaVia(t, run, "--from", "2031-03-05", "--days", "1")["items"].([]any)
+	if len(its) == 0 {
+		t.Fatal("no agenda items")
+	}
+	first := its[0].(map[string]any)
+	id, ok := first["id"].(string)
+	if !ok || id == "" || id != first["event_id"] {
+		t.Fatalf("id %v, event_id %v", first["id"], first["event_id"])
+	}
+	ev := eventVia(t, run, id)
+	if ev["id"] != id || ev["event_id"] != id || ev["subject"] != first["subject"] {
+		t.Fatalf("calendar event %s: %v", id, ev)
+	}
+}
+
 func TestCalendarOutlookGoldens(t *testing.T) {
 	e, run := syncedWithOutlook(t, "Main")
 	m := agendaVia(t, run, "--from", "2031-03-05", "--days", "1")
