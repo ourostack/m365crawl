@@ -658,20 +658,29 @@ func TestRealOutlookCost(t *testing.T) {
 		t.Logf("the forced Outlook-only re-read failed with code %s", d.forcedErr)
 	}
 
-	if !d.first.ok {
+	for _, m := range []struct {
+		name string
+		m    syncMeasure
+	}{{"first Outlook sync", d.first}, {"unchanged sync", d.again}} {
+		var parts []string
+		for _, src := range m.m.rep.Sources {
+			parts = append(parts, src.Source[:min(len(src.Source), 7)]+"="+src.Status)
+		}
+		t.Logf("%s: source statuses (a Teams source that is not unchanged was read again in this sync): %s", m.name, strings.Join(parts, ", "))
+	}
+	if d.first.ok {
+		over := max(d.first.peakAfter-d.teams.peakAfter, 0)
+		t.Logf("combined run, for the record and not checked: whole-run peak RSS %s over the Teams-only peak %s: +%s. It includes whatever the Teams pass of that sync did, and on macOS the pages Go frees stay resident", mb(d.first.peakAfter), mb(d.teams.peakAfter), mb(over))
+	}
+	switch {
+	case d.own.failure != "":
+		t.Errorf("the Outlook read's own cost could not be measured: %s", d.own.failure)
+	case !d.own.ok:
 		t.Log("peak RSS is not available on this platform; the memory budget is not checked")
-	} else {
-		over := d.first.peakAfter - d.teams.peakAfter
-		if over < 0 {
-			over = 0
-		}
-		note := ""
-		if d.teams.peakBefore >= d.teams.peakAfter {
-			note = " (the Teams-only peak was set by earlier tests of this process; run make acceptance-calendar for a clean figure)"
-		}
-		t.Logf("whole-run peak RSS %s over the Teams-only peak %s: +%s (budget +%s)%s", mb(d.first.peakAfter), mb(d.teams.peakAfter), mb(over), mb(c.RSSOverTeamsMax), note)
-		if over > c.RSSOverTeamsMax {
-			t.Errorf("peak RSS is %s over the Teams-only peak, above the %s budget", mb(over), mb(c.RSSOverTeamsMax))
+	default:
+		t.Logf("the Outlook read alone, each in a fresh process on a copy of the archive: peak RSS %s when it reads the store, %s for a fresh process that only opens the archive (Outlook off, no Teams root): +%s (budget +%s)", mb(d.own.first), mb(d.own.baseline), mb(d.own.over()), mb(c.RSSOverTeamsMax))
+		if d.own.over() > c.RSSOverTeamsMax {
+			t.Errorf("the Outlook read adds %s of peak RSS, above the %s budget", mb(d.own.over()), mb(c.RSSOverTeamsMax))
 		}
 	}
 

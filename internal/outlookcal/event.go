@@ -224,8 +224,8 @@ type reader struct {
 // scrub passes s through the same scrubber the Teams derivation uses, on its JSON string
 // form, and counts what it removed.
 func (r reader) scrub(s string) string {
-	if s == "" {
-		return s
+	if s == "" || !teamsdesktop.MayRedact(s) {
+		return s // no rule can match this text: skip encoding it and scanning the copy
 	}
 	in, _ := json.Marshal(s) // a string always marshals
 	out, n := teamsdesktop.Scrub(in)

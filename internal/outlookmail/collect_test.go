@@ -491,7 +491,7 @@ func TestCollectResyncedObjectsThatMapAreKept(t *testing.T) {
 
 // A folder whose every copy was reached after unknown bytes is not lost: its messages keep their folder.
 func TestCollectResyncedFolderKeepsItsMessages(t *testing.T) {
-	objs := append([]*hxbuild.Object{folderObjs()[0]}, hdr(12, 22, 150, 1, "ok", 2), det(22, "<b@example.invalid>"))
+	objs := []*hxbuild.Object{folderObjs()[0], hdr(12, 22, 150, 1, "ok", 2), det(22, "<b@example.invalid>")}
 	stray := append([]byte{1, 2, 3}, hxbuild.NewMailFolder(hxbuild.MailFolderSpec{Key: 150, Parent: rootKey, Name: "Resynced Archive", Type: 0x63}).Encode()...)
 	r := collect(t, storeOf(t, append(framed(objs...), stray...)), Options{})
 	if len(r.Messages) != 1 || r.Messages[0].Folder.Name != "Resynced Archive" || r.Messages[0].Folder.Kind != "archive" || r.Notes.MissingFolder != 0 || r.Notes.ResyncedKept != 1 {

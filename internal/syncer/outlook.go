@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -248,6 +249,19 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if err != nil {
 		return SourceReport{}, false, nil, err
 	}
+	// Collect at a quarter of the live heap (not the usual 100%) from the first read to the last
+	// commit: the read builds as much garbage as it keeps, and the result is still held while it is
+	// committed, so a commit at the usual setting could add as much garbage as the result is big. A
+	// soft memory limit is not used: it is an absolute number and the live heap of the earlier
+	// sources is not known here.
+	defer debug.SetGCPercent(debug.SetGCPercent(outlookGCPercent))
+	// A soft limit on what the runtime holds, a fixed headroom above what it holds now, makes the
+	// collector work harder as the read nears it instead of letting garbage pile up. It is soft: a
+	// read that needs more still gets it. The read's memory goes back to the system on the way out,
+	// which matters to a watch that runs for days.
+	debug.FreeOSMemory()
+	defer debug.FreeOSMemory()
+	defer debug.SetMemoryLimit(debug.SetMemoryLimit(outlookMemoryLimit()))
 	if mailOn {
 		// The calendar commit records the new fingerprint. If the sync stops before the mail is
 		// committed, the old marker must not stand, or the mail would be skipped until the store
@@ -299,7 +313,24 @@ func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, 
 	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{account}, Counts: &SourceCounts{Calendar: cal.Counts}}, true, nil
 }
 
-// outlookGCPercent is the GC target while the Outlook store is read.
+// outlookHeadroom is how much more than it holds when the read starts the runtime may hold before
+// the collector works harder.
+const outlookHeadroom = 192 << 20
+
+// outlookMemoryLimit is the soft memory limit for the read: what the runtime holds now, plus the
+// headroom, unless the caller has set a lower limit (GOMEMLIMIT or debug.SetMemoryLimit), which
+// stays: the read never raises a limit.
+func outlookMemoryLimit() int64 {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return limitFor(debug.SetMemoryLimit(-1), int64(ms.Sys-ms.HeapReleased)) //nolint:gosec // the runtime's own byte counts
+}
+
+// limitFor is the limit to run the read under, given the caller's (math.MaxInt64 when none) and
+// the bytes the runtime holds.
+func limitFor(current, held int64) int64 { return min(current, held+outlookHeadroom) }
+
+// outlookGCPercent is the GC target while the Outlook store is read and committed.
 const outlookGCPercent = 25
 
 // collectOutlook opens the private copy and reads it. A guard refusal comes back as a coded
@@ -313,13 +344,10 @@ func collectOutlook(ctx context.Context, info outlookdesktop.Info, account strin
 	var res outlookcal.Result
 	s, err := outlookcal.OpenStore(f, info.Size)
 	if err == nil {
-		// The read inflates about 400 MB of payloads and builds as much garbage as it keeps. Hand
-		// back what the earlier sources freed, collect at a quarter of the live heap (not the usual
-		// 100%) while the read runs, and hand back its garbage after. A soft memory limit is not
-		// used: it is an absolute number and the live heap of the earlier sources is not known here.
+		// The read inflates about 400 MB of payloads. Hand back what the earlier sources freed, and
+		// hand back the read's garbage after.
 		debug.FreeOSMemory()
 		defer debug.FreeOSMemory()
-		defer debug.SetGCPercent(debug.SetGCPercent(outlookGCPercent))
 		if res, err = outlookcal.Collect(ctx, s, account, outlookcal.Options{ExpectEvents: had}); err == nil {
 			return res, nil
 		}
