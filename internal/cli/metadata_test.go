@@ -74,3 +74,20 @@ func TestMetadataReportsAWriteFailure(t *testing.T) {
 		t.Fatal("a failed write must not exit 0")
 	}
 }
+
+// The manifest lists the offline transcript commands, and transcripts is a capability.
+func TestMetadataTranscriptsCommands(t *testing.T) {
+	m := manifest()
+	for _, name := range []string{"transcripts", "transcripts show"} {
+		if c, ok := m.Commands[name]; !ok || !c.JSON || c.Mutates {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	found := false
+	for _, c := range m.Capabilities {
+		found = found || c == "transcripts"
+	}
+	if !found {
+		t.Errorf("capabilities %v", m.Capabilities)
+	}
+}

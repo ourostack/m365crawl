@@ -753,6 +753,11 @@ func TestTranscriptReadFailuresSurface(t *testing.T) {
 			return err
 		},
 		"HasTranscriptTables": func(ctx context.Context, s *Store) error { _, err := s.HasTranscriptTables(ctx); return err },
+		"HasTranscriptText":   func(ctx context.Context, s *Store) error { _, err := s.HasTranscriptText(ctx); return err },
+		"TranscriptSearch": func(ctx context.Context, s *Store) error {
+			_, _, err := s.TranscriptSearch(ctx, "x", TranscriptFilter{Account: &acctA})
+			return err
+		},
 		"ResolveMeeting call": func(ctx context.Context, s *Store) error {
 			_, _, err := s.ResolveMeeting(ctx, &acctA, "call-1")
 			return err
@@ -765,4 +770,8 @@ func TestTranscriptReadFailuresSurface(t *testing.T) {
 	for name, op := range ops {
 		t.Run(name, func(t *testing.T) { sweepReadFaults(t, seed, op) })
 	}
+	// The newest attempt is null in an archive no fetch ever wrote to, so a null there is no failure.
+	t.Run("TranscriptStatus", func(t *testing.T) {
+		sweepReadFaults(t, seed, func(ctx context.Context, s *Store) error { _, err := s.TranscriptStatus(ctx); return err }, 3)
+	})
 }

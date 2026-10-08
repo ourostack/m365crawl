@@ -295,3 +295,8 @@ func isDefaultArchiveDir(parent string) bool {
 	}
 	return strings.EqualFold(absPath(parent), absPath(filepath.Join(base, "m365crawl")))
 }
+
+// PrivateDir reports whether only the current user and SYSTEM can reach a directory, and whatever it
+// holds inherits that: the private-directory rule of the archive's own directory. It reads the
+// directory's access list only, never its contents.
+func PrivateDir(path string) (bool, error) { return hasPrivateACL(path, true) }

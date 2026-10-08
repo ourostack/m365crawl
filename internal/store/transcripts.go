@@ -378,6 +378,10 @@ type TranscriptFilter struct {
 	Since, Until time.Time // by the call's start: at or after Since, before Until
 	State        string    // one of the Call states; empty keeps every state
 	Limit        int       // 0 or less: no limit
+	// Speaker keeps only entries whose speaker contains this text, ignoring case. Only
+	// TranscriptSearch reads it, and for TranscriptSearch Since and Until bound the time of each
+	// entry, not the start of its call.
+	Speaker string
 }
 
 // FetchRow is what the archive holds about the fetch of one part. State is the outcome of the

@@ -202,6 +202,13 @@ func (rt *runtime) statusBlock(title string, r *statusResult) {
 	if r.Mail != nil {
 		m["mail"] = r.Mail.text()
 	}
+	if t := r.Transcripts; t != nil {
+		last := "never fetched"
+		if t.LastFetchAt != nil {
+			last = "last fetch " + stamp(*t.LastFetchAt)
+		}
+		m["transcripts"] = fmt.Sprintf("%d recorded meetings, %d parts, %d of %d fetchable parts fetched; %s", t.Calls, t.Parts, t.Fetched, t.Fetchable, last)
+	}
 	render.Block(w, title, m, rt.color)
 	if len(r.Accounts) == 0 {
 		return
@@ -273,6 +280,17 @@ func (rt *runtime) listTable(r *listResult) {
 				text += " - " + p
 			}
 			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, x.ID, text})
+		case searchTranscriptItem:
+			cols, textCol = searchColumns, 5
+			var at time.Time
+			if x.At != nil {
+				at = *x.At
+			}
+			text := oneLine(x.Text)
+			if x.Matches > 1 { // first, so a clipped column still shows it
+				text = fmt.Sprintf("(%d matches) %s", x.Matches, text)
+			}
+			rows = append(rows, []string{stamp(at), x.Source, firstOf(oneLine(searchVal(x.Title)), "(untitled)"), searchVal(x.Speaker), x.CallID, text})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})
@@ -602,6 +620,18 @@ func (rt *runtime) eventBlock(r *eventResult) {
 			rows[i] = []string{stamp(rec.SentAt), rec.Kind, rec.MatchedBy}
 		}
 		render.Table(w, []string{"sent_at", "recording", "matched by"}, rows, color)
+	}
+	if len(ev.Transcripts) > 0 {
+		_, _ = fmt.Fprintln(w)
+		rows := make([][]string, len(ev.Transcripts))
+		for i, t := range ev.Transcripts {
+			when := "-"
+			if t.LastFetchedAt != nil {
+				when = stamp(*t.LastFetchedAt)
+			}
+			rows[i] = []string{t.CallID, t.State, strconv.Itoa(t.PartsTotal), fmt.Sprintf("%d of %d", t.PartsFetched, t.PartsFetchable), when}
+		}
+		render.Table(w, []string{"transcript call", "state", "parts", "fetched", "last fetched"}, rows, color)
 	}
 	if ev.Chat != nil && len(ev.Chat.RecentMessages) > 0 {
 		_, _ = fmt.Fprintln(w)

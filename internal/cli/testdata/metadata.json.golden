@@ -109,6 +109,26 @@
       ],
       "json": true,
       "mutates": true
+    },
+    "transcripts": {
+      "title": "transcripts: recorded meetings and what of their transcripts is in the archive (offline)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "transcripts"
+      ],
+      "json": true
+    },
+    "transcripts show": {
+      "title": "transcripts show (\u003cmeeting\u003e is a placeholder: use a call_id printed by transcripts)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "transcripts",
+        "show",
+        "\u003cmeeting\u003e"
+      ],
+      "json": true
     }
   },
   "capabilities": [
@@ -120,7 +140,8 @@
     "sql",
     "chats",
     "mail",
-    "calendar"
+    "calendar",
+    "transcripts"
   ],
   "privacy": {
     "contains_private_messages": true,

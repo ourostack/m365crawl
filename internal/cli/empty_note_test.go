@@ -302,7 +302,7 @@ func TestSearchEmptyNoteOnOtherPlatforms(t *testing.T) {
 	teamsReadHere, searchMailPlatform = func() bool { return true }, "windows"
 	e = newEnv(t)
 	got := noteOf(t, e, "search", "x")
-	if !strings.Contains(got, "mail is not yet read on Windows; searched Teams chats only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
+	if !strings.Contains(got, "mail is not yet read on Windows; searched Teams chats and meeting transcripts only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
 		t.Errorf("windows, no archive: note %q", got)
 	}
 	e.emptyArchive()

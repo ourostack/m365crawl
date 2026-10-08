@@ -1,11 +1,11 @@
 ---
 name: m365crawl
-description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail or calendar on this Mac or Windows PC, offline, through the local `m365crawl` CLI, which mirrors them into one SQLite archive.
+description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail, calendar or meeting transcripts on this Mac or Windows PC, offline, through the local `m365crawl` CLI, which mirrors them into one SQLite archive.
 ---
 
 # m365crawl
 
-m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the new Outlook for Mac's mail, and the Teams and Outlook calendar) into one local SQLite archive, and answers from it offline and read-only. It cannot send, reply, react or mark anything read. It knows only what the desktop apps cached, so old history can be missing. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
+m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the new Outlook for Mac's mail, and the Teams and Outlook calendar) into one local SQLite archive, and answers from it read-only. It cannot send, reply, react or mark anything read. Only `transcripts fetch` uses the network, through an invisible Edge (or Chrome) with m365crawl's own browser profile; every other command reads the archive offline. It knows only what the desktop apps cached, so old history can be missing. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
 
 ## Privacy
 
@@ -37,6 +37,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 | Threads: the whole conversation | `m365crawl thread <conversation_id> <root_id>` (the root is `reply_chain_id`, else `id`), `m365crawl mail thread <id>` |
 | Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, then `m365crawl calendar event <event_id>`: one meeting with its `chat` (its newest messages in `chat.recent_messages`, kept by `--fields chat`) and `related_mail`, matched by invite or by subject from 14 days before to 7 days after the start; `m365crawl people --query <name>` finds Teams people and mail correspondents (`id` `mail:<address>`) |
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
+| Meeting transcripts | `m365crawl transcripts` lists recorded meetings and which parts' text is in the archive; `m365crawl transcripts show <meeting>` prints one in time order with each seam marked; `transcripts fetch` brings the text from SharePoint; `m365crawl search "words" --source transcripts` finds what was said (`--from` matches the speaker); `calendar event` lists an occurrence's recorded calls in `transcripts` |
 
 ## Hosts
 

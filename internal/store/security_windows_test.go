@@ -443,3 +443,27 @@ func mustWorldSID(t *testing.T) *windows.SID {
 	}
 	return sid
 }
+
+func TestPrivateDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private", "profile")
+	if _, err := PrivateDir(dir); err == nil {
+		t.Fatal("a missing directory is an error")
+	}
+	if _, err := createPrivateDirChain(dir); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := PrivateDir(dir); err != nil || !ok {
+		t.Fatalf("a private directory: %v, %v", ok, err)
+	}
+	// Another trustee on the list makes it not private.
+	open := filepath.Join(t.TempDir(), "open")
+	must0(os.Mkdir(open, 0o700))
+	setACL(t, open,
+		aceForSIDWithInheritance(t, mustCurrentUserSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),
+		aceForSIDWithInheritance(t, mustSystemSID(t), windows.GENERIC_ALL, windows.TRUSTEE_IS_USER, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),
+		aceForSIDWithInheritance(t, mustWorldSID(t), windows.GENERIC_READ, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE),
+	)
+	if ok, err := PrivateDir(open); err != nil || ok {
+		t.Fatalf("a directory everyone can read: %v, %v", ok, err)
+	}
+}

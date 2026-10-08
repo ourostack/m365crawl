@@ -274,7 +274,7 @@ type calendarCmd struct {
 
 // eventOnlyKeys are the keys only calendar event has; asking calendar for one says where it is.
 var eventOnlyKeys = []string{"organizer", "attendees", "attendees_as_of", "response_counts", "body_text", "body_html", "body_type",
-	"attachments", "categories", "reminder_minutes", "series", "recaps", "chat", "recordings", "series_recordings", "series_recordings_total", "related_mail"}
+	"attachments", "categories", "reminder_minutes", "series", "recaps", "chat", "recordings", "series_recordings", "series_recordings_total", "related_mail", "transcripts"}
 
 func checkCalendarFields(rt *runtime) error {
 	for _, f := range rt.fields {
@@ -635,7 +635,55 @@ type calendarExtras struct {
 	SeriesRecordings      []calendarRecording  `json:"series_recordings,omitempty"`
 	SeriesRecordingsTotal int                  `json:"series_recordings_total,omitempty"`
 	RelatedMail           []relatedMail        `json:"related_mail"`
+	Transcripts           []eventTranscript    `json:"transcripts,omitempty"`
 	TextTruncated         bool                 `json:"text_truncated,omitempty"`
+}
+
+// eventTranscript is one recorded call of the occurrence, as the archive holds its transcript:
+// source is always archive (nothing is fetched to answer), state is the call's state as
+// `transcripts` prints it, and last_fetched_at is when the newest of its parts' text was fetched.
+type eventTranscript struct {
+	CallID         string     `json:"call_id"`
+	Source         string     `json:"source"`
+	State          string     `json:"state"`
+	PartsTotal     int        `json:"parts_total"`
+	PartsFetchable int        `json:"parts_fetchable"`
+	PartsFetched   int        `json:"parts_fetched"`
+	LastFetchedAt  *time.Time `json:"last_fetched_at"`
+}
+
+// eventTranscripts lists the recorded calls of one occurrence, newest first, as transcripts names
+// them for the same event id: none when the archive has no transcript tables or the event names no
+// recorded call. unfetched and fetchable count the parts over every call.
+func (rt *runtime) eventTranscripts(st *store.Store, eventID string) (out []eventTranscript, unfetched, fetchable int, err error) {
+	ok, err := transcriptTablesOf(st, rt.ctx)
+	if err != nil || !ok {
+		return nil, 0, 0, err
+	}
+	ids, _, err := st.ResolveMeeting(rt.ctx, rt.account, eventID)
+	var coded *errs.Coded
+	if errors.As(err, &coded) && coded.Code == errs.CodeUnknownMeeting {
+		return nil, 0, 0, nil
+	}
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	calls, _, err := transcriptCallsOf(st, rt.ctx, store.TranscriptFilter{Account: rt.account, Calls: ids})
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	for _, c := range calls {
+		n, fetched := c.Fetchable()
+		t := eventTranscript{CallID: c.CallID, Source: sourceArchive, State: c.State, PartsTotal: len(c.Parts), PartsFetchable: n, PartsFetched: fetched}
+		for _, p := range c.Parts {
+			if p.HasText() && (t.LastFetchedAt == nil || p.Fetch.FetchedAt.After(*t.LastFetchedAt)) {
+				t.LastFetchedAt = p.Fetch.FetchedAt
+			}
+		}
+		out = append(out, t)
+		unfetched, fetchable = unfetched+n-fetched, fetchable+n
+	}
+	return out, unfetched, fetchable, nil
 }
 
 // calendarEvent is one event with everything the archive holds about it.
@@ -683,12 +731,19 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		ev.RelatedMail = relatedMailOf(related)
+		unfetched, fetchable := 0, 0
+		if ev.Transcripts, unfetched, fetchable, err = rt.eventTranscripts(st, ev.EventID); err != nil {
+			return nil, err
+		}
 		if rt.g.MaxText > 0 {
 			ev.truncate(rt.g.MaxText)
 		}
 		res, _ := rt.eventResult(ev) // never fails
 		if ev.MeetingChatID == "" {
 			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
+		}
+		if unfetched > 0 {
+			res.(*eventResult).addNotice(fmt.Sprintf("%d of %d transcript parts are not fetched; run m365crawl transcripts fetch %s", unfetched, fetchable, shellWord(ev.EventID)))
 		}
 		rt.noteOutlookOff(st, res, slices.Contains(ev.Sources, string(calendar.SourceOutlook)))
 		return res, nil
