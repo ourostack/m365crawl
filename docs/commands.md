@@ -49,7 +49,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list and r
 Output is JSON when stdout is not a terminal and text on a terminal. In JSON mode each command prints exactly one document; `watch` is the one exception and prints JSON Lines.
 
 - **Lists** are `{"items": [...], "count": N, "truncated": bool}`. `--limit` defaults to 50. A truncated list also carries `total` when the exact count is known.
-- **`note`** is on every list result. It says why a list is empty (the archive is empty, the filter matched nothing, the range is outside the cached window with that window, or the source is not read on this system) and adds anything else the reader should know, such as a source a flag left out.
+- **`note`** is one plain sentence on an empty list, for Teams, calendar and mail lists alike. It says why the list is empty: no archive yet, no data of that source yet, a time range outside what the archive holds (naming the window), filters that matched nothing, a source this operating system does not read, or an `--account` the archive does not hold. A list with items has no `note`, except where a command documents its own use: `search` (a source a flag left out), `mail list --unread`, `mail unread` and `mail thread`.
 - **Freshness.** Every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts it covers. An archive with no complete sync adds `"needs_sync": true` and `"hint": "run m365crawl sync"`.
 - **Errors** go to stderr as `{"error": {"code", "message", "fix"}}`, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. [SPEC.md](../SPEC.md) section 6 lists every error code.
 
@@ -61,13 +61,15 @@ Output is JSON when stdout is not a terminal and text on a terminal. In JSON mod
 m365crawl
 ```
 
-For each source it shows:
+In text mode it prints the banner, one row per source with its state, what it holds and its last sync, any source notes, and then the "Start here" block. Per source it shows:
 
-- **chats:** conversation and message counts, the newest message and the last sync.
-- **mail:** message count, the newest received and the oldest cached message, and the last sync, or `unsupported on this OS`.
-- **calendar:** event count, the covered window (as `calendar sources` reports it) and `coverage_gap`.
+- **chats:** message and conversation counts and the newest message.
+- **mail:** message count, the oldest cached and the newest received message.
+- **calendar:** event count, the window from the earliest to the latest covered day, and whether today is fully covered (`coverage_gap`).
 
-`--json` gives `{"sources": [...], "next": [...]}`, where `next` lists the "Start here" commands that apply on this system. The overview opens the archive read-only and never syncs. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0.
+`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a source this operating system does not read, such as mail on Windows), `off` (the Outlook source is off for this run) or `no_profile` (no new Outlook profile on this machine). `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
+
+The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one.
 
 `m365crawl --help` starts with the same block:
 
@@ -217,11 +219,12 @@ m365crawl search [<query>] [flags]
 How the sources combine:
 
 - Every item has `source`: `chats` or `mail`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item.
+- Text output has a `thread` column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread`, `<conversation_id> <reply_chain_id, else id>`; for mail the id that `m365crawl mail thread` takes.
 - Items are newest first across both sources, by `sent_at` for chats and `received_at` for mail.
 - The result's `sources` says, per source, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}}`.
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail was not searched`. With the other `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
-- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats (`note` says so). The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
+- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
 - `--fields` accepts the keys of both kinds of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 
@@ -302,7 +305,7 @@ m365crawl messages [flags]
 | `--include-channels` | Include channels. Off by default: most channels are never opened, so their unread counts are noise; channel mentions and replies reach you through `activity`. |
 | `--html` | Add each message's HTML body as `html`. |
 
-Result: a list of message items, oldest first. Each carries a `link` (a Teams deep link). Channel thread roots carry `reply_count` and `last_reply_at`; items that mention you carry `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone` or `other`).
+Result: a list of message items, oldest first. Each carries a `link` (a Teams deep link). Text output has a `thread` column with the two arguments of `m365crawl thread` for the message's thread: `<conversation_id> <reply_chain_id, else id>`. Channel thread roots carry `reply_count` and `last_reply_at`; items that mention you carry `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone` or `other`).
 
 ```sh
 m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text 80
@@ -675,7 +678,7 @@ Print the crawlkit app manifest, for `crawlctl discover`.
 m365crawl metadata [flags]
 ```
 
-Result: one crawlkit `control.Manifest` JSON document on stdout, indented in every output mode: the app id, description, default database path, the commands crawlkit can run (including `search` and `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`), capabilities (`chats`, `mail`, `calendar`) and privacy flags. Needs no archive and never syncs.
+Result: one crawlkit `control.Manifest` JSON document on stdout, indented in every output mode: the app id, description, default database path, the commands crawlkit can run (`overview`, `status`, `sync`, `doctor`, `search`, `calendar`, and `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`), capabilities (`doctor`, `status`, `sync`, `watch`, `search`, `sql`, `chats`, `mail`, `calendar`) and privacy flags. Needs no archive and never syncs.
 
 ## skill
 
@@ -685,7 +688,7 @@ Print the agent guide for this version, as Markdown in every output mode.
 m365crawl skill
 ```
 
-Result: raw Markdown on stdout, the same text as `.agents/skills/m365crawl/SKILL.md`, embedded in the binary. It is short on purpose and points at `m365crawl` and `m365crawl --help`. Needs no archive.
+Result: raw Markdown on stdout, the same text as `.agents/skills/m365crawl/SKILL.md`, embedded in the binary. It is short on purpose: what m365crawl is, privacy, "run `m365crawl` and `m365crawl --help` first", and one table of jobs (triage, recall, threads, cross-source and meeting prep, attachments) with their commands. Flag detail lives in `--help` and this page. Needs no archive.
 
 ## version
 

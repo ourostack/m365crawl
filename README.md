@@ -103,7 +103,54 @@ m365crawl calendar event ev_2da7280856
 
 `m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with.
 
-<!-- Example output (overview, a search with one chat and one mail hit, mail show) is generated from the final release build against the fixtures. -->
+Here is what three of those commands print. The output comes from a run against the same synthetic data; the dates follow the day you build the showcase store.
+
+`m365crawl` (the overview):
+
+```
+        ▄████▄ ▄████▄ ██████                           ▄▄
+            ██ ██     ██                               ██
+██▀█▀██   ███▀ █████▄ █████▄ ▄████ ████▄  ▀▀█▄ ██   ██ ██
+██ █ ██     ██ ██  ██     ██ ██    ██ ▀▀ ▄█▀██ ██ █ ██ ██
+██   ██ ▀████▀ ▀████▀ ▀████▀ ▀████ ██    ▀█▄██  ██▀██  ██
+local-first Microsoft 365 mirror for SQLite  |  overview
+
+source    state  holds                                                             last sync
+--------  -----  ----------------------------------------------------------------  ----------------
+chats     ok     120 messages in 14 conversations, newest 2023-12-05 10:31         2026-10-08 02:51
+mail      ok     37 messages from 2026-09-24, newest 2026-10-08 02:39              2026-10-08 02:51
+calendar  ok     44 events from 2023-11-20 to 2026-10-23; today not fully covered  2026-10-08 02:51
+calendar: today is not fully covered by cached calendar data: run m365crawl sync, or open the calendar in Teams or Outlook
+
+Start here:
+  m365crawl sync              read Teams, Outlook mail and the calendar into the archive
+  m365crawl                   what the archive holds and how fresh it is
+  m365crawl search "words"    find anything across chats and mail
+  m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
+  m365crawl mail unread       unread mail by folder
+  m365crawl unread            unread Teams chats
+  m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
+```
+
+`m365crawl search planning --limit 4`: chats and mail together, newest first, with the `thread` to open next:
+
+```
+at                source  where                      who           thread                                          text
+----------------  ------  -------------------------  ------------  ----------------------------------------------  ---------------------------------------------
+2026-10-07 00:51  mail    Inbox                      Casey Brooks  outlook/Main:3007                               Q4 planning offsite agenda - Draft agenda ...
+2026-10-03 00:51  mail    Sent Items                 Riley Chen    outlook/Main:3023                               Re: Q4 planning offsite agenda - Added a s...
+2023-11-14 14:14  chats   Fixture team 1 › Planning  Pat Example   19:planningchannel1@thread.tacv2 1700000047000  Planning channel message
+2023-11-14 14:14  chats   Fixture team 2 › Planning  Pat Example   19:planningchannel2@thread.tacv2 1700000047000  Planning channel message
+
+4 items
+archive age: 1m15s
+```
+
+`m365crawl mail show outlook/Main:3001 --json --max-text 200`:
+
+```json
+{"id":"outlook/Main:3001","account":"outlook/Main","folder":"Inbox","folder_kind":"inbox","to_me":false,"subject":"Launch checklist: final review","from_name":"Sam Ortiz","from_address":"sam.ortiz@example.test","recipients":[{"name":"Riley Chen","address":"riley.chen@example.test","kind_raw":1}],"in_reply_to":null,"received_at":"2026-10-08T09:39:00Z","sent_at":"2026-10-08T09:38:00Z","is_read":false,"read_state":"unread","flag":"none","importance":"high","has_attachments":true,"attachments":[{"name":"launch-checklist.pdf","size":49000,"content_type":"application/pdf","inline":false,"downloaded":true}],"preview":"Everything is green except the docs pass. Can you take a last look before 3?","body_text":"Everything is green except the docs pass. Can you take a last look before 3? Sam Ortiz","body_state":"inline","internet_message_id":"<showcase-001@example.test>","ical_uid":null,"gone_at":null,"evicted_at":null,"synced_at":"2026-10-08T09:51:45.16Z","archive_age_seconds":58}
+```
 
 Output is JSON when stdout is not a terminal and readable text on a terminal. Force either with `--format json|text`.
 
@@ -119,6 +166,7 @@ m365crawl messages --team "Fixture team 1" --since 2023-11-14 --max-text 80
 ```
 
 - **Deep links.** Every message and activity item carries a `link`, a Teams deep link you can cite or open. `thread` accepts such a link in place of the conversation and root id.
+- **Threads.** In text output, `messages` and `search` have a `thread` column with the two arguments `thread` takes: `<conversation_id> <reply_chain_id, else id>`. For mail, the column holds the id that `mail thread` takes.
 - **Mentions.** An @-mention shows in `text` as the person's plain name. `mentions` lists who was mentioned, `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned. `--direct-mentions` keeps only `person` mentions.
 - **System pseudo-conversations.** `48:notifications`, `48:calllogs` and `48:annotations` duplicate real messages, so they are hidden by default; `--include-system` brings them back. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 - **Unread.** Channels are left out of `unread` by default because their unread counts are noise; `--include-channels` adds them. Use `--since` for "what needs my attention", because old read markers leave stale chats with hundreds of unread messages.
@@ -182,7 +230,7 @@ m365crawl calendar sources
 Run `m365crawl` for an overview and `m365crawl --help` for where to start; every command's `--help` is complete. `m365crawl skill` prints a short guide, the same text as [`.agents/skills/m365crawl/SKILL.md`](.agents/skills/m365crawl/SKILL.md). The full contract is [`SPEC.md`](SPEC.md). In five bullets:
 
 - Results go to stdout, progress and warnings to stderr. In JSON mode each command prints exactly one document.
-- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50). A truncated list also has `"total": N` where the exact count is known. An empty list carries a `note` that says why: the archive is empty, the filter matched nothing, the range is outside the cached window, or the source is not read on this system.
+- Lists are `{"items": [...], "count": N, "truncated": bool}` with `--limit` (default 50). A truncated list also has `"total": N` where the exact count is known. An empty list carries a `note` that says why: no archive yet, no data of that source yet, a time range outside what the archive holds, filters that matched nothing, a source this system does not read, or an account the archive does not hold.
 - Errors are `{"error": {"code", "message", "fix"}}` on stderr, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock.
 - Every item carries an id or link for citing, and every read result carries `archive_age_seconds`.
 - Nothing ever writes to Teams or Outlook.
