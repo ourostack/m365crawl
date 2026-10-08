@@ -107,8 +107,8 @@ func TestArchiveSchemaNewer(t *testing.T) {
 	}
 }
 
-func TestSigninRequiredFixTellsAgentToAsk(t *testing.T) {
-	const want = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes."
+func TestSigninFixTellsAgentToAskAndToStopOnEnrollment(t *testing.T) {
+	const want = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline."
 	for _, c := range []*Coded{SigninRequired(), SigninNeedsAgreement()} {
 		if c.Fix != want {
 			t.Errorf("%s fix = %q", c.Code, c.Fix)

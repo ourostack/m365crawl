@@ -215,7 +215,7 @@ func UnknownMeeting(ref string) *Coded {
 
 // signinAskFix is the remedy of every error that leads to transcripts signin. The sign-in opens a
 // visible window on the user's screen, so an agent asks first.
-const signinAskFix = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes."
+const signinAskFix = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline."
 
 // SigninRequired reports that the browser profile is not signed in to SharePoint: the page landed
 // on a sign-in page, or SharePoint answered as if nobody were signed in.
