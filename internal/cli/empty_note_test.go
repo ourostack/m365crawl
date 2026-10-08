@@ -37,6 +37,16 @@ func teamsArchive(t *testing.T, e *env) {
 	}
 }
 
+// pinReadsHere makes the notes and search run as on a Mac, which reads Teams and mail, whatever
+// the host is.
+func pinReadsHere(t *testing.T) {
+	t.Helper()
+	oldTeams, oldSearch := teamsReadHere, searchMailPlatform
+	teamsReadHere, searchMailPlatform = func() bool { return true }, "darwin"
+	t.Cleanup(func() { teamsReadHere, searchMailPlatform = oldTeams, oldSearch })
+	pinMailPlatform(t)
+}
+
 // noteOf runs a read command in JSON and returns its note.
 func noteOf(t *testing.T, e *env, args ...string) string {
 	t.Helper()
@@ -54,6 +64,7 @@ func noteOf(t *testing.T, e *env, args ...string) string {
 
 // Every Teams list command says why it is empty.
 func TestEmptyTeamsListsSayWhy(t *testing.T) {
+	pinReadsHere(t)
 	e := newEnv(t)
 	for _, args := range [][]string{{"messages"}, {"search", "x"}, {"conversations"}, {"teams"}, {"people"}, {"activity"}, {"stores"}, {"unread"}, {"thread", "c", "r"}, {"calendar"}, {"calendar", "actions"}, {"calendar", "sources"}} {
 		if got := noteOf(t, e, args...); got != "no archive yet: run m365crawl sync" {
@@ -172,6 +183,7 @@ func TestCalendarEmptyNoteReportsAFailure(t *testing.T) {
 
 // The thread column of search and messages text output is what `thread` takes, whole.
 func TestTextThreadColumnRunsThread(t *testing.T) {
+	pinReadsHere(t)
 	e := newEnv(t)
 	teamsArchive(t, e)
 	for _, args := range [][]string{{"messages"}, {"search", "hello"}} {
@@ -185,7 +197,6 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 		t.Fatalf("thread: %d %v", code, m)
 	}
 	// For mail, the thread column holds the id that mail thread takes.
-	pinMailPlatform(t)
 	e = newEnv(t)
 	seedMail(t, e, seedMessages())
 	_, out, _ = e.run("--format", "text", "--max-age", "0", "search", "Quarterly", "--source", "mail")
@@ -209,6 +220,7 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 
 // An empty search names only the sources it read: a mail-only search never blames Teams.
 func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
+	pinReadsHere(t)
 	noTeams := "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty"
 	e := newEnv(t)
 	e.emptyArchive()
@@ -251,6 +263,7 @@ func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
 
 // A failure while reading why a search found nothing is reported, not hidden behind a note.
 func TestSearchEmptyNoteReportsAFailure(t *testing.T) {
+	pinReadsHere(t)
 	e := newEnv(t)
 	teamsArchive(t, e)
 	old := messageWindowOf
@@ -264,5 +277,36 @@ func TestSearchEmptyNoteReportsAFailure(t *testing.T) {
 	}
 	if body := errorOf(t, errOut); body["code"] != "db_error" {
 		t.Fatalf("error = %v", body)
+	}
+}
+
+// Where Teams or mail is not read, an empty search says so instead of asking for a sync.
+func TestSearchEmptyNoteOnOtherPlatforms(t *testing.T) {
+	pinReadsHere(t)
+	noTeamsHere := "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system"
+	e := newEnv(t)
+	e.emptyArchive()
+
+	// Linux: no Teams cache to read.
+	teamsReadHere = func() bool { return false }
+	if got := noteOf(t, e, "search", "x", "--source", "chats"); got != noTeamsHere {
+		t.Errorf("linux, --source chats: note %q", got)
+	}
+	seedMail(t, e, seedMessages())
+	if got := noteOf(t, e, "search", "zzzqqq"); got != "Teams chats: "+noTeamsHere+"; no mail matched the search words and filters" {
+		t.Errorf("linux, both sources: note %q", got)
+	}
+
+	// Windows: Teams is read, mail is not yet.
+	teamsReadHere, searchMailPlatform = func() bool { return true }, "windows"
+	e = newEnv(t)
+	got := noteOf(t, e, "search", "x")
+	if !strings.Contains(got, "mail is not yet read on Windows; searched Teams chats only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
+		t.Errorf("windows, no archive: note %q", got)
+	}
+	e.emptyArchive()
+	code, _, errOut := e.run("--json", "--max-age", "0", "search", "x", "--source", "mail")
+	if body := errorOf(t, errOut); code != 3 || body["code"] != "mail_unsupported_platform" {
+		t.Errorf("windows, --source mail: exit %d, %v", code, body)
 	}
 }

@@ -265,7 +265,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if !has {
 			searchMailNow = false
-			if st != nil || !p.chats { // with no archive and chats searched, noteEmpty says to sync
+			if st != nil || !p.chats { // with no archive and chats searched, the empty note says to sync
 				notes = append(notes, "mail is not in the archive yet; run m365crawl sync")
 			}
 		}
@@ -337,7 +337,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	} else {
 		res.withTotal(*f.Total)
 	}
-	if len(hits) == 0 && st != nil { // with no archive, the notes say to sync, or noteEmpty does
+	if len(hits) == 0 {
 		cause, err := rt.searchEmptyNote(st, p.chats, searchMailNow)
 		if err != nil {
 			return nil, err
@@ -354,7 +354,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 const searchNoMatch = "no message matched the search words and filters"
 
 // searchEmptyNote says why a search found nothing, naming only the sources it read: the Teams
-// cause (no Teams data, an unknown account, a range outside the archived window, or no match), and for mail
+// cause (no archive, no Teams data, an unknown account, a range outside the archived window, or no match), and for mail
 // that nothing matched. Empty when neither source was read: the plan's notes already say why.
 func (rt *runtime) searchEmptyNote(st *store.Store, chats, mail bool) (string, error) {
 	const noMail = "no mail matched the search words and filters"
