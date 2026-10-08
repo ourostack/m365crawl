@@ -1,0 +1,13 @@
+[2mthread: reply chain[0m
+
+[2mid[0m                [2mreceived[0m          [2mstate[0m                 [2mfrom[0m        [2msubject[0m               [2mfolder[0m
+[2m----------------[0m  [2m----------------[0m  [2m--------------------[0m  [2m----------[0m  [2m--------------------[0m  [2m----------[0m
+outlook/Main:101  2026-09-05 08:00  unread,flagged,files  Ann Sender  Quarterly plan        Inbox
+outlook/Main:102  2026-09-06 08:00  [2m-[0m                     Bob Reader  Re: Quarterly plan    Inbox
+outlook/Main:103  2026-09-07 08:00  [2m-[0m                     Ann Sender  Re: Re: Quarterly...  Sent Items
+
+participants: Ann Sender <ann@example.test>, Bob Reader <bob@example.test>, Cy Copy <cy@example.test>, Di Dee <di@example.test>, eve@example.test, No Address
+
+[2m3 items[0m
+[2marchive age: <age> synced[0m
+[2msynced <stamp> · cache covers since 2026-08-01[0m

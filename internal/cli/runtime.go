@@ -85,7 +85,7 @@ func (rt *runtime) setup() error {
 	}
 	rt.root = g.TeamsRoot
 	rt.outlookRoot, rt.outlookOn, rt.outlookDefault = outlookChoice(g.OutlookRoot, g.TeamsRoot)
-	if g.Account != "" {
+	if g.Account != "" && !strings.HasPrefix(rt.cmd, "mail ") { // a mail account is outlook/<profile>, not a Teams account
 		if rt.account, err = parseAccount(g.Account); err != nil {
 			return err
 		}

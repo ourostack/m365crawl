@@ -47,6 +47,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. Errors go t
 | [`people`](#people) | List people seen as senders or members. |
 | [`activity`](#activity) | List activity-feed items (mentions, replies, reactions) with their messages. |
 | [`calendar`](#calendar) | The agenda for a range (default today), merged across sources, with per-principal coverage; `calendar event` shows one event with everything the archive holds about it; `calendar actions` lists the action items of the recaps held by the events of a range; `calendar sources` says what the archive holds per account and source and how fresh it is. |
+| [`mail`](#mail) | Read Outlook mail offline: `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`. |
 | [`stores`](#stores) | List every database and object store archived without a typed table, with record counts; the database name is what records --database takes. |
 | [`records`](#records) | List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated). |
 | [`unread`](#unread) | List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. |
@@ -363,6 +364,81 @@ m365crawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,s
 m365crawl calendar event ev_2da7280856 --max-text 400
 m365crawl calendar sources --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1
 ```
+
+## mail
+
+Read Outlook for Mac mail from the archive. Mail comes from Outlook's local cache, so the archive holds only what Outlook has cached; every result says when mail was last read and how far back the cache reaches. On Windows every `mail` command fails with `mail_unsupported_platform` ("mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`").
+
+An id is `account:detail_key`, split on the last colon, as printed by `mail list` (for example `outlook/Main:12345`). `--account` takes the mail account as it appears in the ids (`outlook/<profile>`), not a Teams account.
+
+Every list result is `{"items": [...], "count", "truncated", "synced_at", "coverage": [{"account", "folder", "kind", "oldest_at", "newest_at", "count"}], "note"}`. `note` explains an empty result (no archive yet, Outlook source off, no Outlook profile, mail not read yet, filters matched nothing, or the cache covers only since a date) and, for unread results, says "the local cache holds N messages in this folder; Outlook may show more". Human output of every `mail` list ends with `synced <time> · cache covers since <date>`. `--limit` is at most 1000 on every `mail` command.
+
+A field the archive does not hold is `null`, never guessed: `subject`, `from_name`, `from_address`, `in_reply_to`, `ical_uid` and `internet_message_id` when Outlook stored none, `is_read` when the read state is not known, `sent_at` when the store has no send time, `address` on a recipient without one, and `gone_at` and `evicted_at` while the message is present.
+
+To and Cc are not yet told apart. A recipient carries only `name`, `address` and `kind_raw` (the store's own number); there is no `to` or `cc` field. `mail list` shows `recipient_count` and `recipients_preview` (the first three names); `mail show` lists every recipient. `importance` (`low`, `normal`, `high`) is likely right but is read from one store field that is not fully confirmed.
+
+### mail list
+
+List archived Outlook mail, newest first.
+
+```
+m365crawl mail list [flags]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--folder=NAME\|KIND` | Only this folder, matched by name first (ignoring case), then by kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `junk`, `to_me`. An unknown folder is the `unknown_folder` error, which lists the folders. |
+| `--from=TEXT` | Only messages whose sender name or address contains this text, ignoring case. |
+| `--since=DATE` | Only messages received at or after this time (`YYYY-MM-DD`, RFC3339 or an age such as `7d`). |
+| `--until=DATE` | Only messages received before this time (exclusive); same forms. |
+| `--unread` | Only unread messages. |
+| `--flagged` | Only flagged messages. |
+| `--has-attachments` | Only messages with attachments. |
+| `--include-gone` | Also list messages a sync saw disappear. |
+| `--include-evicted` | Also list messages that fell out of the cache's covered range. |
+| `--limit=50` | Maximum messages (1 to 1000); `truncated` says whether more exist. |
+
+Filters combine with AND. Item keys: `id, account, folder, folder_kind, to_me, subject, from_name, from_address, recipient_count, recipients_preview, in_reply_to, received_at, sent_at, is_read, flag, importance, has_attachments, preview, internet_message_id, ical_uid, gone_at, evicted_at`.
+
+### mail show
+
+Show one message: headers, recipients, attachments and body text.
+
+```
+m365crawl mail show <id>
+```
+
+Keys are those of `mail list` with `recipients` (`name`, `address`, `kind_raw`) in place of the recipient count and preview, plus `read_state`, `attachments` (`name`, `size`, `content_type`, `inline`, `downloaded`), `body_text` and `body_state`. `--max-text N` cuts `body_text` and sets `text_truncated`. A bad id is `bad_mail_id`; an id the archive does not hold is `mail_not_found`.
+
+### mail thread
+
+Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.
+
+```
+m365crawl mail thread <id>
+```
+
+Items are in the shape of `mail list`, oldest first. `grouping` is `reply_chain` (In-Reply-To links followed in both directions) or `subject`; `participants` lists each person in the thread once (`name`, `address`).
+
+### mail folders
+
+List mail folders with message and unread counts and how far back the cache reaches.
+
+```
+m365crawl mail folders
+```
+
+Item keys: `account, folder, kind, messages, unread, oldest_at, newest_at, read_at`. Counts leave out gone and evicted messages.
+
+### mail unread
+
+Unread mail by folder.
+
+```
+m365crawl mail unread [--folder NAME|KIND] [--limit N]
+```
+
+`folders` is one `{account, folder, kind, unread, cached}` per folder that holds messages; `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
 
 ## stores
 

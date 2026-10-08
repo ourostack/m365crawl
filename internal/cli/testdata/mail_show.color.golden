@@ -1,0 +1,28 @@
+[1m[36mQUARTERLY PLAN[0m
+[2m==============[0m
+
+[2mbody               [0m[2m : [0minline
+[2mflag               [0m[2m : [0mflagged
+[2mfolder             [0m[2m : [0mInbox
+[2mfrom               [0m[2m : [0mAnn Sender <ann@example.test>
+[2mid                 [0m[2m : [0moutlook/Main:101
+[2mimportance (likely)[0m[2m : [0mhigh
+[2mreceived           [0m[2m : [0m2026-09-05 08:00
+[2msent               [0m[2m : [0m2026-09-05 07:59
+[2mstate              [0m[2m : [0munread
+
+[2mrecipient (To and Cc not yet told apart)[0m  [2maddress[0m           [2mkind_raw[0m
+[2m----------------------------------------[0m  [2m----------------[0m  [2m--------[0m
+Bob Reader                                bob@example.test  1
+Cy Copy                                   cy@example.test   2
+Di Dee                                    di@example.test   2
+[2m-[0m                                         eve@example.test  2
+No Address                                [2m-[0m                 2
+
+[2mattachment[0m  [2mbytes[0m  [2mtype[0m
+[2m----------[0m  [2m-----[0m  [2m---------------[0m
+plan.pdf    2048   application/pdf
+
+body of Quarterly plan
+[2marchive age: <age> synced[0m
+[2msynced <stamp> · cache covers since 2026-08-01[0m
