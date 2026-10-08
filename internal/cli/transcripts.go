@@ -148,7 +148,7 @@ var transcriptStates = []string{store.CallFetched, store.CallPartial, store.Call
 // link, or a link to the meeting chat or one of its messages) names that chat; anything else is
 // passed on as it is.
 func meetingRef(arg string) (string, error) {
-	if !strings.HasPrefix(arg, "http://") && !strings.HasPrefix(arg, "https://") {
+	if !isLink(arg) {
 		return arg, nil
 	}
 	thread, _, _, err := parseTeamsLink(arg)

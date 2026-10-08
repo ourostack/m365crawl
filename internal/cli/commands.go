@@ -386,7 +386,7 @@ func (c *threadCmd) Run(rt *runtime) error {
 		return err
 	}
 	if isLink(c.Target) {
-		rt.link = &convLink{raw: c.Target, conversation: conv}
+		rt.link = &convLink{raw: cleanLink(c.Target), conversation: conv}
 	}
 	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"}
 	return rt.read("thread", func(st *store.Store) (result, error) {
@@ -436,6 +436,12 @@ func parseThreadTarget(target, root string) (conversation, rootID string, err er
 			return "", "", errs.Usage("thread needs a root message id after the conversation, or a Teams message link")
 		}
 		return target, root, nil
+	}
+	target = cleanLink(target)
+	if root != "" {
+		c := errs.Usage("thread takes a Teams link or a conversation id and a root message id, not both")
+		c.Fix = "Run `m365crawl thread '" + target + "'` without the root: a message link names its thread."
+		return "", "", c
 	}
 	conversation, msg, parent, lerr := parseTeamsLink(target)
 	switch {

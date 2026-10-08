@@ -14,6 +14,9 @@ import (
 
 func TestParseTeamsLink(t *testing.T) {
 	const ctx = "?context=%7B%22contextType%22%3A%22chat%22%7D"
+	if !contains(teamsHosts, "gov.teams.microsoft.us") || !contains(teamsHosts, "dod.teams.microsoft.us") {
+		t.Fatalf("hosts %v", teamsHosts)
+	}
 	for _, host := range teamsHosts {
 		base := "https://" + host
 		for _, c := range []struct {
@@ -29,6 +32,13 @@ func TestParseTeamsLink(t *testing.T) {
 			{"channel reply", base + "/l/message/19%3Aabc%40thread.tacv2/1700000046000?tenantId=t&parentMessageId=1700000045000", "19:abc@thread.tacv2", "1700000046000", "1700000045000"},
 			{"message, trailing slash", base + "/l/message/19%3Aabc%40thread.v2/17/", "19:abc@thread.v2", "17", ""},
 			{"meeting, lower-case escapes", base + "/l/meetup-join/19%3ameeting_ZmFrZQ%40thread.v2/0?context=%7b%7d", "19:meeting_ZmFrZQ@thread.v2", "", ""},
+			{"pasted in angle brackets", " <" + base + "/l/chat/19%3Aabc%40thread.v2/0> ", "19:abc@thread.v2", "", ""},
+			{"pasted in quotes", "\"" + base + "/l/chat/19%3Aabc%40thread.v2/0\"", "19:abc@thread.v2", "", ""},
+			{"pasted in backticks", "`" + base + "/l/chat/19%3Aabc%40thread.v2/0`", "19:abc@thread.v2", "", ""},
+			{"upper-case scheme", strings.Replace(base, "https", "HTTPS", 1) + "/l/chat/19%3Aabc%40thread.v2/0", "19:abc@thread.v2", "", ""},
+			{"message link ending a sentence", base + "/l/message/19%3Aabc%40thread.v2/1700000000002).", "19:abc@thread.v2", "1700000000002", ""},
+			{"chat link ending a sentence", base + "/l/chat/19%3Ax%40thread.v2.", "19:x@thread.v2", "", ""},
+			{"team link", base + "/l/team/19%3Ageneral%40thread.tacv2/conversations?groupId=00000000-0000-4000-8000-000000000001&tenantId=t", "19:general@thread.tacv2", "", ""},
 			{"upper-case host and http", strings.Replace(base, "https://"+host, "http://"+strings.ToUpper(host), 1) + "/l/chat/19%3Aabc%40thread.v2/0", "19:abc@thread.v2", "", ""},
 		} {
 			conv, msg, parent, err := parseTeamsLink(c.link)
@@ -52,7 +62,7 @@ func TestParseTeamsLinkRejects(t *testing.T) {
 		{"ftp://teams.microsoft.com/l/chat/19%3Aabc%40thread.v2/0", "not a Teams link", false},
 		{"https://teams.microsoft.com/", "not a Teams channel, chat, message or meeting link", false},
 		{"https://teams.microsoft.com/v2/", "not a Teams channel, chat, message or meeting link", false},
-		{"https://teams.microsoft.com/l/team/19%3Aabc%40thread.tacv2/conversations", "not a Teams channel, chat, message or meeting link", false},
+		{"https://teams.microsoft.com/l/entity/00000000-0000-4000-8000-000000000003/tab", "not a Teams channel, chat, message or meeting link", false},
 		{"https://teams.microsoft.com/l/chat", "no conversation id", false},
 		{"https://teams.microsoft.com/l/channel/", "no conversation id", false},
 		{"https://teams.microsoft.com/l/message//1", "no conversation id", false},
@@ -76,6 +86,24 @@ func TestParseTeamsLinkRejects(t *testing.T) {
 	}
 	if !strings.Contains(peopleLinkFix, "m365crawl conversations --query <name>") {
 		t.Fatalf("people fix %q", peopleLinkFix)
+	}
+}
+
+func TestIsLink(t *testing.T) {
+	for s, want := range map[string]bool{
+		"https://teams.microsoft.com/l/chat/x/0":    true,
+		"HTTPS://teams.microsoft.com/l/chat/x/0":    true,
+		"  http://teams.microsoft.com/l/chat/x/0 ":  true,
+		"<https://teams.microsoft.com/l/chat/x/0>":  true,
+		"'https://teams.microsoft.com/l/chat/x/0'":  true,
+		"`https://teams.microsoft.com/l/chat/x/0`.": true,
+		"19:abc@thread.v2":                          false,
+		"Fixture chat 1":                            false,
+		"":                                          false,
+	} {
+		if got := isLink(s); got != want {
+			t.Errorf("isLink(%q) = %v", s, got)
+		}
 	}
 }
 
@@ -134,6 +162,8 @@ func TestConversationFlagTakesTeamsLinks(t *testing.T) {
 		{"https://teams.microsoft.com/l/channel/" + linkTo(fixtureChannel) + "/General?groupId=00000000-0000-4000-8000-000000000001&tenantId=" + tenantA, fixtureChannel},
 		{"https://teams.cloud.microsoft/l/chat/" + linkTo(fixtureChat) + "/conversations?context=%7B%22contextType%22%3A%22chat%22%7D", fixtureChat},
 		{"https://teams.live.com/l/chat/" + fixtureChat + "/conversations", fixtureChat},
+		{" <HTTPS://gov.teams.microsoft.us/l/chat/" + linkTo(fixtureChat) + "/conversations>.", fixtureChat},
+		{"https://teams.microsoft.com/l/team/" + linkTo(fixtureChannel) + "/conversations?groupId=00000000-0000-4000-8000-000000000001", fixtureChannel},
 		{"https://teams.microsoft.com/l/meetup-join/" + strings.NewReplacer(":", "%3a", "@", "%40").Replace(fixtureMeeting) + "/0?context=%7b%7d", fixtureMeeting},
 	} {
 		for _, flag := range []string{"-c", "--conversation"} {
@@ -179,12 +209,17 @@ func TestConversationLinkNotArchived(t *testing.T) {
 		{"thread", "https://teams.microsoft.com/l/message/19%3Amissing%40thread.v2/17"},
 	} {
 		got, note := conversationsOf(t, e, args...)
-		if len(got) != 0 || note != uncachedNote("19:missing@thread.v2") {
+		if len(got) != 0 || note != uncachedNote("19:missing@thread.v2", true) || !strings.Contains(note, "for this account") {
 			t.Errorf("%v: %v, note %q", args, got, note)
 		}
 	}
-	if n := uncachedNote("x"); !strings.Contains(n, "Teams desktop app may not have cached it") || !strings.Contains(n, "open it once in Teams, then run m365crawl sync") {
+	if n := uncachedNote("x", false); strings.Contains(n, "for this account") || !strings.Contains(n, "Teams desktop app may not have cached it") || !strings.Contains(n, "open it once in Teams, then run m365crawl sync") {
 		t.Fatalf("note %q", n)
+	}
+	// Without --account the note does not name one.
+	_, stdout, _ := e.run("--json", "--max-age", "0", "messages", "-c", missing)
+	if note := decode(t, stdout)["note"]; note != uncachedNote("19:missing@thread.v2", false) {
+		t.Fatalf("no --account: note %q", note)
 	}
 	// A conversation the archive holds keeps the usual note when a filter empties it.
 	_, note := conversationsOf(t, e, "messages", "-c", "https://teams.microsoft.com/l/chat/"+linkTo(fixtureChat)+"/0", "--from", "nobody-at-all")
@@ -243,6 +278,18 @@ func TestThreadTakesLinks(t *testing.T) {
 			t.Errorf("thread %s: %d items, want %d", l, len(got), len(its))
 		}
 	}
+	// A link pasted with brackets, spaces, an upper-case scheme or a full stop reads the same thread.
+	for _, l := range []string{" <" + link + "> ", strings.Replace(link, "https", "HTTPS", 1) + "."} {
+		_, out, _ := e.run("--json", "--max-age", "0", "--account", tenantA+"/"+userA, "thread", l)
+		if got := items(t, decode(t, out)); len(got) != len(its) {
+			t.Errorf("thread %q: %d items, want %d", l, len(got), len(its))
+		}
+	}
+	// A root after a link is a usage error.
+	code, _, stderr := e.run("--json", "--max-age", "0", "thread", link, "1700000045000")
+	if er := errorOf(t, stderr); code != 2 || er["code"] != "usage" || !strings.Contains(er["message"].(string), "not both") || !strings.Contains(er["fix"].(string), "without the root") {
+		t.Fatalf("thread <link> <root>: exit %d %v", code, er)
+	}
 	// A channel or chat link names no message: thread points to messages --conversation.
 	for _, l := range []string{
 		"https://teams.microsoft.com/l/channel/" + linkTo(fixtureChannel) + "/General",
@@ -257,7 +304,7 @@ func TestThreadTakesLinks(t *testing.T) {
 		}
 	}
 	// A link that names people keeps its own fix.
-	code, _, stderr := e.run("--json", "--max-age", "0", "thread", "https://teams.microsoft.com/l/chat/0/0?users=a@example.com")
+	code, _, stderr = e.run("--json", "--max-age", "0", "thread", "https://teams.microsoft.com/l/chat/0/0?users=a@example.com")
 	if er := errorOf(t, stderr); code != 2 || er["fix"] != peopleLinkFix {
 		t.Fatalf("thread <people link>: exit %d %v", code, er)
 	}
@@ -269,6 +316,7 @@ func TestTranscriptsTakesAMeetingLink(t *testing.T) {
 		{"https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZmFrZQ%40thread.v2/0?context=%7b%7d", "19:meeting_ZmFrZQ@thread.v2"},
 		{"https://teams.microsoft.com/l/chat/19%3Ameeting_ZmFrZQ%40thread.v2/conversations", "19:meeting_ZmFrZQ@thread.v2"},
 		{"https://teams.microsoft.com/l/message/19%3Ameeting_ZmFrZQ%40thread.v2/17", "19:meeting_ZmFrZQ@thread.v2"},
+		{" <HTTPS://teams.microsoft.com/l/meetup-join/19%3ameeting_ZmFrZQ%40thread.v2/0>", "19:meeting_ZmFrZQ@thread.v2"},
 	} {
 		if got, err := meetingRef(c.arg); err != nil || got != c.want {
 			t.Errorf("%s: %q %v", c.arg, got, err)

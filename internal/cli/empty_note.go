@@ -71,7 +71,7 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	if rt.link != nil {
 		held, err := hasConversationOf(st, rt.ctx, rt.account, rt.link.conversation)
 		if err != nil || !held {
-			return uncachedNote(rt.link.conversation), err
+			return uncachedNote(rt.link.conversation, rt.account != nil), err
 		}
 	}
 	switch {

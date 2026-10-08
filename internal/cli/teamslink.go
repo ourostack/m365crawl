@@ -8,10 +8,11 @@ import (
 )
 
 // teamsHosts are the hosts a Teams link is served from; any other host is not a Teams link.
-var teamsHosts = []string{"teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com"}
+var teamsHosts = []string{"teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com", "gov.teams.microsoft.us", "dod.teams.microsoft.us"}
 
-// linkKinds are the kinds of Teams link (the path segment after /l/) that name a conversation.
-var linkKinds = []string{"channel", "chat", "message", "meetup-join"}
+// linkKinds are the kinds of Teams link (the path segment after /l/) that name a conversation. A
+// team link (/l/team/<id>/conversations) names the team's General channel.
+var linkKinds = []string{"channel", "chat", "message", "meetup-join", "team"}
 
 // linkFix is the fix of a link that names no conversation m365crawl can read.
 const linkFix = "Pass a Teams channel, chat, message or meeting link (https://teams.microsoft.com/l/channel/<conversationId>/..., /l/chat/<conversationId>/..., /l/message/<conversationId>/<messageId> or /l/meetup-join/<conversationId>/...), or the conversation id itself; `m365crawl conversations --query <name>` finds a conversation's id."
@@ -38,16 +39,31 @@ func (e *linkError) coded(fix string) *errs.Coded {
 	return c
 }
 
-// isLink says the argument is a URL rather than an id or a name.
+// isLink says the argument is a URL rather than an id or a name, once cleanLink has tidied it.
 func isLink(s string) bool {
+	s = strings.ToLower(cleanLink(s))
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// cleanLink tidies a link as a user pastes it: surrounding spaces, the <>, quotes or backticks
+// around it, and the punctuation of the sentence it ended (a Teams id never ends in one of those).
+func cleanLink(s string) string {
+	for {
+		t := strings.TrimRight(strings.TrimLeft(strings.TrimSpace(s), "<\"'`"), ".,;:!?)]}>'\"`")
+		if t == s {
+			return s
+		}
+		s = t
+	}
 }
 
 // parseTeamsLink reads the conversation, the message and the thread root (parentMessageId, a
 // channel reply's root) a Teams link names. Channel (/l/channel/), chat (/l/chat/), message
-// (/l/message/) and meeting (/l/meetup-join/) links are understood, their ids percent-encoded or
+// (/l/message/), meeting (/l/meetup-join/) and team (/l/team/) links are understood, tidied by
+// cleanLink first, their ids percent-encoded or
 // not; only a message link names a message.
 func parseTeamsLink(raw string) (conversation, messageID, parentID string, err *linkError) {
+	raw = cleanLink(raw)
 	u, perr := url.Parse(raw)
 	if perr != nil {
 		return "", "", "", &linkError{why: "the link is not a valid URL"}
@@ -104,7 +120,7 @@ func (rt *runtime) conversationArg(v string) (string, error) {
 		c.Message = "--conversation: " + c.Message
 		return "", c
 	}
-	rt.link = &convLink{raw: v, conversation: conv, message: msg != ""}
+	rt.link = &convLink{raw: cleanLink(v), conversation: conv, message: msg != ""}
 	return conv, nil
 }
 
@@ -118,9 +134,13 @@ func (rt *runtime) linkNote() string {
 }
 
 // uncachedNote is the note of an empty read of a conversation a link named that the archive does
-// not hold: Teams may not have cached it.
-func uncachedNote(conversation string) string {
-	return "the archive holds no conversation " + conversation + ": the Teams desktop app may not have cached it; open it once in Teams, then run m365crawl sync"
+// not hold (for the --account of the read, when one is given): Teams may not have cached it.
+func uncachedNote(conversation string, forAccount bool) string {
+	held := "the archive holds no conversation " + conversation
+	if forAccount {
+		held += " for this account"
+	}
+	return held + ": the Teams desktop app may not have cached it; open it once in Teams, then run m365crawl sync"
 }
 
 // joinNotes joins two notes into one, either of which may be empty.
