@@ -10,21 +10,23 @@
 
 [36mReady checks[0m
 [2m------------[0m
-  [32m●[0m [2mteams_installed  [0m  Teams data found at <teams-root>
-  [32m●[0m [2mfull_disk_access [0m  the Teams container is readable
-  [32m●[0m [2mteams_origin     [0m  1 Teams origin(s) found
-  [32m●[0m [2mdatabase_writable[0m  <db> is writable
-  [32m●[0m [2mschema_version   [0m  schema v7
-  [32m●[0m [2mfts              [0m  full-text indexes present
-  [32m●[0m [2marchive_newer    [0m  the archive was written by this or an older m365crawl (derivation version 2)
-  [32m●[0m [2mlast_sync_status [0m  the last sync was ok
-  [32m●[0m [2mlast_sync_age    [0m  last successful sync <age> ago
-  [33m▲[0m [2mcalendar_cache   [0m  the Teams calendar cache was last fresh <age> ago
-                       [33mfix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.[0m
-  [33m▲[0m [2moutlook_store    [0m  profile Main: store version readable; the last read failed (unsupported_layout): outlook_layout_unsupported: the Outlook store cannot be read by this version of m365crawl: class 0x6b tag 0x456 x3, known 0x455
-                       [33mfix: Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.[0m
-  [32m●[0m [2mmail_readable    [0m  profile Main: mail read <age> ago
-  [32m●[0m [2mmail_archive_mode[0m  the archive is readable by its owner only (0600)
+  [32m●[0m [2mteams_installed         [0m  Teams data found at <teams-root>
+  [32m●[0m [2mfull_disk_access        [0m  the Teams container is readable
+  [32m●[0m [2mteams_origin            [0m  1 Teams origin(s) found
+  [32m●[0m [2mdatabase_writable       [0m  <db> is writable
+  [32m●[0m [2mschema_version          [0m  schema v7
+  [32m●[0m [2mfts                     [0m  full-text indexes present
+  [32m●[0m [2marchive_newer           [0m  the archive was written by this or an older m365crawl (derivation version 2)
+  [32m●[0m [2mlast_sync_status        [0m  the last sync was ok
+  [32m●[0m [2mlast_sync_age           [0m  last successful sync <age> ago
+  [33m▲[0m [2mcalendar_cache          [0m  the Teams calendar cache was last fresh <age> ago
+                              [33mfix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.[0m
+  [33m▲[0m [2moutlook_store           [0m  profile Main: store version readable; the last read failed (unsupported_layout): outlook_layout_unsupported: the Outlook store cannot be read by this version of m365crawl: class 0x6b tag 0x456 x3, known 0x455
+                              [33mfix: Update m365crawl: this version reads Outlook store version i, event layout 0x6b/0x455. Nothing of Outlook was applied.[0m
+  [32m●[0m [2mmail_readable           [0m  profile Main: mail read <age> ago
+  [32m●[0m [2mmail_archive_mode       [0m  the archive is readable by its owner only (0600)
+  [32m●[0m [2mtranscripts_browser     [0m  edge at /opt/m365crawl-test/msedge (transcripts fetch runs it headless; doctor does not start it)
+  [32m●[0m [2mtranscripts_profile_mode[0m  no browser profile yet; transcripts fetch creates <db-dir>/browser, readable by its owner only
 
 [36mSnapshot[0m
 [2m--------[0m

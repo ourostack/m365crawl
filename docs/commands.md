@@ -106,6 +106,8 @@ Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (
 | `outlook_store` | Says the Outlook source is off, or lists each profile with whether this build reads its store version, what the last sync recorded and how it is linked to Teams. No Outlook on the machine is a plain pass. It warns when a named root has no profile, access is denied, a store version is unknown or the last read failed, with the same fix a sync gives. |
 | `mail_readable` | A warning. Per Outlook profile, when its mail was last read or why the last read failed; also that mail is not read when the Outlook source is off or on Windows. |
 | `mail_archive_mode` | Warns when other users can read the archive file, which holds mail. The file is created with mode 0600. Not applicable on Windows. |
+| `transcripts_browser` | Names the browser `transcripts fetch` would run: the one `M365CRAWL_BROWSER` names, else Microsoft Edge, then Google Chrome. Doctor only looks for it and never starts it. No browser is a warning (`none: transcripts fetch needs Edge or Chrome`, or, when `M365CRAWL_BROWSER` is set, that it names no browser on this machine), never a failure: every other command works without one. |
+| `transcripts_profile_mode` | Warns when other users can read m365crawl's browser profile (`browser` beside the archive), which holds that browser's own sign-in state. Doctor reads the directory's permissions (its mode, or its access list on Windows) and never opens a file in it. No profile yet is a plain pass. |
 
 In text mode the checks are followed by a Snapshot of the archive, one line per source, then the last sync and the archive's age:
 
@@ -121,7 +123,7 @@ m365crawl doctor
 
 ## status
 
-Show archive counts per account, the last sync, other Teams origins seen, and mail.
+Show archive counts per account, the last sync, other Teams origins seen, mail and meeting transcripts.
 
 ```
 m365crawl status [flags]
@@ -130,6 +132,8 @@ m365crawl status [flags]
 No flags beyond the global ones.
 
 Result: archive path, schema version, per-account counts, the last run and other Teams origins seen, and a `mail` block: `{"messages", "unread", "folders", "oldest_at", "synced_at", "state"}`. `messages` counts mail that is not gone or evicted. `state` is `ok` once a sync has read mail, `skipped` when the Outlook source is off for this run or no sync has read mail yet, `no_profile` when this machine has no Outlook profile, and `unsupported_platform` on Windows.
+
+A `transcripts` block counts the recorded meetings: `{"calls", "parts", "fetchable", "fetched", "last_fetch_at"}`. `parts` leaves out the placeholder of a call that has a transcript notice and no file reference; `fetchable` counts the parts a fetch can ask for and `fetched` those whose text is in the archive; `last_fetch_at` is the newest fetch attempt, null when none ever ran. The block is absent with no archive or an archive from before the transcript tables.
 
 ```sh
 m365crawl status
@@ -191,7 +195,7 @@ m365crawl watch --every 30s --fields id,type,text --max-text 200
 
 ## search
 
-Full-text search over Teams chats and Outlook mail, newest first; default `--limit 50` (check `truncated`).
+Full-text search over Teams chats, Outlook mail and fetched meeting transcripts, newest first; default `--limit 50` (check `truncated`).
 
 ```
 m365crawl search [<query>] [flags]
@@ -203,11 +207,11 @@ m365crawl search [<query>] [flags]
 
 | Flag | Applies to | Meaning |
 | --- | --- | --- |
-| `--source=chats\|mail\|all` | both | What to search: `chats` (Teams), `mail` (Outlook) or `all` (both, the default). |
-| `--from=STRING` | both | Sender. Chats: a person id or a case-insensitive part of the name. Mail: a case-insensitive part of the sender's name or address. |
-| `--since=STRING` | both | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). |
-| `--until=STRING` | both | Only messages at or before this time (same formats as `--since`). |
-| `--limit=50` | both | Maximum items in the merged list; `truncated` says whether either source had more. |
+| `--source=chats\|mail\|transcripts\|all` | every source | What to search: `chats` (Teams), `mail` (Outlook), `transcripts` (fetched meeting transcripts) or `all` (every one, the default). |
+| `--from=STRING` | every source | Sender. Chats: a person id or a case-insensitive part of the name. Mail: a case-insensitive part of the sender's name or address. Transcripts: a case-insensitive part of the speaker's name. |
+| `--since=STRING` | every source | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). For transcripts, the time of each entry. |
+| `--until=STRING` | every source | Only messages at or before this time (same formats as `--since`). |
+| `--limit=50` | every source | Maximum items in the merged list; `truncated` says whether any source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
 | `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--team=STRING` | chats | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
@@ -219,20 +223,22 @@ m365crawl search [<query>] [flags]
 
 How the sources combine:
 
-- Every item has `source`: `chats` or `mail`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item.
-- Text output has a `thread` column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread`, `<conversation_id> <reply_chain_id, else id>`; for mail the id that `m365crawl mail thread` takes.
-- Items are newest first across both sources, by `sent_at` for chats and `received_at` for mail.
-- The result's `sources` says, per source, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}}`.
-- With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail was not searched`. With the other `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
+- Every item has `source`: `chats`, `mail` or `transcripts`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item.
+- A transcript item is one part of a recorded meeting whose fetched text matched: `{"source", "call_id", "event_key", "title", "ordinal", "speaker", "at", "text", "matches", "fetched_at"}`. `speaker`, `text` and `at` (absolute) are those of the part's first matching entry, and `matches` counts the part's matching entries, so a part that says a word fifty times is one item. The words match what was said, not the speaker's name (that is `--from`). Only text already fetched into the archive is searched, offline; with `--source transcripts` and nothing fetched, `note` says `no transcripts are fetched yet; run m365crawl transcripts to see what can be fetched`.
+- Text output has a `thread` column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread`, `<conversation_id> <reply_chain_id, else id>`; for mail the id that `m365crawl mail thread` takes; for a transcript the call id that `m365crawl transcripts show` takes.
+- Items are newest first across every source, by `sent_at` for chats, `received_at` for mail and `at` for transcripts.
+- The result's `sources` says, per source searched, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}, "transcripts": {"count", "truncated"}}`.
+- With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched`. With another `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
-- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
-- `--fields` accepts the keys of both kinds of item, plus `source`.
+- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
+- `--fields` accepts the keys of every kind of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 
 ```sh
 m365crawl search planning --limit 5
 m365crawl search "budget review" --source mail --since 30d
 m365crawl search --mentions-me --since 7d --max-text 200
+m365crawl search "release date" --source transcripts --from ada
 ```
 
 ## people
@@ -615,9 +621,10 @@ Result: the agenda item, plus:
   - Each carries `id` (as `mail show` takes it), `match`, `account`, `folder`, `folder_kind`, `subject`, `from_name`, `from_address`, `received_at`, `is_read`, `has_attachments`, `preview` and `ical_uid`.
   - A very common subject ("Standup") shared with the same people can still pull in another meeting's mail from inside the window.
 - `recordings`, each with `message_id`, `sent_at`, `kind`, `text`, `link` and `matched_by` (`recap` or `window`); `series_recordings` (recordings of the chat that match no occurrence, newest 20) and `series_recordings_total`.
+- `transcripts`: the occurrence's recorded calls, newest first, the same calls `m365crawl transcripts <event_id>` lists, each `{"call_id", "source": "archive", "state", "parts_total", "parts_fetchable", "parts_fetched", "last_fetched_at"}`; `parts_total` leaves out the placeholder of a call that has only a transcript notice. Absent when the occurrence has no recorded call. When a part that can be fetched is not, a `notices` entry says `N of M transcript parts are not fetched; run m365crawl transcripts fetch <event-id>`. Nothing is fetched to answer.
 - The archive meta (`archive_age_seconds` and the rest).
 
-In text mode the event ends with the chat's recent messages and a related-mail table with a `match` column.
+In text mode the event ends with a table of its recorded calls and their transcripts, the chat's recent messages and a related-mail table with a `match` column.
 
 ```sh
 m365crawl calendar event ev_2da7280856 --max-text 400
@@ -723,7 +730,7 @@ Print the crawlkit app manifest, for `crawlctl discover`.
 m365crawl metadata [flags]
 ```
 
-Result: one crawlkit `control.Manifest` JSON document on stdout, indented in every output mode: the app id, description, default database path, the commands crawlkit can run (`overview`, `status`, `sync`, `doctor`, `search`, `calendar`, and `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`), capabilities (`doctor`, `status`, `sync`, `watch`, `search`, `sql`, `chats`, `mail`, `calendar`) and privacy flags. Needs no archive and never syncs.
+Result: one crawlkit `control.Manifest` JSON document on stdout, indented in every output mode: the app id, description, default database path, the commands crawlkit can run (`overview`, `status`, `sync`, `doctor`, `search`, `calendar`, and `mail list`, `mail show`, `mail thread`, `mail folders` and `mail unread`, `transcripts` and `transcripts show`), capabilities (`doctor`, `status`, `sync`, `watch`, `search`, `sql`, `chats`, `mail`, `calendar`, `transcripts`) and privacy flags. Needs no archive and never syncs.
 
 ## skill
 

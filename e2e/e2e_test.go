@@ -1409,11 +1409,18 @@ func makeAlpha1(t *testing.T, path string) {
 	archiveExec(t, path, `alter table sync_runs drop column accounts_json`)
 }
 
+// hostWarning says a doctor warning comes from the fixture or the host, not from the archive: the
+// fixture's old calendar cache, or a host with no browser for transcripts fetch.
+func hostWarning(name any) bool { return name == "calendar_cache" || name == "transcripts_browser" }
+
 func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	makeAlpha1(t, e.db)
-	res := e.cmd("doctor")
+	// No browser, as on the Linux runner, on every host: that warning must not count.
+	noBrowser := []string{"M365CRAWL_BROWSER=" + filepath.Join(e.home, "no-such-browser")}
+	doctor := func() result { return e.runWith(noBrowser, append([]string{"doctor"}, e.baseArgs()...)...) }
+	res := doctor()
 	mustExit(t, res, 0)
 	var warns []string
 	for _, ch := range mustJSON(t, res.stdout)["checks"].([]any) {
@@ -1421,8 +1428,9 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 		if m["ok"] != true {
 			t.Fatalf("a failing check on an alpha.1 archive: %s", res.stdout)
 		}
-		// The fixture's calendar cache dates from 2023, so calendar_cache always warns on it.
-		if m["warn"] == true && m["name"] != "calendar_cache" {
+		// The fixture's calendar cache dates from 2023, so calendar_cache always warns on it, and a
+		// host with no Edge or Chrome (the Linux runner) warns transcripts_browser.
+		if m["warn"] == true && !hostWarning(m["name"]) {
 			warns = append(warns, m["name"].(string))
 		}
 	}
@@ -1430,10 +1438,10 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 		t.Fatalf("warnings %v: %s", warns, res.stdout)
 	}
 	e.sync()
-	res = e.cmd("doctor")
+	res = doctor()
 	mustExit(t, res, 0)
 	for _, ch := range mustJSON(t, res.stdout)["checks"].([]any) {
-		if m := ch.(map[string]any); m["warn"] == true && m["name"] != "calendar_cache" {
+		if m := ch.(map[string]any); m["warn"] == true && !hostWarning(m["name"]) {
 			t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 		}
 	}

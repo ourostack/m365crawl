@@ -1,6 +1,6 @@
 ---
 name: m365crawl
-description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail or calendar on this Mac or Windows PC, offline, through the local `m365crawl` CLI, which mirrors them into one SQLite archive.
+description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail, calendar or meeting transcripts on this Mac or Windows PC, offline, through the local `m365crawl` CLI, which mirrors them into one SQLite archive.
 ---
 
 # m365crawl
@@ -12,6 +12,7 @@ m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the n
 - The archive holds the user's private chats and mail. Quote from it only where the user asked; never paste it into issues, logs or other tools unasked.
 - Sign-in credentials are never read, and token-shaped values are stored as `[redacted]`.
 - Never edit Teams' or Outlook's folders, or the archive, by hand; use the commands.
+- `transcripts fetch` and `transcripts signin` are the only commands that use the network, through Edge (or Chrome) with m365crawl's own browser profile; every other command reads the archive offline. Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes, then pass `--user-agreed` and relay the steps it prints.
 
 ## Start here
 
@@ -38,6 +39,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 | Threads: the whole conversation | `m365crawl thread <conversation_id> <root_id>` (the root is `reply_chain_id`, else `id`), `m365crawl mail thread <id>` |
 | Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, then `m365crawl calendar event <event_id>`: one meeting with its `chat` (its newest messages in `chat.recent_messages`, kept by `--fields chat`) and `related_mail`, matched by invite or by subject from 14 days before to 7 days after the start; `m365crawl people --query <name>` finds Teams people and mail correspondents (`id` `mail:<address>`) |
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
+| Meeting transcripts | `m365crawl transcripts` lists recorded meetings and which parts' text is in the archive; `m365crawl transcripts show <meeting>` prints one in time order with each seam marked; `transcripts fetch` brings the text from SharePoint; `m365crawl search "words" --source transcripts` finds what was said (`--from` matches the speaker); `calendar event` lists an occurrence's recorded calls in `transcripts` |
 
 ## Hosts
 

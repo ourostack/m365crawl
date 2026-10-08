@@ -29,7 +29,11 @@ func manifest() control.Manifest {
 		}
 		m.Commands[name] = c
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar"}
+	m.Commands["transcripts"] = control.Command{Argv: []string{"m365crawl", "--json", "transcripts"}, JSON: true,
+		Title: "transcripts: recorded meetings and what of their transcripts is in the archive (offline)"}
+	m.Commands["transcripts show"] = control.Command{Argv: []string{"m365crawl", "--json", "transcripts", "show", "<meeting>"}, JSON: true,
+		Title: "transcripts show (<meeting> is a placeholder: use a call_id printed by transcripts)"}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}
 	return m
 }

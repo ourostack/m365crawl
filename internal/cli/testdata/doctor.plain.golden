@@ -10,20 +10,22 @@ DOCTOR
 
 Ready checks
 ------------
-  ● teams_installed    Teams data found at <teams-root>
-  ● full_disk_access   the Teams container is readable
-  ● teams_origin       1 Teams origin(s) found
-  ● database_writable  <db> is writable
-  ● schema_version     schema v7
-  ● fts                full-text indexes present
-  ● archive_newer      the archive was written by this or an older m365crawl (derivation version 2)
-  ● last_sync_status   the last sync was ok
-  ● last_sync_age      last successful sync <age> ago
-  ▲ calendar_cache     the Teams calendar cache was last fresh <age> ago
-                       fix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.
-  ● outlook_store      the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on
-  ● mail_readable      mail is not read: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)
-  ● mail_archive_mode  the archive is readable by its owner only (0600)
+  ● teams_installed           Teams data found at <teams-root>
+  ● full_disk_access          the Teams container is readable
+  ● teams_origin              1 Teams origin(s) found
+  ● database_writable         <db> is writable
+  ● schema_version            schema v7
+  ● fts                       full-text indexes present
+  ● archive_newer             the archive was written by this or an older m365crawl (derivation version 2)
+  ● last_sync_status          the last sync was ok
+  ● last_sync_age             last successful sync <age> ago
+  ▲ calendar_cache            the Teams calendar cache was last fresh <age> ago
+                              fix: Open the Teams calendar once so Teams caches it, then run `m365crawl sync`.
+  ● outlook_store             the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on
+  ● mail_readable             mail is not read: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)
+  ● mail_archive_mode         the archive is readable by its owner only (0600)
+  ● transcripts_browser       edge at /opt/m365crawl-test/msedge (transcripts fetch runs it headless; doctor does not start it)
+  ● transcripts_profile_mode  no browser profile yet; transcripts fetch creates <db-dir>/browser, readable by its owner only
 
 Snapshot
 --------

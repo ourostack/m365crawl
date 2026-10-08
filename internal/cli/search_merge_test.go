@@ -205,8 +205,11 @@ func searchSourcesOf(its []map[string]any) []string {
 func itemAt(t *testing.T, it map[string]any) time.Time {
 	t.Helper()
 	key := "sent_at"
-	if it["source"] == "mail" {
+	switch it["source"] {
+	case "mail":
 		key = "received_at"
+	case "transcripts":
+		key = "at"
 	}
 	at, err := time.Parse(time.RFC3339, it[key].(string))
 	if err != nil {
@@ -379,7 +382,7 @@ func TestSearchFlagSourceConflicts(t *testing.T) {
 func TestSearchChatsOnlyFlagsNarrowToChatsAndSayWhy(t *testing.T) {
 	e := searchMailEnv(t)
 	m := searchJSON(t, e, "review", "--mentions-me")
-	if m["note"] != "--mentions-me applies to Teams chats only; mail was not searched" {
+	if m["note"] != "--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched" {
 		t.Fatalf("note = %v", m["note"])
 	}
 	if got := strings.Join(searchSourcesOf(items(t, m)), " "); got == "" || strings.Contains(got, "mail") {
@@ -389,11 +392,11 @@ func TestSearchChatsOnlyFlagsNarrowToChatsAndSayWhy(t *testing.T) {
 		t.Fatal("mail was not searched, so it has no entry")
 	}
 	m = searchJSON(t, e, "review", "--mentions-me", "--include-deleted")
-	if m["note"] != "--mentions-me and --include-deleted apply to Teams chats only; mail was not searched" {
+	if m["note"] != "--mentions-me and --include-deleted apply to Teams chats only; mail and meeting transcripts were not searched" {
 		t.Fatalf("two flags: %v", m["note"])
 	}
 	m = searchJSON(t, e, "review", "--mentions-me", "--include-deleted", "--html")
-	if m["note"] != "--mentions-me, --include-deleted and --html apply to Teams chats only; mail was not searched" {
+	if m["note"] != "--mentions-me, --include-deleted and --html apply to Teams chats only; mail and meeting transcripts were not searched" {
 		t.Fatalf("three flags: %v", m["note"])
 	}
 }
@@ -401,7 +404,7 @@ func TestSearchChatsOnlyFlagsNarrowToChatsAndSayWhy(t *testing.T) {
 func TestSearchFolderNarrowsToMailAndSaysWhy(t *testing.T) {
 	e := searchMailEnv(t)
 	m := searchJSON(t, e, "Hello", "--folder", "inbox")
-	if m["note"] != "--folder applies to mail only; Teams chats were not searched" {
+	if m["note"] != "--folder applies to mail only; Teams chats and meeting transcripts were not searched" {
 		t.Fatalf("note = %v", m["note"])
 	}
 	if got := strings.Join(searchSourcesOf(items(t, m)), " "); got != "mail mail mail" {
@@ -458,12 +461,12 @@ func TestSearchOnWindowsReturnsChatsWithANote(t *testing.T) {
 	e := searchMailEnv(t)
 	searchMailPlatform = "windows"
 	m := searchJSON(t, e, "Hello")
-	if m["note"] != "mail is not yet read on Windows; searched Teams chats only" || m["count"] != float64(2) {
+	if m["note"] != "mail is not yet read on Windows; searched Teams chats and meeting transcripts only" || m["count"] != float64(2) {
 		t.Fatalf("windows: %v", m)
 	}
 	// A chats-only flag already explains why mail is out; Windows adds nothing.
 	m = searchJSON(t, e, "review", "--mentions-me")
-	if m["note"] != "--mentions-me applies to Teams chats only; mail was not searched" {
+	if m["note"] != "--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched" {
 		t.Fatalf("note = %v", m["note"])
 	}
 	er := searchFails(t, e, 3, "Hello", "--source", "mail")
@@ -523,7 +526,7 @@ func TestSearchAccountFlagNamesTeamsAccountsOnly(t *testing.T) {
 		t.Fatalf("mail was not narrowed: %v", m["sources"])
 	}
 	m = searchJSON(t, e, "review", "--mentions-me", "--account", tenantA+"/"+userA)
-	if m["note"] != "--mentions-me applies to Teams chats only; mail was not searched" {
+	if m["note"] != "--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched" {
 		t.Fatalf("no second note when mail is out: %v", m["note"])
 	}
 }
@@ -639,7 +642,7 @@ func TestSearchReportsArchiveFailuresFromEitherSource(t *testing.T) {
 func TestSearchAccountNamingAMailAccountNarrowsMailAndSkipsChats(t *testing.T) {
 	e := searchMailEnv(t)
 	m := searchJSON(t, e, "Hello", "--account", searchMailAccount)
-	if m["note"] != "--account names a mail account; Teams chats were not searched" || m["count"] != float64(4) {
+	if m["note"] != "--account names a mail account; Teams chats and meeting transcripts were not searched" || m["count"] != float64(4) {
 		t.Fatalf("mail account: %v", m)
 	}
 	src := m["sources"].(map[string]any)

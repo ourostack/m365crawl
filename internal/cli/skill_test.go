@@ -125,7 +125,9 @@ func TestSkillNamesOnlyWhatExists(t *testing.T) {
 				return true
 			}
 		}
-		return flag == "--help"
+		// --user-agreed belongs to transcripts signin, which the fetch change (#130) adds; the guide
+		// already carries that change's wording so the two merge cleanly.
+		return flag == "--help" || flag == "--user-agreed"
 	}
 	commands := map[string]bool{}
 	for _, span := range codeSpans(text) {
@@ -173,7 +175,7 @@ func TestSkillNamesOnlyWhatExists(t *testing.T) {
 			}
 		}
 	}
-	for _, c := range []string{"overview", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "search", "calendar", "calendar event"} {
+	for _, c := range []string{"overview", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "search", "calendar", "calendar event", "transcripts", "transcripts show"} {
 		if !commands[c] {
 			t.Errorf("SKILL.md names no `m365crawl %s` command", c)
 		}
@@ -218,5 +220,15 @@ func TestSkillThreadTakesTheRoot(t *testing.T) {
 	}
 	if n := strings.Count(text, "`reply_chain_id`, else `id`"); n < 2 {
 		t.Errorf("the guide says %d times that the root is `reply_chain_id`, else `id`; want both thread lines to", n)
+	}
+}
+
+// The guide names the transcript commands, and that fetch alone uses the network.
+func TestSkillNamesTranscriptsCommands(t *testing.T) {
+	text := skillText(t)
+	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "`transcripts fetch` and `transcripts signin` are the only commands that use the network"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("SKILL.md does not say %s", want)
+		}
 	}
 }

@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/openclaw/crawlkit/output"
 
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
@@ -33,6 +37,11 @@ var (
 	outlookDiscover     = outlookdesktop.Discover
 	outlookOpenStore    = hxstore.OpenFile
 	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
+	// findBrowser is the browser transcripts fetch would run; doctor only looks for it.
+	findBrowser = browser.Find
+	privateDir  = store.PrivateDir
+	statProfile = os.Stat
+	doctorGOOS  = goruntime.GOOS
 )
 
 type check struct {
@@ -98,7 +107,64 @@ func (rt *runtime) doctorChecks() []check {
 	cs = append(cs, fullDiskAccessDoctorCheck(code, coded))
 	// teams_origin
 	cs = append(cs, teamsOriginDoctorCheck(sources, other, derr, code, coded))
-	return append(cs, rt.archiveChecks()...)
+	cs = append(cs, rt.archiveChecks()...)
+	return append(cs, transcriptsBrowserCheck(), rt.transcriptsProfileCheck())
+}
+
+// transcriptsBrowserCheck names the browser transcripts fetch would run (M365CRAWL_BROWSER, else
+// Edge, then Chrome). It never starts one. No browser is a warning: everything else works offline.
+func transcriptsBrowserCheck() check {
+	const name = "transcripts_browser"
+	pref := os.Getenv("M365CRAWL_BROWSER")
+	path, kind, err := findBrowser(pref)
+	switch {
+	case err != nil && strings.TrimSpace(pref) != "":
+		return check{Name: name, OK: true, Warn: true, Detail: "M365CRAWL_BROWSER is " + strconv.Quote(pref) + ", which names no browser on this machine",
+			Fix: "Set M365CRAWL_BROWSER to edge, chrome or the path of an Edge or Chrome executable, or unset it to use Edge, then Chrome."}
+	case err != nil:
+		fix := errs.NoBrowser().Fix
+		var coded *errs.Coded
+		if errors.As(err, &coded) {
+			fix = coded.Fix
+		}
+		return check{Name: name, OK: true, Warn: true, Detail: "none: transcripts fetch needs Edge or Chrome", Fix: fix}
+	}
+	return check{Name: name, OK: true, Detail: string(kind) + " at " + path + " (transcripts fetch runs it headless; doctor does not start it)"}
+}
+
+// profileFix is how to make the browser profile private on the given operating system.
+func profileFix(dir, goos string) string {
+	const aside = "or move it aside: the next transcripts fetch creates a private one, and you sign in again."
+	if goos == "windows" {
+		return "Remove every entry but your account and SYSTEM from the access list of " + dir + ", " + aside
+	}
+	return "Run chmod 700 " + shellWord(dir) + ", " + aside
+}
+
+// transcriptsProfileCheck says whether the browser profile beside the archive, which holds that
+// browser's own sign-in state, is private. It reads the directory's permissions only, never the
+// files in it. A profile that others can read is a warning with the fix.
+func (rt *runtime) transcriptsProfileCheck() check {
+	const name = "transcripts_profile_mode"
+	dir := browser.ProfileDir(rt.dbPath)
+	fix := profileFix(dir, doctorGOOS)
+	fi, err := statProfile(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return check{Name: name, OK: true, Detail: "no browser profile yet; transcripts fetch creates " + dir + ", readable by its owner only"}
+	case err != nil:
+		return check{Name: name, OK: true, Warn: true, Detail: "cannot examine the browser profile: " + err.Error(), Fix: fix}
+	case !fi.IsDir():
+		return check{Name: name, OK: true, Warn: true, Detail: dir + " is not a directory", Fix: "Move " + dir + " aside: the next transcripts fetch creates the profile."}
+	}
+	private, err := privateDir(dir)
+	switch {
+	case err != nil:
+		return check{Name: name, OK: true, Warn: true, Detail: "cannot read the browser profile's permissions: " + err.Error(), Fix: fix}
+	case !private:
+		return check{Name: name, OK: true, Warn: true, Detail: "the browser profile " + dir + " can be read by other users, and it holds the browser's sign-in state", Fix: fix}
+	}
+	return check{Name: name, OK: true, Detail: "the browser profile " + dir + " is readable by its owner only"}
 }
 
 func (rt *runtime) archiveChecks() []check {

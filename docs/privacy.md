@@ -1,6 +1,6 @@
 # Privacy
 
-m365crawl reads the Teams and Outlook caches already on your computer and writes one private archive on the same computer. Nothing leaves the machine. m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. The archive holds your real chats, mail and meetings, so protect it like the mailbox it contains. [SPEC.md](../SPEC.md) section 8 is the normative version of this page.
+m365crawl reads the Teams and Outlook caches already on your computer and writes one private archive on the same computer. Nothing leaves the machine. Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token. Everything else comes from files Teams and Outlook already keep on this machine. The archive holds your real chats, mail and meetings, so protect it like the mailbox it contains. [SPEC.md](../SPEC.md) section 8 is the normative version of this page.
 
 ## What m365crawl reads
 
@@ -16,7 +16,7 @@ On macOS reading these needs Full Disk Access for the app that runs m365crawl ([
 
 - **It never writes to Teams or Outlook.** There is no code path that writes to either app's storage. It cannot send, reply, react, move, delete or mark anything read.
 - **It never reads sign-in credentials.** Teams databases and object stores whose names look like credentials (`auth`, `token`, `credential`, `secret`, `cookie`, `msal`, `oneauth`, `key-store`, `keystore`, `keyval`, `session`, ignoring case) are never opened for values; a sync reports only how many it skipped. Token-shaped values found in other records (JWTs, `Bearer` strings, `access_token` and similar keys, `sig=` URL parameters) are replaced by `[redacted]` before they are archived, and the sync report counts them in `redacted`.
-- **It never uses the network.** m365crawl makes no network requests: it reads files Teams and Outlook already keep on this machine. There is no sign-in, no API call and no telemetry. Mail HTML is converted to text without fetching images or any other remote content.
+- **It uses the network only to fetch meeting transcripts.** Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token. The sign-in state lives in that browser profile (`browser` beside the archive, readable by you only), and m365crawl never reads it. Every other command reads files Teams and Outlook already keep on this machine. There is no app registration, no API token and no telemetry. Mail HTML is converted to text without fetching images or any other remote content.
 - **It never copies attachment files.** Attachments are recorded as metadata only: name, size, content type and whether Outlook's cache holds the file.
 
 ## What the archive holds
