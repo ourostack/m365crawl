@@ -275,7 +275,7 @@ func (c *messagesCmd) Run(rt *runtime) error {
 	}
 	f.IncludeDeleted, f.MentionsMe, f.DirectMentions, f.Unread, f.IncludeChannels = c.IncludeDeleted, c.MentionsMe, c.DirectMentions, c.Unread, c.IncludeChannels
 	f.Total = new(int)
-	rt.query = listQuery{filtered: c.msgFlags.filtered() || c.MentionsMe || c.DirectMentions || c.Unread, since: f.Since, until: f.Until}
+	rt.query = listQuery{filtered: c.filtered() || c.MentionsMe || c.DirectMentions || c.Unread, since: f.Since, until: f.Until}
 	return rt.read("messages", func(st *store.Store) (result, error) {
 		if st == nil {
 			return newList(nil, false), nil

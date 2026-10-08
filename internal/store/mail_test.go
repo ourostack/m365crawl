@@ -523,20 +523,20 @@ func TestMailThreadCap(t *testing.T) {
 func TestMailThreadSubjectCap(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {
-		n         int
+		n         uint32
 		truncated bool
 	}{{mailThreadCap, false}, {mailThreadCap + 1, true}} {
 		s := newStore(t)
 		var msgs []outlookmail.Message
-		for i := 1; i <= c.n; i++ {
-			msgs = append(msgs, mailMsg(uint32(i), fInbox, fmt.Sprintf("<s%d@x>", i), "Standup", i))
+		for i := uint32(1); i <= c.n; i++ {
+			msgs = append(msgs, mailMsg(i, fInbox, fmt.Sprintf("<s%d@x>", i), "Standup", int(i)))
 		}
 		mustCommitMail(t, s, mailBatch(mailT0, msgs...))
-		rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, uint32(c.n)) // the oldest message
-		if err != nil || grouping != "subject" || len(rows) != min(c.n, mailThreadCap) || truncated != c.truncated {
+		rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, c.n) // the oldest message
+		if err != nil || grouping != "subject" || len(rows) != min(int(c.n), mailThreadCap) || truncated != c.truncated {
 			t.Fatalf("group of %d: %d rows %q truncated=%v %v", c.n, len(rows), grouping, truncated, err)
 		}
-		if rows[0].DetailKey != uint32(c.n) {
+		if rows[0].DetailKey != c.n {
 			t.Fatalf("group of %d: the seed was cut, first row %d", c.n, rows[0].DetailKey)
 		}
 	}
