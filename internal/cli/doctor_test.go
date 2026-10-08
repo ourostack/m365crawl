@@ -14,6 +14,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/render"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -410,5 +411,39 @@ func TestDoctorSnapshotIsOmittedWhenTheArchiveCannotBeRead(t *testing.T) {
 	rt.dbPath = filepath.Join(t.TempDir(), "none.db")
 	if snap := rt.doctorSnapshot(); snap != nil {
 		t.Fatalf("snapshot of a missing archive = %+v, want nil", snap)
+	}
+}
+
+func TestDoctorSnapshotGroups(t *testing.T) {
+	snapOf := func(t *testing.T, tamper ...string) *render.Snapshot {
+		t.Helper()
+		e := newEnv(t)
+		e.sync()
+		for _, q := range tamper {
+			e.exec(q)
+		}
+		rt := newRuntime(context.Background(), &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
+		rt.dbPath = e.db
+		return rt.doctorSnapshot()
+	}
+	labels := func(s *render.Snapshot) (out []string) {
+		for _, g := range s.Groups {
+			out = append(out, g.Label)
+		}
+		return out
+	}
+	if got := labels(snapOf(t)); strings.Join(got, ",") != "Teams,Calendar" {
+		t.Fatalf("groups = %v", got)
+	}
+	// A calendar that cannot be read, or holds no live event, leaves its line out.
+	if got := labels(snapOf(t, "alter table calendar_sources rename column synced_at to synced_at_x")); strings.Join(got, ",") != "Teams" {
+		t.Fatalf("unreadable calendar: groups = %v", got)
+	}
+	if got := labels(snapOf(t, "delete from calendar_source_events")); strings.Join(got, ",") != "Teams" {
+		t.Fatalf("empty calendar: groups = %v", got)
+	}
+	// The sync history cannot be read: no snapshot.
+	if s := snapOf(t, "drop table sync_runs"); s != nil {
+		t.Fatalf("snapshot = %+v, want nil", s)
 	}
 }

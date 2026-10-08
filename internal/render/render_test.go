@@ -151,6 +151,19 @@ func TestDoctor(t *testing.T) {
 	both(t, "doctor_snap_pairs_only", func(w *bytes.Buffer, c bool) {
 		Doctor(w, "Doctor", nil, &Snapshot{Pairs: [][2]string{{"a", "1"}}}, c)
 	})
+	both(t, "doctor_snap_groups", func(w *bytes.Buffer, c bool) {
+		Doctor(w, "", nil, &Snapshot{
+			Groups: []SnapshotGroup{
+				{Label: "Teams", Pairs: [][2]string{{"chats", "6"}, {"channels", "4"}}},
+				{Label: "Mail", Pairs: [][2]string{{"messages", "37"}, {"unread", ""}}},
+				{Label: "Calendar"},
+			},
+			Lines: [][2]string{{"last sync", "2026-09-27 10:00"}},
+		}, c)
+	})
+	both(t, "doctor_snap_groups_only", func(w *bytes.Buffer, c bool) {
+		Doctor(w, "", nil, &Snapshot{Groups: []SnapshotGroup{{Label: "Teams", Pairs: [][2]string{{"chats", "6"}}}}}, c)
+	})
 }
 
 func TestTable(t *testing.T) {

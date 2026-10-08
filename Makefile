@@ -33,7 +33,7 @@ help:
 		'  coverage       Enforce 100% function coverage on internal/... (COVERAGE_PACKAGES to narrow on Unix; on Windows the PowerShell gate proves the Windows-only files are covered).' \
 		'  check          Run every local gate enforced by CI.' \
 		'  snapshot       Build release artifacts locally without publishing.' \
-		'  screenshot     Regenerate screenshot.png from the committed fixture (Node 22, Edge via Playwright).' \
+		'  screenshot     Regenerate screenshot.png from synthetic Teams and Outlook data (Node 22, headless Edge via Playwright; M365CRAWL_SHOT_REAL=1 renders your own archive).' \
 		'  clean          Remove local build output.'
 
 build:
