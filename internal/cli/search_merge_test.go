@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -429,7 +430,11 @@ func TestSearchWithoutMailInTheArchiveReturnsChatsWithANote(t *testing.T) {
 	e := searchEnv(t)
 	searchArchive(t, e, false)
 	// The sync read the profile and found no mail, so a sync is not the fix: the note says so.
-	const readEmpty = "mail was read and the Outlook cache holds no messages"
+	readEmpty := "mail was read and the Outlook cache holds no messages"
+	if goruntime.GOOS == "windows" {
+		// A sync on a Windows host reads no mail, so with the platform pinned to a Mac the archive looks unread.
+		readEmpty = "mail is not in the archive yet; run m365crawl sync"
+	}
 	m := searchJSON(t, e, "Hello")
 	if m["note"] != readEmpty || m["count"] != float64(2) {
 		t.Fatalf("note/count = %v / %v", m["note"], m["count"])
