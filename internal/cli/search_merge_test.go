@@ -671,12 +671,9 @@ func TestSearchAccountConflictsWithTheOtherSource(t *testing.T) {
 	}
 }
 
-// A search mail item has the keys of a mail list item plus source, so the two cannot drift apart
-// while the mail commands keep their own copy of the item.
+// A search mail item has the keys of a mail list item plus source, so the two cannot drift apart.
 func TestSearchMailItemHasTheKeysOfAMailListItem(t *testing.T) {
-	mailListKeys := []string{"id", "account", "folder", "folder_kind", "to_me", "subject", "from_name", "from_address", "recipient_count",
-		"recipients_preview", "in_reply_to", "received_at", "sent_at", "is_read", "flag", "importance", "has_attachments", "preview",
-		"internet_message_id", "ical_uid", "gone_at", "evicted_at", "text_truncated"}
+	mailListKeys := jsonKeys(reflect.TypeFor[mailListItem]())
 	got := jsonKeys(reflect.TypeFor[searchMailItem]())
 	if got[0] != "source" || strings.Join(got[1:], ",") != strings.Join(mailListKeys, ",") {
 		t.Fatalf("search mail item keys:\n%v\nmail list item keys:\n%v", got, mailListKeys)
