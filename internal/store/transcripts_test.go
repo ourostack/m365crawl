@@ -678,15 +678,62 @@ func TestTranscriptCallsNameTheEvent(t *testing.T) {
 	}
 }
 
-func TestEventOfCallPrefersTheSmallestKey(t *testing.T) {
-	cr := &chatRecordings{matched: map[string][]CalendarRecording{
-		"k2": {{MessageID: "a"}}, "k1": {{MessageID: "b"}}, "k0": {{MessageID: "other"}},
-	}, calls: map[string]string{"a": "call-x", "b": "call-x", "other": "call-z"}}
-	c := TranscriptCall{CallID: "call-x"}
-	for i := 0; i < 20; i++ { // map order must not decide
-		if got := eventOfCall(cr, c); got != "k1" {
-			t.Fatalf("event %q", got)
-		}
+// eventKeyOf is the event key TranscriptCalls prints for one call.
+func eventKeyOf(t *testing.T, s *Store, call string) string {
+	t.Helper()
+	calls, _, err := s.TranscriptCalls(context.Background(), TranscriptFilter{Calls: []string{call}})
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("%s: %+v, %v", call, calls, err)
+	}
+	return calls[0].EventKey
+}
+
+// A notice re-posted inside a later occurrence's window does not move the call: a call belongs to
+// the occurrence of its earliest Success recording notice, and to that one alone.
+func TestRepostInALaterOccurrenceKeepsTheCall(t *testing.T) {
+	s := tEventSeed(t)
+	o1, o3 := calendar.Key(qEvent("o1", 3)), calendar.Key(qEvent("o3", 17))
+	s.tMessage(t, acctA, qChat, "t-1b-again", transcripts.TypeRecording, "2026-11-17T10:30:00.000Z", tNotice("call-1b", "0", "Success", "Recording+Transcript", "2026-11-03T10:30:00Z", "drive:E1B"))
+	tDerive(t, s, qTeams)
+	if calls, _ := resolve(t, s, nil, o1); calls != "call-1b,call-1" {
+		t.Fatalf("o1: %q", calls)
+	}
+	// The re-post does fall in o3's window: the event lists it among its recordings.
+	d, err := s.CalendarEvent(context.Background(), nil, o3)
+	if err != nil || len(d.Recordings) != 1 || d.Recordings[0].MessageID != "t-1b-again" {
+		t.Fatalf("o3's recordings: %+v, %v", d.Recordings, err)
+	}
+	unknownMeeting(t, s, nil, EventID(qTeams, o3)) // o3 has no recording of its own
+	if got := eventKeyOf(t, s, "call-1b"); got != o1 {
+		t.Fatalf("call-1b's event %q, want %q", got, o1)
+	}
+}
+
+// A call's transcript notice in another occurrence's window does not put the call there too. A
+// call with only a transcript notice belongs to the occurrence that notice fell in.
+func TestTranscriptNoticeInAnotherOccurrence(t *testing.T) {
+	s := tEventSeed(t)
+	o2, o3 := calendar.Key(qEvent("o2", 10)), calendar.Key(qEvent("o3", 17))
+	s.tMessage(t, acctA, qChat, "t-2-tr", transcripts.TypeTranscript, "2026-11-17T10:30:00.000Z", tTranscriptNotice("call-2"))
+	tDerive(t, s, qTeams)
+	if calls, _ := resolve(t, s, nil, o2); calls != "call-2" {
+		t.Fatalf("o2: %q", calls)
+	}
+	if d, err := s.CalendarEvent(context.Background(), nil, o3); err != nil || len(d.Recordings) != 1 || d.Recordings[0].MessageID != "t-2-tr" {
+		t.Fatalf("o3's recordings: %+v, %v", d.Recordings, err)
+	}
+	unknownMeeting(t, s, nil, EventID(qTeams, o3))
+	if got := eventKeyOf(t, s, "call-2"); got != o2 {
+		t.Fatalf("call-2's event %q, want %q", got, o2)
+	}
+	// Only a transcript notice: the call is o3's.
+	s.tMessage(t, acctA, qChat, "t-9-tr", transcripts.TypeTranscript, "2026-11-17T10:40:00.000Z", tTranscriptNotice("call-9"))
+	tDerive(t, s, qTeams)
+	if calls, _ := resolve(t, s, nil, o3); calls != "call-9" {
+		t.Fatalf("o3: %q", calls)
+	}
+	if got := eventKeyOf(t, s, "call-9"); got != o3 {
+		t.Fatalf("call-9's event %q, want %q", got, o3)
 	}
 }
 
