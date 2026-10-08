@@ -5,13 +5,14 @@ description: Use when an agent needs to read the user's Microsoft Teams chats an
 
 # m365crawl
 
-m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the new Outlook for Mac's mail, and the Teams and Outlook calendar) into one local SQLite archive, and answers from it read-only. It cannot send, reply, react or mark anything read. Only `transcripts fetch` and `transcripts signin` use the network, through an Edge (or Chrome) that m365crawl starts with its own browser profile; every other command reads the archive offline. It knows only what the desktop apps cached, so old history can be missing. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
+m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the new Outlook for Mac's mail, and the Teams and Outlook calendar) into one local SQLite archive, and answers from it offline and read-only. It cannot send, reply, react or mark anything read. It knows only what the desktop apps cached, so old history can be missing. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
 
 ## Privacy
 
 - The archive holds the user's private chats and mail. Quote from it only where the user asked; never paste it into issues, logs or other tools unasked.
 - Sign-in credentials are never read, and token-shaped values are stored as `[redacted]`.
 - Never edit Teams' or Outlook's folders, or the archive, by hand; use the commands.
+- `transcripts fetch` and `transcripts signin` are the only commands that use the network, through Edge (or Chrome) with m365crawl's own browser profile; every other command reads the archive offline. Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes, then pass `--user-agreed` and relay the steps it prints.
 
 ## Start here
 

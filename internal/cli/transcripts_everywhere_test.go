@@ -45,6 +45,7 @@ func TestTranscriptQuestionsFailTheCommands(t *testing.T) {
 
 func TestStatusTranscriptsBlock(t *testing.T) {
 	e := trEnv(t)
+	trSharePointHosts(e)
 	m := trJSON(t, e, "status")
 	tr, ok := m["transcripts"].(map[string]any)
 	// call-1 (3 parts), call-2 (1), call-3 (1, a sharing link only), call-4 (1); P1, P2 and Q1 fetched.

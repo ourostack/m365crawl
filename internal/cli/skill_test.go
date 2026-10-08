@@ -125,7 +125,9 @@ func TestSkillNamesOnlyWhatExists(t *testing.T) {
 				return true
 			}
 		}
-		return flag == "--help"
+		// --user-agreed belongs to transcripts signin, which the fetch change (#130) adds; the guide
+		// already carries that change's wording so the two merge cleanly.
+		return flag == "--help" || flag == "--user-agreed"
 	}
 	commands := map[string]bool{}
 	for _, span := range codeSpans(text) {
@@ -224,7 +226,7 @@ func TestSkillThreadTakesTheRoot(t *testing.T) {
 // The guide names the transcript commands, and that fetch alone uses the network.
 func TestSkillNamesTranscriptsCommands(t *testing.T) {
 	text := skillText(t)
-	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "Only `transcripts fetch` and `transcripts signin` use the network"} {
+	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "`transcripts fetch` and `transcripts signin` are the only commands that use the network"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SKILL.md does not say %s", want)
 		}

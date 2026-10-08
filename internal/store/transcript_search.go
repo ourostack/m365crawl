@@ -36,15 +36,13 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 	if strings.TrimSpace(query) != "" {
 		match := buildFTSQuery(query)
 		if match == "" {
-			return nil, false, searchUsage("search query has no searchable terms")
+			return nil, false, transcriptSearchUsage("search query has no searchable terms")
 		}
 		// The speaker column is matched by --from, so the words look in the text only.
 		w.add(`transcript_fts match ?`, "text : ("+match+")")
 		from = ` from transcript_fts join transcript_entries e on e.rowid=transcript_fts.rowid`
 	} else if f.Speaker == "" && f.Since.IsZero() && f.Until.IsZero() {
-		u := errs.Usage("a transcript search needs words to find or at least one filter (--from, --since, --until)")
-		u.Fix = "Give words to find, or --from (a part of the speaker's name), --since or --until; `m365crawl transcripts` lists the recorded meetings."
-		return nil, false, u
+		return nil, false, transcriptSearchUsage("a transcript search needs words to find or at least one filter (--from, --since, --until)")
 	}
 	if f.Account != nil {
 		w.add(`p.account_id=?`, accountString(f.Account))
@@ -97,6 +95,13 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 		return nil, false, err
 	}
 	return out, truncated, nil
+}
+
+// transcriptSearchUsage is a usage error of a transcript search, with a fix that fits transcripts.
+func transcriptSearchUsage(msg string) *errs.Coded {
+	u := errs.Usage(msg)
+	u.Fix = "Give words to find, or --from (a part of the speaker's name), --since or --until; `m365crawl transcripts` lists the recorded meetings."
+	return u
 }
 
 // collapseHits groups matching entries, which come ordered by call, part and entry, into one hit

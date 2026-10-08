@@ -32,6 +32,7 @@ func trSecondCall(t *testing.T, e *env) {
 	if err := sess.Commit(); err != nil {
 		t.Fatal(err)
 	}
+	trSharePointHosts(e)
 	r := transcripts.FetchResult{State: transcripts.StateOK, HTTPStatus: 200, Browser: "edge", At: trFetchedAt.Add(-24 * 60 * 60 * 1e9),
 		Entries: []transcripts.Entry{{Speaker: "Ada Example", StartMS: trMS(0), Text: "A last word."}}}
 	if err := st.SaveTranscript(ctx, trAccount, "d:b!d1/S1", r); err != nil {
@@ -87,6 +88,7 @@ func TestCalendarEventTranscripts(t *testing.T) {
 
 func TestCalendarEventTranscriptsAllFetched(t *testing.T) {
 	e := trEnv(t)
+	trSharePointHosts(e)
 	st, err := store.Open(context.Background(), e.db)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +125,7 @@ func TestCalendarEventNoTranscripts(t *testing.T) {
 
 func TestCalendarEventFieldsTranscripts(t *testing.T) {
 	e := trEnv(t)
+	trSharePointHosts(e)
 	m := trJSON(t, e, "calendar", "event", trEventID(), "--fields", "event_id,transcripts")
 	if got := eventTranscripts(t, m); len(got) != 1 || got[0]["call_id"] != "call-1" || m["subject"] != nil {
 		t.Fatalf("fields: %v", m)
@@ -141,6 +144,13 @@ func TestCalendarEventTranscriptsFailuresSurface(t *testing.T) {
 	if code == 0 || errorOf(t, errOut)["code"] == nil {
 		t.Fatalf("a broken transcript table must fail the event: %d %s", code, errOut)
 	}
+}
+
+// trSharePointHosts gives the derived parts a host under a SharePoint domain, so what counts as
+// fetchable does not hang on how the fetch judges the seed's test host.
+func trSharePointHosts(e *env) {
+	e.t.Helper()
+	e.exec(`update transcript_parts set host='contoso.sharepoint.com' where host<>''`)
 }
 
 // noticesOf is a result's notices as strings.

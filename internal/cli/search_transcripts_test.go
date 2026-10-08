@@ -16,8 +16,8 @@ func seedSearchTranscripts(t *testing.T, e *env) {
 	t.Helper()
 	e.exec(`insert into conversations(tenant_id,user_id,id,kind,title,display_name,updated_at) values('` + tenantA + `','` + userA + `','` + searchMeeting + `','Meeting','','Search review','2023-11-01T00:00:00.000Z')`)
 	for _, p := range []struct{ key, ord, starts string }{{"d:b!s/T1", "1", "2023-11-14T22:14:00.000Z"}, {"d:b!s/T2", "2", "2023-11-14T22:20:00.000Z"}} {
-		e.exec(`insert into transcript_parts(account_id, call_id, part_key, thread_id, message_id, ordinal, starts_at, ref_quality, sent_at, drive_id, item_id)
-		  values('` + trAccount + `','call-s1','` + p.key + `','` + searchMeeting + `','m` + p.ord + `',` + p.ord + `,'` + p.starts + `','drive_item','2023-11-14T23:00:00.000Z','b!s','T` + p.ord + `')`)
+		e.exec(`insert into transcript_parts(account_id, call_id, part_key, thread_id, message_id, ordinal, starts_at, ref_quality, sent_at, host, site_root, drive_id, item_id, transcript_id)
+		  values('` + trAccount + `','call-s1','` + p.key + `','` + searchMeeting + `','m` + p.ord + `',` + p.ord + `,'` + p.starts + `','drive_item','2023-11-14T23:00:00.000Z','contoso.sharepoint.com','/teams/site-a','b!s','T` + p.ord + `','tr-T` + p.ord + `')`)
 	}
 	fetched := trFetchedAt.Format("2006-01-02T15:04:05.000Z")
 	for _, x := range []struct {

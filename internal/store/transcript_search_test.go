@@ -19,6 +19,7 @@ func tSearchSeed(t *testing.T) (*Store, time.Time) {
 	s := newStore(t)
 	tSeed(t, s)
 	tDerive(t, s, tAcctA)
+	tSharePointHosts(t, s)
 	at := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
 	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM1", okResult(at,
 		transcripts.Entry{Speaker: "Ada Example", StartMS: ms(0), Text: "the budget review starts"},
@@ -27,6 +28,13 @@ func tSearchSeed(t *testing.T) (*Store, time.Time) {
 	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM2", okResult(at, transcripts.Entry{Speaker: "Bo Example", StartMS: ms(30_000), Text: "the budget is fine"})))
 	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM5", okResult(at, transcripts.Entry{Speaker: "Cy Example", Text: "budget again"})))
 	return s, at
+}
+
+// tSharePointHosts gives the derived parts a host under a SharePoint domain, so what counts as
+// fetchable does not hang on how the fetch judges the seed's test host.
+func tSharePointHosts(t *testing.T, s *Store) {
+	t.Helper()
+	s.qExec(t, `update transcript_parts set host='contoso.sharepoint.com' where host<>''`)
 }
 
 func hitList(hits []TranscriptHit) string {
@@ -93,7 +101,7 @@ func TestTranscriptSearchFilters(t *testing.T) {
 	}
 	for _, q := range []string{"", `""`} {
 		_, _, err := s.TranscriptSearch(ctx, q, TranscriptFilter{})
-		if coded := (*errs.Coded)(nil); !errors.As(err, &coded) || coded.Code != errs.CodeUsage {
+		if coded := (*errs.Coded)(nil); !errors.As(err, &coded) || coded.Code != errs.CodeUsage || strings.Contains(coded.Fix, "messages") || !strings.Contains(coded.Fix, "m365crawl transcripts") {
 			t.Errorf("%q: %v", q, err)
 		}
 	}
@@ -139,6 +147,7 @@ func TestTranscriptFetchedWithNoEntries(t *testing.T) {
 	s := newStore(t)
 	tSeed(t, s)
 	tDerive(t, s, tAcctA)
+	tSharePointHosts(t, s)
 	at := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
 	// A failed attempt is not a fetch.
 	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM5", transcripts.FetchResult{State: transcripts.StateFailed, At: at}))
