@@ -233,8 +233,9 @@ type searchCmd struct {
 func (searchCmd) Help() string {
 	return "Searches Teams chats and Outlook mail together; every item has a source (chats or mail) and the result's sources says how many items each source gave and whether it had more. Items are newest first across both sources, by sent_at for chats and received_at for mail.\n" +
 		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with the other --source it is a usage error (flag_source_conflict). --from, --since, --until, --limit and --fields apply to both; --fields accepts the keys of both kinds of item.\n" +
-		"note also says when mail is left out because it is not in the archive yet or not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
-		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only."
+		"note also says when mail is left out and why: it is not in the archive yet, the Outlook source is off, there is no Outlook profile, or mail is not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
+		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only.\n" +
+		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`."
 }
 
 func (c *searchCmd) Run(rt *runtime) error {
@@ -418,6 +419,11 @@ func sqlEngineError(err error) *errs.Coded {
 // parseThreadTarget resolves "<conversation> <root>" or a Teams message link to a conversation
 // id and the thread's root message id. A channel reply's link names the root as parentMessageId.
 func parseThreadTarget(target, root string) (conversation, rootID string, err error) {
+	if strings.HasPrefix(target, outlookAccountPrefix) {
+		c := errs.Usage(target + " is a mail id; thread reads Teams chats and channels")
+		c.Fix = "Run `m365crawl mail thread " + target + "`."
+		return "", "", c
+	}
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		if root == "" {
 			return "", "", errs.Usage("thread needs a root message id after the conversation, or a Teams message link")

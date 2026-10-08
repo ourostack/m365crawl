@@ -2,6 +2,7 @@ package cli
 
 import (
 	goruntime "runtime"
+	"slices"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/store"
@@ -43,7 +44,7 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	if st == nil {
 		return "no archive yet: run m365crawl sync", nil
 	}
-	if note, err := rt.unknownAccountNote(st); note != "" || err != nil {
+	if note, err := rt.teamsAccountNote(st); note != "" || err != nil {
 		return note, err
 	}
 	oldest, newest, err := messageWindowOf(st, rt.ctx, rt.account)
@@ -66,17 +67,55 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	return noneOfThisKind, nil
 }
 
-// unknownAccountNote is the note of a read whose --account names a Teams account the archive does
-// not hold; empty when there is no --account or the archive holds it.
+// unknownAccountNote is the note of a read whose --account names an account the archive does not
+// hold: a Teams account missing from its accounts, or an Outlook account (outlook/<profile>) with
+// neither mail nor a calendar. Empty when there is no --account or the archive holds it.
 func (rt *runtime) unknownAccountNote(st *store.Store) (string, error) {
-	if rt.account == nil {
+	switch mail := rt.mailAccount(); {
+	case rt.account == nil:
 		return "", nil
+	case mail != "":
+		ok, err := rt.holdsOutlookAccount(st, mail)
+		if err != nil || ok {
+			return "", err
+		}
+		return "the archive holds no data for account " + mail + ": m365crawl mail folders and m365crawl calendar sources list the Outlook accounts it holds", nil
 	}
 	ok, err := st.HasAccount(rt.ctx, *rt.account)
 	if err != nil || ok {
 		return "", err
 	}
 	return "the archive holds no data for account " + rt.account.TenantID + "/" + rt.account.UserID + ": m365crawl whoami lists the accounts it holds", nil
+}
+
+// teamsAccountNote is unknownAccountNote for a Teams read, which an Outlook account the archive
+// holds has nothing for: it says so and points to that account's mail.
+func (rt *runtime) teamsAccountNote(st *store.Store) (string, error) {
+	note, err := rt.unknownAccountNote(st)
+	return rt.forTeams(note), err
+}
+
+// forTeams turns unknownAccountNote's note into a Teams read's: for an Outlook account the archive
+// holds, that the account has no Teams chats and where its mail is.
+func (rt *runtime) forTeams(note string) string {
+	if mail := rt.mailAccount(); note == "" && mail != "" {
+		return "--account " + mail + " names an Outlook account, which holds no Teams chats: run m365crawl mail list --account " + mail + " for its mail, or pass a Teams account that m365crawl whoami lists"
+	}
+	return note
+}
+
+// holdsOutlookAccount says whether the archive holds mail, a mail read or a calendar of the
+// Outlook account.
+func (rt *runtime) holdsOutlookAccount(st *store.Store, account string) (bool, error) {
+	m, err := st.MailStatusOf(rt.ctx, account)
+	if err != nil || m.Messages > 0 || !m.SyncedAt.IsZero() {
+		return err == nil, err
+	}
+	res, err := calendarSourcesOf(st, rt.ctx, store.CalendarSourcesFilter{Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(res.Rows, func(r store.CalendarSource) bool { return r.AccountID == account }), nil
 }
 
 // calendarSourcesOf is the test seam of the calendar sources an empty calendar list is explained by.

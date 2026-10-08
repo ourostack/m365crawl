@@ -119,12 +119,17 @@ func (overviewCmd) Run(rt *runtime) error {
 	}
 	defer func() { _ = st.Close() }()
 	res.ArchiveExists = true
-	note, err := rt.unknownAccountNote(st) // what chats and the calendar say for an account the archive lacks
+	// What chats and the calendar say for an account the archive lacks, or chats for a mail account.
+	note, err := rt.unknownAccountNote(st)
 	if err != nil {
 		return asCoded(err)
 	}
-	for _, fill := range []func(*store.Store, string) (overviewSource, error){rt.overviewChats, rt.overviewMail, rt.overviewCalendar} {
-		src, err := fill(st, note)
+	for _, fill := range []func() (overviewSource, error){
+		func() (overviewSource, error) { return rt.overviewChats(st, rt.forTeams(note)) },
+		func() (overviewSource, error) { return rt.overviewMail(st) },
+		func() (overviewSource, error) { return rt.overviewCalendar(st, note) },
+	} {
+		src, err := fill()
 		if err != nil {
 			return asCoded(err)
 		}
@@ -180,9 +185,11 @@ const (
 
 // overviewMail says what the archive holds of mail and, when it holds none, why: mail is not read
 // on this platform, the Outlook source is off, there is no Outlook profile, it was read and is
-// empty, or it was never read. Only the last is fixed by a sync.
-func (rt *runtime) overviewMail(st *store.Store, _ string) (overviewSource, error) {
-	b, err := rt.mailStatus(st)
+// empty, or it was never read. Only the last is fixed by a sync. --account outlook/<profile>
+// narrows it to that account; a Teams account leaves it covering every Outlook account.
+func (rt *runtime) overviewMail(st *store.Store) (overviewSource, error) {
+	account := rt.mailAccount()
+	b, err := rt.mailStatusOf(st, account)
 	if err != nil {
 		return overviewSource{}, err
 	}
@@ -190,19 +197,35 @@ func (rt *runtime) overviewMail(st *store.Store, _ string) (overviewSource, erro
 	switch {
 	case b.State == mailStateUnsupportedPlatform:
 		return overviewSource{Source: "mail", State: overviewUnsupported, Note: errs.MailUnsupportedPlatform().Message}, nil
+	case account != "" && b.Messages == 0:
+		src.State, src.Note = overviewEmpty, "no mail is archived for account "+account+": m365crawl mail folders lists the Outlook accounts with mail"
 	case b.Messages > 0 && !rt.outlookOn:
 		src.Note = "the Outlook source is off for this run, so this archived mail is not being refreshed"
 	case b.Messages > 0:
-	case !rt.outlookOn:
-		src.State, src.Note = overviewOff, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
-	case b.State == mailStateNoProfile:
-		src.State, src.Note = overviewNoProfile, "no new Outlook for Mac profile on this machine, so there is no mail to read"
-	case b.State == mailStateOK:
-		src.State, src.Note = overviewEmpty, "mail was read and the Outlook cache holds no messages"
 	default:
-		src.State, src.Note = overviewEmpty, "no mail has been read yet: run m365crawl sync; m365crawl doctor says why if it stays empty"
+		src.State, src.Note = rt.whyNoMail(b)
+	}
+	if rt.account != nil && account == "" { // a Teams account: mail is not narrowed by it
+		src.Note = strings.TrimPrefix(src.Note+"; mail is shown for every Outlook account, and --account outlook/<profile> narrows it", "; ")
 	}
 	return src, nil
+}
+
+// noMailYet is the note of mail that was never read, the one cause a sync fixes.
+const noMailYet = "no mail has been read yet: run m365crawl sync; m365crawl doctor says why if it stays empty"
+
+// whyNoMail is the state and note of an archive with no mail on a platform that reads it: the
+// Outlook source is off, there is no Outlook profile, the read found none, or none was read yet.
+func (rt *runtime) whyNoMail(b *mailStatusBlock) (state, note string) {
+	switch {
+	case !rt.outlookOn:
+		return overviewOff, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
+	case b.State == mailStateNoProfile:
+		return overviewNoProfile, "no new Outlook for Mac profile on this machine, so there is no mail to read"
+	case b.State == mailStateOK:
+		return overviewEmpty, "mail was read and the Outlook cache holds no messages"
+	}
+	return overviewEmpty, noMailYet
 }
 
 // calendarAgendaOf is the test seam of the agenda the overview reads today's coverage from.

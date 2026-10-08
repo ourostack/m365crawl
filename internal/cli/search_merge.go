@@ -265,8 +265,18 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if !has {
 			searchMailNow = false
-			if st != nil || !p.chats { // with no archive and chats searched, the empty note says to sync
-				notes = append(notes, "mail is not in the archive yet; run m365crawl sync")
+			b, err := rt.mailStatus(st)
+			if err != nil {
+				return nil, err
+			}
+			const syncForMail = "mail is not in the archive yet; run m365crawl sync"
+			why := syncForMail
+			if _, n := rt.whyNoMail(b); n != noMailYet {
+				why = n // a sync would read no mail: say why instead
+			}
+			// With no archive and chats searched, the empty note already says to sync.
+			if st != nil || !p.chats || why != syncForMail {
+				notes = append(notes, why)
 			}
 		}
 	}

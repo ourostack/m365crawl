@@ -118,6 +118,37 @@ func TestMailStatus(t *testing.T) {
 	}
 }
 
+// One account's status counts only its mail, folders and read marker.
+func TestMailStatusOfOneAccount(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	mustCommitMail(t, s, mailBatch(mailT0, mailMsg(1, fInbox, "<1@x>", "One", 30), mailMsg(2, fInbox, "<2@x>", "Two", 12)))
+	if err := s.SetMailRead(ctx, mailAcct, mailT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMailRead(ctx, "outlook/other", mailT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.MailStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := s.MailStatusOf(ctx, mailAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mine.Messages != 2 || mine.Folders != all.Folders || !mine.SyncedAt.Equal(mailT0) || !mine.NewestAt.Equal(mailT0.AddDate(0, 0, -12)) {
+		t.Fatalf("mine: %+v", mine)
+	}
+	other, err := s.MailStatusOf(ctx, "outlook/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Messages != 0 || other.Folders != 0 || !other.OldestAt.IsZero() || !other.SyncedAt.Equal(mailT0.Add(time.Hour)) {
+		t.Fatalf("other: %+v", other)
+	}
+}
+
 func TestMailStateWriteFailuresRollBack(t *testing.T) {
 	t.Run("read", func(t *testing.T) {
 		sweepFaults(t, nil, func(ctx context.Context, s *Store) error { return s.SetMailRead(ctx, mailAcct, mailT0) })

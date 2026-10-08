@@ -206,3 +206,17 @@ func TestFiveJobsHaveCommands(t *testing.T) {
 		}
 	}
 }
+
+// A channel reply's own id reads only that reply, so the guide gives thread the root: the
+// message's reply_chain_id, else its id.
+func TestSkillThreadTakesTheRoot(t *testing.T) {
+	text := skillText(t)
+	for _, span := range codeSpans(text) {
+		if strings.HasPrefix(span, "m365crawl thread ") && span != "m365crawl thread <conversation_id> <root_id>" {
+			t.Errorf("`%s`: thread takes <conversation_id> <root_id>", span)
+		}
+	}
+	if n := strings.Count(text, "`reply_chain_id`, else `id`"); n < 2 {
+		t.Errorf("the guide says %d times that the root is `reply_chain_id`, else `id`; want both thread lines to", n)
+	}
+}

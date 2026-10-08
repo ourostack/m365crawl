@@ -86,6 +86,12 @@ type MailStatus struct {
 
 // MailStatus counts the archive's live mail and finds when it was last read.
 func (s *Store) MailStatus(ctx context.Context) (MailStatus, error) {
+	return s.MailStatusOf(ctx, "")
+}
+
+// MailStatusOf is MailStatus for one mail account (outlook/<profile>), or every account when
+// account is empty.
+func (s *Store) MailStatusOf(ctx context.Context, account string) (MailStatus, error) {
 	var m MailStatus
 	var oldest, newest, synced sql.NullString
 	// A read-only archive from before mail (or before the meta table) has no mail tables yet: it
@@ -97,13 +103,19 @@ func (s *Store) MailStatus(ctx context.Context) (MailStatus, error) {
 	if tables < 3 {
 		return m, nil
 	}
+	live := `gone_at is null and evicted_at is null and (?='' or account=?)`
+	marker := escapeLike(mailReadKey) + "%"
+	if account != "" {
+		marker = escapeLike(mailReadKey + account)
+	}
 	err := s.db.QueryRowContext(ctx, `select
-  (select count(*) from mail_messages where gone_at is null and evicted_at is null),
-  (select count(*) from mail_messages where gone_at is null and evicted_at is null and is_read=0),
-  (select count(*) from mail_folders),
-  (select min(received_at) from mail_messages where gone_at is null and evicted_at is null),
-  (select max(received_at) from mail_messages where gone_at is null and evicted_at is null),
-  (select max(value) from meta where key like 'outlook\_mail\_read:%' escape '\')`).
+  (select count(*) from mail_messages where `+live+`),
+  (select count(*) from mail_messages where `+live+` and is_read=0),
+  (select count(*) from mail_folders where ?='' or account=?),
+  (select min(received_at) from mail_messages where `+live+`),
+  (select max(received_at) from mail_messages where `+live+`),
+  (select max(value) from meta where key like ? escape '\')`,
+		account, account, account, account, account, account, account, account, account, account, marker).
 		Scan(&m.Messages, &m.Unread, &m.Folders, &oldest, &newest, &synced)
 	if err != nil {
 		return MailStatus{}, err

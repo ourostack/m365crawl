@@ -26,6 +26,7 @@ const defaultMaxAge = 15 * time.Minute
 type runtime struct {
 	ctx            context.Context
 	g              *Globals
+	args           []string // the command line, for the typo suggestion of an unknown command
 	stdout, stderr io.Writer
 	stdoutTTY      bool
 	stderrTTY      bool
@@ -93,6 +94,16 @@ func (rt *runtime) setup() error {
 		}
 	}
 	return nil
+}
+
+// mailAccount is the Outlook account (outlook/<profile>) --account names, or "" for a Teams account
+// or none. Commands other than mail and search keep it as an account with tenant "outlook", which
+// is how the calendar names an Outlook profile.
+func (rt *runtime) mailAccount() string {
+	if rt.account == nil || rt.account.TenantID+"/" != outlookAccountPrefix {
+		return ""
+	}
+	return outlookAccountPrefix + rt.account.UserID
 }
 
 func parseAccount(s string) (*teamsdesktop.Account, error) {
