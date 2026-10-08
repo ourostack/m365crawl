@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -28,13 +29,18 @@ const trHost = "tenant.sharepoint.example.invalid"
 // trPage is a fake browser tab: navigation lands on the host asked for (or landOn), and Eval
 // answers the in-page script per item id, by default with one synthetic entry.
 type trPage struct {
-	mu      sync.Mutex
-	host    string
-	landOn  string
-	hostErr error
-	hosts   []string // successive answers of Host, then host
-	answer  map[string]func(ctx context.Context) (transcripts.ScriptResult, error)
-	items   []string
+	mu         sync.Mutex
+	host       string
+	landOn     string
+	hostErr    error
+	hosts      []string // successive answers of Host, then host
+	paths      []string // successive answers of location.pathname, then "/"
+	probes     []bool   // successive answers of the sign-in probe, then true
+	nPaths     int
+	nProbes    int
+	noDeadline int // Host calls whose context had no deadline
+	answer     map[string]func(ctx context.Context) (transcripts.ScriptResult, error)
+	items      []string
 }
 
 func (p *trPage) Navigate(ctx context.Context, raw string) error {
@@ -48,9 +54,12 @@ func (p *trPage) Navigate(ctx context.Context, raw string) error {
 	return ctx.Err()
 }
 
-func (p *trPage) Host(context.Context) (string, error) {
+func (p *trPage) Host(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, ok := ctx.Deadline(); !ok {
+		p.noDeadline++
+	}
 	if len(p.hosts) > 0 {
 		h := p.hosts[0]
 		p.hosts = p.hosts[1:]
@@ -60,6 +69,28 @@ func (p *trPage) Host(context.Context) (string, error) {
 }
 
 func (p *trPage) Eval(ctx context.Context, expr string, out any) error {
+	p.mu.Lock()
+	switch expr {
+	case "location.pathname":
+		p.nPaths++
+		v := "/"
+		if len(p.paths) > 0 {
+			v, p.paths = p.paths[0], p.paths[1:]
+		}
+		p.mu.Unlock()
+		b, _ := json.Marshal(v)
+		return json.Unmarshal(b, out)
+	case signinProbeJS:
+		p.nProbes++
+		v := true
+		if len(p.probes) > 0 {
+			v, p.probes = p.probes[0], p.probes[1:]
+		}
+		p.mu.Unlock()
+		b, _ := json.Marshal(v)
+		return json.Unmarshal(b, out)
+	}
+	p.mu.Unlock()
 	var args transcripts.ScriptArgs
 	body := strings.TrimSuffix(strings.TrimPrefix(expr, "("+transcripts.Script()+")("), ")")
 	if err := json.Unmarshal([]byte(body), &args); err != nil {
@@ -805,5 +836,149 @@ func TestTranscriptsFetchHelp(t *testing.T) {
 	flat := strings.Join(strings.Fields(out), " ")
 	if code != 0 || !strings.Contains(flat, "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes.") {
 		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestSigninHostMustBeSharePoint(t *testing.T) {
+	e := trEnv(t)
+	fakeBrowser(t, nil)
+	er := trFails(t, e, errs.CodeUsage, errs.ExitUsage, "transcripts", "signin", "--user-agreed", "--host", "attacker.example")
+	if !strings.Contains(er["message"].(string), "not a SharePoint host") {
+		t.Fatalf("error %v", er)
+	}
+	// A host the archive names is used only when it is a SharePoint host.
+	e.exec(`update transcript_parts set host='attacker.example'`)
+	er = trFails(t, e, errs.CodeUsage, errs.ExitUsage, "transcripts", "signin", "--user-agreed")
+	if !strings.Contains(er["message"].(string), "--host") {
+		t.Fatalf("error %v", er)
+	}
+}
+
+func TestSigninDefaultHostIsValidated(t *testing.T) {
+	old := signinHosts
+	signinHosts = func(*store.Store, context.Context) ([]string, error) { return []string{"bad host/"}, nil }
+	t.Cleanup(func() { signinHosts = old })
+	e := trEnv(t)
+	fakeBrowser(t, nil)
+	trFails(t, e, errs.CodeUsage, errs.ExitUsage, "transcripts", "signin", "--user-agreed")
+}
+
+func TestSigninWaitsPastTheSignInPages(t *testing.T) {
+	e := trEnv(t)
+	page := newTrPage()
+	page.paths = []string{"/_layouts/15/Authenticate.aspx", "/_forms/default.aspx", "/_layouts/15/AccessDenied.aspx", "/"}
+	page.probes = []bool{false, true}
+	closer, _ := fakeBrowser(t, page)
+	code, _, errOut := e.tr("--json", "transcripts", "signin", "--user-agreed")
+	if code != 0 || closer.n.Load() != 1 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if page.nPaths != 5 || page.nProbes != 2 {
+		t.Fatalf("pathname asked %d times, probe %d times", page.nPaths, page.nProbes)
+	}
+	if page.noDeadline != 0 {
+		t.Fatalf("%d host questions had no deadline", page.noDeadline)
+	}
+	// The probe itself returns a boolean only, from the page's own API.
+	for _, want := range []string{`fetch("/_api/web?$select=Id"`, `credentials: "include"`, `cache: "no-store"`, "r.status === 200"} {
+		if !strings.Contains(signinProbeJS, want) {
+			t.Errorf("probe lacks %s", want)
+		}
+	}
+}
+
+func TestSigninPageQuestionsFail(t *testing.T) {
+	// The window closes between the host and the probe: the same closed-window failure.
+	e := trEnv(t)
+	page := &evalFails{trPage: newTrPage()}
+	fakeBrowserDriver(t, page)
+	er := trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+	if !strings.Contains(er["message"].(string), "closed before sign-in finished") {
+		t.Fatalf("error %v", er)
+	}
+	page.failProbe = true
+	trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+}
+
+// evalFails answers the host, then fails the pathname question (or the probe).
+type evalFails struct {
+	*trPage
+	failProbe bool
+}
+
+func (p *evalFails) Eval(ctx context.Context, expr string, out any) error {
+	if expr == "location.pathname" && !p.failProbe || expr == signinProbeJS {
+		return errors.New("target closed")
+	}
+	return p.trPage.Eval(ctx, expr, out)
+}
+
+func fakeBrowserDriver(t *testing.T, page transcripts.PageDriver) {
+	t.Helper()
+	fakeBrowser(t, newTrPage())
+	openBrowser = func(ctx context.Context, o browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		_ = page.Navigate(ctx, o.StartURL)
+		return page, &countCloser{}, nil
+	}
+}
+
+func TestFetchCommandBrowserGone(t *testing.T) {
+	e := trEnv(t)
+	page := newTrPage()
+	page.answer["P3"] = func(context.Context) (transcripts.ScriptResult, error) {
+		return transcripts.ScriptResult{}, fmt.Errorf("%w: websocket closed", browser.ErrDisconnected)
+	}
+	closer, _ := fakeBrowser(t, page)
+	er := trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "fetch", "call-1")
+	if closer.n.Load() != 1 || !strings.Contains(er["message"].(string), "stopped answering") {
+		t.Fatalf("error %v, closed %d", er, closer.n.Load())
+	}
+}
+
+func TestFetchClosesBrowserBeforeWaitingForTheLock(t *testing.T) {
+	// The archive is busy for the whole fetch and frees up only when the browser closes: the
+	// results must still be saved, so the wait for the lock comes after the browser is closed.
+	e := trEnv(t)
+	release, err := store.AcquireLock(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	oldPoll, oldWait := fetchLockPoll, fetchLockWait
+	fetchLockPoll, fetchLockWait = 10*time.Millisecond, 2*time.Second
+	t.Cleanup(func() { fetchLockPoll, fetchLockWait = oldPoll, oldWait })
+	fakeBrowser(t, newTrPage())
+	inner := openBrowser
+	openBrowser = func(ctx context.Context, o browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		p, _, err := inner(ctx, o)
+		return p, closerFunc(func() error { release(); return nil }), err
+	}
+	m := trJSON(t, e, "transcripts", "fetch", "call-4")
+	if m["fetched"] != float64(1) {
+		t.Fatalf("result %v", m)
+	}
+	if s := trJSON(t, e, "transcripts", "call-4"); items(t, s)[0]["state"] != "fetched" {
+		t.Fatalf("not saved: %v", s)
+	}
+}
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+func TestFetchLockNeverFreedAfterClose(t *testing.T) {
+	e := trEnv(t)
+	release, err := store.AcquireLock(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	oldPoll, oldWait := fetchLockPoll, fetchLockWait
+	fetchLockPoll, fetchLockWait = 10*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { fetchLockPoll, fetchLockWait = oldPoll, oldWait })
+	closer, _ := fakeBrowser(t, newTrPage())
+	er := trFails(t, e, errs.CodeLocked, errs.ExitLocked, "transcripts", "fetch", "call-4")
+	if !strings.Contains(er["message"].(string), "1 fetched parts were not saved") || closer.n.Load() != 1 {
+		t.Fatalf("error %v, closed %d", er, closer.n.Load())
 	}
 }

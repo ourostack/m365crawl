@@ -18,11 +18,14 @@ func TestTranscriptHosts(t *testing.T) {
 	// A second host with fewer fetchable parts, and a share-only part on a third that does not count.
 	s.qExec(t, `update transcript_parts set host='other.sharepoint.example.invalid' where call_id='call-5'`)
 	s.qExec(t, `update transcript_parts set host='share.sharepoint.example.invalid' where call_id='call-2'`)
+	// A drive item on a host that is not SharePoint's is not offered.
+	s.qExec(t, `update transcript_parts set host='attacker.example' where call_id='call-1' and ordinal=1`)
+	s.qExec(t, `update transcript_parts set host='attacker.example' where call_id='call-1' and ordinal=2`)
 	hosts, err = s.TranscriptHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(hosts, ","); got != "tenant.sharepoint.example.invalid,other.sharepoint.example.invalid" {
+	if got := strings.Join(hosts, ","); got != "other.sharepoint.example.invalid" {
 		t.Fatalf("hosts %s", got)
 	}
 	_ = s.Close()

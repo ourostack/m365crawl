@@ -6,12 +6,15 @@ import (
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/browser/browsertest"
+	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
 // TestMain gives every test a home directory of its own. Outlook is read by default, so a test that
 // does not name its roots would otherwise look at the Teams and Outlook data of the machine it runs on.
 func TestMain(m *testing.M) {
 	browsertest.RunIfFake() // the fake browser of the launch tests is this binary
+	// The synthetic SharePoint hosts of the fixtures live under the reserved .invalid domain.
+	transcripts.AllowHostSuffixForTests(".sharepoint.example.invalid")
 	home, err := os.MkdirTemp("", "m365crawl-cli-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

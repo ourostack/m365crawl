@@ -48,12 +48,12 @@ func (f *fakePage) Navigate(ctx context.Context, raw string) error {
 	defer f.mu.Unlock()
 	f.navigations = append(f.navigations, raw)
 	u, _ := url.Parse(raw)
-	if err := f.navErr[u.Host]; err != nil {
-		return err
-	}
 	f.host = u.Host
 	if to, ok := f.landOn[u.Host]; ok {
 		f.host = to
+	}
+	if err := f.navErr[u.Host]; err != nil {
+		return err
 	}
 	return ctx.Err()
 }
@@ -236,6 +236,7 @@ func TestFetchHostRedirectedElsewhere(t *testing.T) {
 	page := newFakePage()
 	page.landOn["a.sharepoint.example.invalid"] = "other.example.invalid"
 	page.navErr["c.sharepoint.example.invalid"] = errors.New("navigation failed: net::ERR_NAME_NOT_RESOLVED")
+	page.landOn["c.sharepoint.example.invalid"] = "" // the tab stays on its blank page
 	var s saved
 	parts := []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("b.sharepoint.example.invalid", "I2", 2), tpart("c.sharepoint.example.invalid", "I3", 3)}
 	sum, err := newFetcher(page).Fetch(context.Background(), parts, s.save)
@@ -538,6 +539,10 @@ func TestFetchSavesAfterLockFreed(t *testing.T) {
 	f.LockPoll = 10 * time.Millisecond
 	parts := []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}
 	sum, err := f.Fetch(context.Background(), parts, save)
+	if err != nil || sum.Parts[0].Saved {
+		t.Fatalf("err %v; the archive is still busy: %+v", err, sum)
+	}
+	sum, err = f.FinishSaves(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +557,10 @@ func TestFetchLockNeverFreed(t *testing.T) {
 	f.LockWait = 50 * time.Millisecond
 	f.LockPoll = 10 * time.Millisecond
 	locked := func(Part, FetchResult) error { return errs.Locked("held") }
-	sum, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, locked)
+	if _, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, locked); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := f.FinishSaves(context.Background())
 	var c *errs.Coded
 	if !errors.As(err, &c) || c.Code != errs.CodeLocked || !strings.Contains(c.Message, "2 fetched parts were not saved") {
 		t.Fatalf("err %v", err)
@@ -564,7 +572,14 @@ func TestFetchLockNeverFreed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f.LockWait = 5 * time.Second
 	time.AfterFunc(50*time.Millisecond, cancel)
-	if _, err := f.Fetch(ctx, []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, locked); !errors.Is(err, context.Canceled) {
+	if _, err := f.Fetch(ctx, []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, locked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.FinishSaves(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+	// Nothing waiting: nothing to do.
+	if _, err := (&Fetcher{}).FinishSaves(ctx); err != nil {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -577,11 +592,12 @@ func TestFetchSaveErrorStops(t *testing.T) {
 	if !errors.Is(err, boom) || page.evalCount() != 1 {
 		t.Fatalf("err %v, evals %d", err, page.evalCount())
 	}
-	// A save that fails while a sign-in stop drains the pending results is reported too.
+	// A save that fails while the waiting results are saved is reported too.
 	page = newFakePage()
 	page.results["I2"] = answer(ScriptResult{State: "signin"})
 	n := 0
-	_, err = newFetcher(page).Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)},
+	f := newFetcher(page)
+	_, err = f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)},
 		func(Part, FetchResult) error {
 			n++
 			if n == 1 {
@@ -589,7 +605,10 @@ func TestFetchSaveErrorStops(t *testing.T) {
 			}
 			return boom
 		})
-	if !errors.Is(err, boom) {
+	if codeOf(err) != errs.CodeSigninRequired {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := f.FinishSaves(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -610,7 +629,10 @@ func TestFetchSigninKeepsPendingSaves(t *testing.T) {
 	f := newFetcher(page)
 	f.LockPoll = time.Millisecond
 	_, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, save)
-	if codeOf(err) != errs.CodeSigninRequired || strings.Join(s.parts, ",") != "I1" {
+	if codeOf(err) != errs.CodeSigninRequired || len(s.parts) != 0 {
+		t.Fatalf("err %v, saved %v", err, s.parts)
+	}
+	if _, err := f.FinishSaves(context.Background()); err != nil || strings.Join(s.parts, ",") != "I1" {
 		t.Fatalf("err %v, saved %v", err, s.parts)
 	}
 }
@@ -669,8 +691,77 @@ func TestFetchSlowLoadStillAsksTheHost(t *testing.T) {
 	f.LandTimeout = 30 * time.Millisecond
 	page.onNavigate = func() { time.Sleep(50 * time.Millisecond) }
 	page.navErr["a.sharepoint.example.invalid"] = context.DeadlineExceeded
-	page.host = "login.microsoftonline.com"
 	if _, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, (&saved{}).save); codeOf(err) != errs.CodeSigninRequired {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestFetchNavigationErrorThenLogin(t *testing.T) {
+	// The navigation reports an error, yet the tab ends on the sign-in page: that is a sign-in stop.
+	page := newFakePage()
+	page.landOn["a.sharepoint.example.invalid"] = "login.microsoftonline.com"
+	page.navErr["a.sharepoint.example.invalid"] = errors.New("navigation failed: net::ERR_ABORTED")
+	if _, err := newFetcher(page).Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, (&saved{}).save); codeOf(err) != errs.CodeSigninRequired {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestFetchNavigationErrorThenTarget(t *testing.T) {
+	// The navigation reports an error, yet the tab ends on the host: the parts are fetched.
+	page := newFakePage()
+	page.navErr["a.sharepoint.example.invalid"] = errors.New("navigation failed: net::ERR_ABORTED")
+	var s saved
+	if _, err := newFetcher(page).Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, s.save); err != nil || s.res["I1"].State != StateOK {
+		t.Fatalf("err %v, saved %+v", err, s.res)
+	}
+}
+
+var errGone = errors.New("the browser connection closed")
+
+func TestFetchBrowserGoneIsABrowserFailure(t *testing.T) {
+	gone := func(err error) bool { return errors.Is(err, errGone) }
+	// While a part runs.
+	page := newFakePage()
+	page.results["I2"] = func(context.Context) (ScriptResult, error) { return ScriptResult{}, errGone }
+	var s saved
+	f := newFetcher(page)
+	f.Gone = gone
+	parts := []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2), tpart("a.sharepoint.example.invalid", "I3", 3)}
+	if _, err := f.Fetch(context.Background(), parts, s.save); codeOf(err) != errs.CodeBrowserFailed || strings.Join(s.parts, ",") != "I1" {
+		t.Fatalf("err %v, saved %v", err, s.parts)
+	}
+	// While a host is opened, and while the host is asked.
+	page = newFakePage()
+	page.navErr["a.sharepoint.example.invalid"] = errGone
+	f = newFetcher(page)
+	f.Gone = gone
+	if _, err := f.Fetch(context.Background(), parts, s.save); codeOf(err) != errs.CodeBrowserFailed {
+		t.Fatalf("err %v", err)
+	}
+	page = newFakePage()
+	page.hostErr = errGone
+	f = newFetcher(page)
+	f.Gone = gone
+	if _, err := f.Fetch(context.Background(), parts, s.save); codeOf(err) != errs.CodeBrowserFailed {
+		t.Fatalf("err %v", err)
+	}
+	// While the sign-in probe asks the host.
+	page = newFakePage()
+	page.results["I1"] = func(context.Context) (ScriptResult, error) {
+		page.mu.Lock()
+		page.hostErr = errGone
+		page.mu.Unlock()
+		return ScriptResult{State: "signin_probe"}, nil
+	}
+	f = newFetcher(page)
+	f.Gone = gone
+	if _, err := f.Fetch(context.Background(), parts[:1], s.save); codeOf(err) != errs.CodeBrowserFailed {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestFetchScriptChecksContentLength(t *testing.T) {
+	if !strings.Contains(Script(), `Number(r.headers.get("content-length") || 0)`) || !strings.Contains(Script(), "buf.byteLength > maxBytes") {
+		t.Fatal("the script must refuse an oversize download by its header and by its size")
 	}
 }
