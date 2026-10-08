@@ -72,6 +72,9 @@ type listResult struct {
 	// true: counting costs one extra query, and a result that is not truncated is its own total
 	// (count).
 	Total int `json:"total,omitempty"`
+	// Sources is search's: per source searched, how many items of the result it gave and whether
+	// it had more. Nil on every other list.
+	Sources *searchSources `json:"sources,omitempty"`
 	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
 	// does not read the result as covering every conversation. Omitted otherwise.
 	ChannelsExcluded bool `json:"channels_excluded,omitempty"`
@@ -308,10 +311,14 @@ func shape[T any](rt *runtime, in []T) []any {
 
 // checkFields rejects --fields keys that item type T does not have.
 func checkFields[T any](rt *runtime) error {
+	return checkKeys(rt, jsonKeys(reflect.TypeFor[T]()))
+}
+
+// checkKeys rejects --fields keys that are not in valid.
+func checkKeys(rt *runtime, valid []string) error {
 	if len(rt.fields) == 0 {
 		return nil
 	}
-	valid := jsonKeys(reflect.TypeFor[T]())
 	for _, f := range rt.fields {
 		if !contains(valid, f) {
 			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))
