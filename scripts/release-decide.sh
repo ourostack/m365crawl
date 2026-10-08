@@ -10,6 +10,7 @@
 #   REF             the ref the run started on (github.ref); must be refs/heads/main when set
 #   GH_TOKEN        token that can read this repository's tags and releases
 #   GITHUB_OUTPUT   where the outputs go (set by Actions)
+#   CASK_SINCE      the first version published as Casks/m365crawl.rb (default 0.5.0; empty: no floor)
 #
 # The candidates are every docs/releases/v*.md in AFTER's tree whose release is not done:
 # its tag does not exist, or the tag exists at a commit of main that holds the notes file but
@@ -28,6 +29,9 @@
 # the tap backwards. A release that a higher pending notes file supersedes (for example a stable
 # release demoted after a failed install, with the next patch version's notes merged) is left
 # alone too, so the next release is never blocked by an unfinished one.
+# A release below CASK_SINCE (compared without its prerelease part, so every rehearsal of that version
+# counts) was published under an earlier cask name, so Casks/m365crawl.rb says nothing about it: it is
+# finished once its release exists and is never resumed at publish (its assets do not carry this name).
 # No candidate: release=false and exit 0. Otherwise the lowest version in semantic-version
 # order is released, and remaining=true says more candidates wait (the workflow starts itself
 # again for them). Because the decision reads state, not the push, a run that was cancelled or
@@ -157,6 +161,8 @@ decide() {
   for name in AFTER REPO GITHUB_OUTPUT; do
     [[ -n "${!name:-}" ]] || fail "$name is required"
   done
+  local cask_since="${CASK_SINCE-0.5.0}"
+  [[ -z "$cask_since" || "$cask_since" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail "CASK_SINCE must be a version X.Y.Z without a prerelease part ($cask_since)"
   [[ -z "${REF:-}" || "$REF" == refs/heads/main ]] || fail "releases run from main only; this run started on $REF"
   git cat-file -e "${AFTER}^{commit}" 2>/dev/null || fail "the commit $AFTER is not in the checkout (fetch full history)"
 
@@ -208,6 +214,8 @@ decide() {
     if [[ -n "$pending" && "$(semver_cmp "$version" "$pending")" == -1 ]]; then continue; fi
     # Superseded by a higher stable release: its cask would move the tap backwards, so it is never resumed.
     if [[ -n "$highest" && "$(semver_cmp "$version" "$highest")" == -1 ]]; then continue; fi
+    # Published before this cask name existed: the tap's Casks/m365crawl.rb cannot finish it.
+    if [[ -n "$cask_since" && "$(semver_cmp "${version%%-*}" "$cask_since")" == -1 ]]; then continue; fi
     branch=main
     [[ "$tag" != *-* ]] || branch=rehearsal
     tapv="$(tap_version "$branch")"
@@ -340,12 +348,13 @@ STUB
   printf '# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-10-05\n\n## [0.10.0] - 2026-10-06\n' > "$repo/CHANGELOG.md"
   c0="$(commit base README.md)"
 
-  decide_run() { # decide_run AFTER [VAR=value ...]; sets out, status. The tap serves a far-future cask unless a case says otherwise.
+  decide_run() { # decide_run AFTER [VAR=value ...]; sets out, status. The tap serves a far-future cask unless a case says otherwise,
+    # and no CASK_SINCE floor applies unless a case sets one.
     local a="$1"
     shift
     : > "$outputs"
     status=0
-    out="$(cd "$repo" && env PATH="$stub:$PATH" HOME="$tmp" AFTER="$a" REPO=o/r GH_TOKEN=t GITHUB_OUTPUT="$outputs" STUB_TAP="main:99.0.0 rehearsal:99.0.0-rc.1" "$@" "$self" 2>&1)" || status=$?
+    out="$(cd "$repo" && env PATH="$stub:$PATH" HOME="$tmp" AFTER="$a" REPO=o/r GH_TOKEN=t GITHUB_OUTPUT="$outputs" CASK_SINCE= STUB_TAP="main:99.0.0 rehearsal:99.0.0-rc.1" "$@" "$self" 2>&1)" || status=$?
   }
   expect_ok() { # expect_ok DESCRIPTION OUTPUT-LINE...
     local what="$1" line
@@ -556,6 +565,44 @@ STUB
   expect_ok "demoted v0.4.0 with a pending v0.4.1 notes file" release=true tag=v0.4.1 version=0.4.1 "sha=$c1" publish_only=false resume=false remaining=false
   decide_run "$c1" STUB_TAGS="v0.4.0:$c0" STUB_RELEASES="v0.4.0" STUB_DEMOTED="v0.4.0" STUB_TAP="main:0.4.0"
   expect_ok "v0.4.0 unpublished (cask on tap, demoted) with a pending v0.4.1" release=true tag=v0.4.1 publish_only=false
+
+  # The first release under the cask name m365crawl. v0.4.0 (and its rehearsals) were released and published under
+  # an earlier cask name, so the tap has no Casks/m365crawl.rb at all. Below CASK_SINCE they are finished without a
+  # cask: never resumed at publish (their assets do not carry this name), and the next version releases normally.
+  repo="$tmp/repo4"
+  mkdir -p "$repo/docs/releases"
+  git -C "$repo" init --quiet --initial-branch=main
+  git -C "$repo" config user.name t
+  git -C "$repo" config user.email t@example.com
+  printf '# Changelog\n\n## [0.5.0] - 2026-10-08\n\n## [0.4.0] - 2026-10-07\n' > "$repo/CHANGELOG.md"
+  c0="$(commit "before" docs/releases/v0.4.0-rc.3.md docs/releases/v0.4.0.md)"
+  local ptags="v0.4.0-rc.3:$c0 v0.4.0:$c0" prel="v0.4.0-rc.3 v0.4.0"
+  decide_run "$c0" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP=""
+  expect_ok "without a floor, a stable release with no cask resumes at publish" release=true tag=v0.4.0 publish_only=true
+  decide_run "$c0" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="" CASK_SINCE=0.5.0
+  expect_ok "a release below CASK_SINCE is finished without a cask" release=false
+  out="$(cd "$repo" && env -u CASK_SINCE PATH="$stub:$PATH" HOME="$tmp" AFTER="$c0" REPO=o/r GH_TOKEN=t GITHUB_OUTPUT="$outputs" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="" "$self" 2>&1)" \
+    && grep -Fq "nothing to release" <<<"$out" || fail "selftest: CASK_SINCE defaults to 0.5.0, so v0.4.0 is finished: $out"
+  decide_run "$c0" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_DEMOTED="v0.4.0" STUB_TAP="" CASK_SINCE=0.5.0
+  expect_ok "a demoted release below CASK_SINCE is not resumed either" release=false
+  decide_run "$c0" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="" CASK_SINCE=0.5.0-rc.1
+  expect_fail "CASK_SINCE with a prerelease part" "CASK_SINCE must be a version X.Y.Z"
+  c1="$(commit "rc" docs/releases/v0.5.0-rc.1.md)"
+  decide_run "$c1" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="" CASK_SINCE=0.5.0
+  expect_ok "the first rehearsal of CASK_SINCE releases" release=true tag=v0.5.0-rc.1 "sha=$c1" rehearsal=true resume=false publish_only=false remaining=false
+  ptags="$ptags v0.5.0-rc.1:$c1"
+  prel="$prel v0.5.0-rc.1"
+  decide_run "$c1" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="" CASK_SINCE=0.5.0
+  expect_ok "a rehearsal of CASK_SINCE with no cask still resumes at publish" release=true tag=v0.5.0-rc.1 rehearsal=true publish_only=true
+  decide_run "$c1" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="rehearsal:0.5.0-rc.1" CASK_SINCE=0.5.0
+  expect_ok "rehearsal published, no stable notes yet: v0.4.0 is not resumed" release=false
+  c2="$(commit "stable" docs/releases/v0.5.0.md)"
+  decide_run "$c2" STUB_TAGS="$ptags" STUB_RELEASES="$prel" STUB_TAP="rehearsal:0.5.0-rc.1" CASK_SINCE=0.5.0
+  expect_ok "CASK_SINCE itself releases" release=true tag=v0.5.0 "sha=$c2" rehearsal=false resume=false publish_only=false remaining=false
+  decide_run "$c2" STUB_TAGS="$ptags v0.5.0:$c2" STUB_RELEASES="$prel v0.5.0" STUB_TAP="rehearsal:0.5.0-rc.1" CASK_SINCE=0.5.0
+  expect_ok "CASK_SINCE released with no cask on main resumes at publish" release=true tag=v0.5.0 "sha=$c2" publish_only=true
+  decide_run "$c2" STUB_TAGS="$ptags v0.5.0:$c2" STUB_RELEASES="$prel v0.5.0" STUB_TAP="main:0.5.0 rehearsal:0.5.0-rc.1" CASK_SINCE=0.5.0
+  expect_ok "CASK_SINCE released and published" release=false
   repo="$tmp/repo"
 
   # Semantic-version order.
