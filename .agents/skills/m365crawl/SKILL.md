@@ -22,8 +22,8 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 - Lists stop at `--limit`, so check `truncated`. An empty list carries a `note` saying why: no archive, filters that matched nothing, or a range outside what the apps cached. `needs_sync` means no data yet, not no match.
 - Unknown is not none. `coverage_gap` on a calendar result means some days are not cached, so a missing meeting is not evidence; a field named in `unknown_fields` was never stated.
 - `unread` and `messages --unread` cover chats and meetings; channels are left out (`channels_excluded`) because most are never opened. Add `--include-channels` to count them; channel mentions and replies reach you through `activity`.
-- `messages` and `search` text output has a `thread` column with the two arguments of `m365crawl thread <conversation_id> <id>`, which reads the whole thread.
-- `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields id,sent_at,text --max-text 300`.
+- `messages` and `search` text output has a `thread` column that names the whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <id>`, for mail the id for `m365crawl mail thread <id>`.
+- `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields source,id,sent_at,subject,text --max-text 300`.
 
 ## Jobs
 

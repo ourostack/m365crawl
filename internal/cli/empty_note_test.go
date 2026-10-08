@@ -80,9 +80,9 @@ func TestEmptyTeamsListsSayWhy(t *testing.T) {
 		want string
 	}{
 		{[]string{"messages", "--since", "2026-04-01"}, "nothing matched: the time range is outside the archived Teams messages, which run from 2026-03-10 to 2026-03-10"},
-		{[]string{"search", "hello", "--until", "2026-03-01"}, "nothing matched: the time range is outside the archived Teams messages, which run from 2026-03-10 to 2026-03-10"},
+		{[]string{"search", "hello", "--source", "chats", "--until", "2026-03-01"}, "nothing matched: the time range is outside the archived Teams messages, which run from 2026-03-10 to 2026-03-10"},
 		{[]string{"messages", "--from", "nobody"}, "nothing matched the filters"},
-		{[]string{"search", "absent"}, "no message matched the search words and filters"},
+		{[]string{"search", "absent", "--source", "chats"}, "no message matched the search words and filters"},
 		{[]string{"conversations", "--kind", "Space"}, "nothing matched the filters"},
 		{[]string{"people", "--query", "nobody"}, "nothing matched the filters"},
 		{[]string{"activity"}, noneOfThisKind},
@@ -184,10 +184,85 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 	if m := decode(t, out); code != 0 || m["count"] != float64(1) {
 		t.Fatalf("thread: %d %v", code, m)
 	}
+	// For mail, the thread column holds the id that mail thread takes.
+	pinMailPlatform(t)
+	e = newEnv(t)
+	seedMail(t, e, seedMessages())
+	_, out, _ = e.run("--format", "text", "--max-age", "0", "search", "Quarterly", "--source", "mail")
+	var id string
+	for _, w := range strings.Fields(out) {
+		if strings.HasPrefix(w, "outlook/") {
+			id = w
+			break
+		}
+	}
+	if code, out, errOut := e.run("--json", "--max-age", "0", "mail", "thread", id); code != 0 || decode(t, out)["count"] == float64(0) {
+		t.Fatalf("mail thread %q: %d %s %s", id, code, out, errOut)
+	}
 	if got := threadTarget("19:c", "", "5"); got != "19:c 5" {
 		t.Fatalf("no reply chain: %q", got)
 	}
 	if got := threadTarget("19:c", "4", "5"); got != "19:c 4" {
 		t.Fatalf("reply chain: %q", got)
+	}
+}
+
+// An empty search names only the sources it read: a mail-only search never blames Teams.
+func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
+	noTeams := "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+	e := newEnv(t)
+	e.emptyArchive()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"search", "x", "--source", "mail"}, "mail is not in the archive yet; run m365crawl sync"},
+		{[]string{"search", "x", "--source", "chats"}, noTeams},
+		{[]string{"search", "x"}, "mail is not in the archive yet; run m365crawl sync; " + noTeams},
+	} {
+		if got := noteOf(t, e, c.args...); got != c.want {
+			t.Errorf("empty archive, %v: note %q, want %q", c.args, got, c.want)
+		}
+	}
+
+	e = newEnv(t)
+	seedMail(t, e, seedMessages())
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"search", "zzzqqq", "--source", "mail"}, "no mail matched the search words and filters"},
+		{[]string{"search", "zzzqqq"}, "Teams chats: " + noTeams + "; no mail matched the search words and filters"},
+	} {
+		got := noteOf(t, e, c.args...)
+		if got != c.want {
+			t.Errorf("mail only, %v: note %q, want %q", c.args, got, c.want)
+		}
+		if c.args[len(c.args)-1] == "mail" && strings.Contains(got, "Teams") {
+			t.Errorf("a mail-only search blamed Teams: %q", got)
+		}
+	}
+
+	e = searchMailEnv(t)
+	if got := noteOf(t, e, "search", "zzzqqq"); got != "no chat message or mail matched the search words and filters" {
+		t.Errorf("both sources: note %q", got)
+	}
+}
+
+// A failure while reading why a search found nothing is reported, not hidden behind a note.
+func TestSearchEmptyNoteReportsAFailure(t *testing.T) {
+	e := newEnv(t)
+	teamsArchive(t, e)
+	old := messageWindowOf
+	t.Cleanup(func() { messageWindowOf = old })
+	messageWindowOf = func(*store.Store, context.Context, *teamsdesktop.Account) (time.Time, time.Time, error) {
+		return time.Time{}, time.Time{}, errors.New("broken")
+	}
+	code, _, errOut := e.run("--json", "--max-age", "0", "search", "zzzqqq", "--source", "chats")
+	if code == 0 {
+		t.Fatalf("exit 0, stderr %q", errOut)
+	}
+	if body := errorOf(t, errOut); body["code"] != "db_error" {
+		t.Fatalf("error = %v", body)
 	}
 }

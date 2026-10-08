@@ -251,7 +251,7 @@ func (c *searchCmd) Run(rt *runtime) error {
 	}
 	f.IncludeDeleted, f.MentionsMe, f.DirectMentions = c.IncludeDeleted, c.MentionsMe, c.DirectMentions
 	f.Total = new(int)
-	rt.query = listQuery{since: f.Since, until: f.Until, none: "no message matched the search words and filters"}
+	rt.query = listQuery{since: f.Since, until: f.Until, none: searchNoMatch}
 	return rt.read("search", func(st *store.Store) (result, error) { return c.search(rt, p, f, st) })
 }
 

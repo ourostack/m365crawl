@@ -241,21 +241,21 @@ func (rt *runtime) listTable(r *listResult) {
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
-			if rt.cmd == "search" || rt.cmd == "messages" { // what `m365crawl thread` takes to read on
+			if rt.cmd == "messages" { // what `m365crawl thread` takes to read on
 				cols, textCol = []string{"sent_at", "conversation", "sender", "thread", "text"}, 4
 				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
 				continue
 			}
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
-			cols, textCol = searchColumns, 4
+			cols, textCol = searchColumns, 5
 			text := oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
-			rows = append(rows, []string{stamp(x.SentAt), x.Source, x.ConversationDisplayName, x.SenderName, text})
+			rows = append(rows, []string{stamp(x.SentAt), x.Source, x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
 		case searchMailItem:
-			cols, textCol = searchColumns, 4
+			cols, textCol = searchColumns, 5
 			var at time.Time
 			if x.ReceivedAt != nil {
 				at = *x.ReceivedAt
@@ -268,7 +268,7 @@ func (rt *runtime) listTable(r *listResult) {
 			if p := oneLine(searchVal(x.Preview)); p != "" {
 				text += " - " + p
 			}
-			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, text})
+			rows = append(rows, []string{stamp(at), x.Source, searchVal(x.Folder), from, x.ID, text})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})

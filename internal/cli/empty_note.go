@@ -22,6 +22,9 @@ const noneOfThisKind = "the archive holds no items of this kind"
 // teamsReadHere says whether this operating system has a Teams cache to read; a test seam.
 var teamsReadHere = func() bool { return goruntime.GOOS == "darwin" || goruntime.GOOS == "windows" }
 
+// messageWindowOf reads the span of the archived Teams messages; a test seam.
+var messageWindowOf = (*store.Store).MessageWindow
+
 // noteEmpty sets note on an empty list that has none yet, naming its cause: no archive, a platform
 // with no Teams, an archive without Teams data, bounds outside the archived window, filters that
 // matched nothing, or nothing of the kind archived.
@@ -43,7 +46,7 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	if note, err := rt.unknownAccountNote(st); note != "" || err != nil {
 		return note, err
 	}
-	oldest, newest, err := st.MessageWindow(rt.ctx, rt.account)
+	oldest, newest, err := messageWindowOf(st, rt.ctx, rt.account)
 	if err != nil {
 		return "", err
 	}

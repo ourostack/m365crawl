@@ -1,7 +1,7 @@
-at                source  where           who            text
-----------------  ------  --------------  -------------  -------------------------
-2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   Pat Example please review
-2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  Pat Example please review
+at                source  where           who            thread                                                                                                     text
+----------------  ------  --------------  -------------  ---------------------------------------------------------------------------------------------------------  --------------------
+2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000006000  Pat Example pleas...
+2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000006000  Pat Example pleas...
 
 2 items
 note: --mentions-me applies to Teams chats only; mail was not searched
