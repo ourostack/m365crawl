@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -290,6 +291,8 @@ type CalendarDetail struct {
 	Recordings            []CalendarRecording
 	SeriesRecordings      []CalendarRecording
 	SeriesRecordingsTotal int
+	// calls is the recorded calls that belong to this occurrence (chatRecordings.occurrence), sorted.
+	calls []string
 }
 
 // seriesRecordingsShown is how many series-level recordings an event lists.
@@ -369,6 +372,12 @@ func (s *Store) calendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 		for _, k := range keys {
 			d.Recordings = append(d.Recordings, cr.matched[k]...)
 		}
+		for call, k := range cr.occurrence {
+			if slices.Contains(keys, k) {
+				d.calls = append(d.calls, call)
+			}
+		}
+		sort.Strings(d.calls)
 		sort.SliceStable(d.Recordings, func(i, j int) bool { return d.Recordings[i].SentAt.Before(d.Recordings[j].SentAt) })
 		d.SeriesRecordingsTotal = len(cr.series)
 		d.SeriesRecordings = cr.series
@@ -650,7 +659,11 @@ type chatRecordings struct {
 	matched map[string][]CalendarRecording
 	series  []CalendarRecording // newest first
 	chat    *CalendarChat
-	calls   map[string]string // message id to call id, for the recording and transcript notices that name one
+	// occurrence is the one occurrence (event key) each recorded call of the chat belongs to: the
+	// one its earliest Success recording notice fell in, else, for a call with no such notice in
+	// any occurrence, the one its earliest transcript notice fell in. Teams re-posts notices, and a
+	// call's transcript and recording notices can land in different windows; neither moves a call.
+	occurrence map[string]string
 }
 
 // cached is the recordings of a chat that of has already loaded.
@@ -738,17 +751,33 @@ func (s *Store) matchRecordings(ctx context.Context, accounts []string, chat str
 		}
 		_ = wr.Close()
 	}
-	msgs, calls, err := s.chatMessages(ctx, accounts, chat)
+	msgs, notices, err := s.chatMessages(ctx, accounts, chat)
 	if err != nil {
 		return nil, err
 	}
-	out.calls = calls
-	for _, m := range msgs {
-		if key, by := matchOccurrence(occs, m.SentAt); key != "" {
-			m.MatchedBy = by
-			out.matched[key] = append(out.matched[key], m)
-		} else {
+	byRecording, byTranscript := map[string]string{}, map[string]string{}
+	for _, m := range msgs { // oldest first, so the first notice of a call to match is its earliest
+		key, by := matchOccurrence(occs, m.SentAt)
+		if key == "" {
 			out.series = append(out.series, m)
+			continue
+		}
+		m.MatchedBy = by
+		out.matched[key] = append(out.matched[key], m)
+		if n, ok := notices[m.MessageID]; ok {
+			first := byTranscript
+			if n.recording {
+				first = byRecording
+			}
+			if _, seen := first[n.call]; !seen {
+				first[n.call] = key
+			}
+		}
+	}
+	out.occurrence = byRecording
+	for call, key := range byTranscript {
+		if _, ok := byRecording[call]; !ok {
+			out.occurrence[call] = key
 		}
 	}
 	sort.SliceStable(out.series, func(i, j int) bool { return out.series[i].SentAt.After(out.series[j].SentAt) })
@@ -804,7 +833,15 @@ func matchOccurrence(occs []occurrence, t time.Time) (key, by string) {
 	return "", ""
 }
 
-func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, map[string]string, error) {
+// callNotice is the call a recording or transcript notice names, and which of the two it is.
+type callNotice struct {
+	call      string
+	recording bool
+}
+
+// chatMessages is a meeting chat's recordings, oldest first, and the call each notice among them
+// names, by message id.
+func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, map[string]callNotice, error) {
 	args := append([]any{chat}, stringArgs(accounts)...)
 	rows, err := s.query(ctx, `select id, conversation_id, sent_at, message_type, content_text, link, content_html from messages
 	  where conversation_id=? and tenant_id||'/'||user_id in `+inList(len(accounts))+` and deleted_at is null
@@ -814,7 +851,7 @@ func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string
 	}
 	defer func() { _ = rows.Close() }()
 	var out []CalendarRecording
-	calls := map[string]string{}
+	notices := map[string]callNotice{}
 	for rows.Next() {
 		var m CalendarRecording
 		var sent, typ, html string
@@ -822,12 +859,12 @@ func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string
 			return nil, nil, err
 		}
 		m.SentAt, m.Kind = parseTime(sql.NullString{String: sent, Valid: true}), recordingKinds[typ]
-		if call := noticeCall(typ, html); call != "" {
-			calls[m.MessageID] = call
+		if n, ok := noticeCall(typ, html); ok {
+			notices[m.MessageID] = n
 		}
 		out = append(out, m)
 	}
-	return out, calls, rows.Err()
+	return out, notices, rows.Err()
 }
 
 func (s *Store) chatOf(ctx context.Context, accounts []string, chat string) (*CalendarChat, error) {

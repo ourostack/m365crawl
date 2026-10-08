@@ -144,16 +144,17 @@ type transcriptsCmd struct {
 
 var transcriptStates = []string{store.CallFetched, store.CallPartial, store.CallNotFetched, store.CallUnfetchable}
 
-// meetingRef turns what the user typed into what the archive resolves: a link to a message of a
-// meeting chat names that chat; anything else is passed on as it is.
+// meetingRef turns what the user typed into what the archive resolves: a Teams link (a meeting
+// link, or a link to the meeting chat or one of its messages) names that chat; anything else is
+// passed on as it is.
 func meetingRef(arg string) (string, error) {
-	if !strings.HasPrefix(arg, "http://") && !strings.HasPrefix(arg, "https://") {
+	if !isLink(arg) {
 		return arg, nil
 	}
-	thread, _, err := parseThreadTarget(arg, "")
+	thread, _, _, err := parseTeamsLink(arg)
 	if err != nil {
-		c := errs.Usage(fmt.Sprintf("%q is not a link to a message of a meeting chat", arg))
-		c.Fix = "Pass a link like https://teams.microsoft.com/l/message/<threadId>/<messageId>, or a thread id, a call id or an event id."
+		c := err.coded("Pass a link like https://teams.microsoft.com/l/message/<threadId>/<messageId>, or a thread id, a call id or an event id.")
+		c.Message = fmt.Sprintf("%q is not a link to a meeting or its chat: %s", arg, err.why)
 		return "", c
 	}
 	return thread, nil

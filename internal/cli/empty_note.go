@@ -23,20 +23,30 @@ const noneOfThisKind = "the archive holds no items of this kind"
 // teamsReadHere says whether this operating system has a Teams cache to read; a test seam.
 var teamsReadHere = func() bool { return goruntime.GOOS == "darwin" || goruntime.GOOS == "windows" }
 
+// hasConversationOf says whether the archive holds a conversation; a test seam.
+var hasConversationOf = (*store.Store).HasConversation
+
 // messageWindowOf reads the span of the archived Teams messages; a test seam.
 var messageWindowOf = (*store.Store).MessageWindow
 
 // noteEmpty sets note on an empty list that has none yet, naming its cause: no archive, a platform
 // with no Teams, an archive without Teams data, bounds outside the archived window, filters that
 // matched nothing, or nothing of the kind archived.
+// A read whose --conversation was a message link also says so (linkNote), empty or not.
 func (rt *runtime) noteEmpty(st *store.Store, res result) error {
 	l, ok := res.(*listResult)
-	if !ok || l.Count > 0 || l.Note != "" {
+	if !ok {
 		return nil
 	}
-	note, err := rt.emptyListNote(st)
-	l.Note = note
-	return err
+	if l.Count == 0 && l.Note == "" {
+		note, err := rt.emptyListNote(st)
+		if err != nil {
+			return err
+		}
+		l.Note = note
+	}
+	l.Note = joinNotes(l.Note, rt.linkNote())
+	return nil
 }
 
 func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
@@ -57,6 +67,14 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 		return "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system", nil
 	case newest.IsZero():
 		return "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty", nil
+	}
+	if rt.link != nil {
+		held, err := hasConversationOf(st, rt.ctx, rt.account, rt.link.conversation)
+		if err != nil || !held {
+			return uncachedNote(rt.link.conversation, rt.account != nil), err
+		}
+	}
+	switch {
 	case !q.since.IsZero() && q.since.After(newest), !q.until.IsZero() && q.until.Before(oldest):
 		return "nothing matched: the time range is outside the archived Teams messages, which run from " + day(oldest) + " to " + day(newest), nil
 	case q.filtered:

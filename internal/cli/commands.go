@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"net/url"
 	"strings"
 	"time"
 
@@ -188,7 +187,7 @@ func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.
 
 // msgFlags are the filters messages, search and unread share.
 type msgFlags struct {
-	Conversation  string `short:"c" help:"Conversation id, or its exact title or display name."`
+	Conversation  string `short:"c" help:"Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link)."`
 	From          string `help:"Sender: a person id, or a case-insensitive part of the name."`
 	Since         string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
 	Until         string `help:"Only messages at or before this time (same formats as --since)."`
@@ -215,7 +214,11 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	return store.Filter{Account: rt.account, Conversation: f.Conversation, From: f.From, Since: since, Until: until, Limit: f.Limit, IncludeSystem: f.IncludeSystem, Team: f.Team}, nil
+	conv, err := rt.conversationArg(f.Conversation)
+	if err != nil {
+		return store.Filter{}, err
+	}
+	return store.Filter{Account: rt.account, Conversation: conv, From: f.From, Since: since, Until: until, Limit: f.Limit, IncludeSystem: f.IncludeSystem, Team: f.Team}, nil
 }
 
 type searchCmd struct {
@@ -301,7 +304,7 @@ func excludingChannels(res result, err error) func(on bool) (result, error) {
 }
 
 type unreadCmd struct {
-	Conversation    string `short:"c" help:"Conversation id, or its exact title or display name."`
+	Conversation    string `short:"c" help:"Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link)."`
 	Team            string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
 	Since           string `help:"Count only unread messages sent at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). Use it for \"what needs my attention\": old read markers leave stale conversations with hundreds of unread messages."`
 	Limit           int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
@@ -364,7 +367,7 @@ func (c *unreadCmd) Run(rt *runtime) error {
 }
 
 type threadCmd struct {
-	Target         string `arg:"" help:"Conversation id, or a Teams message link."`
+	Target         string `arg:"" help:"Conversation id, or a Teams message link (a channel or chat link names no message: read it with messages --conversation)."`
 	Root           string `arg:"" optional:"" help:"Root message id (not needed with a link)."`
 	Limit          int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also show deleted messages."`
@@ -382,6 +385,9 @@ func (c *threadCmd) Run(rt *runtime) error {
 	conv, root, err := parseThreadTarget(c.Target, c.Root)
 	if err != nil {
 		return err
+	}
+	if isLink(c.Target) {
+		rt.link = &convLink{raw: cleanLink(c.Target), conversation: conv}
 	}
 	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"}
 	return rt.read("thread", func(st *store.Store) (result, error) {
@@ -419,37 +425,35 @@ func sqlEngineError(err error) *errs.Coded {
 
 // parseThreadTarget resolves "<conversation> <root>" or a Teams message link to a conversation
 // id and the thread's root message id. A channel reply's link names the root as parentMessageId.
+// A channel, chat or meeting link names no message, so it is a usage error that points to messages.
 func parseThreadTarget(target, root string) (conversation, rootID string, err error) {
 	if strings.HasPrefix(target, outlookAccountPrefix) {
 		c := errs.Usage(target + " is a mail id; thread reads Teams chats and channels")
 		c.Fix = "Run `m365crawl mail thread " + target + "`."
 		return "", "", c
 	}
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+	if !isLink(target) {
 		if root == "" {
 			return "", "", errs.Usage("thread needs a root message id after the conversation, or a Teams message link")
 		}
 		return target, root, nil
 	}
-	u, perr := url.Parse(target)
-	if perr != nil {
-		return "", "", badLink("the link is not a valid URL")
+	target = cleanLink(target)
+	if root != "" {
+		c := errs.Usage("thread takes a Teams link or a conversation id and a root message id, not both")
+		c.Fix = "Run `m365crawl thread '" + target + "'` without the root: a message link names its thread."
+		return "", "", c
 	}
-	rest, ok := strings.CutPrefix(u.EscapedPath(), "/l/message/")
-	if !ok || !strings.Contains(u.Hostname(), "teams") {
-		return "", "", badLink("not a Teams message link")
-	}
-	convEsc, msgEsc, ok := strings.Cut(rest, "/")
-	if !ok || msgEsc == "" {
-		return "", "", badLink("the link has no message id")
-	}
-	conversation, err1 := url.PathUnescape(convEsc)
-	msg, err2 := url.PathUnescape(strings.TrimSuffix(msgEsc, "/"))
-	if err1 != nil || err2 != nil || conversation == "" || msg == "" {
-		return "", "", badLink("the link has a malformed conversation or message id")
-	}
-	if p := u.Query().Get("parentMessageId"); p != "" {
-		msg = p
+	conversation, msg, parent, lerr := parseTeamsLink(target)
+	switch {
+	case lerr != nil:
+		return "", "", lerr.coded(badLink("").Fix)
+	case msg == "":
+		c := errs.Usage("the link names a conversation, not a message, so it has no thread to read")
+		c.Fix = "Run `m365crawl messages --conversation '" + target + "'` to read the conversation, or pass a message link (Copy link on a message in Teams) to read its thread."
+		return "", "", c
+	case parent != "":
+		msg = parent
 	}
 	return conversation, msg, nil
 }

@@ -346,6 +346,9 @@ func unknownFolder(name string, all []store.MailFolderRow) *errs.Coded {
 		return c
 	}
 	c.Fix = "Pick a folder name or kind that `m365crawl mail folders` lists. The folders are: " + strings.Join(names, ", ") + "."
+	if strings.EqualFold(name, "junk") {
+		c.Fix = "Junk mail folders are not detected by kind, so no folder has kind junk. Pass the junk folder's name as `m365crawl mail folders` lists it, for example `--folder \"<name>\"`. The folders are: " + strings.Join(names, ", ") + "."
+	}
 	return c
 }
 
@@ -611,7 +614,7 @@ func mailState(m store.MailRow) string {
 // ---- mail list ----
 
 type mailListCmd struct {
-	Folder         string `help:"Only this folder, by name (checked first) or kind: inbox, sent, drafts, archive, deleted, junk, to_me." placeholder:"NAME|KIND"`
+	Folder         string `help:"Only this folder, by name (checked first) or kind: inbox, sent, drafts, archive, deleted, to_me, other." placeholder:"NAME|KIND"`
 	From           string `help:"Only messages whose sender name or address contains this text, ignoring case." placeholder:"TEXT"`
 	Since          string `help:"Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d)." placeholder:"DATE"`
 	Until          string `help:"Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive." placeholder:"DATE"`
@@ -1009,9 +1012,11 @@ type mailUnreadCmd struct {
 	Limit  int    `default:"20" help:"How many of the newest unread messages to list." placeholder:"N"`
 }
 
-// mailUnreadResult is mail unread's document: the folders, then the newest unread messages.
+// mailUnreadResult is mail unread's document: the folders, their unread total, then the newest
+// unread messages.
 type mailUnreadResult struct {
-	Folders []mailUnreadFolder `json:"folders"`
+	Folders     []mailUnreadFolder `json:"folders"`
+	UnreadTotal int                `json:"unread_total"`
 	mailListResult
 }
 
@@ -1051,6 +1056,7 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 			}
 			line := mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages}
 			res.Folders = append(res.Folders, line)
+			res.UnreadTotal += f.Unread
 			if f.Unread > 0 {
 				withUnread = append(withUnread, line)
 			}

@@ -92,8 +92,10 @@ type overriddenField struct {
 
 // calendarItem is one event of the agenda. A known flag is printed true or false; an unknown flag
 // has no key and its name is in unknown_fields. An empty string that is not named in unknown_fields
-// means known and empty.
+// means known and empty. id is event_id under the name every other item uses, so an agent can pass
+// items[].id to calendar event.
 type calendarItem struct {
+	ID                 string            `json:"id"`
 	EventID            string            `json:"event_id"`
 	EventKey           string            `json:"event_key"`
 	AccountID          string            `json:"account_id"`
@@ -188,7 +190,7 @@ func localTime(t time.Time, iana string) string {
 func itemOf(r store.CalendarRow) calendarItem {
 	e := r.Event
 	it := calendarItem{
-		EventID: r.EventID, EventKey: r.Key, AccountID: r.Principal, Sources: strs(r.Sources),
+		ID: r.EventID, EventID: r.EventID, EventKey: r.Key, AccountID: r.Principal, Sources: strs(r.Sources),
 		ICalUID: e.ICalUID, SeriesKey: e.SeriesKey, EventType: e.EventType, Subject: e.Subject,
 		Start: e.Start.UTC(), End: e.End.UTC(), StartLocal: localTime(e.Start, e.TimeZoneIANA), EndLocal: localTime(e.End, e.TimeZoneIANA),
 		AllDay: triPtr(e.AllDay), StartDate: e.StartDate, EndDate: e.EndDate, TimeZone: e.TimeZone, TimeZoneIANA: e.TimeZoneIANA,
@@ -704,7 +706,7 @@ func eventKeys() []string {
 }
 
 type calendarEventCmd struct {
-	Event string `arg:"" help:"An event_id, an event_key, or an unambiguous prefix of either (also the id a link made obsolete)."`
+	Event string `arg:"" help:"An id (the same as event_id), an event_key, or an unambiguous prefix of either (also the id a link made obsolete)."`
 }
 
 func (c *calendarEventCmd) Run(rt *runtime) error {

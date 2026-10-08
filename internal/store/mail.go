@@ -78,8 +78,8 @@ type MailResult struct {
 // A trusted read that does not hold a live message records the first miss in mail_absent. A later
 // trusted read of a different store copy (a later FreshAt) that also misses it confirms the
 // absence: the message is gone when it was received inside the range its folder's read covers,
-// and evicted when it is older (the cache dropped it). For deleted, junk, archive, drafts and
-// other small folders the range is the account's combined range, the earliest oldest_at of its
+// and evicted when it is older (the cache dropped it). For deleted, archive, drafts and other
+// folders the range is the account's combined range, the earliest oldest_at of its
 // inbox, to_me and sent folders. A message that reappears clears both marks and its absence row.
 // A read that misses more than MailGoneWithholdMin messages and more than MailGoneWithholdPercent
 // percent of the live ones marks nothing.

@@ -93,6 +93,18 @@ func (s *Store) MessageWindow(ctx context.Context, a *teamsdesktop.Account) (old
 	return parseTime(lo), parseTime(hi), nil
 }
 
+// HasConversation says whether the archive holds the conversation id, for the account a when it
+// is not nil.
+func (s *Store) HasConversation(ctx context.Context, a *teamsdesktop.Account, id string) (bool, error) {
+	q, args := `select exists(select 1 from conversations where id=?`, []any{id}
+	if a != nil {
+		q, args = q+` and tenant_id=? and user_id=?`, append(args, a.TenantID, a.UserID)
+	}
+	var ok bool
+	err := s.db.QueryRowContext(ctx, q+`)`, args...).Scan(&ok)
+	return ok, err
+}
+
 // HasAccount says whether the archive holds the Teams account a.
 func (s *Store) HasAccount(ctx context.Context, a teamsdesktop.Account) (bool, error) {
 	var ok bool
