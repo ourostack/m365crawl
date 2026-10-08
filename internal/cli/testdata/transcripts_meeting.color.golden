@@ -1,0 +1,16 @@
+Weekly sync · 2026-11-10 10:00 · call call-2 · fetched (1 of 1 fetchable parts fetched)
+[2mpart[0m  [2mstarts[0m  [2mkind[0m      [2mstate[0m  [2mentries[0m  [2mfetched[0m           [2mwhy no text[0m
+[2m----[0m  [2m------[0m  [2m--------[0m  [2m-----[0m  [2m-------[0m  [2m----------------[0m  [2m-----------[0m
+1     10:00   recorded  ok     1        2026-11-09 08:00  [2m-[0m
+
+Weekly sync · 2026-11-03 10:00 · call call-1 · partial (2 of 3 fetchable parts fetched)
+[2mpart[0m  [2mstarts[0m  [2mkind[0m             [2mstate[0m        [2mentries[0m  [2mfetched[0m           [2mwhy no text[0m
+[2m----[0m  [2m------[0m  [2m---------------[0m  [2m-----------[0m  [2m-------[0m  [2m----------------[0m  [2m-------------------------------------------------------[0m
+1     10:00   transcribe only  ok           3        2026-11-09 08:00  [2m-[0m
+2     10:02   recorded         ok           2        2026-11-09 08:00  [2m-[0m
+3     10:40   recorded         not_fetched  [2m-[0m        [2m-[0m                 not fetched yet; run m365crawl transcripts fetch call-1
+
+[2m2 items[0m
+[2mnotice: 1 of the 2 meetings listed has transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>[0m
+[2marchive age: <age>[0m
+[2msource: archive[0m

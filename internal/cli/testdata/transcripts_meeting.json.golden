@@ -1,0 +1,114 @@
+{
+  "items": [
+    {
+      "call_id": "call-2",
+      "thread_id": "19:meeting_weekly@thread.v2",
+      "event_key": null,
+      "title": "Weekly sync",
+      "started_at": "2026-11-10T10:00:00Z",
+      "state": "fetched",
+      "parts_total": 1,
+      "parts_fetchable": 1,
+      "parts_fetched": 1,
+      "parts": [
+        {
+          "ordinal": 1,
+          "part_key": "d:b!d1/Q1",
+          "starts_at": "2026-11-10T10:00:00Z",
+          "duration_seconds": 1800,
+          "transcribe_only": false,
+          "content_types": "Recording+Transcript",
+          "storage_kind": "SharedSharePoint",
+          "ref_quality": "drive_item",
+          "fetchable": true,
+          "state": "ok",
+          "reason": null,
+          "fetch": {
+            "state": "ok",
+            "fetched_at": "2026-11-09T08:00:00Z",
+            "attempted_at": "2026-11-09T08:00:00Z",
+            "entries": 1,
+            "http_status": 200,
+            "browser": "edge"
+          }
+        }
+      ]
+    },
+    {
+      "call_id": "call-1",
+      "thread_id": "19:meeting_weekly@thread.v2",
+      "event_key": "uid-weekly-1103|",
+      "title": "Weekly sync",
+      "started_at": "2026-11-03T10:00:00Z",
+      "state": "partial",
+      "parts_total": 3,
+      "parts_fetchable": 3,
+      "parts_fetched": 2,
+      "parts": [
+        {
+          "ordinal": 1,
+          "part_key": "d:b!d1/P1",
+          "starts_at": "2026-11-03T10:00:00Z",
+          "duration_seconds": 1800,
+          "transcribe_only": true,
+          "content_types": "Transcript",
+          "storage_kind": "SharedSharePoint",
+          "ref_quality": "drive_item",
+          "fetchable": true,
+          "state": "ok",
+          "reason": null,
+          "fetch": {
+            "state": "ok",
+            "fetched_at": "2026-11-09T08:00:00Z",
+            "attempted_at": "2026-11-09T08:00:00Z",
+            "entries": 3,
+            "http_status": 200,
+            "browser": "edge"
+          }
+        },
+        {
+          "ordinal": 2,
+          "part_key": "d:b!d1/P2",
+          "starts_at": "2026-11-03T10:02:00Z",
+          "duration_seconds": 1800,
+          "transcribe_only": false,
+          "content_types": "Recording+Transcript",
+          "storage_kind": "SharedSharePoint",
+          "ref_quality": "drive_item",
+          "fetchable": true,
+          "state": "ok",
+          "reason": null,
+          "fetch": {
+            "state": "ok",
+            "fetched_at": "2026-11-09T08:00:00Z",
+            "attempted_at": "2026-11-09T08:00:00Z",
+            "entries": 2,
+            "http_status": 200,
+            "browser": "edge"
+          }
+        },
+        {
+          "ordinal": 3,
+          "part_key": "d:b!d1/P3",
+          "starts_at": "2026-11-03T10:40:00Z",
+          "duration_seconds": 1800,
+          "transcribe_only": false,
+          "content_types": "Recording+Transcript",
+          "storage_kind": "SharedSharePoint",
+          "ref_quality": "drive_item",
+          "fetchable": true,
+          "state": "not_fetched",
+          "reason": "not fetched yet; run m365crawl transcripts fetch call-1",
+          "fetch": null
+        }
+      ]
+    }
+  ],
+  "count": 2,
+  "truncated": false,
+  "source": "archive",
+  "archive_age_seconds": 0,
+  "notices": [
+    "1 of the 2 meetings listed has transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>"
+  ]
+}

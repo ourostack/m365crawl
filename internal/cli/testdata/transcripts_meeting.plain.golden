@@ -1,0 +1,16 @@
+Weekly sync · 2026-11-10 10:00 · call call-2 · fetched (1 of 1 fetchable parts fetched)
+part  starts  kind      state  entries  fetched           why no text
+----  ------  --------  -----  -------  ----------------  -----------
+1     10:00   recorded  ok     1        2026-11-09 08:00  -
+
+Weekly sync · 2026-11-03 10:00 · call call-1 · partial (2 of 3 fetchable parts fetched)
+part  starts  kind             state        entries  fetched           why no text
+----  ------  ---------------  -----------  -------  ----------------  -------------------------------------------------------
+1     10:00   transcribe only  ok           3        2026-11-09 08:00  -
+2     10:02   recorded         ok           2        2026-11-09 08:00  -
+3     10:40   recorded         not_fetched  -        -                 not fetched yet; run m365crawl transcripts fetch call-1
+
+2 items
+notice: 1 of the 2 meetings listed has transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>
+archive age: <age>
+source: archive

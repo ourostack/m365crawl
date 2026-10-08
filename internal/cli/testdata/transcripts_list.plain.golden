@@ -1,0 +1,11 @@
+started           state        parts  fetched  title        call
+----------------  -----------  -----  -------  -----------  ------
+2026-11-12 14:00  not_fetched  1      0 of 1   -            call-4
+2026-11-11 14:00  unfetchable  1      0 of 0   -            call-3
+2026-11-10 10:00  fetched      1      1 of 1   Weekly sync  call-2
+2026-11-03 10:00  partial      3      2 of 3   Weekly sync  call-1
+
+4 items
+notice: 2 of the 4 meetings listed have transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>
+archive age: <age>
+source: archive

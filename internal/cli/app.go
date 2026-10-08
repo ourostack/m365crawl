@@ -72,6 +72,7 @@ type cliApp struct {
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
 	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams and Outlook caches hold the days each app has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook mail offline: list, show, thread, folders and unread. Mail comes from Outlook for Mac's local cache; every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
+	Transcripts   transcriptsGroup `cmd:"" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive. With <meeting> (an event id or key, a meeting chat link or thread id, or a call id) it lists that meeting's parts. The list flags (--since, --until, --state, --limit) are listed by: m365crawl transcripts list --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
 	Unread        unreadCmd        "cmd:\"\" help:\"List unread messages (chats and meetings unless --include-channels), newest first; --by-conversation gives per-conversation counts. Teams chats and channels; for Outlook mail use `m365crawl mail unread`.\""
@@ -163,7 +164,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
@@ -254,8 +255,11 @@ func commandName(k *kong.Context) string {
 		words = append(words, w)
 	}
 	name := strings.Join(words, " ")
-	if name == "calendar agenda" {
+	switch name {
+	case "calendar agenda":
 		return "calendar" // the agenda is the calendar group's default command
+	case "transcripts list":
+		return "transcripts" // the list is the transcripts group's default command
 	}
 	return name
 }

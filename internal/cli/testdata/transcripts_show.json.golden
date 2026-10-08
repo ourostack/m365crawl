@@ -1,0 +1,74 @@
+{
+  "call_id": "call-1",
+  "event_key": "uid-weekly-1103|",
+  "title": "Weekly sync",
+  "source": "archive",
+  "complete": false,
+  "segments": [
+    {
+      "ordinal": 1,
+      "transcribe_only": true,
+      "starts_at": "2026-11-03T10:00:00Z",
+      "fetched_at": "2026-11-09T08:00:00Z",
+      "state": "ok",
+      "reason": null,
+      "entries": [
+        {
+          "speaker": "Ada Example",
+          "start": "2026-11-03T10:00:00Z",
+          "end": "2026-11-03T10:00:02.5Z",
+          "offset": "0:00:00",
+          "text": "Good morning."
+        },
+        {
+          "speaker": "Ada Example",
+          "start": "2026-11-03T10:00:02.5Z",
+          "end": "2026-11-03T10:00:04Z",
+          "offset": "0:00:02",
+          "text": "Shall we start?"
+        },
+        {
+          "speaker": "Bo Example",
+          "start": "2026-11-03T10:01:05Z",
+          "end": "2026-11-03T10:01:06Z",
+          "offset": "0:01:05",
+          "text": "Yes, the agenda is short."
+        }
+      ]
+    },
+    {
+      "ordinal": 2,
+      "transcribe_only": false,
+      "starts_at": "2026-11-03T10:02:00Z",
+      "fetched_at": "2026-11-09T08:00:00Z",
+      "state": "ok",
+      "reason": null,
+      "entries": [
+        {
+          "speaker": "Bo Example",
+          "start": "2026-11-03T11:04:05.5Z",
+          "end": "2026-11-03T11:04:07Z",
+          "offset": "1:02:05",
+          "text": "First item: the release."
+        },
+        {
+          "speaker": null,
+          "start": null,
+          "end": null,
+          "offset": null,
+          "text": "(inaudible)"
+        }
+      ]
+    },
+    {
+      "ordinal": 3,
+      "transcribe_only": false,
+      "starts_at": "2026-11-03T10:40:00Z",
+      "fetched_at": null,
+      "state": "not_fetched",
+      "reason": "not fetched yet; run m365crawl transcripts fetch call-1",
+      "entries": []
+    }
+  ],
+  "archive_age_seconds": 0
+}
