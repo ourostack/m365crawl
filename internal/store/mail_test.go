@@ -542,6 +542,36 @@ func TestMailThreadSubjectCap(t *testing.T) {
 	}
 }
 
+// A subject group finds the messages that share a participant even behind newer same-subject
+// mail between other people, and is truncated only when more of those exist.
+func TestMailThreadSubjectSkipsStrangers(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seed := mailMsg(1, fInbox, "<seed@x>", "Standup", 400)
+	shared := mailMsg(2, fInbox, "<shared@x>", "Standup", 300)
+	shared.SenderAddress = "BOB@example.test" // the seed's recipient, in another case
+	shared.Recipients = nil
+	msgs := []outlookmail.Message{seed, shared}
+	for i := uint32(3); i < 3+mailThreadCap+20; i++ {
+		m := mailMsg(i, fInbox, fmt.Sprintf("<x%d@x>", i), "Standup", int(i%200))
+		m.SenderAddress = "stranger@example.test"
+		m.Recipients = []outlookmail.Recipient{{Name: "Nobody", Address: "nobody@example.test"}}
+		msgs = append(msgs, m)
+	}
+	mustCommitMail(t, s, mailBatch(mailT0, msgs...))
+	rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, 1)
+	if err != nil || grouping != "subject" || truncated || len(rows) != 2 || rows[0].DetailKey != 1 || rows[1].DetailKey != 2 {
+		t.Fatalf("group: %d rows %q truncated=%v %v", len(rows), grouping, truncated, err)
+	}
+	// A seed with no address at all groups alone.
+	lone := mailMsg(900, fInbox, "<lone@x>", "Standup", 1)
+	lone.SenderAddress, lone.Recipients = "", nil
+	mustCommitMail(t, s, mailBatch(mailT0, append(msgs, lone)...))
+	if rows, _, _, err := s.MailThread(ctx, mailAcct, 900); err != nil || len(rows) != 1 {
+		t.Fatalf("addressless seed: %d rows %v", len(rows), err)
+	}
+}
+
 func TestMailFoldersAndCoverage(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

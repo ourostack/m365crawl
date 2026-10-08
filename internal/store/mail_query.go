@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -418,28 +420,26 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 	return ids, linked, nil
 }
 
-// subjectGroup returns the seed and the messages of its account with the same normalised subject
-// that share an address (sender or recipient) with it.
+// subjectGroup returns the seed and the newest messages of its account with the same normalised
+// subject that share an address (sender or recipient, ignoring case) with it, at most
+// mailThreadCap+1 in all. The address check runs in the query, before the limit, so a match is
+// never lost behind newer same-subject mail between other people.
 func (s *Store) subjectGroup(ctx context.Context, seed MailRow) ([]int64, error) {
-	if seed.SubjectNorm == "" {
-		return []int64{seed.Rowid}, nil
+	ids := []int64{seed.Rowid}
+	mine := slices.Sorted(maps.Keys(addressSet(seed)))
+	if seed.SubjectNorm == "" || len(mine) == 0 {
+		return ids, nil
 	}
-	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and m.subject_norm=? order by m.received_at desc, m.rowid desc limit ?`, []any{seed.Account, seed.SubjectNorm, mailThreadCap + 1})
+	in, args := inList(len(mine)), stringArgs(mine)
+	w := where{}
+	w.add(`m.account=? and m.subject_norm=? and m.rowid<>?`, seed.Account, seed.SubjectNorm, seed.Rowid)
+	w.add(`(lower(m.sender_address) in `+in+` or exists(select 1 from mail_recipients r where r.message_rowid=m.rowid and lower(r.address) in `+in+`))`, append(args, args...)...)
+	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, mailThreadCap)) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
 		return nil, err
 	}
-	mine := addressSet(seed)
-	ids := []int64{seed.Rowid}
 	for _, m := range same {
-		if m.Rowid == seed.Rowid {
-			continue
-		}
-		for a := range addressSet(m) {
-			if mine[a] {
-				ids = append(ids, m.Rowid)
-				break
-			}
-		}
+		ids = append(ids, m.Rowid)
 	}
 	return ids, nil
 }
