@@ -14,7 +14,7 @@ Ready checks
   ● full_disk_access   the Teams container is readable
   ● teams_origin       1 Teams origin(s) found
   ● database_writable  <db> is writable
-  ● schema_version     schema v6
+  ● schema_version     schema v7
   ● fts                full-text indexes present
   ● archive_newer      the archive was written by this or an older m365crawl (derivation version 2)
   ● last_sync_status   the last sync was ok

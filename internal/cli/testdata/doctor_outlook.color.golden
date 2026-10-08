@@ -14,7 +14,7 @@
   [32m●[0m [2mfull_disk_access [0m  the Teams container is readable
   [32m●[0m [2mteams_origin     [0m  1 Teams origin(s) found
   [32m●[0m [2mdatabase_writable[0m  <db> is writable
-  [32m●[0m [2mschema_version   [0m  schema v6
+  [32m●[0m [2mschema_version   [0m  schema v7
   [32m●[0m [2mfts              [0m  full-text indexes present
   [32m●[0m [2marchive_newer    [0m  the archive was written by this or an older m365crawl (derivation version 2)
   [32m●[0m [2mlast_sync_status [0m  the last sync was ok

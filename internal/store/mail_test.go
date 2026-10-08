@@ -116,7 +116,7 @@ func TestSchemaMigratesV5ToV6(t *testing.T) {
 		t.Fatalf("open v5 archive: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != 6 || SchemaVersion != 6 {
+	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
 		t.Fatalf("version %d, SchemaVersion %d", v, SchemaVersion)
 	}
 	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('mail_folders','mail_messages','mail_recipients','mail_attachments','mail_coverage','mail_absent','mail_fts')`); n != 7 {
@@ -136,7 +136,7 @@ func TestOpenRefusesAnArchiveFromANewerSchemaWithMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 7`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = 8`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()

@@ -16,7 +16,7 @@ Blair Fixture  00000000-0000-4000-8000-000000000002  00000000-0000-4000-8000-000
 [2marchive path  [0m[2m : [0m<db>
 [2mfts present   [0m[2m : [0m[32myes[0m
 [2mlast run      [0m[2m : [0mok at <stamp>
-[2mschema version[0m[2m : [0m6
+[2mschema version[0m[2m : [0m7
 
 [2maccount[0m                                                                    [2mconversations[0m  [2mmessages[0m  [2mpeople[0m  [2mactivity[0m  [2mnewest[0m
 [2m-------------------------------------------------------------------------[0m  [2m-------------[0m  [2m--------[0m  [2m------[0m  [2m--------[0m  [2m----------------[0m

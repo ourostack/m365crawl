@@ -9,7 +9,10 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // records (see calendar.go); an archive at version 4 gains them, empty, on its next writable open.
 // Version 6 added the mail tables (mail_schema.go), which a sync fills from Outlook for Mac's store
 // (see mail.go); an archive at version 5 gains them, empty, on its next writable open.
-const SchemaVersion = 6
+// Version 7 added the meeting transcript tables (transcripts_schema.go): the parts a sync derives
+// from the recording notices in messages, and what a fetch stores (see transcripts.go); an archive
+// at version 6 gains them, empty, on its next writable open.
+const SchemaVersion = 7
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -181,6 +184,6 @@ create table if not exists calendar_losses(
 );
 `
 
-// schemaDDL is every table the archive has: the Teams tables above, the calendar tables and the
-// mail tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL
+// schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
+// tables and the meeting transcript tables.
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL

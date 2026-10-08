@@ -1,0 +1,1 @@
+<URIObject type="Video.2/CallRecording.1"><a href="https://tenant.sharepoint.example.invalid/:v:/t/site-a/EabcTOKEN">Play</a><Identifiers><Id type="callId" value="call-3"/></Identifiers><RecordingStatus status="Success" code="200"/><RecordingContent contentTypes="Recording+Transcript" timestamp="2026-11-04T09:00:00Z" duration="0:10:00.000"></RecordingContent></URIObject>

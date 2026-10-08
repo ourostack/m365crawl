@@ -108,6 +108,13 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		_ = record(StatusFailed)
 		return Report{}, nil, errs.DBError(err)
 	}
+	// An archive whose transcript parts were derived by an older mapper (or never: it is from before
+	// the transcript tables) gets them rebuilt from the notices it already holds.
+	err = contained(func() (e error) { r.transcripts, e = ensureTranscripts(st, ctx); return })
+	if err != nil {
+		_ = record(StatusFailed)
+		return Report{}, nil, errs.DBError(err)
+	}
 	rep, changes, err = r.run(ctx, started)
 	if rep.Status == "" { // failed before any source ran
 		_ = record(StatusFailed)
@@ -127,6 +134,10 @@ type runner struct {
 	sig []byte // teamsdesktop.MemoSignature: what record digests are taken under
 	// calendar is what the calendar rebuild at the start of the run did, nil when none was due.
 	calendar *store.CalendarResult
+	// transcripts is what this run's derivations of the transcript parts counted, per account: the
+	// rebuild at the start of the run, when one was due, and each source's own. A later derivation
+	// of an account replaces an earlier one, so no part is counted twice.
+	transcripts map[string]store.TranscriptCounts
 }
 
 // outlookOn says whether the Outlook source takes part in this run.
@@ -240,6 +251,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	}
 	if stopped == nil && linkErr == nil && r.outlookOn() {
 		r.autoLinkOutlook(ctx)
+	}
+	for _, c := range r.transcripts {
+		rep.Transcripts.Add(c)
 	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {
@@ -407,6 +421,12 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 	add(&rep.Activity, w.counts.Activity)
 	add(&rep.Records, w.counts.Records)
 	rep.Calendar.Add(w.counts.Calendar)
+	if r.transcripts == nil {
+		r.transcripts = map[string]store.TranscriptCounts{}
+	}
+	for account, c := range w.transcripts {
+		r.transcripts[account] = c
+	}
 	rep.Redacted += redacted
 	*changes = append(*changes, w.changes...)
 	r.progress("%s: %s (%d messages, %d conversations, %d activity items, %d records)", src.Key(), status, w.counts.Messages.Seen, w.counts.Conversations.Seen, w.counts.Activity.Seen, w.counts.Records.Seen)
@@ -449,6 +469,11 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	w.counts.Calendar = cal.Counts
 	if err := w.finish(); err != nil {
 		return nil, nil, 0, err
+	}
+	// The messages are flushed now: the transcript parts of the accounts this source wrote to are
+	// rebuilt from every notice the archive holds for them, in the source's own transaction.
+	if w.transcripts, err = deriveTranscripts(sess, ctx, w.accounts()); err != nil {
+		return nil, nil, 0, asCoded(err)
 	}
 	if conflictFn(w.memo) {
 		return nil, nil, 0, errMemoConflict
@@ -493,6 +518,8 @@ type writer struct {
 	present  []string // the databases the generic read found: the accounts whose cache was read
 	counts   runCounts
 	changes  []Change // held until the source commits
+	// transcripts is what deriving the transcript parts of this source's accounts counted.
+	transcripts map[string]store.TranscriptCounts
 
 	memo *memo
 	// Who produced each pending row, parallel to convs, msgs and acts; nil when the record is not
@@ -776,13 +803,15 @@ var (
 	ensureCalendar  = func(ctx context.Context, st *store.Store, at time.Time) (*store.CalendarResult, error) {
 		return st.EnsureCalendar(ctx, calendarZone(), at)
 	}
-	calendarZone    = func() *time.Location { return time.Local }
-	rederiveArchive = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
-	batchSize       = 2000
-	beforeFlush     = func(kind string, n int) error { return nil }
-	afterSnapshot   = func() {}
-	afterApply      = func(*writer) {}
-	beforeRead      = func(*writer) {}
-	memoSignature   = teamsdesktop.MemoSignature
-	conflictFn      = (*memo).conflict
+	ensureTranscripts = (*store.Store).EnsureTranscriptParts
+	deriveTranscripts = (*store.Session).DeriveTranscriptParts
+	calendarZone      = func() *time.Location { return time.Local }
+	rederiveArchive   = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
+	batchSize         = 2000
+	beforeFlush       = func(kind string, n int) error { return nil }
+	afterSnapshot     = func() {}
+	afterApply        = func(*writer) {}
+	beforeRead        = func(*writer) {}
+	memoSignature     = teamsdesktop.MemoSignature
+	conflictFn        = (*memo).conflict
 )
