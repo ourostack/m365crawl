@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/openclaw/crawlkit/control"
 )
 
@@ -81,6 +82,29 @@ func TestMetadataTranscriptsCommands(t *testing.T) {
 	for _, name := range []string{"transcripts", "transcripts show"} {
 		if c, ok := m.Commands[name]; !ok || !c.JSON || c.Mutates {
 			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	// Every command's argv parses, a value standing in for each <placeholder>, and names its command.
+	for name, c := range m.Commands {
+		args := make([]string, 0, len(c.Argv)-1)
+		for _, a := range c.Argv[1:] {
+			if strings.HasPrefix(a, "<") && strings.HasSuffix(a, ">") {
+				a = "x"
+			}
+			args = append(args, a)
+		}
+		var app cliApp
+		p, err := kong.New(&app)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kctx, err := p.Parse(args)
+		if err != nil {
+			t.Errorf("%s: %v does not parse: %v", name, args, err)
+			continue
+		}
+		if got := commandName(kctx); got != name {
+			t.Errorf("%s: %v resolves to %q", name, args, got)
 		}
 	}
 	found := false

@@ -129,3 +129,26 @@ func TestDoctorNeverOpensTheProfile(t *testing.T) {
 		t.Fatalf("a profile doctor cannot enter is still examined by its mode alone: %v", c)
 	}
 }
+
+// M365CRAWL_BROWSER naming nothing on this machine is said as such, with the variable named.
+func TestDoctorTranscriptsBrowserEnvNamesNothing(t *testing.T) {
+	e := newEnv(t)
+	old := findBrowser
+	t.Cleanup(func() { findBrowser = old })
+	findBrowser = func(string) (string, browser.Kind, error) { return "", "", errs.NoBrowser() }
+	t.Setenv("M365CRAWL_BROWSER", "/nowhere/msedge")
+	c, code := doctorCheck(t, e, "transcripts_browser")
+	if c["warn"] != true || c["detail"] != `M365CRAWL_BROWSER is "/nowhere/msedge", which names no browser on this machine` ||
+		!strings.Contains(c["fix"].(string), "M365CRAWL_BROWSER") || code != 0 {
+		t.Fatalf("check %v, exit %d", c, code)
+	}
+}
+
+func TestProfileFixFitsThePlatform(t *testing.T) {
+	if f := profileFix("/a b/browser", "darwin"); !strings.HasPrefix(f, "Run chmod 700 '/a b/browser', or move it aside") {
+		t.Errorf("darwin: %s", f)
+	}
+	if f := profileFix(`C:\x\browser`, "windows"); strings.Contains(f, "chmod") || !strings.Contains(f, "SYSTEM") || !strings.Contains(f, `C:\x\browser`) {
+		t.Errorf("windows: %s", f)
+	}
+}

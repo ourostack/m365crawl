@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,4 +151,35 @@ func noticesOf(m map[string]any) []string {
 		out = append(out, n.(string))
 	}
 	return out
+}
+
+// A call with only a transcript notice has a placeholder row and no part: parts_total is 0.
+func TestCalendarEventPartsTotalLeavesOutThePlaceholder(t *testing.T) {
+	e := trEnv(t)
+	e.exec(`insert into messages(tenant_id,user_id,conversation_id,id,sent_at,message_type,content_html,updated_at) values('` + tenantA + `','` + userA + `','` + trWeekly +
+		`','1006','2026-11-03T10:50:00.000Z','` + transcripts.TypeTranscript + `','{\"callId\":\"call-6\",\"isDeleted\":false}','2026-11-03T10:50:00.000Z')`)
+	ctx := context.Background()
+	st, err := store.Open(ctx, e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.DeriveTranscriptParts(ctx, []string{trAccount}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	m := trJSON(t, e, "calendar", "event", trEventID())
+	var got []string
+	for _, c := range eventTranscripts(t, m) {
+		got = append(got, c["call_id"].(string)+"="+c["state"].(string)+"/"+fmt.Sprint(c["parts_total"]))
+	}
+	if strings.Join(got, " ") != "call-6=unfetchable/0 call-1=partial/3" && strings.Join(got, " ") != "call-1=partial/3 call-6=unfetchable/0" {
+		t.Fatalf("calls %v", got)
+	}
 }

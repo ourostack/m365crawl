@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
@@ -41,7 +42,9 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 		w.add(`transcript_fts match ?`, "text : ("+match+")")
 		from = ` from transcript_fts join transcript_entries e on e.rowid=transcript_fts.rowid`
 	} else if f.Speaker == "" && f.Since.IsZero() && f.Until.IsZero() {
-		return nil, false, searchUsage("search needs words to find or at least one filter (--from, --since, --until)")
+		u := errs.Usage("a transcript search needs words to find or at least one filter (--from, --since, --until)")
+		u.Fix = "Give words to find, or --from (a part of the speaker's name), --since or --until; `m365crawl transcripts` lists the recorded meetings."
+		return nil, false, u
 	}
 	if f.Account != nil {
 		w.add(`p.account_id=?`, accountString(f.Account))
@@ -49,8 +52,13 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 	if f.Speaker != "" {
 		w.add(`instr(lower(e.speaker), lower(?))>0`, f.Speaker)
 	}
-	if !f.Until.IsZero() { // an entry is never before its part's start
-		w.add(`coalesce(p.starts_at, p.sent_at)<?`, f.Until.UTC().Format(timeLayout))
+	// An entry's time is its part's start plus its offset, in milliseconds since the epoch.
+	const entryMS = `(cast(round((julianday(coalesce(p.starts_at, p.sent_at))-2440587.5)*86400000) as integer)+coalesce(e.start_ms, 0))`
+	if !f.Since.IsZero() {
+		w.add(entryMS+`>=?`, f.Since.UnixMilli())
+	}
+	if !f.Until.IsZero() {
+		w.add(entryMS+`<?`, f.Until.UnixMilli())
 	}
 	//nolint:gosec // G202: the fragments are constants; values are placeholders
 	q := `select e.rowid, p.account_id, p.call_id, p.part_key, p.thread_id, p.ordinal, coalesce(p.starts_at, p.sent_at), f.fetched_at, e.start_ms` + from + `
@@ -62,7 +70,7 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 		return nil, false, err
 	}
 	var first []int64 // the rowid of each hit's first matching entry
-	if hits, first, err = collapseHits(rows, f); err != nil {
+	if hits, first, err = collapseHits(rows); err != nil {
 		return nil, false, err
 	}
 	order := make([]int, len(hits))
@@ -92,8 +100,8 @@ func (s *Store) TranscriptSearch(ctx context.Context, query string, f Transcript
 }
 
 // collapseHits groups matching entries, which come ordered by call, part and entry, into one hit
-// per part, keeping the entries inside the time bounds.
-func collapseHits(rows *sql.Rows, f TranscriptFilter) (hits []TranscriptHit, first []int64, err error) {
+// per part.
+func collapseHits(rows *sql.Rows) (hits []TranscriptHit, first []int64, err error) {
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var h TranscriptHit
@@ -104,9 +112,6 @@ func collapseHits(rows *sql.Rows, f TranscriptFilter) (hits []TranscriptHit, fir
 			return nil, nil, err
 		}
 		h.At = parseTime(starts).Add(time.Duration(offset.Int64) * time.Millisecond)
-		if (!f.Since.IsZero() && h.At.Before(f.Since)) || (!f.Until.IsZero() && !h.At.Before(f.Until)) {
-			continue
-		}
 		if n := len(hits); n > 0 && hits[n-1].AccountID == h.AccountID && hits[n-1].CallID == h.CallID && hits[n-1].PartKey == h.PartKey {
 			hits[n-1].Matches++
 			continue
@@ -158,10 +163,13 @@ func (s *Store) nameHits(ctx context.Context, hits []TranscriptHit) error {
 	return nil
 }
 
-// HasTranscriptText reports whether the archive holds the text of any transcript part.
+// HasTranscriptText reports whether any part of a recorded call has been fetched: its text is in
+// the archive (fetched_at is set), even when the transcript had no entries. TranscriptStatus counts
+// the same parts as fetched.
 func (s *Store) HasTranscriptText(ctx context.Context) (bool, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `select exists(select 1 from transcript_entries)`).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from transcript_fetches f join transcript_parts p on p.account_id=f.account_id and p.part_key=f.part_key
+	  where f.fetched_at is not null)`).Scan(&n)
 	return n == 1, err
 }
 

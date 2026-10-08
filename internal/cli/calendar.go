@@ -15,6 +15,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
 // rangeFix is the usage fix for an unsigned duration given as a calendar bound.
@@ -641,7 +642,9 @@ type calendarExtras struct {
 
 // eventTranscript is one recorded call of the occurrence, as the archive holds its transcript:
 // source is always archive (nothing is fetched to answer), state is the call's state as
-// `transcripts` prints it, and last_fetched_at is when the newest of its parts' text was fetched.
+// `transcripts` prints it, parts_total leaves out the placeholder of a call that has only a
+// transcript notice (as status does), and last_fetched_at is when the newest of its parts' text
+// was fetched.
 type eventTranscript struct {
 	CallID         string     `json:"call_id"`
 	Source         string     `json:"source"`
@@ -674,8 +677,11 @@ func (rt *runtime) eventTranscripts(st *store.Store, eventID string) (out []even
 	}
 	for _, c := range calls {
 		n, fetched := c.Fetchable()
-		t := eventTranscript{CallID: c.CallID, Source: sourceArchive, State: c.State, PartsTotal: len(c.Parts), PartsFetchable: n, PartsFetched: fetched}
+		t := eventTranscript{CallID: c.CallID, Source: sourceArchive, State: c.State, PartsFetchable: n, PartsFetched: fetched}
 		for _, p := range c.Parts {
+			if p.RefQuality != transcripts.RefUnresolved { // the placeholder of a call with no file reference is no part
+				t.PartsTotal++
+			}
 			if p.HasText() && (t.LastFetchedAt == nil || p.Fetch.FetchedAt.After(*t.LastFetchedAt)) {
 				t.LastFetchedAt = p.Fetch.FetchedAt
 			}

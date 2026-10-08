@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ var (
 	findBrowser = browser.Find
 	privateDir  = store.PrivateDir
 	statProfile = os.Stat
+	doctorGOOS  = goruntime.GOOS
 )
 
 type check struct {
@@ -112,8 +115,13 @@ func (rt *runtime) doctorChecks() []check {
 // Edge, then Chrome). It never starts one. No browser is a warning: everything else works offline.
 func transcriptsBrowserCheck() check {
 	const name = "transcripts_browser"
-	path, kind, err := findBrowser(os.Getenv("M365CRAWL_BROWSER"))
-	if err != nil {
+	pref := os.Getenv("M365CRAWL_BROWSER")
+	path, kind, err := findBrowser(pref)
+	switch {
+	case err != nil && strings.TrimSpace(pref) != "":
+		return check{Name: name, OK: true, Warn: true, Detail: "M365CRAWL_BROWSER is " + strconv.Quote(pref) + ", which names no browser on this machine",
+			Fix: "Set M365CRAWL_BROWSER to edge, chrome or the path of an Edge or Chrome executable, or unset it to use Edge, then Chrome."}
+	case err != nil:
 		fix := errs.NoBrowser().Fix
 		var coded *errs.Coded
 		if errors.As(err, &coded) {
@@ -124,13 +132,22 @@ func transcriptsBrowserCheck() check {
 	return check{Name: name, OK: true, Detail: string(kind) + " at " + path + " (transcripts fetch runs it headless; doctor does not start it)"}
 }
 
+// profileFix is how to make the browser profile private on the given operating system.
+func profileFix(dir, goos string) string {
+	const aside = "or move it aside: the next transcripts fetch creates a private one, and you sign in again."
+	if goos == "windows" {
+		return "Remove every entry but your account and SYSTEM from the access list of " + dir + ", " + aside
+	}
+	return "Run chmod 700 " + shellWord(dir) + ", " + aside
+}
+
 // transcriptsProfileCheck says whether the browser profile beside the archive, which holds that
 // browser's own sign-in state, is private. It reads the directory's permissions only, never the
 // files in it. A profile that others can read is a warning with the fix.
 func (rt *runtime) transcriptsProfileCheck() check {
 	const name = "transcripts_profile_mode"
 	dir := browser.ProfileDir(rt.dbPath)
-	fix := "Make " + dir + " readable by you only (chmod 700 on macOS), or move it aside: the next transcripts fetch creates a private one, and you sign in again."
+	fix := profileFix(dir, doctorGOOS)
 	fi, err := statProfile(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

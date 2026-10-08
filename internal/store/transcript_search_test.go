@@ -132,3 +132,32 @@ func TestTranscriptStatus(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 }
+
+// A part fetched with no entries is fetched: status and the text question agree.
+func TestTranscriptFetchedWithNoEntries(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	tSeed(t, s)
+	tDerive(t, s, tAcctA)
+	at := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
+	// A failed attempt is not a fetch.
+	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM5", transcripts.FetchResult{State: transcripts.StateFailed, At: at}))
+	if has, err := s.HasTranscriptText(ctx); err != nil || has {
+		t.Fatalf("failed attempt: %v, %v", has, err)
+	}
+	must0(s.SaveTranscript(ctx, tAcctA, "d:b!d1/ITEM1", okResult(at)))
+	has, err := s.HasTranscriptText(ctx)
+	st, _ := s.TranscriptStatus(ctx)
+	if err != nil || !has || st.Fetched != 1 {
+		t.Fatalf("empty fetch: %v, %v, %+v", has, err, st)
+	}
+}
+
+func TestTranscriptSearchUsageFitsTranscripts(t *testing.T) {
+	s := newStore(t)
+	_, _, err := s.TranscriptSearch(context.Background(), " ", TranscriptFilter{})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeUsage || strings.Contains(coded.Fix, "messages") || !strings.Contains(coded.Fix, "--from") {
+		t.Fatalf("%v", err)
+	}
+}

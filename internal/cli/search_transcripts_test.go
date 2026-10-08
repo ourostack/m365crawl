@@ -1,45 +1,39 @@
 package cli
 
 import (
-	"context"
+	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/ourostack/m365crawl/internal/store"
-	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
 const searchMeeting = "19:meeting_search@thread.v2"
 
 // seedSearchTranscripts adds one recorded call to a search archive, in two fetched parts that land
 // between the fixture's chat messages and the synthetic mail: part 1 at 22:14 with two entries
-// that say hello, part 2 at 22:20 with one.
+// that say hello, part 2 at 22:20 with one. It writes the rows with SQL, as SaveTranscript would:
+// the archive is a copy whose directory is not private on Windows, so the store would refuse it.
 func seedSearchTranscripts(t *testing.T, e *env) {
 	t.Helper()
-	ctx := context.Background()
 	e.exec(`insert into conversations(tenant_id,user_id,id,kind,title,display_name,updated_at) values('` + tenantA + `','` + userA + `','` + searchMeeting + `','Meeting','','Search review','2023-11-01T00:00:00.000Z')`)
 	for _, p := range []struct{ key, ord, starts string }{{"d:b!s/T1", "1", "2023-11-14T22:14:00.000Z"}, {"d:b!s/T2", "2", "2023-11-14T22:20:00.000Z"}} {
 		e.exec(`insert into transcript_parts(account_id, call_id, part_key, thread_id, message_id, ordinal, starts_at, ref_quality, sent_at, drive_id, item_id)
 		  values('` + trAccount + `','call-s1','` + p.key + `','` + searchMeeting + `','m` + p.ord + `',` + p.ord + `,'` + p.starts + `','drive_item','2023-11-14T23:00:00.000Z','b!s','T` + p.ord + `')`)
 	}
-	st, err := store.Open(ctx, e.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ok := func(entries ...transcripts.Entry) transcripts.FetchResult {
-		return transcripts.FetchResult{State: transcripts.StateOK, HTTPStatus: 200, Entries: entries, Browser: "edge", At: trFetchedAt}
-	}
-	for key, r := range map[string]transcripts.FetchResult{
-		"d:b!s/T1": ok(transcripts.Entry{Speaker: "Dee Example", StartMS: trMS(0), Text: "Hello all, the first point is short."},
-			transcripts.Entry{Speaker: "Eve Example", StartMS: trMS(30_000), Text: "hello again from me"},
-			transcripts.Entry{Speaker: "Dee Example", StartMS: trMS(60_000), Text: "nothing to add"}),
-		"d:b!s/T2": ok(transcripts.Entry{Speaker: "Eve Example", StartMS: trMS(0), Text: "and hello once more"}),
+	fetched := trFetchedAt.Format("2006-01-02T15:04:05.000Z")
+	for _, x := range []struct {
+		key     string
+		entries [][3]string // speaker, start_ms, text
+	}{
+		{"d:b!s/T1", [][3]string{{"Dee Example", "0", "Hello all, the first point is short."}, {"Eve Example", "30000", "hello again from me"}, {"Dee Example", "60000", "nothing to add"}}},
+		{"d:b!s/T2", [][3]string{{"Eve Example", "0", "and hello once more"}}},
 	} {
-		if err := st.SaveTranscript(ctx, trAccount, key, r); err != nil {
-			t.Fatal(err)
+		e.exec(fmt.Sprintf(`insert into transcript_fetches(account_id, part_key, state, fetched_at, http_status, entry_count, browser, attempted_at) values('%s','%s','ok','%s',200,%d,'edge','%s')`,
+			trAccount, x.key, fetched, len(x.entries), fetched))
+		for i, en := range x.entries {
+			e.exec(fmt.Sprintf(`insert into transcript_entries(account_id, part_key, ord, speaker, start_ms, text) values('%s','%s',%d,'%s',%s,'%s')`, trAccount, x.key, i, en[0], en[1], en[2]))
 		}
 	}
+	e.exec(`insert into transcript_fts(rowid, speaker, text) select rowid, speaker, text from transcript_entries`)
 }
 
 func searchTranscriptEnv(t *testing.T) *env {
@@ -122,7 +116,8 @@ func TestSearchTranscriptsSource(t *testing.T) {
 		t.Fatalf("no match anywhere: %v", m["note"])
 	}
 	// No words and no filter is a usage error for transcripts too.
-	if er := searchFails(t, e, 2, "", "--source", "transcripts"); !strings.Contains(er["message"].(string), "at least one filter") {
+	if er := searchFails(t, e, 2, "", "--source", "transcripts"); !strings.Contains(er["message"].(string), "at least one filter") ||
+		strings.Contains(er["fix"].(string), "m365crawl messages") || !strings.Contains(er["fix"].(string), "m365crawl transcripts") {
 		t.Fatalf("no words: %v", er)
 	}
 }

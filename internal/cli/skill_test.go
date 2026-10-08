@@ -224,7 +224,7 @@ func TestSkillThreadTakesTheRoot(t *testing.T) {
 // The guide names the transcript commands, and that fetch alone uses the network.
 func TestSkillNamesTranscriptsCommands(t *testing.T) {
 	text := skillText(t)
-	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "Only `transcripts fetch` uses the network"} {
+	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "Only `transcripts fetch` and `transcripts signin` use the network"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SKILL.md does not say %s", want)
 		}
