@@ -60,10 +60,45 @@ var (
 	refID       = regexp.MustCompile(`^[A-Za-z0-9!_.%-]+$`)
 )
 
-// ValidRef reports whether the part's file reference is safe to build a request from: a plain host
-// name, a site root of one known kind, and ids made only of the characters such ids use.
+// sharePointSuffixes are the domains SharePoint Online serves its sites from. A fetch opens a
+// signed-in browser on the part's host, so no other host is ever fetched.
+var sharePointSuffixes = []string{".sharepoint.com", ".sharepoint.us", ".sharepoint-mil.us", ".sharepoint.cn", ".sharepoint.de"}
+
+// allowedTestSuffix is one more suffix a test allows, for the synthetic hosts of its fixtures.
+var allowedTestSuffix string
+
+// AllowHostSuffixForTests lets tests use synthetic hosts ending in suffix (under the reserved
+// .invalid domain, which never resolves) as SharePoint hosts. Only tests call it; an empty suffix
+// allows none. It returns a function that puts back the previous suffix.
+func AllowHostSuffixForTests(suffix string) (restore func()) {
+	old := allowedTestSuffix
+	allowedTestSuffix = suffix
+	return func() { allowedTestSuffix = old }
+}
+
+// IsSharePointHost reports whether host is a plain host name under one of SharePoint's domains,
+// ignoring case.
+func IsSharePointHost(host string) bool {
+	h := strings.ToLower(host)
+	if !refHost.MatchString(h) {
+		return false
+	}
+	suffixes := sharePointSuffixes
+	if allowedTestSuffix != "" {
+		suffixes = append(suffixes[:len(suffixes):len(suffixes)], allowedTestSuffix)
+	}
+	for _, s := range suffixes {
+		if len(h) > len(s) && strings.HasSuffix(h, s) && !strings.HasPrefix(h, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidRef reports whether the part's file reference is safe to build a request from: a SharePoint
+// host name, a site root of one known kind, and ids made only of the characters such ids use.
 func (p Part) ValidRef() bool {
-	return refHost.MatchString(strings.ToLower(p.Host)) && refSiteRoot.MatchString(p.SiteRoot) &&
+	return IsSharePointHost(p.Host) && refSiteRoot.MatchString(p.SiteRoot) &&
 		refID.MatchString(p.DriveID) && refID.MatchString(p.ItemID) && refID.MatchString(p.TranscriptID)
 }
 

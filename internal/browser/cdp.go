@@ -29,6 +29,10 @@ func (e *CDPError) Error() string {
 	return fmt.Sprintf("browser protocol error %d: %s", e.Code, e.Message)
 }
 
+// ErrDisconnected is the error of every call once the connection to the browser is gone: the
+// browser quit, crashed or was closed. A caller tells it apart from a page that failed.
+var ErrDisconnected = errors.New("the connection to the browser closed")
+
 var errNotLoopback = errors.New("refusing to connect to a debugging address that is not on this machine")
 
 type reply struct {
@@ -101,6 +105,7 @@ func (c *client) readLoop(ctx context.Context) {
 
 // fail ends every call in flight and every later one.
 func (c *client) fail(err error) {
+	err = fmt.Errorf("%w: %w", ErrDisconnected, err)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dead = err
@@ -144,7 +149,7 @@ func (c *client) call(ctx context.Context, sessionID, method string, params, out
 	}
 	if err != nil {
 		c.forget(id)
-		return ctxErr(ctx, err)
+		return ctxErr(ctx, fmt.Errorf("%w: %w", ErrDisconnected, err))
 	}
 	select {
 	case r := <-ch:

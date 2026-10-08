@@ -49,6 +49,8 @@ var (
 	transcriptsNow             = time.Now
 	fetchLandTimeout           = transcripts.DefaultLandTimeout
 	fetchLockPoll              = time.Second
+	fetchLockWait              = transcripts.DefaultLockWait
+	signinHosts                = (*store.Store).TranscriptHosts
 	openArchive                = store.Open
 	stdinIsTTY                 = func() bool { return isTTY(os.Stdin) }
 	stdinReader      io.Reader = os.Stdin
@@ -261,11 +263,27 @@ func (c *transcriptsFetchCmd) fetch(rt *runtime, parts []transcripts.Part, res *
 	if err != nil {
 		return transcripts.FetchSummary{}, c.runErr(rt, ctx, err)
 	}
-	defer func() { _ = closer.Close() }()
-	f := &transcripts.Fetcher{Page: page, Browser: string(kind), Now: transcriptsNow, LandTimeout: fetchLandTimeout, LockPoll: fetchLockPoll, Progress: rt.progressLine}
-	sum, err := f.Fetch(ctx, parts, rt.saveFetched)
-	if err != nil {
-		return sum, c.runErr(rt, ctx, err)
+	closed := false
+	defer func() {
+		if !closed { // a panic: the browser still ends
+			_ = closer.Close()
+		}
+	}()
+	f := &transcripts.Fetcher{Page: page, Browser: string(kind), Now: transcriptsNow, LandTimeout: fetchLandTimeout, LockWait: fetchLockWait, LockPoll: fetchLockPoll,
+		Progress: rt.progressLine, Gone: func(err error) bool { return errors.Is(err, browser.ErrDisconnected) }}
+	sum, ferr := f.Fetch(ctx, parts, rt.saveFetched)
+	closed = true
+	_ = closer.Close()
+	if rt.ctx.Err() != nil {
+		return sum, rt.ctx.Err()
+	}
+	// Results that met a busy archive are saved now, with the browser already gone.
+	sum, serr := f.FinishSaves(rt.ctx)
+	if serr != nil {
+		return sum, serr
+	}
+	if ferr != nil {
+		return sum, c.runErr(rt, ctx, ferr)
 	}
 	b := string(kind)
 	res.Source, res.FetchedAt, res.Browser = sourceNetwork, &now, &b
@@ -428,10 +446,22 @@ func (r *signinResult) renderTranscripts(rt *runtime) {
 
 var hostName = regexp.MustCompile(`^[a-z0-9-]+(\.[a-z0-9-]+)+$`)
 
+// signinHostOK reports whether host is a plain SharePoint host name, safe to open signed in.
+func signinHostOK(host string) bool {
+	return hostName.MatchString(host) && transcripts.IsSharePointHost(host)
+}
+
+// signinPagePath is a SharePoint page on the way to sign-in, not past it.
+var signinPagePath = regexp.MustCompile(`(?i)^/_layouts/15/(Authenticate|AccessDenied)\.aspx|^/_forms/`)
+
+// signinProbeJS asks the site's own API whether the session is signed in. It returns a boolean
+// and nothing else.
+const signinProbeJS = `(async () => { try { const r = await fetch("/_api/web?$select=Id", {headers: {accept: "application/json"}, credentials: "include", cache: "no-store"}); return r.status === 200 && (r.headers.get("content-type") || "").includes("json"); } catch (e) { return false; } })()`
+
 func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 	host := strings.ToLower(strings.TrimSpace(c.Host))
-	if host != "" && !hostName.MatchString(host) {
-		u := errs.Usage(fmt.Sprintf("--host %q is not a host name", c.Host))
+	if host != "" && !signinHostOK(host) {
+		u := errs.Usage(fmt.Sprintf("--host %q is not a SharePoint host name", c.Host))
 		u.Fix = "Pass the SharePoint host alone, such as <tenant>.sharepoint.com, with no scheme or path."
 		return u
 	}
@@ -477,11 +507,11 @@ func (rt *runtime) defaultSigninHost() (string, error) {
 	if ok, err := st.HasTranscriptTables(rt.ctx); err != nil || !ok {
 		return "", u
 	}
-	hosts, err := st.TranscriptHosts(rt.ctx)
+	hosts, err := signinHosts(st, rt.ctx)
 	if err != nil {
 		return "", errs.DBError(err)
 	}
-	if len(hosts) == 0 {
+	if len(hosts) == 0 || !signinHostOK(hosts[0]) {
 		return "", u
 	}
 	return hosts[0], nil
@@ -497,8 +527,9 @@ func (c *transcriptsSigninCmd) agree(rt *runtime, kind browser.Kind) error {
 	}
 	_, _ = fmt.Fprintf(rt.stderr, "m365crawl will open a visible %s window with its own browser profile, where you sign in to Microsoft 365 once. Press Enter to open it, or Ctrl-C to stop.\n", browserName(kind))
 	line := make(chan error, 1)
+	in := stdinReader
 	go func() {
-		_, err := bufio.NewReader(stdinReader).ReadString('\n')
+		_, err := bufio.NewReader(in).ReadString('\n')
 		line <- err
 	}()
 	select {
@@ -512,29 +543,57 @@ func (c *transcriptsSigninCmd) agree(rt *runtime, kind browser.Kind) error {
 	}
 }
 
-// waitForHost waits until the tab is on host: the user signed in and SharePoint let them through.
+// waitForHost waits until the window is signed in: the tab is on host, past SharePoint's own
+// sign-in pages, and the site's API answers as for a signed-in user.
 func waitForHost(ctx context.Context, page transcripts.PageDriver, host string) error {
 	deadline := time.Now().Add(signinWait)
 	for {
-		h, err := page.Host(ctx)
-		if ctx.Err() != nil {
+		done, err := signedIn(ctx, page, host, deadline)
+		switch {
+		case ctx.Err() != nil:
 			return ctx.Err()
-		}
-		if err != nil {
+		case done:
+			return nil
+		case !time.Now().Before(deadline):
+			b := errs.BrowserFailed("sign-in did not finish within " + compactDuration(signinWait))
+			b.Fix = "Ask the user, then run `m365crawl transcripts signin` again and finish signing in in the window it opens."
+			return b
+		case err != nil:
 			b := errs.BrowserFailed("the sign-in window was closed before sign-in finished")
 			b.Fix = "Ask the user, then run `m365crawl transcripts signin` again and leave the window open until it closes by itself."
 			return b
 		}
-		if strings.EqualFold(h, host) {
-			return nil
-		}
-		if !time.Now().Before(deadline) {
-			b := errs.BrowserFailed("sign-in did not finish within " + compactDuration(signinWait))
-			b.Fix = "Ask the user, then run `m365crawl transcripts signin` again and finish signing in in the window it opens."
-			return b
-		}
 		pause(ctx, signinPoll) // a cancellation is seen at the next question
 	}
+}
+
+// signedIn asks the tab once, each question bounded by the deadline. The error is a window that
+// went away; a page still loading is only not signed in yet.
+func signedIn(ctx context.Context, page transcripts.PageDriver, host string, deadline time.Time) (bool, error) {
+	qctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	h, err := page.Host(qctx)
+	if err != nil || !strings.EqualFold(h, host) {
+		return false, err
+	}
+	var path string
+	if err := page.Eval(qctx, "location.pathname", &path); err != nil {
+		return false, gone(err)
+	}
+	if signinPagePath.MatchString(path) {
+		return false, nil
+	}
+	var ok bool
+	err = page.Eval(qctx, signinProbeJS, &ok)
+	return ok && err == nil, gone(err)
+}
+
+// gone keeps an error only when the browser's connection closed.
+func gone(err error) error {
+	if errors.Is(err, browser.ErrDisconnected) {
+		return err
+	}
+	return nil
 }
 
 // pause waits d or until ctx ends.

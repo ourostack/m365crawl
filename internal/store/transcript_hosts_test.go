@@ -28,6 +28,24 @@ func TestTranscriptHosts(t *testing.T) {
 	if got := strings.Join(hosts, ","); got != "other.sharepoint.example.invalid" {
 		t.Fatalf("hosts %s", got)
 	}
+	// Hosts with as many parts each go by name; then the host with the most parts comes first.
+	s.qExec(t, `update transcript_parts set host='b.sharepoint.example.invalid' where call_id='call-1' and ordinal=1`)
+	s.qExec(t, `update transcript_parts set host='a.sharepoint.example.invalid' where call_id='call-1' and ordinal=2`)
+	for _, step := range []struct{ update, want string }{
+		{"", "a.sharepoint.example.invalid,b.sharepoint.example.invalid,other.sharepoint.example.invalid"},
+		{`update transcript_parts set host='B.sharepoint.example.invalid' where call_id='call-1' and ordinal=2`, "b.sharepoint.example.invalid,other.sharepoint.example.invalid"},
+	} {
+		if step.update != "" {
+			s.qExec(t, step.update)
+		}
+		hosts, err = s.TranscriptHosts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(hosts, ","); got != step.want {
+			t.Fatalf("hosts %s, want %s", got, step.want)
+		}
+	}
 	_ = s.Close()
 	if _, err := s.TranscriptHosts(ctx); err == nil {
 		t.Fatal("a closed archive answered")

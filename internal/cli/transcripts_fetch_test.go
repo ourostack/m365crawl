@@ -888,9 +888,9 @@ func TestSigninWaitsPastTheSignInPages(t *testing.T) {
 }
 
 func TestSigninPageQuestionsFail(t *testing.T) {
-	// The window closes between the host and the probe: the same closed-window failure.
+	// The browser goes away between the host and the probe: the same closed-window failure.
 	e := trEnv(t)
-	page := &evalFails{trPage: newTrPage()}
+	page := &evalFails{trPage: newTrPage(), err: fmt.Errorf("%w: closed", browser.ErrDisconnected)}
 	fakeBrowserDriver(t, page)
 	er := trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
 	if !strings.Contains(er["message"].(string), "closed before sign-in finished") {
@@ -898,17 +898,27 @@ func TestSigninPageQuestionsFail(t *testing.T) {
 	}
 	page.failProbe = true
 	trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+	// A page that is still loading only keeps the wait going.
+	old := signinWait
+	signinWait = 30 * time.Millisecond
+	t.Cleanup(func() { signinWait = old })
+	page.err = errors.New("Execution context was destroyed")
+	er = trFails(t, e, errs.CodeBrowserFailed, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+	if !strings.Contains(er["message"].(string), "did not finish within") {
+		t.Fatalf("error %v", er)
+	}
 }
 
 // evalFails answers the host, then fails the pathname question (or the probe).
 type evalFails struct {
 	*trPage
 	failProbe bool
+	err       error
 }
 
 func (p *evalFails) Eval(ctx context.Context, expr string, out any) error {
 	if expr == "location.pathname" && !p.failProbe || expr == signinProbeJS {
-		return errors.New("target closed")
+		return p.err
 	}
 	return p.trPage.Eval(ctx, expr, out)
 }
@@ -980,5 +990,21 @@ func TestFetchLockNeverFreedAfterClose(t *testing.T) {
 	er := trFails(t, e, errs.CodeLocked, errs.ExitLocked, "transcripts", "fetch", "call-4")
 	if !strings.Contains(er["message"].(string), "1 fetched parts were not saved") || closer.n.Load() != 1 {
 		t.Fatalf("error %v, closed %d", er, closer.n.Load())
+	}
+}
+
+func TestFetchCommandCancelledWhileLaunching(t *testing.T) {
+	e := trEnv(t)
+	fakeBrowser(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	openBrowser = func(c context.Context, _ browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		cancel()
+		return nil, nil, c.Err()
+	}
+	var out, errb bytes.Buffer
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "fetch", "call-4"}, &out, &errb)
+	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted {
+		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 }

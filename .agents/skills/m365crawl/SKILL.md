@@ -12,7 +12,7 @@ m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the n
 - The archive holds the user's private chats and mail. Quote from it only where the user asked; never paste it into issues, logs or other tools unasked.
 - Sign-in credentials are never read, and token-shaped values are stored as `[redacted]`.
 - Never edit Teams' or Outlook's folders, or the archive, by hand; use the commands.
-- `m365crawl transcripts fetch` is the only command that uses the network, inside an invisible browser with m365crawl's own profile. When it fails with `transcripts_signin_required`, ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes, with `--user-agreed`, and relay the steps it prints.
+- `transcripts fetch` and `transcripts signin` are the only commands that use the network, through Edge (or Chrome) with m365crawl's own browser profile; every other command reads the archive offline. Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes, then pass `--user-agreed` and relay the steps it prints.
 
 ## Start here
 

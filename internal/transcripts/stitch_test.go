@@ -15,7 +15,7 @@ func TestStitchOrdersAndMarksSeams(t *testing.T) {
 	two := drivePart("c", "b", "m2", at(10, 2), at(11, 0))
 	two.Ordinal = 2
 	for _, p := range []*Part{&one, &two} {
-		p.Host, p.SiteRoot, p.TranscriptID = "h.example.invalid", "/teams/s", "t"
+		p.Host, p.SiteRoot, p.TranscriptID = "h.sharepoint.example.invalid", "/teams/s", "t"
 	}
 	segs := Stitch([]StitchPart{
 		{Part: two, State: StateOK, FetchedAt: &fetched, Entries: []Entry{{Speaker: "Bo", StartMS: ms(0), EndMS: ms(900), Text: "second"}}},
@@ -35,7 +35,7 @@ func TestStitchUnfetchedPartKeepsPlace(t *testing.T) {
 	fetched := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
 	mk := func(ord int, edit func(*Part)) Part {
 		p := drivePart("call-x", "i", "m", at(10, ord), at(11, 0))
-		p.Ordinal, p.Host, p.SiteRoot, p.TranscriptID = ord, "h.example.invalid", "/teams/s", "t"
+		p.Ordinal, p.Host, p.SiteRoot, p.TranscriptID = ord, "h.sharepoint.example.invalid", "/teams/s", "t"
 		if edit != nil {
 			edit(&p)
 		}

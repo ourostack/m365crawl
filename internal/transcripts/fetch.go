@@ -109,10 +109,15 @@ type Fetcher struct {
 	LockWait time.Duration
 	// Progress, when set, gets one line per step: counts, ordinals and states only.
 	Progress func(string)
+	// Gone, when set, tells a browser that went away (its connection closed) from a page that
+	// failed: the first stops the run with transcripts_browser_failed.
+	Gone func(error) bool
 	// LockPoll is how often a waiting result tries the archive again (default one second).
 	LockPoll time.Duration
 
 	hostPoll time.Duration
+	sum      *FetchSummary
+	sv       *saver
 }
 
 // PartOutcome is what happened to one part in this run. FetchedAt is set when the text was
@@ -169,8 +174,10 @@ func (f *Fetcher) progress(format string, a ...any) {
 // page stops the run with transcripts_signin_required; parts already saved keep their state.
 func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, FetchResult) error) (FetchSummary, error) {
 	f.defaults()
-	var sum FetchSummary
-	sv := &saver{save: save, sum: &sum}
+	f.sum = &FetchSummary{}
+	sum := f.sum
+	sv := &saver{save: save, sum: sum}
+	f.sv = sv
 	var hosts []string
 	byHost := map[string][]int{}
 	for _, p := range parts {
@@ -190,12 +197,12 @@ func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, Fetch
 	n := 0
 	for hi, host := range hosts {
 		if err := ctx.Err(); err != nil {
-			return sum, err
+			return *sum, err
 		}
 		f.progress("opening SharePoint site %d of %d", hi+1, len(hosts))
 		reason, err := f.land(ctx, host)
 		if err != nil {
-			return sum, f.stop(ctx, sv, err)
+			return *sum, f.stop(ctx, err)
 		}
 		for _, i := range byHost[host] {
 			n++
@@ -204,7 +211,7 @@ func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, Fetch
 			if why == "" {
 				r, why, err = f.fetchPart(ctx, host, p)
 				if err != nil {
-					return sum, f.stop(ctx, sv, err)
+					return *sum, f.stop(ctx, err)
 				}
 			}
 			r.Browser, r.At = f.Browser, f.Now()
@@ -219,23 +226,40 @@ func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, Fetch
 				f.progress("part %d of %d fetched: %s", n, total, r.State)
 			}
 			if err := sv.put(i, r); err != nil {
-				return sum, err
+				return *sum, err
 			}
 		}
 	}
-	return sum, sv.drain(ctx, f.LockWait, f.LockPoll)
+	return *sum, nil
 }
 
-// stop ends a run early: a cancelled run returns at once; a sign-in stop first saves what is waiting.
-func (f *Fetcher) stop(ctx context.Context, sv *saver, err error) error {
+// stop ends a run early with err, or with the cancellation when the run was cancelled.
+func (f *Fetcher) stop(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if derr := sv.drain(ctx, f.LockWait, f.LockPoll); derr != nil {
-		return derr
-	}
 	return err
 }
+
+// FinishSaves saves the results that met a busy archive during Fetch, waiting up to LockWait for
+// it; after that it gives up with `locked`, naming how many fetched parts were not saved. Call it
+// after the browser is closed, so the browser is not kept open while the archive is busy. It
+// returns the summary with every part's Saved mark.
+func (f *Fetcher) FinishSaves(ctx context.Context) (FetchSummary, error) {
+	if f.sv == nil {
+		return FetchSummary{}, nil
+	}
+	err := f.sv.drain(ctx, f.LockWait, f.LockPoll)
+	return *f.sum, err
+}
+
+// browserGone is the error of a run whose browser went away under it.
+func browserGone() error {
+	return errs.BrowserFailed("the browser stopped answering in the middle of the fetch")
+}
+
+// gone reports whether err says the browser itself went away.
+func (f *Fetcher) gone(err error) bool { return err != nil && f.Gone != nil && f.Gone(err) }
 
 // land opens https://<host>/ and waits until the tab settles on that host. It returns a reason
 // when the host's parts cannot be fetched, and transcripts_signin_required when the tab is left
@@ -248,15 +272,20 @@ func (f *Fetcher) land(ctx context.Context, host string) (string, error) {
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	if navErr != nil && time.Now().Before(deadline) {
-		return reasonUnreachable, nil
+	if f.gone(navErr) {
+		return "", browserGone()
 	}
-	// The host is asked at least once, even when loading the page took the whole wait.
+	// The host is asked until the wait ends, even after a navigation error: a redirect through the
+	// sign-in pages can report one and still end on the host, or on a sign-in page. The host is
+	// asked at least once, even when loading the page took the whole wait.
 	last := ""
 	for {
 		hctx, hcancel := context.WithTimeout(ctx, hostCallTimeout)
 		h, err := f.Page.Host(hctx)
 		hcancel()
+		if f.gone(err) {
+			return "", browserGone()
+		}
 		if err == nil {
 			last = strings.ToLower(h)
 			if last == host {
@@ -270,8 +299,11 @@ func (f *Fetcher) land(ctx context.Context, host string) (string, error) {
 			return "", err
 		}
 	}
-	if IsLoginHost(last) {
+	switch {
+	case IsLoginHost(last):
 		return "", errs.SigninRequired()
+	case navErr != nil:
+		return reasonUnreachable, nil
 	}
 	return reasonElsewhere, nil
 }
@@ -289,6 +321,8 @@ func (f *Fetcher) fetchPart(ctx context.Context, host string, p Part) (FetchResu
 		return FetchResult{}, "", ctx.Err()
 	case pctx.Err() != nil:
 		return FetchResult{State: StateFailed}, reasonTimeout, nil
+	case f.gone(err):
+		return FetchResult{}, "", browserGone()
 	case err != nil:
 		return FetchResult{State: StateFailed}, reasonEval, nil
 	}
@@ -299,11 +333,13 @@ func (f *Fetcher) fetchPart(ctx context.Context, host string, p Part) (FetchResu
 	case scriptSigninProbe:
 		hctx, hcancel := context.WithTimeout(ctx, f.LandTimeout)
 		defer hcancel()
-		h, _ := f.Page.Host(hctx)
-		if ctx.Err() != nil {
+		h, herr := f.Page.Host(hctx)
+		switch {
+		case ctx.Err() != nil:
 			return FetchResult{}, "", ctx.Err()
-		}
-		if IsLoginHost(h) {
+		case f.gone(herr):
+			return FetchResult{}, "", browserGone()
+		case IsLoginHost(h):
 			return r, "", errs.SigninRequired()
 		}
 		return FetchResult{State: StateFailed}, reasonRequest, nil

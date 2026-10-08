@@ -724,7 +724,7 @@ m365crawl transcripts fetch [<meeting>] [flags]
 m365crawl transcripts fetch --since=DATE [flags]
 ```
 
-Pass exactly one of `<meeting>` or `--since`. Parts whose text is already in the archive are not fetched again (state `local`, with their `fetched_at`) unless `--refetch`; parts that cannot be fetched are listed with their `reason` and never sent. With nothing left to fetch no browser starts. This and `transcripts signin` are the only commands that use the network, and only inside the browser: it runs headless with its own profile next to the archive, opens each SharePoint site once and fetches each part inside the page, so m365crawl never handles a password, token or download link. The browser is closed, with every process it started, however the command ends.
+Pass exactly one of `<meeting>` or `--since`. Parts whose text is already in the archive are not fetched again (state `local`, with their `fetched_at`) unless `--refetch`; parts that cannot be fetched are listed with their `reason` and never sent, including a part whose cached host is not a SharePoint host. With nothing left to fetch no browser starts. This and `transcripts signin` are the only commands that use the network, and only inside the browser: it runs headless with its own profile next to the archive, opens each SharePoint site once and fetches each part inside the page, so m365crawl never handles a password, token or download link. The browser is closed, with every process it started, however the command ends.
 
 | Flag | Meaning |
 | --- | --- |
@@ -751,11 +751,11 @@ Open m365crawl's browser profile in a visible window once, so you can sign in to
 m365crawl transcripts signin [flags]
 ```
 
-Ask the user before running it: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. When stdin is not a terminal (an agent runs it) it refuses without `--user-agreed` (`signin_needs_agreement`, exit 2); on a terminal it says what will open and waits for Enter. It prints each step on stderr (opening the window, waiting for sign-in, signed in), waits up to 5 minutes until the window reaches the SharePoint host, then closes the browser. The window uses m365crawl's own profile next to the archive, never the everyday browser profile.
+Ask the user before running it: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. When stdin is not a terminal (an agent runs it) it refuses without `--user-agreed` (`signin_needs_agreement`, exit 2); on a terminal it says what will open and waits for Enter. It prints each step on stderr (opening the window, waiting for sign-in, signed in) and waits up to 5 minutes until the window is signed in: on the SharePoint host, past its sign-in pages, and with the site's API answering as for a signed-in user. Then it closes the browser. The window uses m365crawl's own profile next to the archive, never the everyday browser profile.
 
 | Flag | Meaning |
 | --- | --- |
-| `--host=HOST` | The SharePoint host to sign in to, such as `<tenant>.sharepoint.com`. Default: the host that holds most of the archive's transcript parts; with none, a `usage` error names `--host`. |
+| `--host=HOST` | The SharePoint host to sign in to, such as `<tenant>.sharepoint.com` (only SharePoint's own domains). Default: the host that holds most of the archive's transcript parts; with none, a `usage` error names `--host`. |
 | `--browser=edge\|chrome\|PATH` | As for `transcripts fetch`. |
 | `--user-agreed` | The user has agreed to the visible window. Required when stdin is not a terminal. |
 

@@ -19,6 +19,8 @@ async ({base, transcriptId, maxBytes, loginHosts}) => {
     const u = tr.temporaryDownloadUrl + (tr.temporaryDownloadUrl.includes("?") ? "&" : "?") + "format=json";
     const r = await fetch(u, {cache: "no-store"});
     if (!r.ok) return {state: r.status === 403 ? "no_access" : r.status === 404 ? "not_found" : "failed", status: r.status};
+    const declared = Number(r.headers.get("content-length") || 0);
+    if (declared > maxBytes) return {state: "too_large", status: r.status, bytes: declared};
     const buf = await r.arrayBuffer();
     if (buf.byteLength > maxBytes) return {state: "too_large", status: r.status, bytes: buf.byteLength};
     const es = (JSON.parse(new TextDecoder().decode(buf)).entries || []).map(x => ({s: x.speakerDisplayName || "", b: x.startOffset || "", e: x.endOffset || "", t: x.text || ""}));
