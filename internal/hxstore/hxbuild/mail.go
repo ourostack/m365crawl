@@ -255,7 +255,7 @@ type MailFolderSpec struct {
 	Stamp  uint64
 	Parent uint32
 	Name   string
-	Type   uint32 // +1160: 0x61 inbox, 0x63 archive, 0x64 drafts, 0x65 sent, 0x67 deleted, 0x7a junk or to me
+	Type   uint32 // +1160: 0x61 inbox, 0x63 archive, 0x64 drafts, 0x65 sent, 0x67 deleted, 0x7a generic (user folders, To Me, Junk Email and other system folders)
 	Lead   int
 }
 

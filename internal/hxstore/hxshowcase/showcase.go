@@ -29,7 +29,7 @@ const (
 	typeDrafts  = 0x64
 	typeSent    = 0x65
 	typeDeleted = 0x67
-	typeUser    = 0x01
+	typeUser    = 0x7a // the generic type user-created folders have
 )
 
 // rootKey is the account root the folders hang from.

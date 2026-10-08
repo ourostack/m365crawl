@@ -13,13 +13,13 @@ import (
 )
 
 // The folder set of the account under test: the root key 1000 holds an inbox, a sent folder, a
-// To Me folder and a junk folder (the last two share type 0x7a), and deleted items.
+// To Me folder and a user folder (the last two share the generic type 0x7a), and deleted items.
 const (
 	rootKey   = 1000
 	fInbox    = 101
 	fSent     = 102
 	fToMe     = 103
-	fJunk     = 104
+	fUser     = 104
 	fDeleted  = 105
 	otherRoot = 2000
 	fOtherBox = 201
@@ -31,7 +31,7 @@ func folderObjs() []*hxbuild.Object {
 	}
 	return []*hxbuild.Object{
 		f(fInbox, "Fixture Inbox", 0x61), f(fSent, "Fixture Sent", 0x65), f(fToMe, "Fixture To Me", 0x7a),
-		f(fJunk, "Fixture Junk", 0x7a), f(fDeleted, "Fixture Deleted", 0x67),
+		f(fUser, "Fixture Project", 0x7a), f(fDeleted, "Fixture Deleted", 0x67),
 	}
 }
 
@@ -113,13 +113,13 @@ func TestCollectJoinsCopiesOfOneMessage(t *testing.T) {
 	for _, f := range r.Folders {
 		kinds[f.Key] = f.Kind
 	}
-	if kinds[fToMe] != "to_me" || kinds[fJunk] != "junk" || kinds[fInbox] != "inbox" || kinds[fSent] != "sent" || kinds[fDeleted] != "deleted" {
+	if kinds[fToMe] != "to_me" || kinds[fUser] != "other" || kinds[fInbox] != "inbox" || kinds[fSent] != "sent" || kinds[fDeleted] != "deleted" {
 		t.Fatalf("%v", kinds)
 	}
 }
 
 func TestCollectToMeOnlyKeepsTheToMeFolder(t *testing.T) {
-	// Another message sits in Inbox and To Me, so To Me is told from Junk; this one has only a
+	// Another message sits in Inbox and To Me, so To Me is told from the user folder; this one has only a
 	// To Me copy and is shown from it.
 	objs := append(folderObjs(),
 		hdr(11, 21, fToMe, 1, "both", 2), hdr(12, 21, fInbox, 2, "both", 2), det(21, "<a@example.invalid>"),
@@ -136,17 +136,18 @@ func TestCollectToMeOnlyKeepsTheToMeFolder(t *testing.T) {
 }
 
 func TestCollectClassifyToMeNeedsSharedInboxKeys(t *testing.T) {
-	// One 0x7a folder shares detail keys with the Inbox, the other holds mail of its own.
+	// One 0x7a folder shares detail keys with the Inbox, the other holds mail of its own and is
+	// never labelled junk.
 	objs := append(folderObjs(),
 		hdr(11, 21, fToMe, 1, "x", 2), hdr(12, 21, fInbox, 2, "x", 2), det(21, "<a@example.invalid>"),
-		hdr(13, 22, fJunk, 1, "y", 2), det(22, "<b@example.invalid>"),
+		hdr(13, 22, fUser, 1, "y", 2), det(22, "<b@example.invalid>"),
 	)
 	r := collect(t, storeOf(t, framed(objs...)), Options{})
 	byDetail := map[uint32]Message{}
 	for _, m := range r.Messages {
 		byDetail[m.DetailKey] = m
 	}
-	if byDetail[21].Folder.Kind != "inbox" || !byDetail[21].ToMe || byDetail[22].Folder.Kind != "junk" || byDetail[22].ToMe {
+	if byDetail[21].Folder.Kind != "inbox" || !byDetail[21].ToMe || byDetail[22].Folder.Kind != "other" || byDetail[22].ToMe {
 		t.Fatalf("%+v %+v", byDetail[21], byDetail[22])
 	}
 }
