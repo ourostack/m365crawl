@@ -551,7 +551,7 @@ type calendarChat struct {
 // relatedMail is an Outlook message related to the event, with how it matched: "invite" (its
 // invite id is the event's iCalUId) or "subject" (the same subject, without reply and forward
 // prefixes, received from 14 days before to 7 days after the start, and sent or received by an
-// attendee or the organizer when the event names any).
+// attendee or the organizer other than the mailbox owner when the event names any).
 type relatedMail struct {
 	ID             string    `json:"id"`
 	Match          string    `json:"match"`

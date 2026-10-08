@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -178,5 +179,64 @@ func TestCalendarEventReportsAChatReadError(t *testing.T) {
 	s.qExec(t, `drop table activity`) // only the message columns of the recent messages read it
 	if _, err := s.CalendarEvent(context.Background(), nil, EventID(qTeams, calendar.Key(qEvent("o1", 3)))); err == nil || !strings.Contains(err.Error(), "activity") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A match older than many newer same-subject messages between other people is still found: the
+// participant check runs in the query, before the limit.
+func TestEventMailFindsAMatchBehindManyStrangers(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	msgs := []outlookmail.Message{receivedAt(mailMsg(1, fInbox, "<ann@x>", "Standup", 0), mailT0.Add(-3*24*time.Hour))}
+	for i := 0; i < 205; i++ {
+		m := receivedAt(mailMsg(uint32(100+i), fInbox, fmt.Sprintf("<s%d@x>", i), "Standup", 0), mailT0.Add(-time.Duration(i+1)*time.Minute))
+		m.SenderAddress, m.Recipients = "zed@example.test", []outlookmail.Recipient{{Name: "Yan", Address: "yan@example.test"}}
+		msgs = append(msgs, m)
+	}
+	mustCommitMail(t, s, mailBatch(mailT0, msgs...))
+	ev := calendar.Event{Subject: "Standup", Start: mailT0, AttendeesJSON: `[{"address":"ann@example.test"}]`}
+	got := must(s.EventMail(ctx, ev, 0))
+	if len(got) != 1 || got[0].DetailKey != 1 {
+		t.Fatalf("%s", relatedKeys(got))
+	}
+}
+
+// The mailbox owner is in nearly every meeting, so their own address does not make a message
+// related; an event whose only participant is the owner keeps the owner's address.
+func TestEventMailLeavesTheOwnerOutOfTheOverlap(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if _, err := s.db.ExecContext(ctx, `insert into meta(key, value) values(?, ?)`, outlookIdentityKey+mailAcct, "me@example.test\nme2@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	fromAnn := receivedAt(mailMsg(1, fInbox, "<a@x>", "Standup", 0), mailT0.Add(-time.Hour))
+	other := receivedAt(mailMsg(2, fInbox, "<b@x>", "Standup", 0), mailT0.Add(-2*time.Hour))
+	other.SenderAddress, other.Recipients = "zed@example.test", []outlookmail.Recipient{{Name: "Me", Address: "ME@example.test"}}
+	mustCommitMail(t, s, mailBatch(mailT0, fromAnn, other))
+	ev := calendar.Event{Subject: "Standup", Start: mailT0, OrganizerAddress: "Me@Example.test", AttendeesJSON: `[{"address":"ann@example.test"}]`}
+	if got := must(s.EventMail(ctx, ev, 0)); len(got) != 1 || got[0].DetailKey != 1 {
+		t.Fatalf("with others: %s", relatedKeys(got))
+	}
+	ev.AttendeesJSON = `[{"address":"me2@example.test"}]`
+	if got := must(s.EventMail(ctx, ev, 0)); len(got) != 1 || got[0].DetailKey != 2 {
+		t.Fatalf("owner only: %s", relatedKeys(got))
+	}
+	// An unreadable identity row, then no meta table at all, fail the read.
+	for _, q := range []string{
+		`create table meta2 as select * from meta`, `drop table meta`, `create table meta(key text primary key, value text)`,
+		`insert into meta select * from meta2`, `insert into meta(key, value) values('outlook_identity:outlook/x', null)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.EventMail(ctx, ev, 0); err == nil {
+		t.Fatal("a NULL identity was read")
+	}
+	if _, err := s.db.ExecContext(ctx, `drop table meta`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EventMail(ctx, ev, 0); err == nil {
+		t.Fatal("a read without meta succeeded")
 	}
 }

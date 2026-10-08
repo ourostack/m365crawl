@@ -50,7 +50,7 @@ type Globals struct {
 	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
 	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
 	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
-	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated." placeholder:"a,b,c"`
+	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
 	MaxText        int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
 }
 

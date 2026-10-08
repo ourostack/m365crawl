@@ -158,3 +158,29 @@ func TestPeopleReportsAnUnreadableMailRow(t *testing.T) {
 		t.Fatal("a NULL name was read")
 	}
 }
+
+// "mail:<address>" names one address exactly, even when it sits inside another.
+func TestPeopleMailIDMatchesExactly(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	a := mailMsg(1, fInbox, "<1@x>", "One", 1)
+	a.SenderName, a.SenderAddress, a.Recipients = "Ann", "ann@example.test", nil
+	b := mailMsg(2, fInbox, "<2@x>", "Two", 2)
+	b.SenderName, b.SenderAddress, b.Recipients = "Joann", "joann@example.test", nil
+	mustCommitMail(t, s, mailBatch(mailT0, a, b))
+	for q, want := range map[string]string{
+		"mail:ann@example.test": "mail:ann@example.test",
+		"MAIL:Ann@Example.test": "mail:ann@example.test",
+		"mail:ann@":             "",
+		"ann@":                  "mail:ann@example.test,mail:joann@example.test",
+	} {
+		rows, _ := must2(s.People(ctx, q, Filter{}))
+		var ids []string
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
+		if strings.Join(ids, ",") != want {
+			t.Errorf("%q: %v", q, ids)
+		}
+	}
+}

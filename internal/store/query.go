@@ -789,14 +789,16 @@ const mailPeopleCTE = `with c(addr, name, at) as (
   select addr, name, row_number() over (partition by addr order by name='', at desc, name) rn, min(at) over (partition by addr) first_at, max(at) over (partition by addr) last_at from c
 ) `
 
-// mailPeopleWhere matches query as a part of the address or name; "mail:<address>" names an
-// address exactly, which the part match covers.
+// mailPeopleWhere matches query as a part of the address or name, ignoring case; "mail:<address>"
+// names one address exactly.
 func mailPeopleWhere(query string) where {
 	var w where
 	w.add(`mp.rn=1`)
-	if query != "" {
-		q := strings.ToLower(query)
-		q = strings.TrimPrefix(q, "mail:")
+	q := strings.ToLower(query)
+	switch {
+	case strings.HasPrefix(q, "mail:"):
+		w.add(`mp.addr=?`, strings.TrimPrefix(q, "mail:"))
+	case q != "":
 		like := "%" + escapeLike(q) + "%"
 		w.add(`(mp.addr like ? escape '\' or lower(mp.name) like ? escape '\')`, like, like)
 	}
