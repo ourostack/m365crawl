@@ -582,7 +582,9 @@ func TestTranscriptsHelpIsTheContract(t *testing.T) {
 	e := textEnv(t)
 	for _, args := range [][]string{{"transcripts", "--help"}, {"transcripts", "show", "--help"}, {"transcripts", "list", "--help"}} {
 		code, out, _ := e.run(append(args, "--format", "text")...)
-		if code != 0 || !strings.Contains(out, "transcripts --help") && !strings.Contains(out, "A recorded meeting is one call.") {
+		// Help wraps to the terminal's width, which differs by host: compare with whitespace collapsed.
+		flat := strings.Join(strings.Fields(out), " ")
+		if code != 0 || !strings.Contains(flat, "transcripts --help") && !strings.Contains(flat, "A recorded meeting is one call.") {
 			t.Fatalf("%v: exit %d\n%s", args, code, out)
 		}
 	}

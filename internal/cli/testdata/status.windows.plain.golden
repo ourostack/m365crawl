@@ -12,7 +12,7 @@ archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp>
 mail           : unsupported_platform
-schema version : 6
+schema version : 7
 
 account                                                                    conversations  messages  people  activity  newest
 -------------------------------------------------------------------------  -------------  --------  ------  --------  ----------------
