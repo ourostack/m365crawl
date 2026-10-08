@@ -2,8 +2,15 @@
 # Enforce 100% statement coverage of every function in internal/... .
 # Carve-outs live in coverage/allow/<package>.txt (see coverage/allow/README.md).
 # COVERAGE_PACKAGES overrides the package list (default: ./internal/...).
+# COVERAGE_PROFILE names a coverage profile a test run already wrote (for example CI's own
+# `go test -coverprofile` of ./...), so the gate reads it instead of running the tests again. Only
+# the rows of the packages under test count, so the run that wrote it must have tested them all.
 set -euo pipefail
 
+given_profile="${COVERAGE_PROFILE:-}"
+if [ -n "$given_profile" ] && [ "${given_profile#/}" = "$given_profile" ]; then
+	given_profile="$PWD/$given_profile"
+fi
 cd "$(dirname "$0")/.."
 export GOWORK=off
 
@@ -19,12 +26,29 @@ fi
 trap 'rm -rf "$tmp"' EXIT
 profile="$tmp/cover.out"
 
+# Package paths under test, repo-relative, and every package that exists in the module.
 # shellcheck disable=SC2086
-go test -count=1 -coverprofile="$profile" $packages >"$tmp/test.log" 2>&1 || {
-	cat "$tmp/test.log"
-	echo "check-coverage: go test failed" >&2
-	exit 1
-}
+go list -f '{{.ImportPath}}' $packages | sed "s#^$modpath/##" | sort -u >"$tmp/pkgs.txt"
+go list -f '{{.ImportPath}}' ./... | sed "s#^$modpath/##" | sort -u >"$tmp/existing.txt"
+
+if [ -n "$given_profile" ]; then
+	if [ ! -s "$given_profile" ]; then
+		echo "check-coverage: COVERAGE_PROFILE $given_profile is missing or empty" >&2
+		exit 1
+	fi
+	# Keep the mode line and the blocks of files in the packages under test.
+	awk -v mod="$modpath/" 'NR == FNR { want[$0] = 1; next }
+		FNR == 1 { print; next }
+		{ f = $1; sub(/:.*/, "", f); sub("^" mod, "", f); sub(/\/[^\/]*$/, "", f); if (f in want) print }' \
+		"$tmp/pkgs.txt" "$given_profile" >"$profile"
+else
+	# shellcheck disable=SC2086
+	go test -count=1 -coverprofile="$profile" $packages >"$tmp/test.log" 2>&1 || {
+		cat "$tmp/test.log"
+		echo "check-coverage: go test failed" >&2
+		exit 1
+	}
+fi
 go tool cover -func="$profile" | grep -v '^total:' >"$tmp/func.txt"
 
 # One line per function: "<repo-relative file>:<FuncName><TAB><percent><TAB><file:line>".
@@ -38,11 +62,6 @@ awk -v mod="$modpath/" '{
 cut -f1 "$tmp/rows.tsv" | sort | uniq -d >"$tmp/ambiguous.txt"
 cut -f1 "$tmp/rows.tsv" | sort -u >"$tmp/all.txt"
 awk -F'\t' '$2 != "100.0%" {print $1}' "$tmp/rows.tsv" | sort -u >"$tmp/below.txt"
-
-# Package paths under test, repo-relative, and every package that exists in the module.
-# shellcheck disable=SC2086
-go list -f '{{.ImportPath}}' $packages | sed "s#^$modpath/##" | sort -u >"$tmp/pkgs.txt"
-go list -f '{{.ImportPath}}' ./... | sed "s#^$modpath/##" | sort -u >"$tmp/existing.txt"
 
 : >"$tmp/allowed.txt"
 status=0
