@@ -37,18 +37,18 @@ jobs:
         run: |
           old='teamscra''wl'
           fail=0
-          hits="$(git grep -nIi "$old" -- . ':!CHANGELOG.md' ':!docs/releases/' || true)"
+          hits="$(git grep -nIi "$old" || true)"
           if [ -n "$hits" ]; then
             echo "$hits" >&2
             fail=1
           fi
-          paths="$(git ls-files | grep -i "$old" | grep -v '^docs/releases/' || true)"
+          paths="$(git ls-files | grep -i "$old" || true)"
           if [ -n "$paths" ]; then
             echo "$paths" >&2
             fail=1
           fi
           if [ "$fail" = 1 ]; then
-            echo 'the product was renamed to m365crawl; remove the old name (CHANGELOG.md and docs/releases/ keep history)' >&2
+            echo 'remove the old product name; no file and no file name may carry it' >&2
             exit 1
           fi
       - name: Check tidy, format, vet and lint
