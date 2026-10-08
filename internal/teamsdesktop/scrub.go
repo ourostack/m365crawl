@@ -62,7 +62,7 @@ func redactKeyed(in []byte, depth int) ([]byte, int) {
 		if end, ok := siblings[i]; ok {
 			out.WriteString(`"` + redacted + `"`)
 			n++
-			i = end
+			i = max(end, i+1) // always advance
 			continue
 		}
 		if in[i] == '{' {
@@ -197,7 +197,9 @@ func siblingValues(obj []byte) map[int]int {
 				named = true
 			}
 		case lk == rules.SiblingValueField:
-			spans[vs] = ve
+			if ve > vs { // a "value" with no value has nothing to redact
+				spans[vs] = ve
+			}
 		}
 		i = skipSpace(obj, ve)
 		i = skipSpace(obj, i+1)

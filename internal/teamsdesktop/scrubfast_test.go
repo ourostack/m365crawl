@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 )
 
 // scrubCases mixes text that must be scrubbed with text that looks close to it.
 var scrubCases = []string{
 	``, `plain meeting text`, `<p>Join: https://example.invalid/join?x=1&y=2</p> call +1 555 0100`,
+	`{"name":"password","value":}`, `{"name":"password","value"}x`, `{"name":"password","value":,"a":1}`,
 	`{"password":"hunter2"}`, `{"PassWord":"x"}`, `{"name":"password","value":"x"}`, `[ "password" , "x" ]`,
 	`"Bearer abc.def"`, `"bearer\tabc"`, `see https://x.invalid/a?sig=ABC123&b=1`, `https://x.invalid/a?SIG=ABC`,
 	`token eyJhbGciOi.eyJzdWIiOi.abc_-`, `eyJ only`, `sig= alone`, `{"a":"{\"password\":\"x\"}"}`,
@@ -95,6 +97,26 @@ func FuzzScrubFastPath(f *testing.F) {
 }
 
 // indexFold finds what the lower-casing version found, at the same byte offsets.
+// An object that names a credential but has no value in its "value" field once made Scrub loop
+// forever; a hang must fail the test, not the CI timeout.
+func TestScrubReturnsOnAValueFieldWithNoValue(t *testing.T) {
+	for _, in := range []string{
+		`{"name":"password","value":}`, `{"name":"password","value"}x`, `{"name":"password","value":,"a":1}`,
+	} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			Scrub([]byte(in))
+			scrub([]byte(in), 0)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Scrub(%q) did not return", in)
+		}
+	}
+}
+
 func TestIndexFoldMatchesLowerCasedIndex(t *testing.T) {
 	for _, c := range [][2]string{{"", ""}, {"abc", ""}, {"a</SCRIPT>b", "</script>"}, {"a</scrip", "</script>"}, {"x", "xy"}, {"ĀBC</Style>", "</style>"}, {"nothing", "</style>"}, {"</STYLE></style>", "</style>"}} {
 		if got, want := indexFold(c[0], c[1]), strings.Index(asciiLower(c[0]), asciiLower(c[1])); got != want {
