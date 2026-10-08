@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into six groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into seven groups:
 
 | Group | Commands |
 | --- | --- |
@@ -11,6 +11,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Teams | [`messages`](#messages), [`unread`](#unread), [`thread`](#thread), [`conversations`](#conversations), [`teams`](#teams), [`activity`](#activity), [`stores`](#stores), [`records`](#records) |
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
+| Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## Platform defaults
@@ -26,7 +27,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event` and `calendar actions`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts` and `transcripts show`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -669,6 +670,50 @@ m365crawl calendar sources [flags]
 ```sh
 m365crawl calendar sources
 ```
+
+## transcripts
+
+Read meeting transcripts offline. A recorded meeting is one call. A call has one part for each stretch that was recorded or transcribed, and each part's transcript is a file of its own in SharePoint. A sync lists the parts from the recording notices it already archived from the meeting chat; nothing is fetched, and `transcripts` and `transcripts show` read only the archive (no network, no browser).
+
+`<meeting>` is an event id or key (as `calendar` prints them), a meeting chat link or thread id, or a call id. A chat or an event can hold several recorded calls. One that names no recorded call is the `unknown_meeting` error (exit 2).
+
+- **A part's `state`** is `ok` when its text is in the archive, `not_fetched` when it can be fetched and has not been, `unfetchable` when no file reference is cached for it, and otherwise the outcome of the last attempt (`no_access`, `not_found`, `no_transcript`, `too_large`, `failed`). `reason` says in one sentence why a part has no text; a part not fetched yet says `not fetched yet; run m365crawl transcripts fetch <call-id>`.
+- **A meeting's `state`** is `fetched` (every part that can be fetched has text), `partial`, `not_fetched` or `unfetchable` (no part can be fetched by ids).
+- **Where it came from.** Every result has `"source": "archive"`, and `fetched_at` says when each part's text was fetched. Text output ends with `source: archive`.
+
+```
+m365crawl transcripts [<meeting>] [flags]
+m365crawl transcripts list [<meeting>] [flags]
+m365crawl transcripts show <meeting>
+```
+
+Without `<meeting>` every recorded meeting is listed, newest first, with its part counts. With `<meeting>` each call of it is listed with its `parts`, in order. `transcripts` and `transcripts list` are the same command.
+
+| Flag | Meaning |
+| --- | --- |
+| `--since=DATE` | Only meetings that started at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d). |
+| `--until=DATE` | Only meetings that started before this time; a date alone (YYYY-MM-DD) includes that whole day. |
+| `--state=STATE` | Only meetings in this state: fetched, partial, not_fetched or unfetchable. |
+| `--limit=N` | Maximum meetings to return (at most 1000); `truncated` says whether more exist. |
+
+Result: `{"items", "count", "truncated", "source": "archive", "notices"?, "note"?, "archive_age_seconds"}`. Item keys: `call_id`, `thread_id`, `event_key`, `title`, `started_at`, `state`, `parts_total`, `parts_fetchable`, `parts_fetched` and, with `<meeting>`, `parts` (`ordinal`, `part_key`, `starts_at`, `duration_seconds`, `transcribe_only`, `content_types`, `storage_kind`, `ref_quality`, `fetchable`, `state`, `reason`, `fetch`). `fetch` is `{"state", "fetched_at", "attempted_at", "entries", "http_status", "browser"}` or null. A notice says how many listed meetings have parts not fetched yet.
+
+```sh
+m365crawl transcripts --since 7d
+m365crawl transcripts ev_1234abcd
+```
+
+### transcripts show
+
+Print a meeting's transcript from the archive: every part in time order, with each seam marked and where each part came from.
+
+```
+m365crawl transcripts show <meeting>
+```
+
+Result: `{"call_id", "event_key", "title", "source": "archive", "complete", "segments": [{"ordinal", "transcribe_only", "starts_at", "fetched_at", "state", "reason", "entries": [{"speaker", "start", "end", "offset", "text"}]}], "text_truncated"?}`. A part with no text keeps its place as a segment with no entries and its `reason`, and `complete` is false. `start` and `end` are absolute times; `offset` (h:mm:ss) is from the start of the part. When `<meeting>` names several recorded calls the newest is shown and a notice says how to pick another. `--max-text` cuts each entry's text and sets `text_truncated`.
+
+In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──`, `── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
 
 ## metadata
 

@@ -302,21 +302,30 @@ type refCandidate struct{ principal, key string }
 // any of them) to one event and loads everything about it. An unknown or ambiguous reference is a
 // usage error.
 func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, ref string) (CalendarDetail, error) {
-	var d CalendarDetail
+	d, found, err := s.calendarEvent(ctx, acct, ref)
+	if err == nil && !found {
+		err = noEvent(ref)
+	}
+	return d, err
+}
+
+// calendarEvent is CalendarEvent that reports a reference no event matches as found false, so a
+// caller with its own way to say so does not have to read an error's text.
+func (s *Store) calendarEvent(ctx context.Context, acct *teamsdesktop.Account, ref string) (d CalendarDetail, found bool, err error) {
 	ok, err := s.hasCalendarTables(ctx)
 	if err != nil {
-		return d, err
+		return d, false, err
 	}
 	if !ok {
-		return d, ErrNoCalendarTables
+		return d, false, ErrNoCalendarTables
 	}
 	principals, err := calendar.LoadPrincipals(ctx, s.db)
 	if err != nil {
-		return d, err
+		return d, false, err
 	}
 	cands, err := s.matchRef(ctx, principals, accountString(acct), ref)
 	if err != nil {
-		return d, err
+		return d, false, err
 	}
 	// Find loads each candidate's group; two candidates that are one joined group are one event.
 	seen := map[refCandidate]bool{}
@@ -324,7 +333,7 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 	for _, c := range cands {
 		it, ok, err := calendar.Find(ctx, s.db, c.principal, c.key)
 		if err != nil {
-			return d, err
+			return d, false, err
 		}
 		g := refCandidate{it.Principal, it.Key}
 		if ok && !seen[g] {
@@ -334,25 +343,25 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 	}
 	switch len(items) {
 	case 0:
-		return d, noEvent(ref)
+		return d, false, nil
 	case 1:
 	default:
-		return d, ambiguousEvent(ref, items)
+		return d, false, ambiguousEvent(ref, items)
 	}
 	it := items[0]
 	rec := &recordingCache{s: s, principals: principals, byChat: map[string]*chatRecordings{}}
 	if d.CalendarRow, err = s.rowOf(ctx, it, principals, rec); err != nil {
-		return d, err
+		return d, false, err
 	}
 	d.Attendees = parseAttendees(it.AttendeesJSON)
 	accounts := principals.Accounts(it.Principal)
 	if it.ICalUID != "" {
 		if d.Recaps, err = s.recaps(ctx, accounts, it); err != nil {
-			return d, err
+			return d, false, err
 		}
 	}
 	if d.Series, err = s.series(ctx, accounts, it); err != nil {
-		return d, err
+		return d, false, err
 	}
 	if it.TeamsThreadID != "" {
 		cr := rec.cached(it.Principal, it.TeamsThreadID) // rowOf loaded it
@@ -368,7 +377,7 @@ func (s *Store) CalendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 		}
 		d.Chat = cr.chat
 	}
-	return d, nil
+	return d, true, nil
 }
 
 func noEvent(ref string) *errs.Coded {
@@ -641,6 +650,7 @@ type chatRecordings struct {
 	matched map[string][]CalendarRecording
 	series  []CalendarRecording // newest first
 	chat    *CalendarChat
+	calls   map[string]string // message id to call id, for the recording and transcript notices that name one
 }
 
 // cached is the recordings of a chat that of has already loaded.
@@ -728,10 +738,11 @@ func (s *Store) matchRecordings(ctx context.Context, accounts []string, chat str
 		}
 		_ = wr.Close()
 	}
-	msgs, err := s.chatMessages(ctx, accounts, chat)
+	msgs, calls, err := s.chatMessages(ctx, accounts, chat)
 	if err != nil {
 		return nil, err
 	}
+	out.calls = calls
 	for _, m := range msgs {
 		if key, by := matchOccurrence(occs, m.SentAt); key != "" {
 			m.MatchedBy = by
@@ -793,26 +804,30 @@ func matchOccurrence(occs []occurrence, t time.Time) (key, by string) {
 	return "", ""
 }
 
-func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, error) {
+func (s *Store) chatMessages(ctx context.Context, accounts []string, chat string) ([]CalendarRecording, map[string]string, error) {
 	args := append([]any{chat}, stringArgs(accounts)...)
-	rows, err := s.query(ctx, `select id, conversation_id, sent_at, message_type, content_text, link from messages
+	rows, err := s.query(ctx, `select id, conversation_id, sent_at, message_type, content_text, link, content_html from messages
 	  where conversation_id=? and tenant_id||'/'||user_id in `+inList(len(accounts))+` and deleted_at is null
 	  and message_type in ('RichText/Media_CallRecording','RichText/Media_CallTranscript','Event/Call') order by sent_at, id`, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []CalendarRecording
+	calls := map[string]string{}
 	for rows.Next() {
 		var m CalendarRecording
-		var sent, typ string
-		if err := rows.Scan(&m.MessageID, &m.ConversationID, &sent, &typ, &m.Text, &m.Link); err != nil {
-			return nil, err
+		var sent, typ, html string
+		if err := rows.Scan(&m.MessageID, &m.ConversationID, &sent, &typ, &m.Text, &m.Link, &html); err != nil {
+			return nil, nil, err
 		}
 		m.SentAt, m.Kind = parseTime(sql.NullString{String: sent, Valid: true}), recordingKinds[typ]
+		if call := noticeCall(typ, html); call != "" {
+			calls[m.MessageID] = call
+		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	return out, calls, rows.Err()
 }
 
 func (s *Store) chatOf(ctx context.Context, accounts []string, chat string) (*CalendarChat, error) {

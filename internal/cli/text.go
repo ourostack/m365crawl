@@ -59,6 +59,10 @@ func (rt *runtime) renderText(label string, v any) error {
 		m.renderMail(rt)
 		return nil
 	}
+	if m, ok := v.(transcriptRenderer); ok {
+		m.renderTranscripts(rt)
+		return nil
+	}
 	switch r := v.(type) {
 	case *overviewResult:
 		rt.renderOverview(r)

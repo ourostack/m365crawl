@@ -1,0 +1,74 @@
+// Package transcripts turns the meeting recording notices a sync already archived into transcript
+// parts: one row per recorded part of a call, with the SharePoint reference a later fetch needs.
+// Nothing here touches the network.
+package transcripts
+
+import (
+	"regexp"
+	"strings"
+	"time"
+)
+
+// The chat message types a part listing reads.
+const (
+	TypeRecording  = "RichText/Media_CallRecording"
+	TypeTranscript = "RichText/Media_CallTranscript"
+)
+
+// RefQuality values: what kind of reference a part carries.
+const (
+	// RefDriveItem is a part with its own drive id and item id: it can be fetched.
+	RefDriveItem = "drive_item"
+	// RefShareOnly is a part with only a path or sharing link.
+	RefShareOnly = "share_only"
+	// RefAMSOnly is a part with only a link to Teams' own media service.
+	RefAMSOnly = "ams_only"
+	// RefUnresolved stands for a call that has a transcript notice and no part with a transcript.
+	RefUnresolved = "unresolved"
+)
+
+// PartsMapper numbers how the notices are turned into parts. It is stored as
+// meta.transcript_parts_mapper; raise it when ParseRecording or Assemble changes what they derive,
+// and the next sync rebuilds the parts of every account.
+const PartsMapper = 1
+
+// Part is one recorded part of a call, as the Success notice of its recording describes it.
+type Part struct {
+	AccountID, CallID, ThreadID, MessageID, PartKey string
+	// Ordinal is the part's place in its call, from 1, in time order.
+	Ordinal         int
+	StartsAt        time.Time
+	DurationSeconds float64
+	ContentTypes    string
+	ChunkIndex      string
+	// TranscribeOnly is a part that was transcribed and not recorded.
+	TranscribeOnly                                             bool
+	Host, SiteRoot, StorageKind, DriveID, ItemID, TranscriptID string
+	ShareURL, RefQuality, MeetingICalUID, OriginalName         string
+	SentAt                                                     time.Time
+}
+
+// Notice is a transcript notice of a call: the message that says a transcript exists.
+type Notice struct {
+	ThreadID, MessageID string
+	SentAt              time.Time
+}
+
+var (
+	refHost     = regexp.MustCompile(`^[a-z0-9.-]+$`)
+	refSiteRoot = regexp.MustCompile(`^/(teams|sites|personal)/[^/?#]+$`)
+	refID       = regexp.MustCompile(`^[A-Za-z0-9!_.%-]+$`)
+)
+
+// ValidRef reports whether the part's file reference is safe to build a request from: a plain host
+// name, a site root of one known kind, and ids made only of the characters such ids use.
+func (p Part) ValidRef() bool {
+	return refHost.MatchString(strings.ToLower(p.Host)) && refSiteRoot.MatchString(p.SiteRoot) &&
+		refID.MatchString(p.DriveID) && refID.MatchString(p.ItemID) && refID.MatchString(p.TranscriptID)
+}
+
+// Fetchable reports whether a fetch can ask SharePoint for this part.
+func (p Part) Fetchable() bool { return p.RefQuality == RefDriveItem && p.ValidRef() }
+
+// HasTranscript reports whether the part's notice says it carries a transcript.
+func (p Part) HasTranscript() bool { return strings.Contains(p.ContentTypes, "Transcript") }

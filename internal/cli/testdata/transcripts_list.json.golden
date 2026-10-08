@@ -1,0 +1,55 @@
+{
+  "items": [
+    {
+      "call_id": "call-4",
+      "thread_id": "19:meeting_adhoc@thread.v2",
+      "event_key": null,
+      "title": null,
+      "started_at": "2026-11-12T14:00:00Z",
+      "state": "not_fetched",
+      "parts_total": 1,
+      "parts_fetchable": 1,
+      "parts_fetched": 0
+    },
+    {
+      "call_id": "call-3",
+      "thread_id": "19:meeting_adhoc@thread.v2",
+      "event_key": null,
+      "title": null,
+      "started_at": "2026-11-11T14:00:00Z",
+      "state": "unfetchable",
+      "parts_total": 1,
+      "parts_fetchable": 0,
+      "parts_fetched": 0
+    },
+    {
+      "call_id": "call-2",
+      "thread_id": "19:meeting_weekly@thread.v2",
+      "event_key": null,
+      "title": "Weekly sync",
+      "started_at": "2026-11-10T10:00:00Z",
+      "state": "fetched",
+      "parts_total": 1,
+      "parts_fetchable": 1,
+      "parts_fetched": 1
+    },
+    {
+      "call_id": "call-1",
+      "thread_id": "19:meeting_weekly@thread.v2",
+      "event_key": "uid-weekly-1103|",
+      "title": "Weekly sync",
+      "started_at": "2026-11-03T10:00:00Z",
+      "state": "partial",
+      "parts_total": 3,
+      "parts_fetchable": 3,
+      "parts_fetched": 2
+    }
+  ],
+  "count": 4,
+  "truncated": false,
+  "source": "archive",
+  "archive_age_seconds": 0,
+  "notices": [
+    "2 of the 4 meetings listed have transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>"
+  ]
+}
