@@ -43,7 +43,7 @@ func mailGuard() error {
 // mailGroup is the mail command group.
 type mailGroup struct {
 	List    mailListCmd    `cmd:"" help:"List archived Outlook mail, newest first."`
-	Show    mailShowCmd    `cmd:"" help:"Show one message: headers, recipients, attachments and body text."`
+	Show    mailShowCmd    `cmd:"" help:"Show one message: headers, recipients, body text and each attachment's name, size and type."`
 	Thread  mailThreadCmd  `cmd:"" help:"Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link."`
 	Folders mailFoldersCmd `cmd:"" help:"List mail folders with message and unread counts and how far back the cache reaches."`
 	Unread  mailUnreadCmd  `cmd:"" help:"Unread mail by folder."`

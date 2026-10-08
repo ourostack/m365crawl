@@ -47,7 +47,7 @@ func metaLines(w io.Writer, m meta, color bool) {
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // textBanners are the commands whose text output opens with the wordmark.
-var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, "whoami": true}
+var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, "whoami": true, "overview": true}
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
@@ -60,6 +60,8 @@ func (rt *runtime) renderText(label string, v any) error {
 		return nil
 	}
 	switch r := v.(type) {
+	case *overviewResult:
+		rt.renderOverview(r)
 	case *listResult:
 		rt.listTable(r)
 		_, _ = fmt.Fprintln(w)

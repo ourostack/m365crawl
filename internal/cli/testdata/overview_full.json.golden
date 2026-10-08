@@ -1,0 +1,60 @@
+{
+  "archive_exists": true,
+  "next": [
+    {
+      "command": "m365crawl sync",
+      "does": "read Teams, Outlook mail and the calendar into the archive"
+    },
+    {
+      "command": "m365crawl",
+      "does": "what the archive holds and how fresh it is"
+    },
+    {
+      "command": "m365crawl search \"words\"",
+      "does": "find anything across chats and mail"
+    },
+    {
+      "command": "m365crawl calendar",
+      "does": "today's meetings; calendar event <id> for one meeting with its chat and mail"
+    },
+    {
+      "command": "m365crawl mail unread",
+      "does": "unread mail by folder"
+    },
+    {
+      "command": "m365crawl unread",
+      "does": "unread Teams chats"
+    },
+    {
+      "command": "m365crawl mail list --has-attachments",
+      "does": "mail with files; mail show <id> lists each file's name, size and type"
+    }
+  ],
+  "sources": [
+    {
+      "conversations": 1,
+      "last_sync_at": null,
+      "messages": 1,
+      "newest_at": "2026-03-10T12:00:00Z",
+      "source": "chats",
+      "state": "ok"
+    },
+    {
+      "last_sync_at": null,
+      "messages": 6,
+      "newest_at": "2026-09-09T08:00:00Z",
+      "oldest_at": "2026-08-01T08:00:00Z",
+      "source": "mail",
+      "state": "ok"
+    },
+    {
+      "coverage_gap": false,
+      "events": 42,
+      "last_sync_at": "2026-03-10T13:00:00Z",
+      "source": "calendar",
+      "state": "ok",
+      "window_end": "2026-03-24T12:00:00Z",
+      "window_start": "2026-02-08T12:00:00Z"
+    }
+  ]
+}

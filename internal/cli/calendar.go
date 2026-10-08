@@ -316,7 +316,8 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if agenda.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
+			out.Note = noCalendarTables
+			out.setNeedsSync(noCalendarTables)
 			return out, nil
 		}
 		items := make([]calendarItem, len(agenda.Rows))
@@ -336,9 +337,17 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
+		if len(items) == 0 {
+			if list.Note, err = rt.calendarEmptyNote(st, from, to, agenda.Gap, c.Query != "", "event"); err != nil {
+				return nil, err
+			}
+		}
 		return list, nil
 	})
 }
+
+// noCalendarTables is the hint and note of an archive that predates the calendar.
+const noCalendarTables = "the archive has no calendar tables yet: run m365crawl sync"
 
 // outlookAccountPrefix starts the account id of an Outlook profile.
 const outlookAccountPrefix = "outlook/"
@@ -662,7 +671,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 		d, err := st.CalendarEvent(rt.ctx, rt.account, c.Event)
 		if errors.Is(err, store.ErrNoCalendarTables) {
 			r := &eventResult{}
-			r.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
+			r.setNeedsSync(noCalendarTables)
 			return r, nil
 		}
 		if err != nil {
@@ -953,14 +962,19 @@ func (calendarSourcesCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if res.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
+			out.Note = noCalendarTables
+			out.setNeedsSync(noCalendarTables)
 			return out, nil
 		}
 		items := make([]calendarSourceItem, len(res.Rows))
 		for i, r := range res.Rows {
 			items[i] = sourceItemOf(r)
 		}
-		return newList(shape(rt, items), false), nil
+		list := newList(shape(rt, items), false)
+		if len(items) == 0 {
+			list.Note = "the archive holds no calendar yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+		}
+		return list, nil
 	})
 }
 
@@ -1023,7 +1037,8 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if res.NoTables {
-			out.setNeedsSync("the archive has no calendar tables yet: run m365crawl sync")
+			out.Note = noCalendarTables
+			out.setNeedsSync(noCalendarTables)
 			return out, nil
 		}
 		items := make([]actionItem, len(res.Items))
@@ -1040,6 +1055,11 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		list.MineAmbiguousOmitted, list.MineUnknownAccounts = res.MineAmbiguous, res.MineUnknownAccounts
 		hasOutlook := slices.ContainsFunc(res.Items, func(a store.CalendarAction) bool { return a.Outlook })
 		rt.noteOutlookOff(st, list, hasOutlook)
+		if len(items) == 0 {
+			if list.Note, err = rt.calendarEmptyNote(st, from, to, res.Gap, c.Owner != "" || c.Mine, "action item"); err != nil {
+				return nil, err
+			}
+		}
 		return list, nil
 	})
 }

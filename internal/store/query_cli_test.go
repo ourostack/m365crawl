@@ -41,3 +41,22 @@ func TestMessageHTML(t *testing.T) {
 		t.Fatalf("html = %v", got)
 	}
 }
+
+func TestMessageWindow(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if oldest, newest, err := s.MessageWindow(ctx, nil); err != nil || !oldest.IsZero() || !newest.IsZero() {
+		t.Fatalf("empty archive: %v %v %v", oldest, newest, err)
+	}
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m1", "a", base), msg(acctA, "c", "m2", "b", base.Add(48*time.Hour)), msg(acctB, "c", "m1", "c", base.Add(-time.Hour))}))
+	if oldest, newest, err := s.MessageWindow(ctx, nil); err != nil || !oldest.Equal(base.Add(-time.Hour)) || !newest.Equal(base.Add(48*time.Hour)) {
+		t.Fatalf("every account: %v %v %v", oldest, newest, err)
+	}
+	if oldest, newest, err := s.MessageWindow(ctx, &acctA); err != nil || !oldest.Equal(base) || !newest.Equal(base.Add(48*time.Hour)) {
+		t.Fatalf("one account: %v %v %v", oldest, newest, err)
+	}
+	_ = s.Close()
+	if _, _, err := s.MessageWindow(ctx, nil); err == nil {
+		t.Fatal("a closed archive must fail")
+	}
+}

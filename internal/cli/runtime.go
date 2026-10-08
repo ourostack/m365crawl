@@ -46,6 +46,7 @@ type runtime struct {
 	exitErr        error       // a failure while printing for a flag that ends the run (--version)
 	team           string      // --team of the running read command, validated before any implicit sync
 	synced         *syncedInfo // the implicit sync this read ran, if any
+	query          listQuery   // what the running list command asked for, to explain an empty result
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
@@ -259,6 +260,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	}
 	res, err := fn(st)
 	if err != nil {
+		return asCoded(err)
+	}
+	if err := rt.noteEmpty(st, res); err != nil {
 		return asCoded(err)
 	}
 	if sr, ok := res.(*statusResult); ok && bad != nil {

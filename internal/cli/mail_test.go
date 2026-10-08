@@ -622,7 +622,7 @@ func TestMailHelpIsTheContract(t *testing.T) {
 	e := textEnv(t)
 	for cmd, want := range map[string]string{
 		"list":    "List archived Outlook mail, newest first.",
-		"show":    "Show one message: headers, recipients, attachments and body text.",
+		"show":    "Show one message: headers, recipients, body text and each attachment's name, size and type.",
 		"thread":  "Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.",
 		"folders": "List mail folders with message and unread counts and how far back the cache reaches.",
 		"unread":  "Unread mail by folder.",

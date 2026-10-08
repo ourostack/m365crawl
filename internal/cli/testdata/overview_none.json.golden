@@ -1,0 +1,51 @@
+{
+  "archive_exists": false,
+  "next": [
+    {
+      "command": "m365crawl sync",
+      "does": "read Teams, Outlook mail and the calendar into the archive"
+    },
+    {
+      "command": "m365crawl",
+      "does": "what the archive holds and how fresh it is"
+    },
+    {
+      "command": "m365crawl search \"words\"",
+      "does": "find anything across chats and mail"
+    },
+    {
+      "command": "m365crawl calendar",
+      "does": "today's meetings; calendar event <id> for one meeting with its chat and mail"
+    },
+    {
+      "command": "m365crawl mail unread",
+      "does": "unread mail by folder"
+    },
+    {
+      "command": "m365crawl unread",
+      "does": "unread Teams chats"
+    },
+    {
+      "command": "m365crawl mail list --has-attachments",
+      "does": "mail with files; mail show <id> lists each file's name, size and type"
+    }
+  ],
+  "note": "no archive yet; run m365crawl sync",
+  "sources": [
+    {
+      "last_sync_at": null,
+      "source": "chats",
+      "state": "no_archive"
+    },
+    {
+      "last_sync_at": null,
+      "source": "mail",
+      "state": "no_archive"
+    },
+    {
+      "last_sync_at": null,
+      "source": "calendar",
+      "state": "no_archive"
+    }
+  ]
+}

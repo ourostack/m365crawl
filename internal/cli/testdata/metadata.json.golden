@@ -2,7 +2,7 @@
   "schema_version": "crawlkit.control.v1",
   "id": "m365crawl",
   "display_name": "m365crawl",
-  "description": "Mirrors the Microsoft Teams desktop app's local cache, and optionally the new Outlook for Mac's calendar, into a SQLite archive on your Mac or Windows PC, with full-text search, unread state, mentions, the activity feed and a calendar with meeting recaps, so an AI agent can read your Teams history and agenda in milliseconds, offline and read-only.",
+  "description": "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline.",
   "binary": {
     "name": "m365crawl"
   },
@@ -77,6 +77,14 @@
       ],
       "json": true
     },
+    "overview": {
+      "title": "overview (m365crawl with no command): what the archive holds per source and where to start",
+      "argv": [
+        "m365crawl",
+        "--json"
+      ],
+      "json": true
+    },
     "search": {
       "argv": [
         "m365crawl",
@@ -110,8 +118,9 @@
     "watch",
     "search",
     "sql",
-    "calendar",
-    "mail"
+    "chats",
+    "mail",
+    "calendar"
   ],
   "privacy": {
     "contains_private_messages": true,
