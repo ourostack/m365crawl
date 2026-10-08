@@ -35,7 +35,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 | Triage: what needs me | `m365crawl unread --by-conversation --since 7d`, `m365crawl mail unread`, `m365crawl activity --unread` |
 | Recall: what was said about something | `m365crawl search "words" --since 30d`, `m365crawl mail list --from <name>`, `m365crawl mail folders` (how far back mail reaches) |
 | Threads: the whole conversation | `m365crawl thread <conversation_id> <id>`, `m365crawl mail thread <id>` |
-| Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, `m365crawl calendar event <event_id>` (one meeting with its chat and mail), `m365crawl people --query <name>` |
+| Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, then `m365crawl calendar event <event_id>`: one meeting with its `chat` (its newest messages in `chat.recent_messages`, kept by `--fields chat`) and `related_mail`, matched by invite or by subject from 14 days before to 7 days after the start; `m365crawl people --query <name>` finds Teams people and mail correspondents (`id` `mail:<address>`) |
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
 
 ## Hosts

@@ -99,13 +99,18 @@ func shellWords(s string) []string {
 func skillKeys() []string {
 	keys := []string{errs.CodeMailUnsupportedPlatform}
 	for _, typ := range []reflect.Type{reflect.TypeFor[listResult](), reflect.TypeFor[meta](), reflect.TypeFor[messageItem](), reflect.TypeFor[mailListItem](),
-		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource]()} {
+		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource](),
+		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
 	return keys
 }
 
-var snakeWord = regexp.MustCompile(`^[a-z]+(_[a-z]+)+$|^(note|fix|truncated)$`)
+var (
+	snakeWord = regexp.MustCompile(`^[a-z]+(_[a-z]+)+$|^(note|fix|truncated)$`)
+	// nestedField is a field inside another, such as chat.recent_messages.
+	nestedField = regexp.MustCompile(`^[a-z_]+\.[a-z_]+$`)
+)
 
 // The guide is short, and every command, flag, --fields key and field it names exists.
 func TestSkillNamesOnlyWhatExists(t *testing.T) {
@@ -155,6 +160,12 @@ func TestSkillNamesOnlyWhatExists(t *testing.T) {
 		case strings.HasPrefix(span, "--"):
 			if name, _, _ := strings.Cut(span, " "); !flagExists(name) {
 				t.Errorf("no flag %s", name)
+			}
+		case nestedField.MatchString(span):
+			for _, k := range strings.Split(span, ".") {
+				if !contains(keys, k) {
+					t.Errorf("no field %q in %q", k, span)
+				}
 			}
 		case snakeWord.MatchString(span):
 			if !contains(keys, span) {

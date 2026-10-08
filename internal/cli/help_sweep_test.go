@@ -62,6 +62,7 @@ var teamsHelp = map[string]string{
 	"activity --include-system":      "Teams-only: Teams' system conversations",
 	"conversations --include-system": "Teams-only: Teams' system conversations",
 	"messages --include-system":      "Teams-only: Teams' system conversations",
+	"people":                         "names both: Teams senders and members, and Outlook mail correspondents",
 	"search":                         "names both: Teams chats and Outlook mail",
 	"search --source":                "names both: chats (Teams), mail (Outlook) or all",
 	"search --folder":                "names both: mail only, so it leaves Teams chats out",
