@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -428,18 +429,24 @@ func TestSearchFolderNarrowsToMailAndSaysWhy(t *testing.T) {
 func TestSearchWithoutMailInTheArchiveReturnsChatsWithANote(t *testing.T) {
 	e := searchEnv(t)
 	searchArchive(t, e, false)
+	// The sync read the profile and found no mail, so a sync is not the fix: the note says so.
+	readEmpty := "mail was read and the Outlook cache holds no messages"
+	if goruntime.GOOS == "windows" {
+		// A sync on a Windows host reads no mail, so with the platform pinned to a Mac the archive looks unread.
+		readEmpty = "mail is not in the archive yet; run m365crawl sync"
+	}
 	m := searchJSON(t, e, "Hello")
-	if m["note"] != "mail is not in the archive yet; run m365crawl sync" || m["count"] != float64(2) {
+	if m["note"] != readEmpty || m["count"] != float64(2) {
 		t.Fatalf("note/count = %v / %v", m["note"], m["count"])
 	}
 	if _, has := m["sources"].(map[string]any)["mail"]; has {
 		t.Fatal("mail was not searched")
 	}
 	m = searchJSON(t, e, "Hello", "--source", "mail")
-	if m["note"] != "mail is not in the archive yet; run m365crawl sync" || m["count"] != float64(0) {
+	if m["note"] != readEmpty || m["count"] != float64(0) {
 		t.Fatalf("mail only: %v", m)
 	}
-	// No archive at all: nothing from either source, and the same note.
+	// No archive at all: nothing from either source, and a sync is what reads mail.
 	fresh := searchEnv(t)
 	m = searchJSON(t, fresh, "Hello", "--source", "mail")
 	if m["note"] != "mail is not in the archive yet; run m365crawl sync" || m["count"] != float64(0) {

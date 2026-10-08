@@ -108,3 +108,14 @@ func TestTeamsOnlyCommandsPointToMail(t *testing.T) {
 		t.Errorf("mail show: %q", h)
 	}
 }
+
+// search --help says what its text output's thread column holds and which command reads it.
+func TestSearchHelpNamesTheThreadColumn(t *testing.T) {
+	e := newEnv(t)
+	_, out, _ := e.run("search", "--help")
+	for _, want := range []string{"thread column", "m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id", "m365crawl mail thread <id>"} {
+		if !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
+			t.Errorf("search --help lacks %q", want)
+		}
+	}
+}

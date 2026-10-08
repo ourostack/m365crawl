@@ -4,5 +4,5 @@
 2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000001000  Hello from Blair ...
 
 [2m2 items[0m
-[2mnote: mail is not in the archive yet; run m365crawl sync[0m
+[2mnote: mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)[0m
 [2marchive age: <age>[0m

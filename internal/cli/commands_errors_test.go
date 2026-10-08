@@ -152,6 +152,17 @@ func TestThreadWithoutAnArchiveIsAnEmptyList(t *testing.T) {
 	}
 }
 
+// A mail id given to thread is named as one, and the fix is the mail thread command.
+func TestThreadOfAMailIDPointsToMailThread(t *testing.T) {
+	e := newEnv(t)
+	code, _, stderr := e.run("--json", "--max-age", "0", "thread", "outlook/Main:3001")
+	body := errorOf(t, stderr)
+	if code != errs.ExitUsage || body["message"] != "outlook/Main:3001 is a mail id; thread reads Teams chats and channels" ||
+		body["fix"] != "Run `m365crawl mail thread outlook/Main:3001`." {
+		t.Fatalf("exit %d, %v", code, body)
+	}
+}
+
 func TestSQLErrorsAreUsageErrorsWithTheDatabaseMessage(t *testing.T) {
 	e := newEnv(t)
 	e.sync()

@@ -22,7 +22,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 - Lists stop at `--limit`, so check `truncated`. An empty list carries a `note` saying why: no archive, filters that matched nothing, or a range outside what the apps cached. `needs_sync` means no data yet, not no match.
 - Unknown is not none. `coverage_gap` on a calendar result means some days are not cached, so a missing meeting is not evidence; a field named in `unknown_fields` was never stated.
 - `unread` and `messages --unread` cover chats and meetings; channels are left out (`channels_excluded`) because most are never opened. Add `--include-channels` to count them; channel mentions and replies reach you through `activity`.
-- `messages` and `search` text output has a `thread` column that names the whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <id>`, for mail the id for `m365crawl mail thread <id>`.
+- `messages` and `search` text output has a `thread` column that names the whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, where the root is the message's `reply_chain_id`, else `id` (a channel reply's own id reads only that reply); for mail the id for `m365crawl mail thread <id>`.
 - `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields source,id,sent_at,subject,text --max-text 300`.
 
 ## Jobs
@@ -34,7 +34,7 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 | Mentions of me | `m365crawl search --mentions-me --since 7d` (`--direct-mentions` leaves out @channel and @team), `m365crawl activity --unread` |
 | Triage: what needs me | `m365crawl unread --by-conversation --since 7d`, `m365crawl mail unread`, `m365crawl activity --unread` |
 | Recall: what was said about something | `m365crawl search "words" --since 30d`, `m365crawl mail list --from <name>`, `m365crawl mail folders` (how far back mail reaches) |
-| Threads: the whole conversation | `m365crawl thread <conversation_id> <id>`, `m365crawl mail thread <id>` |
+| Threads: the whole conversation | `m365crawl thread <conversation_id> <root_id>` (the root is `reply_chain_id`, else `id`), `m365crawl mail thread <id>` |
 | Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, then `m365crawl calendar event <event_id>`: one meeting with its `chat` (its newest messages in `chat.recent_messages`, kept by `--fields chat`) and `related_mail`, matched by invite or by subject from 14 days before to 7 days after the start; `m365crawl people --query <name>` finds Teams people and mail correspondents (`id` `mail:<address>`) |
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
 

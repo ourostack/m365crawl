@@ -209,13 +209,16 @@ func TestOverviewWhereMailIsNotRead(t *testing.T) {
 // A word that is no command is an unknown command, not a stray argument of the overview.
 func TestUnknownCommandIsNamed(t *testing.T) {
 	e := newEnv(t)
-	for word, want := range map[string]string{
-		"nope":  `unknown command "nope"`,
-		"serch": `unknown command "serch", did you mean "search"?`,
+	for words, want := range map[string]string{
+		"nope":       `unknown command "nope"`,
+		"serch":      `unknown command "serch", did you mean "search"?`,
+		"mial list":  `unknown command "mial", did you mean "mail list"?`,
+		"mial nope":  `unknown command "mial", did you mean "mail"?`,
+		"calender x": `unknown command "calender", did you mean "calendar"?`,
 	} {
-		code, _, errOut := e.run("--json", word)
+		code, _, errOut := e.run(append([]string{"--json"}, strings.Fields(words)...)...)
 		if code != 2 || errorOf(t, errOut)["message"] != want {
-			t.Fatalf("%s: exit %d, stderr %q", word, code, errOut)
+			t.Fatalf("%s: exit %d, stderr %q", words, code, errOut)
 		}
 	}
 }

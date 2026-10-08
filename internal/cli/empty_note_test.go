@@ -66,7 +66,7 @@ func noteOf(t *testing.T, e *env, args ...string) string {
 func TestEmptyTeamsListsSayWhy(t *testing.T) {
 	pinReadsHere(t)
 	e := newEnv(t)
-	for _, args := range [][]string{{"messages"}, {"search", "x"}, {"conversations"}, {"teams"}, {"people"}, {"activity"}, {"stores"}, {"unread"}, {"thread", "c", "r"}, {"calendar"}, {"calendar", "actions"}, {"calendar", "sources"}} {
+	for _, args := range [][]string{{"messages"}, {"search", "x", "--source", "chats"}, {"conversations"}, {"teams"}, {"people"}, {"activity"}, {"stores"}, {"unread"}, {"thread", "c", "r"}, {"calendar"}, {"calendar", "actions"}, {"calendar", "sources"}} {
 		if got := noteOf(t, e, args...); got != "no archive yet: run m365crawl sync" {
 			t.Errorf("no archive, %v: note %q", args, got)
 		}
@@ -222,15 +222,16 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
 	pinReadsHere(t)
 	noTeams := "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+	outlookOff := "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
 	e := newEnv(t)
 	e.emptyArchive()
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"search", "x", "--source", "mail"}, "mail is not in the archive yet; run m365crawl sync"},
+		{[]string{"search", "x", "--source", "mail"}, outlookOff},
 		{[]string{"search", "x", "--source", "chats"}, noTeams},
-		{[]string{"search", "x"}, "mail is not in the archive yet; run m365crawl sync; " + noTeams},
+		{[]string{"search", "x"}, outlookOff + "; " + noTeams},
 	} {
 		if got := noteOf(t, e, c.args...); got != c.want {
 			t.Errorf("empty archive, %v: note %q, want %q", c.args, got, c.want)

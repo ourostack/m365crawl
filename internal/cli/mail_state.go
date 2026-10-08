@@ -35,10 +35,15 @@ type mailStatusBlock struct {
 
 // mailStatus builds the block; st is nil when there is no archive.
 func (rt *runtime) mailStatus(st *store.Store) (*mailStatusBlock, error) {
+	return rt.mailStatusOf(st, "")
+}
+
+// mailStatusOf is mailStatus for one mail account, or every account when account is empty.
+func (rt *runtime) mailStatusOf(st *store.Store, account string) (*mailStatusBlock, error) {
 	b := &mailStatusBlock{}
 	if st != nil {
 		var err error
-		if b.MailStatus, err = st.MailStatus(rt.ctx); err != nil {
+		if b.MailStatus, err = st.MailStatusOf(rt.ctx, account); err != nil {
 			return nil, err
 		}
 	}

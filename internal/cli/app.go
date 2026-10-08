@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -172,6 +173,7 @@ var newParser = kong.New
 func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	var app cliApp
 	rt := newRuntime(ctx, &app.Globals, stdout, stderr)
+	rt.args = args
 	rt.format = guessFormat(args, rt.stdoutTTY) // until the real flags are validated
 	// Defense in depth: no path may print a Go stack trace unasked.
 	defer func() {
@@ -270,13 +272,23 @@ func (rt *runtime) checkListOnly() error {
 
 // unknownCommand words kong's complaint about a stray word: the word quoted alone, and kong's
 // suggestion, when it has one, after it.
-func unknownCommand(rest string) string {
+// When kong suggests a command group and the word after the typo is one of its commands, the
+// suggestion names both: "mial list" suggests "mail list".
+func unknownCommand(rest string, args []string, kctx *kong.Context) string {
 	word, suggestion, _ := strings.Cut(rest, ", did you mean ")
 	msg := fmt.Sprintf("unknown command %q", word)
-	if suggestion != "" {
-		msg += ", did you mean " + suggestion
+	if suggestion == "" {
+		return msg
 	}
-	return msg
+	group := strings.Trim(strings.TrimSuffix(suggestion, "?"), `"`)
+	if i := slices.Index(args, word); i >= 0 && i+1 < len(args) && kctx != nil {
+		for _, g := range kctx.Model.Children {
+			if g.Name == group && slices.ContainsFunc(g.Children, func(c *kong.Node) bool { return c.Name == args[i+1] }) {
+				suggestion = fmt.Sprintf("%q?", group+" "+args[i+1])
+			}
+		}
+	}
+	return msg + ", did you mean " + suggestion
 }
 
 // fail prints err as a coded error and returns its exit status.
@@ -290,7 +302,7 @@ func (rt *runtime) fail(err error) int {
 		switch {
 		case errors.As(err, &pe) && (rt.cmd == "" || rt.cmd == "overview") && strings.HasPrefix(pe.Error(), "unexpected argument "):
 			// A word that is no command lands on the default command as a stray argument.
-			coded = errs.Usage(unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument ")))
+			coded = errs.Usage(unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument "), rt.args, pe.Context))
 		case errors.As(err, &pe):
 			coded = errs.Usage(pe.Error())
 		default:

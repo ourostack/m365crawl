@@ -920,6 +920,18 @@ func TestCalendarShowsOutlookEvents(t *testing.T) {
 	if ev["account_id"] != "outlook/Main" || ev["subject"] != "Fixture planning review" {
 		t.Fatalf("%v", ev)
 	}
+	// --account outlook/Main narrows the agenda to the profile, and an empty range says why, not
+	// that the archive lacks the account.
+	m = agenda(t, e, "--account", "outlook/Main", "--from", "2023-11-20", "--to", "2023-11-25", "--limit", "200")
+	for _, it := range items(t, m) {
+		if src := asStrings(it["sources"]); len(src) != 1 || src[0] != "outlook" {
+			t.Fatalf("--account outlook/Main: sources %v", src)
+		}
+	}
+	itemBySubjectFrom(t, m, "Fixture planning review", "outlook")
+	if got := noteOf(t, e, "--account", "outlook/Main", "calendar", "--from", "2001-01-01", "--to", "2001-01-02"); !strings.Contains(got, "the range is outside the archived calendar") {
+		t.Fatalf("outlook account, range outside: %q", got)
+	}
 }
 
 // A recap owner is mostly a first name: it is the user when no one else in the meeting has it, and
