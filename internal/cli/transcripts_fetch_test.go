@@ -33,7 +33,7 @@ type trPage struct {
 	host       string
 	landOn     string
 	hostErr    error
-	hostFails  []error // errors of the first Host calls; errHang blocks until the call's context ends
+	hostFails  []error  // errors of the first Host calls; errHang blocks until the call's context ends
 	hosts      []string // successive answers of Host, then host
 	paths      []string // successive answers of location.pathname, then "/"
 	probes     []bool   // successive answers of the sign-in probe, then true
@@ -64,7 +64,7 @@ func (p *trPage) Host(ctx context.Context) (string, error) {
 	if len(p.hostFails) > 0 {
 		err := p.hostFails[0]
 		p.hostFails = p.hostFails[1:]
-		if err == errHang {
+		if errors.Is(err, errHang) {
 			p.mu.Unlock()
 			<-ctx.Done()
 			p.mu.Lock()

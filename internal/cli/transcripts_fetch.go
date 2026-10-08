@@ -46,16 +46,17 @@ var (
 		}
 		return p, b, nil
 	}
-	transcriptsNow             = time.Now
-	fetchLandTimeout           = transcripts.DefaultLandTimeout
-	fetchLockPoll              = time.Second
-	fetchLockWait              = transcripts.DefaultLockWait
-	signinHosts                = (*store.Store).TranscriptHosts
-	openArchive                = store.Open
-	stdinIsTTY                 = func() bool { return isTTY(os.Stdin) }
-	stdinReader      io.Reader = os.Stdin
-	signinWait                 = 5 * time.Minute
-	signinPoll                 = time.Second
+	transcriptsNow              = time.Now
+	fetchLandTimeout            = transcripts.DefaultLandTimeout
+	fetchLockPoll               = time.Second
+	fetchLockWait               = transcripts.DefaultLockWait
+	signinHosts                 = (*store.Store).TranscriptHosts
+	openArchive                 = store.Open
+	stdinIsTTY                  = func() bool { return isTTY(os.Stdin) }
+	stdinReader       io.Reader = os.Stdin
+	signinWait                  = 5 * time.Minute
+	signinPoll                  = time.Second
+	signinCallTimeout           = 10 * time.Second // each question to the tab; a hung one is asked again
 )
 
 const (
@@ -567,24 +568,31 @@ func waitForHost(ctx context.Context, page transcripts.PageDriver, host string) 
 	}
 }
 
-// signedIn asks the tab once, each question bounded by the deadline. The error is a window that
-// went away; a page still loading is only not signed in yet.
+// signedIn asks the tab once, each question bounded by the deadline and by signinCallTimeout. The
+// error is a window that went away; a page still loading, or a question that failed or hung, is
+// only not signed in yet.
 func signedIn(ctx context.Context, page transcripts.PageDriver, host string, deadline time.Time) (bool, error) {
 	qctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	h, err := page.Host(qctx)
+	ask := func(q func(context.Context) error) error {
+		cctx, ccancel := context.WithTimeout(qctx, signinCallTimeout)
+		defer ccancel()
+		return q(cctx)
+	}
+	var h string
+	err := ask(func(c context.Context) (e error) { h, e = page.Host(c); return e })
 	if err != nil || !strings.EqualFold(h, host) {
-		return false, err
+		return false, gone(err)
 	}
 	var path string
-	if err := page.Eval(qctx, "location.pathname", &path); err != nil {
+	if err := ask(func(c context.Context) error { return page.Eval(c, "location.pathname", &path) }); err != nil {
 		return false, gone(err)
 	}
 	if signinPagePath.MatchString(path) {
 		return false, nil
 	}
 	var ok bool
-	err = page.Eval(qctx, signinProbeJS, &ok)
+	err = ask(func(c context.Context) error { return page.Eval(c, signinProbeJS, &ok) })
 	return ok && err == nil, gone(err)
 }
 
