@@ -111,6 +111,9 @@ func fakeBrowser(t *testing.T, page *trPage) (*countCloser, *browser.LaunchOptio
 		if page == nil {
 			t.Fatal("no browser may start in this test")
 		}
+		if o.StartURL != "" {
+			_ = page.Navigate(context.Background(), o.StartURL)
+		}
 		return page, closer, nil
 	}
 	transcriptsNow = func() time.Time { return trFetchedAt.Add(time.Hour) }
@@ -445,7 +448,7 @@ func TestFetchProgressHasNoContent(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		if !strings.Contains(errOut, "part 4 of 4") {
+		if !strings.Contains(errOut, "part 5 of 5 fetched") || !strings.Contains(errOut, "starting a headless Edge to fetch 5 parts") {
 			t.Fatalf("%s: no progress: %q", format, errOut)
 		}
 		for _, leak := range []string{"Example", "Fetched line", "sharepoint", trHost, "call-", "P1", "P3", "R1", "b!d1", "meeting_", "tr-", "Weekly"} {
@@ -465,18 +468,36 @@ func TestFetchProgressHasNoContent(t *testing.T) {
 }
 
 func TestFetchGolden(t *testing.T) {
-	e := trEnv(t)
+	// Every state a fetch prints: local, ok and no_access from --since, then ok's part read back
+	// as local beside an unfetchable one. Each output format starts from a fresh archive.
 	page := newTrPage()
 	page.answer["P3"] = func(context.Context) (transcripts.ScriptResult, error) {
 		return transcripts.ScriptResult{State: "no_access", Status: 403}, nil
 	}
 	fakeBrowser(t, page)
-	checkFetchGoldens(t, e, "transcripts_fetch", "fetch", "--since", "2026-11-01", "--refetch")
-	checkFetchGoldens(t, e, "transcripts_fetch_nothing", "fetch", "call-3")
+	checkFetchGoldens(t, "transcripts_fetch", [][]string{{"fetch", "--since", "2026-11-01"}})
+	checkFetchGoldens(t, "transcripts_fetch_local", [][]string{{"fetch", "call-4"}, {"fetch", trAdhoc}})
 }
 
-func checkFetchGoldens(t *testing.T, e *env, name string, args ...string) {
+// checkFetchGoldens runs the commands on a fresh archive for each of plain, color and JSON output
+// and compares the last command's output with its goldens.
+func checkFetchGoldens(t *testing.T, name string, runs [][]string) {
 	t.Helper()
+	run := func(format string) string {
+		e := trEnv(t)
+		var out string
+		for _, args := range runs {
+			code, o, errOut := e.tr(append([]string{format, "transcripts"}, args...)...)
+			if code != 0 {
+				t.Fatalf("%s %v: exit %d: %s", name, args, code, errOut)
+			}
+			out = o
+		}
+		if format == "--json" {
+			return jsonGolden(t, out)
+		}
+		return e.scrub(out)
+	}
 	for _, color := range []bool{false, true} {
 		suffix := "plain"
 		t.Setenv("CLICOLOR_FORCE", "")
@@ -484,24 +505,33 @@ func checkFetchGoldens(t *testing.T, e *env, name string, args ...string) {
 			suffix = "color"
 			t.Setenv("CLICOLOR_FORCE", "1")
 		}
-		code, out, errOut := e.tr(append([]string{"--format", "text", "transcripts"}, args...)...)
-		if code != 0 {
-			t.Fatalf("%s: exit %d: %s", name, code, errOut)
-		}
+		out := run("--format=text")
 		if !color && strings.Contains(out, "\x1b") {
 			t.Errorf("%s: escape in plain output", name)
 		}
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-		if last := lines[len(lines)-1]; !strings.Contains(last, "source: ") {
+		if last := lines[len(lines)-1]; !strings.HasPrefix(last, "source: ") && !strings.Contains(last, "source: ") {
 			t.Errorf("%s: the last line says where the result came from: %q", name, last)
 		}
-		checkGolden(t, name+"."+suffix, e.scrub(out))
+		checkGolden(t, name+"."+suffix, out)
 	}
-	code, out, errOut := e.tr(append([]string{"--json", "transcripts"}, args...)...)
-	if code != 0 {
-		t.Fatalf("%s: exit %d: %s", name, code, errOut)
+	t.Setenv("CLICOLOR_FORCE", "")
+	checkGolden(t, name+".json", run("--json"))
+}
+
+func TestFetchTextTruncated(t *testing.T) {
+	e := trEnv(t)
+	fakeBrowser(t, newTrPage())
+	code, out, errOut := e.tr("--format", "text", "transcripts", "fetch", "--since", "2026-11-01", "--limit", "1")
+	if code != 0 || !strings.Contains(out, "(more meetings were left; raise --limit)") || !strings.Contains(out, "next: m365crawl transcripts show call-4") {
+		t.Fatalf("exit %d: %s%s", code, out, errOut)
 	}
-	checkGolden(t, name+".json", jsonGolden(t, out))
+	// Nothing left: no table, the totals and the note.
+	e.tr("--format", "text", "transcripts", "fetch", "--since", "2026-11-01")
+	code, out, _ = e.tr("--format", "text", "transcripts", "fetch", "--since", "2026-11-01")
+	if code != 0 || strings.Contains(out, "call ") || !strings.HasPrefix(out, "0 fetched · 0 local") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
 }
 
 // ---- signin ----
@@ -550,7 +580,7 @@ func TestSigninHeadedWaitsForHost(t *testing.T) {
 		steps = append(steps, doc["progress"])
 	}
 	want := []string{"opening a visible Edge window with m365crawl's own browser profile",
-		"waiting for you to sign in to SharePoint in that window (up to 5m0s)", "signed in; closing the window"}
+		"waiting for you to sign in to SharePoint in that window (up to 5m)", "signed in; closing the window"}
 	if strings.Join(steps, "|") != strings.Join(want, "|") {
 		t.Fatalf("steps %q", steps)
 	}
@@ -612,7 +642,6 @@ func TestSigninTimesOut(t *testing.T) {
 	e := trEnv(t)
 	page := newTrPage()
 	page.landOn = "login.microsoftonline.com"
-	page.host = "login.microsoftonline.com"
 	fakeBrowser(t, page)
 	old := signinWait
 	signinWait = 30 * time.Millisecond
@@ -634,8 +663,7 @@ func TestSigninFailures(t *testing.T) {
 	trFails(t, e, errs.CodeBrowserBusy, errs.ExitLocked, "transcripts", "signin", "--user-agreed")
 	ctx, cancel := context.WithCancel(context.Background())
 	page := newTrPage()
-	page.host = "login.microsoftonline.com"
-	page.hostErr = nil
+	page.landOn = "login.microsoftonline.com"
 	fakeBrowser(t, page)
 	time.AfterFunc(30*time.Millisecond, cancel)
 	var out, errb bytes.Buffer
@@ -657,6 +685,42 @@ func TestSigninNeedsHost(t *testing.T) {
 	}
 	e.exec(`drop table transcript_parts`)
 	trFails(t, e, errs.CodeUsage, errs.ExitUsage, "transcripts", "signin", "--user-agreed")
+	// A parts table the query cannot read, and an archive file that is not a database.
+	e.exec(`create table transcript_parts(x)`)
+	trFails(t, e, errs.CodeDBError, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+	if err := os.WriteFile(e.db, []byte("not a database, long enough to be read as one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trFails(t, e, errs.CodeDBError, errs.ExitRuntime, "transcripts", "signin", "--user-agreed")
+	_ = stdinIsTTY() // the real check runs; what it says depends on how the tests were started
+}
+
+func TestBrowserName(t *testing.T) {
+	for k, want := range map[browser.Kind]string{browser.KindEdge: "Edge", browser.KindChrome: "Chrome", browser.KindCustom: "browser"} {
+		if got := browserName(k); got != want {
+			t.Errorf("%s: %q", k, got)
+		}
+	}
+}
+
+func TestFetchCommandManyFailuresAndReadError(t *testing.T) {
+	e := trEnv(t)
+	page := newTrPage()
+	refuse := func(context.Context) (transcripts.ScriptResult, error) {
+		return transcripts.ScriptResult{State: "not_found", Status: 404}, nil
+	}
+	page.answer["P3"], page.answer["R1"] = refuse, refuse
+	fakeBrowser(t, page)
+	m := trJSON(t, e, "transcripts", "fetch", "--since", "2026-11-01")
+	if m["note"] != "2 parts could not be fetched; each reason is listed with its part" || m["failed"] != float64(2) {
+		t.Fatalf("result %v", m)
+	}
+	old := transcriptCallsOf
+	transcriptCallsOf = func(*store.Store, context.Context, store.TranscriptFilter) ([]store.TranscriptCall, bool, error) {
+		return nil, false, errors.New("synthetic read failure")
+	}
+	t.Cleanup(func() { transcriptCallsOf = old })
+	trFails(t, e, errs.CodeDBError, errs.ExitRuntime, "transcripts", "fetch", "call-1")
 }
 
 func TestSigninGolden(t *testing.T) {
@@ -698,12 +762,24 @@ func TestOpenBrowserFakeExecutable(t *testing.T) {
 	if err := closer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The browser publishes its port and exits at once: the tab cannot be reached, and nothing is left.
-	t.Setenv(browsertest.EnvLeaderExits, "1")
-	if _, _, err := openBrowser(context.Background(), browser.LaunchOptions{Exe: exe, Kind: browser.KindCustom, Profile: profile, Headless: true, Timeout: 20 * time.Second}); err == nil {
-		t.Fatal("a page from a browser that exited")
+	// The tab cannot be reached: the browser is closed, and the error says so.
+	tab := &tabless{}
+	old := launchBrowser
+	launchBrowser = func(context.Context, browser.LaunchOptions) (launchedBrowser, error) { return tab, nil }
+	t.Cleanup(func() { launchBrowser = old })
+	_, _, err = openBrowser(context.Background(), browser.LaunchOptions{})
+	var c *errs.Coded
+	if !errors.As(err, &c) || c.Code != errs.CodeBrowserFailed || tab.closed != 1 {
+		t.Fatalf("err %v, closed %d", err, tab.closed)
 	}
 }
+
+type tabless struct{ closed int }
+
+func (b *tabless) Page(context.Context) (*browser.Page, error) {
+	return nil, errors.New("connection refused")
+}
+func (b *tabless) Close() error { b.closed++; return nil }
 
 func TestTranscriptsFetchHelp(t *testing.T) {
 	texts := helpTexts(t)

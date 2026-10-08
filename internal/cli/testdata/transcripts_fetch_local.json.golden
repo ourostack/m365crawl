@@ -1,0 +1,41 @@
+{
+  "source": "archive",
+  "fetched_at": null,
+  "browser": null,
+  "calls": [
+    {
+      "call_id": "call-4",
+      "parts": [
+        {
+          "ordinal": 1,
+          "state": "local",
+          "http_status": 200,
+          "entries": 2,
+          "fetched_at": "2026-11-09T09:00:00Z",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "call_id": "call-3",
+      "parts": [
+        {
+          "ordinal": 1,
+          "state": "unfetchable",
+          "http_status": null,
+          "entries": 0,
+          "fetched_at": null,
+          "reason": "only a sharing link is cached for this part; m365crawl cannot fetch it from ids"
+        }
+      ]
+    }
+  ],
+  "fetched": 0,
+  "local": 1,
+  "failed": 0,
+  "unfetchable": 1,
+  "truncated": false,
+  "next": "m365crawl transcripts show '19:meeting_adhoc@thread.v2'",
+  "archive_age_seconds": 0,
+  "note": "nothing to fetch: every part that can be fetched is already in the archive"
+}

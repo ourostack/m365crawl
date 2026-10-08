@@ -15,8 +15,10 @@ import (
 
 // transcriptsGroup is the transcripts command: with no subcommand it lists.
 type transcriptsGroup struct {
-	List transcriptsCmd     `cmd:"" default:"withargs" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive."`
-	Show transcriptsShowCmd `cmd:"" help:"Print a meeting's transcript from the archive: every part in time order, with each seam marked and where each part came from. Offline."`
+	List   transcriptsCmd       `cmd:"" default:"withargs" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive."`
+	Show   transcriptsShowCmd   `cmd:"" help:"Print a meeting's transcript from the archive: every part in time order, with each seam marked and where each part came from. Offline."`
+	Fetch  transcriptsFetchCmd  `cmd:"" help:"Fetch the transcripts of a meeting's parts from SharePoint and store them, so later reads are offline. Runs an invisible Edge (or Chrome) with m365crawl's own browser profile; m365crawl never sees a password or token."`
+	Signin transcriptsSigninCmd `cmd:"" help:"Open m365crawl's browser profile in a visible window once, so you can sign in to SharePoint; transcripts fetch then signs in silently."`
 }
 
 const transcriptsCommon = `A recorded meeting is one call. A call has one part for each stretch that was recorded or transcribed, and each part's transcript is a file of its own in SharePoint. The parts are listed from the recording notices in the meeting chat, which a sync already archived; listing and showing them reads only the archive.

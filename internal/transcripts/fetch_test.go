@@ -28,6 +28,7 @@ type fakePage struct {
 	landOn      map[string]string // navigated host -> host the tab ends on; default: itself
 	navErr      map[string]error
 	onNavigate  func()
+	onHost      func()
 	hostErr     error
 	results     map[string]func(ctx context.Context) (ScriptResult, error)
 	navigations []string
@@ -57,7 +58,11 @@ func (f *fakePage) Navigate(ctx context.Context, raw string) error {
 	return ctx.Err()
 }
 
-func (f *fakePage) Host(context.Context) (string, error) {
+func (f *fakePage) Host(ctx context.Context) (string, error) {
+	if f.onHost != nil {
+		f.onHost()
+		return "", ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.host, f.hostErr
@@ -188,7 +193,7 @@ func TestFetchGroupsByHostNavigatesOnce(t *testing.T) {
 			t.Fatalf("outcome %+v", o)
 		}
 	}
-	if a := page.evals[1]; a.Base != "https://b.sharepoint.example.invalid/teams/site-a/_api/v2.1/drives/b!d1/items/I2" || a.TranscriptID != "tr-I2" ||
+	if a := page.evals[3]; a.Base != "https://b.sharepoint.example.invalid/teams/site-a/_api/v2.1/drives/b!d1/items/I2" || a.TranscriptID != "tr-I2" ||
 		a.MaxBytes != DefaultMaxBytes || strings.Join(a.LoginHosts, ",") != strings.Join(LoginHosts, ",") {
 		t.Fatalf("args %+v", a)
 	}
@@ -383,7 +388,9 @@ func TestFetchResultTable(t *testing.T) {
 
 func TestFetchEvalFailure(t *testing.T) {
 	page := newFakePage()
-	page.results["I1"] = func(context.Context) (ScriptResult, error) { return ScriptResult{}, errors.New("the page script threw TypeError") }
+	page.results["I1"] = func(context.Context) (ScriptResult, error) {
+		return ScriptResult{}, errors.New("the page script threw TypeError")
+	}
 	var s saved
 	sum, err := newFetcher(page).Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, s.save)
 	if err != nil || s.res["I1"].State != StateFailed || s.res["I2"].State != StateOK || sum.Failed != 1 {
@@ -427,7 +434,7 @@ func TestFetchArgsJSONEncoded(t *testing.T) {
 	if ScriptExpr(ScriptArgs{Base: "\"); alert(1); (\""}) == "("+Script()+")({\"base\":\"\"); alert(1); (\"\"" {
 		t.Fatal("an argument escaped its JSON string")
 	}
-	if e := ScriptExpr(ScriptArgs{Base: "</script> \""}); !strings.Contains(e, `"base":"</script> \""`) {
+	if e := ScriptExpr(ScriptArgs{Base: "</script>\u2028\""}); !strings.Contains(e, `"base":"\u003c/script\u003e\u2028\""`) {
 		t.Fatalf("not JSON-encoded: %s", e)
 	}
 }
@@ -528,7 +535,7 @@ func TestFetchSavesAfterLockFreed(t *testing.T) {
 	}
 	f := newFetcher(page)
 	f.LockWait = 5 * time.Second
-	f.lockPoll = 10 * time.Millisecond
+	f.LockPoll = 10 * time.Millisecond
 	parts := []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}
 	sum, err := f.Fetch(context.Background(), parts, save)
 	if err != nil {
@@ -543,7 +550,7 @@ func TestFetchLockNeverFreed(t *testing.T) {
 	page := newFakePage()
 	f := newFetcher(page)
 	f.LockWait = 50 * time.Millisecond
-	f.lockPoll = 10 * time.Millisecond
+	f.LockPoll = 10 * time.Millisecond
 	locked := func(Part, FetchResult) error { return errs.Locked("held") }
 	sum, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, locked)
 	var c *errs.Coded
@@ -601,7 +608,7 @@ func TestFetchSigninKeepsPendingSaves(t *testing.T) {
 		return s.save(p, r)
 	}
 	f := newFetcher(page)
-	f.lockPoll = time.Millisecond
+	f.LockPoll = time.Millisecond
 	_, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1), tpart("a.sharepoint.example.invalid", "I2", 2)}, save)
 	if codeOf(err) != errs.CodeSigninRequired || strings.Join(s.parts, ",") != "I1" {
 		t.Fatalf("err %v, saved %v", err, s.parts)
@@ -618,7 +625,7 @@ func TestFetchProgress(t *testing.T) {
 	if _, err := f.Fetch(context.Background(), parts, (&saved{}).save); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"opening SharePoint site 1 of 2", "part 1 of 2 fetched: ok, 1 entries", "opening SharePoint site 2 of 2", "part 2 of 2 fetched: no_access"}
+	want := []string{"opening SharePoint site 1 of 2", "part 1 of 2 fetched: ok, 1 entry", "opening SharePoint site 2 of 2", "part 2 of 2 fetched: no_access"}
 	if strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("progress %q", lines)
 	}
@@ -627,7 +634,7 @@ func TestFetchProgress(t *testing.T) {
 func TestFetcherDefaults(t *testing.T) {
 	f := &Fetcher{}
 	f.defaults()
-	if f.LandTimeout != 30*time.Second || f.PartTimeout != 60*time.Second || f.MaxBytes != 32<<20 || f.LockWait != 2*time.Minute || f.Now == nil || f.lockPoll <= 0 {
+	if f.LandTimeout != 30*time.Second || f.PartTimeout != 60*time.Second || f.MaxBytes != 32<<20 || f.LockWait != 2*time.Minute || f.Now == nil || f.LockPoll <= 0 {
 		t.Fatalf("defaults %+v", f)
 	}
 	for _, h := range LoginHosts {
@@ -637,5 +644,33 @@ func TestFetcherDefaults(t *testing.T) {
 	}
 	if IsLoginHost("a.sharepoint.example.invalid") {
 		t.Error("a SharePoint host is not a login host")
+	}
+}
+
+func TestFetchCancelledDuringSigninProbe(t *testing.T) {
+	page := newFakePage()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	page.results["I1"] = func(context.Context) (ScriptResult, error) {
+		page.onHost = cancel
+		return ScriptResult{State: "signin_probe"}, nil
+	}
+	var s saved
+	if _, err := newFetcher(page).Fetch(ctx, []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, s.save); !errors.Is(err, context.Canceled) || len(s.parts) != 0 {
+		t.Fatalf("err %v, saved %v", err, s.parts)
+	}
+}
+
+func TestFetchSlowLoadStillAsksTheHost(t *testing.T) {
+	// Loading the page used the whole wait and failed, and the tab is on a sign-in page.
+	page := newFakePage()
+	page.landOn["a.sharepoint.example.invalid"] = "login.microsoftonline.com"
+	f := newFetcher(page)
+	f.LandTimeout = 30 * time.Millisecond
+	page.onNavigate = func() { time.Sleep(50 * time.Millisecond) }
+	page.navErr["a.sharepoint.example.invalid"] = context.DeadlineExceeded
+	page.host = "login.microsoftonline.com"
+	if _, err := f.Fetch(context.Background(), []Part{tpart("a.sharepoint.example.invalid", "I1", 1)}, (&saved{}).save); codeOf(err) != errs.CodeSigninRequired {
+		t.Fatalf("err %v", err)
 	}
 }

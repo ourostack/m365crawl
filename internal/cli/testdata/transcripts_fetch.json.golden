@@ -1,0 +1,57 @@
+{
+  "source": "network",
+  "fetched_at": "2026-11-09T09:00:00Z",
+  "browser": "edge",
+  "calls": [
+    {
+      "call_id": "call-4",
+      "parts": [
+        {
+          "ordinal": 1,
+          "state": "ok",
+          "http_status": 200,
+          "entries": 2,
+          "fetched_at": "2026-11-09T09:00:00Z",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "call_id": "call-1",
+      "parts": [
+        {
+          "ordinal": 1,
+          "state": "local",
+          "http_status": 200,
+          "entries": 3,
+          "fetched_at": "2026-11-09T08:00:00Z",
+          "reason": null
+        },
+        {
+          "ordinal": 2,
+          "state": "local",
+          "http_status": 200,
+          "entries": 2,
+          "fetched_at": "2026-11-09T08:00:00Z",
+          "reason": null
+        },
+        {
+          "ordinal": 3,
+          "state": "no_access",
+          "http_status": 403,
+          "entries": 0,
+          "fetched_at": null,
+          "reason": "SharePoint refused access (HTTP 403); you may have lost access to this file"
+        }
+      ]
+    }
+  ],
+  "fetched": 1,
+  "local": 2,
+  "failed": 1,
+  "unfetchable": 0,
+  "truncated": false,
+  "next": "m365crawl transcripts show <call-id>",
+  "archive_age_seconds": 0,
+  "note": "1 part could not be fetched; its reason is listed with it"
+}
