@@ -92,6 +92,9 @@ func collect(ctx context.Context, s *hxstore.Store, limits collectLimits) (Resul
 	if err != nil {
 		return Result{Stats: stats}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return Result{Stats: stats}, err
+	}
 	if stats.PayloadBytes > 0 && (stats.PayloadBytes-stats.UnwalkedBytes)*100 < stats.PayloadBytes*80 {
 		return Result{Stats: stats}, &hxstore.GuardError{Code: "outlook_people_layout_unsupported", Detail: "walk_coverage"}
 	}
@@ -108,6 +111,9 @@ func collect(ctx context.Context, s *hxstore.Store, limits collectLimits) (Resul
 	})
 	for _, code := range slices.Sorted(maps.Keys(losses)) {
 		res.Losses = append(res.Losses, Loss{Code: code, Count: losses[code]})
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{Stats: stats}, err
 	}
 	return res, nil
 }

@@ -249,6 +249,75 @@ func TestCollectCancellationAfterBlockReadDiscardsPeople(t *testing.T) {
 	}
 }
 
+type terminalReader struct {
+	r          io.ReaderAt
+	terminalAt int64
+	onTerminal func()
+}
+
+func (r *terminalReader) ReadAt(b []byte, off int64) (int, error) {
+	n, err := r.r.ReadAt(b, off)
+	if off == r.terminalAt {
+		r.onTerminal()
+	}
+	return n, err
+}
+
+type cancelAfterWalkContext struct {
+	context.Context
+	cancel       context.CancelFunc
+	terminalRead bool
+}
+
+func (c *cancelAfterWalkContext) Err() error {
+	err := c.Context.Err()
+	if c.terminalRead && err == nil {
+		c.cancel()
+	}
+	return err
+}
+
+func TestCollectCancellationAtEndDiscardsPeople(t *testing.T) {
+	for _, afterWalk := range []bool{false, true} {
+		name := "during-terminal-read"
+		if afterWalk {
+			name = "after-walk-context-check"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := hxbuild.New(hxbuild.Options{})
+			b.Block(hxbuild.FramedPayload(nil, relevantPerson()))
+			terminalAt := int64(b.Len())
+			b.BlockType(9, []byte{0, 0, 0, 0})
+			data := b.Bytes()
+			base, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := &cancelAfterWalkContext{Context: base, cancel: cancel}
+			r := &terminalReader{
+				r: bytes.NewReader(data), terminalAt: terminalAt,
+				onTerminal: func() {
+					if afterWalk {
+						ctx.terminalRead = true
+					} else {
+						cancel()
+					}
+				},
+			}
+			s, err := hxstore.Open(r, int64(len(data)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Collect(ctx, s)
+			if !errors.Is(err, context.Canceled) || len(got.People) != 0 ||
+				len(got.AmbiguousKeys) != 0 || len(got.Losses) != 0 {
+				t.Fatalf("cancel at end = %#v, error %v", got, err)
+			}
+			if got.Stats.Objects != 1 || got.Stats.Rejected[hxstore.RejectTypeOther] != 1 {
+				t.Fatalf("cancelled read lost partial stats: %#v", got.Stats)
+			}
+		})
+	}
+}
+
 func TestCollectPropagatesReadFailure(t *testing.T) {
 	b := hxbuild.New(hxbuild.Options{})
 	b.Block(hxbuild.FramedPayload(nil, relevantPerson()))
