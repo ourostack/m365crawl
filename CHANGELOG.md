@@ -4,6 +4,12 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- Each list command's `--help` now ends with the `--fields` keys it accepts, so an agent can pick them before running the command instead of learning them from an error. The list comes from the same table the check uses. `calendar agenda --help` also names the keys that only `calendar event` has.
+- A mistyped or guessed command name now suggests the command that does the job: `chats` suggests `conversations`, `email` suggests `mail`, `events` and `meetings` suggest `calendar`, and `transcript` suggests `transcripts`. The error's `fix` names that command's `--help`. These words remain errors, not aliases.
+- The calendar agenda now says how fresh Teams' own calendar cache is. Each account in `accounts` has `teams_cache_fresh_at`, when the Teams calendar cache last synced with the calendar service, and, when the requested range starts after that time, a notice says that an event created or changed since then, such as a new invitation, is not listed until Teams refreshes its calendar (open the Calendar in Teams, then sync).
+
 ### Fixed
 
 - `transcripts fetch` and `transcripts signin` no longer fail on Windows when Edge's first process hands off to another and exits before the browser is ready; m365crawl waits for the browser and still closes every process it started, including any outside the job object.

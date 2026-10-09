@@ -243,7 +243,7 @@ func (searchCmd) Help() string {
 }
 
 func (c *searchCmd) Run(rt *runtime) error {
-	if err := checkKeys(rt, searchKeys()); err != nil {
+	if err := checkCommandFields(rt, "search", ""); err != nil {
 		return err
 	}
 	p, err := c.plan(rt)
@@ -271,7 +271,7 @@ type messagesCmd struct {
 }
 
 func (c *messagesCmd) Run(rt *runtime) error {
-	if err := checkFields[messageItem](rt); err != nil {
+	if err := checkCommandFields(rt, "messages", ""); err != nil {
 		return err
 	}
 	f, err := rt.filter(c.msgFlags)
@@ -326,10 +326,10 @@ type unreadConversationItem struct {
 
 func (c *unreadCmd) Run(rt *runtime) error {
 	if c.ByConversation {
-		if err := checkFields[unreadConversationItem](rt); err != nil {
+		if err := checkCommandFields(rt, "unread", "--by-conversation"); err != nil {
 			return err
 		}
-	} else if err := checkFields[messageItem](rt); err != nil {
+	} else if err := checkCommandFields(rt, "unread", ""); err != nil {
 		return err
 	}
 	f, err := rt.filter(msgFlags{Conversation: c.Conversation, Team: c.Team, Since: c.Since, Limit: c.Limit, IncludeSystem: c.IncludeSystem})
@@ -376,7 +376,7 @@ type threadCmd struct {
 }
 
 func (c *threadCmd) Run(rt *runtime) error {
-	if err := checkFields[messageItem](rt); err != nil {
+	if err := checkCommandFields(rt, "thread", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {
@@ -467,7 +467,7 @@ type conversationsCmd struct {
 }
 
 func (c *conversationsCmd) Run(rt *runtime) error {
-	if err := checkFields[conversationItem](rt); err != nil {
+	if err := checkCommandFields(rt, "conversations", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {
@@ -509,7 +509,7 @@ type teamsCmd struct {
 }
 
 func (c *teamsCmd) Run(rt *runtime) error {
-	if err := checkFields[teamItem](rt); err != nil {
+	if err := checkCommandFields(rt, "teams", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {
@@ -539,7 +539,7 @@ type peopleCmd struct {
 }
 
 func (c *peopleCmd) Run(rt *runtime) error {
-	if err := checkFields[personItem](rt); err != nil {
+	if err := checkCommandFields(rt, "people", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {
@@ -574,7 +574,7 @@ type activityCmd struct {
 }
 
 func (c *activityCmd) Run(rt *runtime) error {
-	if err := checkFields[activityItem](rt); err != nil {
+	if err := checkCommandFields(rt, "activity", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {

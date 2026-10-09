@@ -52,7 +52,7 @@ type Globals struct {
 	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
 	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
 	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
-	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
+	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A list command's --help ends with the keys it accepts. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
 	MaxText        int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
 }
 
@@ -207,7 +207,12 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 				// The root help opens with where to start, before the usage line and the flags.
 				_, _ = io.WriteString(kctx.Stdout, startHereText(stepsHere())+"\n")
 			}
-			return kong.DefaultHelpPrinter(opts, kctx)
+			err := kong.DefaultHelpPrinter(opts, kctx)
+			if n := kctx.Selected(); err == nil && n != nil && len(n.Children) == 0 {
+				// A list command's help ends with the --fields keys it accepts.
+				writeFieldsHelp(kctx.Stdout, commandOf(n.Path()))
+			}
+			return err
 		}),
 	)
 	if err != nil {
@@ -246,9 +251,13 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 }
 
 // commandName is the command path without its argument placeholders: "search <query>" -> "search".
-func commandName(k *kong.Context) string {
+func commandName(k *kong.Context) string { return commandOf(k.Command()) }
+
+// commandOf is the command a kong command path names, without its argument placeholders, and with
+// a group's default command named by its group.
+func commandOf(path string) string {
 	var words []string
-	for _, w := range strings.Fields(k.Command()) {
+	for _, w := range strings.Fields(path) {
 		if strings.HasPrefix(w, "<") || strings.HasPrefix(w, "[") {
 			break
 		}
@@ -274,25 +283,42 @@ func (rt *runtime) checkListOnly() error {
 	return c
 }
 
-// unknownCommand words kong's complaint about a stray word: the word quoted alone, and kong's
-// suggestion, when it has one, after it.
-// When kong suggests a command group and the word after the typo is one of its commands, the
-// suggestion names both: "mial list" suggests "mail list".
-func unknownCommand(rest string, args []string, kctx *kong.Context) string {
-	word, suggestion, _ := strings.Cut(rest, ", did you mean ")
-	msg := fmt.Sprintf("unknown command %q", word)
-	if suggestion == "" {
-		return msg
+// commandSynonyms maps a word an agent is likely to try for a command to the command that does
+// that job. They are suggestions only, never aliases: the word stays a usage error, and the error
+// names the command in its message and its fix.
+var commandSynonyms = map[string]string{
+	"chat": "conversations", "chats": "conversations",
+	"email": "mail", "emails": "mail", "inbox": "mail",
+	"event": "calendar", "events": "calendar", "meeting": "calendar", "meetings": "calendar", "agenda": "calendar",
+	"transcript": "transcripts", "recording": "transcripts", "recordings": "transcripts",
+	"message": "messages", "msgs": "messages",
+	"person": "people", "contacts": "people",
+}
+
+// unknownCommand words kong's complaint about a stray word: the word quoted alone, and the closest
+// command, when there is one, after it. The closest command is the one commandSynonyms names for the
+// word, else kong's suggestion. When it is a command group and the word after the typo is one of its
+// commands, the suggestion names both: "mial list" suggests "mail list". suggestion is the command
+// suggested, empty when there is none.
+func unknownCommand(rest string, args []string, kctx *kong.Context) (msg, suggestion string) {
+	word, kongs, _ := strings.Cut(rest, ", did you mean ")
+	msg = fmt.Sprintf("unknown command %q", word)
+	suggestion = strings.Trim(strings.TrimSuffix(kongs, "?"), `"`)
+	if s, ok := commandSynonyms[strings.ToLower(word)]; ok {
+		suggestion = s
 	}
-	group := strings.Trim(strings.TrimSuffix(suggestion, "?"), `"`)
+	if suggestion == "" {
+		return msg, ""
+	}
 	if i := slices.Index(args, word); i >= 0 && i+1 < len(args) && kctx != nil {
 		for _, g := range kctx.Model.Children {
-			if g.Name == group && slices.ContainsFunc(g.Children, func(c *kong.Node) bool { return c.Name == args[i+1] }) {
-				suggestion = fmt.Sprintf("%q?", group+" "+args[i+1])
+			if g.Name == suggestion && slices.ContainsFunc(g.Children, func(c *kong.Node) bool { return c.Name == args[i+1] }) {
+				suggestion += " " + args[i+1]
+				break
 			}
 		}
 	}
-	return msg + ", did you mean " + suggestion
+	return fmt.Sprintf("%s, did you mean %q?", msg, suggestion), suggestion
 }
 
 // fail prints err as a coded error and returns its exit status.
@@ -306,7 +332,11 @@ func (rt *runtime) fail(err error) int {
 		switch {
 		case errors.As(err, &pe) && (rt.cmd == "" || rt.cmd == "overview") && strings.HasPrefix(pe.Error(), "unexpected argument "):
 			// A word that is no command lands on the default command as a stray argument.
-			coded = errs.Usage(unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument "), rt.args, pe.Context))
+			msg, suggestion := unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument "), rt.args, pe.Context)
+			coded = errs.Usage(msg)
+			if suggestion != "" {
+				coded.Fix = fmt.Sprintf("Run `m365crawl %s --help` to see what it does and its flags.", suggestion)
+			}
 		case errors.As(err, &pe):
 			coded = errs.Usage(pe.Error())
 		default:

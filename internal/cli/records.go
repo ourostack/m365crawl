@@ -19,7 +19,7 @@ type storeItem struct {
 type storesCmd struct{}
 
 func (c *storesCmd) Run(rt *runtime) error {
-	if err := checkFields[storeItem](rt); err != nil {
+	if err := checkCommandFields(rt, "stores", ""); err != nil {
 		return err
 	}
 	rt.query = listQuery{none: "the archive holds no generic stores yet: run m365crawl sync"}
@@ -83,7 +83,7 @@ type recordsCmd struct {
 }
 
 func (c *recordsCmd) Run(rt *runtime) error {
-	if err := checkFields[recordItem](rt); err != nil {
+	if err := checkCommandFields(rt, "records", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {

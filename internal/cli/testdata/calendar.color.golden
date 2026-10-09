@@ -6,4 +6,5 @@
 2023-11-23 18:00  2023-11-23 18:30  confirmed  Fixture standup              online  accepted
 
 [2m4 items[0m
+[2mnotice: the Teams calendar cache last refreshed from the calendar service 2023-11-14T09:30:00Z, before this range starts (teams_cache_fresh_at): an event created or changed since then, such as a new invitation, is listed only after Teams refreshes it (open the Calendar in Teams, then run `m365crawl sync`).[0m
 [2marchive age: <age>[0m

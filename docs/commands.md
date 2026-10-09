@@ -41,7 +41,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list and r
 | `--account=ACCOUNT` | Only this account. Teams commands take a Teams account, `<tenantId>/<userId>` (`whoami` lists them); `mail` commands take a mail account, `outlook/<profile>`; `search` takes either (see [search](#search)). Default: every account. |
 | `--no-color` | Disable colored output (also `NO_COLOR`). `CLICOLOR_FORCE=1` forces color. |
 | `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d); `0` disables the implicit sync (`$M365CRAWL_MAX_AGE`). When a read syncs first, stderr gets one line before it starts: in text mode `m365crawl: syncing — archive is 2h14m old (max-age 15m)`, in json and log mode `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}`. The result then gains `synced: {seconds, status}`. |
-| `--fields=a,b,c` | Keep only these top-level keys of each item, comma separated. An unknown key is a `usage` error. |
+| `--fields=a,b,c` | Keep only these top-level keys of each item, comma separated. An unknown key is a `usage` error. Each list command's `--help` ends with the keys it accepts, and each command below lists them under "`--fields` keys". |
 | `--max-text=N` | Truncate each item's text to N characters, including the trailing `…`, and set `text_truncated`. `0` keeps all of it. |
 | `--version` | Print the version, commit and build date, then exit. |
 
@@ -70,7 +70,7 @@ In text mode it prints the banner, one row per source with its state, what it ho
 
 `--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a source this operating system does not read, such as mail on Windows), `off` (the Outlook source is off for this run) or `no_profile` (no new Outlook profile on this machine). `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
 
-The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one.
+The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one, and the error's `fix` then names that command's `--help`. A likely synonym counts as close: `chats` suggests `conversations`, `email` suggests `mail`, `events` and `meetings` suggest `calendar`, and `transcript` suggests `transcripts`. The synonym itself is never accepted.
 
 `m365crawl --help` starts with the same block:
 
@@ -193,6 +193,8 @@ Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 
 m365crawl watch --every 30s --fields id,type,text --max-text 200
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `type`, `subtype`, `is_read`, `at`, `message_id`, `app_id`, `message_sent_at`, `actor_id`, `actor_name`, `actor_inferred`.
+
 ## search
 
 Full-text search over Teams chats, Outlook mail and fetched meeting transcripts, newest first; default `--limit 50` (check `truncated`).
@@ -241,6 +243,8 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
+`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`.
+
 ## people
 
 List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id `mail:<address>`).
@@ -267,6 +271,8 @@ Use a Teams person's `id` or name with `--from` on Teams commands, and a mail ad
 m365crawl people --query alex
 m365crawl people --query @example.com
 ```
+
+`--fields` keys: `tenant_id`, `id`, `display_name`, `email`, `sources`, `last_seen_at`.
 
 ## sql
 
@@ -319,6 +325,8 @@ m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text
 m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`.
+
 ## unread
 
 List unread Teams messages (chats and meetings unless `--include-channels`), newest first; `--by-conversation` gives per-conversation counts. For Outlook mail use `m365crawl mail unread`.
@@ -345,6 +353,8 @@ m365crawl unread --limit 5
 m365crawl unread --by-conversation --since 7d
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
+
 ## thread
 
 Show one Teams thread: `<conversation> <root-message-id>`, or a Teams message link. For Outlook mail use `m365crawl mail thread`.
@@ -369,6 +379,8 @@ m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
 m365crawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`.
+
 ## conversations
 
 List Teams conversations by last activity, newest first; default `--limit 50` (check `truncated`).
@@ -392,6 +404,8 @@ m365crawl conversations --kind Space
 m365crawl conversations --query planning
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `id`, `kind`, `title`, `display_name`, `team_id`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`, `calendar_series_key`, `calendar_event_count`.
+
 ## teams
 
 List Teams teams with their channel count, last activity and unread count. A team's `team_id` or `display_name` is what `--team` takes.
@@ -405,6 +419,8 @@ Result: a list of `{tenant_id, user_id, team_id, display_name, channel_count, la
 ```sh
 m365crawl teams --fields team_id,display_name,unread_count
 ```
+
+`--fields` keys: `tenant_id`, `user_id`, `team_id`, `display_name`, `channel_count`, `last_activity_at`, `unread_count`.
 
 ## activity
 
@@ -431,6 +447,8 @@ m365crawl activity --unread --limit 5 --fields at,type,conversation_display_name
 m365crawl activity --type mention,mentionInChat
 ```
 
+`--fields` keys: `tenant_id`, `user_id`, `id`, `type`, `subtype`, `is_read`, `at`, `conversation_id`, `conversation_display_name`, `message_id`, `reply_chain_id`, `app_id`, `sender_id`, `sender_name`, `message_sent_at`, `text`, `text_truncated`, `link`, `actor_id`, `actor_name`, `actor_inferred`.
+
 ## stores
 
 List every Teams database and object store archived without a typed table, with record counts. The database name is what `records --database` takes.
@@ -440,6 +458,8 @@ m365crawl stores [flags]
 ```
 
 Result: a list of `{database, store, records, removed, last_updated_at}`, sorted by database and store, never truncated. `records` counts the live rows and `removed` the rows Teams' cache no longer holds. `--account` hides databases whose name carries no account.
+
+`--fields` keys: `database`, `store`, `records`, `removed`, `last_updated_at`.
 
 ## records
 
@@ -462,6 +482,8 @@ Result: a list of `{source, tenant_id?, user_id?, database, store, key_json, val
 ```sh
 m365crawl records --database Teams:pinned-manager --store pins --since 7d
 ```
+
+`--fields` keys: `source`, `tenant_id`, `user_id`, `database`, `store`, `key_json`, `value_json`, `first_seen_at`, `updated_at`, `removed_at`, `text_truncated`.
 
 ## mail
 
@@ -506,6 +528,8 @@ m365crawl mail list --from pat --since 7d --fields id,subject,from_name,received
 m365crawl mail list --has-attachments --limit 20
 ```
 
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+
 ### mail show
 
 Show one message: headers, recipients, attachments and body text.
@@ -520,6 +544,8 @@ Keys are those of `mail list`, with `recipients` (every recipient, each `{name, 
 m365crawl mail show outlook/Main:12345 --max-text 2000
 ```
 
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+
 ### mail thread
 
 Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.
@@ -529,6 +555,8 @@ m365crawl mail thread <id>
 ```
 
 Items have the shape of `mail list`, oldest first. `grouping` is `reply_chain` (In-Reply-To and Message-ID links followed in both directions) or `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When nothing shares the message's reply chain or subject, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
+
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ### mail folders
 
@@ -540,6 +568,8 @@ m365crawl mail folders
 
 Item keys: `account`, `folder`, `kind`, `messages`, `unread`, `oldest_at`, `newest_at`, `read_at`. Counts leave out gone and evicted messages. `kind` is `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me` or `other`. Folders you created are `other`, and so are the system folders the store does not tell apart, Junk Email among them: m365crawl does not detect junk mail. `to_me` is the folder that shares messages with the Inbox; when it shares none it is `other`.
 
+`--fields` keys: `account`, `folder`, `kind`, `messages`, `unread`, `oldest_at`, `newest_at`, `read_at`.
+
 ### mail unread
 
 Unread mail by folder.
@@ -549,6 +579,8 @@ m365crawl mail unread [--folder NAME|KIND] [--limit N]
 ```
 
 `folders` holds one `{account, folder, kind, unread, cached}` per folder that holds messages. `unread_total` is the sum of the folders' `unread`, every folder included. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
+
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ## calendar
 
@@ -578,10 +610,10 @@ Flags of the agenda:
 Result of the agenda: `{"items", "count", "truncated", "total"?, "coverage_gap", "coverage_as_of"?, "uncovered_days"?, "uncovered_days_total"?, "accounts"?, "range": {"from", "to", "zone"}, "unlinked_accounts"?, "unlinked_fix"?, "unlinked_recaps"?, "unlinked_recaps_total"?, "notices"?, "note", "archive_age_seconds"}`.
 
 - `coverage_gap` is true when some day of the range is not covered by any cached data. `coverage_as_of` is the oldest time a covered day of the range was verified. `uncovered_days` lists the dates some account does not cover (at most 31; `uncovered_days_total` gives the count when it is longer).
-- `accounts` lists, per account (an unlinked Outlook profile is its own), `account_id`, `synced_at` and its own `coverage_as_of`, so an agent can tell which account to distrust. When several accounts are in scope, an entry has `"uncovered_all": true` when it lacks every day of `uncovered_days`, or its own `uncovered_days` when it lacks fewer. An entry with neither covers the whole range.
+- `accounts` lists, per account (an unlinked Outlook profile is its own), `account_id`, `synced_at` and its own `coverage_as_of`, so an agent can tell which account to distrust. When several accounts are in scope, an entry has `"uncovered_all": true` when it lacks every day of `uncovered_days`, or its own `uncovered_days` when it lacks fewer. An entry with neither covers the whole range. An account with a Teams calendar also has `teams_cache_fresh_at`: when the Teams calendar cache last synced with the calendar service (the `cache_fresh_at` of its Teams row in `calendar sources`). The agenda is read from that cache, so an event created or changed after this time, such as an invitation sent a moment ago, is not listed until Teams refreshes its calendar, which it does while its Calendar view is open.
 - `range` is the range read, in this machine's zone.
 - `unlinked_accounts` lists accounts of another source that no link joins to a Teams account (their events are not merged). `unlinked_fix` has, in the same order, the exact command that links each one, for example `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`.
-- `notices` (here, in `calendar event` and in `calendar actions`) says when the result holds Outlook events while the Outlook source is off for this run, so they are archived data that is not being refreshed, with the age of the last good read.
+- `notices` says, when the whole range starts after an account's `teams_cache_fresh_at`, when the Teams calendar cache was last refreshed and that newer events are missing until Teams refreshes it: open the Calendar in Teams, then run `m365crawl sync`. A notice (here, in `calendar event` and in `calendar actions`) also says when the result holds Outlook events while the Outlook source is off for this run, so they are archived data that is not being refreshed, with the age of the last good read.
 - `unlinked_recaps` lists the meeting recaps that started in the range and belong to no event (an impromptu meeting, or an event the cache dropped), each with its summary, action items and mentions. Each carries `placed_at` and `placed_by` (`meeting_start`, or `recording_start` when the recap has no meeting start).
 - A recap's `link_method` says how it reached its event: `ical_uid` (the recap carries the event's id: certain), `time` (no id, but its start and end each match the event's within a minute) or `start_time` (no id, and exactly one event starts within five minutes of the meeting start: weigh it accordingly). When several occurrences of a series carry the same id, a recap belongs to the occurrence whose start is nearest its `meeting_start` within five minutes; a recap that no occurrence matches stays on every occurrence with `series_level: true`.
 
@@ -599,6 +631,8 @@ m365crawl calendar --days 7
 m365crawl calendar --from=-7d --to=tomorrow --query planning
 m365crawl calendar --from 2023-11-20 --to 2023-11-25 --fields event_id,subject,start,has_recap
 ```
+
+`--fields` keys: `id`, `event_id`, `event_key`, `account_id`, `tenant_id`, `user_id`, `sources`, `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end`, `start_local`, `end_local`, `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status`, `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of`, `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields`, `filled_fields`, `overridden_fields`. Only in `calendar event`, and refused here: `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series`, `recaps`, `chat`, `recordings`, `series_recordings`, `series_recordings_total`, `related_mail`, `transcripts`.
 
 ### calendar event
 
@@ -631,6 +665,8 @@ m365crawl calendar event ev_2da7280856 --max-text 400
 m365crawl calendar event ev_2da7280856 --fields subject,start,attendees,chat,related_mail
 ```
 
+`--fields` keys: `id`, `event_id`, `event_key`, `account_id`, `tenant_id`, `user_id`, `sources`, `ical_uid`, `series_key`, `event_type`, `subject`, `start`, `end`, `start_local`, `end_local`, `all_day`, `start_date`, `end_date`, `time_zone`, `time_zone_iana`, `status`, `cancelled`, `response`, `show_as`, `is_organizer`, `is_private`, `organizer_name`, `organizer_address`, `is_online_meeting`, `join_url`, `short_join_url`, `dial_in_conference_id`, `dial_in_toll_number`, `meeting_chat_id`, `location`, `rooms`, `rooms_as_of`, `attendee_count`, `has_attachments`, `body_preview`, `has_recap`, `action_item_count`, `recording_count`, `detail_level`, `detail_as_of`, `last_modified`, `removed`, `removed_by`, `unknown_fields`, `filled_fields`, `overridden_fields`, `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes`, `series`, `recaps`, `chat`, `recordings`, `series_recordings`, `series_recordings_total`, `related_mail`, `transcripts`, `text_truncated`.
+
 ### calendar actions
 
 The action items of the recaps held by the events that start in a range, with their owners.
@@ -662,6 +698,8 @@ m365crawl calendar actions --from yesterday --to today --mine
 m365crawl calendar actions --days 7 --owner pat
 ```
 
+`--fields` keys: `event_id`, `event_key`, `subject`, `event_start`, `call_id`, `title`, `text`, `owner`, `speaker`, `at`, `origin`, `mine`, `mine_basis`, `unknown_fields`, `expires_at`, `series_level`.
+
 ### calendar sources
 
 What the archive holds per account and source, and how fresh it is: one row per account and source, Teams first. `--account` keeps that Teams account and the Outlook profiles linked to it.
@@ -677,6 +715,8 @@ m365crawl calendar sources [flags]
 ```sh
 m365crawl calendar sources
 ```
+
+`--fields` keys: `source`, `account_id`, `principal`, `link`, `tenant_id`, `user_id`, `window_start`, `window_end`, `covered_days`, `last_verified_at`, `synced_at`, `cache_fresh_at`, `events_live`, `events_removed`, `events_with_detail`, `events_with_attendees`, `events_with_body`, `events_online`, `recaps_total`, `recaps_with_content`, `recaps_linked`, `recap_action_items`, `unknown_time_zones`, `status`, `last_read_at`, `last_attempt_at`, `last_checked_at`, `census_as_of`, `next_read_after`, `read_interval_seconds`, `unknown_layouts`, `blocks_invalid_ratio`, `unmapped_values`, `deletions`, `error`.
 
 ## transcripts
 
@@ -710,6 +750,8 @@ m365crawl transcripts --since 7d
 m365crawl transcripts ev_1234abcd
 ```
 
+`--fields` keys: `call_id`, `thread_id`, `event_key`, `title`, `started_at`, `state`, `parts_total`, `parts_fetchable`, `parts_fetched`, `parts`.
+
 ### transcripts show
 
 Print a meeting's transcript from the archive: every part in time order, with each seam marked and where each part came from.
@@ -721,6 +763,8 @@ m365crawl transcripts show <meeting>
 Result: `{"call_id", "event_key", "title", "source": "archive", "complete", "segments": [{"ordinal", "transcribe_only", "starts_at", "fetched_at", "state", "reason", "entries": [{"speaker", "start", "end", "offset", "text"}]}], "text_truncated"?}`. A part with no text keeps its place as a segment with no entries and its `reason`, and `complete` is false. `start` and `end` are absolute times; `offset` (h:mm:ss) is from the start of the part. When `<meeting>` names several recorded calls the newest is shown and a notice says how to pick another. `--max-text` cuts each entry's text and sets `text_truncated`.
 
 In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──`, `── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
+
+`--fields` keys: `call_id`, `event_key`, `title`, `source`, `complete`, `segments`, `text_truncated`.
 
 ### transcripts fetch
 

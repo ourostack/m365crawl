@@ -277,18 +277,6 @@ func listKeys() []string   { return jsonKeys(reflect.TypeFor[mailListItem]()) }
 func showKeys() []string   { return jsonKeys(reflect.TypeFor[mailShowItem]()) }
 func folderKeys() []string { return jsonKeys(reflect.TypeFor[mailFolderItem]()) }
 
-// checkMailFields rejects a --fields key the command's items do not have.
-func (rt *runtime) checkMailFields(valid []string) error {
-	for _, f := range rt.fields {
-		if !contains(valid, f) {
-			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(valid, ", ")))
-			c.Fix = "Pick keys from the list in the message."
-			return c
-		}
-	}
-	return nil
-}
-
 // ---- scope: folders and coverage ----
 
 type mailScope struct {
@@ -630,7 +618,7 @@ func (c *mailListCmd) Run(rt *runtime) error {
 	if err := mailGuard(); err != nil {
 		return err
 	}
-	if err := rt.checkMailFields(listKeys()); err != nil {
+	if err := checkCommandFields(rt, "mail list", ""); err != nil {
 		return err
 	}
 	if err := checkMailLimit(c.Limit); err != nil {
@@ -747,7 +735,7 @@ func (c *mailShowCmd) Run(rt *runtime) error {
 	if err := mailGuard(); err != nil {
 		return err
 	}
-	if err := rt.checkMailFields(showKeys()); err != nil {
+	if err := checkCommandFields(rt, "mail show", ""); err != nil {
 		return err
 	}
 	account, key, err := parseMailID(c.ID)
@@ -898,7 +886,7 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 	if err := mailGuard(); err != nil {
 		return err
 	}
-	if err := rt.checkMailFields(listKeys()); err != nil {
+	if err := checkCommandFields(rt, "mail thread", ""); err != nil {
 		return err
 	}
 	account, key, err := parseMailID(c.ID)
@@ -965,7 +953,7 @@ func (c *mailFoldersCmd) Run(rt *runtime) error {
 	if err := mailGuard(); err != nil {
 		return err
 	}
-	if err := rt.checkMailFields(folderKeys()); err != nil {
+	if err := checkCommandFields(rt, "mail folders", ""); err != nil {
 		return err
 	}
 	return rt.read("mail folders", func(st *store.Store) (result, error) {
@@ -1024,7 +1012,7 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 	if err := mailGuard(); err != nil {
 		return err
 	}
-	if err := rt.checkMailFields(listKeys()); err != nil {
+	if err := checkCommandFields(rt, "mail unread", ""); err != nil {
 		return err
 	}
 	if err := checkMailLimit(c.Limit); err != nil {

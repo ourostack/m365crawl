@@ -287,7 +287,7 @@ func checkCalendarFields(rt *runtime) error {
 			return c
 		}
 	}
-	return checkFields[calendarItem](rt)
+	return checkCommandFields(rt, "calendar", "")
 }
 
 func (c *calendarCmd) Run(rt *runtime) error {
@@ -337,6 +337,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.setCoverage(agenda.UncoveredDays, agenda.Accounts, agenda.AsOf)
 		rt.noteOutlookOff(st, list, hasOutlook)
+		noteTeamsCacheAge(list, from)
 		if agenda.UnlinkedRecapsTotal > len(agenda.UnlinkedRecaps) {
 			list.UnlinkedRecapsTotal = agenda.UnlinkedRecapsTotal
 		}
@@ -347,6 +348,30 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		}
 		return list, nil
 	})
+}
+
+// noteTeamsCacheAge adds a notice when the whole range is newer than an account's last Teams
+// calendar refresh (the range starts after the cache last synced with the calendar service). The
+// agenda reads that cache, so an event created or changed since (a new invitation) cannot be listed
+// until Teams refreshes its calendar. The range bound keeps the notice off today's agenda when the
+// cache refreshed today, where it would be printed on nearly every read.
+func noteTeamsCacheAge(list *listResult, from time.Time) {
+	var ages []string
+	for _, a := range list.Accounts {
+		if a.TeamsCacheFreshAt == nil || !from.After(*a.TeamsCacheFreshAt) {
+			continue
+		}
+		at := a.TeamsCacheFreshAt.Format(time.RFC3339)
+		if len(list.Accounts) > 1 {
+			at = a.AccountID + " at " + at
+		}
+		ages = append(ages, at)
+	}
+	if len(ages) == 0 {
+		return
+	}
+	list.addNotice("the Teams calendar cache last refreshed from the calendar service " + strings.Join(ages, ", ") +
+		", before this range starts (teams_cache_fresh_at): an event created or changed since then, such as a new invitation, is listed only after Teams refreshes it (open the Calendar in Teams, then run `m365crawl sync`).")
 }
 
 // noCalendarTables is the hint and note of an archive that predates the calendar.
@@ -407,6 +432,10 @@ func (l *listResult) setCoverage(uncovered []string, accounts []calendar.Account
 			t := a.AsOf.UTC()
 			ac.CoverageAsOf = &t
 		}
+		if !a.TeamsCacheFreshAt.IsZero() {
+			t := a.TeamsCacheFreshAt.UTC()
+			ac.TeamsCacheFreshAt = &t
+		}
 		l.Accounts = append(l.Accounts, ac)
 	}
 	if !asOf.IsZero() {
@@ -430,6 +459,10 @@ type accountCoverage struct {
 	UncoveredAll       bool     `json:"uncovered_all,omitempty"`
 	UncoveredDays      []string `json:"uncovered_days,omitempty"`
 	UncoveredDaysTotal int      `json:"uncovered_days_total,omitempty"`
+	// TeamsCacheFreshAt is when the account's Teams calendar cache last synced with the calendar
+	// service (calendar sources' cache_fresh_at of its Teams row). An event created or changed after
+	// it is not in the cache until Teams refreshes its calendar.
+	TeamsCacheFreshAt *time.Time `json:"teams_cache_fresh_at,omitempty"`
 }
 
 func rangeOf(from, to time.Time) *rangeInfo {
@@ -713,12 +746,8 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 	if err := rt.checkLink(); err != nil {
 		return err
 	}
-	for _, f := range rt.fields {
-		if !contains(eventKeys(), f) {
-			u := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(eventKeys(), ", ")))
-			u.Fix = "Pick keys from the list in the message."
-			return u
-		}
+	if err := checkCommandFields(rt, "calendar event", ""); err != nil {
+		return err
 	}
 	return rt.read("calendar event", func(st *store.Store) (result, error) {
 		if st == nil {
@@ -1012,7 +1041,7 @@ func sourceItemOf(r store.CalendarSource) calendarSourceItem {
 type calendarSourcesCmd struct{}
 
 func (calendarSourcesCmd) Run(rt *runtime) error {
-	if err := checkFields[calendarSourceItem](rt); err != nil {
+	if err := checkCommandFields(rt, "calendar sources", ""); err != nil {
 		return err
 	}
 	return rt.read("calendar sources", func(st *store.Store) (result, error) {
@@ -1081,7 +1110,7 @@ type calendarActionsCmd struct {
 }
 
 func (c *calendarActionsCmd) Run(rt *runtime) error {
-	if err := checkFields[actionItem](rt); err != nil {
+	if err := checkCommandFields(rt, "calendar actions", ""); err != nil {
 		return err
 	}
 	if err := checkLimit(c.Limit); err != nil {
