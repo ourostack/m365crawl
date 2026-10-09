@@ -4,6 +4,27 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
+### Added
+
+- Meeting transcripts. `transcripts` lists recorded meetings and their transcript parts; `transcripts show <meeting>` prints a meeting's transcript, every part in time order with each seam marked. A meeting can be named by its call, its Teams chat, its calendar event or a Teams link. Both read the archive offline.
+- `transcripts fetch <meeting>` (or `--since DATE`) downloads the parts not yet stored through an invisible Edge or Chrome that m365crawl starts with its own browser profile, and stores them; stored parts are not fetched again. It reaches only SharePoint hosts and never sees a password or token.
+- `transcripts fetch` signs in silently where the organization's single sign-on covers the browser. Where it cannot, `transcripts signin` opens that browser profile in a visible window once so the user can sign in. Without a terminal it refuses unless given `--user-agreed`, so an agent asks the user first, and it prints each step. If the window asks to enroll or register the device, the organization signs in only from managed devices, and the agent tells the user instead of retrying.
+- Transcripts in `search` (one result per part with a `matches` count; `--source transcripts`; `--from` matches the speaker), in `calendar event` (a meeting's recorded calls and what is fetched), in `status`, and two `doctor` checks (a browser is available; the browser profile is private).
+- Teams links everywhere: `thread`, `transcripts` and every `--conversation` flag accept channel, chat, message and meeting links from teams.microsoft.com, teams.cloud.microsoft and teams.live.com.
+- Calendar items carry `id` (equal to `event_id`); `mail unread` has `unread_total`.
+
+### Changed
+
+- `transcripts fetch` and `transcripts signin` are the only commands that use the network, and only through the browser m365crawl starts; every other command is offline.
+- The archive format is version 7, which adds the transcript tables. A v0.5.0 archive is upgraded the first time this version syncs it.
+
+### Fixed
+
+- Outlook's general folder type was read as "Junk or To Me", so user folders and several system folders were labelled `junk`. They are now `other`; To Me is still recognised; the next sync corrects an existing archive.
+- A recording Teams re-posts later, or whose transcript notice falls near a different occurrence, stays with the one occurrence it belongs to.
+
 ### Security
 
 - Built with Go 1.27.2, which fixes standard-library vulnerabilities in `net/http`, HTTP/2, `crypto/tls` and `net/textproto` (GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610 to GO-2026-6613, GO-2026-6617).
