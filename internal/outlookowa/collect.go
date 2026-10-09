@@ -77,33 +77,9 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 	if err != nil {
 		return Result{}, errors.New("outlookowa: metadata_unreadable")
 	}
-	var selected []indexeddb.Database
-	for _, db := range dbs {
-		if db.Name == "owa-offline-data" || strings.HasPrefix(db.Name, "owa-offline-data-") {
-			selected = append(selected, db)
-		}
-	}
-	if len(selected) == 0 {
-		return Result{}, layout("content_database_missing")
-	}
-	if len(selected) != 1 {
-		return Result{}, layout("multiple_mailboxes")
-	}
-	db := selected[0]
-	stores := map[string]int64{}
-	for _, s := range db.Stores {
-		switch s.Name {
-		case "folders", "messages", "messageBodies":
-			if _, exists := stores[s.Name]; exists {
-				return Result{}, layout("required_store_ambiguous")
-			}
-			stores[s.Name] = s.ID
-		}
-	}
-	for _, name := range []string{"folders", "messages", "messageBodies"} {
-		if _, ok := stores[name]; !ok {
-			return Result{}, layout("required_store_missing")
-		}
+	db, stores, err := selectMailStores(dbs)
+	if err != nil {
+		return Result{}, err
 	}
 	r := Result{}
 	folders, headers, bodies := newRecords(), newRecords(), newRecords()
@@ -233,6 +209,39 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 	sort.Strings(r.SeenIDs)
 	sort.Slice(r.Losses, func(i, j int) bool { return r.Losses[i].Code < r.Losses[j].Code })
 	return r, nil
+}
+
+// selectMailStores is the single case-exact layout guard shared by opening and collecting.
+func selectMailStores(dbs []indexeddb.Database) (indexeddb.Database, map[string]int64, error) {
+	var selected []indexeddb.Database
+	for _, db := range dbs {
+		if db.Name == "owa-offline-data" || strings.HasPrefix(db.Name, "owa-offline-data-") {
+			selected = append(selected, db)
+		}
+	}
+	if len(selected) == 0 {
+		return indexeddb.Database{}, nil, layout("content_database_missing")
+	}
+	if len(selected) != 1 {
+		return indexeddb.Database{}, nil, layout("multiple_mailboxes")
+	}
+	db := selected[0]
+	stores := map[string]int64{}
+	for _, s := range db.Stores {
+		switch s.Name {
+		case "folders", "messages", "messageBodies":
+			if _, exists := stores[s.Name]; exists {
+				return indexeddb.Database{}, nil, layout("required_store_ambiguous")
+			}
+			stores[s.Name] = s.ID
+		}
+	}
+	for _, name := range []string{"folders", "messages", "messageBodies"} {
+		if _, ok := stores[name]; !ok {
+			return indexeddb.Database{}, nil, layout("required_store_missing")
+		}
+	}
+	return db, stores, nil
 }
 
 func folderRoot(folders map[string]Folder) string {
