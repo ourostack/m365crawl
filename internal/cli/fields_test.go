@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -118,12 +119,11 @@ func fieldsDoc(name string) string {
 	}
 	var b strings.Builder
 	for i, s := range commandFields[name] {
-		switch {
-		case i == 0:
+		if i == 0 {
 			b.WriteString("`--fields` keys: " + quote(s.keys()) + ".")
-		default:
-			b.WriteString(" With `" + s.when + "`: " + quote(s.keys()) + ".")
+			continue
 		}
+		b.WriteString(" With `" + s.when + "`: " + quote(s.keys()) + ".")
 	}
 	if name == "calendar" {
 		b.WriteString(" Only in `calendar event`, and refused here: " + quote(eventOnlyKeys) + ".")
@@ -136,8 +136,8 @@ var docHeading = regexp.MustCompile(`(?m)^#{2,3} `)
 // docs/commands.md lists each list command's --fields keys from the same table; -update rewrites
 // the paragraph, at the end of the command's section.
 func TestCommandsDocListsFields(t *testing.T) {
-	const path = "../../docs/commands.md"
-	raw, err := os.ReadFile(path)
+	path := filepath.Join("..", "..", "docs", "commands.md")
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the committed docs page
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestCommandsDocListsFields(t *testing.T) {
 		doc = doc[:loc[1]] + section + doc[end:]
 	}
 	if *update {
-		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(doc), 0o600); err != nil { //nolint:gosec // G703: the committed docs page, rewritten under -update
 			t.Fatal(err)
 		}
 	}
