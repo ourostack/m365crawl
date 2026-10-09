@@ -34,6 +34,34 @@
 
 **When you want something else.** Use Graph or an MCP server if you need to send or react, need data the apps never cached (old history, other people's mailboxes), run Linux, classic Teams or classic Outlook, or cannot grant Full Disk Access on macOS.
 
+## Scope and requesting support
+
+m365crawl is built around the maintainer's own Microsoft 365 usage: support grows from data we can inspect and workflows we can test on real machines. The name is the direction, not a claim that every Microsoft 365 app is supported. Your apps, account configuration and cached history may differ.
+
+**Available now:** Teams chats and channels, Outlook mail on macOS, the calendar, meeting recaps and action items, and meeting transcript text through an explicit browser fetch. The platform differences and cache limits are described below; an archived recap action item is not a Planner or To Do task.
+
+**Planned expansion, not shipped support:**
+
+| Area | Direction | What still needs proving |
+| --- | --- | --- |
+| People and meetings | Connect identities across sources and read fuller attendee lists | Identity ambiguity, source coverage and platform-specific mappings |
+| Office and OneDrive | Join recent documents, sharing activity and library metadata to people and conversations | Changing cache layouts, link resolution and Windows data sources; metadata is not document text |
+| OneNote | Search locally indexed page text alongside chats and mail | Freshness, page links and Windows data sources; an index is not a complete notebook export |
+| Copilot and Loop | Expose citations in archived bot replies and readable cached Loop content | Private Copilot history and broader Loop coverage require live browser probes |
+| Browser-backed content | Read cloud document text, Stream transcripts, SharePoint pages and News, and used Planner/To Do and Engage surfaces | A tested read path for each service; transcript fetching does not prove another service works |
+
+Lists can follow a working SharePoint reader when there is data and a concrete use. Forms, Whiteboard, Viva Insights and separate Bookings support are deferred: they are not part of the current implementation commitment. Security and identity apps are outside the work-content scope. These are priorities, not declarations that those products can never be supported.
+
+The goal is one connected archive, not an unrelated crawler per app. New sources should improve shared search, people resolution or links between work items, preserve the distinction between cached and fetched data, and make missing or stale content visible. Planned capabilities will be documented as available only after they ship and their platform support is verified.
+
+**Missing something you use? Work with your agent to open a GitHub issue as a "prompt request".** Describe the job you want the agent to do, the Microsoft 365 app, your operating system and app version, and what happens today. Your agent can help check whether a readable cache or a browser read path exists, but you do not need to reverse-engineer it or submit code before asking.
+
+For example:
+
+> Add support for my Microsoft 365 app so my agent can answer this question: [the job]. I use [app and version] on [operating system]. Today m365crawl [what it does or cannot do]. Please investigate the available data, explain any coverage limits, and propose how it would join the existing archive.
+
+Search [existing issues](https://github.com/ourostack/m365crawl/issues) first, then [open a prompt request](https://github.com/ourostack/m365crawl/issues/new). Requests help choose the next integrations; they are not a promise of support or a delivery date. Do not attach real mail, chats, document contents, cache files, archive databases, credentials or tokens to public issues. Use synthetic examples and non-sensitive counts, formats and field names.
+
 ## Install
 
 ### macOS
