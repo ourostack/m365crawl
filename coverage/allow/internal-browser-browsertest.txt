@@ -5,3 +5,4 @@ internal/browser/browsertest/fakebrowser.go:RunIfFake runs only in the re-execut
 internal/browser/browsertest/fakebrowser.go:runFake runs only in the re-executed fake browser process
 internal/browser/browsertest/fakebrowser.go:startChild runs only in the re-executed fake browser process
 internal/browser/browsertest/fakebrowser.go:startSuccessor runs only in the re-executed fake browser process
+internal/browser/browsertest/detach_unix.go:waitGone runs only in the re-executed fake browser process
