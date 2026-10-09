@@ -178,11 +178,17 @@ func exitStatus(err error) string {
 }
 
 // waitForPort polls DevToolsActivePort until the browser publishes its debugging address.
+//
+// The first process may exit before the port appears. A non-zero status is a failed start and
+// ends the wait at once. Status 0 can be a launcher handing off to the process that runs the
+// browser (Edge on Windows does this), so the wait goes on until the timeout; whatever the
+// launcher started is still contained and ended by Close.
 func (b *Browser) waitForPort(ctx context.Context, timeout time.Duration) (string, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	tick := time.NewTicker(pollEvery)
 	defer tick.Stop()
+	exited := b.exited // nil once the first process has exited cleanly
 	for {
 		if u, ok := readDevToolsPort(b.profile); ok {
 			return u, nil
@@ -191,11 +197,17 @@ func (b *Browser) waitForPort(ctx context.Context, timeout time.Duration) (strin
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-deadline.C:
+			if exited == nil || b.exitedCleanly() {
+				return "", b.handoffFailed()
+			}
 			return "", errs.BrowserFailed("did not start")
-		case <-b.exited:
-			// The launch may have handed off to a browser that already ran on this profile.
+		case <-exited:
 			if u, ok := readDevToolsPort(b.profile); ok {
 				return u, nil
+			}
+			if b.status == "0" {
+				exited = nil // a possible handoff: keep waiting for the port
+				continue
 			}
 			if singletonLiveFn(b.profile) {
 				return "", errs.BrowserBusy()
@@ -204,6 +216,26 @@ func (b *Browser) waitForPort(ctx context.Context, timeout time.Duration) (strin
 		case <-tick.C:
 		}
 	}
+}
+
+// exitedCleanly reports whether the first process has already exited with status 0.
+func (b *Browser) exitedCleanly() bool {
+	select {
+	case <-b.exited:
+		return b.status == "0"
+	default:
+		return false
+	}
+}
+
+// handoffFailed is the error when the first process exited cleanly and no port appeared in time.
+// When nothing this launch started still runs but a browser holds the profile, the launch was
+// handed to a browser that m365crawl did not start; otherwise the browser did not start.
+func (b *Browser) handoffFailed() error {
+	if !b.group.alive() && singletonLiveFn(b.profile) {
+		return errs.BrowserBusy()
+	}
+	return errs.BrowserFailed("did not start: the browser's first process exited with status 0 and no debugging port appeared")
 }
 
 // readDevToolsPort parses DevToolsActivePort: a port, then the browser endpoint path.

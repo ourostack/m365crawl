@@ -108,10 +108,14 @@ func IsSharePointHost(host string) bool {
 	return false
 }
 
+// IsSiteRoot reports whether root is a site root of one known kind, such as /sites/<name> or
+// /personal/<user>, safe to put after a host in a URL.
+func IsSiteRoot(root string) bool { return refSiteRoot.MatchString(root) }
+
 // ValidRef reports whether the part's file reference is safe to build a request from: a SharePoint
 // host name, a site root of one known kind, and ids made only of the characters such ids use.
 func (p Part) ValidRef() bool {
-	return IsSharePointHost(p.Host) && refSiteRoot.MatchString(p.SiteRoot) &&
+	return IsSharePointHost(p.Host) && IsSiteRoot(p.SiteRoot) &&
 		refID.MatchString(p.DriveID) && refID.MatchString(p.ItemID) && refID.MatchString(p.TranscriptID)
 }
 

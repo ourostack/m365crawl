@@ -4,6 +4,11 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- `transcripts fetch` and `transcripts signin` no longer fail on Windows when Edge's first process hands off to another and exits before the browser is ready; m365crawl waits for the browser and still closes every process it started, including any outside the job object.
+- `transcripts signin` opens the window on a site of the host, as `transcripts fetch` does, so signing in to a OneDrive host no longer waits on a page that left the host; a signed-in user who cannot open that site is still recognised.
+
 ## [0.6.1] - 2026-10-09
 
 ### Fixed

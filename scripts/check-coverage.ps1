@@ -51,6 +51,7 @@ if ($givenProfile) {
 }
 
 $requiredFiles = @(
+    'internal/browser/sweep_windows.go',
     'internal/cli/platform_windows.go',
     'internal/errs/no_full_disk_access_windows.go',
     'internal/store/lock_windows.go',
