@@ -4,6 +4,10 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Security
+
+- Built with Go 1.27.2, which fixes standard-library vulnerabilities in `net/http`, HTTP/2, `crypto/tls` and `net/textproto` (GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610 to GO-2026-6613, GO-2026-6617).
+
 ## [0.5.0] - 2026-10-08
 
 ### Added
