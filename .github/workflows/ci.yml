@@ -51,6 +51,11 @@ jobs:
             echo 'remove the old product name; no file and no file name may carry it' >&2
             exit 1
           fi
+      # Pull requests add a fragment in changes/ instead of editing CHANGELOG.md, so two open
+      # pull requests never conflict on the [Unreleased] lines. A release pull request passes:
+      # scripts/changelog-assemble.sh moves the fragments into its version section.
+      - name: Changelog entries are fragments in changes/
+        run: scripts/changelog-assemble.sh --check
       - name: Check tidy, format, vet and lint
         run: make tidy-check fmt-check vet lint
 

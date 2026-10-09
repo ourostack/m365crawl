@@ -101,6 +101,7 @@ script-lint:
 	shellcheck scripts/*.sh
 	scripts/sign-notarize.sh --selftest
 	scripts/release-decide.sh --selftest
+	scripts/changelog-assemble.sh --selftest
 	scripts/publish-cask.sh --selftest
 	scripts/check-tap-key.sh --selftest
 	scripts/report-failure.sh --selftest

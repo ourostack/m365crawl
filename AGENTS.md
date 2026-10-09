@@ -13,6 +13,7 @@
 - Tests that rely on `chmod 000` must skip when `os.Geteuid() == 0`.
 - Do not add AI attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines, no AI credit in commits, PRs, code comments or docs.
 - Use conventional commit messages (`feat:`, `fix:`, `ci:`, `chore:`).
+- Record a user-visible change in a changelog fragment, `changes/<short-slug>.md` (format in `changes/README.md`), never by editing `CHANGELOG.md`; CI refuses lines under `## [Unreleased]`. A release assembles the fragments with `scripts/changelog-assemble.sh X.Y.Z YYYY-MM-DD` (see `docs/releasing.md`).
 
 ## Credential denylist
 
@@ -30,7 +31,7 @@
 - The calendar tables follow the same rules: no `DELETE`, no `VACUUM`; "gone" is a sticky `removed_at` and a recap item a newer copy drops is `superseded_at`. The archive schema is version 7; `internal/calendar`'s `SchemaDDL` is part of `store`'s schema and the calendar tables are created once, there.
 - The mail tables (`internal/store/mail_schema.go`) follow the same rules: no `DELETE` of a `mail_messages` row and no `VACUUM`, because `mail_fts`, `mail_recipients` and `mail_attachments` use the message's implicit rowid. "Gone" and "evicted" are sticky marks set only after two trusted reads of different store copies miss a message (`CommitMail`). A change to `outlookmail.HTMLText` or `store.NormalizeSubject` raises `store.MailTextVersion` and `Rederive` recomputes the rows below it.
 - The Outlook source is read-only and on by default (it reads the default directory when it is there; `--outlook-root none` or `M365CRAWL_OUTLOOK_ROOT=none` turns it off, and an explicit `--teams-root` without an explicit Outlook root keeps it off so tests stay hermetic; `M365CRAWL_OUTLOOK=1` is accepted and does nothing). A default Outlook must never fail or slow a Teams sync (`syncer.Options.OutlookImplicit`). A profile is linked to a Teams account by address only when an address signed in to the profile equals the Teams account's own address; the operator's explicit link or `none` always wins. Any test that runs the CLI must give its roots (or a home directory of its own), or it will read the machine's real Teams and Outlook data. The pinned classes, tags and fields in `internal/outlookcal` and `docs/outlook-store.md` change together, and a mapper change that alters derived data raises `outlookcal.MapperVersion`. Never print a string from a real Outlook store in tests, logs, docs or PRs; fixtures are in `testdata/outlook-fixture`.
-- Schema and field changes go through `CHANGELOG.md`: adding a field is compatible, renaming or removing one is a breaking change.
+- Schema and field changes go through the changelog (a fragment in `changes/`): adding a field is compatible, renaming or removing one is a breaking change.
 
 ## Documentation
 
