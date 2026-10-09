@@ -48,7 +48,7 @@ type MailBatch struct {
 	// Trusted says the read passed its guard and lost nothing (no loss codes), so it may say that
 	// a message is gone or evicted. An untrusted batch still adds and updates.
 	Trusted bool
-	// RekeyAcrossFolders enables singleton-guarded native-ID moves; false keeps Mac's policy.
+	// RekeyAcrossFolders opts into Windows native moves and sparse metadata; false keeps Mac's policy, including attachment inference.
 	RekeyAcrossFolders bool
 }
 
@@ -176,6 +176,9 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 			}
 		}
 		d := deriveMail(m)
+		if b.RekeyAcrossFolders && m.HasAttachments == nil {
+			d.hasAtt = false // Native unavailable headers do not inherit Mac's metadata-derived flag.
+		}
 		switch {
 		case ex == nil:
 			if err := insertMail(ctx, tx, b.Account, m, d, at); err != nil {
