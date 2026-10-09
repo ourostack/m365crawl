@@ -35,6 +35,8 @@ const (
 	CodeBrowserFailed               = "transcripts_browser_failed"
 	CodeMailUnsupportedPlatform     = "mail_unsupported_platform"
 	CodeUnknownMeeting              = "unknown_meeting"
+	CodeSigninRequired              = "transcripts_signin_required"
+	CodeSigninNeedsAgreement        = "signin_needs_agreement"
 )
 
 // Coded is an error with a stable machine-readable code, a remedy for the caller and the
@@ -209,6 +211,26 @@ func UnknownMeeting(ref string) *Coded {
 	return &Coded{Code: CodeUnknownMeeting, Exit: ExitUsage,
 		Message: fmt.Sprintf("no recorded meeting in the archive matches %q", ref),
 		Fix:     "List meetings with recordings: m365crawl transcripts"}
+}
+
+// signinAskFix is the remedy of every error that leads to transcripts signin. The sign-in opens a
+// visible window on the user's screen, so an agent asks first.
+const signinAskFix = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline."
+
+// SigninRequired reports that the browser profile is not signed in to SharePoint: the page landed
+// on a sign-in page, or SharePoint answered as if nobody were signed in.
+func SigninRequired() *Coded {
+	return &Coded{Code: CodeSigninRequired, Exit: ExitEnvironment,
+		Message: "the m365crawl browser profile is not signed in to SharePoint",
+		Fix:     signinAskFix}
+}
+
+// SigninNeedsAgreement reports a transcripts signin that is not run from a terminal and was not
+// told that the user agreed (--user-agreed).
+func SigninNeedsAgreement() *Coded {
+	return &Coded{Code: CodeSigninNeedsAgreement, Exit: ExitUsage,
+		Message: "transcripts signin opens a visible browser window, and the user has not agreed to it (pass --user-agreed once they have)",
+		Fix:     signinAskFix}
 }
 
 var _ error = (*Coded)(nil)

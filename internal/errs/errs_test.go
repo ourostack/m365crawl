@@ -33,6 +33,8 @@ func TestConstructorsMatchOutputContract(t *testing.T) {
 		{BrowserFailed("did not start"), "transcripts_browser_failed", 1},
 		{MailUnsupportedPlatform(), "mail_unsupported_platform", 3},
 		{UnknownMeeting("ev_x"), "unknown_meeting", 2},
+		{SigninRequired(), "transcripts_signin_required", 3},
+		{SigninNeedsAgreement(), "signin_needs_agreement", 2},
 	}
 	for _, c := range cases {
 		if c.err.Code != c.code || c.err.Exit != c.exit {
@@ -102,5 +104,17 @@ func TestArchiveSchemaNewer(t *testing.T) {
 	e := ArchiveSchemaNewer(4, 3)
 	if e.Code != "archive_newer" || e.Exit != ExitEnvironment || !strings.Contains(e.Message, "schema version 4") || !strings.Contains(e.Message, "version 3") || !strings.Contains(e.Fix, "Upgrade m365crawl to a newer build") {
 		t.Errorf("%+v", e)
+	}
+}
+
+func TestSigninFixTellsAgentToAskAndToStopOnEnrollment(t *testing.T) {
+	const want = "Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline."
+	for _, c := range []*Coded{SigninRequired(), SigninNeedsAgreement()} {
+		if c.Fix != want {
+			t.Errorf("%s fix = %q", c.Code, c.Fix)
+		}
+	}
+	if m := SigninRequired().Message; m != "the m365crawl browser profile is not signed in to SharePoint" {
+		t.Errorf("message %q", m)
 	}
 }

@@ -1,0 +1,10 @@
+call    part  state        entries  fetched           why no text
+------  ----  -----------  -------  ----------------  -------------------------------------------------------------------------------
+call-4  1     local        2        2026-11-09 09:00  -
+call-3  1     unfetchable  -        -                 only a sharing link is cached for this part; m365crawl cannot fetch it from ids
+
+0 fetched · 1 local · 0 failed · 1 unfetchable
+note: nothing to fetch: every part that can be fetched is already in the archive
+archive age: <age>
+next: m365crawl transcripts show '19:meeting_adhoc@thread.v2'
+source: archive

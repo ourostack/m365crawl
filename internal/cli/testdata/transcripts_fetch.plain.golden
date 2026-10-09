@@ -1,0 +1,12 @@
+call    part  state      entries  fetched           why no text
+------  ----  ---------  -------  ----------------  ---------------------------------------------------------------------------
+call-4  1     ok         2        2026-11-09 09:00  -
+call-1  1     local      3        2026-11-09 08:00  -
+call-1  2     local      2        2026-11-09 08:00  -
+call-1  3     no_access  -        -                 SharePoint refused access (HTTP 403); you may have lost access to this file
+
+1 fetched · 2 local · 1 failed · 0 unfetchable
+note: 1 part could not be fetched; its reason is listed with it
+archive age: <age>
+next: m365crawl transcripts show <call-id>
+source: network · fetched 2026-11-09 09:00

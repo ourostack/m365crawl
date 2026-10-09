@@ -3,5 +3,6 @@
 *.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.js text eol=lf
 **/testdata/** -text binary
 **/*.golden text diff merge eol=lf

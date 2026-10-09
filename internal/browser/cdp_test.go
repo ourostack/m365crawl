@@ -371,15 +371,15 @@ func TestCallFailsWhenConnectionDrops(t *testing.T) {
 		s.DropConnections()
 		return map[string]any{}, nil
 	})
-	if err := p.Eval(context.Background(), "x", nil); err == nil {
-		t.Fatal("a call in flight when the connection drops must fail")
+	if err := p.Eval(context.Background(), "x", nil); !errors.Is(err, ErrDisconnected) {
+		t.Fatalf("a call in flight when the connection drops must fail as disconnected: %v", err)
 	}
-	if !waitUntil(2*time.Second, func() bool { return p.Eval(context.Background(), "x", nil) != nil }) {
+	if !waitUntil(2*time.Second, func() bool { return errors.Is(p.Eval(context.Background(), "x", nil), ErrDisconnected) }) {
 		t.Fatal("later calls on a dead connection must fail")
 	}
 	// A write on a dead connection fails the same way.
-	if err := p.c.call(context.Background(), "", "X", nil, nil); err == nil {
-		t.Fatal("dead client")
+	if err := p.c.call(context.Background(), "", "X", nil, nil); !errors.Is(err, ErrDisconnected) {
+		t.Fatalf("dead client: %v", err)
 	}
 }
 
@@ -387,7 +387,7 @@ func TestCallWriteFails(t *testing.T) {
 	s := browsertest.NewServer(t)
 	p := testPage(t, s)
 	p.c.close() // closes the socket under the client
-	if err := p.c.call(context.Background(), "", "X", nil, nil); err == nil {
+	if err := p.c.call(context.Background(), "", "X", nil, nil); !errors.Is(err, ErrDisconnected) {
 		t.Fatal("write on a closed socket must fail")
 	}
 }

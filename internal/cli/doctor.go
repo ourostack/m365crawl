@@ -37,7 +37,7 @@ var (
 	outlookDiscover     = outlookdesktop.Discover
 	outlookOpenStore    = hxstore.OpenFile
 	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
-	// findBrowser is the browser transcripts fetch would run; doctor only looks for it.
+	// findBrowser finds the browser transcripts fetch and signin run; doctor only looks for it.
 	findBrowser = browser.Find
 	privateDir  = store.PrivateDir
 	statProfile = os.Stat

@@ -11,7 +11,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Teams | [`messages`](#messages), [`unread`](#unread), [`thread`](#thread), [`conversations`](#conversations), [`teams`](#teams), [`activity`](#activity), [`stores`](#stores), [`records`](#records) |
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
-| Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show) |
+| Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## Platform defaults
@@ -721,6 +721,52 @@ m365crawl transcripts show <meeting>
 Result: `{"call_id", "event_key", "title", "source": "archive", "complete", "segments": [{"ordinal", "transcribe_only", "starts_at", "fetched_at", "state", "reason", "entries": [{"speaker", "start", "end", "offset", "text"}]}], "text_truncated"?}`. A part with no text keeps its place as a segment with no entries and its `reason`, and `complete` is false. `start` and `end` are absolute times; `offset` (h:mm:ss) is from the start of the part. When `<meeting>` names several recorded calls the newest is shown and a notice says how to pick another. `--max-text` cuts each entry's text and sets `text_truncated`.
 
 In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──`, `── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
+
+### transcripts fetch
+
+Fetch the transcripts of a meeting's parts from SharePoint and store them, so later reads are offline. Runs an invisible Edge (or Chrome) with m365crawl's own browser profile; m365crawl never sees a password or token.
+
+```
+m365crawl transcripts fetch [<meeting>] [flags]
+m365crawl transcripts fetch --since=DATE [flags]
+```
+
+Pass exactly one of `<meeting>` or `--since`. Parts whose text is already in the archive are not fetched again (state `local`, with their `fetched_at`) unless `--refetch`; parts that cannot be fetched are listed with their `reason` and never sent, including a part whose cached host is not a SharePoint host. With nothing left to fetch no browser starts. This and `transcripts signin` are the only commands that use the network, and only inside the browser: it runs headless with its own profile next to the archive, opens each SharePoint site once and fetches each part inside the page, so m365crawl never handles a password, token or download link. The browser is closed, with every process it started, however the command ends.
+
+| Flag | Meaning |
+| --- | --- |
+| `--since=DATE` | Instead of `<meeting>`: every recorded meeting that started at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d) and has parts not fetched yet. |
+| `--limit=N` | Maximum meetings to fetch (default 20, at most 200); `truncated` says whether more were left. |
+| `--refetch` | Also fetch parts whose text is already in the archive. |
+| `--browser=edge\|chrome\|PATH` | The browser to run: `edge`, `chrome` or the path of an Edge or Chrome executable. Default: Edge, then Chrome. Env `M365CRAWL_BROWSER`. |
+| `--timeout=DURATION` | Stop the whole fetch after this long (default 10m). |
+
+Result: `{"source", "fetched_at", "browser", "calls": [{"call_id", "parts": [{"ordinal", "state", "http_status", "entries", "fetched_at", "reason"}]}], "fetched", "local", "failed", "unfetchable", "truncated", "next", "note"?, "archive_age_seconds"}`. `source` is `network` when a browser ran (`fetched_at` and `browser` say when and which) and `archive` when nothing needed fetching. A part's `state` is `local`, `unfetchable` or this run's outcome (`ok`, `no_access`, `not_found`, `no_transcript`, `too_large`, `failed`). A part SharePoint refuses is stored with its state and the others still fetch; the command exits 0 with a `note`. Text output prints one row per part, the totals, `next` and `source: network · fetched <time>`. Progress lines go to stderr (`m365crawl: ...` in text mode, `{"progress": "..."}` otherwise) and carry counts and states only.
+
+A profile that is not signed in stops the run with `transcripts_signin_required` (exit 3); the parts not fetched stay `not_fetched`. Its fix: ask the user before running `m365crawl transcripts signin`, because it opens a visible window, and run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline. Other errors: `transcripts_no_browser` (exit 3), `transcripts_browser_busy` (exit 4: a sign-in window is open or another fetch runs), `transcripts_browser_failed` (exit 1, also when `--timeout` ends the run).
+
+```sh
+m365crawl transcripts fetch ev_1234abcd
+m365crawl transcripts fetch --since 7d --limit 50
+```
+
+### transcripts signin
+
+Open m365crawl's browser profile in a visible window once, so you can sign in to SharePoint; `transcripts fetch` then signs in silently.
+
+```
+m365crawl transcripts signin [flags]
+```
+
+Ask the user before running it: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline. When stdin is not a terminal (an agent runs it) it refuses without `--user-agreed` (`signin_needs_agreement`, exit 2); on a terminal it says what will open and waits for Enter. It prints each step on stderr (opening the window, waiting for sign-in, signed in) and waits up to 5 minutes until the window is signed in: on the SharePoint host, past its sign-in pages, and with the site's API answering as for a signed-in user. Then it closes the browser. The window uses m365crawl's own profile next to the archive, never the everyday browser profile.
+
+| Flag | Meaning |
+| --- | --- |
+| `--host=HOST` | The SharePoint host to sign in to, such as `<tenant>.sharepoint.com` (only SharePoint's own domains). Default: the host that holds most of the archive's transcript parts; with none, a `usage` error names `--host`. |
+| `--browser=edge\|chrome\|PATH` | As for `transcripts fetch`. |
+| `--user-agreed` | The user has agreed to the visible window. Required when stdin is not a terminal. |
+
+Result: `{"signed_in": true, "browser", "next"}`, or in text mode `signed in; run m365crawl transcripts fetch <meeting>`. A window closed before sign-in finished, or no sign-in within 5 minutes, is `transcripts_browser_failed`.
 
 ## metadata
 

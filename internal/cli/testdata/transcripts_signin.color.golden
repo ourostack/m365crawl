@@ -1,0 +1,5 @@
+signed in; run m365crawl transcripts fetch <meeting>
+--- stderr ---
+m365crawl: opening a visible Edge window with m365crawl's own browser profile
+m365crawl: waiting for you to sign in to SharePoint in that window (up to 5m)
+m365crawl: signed in; closing the window
