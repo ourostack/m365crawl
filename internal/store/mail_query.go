@@ -42,6 +42,7 @@ type MailRecipient struct {
 	Name    string
 	Address string
 	KindRaw uint32
+	Role    string
 }
 
 // MailAttachment is one attachment.
@@ -61,6 +62,7 @@ type MailRow struct {
 	Account                                     string
 	DetailKey                                   uint32
 	InternetMessageID                           string
+	ConversationID                              string
 	FolderKey                                   uint32
 	Folder, FolderKind                          string
 	ToMe                                        bool
@@ -125,7 +127,7 @@ func mailEach(ctx context.Context, q mailQuerier, query string, args []any, fn f
 	return rows.Err()
 }
 
-const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), m.to_me,
+const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, m.conversation_id, m.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), m.to_me,
   m.subject, m.subject_norm, m.sender_name, m.sender_address, m.preview, m.in_reply_to, m.received_at, m.sent_at, m.class, m.importance, m.ical_uid,
   m.is_read, m.read_state, m.flag, m.has_attachments, m.body_state, %s, m.first_seen_at, m.state_seen_at, m.gone_at, m.evicted_at`
 
@@ -141,7 +143,7 @@ func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any
 		var m MailRow
 		var recv, sent, first, seen, gone, evicted sql.NullString
 		var isRead sql.NullInt64
-		if err := r.Scan(&m.Rowid, &m.Account, &m.DetailKey, &m.InternetMessageID, &m.FolderKey, &m.Folder, &m.FolderKind, &m.ToMe,
+		if err := r.Scan(&m.Rowid, &m.Account, &m.DetailKey, &m.InternetMessageID, &m.ConversationID, &m.FolderKey, &m.Folder, &m.FolderKind, &m.ToMe,
 			&m.Subject, &m.SubjectNorm, &m.SenderName, &m.SenderAddress, &m.Preview, &m.InReplyTo, &recv, &sent, &m.Class, &m.Importance, &m.ICalUID,
 			&isRead, &m.ReadState, &m.Flag, &m.HasAttachments, &m.BodyState, &m.BodyText, &first, &seen, &gone, &evicted); err != nil {
 			return err
@@ -172,15 +174,16 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow) error {
 		at[r.Rowid] = i
 		ids[i] = fmt.Sprint(r.Rowid)
 	}
-	in := strings.Join(ids, ",")                                                                                                                                                                // row ids are integers
-	err := mailEach(ctx, s.db, `select message_rowid, name, address, kind_raw from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: in is integers
+	in := strings.Join(ids, ",")                                                                                                                                                                      // row ids are integers
+	err := mailEach(ctx, s.db, `select message_rowid, name, address, kind_raw, role from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: in is integers
 		var id int64
 		var rc MailRecipient
-		var addr sql.NullString
-		if err := r.Scan(&id, &rc.Name, &addr, &rc.KindRaw); err != nil {
+		var addr, role sql.NullString
+		if err := r.Scan(&id, &rc.Name, &addr, &rc.KindRaw, &role); err != nil {
 			return err
 		}
 		rc.Address = addr.String
+		rc.Role = role.String
 		rows[at[id]].Recipients = append(rows[at[id]].Recipients, rc)
 		return nil
 	})
@@ -350,33 +353,51 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 	return rows[0], nil
 }
 
-// MailThread returns the conversation a message belongs to, oldest first, and how it was grouped:
-// "reply_chain" when In-Reply-To links join the message to at least one other Message-ID, else
-// "subject" (messages with the same normalised subject that share a participant with the seed; an
-// empty subject gives the seed alone). Gone and evicted messages are included. A thread holds at
-// most mailThreadCap messages, the seed always among them; truncated says more belong to it.
+// MailThread returns the conversation a message belongs to, oldest first, and how it was grouped: "conversation" when its native conversation id joins at least two account-scoped messages; otherwise "reply_chain" when In-Reply-To links join it to another Message-ID, else "subject" (messages with the same normalised subject that share a participant with the seed; an empty subject gives the seed alone). Gone and evicted messages are included. A thread holds at most mailThreadCap messages, the seed always among them; truncated says more belong to it.
 func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32) (rows []MailRow, grouping string, truncated bool, err error) {
 	seed, err := s.MailGet(ctx, account, detailKey)
 	if err != nil {
 		return nil, "", false, err
 	}
-	ids, linked, err := s.replyChain(ctx, seed)
+	ids, linked, err := s.conversationGroup(ctx, seed)
 	if err != nil {
 		return nil, "", false, err
 	}
-	grouping = "reply_chain"
+	grouping = "conversation"
 	if !linked {
-		grouping = "subject"
-		if ids, err = s.subjectGroup(ctx, seed); err != nil {
+		grouping = "reply_chain"
+		if ids, linked, err = s.replyChain(ctx, seed); err != nil {
 			return nil, "", false, err
 		}
+		if !linked {
+			grouping = "subject"
+			if ids, err = s.subjectGroup(ctx, seed); err != nil {
+				return nil, "", false, err
+			}
+		}
 	}
-	// Both groupings gather one message past the cap, so a thread of exactly the cap is not truncated.
+	// Each grouping gathers one message past the cap, so exactly the cap is not truncated.
 	if truncated = len(ids) > mailThreadCap; truncated {
 		ids = ids[:mailThreadCap] // the seed is first, so it stays
 	}
 	rows, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
 	return rows, grouping, truncated, err
+}
+
+func (s *Store) conversationGroup(ctx context.Context, seed MailRow) ([]int64, bool, error) {
+	ids := []int64{seed.Rowid}
+	if seed.ConversationID == "" {
+		return ids, false, nil
+	}
+	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and m.conversation_id=? and m.rowid<>? order by m.received_at desc, m.rowid desc limit ?`,
+		[]any{seed.Account, seed.ConversationID, seed.Rowid, mailThreadCap})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, m := range rows {
+		ids = append(ids, m.Rowid)
+	}
+	return ids, len(rows) != 0, nil
 }
 
 func joinIDs(ids []int64) string {

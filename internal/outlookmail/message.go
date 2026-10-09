@@ -91,7 +91,8 @@ type Recipient struct {
 	Name       string
 	Address    string
 	KindRaw    uint32
-	BadStrings int // see Header.BadStrings
+	Role       string // to, cc or bcc when established; empty for Mac raw-kind recipients
+	BadStrings int    // see Header.BadStrings
 }
 
 // Header is a message header. Offset is the file offset of the block that held the copy.
@@ -101,6 +102,8 @@ type Header struct {
 	Offset                    int64
 	Subject, SenderName       string
 	SenderAddress, Preview    string
+	ConversationID            string
+	HasAttachments            *bool // nil preserves the Mac attachment-derived flag
 	// ICalUID is the invite id (the event's iCal UID) in lower case, empty when the header
 	// carries none.
 	ICalUID  string

@@ -48,6 +48,8 @@ type MailBatch struct {
 	// Trusted says the read passed its guard and lost nothing (no loss codes), so it may say that
 	// a message is gone or evicted. An untrusted batch still adds and updates.
 	Trusted bool
+	// RekeyAcrossFolders enables singleton-guarded native-ID moves; false keeps Mac's policy.
+	RekeyAcrossFolders bool
 }
 
 // MailResult is what one CommitMail did. Gone and Evicted count the messages marked by this call.
@@ -69,11 +71,8 @@ type MailResult struct {
 // as updated. The same key with a different Message-ID is a different message: the row is
 // replaced in full (Replaced) and its text index rewritten.
 //
-// What the message says (subject, sender, recipients, times, Message-ID, In-Reply-To, invite id)
-// never changes after it is stored. Its folder, to-me flag, read state, flag and importance are
-// updated in place. Its body, has_attachments and attachments are filled when a later read has
-// more: a body is taken only while the stored body_state is not inline or file, and attachments
-// are added and have their downloaded flag updated.
+// What the message says (subject, sender, recipients, times, Message-ID, In-Reply-To, invite id) never changes after it is stored, except a native batch may fill a missing Message-ID or invite id. A missing conversation id can be filled later. Its folder, to-me flag, read state, flag and importance are updated in place. Its body, has_attachments and attachments are filled when a later read has more: a body is taken only while the stored body_state is not inline or file, and attachments are added and have their downloaded flag updated.
+// An explicit header attachment flag is authoritative; nil keeps Mac's attachment-derived rule.
 //
 // A trusted read that does not hold a live message records the first miss in mail_absent. A later
 // trusted read of a different store copy (a later FreshAt) that also misses it confirms the
@@ -99,7 +98,7 @@ func (s *Store) CommitMail(ctx context.Context, b MailBatch) (res MailResult, er
 type mailExisting struct {
 	rowid                                  int64
 	detailKey, folderKey                   uint32
-	msgID, kind                            string
+	msgID, kind, conversationID, icalUID   string
 	toMe, hasAtt, hasRecips, gone, evicted bool
 	isRead                                 sql.NullInt64
 	readState, flag, imp, body             string
@@ -130,8 +129,12 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 		return res, err
 	}
 	inBatch := make(map[uint32]bool, len(b.Result.Messages))
+	newMessageIDs := map[string]int{}
 	for _, m := range b.Result.Messages {
 		inBatch[m.DetailKey] = true
+		if byKey[m.DetailKey] == nil && m.MessageID != "" {
+			newMessageIDs[m.MessageID]++
+		}
 	}
 	rekey := map[rekeyKey][]*mailExisting{}
 	live := 0
@@ -142,6 +145,9 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 		}
 		if !inBatch[k] && ex.msgID != "" {
 			rk := rekeyKey{ex.msgID, ex.kind}
+			if b.RekeyAcrossFolders {
+				rk.kind = ""
+			}
 			rekey[rk] = append(rekey[rk], ex)
 		}
 	}
@@ -149,8 +155,12 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 		ex := byKey[m.DetailKey]
 		moved := false
 		if ex == nil && m.MessageID != "" {
-			if cand := rekey[rekeyKey{m.MessageID, m.Folder.Kind}]; len(cand) > 0 {
-				ex, rekey[rekeyKey{m.MessageID, m.Folder.Kind}] = cand[0], cand[1:]
+			rk := rekeyKey{m.MessageID, m.Folder.Kind}
+			if b.RekeyAcrossFolders {
+				rk.kind = ""
+			}
+			if cand := rekey[rk]; len(cand) > 0 && (!b.RekeyAcrossFolders || len(cand) == 1 && newMessageIDs[m.MessageID] == 1) {
+				ex, rekey[rk] = cand[0], cand[1:]
 				old := ex.detailKey
 				if err := rekeyMail(ctx, tx, b.Account, ex, m.DetailKey); err != nil {
 					return res, err
@@ -175,7 +185,7 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 			res.Replaced++
 		default:
 			ex.seen = true
-			changed, err := updateMail(ctx, tx, ex, m, d, at, moved)
+			changed, err := updateMail(ctx, tx, ex, m, d, at, moved, b.RekeyAcrossFolders)
 			if err != nil {
 				return res, err
 			}
@@ -262,11 +272,11 @@ func loadMailExisting(ctx context.Context, tx *sql.Tx, account string) (map[uint
 	byRow := map[int64]*mailExisting{}
 	err := eachRow(ctx, tx, `select m.rowid, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.kind,'unknown'), m.to_me, m.is_read, m.read_state, m.flag, m.importance,
   m.has_attachments, m.body_state, m.gone_at is not null, m.evicted_at is not null, m.received_at,
-  exists(select 1 from mail_recipients r where r.message_rowid=m.rowid)
+  exists(select 1 from mail_recipients r where r.message_rowid=m.rowid), m.conversation_id, m.ical_uid
 from mail_messages m left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key where m.account=? order by m.rowid`, []any{account}, func(r *sql.Rows) error {
 		ex := &mailExisting{atts: map[uint32]bool{}}
 		if err := r.Scan(&ex.rowid, &ex.detailKey, &ex.msgID, &ex.folderKey, &ex.kind, &ex.toMe, &ex.isRead, &ex.readState, &ex.flag, &ex.imp,
-			&ex.hasAtt, &ex.body, &ex.gone, &ex.evicted, &ex.received, &ex.hasRecips); err != nil {
+			&ex.hasAtt, &ex.body, &ex.gone, &ex.evicted, &ex.received, &ex.hasRecips, &ex.conversationID, &ex.icalUID); err != nil {
 			return err
 		}
 		byKey[ex.detailKey], byRow[ex.rowid] = ex, ex
@@ -340,6 +350,9 @@ func deriveMail(m outlookmail.Message) mailDerived {
 			d.hasAtt = true
 		}
 	}
+	if m.HasAttachments != nil {
+		d.hasAtt = *m.HasAttachments
+	}
 	if !d.hasHTML && d.state == outlookmail.BodyNotRead {
 		d.state = bodyPending // the body file was not read
 	}
@@ -362,10 +375,10 @@ func readFlag(m outlookmail.Message) any {
 
 func insertMail(ctx context.Context, tx *sql.Tx, account string, m outlookmail.Message, d mailDerived, at string) error {
 	d.body(m)
-	r, err := tx.ExecContext(ctx, `insert into mail_messages(account, detail_key, internet_message_id, folder_key, to_me, subject, subject_norm, sender_name, sender_address, preview,
+	r, err := tx.ExecContext(ctx, `insert into mail_messages(account, detail_key, internet_message_id, conversation_id, folder_key, to_me, subject, subject_norm, sender_name, sender_address, preview,
   in_reply_to, received_at, sent_at, class, importance, ical_uid, is_read, read_state, flag, has_attachments, body_state, body_html_gz, body_text, body_text_version, first_seen_at, state_seen_at)
-values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		account, m.DetailKey, m.MessageID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
+values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		account, m.DetailKey, m.MessageID, m.ConversationID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
 		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion, at, at)
 	if err != nil {
 		return err
@@ -383,10 +396,10 @@ values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // replaceMail rewrites a stored message with the content of a different one that took its key.
 func replaceMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail.Message, d mailDerived, at string) error {
 	d.body(m)
-	if _, err := tx.ExecContext(ctx, `update mail_messages set internet_message_id=?, folder_key=?, to_me=?, subject=?, subject_norm=?, sender_name=?, sender_address=?, preview=?,
+	if _, err := tx.ExecContext(ctx, `update mail_messages set internet_message_id=?, conversation_id=?, folder_key=?, to_me=?, subject=?, subject_norm=?, sender_name=?, sender_address=?, preview=?,
   in_reply_to=?, received_at=?, sent_at=?, class=?, importance=?, ical_uid=?, is_read=?, read_state=?, flag=?, has_attachments=?, body_state=?, body_html_gz=?, body_text=?, body_text_version=?,
   state_seen_at=?, gone_at=null, evicted_at=null where rowid=?`,
-		m.MessageID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
+		m.MessageID, m.ConversationID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
 		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion,
 		at, ex.rowid); err != nil {
 		return err
@@ -410,7 +423,8 @@ func insertMailChildren(ctx context.Context, tx *sql.Tx, rowid int64, m outlookm
 			if r.Address != "" {
 				addr = r.Address
 			}
-			if _, err := tx.ExecContext(ctx, `insert into mail_recipients(message_rowid, ord, name, address, kind_raw) values(?,?,?,?,?)`, rowid, i, r.Name, addr, r.KindRaw); err != nil {
+			role := sql.NullString{String: r.Role, Valid: r.Role != ""}
+			if _, err := tx.ExecContext(ctx, `insert into mail_recipients(message_rowid, ord, name, address, kind_raw, role) values(?,?,?,?,?,?)`, rowid, i, r.Name, addr, r.KindRaw, role); err != nil {
 				return err
 			}
 		}
@@ -441,7 +455,7 @@ func reindexMail(ctx context.Context, tx *sql.Tx, rowid int64, m outlookmail.Mes
 
 // updateMail applies what a later read may change on a stored message and reports whether it
 // changed anything. moved says the row was just re-keyed, which counts as a change.
-func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail.Message, d mailDerived, at string, moved bool) (bool, error) {
+func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail.Message, d mailDerived, at string, moved, native bool) (bool, error) {
 	var sets []string
 	var args []any
 	set := func(col string, v any) {
@@ -449,6 +463,18 @@ func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail
 		args = append(args, v)
 	}
 	changed := moved
+	if ex.conversationID == "" && m.ConversationID != "" {
+		set("conversation_id", m.ConversationID)
+		changed = true
+	}
+	if native && ex.msgID == "" && m.MessageID != "" {
+		set("internet_message_id", m.MessageID)
+		changed = true
+	}
+	if native && ex.icalUID == "" && m.ICalUID != "" {
+		set("ical_uid", strings.ToLower(m.ICalUID))
+		changed = true
+	}
 	newRead := readFlag(m)
 	stateChanged := ex.folderKey != m.FolderKey || ex.toMe != m.ToMe || ex.readState != m.ReadState || ex.flag != m.Flag || ex.imp != m.Importance ||
 		ex.isRead.Valid != (newRead != nil) || ex.isRead.Valid && int(ex.isRead.Int64) != newRead
@@ -467,7 +493,7 @@ func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail
 		set("state_seen_at", at)
 		changed = true
 	}
-	if !ex.hasAtt && d.hasAtt { // raised by a later read, never cleared
+	if !ex.hasAtt && d.hasAtt || m.HasAttachments != nil && ex.hasAtt != d.hasAtt {
 		set("has_attachments", b2i(d.hasAtt))
 		changed = true
 	}
