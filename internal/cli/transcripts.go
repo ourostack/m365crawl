@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -163,7 +162,7 @@ func meetingRef(arg string) (string, error) {
 }
 
 func (c *transcriptsCmd) Run(rt *runtime) error {
-	if err := checkFields[transcriptItem](rt); err != nil {
+	if err := checkCommandFields(rt, "transcripts", ""); err != nil {
 		return err
 	}
 	if c.Meeting == "" && contains(rt.fields, "parts") {
@@ -371,7 +370,7 @@ func transcriptEntryOf(e transcripts.Entry, partStart time.Time, max int) transc
 }
 
 func (c *transcriptsShowCmd) Run(rt *runtime) error {
-	if err := checkKeys(rt, jsonKeys(reflect.TypeFor[transcriptShow]())); err != nil {
+	if err := checkCommandFields(rt, "transcripts show", ""); err != nil {
 		return err
 	}
 	ref, err := meetingRef(c.Meeting)

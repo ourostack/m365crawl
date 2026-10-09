@@ -309,11 +309,6 @@ func shape[T any](rt *runtime, in []T) []any {
 	return out
 }
 
-// checkFields rejects --fields keys that item type T does not have.
-func checkFields[T any](rt *runtime) error {
-	return checkKeys(rt, jsonKeys(reflect.TypeFor[T]()))
-}
-
 // checkKeys rejects --fields keys that are not in valid.
 func checkKeys(rt *runtime, valid []string) error {
 	if len(rt.fields) == 0 {

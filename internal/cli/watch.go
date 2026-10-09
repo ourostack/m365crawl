@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"reflect"
-	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -75,27 +73,11 @@ func (c *watchCmd) Run(rt *runtime) error {
 	if c.MinInterval < 0 {
 		return errs.Usage("--min-interval must not be negative (0 disables the pause)")
 	}
-	if err := checkWatchFields(rt); err != nil {
+	if err := checkCommandFields(rt, "watch", ""); err != nil {
 		return err
 	}
 	w := &watcher{rt: rt, every: c.Every, minInterval: c.MinInterval, emitInitial: c.EmitInitial}
 	return w.run()
-}
-
-// checkWatchFields accepts any key that messages or activity items have.
-func checkWatchFields(rt *runtime) error {
-	if len(rt.fields) == 0 {
-		return nil
-	}
-	valid := append(jsonKeys(reflect.TypeFor[messageItem]()), jsonKeys(reflect.TypeFor[activityItem]())...)
-	for _, f := range rt.fields {
-		if !contains(valid, f) {
-			c := errs.Usage(fmt.Sprintf("unknown --fields key %q; valid keys: %s", f, strings.Join(dedupe(valid), ", ")))
-			c.Fix = "Pick keys from the list in the message."
-			return c
-		}
-	}
-	return nil
 }
 
 func dedupe(ss []string) []string {

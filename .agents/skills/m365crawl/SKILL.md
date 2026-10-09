@@ -21,11 +21,11 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 - Output is JSON when stdout is not a terminal; pass `--json` to be sure. An error is one JSON line on stderr with a `fix`: follow it.
 - Read commands sync first when the archive is older than `--max-age` (default 15m); `--max-age 0` reads it as it is.
 - Lists stop at `--limit`, so check `truncated`. An empty list carries a `note` saying why: no archive, filters that matched nothing, or a range outside what the apps cached. `needs_sync` means no data yet, not no match.
-- Unknown is not none. `coverage_gap` on a calendar result means some days are not cached, so a missing meeting is not evidence; a field named in `unknown_fields` was never stated.
+- Unknown is not none. `coverage_gap` on a calendar result means some days are not cached, so a missing meeting is not evidence; a field named in `unknown_fields` was never stated. The calendar is Teams' cached copy: an event created or changed after an account's `teams_cache_fresh_at` (in `accounts`; a `notices` line says so when the range starts after it) is not listed until Teams refreshes it, so ask the user to open the Calendar in Teams, then sync again.
 - `unread` and `messages --unread` cover chats and meetings; channels are left out (`channels_excluded`) because most are never opened. Add `--include-channels` to count them; channel mentions and replies reach you through `activity`.
 - `messages` and `search` text output has a `thread` column that names the whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, where the root is the message's `reply_chain_id`, else `id` (a channel reply's own id reads only that reply); for mail the id for `m365crawl mail thread <id>`.
 - Any Teams link the user pastes (channel, chat, message or meeting) can be passed where a conversation or thread is expected: `--conversation '<link>'`, `thread '<message link>'`, `transcripts '<meeting link>'`; a channel or chat link to `thread` is an error, so use `messages --conversation`.
-- `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields source,id,sent_at,subject,text --max-text 300`.
+- `--fields` and `--max-text` keep results small, for example `m365crawl search "budget" --fields source,id,sent_at,subject,text --max-text 300`. Each list command's `--help` ends with the `--fields` keys it accepts; read it instead of guessing (a Teams message's text is `text`, an event's body is `body_text`, only in `calendar event`).
 
 ## Jobs
 

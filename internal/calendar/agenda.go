@@ -56,6 +56,9 @@ type AccountCoverage struct {
 	// Uncovered are the dates of the range this principal does not cover: a subset of the
 	// result's UncoveredDays. Empty when it covers the whole range.
 	Uncovered []string
+	// TeamsCacheFreshAt is the cache_fresh_at of the principal's Teams source: when the Teams cache
+	// last synced with the calendar service. Zero when no Teams source of the principal knows it.
+	TeamsCacheFreshAt time.Time
 }
 
 // AgendaItem is one merged event and the key it is stored under.
@@ -244,6 +247,7 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		verified map[string]time.Time // date -> newest verification across the principal's sources
 		spans    []Window             // windows of the principal's sources that have no covered days
 		synced   time.Time
+		fresh    time.Time // the newest cache_fresh_at of the principal's Teams sources
 		asOf     time.Time
 		lacks    []string // dates this principal does not cover
 	}
@@ -266,6 +270,9 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		c := of(p.Of(w.AccountID))
 		if w.SyncedAt.After(c.synced) {
 			c.synced = w.SyncedAt
+		}
+		if w.Source == SourceTeams && w.CacheFreshAt.After(c.fresh) {
+			c.fresh = w.CacheFreshAt
 		}
 		if !withDays[srcKey{w.Source, w.AccountID}] {
 			c.spans = append(c.spans, w)
@@ -318,7 +325,7 @@ func coverage(windows []Window, days []coveredDay, p Principals, from, to time.T
 		}
 	}
 	for name, c := range accounts {
-		out.accounts = append(out.accounts, AccountCoverage{AccountID: name, SyncedAt: c.synced, AsOf: c.asOf, Uncovered: c.lacks})
+		out.accounts = append(out.accounts, AccountCoverage{AccountID: name, SyncedAt: c.synced, AsOf: c.asOf, Uncovered: c.lacks, TeamsCacheFreshAt: c.fresh})
 	}
 	sort.Slice(out.accounts, func(i, j int) bool { return out.accounts[i].AccountID < out.accounts[j].AccountID })
 	return out

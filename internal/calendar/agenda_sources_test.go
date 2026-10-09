@@ -447,7 +447,7 @@ func TestCoverageNamesUncoveredDaysAndEachAccount(t *testing.T) {
 	if !reflect.DeepEqual(res.UncoveredDays, []string{"2026-11-02", "2026-11-04"}) || !res.Gap {
 		t.Fatalf("uncovered %v gap %v", res.UncoveredDays, res.Gap)
 	}
-	want := []AccountCoverage{{AccountID: acctTeams, SyncedAt: from.Add(time.Hour), AsOf: mustTime(t, "2026-11-03T05:00:00Z"), Uncovered: []string{"2026-11-02", "2026-11-04"}}}
+	want := []AccountCoverage{{AccountID: acctTeams, SyncedAt: from.Add(time.Hour), AsOf: mustTime(t, "2026-11-03T05:00:00Z"), Uncovered: []string{"2026-11-02", "2026-11-04"}, TeamsCacheFreshAt: from}}
 	if !reflect.DeepEqual(res.Accounts, want) {
 		t.Fatalf("%+v, want %+v", res.Accounts, want)
 	}

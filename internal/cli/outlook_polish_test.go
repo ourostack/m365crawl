@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -152,7 +153,7 @@ func TestOutlookOffNotice(t *testing.T) {
 	const from, to = "2023-11-20", "2023-11-26"
 	e.exec(`UPDATE meta SET value=json_set(value,'$.at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 days','-1 hour')) WHERE key='outlook_read:outlook/Main'`)
 	on := agendaVia(t, run, "--from", from, "--to", to)
-	if on["notices"] != nil {
+	if len(outlookNotices(on)) != 0 {
 		t.Fatalf("the source is on: %v", on["notices"])
 	}
 	off := func(args ...string) map[string]any {
@@ -164,7 +165,7 @@ func TestOutlookOffNotice(t *testing.T) {
 		return decode(t, out)
 	}
 	agenda := off("calendar", "--limit", "200", "--from", from, "--to", to)
-	notices := asStrings(agenda["notices"])
+	notices := outlookNotices(agenda)
 	if len(notices) != 1 || !strings.Contains(notices[0], "Outlook source is off for this run") || !strings.Contains(notices[0], "last read outlook/Main 5 days ago") {
 		t.Fatalf("notices %v", notices)
 	}
@@ -184,7 +185,7 @@ func TestOutlookOffNotice(t *testing.T) {
 	}
 	// Absent: a result with no Outlook event, a run with the source on, and the Teams-only account.
 	teams := off("calendar", "--from", from, "--to", to, "--account", teamsAccount)
-	if teams["notices"] != nil {
+	if len(outlookNotices(teams)) != 0 {
 		t.Fatalf("a Teams-only result: %v", teams["notices"])
 	}
 	if code, out, _ := run("--max-age", "0", "calendar", "event", outlookOnly["event_id"].(string)); code != 0 || len(asStrings(decode(t, out)["notices"])) != 1 {
@@ -198,7 +199,7 @@ func TestOutlookOffNotice(t *testing.T) {
 	// With no read time kept the notice still says the source is off.
 	e.exec(`DELETE FROM meta WHERE key LIKE 'outlook_read:%'`)
 	bare := off("calendar", "--limit", "200", "--from", from, "--to", to)
-	if got := asStrings(bare["notices"]); len(got) != 1 || strings.Contains(got[0], "last read") {
+	if got := outlookNotices(bare); len(got) != 1 || strings.Contains(got[0], "last read") {
 		t.Fatalf("no read time: %v", got)
 	}
 }
@@ -287,6 +288,12 @@ func TestSetCoverageCapsAnAccountsOwnDays(t *testing.T) {
 	}
 }
 
+// outlookNotices are a result's notices without the Teams calendar cache's: the fixture's Teams
+// cache last refreshed before the ranges these tests read, so every agenda of them carries that one.
+func outlookNotices(res map[string]any) []string {
+	return slices.DeleteFunc(asStrings(res["notices"]), func(n string) bool { return strings.HasPrefix(n, "the Teams calendar cache last refreshed") })
+}
+
 // A read time that cannot be loaded leaves the ages out; the notice is still given.
 func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 	e, _ := syncedWithOutlook(t, "Main")
@@ -294,7 +301,7 @@ func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 	t.Cleanup(func() { outlookReadTimes = old })
 	outlookReadTimes = func(*store.Store, context.Context) (map[string]time.Time, error) { return nil, errors.New("no meta") }
 	code, out, errOut := e.run("--max-age", "0", "calendar", "--limit", "200", "--from", "2023-11-20", "--to", "2023-11-26")
-	got := asStrings(decode(t, out)["notices"])
+	got := outlookNotices(decode(t, out))
 	if code != 0 || len(got) != 1 || strings.Contains(got[0], "last read") {
 		t.Fatalf("%d %v %s", code, got, errOut)
 	}
