@@ -3,10 +3,14 @@
 package outlookowa
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestDefaultRootWindows(t *testing.T) {
@@ -78,5 +82,84 @@ func TestWindowsIdentityErrorsAreFixed(t *testing.T) {
 		if _, err := sourceIdentity(path, nil); err == nil || err.Error() != "outlookowa: source_unreadable" {
 			t.Fatalf("identity error was not fixed: %v", err)
 		}
+	}
+}
+
+func TestWindowsHandleInformationFailureClosesHandleAndRetries(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(file, []byte("synthetic metadata"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := sourceHandleInfo
+	var handle windows.Handle
+	sourceHandleInfo = func(h windows.Handle, info *windows.ByHandleFileInformation) error {
+		handle = h
+		if err := old(h, info); err != nil {
+			return err
+		}
+		return fs.ErrPermission
+	}
+	t.Cleanup(func() { sourceHandleInfo = old })
+	if id, err := sourceIdentity(file, nil); id != "" || !errors.Is(err, fs.ErrPermission) || err.Error() != "outlookowa: source_unreadable" {
+		t.Fatalf("native handle fault returned identity or unsafe diagnostic: %q %v", id, err)
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+		t.Fatalf("failed identity left its native handle open: %v", err)
+	}
+	sourceHandleInfo = old
+	if id, err := sourceIdentity(file, nil); err != nil || id == "" {
+		t.Fatalf("identity failure blocked later eligible read: %q %v", id, err)
+	}
+}
+
+func TestFingerprintRejectsReparseReplacementAfterValidation(t *testing.T) {
+	restoreSourceIO(t)
+	p := fixtureProfile(t, sourceTempDir(t), "Default", "mail", false)
+	current := filepath.Join(p.Source.LevelDBDir, "CURRENT")
+	content, err := os.ReadFile(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	linked := false
+	restore := func() {
+		if linked {
+			if err := os.Remove(current); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(current, content, 0o600); err != nil {
+				t.Error(err)
+			}
+			linked = false
+		}
+	}
+	t.Cleanup(restore)
+	walk := sourceWalkDir
+	validated := false
+	sourceWalkDir = func(path string, fn fs.WalkDirFunc) error {
+		if !validated {
+			err := walk(path, fn)
+			validated = true
+			return err
+		}
+		if err := os.Remove(current); err != nil {
+			return err
+		}
+		out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", current, target).CombinedOutput()
+		if err != nil {
+			t.Fatalf("controlled concurrent junction: %v %s", err, out)
+		}
+		linked = true
+		return walk(path, fn)
+	}
+	fp, fresh, err := Fingerprint(p)
+	if err == nil || err.Error() != "outlookowa: unsafe_source" || fp != "" || !fresh.IsZero() {
+		t.Fatalf("concurrent reparse entry vouched for a fingerprint: %q %v %v", fp, fresh, err)
+	}
+	restore()
+	sourceWalkDir = walk
+	if fp, _, err := Fingerprint(p); err != nil || fp == "" {
+		t.Fatalf("restored controlled source cannot retry: %q %v", fp, err)
 	}
 }

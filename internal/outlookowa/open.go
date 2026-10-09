@@ -6,11 +6,17 @@ import (
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 )
 
+var (
+	mailCensus   = indexeddb.Census
+	mailOpenWith = indexeddb.OpenWith
+	mailClose    = (*indexeddb.Origin).Close
+)
+
 func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	_, dbs, err := indexeddb.Census(leveldbDir)
+	_, dbs, err := mailCensus(leveldbDir)
 	if err != nil {
 		return nil, sourceFailure("metadata_unreadable", err)
 	}
@@ -21,14 +27,14 @@ func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	o, err := indexeddb.OpenWith(leveldbDir, blobDir, indexeddb.OpenOptions{KeepStore: func(dbID, storeID int64) bool {
+	o, err := mailOpenWith(leveldbDir, blobDir, indexeddb.OpenOptions{KeepStore: func(dbID, storeID int64) bool {
 		return dbID == db.ID && (storeID == stores["folders"] || storeID == stores["messages"] || storeID == stores["messageBodies"])
 	}})
 	if err != nil {
 		return nil, sourceFailure("records_unreadable", err)
 	}
 	if err := ctx.Err(); err != nil {
-		_ = o.Close()
+		_ = mailClose(o)
 		return nil, err
 	}
 	return o, nil

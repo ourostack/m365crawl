@@ -9,6 +9,7 @@ import (
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/outlookmail"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
@@ -17,10 +18,11 @@ import (
 )
 
 func defaultOutlookRoot() (string, error) {
-	if runtime.GOOS == "windows" {
-		return outlookowa.DefaultRoot()
+	root, err := outlookOWADefaultRoot()
+	if errors.Is(err, outlookdesktop.ErrNotSupported) {
+		return outlookdesktop.DefaultRoot()
 	}
-	return outlookdesktop.DefaultRoot()
+	return root, err
 }
 
 // Explicit copied OWA roots work everywhere; explicit HxStore roots keep the old route.
@@ -33,7 +35,7 @@ func (r *runner) outlookOWARoute(root string) (bool, error) {
 	if len(hx)+len(classic)+len(hxSkipped) > 0 || hxErr != nil {
 		return false, nil
 	}
-	profiles, skipped, err := outlookowa.Discover(root)
+	profiles, skipped, err := outlookOWADiscover(root)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false, owaSourceError(err)
 	}
@@ -49,7 +51,7 @@ func (r *runner) outlookOWASources(ctx context.Context, _ *Report) []outlookOutc
 			return []outlookOutcome{{key: "outlook", err: owaSourceError(err)}}
 		}
 	}
-	profiles, skipped, err := outlookowa.Discover(root)
+	profiles, skipped, err := outlookOWADiscover(root)
 	if err != nil {
 		if r.o.OutlookImplicit && errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -197,12 +199,12 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 
 // The Origin closes before this returns, so the caller can then remove the private snapshot.
 func collectOWAMail(ctx context.Context, snap, account string, expect bool) (res outlookowa.Result, err error) {
-	o, err := outlookowa.Open(ctx, filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
+	o, err := outlookOWAOpen(ctx, filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
 	if err != nil {
 		return res, err
 	}
 	defer func() {
-		if closeErr := o.Close(); closeErr != nil && err == nil {
+		if closeErr := outlookOWAClose(o); closeErr != nil && err == nil {
 			err = errors.New("outlookowa: close_failed")
 		}
 	}()
@@ -238,6 +240,10 @@ func owaSourceError(err error) error {
 
 var (
 	outlookOWAFingerprint = outlookowa.Fingerprint
+	outlookOWADefaultRoot = outlookowa.DefaultRoot
+	outlookOWADiscover    = outlookowa.Discover
+	outlookOWAOpen        = outlookowa.Open
+	outlookOWAClose       = (*indexeddb.Origin).Close
 	outlookOWASnapshot    = teamsdesktop.Snapshot
 	outlookOWARecordRun   = func(ctx context.Context, st *store.Store, run store.Run) error { return st.RecordRun(ctx, run) }
 )

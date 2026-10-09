@@ -2,8 +2,8 @@
 
 package outlookowa
 
-import "errors"
+import "github.com/ourostack/m365crawl/internal/outlookdesktop"
 
 func DefaultRoot() (string, error) {
-	return "", errors.New("outlookowa: default_root_not_supported")
+	return "", outlookdesktop.ErrNotSupported
 }

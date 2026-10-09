@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -12,9 +13,15 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
+	gl "github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 func owaRoot(t *testing.T, variant string) string {
@@ -357,6 +364,8 @@ func TestSyncOWADatabaseFailuresCannotVouchForRead(t *testing.T) {
 				o.OutlookMinReadInterval = 0
 				now = now.Add(time.Minute)
 			}
+			var progress bytes.Buffer
+			o.Progress = &progress
 			r, _, err := Run(context.Background(), o)
 			m := sourceKeyed(t, r, "outlook|Default|mail")
 			if err == nil || m.Status != StatusFailed || m.Error.Code != errs.CodeDBError || count(t, db, `select count(*) from mail_messages`) != 5 {
@@ -364,6 +373,9 @@ func TestSyncOWADatabaseFailuresCannotVouchForRead(t *testing.T) {
 			}
 			if tc.name != "clear-read" && count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 {
 				t.Fatal("archive failure left read marker")
+			}
+			if tc.name == "clear-read" && !strings.Contains(progress.String(), "could not record the mail failure") {
+				t.Fatal("refusal of both marker writes silently hid the persistence limitation")
 			}
 		})
 	}
@@ -488,5 +500,314 @@ func TestSyncOWASourceDisappearingAfterCopyIsRetryable(t *testing.T) {
 	r, _ = run(t, o)
 	if sourceKeyed(t, r, "outlook|Default|mail").Status != StatusOK {
 		t.Fatal("disappeared source was marked read")
+	}
+}
+
+func TestDefaultOutlookRootDispatchesUnsupportedProviderAndErrors(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(local, "AppData", "Local"))
+	t.Setenv("HOME", local)
+	t.Setenv("USERPROFILE", local)
+	old := outlookOWADefaultRoot
+	t.Cleanup(func() { outlookOWADefaultRoot = old })
+	outlookOWADefaultRoot = func() (string, error) { return "", outlookdesktop.ErrNotSupported }
+	root, err := defaultOutlookRoot()
+	if runtime.GOOS == "darwin" {
+		if err != nil || root == "" {
+			t.Fatalf("legacy provider did not supply its default: %q %v", root, err)
+		}
+	} else if root != "" || !errors.Is(err, outlookdesktop.ErrNotSupported) {
+		t.Fatalf("unsupported OWA provider did not delegate to real legacy provider: %q %v", root, err)
+	}
+	denied := errors.New("synthetic provider root unavailable")
+	outlookOWADefaultRoot = func() (string, error) { return "", denied }
+	if root, err := defaultOutlookRoot(); root != "" || !errors.Is(err, denied) {
+		t.Fatalf("provider failure was replaced by another default: %q %v", root, err)
+	}
+}
+
+func tableOWARoot(t *testing.T) string {
+	t.Helper()
+	root := owaRoot(t, "mail")
+	p := owaProfile(root)
+	src, err := leveldb.Load(p.Source.LevelDBDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string][]byte{}
+	if err := src.Scan(nil, func(k, v []byte) error {
+		values[string(k)] = append([]byte(nil), v...)
+		return nil
+	}); err != nil {
+		_ = src.Close()
+		t.Fatal(err)
+	}
+	if err := src.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(p.Source.LevelDBDir, p.Source.LevelDBDir+".original-log-copy"); err != nil {
+		t.Fatal(err)
+	}
+	w, err := gl.OpenFile(p.Source.LevelDBDir, &opt.Options{Compression: opt.SnappyCompression, BlockSize: 2048})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range values {
+		if err := w.Put([]byte(k), v, nil); err != nil {
+			_ = w.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := w.CompactRange(util.Range{}); err != nil {
+		_ = w.Close()
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func owaHeaderStore(t *testing.T, o *indexeddb.Origin) (int64, int64) {
+	t.Helper()
+	dbs, err := o.Databases()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, db := range dbs {
+		if strings.HasPrefix(db.Name, "owa-offline-data-") {
+			for _, s := range db.Stores {
+				if s.Name == "messages" {
+					return db.ID, s.ID
+				}
+			}
+		}
+	}
+	t.Fatal("synthetic header metadata missing")
+	return 0, 0
+}
+
+func TestSyncOWALazyOriginClosesBeforeCleanupIncludingCloseFailure(t *testing.T) {
+	for _, failClose := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "close-error"}[failClose], func(t *testing.T) {
+			tmp := isolateTmp(t)
+			root, db := tableOWARoot(t), newDB(t)
+			o := outlookOpts(db, root)
+			run(t, o)
+			o.FullRead = true
+			oldOpen, oldClose, oldCopy := outlookOWAOpen, outlookOWAClose, outlookOWASnapshot
+			t.Cleanup(func() { outlookOWAOpen, outlookOWAClose, outlookOWASnapshot = oldOpen, oldClose, oldCopy })
+			var origin *indexeddb.Origin
+			var dbID, storeID int64
+			outlookOWAOpen = func(ctx context.Context, dir, blob string) (*indexeddb.Origin, error) {
+				result, err := oldOpen(ctx, dir, blob)
+				if err == nil {
+					origin = result
+					dbID, storeID = owaHeaderStore(t, result)
+				}
+				return result, err
+			}
+			outlookOWAClose = func(origin *indexeddb.Origin) error {
+				large := false
+				err := origin.Records(dbID, storeID, func(r indexeddb.Record) error {
+					large = large || len(r.Raw) >= leveldb.LazyMin()
+					return nil
+				})
+				if err != nil || !large || origin.Stats().Tables == 0 {
+					t.Errorf("no real lazy table read before close: %v", err)
+				}
+				if err := oldClose(origin); err != nil {
+					return err
+				}
+				if failClose {
+					return errors.New("synthetic private close failure")
+				}
+				return nil
+			}
+			outlookOWASnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+				dir, cleanup, err := oldCopy(ctx, source)
+				return dir, func() {
+					if origin == nil {
+						t.Error("snapshot cleanup preceded origin opening")
+					} else if err := origin.Records(dbID, storeID, func(indexeddb.Record) error { return nil }); !errors.Is(err, leveldb.ErrClosed) {
+						t.Errorf("snapshot cleanup preceded actual lazy-origin closure: %v", err)
+					}
+					cleanup()
+					if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("closed snapshot cleanup failed: %v", err)
+					}
+				}, err
+			}
+			r, _, err := Run(context.Background(), o)
+			m := sourceKeyed(t, r, "outlook|Default|mail")
+			if failClose {
+				if err == nil || m.Status != StatusFailed || m.Error.Code != CodeOutlookProfileUnreadable || strings.Contains(m.Error.Message, "private") {
+					t.Fatalf("failed close looked successful or leaked: %+v %v", m, err)
+				}
+				if count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 || count(t, db, `select count(*) from mail_absent`) != 0 {
+					t.Fatal("failed close vouched for read/absence")
+				}
+			} else if err != nil || m.Status != StatusOK {
+				t.Fatalf("real table read failed: %+v %v", m, err)
+			}
+			if count(t, db, `select count(*) from mail_messages`) != 5 || len(snapshotDirs(t, tmp)) != 0 {
+				t.Fatal("close path damaged archive or leaked private snapshot")
+			}
+			outlookOWAOpen, outlookOWAClose, outlookOWASnapshot = oldOpen, oldClose, oldCopy
+			o.FullRead = false
+			next, _ := run(t, o)
+			want := StatusUnchanged
+			if failClose {
+				want = StatusOK
+			}
+			if sourceKeyed(t, next, "outlook|Default|mail").Status != want {
+				t.Fatal("close outcome produced the wrong next eligible read")
+			}
+		})
+	}
+}
+
+func TestSyncOWAFirstFingerprintAndMailHoldsFaultsRetry(t *testing.T) {
+	for _, where := range []string{"first-fingerprint", "mail-holds"} {
+		t.Run(where, func(t *testing.T) {
+			tmp := isolateTmp(t)
+			root, db := owaRoot(t, "mail"), newDB(t)
+			o := outlookOpts(db, root)
+			run(t, o)
+			o.FullRead = true
+			fp, copy := outlookOWAFingerprint, outlookOWASnapshot
+			t.Cleanup(func() { outlookOWAFingerprint, outlookOWASnapshot = fp, copy })
+			var restore func()
+			if where == "first-fingerprint" {
+				outlookOWAFingerprint = func(p outlookowa.Profile) (string, time.Time, error) {
+					moved := p.Source.LevelDBDir + ".synthetic-moved"
+					if err := os.Rename(p.Source.LevelDBDir, moved); err != nil {
+						return "", time.Time{}, err
+					}
+					restore = func() {
+						if err := os.Rename(moved, p.Source.LevelDBDir); err != nil {
+							t.Error(err)
+						}
+					}
+					return fp(p)
+				}
+			} else {
+				raw := openRaw(t, db)
+				outlookOWASnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+					dir, cleanup, err := copy(ctx, source)
+					if err != nil {
+						return dir, cleanup, err
+					}
+					if _, err := raw.Exec(`alter table mail_messages rename column account to synthetic_broken_account`); err != nil {
+						cleanup()
+						return "", func() {}, err
+					}
+					return dir, func() {
+						if _, err := raw.Exec(`alter table mail_messages rename column synthetic_broken_account to account`); err != nil {
+							t.Error(err)
+						}
+						cleanup()
+					}, nil
+				}
+			}
+			r, _, err := Run(context.Background(), o)
+			if restore != nil {
+				restore()
+			}
+			m := sourceKeyed(t, r, "outlook|Default|mail")
+			want := CodeOutlookProfileUnreadable
+			if where == "mail-holds" {
+				want = errs.CodeDBError
+			}
+			if err == nil || m.Status != StatusFailed || m.Error.Code != want || count(t, db, `select count(*) from mail_messages`) != 5 {
+				t.Fatalf("source/database boundary failed unsafely: %+v %v", m, err)
+			}
+			if count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 || count(t, db, `select count(*) from mail_absent`) != 0 || len(snapshotDirs(t, tmp)) != 0 {
+				t.Fatal("failed boundary vouched for read/absence or leaked a snapshot")
+			}
+			outlookOWAFingerprint, outlookOWASnapshot = fp, copy
+			o.FullRead = false
+			if next, _ := run(t, o); sourceKeyed(t, next, "outlook|Default|mail").Status != StatusOK {
+				t.Fatal("failed boundary made next eligible read skip")
+			}
+		})
+	}
+}
+
+func TestSyncOWACancellationBeforeSubsequentProfileDoesNotReadIt(t *testing.T) {
+	tmp := isolateTmp(t)
+	root, db := owaRoot(t, "mail"), newDB(t)
+	copyTree(t, filepath.Join(root, "Default"), filepath.Join(root, "Second"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	old := outlookOWASnapshot
+	outlookOWASnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		dir, cleanup, err := old(ctx, source)
+		cancel()
+		return dir, cleanup, err
+	}
+	t.Cleanup(func() { outlookOWASnapshot = old })
+	r := runner{o: outlookOpts(db, root), st: st}
+	out := r.outlookOWASources(ctx, &Report{})
+	if len(out) != 2 || !errors.Is(out[0].err, context.Canceled) || !errors.Is(out[1].err, context.Canceled) || out[1].key != "outlook|Second|mail" {
+		t.Fatalf("cancellation did not stop the subsequent source: %+v", out)
+	}
+	if count(t, db, `select count(*) from meta where key='outlook_last_attempt:Second' or key like 'outlook_mail_read:%'`) != 0 || count(t, db, `select count(*) from mail_messages`) != 0 || len(snapshotDirs(t, tmp)) != 0 {
+		t.Fatal("subsequent profile was attempted/read or cancellation leaked resources")
+	}
+}
+
+func TestOWADefaultResolutionErrorAndEmptyRootAreExplicit(t *testing.T) {
+	isolateTmp(t)
+	old := outlookDefaultRoot
+	t.Cleanup(func() { outlookDefaultRoot = old })
+	st, err := store.Open(context.Background(), newDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	r := runner{st: st}
+	outlookDefaultRoot = func() (string, error) { return "", errors.New("synthetic private provider error") }
+	out := r.outlookOWASources(context.Background(), &Report{})
+	if len(out) != 1 || out[0].err == nil || codedOf(out[0].err).Code != CodeOutlookProfileUnreadable || strings.Contains(out[0].err.Error(), "private") {
+		t.Fatalf("default resolver failure hidden or leaked: %+v", out)
+	}
+	root := t.TempDir()
+	outlookDefaultRoot = func() (string, error) { return root, nil }
+	out = r.outlookOWASources(context.Background(), &Report{})
+	if len(out) != 1 || out[0].key != "outlook" || codedOf(out[0].err).Code != CodeNoOutlookProfiles {
+		t.Fatalf("explicit empty default source succeeded: %+v", out)
+	}
+}
+
+func TestSyncOWAFormatProbeRefusalIsNotAnEmptySuccess(t *testing.T) {
+	isolateTmp(t)
+	root, db := owaRoot(t, "mail"), newDB(t)
+	o := outlookOpts(db, root)
+	run(t, o)
+	old := outlookOWADiscover
+	outlookOWADiscover = func(path string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
+		profiles, skipped, err := old(path)
+		if err == nil {
+			return nil, nil, os.ErrPermission
+		}
+		return profiles, skipped, err
+	}
+	t.Cleanup(func() { outlookOWADiscover = old })
+	r, _, err := Run(context.Background(), o)
+	if err == nil || sourceKeyed(t, r, "outlook").Error.Code != CodeOutlookProfileUnreadable {
+		t.Fatalf("format probe error became a silent HxStore/empty fallback: %+v %v", r.Sources, err)
+	}
+	probe := runner{o: o}
+	if probe.outlookPresent() {
+		t.Fatal("failed format probe claimed readable source availability")
+	}
+	if count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 {
+		t.Fatal("format-probe failure changed cached mail or inferred absence")
 	}
 }

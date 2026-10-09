@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var sourceHandleInfo = windows.GetFileInformationByHandle
+
 func unsafeEntry(info os.FileInfo) bool {
 	attr, ok := info.Sys().(*syscall.Win32FileAttributeData)
 	return info.Mode()&os.ModeSymlink != 0 || !ok || attr.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0
@@ -26,7 +28,7 @@ func sourceIdentity(path string, _ os.FileInfo) (string, error) {
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+	if err := sourceHandleInfo(h, &info); err != nil {
 		return "", sourceFailure("source_unreadable", err)
 	}
 	if info.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {

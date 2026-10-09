@@ -22,7 +22,13 @@ type SkippedProfile struct {
 	Err               error
 }
 
-var sourceReadDir = os.ReadDir
+var (
+	sourceReadDir   = os.ReadDir
+	sourceLstat     = os.Lstat
+	sourceAbs       = filepath.Abs
+	sourceWalkDir   = filepath.WalkDir
+	sourceEntryInfo = func(e fs.DirEntry) (fs.FileInfo, error) { return e.Info() }
+)
 
 const (
 	levelDBSuffix = ".indexeddb.leveldb"
@@ -55,7 +61,7 @@ func Discover(root string) (profiles []Profile, skipped []SkippedProfile, err er
 	}
 	for _, e := range ents {
 		dir := filepath.Join(root, e.Name())
-		info, err := os.Lstat(dir)
+		info, err := sourceLstat(dir)
 		if err == nil && info.Mode().IsRegular() {
 			continue
 		}
@@ -80,7 +86,7 @@ func Discover(root string) (profiles []Profile, skipped []SkippedProfile, err er
 
 func discoverSource(p Profile) (teamsdesktop.Source, string, error) {
 	idb := filepath.Join(p.Dir, "IndexedDB")
-	if _, err := os.Lstat(idb); errors.Is(err, fs.ErrNotExist) {
+	if _, err := sourceLstat(idb); errors.Is(err, fs.ErrNotExist) {
 		return teamsdesktop.Source{}, "", nil
 	}
 	if err := validatePath(idb, true); err != nil {
@@ -108,7 +114,7 @@ func discoverSource(p Profile) (teamsdesktop.Source, string, error) {
 	}
 	s := teamsdesktop.Source{Profile: p.Name, Origin: origins[0], LevelDBDir: filepath.Join(idb, origins[0]+levelDBSuffix)}
 	blob := filepath.Join(idb, origins[0]+blobSuffix)
-	if _, err := os.Lstat(blob); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := sourceLstat(blob); !errors.Is(err, fs.ErrNotExist) {
 		if err != nil {
 			return teamsdesktop.Source{}, "unreadable", sourceFailure("profile_unreadable", err)
 		}
@@ -136,11 +142,11 @@ func ValidateSource(s teamsdesktop.Source) error {
 		if err := validatePath(dir, true); err != nil {
 			return err
 		}
-		err := filepath.WalkDir(dir, func(path string, e fs.DirEntry, err error) error {
+		err := sourceWalkDir(dir, func(path string, e fs.DirEntry, err error) error {
 			if err != nil {
 				return sourceFailure("source_unreadable", err)
 			}
-			info, err := e.Info()
+			info, err := sourceEntryInfo(e)
 			if err != nil {
 				return sourceFailure("source_unreadable", err)
 			}
@@ -158,12 +164,12 @@ func ValidateSource(s teamsdesktop.Source) error {
 
 // Check every ancestor as well: Lstat of a child alone follows a junction in its parent.
 func validatePath(path string, directory bool) error {
-	absolute, err := filepath.Abs(path)
+	absolute, err := sourceAbs(path)
 	if err != nil {
 		return sourceFailure("source_unreadable", err)
 	}
 	for current := absolute; ; current = filepath.Dir(current) {
-		info, err := os.Lstat(current)
+		info, err := sourceLstat(current)
 		if err != nil {
 			return sourceFailure("source_unreadable", err)
 		}

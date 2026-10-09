@@ -13,7 +13,11 @@ import (
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
-var mapperVersion = MapperVersion
+var (
+	mapperVersion       = MapperVersion
+	fingerprintIdentity = sourceIdentity
+	fingerprintRel      = filepath.Rel
+)
 
 // Fingerprint includes source identity, eligible metadata and decoder/rules/mapper versions.
 // FreshAt is the latest eligible source file write, never the copy or sync time.
@@ -27,25 +31,25 @@ func Fingerprint(p Profile) (string, time.Time, error) {
 		if d.dir == "" {
 			continue
 		}
-		err := filepath.WalkDir(d.dir, func(path string, e fs.DirEntry, err error) error {
+		err := sourceWalkDir(d.dir, func(path string, e fs.DirEntry, err error) error {
 			if err != nil {
 				return sourceFailure("source_unreadable", err)
 			}
 			if !e.IsDir() && (e.Name() == "LOCK" || strings.HasPrefix(e.Name(), "LOG")) {
 				return nil
 			}
-			info, err := e.Info()
+			info, err := sourceEntryInfo(e)
 			if err != nil {
 				return sourceFailure("source_unreadable", err)
 			}
 			if unsafeEntry(info) || !info.IsDir() && !info.Mode().IsRegular() {
 				return sourceFailure("unsafe_source", nil)
 			}
-			id, err := sourceIdentity(path, info)
+			id, err := fingerprintIdentity(path, info)
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(d.dir, path)
+			rel, err := fingerprintRel(d.dir, path)
 			if err != nil {
 				return sourceFailure("source_unreadable", err)
 			}
