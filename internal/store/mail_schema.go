@@ -1,6 +1,6 @@
 package store
 
-// mailSchemaDDL is the mail archive (schema version 6). Times are UTC text in timeLayout, like the
+// mailSchemaDDL is the mail archive (schema version 8). Times are UTC text in timeLayout, like the
 // rest of the archive. A message is identified by (account, detail_key); the unique key lets a
 // re-keyed row (see CommitMail) keep its rowid, which mail_fts, mail_recipients and mail_attachments
 // all use. subject_norm compares without regard to ASCII case, so the thread fallback and its
@@ -22,6 +22,7 @@ create table if not exists mail_messages(
   account text not null,
   detail_key integer not null,
   internet_message_id text not null default '',
+  conversation_id text not null default '',
   folder_key integer not null,
   to_me integer not null default 0,
   subject text not null default '',
@@ -61,6 +62,7 @@ create table if not exists mail_recipients(
   name text not null default '',
   address text,
   kind_raw integer not null default 0,
+  role text check(role in ('to','cc','bcc')),
   primary key(message_rowid, ord)
 );
 create table if not exists mail_attachments(
@@ -91,4 +93,12 @@ create table if not exists mail_absent(
   primary key(account, detail_key)
 );
 create virtual table if not exists mail_fts using fts5(subject, sender_name, sender_address, body_text);
+create table if not exists mail_source_ids(
+  account text not null,
+  kind text not null check(kind in ('message','folder','attachment')),
+  source_id text not null,
+  key integer not null check(typeof(key)='integer' and key between 1 and 4294967295),
+  primary key(account, kind, source_id),
+  unique(account, kind, key)
+);
 `

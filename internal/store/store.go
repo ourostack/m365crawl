@@ -126,13 +126,18 @@ var chmodFile = os.Chmod
 // columns themselves and adds each missing one on its own, so an archive that a crash left with
 // only one of the two version 4 columns repairs itself on the next open. All of its statements run
 // in one transaction (SQLite's ALTER TABLE is transactional), so a failure keeps none of them.
+// Version 8 adds mail conversation ids and recipient roles. Its conversation index is created
+// here, after the column exists, because the schema DDL runs before migration on old archives.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has, digest, redacted int
+	var old, has, digest, redacted, conversation, role, conversationIndex int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
   (select count(*) from pragma_table_info('records') where name='raw_digest'),
-  (select count(*) from pragma_table_info('records') where name='value_redacted')`).Scan(&old, &has, &digest, &redacted); err != nil {
+  (select count(*) from pragma_table_info('records') where name='value_redacted'),
+  (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
+  (select count(*) from pragma_table_info('mail_recipients') where name='role'),
+  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex); err != nil {
 		return err
 	}
 	var stmts []string
@@ -149,6 +154,15 @@ func (s *Store) migrate(ctx context.Context) error {
 		stmts = append(stmts, `alter table sync_runs add column accounts_json text`,
 			// Runs recorded before run-level rows existed counted for every account; keep them that way.
 			`update sync_runs set accounts_json = '["*"]' where status in `+successStatuses)
+	}
+	if conversation == 0 {
+		stmts = append(stmts, `alter table mail_messages add column conversation_id text not null default ''`)
+	}
+	if role == 0 {
+		stmts = append(stmts, `alter table mail_recipients add column role text check(role in ('to','cc','bcc'))`)
+	}
+	if conversationIndex == 0 {
+		stmts = append(stmts, `create index if not exists mail_messages_conversation on mail_messages(account, conversation_id)`)
 	}
 	if len(stmts) == 0 {
 		return nil
@@ -177,18 +191,25 @@ func (s *Store) runInTx(ctx context.Context, stmts []string) (err error) {
 
 // NeedsUpgrade reports an archive written before run-level sync_runs rows existed: it has no
 // sync_runs.accounts_json column, and only a writable open (the next sync) adds it. Reads work on
-// such an archive and treat it as having no complete sync yet. The answer is cached per open.
+// such an archive and treat it as having no complete sync yet. It also reports missing schema-8
+// mail columns, identity table or conversation index. The answer is cached per open.
 func (s *Store) NeedsUpgrade(ctx context.Context) (bool, error) {
 	if s.upgrade == 0 {
-		var cols, has int
-		if err := s.db.QueryRowContext(ctx, `select count(*), count(case when name='accounts_json' then 1 end) from pragma_table_info('sync_runs')`).Scan(&cols, &has); err != nil {
+		var cols, has, conversation, role, identities, conversationIndex int
+		if err := s.db.QueryRowContext(ctx, `select
+  (select count(*) from pragma_table_info('sync_runs')),
+  (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
+  (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
+  (select count(*) from pragma_table_info('mail_recipients') where name='role'),
+  (select count(*) from sqlite_master where type='table' and name='mail_source_ids'),
+  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation')`).Scan(&cols, &has, &conversation, &role, &identities, &conversationIndex); err != nil {
 			return false, err
 		}
 		if cols == 0 {
 			return false, errors.New("no such table: sync_runs")
 		}
 		s.upgrade = 1
-		if has == 0 {
+		if has == 0 || conversation == 0 || role == 0 || identities == 0 || conversationIndex == 0 {
 			s.upgrade = 2
 		}
 	}

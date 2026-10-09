@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -293,8 +294,8 @@ func TestSchemaMigratesV2ToV3(t *testing.T) {
 		t.Fatalf("open v2 archive: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select version from schema_migrations`); v != SchemaVersion || SchemaVersion != 7 {
-		t.Fatalf("version %d, want 7", v)
+	if v := rowCount(t, s, `select version from schema_migrations`); v != SchemaVersion {
+		t.Fatalf("version %d, want %d", v, SchemaVersion)
 	}
 	if n := rowCount(t, s, `select count(*) from sqlite_master where name in ('records','records_db_store','records_updated')`); n != 3 {
 		t.Fatalf("records table and index: %d", n)
@@ -314,14 +315,14 @@ func TestArchiveNewerThanThisBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 8`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = ?`, SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
 	_, err = Open(ctx, path)
 	var coded *errs.Coded
-	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, "schema version 8") {
-		t.Fatalf("Open of a v8 archive = %v, want archive_newer", err)
+	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, fmt.Sprintf("schema version %d", SchemaVersion+1)) {
+		t.Fatalf("Open of a newer archive = %v, want archive_newer", err)
 	}
 }
 
@@ -332,14 +333,14 @@ func TestOpenReadOnlyRefusesANewerArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 8`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = ?`, SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
 	_, err = OpenReadOnly(ctx, path)
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer {
-		t.Fatalf("OpenReadOnly of a v8 archive = %v, want archive_newer", err)
+		t.Fatalf("OpenReadOnly of a newer archive = %v, want archive_newer", err)
 	}
 	if _, err := OpenReadOnly(ctx, filepath.Join(t.TempDir(), "none.db")); !errors.Is(err, ErrNoArchive) {
 		t.Fatalf("missing archive: %v", err)

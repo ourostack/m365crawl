@@ -12,7 +12,8 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 7 added the meeting transcript tables (transcripts_schema.go): the parts a sync derives
 // from the recording notices in messages, and what a fetch stores (see transcripts.go); an archive
 // at version 6 gains them, empty, on its next writable open.
-const SchemaVersion = 7
+// Version 8 adds native mail identity mappings, conversation ids and nullable recipient roles.
+const SchemaVersion = 8
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as

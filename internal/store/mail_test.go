@@ -136,7 +136,7 @@ func TestOpenRefusesAnArchiveFromANewerSchemaWithMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`update schema_migrations set version = 8`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version = ?`, SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
