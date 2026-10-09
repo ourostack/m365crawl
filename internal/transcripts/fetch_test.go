@@ -26,6 +26,7 @@ type fakePage struct {
 	mu          sync.Mutex
 	host        string
 	landOn      map[string]string // navigated host -> host the tab ends on; default: itself
+	landOnURL   map[string]string // navigated URL -> host the tab ends on; checked before landOn
 	navErr      map[string]error
 	onNavigate  func()
 	onHost      func()
@@ -37,7 +38,7 @@ type fakePage struct {
 }
 
 func newFakePage() *fakePage {
-	return &fakePage{landOn: map[string]string{}, navErr: map[string]error{}, results: map[string]func(context.Context) (ScriptResult, error){}}
+	return &fakePage{landOn: map[string]string{}, landOnURL: map[string]string{}, navErr: map[string]error{}, results: map[string]func(context.Context) (ScriptResult, error){}}
 }
 
 func (f *fakePage) Navigate(ctx context.Context, raw string) error {
@@ -49,7 +50,9 @@ func (f *fakePage) Navigate(ctx context.Context, raw string) error {
 	f.navigations = append(f.navigations, raw)
 	u, _ := url.Parse(raw)
 	f.host = u.Host
-	if to, ok := f.landOn[u.Host]; ok {
+	if to, ok := f.landOnURL[raw]; ok {
+		f.host = to
+	} else if to, ok := f.landOn[u.Host]; ok {
 		f.host = to
 	}
 	if err := f.navErr[u.Host]; err != nil {
@@ -177,7 +180,7 @@ func TestFetchGroupsByHostNavigatesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"https://a.sharepoint.example.invalid/", "https://b.sharepoint.example.invalid/"}
+	want := []string{"https://a.sharepoint.example.invalid/teams/site-a/", "https://b.sharepoint.example.invalid/teams/site-a/"}
 	if strings.Join(page.navigations, " ") != strings.Join(want, " ") {
 		t.Fatalf("navigations %v", page.navigations)
 	}
@@ -196,6 +199,38 @@ func TestFetchGroupsByHostNavigatesOnce(t *testing.T) {
 	if a := page.evals[3]; a.Base != "https://b.sharepoint.example.invalid/teams/site-a/_api/v2.1/drives/b!d1/items/I2" || a.TranscriptID != "tr-I2" ||
 		a.MaxBytes != DefaultMaxBytes || strings.Join(a.LoginHosts, ",") != strings.Join(LoginHosts, ",") {
 		t.Fatalf("args %+v", a)
+	}
+}
+
+func TestFetchLandsOnThePartsSite(t *testing.T) {
+	// A OneDrive host's bare root sends the tab off the host (to the OneDrive web app or the
+	// Microsoft 365 home); its personal site keeps the tab on it. The host is opened once, on the
+	// first part's site, and every part on the host is fetched, whatever its own site.
+	const host = "contoso-my.sharepoint.example.invalid"
+	page := newFakePage()
+	page.landOn[host] = "www.office.example.invalid"
+	page.landOnURL["https://"+host+"/personal/ada_contoso_example/"] = host
+	first := tpart(host, "I1", 1)
+	first.SiteRoot, first.StorageKind = "/personal/ada_contoso_example", "MeetingOrganizerOneDrive"
+	second := tpart(host, "I2", 2)
+	second.SiteRoot, second.StorageKind = "/personal/bob_contoso_example", "MeetingCoOrganizerOneDrive"
+	var s saved
+	sum, err := newFetcher(page).Fetch(context.Background(), []Part{first, second}, s.save)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(page.navigations, " ") != "https://"+host+"/personal/ada_contoso_example/" {
+		t.Fatalf("navigations %v", page.navigations)
+	}
+	if sum.Fetched != 2 || sum.Failed != 0 || s.res["I1"].State != StateOK || s.res["I2"].State != StateOK {
+		t.Fatalf("summary %+v, saved %+v", sum, s.res)
+	}
+	if b := page.evals[1].Base; b != "https://"+host+"/personal/bob_contoso_example/_api/v2.1/drives/b!d1/items/I2" {
+		t.Fatalf("base %q", b)
+	}
+	// Opening the bare root, as v0.6.0 did, would have left the tab elsewhere.
+	if page.landOn[host] == host {
+		t.Fatal("the fake must send the bare root off the host")
 	}
 }
 
@@ -233,8 +268,9 @@ func TestFetchLandingWaitsForTheHost(t *testing.T) {
 }
 
 func TestFetchHostRedirectedElsewhere(t *testing.T) {
+	// The part's own site sends the tab off the host: its parts fail without running the script.
 	page := newFakePage()
-	page.landOn["a.sharepoint.example.invalid"] = "other.example.invalid"
+	page.landOnURL["https://a.sharepoint.example.invalid/teams/site-a/"] = "other.example.invalid"
 	page.navErr["c.sharepoint.example.invalid"] = errors.New("navigation failed: net::ERR_NAME_NOT_RESOLVED")
 	page.landOn["c.sharepoint.example.invalid"] = "" // the tab stays on its blank page
 	var s saved

@@ -169,9 +169,10 @@ func (f *Fetcher) progress(format string, a ...any) {
 	}
 }
 
-// Fetch fetches every part, host by host: it opens each host once, runs the script per part and
-// hands each result to save. A part that cannot be fetched is listed and never sent. A sign-in
-// page stops the run with transcripts_signin_required; parts already saved keep their state.
+// Fetch fetches every part, host by host: it opens each host once, on its first part's site, runs
+// the script per part and hands each result to save. A part that cannot be fetched is listed and
+// never sent. A sign-in page stops the run with transcripts_signin_required; parts already saved
+// keep their state.
 func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, FetchResult) error) (FetchSummary, error) {
 	f.defaults()
 	f.sum = &FetchSummary{}
@@ -200,7 +201,7 @@ func (f *Fetcher) Fetch(ctx context.Context, parts []Part, save func(Part, Fetch
 			return *sum, err
 		}
 		f.progress("opening SharePoint site %d of %d", hi+1, len(hosts))
-		reason, err := f.land(ctx, host)
+		reason, err := f.land(ctx, host, sum.Parts[byHost[host][0]].Part.SiteRoot)
 		if err != nil {
 			return *sum, f.stop(ctx, err)
 		}
@@ -261,13 +262,16 @@ func browserGone() error {
 // gone reports whether err says the browser itself went away.
 func (f *Fetcher) gone(err error) bool { return err != nil && f.Gone != nil && f.Gone(err) }
 
-// land opens https://<host>/ and waits until the tab settles on that host. It returns a reason
-// when the host's parts cannot be fetched, and transcripts_signin_required when the tab is left
-// on a sign-in page.
-func (f *Fetcher) land(ctx context.Context, host string) (string, error) {
+// land opens https://<host><siteRoot>/ and waits until the tab settles on that host. It opens a
+// site rather than the bare host because a OneDrive host's root sends the tab off the host, to
+// the OneDrive web app or the Microsoft 365 home, while its personal sites stay on it; the script
+// needs only the host's origin, so one site per host is enough. It returns a reason when the
+// host's parts cannot be fetched, and transcripts_signin_required when the tab is left on a
+// sign-in page.
+func (f *Fetcher) land(ctx context.Context, host, siteRoot string) (string, error) {
 	deadline := time.Now().Add(f.LandTimeout)
 	lctx, cancel := context.WithDeadline(ctx, deadline)
-	navErr := f.Page.Navigate(lctx, "https://"+host+"/")
+	navErr := f.Page.Navigate(lctx, "https://"+host+siteRoot+"/")
 	cancel()
 	if ctx.Err() != nil {
 		return "", ctx.Err()
