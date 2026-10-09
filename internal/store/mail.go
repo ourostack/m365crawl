@@ -136,6 +136,11 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 			newMessageIDs[m.MessageID]++
 		}
 	}
+	if b.RekeyAcrossFolders {
+		for _, key := range b.Result.SeenDetailKeys {
+			inBatch[key] = true
+		}
+	}
 	rekey := map[rekeyKey][]*mailExisting{}
 	live := 0
 	for _, k := range sortedMailKeys(byKey) {

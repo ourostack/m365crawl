@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -141,5 +142,35 @@ func TestMailWindowsSparseDetailLateFill(t *testing.T) {
 	got, err := s.MailGet(context.Background(), mailAcct, 101)
 	if err != nil || got.Rowid != before.Rowid || got.InternetMessageID != m.MessageID || got.ICalUID != "abcdef" || got.ConversationID != m.ConversationID || got.BodyState != outlookmail.BodyInline || len(got.Recipients) != 1 || got.Recipients[0].Role != "to" {
 		t.Fatalf("sparse detail failed to fill: %+v/%v", got, err)
+	}
+}
+
+func TestMailWindowsRekeyDoesNotConsumeSeenUnmappedHeader(t *testing.T) {
+	for _, folder := range []uint32{fInbox, fDeleted} {
+		for _, trusted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("folder=%d/trusted=%t", folder, trusted), func(t *testing.T) {
+				s := newStore(t)
+				old := mailMsg(101, fInbox, "<copies@example.test>", "seen preservation", 2)
+				mustCommitMail(t, s, mailBatch(mailT0, old))
+				before, err := s.MailGet(context.Background(), mailAcct, 101)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mapped := mailMsg(201, folder, old.MessageID, "another mapped header", 1)
+				b := mailBatch(mailT0.Add(time.Hour), mapped)
+				b.RekeyAcrossFolders, b.Trusted = true, trusted
+				b.Result.SeenDetailKeys = []uint32{101, 201}
+				if res := mustCommitMail(t, s, b); res.Added != 1 || res.Updated != 0 {
+					t.Fatalf("seen header consumed by re-key: %+v", res)
+				}
+				kept, err := s.MailGet(context.Background(), mailAcct, 101)
+				if err != nil || kept.Rowid != before.Rowid || kept.BodyText != before.BodyText || len(kept.Recipients) != 1 {
+					t.Fatalf("seen row/children changed: %+v/%v", kept, err)
+				}
+				if n := rowCount(t, s, `select count(*) from mail_fts where rowid=? and mail_fts match 'preservation'`, before.Rowid); n != 1 {
+					t.Fatal("seen header lost its text index")
+				}
+			})
+		}
 	}
 }

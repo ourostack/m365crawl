@@ -127,19 +127,23 @@ func mailEach(ctx context.Context, q mailQuerier, query string, args []any, fn f
 	return rows.Err()
 }
 
-const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, m.conversation_id, m.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), m.to_me,
+const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_id, %s, m.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), m.to_me,
   m.subject, m.subject_norm, m.sender_name, m.sender_address, m.preview, m.in_reply_to, m.received_at, m.sent_at, m.class, m.importance, m.ical_uid,
   m.is_read, m.read_state, m.flag, m.has_attachments, m.body_state, %s, m.first_seen_at, m.state_seen_at, m.gone_at, m.evicted_at`
 
 const mailJoin = ` left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key`
 
 func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any) ([]MailRow, error) {
+	conversationCol, roleCol, err := s.mailColumnNames(ctx)
+	if err != nil {
+		return nil, err
+	}
 	bodyCol := `''`
 	if body {
 		bodyCol = `m.body_text`
 	}
 	var out []MailRow
-	err := mailEach(ctx, s.db, fmt.Sprintf(mailSelect, bodyCol)+from, args, func(r *sql.Rows) error {
+	err = mailEach(ctx, s.db, fmt.Sprintf(mailSelect, conversationCol, bodyCol)+from, args, func(r *sql.Rows) error {
 		var m MailRow
 		var recv, sent, first, seen, gone, evicted sql.NullString
 		var isRead sql.NullInt64
@@ -160,11 +164,28 @@ func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any
 	if err != nil {
 		return nil, err
 	}
-	return out, s.mailChildren(ctx, out)
+	return out, s.mailChildren(ctx, out, roleCol)
+}
+
+func (s *Store) mailColumnNames(ctx context.Context) (string, string, error) {
+	var conversation, role int
+	if err := s.db.QueryRowContext(ctx, `select
+  (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
+  (select count(*) from pragma_table_info('mail_recipients') where name='role')`).Scan(&conversation, &role); err != nil {
+		return "", "", err
+	}
+	conversationCol, roleCol := "''", "NULL"
+	if conversation != 0 {
+		conversationCol = "m.conversation_id"
+	}
+	if role != 0 {
+		roleCol = "role"
+	}
+	return conversationCol, roleCol, nil
 }
 
 // mailChildren fills the recipients and attachments of rows.
-func (s *Store) mailChildren(ctx context.Context, rows []MailRow) error {
+func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -174,8 +195,8 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow) error {
 		at[r.Rowid] = i
 		ids[i] = fmt.Sprint(r.Rowid)
 	}
-	in := strings.Join(ids, ",")                                                                                                                                                                      // row ids are integers
-	err := mailEach(ctx, s.db, `select message_rowid, name, address, kind_raw, role from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: in is integers
+	in := strings.Join(ids, ",")                                                                                                                                                                             // row ids are integers
+	err := mailEach(ctx, s.db, `select message_rowid, name, address, kind_raw, `+roleCol+` from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: row ids are integers and roleCol is a fixed schema expression
 		var id int64
 		var rc MailRecipient
 		var addr, role sql.NullString
