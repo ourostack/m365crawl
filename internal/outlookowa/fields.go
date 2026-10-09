@@ -158,6 +158,11 @@ func mapMessage(v any, account string, r *Result) (Message, bool) {
 		h.Flag = "none"
 	case "flagged", "complete":
 		h.Flag = flag
+	default:
+		if flag != "" {
+			r.loss(outlookmail.CodeMailUnmapped)
+			r.Doubtful = true
+		}
 	}
 	if importance := strings.ToLower(r.text(v, "Importance")); importance != "" {
 		h.Importance = importance

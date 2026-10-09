@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/outlookmail"
 	"github.com/ourostack/m365crawl/internal/v8"
 )
 
@@ -259,5 +260,58 @@ func TestUnavailableBodyDoesNotCreateLoss(t *testing.T) {
 	b := mapBody(obj("NormalizedBody", obj("Value", "\xff")), &r)
 	if b.State != "none" || len(r.Losses) == 0 {
 		t.Fatal("invalid UTF-8 became inline HTML")
+	}
+}
+
+func TestMapUnsupportedFlagStatusIsLossy(t *testing.T) {
+	h := header("M", "F")
+	h.Keys = append(h.Keys, "Flag", "DateTimeReceived", "DateTimeSent")
+	h.Values = append(h.Values, obj("FlagStatus", "unobserved"), "2026-10-01T10:00:00Z", "2026-10-01T09:00:00Z")
+	r := Result{}
+	m, ok := mapMessage(h, "Synthetic", &r)
+	if !ok || m.Value.Flag != "unknown" || m.Value.Received.IsZero() || m.Value.Sent.IsZero() {
+		t.Fatal("unsupported optional flag must keep the otherwise valid header with unknown flag")
+	}
+	want := []outlookmail.Loss{{Code: outlookmail.CodeMailUnmapped, Count: 1}}
+	if !reflect.DeepEqual(r.Losses, want) {
+		t.Errorf("unsupported flag fixed loss: got %+v, want %+v", r.Losses, want)
+	}
+	if !r.Doubtful {
+		t.Fatal("unsupported nonempty flag must make attribution doubtful")
+	}
+}
+
+func TestMapFlagStatusCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		flag any
+		want string
+	}{
+		{"absent-flag", nil, "unknown"},
+		{"undefined-flag", v8.Undefined{}, "unknown"},
+		{"absent-status", obj(), "unknown"},
+		{"null-status", obj("FlagStatus", nil), "unknown"},
+		{"undefined-status", obj("FlagStatus", v8.Undefined{}), "unknown"},
+		{"empty-status", obj("FlagStatus", ""), "unknown"},
+		{"not-flagged", obj("FlagStatus", "NotFlagged"), "none"},
+		{"casefolded-not-flagged", obj("FlagStatus", "nOtFlAgGeD"), "none"},
+		{"flagged", obj("FlagStatus", "Flagged"), "flagged"},
+		{"casefolded-flagged", obj("FlagStatus", "fLaGgEd"), "flagged"},
+		{"complete", obj("FlagStatus", "Complete"), "complete"},
+		{"casefolded-complete", obj("FlagStatus", "cOmPlEtE"), "complete"},
+		{"existing-none-alias", obj("FlagStatus", "NONE"), "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := header("M", "F")
+			if tc.flag != nil {
+				h.Keys = append(h.Keys, "Flag")
+				h.Values = append(h.Values, tc.flag)
+			}
+			r := Result{}
+			m, ok := mapMessage(h, "Synthetic", &r)
+			if !ok || m.Value.Flag != tc.want || len(r.Losses) != 0 || r.Doubtful {
+				t.Fatalf("flag compatibility: mapped=%v, flag=%s, losses=%+v, doubtful=%v", ok, m.Value.Flag, r.Losses, r.Doubtful)
+			}
+		})
 	}
 }
