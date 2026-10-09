@@ -451,12 +451,15 @@ func signinHostOK(host string) bool {
 	return hostName.MatchString(host) && transcripts.IsSharePointHost(host)
 }
 
-// signinPagePath is a SharePoint page on the way to sign-in, not past it.
-var signinPagePath = regexp.MustCompile(`(?i)^/_layouts/15/(Authenticate|AccessDenied)\.aspx|^/_forms/`)
+// signinPagePath is a SharePoint page on the way to sign-in, not past it, at the host's root or
+// under a site. AccessDenied.aspx is not one: SharePoint shows it to a user it knows, who may lack
+// access to the site the window opened (another person's OneDrive), so the probe decides.
+var signinPagePath = regexp.MustCompile(`(?i)^(/(teams|sites|personal)/[^/]+)?(/_layouts/15/Authenticate\.aspx|/_forms/)`)
 
-// signinProbeJS asks the site's own API whether the session is signed in. It returns a boolean
-// and nothing else.
-const signinProbeJS = `(async () => { try { const r = await fetch("/_api/web?$select=Id", {headers: {accept: "application/json"}, credentials: "include", cache: "no-store"}); return r.status === 200 && (r.headers.get("content-type") || "").includes("json"); } catch (e) { return false; } })()`
+// signinProbeJS asks SharePoint's own API whether the session is signed in: the API of the site
+// the tab is on, then, when that does not answer, the host's root site, so a site the user may
+// not open still shows a signed-in session. It returns a boolean and nothing else.
+const signinProbeJS = `(async () => { const ok = async (site) => { try { const r = await fetch(site + "/_api/web?$select=Id", {headers: {accept: "application/json"}, credentials: "include", cache: "no-store"}); return r.status === 200 && (r.headers.get("content-type") || "").includes("json"); } catch (e) { return false; } }; const m = location.pathname.match(/^\/(teams|sites|personal)\/[^\/]+/i); return (m !== null && await ok(m[0])) || await ok(""); })()`
 
 func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 	host := strings.ToLower(strings.TrimSpace(c.Host))
@@ -465,11 +468,9 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 		u.Fix = "Pass the SharePoint host alone, such as <tenant>.sharepoint.com, with no scheme or path."
 		return u
 	}
-	if host == "" {
-		var err error
-		if host, err = rt.defaultSigninHost(); err != nil {
-			return err
-		}
+	host, site, err := rt.signinTarget(host)
+	if err != nil {
+		return err
 	}
 	exe, kind, err := findBrowser(c.Browser)
 	if err != nil {
@@ -479,7 +480,7 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 		return err
 	}
 	rt.progressLine(fmt.Sprintf("opening a visible %s window with m365crawl's own browser profile", browserName(kind)))
-	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: "https://" + host + "/"})
+	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: "https://" + host + site + "/"})
 	if err != nil {
 		return err
 	}
@@ -492,29 +493,54 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 	return rt.write("transcripts signin", &signinResult{SignedIn: true, Browser: string(kind), Next: "m365crawl transcripts fetch <meeting>"})
 }
 
-// defaultSigninHost is the host most fetchable parts in the archive live on.
-func (rt *runtime) defaultSigninHost() (string, error) {
-	u := errs.Usage("no transcript part in the archive names a SharePoint host, so transcripts signin needs --host")
-	u.Fix = "Run `m365crawl sync` so the archive lists the meeting recordings, or pass --host <tenant>.sharepoint.com."
-	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
-	if errors.Is(err, store.ErrNoArchive) {
-		return "", u
+// signinTarget says where the sign-in window opens: a host (the one given, or else the host most
+// fetchable parts in the archive live on) and a site on it. The site is the root of the host's
+// first fetchable part, as transcripts fetch opens it, because a OneDrive host's bare root sends
+// the window off the host; it is empty, the host's root, when the archive names no site there.
+func (rt *runtime) signinTarget(host string) (string, string, error) {
+	hosts, err := rt.archiveSigninHosts()
+	if host != "" { // the archive only refines where the given host opens
+		for _, h := range hosts {
+			if h.Host == host && transcripts.IsSiteRoot(h.SiteRoot) {
+				return host, h.SiteRoot, nil
+			}
+		}
+		return host, "", nil
 	}
 	if err != nil {
-		return "", errs.DBError(err)
+		return "", "", err
+	}
+	if len(hosts) == 0 || !signinHostOK(hosts[0].Host) {
+		u := errs.Usage("no transcript part in the archive names a SharePoint host, so transcripts signin needs --host")
+		u.Fix = "Run `m365crawl sync` so the archive lists the meeting recordings, or pass --host <tenant>.sharepoint.com."
+		return "", "", u
+	}
+	site := hosts[0].SiteRoot
+	if !transcripts.IsSiteRoot(site) {
+		site = ""
+	}
+	return hosts[0].Host, site, nil
+}
+
+// archiveSigninHosts lists the archive's transcript hosts, none when there is no archive or it
+// has no transcript tables yet.
+func (rt *runtime) archiveSigninHosts() ([]store.TranscriptHost, error) {
+	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	if errors.Is(err, store.ErrNoArchive) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errs.DBError(err)
 	}
 	defer func() { _ = st.Close() }()
 	if ok, err := st.HasTranscriptTables(rt.ctx); err != nil || !ok {
-		return "", u
+		return nil, nil
 	}
 	hosts, err := signinHosts(st, rt.ctx)
 	if err != nil {
-		return "", errs.DBError(err)
+		return nil, errs.DBError(err)
 	}
-	if len(hosts) == 0 || !signinHostOK(hosts[0]) {
-		return "", u
-	}
-	return hosts[0], nil
+	return hosts, nil
 }
 
 // agree makes sure the user agreed to a visible window: --user-agreed, or Enter on a terminal.

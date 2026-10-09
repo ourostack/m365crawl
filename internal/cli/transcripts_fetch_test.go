@@ -607,7 +607,7 @@ func TestSigninHeadedWaitsForHost(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	if opts.Headless || opts.StartURL != "https://"+trHost+"/" || opts.Profile != browser.ProfileDir(e.db) || closer.n.Load() != 1 {
+	if opts.Headless || opts.StartURL != "https://"+trHost+"/teams/site-a/" || opts.Profile != browser.ProfileDir(e.db) || closer.n.Load() != 1 {
 		t.Fatalf("launch %+v, closed %d", opts, closer.n.Load())
 	}
 	m := decode(t, out)
@@ -891,7 +891,9 @@ func TestSigninHostMustBeSharePoint(t *testing.T) {
 
 func TestSigninDefaultHostIsValidated(t *testing.T) {
 	old := signinHosts
-	signinHosts = func(*store.Store, context.Context) ([]string, error) { return []string{"bad host/"}, nil }
+	signinHosts = func(*store.Store, context.Context) ([]store.TranscriptHost, error) {
+		return []store.TranscriptHost{{Host: "bad host/", SiteRoot: "/teams/site-a"}}, nil
+	}
 	t.Cleanup(func() { signinHosts = old })
 	e := trEnv(t)
 	fakeBrowser(t, nil)
@@ -901,7 +903,10 @@ func TestSigninDefaultHostIsValidated(t *testing.T) {
 func TestSigninWaitsPastTheSignInPages(t *testing.T) {
 	e := trEnv(t)
 	page := newTrPage()
-	page.paths = []string{"/_layouts/15/Authenticate.aspx", "/_forms/default.aspx", "/_layouts/15/AccessDenied.aspx", "/"}
+	// Sign-in pages at the root or under a site keep the wait going without asking the probe. An
+	// access-denied page is shown to a user SharePoint knows, so the probe decides there.
+	page.paths = []string{"/_layouts/15/Authenticate.aspx", "/_forms/default.aspx", "/teams/site-a/_layouts/15/Authenticate.aspx",
+		"/personal/other_example_invalid/_layouts/15/AccessDenied.aspx", "/"}
 	page.probes = []bool{false, true}
 	closer, _ := fakeBrowser(t, page)
 	code, _, errOut := e.tr("--json", "transcripts", "signin", "--user-agreed")
@@ -915,10 +920,95 @@ func TestSigninWaitsPastTheSignInPages(t *testing.T) {
 		t.Fatalf("%d host questions had no deadline", page.noDeadline)
 	}
 	// The probe itself returns a boolean only, from the page's own API.
-	for _, want := range []string{`fetch("/_api/web?$select=Id"`, `credentials: "include"`, `cache: "no-store"`, "r.status === 200"} {
+	// It asks the site the tab is on, then the host's root site.
+	for _, want := range []string{`fetch(site + "/_api/web?$select=Id"`, `credentials: "include"`, `cache: "no-store"`, "r.status === 200",
+		`location.pathname.match(/^\/(teams|sites|personal)\/[^\/]+/i)`, `await ok(m[0])`, `await ok("")`} {
 		if !strings.Contains(signinProbeJS, want) {
 			t.Errorf("probe lacks %s", want)
 		}
+	}
+}
+
+func TestSigninPagePath(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/_layouts/15/Authenticate.aspx":                    true,
+		"/_LAYOUTS/15/authenticate.aspx":                    true,
+		"/_forms/default.aspx":                              true,
+		"/personal/dee_example_invalid/_forms/default.aspx": true,
+		"/sites/x/_layouts/15/Authenticate.aspx":            true,
+		"/_layouts/15/AccessDenied.aspx":                    false,
+		"/personal/other/_layouts/15/AccessDenied.aspx":     false,
+		"/": false,
+		"/personal/dee_example_invalid/Documents": false,
+		"/other/x/_forms/default.aspx":            false,
+	} {
+		if got := signinPagePath.MatchString(path); got != want {
+			t.Errorf("%s: %v, want %v", path, got, want)
+		}
+	}
+}
+
+// The window opens on a site of the host, as transcripts fetch lands: the bare root of a OneDrive
+// host leaves the host.
+func TestSigninOpensTheHostOnItsSite(t *testing.T) {
+	const oneDrive = "tenant-my.sharepoint.example.invalid"
+	e := trEnv(t)
+	page := newTrPage()
+	_, opts := fakeBrowser(t, page)
+	signin := func(args ...string) string {
+		t.Helper()
+		code, _, errOut := e.tr(append([]string{"--json", "transcripts", "signin", "--user-agreed"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, errOut)
+		}
+		return opts.StartURL
+	}
+	e.exec(`update transcript_parts set host='` + oneDrive + `', site_root='/personal/dee_example_invalid'`)
+	want := "https://" + oneDrive + "/personal/dee_example_invalid/"
+	if got := signin(); got != want {
+		t.Fatalf("default host opens %s, want %s", got, want)
+	}
+	// A host given with --host opens on its site when the archive has one there, else at its root.
+	if got := signin("--host", strings.ToUpper(oneDrive)); got != want {
+		t.Fatalf("--host opens %s, want %s", got, want)
+	}
+	if got := signin("--host", "other.sharepoint.example.invalid"); got != "https://other.sharepoint.example.invalid/" {
+		t.Fatalf("a host the archive does not name opens %s", got)
+	}
+	// A site root that is not one of SharePoint's kinds is never put in the URL.
+	old := signinHosts
+	t.Cleanup(func() { signinHosts = old })
+	signinHosts = func(*store.Store, context.Context) ([]store.TranscriptHost, error) {
+		return []store.TranscriptHost{{Host: oneDrive, SiteRoot: "/personal/x/../../evil"}}, nil
+	}
+	if got := signin(); got != "https://"+oneDrive+"/" {
+		t.Fatalf("a bad default site opens %s", got)
+	}
+	if got := signin("--host", oneDrive); got != "https://"+oneDrive+"/" {
+		t.Fatalf("a bad site for --host opens %s", got)
+	}
+	// With --host, an archive that cannot be read only means no site is known.
+	signinHosts = func(*store.Store, context.Context) ([]store.TranscriptHost, error) {
+		return nil, errors.New("synthetic read failure")
+	}
+	if got := signin("--host", oneDrive); got != "https://"+oneDrive+"/" {
+		t.Fatalf("an unreadable archive opens %s", got)
+	}
+	if err := os.WriteFile(e.db, []byte("not a database, long enough to be read as one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := signin("--host", oneDrive); got != "https://"+oneDrive+"/" {
+		t.Fatalf("a broken archive opens %s", got)
+	}
+}
+
+func TestSigninWithHostNeedsNoArchive(t *testing.T) {
+	e := textEnv(t)
+	page := newTrPage()
+	_, opts := fakeBrowser(t, page)
+	code, _, errOut := e.tr("--json", "transcripts", "signin", "--user-agreed", "--host", trHost)
+	if code != 0 || opts.StartURL != "https://"+trHost+"/" {
+		t.Fatalf("exit %d, opened %q: %s", code, opts.StartURL, errOut)
 	}
 }
 

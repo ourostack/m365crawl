@@ -202,12 +202,12 @@ func TestLaunchLockErrorPassesThrough(t *testing.T) {
 	}
 }
 
-func TestLaunchHandoffExit(t *testing.T) {
+func TestLaunchHandoffToABrowserItDidNotStart(t *testing.T) {
 	old := singletonLiveFn
 	t.Cleanup(func() { singletonLiveFn = old })
 	calls := 0
 	singletonLiveFn = func(string) bool { calls++; return calls > 1 } // free before the launch, held after
-	b, profile, err := launchFake(t, map[string]string{browsertest.EnvHandoff: "1"}, nil)
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvHandoff: "1"}, func(o *LaunchOptions) { o.Timeout = 3 * time.Second })
 	requireCode(t, err, errs.CodeBrowserBusy)
 	if b != nil {
 		t.Fatal("no browser on a handoff")
@@ -216,12 +216,89 @@ func TestLaunchHandoffExit(t *testing.T) {
 	requireLockFree(t, profile)
 }
 
+// The first process starts the one that runs the browser and exits 0 before the port appears,
+// as Edge's launcher does on Windows: the launch waits for the port and succeeds.
+func TestLaunchWaitsThroughACleanHandoff(t *testing.T) {
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvLateHandoff: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-b.exited:
+	default:
+		t.Fatal("the first process should have exited before the port appeared")
+	}
+	if b.status != "0" {
+		t.Fatalf("first process status %s", b.status)
+	}
+	pids := fakePids(t, profile) // the successor's
+	page, err := b.Page(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := page.Host(context.Background()); err != nil || h != "complete" {
+		t.Fatalf("host %q, %v", h, err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requireGone(t, "successor", pids["leader"])
+	requireGone(t, "child", pids["child"])
+	requireNoProfileProcs(t, profile)
+	requireLockFree(t, profile)
+}
+
+// Close still ends everything after a handoff, even a successor that ignores Browser.close.
+func TestCloseEndsTheBrowserAfterAHandoff(t *testing.T) {
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvLateHandoff: "1", browsertest.EnvIgnoreClose: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pids := fakePids(t, profile)
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requireGone(t, "successor", pids["leader"])
+	requireGone(t, "child", pids["child"])
+	requireNoProfileProcs(t, profile)
+}
+
+func TestLaunchCleanExitWithoutPortTimesOut(t *testing.T) {
+	start := time.Now()
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvHandoff: "1"}, func(o *LaunchOptions) { o.Timeout = 3 * time.Second })
+	requireCode(t, err, errs.CodeBrowserFailed)
+	if !strings.Contains(err.Error(), "did not start") || !strings.Contains(err.Error(), "status 0") {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(start) < 3*time.Second {
+		t.Fatal("a clean exit must not end the wait before the timeout")
+	}
+	if b != nil {
+		t.Fatal("no browser on failure")
+	}
+	requireNoProfileProcs(t, profile)
+	requireLockFree(t, profile)
+}
+
 func TestLaunchEarlyExitWithoutSingletonFails(t *testing.T) {
+	start := time.Now()
 	_, _, err := launchFake(t, map[string]string{browsertest.EnvExitCode: "3"}, nil)
 	requireCode(t, err, errs.CodeBrowserFailed)
 	if !strings.Contains(err.Error(), "status 3") {
 		t.Fatalf("err = %v", err)
 	}
+	if d := time.Since(start); d > 5*time.Second { // the launch timeout is 10s
+		t.Fatalf("a failed start waited %s instead of failing at once", d)
+	}
+}
+
+func TestLaunchEarlyExitWithSingletonIsBusy(t *testing.T) {
+	old := singletonLiveFn
+	t.Cleanup(func() { singletonLiveFn = old })
+	calls := 0
+	singletonLiveFn = func(string) bool { calls++; return calls > 1 }
+	_, _, err := launchFake(t, map[string]string{browsertest.EnvExitCode: "21"}, nil)
+	requireCode(t, err, errs.CodeBrowserBusy)
 }
 
 func TestLaunchLeaderExitsAfterWritingPort(t *testing.T) {
@@ -347,5 +424,22 @@ func TestLaunchStdioIsNullDevice(t *testing.T) {
 func TestExitStatus(t *testing.T) {
 	if exitStatus(nil) != "0" || exitStatus(errors.New("signal: killed")) != "signal: killed" {
 		t.Fatal("exitStatus")
+	}
+}
+
+// The deadline can come in the same moment as a clean exit; that still counts as a handoff.
+func TestExitedCleanly(t *testing.T) {
+	b := &Browser{exited: make(chan struct{})}
+	if b.exitedCleanly() {
+		t.Fatal("a running process has not exited")
+	}
+	b.status = "0"
+	close(b.exited)
+	if !b.exitedCleanly() {
+		t.Fatal("status 0 is a clean exit")
+	}
+	b.status = "3"
+	if b.exitedCleanly() {
+		t.Fatal("status 3 is not")
 	}
 }

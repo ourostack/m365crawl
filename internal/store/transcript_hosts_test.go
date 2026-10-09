@@ -21,12 +21,14 @@ func TestTranscriptHosts(t *testing.T) {
 	// A drive item on a host that is not SharePoint's is not offered.
 	s.qExec(t, `update transcript_parts set host='attacker.example' where call_id='call-1' and ordinal=1`)
 	s.qExec(t, `update transcript_parts set host='attacker.example' where call_id='call-1' and ordinal=2`)
+	// Each host comes with the site of its first fetchable part.
+	s.qExec(t, `update transcript_parts set site_root='/personal/dee_example_invalid' where call_id='call-5'`)
 	hosts, err = s.TranscriptHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(hosts, ","); got != "other.sharepoint.example.invalid" {
-		t.Fatalf("hosts %s", got)
+	if len(hosts) != 1 || hosts[0] != (TranscriptHost{Host: "other.sharepoint.example.invalid", SiteRoot: "/personal/dee_example_invalid"}) {
+		t.Fatalf("hosts %+v", hosts)
 	}
 	// Hosts with as many parts each go by name; then the host with the most parts comes first.
 	s.qExec(t, `update transcript_parts set host='b.sharepoint.example.invalid' where call_id='call-1' and ordinal=1`)
@@ -42,7 +44,11 @@ func TestTranscriptHosts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := strings.Join(hosts, ","); got != step.want {
+		var names []string
+		for _, h := range hosts {
+			names = append(names, h.Host)
+		}
+		if got := strings.Join(names, ","); got != step.want {
 			t.Fatalf("hosts %s, want %s", got, step.want)
 		}
 	}

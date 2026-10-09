@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,14 +15,16 @@ import (
 const (
 	envFake        = "M365CRAWL_FAKE_BROWSER"
 	envRole        = "M365CRAWL_FAKE_ROLE"
-	EnvIgnoreClose = "FAKE_IGNORE_CLOSE" // keep running after Browser.close
-	EnvIgnoreTerm  = "FAKE_IGNORE_TERM"  // ignore SIGTERM (Unix)
-	EnvHandoff     = "FAKE_HANDOFF"      // exit 0 at once, like a launch handed to a running instance
-	EnvExitCode    = "FAKE_EXIT_CODE"    // exit with this status at once
-	EnvNoPort      = "FAKE_NO_PORT"      // never write DevToolsActivePort
-	EnvLeaderExits = "FAKE_LEADER_EXITS" // exit the leader once ready, leaving its children
-	EnvEscape      = "FAKE_ESCAPE_CHILD" // start a child in its own session (Unix)
-	EnvHangEval    = "FAKE_HANG_EVAL"    // never answer Runtime.evaluate, like a hung page
+	EnvIgnoreClose = "FAKE_IGNORE_CLOSE"        // keep running after Browser.close
+	EnvIgnoreTerm  = "FAKE_IGNORE_TERM"         // ignore SIGTERM (Unix)
+	EnvHandoff     = "FAKE_HANDOFF"             // exit 0 at once, like a launch handed to a running instance
+	EnvLateHandoff = "FAKE_LATE_HANDOFF"        // start a successor that writes the port later, then exit 0 at once
+	envAfterPid    = "M365CRAWL_FAKE_AFTER_PID" // write the port only once this process has exited
+	EnvExitCode    = "FAKE_EXIT_CODE"           // exit with this status at once
+	EnvNoPort      = "FAKE_NO_PORT"             // never write DevToolsActivePort
+	EnvLeaderExits = "FAKE_LEADER_EXITS"        // exit the leader once ready, leaving its children
+	EnvEscape      = "FAKE_ESCAPE_CHILD"        // start a child in its own session (Unix)
+	EnvHangEval    = "FAKE_HANG_EVAL"           // never answer Runtime.evaluate, like a hung page
 )
 
 // Files the fake writes into the profile directory.
@@ -78,6 +81,12 @@ func runFake(args []string) int {
 	if os.Getenv(EnvHandoff) == "1" {
 		return 0
 	}
+	if os.Getenv(EnvLateHandoff) == "1" {
+		// Like Edge's launcher on Windows: the first process starts the one that runs the browser
+		// and exits 0 before that one publishes its debugging port.
+		startSuccessor(args)
+		return 0
+	}
 	if v := os.Getenv(EnvExitCode); v != "" {
 		var n int
 		_, _ = fmt.Sscan(v, &n)
@@ -115,6 +124,10 @@ func runFake(args []string) int {
 		_ = child.Process.Kill()
 		close(exit)
 	})
+	if pid, err := strconv.Atoi(os.Getenv(envAfterPid)); err == nil {
+		waitGone(pid)
+		time.Sleep(200 * time.Millisecond) // and give the launcher time to see it exit
+	}
 	port := fmt.Sprintf("%d\n%s\n", srv.Port, BrowserPath)
 	if err := os.WriteFile(filepath.Join(profile, "DevToolsActivePort"), []byte(port), 0o600); err != nil { //nolint:gosec // G703: the profile is the test's own temp dir
 		return 66
@@ -124,6 +137,16 @@ func runFake(args []string) int {
 	}
 	<-exit
 	return 0
+}
+
+// startSuccessor re-executes the test binary as the fake browser itself, with the same arguments,
+// writing its port only after this process has exited. Its environment turns the handoff off, so
+// it runs as the browser instead of handing off again.
+func startSuccessor(args []string) {
+	exe, _ := os.Executable()
+	cmd := exec.Command(exe, args...) //nolint:gosec // G204: re-executing the test binary
+	cmd.Env = append(os.Environ(), EnvLateHandoff+"=", envAfterPid+"="+strconv.Itoa(os.Getpid()))
+	_ = cmd.Start()
 }
 
 // startChild re-executes the test binary as a helper process that only sleeps. Its argv carries

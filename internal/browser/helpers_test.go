@@ -76,6 +76,13 @@ func requireGone(t *testing.T, name string, pid int) {
 	}
 }
 
+func requireNoProfileProcs(t *testing.T, profile string) {
+	t.Helper()
+	if procs, err := profileProcs(profile); err != nil || len(procs) != 0 {
+		t.Fatalf("processes still run with the profile: %v %v", procs, err)
+	}
+}
+
 func requireLockFree(t *testing.T, profile string) {
 	t.Helper()
 	release, err := store.AcquireLock(profile)
