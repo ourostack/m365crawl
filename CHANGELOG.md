@@ -4,6 +4,8 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-09
+
 ### Fixed
 
 - Transcripts stored in a meeting organizer's OneDrive now fetch, where v0.6.0 reported that the SharePoint host redirected elsewhere. `transcripts fetch` now opens each host on its first part's site instead of the host's root, which on a OneDrive host leaves the host.
