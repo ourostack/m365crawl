@@ -79,14 +79,22 @@ func TestSweepOrphanWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireGone(t, "leader", pids["leader"])
+	requireGone(t, "child", pids["child"]) // outside any job: only the command-line sweep reaches it
+	requireNoProfileProcs(t, profile)
 	if _, err := os.Stat(pidPath(profile)); !os.IsNotExist(err) {
 		t.Fatal("the pid file must be removed")
 	}
 }
 
+// A pid file whose pid now belongs to another process, one that does not run with this profile,
+// leaves that process alone.
 func TestSweepOrphanWindowsIgnoresReusedPid(t *testing.T) {
 	profile := newProfile(t)
-	cmd, pids := startOrphanWindows(t, profile)
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other := newProfile(t)
+	cmd, pids := startOrphanWindows(t, other)
 	for _, started := range []int64{0, 12345} { // unknown, or the creation time of another process
 		if err := writePidFile(profile, cmd.Process.Pid, started); err != nil {
 			t.Fatal(err)
@@ -104,6 +112,18 @@ func TestSweepOrphanWindowsIgnoresReusedPid(t *testing.T) {
 	}
 	if err := SweepOrphan(profile); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// After a handoff, the process that runs the browser is the launcher's child, so it is in the job.
+func TestHandoffSuccessorIsInTheJob(t *testing.T) {
+	b, profile, err := launchFake(t, map[string]string{browsertest.EnvLateHandoff: "1", browsertest.EnvIgnoreClose: "1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pids := fakePids(t, profile)
+	if !inJob(t, pids["leader"], b.group.job) || !inJob(t, pids["child"], b.group.job) {
+		t.Fatal("the handed-off browser and its child must both be in the job object")
 	}
 }
 

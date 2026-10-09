@@ -1,6 +1,8 @@
-# Test doubles. These three run only inside the re-executed fake browser process (the test binary
+# Test doubles. These run only inside the re-executed fake browser process (the test binary
 # started as a browser), where `go test` does not collect coverage. The internal/browser tests
 # prove what they do through the processes they launch and the files they write.
 internal/browser/browsertest/fakebrowser.go:RunIfFake runs only in the re-executed fake browser process
 internal/browser/browsertest/fakebrowser.go:runFake runs only in the re-executed fake browser process
 internal/browser/browsertest/fakebrowser.go:startChild runs only in the re-executed fake browser process
+internal/browser/browsertest/fakebrowser.go:startSuccessor runs only in the re-executed fake browser process
+internal/browser/browsertest/detach_unix.go:waitGone runs only in the re-executed fake browser process
