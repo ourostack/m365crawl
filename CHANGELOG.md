@@ -4,6 +4,8 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-09
+
 ### Added
 
 - Each list command's `--help` now ends with the `--fields` keys it accepts, so an agent can pick them before running the command instead of learning them from an error. The list comes from the same table the check uses. `calendar agenda --help` also names the keys that only `calendar event` has.
