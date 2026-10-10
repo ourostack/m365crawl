@@ -5,6 +5,7 @@ package browser
 import (
 	"errors"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -72,7 +73,7 @@ func TestCompletionNativeTerminationRejectsReusedPID(t *testing.T) {
 		return nil
 	}
 	completionTerminateProcess = func(windows.Handle, uint32) error { killed++; return nil }
-	if err := terminateCompletionTarget(7, 42, 7); err == nil || killed != 0 || closed != 1 {
+	if err := terminateCompletionTarget(7, 42, 7, time.Now().Add(time.Second)); err == nil || killed != 0 || closed != 1 {
 		t.Fatalf("replacement must not be signalled; transient handle disposed: %v, %d, %d", err, killed, closed)
 	}
 }

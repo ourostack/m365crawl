@@ -5,6 +5,7 @@ package browser
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/ourostack/m365crawl/internal/browser/browsertest"
 	"golang.org/x/sys/windows"
@@ -38,11 +39,12 @@ func TestCompletionNativeUnknownVersusUnrelated(t *testing.T) {
 		completionProcessStart, completionMembership, completionReadArgs = oldTime, oldMember, oldArgs
 	})
 	cause := errors.New("private process query")
+	deadline := time.Now().Add(time.Second)
 	completionOpenProcess = func(uint32, bool, uint32) (windows.Handle, error) { return 0, cause }
-	if target, err := openCompletionTarget(42, 7, `C:\profile`, false); target != nil || err != nil {
+	if target, err := openCompletionTarget(42, 7, `C:\profile`, false, deadline); target != nil || err != nil {
 		t.Fatal("unclassifiable unrelated host entry should not fail every close")
 	}
-	if target, err := openCompletionTarget(42, 7, `C:\profile`, true); target != nil || !errors.Is(err, cause) {
+	if target, err := openCompletionTarget(42, 7, `C:\profile`, true, deadline); target != nil || !errors.Is(err, cause) {
 		t.Fatal("known-owned open failure cannot become completed absence")
 	}
 	completionOpenProcess = func(uint32, bool, uint32) (windows.Handle, error) { return 42, nil }
@@ -55,22 +57,26 @@ func TestCompletionNativeUnknownVersusUnrelated(t *testing.T) {
 		}
 		return false, nil
 	}
-	completionReadArgs = func(windows.Handle, uint32) ([]string, error) { return []string{"--user-data-dir=C:\\elsewhere"}, nil }
-	if target, err := openCompletionTarget(42, 7, `C:\profile`, false); target != nil || err != nil || closed != 1 {
+	completionReadArgs = func(windows.Handle, uint32, time.Time) ([]string, error) {
+		return []string{"--user-data-dir=C:\\elsewhere"}, nil
+	}
+	if target, err := openCompletionTarget(42, 7, `C:\profile`, false, deadline); target != nil || err != nil || closed != 1 {
 		t.Fatal("positively unrelated held object must be disposed without admission")
 	}
-	completionReadArgs = func(windows.Handle, uint32) ([]string, error) { return []string{"--user-data-dir=C:\\profile"}, nil }
-	target, err := openCompletionTarget(42, 0, `C:\profile`, false)
+	completionReadArgs = func(windows.Handle, uint32, time.Time) ([]string, error) {
+		return []string{"--user-data-dir=C:\\profile"}, nil
+	}
+	target, err := openCompletionTarget(42, 0, `C:\profile`, false, deadline)
 	if err != nil || target == nil || target.inJob {
 		t.Fatalf("verified fallback must not infer any-job ownership: %v", err)
 	}
 	_ = target.release()
 	completionProcessStart = func(windows.Handle) (int64, error) { return 0, cause }
-	if target, err := openCompletionTarget(42, 7, `C:\profile`, false); target != nil || !errors.Is(err, cause) {
+	if target, err := openCompletionTarget(42, 7, `C:\profile`, false, deadline); target != nil || !errors.Is(err, cause) {
 		t.Fatal("profile ownership plus unknown creation identity must refuse")
 	}
-	completionReadArgs = func(windows.Handle, uint32) ([]string, error) { return nil, cause }
-	if target, err := openCompletionTarget(42, 7, `C:\profile`, true); target != nil || !errors.Is(err, cause) {
+	completionReadArgs = func(windows.Handle, uint32, time.Time) ([]string, error) { return nil, cause }
+	if target, err := openCompletionTarget(42, 7, `C:\profile`, true, deadline); target != nil || !errors.Is(err, cause) {
 		t.Fatal("known-owned unreadable identity must refuse")
 	}
 }

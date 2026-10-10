@@ -30,9 +30,11 @@ func (b *Browser) prepareClose(polite bool) closeWitness {
 	if polite {
 		budget += closeWait
 	}
-	w := &windowsCloseWitness{
-		set:     &completionSet{deadline: time.Now().Add(budget), limit: completionMaxTargets},
-		profile: longPath(b.profile),
+	w := &windowsCloseWitness{set: &completionSet{deadline: time.Now().Add(budget), limit: completionMaxTargets}}
+	w.profile = longPath(b.profile)
+	if err := completionWithin(w.set.deadline); err != nil {
+		w.firstErr = err
+		return w
 	}
 	w.job, w.firstErr = b.group.duplicateJob()
 	w.remember(discoverCompletionTargets(w))
@@ -83,7 +85,7 @@ func (w *windowsCloseWitness) stop(*Browser) (err error) {
 		}
 		var info jobBasicAccounting
 		if queryErr := completionQueryJob(w.job, jobObjectBasicAccountingInformation,
-			unsafe.Pointer(&info), uint32(unsafe.Sizeof(info)), nil); queryErr != nil {
+			unsafe.Pointer(&info), uint32(unsafe.Sizeof(info)), nil); queryErr != nil { //nolint:gosec // G103: fixed native accounting layout lives through the synchronous query
 			return false, &completionFailure{code: "browser_completion_job_query_failed", cause: queryErr}
 		}
 		return done && info.ActiveProcesses == 0, nil
@@ -113,24 +115,22 @@ func discoverCompletionTargets(w *windowsCloseWitness) (err error) {
 		} else {
 			for _, pid := range pids {
 				if !time.Now().Before(w.set.deadline) {
-					return &completionFailure{code: "browser_completion_timeout", cause: err}
+					return completionFirst(err, &completionFailure{code: "browser_completion_timeout"})
 				}
-				target, openErr := openCompletionTarget(pid, w.job, w.profile, true)
+				target, openErr := openCompletionTarget(pid, w.job, w.profile, true, w.set.deadline)
 				if openErr == nil && target != nil {
 					openErr = w.set.add(target)
 				}
-				if err == nil {
-					err = openErr
-				}
+				err = completionFirst(err, openErr)
 			}
 		}
 	}
 	if !time.Now().Before(w.set.deadline) {
-		return &completionFailure{code: "browser_completion_timeout", cause: err}
+		return completionFirst(err, &completionFailure{code: "browser_completion_timeout"})
 	}
 	snap, snapErr := completionSnapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if snapErr != nil {
-		return &completionFailure{code: "browser_completion_snapshot_failed", cause: errors.Join(err, snapErr)}
+		return completionFirst(err, &completionFailure{code: "browser_completion_snapshot_failed", cause: snapErr})
 	}
 	defer func() {
 		if closeErr := completionCloseHandle(snap); closeErr != nil && err == nil {
@@ -138,27 +138,31 @@ func discoverCompletionTargets(w *windowsCloseWitness) (err error) {
 		}
 	}()
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
+	if late := completionWithin(w.set.deadline); late != nil {
+		return completionFirst(err, late)
+	}
 	nextErr := completionProcessFirst(snap, &entry)
 	for scanned := 0; nextErr == nil; scanned++ {
 		if scanned >= completionMaxScan {
-			return &completionFailure{code: "browser_completion_too_large", cause: err}
+			return completionFirst(err, &completionFailure{code: "browser_completion_too_large"})
 		}
 		if !time.Now().Before(w.set.deadline) {
-			return &completionFailure{code: "browser_completion_timeout", cause: err}
+			return completionFirst(err, &completionFailure{code: "browser_completion_timeout"})
 		}
 		if entry.ProcessID != uint32(os.Getpid()) { //nolint:gosec // Windows native process ID fits DWORD
-			target, openErr := openCompletionTarget(entry.ProcessID, w.job, w.profile, false)
+			target, openErr := openCompletionTarget(entry.ProcessID, w.job, w.profile, false, w.set.deadline)
 			if openErr == nil && target != nil {
 				openErr = w.set.add(target)
 			}
-			if err == nil {
-				err = openErr
-			}
+			err = completionFirst(err, openErr)
+		}
+		if late := completionWithin(w.set.deadline); late != nil {
+			return completionFirst(err, late)
 		}
 		nextErr = completionProcessNext(snap, &entry)
 	}
 	if !errors.Is(nextErr, windows.ERROR_NO_MORE_FILES) {
-		return &completionFailure{code: "browser_completion_snapshot_failed", cause: errors.Join(err, nextErr)}
+		return completionFirst(err, &completionFailure{code: "browser_completion_snapshot_failed", cause: nextErr})
 	}
-	return err
+	return completionFirst(err, completionWithin(w.set.deadline))
 }

@@ -1,6 +1,26 @@
 package browser
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+func completionWithin(deadline time.Time) error {
+	if !time.Now().Before(deadline) {
+		return &completionFailure{code: "browser_completion_timeout"}
+	}
+	return nil
+}
+
+func completionFirst(first, next error) error {
+	if first == nil {
+		return next
+	}
+	if next == nil {
+		return first
+	}
+	return &completionFailure{code: first.Error(), cause: errors.Join(first, next)}
+}
 
 type completionFailure struct {
 	code  string
@@ -69,14 +89,17 @@ func (s *completionSet) add(t *completionTarget) error {
 func (s *completionSet) poll() (bool, error) {
 	done := true
 	for _, t := range s.targets {
-		if !time.Now().Before(s.deadline) {
-			return false, &completionFailure{code: "browser_completion_timeout"}
+		if err := completionWithin(s.deadline); err != nil {
+			return false, err
 		}
 		signalled, err := t.poll()
 		if err != nil {
 			return false, &completionFailure{code: "browser_completion_wait_failed", cause: err}
 		}
 		done = done && signalled
+	}
+	if err := completionWithin(s.deadline); err != nil {
+		return false, err
 	}
 	return done, nil
 }
@@ -87,10 +110,8 @@ func (s *completionSet) terminateFallback() error {
 		if t.inJob {
 			continue
 		}
-		if !time.Now().Before(s.deadline) {
-			if first == nil {
-				first = &completionFailure{code: "browser_completion_timeout"}
-			}
+		if err := completionWithin(s.deadline); err != nil {
+			first = completionFirst(first, err)
 			break
 		}
 		signalled, err := t.poll()
@@ -103,10 +124,8 @@ func (s *completionSet) terminateFallback() error {
 		if signalled {
 			continue
 		}
-		if !time.Now().Before(s.deadline) {
-			if first == nil {
-				first = &completionFailure{code: "browser_completion_timeout"}
-			}
+		if err := completionWithin(s.deadline); err != nil {
+			first = completionFirst(first, err)
 			break
 		}
 		if err := t.terminate(); err != nil && first == nil {
@@ -138,6 +157,9 @@ func waitCompletion(deadline time.Time, poll func() (bool, error)) error {
 			return &completionFailure{code: "browser_completion_wait_failed", cause: err}
 		}
 		if done {
+			if !time.Now().Before(deadline) {
+				return &completionFailure{code: "browser_completion_timeout"}
+			}
 			return nil
 		}
 		remaining := time.Until(deadline)
