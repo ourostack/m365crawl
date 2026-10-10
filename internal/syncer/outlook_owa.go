@@ -185,6 +185,10 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 	}
 	mail, err := r.st.CommitOWAMail(ctx, store.OWAMailBatch{Account: account, ReadAt: begun, FreshAt: fresh, Result: res, Trusted: stable})
 	if err != nil {
+		var coded *errs.Coded
+		if errors.As(err, &coded) && coded.Code == "outlook_mail_key_exhausted" {
+			return SourceReport{}, false, owaSourceError(coded)
+		}
 		return SourceReport{}, false, errs.DBError(err)
 	}
 	if err := outlookOWARecordRun(ctx, r.st, store.Run{StartedAt: begun, FinishedAt: outlookNow(), Source: key, Fingerprint: fp, Status: status, Counts: mailRunCounts{Mail: mail}, Omissions: omissions}); err != nil {
@@ -264,6 +268,10 @@ func owaSourceError(err error) error {
 	var c *errs.Coded
 	if errors.As(err, &c) {
 		switch c.Code {
+		case "outlook_mail_key_exhausted":
+			return &errs.Coded{Code: "outlook_mail_key_exhausted", Exit: errs.ExitEnvironment,
+				Message: "the archive has no numeric mail identity keys left for this account and kind",
+				Fix:     "Keep the existing archive for reads; use a separate private archive for further syncs."}
 		case outlookmail.CodeMailLayoutUnsupported, CodeOutlookProfileUnreadable:
 			return c
 		case errs.CodeInternal:

@@ -380,7 +380,7 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 	if err != nil {
 		return nil, "", false, err
 	}
-	ids, linked, err := s.conversationGroup(ctx, seed)
+	ids, linked, err := mailThreadConversationGroup(s, ctx, seed)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -404,6 +404,8 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 	rows, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
 	return rows, grouping, truncated, err
 }
+
+var mailThreadConversationGroup = (*Store).conversationGroup
 
 func (s *Store) conversationGroup(ctx context.Context, seed MailRow) ([]int64, bool, error) {
 	ids := []int64{seed.Rowid}
