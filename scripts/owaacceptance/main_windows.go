@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,36 +161,165 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 }
 
 func (w *workspace) cleanup() error {
-	if err := w.check(); err != nil {
+	inventory, err := w.inventory()
+	if err != nil {
 		return err
 	}
-	var paths []string
-	err := filepath.WalkDir(w.dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || safePath(path) != nil {
-			return errors.New("cleanup_path_refused")
+	return inventory.remove()
+}
+
+type disposal struct {
+	root      string
+	objects   []windows.Handle
+	ancestors []windows.Handle
+}
+
+func (w *workspace) inventory() (inventory *disposal, result error) {
+	if err := w.check(); err != nil {
+		return nil, err
+	}
+	inventory = &disposal{root: w.dir}
+	defer func() {
+		if result != nil {
+			result = errors.Join(result, inventory.close())
+			inventory = nil
 		}
-		if !entry.IsDir() && !entry.Type().IsRegular() {
-			return errors.New("cleanup_special_file_refused")
+	}()
+	for path := filepath.Dir(w.dir); ; path = filepath.Dir(path) {
+		handle, _, err := lockObject(path, false)
+		if err != nil {
+			return inventory, errors.New("cleanup_ancestor_lock_failed")
 		}
-		paths = append(paths, path)
-		return nil
-	})
+		inventory.ancestors = append(inventory.ancestors, handle)
+		if filepath.Dir(path) == path {
+			break
+		}
+	}
+	handle, info, err := lockObject(w.dir, true)
 	if err != nil {
-		return errors.New("cleanup_inventory_refused")
+		return inventory, errors.New("cleanup_root_lock_failed")
 	}
-	for i := len(paths) - 1; i >= 0; i-- {
-		if err := safePath(paths[i]); err != nil {
-			return errors.New("cleanup_path_changed")
+	inventory.objects = append(inventory.objects, handle)
+	if [3]uint32{info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow} != w.id || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return inventory, errors.New("cleanup_root_identity_refused")
+	}
+	if err := w.check(); err != nil {
+		return inventory, err
+	}
+	err = inventory.scan(w.dir, 0)
+	return inventory, err
+}
+
+func (inventory *disposal) scan(path string, depth int) (result error) {
+	if depth > 128 || len(inventory.objects) >= 131072 {
+		return errors.New("cleanup_inventory_budget_refused")
+	}
+	pattern, err := windows.UTF16PtrFromString(filepath.Join(path, "*"))
+	if err != nil {
+		return errors.New("cleanup_inventory_path_refused")
+	}
+	var data windows.Win32finddata
+	search, err := windows.FindFirstFile(pattern, &data)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("cleanup_inventory_open_failed")
+	}
+	defer func() {
+		if err := windows.FindClose(search); err != nil {
+			result = errors.Join(result, errors.New("cleanup_inventory_close_failed"))
 		}
-		if err := os.Remove(paths[i]); err != nil {
-			var errno syscall.Errno
-			if errors.As(err, &errno) {
-				return fmt.Errorf("cleanup_remove_failed index=%d errno=%d", i, uint64(errno))
+	}()
+	for {
+		name := windows.UTF16ToString(data.FileName[:])
+		if name != "." && name != ".." {
+			if name == "" || strings.ContainsAny(name, `\/:`) || len(inventory.objects) >= 131072 {
+				return errors.New("cleanup_inventory_entry_refused")
 			}
-			return errors.New("cleanup_remove_failed")
+			child := filepath.Join(path, name)
+			handle, info, err := lockObject(child, true)
+			if err != nil {
+				return errors.New("cleanup_object_lock_failed")
+			}
+			inventory.objects = append(inventory.objects, handle)
+			if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+				if err := inventory.scan(child, depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		err := windows.FindNextFile(search, &data)
+		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+			return nil
+		}
+		if err != nil {
+			return errors.New("cleanup_inventory_next_failed")
 		}
 	}
-	if _, err := os.Lstat(w.dir); !errors.Is(err, os.ErrNotExist) {
+}
+
+func lockObject(path string, remove bool) (windows.Handle, windows.ByHandleFileInformation, error) {
+	var info windows.ByHandleFileInformation
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, info, errors.New("cleanup_object_path_refused")
+	}
+	access := uint32(windows.FILE_READ_ATTRIBUTES)
+	if remove {
+		access |= windows.DELETE
+	}
+	handle, err := windows.CreateFile(name, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return 0, info, errors.New("cleanup_object_open_failed")
+	}
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil || info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		if closeErr := windows.CloseHandle(handle); closeErr != nil {
+			return 0, info, errors.New("cleanup_refused_object_close_failed")
+		}
+		return 0, info, errors.New("cleanup_object_identity_refused")
+	}
+	return handle, info, nil
+}
+
+func (inventory *disposal) close() error {
+	var result error
+	for i := len(inventory.objects) - 1; i >= 0; i-- {
+		if inventory.objects[i] == 0 {
+			continue
+		}
+		if err := windows.CloseHandle(inventory.objects[i]); err != nil {
+			result = errors.Join(result, errors.New("cleanup_object_close_failed"))
+		} else {
+			inventory.objects[i] = 0
+		}
+	}
+	for i := len(inventory.ancestors) - 1; i >= 0; i-- {
+		if inventory.ancestors[i] == 0 {
+			continue
+		}
+		if err := windows.CloseHandle(inventory.ancestors[i]); err != nil {
+			result = errors.Join(result, errors.New("cleanup_ancestor_close_failed"))
+		} else {
+			inventory.ancestors[i] = 0
+		}
+	}
+	return result
+}
+
+func (inventory *disposal) remove() (result error) {
+	defer func() { result = errors.Join(result, inventory.close()) }()
+	for i := len(inventory.objects) - 1; i >= 0; i-- {
+		deleted := byte(1) // FILE_DISPOSITION_INFO.DeleteFile is a one-byte Windows BOOLEAN.
+		if err := windows.SetFileInformationByHandle(inventory.objects[i], windows.FileDispositionInfo, &deleted, 1); err != nil {
+			return errors.New("cleanup_handle_delete_failed")
+		}
+		if err := windows.CloseHandle(inventory.objects[i]); err != nil {
+			return errors.New("cleanup_deleted_handle_close_failed")
+		}
+		inventory.objects[i] = 0
+	}
+	if _, err := os.Lstat(inventory.root); !errors.Is(err, os.ErrNotExist) {
 		return errors.New("cleanup_verify_failed")
 	}
 	return nil
@@ -401,7 +529,10 @@ func waitEmpty(job windows.Handle) error {
 	}
 }
 
-func stopJob(job windows.Handle) error {
+func stopJob(job windows.Handle) (result error) {
+	if err := sealJob(job); err != nil {
+		return err
+	}
 	type processList struct {
 		assigned, listed uint32
 		pids             [128]uintptr
@@ -414,14 +545,16 @@ func stopJob(job windows.Handle) error {
 	var handles []windows.Handle
 	defer func() {
 		for _, handle := range handles {
-			_ = windows.CloseHandle(handle)
+			if err := windows.CloseHandle(handle); err != nil {
+				result = errors.Join(result, errors.New("job_process_handle_close_failed"))
+			}
 		}
 	}()
 	for _, pid := range list.pids[:list.listed] {
 		if pid == 0 || pid > 0xffffffff {
 			return errors.New("job_process_identity_refused")
 		}
-		handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+		handle, err := memberHandle(job, uint32(pid))
 		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			continue
 		}
@@ -449,6 +582,41 @@ func stopJob(job windows.Handle) error {
 		}
 	}
 	return waitEmpty(job)
+}
+
+func sealJob(job windows.Handle) error {
+	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+	limits.BasicLimitInformation.ActiveProcessLimit = 1
+	// #nosec G103 -- SDK structure pointer; one active member leaves no slot for a new descendant.
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
+		return errors.New("job_birth_barrier_failed")
+	}
+	var actual windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	// #nosec G103 -- SDK-defined buffer and exact native structure size.
+	if err := windows.QueryInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&actual)), uint32(unsafe.Sizeof(actual)), nil); err != nil || actual.BasicLimitInformation.LimitFlags&limits.BasicLimitInformation.LimitFlags != limits.BasicLimitInformation.LimitFlags || actual.BasicLimitInformation.ActiveProcessLimit != 1 {
+		return errors.New("job_birth_barrier_unverified")
+	}
+	return nil
+}
+
+var isProcessInJob = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
+
+func memberHandle(job windows.Handle, pid uint32) (windows.Handle, error) {
+	handle, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0, err
+	}
+	var member uint32
+	// #nosec G103 -- IsProcessInJob takes an SDK BOOL output pointer; verify the opened identity, not its PID label.
+	ok, _, _ := isProcessInJob.Call(uintptr(handle), uintptr(job), uintptr(unsafe.Pointer(&member)))
+	if ok == 0 || member == 0 {
+		if err := windows.CloseHandle(handle); err != nil {
+			return 0, errors.New("job_nonmember_handle_close_failed")
+		}
+		return 0, errors.New("job_member_identity_refused")
+	}
+	return handle, nil
 }
 
 func main() {

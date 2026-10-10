@@ -216,17 +216,21 @@ func TestSupervisorChild(t *testing.T) {
 	if !filepath.IsAbs(control) || !filepath.IsAbs(root) || safeAncestors(control) != nil || safeAncestors(root) != nil || !strings.HasPrefix(filepath.Base(root), "owa-acceptance-") {
 		os.Exit(28)
 	}
-	if mode == "descendant" {
+	if mode == "descendant" || mode == "late-descendant" {
+		receipt, payload := "descendant", "held-payload"
+		if mode == "late-descendant" {
+			receipt, payload = "late-descendant", "late-held-payload"
+		}
 		// #nosec G703 -- Parent-created synthetic control directory was checked above; fixed receipt name.
-		if err := os.WriteFile(filepath.Join(control, "descendant"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(control, receipt), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 			os.Exit(20)
 		}
 		// #nosec G703 -- Synthetic child receives the supervisor's validated private TEMP; fixed file name.
-		if err := os.WriteFile(filepath.Join(root, "held-payload"), []byte("synthetic-private"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, payload), []byte("synthetic-private"), 0o600); err != nil {
 			os.Exit(21)
 		}
 		// #nosec G304 G703 -- Open only the synthetic payload just created in the validated owned TEMP.
-		held, err := os.Open(filepath.Join(root, "held-payload"))
+		held, err := os.Open(filepath.Join(root, payload))
 		if err != nil {
 			os.Exit(22)
 		}
@@ -267,6 +271,25 @@ func TestSupervisorChild(t *testing.T) {
 	case "failure":
 		os.Exit(7)
 	case "timeout":
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	case "late-parent":
+		// #nosec G703 -- Fixed synthetic synchronization receipt under the validated control directory.
+		if err := os.WriteFile(filepath.Join(control, "ready"), []byte("1"), 0o600); err != nil {
+			os.Exit(30)
+		}
+		waitSyntheticReceipt(t, filepath.Join(control, "attempt"))
+		// #nosec G204 -- Same synthetic test executable; parent asks for this attempt only after sealing the job.
+		late := exec.Command(exe, "-test.run=^TestSupervisorChild$")
+		late.Env = append(os.Environ(), "OWA_SUPERVISOR_HELPER=late-descendant")
+		result := "refused"
+		if err := late.Start(); err == nil {
+			result = "allowed"
+		}
+		// #nosec G703 -- Fixed synthetic result receipt under the validated control directory.
+		if err := os.WriteFile(filepath.Join(control, "attempt-result"), []byte(result), 0o600); err != nil {
+			os.Exit(31)
+		}
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	default:
