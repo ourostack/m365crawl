@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 )
 
 func Extract(ctx context.Context, r io.ReaderAt, size int64, kind string, limits Limits) (result Result, err error) {
@@ -45,10 +46,22 @@ func Extract(ctx context.Context, r io.ReaderAt, size int64, kind string, limits
 	if size < 22 {
 		return Result{}, &ReadError{Code: "malformed"}
 	}
-	if _, err := openPackage(ctx, r, size, kind, limits); err != nil {
+	x, err := openPackage(ctx, r, size, kind, limits)
+	if err != nil {
 		return Result{}, err
 	}
-	return Result{}, &ReadError{Code: "unsupported"}
+	if kind != "docx" {
+		return Result{}, &ReadError{Code: "unsupported"}
+	}
+	if err := x.readWord(); err != nil {
+		return Result{}, err
+	}
+	for code, count := range x.losses {
+		x.result.Losses = append(x.result.Losses, Loss{Code: code, Count: count})
+	}
+	sort.Slice(x.result.Losses, func(i, j int) bool { return x.result.Losses[i].Code < x.result.Losses[j].Code })
+	x.result.Partial = len(x.result.Losses) > 0
+	return x.result, nil
 }
 
 func validLimits(l Limits) bool {

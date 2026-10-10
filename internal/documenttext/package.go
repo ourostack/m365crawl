@@ -22,15 +22,19 @@ const (
 )
 
 type extractor struct {
-	ctx           context.Context
-	limits        Limits
-	main          string
-	members       map[string][]*zip.File
-	roots         map[string]xml.Name
-	selected      map[string]bool
-	selectedBytes int64
-	tokens        int
-	relationCache map[string][]relationship
+	ctx            context.Context
+	limits         Limits
+	main           string
+	members        map[string][]*zip.File
+	roots          map[string]xml.Name
+	selected       map[string]bool
+	selectedBytes  int64
+	tokens         int
+	relationCache  map[string][]relationship
+	result         Result
+	losses         map[string]int
+	textBytes      int64
+	paragraphCount int
 }
 
 type relationship struct {
@@ -53,6 +57,7 @@ func openPackage(ctx context.Context, r io.ReaderAt, size int64, kind string, li
 			"[Content_Types].xml": {Space: contentNS, Local: "Types"},
 		},
 		selected: map[string]bool{}, relationCache: map[string][]relationship{},
+		result: Result{Kind: kind, State: "text_observations"}, losses: map[string]int{},
 	}
 	for _, file := range reader.File {
 		if err := ctx.Err(); err != nil {
