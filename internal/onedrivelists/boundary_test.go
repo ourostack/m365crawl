@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"runtime"
 	"sync/atomic"
 	"testing"
 )
@@ -14,6 +15,34 @@ type checkedContext struct {
 	cancel context.CancelFunc
 	checks atomic.Int64
 	at     int64
+}
+
+type scopeCancelContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks atomic.Int64
+}
+
+func (c *scopeCancelContext) Err() error {
+	// SQL may call Err concurrently; only the reader's own second checkpoint arms cancellation.
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		if caller := runtime.FuncForPC(pc); caller != nil &&
+			caller.Name() == "github.com/ourostack/m365crawl/internal/onedrivelists.readIndex" &&
+			c.checks.Add(1) == 2 {
+			c.cancel()
+		}
+	}
+	return c.Context.Err()
+}
+
+func TestReadIndexCancellationAtScopeLoopIsDeterministic(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &scopeCancelContext{Context: parent, cancel: cancel}
+	got, err := ReadIndex(ctx, fixture(t, nativeScope(siteA)))
+	if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, Result{}) || ctx.checks.Load() != 2 {
+		t.Fatalf("scope boundary did not cancel deterministically: %#v,%v; checkpoints=%d", got, err, ctx.checks.Load())
+	}
 }
 
 func (c *checkedContext) Err() error {
