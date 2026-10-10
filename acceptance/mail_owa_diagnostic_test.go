@@ -49,9 +49,15 @@ func (s *owaFailureState) phase(t *testing.T, stage string) func() {
 }
 
 func (s *owaFailureState) record(stage, reason string) {
+	s.recordFields(stage, reason, nil)
+}
+
+func (s *owaFailureState) recordFields(stage, reason string, fields []string) {
 	if s != nil && s.failure == "" {
 		s.failure = stage
 		s.reason = protocol.FixedDiagnosticReason(stage, reason)
+		s.fields = append([]string{}, fields...)
+		s.omissions = map[string]int64{}
 	}
 }
 
@@ -79,8 +85,7 @@ func owaGlobalAccounts(t *testing.T, st *store.Store, observations []owaObservat
 	t.Helper()
 	defer s.phase(t, protocol.StageAccounts)()
 	if fields := owaCompareAllContext(owaWorkContext(t), st, observations, s); len(fields) != 0 {
-		s.mismatch(fields)
-		s.record(protocol.StageAccounts, "account_isolation_mismatch")
+		s.recordFields(protocol.StageAccounts, "account_isolation_mismatch", fields)
 		t.Fatal("account_isolation_mismatch")
 	}
 
@@ -102,11 +107,6 @@ func (s *owaFailureState) cleanup(t *testing.T, fn func()) {
 		s.fields = []string{}
 		s.reason = "unproved"
 		s.omissions = nil
-	}
-}
-func (s *owaFailureState) mismatch(fields []string) {
-	if s != nil {
-		s.fields = append([]string{}, fields...)
 	}
 }
 func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, failure func(string, string, []string, map[string]int64) error) {

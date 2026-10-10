@@ -108,7 +108,7 @@ func owaQueryDiagnosticBudget(ctx context.Context, st *store.Store, q string, ma
 		if s != nil && s.stage == protocol.StageAccounts {
 			stage = protocol.StageAccounts
 		}
-		s.record(stage, "query_projection_budget")
+		s.recordFields(stage, "query_projection_budget", []string{"archive_query"})
 	}
 	return rows, err
 }

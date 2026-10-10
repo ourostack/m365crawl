@@ -135,7 +135,7 @@ func owaReadIndependentCensus(t *testing.T, s *owaObservation) {
 		owaRecordCensusReason(s.failure, err)
 		var coverage *owaCoverageRefusal
 		if errors.As(err, &coverage) {
-			s.failure.mismatch(coverage.fields)
+			s.failure.recordFields(protocol.StageCensus, protocol.CensusReason(err), coverage.fields)
 			t.Fatalf("detail_metadata_coverage_refused fields=%v", coverage.fields)
 		}
 		t.Fatal("raw_census_refused")
@@ -258,8 +258,7 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 func owaArchiveFindings(t *testing.T, s *owaFailureState, findings []string) {
 	t.Helper()
 	if len(findings) != 0 {
-		s.mismatch(findings)
-		s.record(protocol.StageImport, "archive_mismatch")
+		s.recordFields(protocol.StageImport, "archive_mismatch", findings)
 		t.Fatalf("archive_mismatch fields=%v", findings)
 	}
 }
