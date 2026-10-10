@@ -25,7 +25,9 @@ import (
 )
 
 type owaObservation struct {
+	ctx           context.Context
 	root, account string
+	ownedSnapshot string
 	profile       outlookowa.Profile
 	census        owaRawCensus
 	stable        bool
@@ -36,12 +38,15 @@ func owaStable(before, after string) bool { return before != "" && before == aft
 
 func owaCapture(t *testing.T, p outlookowa.Profile) owaObservation {
 	t.Helper()
+	ctx := owaWorkContext(t)
+	if err := owaCheckSource(ctx, p.Source); err != nil {
+		t.Fatal("source_resource_or_context_refused")
+	}
 	before, fresh, err := outlookowa.Fingerprint(p)
 	if err != nil {
 		t.Fatal("source_fingerprint_failed")
 	}
-	// Background owns the snapshot lifetime: no cancellation removes bytes under a reader.
-	dir, cleanup, err := teamsdesktop.Snapshot(context.Background(), p.Source)
+	dir, cleanup, err := owaOwnedSnapshot(ctx, p.Source, teamsdesktop.Snapshot)
 	if err != nil {
 		cleanup()
 		t.Fatal("snapshot_refused")
@@ -79,18 +84,22 @@ func owaCapture(t *testing.T, p outlookowa.Profile) owaObservation {
 	}
 	p.Dir = profileDir
 	p.Source.LevelDBDir, p.Source.BlobDir = level, blob
-	return owaObservation{root: root, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigest(t, p.Source)}
+	return owaObservation{ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source)}
 }
 
 func owaObserve(t *testing.T, p outlookowa.Profile) owaObservation {
 	t.Helper()
 	s := owaCapture(t, p)
 	var err error
-	s.census, err = owaCensus(s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
+	s.census, err = owaCensusContext(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if err != nil {
+		var coverage *owaCoverageRefusal
+		if errors.As(err, &coverage) {
+			t.Fatalf("detail_metadata_coverage_refused fields=%v", coverage.fields)
+		}
 		t.Fatal("raw_census_refused")
 	}
-	if s.digest != owaPayloadDigest(t, s.profile.Source) {
+	if s.digest != owaPayloadDigestContext(t, s.ctx, s.profile.Source) {
 		t.Fatal("private_source_mutated")
 	}
 	if !s.stable {
@@ -102,7 +111,7 @@ func owaObserve(t *testing.T, p outlookowa.Profile) owaObservation {
 
 func owaArchive(t *testing.T, path string) *store.Store {
 	t.Helper()
-	st, err := store.OpenReadOnly(context.Background(), path)
+	st, err := store.OpenReadOnly(owaWorkContext(t), path)
 	if err != nil {
 		t.Fatal("archive_open_failed")
 	}
@@ -131,11 +140,7 @@ func owaCloseArchive(t *testing.T, st *store.Store) {
 }
 
 func owaQuery(st *store.Store, q string) ([][]any, error) {
-	_, rows, truncated, err := st.SQL(context.Background(), q, acceptanceRowLimit)
-	if err != nil || truncated {
-		return nil, errors.New("archive_query_refused")
-	}
-	return rows, nil
+	return owaQueryContext(context.Background(), st, q)
 }
 
 func owaScalar(t *testing.T, st *store.Store, q string) int {
@@ -159,7 +164,7 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 	for step := 0; step < 3; step++ {
 		opts.FullRead = step == 2
 		start := time.Now()
-		rep, _, err := syncer.Run(context.Background(), opts)
+		rep, _, err := syncer.Run(c.ctx, opts)
 		if err != nil {
 			t.Fatal("sync_refused")
 		}
@@ -179,8 +184,8 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 			t.Fatal("sync_counts_mismatch")
 		}
 		st := owaArchive(t, db)
-		findings := owaCompare(st, c.account, c.census)
-		state := owaArchiveState(t, st)
+		findings := owaCompareContext(c.ctx, st, c.account, c.census)
+		state := owaArchiveState(c.ctx, t, st)
 		owaCloseArchive(t, st)
 		if len(findings) != 0 {
 			t.Fatalf("archive_mismatch fields=%v", findings)
@@ -192,27 +197,36 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 		}
 		t.Logf("step=%d messages=%d folders=%d wall_ms=%d", step, len(c.census.messages), len(c.census.folders), time.Since(start).Milliseconds())
 	}
-	if before != owaPayloadDigest(t, c.profile.Source) {
+	if before != owaPayloadDigestContext(t, c.ctx, c.profile.Source) {
 		t.Fatal("private_source_mutated")
 	}
 }
 
-func owaArchiveState(t *testing.T, st *store.Store) map[string][][]any {
+func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store) map[string][][]any {
 	t.Helper()
 	state := map[string][][]any{}
+	var used int64
 	for _, table := range []string{"mail_messages", "mail_folders", "mail_recipients", "mail_attachments", "mail_source_ids", "mail_absent", "mail_fts"} {
 		// Only this fixed table allowlist enters SQL, never a source name or value.
-		rows, err := owaQuery(st, "select rowid,* from "+table+" order by rowid")
+		rows, err := owaQueryBudget(ctx, st, "select rowid,* from "+table+" order by rowid", owaMaxStateBytes-used)
 		if err != nil {
 			t.Fatal("archive_state_refused")
 		}
 		state[table] = rows
+		for _, row := range rows {
+			for _, value := range row {
+				used += int64(len(asString(value)))
+			}
+		}
 	}
 	return state
 }
 
-func owaPayloadDigest(t *testing.T, s teamsdesktop.Source) [32]byte {
+func owaPayloadDigestContext(t *testing.T, ctx context.Context, s teamsdesktop.Source) [32]byte {
 	t.Helper()
+	if err := owaCheckSource(ctx, s); err != nil {
+		t.Fatal("payload_resource_or_context_refused")
+	}
 	h := sha256.New()
 	for _, dir := range []string{s.LevelDBDir, s.BlobDir} {
 		err := filepath.WalkDir(dir, func(path string, e fs.DirEntry, err error) error {
@@ -226,7 +240,7 @@ func owaPayloadDigest(t *testing.T, s teamsdesktop.Source) [32]byte {
 			if err != nil {
 				return errors.New("payload_open_failed")
 			}
-			_, readErr := io.Copy(h, f)
+			_, readErr := io.Copy(h, owaContextReader{ctx: ctx, reader: f})
 			closeErr := f.Close()
 			if readErr != nil || closeErr != nil {
 				return errors.New("payload_read_failed")
@@ -244,7 +258,7 @@ func owaPayloadDigest(t *testing.T, s teamsdesktop.Source) [32]byte {
 
 func owaExpectRefusal(t *testing.T, s owaObservation) {
 	t.Helper()
-	o, err := outlookowa.Open(context.Background(), s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
+	o, err := outlookowa.Open(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if o != nil {
 		if closeErr := o.Close(); closeErr != nil {
 			t.Error("origin_close_failed")
@@ -258,11 +272,11 @@ func owaExpectRefusal(t *testing.T, s owaObservation) {
 
 func owaExpectLoss(t *testing.T, s owaObservation) {
 	t.Helper()
-	o, err := outlookowa.Open(context.Background(), s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
+	o, err := outlookowa.Open(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if err != nil {
 		t.Fatal("origin_open_failed")
 	}
-	res, readErr := outlookowa.Collect(context.Background(), o, s.account, true)
+	res, readErr := outlookowa.Collect(s.ctx, o, s.account, true)
 	closeErr := o.Close()
 	if readErr != nil || closeErr != nil {
 		t.Fatal("origin_read_or_close_failed")
@@ -271,7 +285,7 @@ func owaExpectLoss(t *testing.T, s owaObservation) {
 		t.Fatal("fixed_decoder_loss_missing")
 	}
 	db := filepath.Join(owaScratch(t), "loss.db")
-	rep, _, err := syncer.Run(context.Background(), syncer.Options{Root: filepath.Join(s.root, "no-teams"), DBPath: db, OutlookEnabled: true, OutlookRoot: s.root, OutlookMinReadInterval: -1})
+	rep, _, err := syncer.Run(s.ctx, syncer.Options{Root: filepath.Join(s.root, "no-teams"), DBPath: db, OutlookEnabled: true, OutlookRoot: s.root, OutlookMinReadInterval: -1})
 	if err != nil {
 		t.Fatal("loss_sync_failed")
 	}

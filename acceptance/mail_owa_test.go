@@ -51,10 +51,8 @@ func TestOWAMailAcceptanceHarness(t *testing.T) {
 	owaExercise(t, db, b)
 	st := owaArchive(t, db)
 	defer owaCloseArchive(t, st)
-	for _, c := range []owaObservation{a, b} {
-		if findings := owaCompare(st, c.account, c.census); len(findings) != 0 {
-			t.Fatalf("archive_mismatch fields=%v", findings)
-		}
+	if findings := owaCompareAll(st, []owaObservation{a, b}); len(findings) != 0 {
+		t.Fatalf("archive_mismatch fields=%v", findings)
 	}
 	if n := owaScalar(t, st, `select count(*) from mail_messages`); n != 10 {
 		t.Fatalf("account_isolation messages=%d", n)
@@ -243,6 +241,9 @@ func TestOWAMailSourceMutationEvidence(t *testing.T) {
 
 func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	requireReal(t)
+	if err := owaRealAcceptancePermit(); err != nil {
+		t.Fatal("real_acceptance_blocked_detail_metadata_contract")
+	}
 	root := os.Getenv(outlookRootEnv)
 	if root == "" {
 		t.Skip("explicit M365CRAWL_OUTLOOK_ROOT required for OWA acceptance")
@@ -272,10 +273,8 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	}
 	st := owaArchive(t, db)
 	defer owaCloseArchive(t, st)
-	for _, c := range observations {
-		if fields := owaCompare(st, c.account, c.census); len(fields) != 0 {
-			t.Fatalf("account_isolation_mismatch fields=%v", fields)
-		}
+	if fields := owaCompareAllContext(owaWorkContext(t), st, observations); len(fields) != 0 {
+		t.Fatalf("account_isolation_mismatch fields=%v", fields)
 	}
 	t.Logf("observed_profiles=%d unstable_profiles=%d real_mailbox_completeness=unproved", observed, unstable)
 	if unstable != 0 {
@@ -295,7 +294,7 @@ func owaCorrupt(t *testing.T, path, query string) {
 			t.Error("archive_close_failed")
 		}
 	}()
-	if _, err := st.Exec(query); err != nil {
+	if _, err := st.ExecContext(owaWorkContext(t), query); err != nil {
 		t.Fatal("synthetic_corruption_failed")
 	}
 }

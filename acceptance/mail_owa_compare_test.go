@@ -5,6 +5,7 @@ package acceptance
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
 	"reflect"
 	"strconv"
@@ -16,9 +17,15 @@ import (
 
 // Private values stay inside this comparator. Its only output is a sorted fixed field-name set.
 func owaCompare(st *store.Store, account string, c owaRawCensus) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), owaWorkTimeout)
+	defer cancel()
+	return owaCompareContext(ctx, st, account, c)
+}
+
+func owaCompareContext(ctx context.Context, st *store.Store, account string, c owaRawCensus) []string {
 	bad := map[string]bool{}
 	query := func(q string) [][]any {
-		rows, err := owaQuery(st, q)
+		rows, err := owaQueryContext(ctx, st, q)
 		if err != nil {
 			bad["archive_query"] = true
 		}
@@ -56,7 +63,7 @@ func owaCompare(st *store.Store, account string, c owaRawCensus) []string {
 			bad["source_id"] = true
 		}
 	}
-	root, rootErr := c.root()
+	root, rootErr := c.rootContext(ctx)
 	rootFound := false
 	for _, row := range query(`select key,value from meta where key like 'outlook_mail_root:%'`) {
 		if row[0] == "outlook_mail_root:"+account {
@@ -117,7 +124,9 @@ func owaCompare(st *store.Store, account string, c owaRawCensus) []string {
 		if row[24] != int64(store.MailTextVersion) {
 			bad["body_text_version"] = true
 		}
-		if (!want.inline || want.html == "") && row[23] != "" {
+		if !want.textKnown {
+			bad["body_derivation_unproved"] = true
+		} else if row[23] != want.text {
 			bad["body_text"] = true
 		}
 		if row[25] != nil || row[26] != nil {
@@ -176,7 +185,7 @@ func owaCompare(st *store.Store, account string, c owaRawCensus) []string {
 		}
 		ftsCount++
 		want, found := messageRows[owaNumber(row[1])]
-		if !found || !reflect.DeepEqual(row[2:5], want.fields[3:6]) || row[5] != row[6] {
+		if !found || !want.textKnown || !reflect.DeepEqual(row[2:5], want.fields[3:6]) || row[5] != row[6] || row[5] != want.text {
 			bad["fts"] = true
 		}
 	}

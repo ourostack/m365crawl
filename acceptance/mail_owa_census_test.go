@@ -3,6 +3,7 @@
 package acceptance
 
 import (
+	"context"
 	"errors"
 	"math"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
 )
 
@@ -22,6 +24,9 @@ type owaRawMessage struct {
 	attachments map[string][]any
 	html        string
 	inline      bool
+	text        string
+	textKnown   bool
+	detail      owaDetailInventory
 }
 type owaRawCensus struct {
 	folders  map[string]owaRawFolder
@@ -31,7 +36,16 @@ type owaRawCensus struct {
 
 // This path never calls the importer, its field accessors, Collect or Normalize. Metadata is selected independently; only the three case-exact content stores can expose values.
 func owaCensus(level, blob string) (c owaRawCensus, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), owaWorkTimeout)
+	defer cancel()
+	return owaCensusContext(ctx, level, blob)
+}
+
+func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, err error) {
 	c = owaRawCensus{folders: map[string]owaRawFolder{}, messages: map[string]owaRawMessage{}, bodies: map[string]any{}}
+	if err := owaCheckSource(ctx, teamsdesktop.Source{LevelDBDir: level, BlobDir: blob}); err != nil {
+		return c, err
+	}
 	_, dbs, err := indexeddb.Census(level)
 	if err != nil {
 		return c, errors.New("census_metadata_refused")
@@ -73,9 +87,17 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 		return c, errors.New("census_decoder_refused")
 	}
 	raw := map[string]map[string]any{}
+	var recordCount, decodedBytes int64
 	for _, name := range []string{"folders", "messages", "messageBodies"} {
 		raw[name] = map[string]any{}
 		err := o.Records(db.ID, stores[name], func(rec indexeddb.Record) error {
+			if ctx.Err() != nil {
+				return errors.New("census_context_refused")
+			}
+			recordCount++
+			if recordCount > owaMaxQueryRows || len(rec.Raw) > owaMaxRawValueBytes {
+				return errors.New("census_resource_refused")
+			}
 			if rec.Err != nil {
 				return errors.New("census_decoder_refused")
 			}
@@ -83,11 +105,15 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 			if err != nil {
 				return errors.New("census_decoder_refused")
 			}
+			if len(payload) > owaMaxPayloadBytes || int64(len(payload)) > owaMaxDecodedBytes-decodedBytes {
+				return errors.New("census_resource_refused")
+			}
+			decodedBytes += int64(len(payload))
 			value, err := v8.Deserialize(payload)
 			if err != nil {
 				return errors.New("census_decoder_refused")
 			}
-			f := owaFields{}
+			f := owaFields{ctx: ctx}
 			id := f.text(value, "ItemId", "Id")
 			if name == "folders" {
 				id = f.text(value, "id")
@@ -109,7 +135,7 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 		}
 	}
 	for id, value := range raw["folders"] {
-		f := owaFields{}
+		f := owaFields{ctx: ctx}
 		folder := owaRawFolder{parent: f.text(value, "parentFolderId"), name: f.text(value, "displayName"), kind: "other"}
 		switch kind := strings.ToLower(f.text(value, "distinguishedFolderType")); kind {
 		case "inbox", "archive", "drafts", "sent", "deleted":
@@ -126,7 +152,7 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 	}
 	c.bodies = raw["messageBodies"]
 	for id, value := range raw["messages"] {
-		m, err := owaRawHeader(value, c.bodies[id])
+		m, err := owaRawHeaderContext(ctx, value, c.bodies[id])
 		if err != nil {
 			return c, err
 		}
@@ -135,17 +161,26 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 		}
 		c.messages[id] = m
 	}
-	if _, err := c.root(); err != nil {
+	if _, err := c.rootContext(ctx); err != nil {
 		return c, err
 	}
 	return c, nil
 }
 
 func (c owaRawCensus) root() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), owaWorkTimeout)
+	defer cancel()
+	return c.rootContext(ctx)
+}
+
+func (c owaRawCensus) rootContext(ctx context.Context) (string, error) {
 	roots := map[string]bool{}
 	for id := range c.folders {
 		seen := map[string]bool{}
 		for {
+			if ctx.Err() != nil {
+				return "", errors.New("census_context_refused")
+			}
 			if seen[id] {
 				return "", errors.New("census_folder_cycle_refused")
 			}
@@ -168,9 +203,16 @@ func (c owaRawCensus) root() (string, error) {
 }
 
 // Typed reads deliberately refuse new malformed shapes, instead of turning decoder/layout loss into successful zero coverage.
-type owaFields struct{ err error }
+type owaFields struct {
+	err error
+	ctx context.Context
+}
 
 func (f *owaFields) get(value any, path ...string) any {
+	if f.ctx != nil && f.ctx.Err() != nil {
+		f.err = errors.New("census_context_refused")
+		return nil
+	}
 	for _, key := range path {
 		if value == nil {
 			return nil
@@ -180,9 +222,17 @@ func (f *owaFields) get(value any, path ...string) any {
 			f.err = errors.New("census_field_type_refused")
 			return nil
 		}
+		if len(object.Keys) > owaMaxQueryRows {
+			f.err = errors.New("census_resource_refused")
+			return nil
+		}
 		value = nil
 		found := false
 		for i, k := range object.Keys {
+			if f.ctx != nil && f.ctx.Err() != nil {
+				f.err = errors.New("census_context_refused")
+				return nil
+			}
 			if k == key {
 				if found {
 					f.err = errors.New("census_duplicate_field_refused")
@@ -233,6 +283,11 @@ func (f *owaFields) list(value any, key string) []any {
 	a, ok := v.([]any)
 	if !ok {
 		f.err = errors.New("census_array_refused")
+		return nil
+	}
+	if len(a) > owaMaxQueryRows {
+		f.err = errors.New("census_resource_refused")
+		return nil
 	}
 	return a
 }
@@ -250,11 +305,55 @@ func (f *owaFields) date(value any, key string) any {
 	return at.UTC().Format(time.RFC3339Nano)
 }
 
+type owaDetailInventory struct {
+	present, unproved []string
+}
+
+// The approved mapper currently consumes these fields from the header only. No header/detail precedence is approved except header HasAttachments and the explicitly excluded ReplyTo. Count raw joined detail presence; refuse loss/conflict rather than choosing a new precedence in acceptance code.
+var owaDetailFields = []string{"Attachments", "BccRecipients", "CcRecipients", "ConversationId", "DateTimeReceived", "DateTimeSent", "Flag", "From", "HasAttachments", "Importance", "InternetMessageId", "ItemClass", "Preview", "ReplyTo", "Subject", "ToRecipients", "UID", "IsRead"}
+
+type owaCoverageRefusal struct{ fields []string }
+
+func (*owaCoverageRefusal) Error() string { return "detail_metadata_coverage_refused" }
+
+func owaInventoryDetailContext(ctx context.Context, header, detail any) (owaDetailInventory, error) {
+	f := owaFields{ctx: ctx}
+	var inventory owaDetailInventory
+	for _, name := range owaDetailFields {
+		v := f.get(detail, name)
+		if v == nil {
+			continue
+		}
+		inventory.present = append(inventory.present, name)
+		if name != "HasAttachments" && name != "ReplyTo" && !reflect.DeepEqual(v, f.get(header, name)) {
+			inventory.unproved = append(inventory.unproved, name)
+		}
+	}
+	if f.err != nil {
+		return inventory, f.err
+	}
+	if len(inventory.unproved) != 0 {
+		return inventory, &owaCoverageRefusal{fields: inventory.unproved}
+	}
+	return inventory, nil
+}
+
 var owaMessageFields = []string{"internet_message_id", "conversation_id", "to_me", "subject", "sender_name", "sender_address", "preview", "in_reply_to", "received_at", "sent_at", "class", "importance", "ical_uid", "is_read", "read_state", "flag", "has_attachments", "body_state"}
 
 func owaRawHeader(value, body any) (owaRawMessage, error) {
-	f := owaFields{}
+	ctx, cancel := context.WithTimeout(context.Background(), owaWorkTimeout)
+	defer cancel()
+	return owaRawHeaderContext(ctx, value, body)
+}
+
+func owaRawHeaderContext(ctx context.Context, value, body any) (owaRawMessage, error) {
+	f := owaFields{ctx: ctx}
 	m := owaRawMessage{folder: f.text(value, "ParentFolderId", "Id"), attachments: map[string][]any{}}
+	var detailErr error
+	m.detail, detailErr = owaInventoryDetailContext(ctx, value, body)
+	if detailErr != nil {
+		return m, detailErr
+	}
 	read := f.bool(value, "IsRead")
 	state := "unknown"
 	if read != nil {
@@ -262,6 +361,7 @@ func owaRawHeader(value, body any) (owaRawMessage, error) {
 		if read == int64(1) {
 			state = "read"
 		}
+
 	}
 	flag := strings.ToLower(f.text(value, "Flag", "FlagStatus"))
 	switch flag {
@@ -285,10 +385,21 @@ func owaRawHeader(value, body any) (owaRawMessage, error) {
 	}
 	bodyState := "none"
 	if v := f.get(body, "NormalizedBody", "Value"); v != nil {
+		if kind := f.text(body, "NormalizedBody", "BodyType"); kind != "" && kind != "HTML" {
+			return m, errors.New("body_derivation_unproved")
+		}
 		m.html = f.text(v)
 		m.inline = true
 		bodyState = "inline"
 	}
+	if m.inline {
+		var textErr error
+		m.text, textErr = owaIndependentText(ctx, m.html)
+		if textErr != nil {
+			return m, textErr
+		}
+	}
+	m.textKnown = true
 	m.fields = []any{
 		f.text(value, "InternetMessageId"), f.text(value, "ConversationId", "Id"), int64(0),
 		f.text(value, "Subject"), f.text(value, "From", "Mailbox", "Name"), f.text(value, "From", "Mailbox", "EmailAddress"),
@@ -297,6 +408,9 @@ func owaRawHeader(value, body any) (owaRawMessage, error) {
 	}
 	for _, role := range []struct{ field, name string }{{"ToRecipients", "to"}, {"CcRecipients", "cc"}, {"BccRecipients", "bcc"}} {
 		for _, r := range f.list(value, role.field) {
+			if ctx.Err() != nil {
+				return m, errors.New("census_context_refused")
+			}
 			name, address := f.text(r, "Name"), f.text(r, "EmailAddress")
 			var addr any
 			if address != "" {
@@ -306,6 +420,9 @@ func owaRawHeader(value, body any) (owaRawMessage, error) {
 		}
 	}
 	for _, a := range f.list(value, "Attachments") {
+		if ctx.Err() != nil {
+			return m, errors.New("census_context_refused")
+		}
 		id := f.text(a, "AttachmentId", "Id")
 		if strings.TrimSpace(id) == "" {
 			return m, errors.New("census_attachment_identity_refused")
