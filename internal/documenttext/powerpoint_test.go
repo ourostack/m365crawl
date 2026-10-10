@@ -46,4 +46,14 @@ func TestPowerPointContentLoss(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("PowerPoint loss = %#v, %v; want %#v", got, err, want)
 	}
+
+}
+
+func TestPowerPointNonElementMainTokens(t *testing.T) {
+	raw := powerPointFixture(t, `<p:sld xmlns:p="`+presentationNS+`"/>`)
+	raw = mutateZIP(t, raw, "ppt/presentation.xml", `<p:presentation xmlns:p="`+presentationNS+`" xmlns:r="`+relationNS+`"><!--unselected--><p:sldIdLst><p:sldId r:id="s9"/></p:sldIdLst></p:presentation>`)
+	got, err := Extract(context.Background(), bytes.NewReader(raw), int64(len(raw)), "pptx", DefaultLimits())
+	if err != nil || len(got.Paragraphs) != 1 {
+		t.Fatalf("main non-element tokens = %#v,%v", got, err)
+	}
 }

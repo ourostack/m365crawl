@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"math"
 	"net/url"
 	"path"
 	"strings"
@@ -280,11 +281,15 @@ func (x *extractor) selectPart(part string) (*zip.File, error) {
 		return nil, &ReadError{Code: "unsupported"}
 	}
 	if !x.selected[part] {
-		if len(x.selected) >= x.limits.Parts || file.UncompressedSize64 > uint64(x.limits.MemberBytes) || file.UncompressedSize64 > uint64(x.limits.SelectedBytes-x.selectedBytes) {
+		if file.UncompressedSize64 > math.MaxInt64 {
+			return nil, &ReadError{Code: "too_large"}
+		}
+		size := int64(file.UncompressedSize64)
+		if len(x.selected) >= x.limits.Parts || size > x.limits.MemberBytes || size > x.limits.SelectedBytes-x.selectedBytes {
 			return nil, &ReadError{Code: "too_large"}
 		}
 		x.selected[part] = true
-		x.selectedBytes += int64(file.UncompressedSize64)
+		x.selectedBytes += size
 	}
 	return file, nil
 }

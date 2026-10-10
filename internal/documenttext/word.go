@@ -18,6 +18,12 @@ func (x *extractor) readWord() error {
 	seen := map[string]string{x.main: "document"}
 	for _, role := range []string{"header-footer", "footnotes", "endnotes", "comments"} {
 		for _, rel := range rels {
+			if !strings.HasPrefix(rel.Type, relationNS+"/") {
+				if _, referenced := references[rel.ID]; referenced {
+					return &ReadError{Code: "unsupported"}
+				}
+				continue
+			}
 			kind := strings.TrimPrefix(rel.Type, relationNS+"/")
 			if role == "header-footer" {
 				expected, referenced := references[rel.ID]
@@ -80,6 +86,7 @@ func (x *extractor) wordPart(part string, references map[string]string) error {
 				return nil
 			}
 			if token.Name.Space != wordNS {
+				skipDepth = depth
 				return nil
 			}
 			switch token.Name.Local {
@@ -90,10 +97,6 @@ func (x *extractor) wordPart(part string, references map[string]string) error {
 				x.loss("embedded_content_unmapped")
 				skipDepth = depth
 			case "p":
-				x.paragraphCount++
-				if x.paragraphCount > x.limits.Paragraphs {
-					return &ReadError{Code: "too_large"}
-				}
 				p := &wordParagraph{index: index}
 				index++
 				stack = append(stack, p)
@@ -141,9 +144,10 @@ func (x *extractor) wordPart(part string, references map[string]string) error {
 				stack[len(stack)-1].text.WriteString(value)
 			}
 		case xml.EndElement:
-			if skipDepth == depth {
+			switch skipDepth {
+			case depth:
 				skipDepth = 0
-			} else if skipDepth == 0 {
+			case 0:
 				if textDepth == depth {
 					textDepth = 0
 				}

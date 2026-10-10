@@ -76,6 +76,9 @@ func preflightZIP(ctx context.Context, r io.ReaderAt, size int64, maxEntries int
 		if binary.LittleEndian.Uint16(header[34:]) != 0 {
 			return &ReadError{Code: "unsupported"}
 		}
+		if binary.LittleEndian.Uint32(header[20:]) == 0xffffffff || binary.LittleEndian.Uint32(header[24:]) == 0xffffffff || binary.LittleEndian.Uint32(header[42:]) == 0xffffffff {
+			return &ReadError{Code: "unsupported"}
+		}
 		length := int64(46)
 		for _, field := range []int{28, 30, 32} {
 			length += int64(binary.LittleEndian.Uint16(header[field:]))

@@ -7,9 +7,19 @@ import (
 
 func (x *extractor) readPowerPoint() error {
 	var ids []string
+	var ancestry []xml.Name
 	err := x.readXML(x.main, func(token xml.Token) error {
 		start, ok := token.(xml.StartElement)
-		if !ok || start.Name != (xml.Name{Space: presentationNS, Local: "sldId"}) {
+		if _, ending := token.(xml.EndElement); ending {
+			ancestry = ancestry[:len(ancestry)-1]
+			return nil
+		}
+		if !ok {
+			return nil
+		}
+		ancestry = append(ancestry, start.Name)
+		if len(ancestry) != 3 || ancestry[0] != (xml.Name{Space: presentationNS, Local: "presentation"}) ||
+			ancestry[1] != (xml.Name{Space: presentationNS, Local: "sldIdLst"}) || start.Name != (xml.Name{Space: presentationNS, Local: "sldId"}) {
 			return nil
 		}
 		id, err := relationID(start)
@@ -108,6 +118,14 @@ func (x *extractor) presentationPart(part string) error {
 				skipDepth = depth
 				return nil
 			}
+			if token.Name.Space == presentationNS && (token.Name.Local == "extLst" || token.Name.Local == "ext") {
+				skipDepth = depth
+				return nil
+			}
+			if token.Name.Space != presentationNS && token.Name.Space != drawingNS {
+				skipDepth = depth
+				return nil
+			}
 			if token.Name.Space != drawingNS {
 				return nil
 			}
@@ -115,10 +133,6 @@ func (x *extractor) presentationPart(part string) error {
 			case "p":
 				if paragraphDepth != 0 {
 					return &ReadError{Code: "malformed"}
-				}
-				x.paragraphCount++
-				if x.paragraphCount > x.limits.Paragraphs {
-					return &ReadError{Code: "too_large"}
 				}
 				paragraphDepth = depth
 				text.Reset()
@@ -145,9 +159,10 @@ func (x *extractor) presentationPart(part string) error {
 				text.WriteString(value)
 			}
 		case xml.EndElement:
-			if skipDepth == depth {
+			switch skipDepth {
+			case depth:
 				skipDepth = 0
-			} else if skipDepth == 0 {
+			case 0:
 				if textDepth == depth {
 					textDepth = 0
 				}

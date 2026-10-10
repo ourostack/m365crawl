@@ -103,4 +103,14 @@ func TestExcelAliasedWorksheet(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("worksheet aliases = %#v, %v; want %#v", got, err, want)
 	}
+
+}
+
+func TestExcelNonElementMainTokens(t *testing.T) {
+	raw := excelFixture(t, `<worksheet xmlns="`+excelNS+`"><c r="A1"/></worksheet>`, `<sst xmlns="`+excelNS+`"/>`)
+	raw = mutateZIP(t, raw, "xl/workbook.xml", `<workbook xmlns="`+excelNS+`" xmlns:r="`+relationNS+`"><!--unselected--><sheets><sheet r:id="s1"/></sheets></workbook>`)
+	got, err := Extract(context.Background(), bytes.NewReader(raw), int64(len(raw)), "xlsx", DefaultLimits())
+	if err != nil || len(got.Cells) != 1 {
+		t.Fatalf("main non-element tokens = %#v,%v", got, err)
+	}
 }

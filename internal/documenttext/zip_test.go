@@ -9,6 +9,9 @@ import (
 )
 
 func directoryFixture(count int, declared uint16) []byte {
+	if count < 0 || count > 65537 {
+		panic("invalid synthetic directory fixture size")
+	}
 	raw := make([]byte, count*46+22)
 	for i := range count {
 		h := raw[i*46:]
@@ -49,6 +52,8 @@ func TestZIPDirectoryFraming(t *testing.T) {
 		{"header", func(b []byte) { b[0] = 0 }, "malformed"},
 		{"name-outside-directory", func(b []byte) { binary.LittleEndian.PutUint16(b[28:], 65535) }, "malformed"},
 		{"member-disk", func(b []byte) { binary.LittleEndian.PutUint16(b[34:], 1) }, "unsupported"},
+		{"member-zip64-size", func(b []byte) { binary.LittleEndian.PutUint32(b[24:], 0xffffffff) }, "unsupported"},
+		{"member-zip64-offset", func(b []byte) { binary.LittleEndian.PutUint32(b[42:], 0xffffffff) }, "unsupported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := directoryFixture(2, 2)

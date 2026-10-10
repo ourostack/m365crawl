@@ -57,8 +57,6 @@ func Extract(ctx context.Context, r io.ReaderAt, size int64, kind string, limits
 		err = x.readExcel()
 	case "pptx":
 		err = x.readPowerPoint()
-	default:
-		return Result{}, &ReadError{Code: "unsupported"}
 	}
 	if err != nil {
 		return Result{}, err

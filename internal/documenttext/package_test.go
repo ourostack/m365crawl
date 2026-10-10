@@ -13,6 +13,7 @@ func TestPackageMainAdmission(t *testing.T) {
 	if err != nil || p.main != "word/document.xml" {
 		t.Fatalf("package = %#v, %v", p, err)
 	}
+
 	if err := p.readXML(p.main, xmlNoop); err != nil {
 		t.Fatalf("main XML = %v", err)
 	}
@@ -28,6 +29,18 @@ func TestPackageMainAdmission(t *testing.T) {
 	for _, kind := range []string{"xlsx", "pptx"} {
 		_, err := openPackage(context.Background(), bytes.NewReader(raw), int64(len(raw)), kind, DefaultLimits())
 		requireZIPError(t, err, "unsupported")
+	}
+}
+
+func TestUTF8BOMPackageParts(t *testing.T) {
+	raw := wordFixture(t,
+		"\ufeff"+`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>`,
+		"\ufeff"+`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+		"\ufeff"+`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+	)
+	got, err := Extract(context.Background(), bytes.NewReader(raw), int64(len(raw)), "docx", DefaultLimits())
+	if err != nil || got.State != "text_observations" || len(got.Paragraphs) != 0 {
+		t.Fatalf("UTF8 BOM parts = %#v, %v", got, err)
 	}
 }
 

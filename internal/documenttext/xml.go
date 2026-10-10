@@ -2,6 +2,7 @@ package documenttext
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"encoding/xml"
 	"errors"
@@ -33,7 +34,11 @@ func (x *extractor) readXML(part string, visit func(xml.Token) error) (err error
 		}
 	}()
 	limited := &io.LimitedReader{R: source, N: x.limits.MemberBytes + 1}
-	decoder := xml.NewDecoder(limited)
+	buffered := bufio.NewReader(limited)
+	if prefix, _ := buffered.Peek(3); bytes.Equal(prefix, []byte{0xef, 0xbb, 0xbf}) {
+		_, _ = buffered.Discard(3)
+	}
+	decoder := xml.NewDecoder(buffered)
 	depth := 0
 	rootSeen := false
 	for {
@@ -59,6 +64,19 @@ func (x *extractor) readXML(part string, visit func(xml.Token) error) (err error
 		}
 		switch token := token.(type) {
 		case xml.StartElement:
+			if (expected.Space == wordNS && token.Name == (xml.Name{Space: wordNS, Local: "p"})) ||
+				(expected.Space == presentationNS && token.Name == (xml.Name{Space: drawingNS, Local: "p"})) {
+				x.paragraphCount++
+				if x.paragraphCount > x.limits.Paragraphs {
+					return &ReadError{Code: "too_large"}
+				}
+			}
+			if expected == (xml.Name{Space: excelNS, Local: "worksheet"}) && token.Name == (xml.Name{Space: excelNS, Local: "c"}) {
+				x.cellCount++
+				if x.cellCount > x.limits.Cells {
+					return &ReadError{Code: "too_large"}
+				}
+			}
 			if depth == 0 {
 				if rootSeen {
 					return &ReadError{Code: "malformed"}

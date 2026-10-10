@@ -8,9 +8,19 @@ import (
 
 func (x *extractor) readExcel() error {
 	var sheetIDs []string
+	var ancestry []xml.Name
 	err := x.readXML(x.main, func(token xml.Token) error {
 		start, ok := token.(xml.StartElement)
-		if !ok || start.Name != (xml.Name{Space: excelNS, Local: "sheet"}) {
+		if _, ending := token.(xml.EndElement); ending {
+			ancestry = ancestry[:len(ancestry)-1]
+			return nil
+		}
+		if !ok {
+			return nil
+		}
+		ancestry = append(ancestry, start.Name)
+		if len(ancestry) != 3 || ancestry[0] != (xml.Name{Space: excelNS, Local: "workbook"}) ||
+			ancestry[1] != (xml.Name{Space: excelNS, Local: "sheets"}) || start.Name != (xml.Name{Space: excelNS, Local: "sheet"}) {
 			return nil
 		}
 		id, err := relationID(start)
@@ -32,6 +42,9 @@ func (x *extractor) readExcel() error {
 	sharedSeen := false
 	for _, rel := range rels {
 		byID[rel.ID] = rel
+		if rel.Type == relationNS+"/externalLink" {
+			x.loss("formatting_or_external_values_unmapped")
+		}
 		if rel.Type != relationNS+"/sharedStrings" {
 			continue
 		}
@@ -92,13 +105,17 @@ func (x *extractor) sharedStrings(part string) ([]string, error) {
 	x.roots[part] = xml.Name{Space: excelNS, Local: "sst"}
 	var result []string
 	var current strings.Builder
-	depth, siDepth, textDepth, phoneticDepth := 0, 0, 0, 0
+	depth, siDepth, textDepth, phoneticDepth, skipDepth := 0, 0, 0, 0, 0
 	var retained int64
 	err := x.readXML(part, func(token xml.Token) error {
 		switch token := token.(type) {
 		case xml.StartElement:
 			depth++
+			if skipDepth != 0 {
+				return nil
+			}
 			if token.Name.Space != excelNS {
+				skipDepth = depth
 				return nil
 			}
 			switch token.Name.Local {
@@ -119,7 +136,7 @@ func (x *extractor) sharedStrings(part string) ([]string, error) {
 				}
 			}
 		case xml.CharData:
-			if textDepth != 0 && phoneticDepth == 0 {
+			if skipDepth == 0 && textDepth != 0 && phoneticDepth == 0 {
 				if int64(len(token)) > x.limits.SharedStringBytes-retained {
 					return &ReadError{Code: "too_large"}
 				}
@@ -127,6 +144,13 @@ func (x *extractor) sharedStrings(part string) ([]string, error) {
 				current.Write(token)
 			}
 		case xml.EndElement:
+			if skipDepth != 0 {
+				if skipDepth == depth {
+					skipDepth = 0
+				}
+				depth--
+				return nil
+			}
 			if textDepth == depth {
 				textDepth = 0
 			}
@@ -156,22 +180,22 @@ type worksheetCell struct {
 func (x *extractor) worksheet(part string, shared []string) error {
 	x.roots[part] = xml.Name{Space: excelNS, Local: "worksheet"}
 	seen := map[string]bool{}
-	depth, cellDepth, valueDepth, inlineDepth, textDepth, phoneticDepth := 0, 0, 0, 0, 0, 0
+	depth, cellDepth, valueDepth, inlineDepth, textDepth, phoneticDepth, skipDepth := 0, 0, 0, 0, 0, 0, 0
 	var cell *worksheetCell
 	return x.readXML(part, func(token xml.Token) error {
 		switch token := token.(type) {
 		case xml.StartElement:
 			depth++
+			if skipDepth != 0 {
+				return nil
+			}
 			if token.Name.Space != excelNS {
+				skipDepth = depth
 				return nil
 			}
 			if token.Name.Local == "c" {
 				if cell != nil {
 					return &ReadError{Code: "malformed"}
-				}
-				x.cellCount++
-				if x.cellCount > x.limits.Cells {
-					return &ReadError{Code: "too_large"}
 				}
 				fields, err := selectedAttributes(token, "r", "t", "s")
 				if err != nil {
@@ -189,17 +213,27 @@ func (x *extractor) worksheet(part string, shared []string) error {
 				}
 				return nil
 			}
-			if cell == nil {
+			if skipDepth != 0 || cell == nil {
 				return nil
 			}
 			switch token.Name.Local {
 			case "v":
+				if depth != cellDepth+1 {
+					cell.invalid = true
+					skipDepth = depth
+					return nil
+				}
 				if cell.valueSeen {
 					cell.invalid = true
 				}
 				cell.valueSeen = true
 				valueDepth = depth
 			case "is":
+				if depth != cellDepth+1 {
+					cell.invalid = true
+					skipDepth = depth
+					return nil
+				}
 				if cell.inlineSeen {
 					cell.invalid = true
 				}
@@ -213,24 +247,34 @@ func (x *extractor) worksheet(part string, shared []string) error {
 				phoneticDepth = depth
 				x.loss("phonetic_text_unmapped")
 			case "f":
+				if depth != cellDepth+1 {
+					cell.invalid = true
+				}
 				cell.formula = true
 			}
 		case xml.CharData:
-			if cell == nil {
+			if skipDepth != 0 || cell == nil {
 				return nil
 			}
 			if valueDepth != 0 {
-				if int64(cell.value.Len())+int64(len(token)) > x.limits.MemberBytes {
+				if int64(cell.value.Len())+int64(len(token)) > x.limits.TextBytes {
 					return &ReadError{Code: "too_large"}
 				}
 				cell.value.Write(token)
 			} else if textDepth != 0 && phoneticDepth == 0 {
-				if int64(cell.inline.Len())+int64(len(token)) > x.limits.MemberBytes {
+				if int64(cell.inline.Len())+int64(len(token)) > x.limits.TextBytes {
 					return &ReadError{Code: "too_large"}
 				}
 				cell.inline.Write(token)
 			}
 		case xml.EndElement:
+			if skipDepth != 0 {
+				if skipDepth == depth {
+					skipDepth = 0
+				}
+				depth--
+				return nil
+			}
 			if cellDepth == depth {
 				if err := x.finishCell(part, cell, shared); err != nil {
 					return err
