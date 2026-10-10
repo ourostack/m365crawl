@@ -66,7 +66,7 @@ func TestIndependentTotalStringsExactBoundary(t *testing.T) {
 		raw := nativeResult()
 		raw.State = "transcript_observations"
 		raw.Transcript = &Transcript{ID: "t"}
-		retained := len(raw.Account.Host) + len(raw.Account.WebID) + len(raw.Account.LoginName) + len(raw.File.SiteID) + len(raw.File.WebID) + len(raw.File.FileID) + len(raw.File.Path) + len(*raw.File.ModifiedRaw) + 1
+		retained := len(raw.Account.Host) + len(raw.Account.WebID) + len(raw.Account.LoginName) + len(raw.File.SiteID) + len(raw.File.WebID) + len(raw.File.FileID) + len(raw.File.Path) + len(*raw.File.ModifiedRaw) + len(*raw.File.DriveID) + len(*raw.File.ItemID) + 1
 		for i := 0; i < 32; i++ {
 			raw.Transcript.Entries = append(raw.Transcript.Entries, TranscriptEntry{Ordinal: i, ID: "e", StartRaw: stringPointer(strings.Repeat("x", 262144))})
 			retained += 262145

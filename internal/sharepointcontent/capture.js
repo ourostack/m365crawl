@@ -2,6 +2,7 @@ async (args, readerFactory) => {
   if (location.hostname.toLowerCase() !== args.Host) return {state:"elsewhere"};
   const controller=new AbortController();
   const timer=setTimeout(() => controller.abort(),20000);
+  const sitePath=args.Site.split("/").map(segment=>encodeURIComponent(segment)).join("/");
   const read=readerFactory({origin:location.origin,signal:controller.signal,maxBodyBytes:2097152,maxTotalBytes:8388608,maxRequests:8});
   const uuid=value => typeof value==="string" && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\})$/i.test(value);
   const normalUUID=value => value.replace(/[{}]/g,"").toLowerCase();
@@ -14,16 +15,16 @@ async (args, readerFactory) => {
   try {
     const literal="'"+args.Path.replace(/'/g,"''")+"'";
     const encoded=encodeURIComponent(literal).replace(/'/g,"%27");
-    const fileRead=await read(args.Site+"/_api/web/GetFileByServerRelativePath(decodedurl="+encoded+")?$select=UniqueId,ServerRelativeUrl,TimeLastModified,VroomDriveID,VroomItemID,Length,ListItemAllFields&$expand=ListItemAllFields");
+    const fileRead=await read(sitePath+"/_api/web/GetFileByServerRelativePath(decodedurl="+encoded+")?$select=UniqueId,ServerRelativeUrl,TimeLastModified,VroomDriveID,VroomItemID,Length,ListItemAllFields&$expand=ListItemAllFields");
     if (fileRead.state!=="ok") return {state:fileRead.state,status:fileRead.status};
     const native=unwrap(fileRead);
     if (!native || !uuid(native.UniqueId) || !string(native.ServerRelativeUrl)) return {state:"malformed"};
     if (native.ServerRelativeUrl!==args.Path) return {state:"identity_mismatch"};
-    const siteRead=await read(args.Site+"/_api/site?$select=Id");
+    const siteRead=await read(sitePath+"/_api/site?$select=Id");
     if (siteRead.state!=="ok") return {state:siteRead.state,status:siteRead.status};
-    const webRead=await read(args.Site+"/_api/web?$select=Id");
+    const webRead=await read(sitePath+"/_api/web?$select=Id");
     if (webRead.state!=="ok") return {state:webRead.state,status:webRead.status};
-    const accountRead=await read(args.Site+"/_api/web/currentuser?$select=Id,LoginName");
+    const accountRead=await read(sitePath+"/_api/web/currentuser?$select=Id,LoginName");
     if (accountRead.state!=="ok") return {state:accountRead.state,status:accountRead.status};
     const site=unwrap(siteRead),web=unwrap(webRead),account=unwrap(accountRead);
     if (!site || !web || !account || !uuid(site.Id) || !uuid(web.Id) ||
@@ -56,16 +57,24 @@ async (args, readerFactory) => {
       if (typeof item.CanvasContent1!=="string") return {state:"malformed"};
       const template=document.createElement("template");
       template.innerHTML=item.CanvasContent1;
-      let nodes=0;
+      let nodes=0,candidates=0;
       const pending=[{node:template.content,depth:0}];
       while(pending.length) {
         const {node,depth}=pending.pop();
         if(++nodes>65536 || depth>128) return {state:"too_large"};
+        if(node.nodeType===Node.ELEMENT_NODE && node.hasAttribute("data-sp-canvascontrol") && ++candidates>4096) return {state:"too_large"};
         if(node.nodeType===Node.ELEMENT_NODE && node.tagName==="TEMPLATE") pending.push({node:node.content,depth:depth+1});
         for(let child=node.lastChild;child;child=child.previousSibling) pending.push({node:child,depth:depth+1});
       }
-      const controls=[...template.content.querySelectorAll("[data-sp-canvascontrol]")];
-      if(controls.length>4096) return {state:"too_large"};
+      const ignored=new Set(["SCRIPT","STYLE","NOSCRIPT","TEMPLATE","SVG"]);
+      const eligible=(node,owner)=>{
+        for(let ancestor=node;ancestor&&ancestor!==owner;ancestor=ancestor.parentNode){
+          if(ancestor.nodeType===Node.ELEMENT_NODE &&
+              (ancestor.namespaceURI!=="http://www.w3.org/1999/xhtml" || ignored.has(ancestor.tagName.toUpperCase()))) return false;
+        }
+        return true;
+      };
+      const controls=[...template.content.querySelectorAll("[data-sp-canvascontrol]")].filter(node=>eligible(node,template.content));
       result.pageControls=[];
       const loss=code=>{
         const existing=losses.find(item=>item.Code===code);
@@ -73,7 +82,6 @@ async (args, readerFactory) => {
         else losses.push({Code:code,Count:1});
       };
       let textBytes=0;
-      const ignored=new Set(["SCRIPT","STYLE","NOSCRIPT","TEMPLATE","SVG"]);
       const blocks=new Set(["P","DIV","LI","UL","OL","TABLE","TR","TD","TH","BLOCKQUOTE","H1","H2","H3","H4","H5","H6","PRE"]);
       for(let ordinal=0;ordinal<controls.length;ordinal++) {
         const control=controls[ordinal];
@@ -90,23 +98,28 @@ async (args, readerFactory) => {
         if(data.controlType===0) {observation.State="layout";continue;}
         if(data.controlType!==4) {observation.State="omitted";loss("control_text_unmapped");continue;}
         observation.State="text";
-        const rich=[...control.querySelectorAll("[data-sp-rte]")].filter(node=>node.closest("[data-sp-canvascontrol]")===control);
+        const rich=[...control.querySelectorAll("[data-sp-rte]")].filter(node=>node.closest("[data-sp-canvascontrol]")===control && eligible(node,control));
         if(rich.length===0) {observation.State="unmapped";loss("rich_text_unavailable");continue;}
         for(const root of rich) {
           const segments=[];
+          const boundary=()=>{
+            if(segments.length && !segments[segments.length-1].value.endsWith("\n")) segments.push({value:"\n",generated:true});
+          };
           const walk=[{node:root,exit:false}];
           while(walk.length) {
             const {node,exit}=walk.pop();
-            if(node.nodeType===Node.TEXT_NODE) {segments.push(node.nodeValue || "");continue;}
+            if(node.nodeType===Node.TEXT_NODE) {if(node.nodeValue) segments.push({value:node.nodeValue,generated:false});continue;}
             if(node.nodeType!==Node.ELEMENT_NODE) continue;
             if(node!==root && (node.hasAttribute("data-sp-canvascontrol") || node.hasAttribute("data-sp-rte"))) continue;
             if(node.namespaceURI!=="http://www.w3.org/1999/xhtml" || ignored.has(node.tagName.toUpperCase())) continue;
-            if(node.tagName==="BR") {segments.push("\n");continue;}
-            if(exit) {if(blocks.has(node.tagName)) segments.push("\n");continue;}
+            if(node.tagName==="BR") {segments.push({value:"\n",generated:false});continue;}
+            if(exit) {if(node!==root && blocks.has(node.tagName)) boundary();continue;}
+            if(node!==root && blocks.has(node.tagName)) boundary();
             walk.push({node,exit:true});
             for(let child=node.lastChild;child;child=child.previousSibling) walk.push({node:child,exit:false});
           }
-          const text=segments.join("").replace(/\n+$/,"");
+          while(segments.length && segments[segments.length-1].generated) segments.pop();
+          const text=segments.map(segment=>segment.value).join("");
           const bytes=new TextEncoder().encode(text).byteLength;
           textBytes+=bytes;
           if(bytes>262144 || textBytes>1048576) return {state:"too_large"};
@@ -118,7 +131,7 @@ async (args, readerFactory) => {
     }
     if (args.Kind==="stream") {
       if(!file.DriveID || !file.ItemID) return result;
-      const collectionRead=await read(args.Site+"/_api/v2.0/drives/"+encodeURIComponent(file.DriveID)+"/items/"+encodeURIComponent(file.ItemID)+"/media/transcripts");
+      const collectionRead=await read(sitePath+"/_api/v2.0/drives/"+encodeURIComponent(file.DriveID)+"/items/"+encodeURIComponent(file.ItemID)+"/media/transcripts");
       if(collectionRead.state!=="ok") {
         if(["no_access","not_found","timeout"].includes(collectionRead.state)) return {...result,state:collectionRead.state,status:collectionRead.status || 0};
         return {state:collectionRead.state,status:collectionRead.status};

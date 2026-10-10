@@ -15,7 +15,8 @@ func nativeResult() scriptResult {
 		State: "metadata_only", HTTPStatus: 200,
 		Account: SourceAccount{Host: "fixture.sharepoint.com", WebID: "cccccccc-cccc-cccc-cccc-cccccccccccc", ID: 11, LoginName: "fixture-account"},
 		File: NativeFile{SiteID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", WebID: "cccccccc-cccc-cccc-cccc-cccccccccccc", FileID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-			Path: "/sites/sample/SitePages/Page.aspx", ModifiedRaw: stringPointer("2026-01-01T00:00:00Z")},
+			Path: "/sites/sample/SitePages/Page.aspx", ModifiedRaw: stringPointer("2026-01-01T00:00:00Z"),
+			DriveID: stringPointer("drive"), ItemID: stringPointer("item")},
 	}
 }
 

@@ -17,6 +17,20 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	if request.Kind != "page" && request.Kind != "stream" || raw.HTTPStatus != 0 && (raw.HTTPStatus < 100 || raw.HTTPStatus > 599) {
+		return Result{}, &ReadError{Code: "malformed"}
+	}
+	if raw.State == "no_access" && raw.HTTPStatus != 403 || raw.State == "not_found" && raw.HTTPStatus != 404 {
+		return Result{}, &ReadError{Code: "malformed"}
+	}
+	requiresTranscriptIdentity := false
+	switch raw.State {
+	case "transcript_observations", "no_transcript", "transcript_selection_required", "collection_incomplete", "unsupported_download_host":
+		if request.Kind != "stream" {
+			return Result{}, &ReadError{Code: "malformed"}
+		}
+		requiresTranscriptIdentity = true
+	}
 	switch raw.State {
 	case "no_access", "not_found", "timeout":
 		if raw.File.FileID == "" {
@@ -34,6 +48,9 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 	}
 	if raw.Account.Host != request.Host || raw.Account.WebID != raw.File.WebID || raw.File.Path != request.Path {
 		return Result{}, &ReadError{Code: "identity_mismatch"}
+	}
+	if requiresTranscriptIdentity && (raw.File.DriveID == nil || *raw.File.DriveID == "" || raw.File.ItemID == nil || *raw.File.ItemID == "") {
+		return Result{}, &ReadError{Code: "malformed"}
 	}
 	var retained int
 	stringsToCheck := []*string{&raw.Account.Host, &raw.Account.WebID, &raw.Account.LoginName, &raw.File.SiteID, &raw.File.WebID,
@@ -84,7 +101,12 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 		return Result{}, &ReadError{Code: "malformed"}
 	}
 	textBytes := 0
+	textObservations := 0
 	for i, control := range raw.PageControls {
+		textObservations += len(control.Texts)
+		if textObservations > 65536 {
+			return Result{}, &ReadError{Code: "too_large"}
+		}
 		if control.Ordinal != i || (control.ID != nil && !nativeUUID.MatchString(*control.ID)) {
 			return Result{}, &ReadError{Code: "malformed"}
 		}
