@@ -10,6 +10,26 @@ import (
 	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
+func Fetch(ctx context.Context, page transcripts.PageDriver, request Request) (result Result, err error) {
+	defer func() {
+		if contextErr := ctx.Err(); contextErr != nil {
+			result, err = Result{}, contextErr
+		}
+	}()
+	admitted, err := land(ctx, page, request)
+	if err != nil {
+		return Result{}, err
+	}
+	var raw scriptResult
+	if err := page.Eval(ctx, ScriptExpr(admitted), &raw); err != nil {
+		return Result{}, &ReadError{Code: "unreadable"}
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	return decode(ctx, admitted, raw)
+}
+
 func land(ctx context.Context, page transcripts.PageDriver, request Request) (result admittedRequest, err error) {
 	defer func() {
 		if contextErr := ctx.Err(); contextErr != nil {
