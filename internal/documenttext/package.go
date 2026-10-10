@@ -35,6 +35,7 @@ type extractor struct {
 	losses         map[string]int
 	textBytes      int64
 	paragraphCount int
+	cellCount      int
 }
 
 type relationship struct {

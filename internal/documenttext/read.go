@@ -50,10 +50,15 @@ func Extract(ctx context.Context, r io.ReaderAt, size int64, kind string, limits
 	if err != nil {
 		return Result{}, err
 	}
-	if kind != "docx" {
+	switch kind {
+	case "docx":
+		err = x.readWord()
+	case "xlsx":
+		err = x.readExcel()
+	default:
 		return Result{}, &ReadError{Code: "unsupported"}
 	}
-	if err := x.readWord(); err != nil {
+	if err != nil {
 		return Result{}, err
 	}
 	for code, count := range x.losses {
