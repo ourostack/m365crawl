@@ -133,17 +133,8 @@ func seedMail(t *testing.T, e *env, msgs []outlookmail.Message) {
 	}
 }
 
-// pinMailPlatform makes the mail commands run as on a Mac, whatever the host is.
-func pinMailPlatform(t *testing.T) {
-	t.Helper()
-	old := mailPlatform
-	mailPlatform = "darwin"
-	t.Cleanup(func() { mailPlatform = old })
-}
-
 func mailEnv(t *testing.T) *env {
 	t.Helper()
-	pinMailPlatform(t)
 	e := textEnv(t)
 	seedMail(t, e, seedMessages())
 	return e
@@ -401,7 +392,6 @@ func TestMailThreadTruncatedOnlyWhenMoreExist(t *testing.T) {
 		n         int
 		truncated bool
 	}{{capacity, false}, {capacity + 1, true}} {
-		pinMailPlatform(t)
 		e := textEnv(t)
 		var msgs []outlookmail.Message
 		for i := 1; i <= c.n; i++ {
@@ -489,7 +479,6 @@ func TestMailAccountFlag(t *testing.T) {
 }
 
 func TestMailEmptyNotes(t *testing.T) {
-	pinMailPlatform(t)
 	old := mailProfileCount
 	t.Cleanup(func() { mailProfileCount = old })
 	note := func(e *env, args ...string) string {
@@ -517,7 +506,7 @@ func TestMailEmptyNotes(t *testing.T) {
 	}
 	root := t.TempDir()
 	mailProfileCount = func(string) int { return 0 }
-	if n := note(e, "--outlook-root", root, "mail", "list"); !strings.Contains(n, "no Outlook for Mac profile") {
+	if n := note(e, "--outlook-root", root, "mail", "list"); !strings.Contains(n, "no supported Outlook profile") {
 		t.Fatalf("no profile: %q", n)
 	}
 	mailProfileCount = func(string) int { return 1 }
@@ -554,14 +543,14 @@ func TestMailEmptyNotes(t *testing.T) {
 	}
 }
 
-func TestMailWindows(t *testing.T) {
+func TestMailUnsupportedPlatform(t *testing.T) {
 	old := mailPlatform
-	mailPlatform = "windows"
+	mailPlatform = "plan9"
 	t.Cleanup(func() { mailPlatform = old })
 	e := textEnv(t)
 	for _, args := range [][]string{{"mail", "list"}, {"mail", "show", "outlook/Main:1"}, {"mail", "thread", "outlook/Main:1"}, {"mail", "folders"}, {"mail", "unread"}} {
 		er := mailFails(t, e, "mail_unsupported_platform", 3, args...)
-		if er["message"] != "mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`" {
+		if er["message"] != "mail is not supported on this operating system" {
 			t.Fatalf("message = %v", er["message"])
 		}
 	}
@@ -638,7 +627,7 @@ func TestMailHelpIsTheContract(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"list":    "List archived Outlook mail, newest first.",
 		"show":    "Show one message: headers, recipients, body text and each attachment's name, size and type.",
-		"thread":  "Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.",
+		"thread":  "Show a message's conversation: conversation identity first, then reply chain, then shared subject and participant.",
 		"folders": "List mail folders with message and unread counts and how far back the cache reaches.",
 		"unread":  "Unread mail by folder.",
 	} {
@@ -650,7 +639,7 @@ func TestMailHelpIsTheContract(t *testing.T) {
 	}
 	_, out, _ := e.run("--format", "text", "mail", "--help")
 	flat := strings.Join(strings.Fields(out), " ")
-	if !strings.Contains(flat, "likely") || !strings.Contains(flat, "To and Cc are not yet told apart") || !strings.Contains(flat, "outlook/<profile>") {
+	if !strings.Contains(flat, "likely") || !strings.Contains(flat, "To and Cc are not yet told apart") || !strings.Contains(flat, "outlook/<profile>") || !strings.Contains(flat, "Windows preserves To/Cc/Bcc order") {
 		t.Errorf("mail group help:\n%s", out)
 	}
 	_, out, _ = e.run("--format", "text", "mail", "list", "--help")

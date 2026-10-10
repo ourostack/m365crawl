@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -66,7 +65,7 @@ func mailBlockOf(t *testing.T, doc map[string]any) map[string]any {
 // status carries a mail block: the counts of what a sync read and the state of reading mail.
 func TestStatusMailBlock(t *testing.T) {
 	if goruntime.GOOS == "windows" {
-		t.Skip("a Windows sync does not read mail")
+		t.Skip("explicit HxStore on Windows preserves its calendar-only source contract; native OWA status is tested separately")
 	}
 	e := textEnv(t)
 	root := mailStoreRoot(t)
@@ -234,7 +233,12 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		none := *rt
 		none.outlookRoot = ""
-		if c := none.mailReadableCheck(st); !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
+		c := none.mailReadableCheck(st)
+		if goruntime.GOOS == "windows" {
+			if !c.OK || !c.Warn || !strings.Contains(c.Detail, "outlook_profile_unreadable") {
+				t.Fatalf("%+v", c)
+			}
+		} else if !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
 			t.Fatalf("%+v", c)
 		}
 	})
@@ -242,7 +246,7 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 		old := mailSupported
 		mailSupported = func() bool { return false }
 		t.Cleanup(func() { mailSupported = old })
-		if c := rt.mailReadableCheck(st); !c.OK || c.Warn || c.Detail != errs.MailUnsupportedPlatform().Message {
+		if c := rt.mailReadableCheck(st); !c.OK || c.Warn || c.Detail != "mail is not supported on this operating system" {
 			t.Fatalf("%+v", c)
 		}
 	})

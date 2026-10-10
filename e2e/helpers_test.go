@@ -108,12 +108,12 @@ func (e *env) environ(extra ...string) []string {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch {
-		case strings.HasPrefix(k, "M365CRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA":
+		case strings.HasPrefix(k, "M365CRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA", k == "APPDATA":
 			continue
 		}
 		out = append(out, kv)
 	}
-	out = append(out, "HOME="+e.home, "TMPDIR="+e.tmp, "TMP="+e.tmp, "TEMP="+e.tmp, "USERPROFILE="+e.home, "LOCALAPPDATA="+e.localAppData())
+	out = append(out, "HOME="+e.home, "TMPDIR="+e.tmp, "TMP="+e.tmp, "TEMP="+e.tmp, "USERPROFILE="+e.home, "LOCALAPPDATA="+e.localAppData(), "APPDATA="+filepath.Join(e.home, "AppData", "Roaming"), "M365CRAWL_REAL_CACHE=0")
 	return append(out, extra...)
 }
 

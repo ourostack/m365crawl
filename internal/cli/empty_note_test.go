@@ -41,10 +41,9 @@ func teamsArchive(t *testing.T, e *env) {
 // the host is.
 func pinReadsHere(t *testing.T) {
 	t.Helper()
-	oldTeams, oldSearch := teamsReadHere, searchMailPlatform
-	teamsReadHere, searchMailPlatform = func() bool { return true }, "darwin"
-	t.Cleanup(func() { teamsReadHere, searchMailPlatform = oldTeams, oldSearch })
-	pinMailPlatform(t)
+	oldTeams := teamsReadHere
+	teamsReadHere = func() bool { return true }
+	t.Cleanup(func() { teamsReadHere = oldTeams })
 }
 
 // noteOf runs a read command in JSON and returns its note.
@@ -298,11 +297,14 @@ func TestSearchEmptyNoteOnOtherPlatforms(t *testing.T) {
 		t.Errorf("linux, both sources: note %q", got)
 	}
 
-	// Windows: Teams is read, mail is not yet.
-	teamsReadHere, searchMailPlatform = func() bool { return true }, "windows"
+	// A genuinely unsupported platform retains coded mail refusal.
+	old := mailPlatform
+	mailPlatform = "plan9"
+	t.Cleanup(func() { mailPlatform = old })
+	teamsReadHere = func() bool { return true }
 	e = newEnv(t)
 	got := noteOf(t, e, "search", "x")
-	if !strings.Contains(got, "mail is not yet read on Windows; searched Teams chats and meeting transcripts only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
+	if !strings.Contains(got, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
 		t.Errorf("windows, no archive: note %q", got)
 	}
 	e.emptyArchive()

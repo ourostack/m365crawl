@@ -100,7 +100,7 @@ func TestSearchSaysWhyMailIsMissing(t *testing.T) {
 		want  string
 	}{
 		{nil, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"},
-		{[]string{"--outlook-root", t.TempDir()}, "no new Outlook for Mac profile on this machine, so there is no mail to read"},
+		{[]string{"--outlook-root", t.TempDir()}, "no supported Outlook profile on this machine, so there is no mail to read"},
 		{[]string{"--outlook-root", outlookProfiles(t, "Main")}, "mail is not in the archive yet; run m365crawl sync"},
 	} {
 		if got := noteOf(t, e, append(c.flags, "search", "x", "--source", "mail")...); got != c.want {

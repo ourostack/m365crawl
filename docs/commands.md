@@ -19,9 +19,9 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Host | Default `--teams-root` | Default `--outlook-root` | Default `--db` |
 | --- | --- | --- | --- |
 | macOS | `~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` | `~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles` | `~/.m365crawl/m365crawl.db` |
-| Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | none: Outlook is not read on Windows yet | `%LOCALAPPDATA%\m365crawl\m365crawl.db` |
+| Windows | `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` | `%LOCALAPPDATA%\Microsoft\Olk\EBWebView` | `%LOCALAPPDATA%\m365crawl\m365crawl.db` |
 
-On Windows m365crawl reads Teams chats and the Teams calendar. Every `mail` command there fails with `mail_unsupported_platform`: "mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`". `search` on Windows returns chats with a `note` that says mail was left out.
+On Windows m365crawl reads Teams chats, the Teams calendar and new Outlook OWA cached mail. Mail commands, search, overview, status and doctor share that source. Explicit supported copied OWA roots work on all supported hosts; explicit HxStore roots retain their legacy behavior, including coded unavailable mail on Windows. OWA calendar is not read in this release; Windows calendar parity is next release. See [Windows mail differences](outlook-store.md#windows-owa-cached-mail).
 
 On Windows the default archive path is private by construction. A custom `--db` path is allowed only when its direct parent directory is already private to the current user and SYSTEM, or m365crawl can create that parent itself as a new private directory. If that parent already exists and is not private, or the archive file already exists and is not private, open fails with `db_error` before SQLite writes anything.
 
@@ -35,7 +35,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list and r
 | `--json` | Alias for `--format json`. |
 | `--db=PATH` | Archive database path (`$M365CRAWL_DB`). Default: see the table above. |
 | `--teams-root=DIR` | Teams EBWebView directory (`$M365CRAWL_TEAMS_ROOT`). Default: the new Teams container. |
-| `--outlook-root=DIR` | New Outlook for Mac profiles directory, read for mail and the calendar (`$M365CRAWL_OUTLOOK_ROOT`). Default: the new Outlook's own directory, read when it is there. `none` turns Outlook off, mail included. Outlook is off when `--teams-root` is set without this flag. A default Outlook never fails a sync: a missing directory, no Full Disk Access or an unreadable store is reported (status `unavailable`) and the Teams sync carries on. A named directory that does not exist is the error `outlook_root_missing` (exit 3) on `sync` and on every read command except `whoami`, `status` (which reports it in an `outlook` field) and `version`. |
+| `--outlook-root=DIR` | New Outlook cache root (`$M365CRAWL_OUTLOOK_ROOT`): Mac profiles for mail/calendar or Windows Olk EBWebView for OWA mail only. Explicit supported OWA copies work portably; explicit HxStore roots preserve legacy behavior. `none` turns Outlook off, mail included. Outlook is off when `--teams-root` is set without this flag. A default absent source does not fail a Teams sync. A named directory that does not exist is `outlook_root_missing` (exit 3) on `sync` and implicit-sync read commands except `whoami`, `status` and `version`. Source decoding failures retain coded errors; doctor reports metadata/path/archive state without opening source values. |
 | `--outlook-account=TENANT/USER\|none` | Link the Outlook profile to this Teams account so their events merge; `none` ends the link and keeps it ended (`$M365CRAWL_OUTLOOK_ACCOUNT`). A profile signed in under a Teams account's own address is linked automatically (method `address`); this flag always wins over that. The link is kept, so the flag is needed only to change it. |
 | `--outlook-profile=NAME` | The Outlook profile `--outlook-account` applies to. Required when more than one profile is under the Outlook root (`$M365CRAWL_OUTLOOK_PROFILE`). |
 | `--account=ACCOUNT` | Only this account. Teams commands take a Teams account, `<tenantId>/<userId>` (`whoami` lists them); `mail` commands take a mail account, `outlook/<profile>`; `search` takes either (see [search](#search)). Default: every account. |
@@ -68,7 +68,7 @@ In text mode it prints the banner, one row per source with its state, what it ho
 - **mail:** message count, the oldest cached and the newest received message.
 - **calendar:** event count, the window from the earliest to the latest covered day, and whether today is fully covered (`coverage_gap`).
 
-`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a source this operating system does not read, such as mail on Windows), `off` (the Outlook source is off for this run) or `no_profile` (no new Outlook profile on this machine). `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
+`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a genuinely unsupported operating system), `off` (the Outlook source is off for this run) or `no_profile` (no supported Outlook profile on this machine). Windows OWA mail is supported. `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
 
 The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one, and the error's `fix` then names that command's `--help`. A likely synonym counts as close: `chats` suggests `conversations`, `email` suggests `mail`, `events` and `meetings` suggest `calendar`, and `transcript` suggests `transcripts`. The synonym itself is never accepted.
 
@@ -104,7 +104,7 @@ Result: `{"ok", "checks": [{"name", "ok", "warn"?, "detail", "fix"}]}`. Exit 3 (
 | `archive_upgrade`, `last_sync_status` | Warnings about the archive and the last sync. |
 | `calendar_cache` | Warns when an account has no Teams calendar in the archive or the newest Teams calendar cache is more than 7 days old. |
 | `outlook_store` | Says the Outlook source is off, or lists each profile with whether this build reads its store version, what the last sync recorded and how it is linked to Teams. No Outlook on the machine is a plain pass. It warns when a named root has no profile, access is denied, a store version is unknown or the last read failed, with the same fix a sync gives. |
-| `mail_readable` | A warning. Per Outlook profile, when its mail was last read or why the last read failed; also that mail is not read when the Outlook source is off or on Windows. |
+| `mail_readable` | A warning. Per Outlook profile, when its mail was last read or why the last read failed; unreadable OWA profiles are not treated as an empty successful mailbox. Mail is not refreshed when the Outlook source is off. |
 | `mail_archive_mode` | Warns when other users can read the archive file, which holds mail. The file is created with mode 0600. Not applicable on Windows. |
 | `transcripts_browser` | Names the browser `transcripts fetch` would run: the one `M365CRAWL_BROWSER` names, else Microsoft Edge, then Google Chrome. Doctor only looks for it and never starts it. No browser is a warning (`none: transcripts fetch needs Edge or Chrome`, or, when `M365CRAWL_BROWSER` is set, that it names no browser on this machine), never a failure: every other command works without one. |
 | `transcripts_profile_mode` | Warns when other users can read m365crawl's browser profile (`browser` beside the archive), which holds that browser's own sign-in state. Doctor reads the directory's permissions (its mode, or its access list on Windows) and never opens a file in it. No profile yet is a plain pass. |
@@ -131,7 +131,7 @@ m365crawl status [flags]
 
 No flags beyond the global ones.
 
-Result: archive path, schema version, per-account counts, the last run and other Teams origins seen, and a `mail` block: `{"messages", "unread", "folders", "oldest_at", "synced_at", "state"}`. `messages` counts mail that is not gone or evicted. `state` is `ok` once a sync has read mail, `skipped` when the Outlook source is off for this run or no sync has read mail yet, `no_profile` when this machine has no Outlook profile, and `unsupported_platform` on Windows.
+Result: archive path, schema version, per-account counts, the last run and other Teams origins seen, and a `mail` block: `{"messages", "unread", "folders", "oldest_at", "synced_at", "state"}`. `messages` counts mail that is not gone or evicted. `state` is `ok` once a sync has read mail, `skipped` when the Outlook source is off for this run or no sync has read mail yet, `no_profile` when this machine has no supported Outlook profile, and `unsupported_platform` on a genuinely unsupported operating system, not Windows OWA.
 
 A `transcripts` block counts the recorded meetings: `{"calls", "parts", "fetchable", "fetched", "last_fetch_at"}`. `parts` leaves out the placeholder of a call that has a transcript notice and no file reference; `fetchable` counts the parts a fetch can ask for and `fetched` those whose text is in the archive; `last_fetch_at` is the newest fetch attempt, null when none ever ran. The block is absent with no archive or an archive from before the transcript tables.
 
@@ -161,7 +161,7 @@ m365crawl sync [flags]
 | --- | --- |
 | `--full-read` | Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair (`$M365CRAWL_FULL_READ`). |
 
-Result: the sync report (SPEC.md sections 4 and 5), with one entry per source in `sources`. A Teams source carries counts for `conversations`, `messages`, `people`, `activity`, `records` and `calendar` (`events`, `recaps`, `recap_items`, `gone`, `linked`, `refused` and the link counts). Each Outlook profile has a calendar source and a mail source (`outlook|<profile>|mail`); the mail source's counts are `mail: {added, updated, replaced, gone, evicted, withheld}`. A mail failure does not fail the calendar or Teams, and on Windows the mail source is a note carrying `mail_unsupported_platform`, not a failure.
+Result: the sync report (SPEC.md sections 4 and 5), with one entry per source in `sources`. A Teams source carries counts for `conversations`, `messages`, `people`, `activity`, `records` and `calendar` (`events`, `recaps`, `recap_items`, `gone`, `linked`, `refused` and the link counts). HxStore profiles have separate calendar and mail sources; OWA profiles contribute `outlook|<profile>|mail` only, with `mail: {added, updated, replaced, gone, evicted, withheld}` counts. A mail failure does not fail another source's progress. Explicit Windows HxStore mail retains its `unavailable`/`mail_unsupported_platform` result; native OWA is supported and decoding failures are coded errors, not successful fallbacks.
 
 Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
@@ -494,10 +494,10 @@ The `mail` commands read Outlook for Mac mail from the archive. Mail comes from 
 - **Limits.** `--limit` is at most 1000 on every `mail` command; a larger value is a `usage` error.
 - **Missing folders.** A message whose folder Outlook's store no longer holds is kept, with `folder` null and `folder_kind` `unknown`. `--folder unknown` lists those messages.
 - **Not known is null.** A field the archive does not hold is `null`, never guessed: `subject`, `from_name`, `from_address`, `in_reply_to`, `ical_uid` and `internet_message_id` when Outlook stored none; `is_read` when the read state is not known; `sent_at` when the store has no send time; `address` on a recipient without one; and `gone_at` and `evicted_at` while the message is present.
-- **Recipients.** To and Cc are not yet told apart. A recipient carries only `name`, `address` and `kind_raw` (the store's own number); there is no `to` or `cc` field.
+- **Recipients.** Mac To and Cc are not yet told apart. Every recipient carries `name`, `address`, nullable `role` and `kind_raw`. Mac role is null and its existing raw kind remains; Windows preserves ordered To/Cc/Bcc roles with `kind_raw=0`, without ReplyTo inference.
 - **Importance** (`low`, `normal`, `high`) is likely right, but it is read from one store field that is not fully confirmed.
 - **Gone and evicted.** A message a sync saw disappear inside the cache's covered range is `gone`; one older than the covered range is `evicted`, because Outlook dropped it from the cache. Both stay in the archive and are hidden unless you ask for them.
-- **On Windows** every `mail` command fails with `mail_unsupported_platform` (exit 3).
+- **On Windows** native OWA cached mail is supported. `conversation_id` is nullable on every message output, including search and a calendar event's `related_mail`; thread grouping tries conversation identity first. Windows limitations are described in [source differences](outlook-store.md#windows-owa-cached-mail).
 
 ### mail list
 
@@ -528,7 +528,7 @@ m365crawl mail list --from pat --since 7d --fields id,subject,from_name,received
 m365crawl mail list --has-attachments --limit 20
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ### mail show
 
@@ -538,25 +538,25 @@ Show one message: headers, recipients, attachments and body text.
 m365crawl mail show <id>
 ```
 
-Keys are those of `mail list`, with `recipients` (every recipient, each `{name, address, kind_raw}`) in place of the count and preview, plus `read_state`, `attachments` (each `{name, size, content_type, inline, downloaded}`), `body_text` and `body_state`. `content_type` comes from the file extension. `inline: true` marks an embedded item, which does not count toward `has_attachments`; `downloaded` says whether Outlook's cache holds the file. `--max-text N` cuts `body_text` and sets `text_truncated`. A malformed id is `bad_mail_id`; an id the archive does not hold is `mail_not_found`; an `--account` that differs from the id's account is `account_mismatch` (the id already names the account, so `--account` is not needed).
+Keys are those of `mail list`, with `recipients` (every recipient, each `{name, address, role, kind_raw}`) in place of the count and preview, plus `read_state`, `attachments` (each `{name, size, content_type, inline, downloaded}`), `body_text` and `body_state`. Windows attachments are metadata only (`downloaded=false`, missing size zero); unknown HasAttachments is not inferred from metadata. Cached HTML may already be truncated inline at source. `--max-text N` cuts `body_text` and sets `text_truncated`. A malformed id is `bad_mail_id`; an id the archive does not hold is `mail_not_found`; an `--account` that differs from the id's account is `account_mismatch` (the id already names the account, so `--account` is not needed).
 
 ```sh
 m365crawl mail show outlook/Main:12345 --max-text 2000
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ### mail thread
 
-Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link.
+Show a message's conversation: shared conversation identity first, then reply chain, then subject and shared participant.
 
 ```
 m365crawl mail thread <id>
 ```
 
-Items have the shape of `mail list`, oldest first. `grouping` is `reply_chain` (In-Reply-To and Message-ID links followed in both directions) or `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When nothing shares the message's reply chain or subject, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
+Items have the shape of `mail list`, oldest first. `grouping` first tries `conversation` (at least two messages sharing an exact nonempty account-scoped `conversation_id`), otherwise `reply_chain` (In-Reply-To and Message-ID links followed in both directions), otherwise `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When no other message joins it, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ### mail folders
 
@@ -580,7 +580,7 @@ m365crawl mail unread [--folder NAME|KIND] [--limit N]
 
 `folders` holds one `{account, folder, kind, unread, cached}` per folder that holds messages. `unread_total` is the sum of the folders' `unread`, every folder included. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
+`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `text_truncated`.
 
 ## calendar
 

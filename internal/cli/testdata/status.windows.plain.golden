@@ -11,7 +11,7 @@ STATUS
 archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp>
-mail           : unsupported_platform
+mail           : skipped
 schema version : 8
 transcripts    : 0 recorded meetings, 0 parts, 0 of 0 fetchable parts fetched; never fetched
 

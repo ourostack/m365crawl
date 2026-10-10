@@ -318,8 +318,8 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		old := outlookDefaultRoot
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		outlookDefaultRoot = func() (string, error) { return "", errors.New("not here") }
-		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not here") || c.Fix != "" {
-			t.Fatalf("a machine that has no Outlook directory is not a problem: %+v", c)
+		if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || c.Fix == "" {
+			t.Fatalf("failed root resolution must be visible: %+v", c)
 		}
 	})
 	t.Run("on by default", func(t *testing.T) {
@@ -336,7 +336,7 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "no profile") {
 			t.Fatalf("no profile: %+v", c)
 		}
-		outlookDefaultRoot = func() (string, error) { return outlookStoreRoot(t, "HxStore.hxd"), nil }
+		rt.outlookRoot = outlookStoreRoot(t, "HxStore.hxd")
 		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "profile Main: store version readable; not read yet") {
 			t.Fatalf("a normal state is a plain pass: %+v", c)
 		}

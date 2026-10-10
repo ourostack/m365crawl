@@ -1,0 +1,101 @@
+package cli
+
+import (
+	"errors"
+	"io/fs"
+	goruntime "runtime"
+	"strings"
+
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
+	"github.com/ourostack/m365crawl/internal/outlookowa"
+	"github.com/ourostack/m365crawl/internal/store"
+)
+
+var (
+	outlookNativeDefaultRoot = outlookowa.DefaultRoot
+	outlookNativeDiscover    = outlookowa.Discover
+)
+
+func defaultMailRoot() (string, error) {
+	root, err := outlookNativeDefaultRoot()
+	if errors.Is(err, outlookdesktop.ErrNotSupported) {
+		return outlookdesktop.DefaultRoot()
+	}
+	return root, err
+}
+
+type outlookMailSource struct {
+	root    string
+	owa     bool
+	legacy  []outlookdesktop.Profile
+	classic []string
+	skipped []outlookdesktop.SkippedProfile
+	native  []outlookowa.Profile
+	refused []outlookowa.SkippedProfile
+	err     error
+}
+
+// Match the runner: native Windows defaults, positively recognized explicit HxStore first, then supported explicit OWA roots. Discovery examines paths and metadata, never values.
+func (rt *runtime) discoverOutlookMail() outlookMailSource {
+	s := outlookMailSource{root: rt.outlookRoot}
+	if s.root == "" {
+		s.owa = goruntime.GOOS == "windows"
+		s.root, s.err = outlookDefaultRoot()
+		if s.err != nil {
+			return s
+		}
+	}
+	if !s.owa {
+		s.legacy, s.classic, s.skipped, s.err = outlookDiscover(s.root)
+		if len(s.legacy)+len(s.classic) > 0 {
+			return s
+		}
+	}
+	profiles, skipped, err := outlookNativeDiscover(s.root)
+	if s.owa || len(profiles)+len(skipped) > 0 || err != nil && !errors.Is(err, fs.ErrNotExist) {
+		s.owa, s.native, s.refused, s.err = true, profiles, skipped, err
+	}
+	return s
+}
+
+func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) check {
+	c := check{Name: "outlook_store", OK: true}
+	switch {
+	case s.err != nil && rt.outlookDefault && errors.Is(s.err, fs.ErrNotExist):
+		c.Detail = "the new Outlook OWA cache is not installed; nothing to read"
+		return c
+	case s.err != nil:
+		c.Warn, c.Detail, c.Fix = true, "the Outlook OWA profile paths cannot be examined (outlook_profile_unreadable)", "Check that the Outlook cache directories are readable by your account."
+		return c
+	case len(s.native)+len(s.refused) == 0:
+		c.Detail = "the new Outlook OWA cache has no profile; nothing to read"
+		if !rt.outlookDefault {
+			c.Warn, c.Fix = true, "Point --outlook-root at an EBWebView directory containing Outlook IndexedDB profiles."
+		}
+		return c
+	}
+	details := []string{"OWA cached mail only; calendar is unsupported on OWA in this release"}
+	for range s.refused {
+		details = append(details, "a cached profile cannot be examined (outlook_profile_unreadable)")
+		c.Warn, c.Fix = true, "Check that each Outlook cache profile is readable and has one supported origin."
+	}
+	for _, p := range s.native {
+		detail := "profile " + p.Name + ": cached paths readable; mail not read yet"
+		if st != nil {
+			state, err := st.MailState(rt.ctx, "outlook/"+p.Name)
+			switch {
+			case err != nil:
+				detail = "profile " + p.Name + ": cannot read the archived mail state"
+				c.Warn, c.Fix = true, "Run `m365crawl sync`."
+			case state.Failure != nil:
+				detail = "profile " + p.Name + ": the last mail read failed (" + state.Failure.Code + ")"
+				c.Warn, c.Fix = true, "Run `m365crawl sync` and read its coded error."
+			case state.Read:
+				detail = "profile " + p.Name + ": cached paths readable; mail read " + oneUnit(rt.now().Sub(state.ReadAt)) + " ago"
+			}
+		}
+		details = append(details, detail)
+	}
+	c.Detail = strings.Join(details, "; ")
+	return c
+}

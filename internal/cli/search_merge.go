@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	goruntime "runtime"
-
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
 )
@@ -18,16 +16,9 @@ import (
 // Codes of search's own errors.
 const (
 	// CodeFlagSourceConflict is a flag that the chosen --source cannot use.
-	CodeFlagSourceConflict = "flag_source_conflict"
-	// searchCodeMailUnsupported and searchCodeUnknownFolder are the codes the mail commands use for
-	// the same two situations, so an agent reads one answer whichever command it ran.
-	searchCodeMailUnsupported = "mail_unsupported_platform"
-	searchCodeUnknownFolder   = "unknown_folder"
+	CodeFlagSourceConflict  = "flag_source_conflict"
+	searchCodeUnknownFolder = "unknown_folder"
 )
-
-// searchMailPlatform is the operating system search believes it runs on when it decides whether
-// mail can be read; tests set it.
-var searchMailPlatform = goruntime.GOOS
 
 // searchColumns are the columns of a text search result, whichever source an item came from. thread
 // holds the arguments that read the item's thread: `m365crawl thread <conversation> <root>` for a
@@ -61,6 +52,7 @@ type searchMailItem struct {
 	RecipientCount    int        `json:"recipient_count"`
 	RecipientsPreview []string   `json:"recipients_preview"`
 	InReplyTo         *string    `json:"in_reply_to"`
+	ConversationID    *string    `json:"conversation_id"`
 	ReceivedAt        *time.Time `json:"received_at"`
 	SentAt            *time.Time `json:"sent_at"`
 	IsRead            *bool      `json:"is_read"`
@@ -141,7 +133,7 @@ func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 	it := searchMailItem{
 		Source: searchMail, ID: r.ID(), Account: r.Account, Folder: searchNZ(r.Folder), FolderKind: searchNZ(r.FolderKind), ToMe: r.ToMe,
 		Subject: searchNZ(r.Subject), FromName: searchNZ(r.SenderName), FromAddress: searchNZ(r.SenderAddress),
-		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo),
+		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo), ConversationID: searchNZ(r.ConversationID),
 		ReceivedAt: searchTime(r.ReceivedAt), SentAt: searchTime(r.SentAt), IsRead: r.IsRead, Flag: searchNZ(r.Flag), Importance: searchNZ(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: searchNZ(r.InternetMessageID), ICalUID: searchNZ(r.ICalUID),
 		GoneAt: searchTime(r.GoneAt), EvictedAt: searchTime(r.EvictedAt),
@@ -273,14 +265,12 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 		p.chats, p.transcripts = false, false
 		p.notes = append(p.notes, "--folder applies to mail only; Teams chats and meeting transcripts were not searched")
 	}
-	if p.mail && searchMailPlatform == "windows" {
+	if p.mail && !mailSupported() {
 		if !p.chats && !p.transcripts {
-			return p, &errs.Coded{Code: searchCodeMailUnsupported, Exit: errs.ExitEnvironment,
-				Message: "mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`",
-				Fix:     "Run `m365crawl calendar` for the agenda, or a Teams command such as `m365crawl unread`."}
+			return p, mailGuard()
 		}
 		p.mail = false
-		p.notes = append(p.notes, "mail is not yet read on Windows; searched Teams chats and meeting transcripts only")
+		p.notes = append(p.notes, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only")
 	}
 	return p, nil
 }

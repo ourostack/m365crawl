@@ -600,6 +600,7 @@ type calendarChat struct {
 type relatedMail struct {
 	ID             string    `json:"id"`
 	Match          string    `json:"match"`
+	ConversationID *string   `json:"conversation_id"`
 	Account        string    `json:"account"`
 	Folder         string    `json:"folder,omitempty"`
 	FolderKind     string    `json:"folder_kind,omitempty"`
@@ -616,7 +617,7 @@ type relatedMail struct {
 func relatedMailOf(in []store.MailRelated) []relatedMail {
 	out := make([]relatedMail, len(in))
 	for i, m := range in {
-		out[i] = relatedMail{ID: m.ID(), Match: m.Match, Account: m.Account, Folder: m.Folder, FolderKind: m.FolderKind, Subject: m.Subject,
+		out[i] = relatedMail{ID: m.ID(), Match: m.Match, ConversationID: nz(m.ConversationID), Account: m.Account, Folder: m.Folder, FolderKind: m.FolderKind, Subject: m.Subject,
 			FromName: m.SenderName, FromAddress: m.SenderAddress, ReceivedAt: m.ReceivedAt.UTC(), IsRead: m.IsRead, HasAttachments: m.HasAttachments,
 			Preview: m.Preview, ICalUID: m.ICalUID}
 	}

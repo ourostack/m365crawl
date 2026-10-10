@@ -16,13 +16,14 @@ if ($go) {
     }
 }
 
-$packages = if ([string]::IsNullOrWhiteSpace($env:COVERAGE_PACKAGES)) { './internal/...' } else { $env:COVERAGE_PACKAGES }
+$packages = if ([string]::IsNullOrWhiteSpace($env:COVERAGE_PACKAGES)) { './internal/... ./scripts/coverage' } else { $env:COVERAGE_PACKAGES }
 $profile = Join-Path $tmpRoot 'cover.out'
 $log = Join-Path $tmpRoot 'go-test.log'
 $stderrLog = Join-Path $tmpRoot 'go-test.stderr.log'
 
 # COVERAGE_PROFILE names a coverage profile a test run already wrote (CI's own Windows test run), so
-# the gate reads it instead of running the tests again. Only the Windows-only files below count.
+# the gate reads it instead of running the tests again. Legacy Windows execution checks remain;
+# the strict native mail gate additionally verifies every required function and SDK block.
 # A relative path is taken from the caller's directory.
 $givenProfile = $null
 if (-not [string]::IsNullOrWhiteSpace($env:COVERAGE_PROFILE)) {
@@ -39,7 +40,7 @@ if ($givenProfile) {
     }
 } else {
     $packageArgs = $packages -split '\s+' | Where-Object { $_ }
-    $argList = @('test', '-count=1', "-coverprofile=$profile") + $packageArgs
+    $argList = @('test', '-count=1', '-coverpkg=./...', "`"-coverprofile=$profile`"") + $packageArgs
     $proc = Start-Process -FilePath $goExe -ArgumentList $argList -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $stderrLog
     if ($proc.ExitCode -ne 0) {
         Get-Content $log
@@ -78,4 +79,8 @@ if ($missing.Count -gt 0) {
     throw "Windows coverage missing execution for: $($missing -join ', ')"
 }
 
-Write-Host 'coverage OK: Windows-only files executed under go test coverage'
+& $goExe run ./scripts/coverage "-profile=$profile" "-root=$repoRoot"
+if ($LASTEXITCODE -ne 0) {
+    throw 'check-coverage: strict native mail coverage failed'
+}
+Write-Host 'coverage OK: legacy Windows-only files executed and strict native mail function/block coverage passed'

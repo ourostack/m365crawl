@@ -13,7 +13,6 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/ourostack/m365crawl/internal/errs"
-	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/render"
 	"github.com/ourostack/m365crawl/internal/store"
 )
@@ -32,27 +31,29 @@ var mailPlatform = goruntime.GOOS
 
 // mailGuard stops every mail command on a platform that cannot read mail.
 func mailGuard() error {
-	if mailPlatform != "windows" {
+	if mailSupported() {
 		return nil
 	}
 	return &errs.Coded{Code: CodeMailUnsupportedPlatform, Exit: errs.ExitEnvironment,
-		Message: "mail is not yet read on Windows; Teams chats and the calendar work here — try `m365crawl calendar`",
-		Fix:     "Run `m365crawl calendar` for the agenda, or a Teams command such as `m365crawl unread`."}
+		Message: "mail is not supported on this operating system",
+		Fix:     "Read the archive on Windows, macOS or Linux."}
 }
 
 // mailGroup is the mail command group.
 type mailGroup struct {
 	List    mailListCmd    `cmd:"" help:"List archived Outlook mail, newest first."`
 	Show    mailShowCmd    `cmd:"" help:"Show one message: headers, recipients, body text and each attachment's name, size and type."`
-	Thread  mailThreadCmd  `cmd:"" help:"Show the conversation a message belongs to: its reply chain, or messages with the same subject and a shared participant when Outlook kept no reply link."`
+	Thread  mailThreadCmd  `cmd:"" help:"Show a message's conversation: conversation identity first, then reply chain, then shared subject and participant."`
 	Folders mailFoldersCmd `cmd:"" help:"List mail folders with message and unread counts and how far back the cache reaches."`
 	Unread  mailUnreadCmd  `cmd:"" help:"Unread mail by folder."`
 }
 
-const mailCommon = `Mail comes from Outlook for Mac's local cache, so it holds only what Outlook has cached. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers.
+const mailCommon = `Mail comes from new Outlook's local cache: HxStore on Mac, OWA IndexedDB on Windows. It holds only cached mail, not server totals. Explicit copied supported sources also work on Linux. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers.
 --account takes the mail account as printed in the ids, outlook/<profile>.
 A field the archive does not hold is null: subject, sender, in_reply_to, ical_uid and internet_message_id when Outlook stored none, is_read when the read state is not known, sent_at when the store has no send time, address on a recipient with no address, gone_at and evicted_at while the message is present.
-Recipients: To and Cc are not yet told apart, so recipients carries each person once with kind_raw, the store's own number. importance is likely right (low, normal, high) but is read from one store field that is not fully confirmed.
+Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is the store's own number. Windows preserves To/Cc/Bcc order with role to/cc/bcc and kind_raw=0; ReplyTo is not inferred. conversation_id is null when absent; threads use a shared conversation identity before reply_chain and subject fallback.
+Windows: to_me is false, in_reply_to is null, attachments are metadata only (downloaded=false; missing size=0). Unknown HasAttachments stays unavailable in decoding and is not inferred from attachment metadata. Cached HTML can be truncated at source. Only one content mailbox per profile is supported; unsupported layouts are coded refusals. OWA calendar is not read in this release; Windows calendar parity is next release.
+Mac importance is likely right (low, normal, high) but is read from one store field that is not fully confirmed.
 An id is account:detail_key, as printed by mail list.`
 
 // Help is the long help of the mail group, shared by every mail command.
@@ -69,12 +70,12 @@ func (mailListCmd) Help() string {
 
 // Help is the long help of mail show.
 func (mailShowCmd) Help() string {
-	return mailSeeGroup + "\nmail show lists every recipient with its kind_raw and every attachment with its name, size and content type. body_text is read from the cached body; body_state says when it is missing or unreadable. --max-text cuts body_text and sets text_truncated."
+	return mailSeeGroup + "\nmail show lists every recipient with role (null on Mac) and kind_raw, and every attachment with its name, size and content type. body_text is read from the cached body; body_state says when it is missing or unreadable. --max-text cuts body_text and sets text_truncated."
 }
 
 // Help is the long help of mail thread.
 func (mailThreadCmd) Help() string {
-	return mailSeeGroup + "\nThe grouping key says how the thread was found: reply_chain follows In-Reply-To links in both directions; subject groups messages with the same subject (ignoring re:, fw: and the like) that share a sender or recipient address with the message. participants lists everyone in the thread once."
+	return mailSeeGroup + "\nThe grouping key says how the thread was found: conversation groups at least two messages with the same account-scoped conversation_id; otherwise reply_chain follows In-Reply-To links in both directions; subject groups messages with the same subject (ignoring re:, fw: and the like) that share a sender or recipient address with the message. participants lists everyone in the thread once."
 }
 
 // Help is the long help of mail folders.
@@ -92,6 +93,7 @@ func (mailUnreadCmd) Help() string {
 type mailRecipientOut struct {
 	Name    *string `json:"name"`
 	Address *string `json:"address"`
+	Role    *string `json:"role"`
 	KindRaw uint32  `json:"kind_raw"`
 }
 
@@ -121,6 +123,7 @@ type mailListItem struct {
 	RecipientCount    int        `json:"recipient_count"`
 	RecipientsPreview []string   `json:"recipients_preview"`
 	InReplyTo         *string    `json:"in_reply_to"`
+	ConversationID    *string    `json:"conversation_id"`
 	ReceivedAt        *time.Time `json:"received_at"`
 	SentAt            *time.Time `json:"sent_at"`
 	IsRead            *bool      `json:"is_read"`
@@ -147,6 +150,7 @@ type mailShowItem struct {
 	FromAddress       *string             `json:"from_address"`
 	Recipients        []mailRecipientOut  `json:"recipients"`
 	InReplyTo         *string             `json:"in_reply_to"`
+	ConversationID    *string             `json:"conversation_id"`
 	ReceivedAt        *time.Time          `json:"received_at"`
 	SentAt            *time.Time          `json:"sent_at"`
 	IsRead            *bool               `json:"is_read"`
@@ -228,7 +232,7 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 	it := mailListItem{
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
-		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo),
+		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
 		ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt), IsRead: r.IsRead, Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID),
 		GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt),
@@ -251,13 +255,13 @@ func showItemOf(r store.MailRow, max int) mailShowItem {
 	it := mailShowItem{
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
-		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),
+		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),
 		IsRead: r.IsRead, ReadState: nz(r.ReadState), Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, Attachments: []mailAttachmentOut{}, BodyState: nz(r.BodyState),
 		InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID), GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt),
 	}
 	for _, rc := range r.Recipients {
-		it.Recipients = append(it.Recipients, mailRecipientOut{Name: nz(rc.Name), Address: nz(rc.Address), KindRaw: rc.KindRaw})
+		it.Recipients = append(it.Recipients, mailRecipientOut{Name: nz(rc.Name), Address: nz(rc.Address), Role: nz(rc.Role), KindRaw: rc.KindRaw})
 	}
 	for _, a := range r.Attachments {
 		it.Attachments = append(it.Attachments, mailAttachmentOut{Name: nz(a.Name), Size: a.Size, ContentType: nz(a.ContentType), Inline: a.Inline, Downloaded: a.Downloaded})
@@ -407,14 +411,8 @@ var mailReadAccounts = (*store.Store).MailReadAccounts
 
 // mailProfileCount counts the Outlook profiles under root (the default root when empty); a test seam.
 var mailProfileCount = func(root string) int {
-	if root == "" {
-		root, _ = outlookdesktop.DefaultRoot() // an unknown home gives "", which Discover refuses
-	}
-	profiles, _, _, err := outlookdesktop.Discover(root)
-	if err != nil {
-		return 0
-	}
-	return len(profiles)
+	rt := runtime{outlookRoot: root}
+	return len(rt.outlookProfiles())
 }
 
 // emptyNote explains an empty result: which of the causes it is. filtered says the command had
@@ -428,7 +426,7 @@ func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since
 	case len(sc.all) == 0 && !rt.outlookOn:
 		return "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
 	case len(sc.all) == 0 && mailProfileCount(rt.outlookRoot) == 0:
-		return "no Outlook for Mac profile was found on this machine, so there is no mail to read"
+		return "no supported Outlook profile was found on this machine, so there is no mail to read"
 	case len(sc.all) == 0 && sc.marked:
 		return "the Outlook source is on and the last read found no mail folders: mail is turned off in Outlook for this account, or none is set up"
 	case len(sc.all) == 0 && rt.synced != nil:
@@ -826,9 +824,9 @@ func (r *mailShowResult) renderMail(rt *runtime) {
 		_, _ = fmt.Fprintln(w)
 		rows := make([][]string, len(it.Recipients))
 		for i, rc := range it.Recipients {
-			rows[i] = []string{sv(rc.Name), sv(rc.Address), strconv.FormatUint(uint64(rc.KindRaw), 10)}
+			rows[i] = []string{sv(rc.Name), sv(rc.Address), sv(rc.Role), strconv.FormatUint(uint64(rc.KindRaw), 10)}
 		}
-		render.Table(w, []string{"recipient (To and Cc not yet told apart)", "address", "kind_raw"}, rows, color)
+		render.Table(w, []string{"recipient", "address", "role (unknown on Mac)", "kind_raw"}, rows, color)
 	}
 	if len(it.Attachments) > 0 {
 		_, _ = fmt.Fprintln(w)
@@ -924,8 +922,11 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 
 func (r *mailThreadResult) renderMail(rt *runtime) {
 	how := "same subject and a shared participant"
-	if r.Grouping == "reply_chain" {
+	switch r.Grouping {
+	case "reply_chain":
 		how = "reply chain"
+	case "conversation":
+		how = "conversation identity"
 	}
 	_, _ = fmt.Fprintf(rt.stdout, "%s\n\n", render.Dim("thread: "+how, rt.color))
 	r.messages(rt)

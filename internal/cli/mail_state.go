@@ -6,7 +6,6 @@ import (
 	goruntime "runtime"
 	"strings"
 
-	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
 )
@@ -21,7 +20,14 @@ const (
 
 // Test seams: whether this operating system reads mail, and whether file modes mean anything on it.
 var (
-	mailSupported         = func() bool { return goruntime.GOOS != "windows" }
+	mailSupported = func() bool {
+		switch mailPlatform {
+		case "darwin", "windows", "linux":
+			return true
+		default:
+			return false
+		}
+	}
 	archiveModeApplicable = func() bool { return goruntime.GOOS != "windows" }
 )
 
@@ -73,15 +79,18 @@ func (b *mailStatusBlock) text() string {
 // outlookProfiles lists the profiles of the Outlook root this run reads, none when there is no
 // root or it cannot be listed.
 func (rt *runtime) outlookProfiles() []outlookdesktop.Profile {
-	root := rt.outlookRoot
-	if root == "" {
-		var err error
-		if root, err = outlookDefaultRoot(); err != nil {
-			return nil
+	s := rt.discoverOutlookMail()
+	if s.owa {
+		profiles := make([]outlookdesktop.Profile, len(s.native), len(s.native)+len(s.refused))
+		for i, p := range s.native {
+			profiles[i] = outlookdesktop.Profile{Name: p.Name, Dir: p.Dir}
 		}
+		for _, p := range s.refused {
+			profiles = append(profiles, outlookdesktop.Profile{Name: p.Name, Dir: p.Dir})
+		}
+		return profiles
 	}
-	profiles, _, _, _ := outlookDiscover(root)
-	return profiles
+	return s.legacy
 }
 
 // mailReadableCheck reports whether mail is being read: per Outlook profile, when the last read was
@@ -91,12 +100,17 @@ func (rt *runtime) mailReadableCheck(st *store.Store) check {
 	const name = "mail_readable"
 	switch {
 	case !mailSupported():
-		c := errs.MailUnsupportedPlatform()
-		return check{Name: name, OK: true, Detail: c.Message}
+		return check{Name: name, OK: true, Detail: "mail is not supported on this operating system"}
 	case !rt.outlookOn:
 		return check{Name: name, OK: true, Detail: "mail is not read: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"}
 	case st == nil:
 		return check{Name: name, OK: true, Detail: "no archive yet; the first sync reads mail"}
+	}
+	source := rt.discoverOutlookMail()
+	if source.owa && (source.err != nil || len(source.refused) > 0) {
+		c := rt.outlookNativeCheck(source, st)
+		c.Name = name
+		return c
 	}
 	profiles := rt.outlookProfiles()
 	if len(profiles) == 0 {
