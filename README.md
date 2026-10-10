@@ -1,4 +1,4 @@
-# m365crawl — Microsoft 365, readable by your agents
+# m365crawl — Your Microsoft 365 work, ready for your agents
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?include_prereleases&style=flat-square)](https://github.com/ourostack/m365crawl/releases)
@@ -7,7 +7,11 @@
 [![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
-`m365crawl` mirrors what Microsoft 365 already keeps on your computer — your **Teams chats and channels**, your **Outlook mail** and your **calendar** — into one SQLite archive, so an AI agent can search, triage and cross-reference your work in milliseconds, offline and read-only. It reads the local caches of the signed-in Teams and Outlook apps. It never talks to a Microsoft service, never reads your credentials and never writes to either app's storage.
+Find the conversation. Recover the context. Walk into the meeting prepared.
+
+`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail** and **meetings with their recaps and action items**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
+
+**Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
 
 <p align="center"><img src="screenshot.png" alt="m365crawl doctor with every check green and a snapshot of the archive: Teams chats, channels, meetings and messages, Outlook mail, and the calendar" width="801"></p>
 
@@ -22,17 +26,16 @@
 | Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
 | What's in the archive and how fresh is it? | `m365crawl` |
 
-## Why not Graph, an MCP server or Work IQ?
+## Give your agent the context, not another inbox
 
-- **No tokens, app registration or admin consent.** Graph needs an Entra app, delegated scopes and often a tenant admin to approve them. m365crawl needs the signed-in desktop apps and one local prerequisite: Full Disk Access on macOS, or no extra permission step on Windows.
+- **Start with the apps you already use.** Desktop capture needs no API token or app registration. It reads the signed-in apps' caches, with Full Disk Access on macOS and the local access rules described below.
 - **Built for agent context budgets.** Every item carries a stable id, and every Teams item a deep link. `--fields` and `--max-text` return only what you need.
-- **Offline, no rate limits.** A search over 50,000 messages returns in about 140 ms from local SQLite. Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token.
-- **Works offline and under conditional access.** Device-compliance and location policies gate API tokens, not files on your disk.
-- **Read-only by construction.** There is no write path in the code. It cannot send, reply, react, move or mark anything read, so handing it to an agent is safe.
+- **Query locally.** Search and recall read SQLite instead of making a service request for each question. Explicit transcript fetch and sign-in use the tool-owned browser; desktop-app and browser access can still be governed by your organization's policies.
+- **No message actions.** It cannot send, reply, react, move or mark messages read. Sync writes its own archive and private working files, not the source apps.
 - **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
 - **One place for everything.** Chats, mail, the activity feed, unread state, mentions and meetings sit in one database that an agent can query with full-text search or plain SQL.
 
-**When you want something else.** Use Graph or an MCP server if you need to send or react, need data the apps never cached (old history, other people's mailboxes), run Linux, classic Teams or classic Outlook, or cannot grant Full Disk Access on macOS.
+**A complement to Graph and MCP tools, not a replacement for every job.** Use those tools when you need to send or react, retrieve data the desktop apps never cached, or work on an unsupported host or app. Keep m365crawl for local recall, archive search and context-building from the sources it actually covers. Missing or stale cache data stays visible rather than becoming a claim that the work does not exist.
 
 ## Scope and requesting support
 
@@ -97,6 +100,26 @@ m365crawl doctor
 `doctor` checks every prerequisite, prints the exact app to grant when access is missing and exits 3 if a required check fails. One grant covers Teams and Outlook. On Windows the caches live under `%LOCALAPPDATA%` and need no extra step.
 
 [`docs/install.md`](docs/install.md) covers upgrades, verifying a download and removing m365crawl.
+
+## Start with your agent
+
+After installing, check access and build the archive:
+
+```sh
+m365crawl doctor
+m365crawl sync
+m365crawl skill
+```
+
+Give the `skill` output to your agent. It is the guide for the version you installed, including commands, context-budget flags and how to interpret missing data. Then ask for a concrete job:
+
+> What needs my attention from the last week? Group unread chats by conversation, check unread and flagged mail, and cite the items you use.
+
+> Prepare me for my next meeting. Show the agenda, attendees, meeting chat and related mail; tell me which fields or days are not cached.
+
+> Find the discussion about the launch checklist, then open the relevant thread. Keep the first pass short and expand only the matches.
+
+For an offline-only read, use `--max-age 0`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. An explicit transcript fetch is a separate action, never a side effect of search.
 
 ## Quick start
 
