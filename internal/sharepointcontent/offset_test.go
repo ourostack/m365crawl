@@ -32,11 +32,12 @@ func TestFetchNativeTranscriptOffsetsAndContentStates(t *testing.T) {
 		test := raw
 		test.State = state
 		test.Transcript = nil
-		if state == "no_access" {
+		switch state {
+		case "no_access":
 			test.HTTPStatus = 403
-		} else if state == "not_found" {
+		case "not_found":
 			test.HTTPStatus = 404
-		} else {
+		default:
 			test.HTTPStatus = 200
 		}
 		page.result = test
