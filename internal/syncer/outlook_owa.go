@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore"
@@ -30,9 +31,9 @@ func (r *runner) outlookOWARoute(root string) (bool, error) {
 	if r.o.OutlookRoot == "" {
 		return runtime.GOOS == "windows", nil
 	}
-	// HxStore discovery owns its existing validation and error contract, including Mac aliases.
-	hx, classic, hxSkipped, hxErr := outlookDiscover(root)
-	if len(hx)+len(classic)+len(hxSkipped) > 0 || hxErr != nil {
+	// Only positively recognized legacy stores select that route; skips/errors cannot hide OWA.
+	hx, classic, _, _ := outlookDiscover(root)
+	if len(hx)+len(classic) > 0 {
 		return false, nil
 	}
 	profiles, skipped, err := outlookOWADiscover(root)
@@ -146,7 +147,7 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 	if err := r.st.ClearMailRead(ctx, account); err != nil {
 		return SourceReport{}, false, errs.DBError(err)
 	}
-	snap, cleanup, err := outlookOWASnapshot(ctx, p.Source)
+	snap, cleanup, err := outlookOWAPrivateSnapshot(ctx, p.Source)
 	defer cleanup()
 	if err != nil {
 		return SourceReport{}, false, err
@@ -197,6 +198,45 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{account}, Counts: &SourceCounts{Mail: &mail}}, true, nil
 }
 
+// Copy cancellation follows the caller until handoff; the original reader context still cancels reads/deadlines, but this owner removes the snapshot only after Close.
+func ownedOWASnapshot(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+	copyCtx, cancelCopy := context.WithCancel(context.WithoutCancel(ctx))
+	forwarded := make(chan struct{})
+	stopForwarding := context.AfterFunc(ctx, func() {
+		cancelCopy()
+		close(forwarded)
+	})
+	var stopped sync.Once
+	stop := func() {
+		stopped.Do(func() {
+			if !stopForwarding() {
+				<-forwarded
+			}
+		})
+	}
+	handedOff := false
+	defer func() {
+		stop()
+		if !handedOff {
+			cancelCopy()
+		}
+	}()
+	snap, cleanup, err := outlookOWASnapshot(copyCtx, source)
+	stop()
+	if err := ctx.Err(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err != nil {
+		return snap, cleanup, err
+	}
+	handedOff = true
+	return snap, func() {
+		cleanup()
+		cancelCopy()
+	}, nil
+}
+
 // The Origin closes before this returns, so the caller can then remove the private snapshot.
 func collectOWAMail(ctx context.Context, snap, account string, expect bool) (res outlookowa.Result, err error) {
 	o, err := outlookOWAOpen(ctx, filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
@@ -239,11 +279,12 @@ func owaSourceError(err error) error {
 }
 
 var (
-	outlookOWAFingerprint = outlookowa.Fingerprint
-	outlookOWADefaultRoot = outlookowa.DefaultRoot
-	outlookOWADiscover    = outlookowa.Discover
-	outlookOWAOpen        = outlookowa.Open
-	outlookOWAClose       = (*indexeddb.Origin).Close
-	outlookOWASnapshot    = teamsdesktop.Snapshot
-	outlookOWARecordRun   = func(ctx context.Context, st *store.Store, run store.Run) error { return st.RecordRun(ctx, run) }
+	outlookOWAFingerprint     = outlookowa.Fingerprint
+	outlookOWADefaultRoot     = outlookowa.DefaultRoot
+	outlookOWADiscover        = outlookowa.Discover
+	outlookOWAOpen            = outlookowa.Open
+	outlookOWAClose           = (*indexeddb.Origin).Close
+	outlookOWASnapshot        = teamsdesktop.Snapshot
+	outlookOWAPrivateSnapshot = ownedOWASnapshot
+	outlookOWARecordRun       = func(ctx context.Context, st *store.Store, run store.Run) error { return st.RecordRun(ctx, run) }
 )

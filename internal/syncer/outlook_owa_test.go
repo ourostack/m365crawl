@@ -811,3 +811,297 @@ func TestSyncOWAFormatProbeRefusalIsNotAnEmptySuccess(t *testing.T) {
 		t.Fatal("format-probe failure changed cached mail or inferred absence")
 	}
 }
+
+func TestSyncOWAActiveLazyCancellationKeepsSnapshotUntilClose(t *testing.T) {
+	tmp := isolateTmp(t)
+	root, db := tableOWARoot(t), newDB(t)
+	o := outlookOpts(db, root)
+	run(t, o)
+	o.FullRead = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldOpen, oldCopy := outlookOWAOpen, outlookOWASnapshot
+	t.Cleanup(func() { outlookOWAOpen, outlookOWASnapshot = oldOpen, oldCopy })
+	var origin *indexeddb.Origin
+	var snapshotContext context.Context
+	var snapshot string
+	var dbID, storeID int64
+	outlookOWASnapshot = func(copyCtx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		dir, cleanup, err := oldCopy(copyCtx, source)
+		snapshotContext, snapshot = copyCtx, dir
+		return dir, func() {
+			if origin != nil {
+				if err := origin.Records(dbID, storeID, func(indexeddb.Record) error { return nil }); !errors.Is(err, leveldb.ErrClosed) {
+					t.Errorf("returned cleanup preceded lazy Origin.Close: %v", err)
+				}
+			}
+			cleanup()
+			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("private snapshot removal failed after close: %v", err)
+			}
+		}, err
+	}
+	outlookOWAOpen = func(readCtx context.Context, dir, blob string) (*indexeddb.Origin, error) {
+		result, err := oldOpen(readCtx, dir, blob)
+		if err != nil {
+			return result, err
+		}
+		origin = result
+		dbID, storeID = owaHeaderStore(t, result)
+		large := false
+		if err := result.Records(dbID, storeID, func(r indexeddb.Record) error {
+			large = large || len(r.Raw) >= leveldb.LazyMin()
+			return nil
+		}); err != nil || !large || result.Stats().Tables == 0 {
+			_ = result.Close()
+			t.Fatalf("cancellation scenario did not open an actual lazy table: %v", err)
+		}
+		cancel()
+		// If production still gives Snapshot the consumer context, observe the real borrowed
+		// automatic-removal callback while this actual lazy handle remains open.
+		if snapshotContext.Err() != nil {
+			until := time.Now().Add(time.Second)
+			for time.Now().Before(until) {
+				if _, err := os.Stat(filepath.Join(snapshot, "leveldb", "CURRENT")); errors.Is(err, os.ErrNotExist) {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			t.Error("consumer cancellation reached snapshot automatic-removal context before Origin.Close")
+		}
+		if _, err := os.Stat(filepath.Join(snapshot, "leveldb", "CURRENT")); err != nil {
+			t.Errorf("automatic cancellation removed snapshot data before Origin.Close: %v", err)
+		}
+		return result, nil
+	}
+	_, _, err := Run(ctx, o)
+	if !errors.Is(err, context.Canceled) || count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 || count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 {
+		t.Fatalf("active-reader cancellation changed archive, absence or eligibility: %v", err)
+	}
+	if len(snapshotDirs(t, tmp)) != 0 {
+		t.Fatal("active-reader cancellation leaked private snapshot")
+	}
+	outlookOWAOpen, outlookOWASnapshot = oldOpen, oldCopy
+	o.FullRead = false
+	if r, _ := run(t, o); sourceKeyed(t, r, "outlook|Default|mail").Status != StatusOK {
+		t.Fatal("canceled active reader made next eligible read skip")
+	}
+}
+
+func TestSyncOWAReadableProfileSurvivesLegacyClassificationFailure(t *testing.T) {
+	isolateTmp(t)
+	root, db := owaRoot(t, "mail"), newDB(t)
+	denied := filepath.Join(root, "Denied")
+	if err := os.MkdirAll(filepath.Join(denied, "IndexedDB"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldHX, oldOWA := outlookDiscover, outlookOWADiscover
+	t.Cleanup(func() { outlookDiscover, outlookOWADiscover = oldHX, oldOWA })
+	outlookDiscover = func(path string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+		profiles, classic, _, err := oldHX(path)
+		if err != nil {
+			return profiles, classic, nil, err
+		}
+		return profiles, classic, []outlookdesktop.SkippedProfile{{Name: "Denied", Dir: denied, Reason: "no_full_disk_access", Err: os.ErrPermission}}, errs.NoFullDiskAccess(denied, os.ErrPermission)
+	}
+	outlookOWADiscover = func(path string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
+		profiles, _, err := oldOWA(path)
+		return profiles, []outlookowa.SkippedProfile{{Name: "Denied", Dir: denied, Reason: "unreadable", Err: os.ErrPermission}}, err
+	}
+	o := outlookOpts(db, root)
+	r, _, err := Run(context.Background(), o)
+	if err == nil || r.Status != StatusPartial {
+		t.Fatalf("inaccessible profile was hidden: %+v %v", r.Sources, err)
+	}
+	healthy := sourceKeyed(t, r, "outlook|Default|mail")
+	failed := sourceKeyed(t, r, "outlook|Denied|mail")
+	if healthy.Status != StatusOK || healthy.Counts.Mail == nil || healthy.Counts.Mail.Added != 5 || failed.Status != StatusFailed || failed.Error.Code != CodeOutlookProfileUnreadable || strings.Contains(failed.Error.Fix, "Full Disk Access") {
+		t.Fatalf("legacy uncertainty suppressed healthy OWA or gave legacy guidance: %+v", r.Sources)
+	}
+	if count(t, db, `select count(*) from mail_messages where account='outlook/Default'`) != 5 || count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Denied'`) != 0 {
+		t.Fatal("profile failures were not isolated from healthy OWA progress")
+	}
+	probe := runner{o: o}
+	if !probe.outlookPresent() {
+		t.Fatal("legacy uncertainty hid readable OWA availability")
+	}
+}
+
+func TestOwnedOWASnapshotForwardsCopyDeadlineAndReleasesContext(t *testing.T) {
+	isolateTmp(t)
+	p := owaProfile(owaRoot(t, "mail"))
+	type valueKey struct{}
+	parent := context.WithValue(context.Background(), valueKey{}, "synthetic scope")
+	ctx, cancel := context.WithTimeout(parent, 20*time.Millisecond)
+	defer cancel()
+	old := outlookOWASnapshot
+	var copyContext context.Context
+	outlookOWASnapshot = func(copyCtx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		copyContext = copyCtx
+		if copyCtx.Value(valueKey{}) != "synthetic scope" {
+			t.Error("copy lost caller values")
+		}
+		select {
+		case <-copyCtx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("caller deadline was not forwarded to cancellable copying")
+		}
+		return old(copyCtx, source)
+	}
+	t.Cleanup(func() { outlookOWASnapshot = old })
+	dir, cleanup, err := ownedOWASnapshot(ctx, p.Source)
+	cleanup()
+	if dir != "" || !errors.Is(err, context.DeadlineExceeded) || copyContext.Err() == nil {
+		t.Fatalf("copy deadline was lost/masked or its context remained live: %q %v", dir, err)
+	}
+	outlookOWASnapshot = old
+	var activeCopyCtx context.Context
+	outlookOWASnapshot = func(copyCtx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		activeCopyCtx = copyCtx
+		return old(copyCtx, source)
+	}
+	dir, cleanup, err = ownedOWASnapshot(parent, p.Source)
+	if err != nil || activeCopyCtx.Err() != nil {
+		t.Fatalf("copy handoff failed: %q %v", dir, err)
+	}
+	cleanup()
+	if !errors.Is(activeCopyCtx.Err(), context.Canceled) {
+		t.Fatal("cleanup retained the detached copy context")
+	}
+}
+
+func TestSyncOWAActiveLazyDeadlinePreservesReaderDeadlineAndCleanup(t *testing.T) {
+	tmp := isolateTmp(t)
+	root, db := tableOWARoot(t), newDB(t)
+	st, err := store.Open(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	oldOpen := outlookOWAOpen
+	t.Cleanup(func() { outlookOWAOpen = oldOpen })
+	outlookOWAOpen = func(readCtx context.Context, dir, blob string) (*indexeddb.Origin, error) {
+		o, err := oldOpen(readCtx, dir, blob)
+		if err != nil {
+			return o, err
+		}
+		dbID, storeID := owaHeaderStore(t, o)
+		large := false
+		if err := o.Records(dbID, storeID, func(r indexeddb.Record) error {
+			large = large || len(r.Raw) >= leveldb.LazyMin()
+			return nil
+		}); err != nil || !large {
+			_ = o.Close()
+			t.Fatalf("no opened lazy table for active-reader deadline: %v", err)
+		}
+		gotDeadline, ok := readCtx.Deadline()
+		if !ok || !gotDeadline.Equal(deadline) {
+			t.Error("active reader lost its original deadline")
+		}
+		<-readCtx.Done()
+		if _, err := os.Stat(filepath.Join(dir, "CURRENT")); err != nil {
+			t.Errorf("active deadline deleted snapshot before closing reader: %v", err)
+		}
+		return o, nil
+	}
+	r := runner{o: outlookOpts(db, root), st: st}
+	_, _, err = r.outlookOWAMail(ctx, owaProfile(root))
+	if !errors.Is(err, context.DeadlineExceeded) || len(snapshotDirs(t, tmp)) != 0 || count(t, db, `select count(*) from mail_messages`) != 0 || count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 {
+		t.Fatalf("active reader deadline was masked or leaked/applied mail: %v", err)
+	}
+}
+
+func TestOWAFormatRoutingDistinguishesPositiveLegacyAndRootErrors(t *testing.T) {
+	for _, kind := range []string{"hx", "classic", "legacy-error-owa-empty", "both-root-errors"} {
+		t.Run(kind, func(t *testing.T) {
+			isolateTmp(t)
+			root, db := owaRoot(t, "mail"), newDB(t)
+			hx, owa := outlookDiscover, outlookOWADiscover
+			t.Cleanup(func() { outlookDiscover, outlookOWADiscover = hx, owa })
+			o := outlookOpts(db, root)
+			switch kind {
+			case "hx":
+				root = outlookRoot(t, "HxStore.hxd")
+				o.OutlookRoot = root
+				r, _ := run(t, o)
+				if sourceKeyed(t, r, "outlook|Main").Status != StatusOK {
+					t.Fatal("positive HxStore root lost legacy route")
+				}
+			case "classic":
+				outlookDiscover = func(string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+					return nil, []string{"Classic"}, nil, nil
+				}
+				r, _, err := Run(context.Background(), o)
+				if err == nil || len(r.OutlookClassicOnly) != 1 || sourceKeyed(t, r, "outlook").Error.Code != CodeNoOutlookProfiles {
+					t.Fatalf("positive classic source changed route or became an empty success: %+v %v", r, err)
+				}
+			default:
+				outlookDiscover = func(string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+					return nil, nil, nil, errs.Internal(errors.New("synthetic legacy root failure"))
+				}
+				outlookOWADiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
+					if kind == "both-root-errors" {
+						return nil, nil, os.ErrPermission
+					}
+					return nil, nil, nil
+				}
+				r, _, err := Run(context.Background(), o)
+				want := errs.CodeInternal
+				if kind == "both-root-errors" {
+					want = CodeOutlookProfileUnreadable
+				}
+				if err == nil || sourceKeyed(t, r, "outlook").Error.Code != want {
+					t.Fatalf("unrecognized/error root became an empty successful source: %+v %v", r.Sources, err)
+				}
+			}
+		})
+	}
+}
+
+func TestSyncOWACancelAtReaderHandoffDoesNotOpenOrigin(t *testing.T) {
+	tmp := isolateTmp(t)
+	root, db := tableOWARoot(t), newDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	old := outlookOWAPrivateSnapshot
+	outlookOWAPrivateSnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		dir, cleanup, err := old(ctx, source)
+		if err == nil {
+			cancel()
+		}
+		return dir, cleanup, err
+	}
+	t.Cleanup(func() { outlookOWAPrivateSnapshot = old })
+	o := outlookOpts(db, root)
+	o.Root = t.TempDir()
+	_, _, err := Run(ctx, o)
+	if !errors.Is(err, context.Canceled) || count(t, db, `select count(*) from mail_messages`) != 0 || count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 || len(snapshotDirs(t, tmp)) != 0 {
+		t.Fatalf("handoff cancellation applied mail, vouched for a read or leaked snapshot: %v", err)
+	}
+}
+
+func TestSyncOWAReadableFormatOverridesEachNegativeLegacyProbe(t *testing.T) {
+	for _, kind := range []string{"skipped-only", "error-only"} {
+		t.Run(kind, func(t *testing.T) {
+			isolateTmp(t)
+			root, db := owaRoot(t, "mail"), newDB(t)
+			old := outlookDiscover
+			t.Cleanup(func() { outlookDiscover = old })
+			outlookDiscover = func(path string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+				if kind == "error-only" {
+					return nil, nil, nil, os.ErrPermission
+				}
+				return nil, nil, []outlookdesktop.SkippedProfile{{Name: "Default", Dir: filepath.Join(path, "Default"), Reason: "no_full_disk_access", Err: os.ErrPermission}}, nil
+			}
+			o := outlookOpts(db, root)
+			o.Root = t.TempDir()
+			r, _ := run(t, o)
+			if len(r.Sources) != 1 || sourceKeyed(t, r, "outlook|Default|mail").Counts.Mail.Added != 5 {
+				t.Fatalf("negative legacy probe overrode positive OWA evidence: %+v", r.Sources)
+			}
+		})
+	}
+}
