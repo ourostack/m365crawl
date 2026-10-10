@@ -2,6 +2,7 @@ package outlookowa
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -128,6 +129,24 @@ func mapFolder(v any, r *Result) (Folder, bool) {
 }
 
 func mapMessage(v any, account string, r *Result) (Message, bool) {
+	return mapMessageDetail(v, nil, account, r)
+}
+
+// metadata selects the measured detail source without guessing across conflicting values.
+func (r *Result) metadata(header, detail any, key string) (any, bool) {
+	h, d := field(header, key), field(detail, key)
+	if d == nil {
+		return h, false
+	}
+	conflict := h != nil && !reflect.DeepEqual(h, d)
+	if conflict {
+		r.loss("outlook_owa_detail_conflict")
+		r.Doubtful = true
+	}
+	return d, conflict
+}
+
+func mapMessageDetail(v, detail any, account string, r *Result) (Message, bool) {
 	m := Message{ID: r.text(v, "ItemId", "Id"), FolderID: r.text(v, "ParentFolderId", "Id")}
 	if !validID(m.ID) || !validID(m.FolderID) {
 		r.Notes.Unmapped++
@@ -138,8 +157,8 @@ func mapMessage(v any, account string, r *Result) (Message, bool) {
 	h := outlookmail.Header{
 		Subject: r.text(v, "Subject"), Preview: r.text(v, "Preview"),
 		SenderName: r.text(v, "From", "Mailbox", "Name"), SenderAddress: r.text(v, "From", "Mailbox", "EmailAddress"),
-		ConversationID: r.text(v, "ConversationId", "Id"), ICalUID: strings.ToLower(r.text(v, "UID")),
-		Received: r.date(v, "DateTimeReceived"), ReadState: "unknown", Flag: "unknown", Importance: "unknown",
+		ConversationID: r.text(v, "ConversationId", "Id"),
+		Received:       r.date(v, "DateTimeReceived"), ReadState: "unknown", Flag: "unknown", Importance: "unknown",
 		HasAttachments: r.boolean(field(v, "HasAttachments")),
 	}
 	if h.HasAttachments == nil {
@@ -168,18 +187,33 @@ func mapMessage(v any, account string, r *Result) (Message, bool) {
 		h.Importance = importance
 	}
 	for _, role := range []struct{ key, role string }{{"ToRecipients", "to"}, {"CcRecipients", "cc"}, {"BccRecipients", "bcc"}} {
-		for _, rc := range r.list(field(v, role.key)) {
+		value, conflict := r.metadata(v, detail, role.key)
+		for _, rc := range r.list(value) {
 			if o, ok := rc.(*v8.Object); !ok || o == nil {
 				r.loss(outlookmail.CodeMailUnmapped)
 				continue
 			}
-			h.Recipients = append(h.Recipients, outlookmail.Recipient{Name: r.text(rc, "Name"), Address: r.text(rc, "EmailAddress"), Role: role.role})
+			recipient := outlookmail.Recipient{Name: r.text(rc, "Name"), Address: r.text(rc, "EmailAddress"), Role: role.role}
+			if !conflict {
+				h.Recipients = append(h.Recipients, recipient)
+			}
 		}
 	}
-	m.Value = outlookmail.Message{Account: account, Header: h, Detail: outlookmail.Detail{Sent: r.date(v, "DateTimeSent"), MessageID: r.text(v, "InternetMessageId"), Class: r.text(v, "ItemClass")}, Body: outlookmail.Body{State: "none"}, Copies: 1}
+	uid, uidConflict := r.metadata(v, detail, "UID")
+	uidText := strings.ToLower(r.text(uid))
+	if !uidConflict {
+		h.ICalUID = uidText
+	}
+	messageID, messageIDConflict := r.metadata(v, detail, "InternetMessageId")
+	messageIDText := r.text(messageID)
+	if messageIDConflict {
+		messageIDText = ""
+	}
+	m.Value = outlookmail.Message{Account: account, Header: h, Detail: outlookmail.Detail{Sent: r.date(v, "DateTimeSent"), MessageID: messageIDText, Class: r.text(v, "ItemClass")}, Body: outlookmail.Body{State: "none"}, Copies: 1}
 	attachments := newRecords()
 	var attachmentOrder []string
-	for _, a := range r.list(field(v, "Attachments")) {
+	attachmentValues, attachmentConflict := r.metadata(v, detail, "Attachments")
+	for _, a := range r.list(attachmentValues) {
 		id := r.text(a, "AttachmentId", "Id")
 		if !validID(id) {
 			r.loss(outlookmail.CodeMailUnmapped)
@@ -219,6 +253,10 @@ func mapMessage(v any, account string, r *Result) (Message, bool) {
 		}
 		m.AttachmentIDs = append(m.AttachmentIDs, id)
 		m.Value.Attachments = append(m.Value.Attachments, at)
+	}
+	if attachmentConflict {
+		m.AttachmentIDs = nil
+		m.Value.Attachments = nil
 	}
 	return m, true
 }

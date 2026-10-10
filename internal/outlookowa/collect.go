@@ -175,7 +175,8 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 		r.loss("outlook_owa_root_uncertain")
 	}
 	for _, value := range headers.values {
-		m, ok := mapMessage(value, account, &r)
+		id := r.text(value, "ItemId", "Id")
+		m, ok := mapMessageDetail(value, bodies.values[id], account, &r)
 		if !ok {
 			continue
 		}

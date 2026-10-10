@@ -5,7 +5,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookmail"
 )
 
-const MapperVersion = 1
+const MapperVersion = 2
 
 // Folder retains native folder and parent identities until Normalize binds them.
 type Folder struct {
