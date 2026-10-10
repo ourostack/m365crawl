@@ -18,6 +18,7 @@ type completionNativeFixture struct {
 	owned         map[uint32]bool
 	signalled     map[uint32]bool
 	closed        map[windows.Handle]int
+	opened        map[windows.Handle]int
 	polls         map[uint32]int
 	jobKills      int
 	fallbackKills int
@@ -48,12 +49,13 @@ func newCompletionNativeFixture(t *testing.T) *completionNativeFixture {
 	})
 	f := &completionNativeFixture{
 		w:     &windowsCloseWitness{set: completionTestSet(4096), job: 7, profile: `C:\synthetic`},
-		owned: map[uint32]bool{}, signalled: map[uint32]bool{}, closed: map[windows.Handle]int{}, polls: map[uint32]int{},
+		owned: map[uint32]bool{}, signalled: map[uint32]bool{}, closed: map[windows.Handle]int{}, opened: map[windows.Handle]int{}, polls: map[uint32]int{},
 	}
 	completionOpenProcess = func(_ uint32, _ bool, pid uint32) (windows.Handle, error) {
 		if pid == f.openFail {
 			return 0, errors.New("private owned open error")
 		}
+		f.opened[windows.Handle(pid)]++
 		return windows.Handle(pid), nil
 	}
 	completionCloseHandle = func(h windows.Handle) error { f.closed[h]++; return nil }
@@ -190,6 +192,9 @@ func TestCompletionProductionPartialFailurePreservesPrimaryAndCleansPeers(t *tes
 	if err == nil || err.Error() != "browser_completion_process_open_failed" || f.jobKills != 1 || f.fallbackKills != 1 || f.closed[7] != 1 {
 		t.Fatalf("first owned error and safe verified peer cleanup: %v; job/fallback=%d/%d closes=%v", err, f.jobKills, f.fallbackKills, f.closed)
 	}
+	if f.opened[42] != 1 || f.opened[44] != 4 || f.closed[42] != 1 || f.closed[44] != 4 || f.closed[43] != 0 || f.closed[99] != 3 {
+		t.Fatalf("every held/duplicate/transient/snapshot acquisition must dispose once: opened=%v closed=%v", f.opened, f.closed)
+	}
 }
 
 func TestCompletionDiscoveryFirstCodeSurvivesSnapshotFailure(t *testing.T) {
@@ -206,6 +211,8 @@ func TestCompletionDiscoveryDeadlineStopsNewNativeTransitions(t *testing.T) {
 	for _, stage := range []string{"creation", "snapshot", "last-target"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newCompletionNativeFixture(t)
+			f.w.set.deadline = time.Now().Add(5 * time.Millisecond)
+			deadline := f.w.set.deadline
 			f.jobPids = []uint32{42}
 			f.snapshotPids = []uint32{42}
 			lateOps := 0
@@ -218,13 +225,13 @@ func TestCompletionDiscoveryDeadlineStopsNewNativeTransitions(t *testing.T) {
 			}
 			switch stage {
 			case "creation":
-				f.onCreation = func(uint32) { f.w.set.deadline = time.Now().Add(-time.Second) }
+				f.onCreation = func(uint32) { time.Sleep(time.Until(deadline) + time.Millisecond) }
 			case "snapshot":
-				f.onSnapshot = func() { f.w.set.deadline = time.Now().Add(-time.Second) }
+				f.onSnapshot = func() { time.Sleep(time.Until(deadline) + time.Millisecond) }
 				f.onEnumeration = func() { lateOps++ }
 			default:
 				f.jobPids = nil
-				f.onCreation = func(uint32) { f.w.set.deadline = time.Now().Add(-time.Second) }
+				f.onCreation = func(uint32) { time.Sleep(time.Until(deadline) + time.Millisecond) }
 				f.onEnumeration = func() {
 					if !time.Now().Before(f.w.set.deadline) {
 						lateOps++
