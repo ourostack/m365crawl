@@ -27,12 +27,13 @@ type Diagnostic struct {
 	Child        Process   `json:"child"`
 	Outcome      string    `json:"outcome"`
 	Stage        string    `json:"stage"`
+	Reason       string    `json:"reason"`
 	Fields       []string  `json:"fields"`
 }
 
 func DecodeDiagnostic(data []byte) (Diagnostic, error) {
 	var d Diagnostic
-	if strict(data, &d) != nil || d.Version != Version || d.Test != TestName || !hash(d.Nonce) || !hash(d.BinaryHash) || d.BinaryNative == [3]uint32{} || d.RootNative == [3]uint32{} || !process(d.Supervisor) || !process(d.Child) || d.Supervisor.PID == d.Child.PID || d.Outcome != "failed" || !DiagnosticStage(d.Stage) || !DiagnosticFields(d.Fields) {
+	if strict(data, &d) != nil || d.Version != Version || d.Test != TestName || !hash(d.Nonce) || !hash(d.BinaryHash) || d.BinaryNative == [3]uint32{} || d.RootNative == [3]uint32{} || !process(d.Supervisor) || !process(d.Child) || d.Supervisor.PID == d.Child.PID || d.Outcome != "failed" || !DiagnosticStage(d.Stage) || !DiagnosticReason(d.Stage, d.Reason) || !DiagnosticFields(d.Fields) {
 		return Diagnostic{}, refused()
 	}
 	return d, nil
@@ -82,5 +83,86 @@ func MatchDiagnostic(o Ownership, d Diagnostic) error {
 }
 
 func DiagnosticFor(o Ownership, stage string, fields []string) Diagnostic {
-	return Diagnostic{Version: Version, Nonce: o.Nonce, Test: o.Test, BinaryHash: o.BinaryHash, BinaryNative: o.BinaryNative, RootNative: o.RootNative, Supervisor: o.Supervisor, Child: o.Child, Outcome: "failed", Stage: stage, Fields: fields}
+	return Diagnostic{Version: Version, Nonce: o.Nonce, Test: o.Test, BinaryHash: o.BinaryHash, BinaryNative: o.BinaryNative, RootNative: o.RootNative, Supervisor: o.Supervisor, Child: o.Child, Outcome: "failed", Stage: stage, Reason: "unproved", Fields: fields}
+}
+
+// CensusReason recognizes only exact fixed errors from the independent census and HTML evidence helpers. It neither unwraps nor forwards arbitrary error text.
+func CensusReason(err error) string {
+	if err == nil {
+		return "unproved"
+	}
+	return censusReasonConstant(err.Error())
+}
+
+func censusReasonConstant(code string) string {
+	// One exact-switch whitelist serves both mapping and wire validation; return constants, never arbitrary error text.
+	switch code {
+	case "census_metadata_refused":
+		return "census_metadata_refused"
+	case "census_layout_refused":
+		return "census_layout_refused"
+	case "census_open_refused":
+		return "census_open_refused"
+	case "census_close_refused":
+		return "census_close_refused"
+	case "census_decoder_refused":
+		return "census_decoder_refused"
+	case "census_context_refused":
+		return "census_context_refused"
+	case "census_resource_refused":
+		return "census_resource_refused"
+	case "census_identity_refused":
+		return "census_identity_refused"
+	case "census_duplicate_refused":
+		return "census_duplicate_refused"
+	case "census_folder_refused":
+		return "census_folder_refused"
+	case "census_folder_join_refused":
+		return "census_folder_join_refused"
+	case "census_folder_cycle_refused":
+		return "census_folder_cycle_refused"
+	case "census_folder_root_refused":
+		return "census_folder_root_refused"
+	case "census_field_type_refused":
+		return "census_field_type_refused"
+	case "census_duplicate_field_refused":
+		return "census_duplicate_field_refused"
+	case "census_text_refused":
+		return "census_text_refused"
+	case "census_boolean_refused":
+		return "census_boolean_refused"
+	case "census_array_refused":
+		return "census_array_refused"
+	case "census_date_refused":
+		return "census_date_refused"
+	case "detail_metadata_coverage_refused":
+		return "detail_metadata_coverage_refused"
+	case "census_flag_refused":
+		return "census_flag_refused"
+	case "census_attachment_flag_refused":
+		return "census_attachment_flag_refused"
+	case "body_derivation_unproved":
+		return "body_derivation_unproved"
+	case "census_recipient_refused":
+		return "census_recipient_refused"
+	case "census_attachment_identity_refused":
+		return "census_attachment_identity_refused"
+	case "census_size_refused":
+		return "census_size_refused"
+	case "body_derivation_resource_refused":
+		return "body_derivation_resource_refused"
+	case "body_derivation_encoding_unproved":
+		return "body_derivation_encoding_unproved"
+	case "body_tokenization_unproved":
+		return "body_tokenization_unproved"
+	case "body_foreign_content_unproved":
+		return "body_foreign_content_unproved"
+	case "body_rawtext_semantics_unproved":
+		return "body_rawtext_semantics_unproved"
+	}
+	return "unproved"
+}
+
+func DiagnosticReason(stage, reason string) bool {
+	return reason == "unproved" || stage == StageCensus && censusReasonConstant(reason) != "unproved"
 }

@@ -19,8 +19,15 @@ import (
 type owaFailureState struct {
 	stage     string
 	failure   string
+	reason    string
 	fields    []string
 	completed bool
+}
+
+func owaRecordCensusReason(s *owaFailureState, err error) {
+	if s != nil && s.failure == "" {
+		s.reason = protocol.CensusReason(err)
+	}
 }
 
 func (s *owaFailureState) phase(t *testing.T, stage string) func() {
@@ -73,7 +80,7 @@ func (s *owaFailureState) mismatch(fields []string) {
 		s.fields = append([]string{}, fields...)
 	}
 }
-func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, failure func(string, []string) error) {
+func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, failure func(string, string, []string) error) {
 	t.Cleanup(func() {
 		if t.Failed() {
 			stage := s.failure
@@ -87,7 +94,11 @@ func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, f
 			if fields == nil {
 				fields = []string{}
 			}
-			if !protocol.DiagnosticStage(stage) || !protocol.DiagnosticFields(fields) || failure(stage, fields) != nil {
+			reason := s.reason
+			if reason == "" {
+				reason = "unproved"
+			}
+			if !protocol.DiagnosticStage(stage) || !protocol.DiagnosticReason(stage, reason) || !protocol.DiagnosticFields(fields) || failure(stage, reason, fields) != nil {
 				t.Error("diagnostic_write_refused")
 			}
 		} else if success() != nil {
@@ -133,6 +144,7 @@ func TestOWADiagnosticResponsibleStages(t *testing.T) {
 			}
 			var actual struct {
 				Stage  string
+				Reason string
 				Fields []string
 			}
 			if json.Unmarshal(data, &actual) != nil {
@@ -144,6 +156,12 @@ func TestOWADiagnosticResponsibleStages(t *testing.T) {
 			}
 			if mode == "conflict" && (len(actual.Fields) != 1 || actual.Fields[0] != "UID") {
 				t.Fatal("conflict_field_witness_missing")
+			}
+			if mode == "conflict" && actual.Reason != "detail_metadata_coverage_refused" {
+				t.Fatal("conflict_fixed_reason_missing")
+			}
+			if mode != "census" && mode != "conflict" && actual.Reason != "unproved" {
+				t.Fatal("noncensus_reason_not_unproved")
 			}
 		})
 	}
@@ -158,14 +176,15 @@ func TestOWADiagnosticStageProbe(t *testing.T) {
 		t.Fatal("synthetic_real_flag_refused")
 	}
 	s := &owaFailureState{}
-	owaFailureCleanup(t, s, func() error { return nil }, func(stage string, fields []string) error {
+	owaFailureCleanup(t, s, func() error { return nil }, func(stage, reason string, fields []string) error {
 		if mode == "failed_write" {
 			return errors.New("synthetic_write_refused")
 		}
 		data, err := json.Marshal(struct {
 			Stage  string
+			Reason string
 			Fields []string
-		}{stage, fields})
+		}{stage, reason, fields})
 		if err != nil {
 			return errors.New("synthetic_encode_failed")
 		}

@@ -13,11 +13,11 @@ import (
 
 func TestDiagnosticFailurePacketNeverPrintsCause(t *testing.T) {
 	err := diagnosticFailure(protocol.StageCensus, []string{"ical_uid"}, errors.New("private_path_or_source_never_output"))
-	if failurePacket(err) != `owa_acceptance status=unqualified stage=independent_census fields=["ical_uid"]` {
+	if failurePacket(err) != `owa_acceptance status=unqualified stage=independent_census reason=unproved fields=["ical_uid"]` {
 		t.Fatal("fixed_diagnostic_packet_missing")
 	}
 	for _, err := range []error{errors.New("private"), diagnosticFailure("private", []string{"subject"}, errors.New("private")), diagnosticFailure(protocol.StageImport, []string{"private"}, errors.New("private")), errTimeout} {
-		if failurePacket(err) != "owa_acceptance status=unqualified stage=unproved fields=[]" {
+		if failurePacket(err) != "owa_acceptance status=unqualified stage=unproved reason=unproved fields=[]" {
 			t.Fatal("untrusted_failure_packet_accepted")
 		}
 	}
@@ -45,7 +45,7 @@ func TestDiagnosticWriteRefusalAndTimeoutRemainUnproved(t *testing.T) {
 			}
 			exit, result := w.run(binary, []string{"-test.run=^" + protocol.TestName + "$", "-test.timeout=4m"}, qualifiedEnv(os.Environ(), q), timeout)
 			finishErr := q.finish(exit, result)
-			if finishErr == nil || q.diagnostic.Stage != "" || failurePacket(finishErr) != "owa_acceptance status=unqualified stage=unproved fields=[]" {
+			if finishErr == nil || q.diagnostic.Stage != "" || failurePacket(finishErr) != "owa_acceptance status=unqualified stage=unproved reason=unproved fields=[]" {
 				t.Fatal("failed_diagnostic_or_timeout_became_proof")
 			}
 			data, err := protocol.ReadProtected(filepath.Join(q.receipt, protocol.CloseoutName))
@@ -86,7 +86,7 @@ func TestDiagnosticActualCompiledSourceRefusal(t *testing.T) {
 	copySyntheticFixture(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "multiple"), filepath.Join(source, "Default"))
 	receipt := filepath.Join(t.TempDir(), "receipt")
 	_, err := runQualified(binary, testDigest(t, binary), source, t.TempDir(), receipt, 30*time.Second)
-	if err == nil || failurePacket(err) != `owa_acceptance status=unqualified stage=independent_census fields=[]` {
+	if err == nil || failurePacket(err) != `owa_acceptance status=unqualified stage=independent_census reason=census_layout_refused fields=[]` {
 		t.Fatal("actual_failed_test_diagnostic_missing")
 	}
 	data, readErr := protocol.ReadProtected(filepath.Join(receipt, protocol.DiagnosticName))
@@ -94,7 +94,7 @@ func TestDiagnosticActualCompiledSourceRefusal(t *testing.T) {
 		t.Fatal("private_failure_witness_missing")
 	}
 	d, err := protocol.DecodeDiagnostic(data)
-	if err != nil || d.Stage != protocol.StageCensus || d.Outcome != "failed" {
+	if err != nil || d.Stage != protocol.StageCensus || d.Reason != "census_layout_refused" || d.Outcome != "failed" {
 		t.Fatal("actual_failure_stage_unproved")
 	}
 	if _, err := os.Lstat(filepath.Join(receipt, protocol.WitnessName)); !errors.Is(err, os.ErrNotExist) {
@@ -107,7 +107,7 @@ func TestDiagnosticConsumerRejectsMissingUnknownAndForeign(t *testing.T) {
 	if err != nil {
 		t.Fatal("synthetic_artifact_failed")
 	}
-	for _, mode := range []string{"missing", "unknown", "foreign", "trailing", "extra", "oversized", "negative_counts", "valid"} {
+	for _, mode := range []string{"missing", "unknown", "unknown_reason", "foreign", "trailing", "extra", "oversized", "negative_counts", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			w, q, err := newQualifiedRun(exe, testDigest(t, exe), qualifiedFixtureRoot(t), t.TempDir(), filepath.Join(t.TempDir(), "receipt"))
 			if err != nil {
@@ -120,6 +120,8 @@ func TestDiagnosticConsumerRejectsMissingUnknownAndForeign(t *testing.T) {
 			switch mode {
 			case "unknown":
 				d.Stage = "private"
+			case "unknown_reason":
+				d.Reason = "private_value"
 			case "foreign":
 				d.Nonce = strings.Repeat("f", 64)
 			}

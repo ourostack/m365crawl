@@ -124,6 +124,7 @@ func owaReadIndependentCensus(t *testing.T, s *owaObservation) {
 	var err error
 	s.census, err = owaCensusContext(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if err != nil {
+		owaRecordCensusReason(s.failure, err)
 		var coverage *owaCoverageRefusal
 		if errors.As(err, &coverage) {
 			s.failure.mismatch(coverage.fields)
