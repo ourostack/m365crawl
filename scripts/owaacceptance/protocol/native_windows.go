@@ -339,6 +339,9 @@ func CurrentGuard() (Ownership, error) {
 	if initial != wantInitial || CheckPrivate(owner.Root, true) != nil || SafeAbsolute(owner.Source, true, true) != nil {
 		return Ownership{}, refused()
 	}
+	if StorageOutsideSource(owner.Source, owner.Root, filepath.Dir(path)) != nil {
+		return Ownership{}, refused()
+	}
 	root, err := NativeIdentity(owner.Root, true)
 	if err != nil || root != owner.RootNative {
 		return Ownership{}, refused()

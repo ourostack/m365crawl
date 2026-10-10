@@ -53,6 +53,9 @@ func newQualifiedRun(binary, digest, source, parent, receipt string) (*workspace
 	if protocol.SafeAbsolute(source, true, true) != nil || !filepath.IsAbs(receipt) || filepath.Clean(receipt) != receipt || protocol.SafeAbsolute(filepath.Dir(receipt), true, true) != nil {
 		return nil, nil, errors.New("qualification_arguments_refused")
 	}
+	if protocol.StorageOutsideSource(source, parent, receipt) != nil {
+		return nil, nil, errors.New("qualification_storage_placement_refused")
+	}
 	pin, err := protocol.PinBinary(binary, digest)
 	if err != nil {
 		return nil, nil, errors.New("qualification_binary_refused")
