@@ -23,13 +23,10 @@ func scriptPage(t *testing.T) (context.Context, *browser.Page) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
-	profile := filepath.Join(t.TempDir(), "profile")
-	if err := os.Mkdir(profile, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	profile := filepath.Join(t.TempDir(), "archive", "profile")
 	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, StartURL: "about:blank"})
 	if err != nil {
-		t.Fatal("synthetic script browser launch failed")
+		t.Fatalf("synthetic script browser launch failed: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := b.Close(); err != nil {
