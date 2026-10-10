@@ -307,10 +307,12 @@ func (f *owaFields) date(value any, key string) any {
 
 type owaDetailInventory struct {
 	present, unproved []string
+	selected          map[string]any
 }
 
-// The approved mapper currently consumes these fields from the header only. No header/detail precedence is approved except header HasAttachments and the explicitly excluded ReplyTo. Count raw joined detail presence; refuse loss/conflict rather than choosing a new precedence in acceptance code.
+// The six-field contract is independently applied to exact raw values: unavailable means null/undefined/absent, empty values are present, equal overlap is used once and unequal overlap is not clean coverage. Other header fields retain their authoritative header projection.
 var owaDetailFields = []string{"Attachments", "BccRecipients", "CcRecipients", "ConversationId", "DateTimeReceived", "DateTimeSent", "Flag", "From", "HasAttachments", "Importance", "InternetMessageId", "ItemClass", "Preview", "ReplyTo", "Subject", "ToRecipients", "UID", "IsRead"}
+var owaJoinedMetadataFields = []string{"Attachments", "BccRecipients", "CcRecipients", "InternetMessageId", "ToRecipients", "UID"}
 
 type owaCoverageRefusal struct{ fields []string }
 
@@ -318,14 +320,24 @@ func (*owaCoverageRefusal) Error() string { return "detail_metadata_coverage_ref
 
 func owaInventoryDetailContext(ctx context.Context, header, detail any) (owaDetailInventory, error) {
 	f := owaFields{ctx: ctx}
-	var inventory owaDetailInventory
+	inventory := owaDetailInventory{selected: map[string]any{}}
 	for _, name := range owaDetailFields {
 		v := f.get(detail, name)
 		if v == nil {
 			continue
 		}
 		inventory.present = append(inventory.present, name)
-		if name != "HasAttachments" && name != "ReplyTo" && !reflect.DeepEqual(v, f.get(header, name)) {
+	}
+	for _, name := range owaJoinedMetadataFields {
+		h, d := f.get(header, name), f.get(detail, name)
+		switch {
+		case h == nil:
+			inventory.selected[name] = d
+		case d == nil:
+			inventory.selected[name] = h
+		case reflect.DeepEqual(h, d):
+			inventory.selected[name] = h
+		default:
 			inventory.unproved = append(inventory.unproved, name)
 		}
 	}
@@ -353,6 +365,11 @@ func owaRawHeaderContext(ctx context.Context, value, body any) (owaRawMessage, e
 	m.detail, detailErr = owaInventoryDetailContext(ctx, value, body)
 	if detailErr != nil {
 		return m, detailErr
+	}
+	metadata := &v8.Object{}
+	for _, name := range owaJoinedMetadataFields {
+		metadata.Keys = append(metadata.Keys, name)
+		metadata.Values = append(metadata.Values, m.detail.selected[name])
 	}
 	read := f.bool(value, "IsRead")
 	state := "unknown"
@@ -401,15 +418,18 @@ func owaRawHeaderContext(ctx context.Context, value, body any) (owaRawMessage, e
 	}
 	m.textKnown = true
 	m.fields = []any{
-		f.text(value, "InternetMessageId"), f.text(value, "ConversationId", "Id"), int64(0),
+		f.text(metadata, "InternetMessageId"), f.text(value, "ConversationId", "Id"), int64(0),
 		f.text(value, "Subject"), f.text(value, "From", "Mailbox", "Name"), f.text(value, "From", "Mailbox", "EmailAddress"),
 		f.text(value, "Preview"), "", f.date(value, "DateTimeReceived"), f.date(value, "DateTimeSent"),
-		f.text(value, "ItemClass"), importance, strings.ToLower(f.text(value, "UID")), read, state, flag, has, bodyState,
+		f.text(value, "ItemClass"), importance, strings.ToLower(f.text(metadata, "UID")), read, state, flag, has, bodyState,
 	}
 	for _, role := range []struct{ field, name string }{{"ToRecipients", "to"}, {"CcRecipients", "cc"}, {"BccRecipients", "bcc"}} {
-		for _, r := range f.list(value, role.field) {
+		for _, r := range f.list(metadata, role.field) {
 			if ctx.Err() != nil {
 				return m, errors.New("census_context_refused")
+			}
+			if object, ok := r.(*v8.Object); !ok || object == nil {
+				return m, errors.New("census_recipient_refused")
 			}
 			name, address := f.text(r, "Name"), f.text(r, "EmailAddress")
 			var addr any
@@ -419,7 +439,7 @@ func owaRawHeaderContext(ctx context.Context, value, body any) (owaRawMessage, e
 			m.recipients = append(m.recipients, []any{int64(len(m.recipients)), name, addr, int64(0), role.name})
 		}
 	}
-	for _, a := range f.list(value, "Attachments") {
+	for _, a := range f.list(metadata, "Attachments") {
 		if ctx.Err() != nil {
 			return m, errors.New("census_context_refused")
 		}

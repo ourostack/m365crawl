@@ -25,14 +25,15 @@ const (
 	owaMaxStateBytes    = 64 << 20
 	owaMaxSourceFiles   = 32768
 	owaMaxSourceBytes   = 512 << 20
-	owaMaxRawValueBytes = 256 << 10
+	owaMaxRawValueBytes = 8 << 20
 	owaMaxPayloadBytes  = 8 << 20
 	owaMaxDecodedBytes  = 64 << 20
+	owaMaxHTMLTokens    = 262144
 )
 
-// R1 proves silent product loss of detail metadata. No real execution is permitted until the source owner resolves that contract and the affected review approves the resulting candidate.
+// Real execution remains forbidden until affected safety review and the parent's tracked-process/private-TEMP reconciliation lifecycle are complete.
 func owaRealAcceptancePermit() error {
-	return errors.New("real_acceptance_blocked_detail_metadata_contract")
+	return errors.New("real_acceptance_blocked_parent_lifecycle")
 }
 
 func owaWorkContext(t *testing.T) context.Context {

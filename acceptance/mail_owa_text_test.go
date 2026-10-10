@@ -4,83 +4,94 @@ package acceptance
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"io"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/net/html"
 )
 
-// Only an explicitly supported XML-shaped HTML fragment is proved. x/net/html is not available in this module's unchanged readonly dependency graph. This standard-library parser is not a substitute claim of full HTML/browser rendering support: attributes, namespaces, scripts/styles, unsupported elements, malformed markup and HTML-only syntax are fixed unproved refusals.
+// Independently traverse HTML5 tokens. Text extraction is not CSS/browser visibility: attributes are not fetched/evaluated, script/style raw text and comments are excluded, block boundaries separate runs, and inline text stays adjacent. Invalid encoding, foreign-content tokenization or incomplete lexical tokens are explicitly unproved.
 func owaIndependentText(ctx context.Context, source string) (string, error) {
 	if ctx.Err() != nil || len(source) > owaMaxPayloadBytes {
 		return "", errors.New("body_derivation_resource_refused")
 	}
-	decoder := xml.NewDecoder(owaContextReader{ctx: ctx, reader: strings.NewReader("<owa>" + source + "</owa>")})
-	decoder.Entity = map[string]string{"nbsp": "\u00a0"}
-	var text strings.Builder
-	var stack []string
-	started, ended := false, false
-	tokens := 0
-	for {
-		token, err := decoder.Token()
-		if errors.Is(err, io.EOF) {
+	if !utf8.ValidString(source) || strings.ContainsRune(source, '\x00') {
+		return "", errors.New("body_derivation_encoding_unproved")
+	}
+	tokenizer := html.NewTokenizer(owaContextReader{ctx: ctx, reader: strings.NewReader(source)})
+	tokenizer.SetMaxBuf(owaMaxPayloadBytes)
+	var output strings.Builder
+	hidden := ""
+	for tokens := 0; ; tokens++ {
+		if ctx.Err() != nil || tokens > owaMaxHTMLTokens {
+			return "", errors.New("body_derivation_resource_refused")
+		}
+		kind := tokenizer.Next()
+		raw := tokenizer.Raw()
+		if kind == html.ErrorToken {
+			if !errors.Is(tokenizer.Err(), io.EOF) || len(raw) != 0 {
+				return "", errors.New("body_tokenization_unproved")
+			}
 			break
 		}
-		if err != nil || ctx.Err() != nil {
-			return "", errors.New("body_derivation_unproved")
+		if kind == html.StartTagToken || kind == html.EndTagToken || kind == html.SelfClosingTagToken {
+			if len(raw) == 0 || raw[len(raw)-1] != '>' {
+				return "", errors.New("body_tokenization_unproved")
+			}
 		}
-		tokens++
-		if tokens > owaMaxQueryRows {
-			return "", errors.New("body_derivation_resource_refused")
+		if kind == html.CommentToken && (!strings.HasPrefix(string(raw), "<!--") || !strings.HasSuffix(string(raw), "-->")) {
+			return "", errors.New("body_tokenization_unproved")
 		}
-		switch value := token.(type) {
-		case xml.StartElement:
-			name := value.Name.Local
-			if value.Name.Space != "" || len(value.Attr) != 0 || len(stack) >= 64 {
-				return "", errors.New("body_derivation_unproved")
+		token := tokenizer.Token()
+		switch kind {
+		case html.TextToken:
+			if hidden == "" {
+				output.WriteString(token.Data)
 			}
-			if len(stack) == 0 {
-				if started || ended || name != "owa" {
-					return "", errors.New("body_derivation_unproved")
-				}
-				started = true
-			} else {
-				switch name {
-				case "p", "div", "br", "hr":
-					text.WriteByte(' ')
-				case "b", "strong", "i", "em", "u", "span", "code":
-				default:
-					return "", errors.New("body_derivation_unproved")
-				}
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			name := token.Data
+			if name == "svg" || name == "math" {
+				return "", errors.New("body_foreign_content_unproved")
 			}
-			stack = append(stack, name)
-		case xml.EndElement:
-			name := value.Name.Local
-			if len(stack) == 0 || stack[len(stack)-1] != name {
-				return "", errors.New("body_derivation_unproved")
-			}
-			stack = stack[:len(stack)-1]
 			switch name {
-			case "p", "div", "br", "hr":
-				text.WriteByte(' ')
-			case "owa":
-				ended = true
+			case "plaintext", "xmp", "iframe", "noembed", "noframes", "textarea", "title":
+				return "", errors.New("body_rawtext_semantics_unproved")
 			}
-		case xml.CharData:
-			if len(stack) == 0 {
-				return "", errors.New("body_derivation_unproved")
+			if hidden != "" {
+				if kind == html.EndTagToken && name == hidden {
+					hidden = ""
+					output.WriteByte(' ')
+				}
+				continue
 			}
-			text.Write(value)
-		case xml.Comment:
+			if name == "script" || name == "style" {
+				output.WriteByte(' ')
+				if kind == html.StartTagToken || kind == html.SelfClosingTagToken {
+					hidden = name
+				}
+				continue
+			}
+			if owaTextBoundary(name) {
+				output.WriteByte(' ')
+			}
+		case html.CommentToken, html.DoctypeToken:
 		default:
-			return "", errors.New("body_derivation_unproved")
+			return "", errors.New("body_tokenization_unproved")
 		}
-		if text.Len() > owaMaxPayloadBytes {
+		if output.Len() > owaMaxPayloadBytes {
 			return "", errors.New("body_derivation_resource_refused")
 		}
 	}
-	if !started || !ended || len(stack) != 0 {
-		return "", errors.New("body_derivation_unproved")
+	return strings.Join(strings.Fields(output.String()), " "), nil
+}
+
+// This extraction contract is characterized by literals, not a call to the production HTMLText helper or an archive-derived expected value.
+func owaTextBoundary(name string) bool {
+	switch name {
+	case "p", "br", "div", "tr", "td", "th", "li", "ul", "ol", "table", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "blockquote", "pre", "title", "head", "body", "html":
+		return true
 	}
-	return strings.Join(strings.Fields(text.String()), " "), nil
+	return false
 }

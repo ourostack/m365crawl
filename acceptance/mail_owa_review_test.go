@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/leveldb"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
-	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
 	gl "github.com/syndtr/goleveldb/leveldb"
@@ -46,22 +46,21 @@ func owaDetailOnly() *v8.Object {
 		"UID", "SYNTHETIC-DETAIL-UID", "InternetMessageId", "<synthetic-detail@example.invalid>")
 }
 
-func TestOWAMailReviewA1DetailOnlyRefusal(t *testing.T) {
+func TestOWAMailReviewA1DetailOnlySelection(t *testing.T) {
 	header := owaObject("ParentFolderId", owaIdentity("F"), "HasAttachments", false)
 	for _, field := range []string{"ToRecipients", "CcRecipients", "BccRecipients", "Attachments", "UID", "InternetMessageId"} {
 		t.Run(field, func(t *testing.T) {
 			f := owaFields{}
 			body := owaObject(field, f.get(owaDetailOnly(), field))
 			m, err := owaRawHeader(header, body)
-			var refusal *owaCoverageRefusal
-			if !errors.As(err, &refusal) || len(refusal.fields) != 1 || refusal.fields[0] != field || len(m.detail.present) != 1 || m.detail.present[0] != field {
-				t.Fatal("detail_metadata_blind_spot")
+			if err != nil || len(m.detail.present) != 1 || m.detail.present[0] != field {
+				t.Fatal("approved_detail_selection_refused")
 			}
 		})
 	}
 }
 
-func TestOWAMailReviewA1ProductDetailLoss(t *testing.T) {
+func TestOWAMailReviewA1ActualDetailMapping(t *testing.T) {
 	s := owaCapture(t, owaFixtureProfile("mail", "Synthetic"))
 	owaSyntheticTable(t, s, owaDetailOnly(), false)
 	o, err := outlookowa.Open(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
@@ -77,32 +76,35 @@ func TestOWAMailReviewA1ProductDetailLoss(t *testing.T) {
 	for _, m := range r.Messages {
 		if m.ID == "Message/Sparse==" {
 			found = true
-			if len(m.Value.Recipients) != 0 || len(m.Value.Attachments) != 0 || m.Value.ICalUID != "" || m.Value.MessageID != "" || m.Value.Body.State != "inline" {
-				t.Fatal("product_detail_contract_changed")
+			if len(m.Value.Recipients) != 3 || len(m.Value.Attachments) != 1 || m.Value.ICalUID != "synthetic-detail-uid" || m.Value.MessageID != "<synthetic-detail@example.invalid>" || m.Value.Body.State != "inline" || m.Value.HasAttachments == nil || *m.Value.HasAttachments {
+				t.Fatal("approved_product_detail_mapping_mismatch")
 			}
 		}
 	}
 	if !found {
 		t.Fatal("synthetic_product_message_missing")
 	}
-	t.Log("observed_detail_only_fields=6 imported_detail_metadata_fields=0 importer_losses=0")
-	_, err = owaCensus(s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
-	var coverage *owaCoverageRefusal
-	if !errors.As(err, &coverage) || len(coverage.fields) != 6 {
-		t.Fatal("product_loss_accepted_as_coverage")
+	s.census, err = owaCensusContext(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
+	if err != nil {
+		t.Fatal("independent_detail_census_refused")
 	}
+	s.digest = owaPayloadDigestContext(t, s.ctx, s.profile.Source)
 	path := filepath.Join(owaScratch(t), "detail-loss.db")
-	rep, _, err := syncer.Run(s.ctx, syncer.Options{Root: filepath.Join(s.root, "no-teams"), DBPath: path, OutlookEnabled: true, OutlookRoot: s.root, OutlookMinReadInterval: -1})
-	src, found := mailSource(rep)
-	if err != nil || !found || src.Status != syncer.StatusOK || len(src.Omissions) != 0 {
-		t.Fatal("synthetic_product_sync_refused")
-	}
+	owaExercise(t, path, s)
 	st := owaArchive(t, path)
-	defer owaCloseArchive(t, st)
-	if owaScalar(t, st, `select count(*) from mail_recipients r join mail_messages m on m.rowid=r.message_rowid join mail_source_ids i on i.account=m.account and i.kind='message' and i.key=m.detail_key where i.source_id='Message/Sparse=='`) != 0 {
-		t.Fatal("detail_recipient_contract_changed")
+	if fields := owaCompareAll(st, []owaObservation{s}); len(fields) != 0 {
+		t.Fatalf("actual_detail_archive_mismatch fields=%v", fields)
 	}
-	t.Log("candidate_sync_ok=1 candidate_detail_recipient_rows=0 detail_metadata_coverage_refused=1")
+	if owaScalar(t, st, `select count(*) from mail_recipients r join mail_messages m on m.rowid=r.message_rowid join mail_source_ids i on i.account=m.account and i.kind='message' and i.key=m.detail_key where i.source_id='Message/Sparse=='`) != 3 {
+		t.Fatal("detail_recipient_literal_mismatch")
+	}
+	owaCloseArchive(t, st)
+	owaCorrupt(t, path, `update mail_messages set ical_uid='',internet_message_id='' where ical_uid='synthetic-detail-uid'`)
+	bad := owaArchive(t, path)
+	defer owaCloseArchive(t, bad)
+	if fields := owaCompareAll(bad, []owaObservation{s}); !reflect.DeepEqual(fields, []string{"ical_uid", "internet_message_id"}) {
+		t.Fatalf("deliberate_detail_corruption_undetected fields=%v", fields)
+	}
 }
 
 func TestOWAMailReviewA2QueryRefusals(t *testing.T) {
@@ -237,13 +239,18 @@ func TestOWAMailReviewA4IndependentTextCorpus(t *testing.T) {
 		{"<p>one</p>", "one"}, {"<p>a<b>b</b>c</p><p>d</p>", "abc d"},
 		{"<div>a<br/>b</div>", "a b"}, {"<p>a&nbsp;b</p>", "a b"},
 		{"<p>&lt;tag&gt;&amp;</p>", "<tag>&"}, {"<p>a<!--excluded-->b</p>", "ab"},
+		{`<p style="display:none">hidden</p>`, "hidden"}, {"<script>ignored</script><p>shown", "shown"},
+		{"<p>unclosed", "unclosed"}, {`<img src="https://example.invalid/never-fetched">`, ""},
+		{"<div>A<style>.x { hidden }</style>B</div>", "A B"},
+		{"<h1>heading</h1><ul><li>one<li>two</ul>", "heading one two"},
+		{"2 < 3 &amp;&amp; 4 > 1", "2 < 3 && 4 > 1"},
 	} {
 		got, err := owaIndependentText(context.Background(), tc.html)
 		if err != nil || got != tc.text {
 			t.Error("independent_text_literal_mismatch")
 		}
 	}
-	for _, html := range []string{`<p style="display:none">hidden</p>`, "<script>ignored</script>", "<p>unclosed", "<img src=x>"} {
+	for _, html := range []string{"<p>\x00</p>", "<p>\xff</p>", "<p broken", "<svg><text>foreign</text></svg>", "<textarea>a<b>b</b></textarea>", "<!--unfinished"} {
 		if _, err := owaIndependentText(context.Background(), html); err == nil {
 			t.Error("unsupported_derivation_blessed")
 		}
@@ -319,15 +326,15 @@ func TestOWAMailReviewA3UnexpectedCoverageAndAbsence(t *testing.T) {
 }
 
 func TestOWAMailReviewRealPermitRefusal(t *testing.T) {
-	if err := owaRealAcceptancePermit(); err == nil || err.Error() != "real_acceptance_blocked_detail_metadata_contract" {
+	if err := owaRealAcceptancePermit(); err == nil || err.Error() != "real_acceptance_blocked_parent_lifecycle" {
 		t.Fatal("unreviewed_real_acceptance_permitted")
 	}
 }
 
 func TestOWAMailReviewA4UnsupportedSourceIsUnproved(t *testing.T) {
 	header := owaObject("ParentFolderId", owaIdentity("F"), "HasAttachments", false)
-	_, err := owaRawHeader(header, owaObject("NormalizedBody", owaObject("Value", `<p style="display:none">synthetic</p>`)))
-	if err == nil || err.Error() != "body_derivation_unproved" {
+	_, err := owaRawHeader(header, owaObject("NormalizedBody", owaObject("Value", "<p>\xff</p>")))
+	if err == nil {
 		t.Fatal("unsupported_source_derivation_accepted")
 	}
 }
@@ -365,6 +372,10 @@ func owaSyntheticTable(t *testing.T, observation owaObservation, detail *v8.Obje
 	}
 	if detail != nil {
 		key := owaSyntheticKey(3, "review-detail")
+		f := owaFields{}
+		if f.text(detail, "ItemId", "Id") == "Message/Normal==" {
+			key = owaSyntheticKey(3, "body-0")
+		}
 		values[string(key)] = append([]byte{1, 0xff, 0x10, 0xff, 15}, owaEncodeSynthetic(t, detail)...)
 	}
 	if lazy {

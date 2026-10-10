@@ -242,7 +242,7 @@ func TestOWAMailSourceMutationEvidence(t *testing.T) {
 func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	requireReal(t)
 	if err := owaRealAcceptancePermit(); err != nil {
-		t.Fatal("real_acceptance_blocked_detail_metadata_contract")
+		t.Fatal("real_acceptance_blocked_parent_lifecycle")
 	}
 	root := os.Getenv(outlookRootEnv)
 	if root == "" {
