@@ -267,9 +267,9 @@ func owaSourceError(err error) error {
 		case outlookmail.CodeMailLayoutUnsupported, CodeOutlookProfileUnreadable:
 			return c
 		case errs.CodeInternal:
-			return errs.Internal(errors.New("Outlook mail source operation failed"))
+			return errs.Internal(errors.New("outlook mail source operation failed"))
 		case errs.CodeDBError:
-			return errs.DBError(errors.New("Outlook mail archive operation failed"))
+			return errs.DBError(errors.New("outlook mail archive operation failed"))
 		case errs.CodeSnapshotInconsistent, errs.CodeUnsupportedBlockCompression:
 			return &errs.Coded{Code: c.Code, Exit: c.Exit, Message: "the Outlook mail snapshot could not be read consistently", Fix: "Wait for Outlook to finish syncing, then run again; update m365crawl if it persists."}
 		}

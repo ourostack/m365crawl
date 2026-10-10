@@ -90,11 +90,12 @@ func TestMailConversationCapSeedAndGone(t *testing.T) {
 	if _, err := s.db.Exec(`update mail_messages set gone_at='2026-09-11T00:00:00.000Z' where detail_key=1`); err != nil {
 		t.Fatal(err)
 	}
-	rows, grouping, truncated, err := s.MailThread(context.Background(), mailAcct, uint32(len(msgs)))
+	seed := msgs[len(msgs)-1].DetailKey
+	rows, grouping, truncated, err := s.MailThread(context.Background(), mailAcct, seed)
 	if err != nil || grouping != "conversation" || !truncated || len(rows) != mailThreadCap {
 		t.Fatalf("capped conversation = %d/%q/%t/%v", len(rows), grouping, truncated, err)
 	}
-	if !slices.ContainsFunc(rows, func(m MailRow) bool { return m.DetailKey == uint32(len(msgs)) }) {
+	if !slices.ContainsFunc(rows, func(m MailRow) bool { return m.DetailKey == seed }) {
 		t.Fatal("conversation cap dropped the seed")
 	}
 	rows, _, _, err = s.MailThread(context.Background(), mailAcct, 1)

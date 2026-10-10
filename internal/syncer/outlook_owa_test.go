@@ -177,9 +177,10 @@ func TestSyncOWAFailureAndInterval(t *testing.T) {
 				t.Fatalf("interval hid failed read: %+v %v", next, err)
 			}
 			outlookOWASnapshot = oldCopy
-			if failure == "map" {
+			switch failure {
+			case "map":
 				copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), owaProfile(root).Dir)
-			} else if failure == "commit" {
+			case "commit":
 				if _, err := openRaw(t, db).Exec(`drop trigger owa_fail`); err != nil {
 					t.Fatal(err)
 				}
@@ -430,7 +431,7 @@ func TestSyncExplicitHxStoreKeepsItsOwnSourceSafety(t *testing.T) {
 	isolateTmp(t)
 	target := outlookRoot(t, "HxStore.hxd")
 	link := filepath.Join(t.TempDir(), "HxRoot")
-	output, err := osexec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput()
+	output, err := osexec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput() //nolint:gosec // G204: fixed junction command; operands are generated test-owned HxStore fixture directories.
 	if err != nil {
 		t.Fatalf("controlled HxStore alias: %v %s", err, output)
 	}

@@ -114,6 +114,9 @@ type faultReader struct {
 func (f *faultReader) Stats() leveldb.Stats                     { return f.stats }
 func (f *faultReader) Databases() ([]indexeddb.Database, error) { return f.dbs, f.metaErr }
 func (f *faultReader) Records(db, store int64, fn func(indexeddb.Record) error) error {
+	if store < 0 || store > 255 || len(f.values[store]) > 256 {
+		return errors.New("synthetic record key exceeds byte range")
+	}
 	if f.cancel != nil {
 		f.cancel()
 	}
@@ -127,6 +130,9 @@ func (f *faultReader) Records(db, store int64, fn func(indexeddb.Record) error) 
 func (f *faultReader) Decode(db int64, raw []byte) (any, error) {
 	if f.decodeErr != nil {
 		return nil, f.decodeErr
+	}
+	if len(raw) != 2 || int(raw[1]) >= len(f.values[int64(raw[0])]) {
+		return nil, errors.New("invalid synthetic record key")
 	}
 	return f.values[int64(raw[0])][int(raw[1])], nil
 }

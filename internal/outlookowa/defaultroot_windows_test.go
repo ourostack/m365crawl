@@ -51,7 +51,7 @@ func TestDiscoverRejectsWindowsJunctions(t *testing.T) {
 			case "root":
 				link = filepath.Join(root, "LinkedRoot")
 			}
-			b, err := exec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput()
+			b, err := exec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput() //nolint:gosec // G204: fixed junction command; both operands are generated t.TempDir paths, never external input.
 			if err != nil {
 				t.Fatalf("synthetic junction creation: %v %s", err, b)
 			}
@@ -117,7 +117,7 @@ func TestFingerprintRejectsReparseReplacementAfterValidation(t *testing.T) {
 	restoreSourceIO(t)
 	p := fixtureProfile(t, sourceTempDir(t), "Default", "mail", false)
 	current := filepath.Join(p.Source.LevelDBDir, "CURRENT")
-	content, err := os.ReadFile(current)
+	content, err := os.ReadFile(current) //nolint:gosec // G304: synthetic fixture CURRENT under the test-owned profile.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestFingerprintRejectsReparseReplacementAfterValidation(t *testing.T) {
 			if err := os.Remove(current); err != nil {
 				t.Error(err)
 			}
-			if err := os.WriteFile(current, content, 0o600); err != nil {
+			if err := os.WriteFile(current, content, 0o600); err != nil { //nolint:gosec // G703: restores the exact test-owned CURRENT path after removing its junction.
 				t.Error(err)
 			}
 			linked = false
@@ -146,7 +146,7 @@ func TestFingerprintRejectsReparseReplacementAfterValidation(t *testing.T) {
 		if err := os.Remove(current); err != nil {
 			return err
 		}
-		out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", current, target).CombinedOutput()
+		out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", current, target).CombinedOutput() //nolint:gosec // G204: fixed junction command with synthetic sourceTempDir/t.TempDir operands.
 		if err != nil {
 			t.Fatalf("controlled concurrent junction: %v %s", err, out)
 		}

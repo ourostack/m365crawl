@@ -52,11 +52,11 @@ func fixtureProfile(t *testing.T, root, name, variant string, blobs bool) Profil
 		if e.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // G304: walk reads only the committed synthetic OWA fixture above.
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o600)
+		return os.WriteFile(target, b, 0o600) //nolint:gosec // G703: rel comes from the fixture walk; dst is the caller's test-owned profile.
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestSourceErrorsAreFixedAndIdentityDetectsReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: CURRENT belongs to the synthetic profile copied into t.TempDir.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSourceErrorsAreFixedAndIdentityDetectsReplacement(t *testing.T) {
 	if err := os.Rename(path, oldPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // G703: replace only the test-owned synthetic CURRENT file.
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
@@ -147,7 +147,7 @@ func TestFingerprintMetadataFreshnessAndVersions(t *testing.T) {
 	at := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
 	err := filepath.WalkDir(p.Dir, func(path string, e fs.DirEntry, err error) error {
 		if err == nil && !e.IsDir() {
-			err = os.Chtimes(path, at, at)
+			err = os.Chtimes(path, at, at) //nolint:gosec // G122: fixture tree is test-owned and no concurrent writer exists in this metadata test.
 		}
 		return err
 	})
@@ -190,7 +190,8 @@ func TestSourceRejectsNonregularAndUnreadableEntries(t *testing.T) {
 		t.Run(bad, func(t *testing.T) {
 			p := fixtureProfile(t, t.TempDir(), "Default", "empty", false)
 			path := p.Source.LevelDBDir
-			if bad == "CURRENT" {
+			switch bad {
+			case "CURRENT":
 				path = filepath.Join(path, "CURRENT")
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -198,12 +199,12 @@ func TestSourceRejectsNonregularAndUnreadableEntries(t *testing.T) {
 				if err := os.Mkdir(path, 0o700); err != nil {
 					t.Fatal(err)
 				}
-			} else if bad == "blob" {
+			case "blob":
 				path = filepath.Join(p.Dir, "IndexedDB", fixtureOrigin+".indexeddb.blob")
 				if err := os.WriteFile(path, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			default:
 				// A nested directory would be skipped by the LevelDB copier.
 				if err := os.Mkdir(filepath.Join(path, "unexpected"), 0o700); err != nil {
 					t.Fatal(err)

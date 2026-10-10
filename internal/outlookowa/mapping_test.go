@@ -10,8 +10,11 @@ import (
 )
 
 func obj(kv ...any) *v8.Object {
+	if len(kv)%2 != 0 {
+		panic("synthetic object requires key/value pairs")
+	}
 	o := &v8.Object{}
-	for i := 0; i < len(kv); i += 2 {
+	for i := 0; i+1 < len(kv); i += 2 {
 		o.Keys = append(o.Keys, kv[i].(string))
 		o.Values = append(o.Values, kv[i+1])
 	}
