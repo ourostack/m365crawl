@@ -19,6 +19,9 @@ func (c portExitContext) Done() <-chan struct{} {
 }
 
 func TestWaitForPortPublishedAtExitCheckpoint(t *testing.T) {
+	previous := pollEvery
+	pollEvery = time.Hour
+	t.Cleanup(func() { pollEvery = previous })
 	profile := newProfile(t)
 	if err := os.MkdirAll(profile, 0o700); err != nil {
 		t.Fatal(err)
@@ -35,7 +38,7 @@ func TestWaitForPortPublishedAtExitCheckpoint(t *testing.T) {
 		}
 		close(b.exited)
 	}}
-	url, err := b.waitForPort(ctx, time.Second)
+	url, err := b.waitForPort(ctx, time.Hour)
 	if err != nil || url != "ws://127.0.0.1:9222/devtools/browser/synthetic-exit" || !published {
 		t.Fatalf("exit-published port = %q, %v, checkpoint=%t", url, err, published)
 	}
