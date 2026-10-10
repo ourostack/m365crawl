@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -190,7 +191,11 @@ func TestReadIndexUnsupportedLayoutDiscardsAll(t *testing.T) {
 }
 
 func TestReadIndexEscapedReadOnlyPath(t *testing.T) {
-	path := indexFixture(t, "index # space ?.db", hierarchyFixture,
+	name := "index # space %.db"
+	if runtime.GOOS != "windows" {
+		name = "index # space % ?.db"
+	}
+	path := indexFixture(t, name, hierarchyFixture,
 		"ALTER TABLE Entities ADD COLUMN Unconsumed TEXT")
 	before, err := os.ReadFile(path) // #nosec G304 -- path is a synthetic fixture in t.TempDir.
 	if err != nil {
