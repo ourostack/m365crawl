@@ -115,6 +115,15 @@ if [ -s "$tmp/uncovered.txt" ]; then
 	echo "FAIL functions below 100% statement coverage and not in coverage/allow:" >&2
 	awk -F'\t' 'NR == FNR {bad[$1] = 1; next} ($1 in bad) && $2 != "100.0%" {print "  " $3 "  " $2 "  " $1}' \
 		"$tmp/uncovered.txt" "$tmp/rows.tsv" >&2
+	echo "uncovered statement blocks in failing source files (range, statements, count):" >&2
+	awk -v mod="$modpath/" 'NR == FNR {
+			file = $1; sub(/:[^:]*$/, "", file); bad[file] = 1; next
+		}
+		FNR > 1 && $3 == 0 {
+			row = $1; if (index(row, mod) == 1) row = substr(row, length(mod) + 1)
+			file = row; sub(/:.*/, "", file)
+			if (file in bad) print "  " row " " $2 " " $3
+		}' "$tmp/uncovered.txt" "$profile" >&2
 	status=1
 fi
 
