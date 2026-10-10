@@ -10,22 +10,24 @@ import (
 	"unicode/utf8"
 )
 
-func decodeDocument(id, format, raw string) (DocumentObservation, bool) {
+var errJSONStructureLimit = errors.New("JSON structure limit exceeded")
+
+func decodeDocument(id, format, raw string) (DocumentObservation, bool, error) {
 	if !utf8.ValidString(raw) || !validUnicodeEscapes([]byte(`"`+raw+`"`)) {
-		return DocumentObservation{}, false
+		return DocumentObservation{}, false, nil
 	}
 	var decoded string
 	if err := json.Unmarshal([]byte(`"`+raw+`"`), &decoded); err != nil {
-		return DocumentObservation{}, false
+		return DocumentObservation{}, false, nil
 	}
-	root, ok := jsonObject(decoded)
+	root, ok, err := jsonObject(decoded)
 	if !ok {
-		return DocumentObservation{}, false
+		return DocumentObservation{}, false, err
 	}
 	m := fieldReader{valid: true}
 	file := m.object(root, "file")
 	if file == nil {
-		return DocumentObservation{}, false
+		return DocumentObservation{}, false, nil
 	}
 	sp, visualization := m.object(file, "SharePointItem"), m.object(file, "Visualization")
 	d := DocumentObservation{
@@ -71,15 +73,15 @@ func decodeDocument(id, format, raw string) (DocumentObservation, bool) {
 		d.History = append(d.History, s)
 	}
 	if !m.valid {
-		return DocumentObservation{}, false
+		return DocumentObservation{}, false, nil
 	}
-	return d, true
+	return d, true, nil
 }
 
-func decodeCollaborator(id, raw string) (Collaborator, bool) {
-	row, ok := jsonObject(raw)
+func decodeCollaborator(id, raw string) (Collaborator, bool, error) {
+	row, ok, err := jsonObject(raw)
 	if !ok {
-		return Collaborator{}, false
+		return Collaborator{}, false, err
 	}
 	m := fieldReader{valid: true}
 	c := Collaborator{ID: id, UserID: m.text(row, "Id"), DisplayName: m.text(row, "DisplayName"),
@@ -92,9 +94,9 @@ func decodeCollaborator(id, raw string) (Collaborator, bool) {
 		c.Emails = append(c.Emails, text)
 	}
 	if !m.valid {
-		return Collaborator{}, false
+		return Collaborator{}, false, nil
 	}
-	return c, true
+	return c, true, nil
 }
 
 type fieldReader struct{ valid bool }
@@ -161,57 +163,57 @@ func (m *fieldReader) boolean(row map[string]any, field string) *bool {
 	return &value
 }
 
-func jsonObject(raw string) (map[string]any, bool) {
+func jsonObject(raw string) (map[string]any, bool, error) {
 	if !utf8.ValidString(raw) || !validUnicodeEscapes([]byte(raw)) {
-		return nil, false
+		return nil, false, nil
 	}
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.UseNumber()
 	members := 0
-	value, ok := jsonValue(decoder, 0, &members)
+	value, ok, err := jsonValue(decoder, 0, &members)
 	if !ok {
-		return nil, false
+		return nil, false, err
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return nil, false
+		return nil, false, nil
 	}
 	row, ok := value.(map[string]any)
-	return row, ok
+	return row, ok, nil
 }
 
-func jsonValue(decoder *json.Decoder, depth int, members *int) (any, bool) {
+func jsonValue(decoder *json.Decoder, depth int, members *int) (any, bool, error) {
 	token, err := decoder.Token()
 	if err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	delim, container := token.(json.Delim)
 	if !container {
-		return token, true
+		return token, true, nil
 	}
 	if depth >= 64 {
-		return nil, false
+		return nil, false, errJSONStructureLimit
 	}
 	object := map[string]any{}
 	var array []any
 	for decoder.More() {
 		*members++
 		if *members > 131072 {
-			return nil, false
+			return nil, false, errJSONStructureLimit
 		}
 		var key string
 		if delim == '{' {
 			keyToken, err := decoder.Token()
 			if err != nil {
-				return nil, false
+				return nil, false, nil
 			}
 			key, _ = keyToken.(string)
 			if _, exists := object[key]; exists {
-				return nil, false
+				return nil, false, nil
 			}
 		}
-		value, ok := jsonValue(decoder, depth+1, members)
+		value, ok, err := jsonValue(decoder, depth+1, members)
 		if !ok {
-			return nil, false
+			return nil, false, err
 		}
 		if delim == '{' {
 			object[key] = value
@@ -220,15 +222,15 @@ func jsonValue(decoder *json.Decoder, depth int, members *int) (any, bool) {
 		}
 	}
 	if _, err := decoder.Token(); err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	if delim == '{' {
-		return object, true
+		return object, true, nil
 	}
 	if array == nil {
 		array = []any{}
 	}
-	return array, true
+	return array, true, nil
 }
 
 func validUnicodeEscapes(data []byte) bool {
