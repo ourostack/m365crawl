@@ -1,6 +1,9 @@
 package officedocuments
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 type Surface string
 
@@ -42,6 +45,7 @@ type Document struct {
 	Title, URL, WebURL, Extension, ResourceID, FriendlyPath string
 	Size                                                    *int64
 	Pinned                                                  *bool
+	SharingState                                            *int64
 	DriveID, ItemID                                         string
 	SharePoint                                              SharePoint
 	SiteURL, SiteTitle, TeamsChannelURL, TeamsChannelTitle  string
@@ -61,8 +65,13 @@ type Result struct {
 	Losses    []Loss
 }
 
+var timestampShape = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+
 func timestamp(raw string) (Timestamp, bool) {
 	result := Timestamp{Raw: raw}
+	if !timestampShape.MatchString(raw) {
+		return result, false
+	}
 	value, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil || value.Year() < 1 {
 		return result, false

@@ -16,6 +16,10 @@ func TestTimestampEvidence(t *testing.T) {
 		{"0001-01-01T00:00:00Z", time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), true},
 		{"0000-01-01T00:00:00Z", time.Time{}, false},
 		{"2026-10-09T12:34:56", time.Time{}, false},
+		{"2026-10-09T1:34:56Z", time.Time{}, false},
+		{"2026-10-09T12:34:56,1Z", time.Time{}, false},
+		{"2026-10-09T12:34:56+24:00", time.Time{}, false},
+		{"2026-10-09T12:34:56+00:60", time.Time{}, false},
 		{"invalid", time.Time{}, false},
 		{"", time.Time{}, false},
 	} {
