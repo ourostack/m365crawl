@@ -157,6 +157,33 @@ func (p *Page) Eval(ctx context.Context, expr string, out any) error {
 	return json.Unmarshal(res.Result.Value, out)
 }
 
+// AddInitScript registers a script before future document application code runs.
+// If the registration response is lost, the caller must close its owned browser,
+// not retry registration or infer an identifier.
+func (p *Page) AddInitScript(ctx context.Context, source string) (string, error) {
+	if err := p.c.call(ctx, p.session, "Page.enable", nil, nil); err != nil {
+		return "", err
+	}
+	var result struct {
+		Identifier string `json:"identifier"`
+	}
+	if err := p.c.call(ctx, p.session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": source}, &result); err != nil {
+		return "", err
+	}
+	if result.Identifier == "" {
+		return "", errors.New("browser script registration identifier missing")
+	}
+	return result.Identifier, nil
+}
+
+// RemoveInitScript removes only the returned registration from this page.
+func (p *Page) RemoveInitScript(ctx context.Context, identifier string) error {
+	if identifier == "" {
+		return errors.New("browser script registration identifier missing")
+	}
+	return p.c.call(ctx, p.session, "Page.removeScriptToEvaluateOnNewDocument", map[string]any{"identifier": identifier}, nil)
+}
+
 func isDestroyed(err error) bool {
 	var ce *CDPError
 	if !errors.As(err, &ce) {
