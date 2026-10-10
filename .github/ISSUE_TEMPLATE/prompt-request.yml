@@ -1,0 +1,66 @@
+name: Prompt request
+description: Tell us the job your agent cannot do yet, without sharing private work data.
+title: "[Prompt request]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the job, not a reverse-engineered integration plan. Work with your agent to describe what you need; you do not need to submit code or cache files.
+
+        **This issue is public.** Do not include real mail, chats, document contents, account or tenant IDs, private URLs, cache files, archive databases, credentials or tokens. Use synthetic examples and non-sensitive counts, formats and field names.
+
+        Requests guide what we investigate next. They are not a promise of support or a delivery date. Search existing issues before submitting.
+  - type: textarea
+    id: agent_job
+    attributes:
+      label: What should your agent be able to do?
+      description: Describe the question or workflow that is blocked today.
+      placeholder: Find the document shared in a conversation and show its readable text, with the source and coverage limits.
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Microsoft 365 app and version
+      description: Name the app or service and its version if known. Do not include account details.
+      placeholder: OneNote desktop, version ...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      description: A request for a platform does not imply that it is currently supported.
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: What happens today?
+      description: Include the command or agent request and the fixed error code or missing capability. Remove private values and paths.
+    validations:
+      required: true
+  - type: input
+    id: tool_version
+    attributes:
+      label: m365crawl version, if installed
+      description: Use the version from m365crawl --json version.
+  - type: textarea
+    id: safe_evidence
+    attributes:
+      label: Optional safe evidence
+      description: Non-sensitive counts, formats, field names or a synthetic example only. Leave this empty if you do not have evidence; no reverse engineering is required.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this workflow.
+          required: true
+        - label: I removed private content, account details, private URLs, cache files, databases, credentials and tokens from this public request.
+          required: true
