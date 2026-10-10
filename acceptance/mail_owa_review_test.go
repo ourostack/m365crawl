@@ -126,7 +126,7 @@ func TestOWAMailReviewA2QueryRefusals(t *testing.T) {
 		}
 	})
 	t.Run("payload", func(t *testing.T) {
-		if _, err := owaQuery(st, `select zeroblob(33554433) as payload`); err == nil {
+		if _, err := owaQueryBudget(context.Background(), st, `select zeroblob(33554433) as payload`, 32<<20); err == nil {
 			t.Fatal("query_payload_budget_ignored")
 		}
 	})

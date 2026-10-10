@@ -21,15 +21,32 @@ import (
 const (
 	owaWorkTimeout      = 2 * time.Minute
 	owaMaxQueryRows     = 16384
-	owaMaxQueryBytes    = 32 << 20
-	owaMaxStateBytes    = 64 << 20
+	owaMaxQueryBytes    = 512 << 20
+	owaMaxStateBytes    = 512 << 20
 	owaMaxSourceFiles   = 32768
 	owaMaxSourceBytes   = 512 << 20
 	owaMaxRawValueBytes = 8 << 20
 	owaMaxPayloadBytes  = 8 << 20
-	owaMaxDecodedBytes  = 64 << 20
+	owaMaxDecodedBytes  = 512 << 20
 	owaMaxHTMLTokens    = 262144
 )
+
+func owaProjectionBudget(rows, bytes, max int64) error {
+	if rows < 0 || rows > owaMaxQueryRows || bytes < 0 || max < 0 || max > owaMaxQueryBytes || bytes > max {
+		return errors.New("query_projection_budget")
+	}
+	return nil
+}
+
+func owaDecodedBudget(used, next int64) error {
+	if next < 0 || used < 0 || next > owaMaxPayloadBytes {
+		return errors.New("census_resource_refused")
+	}
+	if used > owaMaxDecodedBytes || next > owaMaxDecodedBytes-used {
+		return errors.New("aggregate_payload_budget")
+	}
+	return nil
+}
 
 func owaQualificationCleanup(t *testing.T, emit func() error) {
 	t.Helper()
@@ -105,8 +122,11 @@ func owaQueryBudget(parent context.Context, st *store.Store, q string, maxBytes 
 	}
 	rows, rowOK := counts[0][0].(int64)
 	bytes, byteOK := counts[0][1].(int64)
-	if !rowOK || !byteOK || rows < 0 || bytes < 0 || rows > owaMaxQueryRows || bytes > maxBytes || maxBytes < 0 {
+	if !rowOK || !byteOK {
 		return nil, errors.New("query_resource_refused")
+	}
+	if err := owaProjectionBudget(rows, bytes, maxBytes); err != nil {
+		return nil, err
 	}
 	_, result, truncated, err := st.SQL(ctx, q, owaMaxQueryRows)
 	if err != nil || truncated || ctx.Err() != nil {

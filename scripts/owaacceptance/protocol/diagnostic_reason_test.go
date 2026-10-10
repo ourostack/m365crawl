@@ -8,7 +8,7 @@ import (
 )
 
 func TestDiagnosticReasonExactMappingAndStrictWire(t *testing.T) {
-	for _, code := range []string{"census_layout_refused", "census_metadata_refused", "census_duplicate_field_refused", "body_derivation_encoding_unproved", "body_rawtext_semantics_unproved", "detail_metadata_coverage_refused"} {
+	for _, code := range []string{"census_layout_refused", "census_metadata_refused", "census_duplicate_field_refused", "body_derivation_encoding_unproved", "body_rawtext_semantics_unproved", "detail_metadata_coverage_refused", "aggregate_payload_budget"} {
 		if CensusReason(errors.New(code)) != code {
 			t.Error("fixed_census_reason_not_mapped")
 		}

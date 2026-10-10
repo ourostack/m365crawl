@@ -87,8 +87,8 @@ func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, 
 			if err != nil {
 				return errors.New("census_decoder_refused")
 			}
-			if len(payload) > owaMaxPayloadBytes || int64(len(payload)) > owaMaxDecodedBytes-decodedBytes {
-				return errors.New("census_resource_refused")
+			if err := owaDecodedBudget(decodedBytes, int64(len(payload))); err != nil {
+				return err
 			}
 			decodedBytes += int64(len(payload))
 			value, err := v8.Deserialize(payload)

@@ -232,13 +232,27 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 
 func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store) map[string][][]any {
 	t.Helper()
+	state, err := owaArchiveStateBudget(ctx, st, owaMaxStateBytes)
+	if err != nil {
+		t.Fatal("archive_state_refused")
+	}
+	return state
+}
+
+func owaArchiveStateBudget(ctx context.Context, st *store.Store, maxBytes int64) (map[string][][]any, error) {
+	if maxBytes < 0 || maxBytes > owaMaxStateBytes {
+		return nil, errors.New("archive_state_budget")
+	}
 	state := map[string][][]any{}
 	var used int64
 	for _, table := range []string{"mail_messages", "mail_folders", "mail_recipients", "mail_attachments", "mail_source_ids", "mail_absent", "mail_fts"} {
 		// Only this fixed table allowlist enters SQL, never a source name or value.
-		rows, err := owaQueryBudget(ctx, st, "select rowid,* from "+table+" order by rowid", owaMaxStateBytes-used)
+		rows, err := owaQueryBudget(ctx, st, "select rowid,* from "+table+" order by rowid", maxBytes-used)
 		if err != nil {
-			t.Fatal("archive_state_refused")
+			if err.Error() == "query_projection_budget" {
+				return nil, errors.New("archive_state_budget")
+			}
+			return nil, errors.New("archive_state_refused")
 		}
 		state[table] = rows
 		for _, row := range rows {
@@ -247,7 +261,7 @@ func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store) map[str
 			}
 		}
 	}
-	return state
+	return state, nil
 }
 
 func owaPayloadDigestContext(t *testing.T, ctx context.Context, s teamsdesktop.Source) [32]byte {

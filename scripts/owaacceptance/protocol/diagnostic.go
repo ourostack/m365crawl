@@ -111,6 +111,8 @@ func censusReasonConstant(code string) string {
 		return "census_context_refused"
 	case "census_resource_refused":
 		return "census_resource_refused"
+	case "aggregate_payload_budget":
+		return "aggregate_payload_budget"
 	case "census_identity_refused":
 		return "census_identity_refused"
 	case "census_duplicate_refused":
