@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,14 +13,16 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ourostack/m365crawl/scripts/owaacceptance/protocol"
 	"golang.org/x/sys/windows"
 )
 
 var errTimeout = errors.New("acceptance_timeout")
 
 type workspace struct {
-	dir string
-	id  [3]uint32
+	dir           string
+	id            [3]uint32
+	qualification *qualifiedRun
 }
 
 func newWorkspace(parent string) (*workspace, error) {
@@ -51,12 +54,20 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	exit = -1
 	consumersReleased := true
 	defer func() {
+		if w.qualification != nil {
+			w.qualification.consumersReleased = consumersReleased
+		}
 		if !consumersReleased {
 			result = errors.Join(result, errors.New("cleanup_deferred_consumers_unverified"))
 			return
 		}
+		if w.qualification != nil && result == nil && exit == 0 {
+			result = w.qualification.verifyWitness()
+		}
 		if err := w.cleanup(); err != nil {
 			result = errors.Join(result, err)
+		} else if w.qualification != nil {
+			w.qualification.cleanupVerified = true
 		}
 	}()
 	if timeout <= 0 || !filepath.IsAbs(binary) {
@@ -72,6 +83,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	defer func() {
 		if job != 0 {
 			if err := windows.CloseHandle(job); err != nil {
+				if w.qualification != nil {
+					w.qualification.nativeCloseVerified = false
+				}
 				result = errors.Join(result, errors.New("job_close_failed"))
 			}
 		}
@@ -88,10 +102,13 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	}
 	defer func() {
 		if err := null.Close(); err != nil {
+			if w.qualification != nil {
+				w.qualification.nativeCloseVerified = false
+			}
 			result = errors.Join(result, errors.New("null_io_close_failed"))
 		}
 	}()
-	// #nosec G204 -- The local operator explicitly supplies the absolute precompiled test binary; no shell.
+	// #nosec G204 G702 -- Qualified launches hold the digest/native-identity-pinned reviewed local executable; legacy lifecycle tests supply their exact own artifact. Absolute path, fixed arguments, no shell.
 	cmd := exec.Command(binary, args...)
 	cmd.Env = workspaceEnv(env, w.dir)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
@@ -117,6 +134,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	}
 	defer func() {
 		if err := windows.CloseHandle(h); err != nil {
+			if w.qualification != nil {
+				w.qualification.nativeCloseVerified = false
+			}
 			result = errors.Join(result, errors.New("leader_handle_close_failed"))
 		}
 	}()
@@ -126,6 +146,17 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 		consumersReleased = cmd.ProcessState != nil && cmd.ProcessState.Exited()
 		return exit, errors.New("job_assignment_failed")
 	}
+	if w.qualification != nil {
+		if err := w.qualification.beforeResume(pid); err != nil {
+			stopErr := stopJob(job)
+			_ = cmd.Wait()
+			if stopErr == nil {
+				consumersReleased = true
+				w.qualification.nativeCloseVerified = true
+			}
+			return exit, errors.Join(err, stopErr)
+		}
+	}
 	if err := resumeLeader(pid); err != nil {
 		stopErr := stopJob(job)
 		_ = cmd.Wait()
@@ -133,6 +164,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 			return exit, stopErr
 		}
 		consumersReleased = true
+		if w.qualification != nil {
+			w.qualification.nativeCloseVerified = true
+		}
 		return exit, err
 	}
 	done := make(chan error, 1)
@@ -157,6 +191,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 		exit = cmd.ProcessState.ExitCode()
 	}
 	consumersReleased = true
+	if w.qualification != nil {
+		w.qualification.nativeCloseVerified = true
+	}
 	return exit, result
 }
 
@@ -329,6 +366,7 @@ func (w *workspace) check() error {
 	if w.id == [3]uint32{} || !filepath.IsAbs(w.dir) || !strings.HasPrefix(filepath.Base(w.dir), "owa-acceptance-") {
 		return errors.New("workspace_ownership_refused")
 	}
+	// #nosec G703 -- Only the generated workspace root, after no-reparse ancestor validation; its captured native identity is checked below.
 	info, err := os.Lstat(w.dir)
 	id, idErr := directoryIdentity(w.dir)
 	if err != nil || idErr != nil || w.id != id || !info.IsDir() || safeAncestors(w.dir) != nil {
@@ -623,25 +661,22 @@ func main() {
 	binary := flag.String("test-binary", "", "Absolute precompiled acceptance test binary")
 	source := flag.String("outlook-root", "", "Explicit measured EBWebView source")
 	parent := flag.String("scratch-parent", "", "Existing private validation directory outside Git")
+	digest := flag.String("test-sha256", "", "Expected reviewed test executable SHA256")
+	receipt := flag.String("receipt-dir", "", "Explicit protected durable receipt directory outside Git")
 	flag.Parse()
-	if !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || flag.NArg() != 0 {
+	if !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "owa_acceptance status=refused reason=arguments")
 		os.Exit(2)
 	}
-	w, err := newWorkspace(*parent)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "owa_acceptance status=refused reason=workspace")
-		os.Exit(2)
-	}
-	env := append(os.Environ(), "M365CRAWL_REAL_CACHE=1", "M365CRAWL_OUTLOOK_ROOT="+*source, "M365CRAWL_TEAMS_ROOT="+filepath.Join(w.dir, "no-teams"))
-	exit, err := w.run(*binary, []string{"-test.run=^TestRealOWAMailCountsAndRelationships$", "-test.timeout=4m"}, env, 5*time.Minute)
+	witness, err := runQualified(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "owa_acceptance status=failed reason=lifecycle_or_cleanup")
 		os.Exit(1)
 	}
-	if exit != 0 {
-		fmt.Fprintln(os.Stderr, "owa_acceptance status=failed reason=test cleanup=verified")
+	counts, err := json.Marshal(witness.Counts)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "owa_acceptance status=failed reason=safe_counts")
 		os.Exit(1)
 	}
-	fmt.Println("owa_acceptance status=completed qualification=unproved cleanup=verified")
+	fmt.Printf("owa_acceptance status=qualified cleanup=verified version=%d test=%s binary_sha256=%s observed=%d unstable=%d counts=%s\n", protocol.Version, protocol.TestName, witness.BinaryHash, witness.Observed, witness.Unstable, counts)
 }

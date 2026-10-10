@@ -241,8 +241,12 @@ func TestOWAMailSourceMutationEvidence(t *testing.T) {
 
 func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	requireReal(t)
+	observed, unstable := 0, 0
+	counts := map[string]int64{}
+	// Registered first, therefore runs after every observation/archive/scratch cleanup. A cleanup failure must not produce a pass witness.
+	owaQualificationCleanup(t, func() error { return owaEmitQualification(counts, int64(observed), int64(unstable)) })
 	if err := owaRealAcceptancePermit(); err != nil {
-		t.Fatal("real_acceptance_blocked_parent_lifecycle")
+		t.Fatal("qualification_protocol_refused")
 	}
 	root := os.Getenv(outlookRootEnv)
 	if root == "" {
@@ -253,7 +257,6 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 		t.Fatal("profile_discovery_refused")
 	}
 	db := filepath.Join(owaScratch(t), "owa.db")
-	observed, unstable := 0, 0
 	var observations []owaObservation
 	for _, p := range profiles {
 		if filter := os.Getenv(outlookProfileEnv); filter != "" && filter != p.Name {
@@ -265,6 +268,9 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 			unstable++
 		}
 		t.Logf("census_counts=%v", c.census.counts())
+		for field, count := range c.census.counts() {
+			counts[field] += int64(count)
+		}
 		observations = append(observations, c)
 		observed++
 	}

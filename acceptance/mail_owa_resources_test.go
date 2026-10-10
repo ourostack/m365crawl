@@ -31,9 +31,13 @@ const (
 	owaMaxHTMLTokens    = 262144
 )
 
-// Real execution remains forbidden until affected safety review and the parent's tracked-process/private-TEMP reconciliation lifecycle are complete.
-func owaRealAcceptancePermit() error {
-	return errors.New("real_acceptance_blocked_parent_lifecycle")
+func owaQualificationCleanup(t *testing.T, emit func() error) {
+	t.Helper()
+	t.Cleanup(func() {
+		if !t.Failed() && emit() != nil {
+			t.Error("qualification_witness_refused")
+		}
+	})
 }
 
 func owaWorkContext(t *testing.T) context.Context {

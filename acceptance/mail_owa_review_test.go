@@ -326,7 +326,7 @@ func TestOWAMailReviewA3UnexpectedCoverageAndAbsence(t *testing.T) {
 }
 
 func TestOWAMailReviewRealPermitRefusal(t *testing.T) {
-	if err := owaRealAcceptancePermit(); err == nil || err.Error() != "real_acceptance_blocked_parent_lifecycle" {
+	if err := owaRealAcceptancePermit(); err == nil || err.Error() != "qualification_protocol_refused" {
 		t.Fatal("unreviewed_real_acceptance_permitted")
 	}
 }

@@ -198,10 +198,10 @@ func waitSyntheticReceipt(t *testing.T, path string) []byte {
 	for {
 		// #nosec G304 G703 -- Caller supplies a fixed synthetic receipt path in its exact t.TempDir.
 		data, err := os.ReadFile(path)
-		if err == nil {
+		if err == nil && len(data) != 0 {
 			return data
 		}
-		if !errors.Is(err, os.ErrNotExist) || time.Now().After(deadline) {
+		if (err != nil && !errors.Is(err, os.ErrNotExist)) || time.Now().After(deadline) {
 			t.Fatal("synthetic receipt missing")
 		}
 		time.Sleep(10 * time.Millisecond)
