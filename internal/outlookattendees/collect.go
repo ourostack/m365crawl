@@ -45,7 +45,13 @@ func collect(ctx context.Context, s *hxstore.Store, cap limits) (Result, error) 
 		union[key] = struct{}{}
 		return nil
 	}
-	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
+	var callbackFailure error
+	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) (failure error) {
+		defer func() {
+			if failure != nil {
+				callbackFailure = failure
+			}
+		}()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -134,6 +140,12 @@ func collect(ctx context.Context, s *hxstore.Store, cap limits) (Result, error) 
 		return nil
 	})
 	if err != nil {
+		if cancelled := ctx.Err(); cancelled != nil {
+			return Result{Stats: stats}, cancelled
+		}
+		if callbackFailure != nil {
+			return Result{Stats: stats}, callbackFailure
+		}
 		return Result{Stats: stats}, safeReadError(ctx, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -191,10 +203,6 @@ func safeReadError(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return context.DeadlineExceeded
-	}
-	var e *Error
-	if errors.As(err, &e) && (e.Code == "outlook_attendees_too_large" || e.Code == "outlook_attendees_layout_unsupported") {
-		return &Error{Code: e.Code}
 	}
 	return &Error{Code: "outlook_attendees_read_failed", cause: err}
 }

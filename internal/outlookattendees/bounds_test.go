@@ -86,6 +86,11 @@ func TestCollectEveryCancellationCheckpoint(t *testing.T) {
 }
 
 func TestReadErrorsRemainSafe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !errors.Is(safeReadError(ctx, errors.New("private-value")), context.Canceled) {
+		t.Fatal("late read-error cancellation lost")
+	}
 	for _, cause := range []error{
 		context.Canceled,
 		context.DeadlineExceeded,
@@ -100,6 +105,26 @@ func TestReadErrorsRemainSafe(t *testing.T) {
 		} else if got.Error() != "outlook_attendees_read_failed" || !errors.Is(got, cause) {
 			t.Fatalf("arbitrary source error rendered or lost: %v", got)
 		}
+	}
+}
+
+func TestReaderErrorCannotImpersonateCollectorRefusal(t *testing.T) {
+	for _, code := range []string{"outlook_attendees_too_large", "outlook_attendees_layout_unsupported"} {
+		t.Run(code, func(t *testing.T) {
+			b := hxbuild.New(hxbuild.Options{})
+			b.Block(hxbuild.FramedPayload(nil, attendeeObject(1, 2, nil, nil)))
+			raw := b.Bytes()
+			cause := &Error{Code: code}
+			s, err := hxstore.Open(failingReader{raw: bytes.NewReader(raw), err: cause}, int64(len(raw)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Collect(context.Background(), s)
+			if err == nil || err.Error() != "outlook_attendees_read_failed" || !errors.Is(err, cause) ||
+				len(got.Attendees) != 0 || len(got.Evidence) != 0 {
+				t.Fatalf("external reader error treated as collector refusal: %+v,%v", got, err)
+			}
+		})
 	}
 }
 
