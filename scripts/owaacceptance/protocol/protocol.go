@@ -240,7 +240,7 @@ func DecodeCloseout(data []byte) (Closeout, error) {
 	default:
 		return Closeout{}, refused()
 	}
-	if value.Qualified && (value.Outcome != "passed" || value.Reason != "none" || value.Exit != 0 || !value.ConsumersReleased || !value.NativeCloseVerified || value.RootState != "absent") {
+	if value.Qualified && (!value.Owner.Adopted || value.Outcome != "passed" || value.Reason != "none" || value.Exit != 0 || !value.ConsumersReleased || !value.NativeCloseVerified || value.RootState != "absent") {
 		return Closeout{}, refused()
 	}
 	if value.Outcome == "passed" && !value.Qualified {
