@@ -2,6 +2,7 @@ package sharepointcontent
 
 import (
 	"context"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -36,7 +37,8 @@ func land(ctx context.Context, page transcripts.PageDriver, request Request) (re
 		}
 		return &ReadError{Code: "unreadable"}
 	}
-	if err := page.Navigate(landing, "https://"+admitted.Host+admitted.Site); err != nil {
+	siteURL := url.URL{Scheme: "https", Host: admitted.Host, Path: admitted.Site}
+	if err := page.Navigate(landing, siteURL.String()); err != nil {
 		return admittedRequest{}, failure()
 	}
 	if landing.Err() != nil {

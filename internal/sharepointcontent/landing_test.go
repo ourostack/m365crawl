@@ -14,14 +14,17 @@ type landingPage struct {
 	navErr  error
 	hostErr error
 	navHook func()
+	url     string
 }
 
-func (p *landingPage) Navigate(ctx context.Context, _ string) error {
+func (p *landingPage) Navigate(ctx context.Context, url string) error {
 	p.calls = append(p.calls, "navigate")
+	p.url = url
 	deadline, ok := ctx.Deadline()
 	if !ok || time.Until(deadline) > 30*time.Second {
 		return errors.New("landing deadline absent")
 	}
+
 	if p.navHook != nil {
 		p.navHook()
 	}
@@ -36,6 +39,17 @@ func (p *landingPage) Host(context.Context) (string, error) {
 func (p *landingPage) Eval(context.Context, string, any) error {
 	p.calls = append(p.calls, "eval")
 	return errors.New("landing must not evaluate content")
+}
+
+func TestLandingEncodesNativeSiteOnce(t *testing.T) {
+	page := &landingPage{host: "fixture.sharepoint.com"}
+	request := Request{Kind: "page", URL: "https://fixture.sharepoint.com/sites/A%20B%25/SitePages/Page.aspx"}
+	if _, err := land(context.Background(), page, request); err != nil {
+		t.Fatal(err)
+	}
+	if page.url != "https://fixture.sharepoint.com/sites/A%20B%25" {
+		t.Fatalf("decoded site leaked into landing URL: %q", page.url)
+	}
 }
 
 func TestLandingLifecycle(t *testing.T) {
