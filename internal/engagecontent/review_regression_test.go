@@ -48,7 +48,7 @@ func TestReviewWireVersionPreservesNumericEvidence(t *testing.T) {
 				const wire=JSON.stringify({data:{thread}}).replace('"version":2','"version":'+`+string(token)+`);
 				replies.push({fixtureResponse:new Response(wire,{headers:{"content-type":"application/json"}})});
 				await window.fetch("https://engage.cloud.microsoft/graphql");
-				await new Promise(r=>setTimeout(r,30));
+				await captureIdle();
 				return await window.__m365crawlEngageCapture.stop();
 			`, &raw)
 			if raw.Fatal != "" || len(raw.Threads) != 1 {

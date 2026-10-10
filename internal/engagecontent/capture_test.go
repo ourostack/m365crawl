@@ -50,9 +50,43 @@ func runCapture(t *testing.T, body string, out any) {
 		const location = {protocol:"https:",hostname:"engage.cloud.microsoft",port:"",origin:"https://engage.cloud.microsoft"};
 		const original = window.fetch;
 		const replies = [];
+		const fixtureResponses = [];
+		const fixtureClones = new Set();
+		const trackResponse = response => {
+			fixtureResponses.push(response);
+			const clone=response.clone.bind(response);
+			response.clone=()=>{
+				const copy=clone();
+				const getReader=copy.body.getReader.bind(copy.body);
+				copy.body.getReader=(...args)=>{
+					const reader=getReader(...args);
+					let released;
+					const completion=new Promise(resolve=>{released=resolve;});
+					fixtureClones.add(completion);
+					const release=reader.releaseLock.bind(reader);
+					reader.releaseLock=()=>{
+						try {return release();}
+						finally {fixtureClones.delete(completion);released();}
+					};
+					return reader;
+				};
+				return copy;
+			};
+			return response;
+		};
+		const captureIdle=async()=>{
+			await Promise.all(fixtureResponses.filter(response=>!response.bodyUsed).map(response=>response.text()));
+			let timer;
+			try {
+				await Promise.race([
+					Promise.all([...fixtureClones]),
+					new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("synthetic clone did not release")),5000);})
+				]);
+			} finally {clearTimeout(timer);}
+		};
 		window.fetch = async () => {
 			const reply = replies.shift();
-			return reply?.fixtureResponse || new Response(JSON.stringify(reply), {status:200,headers:{"content-type":"application/json"}});
+			return trackResponse(reply?.fixtureResponse || new Response(JSON.stringify(reply), {status:200,headers:{"content-type":"application/json"}}));
 		};
 		try {` + captureSources(t) + body + `}
 		finally { window.fetch = original; delete window.__m365crawlEngageCapture; }
@@ -77,7 +111,7 @@ const nativeFixtureJS = `
 		replies.push({data});
 		const response = await window.fetch("https://engage.cloud.microsoft/graphql", {method:"POST"});
 		if (!(await response.json()).data) throw new Error("original response consumed");
-		await new Promise(resolve=>setTimeout(resolve,10));
+		await captureIdle();
 	};
 `
 
@@ -155,7 +189,7 @@ func TestCaptureMalformedDraftAndGraphQLErrors(t *testing.T) {
 	runCapture(t, nativeFixtureJS+`
 		replies.push({data:viewer,errors:[{message:"synthetic private error"}]});
 		await window.fetch("https://engage.cloud.microsoft/graphql", {method:"POST"});
-		await new Promise(resolve=>setTimeout(resolve,10));
+		await captureIdle();
 		return await window.__m365crawlEngageCapture.stop();
 	`, &got)
 	if got.Fatal != "" || len(got.Losses) == 0 || got.Losses[0].Code != "graphql_error" {

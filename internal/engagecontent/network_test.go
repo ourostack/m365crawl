@@ -6,6 +6,7 @@ func TestCaptureResponseByteAndCountLimits(t *testing.T) {
 	for _, tc := range []struct{ name, setup, fatal string }{
 		{"body-exact", `const payload={data:viewer,padding:""};payload.padding="x".repeat(2097152-JSON.stringify(payload).length);replies.push(payload);await window.fetch("https://engage.cloud.microsoft/graphql");await new Promise(r=>setTimeout(r,30));`, ""},
 		{"body-plus-one", `const payload={data:viewer,padding:""};payload.padding="x".repeat(2097153-JSON.stringify(payload).length);replies.push(payload);await window.fetch("https://engage.cloud.microsoft/graphql");await new Promise(r=>setTimeout(r,30));`, "too_large"},
+		{"delayed-body-plus-one", `const payload={data:viewer,padding:""};payload.padding="x".repeat(2097153-JSON.stringify(payload).length);const response=new Response(JSON.stringify(payload),{headers:{"content-type":"application/json"}});const clone=response.clone.bind(response);response.clone=()=>{const copy=clone();const getReader=copy.body.getReader.bind(copy.body);copy.body.getReader=()=>{const reader=getReader();const read=reader.read.bind(reader);reader.read=async()=>{await new Promise(r=>setTimeout(r,100));return read();};return reader;};return copy;};replies.push({fixtureResponse:response});await window.fetch("https://engage.cloud.microsoft/graphql");await new Promise(r=>setTimeout(r,30));`, "too_large"},
 		{"total-exact", `for(let i=0;i<4;i++){const payload={data:viewer,padding:""};payload.padding="x".repeat(2097152-JSON.stringify(payload).length);replies.push(payload);await window.fetch("https://engage.cloud.microsoft/graphql");await new Promise(r=>setTimeout(r,30));}`, ""},
 		{"total-plus-one", `for(let i=0;i<4;i++){const payload={data:viewer,padding:""};payload.padding="x".repeat(2097152-JSON.stringify(payload).length);replies.push(payload);await window.fetch("https://engage.cloud.microsoft/graphql");await new Promise(r=>setTimeout(r,30));}await send(viewer);`, "too_large"},
 		{"responses-exact", `for(let i=0;i<128;i++)await send(viewer);`, ""},
@@ -13,7 +14,7 @@ func TestCaptureResponseByteAndCountLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got struct{ Fatal string }
-			runCapture(t, nativeFixtureJS+tc.setup+`return await window.__m365crawlEngageCapture.stop();`, &got)
+			runCapture(t, nativeFixtureJS+tc.setup+`await captureIdle();return await window.__m365crawlEngageCapture.stop();`, &got)
 			if got.Fatal != tc.fatal {
 				t.Fatalf("response bound fatal=%q, want %q", got.Fatal, tc.fatal)
 			}
@@ -34,7 +35,7 @@ func TestCaptureResponseFaultsAndUnqualifiedRequests(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var got struct{ Fatal string }
 			runCapture(t, nativeFixtureJS+`await send(viewer);`+tc.setup+`
-				await new Promise(r=>setTimeout(r,20));return await window.__m365crawlEngageCapture.stop();`, &got)
+				await captureIdle();return await window.__m365crawlEngageCapture.stop();`, &got)
 			if got.Fatal != tc.fatal {
 				t.Fatalf("response fault fatal=%q, want %q", got.Fatal, tc.fatal)
 			}
@@ -53,7 +54,7 @@ func TestCaptureSourceOrderAndTerminalCloneCancellation(t *testing.T) {
 		replies.push({data:{thread:second}});
 		const two=window.fetch(new URL("https://engage.cloud.microsoft/graphql"));
 		await Promise.all([one.then(r=>r.text()),two.then(r=>r.text())]);
-		await new Promise(r=>setTimeout(r,30));
+		await captureIdle();
 		const result=await window.__m365crawlEngageCapture.stop();
 		return {IDs:result.Threads.map(t=>t.ID)};
 	`, &order)
