@@ -16,6 +16,7 @@ const (
 	mailStateSkipped             = "skipped"
 	mailStateUnsupportedPlatform = "unsupported_platform"
 	mailStateNoProfile           = "no_profile"
+	mailStateUnavailable         = "unavailable"
 )
 
 // Test seams: whether this operating system reads mail, and whether file modes mean anything on it.
@@ -34,9 +35,9 @@ var (
 // mailStatusBlock is the mail part of `status --json`.
 type mailStatusBlock struct {
 	store.MailStatus
-	// State is ok (mail was read), skipped (the Outlook source is off for this run, or no sync has
-	// read the mail yet), unsupported_platform or no_profile (no Outlook profile on this machine).
-	State string `json:"state"`
+	// State distinguishes archived read state from unavailable discovery; SourceError is fixed and never contains source values.
+	State       string           `json:"state"`
+	SourceError *mailSourceError `json:"source_error,omitempty"`
 }
 
 // mailStatus builds the block; st is nil when there is no archive.
@@ -58,28 +59,40 @@ func (rt *runtime) mailStatusOf(st *store.Store, account string) (*mailStatusBlo
 		b.State = mailStateUnsupportedPlatform
 	case !rt.outlookOn:
 		b.State = mailStateSkipped
-	case !b.SyncedAt.IsZero():
-		b.State = mailStateOK
-	case len(rt.outlookProfiles()) == 0:
-		b.State = mailStateNoProfile
 	default:
-		b.State = mailStateSkipped
+		profiles, problem := rt.outlookProfiles()
+		switch {
+		case problem != nil:
+			b.State, b.SourceError = mailStateUnavailable, problem
+		case !b.SyncedAt.IsZero():
+			b.State = mailStateOK
+		case len(profiles) == 0:
+			b.State = mailStateNoProfile
+		default:
+			b.State = mailStateSkipped
+		}
 	}
 	return b, nil
 }
 
 // text is the block as one line of `status`.
 func (b *mailStatusBlock) text() string {
+	if b.SourceError != nil {
+		return b.State + ": " + mailSourceNote(b.SourceError)
+	}
 	if b.State != mailStateOK {
 		return b.State
 	}
 	return fmt.Sprintf("%d messages, %d unread, %d folders; oldest %s; synced %s", b.Messages, b.Unread, b.Folders, stamp(b.OldestAt), stamp(b.SyncedAt))
 }
 
-// outlookProfiles lists the profiles of the Outlook root this run reads, none when there is no
-// root or it cannot be listed.
-func (rt *runtime) outlookProfiles() []outlookdesktop.Profile {
+// outlookProfiles retains healthy profiles alongside a fixed error; an unexamined source is never evidence of absence.
+func (rt *runtime) outlookProfiles() ([]outlookdesktop.Profile, *mailSourceError) {
 	s := rt.discoverOutlookMail()
+	return s.profiles(), s.problem(rt.outlookDefault)
+}
+
+func (s outlookMailSource) profiles() []outlookdesktop.Profile {
 	if s.owa {
 		profiles := make([]outlookdesktop.Profile, len(s.native), len(s.native)+len(s.refused))
 		for i, p := range s.native {
@@ -107,12 +120,16 @@ func (rt *runtime) mailReadableCheck(st *store.Store) check {
 		return check{Name: name, OK: true, Detail: "no archive yet; the first sync reads mail"}
 	}
 	source := rt.discoverOutlookMail()
-	if source.owa && (source.err != nil || len(source.refused) > 0) {
-		c := rt.outlookNativeCheck(source, st)
-		c.Name = name
-		return c
+	problem := source.problem(rt.outlookDefault)
+	if problem != nil {
+		if source.owa {
+			c := rt.outlookNativeCheck(source, st)
+			c.Name = name
+			return c
+		}
+		return check{Name: name, OK: true, Warn: true, Detail: mailSourceNote(problem), Fix: problem.Fix}
 	}
-	profiles := rt.outlookProfiles()
+	profiles := source.profiles()
 	if len(profiles) == 0 {
 		return check{Name: name, OK: true, Detail: "no new Outlook profile; no mail to read"}
 	}

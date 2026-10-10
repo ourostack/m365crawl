@@ -291,6 +291,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	notes := slices.Clone(p.notes)
 	searchMailNow := p.mail
 	if p.mail {
+		b, err := rt.mailStatus(st)
+		if err != nil {
+			return nil, err
+		}
 		has := false
 		if st != nil {
 			var err error
@@ -300,10 +304,6 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if !has {
 			searchMailNow = false
-			b, err := rt.mailStatus(st)
-			if err != nil {
-				return nil, err
-			}
 			const syncForMail = "mail is not in the archive yet; run m365crawl sync"
 			why := syncForMail
 			if _, n := rt.whyNoMail(b); n != noMailYet {
@@ -313,6 +313,8 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			if st != nil || !p.chats || why != syncForMail {
 				notes = append(notes, why)
 			}
+		} else if b.SourceError != nil {
+			notes = append(notes, mailSourceNote(b.SourceError))
 		}
 	}
 	var hits []searchHit

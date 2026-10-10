@@ -505,11 +505,11 @@ func TestMailEmptyNotes(t *testing.T) {
 		t.Fatalf("source off: %q", n)
 	}
 	root := t.TempDir()
-	mailProfileCount = func(string) int { return 0 }
+	mailProfileCount = func(*runtime) (int, *mailSourceError) { return 0, nil }
 	if n := note(e, "--outlook-root", root, "mail", "list"); !strings.Contains(n, "no supported Outlook profile") {
 		t.Fatalf("no profile: %q", n)
 	}
-	mailProfileCount = func(string) int { return 1 }
+	mailProfileCount = func(*runtime) (int, *mailSourceError) { return 1, nil }
 	if n := note(e, "--outlook-root", root, "mail", "unread"); n != "no mail has been read yet: run m365crawl sync" {
 		t.Fatalf("not read: %q", n)
 	}
@@ -681,7 +681,7 @@ func TestMailDerefTime(t *testing.T) {
 
 func TestMailProfileCount(t *testing.T) {
 	root := t.TempDir()
-	if n := mailProfileCount(root); n != 0 {
+	if n, err := mailProfileCount(&runtime{outlookRoot: root}); n != 0 || err != nil {
 		t.Fatalf("empty root = %d", n)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
@@ -690,14 +690,14 @@ func TestMailProfileCount(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "Main", "HxStore.hxd"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if n := mailProfileCount(root); n != 1 {
+	if n, err := mailProfileCount(&runtime{outlookRoot: root}); n != 1 || err != nil {
 		t.Fatalf("one profile = %d", n)
 	}
-	if n := mailProfileCount(filepath.Join(root, "missing")); n != 0 {
+	if n, err := mailProfileCount(&runtime{outlookRoot: filepath.Join(root, "missing")}); n != 0 || err == nil {
 		t.Fatalf("missing root = %d", n)
 	}
 	t.Setenv("HOME", t.TempDir())
-	if n := mailProfileCount(""); n != 0 {
+	if n, _ := mailProfileCount(&runtime{outlookDefault: true}); n != 0 {
 		t.Fatalf("default root = %d", n)
 	}
 }

@@ -74,7 +74,7 @@ func TestMailOWADoctorArchivedStates(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	rt := &runtime{ctx: context.Background(), outlookOn: true, outlookRoot: root, now: func() time.Time { return now }}
-	if profiles := rt.outlookProfiles(); len(profiles) != 1 || profiles[0].Name != "Default" {
+	if profiles, problem := rt.outlookProfiles(); len(profiles) != 1 || profiles[0].Name != "Default" || problem != nil {
 		t.Fatalf("OWA profile discovery = %v", profiles)
 	}
 	if c := rt.mailReadableCheck(st); !c.Warn || !strings.Contains(c.Detail, "not read yet") {

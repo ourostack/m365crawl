@@ -410,14 +410,22 @@ func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 var mailReadAccounts = (*store.Store).MailReadAccounts
 
 // mailProfileCount counts the Outlook profiles under root (the default root when empty); a test seam.
-var mailProfileCount = func(root string) int {
-	rt := runtime{outlookRoot: root}
-	return len(rt.outlookProfiles())
+var mailProfileCount = func(rt *runtime) (int, *mailSourceError) {
+	profiles, problem := rt.outlookProfiles()
+	return len(profiles), problem
 }
 
 // emptyNote explains an empty result: which of the causes it is. filtered says the command had
 // a filter beyond the account; since is --since.
 func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since time.Time) string {
+	profileCount := 0
+	if rt.outlookOn {
+		var problem *mailSourceError
+		profileCount, problem = mailProfileCount(rt)
+		if problem != nil {
+			return mailSourceNote(problem)
+		}
+	}
 	switch {
 	case st == nil:
 		return "no archive yet: run m365crawl sync"
@@ -425,7 +433,7 @@ func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since
 		return "no mail is archived for account " + rt.g.Account + ": the ids that `m365crawl mail list` prints name the accounts that have mail"
 	case len(sc.all) == 0 && !rt.outlookOn:
 		return "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
-	case len(sc.all) == 0 && mailProfileCount(rt.outlookRoot) == 0:
+	case len(sc.all) == 0 && profileCount == 0:
 		return "no supported Outlook profile was found on this machine, so there is no mail to read"
 	case len(sc.all) == 0 && sc.marked:
 		return "the Outlook source is on and the last read found no mail folders: mail is turned off in Outlook for this account, or none is set up"

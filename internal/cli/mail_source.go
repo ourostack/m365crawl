@@ -35,6 +35,12 @@ type outlookMailSource struct {
 	err     error
 }
 
+type mailSourceError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+}
+
 // Match the runner: native Windows defaults, positively recognized explicit HxStore first, then supported explicit OWA roots. Discovery examines paths and metadata, never values.
 func (rt *runtime) discoverOutlookMail() outlookMailSource {
 	s := outlookMailSource{root: rt.outlookRoot}
@@ -58,10 +64,27 @@ func (rt *runtime) discoverOutlookMail() outlookMailSource {
 	return s
 }
 
+// Only an absent resolved optional default is absence; failed resolution/enumeration or refused siblings remain unknown.
+func (s outlookMailSource) problem(optional bool) *mailSourceError {
+	if s.err != nil && optional && s.root != "" && (errors.Is(s.err, fs.ErrNotExist) || errors.Is(s.err, outlookdesktop.ErrRootNotFound)) {
+		return nil
+	}
+	if s.err != nil || len(s.refused)+len(s.skipped) > 0 {
+		return &mailSourceError{Code: "outlook_profile_unreadable",
+			Message: "the Outlook mail source could not be examined",
+			Fix:     "Check that the Outlook cache root and each profile are readable, then run `m365crawl sync`."}
+	}
+	return nil
+}
+
+func mailSourceNote(problem *mailSourceError) string {
+	return problem.Message + " (" + problem.Code + "); " + problem.Fix
+}
+
 func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) check {
 	c := check{Name: "outlook_store", OK: true}
 	switch {
-	case s.err != nil && rt.outlookDefault && errors.Is(s.err, fs.ErrNotExist):
+	case s.err != nil && rt.outlookDefault && s.root != "" && errors.Is(s.err, fs.ErrNotExist):
 		c.Detail = "the new Outlook OWA cache is not installed; nothing to read"
 		return c
 	case s.err != nil:

@@ -44,7 +44,7 @@ func TestDoctorMailMetadataRoutesLegacyAndNativeFailures(t *testing.T) {
 	outlookNativeDiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
 		return nil, []outlookowa.SkippedProfile{{Name: "Unavailable"}}, nil
 	}
-	if profiles := rt.outlookProfiles(); len(profiles) != 1 || profiles[0].Name != "Unavailable" {
+	if profiles, problem := rt.outlookProfiles(); len(profiles) != 1 || profiles[0].Name != "Unavailable" || problem == nil {
 		t.Fatalf("unexamined profile lost = %v", profiles)
 	}
 	if c := rt.outlookNativeCheck(outlookMailSource{owa: true}, nil); c.Warn || !strings.Contains(c.Detail, "no profile") {

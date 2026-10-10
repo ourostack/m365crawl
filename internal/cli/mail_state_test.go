@@ -106,6 +106,9 @@ func TestStatusMailBlock(t *testing.T) {
 func TestStatusMailStates(t *testing.T) {
 	t.Run("no archive and no Outlook", func(t *testing.T) {
 		forceMailSupported(t)
+		old := outlookDefaultRoot
+		outlookDefaultRoot = func() (string, error) { return filepath.Join(t.TempDir(), "absent"), nil }
+		t.Cleanup(func() { outlookDefaultRoot = old })
 		e := newEnv(t)
 		_, out, _ := e.runDefault("status")
 		if m := mailBlockOf(t, decode(t, out)); m["state"] != "no_profile" || m["messages"] != float64(0) {
