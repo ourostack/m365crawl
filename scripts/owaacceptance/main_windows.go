@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -658,13 +659,14 @@ func memberHandle(job windows.Handle, pid uint32) (windows.Handle, error) {
 }
 
 func main() {
-	binary := flag.String("test-binary", "", "Absolute precompiled acceptance test binary")
-	source := flag.String("outlook-root", "", "Explicit measured EBWebView source")
-	parent := flag.String("scratch-parent", "", "Existing private validation directory outside Git")
-	digest := flag.String("test-sha256", "", "Expected reviewed test executable SHA256")
-	receipt := flag.String("receipt-dir", "", "Explicit protected durable receipt directory outside Git")
-	flag.Parse()
-	if !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flag.NArg() != 0 {
+	flags := flag.NewFlagSet("owaacceptance", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	binary := flags.String("test-binary", "", "Absolute precompiled acceptance test binary")
+	source := flags.String("outlook-root", "", "Explicit measured EBWebView source")
+	parent := flags.String("scratch-parent", "", "Existing private validation directory outside Git")
+	digest := flags.String("test-sha256", "", "Expected reviewed test executable SHA256")
+	receipt := flags.String("receipt-dir", "", "Explicit protected durable receipt directory outside Git")
+	if flags.Parse(os.Args[1:]) != nil || !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flags.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "owa_acceptance status=refused reason=arguments")
 		os.Exit(2)
 	}

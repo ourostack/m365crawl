@@ -45,6 +45,21 @@ func TestSyntheticReceiptWaitsForNonemptyPublication(t *testing.T) {
 	}
 }
 
+func TestSupervisorArgumentErrorsAreFixedCodes(t *testing.T) {
+	binary := os.Getenv("OWA_ACCEPTANCE_SUPERVISOR_BINARY")
+	if binary == "" {
+		t.Skip("explicit compiled synthetic supervisor artifact required")
+	}
+	for _, args := range [][]string{{"--private_value_must_not_be_output"}, {"-test-binary"}} {
+		// #nosec G204 G702 -- Explicit locally built supervisor artifact, fixed invalid synthetic arguments; no shell or source read.
+		cmd := exec.CommandContext(t.Context(), binary, args...)
+		output, err := cmd.CombinedOutput()
+		if err == nil || string(output) != "owa_acceptance status=refused reason=arguments\n" {
+			t.Fatal("supervisor_argument_error_not_fixed_code")
+		}
+	}
+}
+
 func TestQualificationRejectsZeroExitWithoutActualTestWitness(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
