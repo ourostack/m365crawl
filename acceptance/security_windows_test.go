@@ -13,7 +13,7 @@ func setCurrentUserAndSystemOnly(t *testing.T, path string) {
 	t.Helper()
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("private_path_stat_failed")
 	}
 	if info.IsDir() {
 		setACL(t, path,
@@ -32,7 +32,7 @@ func setACL(t *testing.T, path string, entries ...windows.EXPLICIT_ACCESS) {
 	t.Helper()
 	acl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {
-		t.Fatalf("acl for %s: %v", path, err)
+		t.Fatal("private_acl_create_failed")
 	}
 	if err := windows.SetNamedSecurityInfo(
 		path,
@@ -43,7 +43,7 @@ func setACL(t *testing.T, path string, entries ...windows.EXPLICIT_ACCESS) {
 		acl,
 		nil,
 	); err != nil {
-		t.Fatalf("set acl for %s: %v", path, err)
+		t.Fatal("private_acl_set_failed")
 	}
 }
 
@@ -65,7 +65,7 @@ func mustCurrentUserSID(t *testing.T) *windows.SID {
 	t.Helper()
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
-		t.Fatalf("token user: %v", err)
+		t.Fatal("private_acl_user_failed")
 	}
 	return user.User.Sid
 }
@@ -74,7 +74,7 @@ func mustSystemSID(t *testing.T) *windows.SID {
 	t.Helper()
 	sid, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
-		t.Fatalf("system sid: %v", err)
+		t.Fatal("private_acl_system_failed")
 	}
 	return sid
 }
