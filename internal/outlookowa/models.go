@@ -5,12 +5,13 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookmail"
 )
 
-const MapperVersion = 2
+const MapperVersion = 3
 
 // Folder retains native folder and parent identities until Normalize binds them.
 type Folder struct {
-	ID, ParentID string
-	Value        outlookmail.Folder
+	ID, ParentID      string
+	DistinguishedType string
+	Value             outlookmail.Folder
 }
 
 // Message retains native header, folder and metadata-only attachment identities.

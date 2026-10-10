@@ -117,7 +117,8 @@ func mapFolder(v any, r *Result) (Folder, bool) {
 		return Folder{}, false
 	}
 	f.Value = outlookmail.Folder{Name: r.text(v, "displayName"), Kind: "other"}
-	switch typ := strings.ToLower(r.text(v, "distinguishedFolderType")); typ {
+	f.DistinguishedType = strings.ToLower(r.text(v, "distinguishedFolderType"))
+	switch typ := f.DistinguishedType; typ {
 	case "inbox", "archive", "drafts", "sent", "deleted":
 		f.Value.Kind = typ
 	case "sentitems":

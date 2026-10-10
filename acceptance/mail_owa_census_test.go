@@ -16,7 +16,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/v8"
 )
 
-type owaRawFolder struct{ parent, name, kind string }
+type owaRawFolder struct{ parent, name, kind, distinguished string }
 type owaRawMessage struct {
 	folder      string
 	fields      []any
@@ -119,7 +119,8 @@ func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, 
 	for id, value := range raw["folders"] {
 		f := owaFields{ctx: ctx}
 		folder := owaRawFolder{parent: f.text(value, "parentFolderId"), name: f.text(value, "displayName"), kind: "other"}
-		switch kind := strings.ToLower(f.text(value, "distinguishedFolderType")); kind {
+		folder.distinguished = strings.ToLower(f.text(value, "distinguishedFolderType"))
+		switch kind := folder.distinguished; kind {
 		case "inbox", "archive", "drafts", "sent", "deleted":
 			folder.kind = kind
 		case "sentitems":
@@ -157,7 +158,19 @@ func (c owaRawCensus) root() (string, error) {
 
 func (c owaRawCensus) rootContext(ctx context.Context) (string, error) {
 	roots := map[string]bool{}
+	anchor := ""
+	for id, f := range c.folders {
+		if f.distinguished == "msgfolderroot" {
+			if anchor != "" {
+				return "", errors.New("census_folder_root_refused")
+			}
+			anchor = id
+		}
+	}
+	anchored := map[string]bool{}
+	external := map[string]string{}
 	for id := range c.folders {
+		start := id
 		seen := map[string]bool{}
 		for {
 			if ctx.Err() != nil {
@@ -167,13 +180,38 @@ func (c owaRawCensus) rootContext(ctx context.Context) (string, error) {
 				return "", errors.New("census_folder_cycle_refused")
 			}
 			seen[id] = true
+			if id == anchor {
+				anchored[start] = true
+			}
 			f, exists := c.folders[id]
 			if !exists {
 				roots[id] = true
+				external[start] = id
 				break
+			}
+			if strings.TrimSpace(f.parent) == "" {
+				return "", errors.New("census_folder_refused")
 			}
 			id = f.parent
 		}
+	}
+	for _, m := range c.messages {
+		if _, found := c.folders[m.folder]; !found {
+			return "", errors.New("census_folder_join_refused")
+		}
+	}
+	if anchor != "" {
+		for id, f := range c.folders {
+			if (f.kind == "inbox" || f.kind == "sent") && !anchored[id] {
+				return "", errors.New("census_folder_root_refused")
+			}
+		}
+		for _, m := range c.messages {
+			if !anchored[m.folder] {
+				return "", errors.New("census_folder_root_refused")
+			}
+		}
+		return external[anchor], nil
 	}
 	if len(roots) != 1 {
 		return "", errors.New("census_folder_root_refused")

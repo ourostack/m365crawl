@@ -168,12 +168,6 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 	if len(folders.conflicts) > 0 {
 		folderUncertain = true
 	}
-	r.RootID = folderRoot(mappedFolders)
-	if folderUncertain || r.RootID == "" {
-		r.RootID = ""
-		r.Doubtful = true
-		r.loss("outlook_owa_root_uncertain")
-	}
 	for _, value := range headers.values {
 		id := r.text(value, "ItemId", "Id")
 		m, ok := mapMessageDetail(value, bodies.values[id], account, &r)
@@ -182,6 +176,7 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 		}
 		f, ok := mappedFolders[m.FolderID]
 		if !ok {
+			folderUncertain = true
 			r.Notes.MissingFolder++
 			r.Notes.UnknownFolderUnattributed++
 			r.Doubtful = true
@@ -200,6 +195,12 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 			r.Notes.BodiesNone++
 		}
 		r.Messages = append(r.Messages, m)
+	}
+	r.RootID = folderRoot(mappedFolders, r.Messages)
+	if folderUncertain || r.RootID == "" {
+		r.RootID = ""
+		r.Doubtful = true
+		r.loss("outlook_owa_root_uncertain")
 	}
 	for id := range seen {
 		r.SeenIDs = append(r.SeenIDs, id)
@@ -252,22 +253,59 @@ func selectMailStores(dbs []indexeddb.Database) (indexeddb.Database, map[string]
 	return db, stores, nil
 }
 
-func folderRoot(folders map[string]Folder) string {
+func folderRoot(folders map[string]Folder, messages []Message) string {
 	roots := map[string]bool{}
+	anchored := map[string]bool{}
+	external := map[string]string{}
+	anchor := ""
+	for id, f := range folders {
+		if f.DistinguishedType == "msgfolderroot" {
+			if anchor != "" {
+				return ""
+			}
+			anchor = id
+		}
+	}
 	for id := range folders {
+		start := id
 		visited := map[string]bool{}
 		for {
 			if visited[id] {
 				return ""
 			}
 			visited[id] = true
+			if id == anchor {
+				anchored[start] = true
+			}
 			f, exists := folders[id]
 			if !exists {
 				roots[id] = true
+				external[start] = id
 				break
+			}
+			if !validID(f.ParentID) {
+				return ""
 			}
 			id = f.ParentID
 		}
+	}
+	for _, m := range messages {
+		if _, found := folders[m.FolderID]; !found {
+			return ""
+		}
+	}
+	if anchor != "" {
+		for id, f := range folders {
+			if (f.Value.Kind == "inbox" || f.Value.Kind == "sent") && !anchored[id] {
+				return ""
+			}
+		}
+		for _, m := range messages {
+			if !anchored[m.FolderID] {
+				return ""
+			}
+		}
+		return external[anchor]
 	}
 	if len(roots) != 1 {
 		return ""
