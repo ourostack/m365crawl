@@ -247,7 +247,7 @@ func owaArchiveStateBudget(ctx context.Context, st *store.Store, maxBytes int64)
 	var used int64
 	for _, table := range []string{"mail_messages", "mail_folders", "mail_recipients", "mail_attachments", "mail_source_ids", "mail_absent", "mail_fts"} {
 		// Only this fixed table allowlist enters SQL, never a source name or value.
-		rows, err := owaQueryBudget(ctx, st, "select rowid,* from "+table+" order by rowid", maxBytes-used)
+		rows, projectedBytes, err := owaQueryMeasured(ctx, st, "select rowid,* from "+table+" order by rowid", maxBytes-used)
 		if err != nil {
 			if err.Error() == "query_projection_budget" {
 				return nil, errors.New("archive_state_budget")
@@ -255,11 +255,7 @@ func owaArchiveStateBudget(ctx context.Context, st *store.Store, maxBytes int64)
 			return nil, errors.New("archive_state_refused")
 		}
 		state[table] = rows
-		for _, row := range rows {
-			for _, value := range row {
-				used += int64(len(asString(value)))
-			}
-		}
+		used += projectedBytes
 	}
 	return state, nil
 }

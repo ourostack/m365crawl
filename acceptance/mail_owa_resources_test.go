@@ -101,15 +101,20 @@ func owaQueryContext(ctx context.Context, st *store.Store, q string) ([][]any, e
 }
 
 func owaQueryBudget(parent context.Context, st *store.Store, q string, maxBytes int64) ([][]any, error) {
+	rows, _, err := owaQueryMeasured(parent, st, q, maxBytes)
+	return rows, err
+}
+
+func owaQueryMeasured(parent context.Context, st *store.Store, q string, maxBytes int64) ([][]any, int64, error) {
 	ctx, cancel := context.WithTimeout(parent, owaWorkTimeout)
 	defer cancel()
 	if ctx.Err() != nil {
-		return nil, errors.New("query_context_refused")
+		return nil, 0, errors.New("query_context_refused")
 	}
 	// The source query and its schema are fixed acceptance-owned SQL. Inspect names with zero rows, then count projected bytes before materializing any payload.
 	cols, _, _, err := st.SQL(ctx, "select * from ("+q+") limit 0", 0)
 	if err != nil || len(cols) == 0 {
-		return nil, errors.New("archive_query_refused")
+		return nil, 0, errors.New("archive_query_refused")
 	}
 	lengths := make([]string, len(cols))
 	for i, col := range cols {
@@ -118,21 +123,21 @@ func owaQueryBudget(parent context.Context, st *store.Store, q string, maxBytes 
 	preflight := "select count(*),coalesce(sum(" + strings.Join(lengths, "+") + "),0) from (" + q + ")"
 	_, counts, truncated, err := st.SQL(ctx, preflight, 1)
 	if err != nil || truncated || len(counts) != 1 || len(counts[0]) != 2 {
-		return nil, errors.New("archive_query_refused")
+		return nil, 0, errors.New("archive_query_refused")
 	}
 	rows, rowOK := counts[0][0].(int64)
 	bytes, byteOK := counts[0][1].(int64)
 	if !rowOK || !byteOK {
-		return nil, errors.New("query_resource_refused")
+		return nil, 0, errors.New("query_resource_refused")
 	}
 	if err := owaProjectionBudget(rows, bytes, maxBytes); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	_, result, truncated, err := st.SQL(ctx, q, owaMaxQueryRows)
 	if err != nil || truncated || ctx.Err() != nil {
-		return nil, errors.New("archive_query_refused")
+		return nil, 0, errors.New("archive_query_refused")
 	}
-	return result, nil
+	return result, bytes, nil
 }
 
 func owaCheckSource(ctx context.Context, source teamsdesktop.Source) error {
