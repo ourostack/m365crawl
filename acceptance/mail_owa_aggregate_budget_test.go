@@ -61,7 +61,7 @@ func TestOWAAggregateBudgetBoundaries(t *testing.T) {
 		if limit != 512<<20 {
 			t.Error("aggregate_operational_limit_not_512mib")
 		}
-		if owaProjectionBudget(1, limit, limit) != nil || owaProjectionBudget(1, limit+1, limit) == nil || owaProjectionBudget(owaMaxQueryRows+1, 0, limit) == nil || owaProjectionBudget(1, 0, limit+1) == nil {
+		if owaProjectionBudget(1, limit, limit) != nil || owaProjectionBudget(1, limit+1, limit) == nil || owaProjectionBudget(owaMaxProjectionRows+1, 0, limit) == nil || owaProjectionBudget(1, 0, limit+1) == nil {
 			t.Error("projection_budget_boundary_unproved")
 		}
 	}

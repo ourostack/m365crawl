@@ -20,20 +20,21 @@ import (
 
 // Operational refusals bound one observation; these are not mailbox-size correctness thresholds. Parent owns the outer process/TEMP lifetime, including forced termination.
 const (
-	owaWorkTimeout      = 2 * time.Minute
-	owaMaxQueryRows     = 16384
-	owaMaxQueryBytes    = 512 << 20
-	owaMaxStateBytes    = 512 << 20
-	owaMaxSourceFiles   = 32768
-	owaMaxSourceBytes   = 512 << 20
-	owaMaxRawValueBytes = 8 << 20
-	owaMaxPayloadBytes  = 8 << 20
-	owaMaxDecodedBytes  = 512 << 20
-	owaMaxHTMLTokens    = 262144
+	owaWorkTimeout       = 2 * time.Minute
+	owaMaxQueryRows      = 16384
+	owaMaxProjectionRows = 131072
+	owaMaxQueryBytes     = 512 << 20
+	owaMaxStateBytes     = 512 << 20
+	owaMaxSourceFiles    = 32768
+	owaMaxSourceBytes    = 512 << 20
+	owaMaxRawValueBytes  = 8 << 20
+	owaMaxPayloadBytes   = 8 << 20
+	owaMaxDecodedBytes   = 512 << 20
+	owaMaxHTMLTokens     = 262144
 )
 
 func owaProjectionBudget(rows, bytes, max int64) error {
-	if rows < 0 || rows > owaMaxQueryRows || bytes < 0 || max < 0 || max > owaMaxQueryBytes || bytes > max {
+	if rows < 0 || rows > owaMaxProjectionRows || bytes < 0 || max < 0 || max > owaMaxQueryBytes || bytes > max {
 		return errors.New("query_projection_budget")
 	}
 	return nil
@@ -146,7 +147,7 @@ func owaQueryMeasured(parent context.Context, st *store.Store, q string, maxByte
 	if err := owaProjectionBudget(rows, bytes, maxBytes); err != nil {
 		return nil, 0, err
 	}
-	_, result, truncated, err := st.SQL(ctx, q, owaMaxQueryRows)
+	_, result, truncated, err := st.SQL(ctx, q, owaMaxProjectionRows)
 	if err != nil || truncated || ctx.Err() != nil {
 		return nil, 0, errors.New("archive_query_refused")
 	}

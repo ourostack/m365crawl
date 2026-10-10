@@ -121,7 +121,7 @@ func TestOWAMailReviewA2QueryRefusals(t *testing.T) {
 		}
 	})
 	t.Run("rows", func(t *testing.T) {
-		if _, err := owaQuery(st, `with recursive n(x) as (select 1 union all select x+1 from n where x<16385) select x from n`); err == nil {
+		if _, err := owaQuery(st, `with recursive n(x) as (select 1 union all select x+1 from n where x<131073) select x from n`); err == nil {
 			t.Fatal("query_row_budget_ignored")
 		}
 	})
