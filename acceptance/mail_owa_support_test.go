@@ -44,21 +44,25 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 	defer state.phase(t, protocol.StageCapture)()
 	ctx := owaWorkContext(t)
 	if err := owaCheckSource(ctx, p.Source); err != nil {
+		state.record(protocol.StageCapture, "source_resource_or_context_refused")
 		t.Fatal("source_resource_or_context_refused")
 	}
 	before, fresh, err := outlookowa.Fingerprint(p)
 	if err != nil {
+		state.record(protocol.StageCapture, "source_fingerprint_failed")
 		t.Fatal("source_fingerprint_failed")
 	}
 	dir, cleanup, err := owaOwnedSnapshot(ctx, p.Source, teamsdesktop.Snapshot)
 	if err != nil {
 		cleanup()
+		state.record(protocol.StageCapture, "snapshot_refused")
 		t.Fatal("snapshot_refused")
 	}
 	release := func() {
 		state.cleanup(t, func() {
 			cleanup()
 			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+				state.record(protocol.StageCleanup, "snapshot_cleanup_failed")
 				t.Error("snapshot_cleanup_failed")
 			}
 		})
@@ -69,18 +73,21 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 	t.Cleanup(release)
 	after, afterFresh, err := outlookowa.Fingerprint(p)
 	if err != nil {
+		state.record(protocol.StageCapture, "source_fingerprint_failed")
 		t.Fatal("source_fingerprint_failed")
 	}
 	root := filepath.Join(dir, "EBWebView")
 	profileDir := filepath.Join(root, p.Name)
 	idb := filepath.Join(profileDir, "IndexedDB")
 	if err := os.MkdirAll(idb, 0o700); err != nil {
+		state.record(protocol.StageCapture, "snapshot_shape_failed")
 		t.Fatal("snapshot_shape_failed")
 	}
 	level := filepath.Join(idb, p.Source.Origin+".indexeddb.leveldb")
 	blob := filepath.Join(idb, p.Source.Origin+".indexeddb.blob")
 	for i, pair := range [][2]string{{filepath.Join(dir, "leveldb"), level}, {filepath.Join(dir, "blob"), blob}} {
 		if err := os.Rename(pair[0], pair[1]); err != nil {
+			state.record(protocol.StageCapture, "snapshot_shape_failed")
 			var code syscall.Errno
 			if errors.As(err, &code) {
 				t.Fatalf("snapshot_shape_failed operation=rename index=%d errno=%d", i, code)
@@ -90,7 +97,7 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 	}
 	p.Dir = profileDir
 	p.Source.LevelDBDir, p.Source.BlobDir = level, blob
-	return owaObservation{failure: state, ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source)}
+	return owaObservation{failure: state, ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source, state)}
 }
 
 func owaObserve(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) owaObservation {
@@ -113,7 +120,8 @@ func owaCensusObserved(t *testing.T, s *owaObservation) {
 func owaCapturedIntegrity(t *testing.T, s *owaObservation) {
 	t.Helper()
 	defer s.failure.phase(t, protocol.StageCapture)()
-	if s.digest != owaPayloadDigestContext(t, s.ctx, s.profile.Source) {
+	if s.digest != owaPayloadDigestContext(t, s.ctx, s.profile.Source, s.failure) {
+		s.failure.record(protocol.StageCapture, "private_source_mutated")
 		t.Fatal("private_source_mutated")
 	}
 }
@@ -139,9 +147,14 @@ func owaArchive(t *testing.T, path string, states ...*owaFailureState) *store.St
 	state := owaFailureOf(states)
 	st, err := store.OpenReadOnly(owaWorkContext(t), path)
 	if err != nil {
+		stage := protocol.StageImport
+		if state != nil && state.stage == protocol.StageAccounts {
+			stage = protocol.StageAccounts
+		}
+		state.record(stage, "archive_open_failed")
 		t.Fatal("archive_open_failed")
 	}
-	t.Cleanup(func() { state.cleanup(t, func() { owaCloseArchive(t, st) }) })
+	t.Cleanup(func() { state.cleanup(t, func() { owaCloseArchive(t, st, state) }) })
 	return st
 }
 
@@ -154,6 +167,7 @@ func owaScratch(t *testing.T, states ...*owaFailureState) string {
 		state.cleanup(t, func() {
 			removeFlat(dir)
 			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+				state.record(protocol.StageCleanup, "archive_cleanup_failed")
 				t.Error("archive_cleanup_failed")
 			}
 		})
@@ -161,9 +175,10 @@ func owaScratch(t *testing.T, states ...*owaFailureState) string {
 	return dir
 }
 
-func owaCloseArchive(t *testing.T, st *store.Store) {
+func owaCloseArchive(t *testing.T, st *store.Store, states ...*owaFailureState) {
 	t.Helper()
 	if err := st.Close(); err != nil {
+		owaFailureOf(states).record(protocol.StageCleanup, "archive_close_failed")
 		t.Error("archive_close_failed")
 	}
 }
@@ -194,46 +209,83 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 		opts.FullRead = step == 2
 		start := time.Now()
 		rep, _, err := syncer.Run(c.ctx, opts)
-		if err != nil {
-			t.Fatal("sync_refused")
-		}
-		src, found := mailSource(rep)
-		if !found || len(rep.Sources) != 1 || len(src.Omissions) != 0 {
-			t.Fatal("sync_source_refused")
-		}
-		wantStatus := syncer.StatusOK
-		if step == 1 {
-			wantStatus = syncer.StatusUnchanged
-		}
-		if src.Status != wantStatus {
-			t.Fatal("sync_status_mismatch")
-		}
-		m := mailCountsOf(src)
-		if m.Gone != 0 || m.Evicted != 0 || m.Withheld != 0 || m.Replaced != 0 || step > 0 && (m.Added != 0 || m.Updated != 0) || step == 0 && m.Added != len(c.census.messages) {
-			t.Fatal("sync_counts_mismatch")
-		}
+		owaSyncChecks(t, rep, err, c, step)
 		st := owaArchive(t, db, c.failure)
-		findings := owaCompareContext(c.ctx, st, c.account, c.census)
-		state := owaArchiveState(c.ctx, t, st)
-		c.failure.cleanup(t, func() { owaCloseArchive(t, st) })
-		if len(findings) != 0 {
-			c.failure.mismatch(findings)
-			t.Fatalf("archive_mismatch fields=%v", findings)
-		}
+		findings := owaCompareContext(c.ctx, st, c.account, c.census, c.failure)
+		state := owaArchiveState(c.ctx, t, st, c.failure)
+		c.failure.cleanup(t, func() { owaCloseArchive(t, st, c.failure) })
+		owaArchiveFindings(t, c.failure, findings)
 		if step == 0 {
 			baseline = state
-		} else if !reflect.DeepEqual(state, baseline) {
-			t.Fatal("repeat_archive_unstable")
+		} else {
+			owaRepeatState(t, c.failure, state, baseline)
 		}
 		t.Logf("step=%d messages=%d folders=%d wall_ms=%d", step, len(c.census.messages), len(c.census.folders), time.Since(start).Milliseconds())
 	}
 	owaCapturedIntegrity(t, &c)
 }
 
-func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store) map[string][][]any {
+func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation, step int) {
 	t.Helper()
-	state, err := owaArchiveStateBudget(ctx, st, owaMaxStateBytes)
 	if err != nil {
+		c.failure.record(protocol.StageImport, "sync_refused")
+		t.Fatal("sync_refused")
+	}
+	src, found := mailSource(rep)
+	if !found || len(rep.Sources) != 1 || len(src.Omissions) != 0 {
+		if found && len(src.Omissions) != 0 {
+			c.failure.sourceOmissions(src.Omissions)
+		} else {
+			c.failure.record(protocol.StageImport, "sync_source_refused")
+		}
+		t.Fatal("sync_source_refused")
+	}
+	wantStatus := syncer.StatusOK
+	if step == 1 {
+		wantStatus = syncer.StatusUnchanged
+	}
+	if src.Status != wantStatus {
+		c.failure.record(protocol.StageImport, "sync_status_mismatch")
+		t.Fatal("sync_status_mismatch")
+	}
+	m := mailCountsOf(src)
+	if m.Gone != 0 || m.Evicted != 0 || m.Withheld != 0 || m.Replaced != 0 || step > 0 && (m.Added != 0 || m.Updated != 0) || step == 0 && m.Added != len(c.census.messages) {
+		c.failure.record(protocol.StageImport, "sync_counts_mismatch")
+		t.Fatal("sync_counts_mismatch")
+	}
+}
+
+func owaArchiveFindings(t *testing.T, s *owaFailureState, findings []string) {
+	t.Helper()
+	if len(findings) != 0 {
+		s.mismatch(findings)
+		s.record(protocol.StageImport, "archive_mismatch")
+		t.Fatalf("archive_mismatch fields=%v", findings)
+	}
+}
+
+func owaRepeatState(t *testing.T, s *owaFailureState, state, baseline map[string][][]any) {
+	t.Helper()
+	if !reflect.DeepEqual(state, baseline) {
+		s.record(protocol.StageImport, "repeat_archive_unstable")
+		t.Fatal("repeat_archive_unstable")
+	}
+}
+
+func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store, states ...*owaFailureState) map[string][][]any {
+	t.Helper()
+	return owaArchiveStateLimit(ctx, t, st, owaMaxStateBytes, owaFailureOf(states))
+}
+
+func owaArchiveStateLimit(ctx context.Context, t *testing.T, st *store.Store, maxBytes int64, s *owaFailureState) map[string][][]any {
+	t.Helper()
+	state, err := owaArchiveStateBudget(ctx, st, maxBytes)
+	if err != nil {
+		reason := "archive_state_refused"
+		if err.Error() == "archive_state_budget" {
+			reason = "archive_state_budget"
+		}
+		s.record(protocol.StageImport, reason)
 		t.Fatal("archive_state_refused")
 	}
 	return state
@@ -260,9 +312,10 @@ func owaArchiveStateBudget(ctx context.Context, st *store.Store, maxBytes int64)
 	return state, nil
 }
 
-func owaPayloadDigestContext(t *testing.T, ctx context.Context, s teamsdesktop.Source) [32]byte {
+func owaPayloadDigestContext(t *testing.T, ctx context.Context, s teamsdesktop.Source, states ...*owaFailureState) [32]byte {
 	t.Helper()
 	if err := owaCheckSource(ctx, s); err != nil {
+		owaFailureOf(states).record(protocol.StageCapture, "payload_resource_or_context_refused")
 		t.Fatal("payload_resource_or_context_refused")
 	}
 	h := sha256.New()
@@ -286,6 +339,7 @@ func owaPayloadDigestContext(t *testing.T, ctx context.Context, s teamsdesktop.S
 			return nil
 		})
 		if err != nil {
+			owaFailureOf(states).record(protocol.StageCapture, "payload_digest_failed")
 			t.Fatal("payload_digest_failed")
 		}
 	}

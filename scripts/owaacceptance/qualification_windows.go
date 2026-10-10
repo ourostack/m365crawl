@@ -223,7 +223,7 @@ func runQualified(binary, digest, source, parent, receipt string, timeout time.D
 	exit, result := w.run(binary, []string{"-test.run=^" + protocol.TestName + "$", "-test.timeout=4m"}, qualifiedEnv(os.Environ(), q), timeout)
 	if err := q.finish(exit, result); err != nil {
 		if exit != 0 && result == nil && q.diagnosticReleaseVerified && q.closeoutVerified && q.diagnostic.Stage != "" {
-			return protocol.Qualification{}, diagnosticFailure(q.diagnostic.Stage, q.diagnostic.Fields, err, q.diagnostic.Reason)
+			return protocol.Qualification{}, diagnosticWitnessFailure(q.diagnostic, err)
 		}
 		return protocol.Qualification{}, err
 	}

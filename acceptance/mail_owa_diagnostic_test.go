@@ -21,6 +21,7 @@ type owaFailureState struct {
 	failure   string
 	reason    string
 	fields    []string
+	omissions map[string]int64
 	completed bool
 }
 
@@ -36,12 +37,36 @@ func (s *owaFailureState) phase(t *testing.T, stage string) func() {
 	}
 	if s.failure == "" && !t.Failed() {
 		s.stage = stage
+		s.reason = ""
+		s.fields = nil
+		s.omissions = nil
 	}
 	return func() {
 		if t.Failed() && s.failure == "" {
 			s.failure = stage
 		}
 	}
+}
+
+func (s *owaFailureState) record(stage, reason string) {
+	if s != nil && s.failure == "" {
+		s.failure = stage
+		s.reason = protocol.FixedDiagnosticReason(stage, reason)
+	}
+}
+
+func (s *owaFailureState) sourceOmissions(omissions map[string]int) {
+	if s == nil || s.failure != "" {
+		return
+	}
+	s.record(protocol.StageImport, "sync_source_refused")
+	safe, valid := protocol.DiagnosticSourceOmissions(omissions)
+	if !valid {
+		s.reason = "unproved"
+		s.omissions = map[string]int64{}
+		return
+	}
+	s.omissions = safe
 }
 func owaFailureOf(states []*owaFailureState) *owaFailureState {
 	if len(states) > 0 {
@@ -53,8 +78,9 @@ func owaFailureOf(states []*owaFailureState) *owaFailureState {
 func owaGlobalAccounts(t *testing.T, st *store.Store, observations []owaObservation, s *owaFailureState) {
 	t.Helper()
 	defer s.phase(t, protocol.StageAccounts)()
-	if fields := owaCompareAllContext(owaWorkContext(t), st, observations); len(fields) != 0 {
+	if fields := owaCompareAllContext(owaWorkContext(t), st, observations, s); len(fields) != 0 {
 		s.mismatch(fields)
+		s.record(protocol.StageAccounts, "account_isolation_mismatch")
 		t.Fatal("account_isolation_mismatch")
 	}
 
@@ -64,6 +90,7 @@ func owaSourceStability(t *testing.T, unstable int, s *owaFailureState) {
 	t.Helper()
 	defer s.phase(t, protocol.StageStability)()
 	if unstable != 0 {
+		s.record(protocol.StageStability, "unstable_source_observation")
 		t.Error("unstable_source_observation")
 	}
 }
@@ -73,14 +100,16 @@ func (s *owaFailureState) cleanup(t *testing.T, fn func()) {
 	if s != nil && !before && t.Failed() && s.failure == "" {
 		s.failure = protocol.StageCleanup
 		s.fields = []string{}
+		s.reason = "unproved"
+		s.omissions = nil
 	}
 }
 func (s *owaFailureState) mismatch(fields []string) {
-	if s != nil && s.failure == "" {
+	if s != nil {
 		s.fields = append([]string{}, fields...)
 	}
 }
-func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, failure func(string, string, []string) error) {
+func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, failure func(string, string, []string, map[string]int64) error) {
 	t.Cleanup(func() {
 		if t.Failed() {
 			stage := s.failure
@@ -98,7 +127,11 @@ func owaFailureCleanup(t *testing.T, s *owaFailureState, success func() error, f
 			if reason == "" {
 				reason = "unproved"
 			}
-			if !protocol.DiagnosticStage(stage) || !protocol.DiagnosticReason(stage, reason) || !protocol.DiagnosticFields(fields) || failure(stage, reason, fields) != nil {
+			omissions := s.omissions
+			if omissions == nil {
+				omissions = map[string]int64{}
+			}
+			if !protocol.DiagnosticStage(stage) || !protocol.DiagnosticReason(stage, reason) || !protocol.DiagnosticFields(fields) || !protocol.DiagnosticOmissions(stage, reason, omissions) || failure(stage, reason, fields, omissions) != nil {
 				t.Error("diagnostic_write_refused")
 			}
 		} else if success() != nil {
@@ -160,8 +193,9 @@ func TestOWADiagnosticResponsibleStages(t *testing.T) {
 			if mode == "conflict" && actual.Reason != "detail_metadata_coverage_refused" {
 				t.Fatal("conflict_fixed_reason_missing")
 			}
-			if mode != "census" && mode != "conflict" && actual.Reason != "unproved" {
-				t.Fatal("noncensus_reason_not_unproved")
+			remaining := map[string]string{"import": "sync_refused", "global": "account_isolation_mismatch", "stability": "unstable_source_observation", "integrity": "private_source_mutated"}
+			if wantReason, ok := remaining[mode]; ok && actual.Reason != wantReason {
+				t.Fatal("remaining_responsible_reason_missing")
 			}
 		})
 	}
@@ -176,7 +210,7 @@ func TestOWADiagnosticStageProbe(t *testing.T) {
 		t.Fatal("synthetic_real_flag_refused")
 	}
 	s := &owaFailureState{}
-	owaFailureCleanup(t, s, func() error { return nil }, func(stage, reason string, fields []string) error {
+	owaFailureCleanup(t, s, func() error { return nil }, func(stage, reason string, fields []string, _ map[string]int64) error {
 		if mode == "failed_write" {
 			return errors.New("synthetic_write_refused")
 		}

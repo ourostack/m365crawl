@@ -18,10 +18,10 @@ func owaEmitQualification(counts map[string]int64, observed, unstable int64) err
 	return protocol.EmitQualification(owner, counts, observed, unstable)
 }
 
-func owaEmitDiagnostic(stage, reason string, fields []string) error {
+func owaEmitDiagnostic(stage, reason string, fields []string, omissions map[string]int64) error {
 	owner, err := protocol.CurrentGuard()
 	if err != nil {
 		return err
 	}
-	return protocol.EmitDiagnostic(owner, stage, reason, fields)
+	return protocol.EmitDiagnostic(owner, stage, reason, fields, omissions)
 }

@@ -107,7 +107,7 @@ func TestDiagnosticConsumerRejectsMissingUnknownAndForeign(t *testing.T) {
 	if err != nil {
 		t.Fatal("synthetic_artifact_failed")
 	}
-	for _, mode := range []string{"missing", "unknown", "unknown_reason", "foreign", "trailing", "extra", "oversized", "negative_counts", "valid"} {
+	for _, mode := range []string{"missing", "unknown", "unknown_reason", "foreign", "trailing", "extra", "oversized", "negative_counts", "unknown_omissions", "negative_omissions", "misbound_omissions", "valid_omissions", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			w, q, err := newQualifiedRun(exe, testDigest(t, exe), qualifiedFixtureRoot(t), t.TempDir(), filepath.Join(t.TempDir(), "receipt"))
 			if err != nil {
@@ -124,6 +124,18 @@ func TestDiagnosticConsumerRejectsMissingUnknownAndForeign(t *testing.T) {
 				d.Reason = "private_value"
 			case "foreign":
 				d.Nonce = strings.Repeat("f", 64)
+			case "unknown_omissions":
+				d.Reason = "sync_source_refused"
+				d.Omissions = map[string]int64{"private-never-output": 1}
+			case "negative_omissions":
+				d.Reason = "sync_source_refused"
+				d.Omissions = map[string]int64{"outlook_owa_detail_conflict": -1}
+			case "misbound_omissions":
+				d.Reason = "sync_counts_mismatch"
+				d.Omissions = map[string]int64{"outlook_owa_detail_conflict": 1}
+			case "valid_omissions":
+				d.Reason = "sync_source_refused"
+				d.Omissions = map[string]int64{"outlook_owa_detail_conflict": 2}
 			}
 			data, _ := protocol.Encode(d)
 			switch mode {
@@ -150,9 +162,12 @@ func TestDiagnosticConsumerRejectsMissingUnknownAndForeign(t *testing.T) {
 				}
 			}
 			q.readDiagnostic()
-			if mode == "valid" {
+			if mode == "valid" || mode == "valid_omissions" {
 				if q.diagnostic.Stage != protocol.StageImport {
 					t.Error("valid_failed_run_stage_missing")
+				}
+				if mode == "valid_omissions" && q.diagnostic.Omissions["outlook_owa_detail_conflict"] != 2 {
+					t.Error("adopted_omission_witness_not_consumed")
 				}
 			} else if q.diagnostic.Stage != "" {
 				t.Error("untrusted_diagnostic_consumed")

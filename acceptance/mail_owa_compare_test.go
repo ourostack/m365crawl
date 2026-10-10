@@ -22,10 +22,10 @@ func owaCompare(st *store.Store, account string, c owaRawCensus) []string {
 	return owaCompareContext(ctx, st, account, c)
 }
 
-func owaCompareContext(ctx context.Context, st *store.Store, account string, c owaRawCensus) []string {
+func owaCompareContext(ctx context.Context, st *store.Store, account string, c owaRawCensus, states ...*owaFailureState) []string {
 	bad := map[string]bool{}
 	query := func(q string) [][]any {
-		rows, err := owaQueryContext(ctx, st, q)
+		rows, err := owaQueryContext(ctx, st, q, states...)
 		if err != nil {
 			bad["archive_query"] = true
 		}

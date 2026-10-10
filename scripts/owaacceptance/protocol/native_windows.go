@@ -399,13 +399,16 @@ func EmitQualification(owner Ownership, counts map[string]int64, observed, unsta
 	return WriteProtectedNew(filepath.Join(filepath.Dir(os.Getenv(OwnerEnv)), WitnessName), data)
 }
 
-func EmitDiagnostic(owner Ownership, stage, reason string, fields []string) error {
+func EmitDiagnostic(owner Ownership, stage, reason string, fields []string, omissions ...map[string]int64) error {
 	current, err := CurrentGuard()
 	if err != nil || current != owner {
 		return refused()
 	}
 	d := DiagnosticFor(owner, stage, fields)
 	d.Reason = reason
+	if len(omissions) > 0 {
+		d.Omissions = omissions[0]
+	}
 	if MatchDiagnostic(owner, d) != nil {
 		return refused()
 	}

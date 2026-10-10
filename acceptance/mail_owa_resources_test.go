@@ -15,6 +15,7 @@ import (
 
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/scripts/owaacceptance/protocol"
 )
 
 // Operational refusals bound one observation; these are not mailbox-size correctness thresholds. Parent owns the outer process/TEMP lifetime, including forced termination.
@@ -96,8 +97,20 @@ func owaOwnedSnapshot(ctx context.Context, source teamsdesktop.Source, copySnaps
 	}, nil
 }
 
-func owaQueryContext(ctx context.Context, st *store.Store, q string) ([][]any, error) {
-	return owaQueryBudget(ctx, st, q, owaMaxQueryBytes)
+func owaQueryContext(ctx context.Context, st *store.Store, q string, states ...*owaFailureState) ([][]any, error) {
+	return owaQueryDiagnosticBudget(ctx, st, q, owaMaxQueryBytes, owaFailureOf(states))
+}
+
+func owaQueryDiagnosticBudget(ctx context.Context, st *store.Store, q string, maxBytes int64, s *owaFailureState) ([][]any, error) {
+	rows, err := owaQueryBudget(ctx, st, q, maxBytes)
+	if err != nil && err.Error() == "query_projection_budget" {
+		stage := protocol.StageImport
+		if s != nil && s.stage == protocol.StageAccounts {
+			stage = protocol.StageAccounts
+		}
+		s.record(stage, "query_projection_budget")
+	}
+	return rows, err
 }
 
 func owaQueryBudget(parent context.Context, st *store.Store, q string, maxBytes int64) ([][]any, error) {

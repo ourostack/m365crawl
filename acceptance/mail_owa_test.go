@@ -248,6 +248,7 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	// Registered first, therefore runs after every observation/archive/scratch cleanup. A cleanup failure must not produce a pass witness.
 	owaFailureCleanup(t, failure, func() error { return owaEmitQualification(counts, int64(observed), int64(unstable)) }, owaEmitDiagnostic)
 	if err := owaRealAcceptancePermit(); err != nil {
+		failure.record(protocol.StageGuard, "qualification_protocol_refused")
 		t.Fatal("qualification_protocol_refused")
 	}
 	root := os.Getenv(outlookRootEnv)
@@ -257,6 +258,7 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	failure.stage = protocol.StageDiscovery
 	profiles, skipped, err := outlookowa.Discover(root)
 	if err != nil || len(skipped) != 0 {
+		failure.record(protocol.StageDiscovery, "profile_discovery_refused")
 		t.Fatal("profile_discovery_refused")
 	}
 	db := filepath.Join(owaScratch(t, failure), "owa.db")
@@ -278,11 +280,12 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 		observed++
 	}
 	if observed == 0 {
+		failure.record(protocol.StageDiscovery, "no_observed_profiles")
 		t.Fatal("no_observed_profiles")
 	}
 	failure.stage = protocol.StageAccounts
 	st := owaArchive(t, db, failure)
-	defer failure.cleanup(t, func() { owaCloseArchive(t, st) })
+	defer failure.cleanup(t, func() { owaCloseArchive(t, st, failure) })
 	owaGlobalAccounts(t, st, observations, failure)
 	t.Logf("observed_profiles=%d unstable_profiles=%d real_mailbox_completeness=unproved", observed, unstable)
 	owaSourceStability(t, unstable, failure)
