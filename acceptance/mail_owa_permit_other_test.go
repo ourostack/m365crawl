@@ -11,3 +11,7 @@ func owaRealAcceptancePermit() error {
 func owaEmitQualification(map[string]int64, int64, int64) error {
 	return errors.New("qualification_protocol_refused")
 }
+
+func owaEmitDiagnostic(string, []string) error {
+	return errors.New("qualification_protocol_refused")
+}

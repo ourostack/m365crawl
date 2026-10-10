@@ -387,6 +387,7 @@ func EmitQualification(owner Ownership, counts map[string]int64, observed, unsta
 	if err != nil || current != owner {
 		return refused()
 	}
+
 	witness := Qualification{Version: Version, Nonce: owner.Nonce, Test: owner.Test, BinaryHash: owner.BinaryHash, BinaryNative: owner.BinaryNative, RootNative: owner.RootNative, Supervisor: owner.Supervisor, Child: owner.Child, Outcome: "passed", Observed: observed, Unstable: unstable, Counts: counts}
 	if Match(owner, witness) != nil {
 		return refused()
@@ -396,4 +397,39 @@ func EmitQualification(owner Ownership, counts map[string]int64, observed, unsta
 		return err
 	}
 	return WriteProtectedNew(filepath.Join(filepath.Dir(os.Getenv(OwnerEnv)), WitnessName), data)
+}
+
+func EmitDiagnostic(owner Ownership, stage string, fields []string) error {
+	current, err := CurrentGuard()
+	if err != nil || current != owner {
+		return refused()
+	}
+	d := DiagnosticFor(owner, stage, fields)
+	if MatchDiagnostic(owner, d) != nil {
+		return refused()
+	}
+	data, err := Encode(d)
+	if err != nil {
+		return err
+	}
+	return PublishDiagnostic(filepath.Dir(os.Getenv(OwnerEnv)), data)
+}
+
+func PublishDiagnostic(directory string, data []byte) error {
+	if _, err := DecodeDiagnostic(data); err != nil {
+		return refused()
+	}
+	pending := filepath.Join(directory, DiagnosticPendingName)
+	if WriteProtectedNew(pending, data) != nil {
+		return refused()
+	}
+	from, err := windows.UTF16PtrFromString(pending)
+	if err != nil {
+		return refused()
+	}
+	to, err := windows.UTF16PtrFromString(filepath.Join(directory, DiagnosticName))
+	if err != nil || CheckPrivate(directory, true) != nil || windows.MoveFile(from, to) != nil {
+		return refused()
+	}
+	return nil
 }

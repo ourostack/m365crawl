@@ -4,6 +4,7 @@ package acceptance
 
 import (
 	"database/sql"
+	"github.com/ourostack/m365crawl/scripts/owaacceptance/protocol"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -243,8 +244,9 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	requireReal(t)
 	observed, unstable := 0, 0
 	counts := map[string]int64{}
+	failure := &owaFailureState{stage: protocol.StageGuard}
 	// Registered first, therefore runs after every observation/archive/scratch cleanup. A cleanup failure must not produce a pass witness.
-	owaQualificationCleanup(t, func() error { return owaEmitQualification(counts, int64(observed), int64(unstable)) })
+	owaFailureCleanup(t, failure, func() error { return owaEmitQualification(counts, int64(observed), int64(unstable)) }, owaEmitDiagnostic)
 	if err := owaRealAcceptancePermit(); err != nil {
 		t.Fatal("qualification_protocol_refused")
 	}
@@ -252,17 +254,18 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	if root == "" {
 		t.Skip("explicit M365CRAWL_OUTLOOK_ROOT required for OWA acceptance")
 	}
+	failure.stage = protocol.StageDiscovery
 	profiles, skipped, err := outlookowa.Discover(root)
 	if err != nil || len(skipped) != 0 {
 		t.Fatal("profile_discovery_refused")
 	}
-	db := filepath.Join(owaScratch(t), "owa.db")
+	db := filepath.Join(owaScratch(t, failure), "owa.db")
 	var observations []owaObservation
 	for _, p := range profiles {
 		if filter := os.Getenv(outlookProfileEnv); filter != "" && filter != p.Name {
 			continue
 		}
-		c := owaObserve(t, p)
+		c := owaObserve(t, p, failure)
 		owaExercise(t, db, c)
 		if !c.stable {
 			unstable++
@@ -277,15 +280,13 @@ func TestRealOWAMailCountsAndRelationships(t *testing.T) {
 	if observed == 0 {
 		t.Fatal("no_observed_profiles")
 	}
-	st := owaArchive(t, db)
-	defer owaCloseArchive(t, st)
-	if fields := owaCompareAllContext(owaWorkContext(t), st, observations); len(fields) != 0 {
-		t.Fatalf("account_isolation_mismatch fields=%v", fields)
-	}
+	failure.stage = protocol.StageAccounts
+	st := owaArchive(t, db, failure)
+	defer failure.cleanup(t, func() { owaCloseArchive(t, st) })
+	owaGlobalAccounts(t, st, observations, failure)
 	t.Logf("observed_profiles=%d unstable_profiles=%d real_mailbox_completeness=unproved", observed, unstable)
-	if unstable != 0 {
-		t.Error("unstable_source_observation")
-	}
+	owaSourceStability(t, unstable, failure)
+	failure.completed = true
 }
 
 // Keep the normal product API in the harness; SQL mutations above are synthetic negatives only.

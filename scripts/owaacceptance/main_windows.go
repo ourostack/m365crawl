@@ -65,6 +65,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 		if w.qualification != nil && result == nil && exit == 0 {
 			result = w.qualification.verifyWitness()
 		}
+		if w.qualification != nil && result == nil && exit != 0 {
+			w.qualification.readDiagnostic()
+		}
 		if err := w.cleanup(); err != nil {
 			result = errors.Join(result, err)
 		} else if w.qualification != nil {
@@ -672,7 +675,7 @@ func main() {
 	}
 	witness, err := runQualified(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "owa_acceptance status=failed reason=lifecycle_or_cleanup")
+		fmt.Fprintln(os.Stderr, failurePacket(err))
 		os.Exit(1)
 	}
 	counts, err := json.Marshal(witness.Counts)

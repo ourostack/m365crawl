@@ -14,15 +14,30 @@ import (
 )
 
 type qualifiedRun struct {
-	receipt             string
-	receiptNative       [3]uint32
-	owner               protocol.Ownership
-	binary              *protocol.BinaryPin
-	pins                []windows.Handle
-	witness             protocol.Qualification
-	consumersReleased   bool
-	cleanupVerified     bool
-	nativeCloseVerified bool
+	diagnostic                protocol.Diagnostic
+	closeoutVerified          bool
+	diagnosticReleaseVerified bool
+	receipt                   string
+	receiptNative             [3]uint32
+	owner                     protocol.Ownership
+	binary                    *protocol.BinaryPin
+	pins                      []windows.Handle
+	witness                   protocol.Qualification
+	consumersReleased         bool
+	cleanupVerified           bool
+	nativeCloseVerified       bool
+}
+
+func (q *qualifiedRun) readDiagnostic() {
+	data, err := protocol.ReadProtected(filepath.Join(q.receipt, protocol.DiagnosticName))
+	if err != nil {
+		return
+	}
+	d, err := protocol.DecodeDiagnostic(data)
+	if err != nil || protocol.MatchDiagnostic(q.owner, d) != nil {
+		return
+	}
+	q.diagnostic = d
 }
 
 func (q *qualifiedRun) closePins() error {
@@ -192,6 +207,8 @@ func (q *qualifiedRun) finish(exit int, result error) error {
 	if _, err := protocol.DecodeCloseout(data); err != nil {
 		return errors.Join(result, closeErr, errors.New("qualification_closeout_refused"))
 	}
+	q.closeoutVerified = true
+	q.diagnosticReleaseVerified = record.Outcome == "test_failed" && record.NativeCloseVerified && record.ConsumersReleased && record.RootState == "absent"
 	if !record.Qualified {
 		return errors.Join(result, closeErr, errors.New("qualification_unproved"))
 	}
@@ -205,6 +222,9 @@ func runQualified(binary, digest, source, parent, receipt string, timeout time.D
 	}
 	exit, result := w.run(binary, []string{"-test.run=^" + protocol.TestName + "$", "-test.timeout=4m"}, qualifiedEnv(os.Environ(), q), timeout)
 	if err := q.finish(exit, result); err != nil {
+		if exit != 0 && result == nil && q.diagnosticReleaseVerified && q.closeoutVerified && q.diagnostic.Stage != "" {
+			return protocol.Qualification{}, diagnosticFailure(q.diagnostic.Stage, q.diagnostic.Fields, err)
+		}
 		return protocol.Qualification{}, err
 	}
 	return q.witness, nil

@@ -22,9 +22,11 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/scripts/owaacceptance/protocol"
 )
 
 type owaObservation struct {
+	failure       *owaFailureState
 	ctx           context.Context
 	root, account string
 	ownedSnapshot string
@@ -36,8 +38,10 @@ type owaObservation struct {
 
 func owaStable(before, after string) bool { return before != "" && before == after }
 
-func owaCapture(t *testing.T, p outlookowa.Profile) owaObservation {
+func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) owaObservation {
 	t.Helper()
+	state := owaFailureOf(states)
+	defer state.phase(t, protocol.StageCapture)()
 	ctx := owaWorkContext(t)
 	if err := owaCheckSource(ctx, p.Source); err != nil {
 		t.Fatal("source_resource_or_context_refused")
@@ -52,10 +56,12 @@ func owaCapture(t *testing.T, p outlookowa.Profile) owaObservation {
 		t.Fatal("snapshot_refused")
 	}
 	release := func() {
-		cleanup()
-		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-			t.Error("snapshot_cleanup_failed")
-		}
+		state.cleanup(t, func() {
+			cleanup()
+			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+				t.Error("snapshot_cleanup_failed")
+			}
+		})
 	}
 	calMu.Lock()
 	calCleanups = append(calCleanups, cleanup)
@@ -84,50 +90,72 @@ func owaCapture(t *testing.T, p outlookowa.Profile) owaObservation {
 	}
 	p.Dir = profileDir
 	p.Source.LevelDBDir, p.Source.BlobDir = level, blob
-	return owaObservation{ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source)}
+	return owaObservation{failure: state, ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source)}
 }
 
-func owaObserve(t *testing.T, p outlookowa.Profile) owaObservation {
+func owaObserve(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) owaObservation {
 	t.Helper()
-	s := owaCapture(t, p)
+	s := owaCapture(t, p, states...)
+	owaCensusObserved(t, &s)
+	return s
+}
+
+func owaCensusObserved(t *testing.T, s *owaObservation) {
+	t.Helper()
+	owaReadIndependentCensus(t, s)
+	owaCapturedIntegrity(t, s)
+	if !s.stable {
+		// A bounded captured-copy check can still run, but this is not live absence evidence.
+		t.Log("unstable_source_observation")
+	}
+}
+
+func owaCapturedIntegrity(t *testing.T, s *owaObservation) {
+	t.Helper()
+	defer s.failure.phase(t, protocol.StageCapture)()
+	if s.digest != owaPayloadDigestContext(t, s.ctx, s.profile.Source) {
+		t.Fatal("private_source_mutated")
+	}
+}
+
+func owaReadIndependentCensus(t *testing.T, s *owaObservation) {
+	t.Helper()
+	defer s.failure.phase(t, protocol.StageCensus)()
 	var err error
 	s.census, err = owaCensusContext(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if err != nil {
 		var coverage *owaCoverageRefusal
 		if errors.As(err, &coverage) {
+			s.failure.mismatch(coverage.fields)
 			t.Fatalf("detail_metadata_coverage_refused fields=%v", coverage.fields)
 		}
 		t.Fatal("raw_census_refused")
 	}
-	if s.digest != owaPayloadDigestContext(t, s.ctx, s.profile.Source) {
-		t.Fatal("private_source_mutated")
-	}
-	if !s.stable {
-		// A bounded captured-copy check can still run, but this is not live absence evidence.
-		t.Log("unstable_source_observation")
-	}
-	return s
 }
 
-func owaArchive(t *testing.T, path string) *store.Store {
+func owaArchive(t *testing.T, path string, states ...*owaFailureState) *store.Store {
 	t.Helper()
+	state := owaFailureOf(states)
 	st, err := store.OpenReadOnly(owaWorkContext(t), path)
 	if err != nil {
 		t.Fatal("archive_open_failed")
 	}
-	t.Cleanup(func() { owaCloseArchive(t, st) })
+	t.Cleanup(func() { state.cleanup(t, func() { owaCloseArchive(t, st) }) })
 	return st
 }
 
 // Register exact flat archive cleanup with the existing TestMain owner, and verify it at the test boundary after all later-registered handles have closed.
-func owaScratch(t *testing.T) string {
+func owaScratch(t *testing.T, states ...*owaFailureState) string {
 	t.Helper()
+	state := owaFailureOf(states)
 	dir := calendarScratch(t)
 	t.Cleanup(func() {
-		removeFlat(dir)
-		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-			t.Error("archive_cleanup_failed")
-		}
+		state.cleanup(t, func() {
+			removeFlat(dir)
+			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+				t.Error("archive_cleanup_failed")
+			}
+		})
 	})
 	return dir
 }
@@ -158,7 +186,7 @@ func owaScalar(t *testing.T, st *store.Store, q string) int {
 
 func owaExercise(t *testing.T, db string, c owaObservation) {
 	t.Helper()
-	before := c.digest
+	defer c.failure.phase(t, protocol.StageImport)()
 	opts := syncer.Options{Root: filepath.Join(c.root, "no-teams"), DBPath: db, OutlookRoot: c.root, OutlookEnabled: true, OutlookMinReadInterval: -1}
 	var baseline map[string][][]any
 	for step := 0; step < 3; step++ {
@@ -183,11 +211,12 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 		if m.Gone != 0 || m.Evicted != 0 || m.Withheld != 0 || m.Replaced != 0 || step > 0 && (m.Added != 0 || m.Updated != 0) || step == 0 && m.Added != len(c.census.messages) {
 			t.Fatal("sync_counts_mismatch")
 		}
-		st := owaArchive(t, db)
+		st := owaArchive(t, db, c.failure)
 		findings := owaCompareContext(c.ctx, st, c.account, c.census)
 		state := owaArchiveState(c.ctx, t, st)
-		owaCloseArchive(t, st)
+		c.failure.cleanup(t, func() { owaCloseArchive(t, st) })
 		if len(findings) != 0 {
+			c.failure.mismatch(findings)
 			t.Fatalf("archive_mismatch fields=%v", findings)
 		}
 		if step == 0 {
@@ -197,9 +226,7 @@ func owaExercise(t *testing.T, db string, c owaObservation) {
 		}
 		t.Logf("step=%d messages=%d folders=%d wall_ms=%d", step, len(c.census.messages), len(c.census.folders), time.Since(start).Milliseconds())
 	}
-	if before != owaPayloadDigestContext(t, c.ctx, c.profile.Source) {
-		t.Fatal("private_source_mutated")
-	}
+	owaCapturedIntegrity(t, &c)
 }
 
 func owaArchiveState(ctx context.Context, t *testing.T, st *store.Store) map[string][][]any {
