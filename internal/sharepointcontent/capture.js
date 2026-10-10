@@ -3,7 +3,7 @@ async (args, readerFactory) => {
   const controller=new AbortController();
   const timer=setTimeout(() => controller.abort(),20000);
   const read=readerFactory({origin:location.origin,signal:controller.signal,maxBodyBytes:2097152,maxTotalBytes:8388608,maxRequests:8});
-  const uuid=value => typeof value==="string" && /^[{]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[}]?$/i.test(value);
+  const uuid=value => typeof value==="string" && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\})$/i.test(value);
   const normalUUID=value => value.replace(/[{}]/g,"").toLowerCase();
   const string=value => typeof value==="string" && !value.includes("\0") && new TextEncoder().encode(value).byteLength<=262144;
   const optional=value => value===undefined || value===null || string(value);
@@ -61,6 +61,7 @@ async (args, readerFactory) => {
       while(pending.length) {
         const {node,depth}=pending.pop();
         if(++nodes>65536 || depth>128) return {state:"too_large"};
+        if(node.nodeType===Node.ELEMENT_NODE && node.tagName==="TEMPLATE") pending.push({node:node.content,depth:depth+1});
         for(let child=node.lastChild;child;child=child.previousSibling) pending.push({node:child,depth:depth+1});
       }
       const controls=[...template.content.querySelectorAll("[data-sp-canvascontrol]")];

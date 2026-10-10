@@ -3,6 +3,7 @@ package sharepointcontent
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,9 +49,6 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 			return Result{}, &ReadError{Code: "malformed"}
 		}
 		retained += len(*value)
-		if retained > 8<<20 {
-			return Result{}, &ReadError{Code: "too_large"}
-		}
 	}
 	if (raw.File.ListItemID != nil && (*raw.File.ListItemID < 1 || *raw.File.ListItemID > 1<<53-1)) ||
 		(raw.File.Length != nil && (*raw.File.Length < 0 || *raw.File.Length > 1<<53-1)) {
@@ -226,6 +224,7 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	slices.SortFunc(losses, func(a, b Loss) int { return strings.Compare(a.Code, b.Code) })
 	return Result{Kind: request.Kind, State: raw.State, HTTPStatus: raw.HTTPStatus, SourceAccount: raw.Account,
 		File: raw.File, Partial: len(losses) > 0, Losses: losses, PageControls: controls, Transcript: transcript}, nil
 }

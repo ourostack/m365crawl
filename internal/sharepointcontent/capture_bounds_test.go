@@ -44,11 +44,13 @@ func TestNativePageRuntimeWorkAndTextCaps(t *testing.T) {
 		{"controls-over", `payloads[0].ListItemAllFields.CanvasContent1='<div data-sp-canvascontrol data-sp-controldata=\'{"controlType":0}\'></div>'.repeat(4097);`, "too_large"},
 		{"nodes-inclusive", `payloads[0].ListItemAllFields.CanvasContent1='<i></i>'.repeat(65535);`, "page_observations"},
 		{"nodes-over", `payloads[0].ListItemAllFields.CanvasContent1='<i></i>'.repeat(65536);`, "too_large"},
+		{"ignored-template-nodes-over", `payloads[0].ListItemAllFields.CanvasContent1='<template>'+'<i></i>'.repeat(65536)+'</template>';`, "too_large"},
 		{"depth-inclusive", `payloads[0].ListItemAllFields.CanvasContent1='<div>'.repeat(128)+'</div>'.repeat(128);`, "page_observations"},
 		{"depth-over", `payloads[0].ListItemAllFields.CanvasContent1='<div>'.repeat(129)+'</div>'.repeat(129);`, "too_large"},
 		{"text-inclusive", `payloads[0].ListItemAllFields.CanvasContent1=('<div data-sp-canvascontrol data-sp-controldata=\'{"controlType":4}\'><div data-sp-rte>'+'x'.repeat(262144)+'</div></div>').repeat(4);`, "page_observations"},
 		{"text-over", `payloads[0].ListItemAllFields.CanvasContent1=('<div data-sp-canvascontrol data-sp-controldata=\'{"controlType":4}\'><div data-sp-rte>'+'x'.repeat(262144)+'</div></div>').repeat(4)+'<div data-sp-canvascontrol data-sp-controldata=\'{"controlType":4}\'><div data-sp-rte>x</div></div>';`, "too_large"},
 		{"field-over", `payloads[0].ListItemAllFields.CanvasContent1='<div data-sp-canvascontrol data-sp-controldata=\'{"controlType":4}\'><div data-sp-rte>'+'x'.repeat(262145)+'</div></div>';`, "too_large"},
+		{"unpaired-native-brace", `payloads[0].UniqueId="{"+payloads[0].UniqueId;`, "malformed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := runCaptureFixture(t, ctx, page, fixturePrelude+test.setup); got != test.want {
