@@ -2,6 +2,8 @@
   if (window !== top || location.protocol !== "https:" || location.hostname !== "engage.cloud.microsoft" ||
       (location.port && location.port !== "443") || window.__m365crawlEngageCapture) return;
   const state = {fatal:"",account:null,accountEvidence:[],viewerFragments:[],threads:[],losses:new Map(),nodes:0,blocks:0,textBytes:0,stringBytes:0};
+  const generation = [...crypto.getRandomValues(new Uint32Array(4))].join(":");
+  state.versionToken = Symbol("native version token");
   const project = makeProjection(state);
   const original = window.fetch;
   const readers = new Set();
@@ -45,7 +47,10 @@
       const buffer = new Uint8Array(bytes);
       let offset = 0;
       for (const chunk of chunks) { buffer.set(chunk,offset); offset += chunk.byteLength; }
-      const json = JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(buffer));
+      const json = JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(buffer), (key,value,context) => {
+        if (key !== "version" || typeof value !== "number") return value;
+        return {[state.versionToken]:typeof context?.source === "string" ? context.source : null};
+      });
       responses.set(ordinal,json);
       flush();
     } catch { if (!stopped) fail("malformed"); }
@@ -78,6 +83,7 @@
   };
   window.fetch = wrapper;
   window.__m365crawlEngageCapture = {
+    Generation:generation,
     async stop() {
       if (stopped) return {Fatal:"already_stopped"};
       stopped = true;
@@ -103,7 +109,7 @@
       }).map((thread, ordinal) => ({...thread,Ordinal:ordinal}));
       if (!threads.length) state.losses.set("native_content_not_observed",1);
       return {
-        State:threads.length ? "observations" : "metadata_only", Fatal:"", Account:state.account, AccountEvidence:state.accountEvidence, ViewerFragments:state.viewerFragments, Threads:threads,
+        State:threads.length ? "observations" : "metadata_only", Generation:generation, Fatal:"", Account:state.account, AccountEvidence:state.accountEvidence, ViewerFragments:state.viewerFragments, Threads:threads,
         Losses:[...state.losses].sort(([a],[b])=>a.localeCompare(b)).map(([Code,Count])=>({Code,Count}))
       };
     }

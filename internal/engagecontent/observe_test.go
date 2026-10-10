@@ -10,16 +10,17 @@ import (
 )
 
 type fakeDriver struct {
-	events       []string
-	fail         string
-	host         string
-	raw          scriptResult
-	noHome       bool
-	wrongPage    bool
-	cleanupBad   bool
-	noClick      bool
-	finalHostBad bool
-	cancelAtEval context.CancelFunc
+	events          []string
+	fail            string
+	host            string
+	raw             scriptResult
+	noHome          bool
+	wrongPage       bool
+	cleanupBad      bool
+	noClick         bool
+	finalHostBad    bool
+	cancelAtEval    context.CancelFunc
+	clickGeneration string
 }
 
 func (f *fakeDriver) AddInitScript(ctx context.Context, source string) (string, error) {
@@ -66,10 +67,14 @@ func (f *fakeDriver) Eval(_ context.Context, expr string, out any) error {
 	switch expr {
 	case homeStateExpr:
 		f.events = append(f.events, "home-state")
-		value = map[string]bool{"Allowed": !f.wrongPage, "Home": !f.noHome}
+		value = map[string]any{"Allowed": !f.wrongPage, "Home": !f.noHome, "Generation": f.raw.Generation}
 	case homeClickExpr:
 		f.events = append(f.events, "home-click")
-		value = !f.noHome && !f.noClick
+		generation := f.raw.Generation
+		if f.clickGeneration != "" {
+			generation = f.clickGeneration
+		}
+		value = map[string]any{"Clicked": !f.noHome && !f.noClick, "Generation": generation}
 	case stopReadExpr:
 		f.events = append(f.events, "stop-read")
 		value = f.raw

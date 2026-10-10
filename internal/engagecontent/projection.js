@@ -56,7 +56,10 @@
       CreatedRaw:optional(node.createdAt), UpdatedRaw:optional(node.updatedAt),
       StarterCreatedRaw:optional(starter.createdAt), StarterUpdatedRaw:optional(starter.updatedAt),
       SenderID:optional(starter.sender?.id), Language:optional(content.language), Title:optional(content.title),
-      Version:optional(starter.version), IsDeleted:optional(starter.isDeleted), IsDraft:optional(starter.isDraft),
+      Version:starter.version && typeof starter.version === "object" && Object.hasOwn(starter.version,state.versionToken) ?
+        (typeof starter.version[state.versionToken] === "string" && starter.version[state.versionToken].length<=256 ?
+          {nativeNumber:starter.version[state.versionToken]} : null) : optional(starter.version),
+      IsDeleted:optional(starter.isDeleted), IsDraft:optional(starter.isDraft),
       Blocks:[]
     };
     let bytes = 0;

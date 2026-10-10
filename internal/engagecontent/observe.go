@@ -14,20 +14,35 @@ type Driver interface {
 	RemoveInitScript(context.Context, string) error
 }
 
-const homeStateExpr = `(() => {
+const homeControlExpr = `(() => {
 	const label = node => (node.getAttribute("aria-label") || node.textContent || "").trim();
+	const visible = node => {
+		if(node.disabled || node.getAttribute("aria-disabled")==="true" || node.closest("[inert]")) return false;
+		for(let current=node;current instanceof Element;current=current.parentElement) {
+			const style=getComputedStyle(current);
+			if(style.display==="none" || style.visibility==="hidden" || style.visibility==="collapse" ||
+			   Number(style.opacity)===0 || style.contentVisibility==="hidden" || style.pointerEvents==="none") return false;
+		}
+		return [...node.getClientRects()].some(rect=>rect.width>0 && rect.height>0 && rect.right>0 && rect.bottom>0 && rect.left<innerWidth && rect.top<innerHeight);
+	};
+	return [...document.querySelectorAll('button,[role="tab"],a')].find(node=>label(node)==="Home" && visible(node)) || null;
+})()`
+
+const homeStateExpr = `(() => {
 	return {
 		Allowed:location.protocol==="https:" && location.hostname==="engage.cloud.microsoft" && (!location.port || location.port==="443"),
-		Home:[...document.querySelectorAll('button,[role="tab"],a')].some(node=>label(node)==="Home" && node.getClientRects().length>0)
+		Generation:window.__m365crawlEngageCapture?.Generation || "",
+		Home:!!` + homeControlExpr + `
 	};
 })()`
 
 const homeClickExpr = `(() => {
-	if(location.protocol!=="https:" || location.hostname!=="engage.cloud.microsoft" || (location.port && location.port!=="443")) return false;
-	const node=[...document.querySelectorAll('button,[role="tab"],a')].find(node=>(node.getAttribute("aria-label") || node.textContent || "").trim()==="Home" && node.getClientRects().length>0);
-	if(!node) return false;
+	const Generation=window.__m365crawlEngageCapture?.Generation || "";
+	if(location.protocol!=="https:" || location.hostname!=="engage.cloud.microsoft" || (location.port && location.port!=="443")) return {Clicked:false,Generation};
+	const node=` + homeControlExpr + `;
+	if(!node) return {Clicked:false,Generation};
 	node.click();
-	return true;
+	return {Clicked:true,Generation};
 })()`
 
 var waitCollection = func(ctx context.Context) error { return wait(ctx, 10*time.Second) }
@@ -75,12 +90,16 @@ func ObserveHome(ctx context.Context, page Driver) (result Result, err error) {
 	if page.Navigate(landing, "https://engage.cloud.microsoft/") != nil {
 		return Result{}, &ReadError{Code: "navigation_failed"}
 	}
+	generation := ""
 	for {
 		host, e := page.Host(landing)
 		if e != nil || (host != "engage.cloud.microsoft" && host != "engage.cloud.microsoft:443") {
 			return Result{}, &ReadError{Code: "unavailable"}
 		}
-		var state struct{ Allowed, Home bool }
+		var state struct {
+			Allowed, Home bool
+			Generation    string
+		}
 		if page.Eval(landing, homeStateExpr, &state) != nil {
 			return Result{}, &ReadError{Code: "capture_failed"}
 		}
@@ -88,18 +107,28 @@ func ObserveHome(ctx context.Context, page Driver) (result Result, err error) {
 			return Result{}, &ReadError{Code: "unavailable"}
 		}
 		if state.Home {
+			if state.Generation == "" || len(state.Generation) > 128 {
+				return Result{}, &ReadError{Code: "capture_failed"}
+			}
+			generation = state.Generation
 			break
 		}
 		if e := wait(landing, 250*time.Millisecond); e != nil {
 			return Result{}, e
 		}
 	}
-	var clicked bool
-	if page.Eval(landing, homeClickExpr, &clicked) != nil {
+	var action struct {
+		Clicked    bool
+		Generation string
+	}
+	if page.Eval(landing, homeClickExpr, &action) != nil {
 		return Result{}, &ReadError{Code: "capture_failed"}
 	}
-	if !clicked {
+	if !action.Clicked {
 		return Result{}, &ReadError{Code: "home_unavailable"}
+	}
+	if action.Generation != generation {
+		return Result{}, &ReadError{Code: "document_changed"}
 	}
 	closeLanding()
 	if e := waitCollection(work); e != nil {
@@ -114,6 +143,9 @@ func ObserveHome(ctx context.Context, page Driver) (result Result, err error) {
 		return Result{}, &ReadError{Code: "capture_failed"}
 	}
 	stopped = true
+	if raw.Generation != generation {
+		return Result{}, &ReadError{Code: "document_changed"}
+	}
 	return decode(work, raw)
 }
 

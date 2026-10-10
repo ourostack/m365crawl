@@ -57,21 +57,21 @@ func decode(ctx context.Context, raw scriptResult) (Result, error) {
 				return Result{}, err
 			}
 		}
-		for _, fragment := range raw.ViewerFragments {
-			if err := ctx.Err(); err != nil {
+		if account != raw.Account {
+			return refuse("identity_drift")
+		}
+	}
+	for _, fragment := range raw.ViewerFragments {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		for _, field := range []string{fragment.Host, fragment.UserID, fragment.NetworkID} {
+			if err := v.string(field, false, true); err != nil {
 				return Result{}, err
 			}
-			for _, field := range []string{fragment.Host, fragment.UserID, fragment.NetworkID} {
-				if err := v.string(field, false, true); err != nil {
-					return Result{}, err
-				}
-			}
-			if fragment.Host != raw.Account.Host || (fragment.UserID != "" && fragment.UserID != raw.Account.UserID) ||
-				(fragment.NetworkID != "" && fragment.NetworkID != raw.Account.NetworkID) {
-				return refuse("identity_drift")
-			}
 		}
-		if account != raw.Account {
+		if fragment.Host != raw.Account.Host || (fragment.UserID != "" && fragment.UserID != raw.Account.UserID) ||
+			(fragment.NetworkID != "" && fragment.NetworkID != raw.Account.NetworkID) {
 			return refuse("identity_drift")
 		}
 	}
@@ -177,11 +177,15 @@ func (v *validator) string(value string, text, allowEmpty bool) error {
 }
 
 func (v *validator) optionalString(raw json.RawMessage, text bool) (*string, error) {
+	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		v.losses["optional_field_unmapped"]++
 		return nil, nil
 	}
-	if len(raw) > 2097152 || !json.Valid(raw) {
+	if len(raw) > 2097152 || !json.Valid(raw) || !utf8.Valid(raw) {
+		return nil, &ReadError{Code: "malformed"}
+	}
+	if raw[0] == '"' && !validStringScalar(raw) {
 		return nil, &ReadError{Code: "malformed"}
 	}
 	var value string
@@ -213,6 +217,24 @@ func (v *validator) clock(raw json.RawMessage) (*string, *time.Time, error) {
 }
 
 func (v *validator) version(raw json.RawMessage) (*int64, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '{' {
+		if len(raw) > 1024 || !json.Valid(raw) {
+			return nil, &ReadError{Code: "malformed"}
+		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		token, ok := fields["nativeNumber"]
+		if !ok || len(fields) != 1 {
+			v.losses["version_unmapped"]++
+			return nil, nil
+		}
+		var number string
+		if json.Unmarshal(token, &number) != nil || len(number) > 256 {
+			return nil, &ReadError{Code: "malformed"}
+		}
+		raw = []byte(number)
+	}
 	if len(raw) == 0 {
 		v.losses["version_unmapped"]++
 		return nil, nil
@@ -242,6 +264,7 @@ func (v *validator) version(raw json.RawMessage) (*int64, error) {
 }
 
 func (v *validator) flag(raw json.RawMessage) (*bool, error) {
+	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		v.losses["flag_unmapped"]++
 		return nil, nil
@@ -255,4 +278,32 @@ func (v *validator) flag(raw json.RawMessage) (*bool, error) {
 		return nil, nil
 	}
 	return &value, nil
+}
+
+func validStringScalar(raw []byte) bool {
+	// JSON validity has already established escape lengths and hexadecimal syntax.
+	for i := 1; i < len(raw)-1; i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		i++
+		if raw[i] != 'u' {
+			continue
+		}
+		code, _ := strconv.ParseUint(string(raw[i+1:i+5]), 16, 16)
+		i += 4
+		if code >= 0xd800 && code <= 0xdbff {
+			if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+				return false
+			}
+			next, _ := strconv.ParseUint(string(raw[i+3:i+7]), 16, 16)
+			if next < 0xdc00 || next > 0xdfff {
+				return false
+			}
+			i += 6
+		} else if code >= 0xdc00 && code <= 0xdfff {
+			return false
+		}
+	}
+	return true
 }

@@ -127,30 +127,42 @@ func TestInitScriptRemovalFailures(t *testing.T) {
 }
 
 func TestInitScriptCancelledAndUncertainRegistration(t *testing.T) {
-	s := initScriptServer(t)
-	page := scriptMethods(t, testPage(t, s))
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if id, err := page.AddInitScript(ctx, "fixture"); !errors.Is(err, context.Canceled) || id != "" {
-		t.Fatalf("cancelled registration = %q, %v", id, err)
-	}
-	if err := page.RemoveInitScript(ctx, "native-registration"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled removal = %v", err)
-	}
-	s.Handle("Page.addScriptToEvaluateOnNewDocument", func(browsertest.Request) (any, *browsertest.Error) {
-		s.DropConnections()
-		return map[string]any{"identifier": "lost-response"}, nil
-	})
-	if id, err := page.AddInitScript(context.Background(), "fixture"); err == nil || id != "" {
-		t.Fatalf("uncertain registration = %q, %v", id, err)
-	}
-	count := 0
-	for _, r := range s.Requests() {
-		if r.Method == "Page.addScriptToEvaluateOnNewDocument" {
-			count++
+	t.Run("cancelled-registration", func(t *testing.T) {
+		s := initScriptServer(t)
+		page := scriptMethods(t, testPage(t, s))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if id, err := page.AddInitScript(ctx, "fixture"); !errors.Is(err, context.Canceled) || id != "" {
+			t.Fatalf("cancelled registration = %q, %v", id, err)
 		}
-	}
-	if count != 1 {
-		t.Fatalf("uncertain registration retried: %d", count)
-	}
+	})
+	t.Run("cancelled-removal", func(t *testing.T) {
+		s := initScriptServer(t)
+		page := scriptMethods(t, testPage(t, s))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := page.RemoveInitScript(ctx, "native-registration"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled removal = %v", err)
+		}
+	})
+	t.Run("uncertain-response", func(t *testing.T) {
+		s := initScriptServer(t)
+		page := scriptMethods(t, testPage(t, s))
+		s.Handle("Page.addScriptToEvaluateOnNewDocument", func(browsertest.Request) (any, *browsertest.Error) {
+			s.DropConnections()
+			return map[string]any{"identifier": "lost-response"}, nil
+		})
+		if id, err := page.AddInitScript(context.Background(), "fixture"); err == nil || id != "" {
+			t.Fatalf("uncertain registration = %q, %v", id, err)
+		}
+		count := 0
+		for _, r := range s.Requests() {
+			if r.Method == "Page.addScriptToEvaluateOnNewDocument" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("uncertain registration retried: %d", count)
+		}
+	})
 }

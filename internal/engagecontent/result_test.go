@@ -20,7 +20,7 @@ func rawValue(v any) json.RawMessage {
 func nativeResult() scriptResult {
 	account := SourceAccount{Host: "engage.cloud.microsoft", NetworkID: "network", UserID: "viewer"}
 	return scriptResult{
-		State: "observations", Account: account,
+		State: "observations", Generation: "synthetic-generation", Account: account,
 		AccountEvidence: []SourceAccount{account},
 		Threads: []scriptThread{{
 			ID: "thread", NetworkID: "network", GroupID: "group", StarterID: "starter",

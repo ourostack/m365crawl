@@ -38,12 +38,12 @@ type ThreadObservation struct {
 }
 
 type scriptResult struct {
-	State, Fatal    string
-	Account         SourceAccount
-	AccountEvidence []SourceAccount
-	ViewerFragments []SourceAccount
-	Threads         []scriptThread
-	Losses          []Loss
+	State, Fatal, Generation string
+	Account                  SourceAccount
+	AccountEvidence          []SourceAccount
+	ViewerFragments          []SourceAccount
+	Threads                  []scriptThread
+	Losses                   []Loss
 }
 
 type scriptThread struct {
