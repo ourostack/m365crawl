@@ -215,13 +215,20 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 // selectMailStores is the single case-exact layout guard shared by opening and collecting.
 func selectMailStores(dbs []indexeddb.Database) (indexeddb.Database, map[string]int64, error) {
 	var selected []indexeddb.Database
+	matched := false
 	for _, db := range dbs {
 		if db.Name == "owa-offline-data" || strings.HasPrefix(db.Name, "owa-offline-data-") {
-			selected = append(selected, db)
+			matched = true
+			if len(db.Stores) != 0 {
+				selected = append(selected, db)
+			}
 		}
 	}
-	if len(selected) == 0 {
+	if !matched {
 		return indexeddb.Database{}, nil, layout("content_database_missing")
+	}
+	if len(selected) == 0 {
+		return indexeddb.Database{}, nil, layout("required_store_missing")
 	}
 	if len(selected) != 1 {
 		return indexeddb.Database{}, nil, layout("multiple_mailboxes")

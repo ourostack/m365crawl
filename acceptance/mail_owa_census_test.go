@@ -50,27 +50,9 @@ func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, 
 	if err != nil {
 		return c, errors.New("census_metadata_refused")
 	}
-	var selected []indexeddb.Database
-	for _, db := range dbs {
-		if db.Name == "owa-offline-data" || strings.HasPrefix(db.Name, "owa-offline-data-") {
-			selected = append(selected, db)
-		}
-	}
-	if len(selected) != 1 {
-		return c, errors.New("census_layout_refused")
-	}
-	db := selected[0]
-	stores := map[string]int64{}
-	for _, s := range db.Stores {
-		if s.Name == "folders" || s.Name == "messages" || s.Name == "messageBodies" {
-			if _, duplicate := stores[s.Name]; duplicate {
-				return c, errors.New("census_layout_refused")
-			}
-			stores[s.Name] = s.ID
-		}
-	}
-	if len(stores) != 3 {
-		return c, errors.New("census_layout_refused")
+	db, stores, err := owaRawMailMetadata(dbs)
+	if err != nil {
+		return c, err
 	}
 	o, err := indexeddb.OpenWith(level, blob, indexeddb.OpenOptions{KeepStore: func(d, s int64) bool {
 		return d == db.ID && (s == stores["folders"] || s == stores["messages"] || s == stores["messageBodies"])
