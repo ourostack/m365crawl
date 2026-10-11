@@ -310,7 +310,7 @@ m365crawl search "release date" --source transcripts --from ada
 
 ## people
 
-List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id `mail:<address>`).
+List existing Teams people and mail correspondents alongside explicitly registered native Outlook observations. Legacy `last_seen_at` keeps its original meaning, including Teams membership; it is not uniformly a last-contact time. Native observations have no value for that clock and remain unresolved source evidence.
 
 ```
 m365crawl people [flags]
@@ -325,8 +325,31 @@ Result: a list of person items, newest `last_seen_at` first across both sources.
 
 - **A Teams person** has `sources: ["chats"]` and no `email`, because Teams keeps no address for a person.
 - **A mail correspondent** is a sender or recipient with an address; gone messages do not count. It has `id: "mail:<address>"`, `email` (the address, lower case), `sources: ["mail"]`, an empty `tenant_id`, and as `display_name` the newest name it was given, or the address when it never had one.
-- **The two are never merged**, so the same person can appear once per source.
+- **Sources are never silently merged**, so the same person can appear in several sources or native representations.
 - `--account` narrows the Teams people only.
+- Registered native observations expose `person-observation:ID`, native class/key/version/framing, exact email/directory pair claims, separate refresh/capture/source clocks and ambiguity/conflicts. Account-filtered lists exclude those unqualified subjects with a notice; the source profile owner's account is not the subject's tenant.
+
+`--fields` keys: `tenant_id`, `id`, `display_name`, `email`, `sources`, `last_seen_at`, `source_id`, `capture_id`, `native_class`, `native_key`, `native_parent`, `version_raw`, `resynced`, `first_name`, `last_name`, `alternate_email`, `teams_id`, `refreshed_at`, `captured_at`, `source_observed_at`, `retained`, `ambiguous`, `conflicting`, `identity_state`, `text_truncated`.
+
+### people show
+
+`m365crawl people show person-observation:ID` follows a native list hit. It returns one list item with its original capture identity, all retained differing group representations, same-source email/directory conflicts, historical/current profile-owner link evidence and `identity_state: "unresolved"`. Neither native versions nor missing conflicting copies establish a current winner. Existing Teams and `mail:<address>` IDs retain their original workflows, not this inspection command.
+
+`--fields` keys: `id`, `display_name`, `email`, `sources`, `source_id`, `capture_id`, `native_class`, `native_key`, `native_parent`, `version_raw`, `resynced`, `first_name`, `last_name`, `alternate_email`, `teams_id`, `refreshed_at`, `captured_at`, `source_observed_at`, `retained`, `ambiguous`, `conflicting`, `identity_state`, `text_truncated`, `copies`, `conflicts`, `captured_profile_link`, `current_profile_link`, `explanation`.
+
+### people sources
+
+`m365crawl people sources` reports registered native people inputs and their independent attempts, admissions, failures and coverage. Coverage remains outside selected item fields and visible at zero hits. `partial` is useful evidence, not a complete directory; no physical occurrence count is inferred from distinct display representations.
+
+`--fields` keys: `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+
+### people sync
+
+`m365crawl people sync` registers supported Mac HxStore profiles. `m365crawl people sync --root DIR` registers supported copied `<root>/<profile>/HxStore.hxd` sources on supported hosts. Windows OWA people discovery is not implemented. Automatic reads use registered locators only and respect the five-minute HxStore copy minimum interval; `--max-age 0` neither captures nor creates/repairs an archive. Explicit sync retries. A normal Outlook capture may reuse its already-required copy for registered eligible people without changing healthy calendar/mail covering status.
+
+Partial and failed capture retains native representations and durable contradiction evidence. A cache missing a person is not deletion. Native identity strings outside the qualified syntax remain raw evidence; no email-to-person resolution or subject tenancy is inferred. `people sync/show/sources` reject subject `--account` filtering.
+
+Symlink and special-file source leaves are refused explicitly (`outlook_people_source_unsafe`); use a supported regular copied HxStore file. Unsupported default provider errors (`outlook_people_source_unsupported`) point to `--root`, not archive repair. Reader panics remain failed optional captures with cleanup verification. List coverage is refreshed after same-command legacy/shared capture; native ordering uses full names and numeric IDs before output text truncation.
 
 Use a Teams person's `id` or name with `--from` on Teams commands, and a mail address with `--from` on `mail list`.
 

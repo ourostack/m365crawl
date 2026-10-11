@@ -66,6 +66,7 @@ var teamsHelp = map[string]string{
 	"search --conversation":          "Teams-only: takes a Teams link",
 	"unread --conversation":          "Teams-only: takes a Teams link",
 	"people":                         "names both: Teams senders and members, and Outlook mail correspondents",
+	"people show <id>":               "names both: native observations do not replace existing Teams/mail identity workflows",
 	"search":                         "names both: Teams chats and Outlook mail",
 	"search --source":                "names both: chats (Teams), mail (Outlook) or all",
 	"search --folder":                "names both: mail only, so it leaves Teams chats out",

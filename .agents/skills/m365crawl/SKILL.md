@@ -5,6 +5,8 @@ description: Use when an agent needs to read the user's Microsoft Teams chats an
 
 # m365crawl
 
+Native people evidence: run `m365crawl people sync` once for supported Mac Outlook HxStore profiles, then `m365crawl people --query "name or address"` and `m365crawl people show person-observation:ID`. Use `people sources` to inspect partial/failed coverage. Explicit copied HxStore profile roots work with `people sync --root DIR`; Windows OWA people discovery does not. Native pair claims and profile-owner links do not establish subject tenancy or current contacts; identities are not merged by email, and conflicts stay unresolved. `--account` excludes unqualified native subjects with a notice. `--max-age 0` does not capture. Use exact independently qualified identity/account evidence for further mail/chat queries, never a guessed directory match.
+
 m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, new Outlook cached mail on Mac and Windows, and the Teams calendar plus Outlook calendar on Mac) into one local SQLite archive, and answers from it offline and read-only. It cannot send, reply, react or mark anything read. It knows only what the desktop apps cached, so old history can be missing and counts are not server totals. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
 
 ## Privacy

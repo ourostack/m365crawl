@@ -14,7 +14,8 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // at version 6 gains them, empty, on its next writable open.
 // Version 8 adds native mail identity mappings, conversation ids and nullable recipient roles.
 // Version 9 adds optional indexed notes and their independent source admission history.
-const SchemaVersion = 9
+// Version 10 adds retained native people observations and immutable capture evidence.
+const SchemaVersion = 10
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -188,4 +189,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL

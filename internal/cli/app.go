@@ -68,7 +68,7 @@ type cliApp struct {
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). Teams chats and channels; for Outlook mail use `m365crawl mail list`.\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
-	People        peopleCmd        `cmd:"" help:"List people, newest seen first: Teams senders and members, and Outlook mail senders and recipients (one row per address, id mail:<address>)."`
+	People        peopleGroup      `cmd:"" help:"List Teams and mail people with registered native Outlook observations; inspect unresolved source evidence."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
 	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams and Outlook caches hold the days each app has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook cached mail offline on Mac and Windows: list, show, thread, folders and unread. Every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
@@ -165,7 +165,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
@@ -270,6 +270,8 @@ func commandOf(path string) string {
 		return "calendar" // the agenda is the calendar group's default command
 	case "transcripts list":
 		return "transcripts" // the list is the transcripts group's default command
+	case "people list":
+		return "people"
 	}
 	return name
 }

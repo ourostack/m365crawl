@@ -143,17 +143,35 @@ func (s *Store) CommitNotes(ctx context.Context, attempt KnowledgeAttempt, outco
 }
 
 func (s *Store) finishNotes(ctx context.Context, attempt KnowledgeAttempt, outcome KnowledgeOutcome, result *onenote.Result) error {
+	var admit knowledgeAdmission
+	kind := ""
+	if result != nil {
+		kind = "notes"
+		admit = func(ctx context.Context, tx *sql.Tx, attempt KnowledgeAttempt, outcome KnowledgeOutcome) (int64, string, map[string]int, error) {
+			return admitNotes(ctx, tx, attempt, outcome, *result)
+		}
+	}
+	return s.finishKnowledge(ctx, attempt, outcome, kind, admit)
+}
+
+type knowledgeAdmission func(context.Context, *sql.Tx, KnowledgeAttempt, KnowledgeOutcome) (int64, string, map[string]int, error)
+
+func (s *Store) finishKnowledge(ctx context.Context, attempt KnowledgeAttempt, outcome KnowledgeOutcome, kind string, admit knowledgeAdmission) error {
 	if attempt.ID <= 0 || attempt.LocatorID <= 0 || outcome.At.IsZero() {
 		return errors.New("knowledge: invalid attempt")
 	}
 	stale := false
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var latest, frontier int64
+		var actualKind string
 		var terminal sql.NullString
-		if err := tx.QueryRowContext(ctx, `select l.latest_attempt,coalesce(l.last_admitted,0),a.finished_at
+		if err := tx.QueryRowContext(ctx, `select l.latest_attempt,coalesce(l.last_admitted,0),a.finished_at,l.kind
 from knowledge_locators l join knowledge_attempts a on a.locator_id=l.id where a.id=? and l.id=?`,
-			attempt.ID, attempt.LocatorID).Scan(&latest, &frontier, &terminal); err != nil {
+			attempt.ID, attempt.LocatorID).Scan(&latest, &frontier, &terminal, &actualKind); err != nil {
 			return err
+		}
+		if kind != "" && actualKind != kind {
+			return errors.New("knowledge: source kind mismatch")
 		}
 		if terminal.Valid {
 			stale = true
@@ -166,8 +184,8 @@ from knowledge_locators l join knowledge_attempts a on a.locator_id=l.id where a
 			stale = true
 			coverage = "not_admitted"
 			outcome.Reason = "stale_attempt"
-		} else if result != nil {
-			id, c, l, err := admitNotes(ctx, tx, attempt, outcome, *result)
+		} else if admit != nil {
+			id, c, l, err := admit(ctx, tx, attempt, outcome)
 			switch {
 			case errors.Is(err, ErrStaleKnowledgeAttempt):
 				stale = true
@@ -324,7 +342,11 @@ where l.kind=? order by l.id,s.id`, kind)
 }
 
 func (s *Store) KnowledgeLocators(ctx context.Context, sourceID int64) ([]KnowledgeSource, error) {
-	sources, err := s.KnowledgeSources(ctx, "notes")
+	return s.KnowledgeKindLocators(ctx, "notes", sourceID)
+}
+
+func (s *Store) KnowledgeKindLocators(ctx context.Context, kind string, sourceID int64) ([]KnowledgeSource, error) {
+	sources, err := s.KnowledgeSources(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
