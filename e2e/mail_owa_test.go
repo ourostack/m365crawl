@@ -6,16 +6,51 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+func TestCopyOWAFixtureReturnsCanonicalCreatedRoot(t *testing.T) {
+	check := func(t *testing.T) {
+		t.Helper()
+		root := copyOWAFixture(t, "mail")
+		canonical, err := filepath.EvalSymlinks(root)
+		if err != nil || root != canonical {
+			t.Fatal("created_fixture_root_not_canonical")
+		}
+		info, err := os.Stat(filepath.Join(root, "Default"))
+		if err != nil || !info.IsDir() {
+			t.Fatal("created_fixture_profile_missing")
+		}
+	}
+	t.Run("default-temp", check)
+	if runtime.GOOS == "windows" {
+		return // Creating a symlink is not required or privilege-enabled by this test.
+	}
+	t.Run("aliased-temp", func(t *testing.T) {
+		target, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal("test_temp_canonicalization_failed")
+		}
+		link := filepath.Join(t.TempDir(), "alias")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal("test_temp_alias_failed")
+		}
+		t.Setenv("TMPDIR", link)
+		check(t)
+	})
+}
+
 func copyOWAFixture(t *testing.T, variant string) string {
 	t.Helper()
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("created_fixture_root_canonicalization_failed")
+	}
 	src := filepath.Join("..", "testdata", "outlook-owa-fixture", variant)
 	dst := filepath.Join(root, "Default")
-	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+	err = filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
