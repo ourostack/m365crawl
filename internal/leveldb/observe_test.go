@@ -1,9 +1,13 @@
 package leveldb
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -66,14 +70,38 @@ func TestLoadObserveNilIsPlain(t *testing.T) {
 // EntryOverhead matches the measured live heap per retained entry.
 func TestEntryOverheadCalibrated(t *testing.T) {
 	const n = 50000
+	const fixtureEnv = "M365CRAWL_LEVELDB_CALIBRATION_FIXTURE"
+	if os.Getenv(fixtureEnv) == "1" {
+		dir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		d := mustLoad(t, dir)
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		runtime.KeepAlive(d)
+		if d.Stats().Keys != n {
+			t.Fatalf("keys %d", d.Stats().Keys)
+		}
+		const payload = n * (23 + 37)
+		per := (float64(after.HeapAlloc) - float64(before.HeapAlloc) - payload) / n
+		t.Logf("measured %.1f overhead bytes per entry; EntryOverhead = %d", per, EntryOverhead)
+		// Under-estimating is the dangerous direction: allow no more than 5% below the measurement
+		// and up to 50% above it.
+		if lo, hi := per*0.95, per*1.5; float64(EntryOverhead) < lo || float64(EntryOverhead) > hi {
+			t.Errorf("EntryOverhead = %d, measured %.1f per entry (allowed %.1f to %.1f)", EntryOverhead, per, lo, hi)
+		}
+		return
+	}
 	dir := t.TempDir()
 	db := openGL(t, dir)
-	payload := 0
 	for i := 0; i < n; i++ {
 		// Odd lengths (23 and 37 bytes) so allocator size-class rounding is in the measurement.
 		k := fmt.Sprintf("key-%019d", i)
 		v := fmt.Sprintf("val-%033d", i)
-		payload += len(k) + len(v)
 		if err := db.Put([]byte(k), []byte(v), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -81,24 +109,30 @@ func TestEntryOverheadCalibrated(t *testing.T) {
 	if err := db.CompactRange(util.Range{}); err != nil {
 		t.Fatal(err)
 	}
-	_ = db.Close()
-
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	d := mustLoad(t, dir)
-	runtime.GC()
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(d)
-	if d.Stats().Keys != n {
-		t.Fatalf("keys %d", d.Stats().Keys)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
-	per := (float64(after.HeapAlloc) - float64(before.HeapAlloc) - float64(payload)) / n
-	t.Logf("measured %.1f overhead bytes per entry; EntryOverhead = %d", per, EntryOverhead)
-	// Under-estimating is the dangerous direction: allow no more than 5% below the measurement
-	// and up to 50% above it.
-	if lo, hi := per*0.95, per*1.5; float64(EntryOverhead) < lo || float64(EntryOverhead) > hi {
-		t.Errorf("EntryOverhead = %d, measured %.1f per entry (allowed %.1f to %.1f)", EntryOverhead, per, lo, hi)
+	budget := 30 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)-time.Second)
+	}
+	if budget <= 0 {
+		t.Fatal("no time remains for isolated calibration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture creation and earlier tests can retain heap across the measurement's first GC.
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestEntryOverheadCalibrated$", "-test.v", "-test.timeout="+budget.String()) //nolint:gosec // G204: only this test executable, a literal selector and bounded timeout.
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), fixtureEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	t.Logf("%s", output)
+	if err != nil {
+		t.Fatalf("isolated calibration failed: %v", err)
 	}
 }
 
