@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/outlookowa"
@@ -47,7 +48,23 @@ func TestLegacyOutlookCreatedRootsPreservePathStates(t *testing.T) {
 				t.Fatal("owned_temp_alias_setup_failed")
 			}
 			t.Setenv("TMPDIR", link)
-			check(t)
+			t.Setenv("GOTMPDIR", "")
+			t.Run("helper-path-states", func(t *testing.T) {
+				raw := t.TempDir()
+				rel, err := filepath.Rel(link, raw)
+				if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					t.Fatal("fresh_temp_did_not_use_owned_alias")
+				}
+				canonical, err := filepath.EvalSymlinks(raw)
+				if err != nil || canonical == raw {
+					t.Fatal("fresh_temp_alias_not_observed")
+				}
+				rel, err = filepath.Rel(target, canonical)
+				if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					t.Fatal("fresh_temp_outside_owned_target")
+				}
+				check(t)
+			})
 			for _, tc := range []struct {
 				name string
 				run  func(*testing.T)
