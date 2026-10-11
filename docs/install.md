@@ -68,7 +68,7 @@ m365crawl.exe sync
 m365crawl.exe
 ```
 
-Windows needs no extra permission step. On Windows, m365crawl reads Teams chats and the Teams calendar. Outlook mail on Windows is coming next; until then every `mail` command returns the error `mail_unsupported_platform`, which names a command that works.
+Windows needs no extra permission step. On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's cached mail under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. The `mail` commands, `search --source mail`, overview, status and doctor work with that cache. OWA calendar is not read in this release; see [the Windows mail source differences](outlook-store.md#windows-owa-cached-mail) for cache limits and unavailable fields.
 
 ## Where m365crawl keeps its data
 
