@@ -70,6 +70,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.listTable(r)
 		rt.renderNoteDetails(r)
 		rt.renderPeopleDetails(r)
+		if err := rt.renderDocumentDetails(r); err != nil {
+			return err
+		}
 		_, _ = fmt.Fprintln(w)
 		rt.renderNoteCoverage(r.SourceCoverage)
 		if r.CoverageGap != nil && *r.CoverageGap {
@@ -103,6 +106,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		name := "notes"
 		if label == "people sync" {
 			name = "people"
+		}
+		if label == "docs sync" {
+			name = "documents"
 		}
 		_, _ = fmt.Fprintf(w, "%s: %d captured, %d unchanged, %d skipped, %d failed\n", name, r.Captured, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderNoteCoverage(r.SourceCoverage)
@@ -310,6 +316,15 @@ func (rt *runtime) listTable(r *listResult) {
 		case noteItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), oneLine(x.Text)})
+		case documentItem:
+			cols, textCol = []string{"modified_at", "source", "id", "application", "surface", "title", "text_state"}, 5
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, string(x.Surface), oneLine(x.Title), x.TextState})
+		case documentDetailItem:
+			cols, textCol = []string{"modified_at", "source", "id", "title", "text_state"}, 3
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.TextState})
+		case searchDocumentItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
 		case searchNoteItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "notes show " + x.ID, oneLine(x.Text)})

@@ -52,8 +52,19 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "notes sync",
 			Title: command + " (notes show needs an actual note:ID; notes search needs actual words)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people"}}
+	for _, command := range []string{"docs sync", "docs list", "docs search", "docs show", "docs sources"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "docs search":
+			argv = append(argv, "<words>")
+		case "docs show":
+			argv = append(argv, "<document-observation-id>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "docs sync",
+			Title: command + " (local metadata only; show needs document-observation:ID; no document opened or fetched)"}
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents"}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata"}}
 	return m
 }
 

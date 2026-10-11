@@ -224,7 +224,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 type searchCmd struct {
 	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
-	Source         string `default:"all" enum:"chats,mail,transcripts,notes,all" help:"What to search: chats (Teams), mail (Outlook), fetched transcripts, indexed notes or all (the default)."`
+	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata or all."`
 	Folder         string `help:"Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also search deleted messages (Teams chats only)."`
 	MentionsMe     bool   `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only."`
@@ -255,6 +255,9 @@ func (c *searchCmd) Run(rt *runtime) error {
 	if c.Source == searchNotes && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("notes search requires words or --since/--until; use notes list for an unfiltered list")
 	}
+	if c.Source == searchDocuments && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
+		return errs.Usage("document search needs words or --since/--until; use docs list for an unfiltered list")
+	}
 	f, err := rt.filter(c.msgFlags)
 	if err != nil {
 		return err
@@ -269,7 +272,23 @@ func (c *searchCmd) Run(rt *runtime) error {
 		}
 		rt.noteCoverage = coverage
 	}
+	if p.indexedDocuments && (p.chats || p.mail || p.transcripts) {
+		coverage, err := rt.refreshDocuments(0)
+		if err != nil {
+			return documentError(err)
+		}
+		rt.documentCoverage = coverage
+	}
 	if !p.chats && !p.mail && !p.transcripts {
+		if p.indexedDocuments {
+			return rt.documentsRead("search", 0, func(st *store.Store) (*listResult, error) {
+				res, err := c.search(rt, p, f, st)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*listResult), nil
+			})
+		}
 		return rt.notesRead("search", 0, func(st *store.Store) (*listResult, error) {
 			res, err := c.search(rt, p, f, st)
 			if err != nil {

@@ -30,11 +30,17 @@ const (
 	searchMail        = "mail"
 	searchTranscripts = "transcripts"
 	searchNotes       = "notes"
+	searchDocuments   = "documents"
 )
 
 type searchNoteItem struct {
 	Source string `json:"source"`
 	noteItem
+}
+
+type searchDocumentItem struct {
+	Source string `json:"source"`
+	documentItem
 }
 
 // searchChatItem is a Teams message in a search result: the message as every Teams command prints
@@ -112,6 +118,7 @@ type searchSources struct {
 	Mail        *sourceCount `json:"mail,omitempty"`
 	Transcripts *sourceCount `json:"transcripts,omitempty"`
 	Notes       *sourceCount `json:"notes,omitempty"`
+	Documents   *sourceCount `json:"documents,omitempty"`
 }
 
 func searchNZ(s string) *string {
@@ -173,6 +180,11 @@ func searchKeys() []string {
 		if !slices.Contains(keys, k) {
 			keys = append(keys, k)
 		}
+		for _, key := range typeKeys[documentItem]() {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
 	}
 	return keys
 }
@@ -181,8 +193,10 @@ func searchKeys() []string {
 type searchPlan struct {
 	chats, mail, transcripts bool
 	indexedNotes             bool
+	indexedDocuments         bool
 	notes                    []string
 	noteExclusion            string
+	documentExclusion        string
 }
 
 // chatOnlyFlags names the flags that only Teams chats understand, in the order the help lists them.
@@ -232,6 +246,13 @@ func sourceConflict(msg string) error {
 func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	p := searchPlan{chats: true, mail: true, transcripts: true}
 	chatFlags := c.chatOnlyFlags()
+	if c.Source == searchDocuments {
+		if len(chatFlags) > 0 || c.Folder != "" || c.From != "" || rt.g.Account != "" ||
+			rt.g.OutlookAccount != "" || rt.g.OutlookProfile != "" {
+			return p, sourceConflict("--source documents cannot use account/author, chat-only or mail-only filters")
+		}
+		return searchPlan{indexedDocuments: true}, nil
+	}
 	if c.Source == searchNotes {
 		if len(chatFlags) > 0 || c.Folder != "" || c.From != "" || rt.g.Account != "" {
 			return p, sourceConflict("--source notes cannot use account, author, chat-only or mail-only filters")
@@ -293,6 +314,12 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 			p.indexedNotes = true
 		} else {
 			p.noteExclusion = "indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership"
+		}
+		if len(chatFlags) == 0 && c.Folder == "" && rt.g.Account == "" && c.From == "" &&
+			rt.g.OutlookAccount == "" && rt.g.OutlookProfile == "" {
+			p.indexedDocuments = true
+		} else {
+			p.documentExclusion = "document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents"
 		}
 	}
 	return p, nil
@@ -397,11 +424,29 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			hits = append(hits, searchHit{at: at, item: searchNoteItem{Source: searchNotes, noteItem: noteItemOf(row, rt.g.MaxText)}, source: searchNotes})
 		}
 	}
+	documentTruncated := false
+	if p.indexedDocuments && st != nil {
+		rows, truncated, err := st.DocumentObservations(rt.ctx, store.DocumentFilter{Query: c.Query,
+			ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
+		if err != nil {
+			return nil, err
+		}
+		documentTruncated = truncated
+		for _, row := range rows {
+			hits = append(hits, searchHit{at: row.Document.Modified.Value, item: searchDocumentItem{
+				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText)}, source: searchDocuments})
+		}
+		coverage, err := currentDocumentsCoverage(rt, st)
+		if err != nil {
+			return nil, err
+		}
+		rt.documentCoverage = coverage
+	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].at.After(hits[j].at) })
-	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated}
+	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated, searchDocuments: documentTruncated}
 	// The chats' total is the result's only while no other source gave or held back an item.
-	chatTotalIsAll := !p.indexedNotes && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
-	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated
+	chatTotalIsAll := !p.indexedNotes && !p.indexedDocuments && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
+	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated || documentTruncated
 	if len(hits) > f.Limit {
 		truncated = true
 		for _, h := range hits[f.Limit:] {
@@ -419,6 +464,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.noteExclusion != "" {
 		res.addNotice(p.noteExclusion)
 	}
+	if p.documentExclusion != "" {
+		res.addNotice(p.documentExclusion)
+	}
 	res.Sources = &searchSources{}
 	if p.chats {
 		res.Sources.Chats = &sourceCount{Count: count[searchChats], Truncated: trunc[searchChats]}
@@ -433,6 +481,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		res.Sources.Notes = &sourceCount{Count: count[searchNotes], Truncated: trunc[searchNotes]}
 		res.SourceCoverage = rt.noteCoverage
 	}
+	if p.indexedDocuments {
+		res.Sources.Documents = &sourceCount{Count: count[searchDocuments], Truncated: trunc[searchDocuments]}
+		res.SourceCoverage = mergedOptionalCoverage(res.SourceCoverage, rt.documentCoverage)
+	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)
 	}
@@ -446,6 +498,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if p.indexedNotes && rt.noteCoverage != nil && len(rt.noteCoverage.Sources) > 0 {
 			notes = append(notes, "no indexed note matched; source_coverage describes captured input")
+		}
+		if p.indexedDocuments && (c.Source == searchDocuments ||
+			(rt.documentCoverage != nil && len(rt.documentCoverage.Sources) > 0)) {
+			notes = append(notes, "no document metadata matched; inspect docs sources or register with docs sync")
 		}
 	}
 	res.Note = strings.Join(notes, "; ")

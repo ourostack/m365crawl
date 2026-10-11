@@ -20,6 +20,59 @@
       ],
       "json": true
     },
+    "docs list": {
+      "title": "docs list (local metadata only; show needs document-observation:ID; no document opened or fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "docs",
+        "list"
+      ],
+      "json": true
+    },
+    "docs search": {
+      "title": "docs search (local metadata only; show needs document-observation:ID; no document opened or fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "docs",
+        "search",
+        "\u003cwords\u003e"
+      ],
+      "json": true
+    },
+    "docs show": {
+      "title": "docs show (local metadata only; show needs document-observation:ID; no document opened or fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "docs",
+        "show",
+        "\u003cdocument-observation-id\u003e"
+      ],
+      "json": true
+    },
+    "docs sources": {
+      "title": "docs sources (local metadata only; show needs document-observation:ID; no document opened or fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "docs",
+        "sources"
+      ],
+      "json": true
+    },
+    "docs sync": {
+      "title": "docs sync (local metadata only; show needs document-observation:ID; no document opened or fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "docs",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "doctor": {
       "argv": [
         "m365crawl",
@@ -236,7 +289,8 @@
     "mail",
     "calendar",
     "transcripts",
-    "notes"
+    "notes",
+    "documents"
   ],
   "privacy": {
     "contains_private_messages": true,
@@ -245,7 +299,8 @@
       "teams_cache",
       "outlook_store",
       "onenote_index",
-      "outlook_people"
+      "outlook_people",
+      "office_json_metadata"
     ]
   }
 }

@@ -27,6 +27,8 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 | What's in the archive and how fresh is it? | `m365crawl` |
 | Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
 | Read the note and check its coverage | `m365crawl notes show note:ID` · `m365crawl notes sources` |
+| Find the document mentioned in that work | `m365crawl docs sync` once, then shared `search` or `docs search "words"` |
+| Inspect the document claim, not a guessed file | `m365crawl docs show document-observation:ID` · `m365crawl docs sources` |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
 
 ## Give your agent the context, not another inbox
@@ -58,12 +60,18 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the name, inspect the claims, and keep uncertainty visible. These are synthetic observations, not private contacts or a directory export.*
 
+**Document evidence, without opening the document.** `docs sync` captures available Mac Office recent/shared/recommended/dialog metadata; shared search then connects native titles, URLs and sharing/person claims to the conversation. Follow `document-observation:ID` with `docs show` and inspect `docs sources` for losses, failed inputs and retained claims. Explicit ordinary local JSON copies use `docs sync --root DIR`; provider/placeholder and linked inputs are refused. Metadata is not document text, a resolved file identity, current sharing or proof of local residency. Native URLs and friendly paths are never opened or hydrated, and identical sharing claims are not counted as new events. Start from `docs --help`: the embedded guide adds workflow strategy, not missing command contracts.
+
+<p align="center"><img src="docs/document-observations.png" alt="Actual synthetic CLI output: recent and shared document observations, stable detail IDs, unresolved identity, uncaptured text and independent source coverage" width="1000"></p>
+
+*Find the claim, inspect the source, and leave unresolved links unresolved. This is actual output from synthetic metadata, not private documents or a library export.*
+
 **Planned expansion, not shipped support:**
 
 | Area | Direction | What still needs proving |
 | --- | --- | --- |
 | People resolution and meetings | Qualify subject-scoped identity links and read fuller attendee lists | Positive subject tenancy, current-copy ambiguity, source coverage and platform-specific mappings |
-| Office and OneDrive | Join recent documents, sharing activity and library metadata to people and conversations | Changing cache layouts, link resolution and Windows data sources; metadata is not document text |
+| Office and OneDrive | Resolve file/library associations and add separately qualified local document text | Provider/residency evidence, ambiguous identities and Windows-specific sources; metadata alone is not file or text access |
 | More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
 | Archived bot citations and Loop | Expose citations in archived bot replies and version-qualified cached Loop content | Preserve Teams provenance, snapshot versions and partial coverage; this is not private Copilot history |
 | Browser-backed content | Read cloud document text, Stream transcripts, SharePoint pages and News, and used Engage surfaces | A tested read path and archive integration for each service; transcript fetching does not prove another service works |
