@@ -39,6 +39,7 @@ var (
 	exitProcess   = os.Exit
 	closeProfile  = (*os.File).Close
 	coverageScope = nativeScope
+	sdkNumberInt  = strconv.Atoi
 )
 
 func goExe() string {
@@ -187,11 +188,12 @@ func sourceBlocks(path string) ([]block, error) {
 					metadataErr = fmt.Errorf("invalid SDK block number: %w", err)
 					return false
 				}
-				if n > uint64(^uint(0)>>1) {
+				number, err := sdkNumberInt(strconv.FormatUint(n, 10))
+				if err != nil {
 					metadataErr = errors.New("invalid SDK block number: exceeds platform int")
 					return false
 				}
-				nums = append(nums, int(n))
+				nums = append(nums, number)
 			}
 			switch key.Name {
 			case "Pos":

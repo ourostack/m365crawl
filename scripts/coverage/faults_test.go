@@ -19,7 +19,7 @@ func TestSDKMetadataNumbersRespectPlatformIntBounds(t *testing.T) {
 	t.Cleanup(func() { commandOutput, parseSource = oldOutput, oldParse })
 	commandOutput = func(*exec.Cmd) ([]byte, error) { return nil, nil }
 	for _, field := range []string{"Pos", "NumStmt"} {
-		for _, literal := range []string{"2147483647", "2147483648", "4294967295", "4294967296", "-1"} {
+		for _, literal := range []string{"2147483647", "2147483648", "4294967295", "0xffffffff", "037777777777", "0b11111111111111111111111111111111", "4294967296", "-1"} {
 			t.Run(field+"/"+literal, func(t *testing.T) {
 				pos, weight := "1, 2, 65537", "1"
 				if field == "Pos" {
@@ -27,6 +27,7 @@ func TestSDKMetadataNumbersRespectPlatformIntBounds(t *testing.T) {
 				} else {
 					weight = literal
 				}
+
 				text := "package p\nvar CoverageProof = struct{Pos []uint32; NumStmt []uint32}{Pos: []uint32{" + pos + "}, NumStmt: []uint32{" + weight + "}}"
 				parseSource = func(fset *token.FileSet, name string, src any, mode parser.Mode) (*ast.File, error) {
 					return parser.ParseFile(fset, name, text, mode)
@@ -52,6 +53,25 @@ func TestSDKMetadataNumbersRespectPlatformIntBounds(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSDKMetadataNativeIntParserRefusalIsNotPartialInventory(t *testing.T) {
+	oldOutput, oldParse, oldInt := commandOutput, parseSource, sdkNumberInt
+	t.Cleanup(func() { commandOutput, parseSource, sdkNumberInt = oldOutput, oldParse, oldInt })
+	commandOutput = func(*exec.Cmd) ([]byte, error) { return nil, nil }
+	text := "package p\nvar CoverageProof = struct{Pos []uint32; NumStmt []uint32}{Pos: []uint32{1,2,65537}, NumStmt: []uint32{0x80000000}}"
+	parseSource = func(fset *token.FileSet, name string, src any, mode parser.Mode) (*ast.File, error) {
+		return parser.ParseFile(fset, name, text, mode)
+	}
+	sdkNumberInt = func(s string) (int, error) {
+		if _, err := strconv.ParseInt(s, 10, 32); err != nil {
+			return 0, err
+		}
+		return strconv.Atoi(s)
+	}
+	if blocks, err := sourceBlocks("synthetic.go"); err == nil || len(blocks) != 0 || err.Error() != "invalid SDK block number: exceeds platform int" {
+		t.Fatal("native int parsing refusal was ignored")
 	}
 }
 
