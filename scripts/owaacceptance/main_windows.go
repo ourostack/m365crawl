@@ -20,6 +20,90 @@ import (
 
 var errTimeout = errors.New("acceptance_timeout")
 
+var (
+	startupOpenProcess  = windows.OpenProcess
+	startupAssignJob    = windows.AssignProcessToJobObject
+	startupKillProcess  = (*os.Process).Kill
+	startupBeforeResume = (*qualifiedRun).beforeResume
+	startupResumeLeader = resumeLeader
+	startupStopJob      = stopJobUntil
+	startupTerminate    = windows.TerminateProcess
+	startupWait         = windows.WaitForSingleObject
+)
+
+// The started process is either reaped after a held-handle signal, or released without an unbounded waiter.
+func finishStartup(cmd *exec.Cmd, job, leader windows.Handle, assigned bool, deadline time.Time) (released bool, result error) {
+	jobReleased := !assigned
+	if assigned {
+		if err := startupStopJob(job, deadline); err != nil {
+			result = err
+		} else {
+			jobReleased = true
+		}
+	}
+	if !jobReleased || !assigned {
+		if leader != 0 {
+			if err := startupTerminate(leader, 1); err != nil {
+				result = errors.Join(result, errors.New("startup_leader_termination_failed"))
+			}
+		} else if err := startupKillProcess(cmd.Process); err != nil {
+			result = errors.Join(result, errors.New("startup_leader_kill_failed"))
+		}
+	}
+	if leader == 0 {
+		return false, errors.Join(result, releaseUnreaped(cmd), errors.New("startup_leader_signal_unverified"))
+	}
+	state, err := startupWait(leader, 0)
+	if err == nil && state == uint32(windows.WAIT_TIMEOUT) {
+		if remaining := time.Until(deadline); remaining > 0 {
+			millis := remaining.Milliseconds() + 1
+			if millis < 1 || millis > 5001 {
+				return false, errors.Join(result, releaseUnreaped(cmd), errors.New("startup_wait_budget_refused"))
+			}
+			state, err = startupWait(leader, uint32(millis))
+		}
+	}
+	if err != nil || state != windows.WAIT_OBJECT_0 {
+		return false, errors.Join(result, releaseUnreaped(cmd), errors.New("startup_leader_signal_unverified"))
+	}
+	var exitErr *exec.ExitError
+	if err := cmd.Wait(); err != nil && !errors.As(err, &exitErr) {
+		return false, errors.Join(result, errors.New("startup_leader_reap_failed"))
+	}
+	return jobReleased, result
+}
+
+func releaseUnreaped(cmd *exec.Cmd) error {
+	if err := cmd.Process.Release(); err != nil {
+		return errors.New("startup_process_release_failed")
+	}
+	return nil
+}
+
+func (w *workspace) recordStarted(pid uint32) error {
+	if w.qualification == nil {
+		return nil
+	}
+	q := w.qualification
+	child, identityErr := protocol.ProcessIdentity(pid)
+	record := struct {
+		Version       int              `json:"version"`
+		Nonce         string           `json:"nonce"`
+		PID           uint32           `json:"pid"`
+		Child         protocol.Process `json:"child"`
+		IdentityKnown bool             `json:"identity_known"`
+	}{protocol.Version, q.owner.Nonce, pid, child, identityErr == nil}
+	data, err := protocol.Encode(record)
+	id, nativeErr := protocol.NativeIdentity(q.receipt, true)
+	if err != nil || nativeErr != nil || id != q.receiptNative || protocol.WriteProtectedNew(filepath.Join(q.receipt, "started.json"), data) != nil {
+		return errors.New("startup_record_failed")
+	}
+	if identityErr != nil {
+		return errors.New("startup_child_identity_unverified")
+	}
+	return nil
+}
+
 type workspace struct {
 	dir           string
 	id            [3]uint32
@@ -80,6 +164,7 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	if err := w.check(); err != nil {
 		return exit, err
 	}
+	runDeadline := time.Now().Add(timeout)
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return exit, errors.New("job_create_failed")
@@ -117,24 +202,25 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 	cmd.Env = workspaceEnv(env, w.dir)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
+	startupDeadline := time.Now().Add(5 * time.Second)
+	if runDeadline.Before(startupDeadline) {
+		startupDeadline = runDeadline
+	}
 	if err := cmd.Start(); err != nil {
 		return exit, errors.New("test_start_failed")
 	}
 	consumersReleased = false
 	if cmd.Process.Pid <= 0 || int64(cmd.Process.Pid) > 0xffffffff {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		consumersReleased = cmd.ProcessState != nil && cmd.ProcessState.Exited()
-		return exit, errors.New("leader_pid_refused")
+		_, stopErr := finishStartup(cmd, job, 0, false, startupDeadline)
+		return exit, errors.Join(errors.New("leader_pid_refused"), stopErr)
 	}
 	pid := uint32(cmd.Process.Pid)
+	recordErr := w.recordStarted(pid)
 	// The leader is suspended: no cache read or descendant creation can precede job ownership.
-	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, pid)
+	h, err := startupOpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, pid)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		consumersReleased = cmd.ProcessState != nil && cmd.ProcessState.Exited()
-		return exit, errors.New("leader_handle_failed")
+		_, stopErr := finishStartup(cmd, job, 0, false, startupDeadline)
+		return exit, errors.Join(recordErr, errors.New("leader_handle_failed"), stopErr)
 	}
 	defer func() {
 		if err := windows.CloseHandle(h); err != nil {
@@ -144,38 +230,37 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 			result = errors.Join(result, errors.New("leader_handle_close_failed"))
 		}
 	}()
-	if err := windows.AssignProcessToJobObject(job, h); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		consumersReleased = cmd.ProcessState != nil && cmd.ProcessState.Exited()
-		return exit, errors.New("job_assignment_failed")
+	if recordErr != nil {
+		var stopErr error
+		consumersReleased, stopErr = finishStartup(cmd, job, h, false, startupDeadline)
+		return exit, errors.Join(recordErr, stopErr)
+	}
+	if err := startupAssignJob(job, h); err != nil {
+		var stopErr error
+		consumersReleased, stopErr = finishStartup(cmd, job, h, false, startupDeadline)
+		return exit, errors.Join(errors.New("job_assignment_failed"), stopErr)
 	}
 	if w.qualification != nil {
-		if err := w.qualification.beforeResume(pid); err != nil {
-			stopErr := stopJob(job)
-			_ = cmd.Wait()
-			if stopErr == nil {
-				consumersReleased = true
+		if err := startupBeforeResume(w.qualification, pid); err != nil {
+			var stopErr error
+			consumersReleased, stopErr = finishStartup(cmd, job, h, true, startupDeadline)
+			if consumersReleased {
 				w.qualification.nativeCloseVerified = true
 			}
 			return exit, errors.Join(err, stopErr)
 		}
 	}
-	if err := resumeLeader(pid); err != nil {
-		stopErr := stopJob(job)
-		_ = cmd.Wait()
-		if stopErr != nil {
-			return exit, stopErr
-		}
-		consumersReleased = true
-		if w.qualification != nil {
+	if err := startupResumeLeader(pid); err != nil {
+		var stopErr error
+		consumersReleased, stopErr = finishStartup(cmd, job, h, true, startupDeadline)
+		if w.qualification != nil && consumersReleased {
 			w.qualification.nativeCloseVerified = true
 		}
-		return exit, err
+		return exit, errors.Join(err, stopErr)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timer := time.NewTimer(timeout)
+	timer := time.NewTimer(time.Until(runDeadline))
 	defer timer.Stop()
 	select {
 	case err := <-done:
@@ -553,8 +638,7 @@ type jobAccounting struct {
 	pageFaults, total, active, terminated            uint32
 }
 
-func waitEmpty(job windows.Handle) error {
-	deadline := time.Now().Add(5 * time.Second)
+func waitEmptyUntil(job windows.Handle, deadline time.Time) error {
 	for {
 		var accounting jobAccounting
 		// #nosec G103 -- Fixed winnt.h accounting layout; buffer length is checked by the native API.
@@ -572,6 +656,10 @@ func waitEmpty(job windows.Handle) error {
 }
 
 func stopJob(job windows.Handle) (result error) {
+	return stopJobUntil(job, time.Now().Add(5*time.Second))
+}
+
+func stopJobUntil(job windows.Handle, deadline time.Time) (result error) {
 	if err := sealJob(job); err != nil {
 		return err
 	}
@@ -608,7 +696,6 @@ func stopJob(job windows.Handle) (result error) {
 	if err := windows.TerminateJobObject(job, 1); err != nil {
 		return errors.New("job_termination_failed")
 	}
-	deadline := time.Now().Add(5 * time.Second)
 	for _, handle := range handles {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -623,7 +710,7 @@ func stopJob(job windows.Handle) (result error) {
 			return errors.New("job_process_wait_failed")
 		}
 	}
-	return waitEmpty(job)
+	return waitEmptyUntil(job, deadline)
 }
 
 func sealJob(job windows.Handle) error {
