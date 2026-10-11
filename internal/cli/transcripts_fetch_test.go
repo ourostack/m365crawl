@@ -670,6 +670,18 @@ func TestSigninInterruptedAtThePrompt(t *testing.T) {
 	}
 }
 
+func TestWaitForHostCancelledContextReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	page := newTrPage()
+	if err := waitForHost(ctx, page, trHost); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled sign-in wait returned %v", err)
+	}
+	if page.nPaths != 0 || page.nProbes != 0 {
+		t.Fatal("cancelled wait continued page or service queries")
+	}
+}
+
 var errHang = errors.New("hang")
 
 func TestSigninWindowClosed(t *testing.T) {
