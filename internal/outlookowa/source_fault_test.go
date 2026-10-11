@@ -201,3 +201,126 @@ func TestValidateRegularLeafAndNonregularAncestor(t *testing.T) {
 		t.Fatal("nondirectory ancestor accepted")
 	}
 }
+
+func TestDiscoverLateSourceFailures(t *testing.T) {
+	for _, where := range []string{"indexeddb-enumeration", "matched-origin-validation"} {
+		t.Run(where, func(t *testing.T) {
+			restoreSourceIO(t)
+			root := sourceTempDir(t)
+			p := fixtureProfile(t, root, "Default", "mail", false)
+			if err := ValidateSource(p.Source); err != nil {
+				t.Fatal("synthetic_source_prevalidation_failed")
+			}
+			idb := filepath.Join(p.Dir, "IndexedDB")
+			read, stat := sourceReadDir, sourceLstat
+			idbStats, faults := 0, 0
+			enumerated := false
+			sourceLstat = func(path string) (os.FileInfo, error) {
+				if path == idb {
+					idbStats++
+				}
+				if where == "matched-origin-validation" && path == p.Source.LevelDBDir {
+					if !enumerated || idbStats < 2 {
+						t.Fatal("origin_fault_before_indexeddb_validation")
+					}
+					faults++
+					return nil, &fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: fs.ErrPermission}
+				}
+				return stat(path)
+			}
+			sourceReadDir = func(path string) ([]os.DirEntry, error) {
+				if path == idb {
+					if idbStats < 2 {
+						t.Fatal("enumeration_fault_before_indexeddb_validation")
+					}
+					enumerated = true
+					if where == "indexeddb-enumeration" {
+						faults++
+						return nil, &fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: fs.ErrPermission}
+					}
+				}
+				return read(path)
+			}
+			found, refused, err := Discover(root)
+			if faults != 1 || !enumerated || err != nil || len(found) != 0 || len(refused) != 1 {
+				t.Fatal("late_discovery_fault_returned_partial_or_success")
+			}
+			wantReason, wantError := "unsafe_source", "outlookowa: source_unreadable"
+			if where == "indexeddb-enumeration" {
+				wantReason, wantError = "unreadable", "outlookowa: profile_unreadable"
+			}
+			if refused[0].Reason != wantReason || refused[0].Err.Error() != wantError || !errors.Is(refused[0].Err, fs.ErrPermission) {
+				t.Fatal("late_discovery_fault_not_fixed_and_preserved")
+			}
+			sourceReadDir, sourceLstat = read, stat
+			found, refused, err = Discover(root)
+			if err != nil || len(found) != 1 || len(refused) != 0 || found[0].Source != p.Source {
+				t.Fatal("restored_discovery_could_not_retry")
+			}
+		})
+	}
+}
+
+type lateUnsafeInfo struct{ fs.FileInfo }
+
+func (i lateUnsafeInfo) Mode() fs.FileMode { return i.FileInfo.Mode() | fs.ModeSymlink }
+
+func TestFingerprintLateMetadataFailures(t *testing.T) {
+	for _, where := range []string{"entry-info-error", "unsafe-entry"} {
+		t.Run(where, func(t *testing.T) {
+			restoreSourceIO(t)
+			p := fixtureProfile(t, sourceTempDir(t), "Default", "mail", false)
+			wantFP, wantFresh, err := Fingerprint(p)
+			if err != nil || wantFP == "" || wantFresh.IsZero() {
+				t.Fatal("synthetic_native_metadata_preflight_failed")
+			}
+			walk, info := sourceWalkDir, sourceEntryInfo
+			walks, faults := 0, 0
+			validationFinished := false
+			sourceWalkDir = func(path string, fn fs.WalkDirFunc) error {
+				walks++
+				err := walk(path, fn)
+				if walks == 1 {
+					if err != nil {
+						t.Fatal("synthetic_validation_failed_before_fault")
+					}
+					validationFinished = true
+				}
+				return err
+			}
+			sourceEntryInfo = func(e fs.DirEntry) (fs.FileInfo, error) {
+				fi, err := info(e)
+				if err != nil {
+					t.Fatal("synthetic_native_entry_info_failed")
+				}
+				if validationFinished && e.Name() == "CURRENT" {
+					if walks != 2 {
+						t.Fatal("metadata_fault_not_in_fingerprint_walk")
+					}
+					faults++
+					if where == "entry-info-error" {
+						return nil, &fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: fs.ErrPermission}
+					}
+					// Preserve the real native Sys metadata; only the late entry's link mode changes.
+					return lateUnsafeInfo{fi}, nil
+				}
+				return fi, nil
+			}
+			fp, fresh, err := Fingerprint(p)
+			wantError := "outlookowa: unsafe_source"
+			if where == "entry-info-error" {
+				wantError = "outlookowa: source_unreadable"
+			}
+			if !validationFinished || walks != 2 || faults != 1 || err == nil || err.Error() != wantError || fp != "" || !fresh.IsZero() {
+				t.Fatal("late_metadata_fault_returned_partial_or_wrong_phase")
+			}
+			if where == "entry-info-error" && !errors.Is(err, fs.ErrPermission) {
+				t.Fatal("late_metadata_error_cause_lost")
+			}
+			sourceWalkDir, sourceEntryInfo = walk, info
+			if fp, fresh, err := Fingerprint(p); err != nil || fp != wantFP || !fresh.Equal(wantFresh) {
+				t.Fatal("restored_native_metadata_could_not_retry")
+			}
+		})
+	}
+}

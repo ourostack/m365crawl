@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,38 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/store"
 )
+
+func TestDoctorNativeResolvedOptionalAbsence(t *testing.T) {
+	parent := createdOWARoot(t)
+	missing := filepath.Join(parent, "missing")
+	for _, tc := range []struct {
+		name     string
+		optional bool
+		root     string
+		cause    error
+		warn     bool
+	}{
+		{"optional-resolved-missing", true, missing, fs.ErrNotExist, false},
+		{"explicit-resolved-missing", false, missing, fs.ErrNotExist, true},
+		{"optional-unresolved-missing", true, "", fs.ErrNotExist, true},
+		{"optional-resolved-unreadable", true, missing, fs.ErrPermission, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &runtime{outlookDefault: tc.optional}
+			s := outlookMailSource{owa: true, root: tc.root,
+				err: &fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: tc.cause}}
+			c := rt.outlookNativeCheck(s, nil)
+			wantDetail, wantFix := "the new Outlook OWA cache is not installed; nothing to read", ""
+			if tc.warn {
+				wantDetail = "the Outlook OWA profile paths cannot be examined (outlook_profile_unreadable)"
+				wantFix = "Check that the Outlook cache directories are readable by your account."
+			}
+			if c.Name != "outlook_store" || !c.OK || c.Warn != tc.warn || c.Detail != wantDetail || c.Fix != wantFix {
+				t.Fatal("native_optional_absence_not_fixed_or_wrong_warning")
+			}
+		})
+	}
+}
 
 func TestDoctorMailMetadataRoutesLegacyAndNativeFailures(t *testing.T) {
 	oldLegacy, oldNative := outlookDiscover, outlookNativeDiscover

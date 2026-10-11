@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -23,6 +24,78 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
+
+func TestOWAEmptyRootRouteUsesPhysicalPlatform(t *testing.T) {
+	oldLegacy, oldNative := outlookDiscover, outlookOWADiscover
+	t.Cleanup(func() { outlookDiscover, outlookOWADiscover = oldLegacy, oldNative })
+	outlookDiscover = func(string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
+		t.Fatal("empty_route_examined_legacy_source")
+		return nil, nil, nil, nil
+	}
+	outlookOWADiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
+		t.Fatal("empty_route_examined_native_source")
+		return nil, nil, nil
+	}
+	r := runner{}
+	native, err := r.outlookOWARoute("")
+	if err != nil || native != (runtime.GOOS == "windows") {
+		t.Fatal("empty_route_did_not_match_physical_platform")
+	}
+}
+
+func TestOWASourcesOptionalAbsenceAndExplicitFailures(t *testing.T) {
+	root := createdOutlookRoot(t)
+	old := outlookOWADiscover
+	t.Cleanup(func() { outlookOWADiscover = old })
+	for _, implicit := range []bool{true, false} {
+		name := "explicit"
+		if implicit {
+			name = "implicit"
+		}
+		t.Run(name, func(t *testing.T) {
+			for _, state := range []string{"missing", "empty", "partial-missing", "partial-unreadable"} {
+				t.Run(state, func(t *testing.T) {
+					path := root
+					if state == "missing" {
+						path = filepath.Join(root, "missing")
+					}
+					outlookOWADiscover = old
+					if state == "partial-missing" || state == "partial-unreadable" {
+						outlookOWADiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
+							cause := fs.ErrPermission
+							if state == "partial-missing" {
+								cause = fs.ErrNotExist
+							}
+							return []outlookowa.Profile{{Name: "synthetic-private-profile"}}, []outlookowa.SkippedProfile{{Name: "synthetic-private-refusal"}},
+								&fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: cause}
+						}
+					}
+					r := runner{o: Options{OutlookRoot: path, OutlookImplicit: implicit}}
+					out := r.outlookOWASources(context.Background(), &Report{})
+					if implicit && state != "partial-unreadable" {
+						if out != nil {
+							t.Fatal("optional_absence_returned_partial_or_error")
+						}
+					} else {
+						wantCode := CodeOutlookProfileUnreadable
+						if state == "empty" {
+							wantCode = CodeNoOutlookProfiles
+						}
+						if len(out) != 1 || out[0].key != "outlook" || out[0].err == nil || codedOf(out[0].err).Code != wantCode ||
+							out[0].decoded || out[0].report.Source != "" || strings.Contains(out[0].err.Error(), "synthetic-private") {
+							t.Fatal("explicit_or_unreadable_source_returned_partial_or_unsafe_error")
+						}
+					}
+					outlookOWADiscover = old
+					r.o.OutlookRoot, r.o.OutlookImplicit = root, true
+					if next := r.outlookOWASources(context.Background(), &Report{}); next != nil {
+						t.Fatal("restored_empty_source_could_not_retry")
+					}
+				})
+			}
+		})
+	}
+}
 
 func owaRoot(t *testing.T, variant string) string {
 	t.Helper()
