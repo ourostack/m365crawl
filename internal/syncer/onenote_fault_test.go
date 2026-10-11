@@ -26,7 +26,7 @@ func TestSyncNotesArchiveOpenAndLockErrorsRemainVisible(t *testing.T) {
 			default:
 				notesAcquire = func(string) (func(), error) { return nil, fault }
 			}
-			_, err := SyncNotes(context.Background(), NotesOptions{DBPath: filepath.Join(t.TempDir(), "archive.db"), Explicit: operation != "read"})
+			_, err := SyncNotes(context.Background(), NotesOptions{DBPath: newDB(t), Explicit: operation != "read"})
 			if !errors.Is(err, fault) {
 				t.Fatalf("archive error concealed: %v", err)
 			}
@@ -44,7 +44,7 @@ func TestSyncNotesAdmissionDiagnosticFailuresAndCancellation(t *testing.T) {
 				t.Fatal(err)
 			}
 			notesIndex(t, root, "index.db", "fixture")
-			st, err := store.Open(ctx, filepath.Join(t.TempDir(), "archive.db"))
+			st, err := store.Open(ctx, newDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +95,7 @@ func TestSyncNotesAdmissionDiagnosticFailuresAndCancellation(t *testing.T) {
 }
 
 func TestSyncNotesDiscoveryRefusalsAndVanishedRoot(t *testing.T) {
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "archive.db"))
+	st, err := store.Open(context.Background(), newDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestSyncNotesCancellationBetweenIndependentPeers(t *testing.T) {
 	}
 	notesIndex(t, root, "first.db", "first")
 	notesIndex(t, root, "second.db", "second")
-	dbPath := filepath.Join(t.TempDir(), "archive.db")
+	dbPath := newDB(t)
 	if _, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, Root: root, Discover: true, Explicit: true}); err != nil {
 		t.Fatal(err)
 	}

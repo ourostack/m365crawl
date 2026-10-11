@@ -65,7 +65,7 @@ func TestNotesHierarchyMissingAndCycleBoundaries(t *testing.T) {
 
 func TestNotesSchemaPartialRepairAndNewerRefusal(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)

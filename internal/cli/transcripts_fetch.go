@@ -50,6 +50,7 @@ var (
 	fetchLockPoll               = time.Second
 	fetchLockWait               = transcripts.DefaultLockWait
 	signinHosts                 = (*store.Store).TranscriptHosts
+	signinTables                = (*store.Store).HasTranscriptTables
 	openArchive                 = store.Open
 	stdinIsTTY                  = func() bool { return isTTY(os.Stdin) }
 	stdinReader       io.Reader = os.Stdin
@@ -533,7 +534,11 @@ func (rt *runtime) archiveSigninHosts() ([]store.TranscriptHost, error) {
 		return nil, errs.DBError(err)
 	}
 	defer func() { _ = st.Close() }()
-	if ok, err := st.HasTranscriptTables(rt.ctx); err != nil || !ok {
+	ok, err := signinTables(st, rt.ctx)
+	if err != nil {
+		return nil, asCoded(err)
+	}
+	if !ok {
 		return nil, nil
 	}
 	hosts, err := signinHosts(st, rt.ctx)

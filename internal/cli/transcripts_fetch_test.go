@@ -662,12 +662,26 @@ func TestSigninInterruptedAtThePrompt(t *testing.T) {
 	stdinIsTTY, stdinReader = func() bool { return true }, r
 	t.Cleanup(func() { stdinIsTTY, stdinReader = oldTTY, oldIn })
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(50*time.Millisecond, cancel)
+	defer cancel()
 	var out, errb bytes.Buffer
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "signin"}, &out, &errb)
+	prompt := &signinCancelAtPrompt{out: &errb, cancel: cancel}
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "signin"}, &out, prompt)
 	if code != errs.ExitRuntime || !strings.Contains(errb.String(), errs.CodeInterrupted) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
+}
+
+type signinCancelAtPrompt struct {
+	out    *bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *signinCancelAtPrompt) Write(data []byte) (int, error) {
+	n, err := w.out.Write(data)
+	if bytes.Contains(data, []byte("Press Enter to open it")) {
+		w.cancel()
+	}
+	return n, err
 }
 
 func TestWaitForHostCancelledContextReturnsCancellation(t *testing.T) {

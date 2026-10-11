@@ -70,8 +70,17 @@ func knowledgeTimes(values ...sql.NullString) ([]*time.Time, error) {
 }
 
 func (s *Store) hasKnowledgeSchema(ctx context.Context) (bool, error) {
+	return hasKnowledgeSchema(ctx, s.db)
+}
+
+type knowledgeReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func hasKnowledgeSchema(ctx context.Context, reader knowledgeReader) (bool, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table'
+	err := reader.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table'
 and name in ('knowledge_locators','knowledge_attempts','knowledge_sources','note_entities','note_elements','note_flags','note_fts')`).Scan(&count)
 	return count == 7, err
 }
@@ -323,7 +332,12 @@ func (s *Store) KnowledgeLocators(ctx context.Context, sourceID int64) ([]Knowle
 	for _, source := range sources {
 		if sourceID > 0 {
 			if source.ID == sourceID {
-				return []KnowledgeSource{source}, nil
+				for _, current := range sources {
+					if current.LocatorID == source.LocatorID && current.Status != "retained" {
+						return []KnowledgeSource{current}, nil
+					}
+				}
+				return nil, ErrKnowledgeSourceUnknown
 			}
 		} else if source.Status != "retained" {
 			selected = append(selected, source)

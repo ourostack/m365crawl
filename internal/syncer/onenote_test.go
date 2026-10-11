@@ -42,7 +42,7 @@ func TestSyncNotesRegistersAndRootlessRefreshesExplicitLocator(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := notesIndex(t, root, "index.db", "originalword")
-	dbPath := filepath.Join(t.TempDir(), "archive.db")
+	dbPath := newDB(t)
 	report, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, Root: root, Explicit: true, Discover: true})
 	if err != nil || report.Captured != 1 || len(report.Sources) != 1 {
 		t.Fatalf("registration: %#v/%v", report, err)
@@ -99,7 +99,7 @@ func TestSyncNotesFailedPeerRetryUsesAttemptedMetadata(t *testing.T) {
 	if err := os.WriteFile(bad+"-wal", []byte("active"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dbPath := filepath.Join(t.TempDir(), "archive.db")
+	dbPath := newDB(t)
 	report, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, Root: root, Explicit: true, Discover: true})
 	if err != nil || report.Captured != 1 || report.Failed != 1 || len(report.Sources) != 2 {
 		t.Fatalf("independent peers: %#v/%v", report, err)
@@ -122,7 +122,7 @@ func TestSyncNotesFailedPeerRetryUsesAttemptedMetadata(t *testing.T) {
 }
 
 func TestSyncNotesZeroAgeNeverDiscoversOrWrites(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "not-created.db")
+	dbPath := newDB(t)
 	report, err := SyncNotes(context.Background(), NotesOptions{DBPath: dbPath, Root: "/missing", Discover: true})
 	if err != nil || len(report.Sources) != 0 {
 		t.Fatalf("zero-age optional read: %#v/%v", report, err)
@@ -134,7 +134,7 @@ func TestSyncNotesZeroAgeNeverDiscoversOrWrites(t *testing.T) {
 
 func TestSyncNotesUnregisteredOrdinaryReadDoesNotCreateOrRepairLegacyArchive(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "not-created.db")
+	dbPath := newDB(t)
 	if _, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, MaxAge: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSyncNotesUnregisteredOrdinaryReadDoesNotCreateOrRepairLegacyArchive(t *
 }
 
 func TestSyncNotesExplicitRootDoesNotCaptureUnrelatedRegistration(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "archive.db")
+	dbPath := newDB(t)
 	first, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestSyncNotesExplicitRootDoesNotCaptureUnrelatedRegistration(t *testing.T) 
 
 func TestSyncNotesSelectedCoverageExcludesOtherSources(t *testing.T) {
 	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "archive.db")
+	dbPath := newDB(t)
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestSyncNotesDiscoveryBoundsAndUnsafePeers(t *testing.T) {
 				}
 			}
 			report, err := SyncNotes(context.Background(), NotesOptions{
-				DBPath: filepath.Join(t.TempDir(), "archive.db"), Root: root, Explicit: true, Discover: true,
+				DBPath: newDB(t), Root: root, Explicit: true, Discover: true,
 			})
 			switch kind {
 			case "missing", "cap":
@@ -291,7 +291,7 @@ func TestSyncNotesCaptureParseCancellationAndPartialTransitions(t *testing.T) {
 					return result, err
 				}
 			}
-			dbPath := filepath.Join(t.TempDir(), "archive.db")
+			dbPath := newDB(t)
 			report, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, Root: root, Explicit: true, Discover: true})
 			switch failure {
 			case "cancelled":

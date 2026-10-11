@@ -111,7 +111,11 @@ func (s *Store) Notes(ctx context.Context, filter NoteFilter) ([]NoteRow, bool, 
 }
 
 func (s *Store) notes(ctx context.Context, filter NoteFilter, noteID int64) ([]NoteRow, bool, error) {
-	available, err := s.hasKnowledgeSchema(ctx)
+	return s.readNotes(ctx, s.db, filter, noteID)
+}
+
+func (s *Store) readNotes(ctx context.Context, reader knowledgeReader, filter NoteFilter, noteID int64) ([]NoteRow, bool, error) {
+	available, err := hasKnowledgeSchema(ctx, reader)
 	if err != nil || !available {
 		return []NoteRow{}, false, err
 	}
@@ -151,7 +155,7 @@ func (s *Store) notes(ctx context.Context, filter NoteFilter, noteID int64) ([]N
 		limit = DefaultLimit
 	}
 	args = append(args, limit+1)
-	rows, err := s.db.QueryContext(ctx, `select n.rowid,n.source_id,n.capture_id,n.goid,n.guid,n.gosid,
+	rows, err := reader.QueryContext(ctx, `select n.rowid,n.source_id,n.capture_id,n.goid,n.guid,n.gosid,
 n.parent_goid,n.grandparent_goids,n.title,`+noteTextSQL+`,n.modified_at,a.finished_at,ks.source_observed_at
 from note_entities n join knowledge_sources ks on ks.id=n.source_id
 join knowledge_attempts a on a.id=n.capture_id where `+where+`
@@ -189,7 +193,12 @@ func (s *Store) Note(ctx context.Context, id int64) (NoteDetail, error) {
 	if id <= 0 {
 		return NoteDetail{}, ErrNoteNotFound
 	}
-	notes, _, err := s.notes(ctx, NoteFilter{Limit: 1}, id)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return NoteDetail{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	notes, _, err := s.readNotes(ctx, tx, NoteFilter{Limit: 1}, id)
 	if err != nil {
 		return NoteDetail{}, err
 	}
@@ -197,7 +206,7 @@ func (s *Store) Note(ctx context.Context, id int64) (NoteDetail, error) {
 		return NoteDetail{}, ErrNoteNotFound
 	}
 	detail := NoteDetail{NoteRow: notes[0], Elements: []onenote.Element{}, Flags: []onenote.Flag{}, Ancestors: []NoteAncestor{}}
-	rows, err := s.db.QueryContext(ctx, `select native_rowid,native_entity_rowid,goid,text,kind,jcid,hashtag_markers from note_elements where entity_rowid=? order by native_rowid`, id)
+	rows, err := tx.QueryContext(ctx, `select native_rowid,native_entity_rowid,goid,text,kind,jcid,hashtag_markers from note_elements where entity_rowid=? order by native_rowid`, id)
 	if err != nil {
 		return NoteDetail{}, err
 	}
@@ -213,7 +222,7 @@ func (s *Store) Note(ctx context.Context, id int64) (NoteDetail, error) {
 	if err != nil {
 		return NoteDetail{}, err
 	}
-	rows, err = s.db.QueryContext(ctx, `select native_rowid,element_native_rowid,type,shape,status,label from note_flags where entity_rowid=? order by native_rowid`, id)
+	rows, err = tx.QueryContext(ctx, `select native_rowid,element_native_rowid,type,shape,status,label from note_flags where entity_rowid=? order by native_rowid`, id)
 	if err != nil {
 		return NoteDetail{}, err
 	}
@@ -236,7 +245,7 @@ func (s *Store) Note(ctx context.Context, id int64) (NoteDetail, error) {
 		seen[parent] = true
 		var ancestor NoteAncestor
 		var next string
-		err := s.db.QueryRowContext(ctx, `select goid,title,type,parent_goid from note_entities where source_id=? and goid=?`,
+		err := tx.QueryRowContext(ctx, `select goid,title,type,parent_goid from note_entities where source_id=? and goid=?`,
 			detail.SourceID, parent).Scan(&ancestor.GOID, &ancestor.Title, &ancestor.Type, &next)
 		if errors.Is(err, sql.ErrNoRows) {
 			break
@@ -246,6 +255,9 @@ func (s *Store) Note(ctx context.Context, id int64) (NoteDetail, error) {
 		}
 		detail.Ancestors = append(detail.Ancestors, ancestor)
 		parent = strings.TrimSpace(next)
+	}
+	if err := tx.Commit(); err != nil {
+		return NoteDetail{}, err
 	}
 	return detail, nil
 }

@@ -116,3 +116,26 @@ func TestKnowledgeReadFailureSweeps(t *testing.T) {
 		})
 	}
 }
+
+func TestKnowledgeDetailTransactionFailureSweep(t *testing.T) {
+	setup := func(t *testing.T, s *Store) {
+		commitNotes(t, s, beginNotes(t, s, "A", base), "complete", "A", noteFixture("notebook", "Original", "originalword"))
+	}
+	sweepFaults(t, setup, func(ctx context.Context, s *Store) error {
+		_, err := s.Note(ctx, 3)
+		return err
+	})
+}
+
+func TestKnowledgeRetainedSelectionRefusesMissingCurrentIncarnation(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	first := beginNotes(t, s, "A", base)
+	commitNotes(t, s, first, "complete", "A", noteFixture("notebook", "Page", "text"))
+	if _, err := s.db.Exec(`update knowledge_attempts set source_id=999 where id=?`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.KnowledgeLocators(ctx, 1); !errors.Is(err, ErrKnowledgeSourceUnknown) {
+		t.Fatalf("missing current incarnation became selected refresh evidence: %v", err)
+	}
+}

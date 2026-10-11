@@ -53,6 +53,10 @@ func noteItemOf(row store.NoteRow, maxText int) noteItem {
 		SourceObservedAt: row.SourceObservedAt, TextTruncated: truncated}
 }
 
+func noteDetailKeys() []string {
+	return append(typeKeys[noteItem](), typeKeys[noteDetailItem]()...)
+}
+
 func noteStamp(at *time.Time) string {
 	if at == nil {
 		return "-"

@@ -49,7 +49,7 @@ func commitNotes(t *testing.T, s *Store, attempt KnowledgeAttempt, status, diges
 
 func TestNotesSchema9OldReadOnlyAndMigrationPreservesMail(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)

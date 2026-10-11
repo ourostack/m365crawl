@@ -363,9 +363,20 @@ func (rt *runtime) listTable(r *listResult) {
 			}
 			rows = append(rows, []string{stamp(x.UpdatedAt), label, acct, x.Store, oneLine(string(x.KeyJSON)), value})
 		case projected:
-			cols, textCol = x.keys, -1
-			row := make([]string, len(x.keys))
-			for i, k := range x.keys {
+			if len(cols) == 0 {
+				cols = append([]string{}, rt.fields...)
+			}
+			for _, key := range x.keys {
+				if !contains(cols, key) {
+					cols = append(cols, key)
+					for i := range rows {
+						rows[i] = append(rows[i], "")
+					}
+				}
+			}
+			textCol = -1
+			row := make([]string, len(cols))
+			for i, k := range cols {
 				var v any
 				_ = json.Unmarshal(x.vals[k], &v)
 				if v != nil {

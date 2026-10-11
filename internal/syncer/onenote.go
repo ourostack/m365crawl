@@ -205,7 +205,11 @@ func captureNotes(ctx context.Context, st *store.Store, attempt store.KnowledgeA
 		Qualification: store.NotesQualification, SourceObservedAt: capture.SourceModified, At: notesNow().UTC(),
 	}
 	if err := st.CommitNotes(ctx, attempt, outcome, result); err != nil {
-		return "", err
+		if errors.Is(err, store.ErrStaleKnowledgeAttempt) {
+			return "", err
+		}
+		diagnosticErr := recordNotesFailure(ctx, st, attempt, capture.AcquisitionSignature, err, previous.Locator)
+		return "", errors.Join(err, diagnosticErr)
 	}
 	return status, nil
 }

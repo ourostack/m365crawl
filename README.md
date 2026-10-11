@@ -47,6 +47,10 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 **OneNote, without pretending an index is a notebook export.** `notes sync` registers the available Mac indexes; `notes sync --root DIR` accepts supported rollback-mode index copies on Mac, Windows and Linux. Shared search joins their titles, text and OCR to conversations and mail. `notes show note:ID` preserves native elements, flags and hierarchy; `notes sources` shows coverage, failures and last-good capture. Partial or failed captures keep prior text. No original visual layout, page web link, author or tenant ownership is invented. Native Windows app-cache discovery and live WAL capture remain deferred.
 
+<p align="center"><img src="docs/indexed-notes.png" alt="Actual synthetic m365crawl output: focused indexed-note search, then a note with text, OCR, native hierarchy, flags and source coverage" width="1000"></p>
+
+*Find the note, then read the evidence. This example is actual CLI output from synthetic notes, not private work data or a complete notebook export.*
+
 **Planned expansion, not shipped support:**
 
 | Area | Direction | What still needs proving |

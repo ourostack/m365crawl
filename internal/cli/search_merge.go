@@ -168,14 +168,10 @@ func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 func searchKeys() []string {
 	keys := []string{"source"}
 	all := append(jsonKeys(reflect.TypeFor[messageItem]()), jsonKeys(reflect.TypeFor[searchMailItem]())...)
-	for _, k := range append(all, jsonKeys(reflect.TypeFor[searchTranscriptItem]())...) {
+	all = append(all, jsonKeys(reflect.TypeFor[searchTranscriptItem]())...)
+	for _, k := range append(all, typeKeys[noteItem]()...) {
 		if !slices.Contains(keys, k) {
 			keys = append(keys, k)
-		}
-	}
-	for _, key := range jsonKeys(reflect.TypeFor[searchNoteItem]()) {
-		if !slices.Contains(keys, key) {
-			keys = append(keys, key)
 		}
 	}
 	return keys

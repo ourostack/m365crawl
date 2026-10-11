@@ -132,7 +132,7 @@ m365crawl notes show note:ID
 
 One-item list with the note and native indexed `elements`, `flags`, `ancestors` and `ordering: "index_rowid_not_document_layout"`. Element IDs and their native parent rowids remain distinct from archive IDs. `--max-text` bounds combined text and each element separately, preserving native kind and IDs. Invalid or missing note IDs fail explicitly.
 
-`--fields` keys: `ordering`, `elements`, `flags`, `ancestors`.
+`--fields` keys: `id`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `title`, `text`, `modified_at`, `captured_at`, `source_observed_at`, `text_truncated`, `ordering`, `elements`, `flags`, `ancestors`.
 
 ### notes sources
 
@@ -306,7 +306,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`.
+`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `modified_at`, `captured_at`, `source_observed_at`.
 
 ## people
 

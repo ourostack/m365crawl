@@ -42,7 +42,7 @@ var commandFields = map[string][]fieldSet{
 	"transcripts show": {{keys: typeKeys[transcriptShow]}},
 	"notes list":       {{keys: typeKeys[noteItem]}},
 	"notes search":     {{keys: typeKeys[noteItem]}},
-	"notes show":       {{keys: typeKeys[noteDetailItem]}},
+	"notes show":       {{keys: noteDetailKeys}},
 	"notes sources":    {{keys: typeKeys[noteSourceItem]}},
 }
 

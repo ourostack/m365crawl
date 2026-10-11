@@ -3,7 +3,6 @@ package syncer
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,7 +22,7 @@ func TestSyncNotesPrivateReaderSharesBoundedCaptureDeadline(t *testing.T) {
 		return read(ctx, path)
 	}
 	report, err := SyncNotes(context.Background(), NotesOptions{
-		DBPath: filepath.Join(t.TempDir(), "archive.db"), Root: root, Explicit: true, Discover: true,
+		DBPath: newDB(t), Root: root, Explicit: true, Discover: true,
 	})
 	if err != nil || report.Captured != 1 || report.Failed != 0 {
 		t.Fatalf("reader deadline not shared: counts=%d/%d error=%v", report.Captured, report.Failed, err)
