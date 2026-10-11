@@ -108,7 +108,7 @@ func TestStatusMailStates(t *testing.T) {
 	t.Run("no archive and no Outlook", func(t *testing.T) {
 		forceMailSupported(t)
 		old := outlookDefaultRoot
-		outlookDefaultRoot = func() (string, error) { return filepath.Join(t.TempDir(), "absent"), nil }
+		outlookDefaultRoot = func() (string, error) { return filepath.Join(createdOWARoot(t), "absent"), nil }
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		e := newEnv(t)
 		_, out, _ := e.runDefault("status")

@@ -318,7 +318,7 @@ func TestOverviewSaysWhyThereIsNoMail(t *testing.T) {
 	pinMailSupported(t, true)
 	e := newEnv(t)
 	teamsArchive(t, e)
-	empty := t.TempDir()
+	empty := createdOWARoot(t)
 	if m := overviewSourceOf(t, e, 1); m["state"] != "off" || !strings.Contains(m["note"].(string), "Outlook source is off") {
 		t.Errorf("off: %v", m)
 	}

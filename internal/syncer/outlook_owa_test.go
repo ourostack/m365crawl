@@ -26,10 +26,7 @@ import (
 
 func owaRoot(t *testing.T, variant string) string {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := createdOutlookRoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", variant), filepath.Join(root, "Default"))
 	return root
 }
@@ -806,10 +803,7 @@ func TestOWADefaultResolutionErrorAndEmptyRootAreExplicit(t *testing.T) {
 	if len(out) != 1 || out[0].err == nil || codedOf(out[0].err).Code != CodeOutlookProfileUnreadable || strings.Contains(out[0].err.Error(), "private") {
 		t.Fatalf("default resolver failure hidden or leaked: %+v", out)
 	}
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal("synthetic_owa_root_canonicalization_failed")
-	}
+	root := createdOutlookRoot(t)
 	outlookDefaultRoot = func() (string, error) { return root, nil }
 	out = r.outlookOWASources(context.Background(), &Report{})
 	if len(out) != 1 || out[0].key != "outlook" || codedOf(out[0].err).Code != CodeNoOutlookProfiles {

@@ -680,7 +680,7 @@ func TestMailDerefTime(t *testing.T) {
 }
 
 func TestMailProfileCount(t *testing.T) {
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	if n, err := mailProfileCount(&runtime{outlookRoot: root}); n != 0 || err != nil {
 		t.Fatalf("empty root = %d", n)
 	}

@@ -20,7 +20,7 @@ import (
 // fixture file.
 func outlookStoreRoot(t *testing.T, file string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -325,14 +325,14 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 	t.Run("on by default", func(t *testing.T) {
 		rt := *rt
 		rt.outlookDefault = true
-		absent := filepath.Join(t.TempDir(), "absent")
+		absent := filepath.Join(createdOWARoot(t), "absent")
 		old := outlookDefaultRoot
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		outlookDefaultRoot = func() (string, error) { return absent, nil }
 		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "not installed") {
 			t.Fatalf("no Outlook: %+v", c)
 		}
-		outlookDefaultRoot = func() (string, error) { return t.TempDir(), nil }
+		outlookDefaultRoot = func() (string, error) { return createdOWARoot(t), nil }
 		if c := rt.outlookStoreCheck(nil); c.Warn || !c.OK || !strings.Contains(c.Detail, "no profile") {
 			t.Fatalf("no profile: %+v", c)
 		}
@@ -347,7 +347,7 @@ func TestDoctorOutlookStoreCheck(t *testing.T) {
 		}
 	})
 	t.Run("missing root, empty root", func(t *testing.T) {
-		for _, root := range []string{filepath.Join(t.TempDir(), "absent"), t.TempDir()} {
+		for _, root := range []string{filepath.Join(createdOWARoot(t), "absent"), createdOWARoot(t)} {
 			rt := *rt
 			rt.outlookRoot = root
 			if c := rt.outlookStoreCheck(nil); !c.Warn || !c.OK || !strings.Contains(c.Detail, "no Outlook profile found under "+root) || !strings.Contains(c.Fix, "<root>/<profile>/HxStore.hxd") {

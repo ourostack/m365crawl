@@ -23,8 +23,8 @@ import (
 func TestOutlookRootMissingIsOneCodedError(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
-	missing := filepath.Join(t.TempDir(), "gone")
-	file := filepath.Join(t.TempDir(), "file")
+	missing := filepath.Join(createdOWARoot(t), "gone")
+	file := filepath.Join(createdOWARoot(t), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestOutlookRootMissingIsOneCodedError(t *testing.T) {
 		t.Fatalf("none: %d %s", code, errOut)
 	}
 	// A root that exists and holds no profile keeps its own code.
-	empty := t.TempDir()
+	empty := createdOWARoot(t)
 	if code, _, errOut := e.run("--outlook-root", empty, "sync"); code == 0 || !strings.Contains(errOut, "no_outlook_profiles") {
 		t.Fatalf("empty root: %d %s", code, errOut)
 	}

@@ -24,7 +24,7 @@ func outlookRootOf(t *testing.T, _ func(args ...string) (int, string, string)) s
 
 func outlookProfiles(t *testing.T, names ...string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	for _, name := range names {
 		src := "../../testdata/outlook-fixture/HxStore.hxd"
 		if name != "Main" {
