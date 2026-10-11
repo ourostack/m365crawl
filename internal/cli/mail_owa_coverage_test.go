@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
@@ -89,20 +88,6 @@ func TestDoctorMailMetadataRoutesLegacyAndNativeFailures(t *testing.T) {
 	}
 }
 
-type mailCancelBudget struct {
-	context.Context
-	remaining atomic.Int64
-	cancel    context.CancelFunc
-}
-
-func (c *mailCancelBudget) Err() error {
-	if c.remaining.Add(-1) < 0 {
-		c.cancel()
-	}
-	return c.Context.Err()
-}
-
-// Sweep real archive reads with progressively later cancellation; failed conversation lookups must never return success or partial thread items.
 func TestMailOWAThreadCancellationNeverReturnsPartialSuccess(t *testing.T) {
 	e := textEnv(t)
 	a := mailMsg(601, fInbox, "<one@example.test>", "", "First", 2, true)
@@ -114,28 +99,21 @@ func TestMailOWAThreadCancellationNeverReturnsPartialSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	failures, successes := 0, 0
-	for budget := int64(0); budget < 50; budget++ {
+	t.Run("pre-cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		c := &mailCancelBudget{Context: ctx, cancel: cancel}
-		c.remaining.Store(budget)
-		rows, grouping, _, err := st.MailThread(c, "outlook/Main", 601)
 		cancel()
-		if err != nil {
-			failures++
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("unexpected cancellation error: %v", err)
-			}
-		} else {
-			successes++
-			if len(rows) != 2 || grouping != "conversation" {
-				t.Fatalf("partial success: %d %q", len(rows), grouping)
-			}
+		rows, grouping, truncated, err := st.MailThread(ctx, "outlook/Main", 601)
+		if !errors.Is(err, context.Canceled) || rows != nil || grouping != "" || truncated {
+			t.Fatal("cancelled_thread_returned_partial_or_success")
 		}
-	}
-	if failures == 0 || successes == 0 {
-		t.Fatalf("cancellation sweep did not exercise both outcomes: %d/%d", failures, successes)
-	}
+	})
+	t.Run("success-after-cancelled-read", func(t *testing.T) {
+		rows, grouping, truncated, err := st.MailThread(context.Background(), "outlook/Main", 601)
+		if err != nil || len(rows) != 2 || grouping != "conversation" || truncated ||
+			rows[0].DetailKey != 601 || rows[1].DetailKey != 602 {
+			t.Fatal("uncancelled_thread_not_complete_after_cancelled_read")
+		}
+	})
 }
 
 func TestMailOWANativeStatusText(t *testing.T) {

@@ -339,10 +339,10 @@ The archive holds your real chats, mail and meetings. It stays on your machine i
 ## Limits
 
 - It sees only what the desktop apps cached, so sync regularly.
-- Supported: macOS and Windows with the new Teams app, and the new Outlook for Mac for mail and its calendar. Classic Teams, classic Outlook and Linux are not supported. Outlook mail on Windows is coming next.
+- Supported: macOS and Windows with the new Teams app; new Outlook's cached mail on Mac and Windows; and the new Outlook for Mac's calendar. OWA calendar on Windows is not read in this release. Classic Teams and classic Outlook are not supported. Linux can read archives and explicit copied supported sources, but desktop-cache discovery is not supported.
 - Read-only: no sending, replying, reacting, moving or marking read.
 - Attachments are recorded as metadata; their bytes are not copied into the archive.
-- Outlook's local store does not separate To from Cc and keeps no thread id. Importance is read but not yet verified against Outlook's own display.
+- Mac Outlook's local store does not separate To from Cc; Windows preserves To/Cc/Bcc roles and cached conversation identities. Importance is read but not yet verified against Outlook's own display.
 - The calendar holds only the days Teams cached plus what Outlook's store holds, and attendees, body and rooms only for meetings someone opened.
 - Contact stores, call history and pinned-message lists have no typed commands yet; they are mirrored as raw records, readable with `stores` and `records`.
 - The apps can change their storage layout. When they do, `sync` fails with a named error or reports counted omissions instead of guessing.
