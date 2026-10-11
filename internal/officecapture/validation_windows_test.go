@@ -69,10 +69,14 @@ func TestWindowsPrivateCaptureReaderOpenAndCloseFailuresRefuseClaims(t *testing.
 							return create(handle, access, attributes, status, size, fileAttributes, share, disposition, options, ea, eaSize)
 						}
 					} else {
+						closes := 0
 						jsonClose = func(file *os.File) error {
 							err := closeFile(file)
 							if file.Name() == "source.json" {
-								return errors.Join(err, os.ErrPermission)
+								closes++
+								if closes == 2 {
+									return errors.Join(err, os.ErrPermission)
+								}
 							}
 							return err
 						}
