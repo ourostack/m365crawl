@@ -68,6 +68,8 @@ type outlookOutcome struct {
 	// note marks a row that only says something (mail on a platform that does not read it): it is
 	// neither a committed source nor a failure.
 	note bool
+	// optional reports independent observations without changing legacy covering status.
+	optional bool
 }
 
 // outlookSources runs after the Teams sources have finished (memory: the two never hold their
@@ -210,7 +212,7 @@ func (r *runner) safeOutlook(ctx context.Context, p outlookdesktop.Profile, rep 
 // The order is the cheap checks first: the minimum interval, then the fingerprint, then the copy,
 // the guard and one transaction per kind of data. The mail outcomes are rows of their own; a
 // refusal or failure of one kind never stops the other.
-func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (SourceReport, bool, []outlookOutcome, error) {
+func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Report) (sr SourceReport, decoded bool, outcomes []outlookOutcome, returnErr error) {
 	begun := outlookNow()
 	key, account := outlookKey(p.Name), outlookAccount(p.Name)
 	prior, err := r.st.OutlookState(ctx, p.Name, key, account)
@@ -260,8 +262,21 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if err := r.st.SetOutlookLastAttempt(ctx, p.Name, begun); err != nil {
 		return SourceReport{}, false, nil, errs.DBError(err)
 	}
+	pending, pendingErr := beginSharedPeople(ctx, r.st, p.StorePath, fp, begun, r.o.FullRead)
 	info, cleanup, err := outlookSnapshot(ctx, p.StorePath)
-	defer cleanup()
+	if pending != nil {
+		pending.acquired = peopleNow().UTC()
+	}
+	defer func() {
+		if pending == nil {
+			cleanup()
+			if pendingErr != nil {
+				outcomes = append(outcomes, optionalPeopleOutcome(p.Name, pendingErr))
+			}
+			return
+		}
+		outcomes = append(outcomes, finishSharedPeople(ctx, r.st, p.Name, info, cleanup, err, *pending))
+	}()
 	if err != nil {
 		return SourceReport{}, false, nil, err
 	}

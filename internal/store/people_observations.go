@@ -14,6 +14,15 @@ import (
 
 const PeopleQualification = "hxstore-people-v1/mapper-v1"
 
+func (s *Store) PeopleProfileLink(ctx context.Context, account string) (PeopleCaptureLink, error) {
+	link, err := readPeopleLink(ctx, s.db, `select account_id,principal_id,method,linked_at from calendar_account_links
+where source='outlook' and account_id=? and unlinked_at is null`, account)
+	if link.ProfileAccount == "" {
+		link.ProfileAccount = account
+	}
+	return link, err
+}
+
 type PeopleCaptureLink struct {
 	ProfileAccount, Principal, Method string
 	LinkedAt                          *time.Time

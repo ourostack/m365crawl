@@ -232,6 +232,11 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	}
 	if stopped == nil && r.outlookOn() {
 		for _, o := range r.outlookSources(ctx, &rep) {
+			if o.optional {
+				rep.Sources = append(rep.Sources, o.report)
+				r.progress("%s: %s", o.key, o.report.Status)
+				continue
+			}
 			if o.note {
 				rep.Sources = append(rep.Sources, o.report)
 				r.progress("%s: %s", o.key, o.report.Status)
