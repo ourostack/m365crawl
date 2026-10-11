@@ -9,9 +9,51 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestSDKMetadataNumbersRespectPlatformIntBounds(t *testing.T) {
+	oldOutput, oldParse := commandOutput, parseSource
+	t.Cleanup(func() { commandOutput, parseSource = oldOutput, oldParse })
+	commandOutput = func(*exec.Cmd) ([]byte, error) { return nil, nil }
+	for _, field := range []string{"Pos", "NumStmt"} {
+		for _, literal := range []string{"2147483647", "2147483648", "4294967295", "4294967296", "-1"} {
+			t.Run(field+"/"+literal, func(t *testing.T) {
+				pos, weight := "1, 2, 65537", "1"
+				if field == "Pos" {
+					pos = literal + ", 2, 65537"
+				} else {
+					weight = literal
+				}
+				text := "package p\nvar CoverageProof = struct{Pos []uint32; NumStmt []uint32}{Pos: []uint32{" + pos + "}, NumStmt: []uint32{" + weight + "}}"
+				parseSource = func(fset *token.FileSet, name string, src any, mode parser.Mode) (*ast.File, error) {
+					return parser.ParseFile(fset, name, text, mode)
+				}
+				n, parseErr := strconv.ParseUint(literal, 0, 32)
+				wantRefusal := parseErr != nil || strconv.IntSize == 32 && n > 2147483647
+				blocks, err := sourceBlocks("synthetic.go")
+				if wantRefusal {
+					if err == nil || len(blocks) != 0 || !strings.HasPrefix(err.Error(), "invalid SDK block number") {
+						t.Fatalf("out-of-range SDK number did not refuse: blocks=%d err=%v", len(blocks), err)
+					}
+					return
+				}
+				if err != nil || len(blocks) != 1 {
+					t.Fatalf("lawful SDK number refused: blocks=%d err=%v", len(blocks), err)
+				}
+				got := blocks[0].startLine
+				if field == "NumStmt" {
+					got = blocks[0].statements
+				}
+				if strconv.FormatInt(int64(got), 10) != strconv.FormatUint(n, 10) {
+					t.Fatalf("SDK number changed during conversion: got=%d want=%d", got, n)
+				}
+			})
+		}
+	}
+}
 
 func TestSDKMetadataRefusesMissingOrInvalidInventory(t *testing.T) {
 	oldOutput, oldParse := commandOutput, parseSource

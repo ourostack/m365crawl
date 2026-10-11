@@ -187,6 +187,10 @@ func sourceBlocks(path string) ([]block, error) {
 					metadataErr = fmt.Errorf("invalid SDK block number: %w", err)
 					return false
 				}
+				if n > uint64(^uint(0)>>1) {
+					metadataErr = errors.New("invalid SDK block number: exceeds platform int")
+					return false
+				}
 				nums = append(nums, int(n))
 			}
 			switch key.Name {
