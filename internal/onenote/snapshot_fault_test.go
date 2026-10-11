@@ -3,6 +3,7 @@ package onenote
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,8 +131,9 @@ func TestSnapshotDigestBoundsAndCancellation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("literal"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, size := range []int64{0, 8} {
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // path is a synthetic file created in this test's owned temporary directory
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +142,7 @@ func TestSnapshotDigestBoundsAndCancellation(t *testing.T) {
 		}
 		_ = f.Close()
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is the same owned synthetic fixture, never a user input
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +157,30 @@ func TestSnapshotDigestBoundsAndCancellation(t *testing.T) {
 	snapshotRead = func(*os.File, []byte) (int, error) { return 0, nil }
 	if _, err := snapshotDigest(context.Background(), f, nil, 7); err == nil {
 		t.Fatal("stalled read accepted")
+	}
+}
+
+func TestSnapshotDigestRecognizesWrappedTerminalEOF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bytes")
+	if err := os.WriteFile(path, []byte("literal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path) //nolint:gosec // literal fixture owned by this test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	read := snapshotRead
+	t.Cleanup(func() { snapshotRead = read })
+	snapshotRead = func(f *os.File, b []byte) (int, error) {
+		n, err := read(f, b)
+		if errors.Is(err, io.EOF) {
+			err = errors.Join(errors.New("terminal read"), err)
+		}
+		return n, err
+	}
+	if _, err := snapshotDigest(context.Background(), file, nil, 7); err != nil {
+		t.Fatalf("complete exact-byte copy rejected wrapped EOF: %v", err)
 	}
 }
 

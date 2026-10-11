@@ -64,7 +64,7 @@ func (unsupportedSnapshotInfo) Sys() any { return nil }
 
 func TestSnapshotWindowsIdentityFailures(t *testing.T) {
 	path := indexFixture(t, "index.db")
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // opens only the synthetic fixture created immediately above
 	if err != nil {
 		t.Fatal(err)
 	}

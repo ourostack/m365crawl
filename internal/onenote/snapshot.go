@@ -61,7 +61,7 @@ type IndexCapture struct {
 
 func snapshotError(ctx context.Context) error {
 	err := &ReadError{Code: "onenote_snapshot_unavailable"}
-	if ctx != nil && ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return errors.Join(err, ctx.Err())
 	}
 	return err
@@ -72,15 +72,15 @@ func snapshotError(ctx context.Context) error {
 func ObserveIndex(path string) (string, error) {
 	abs, err := snapshotAbs(path)
 	if err != nil {
-		return "", snapshotError(nil)
+		return "", snapshotError(context.Background())
 	}
 	info, err := snapshotLstat(abs)
 	if err != nil || !info.Mode().IsRegular() || info.Size() < 20 || info.Size() > snapshotLimit {
-		return "", snapshotError(nil)
+		return "", snapshotError(context.Background())
 	}
 	canonical, err := snapshotEval(abs)
 	if err != nil || canonical != abs {
-		return "", snapshotError(nil)
+		return "", snapshotError(context.Background())
 	}
 	hash := sha256.New()
 	_, _ = fmt.Fprintf(hash, "%s|%d|%d|%d|%s", abs, info.Size(), info.Mode(),
@@ -93,7 +93,7 @@ func ObserveIndex(path string) (string, error) {
 			continue
 		}
 		if err != nil {
-			return "", snapshotError(nil)
+			return "", snapshotError(context.Background())
 		}
 		_, _ = fmt.Fprintf(hash, "|%s:%d:%d:%d:%s", suffix, companion.Size(),
 			companion.Mode(), companion.ModTime().UnixNano(), snapshotIdentity(companion))
@@ -103,7 +103,7 @@ func ObserveIndex(path string) (string, error) {
 	}
 	signature := fmt.Sprintf("%x", hash.Sum(nil))
 	if unsafe {
-		return signature, snapshotError(nil)
+		return signature, snapshotError(context.Background())
 	}
 	return signature, nil
 }
@@ -236,7 +236,7 @@ func snapshotDigest(ctx context.Context, input, output *os.File, size int64) (st
 				}
 			}
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil || n == 0 {

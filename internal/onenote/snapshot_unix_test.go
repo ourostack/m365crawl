@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 
 func TestCaptureIndexLockFaultsReleaseNativeProtection(t *testing.T) {
 	for _, failCall := range []int{1, 2, 3, 4} {
-		t.Run(string(rune('0'+failCall)), func(t *testing.T) {
+		t.Run(strconv.Itoa(failCall), func(t *testing.T) {
 			path, err := filepath.EvalSymlinks(indexFixture(t, "index.db", hierarchyFixture))
 			if err != nil {
 				t.Fatal(err)
@@ -68,7 +69,7 @@ func (unsupportedSnapshotInfo) Sys() any { return nil }
 
 func TestSnapshotNativeIdentityFailures(t *testing.T) {
 	path := indexFixture(t, "index.db")
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // opens only the synthetic fixture created immediately above
 	if err != nil {
 		t.Fatal(err)
 	}

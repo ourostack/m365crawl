@@ -31,7 +31,7 @@ func TestPrivateSnapshotConsumerCannotOverwriteExistingCopy(t *testing.T) {
 		_ = duplicate.Close()
 		t.Fatal("consumer overwrote an existing snapshot")
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // verifies a literal file written inside this test's owned private root
 	if err != nil || string(data) != "private snapshot" {
 		t.Fatalf("existing copy not preserved: %v", err)
 	}

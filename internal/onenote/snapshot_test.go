@@ -72,7 +72,7 @@ func sqliteWriterProbe(t *testing.T, path string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCaptureSQLiteChild$", "-test.count=1")
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCaptureSQLiteChild$", "-test.count=1") //nolint:gosec // reexecutes only the checked current test executable, with literal arguments
 	cmd.Dir = filepath.Dir(path)
 	cmd.Env = append(os.Environ(), "M365CRAWL_SQLITE_LOCK_CHILD=1")
 	output, err := cmd.CombinedOutput()
@@ -93,7 +93,7 @@ func TestCaptureIndexRefusesActualExclusiveSQLiteWriter(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCaptureSQLiteChild$", "-test.count=1")
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCaptureSQLiteChild$", "-test.count=1") //nolint:gosec // reexecutes only the checked current test executable, with literal arguments
 	cmd.Dir = filepath.Dir(path)
 	cmd.Env = append(os.Environ(), "M365CRAWL_SQLITE_LOCK_CHILD=hold")
 	input, err := cmd.StdinPipe()
@@ -180,7 +180,7 @@ func TestCaptureIndexPrivateEqualCopy(t *testing.T) {
 	if copyPath == path || capture.SourceModified.IsZero() {
 		t.Fatal("copy aliases source or loses observed time")
 	}
-	copied, err := os.ReadFile(copyPath)
+	copied, err := os.ReadFile(copyPath) //nolint:gosec // reads the copy created by CaptureIndex in its owned private directory
 	if err != nil || !bytes.Equal(before, copied) {
 		t.Fatalf("private copy mismatch: %v", err)
 	}
@@ -233,12 +233,12 @@ func TestCaptureIndexRefusesUnsafeInputs(t *testing.T) {
 			return path
 		}},
 		{"wal-header", func(t *testing.T, path string) string {
-			b, err := os.ReadFile(path)
+			b, err := os.ReadFile(path) //nolint:gosec // reads only the synthetic index supplied to this test callback
 			if err != nil {
 				t.Fatal(err)
 			}
 			b[18], b[19] = 2, 2
-			if err := os.WriteFile(path, b, 0o600); err != nil {
+			if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // modifies only this callback's synthetic test fixture to simulate a WAL header
 				t.Fatal(err)
 			}
 			return path
