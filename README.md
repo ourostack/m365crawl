@@ -54,6 +54,10 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 **People observations, without invented identity resolution.** `people sync` registers native Mac Outlook HxStore inputs, and `people --query` joins retained observations to the existing people list. `people show person-observation:ID` exposes native email/directory claims, differing copies and conflicts; `people sources` shows independent coverage. Copied supported HxStore roots work with `--root`. Windows OWA people discovery and automatic subject-tenant resolution are not supplied. A profile-owner link is not the subject's tenant, a cache refresh is not last contact, and ambiguous copies remain unresolved rather than becoming a guessed current contact.
 
+<p align="center"><img src="docs/people-observations.png" alt="Actual synthetic CLI output: two conflicting native people claims, a stable observation follow-up, unresolved identity and partial source coverage" width="1000"></p>
+
+*Find the name, inspect the claims, and keep uncertainty visible. These are synthetic observations, not private contacts or a directory export.*
+
 **Planned expansion, not shipped support:**
 
 | Area | Direction | What still needs proving |

@@ -327,8 +327,8 @@ func (s *Store) PeopleObservation(ctx context.Context, id int64) (detail PeopleO
 	if err != nil {
 		return detail, err
 	}
-	detail.Conflicts, err = readPeopleObservations(ctx, tx, " where p.source_id=? and lower(trim(p.email))=? and p.teams_id<>? and p.teams_id<>'' order by p.rowid",
-		detail.SourceID, strings.ToLower(strings.TrimSpace(p.Email)), p.TeamsID)
+	detail.Conflicts, err = readPeopleObservations(ctx, tx, " where p.source_id=? and lower(trim(p.email))=? and ?<>'' and ?<>'' and p.teams_id<>? and p.teams_id<>'' order by p.rowid",
+		detail.SourceID, strings.ToLower(strings.TrimSpace(p.Email)), strings.TrimSpace(p.Email), p.TeamsID, p.TeamsID)
 	if err != nil {
 		return detail, err
 	}

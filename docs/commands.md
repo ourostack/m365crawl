@@ -349,6 +349,8 @@ Result: a list of person items, newest `last_seen_at` first across both sources.
 
 Partial and failed capture retains native representations and durable contradiction evidence. A cache missing a person is not deletion. Native identity strings outside the qualified syntax remain raw evidence; no email-to-person resolution or subject tenancy is inferred. `people sync/show/sources` reject subject `--account` filtering.
 
+Symlink and special-file source leaves are refused explicitly (`outlook_people_source_unsafe`); use a supported regular copied HxStore file. Unsupported default provider errors (`outlook_people_source_unsupported`) point to `--root`, not archive repair. Reader panics remain failed optional captures with cleanup verification. List coverage is refreshed after same-command legacy/shared capture; native ordering uses full names and numeric IDs before output text truncation.
+
 Use a Teams person's `id` or name with `--from` on Teams commands, and a mail address with `--from` on `mail list`.
 
 ```sh

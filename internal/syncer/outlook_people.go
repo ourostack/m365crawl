@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/outlookpeople"
@@ -109,7 +110,7 @@ func finishSharedPeople(ctx context.Context, s *store.Store, profile string, inf
 	}
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	result, digest, readErr := peopleCollect(readCtx, info)
+	result, digest, readErr := safePeopleCollect(readCtx, info)
 	cause := errors.Join(readErr, peopleCleanupVerified(info, cleanup), readCtx.Err())
 	if cause != nil {
 		err := recordPeopleFailure(ctx, s, pending.attempt, pending.signature, cause, pending.previous.Locator)
@@ -258,7 +259,7 @@ func syncPeople(ctx context.Context, s *store.Store, options PeopleOptions) (Peo
 		if source.AttemptedAt != nil {
 			age = now.Sub(*source.AttemptedAt)
 		}
-		signature, observeErr := outlookdesktop.FingerprintOf(source.Locator, outlookVersions())
+		signature, observeErr := observePeopleSource(source.Locator)
 		if !options.Explicit && source.AttemptedAt != nil && age >= 0 &&
 			(age < OutlookMinReadInterval || age < options.MaxAge && signature == source.AcquisitionSignature) {
 			report.Skipped++
@@ -335,7 +336,7 @@ func capturePeople(ctx context.Context, s *store.Store, attempt store.KnowledgeA
 		return "failed", recordPeopleFailure(ctx, s, attempt, signature, err, previous.Locator)
 	}
 	acquired := peopleNow().UTC()
-	result, digest, readErr := peopleCollect(captureCtx, info)
+	result, digest, readErr := safePeopleCollect(captureCtx, info)
 	cleanupErr := peopleCleanupVerified(info, cleanup)
 	if err := errors.Join(readErr, cleanupErr, captureCtx.Err()); err != nil {
 		return "failed", recordPeopleFailure(ctx, s, attempt, signature, err, previous.Locator)
@@ -363,6 +364,15 @@ func capturePeople(ctx context.Context, s *store.Store, attempt store.KnowledgeA
 	return status, nil
 }
 
+func safePeopleCollect(ctx context.Context, info outlookdesktop.Info) (result outlookpeople.Result, digest string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result, digest, err = outlookpeople.Result{}, "", errs.Internal(errors.New("native people reader panicked"))
+		}
+	}()
+	return peopleCollect(ctx, info)
+}
+
 func recordPeopleFailure(ctx context.Context, s *store.Store, attempt store.KnowledgeAttempt, signature string, cause error, path string) error {
 	status := "failed"
 	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
@@ -374,6 +384,10 @@ func recordPeopleFailure(ctx context.Context, s *store.Store, attempt store.Know
 	if errors.Is(cause, errPeopleCleanup) {
 		reason = "outlook_people_snapshot_cleanup_unverified"
 	}
+	var coded *errs.Coded
+	if errors.As(cause, &coded) && coded.Code == "outlook_people_source_unsafe" {
+		reason = coded.Code
+	}
 	diagnostic, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.RecordKnowledgeFailure(diagnostic, attempt, store.KnowledgeOutcome{Status: status, Reason: reason,
@@ -381,4 +395,17 @@ func recordPeopleFailure(ctx context.Context, s *store.Store, attempt store.Know
 		return errors.Join(cause, err)
 	}
 	return ctx.Err()
+}
+
+func observePeopleSource(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", &errs.Coded{Code: "outlook_people_source_unsafe", Exit: errs.ExitEnvironment,
+			Message: "native people source must be a regular HxStore file, not a symlink or special file",
+			Fix:     "Use a supported copied <root>/<profile>/HxStore.hxd regular file."}
+	}
+	return outlookdesktop.FingerprintOf(path, outlookVersions())
 }

@@ -81,6 +81,8 @@ The default `people` list preserves legacy Teams/mail IDs and keys, adding nativ
 
 Native fields are source claims, not current directory authority. Names, emails, raw versions and profile-owner links never establish subject tenancy; `identity_state` is always `unresolved`, with no resolved-person edge or email-based identity selection. Account-filtered lists preserve legacy scope and exclude unqualified native subjects with a notice; native sync/show/sources reject subject account filtering. Windows OWA people discovery, current-copy selection and full attendee joins remain unsupported. Explicit supported HxStore copies are portable; unknown native identity forms are retained unchanged, not decoded as credentials or invented identities.
 
+Native source leaves must be regular files, not symlinks or special files. Unsupported default discovery returns environment code `outlook_people_source_unsupported` with explicit copied-HxStore guidance; unsafe source leaves record terminal `outlook_people_source_unsafe`. Optional reader panics become fixed internal diagnostics within the people lane, with cleanup/absence verification and terminal attempt recording, rather than escaping into calendar/mail settlement. Same-command shared refresh re-reads current source coverage before presenting people results. Native selection and merged tie-break use untruncated SQLite-compatible ASCII case folding, source ID and numeric observation rowid; `--max-text` does not change selection.
+
 ### 3.1 Tables
 
 | Table | Key | Fields agents see |

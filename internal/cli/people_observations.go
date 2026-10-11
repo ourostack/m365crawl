@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
 )
@@ -161,9 +162,10 @@ func (c *peopleCmd) connectedPeopleResult(rt *runtime, s *store.Store, coverage 
 		return nil, err
 	}
 	type ordered struct {
-		item     any
-		at       time.Time
-		name, id string
+		item               any
+		at                 time.Time
+		name, id           string
+		sourceID, nativeID int64
 	}
 	all := []ordered{}
 	for _, row := range rows {
@@ -181,20 +183,21 @@ func (c *peopleCmd) connectedPeopleResult(rt *runtime, s *store.Store, coverage 
 	}
 	for _, row := range native {
 		item := peopleItem(row, rt.g.MaxText)
-		all = append(all, ordered{item: item, name: item.DisplayName, id: item.ID})
+		all = append(all, ordered{item: item, name: row.Person.DisplayName, id: item.ID, sourceID: row.SourceID, nativeID: row.ID})
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if !all[i].at.Equal(all[j].at) {
 			return all[i].at.After(all[j].at)
 		}
-		a, b := strings.ToLower(all[i].name), strings.ToLower(all[j].name)
+		a, b := asciiFold(all[i].name), asciiFold(all[j].name)
 		if a != b {
 			return a < b
 		}
-		ai, aok := all[i].item.(peopleObservationItem)
-		bi, bok := all[j].item.(peopleObservationItem)
-		if aok && bok && ai.SourceID != bi.SourceID {
-			return ai.SourceID < bi.SourceID
+		if all[i].nativeID != 0 && all[j].nativeID != 0 {
+			if all[i].sourceID != all[j].sourceID {
+				return all[i].sourceID < all[j].sourceID
+			}
+			return all[i].nativeID < all[j].nativeID
 		}
 		return all[i].id < all[j].id
 	})
@@ -207,11 +210,25 @@ func (c *peopleCmd) connectedPeopleResult(rt *runtime, s *store.Store, coverage 
 		items[i] = row.item
 	}
 	out := newList(shape(rt, items), truncated)
-	out.SourceCoverage = coverage
+	sources, err := s.KnowledgeSources(rt.ctx, "outlook_people")
+	if err != nil {
+		return nil, err
+	}
+	out.SourceCoverage = peopleCoverage(sources)
+	out.SourceCoverage.RefreshError = coverage.RefreshError
 	if rt.g.Account != "" {
 		out.addNotice("native Outlook subjects have unresolved account ownership and were excluded; profile-owner links do not prove subject tenancy")
 	}
 	return out, nil
+}
+
+func asciiFold(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, value)
 }
 
 func (rt *runtime) peopleRead(label string, fn func(*store.Store) (*listResult, error)) error {
@@ -249,6 +266,11 @@ func (c *peopleSyncCmd) Run(rt *runtime) error {
 	}
 	report, err := runPeopleSync(rt.ctx, syncer.PeopleOptions{DBPath: rt.dbPath, Root: c.Root, Explicit: true, Discover: true})
 	if err != nil {
+		if errors.Is(err, outlookdesktop.ErrNotSupported) {
+			return &errs.Coded{Code: "outlook_people_source_unsupported", Exit: errs.ExitEnvironment,
+				Message: "default native people discovery is supported for Mac HxStore profiles only",
+				Fix:     "Use `people sync --root DIR` with a supported copied <root>/<profile>/HxStore.hxd input; Windows OWA people discovery is not implemented."}
+		}
 		return asCoded(err)
 	}
 	return rt.write("people sync", notesSyncResult{Captured: report.Captured, Unchanged: report.Unchanged,
