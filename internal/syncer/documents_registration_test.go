@@ -15,7 +15,7 @@ import (
 func TestDocumentsRunnerRegistrationAndParticipatingSourceReadEdges(t *testing.T) {
 	root := documentRootFixture(t)
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestDocumentsRunnerFailedTerminalAndCancellationEdges(t *testing.T) {
 	for _, fault := range []string{"failed-terminal", "cancel-next"} {
 		t.Run(fault, func(t *testing.T) {
 			root := documentRootFixture(t)
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := newDB(t)
 			ctx := context.Background()
 			if _, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true}); err != nil {
 				t.Fatal(err)
@@ -94,7 +94,7 @@ func TestDocumentsRunnerFailedTerminalAndCancellationEdges(t *testing.T) {
 
 func TestDocumentsRunnerSameRegisteredPathHasDeterministicSelection(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	st, err := store.Open(ctx, path)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestDocumentsRunnerSameRegisteredPathHasDeterministicSelection(t *testing.T
 
 func TestDocumentsRunnerFailedRegistrationNeverInventsDescriptor(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	now := documentsNow
 	t.Cleanup(func() { documentsNow = now })
 	documentsNow = func() time.Time { return time.Time{} }
@@ -136,7 +136,7 @@ func TestDocumentsRunnerFailedRegistrationNeverInventsDescriptor(t *testing.T) {
 func TestDocumentsRunnerRegisteredLocatorOrderIsNumericNotPath(t *testing.T) {
 	root := documentRootFixture(t)
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "archive.db"))
+	st, err := store.Open(ctx, newDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

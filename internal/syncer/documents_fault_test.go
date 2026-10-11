@@ -17,7 +17,7 @@ func TestDocumentsRunnerFailureBoundaries(t *testing.T) {
 	for _, fault := range []string{"read", "lock", "open", "discover", "observe", "capture", "panic", "empty-capture", "cancel-capture", "close"} {
 		t.Run(fault, func(t *testing.T) {
 			root := documentRootFixture(t)
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := newDB(t)
 			ctx := context.Background()
 			report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 			if err != nil {
@@ -88,7 +88,7 @@ func TestDocumentsRunnerFailureBoundaries(t *testing.T) {
 
 func TestDocumentsRunnerAgeZeroPreservesArchiveAndSource(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	if _, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true}); err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestDocumentsRunnerRejectsInvalidOptions(t *testing.T) {
 
 func TestDocumentsRunnerLateCancelledCaptureDoesNotAdmit(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 	if err != nil {
@@ -157,7 +157,7 @@ func TestDocumentsRunnerLateCancelledCaptureDoesNotAdmit(t *testing.T) {
 }
 
 func TestDocumentsRunnerSelectedUnknownNeverRefreshes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	s, err := store.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)

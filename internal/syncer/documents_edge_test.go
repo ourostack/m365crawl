@@ -14,7 +14,7 @@ import (
 
 func TestDocumentsRunnerPartialAndChangedSourceBypassThrottle(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	if err := os.WriteFile(filepath.Join(root, "recent.json"),
 		[]byte(`{"documents":{"items":[{"title":"Valid original","url":"https://example.invalid/valid"},null]}}`), 0o600); err != nil {
@@ -47,7 +47,7 @@ func TestDocumentsRunnerAtomicFailureAndStaleAttemptEdges(t *testing.T) {
 	for _, fault := range []string{"missing-binding", "registration-write", "failed-terminal", "commit", "stale", "mid-loop-cancel", "read-sources"} {
 		t.Run(fault, func(t *testing.T) {
 			root := documentRootFixture(t)
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := newDB(t)
 			ctx := context.Background()
 			report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 			if err != nil {

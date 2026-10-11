@@ -13,7 +13,7 @@ import (
 func TestDocumentsDiscoveryKeepsRegisteredBeforeNewLocators(t *testing.T) {
 	root := documentRootFixture(t)
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "archive.db"))
+	st, err := store.Open(ctx, newDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

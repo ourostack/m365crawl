@@ -35,7 +35,7 @@ func documentRootFixture(t *testing.T) string {
 
 func TestDocumentsRegisteredCaptureReuseAndRootlessRefresh(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 	if err != nil || report.Captured != 2 || report.Failed != 0 || len(report.Sources) != 2 {
@@ -78,7 +78,7 @@ func TestDocumentsRegisteredCaptureReuseAndRootlessRefresh(t *testing.T) {
 
 func TestDocumentsFailureKeepsLastGoodAndSelectedPeersIndependent(t *testing.T) {
 	root := documentRootFixture(t)
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := newDB(t)
 	ctx := context.Background()
 	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, Root: root, Explicit: true, Discover: true})
 	if err != nil {
