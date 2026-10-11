@@ -4,6 +4,41 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-11
+
+### Added
+
+- Added a bounded internal mapper for native Teams app/reply metadata and positioned citation observations, preserving message provenance and explicit malformed/unconsumed-content losses. It does not identify Copilot by name, capture private history or add archive/search/CLI citation support.
+- Add a bounded native Engage Home-access-session capture backend with service-scoped viewer/network evidence, ordered thread-starter text and explicit content omissions. Observations are incomplete and do not establish linked-thread retrieval, complete feeds, shared archive or CLI support.
+- Added an internal bounded OOXML reader for source-ordered Word paragraphs, native Excel cell values and PowerPoint slide/notes paragraphs, with explicit unsupported compound packages and content-loss states. This is backend groundwork, not document discovery, placeholder hydration, cloud fetching or installed document commands.
+- Added a bounded internal reader for cached Loop legacy channel text with native snapshot sequences, pending-operation counts and explicit missing/unsupported coverage. This backend does not reconstruct current page layout, apply Fluid operations, fetch components or add archive/search/CLI support.
+- Added a bounded internal reader for consistent Office recent, shared, recommended and open-dialog JSON copies, preserving source-qualified document, person, activity and sharing observations with explicit losses. This backend does not yet add document discovery, sync, search or CLI commands.
+- Added a bounded internal reader for native Office recent-local-document registry copies, preserving source-native IDs, application and raw path/time evidence with explicit losses. It does not open referenced files or add document discovery, sync, search or CLI commands.
+- Added a bounded internal reader for consistent OneDrive ListSync copies, preserving scoped file/folder inventory and native site-user evidence with explicit unavailable-source and row losses. It does not add general Microsoft Lists scraping, downloading, archive integration or document commands.
+- Add a bounded supplied-copy reader for native OneDrive sync-engine file/folder inventory, scope/policy links, graph display-name observations and raw hydration history. This is backend groundwork only; live SQLite snapshots, local-file availability, document extraction, shared archive and CLI support are not included.
+- Added a bounded internal reader for consistent OneDrive FileUsageSync copies, retaining separate native recent-file, formatted-document variant, sharing-history and collaborator observations with explicit losses. It does not add discovery, downloading, archive integration or CLI commands.
+- Added a bounded internal reader for caller-supplied, consistent OneNote full-text index copies, retaining native hierarchy, indexed text/OCR, flags and explicit source losses. This backend does not yet add OneNote sync, search or CLI support.
+- A bounded backend for native full Outlook attendee observations and detail-link evidence, preserving source copies, ambiguity, unknown fields and framing losses. Shared calendar and CLI integration are not included.
+- Internal Outlook people reader maps the measured local people layouts, preserves ambiguous source copies, and reports malformed or resynced observations with bounded retention. This is backend groundwork; people enrichment is not yet connected to sync or commands.
+- A workflow-first GitHub prompt-request form for additional integrations, with optional technical evidence and explicit public-data privacy reminders.
+- Add a bounded native SharePoint capture backend for referenced modern-page rich text and non-meeting Stream transcripts, preserving service-scoped identity, explicit omissions and guarded offsets. Public archive and CLI integration remain separate work.
+- Expose new Outlook OWA cached mail on Windows through mail commands, search, overview, status and doctor. Add nullable recipient roles and conversation identities while preserving legacy Mac fields and IDs. OWA calendar is not read in this release; Windows calendar parity is next release.
+
+### Changed
+
+- Contributors now add a changelog fragment, `changes/<short-slug>.md`, instead of editing `CHANGELOG.md`, so pull requests that land at the same time no longer conflict. A release assembles the fragments into its version section with `scripts/changelog-assemble.sh`, and CI refuses a pull request that adds lines under `[Unreleased]`.
+- Report exact zero-count statement ranges from failing source files when the Unix function-coverage gate fails, without changing coverage thresholds or allowlists.
+- Reframe the README around agent recall, triage and meeting preparation, add an installed-guide onboarding path, and clarify offline archive reads, explicit transcript fetching and the no-app-storage-write boundary.
+- Clarify the usage-led expansion's deferred Planner/To Do and private Copilot coverage, version-qualified cached Loop direction, and unqualified live OneDrive sync-cache capture. Backend readers are not advertised as connected or installed support.
+- README explains the usage-led integration priorities, separates planned and deferred sources from shipped support, and invites agent-assisted GitHub issues ("prompt requests") for additional support.
+
+### Fixed
+
+- Synchronize the synthetic browser write-failure test with server-side connection release, so coverage cannot finish before the failed response-write handler exits.
+- Make the OneDrive ListSync scope-loop cancellation regression deterministic despite background database context checks, without changing the reader.
+- Exercise transcript sign-in wait cancellation directly in a deterministic synthetic test, rather than depending on a timer cancelling at that stage of a full command.
+- Windows browser shutdown retains bounded, exact-owned process-generation handles and checks their exit signals before reporting completion. Profile/job membership alone no longer establishes completion; native failures stay explicit, with no additional teardown grace.
+
 ## [0.6.2] - 2026-10-09
 
 ### Added
