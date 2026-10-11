@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -236,6 +237,7 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		none := *rt
 		none.outlookRoot = ""
+		none.outlookDefault = true
 		c := none.mailReadableCheck(st)
 		if goruntime.GOOS == "windows" {
 			if !c.OK || !c.Warn || !strings.Contains(c.Detail, "outlook_profile_unreadable") {
@@ -253,6 +255,47 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 			t.Fatalf("%+v", c)
 		}
 	})
+}
+
+func TestDoctorMailReadableDefaultResolutionMarkers(t *testing.T) {
+	oldPlatform, oldRoot, oldSupported := mailPlatform, outlookDefaultRoot, mailSupported
+	t.Cleanup(func() { mailPlatform, outlookDefaultRoot, mailSupported = oldPlatform, oldRoot, oldSupported })
+	mailSupported = func() bool { return true }
+	for _, platform := range []string{"darwin", "windows"} {
+		for _, optional := range []bool{true, false} {
+			for _, failure := range []error{outlookdesktop.ErrNotSupported, errors.New("synthetic-private-resolution")} {
+				name := platform + "/explicit"
+				if optional {
+					name = platform + "/optional"
+				}
+				if errors.Is(failure, outlookdesktop.ErrNotSupported) {
+					name += "/unsupported"
+				} else {
+					name += "/unreadable"
+				}
+				t.Run(name, func(t *testing.T) {
+					mailPlatform = platform
+					outlookDefaultRoot = func() (string, error) { return "", failure }
+					rt := &runtime{outlookOn: true, outlookRoot: "", outlookDefault: optional}
+					c := rt.mailReadableCheck(&store.Store{})
+					wantWarn := platform == "windows" || !optional || !errors.Is(failure, outlookdesktop.ErrNotSupported)
+					if !c.OK || c.Warn != wantWarn {
+						t.Fatal("default resolution warning classification mismatch")
+					}
+					if wantWarn {
+						if !strings.Contains(c.Detail, "outlook_profile_unreadable") || c.Fix == "" {
+							t.Fatal("unreadable resolution missing fixed diagnosis")
+						}
+					} else if c.Detail != "no new Outlook profile; no mail to read" || c.Fix != "" {
+						t.Fatal("optional unsupported resolution is not a clean nonwarning")
+					}
+					if strings.Contains(c.Detail+c.Fix, "synthetic-private") {
+						t.Fatal("resolution source value leaked")
+					}
+				})
+			}
+		}
+	}
 }
 
 // mail_archive_mode warns when other users can read the archive and says nothing of its content.
