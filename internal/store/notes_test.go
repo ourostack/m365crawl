@@ -87,7 +87,7 @@ func TestNotesSchemaPartialRepairAndNewerRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitNotes(t, s, beginNotes(t, s, "A", base), "complete", "A", noteFixture("notebook", "Repaired", "repaired"))
-	if _, err := s.db.Exec(`update schema_migrations set version=10`); err != nil {
+	if _, err := s.db.Exec(`update schema_migrations set version=?`, SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	must0(s.Close())

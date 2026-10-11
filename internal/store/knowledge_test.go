@@ -89,8 +89,8 @@ func TestNotesSchema9OldReadOnlyAndMigrationPreservesMail(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n := rowCount(t, s, `select max(version) from schema_migrations`); n != 9 {
-			t.Fatalf("schema %d, want9", n)
+		if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion {
+			t.Fatalf("schema %d, want%d", n, SchemaVersion)
 		}
 		if n := rowCount(t, s, `select count(*) from mail_fts where rowid=? and mail_fts match 'preserved'`, mailRow); n != 1 {
 			t.Fatal("mail FTS/public rowid changed")
