@@ -192,9 +192,13 @@ func (rt *runtime) documentsRead(label string, sourceID int64, fn func(*store.St
 	if err := errors.Join(readErr, closeErr); err != nil {
 		return documentError(err)
 	}
-	result.SourceCoverage, result.sourceOnly = coverage, true
+	if result.SourceCoverage == nil {
+		result.SourceCoverage = documentsCoverage(nil)
+	}
+	result.SourceCoverage.RefreshError = coverage.RefreshError
+	result.sourceOnly = true
 	if result.Count == 0 {
-		if len(coverage.Sources) == 0 {
+		if len(result.SourceCoverage.Sources) == 0 {
 			result.Note = "no document metadata captured yet; run m365crawl docs sync or docs sync --root DIR"
 		} else {
 			result.Note = "no document metadata matched; source_coverage describes retained or unavailable inputs"
@@ -253,21 +257,31 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	until = documentUpperBound(until, c.Until)
 	return rt.documentsRead("docs list", c.SourceID, func(st *store.Store) (*listResult, error) {
 		if st == nil {
 			return newList(nil, false), nil
 		}
-		rows, truncated, err := st.DocumentObservations(rt.ctx, store.DocumentFilter{Query: c.Query,
+		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
 			SourceID: c.SourceID, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit})
 		if err != nil {
 			return nil, err
 		}
-		items := make([]documentItem, len(rows))
-		for i, row := range rows {
+		items := make([]documentItem, len(snapshot.Rows))
+		for i, row := range snapshot.Rows {
 			items[i] = documentItemOf(row, rt.g.MaxText)
 		}
-		return newList(shape(rt, items), truncated), nil
+		result := newList(shape(rt, items), snapshot.Truncated)
+		result.SourceCoverage = documentsCoverage(snapshot.Sources)
+		return result, nil
 	})
+}
+
+func documentUpperBound(until time.Time, raw string) time.Time {
+	if dateOnly.MatchString(raw) {
+		return until.In(time.Local).AddDate(0, 0, 1)
+	}
+	return until
 }
 
 type documentsSearchCmd struct {
@@ -329,7 +343,9 @@ func (c *documentsShowCmd) Run(rt *runtime) error {
 		}
 		item := documentDetailItem{documentItem: documentItemOf(current.Observation, rt.g.MaxText),
 			References: current.References, ReferencesTotal: current.ReferencesTotal, ReferencesTruncated: current.ReferencesTruncated}
-		return newList(shape(rt, []documentDetailItem{item}), false), nil
+		result := newList(shape(rt, []documentDetailItem{item}), false)
+		result.SourceCoverage = documentsCoverage([]store.KnowledgeSource{current.Source})
+		return result, nil
 	})
 }
 

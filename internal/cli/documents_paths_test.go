@@ -61,7 +61,7 @@ func TestDocumentsCLIReadFailuresAndMissingSelections(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := newRuntime(context.Background(), &Globals{}, os.Stdout, os.Stderr)
-	if _, err := currentDocumentsCoverage(rt, st); err == nil {
+	if _, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{}); err == nil {
 		t.Fatal("closed archive coverage read hidden")
 	}
 	run := runDocumentsSync

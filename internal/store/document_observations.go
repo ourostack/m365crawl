@@ -30,6 +30,12 @@ type DocumentObservationRow struct {
 	Retained                     bool
 }
 
+type DocumentObservationSnapshot struct {
+	Rows      []DocumentObservationRow
+	Sources   []KnowledgeSource
+	Truncated bool
+}
+
 type DocumentFilter struct {
 	Query                        string
 	SourceID                     int64

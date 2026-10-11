@@ -16,13 +16,17 @@ import (
 )
 
 func (s *Store) DocumentSources(ctx context.Context) ([]KnowledgeSource, error) {
-	available, err := hasDocumentObservations(ctx, s.db)
+	return readDocumentSources(ctx, s.db)
+}
+
+func readDocumentSources(ctx context.Context, reader knowledgeReader) ([]KnowledgeSource, error) {
+	available, err := hasDocumentObservations(ctx, reader)
 	if err != nil || !available {
 		return []KnowledgeSource{}, err
 	}
 	out := []KnowledgeSource{}
 	for _, surface := range []officedocuments.Surface{officedocuments.Recent, officedocuments.Shared, officedocuments.Recommended, officedocuments.Dialog} {
-		sources, err := s.KnowledgeSources(ctx, DocumentKind(surface))
+		sources, err := readKnowledgeSources(ctx, reader, DocumentKind(surface))
 		if err != nil {
 			return nil, err
 		}
@@ -38,12 +42,16 @@ func (s *Store) DocumentSources(ctx context.Context) ([]KnowledgeSource, error) 
 }
 
 func (s *Store) DocumentLocators(ctx context.Context, sourceID int64) ([]KnowledgeSource, error) {
-	if sourceID < 0 {
-		return nil, ErrKnowledgeSourceUnknown
-	}
 	sources, err := s.DocumentSources(ctx)
 	if err != nil {
 		return nil, err
+	}
+	return documentLocators(sources, sourceID)
+}
+
+func documentLocators(sources []KnowledgeSource, sourceID int64) ([]KnowledgeSource, error) {
+	if sourceID < 0 {
+		return nil, ErrKnowledgeSourceUnknown
 	}
 	var selected int64
 	if sourceID > 0 {
@@ -70,6 +78,45 @@ func (s *Store) DocumentLocators(ctx context.Context, sourceID int64) ([]Knowled
 		return nil, ErrKnowledgeSourceUnknown
 	}
 	return out, nil
+}
+
+func (s *Store) DocumentSnapshot(ctx context.Context, filter DocumentFilter) (DocumentObservationSnapshot, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return DocumentObservationSnapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	snapshot, err := readDocumentSnapshot(ctx, tx, filter)
+	if err != nil {
+		return DocumentObservationSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return DocumentObservationSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func readDocumentSnapshot(ctx context.Context, reader knowledgeReader, filter DocumentFilter) (DocumentObservationSnapshot, error) {
+	sources, err := readDocumentSources(ctx, reader)
+	if err != nil {
+		return DocumentObservationSnapshot{}, err
+	}
+	if filter.SourceID != 0 {
+		if _, err := documentLocators(sources, filter.SourceID); err != nil {
+			return DocumentObservationSnapshot{}, err
+		}
+	}
+	selected := []KnowledgeSource{}
+	for _, source := range sources {
+		if filter.SourceID == 0 || source.ID == filter.SourceID {
+			selected = append(selected, source)
+		}
+	}
+	rows, truncated, err := readDocumentObservations(ctx, reader, filter, 0)
+	if err != nil {
+		return DocumentObservationSnapshot{}, err
+	}
+	return DocumentObservationSnapshot{Rows: rows, Sources: selected, Truncated: truncated}, nil
 }
 
 func (s *Store) DocumentObservations(ctx context.Context, filter DocumentFilter) ([]DocumentObservationRow, bool, error) {

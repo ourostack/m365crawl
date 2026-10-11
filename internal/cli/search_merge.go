@@ -426,21 +426,17 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	documentTruncated := false
 	if p.indexedDocuments && st != nil {
-		rows, truncated, err := st.DocumentObservations(rt.ctx, store.DocumentFilter{Query: c.Query,
-			ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
+		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
+			ModifiedSince: f.Since, ModifiedUntil: documentUpperBound(f.Until, c.Until), Limit: f.Limit})
 		if err != nil {
 			return nil, err
 		}
-		documentTruncated = truncated
-		for _, row := range rows {
+		documentTruncated = snapshot.Truncated
+		for _, row := range snapshot.Rows {
 			hits = append(hits, searchHit{at: row.Document.Modified.Value, item: searchDocumentItem{
 				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText)}, source: searchDocuments})
 		}
-		coverage, err := currentDocumentsCoverage(rt, st)
-		if err != nil {
-			return nil, err
-		}
-		rt.documentCoverage = coverage
+		rt.documentCoverage = documentSnapshotCoverage(rt, snapshot.Sources)
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].at.After(hits[j].at) })
 	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated, searchDocuments: documentTruncated}

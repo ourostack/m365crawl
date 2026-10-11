@@ -315,7 +315,7 @@ m365crawl watch --every 30s --fields id,type,text --max-text 200
 
 ## search
 
-Full-text search over Teams chats, Outlook mail and fetched meeting transcripts, newest first; default `--limit 50` (check `truncated`).
+Full-text search over Teams chats, Outlook mail, fetched meeting transcripts and participating registered indexed notes/document metadata, newest first; default `--limit 50` (check `truncated`). Knowledge hits use native modification time, with unknown times last; document hits remain metadata-only unresolved observations.
 
 ```
 m365crawl search [<query>] [flags]
@@ -327,10 +327,10 @@ m365crawl search [<query>] [flags]
 
 | Flag | Applies to | Meaning |
 | --- | --- | --- |
-| `--source=chats\|mail\|transcripts\|all` | every source | What to search: `chats` (Teams), `mail` (Outlook), `transcripts` (fetched meeting transcripts) or `all` (every one, the default). |
-| `--from=STRING` | every source | Sender. Chats: a person id or a case-insensitive part of the name. Mail: a case-insensitive part of the sender's name or address. Transcripts: a case-insensitive part of the speaker's name. |
+| `--source=chats\|mail\|transcripts\|notes\|documents\|all` | every source | Choose messages, fetched transcripts, indexed notes, document metadata or all participating sources (default). |
+| `--from=STRING` | chats, mail, transcripts | Sender or transcript speaker; unresolved notes/documents are excluded from `all` and reject this filter when explicitly selected. |
 | `--since=STRING` | every source | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). For transcripts, the time of each entry. |
-| `--until=STRING` | every source | Only messages at or before this time (same formats as `--since`). |
+| `--until=STRING` | every source | Bound source-native time (same formats as `--since`). Document modification timestamps are exclusive upper bounds; a date-only document bound includes its whole local day. Unknown knowledge times do not match bounded windows. |
 | `--limit=50` | every source | Maximum items in the merged list; `truncated` says whether any source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
 | `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
@@ -343,14 +343,15 @@ m365crawl search [<query>] [flags]
 
 How the sources combine:
 
-- Every item has `source`: `chats`, `mail` or `transcripts`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item.
+- Every item has `source`: `chats`, `mail`, `transcripts`, `notes` or `documents`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item. Registered knowledge participates only when its unresolved scope permits the selected filters.
 - A transcript item is one part of a recorded meeting whose fetched text matched: `{"source", "call_id", "event_key", "title", "ordinal", "speaker", "at", "text", "matches", "fetched_at"}`. `speaker`, `text` and `at` (absolute) are those of the part's first matching entry, and `matches` counts the part's matching entries, so a part that says a word fifty times is one item. The words match what was said, not the speaker's name (that is `--from`). Only text already fetched into the archive is searched, offline; with `--source transcripts` and nothing fetched, `note` says `no transcripts are fetched yet; run m365crawl transcripts to see what can be fetched`.
-- Text output has a `thread` column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread`, `<conversation_id> <reply_chain_id, else id>`; for mail the id that `m365crawl mail thread` takes; for a transcript the call id that `m365crawl transcripts show` takes.
-- Items are newest first across every source, by `sent_at` for chats, `received_at` for mail and `at` for transcripts.
-- The result's `sources` says, per source searched, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}, "transcripts": {"count", "truncated"}}`.
+- Knowledge hits have stable `note:ID` or `document-observation:ID`; follow `notes show` or `docs show`, not a message thread. Document metadata remains unresolved, with `text_state=not_captured`; URLs are reference evidence, not resolved files or proof of local residency.
+- Text output names source-specific follow-ups: `thread <conversation_id> <reply_chain_id, else id>` for chats, `mail thread <id>` for mail, `transcripts show <call_id>` for transcripts, and the corresponding knowledge `show` command for notes/documents.
+- Items are newest first by `sent_at` for chats, `received_at` for mail, `at` for transcripts and native `modified_at` for knowledge; unknown knowledge dates sort last.
+- The result's `sources` reports count/truncation for each participating source. Knowledge `source_coverage` stays outside item shaping and zero hits; document rows and their source frontier come from one read snapshot, preserving independent refresh errors.
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched`. With another `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
-- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
+- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. It excludes unresolved notes/documents from `all`; explicitly selected knowledge rejects it. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
 - `--fields` accepts the keys of every kind of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 

@@ -2,16 +2,12 @@ package cli
 
 import "github.com/ourostack/m365crawl/internal/store"
 
-func currentDocumentsCoverage(rt *runtime, st *store.Store) (*noteCoverage, error) {
-	sources, err := st.DocumentSources(rt.ctx)
-	if err != nil {
-		return nil, err
-	}
+func documentSnapshotCoverage(rt *runtime, sources []store.KnowledgeSource) *noteCoverage {
 	coverage := documentsCoverage(sources)
 	if rt.documentCoverage != nil {
 		coverage.RefreshError = rt.documentCoverage.RefreshError
 	}
-	return coverage, nil
+	return coverage
 }
 
 func mergedOptionalCoverage(notes, documents *noteCoverage) *noteCoverage {

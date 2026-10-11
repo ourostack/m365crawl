@@ -101,6 +101,10 @@ func TestDocumentObservationsOldSchemaIsReadOnlyOptionalAbsence(t *testing.T) {
 			if sources, err := s.DocumentSources(ctx); err != nil || len(sources) != 0 {
 				t.Fatal("old optional absence discovered sources")
 			}
+			if snapshot, err := s.DocumentSnapshot(ctx, DocumentFilter{Limit: 50}); err != nil ||
+				len(snapshot.Rows) != 0 || len(snapshot.Sources) != 0 || snapshot.Truncated {
+				t.Fatal("old optional absence became populated or writable snapshot")
+			}
 			if _, err := s.DocumentObservation(ctx, 1); !errors.Is(err, ErrDocumentObservationNotFound) {
 				t.Fatal("absent old-schema document detail did not report not found")
 			}
