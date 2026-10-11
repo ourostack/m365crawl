@@ -93,7 +93,8 @@ func TestCompletionNativeDeniedCombinedFailureCannotBecomeProvisional(t *testing
 			if err == nil || !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.Is(err, cause) {
 				t.Fatalf("combined failure lost original native cause: %v", err)
 			}
-			if _, provisional := err.(*completionDeniedFailure); provisional || f.closed[42] != 1 {
+			_, provisional := err.(*completionDeniedFailure) //nolint:errorlint // Wrapped denial retains an independent error and must not be classified by errors.As.
+			if provisional || f.closed[42] != 1 {
 				t.Fatalf("independent failure became clearable or leaked transient: %v closed=%v", provisional, f.closed)
 			}
 		})
