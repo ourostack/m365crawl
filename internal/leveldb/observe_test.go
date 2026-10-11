@@ -71,7 +71,11 @@ func TestLoadObserveNilIsPlain(t *testing.T) {
 func TestEntryOverheadCalibrated(t *testing.T) {
 	const n = 50000
 	const fixtureEnv = "M365CRAWL_LEVELDB_CALIBRATION_FIXTURE"
-	if dir := os.Getenv(fixtureEnv); dir != "" {
+	if os.Getenv(fixtureEnv) == "1" {
+		dir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
@@ -123,7 +127,8 @@ func TestEntryOverheadCalibrated(t *testing.T) {
 	}
 	// Fixture creation and earlier tests can retain heap across the measurement's first GC.
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestEntryOverheadCalibrated$", "-test.v", "-test.timeout="+budget.String()) //nolint:gosec // G204: only this test executable, a literal selector and bounded timeout.
-	cmd.Env = append(os.Environ(), fixtureEnv+"="+dir)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), fixtureEnv+"=1")
 	output, err := cmd.CombinedOutput()
 	t.Logf("%s", output)
 	if err != nil {
