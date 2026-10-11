@@ -69,7 +69,7 @@ func TestDocumentObservationsOldSchemaIsReadOnlyOptionalAbsence(t *testing.T) {
 	ctx := context.Background()
 	for _, version := range []int{8, 9, 10} {
 		t.Run("schema-"+strconv.Itoa(version), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := filepath.Join(t.TempDir(), "data", "archive.db")
 			s, err := Open(ctx, path)
 			if err != nil {
 				t.Fatal(err)
