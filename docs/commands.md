@@ -377,7 +377,7 @@ m365crawl people [flags]
 | `--query=STRING` | Part of a display name or mail address, or an exact person id. A mail correspondent's id is `mail:<address>`, and a `--query` of that form matches that one address exactly. |
 | `--limit=50` | Maximum items in the merged list; `truncated` is true when either source had more. |
 
-Result: a list of person items, newest `last_seen_at` first across both sources. Each carries `tenant_id`, `id`, `display_name`, `sources` and `last_seen_at`.
+Result: a list of person items, known `last_seen_at` newest first, then unknown times. Ties use full display names (ASCII case-insensitive), then source ID and numeric observation ID for native rows, otherwise person ID. `people --help` exposes the default list's query, limit and accepted fields. An empty combined/native list explains that no archived person matched and directs readers to independent source coverage; it is not evidence of contact completeness.
 
 - **A Teams person** has `sources: ["chats"]` and no `email`, because Teams keeps no address for a person.
 - **A mail correspondent** is a sender or recipient with an address; gone messages do not count. It has `id: "mail:<address>"`, `email` (the address, lower case), `sources: ["mail"]`, an empty `tenant_id`, and as `display_name` the newest name it was given, or the address when it never had one.
@@ -413,8 +413,6 @@ Use a Teams person's `id` or name with `--from` on Teams commands, and a mail ad
 m365crawl people --query alex
 m365crawl people --query @example.com
 ```
-
-`--fields` keys: `tenant_id`, `id`, `display_name`, `email`, `sources`, `last_seen_at`.
 
 ## sql
 

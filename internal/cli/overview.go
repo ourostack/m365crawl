@@ -139,6 +139,14 @@ func (overviewCmd) Run(rt *runtime) error {
 		}
 		res.Sources = append(res.Sources, src)
 	}
+	people, err := st.KnowledgeSources(rt.ctx, "outlook_people")
+	if err != nil {
+		return asCoded(err)
+	}
+	if len(people) > 0 {
+		res.Note = "registered native Outlook people observations are available separately; identities remain unresolved and the source table above does not assess their coverage"
+		res.Next = append(res.Next, startStep{Command: "m365crawl --max-age 0 people sources", Does: "inspect independent native people coverage; keep --db, omit --account; m365crawl people lists observations"})
+	}
 	return rt.write("overview", res)
 }
 
@@ -284,6 +292,9 @@ func (rt *runtime) renderOverview(r *overviewResult) {
 			if s.Note != "" {
 				_, _ = fmt.Fprintf(w, "%s\n", render.Dim(s.Source+": "+s.Note, color))
 			}
+		}
+		if r.Note != "" {
+			_, _ = fmt.Fprintln(w, render.Dim(r.Note, color))
 		}
 		_, _ = fmt.Fprintln(w)
 	}
