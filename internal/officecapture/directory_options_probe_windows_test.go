@@ -4,6 +4,7 @@ package officecapture
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"unsafe"
@@ -29,7 +30,8 @@ func TestWindowsInputQualificationDirectoryOptionProbe(t *testing.T) {
 			attributes.Attributes, options, adjusted, fileAttributes, share, disposition, unsafe.Sizeof(*status))
 		err := create(handle, access, attributes, status, size, fileAttributes, share, disposition, adjusted, ea, eaSize)
 		if err != nil {
-			if code, ok := err.(windows.NTStatus); ok {
+			var code windows.NTStatus
+			if errors.As(err, &code) {
 				t.Logf("directory-option-probe ntstatus=0x%08x io-status=0x%08x", uint32(code), uint32(status.Status))
 			}
 		}

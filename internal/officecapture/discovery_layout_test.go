@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || windows
 
 package officecapture
 
@@ -45,8 +45,9 @@ func officeHomeFixture(t *testing.T, accounts int) string {
 
 func TestJSONDiscoveryNamedDefaultsAreSourceDescriptorsOnly(t *testing.T) {
 	home := officeHomeFixture(t, 1)
-	getHome := discoveryHome
-	t.Cleanup(func() { discoveryHome = getHome })
+	getHome, mac := discoveryHome, discoveryMac
+	t.Cleanup(func() { discoveryHome, discoveryMac = getHome, mac })
+	discoveryMac = true
 	discoveryHome = func() (string, error) { return home, nil }
 	inputs, err := DiscoverJSON(context.Background(), "")
 	if err != nil || len(inputs) != 12 {
@@ -71,8 +72,9 @@ func TestJSONDiscoveryMissingUnsafeAndBoundedInputs(t *testing.T) {
 				accounts = 44
 			}
 			home := officeHomeFixture(t, accounts)
-			getHome, read, closeFile := discoveryHome, discoveryRead, jsonClose
-			t.Cleanup(func() { discoveryHome, discoveryRead, jsonClose = getHome, read, closeFile })
+			getHome, read, closeFile, mac := discoveryHome, discoveryRead, jsonClose, discoveryMac
+			t.Cleanup(func() { discoveryHome, discoveryRead, jsonClose, discoveryMac = getHome, read, closeFile, mac })
+			discoveryMac = true
 			discoveryHome = func() (string, error) {
 				if fault == "home" {
 					return "", os.ErrPermission

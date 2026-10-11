@@ -4,6 +4,7 @@ package officecapture
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,7 +27,8 @@ func TestWindowsInputQualificationSingleComponentParameterProbe(t *testing.T) {
 		bound.Attributes &^= windows.OBJ_DONT_REPARSE
 		err := create(handle, access, &bound, status, size, fileAttributes, share, disposition, options, ea, eaSize)
 		if err != nil {
-			if code, ok := err.(windows.NTStatus); ok {
+			var code windows.NTStatus
+			if errors.As(err, &code) {
 				t.Logf("single-component-without-optional-attribute ntstatus=0x%08x", uint32(code))
 			}
 		}

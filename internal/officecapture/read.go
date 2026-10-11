@@ -25,8 +25,11 @@ func (c *JSONCapture) ReadJSON(ctx context.Context) (officedocuments.Result, err
 	}
 	result, readErr := officedocuments.ReadJSON(c.ctx, input.file(), c.surface)
 	closeErr := safeInputClose(c.ctx, input)
-	if readErr != nil || closeErr != nil || ctx.Err() != nil || c.ctx.Err() != nil {
+	if closeErr != nil || ctx.Err() != nil || c.ctx.Err() != nil {
 		return officedocuments.Result{}, errors.Join(jsonError(c.ctx, "office_json_capture_failed"), ctx.Err())
+	}
+	if readErr != nil {
+		return officedocuments.Result{}, readerFailure(c.ctx, readErr)
 	}
 	return result, nil
 }

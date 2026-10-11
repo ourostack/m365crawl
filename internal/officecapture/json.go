@@ -45,6 +45,21 @@ func jsonError(ctx context.Context, code string) error {
 	return errors.Join(&ReadError{Code: code}, ctx.Err())
 }
 
+func readerFailure(ctx context.Context, cause error) error {
+	var fixed *officedocuments.ReadError
+	if errors.As(cause, &fixed) && slices.Contains([]string{"office_surface_unknown", "office_json_unreadable",
+		"office_json_too_large", "office_json_unrecognized"}, fixed.Code) {
+		return jsonError(ctx, fixed.Code)
+	}
+	var capture *ReadError
+	if errors.As(cause, &capture) && slices.Contains([]string{"office_json_input_unqualified", "office_json_capture_failed",
+		"office_json_cleanup_failed", "office_json_policy_restore_failed", "office_surface_unknown", "office_json_unreadable",
+		"office_json_too_large", "office_json_unrecognized"}, capture.Code) {
+		return jsonError(ctx, capture.Code)
+	}
+	return jsonError(ctx, "office_json_capture_failed")
+}
+
 type guardedInput struct {
 	path      string
 	directory bool
@@ -221,7 +236,7 @@ func WithJSONCapture(ctx context.Context, input DocumentInput, consume func(*JSO
 			return jsonError(ctx, "office_json_capture_failed")
 		}
 		if err := consume(c); err != nil {
-			return jsonError(ctx, "office_json_capture_failed")
+			return readerFailure(ctx, err)
 		}
 		if ctx.Err() != nil || source.validate() != nil {
 			return jsonError(ctx, "office_json_capture_failed")
