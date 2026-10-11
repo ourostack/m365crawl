@@ -77,7 +77,13 @@ func openInput(path string, directory bool) (_ *guardedInput, result error) {
 	input := &guardedInput{path: path, directory: directory}
 	defer func() {
 		if result != nil {
-			result = errors.Join(result, input.close())
+			closeErr := input.close()
+			status, nativeStatus := result.(windows.NTStatus)
+			if closeErr == nil && nativeStatus && errors.Is(status.Errno(), os.ErrNotExist) {
+				result = status.Errno()
+			} else {
+				result = errors.Join(result, closeErr)
+			}
 		}
 	}()
 	rootHandle, err := inputWinRoot(rootName, windows.FILE_READ_ATTRIBUTES|windows.FILE_LIST_DIRECTORY|windows.SYNCHRONIZE,
@@ -133,6 +139,9 @@ func openInput(path string, directory bool) (_ *guardedInput, result error) {
 			&attributes, &status, nil, 0, share, windows.FILE_OPEN, options, 0, 0)
 		metadataClose := jsonClose(metadata)
 		if err != nil {
+			if metadataClose == nil {
+				return nil, err
+			}
 			return nil, errors.Join(err, metadataClose)
 		}
 		file := os.NewFile(uintptr(dataHandle), part)
