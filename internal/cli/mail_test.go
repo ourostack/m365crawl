@@ -642,6 +642,9 @@ func TestMailHelpIsTheContract(t *testing.T) {
 	if !strings.Contains(flat, "likely") || !strings.Contains(flat, "To and Cc are not yet told apart") || !strings.Contains(flat, "outlook/<profile>") || !strings.Contains(flat, "Windows preserves To/Cc/Bcc order") {
 		t.Errorf("mail group help:\n%s", out)
 	}
+	if !strings.Contains(flat, "Windows OWA calendar support is planned") || strings.Contains(flat, "calendar parity is next release") {
+		t.Errorf("mail help must distinguish planned calendar support from this notes release:\n%s", out)
+	}
 	_, out, _ = e.run("--format", "text", "mail", "list", "--help")
 	if flat := strings.Join(strings.Fields(out), " "); !strings.Contains(flat, "a date alone (YYYY-MM-DD) includes that whole day") {
 		t.Errorf("--until help:\n%s", out)

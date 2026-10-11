@@ -95,7 +95,7 @@ go install github.com/ourostack/m365crawl/cmd/m365crawl@latest
 
 Download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Add that directory to `PATH` to call it without the full path. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`.
 
-On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's OWA cached mail under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Mail commands, search, overview, status and doctor work with that cache. OWA calendar is not read in this release; Windows calendar parity is next release.
+On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's OWA cached mail under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Mail commands, search, overview, status and doctor work with that cache. OWA calendar is not read in this release; Windows OWA calendar support is planned.
 
 crawlkit's `crawlctl discover --app m365crawl` finds it.
 

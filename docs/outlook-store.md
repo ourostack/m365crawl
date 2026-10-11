@@ -4,7 +4,7 @@ This page is for people working on m365crawl's Outlook reader; you do not need i
 
 ## Windows OWA cached mail
 
-Windows new Outlook defaults to `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Each profile contributes one `IndexedDB\https_outlook.office.com_<port>.indexeddb.leveldb` origin and its optional `.indexeddb.blob` companion. Explicit copied supported OWA roots work portably. Explicit HxStore roots keep the legacy route, including coded unavailable Windows HxStore mail. OWA emits `outlook|<profile>|mail` only: no calendar or address-identity marker. OWA calendar is not read in this release; Windows calendar parity is next release.
+Windows new Outlook defaults to `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Each profile contributes one `IndexedDB\https_outlook.office.com_<port>.indexeddb.leveldb` origin and its optional `.indexeddb.blob` companion. Explicit copied supported OWA roots work portably. Explicit HxStore roots keep the legacy route, including coded unavailable Windows HxStore mail. OWA emits `outlook|<profile>|mail` only: no calendar or address-identity marker. OWA calendar is not read in this release; Windows OWA calendar support is planned.
 
 The collector reads allowlisted mail stores only, never credential stores or attachment payloads. The existing private snapshot is held until lazy readers close. Unknown layouts and multiple content mailboxes per profile refuse with `outlook_mail_layout_unsupported`; no mail from the failed read is applied. Doctor examines paths, metadata and archived state only: no source values, snapshots or live body reads. Windows access checks concern ACLs, not macOS Full Disk Access or POSIX mode bits.
 
