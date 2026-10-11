@@ -9,7 +9,7 @@
 
 Find the conversation. Recover the context. Walk into the meeting prepared.
 
-`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
+`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**, plus inspectable **native Outlook people observations**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
 **Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
 
@@ -44,7 +44,7 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 
 m365crawl is built around the maintainer's own Microsoft 365 usage: support grows from data we can inspect and workflows we can test on real machines. The name is the direction, not a claim that every Microsoft 365 app is supported. Your apps, account configuration and cached history may differ.
 
-**Available now:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, meeting recaps and action items, meeting transcript text through an explicit browser fetch, and local OneNote indexed notes. The platform differences and cache limits are described below; an archived recap action item is not a Planner or To Do task.
+**Available now:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, meeting recaps and action items, meeting transcript text through an explicit browser fetch, local OneNote indexed notes, and source-qualified Outlook people observations. The platform differences and cache limits are described below; an archived recap action item is not a Planner or To Do task, and a native people observation is not a resolved directory identity.
 
 **OneNote, without pretending an index is a notebook export.** `notes sync` registers the available Mac indexes; `notes sync --root DIR` accepts supported rollback-mode index copies on Mac, Windows and Linux. Shared search joins their titles, text and OCR to conversations and mail. `notes show note:ID` preserves native elements, flags and hierarchy; `notes sources` shows coverage, failures and last-good capture. Partial or failed captures keep prior text. No original visual layout, page web link, author or tenant ownership is invented. Native Windows app-cache discovery and live WAL capture remain deferred.
 

@@ -1,2 +1,0 @@
-### Added
-- Capture registered native Outlook people with `people sync`, search their retained observations in `people --query`, inspect stable `person-observation:ID` details and source coverage. Preserve differing native copies and contradictions without choosing current contacts, merging by email or inferring subject tenancy. Mac HxStore discovery and explicit supported copies only; Windows OWA people discovery and subject-scoped resolution remain unsupported.
