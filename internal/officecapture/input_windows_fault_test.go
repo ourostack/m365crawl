@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -58,11 +57,7 @@ func TestWindowsInputNativeFaultsRefuseBeforeCallback(t *testing.T) {
 					return windows.ERROR_ACCESS_DENIED
 				}
 				if fault == "filesystem" {
-					value, err := windows.UTF16FromString("ReFS")
-					if err != nil {
-						return err
-					}
-					copy(unsafe.Slice(filesystem, int(filesystemSize)), value)
+					*filesystem = 'R'
 					return nil
 				}
 				return volume(handle, name, nameSize, serial, maxComponent, flags, filesystem, filesystemSize)
