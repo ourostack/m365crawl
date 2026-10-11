@@ -57,9 +57,10 @@ func TestCompletionProductionDeniedOutcomesDoNotEraseIndependentFailure(t *testi
 			}
 			err := f.w.stop(nil)
 			wantCode := "browser_completion_terminate_failed"
-			if stage == "prior-error" {
+			switch stage {
+			case "prior-error":
 				wantCode = "browser_completion_identity_failed"
-			} else if stage == "late-denial" {
+			case "late-denial":
 				wantCode = "browser_completion_late_process"
 			}
 			if err == nil || err.Error() != wantCode {
