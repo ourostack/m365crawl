@@ -54,8 +54,8 @@ func mailSchema7Archive(t *testing.T) (string, int64) {
 func TestMailSchema8FreshAndUpgrade(t *testing.T) {
 	t.Run("fresh", func(t *testing.T) {
 		s := newStore(t)
-		if v := rowCount(t, s, `select max(version) from schema_migrations`); v != 8 {
-			t.Fatalf("schema version = %d, want 8", v)
+		if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
+			t.Fatalf("schema version = %d, want %d", v, SchemaVersion)
 		}
 		assertMailSchema8(t, s)
 	})

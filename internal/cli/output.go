@@ -65,16 +65,18 @@ type result interface {
 
 // listResult is the shape of every list command.
 type listResult struct {
-	Items     []any `json:"items"`
-	Count     int   `json:"count"`
-	Truncated bool  `json:"truncated"`
+	sourceOnly bool
+	Items      []any `json:"items"`
+	Count      int   `json:"count"`
+	Truncated  bool  `json:"truncated"`
 	// Total is the exact number of matches ignoring --limit. It is present only when truncated is
 	// true: counting costs one extra query, and a result that is not truncated is its own total
 	// (count).
 	Total int `json:"total,omitempty"`
 	// Sources is search's: per source searched, how many items of the result it gave and whether
 	// it had more. Nil on every other list.
-	Sources *searchSources `json:"sources,omitempty"`
+	Sources        *searchSources `json:"sources,omitempty"`
+	SourceCoverage *noteCoverage  `json:"source_coverage,omitempty"`
 	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
 	// does not read the result as covering every conversation. Omitted otherwise.
 	ChannelsExcluded bool `json:"channels_excluded,omitempty"`

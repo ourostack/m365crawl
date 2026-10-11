@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into seven groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into eight groups:
 
 | Group | Commands |
 | --- | --- |
@@ -12,6 +12,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
 | Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
+| Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## Platform defaults
@@ -51,7 +52,7 @@ Output is JSON when stdout is not a terminal and text on a terminal. In JSON mod
 
 - **Lists** are `{"items": [...], "count": N, "truncated": bool}`. `--limit` defaults to 50. A truncated list also carries `total` when the exact count is known.
 - **`note`** is one plain sentence on an empty list, for Teams, calendar and mail lists alike. It says why the list is empty: no archive yet, no data of that source yet, a time range outside what the archive holds (naming the window), filters that matched nothing, a source this operating system does not read, or an `--account` the archive does not hold. A list with items has no `note`, except where a command documents its own use: `search` (a source a flag left out), `mail list --unread`, `mail unread` and `mail thread`.
-- **Freshness.** Every read result carries `archive_age_seconds`, counted from the last fully successful sync of the accounts it covers. An archive with no complete sync adds `"needs_sync": true` and `"hint": "run m365crawl sync"`.
+- **Freshness.** Legacy read results carry `archive_age_seconds`, counted from the last fully successful sync of the accounts they cover. An archive with no complete legacy sync adds `"needs_sync": true` and `"hint": "run m365crawl sync"`. Notes have independent `source_coverage`; notes-only commands/search do not consult or certify Teams/Outlook freshness.
 - **Errors** go to stderr as `{"error": {"code", "message", "fix"}}`, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. [SPEC.md](../SPEC.md) section 6 lists every error code.
 
 ## Overview
@@ -84,6 +85,66 @@ Start here:
   m365crawl unread            unread Teams chats
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
 ```
+
+## Indexed notes
+
+Notes come from OneNote's local full-text indexes, not a complete notebook export. Default discovery is Mac's `~/Library/Containers/com.microsoft.onenote.mac/Data/Library/Application Support/Microsoft User Data/OneNote/15.0/FullTextSearchIndex`. Supported explicit rollback-mode `.db` index copies work on Mac, Windows and Linux; default Windows app discovery and live WAL capture are not supported.
+
+Every notes list/show/search/source result carries `source_coverage: {scope: "onenote_indexed_cache", state, sources}` outside item shaping and zero-hit results. `state` is `unknown` with no registered capture, or `registered` with per-source status. Explicit sync of an empty directory reports `examined_empty_directory`. Per-source fields include source and locator IDs, attempted/admitted IDs, nullable attempt/admission/complete/source clocks, distinct acquisition signature and content digest, qualification, coverage, loss counts and a safe reason.
+
+`complete` means loss-free **indexed** scope, not full notebook or service completeness. `partial` and failed/unavailable/cancelled attempts retain old page text, OCR, flags and stable IDs. An unchanged copy inherits prior losses and coverage; it does not repair a partial capture. Old notebook incarnations remain separately attributed as `retained`. A failed automatic refresh may serve retained content with explicit `source_coverage.refresh_error`; it never hides the failure as healthy empty data.
+
+Ordinary reads refresh registered participating locators only, including previously registered explicit copies. `--source ID` selects one archive-local instance and its locator; a disappeared source remains visible with old content. New indexes require explicit `notes sync`. Recent same-input failed/partial attempts are throttled; changed metadata permits another attempt and explicit sync retries immediately. `--max-age 0` performs no capture. Notes do not use Teams/Outlook freshness or infer account ownership.
+
+### notes sync
+
+```sh
+m365crawl notes sync [--root DIR]
+```
+
+Explicit local capture and registration, independent of Teams/Outlook. Result: `{"captured", "unchanged", "skipped", "failed", "source_coverage"}`. At most 64 `.db` inputs are examined. Each unsafe, malformed or unavailable peer is separately reported and cannot undo a healthy peer. Directory/discovery, archive and cancellation errors remain command failures.
+
+### notes list
+
+```sh
+m365crawl notes list [--source ID] [--query TEXT] [--since TIME] [--until TIME] [--limit N]
+```
+
+Newest native modified time first, undated notes last, stable archive rowid for ties. Default limit 50. Date windows exclude unknown native times; `--until` is exclusive. Items expose stable `note:ID`, source/capture IDs, native GOID/GUID/GOSID and parents, title/text, nullable modified/captured/source-observed times. Text joins indexed rich text and OCR in native index-row order, not original page layout.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `title`, `text`, `modified_at`, `captured_at`, `source_observed_at`, `text_truncated`.
+
+### notes search
+
+```sh
+m365crawl notes search TEXT [--source ID] [--since TIME] [--until TIME] [--limit N]
+```
+
+The same result as filtered notes list. Searches title, text and OCR with literal FTS escaping, quoted phrases and prefix terms. Coverage is present even when no hit matches.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `title`, `text`, `modified_at`, `captured_at`, `source_observed_at`, `text_truncated`.
+
+### notes show
+
+```sh
+m365crawl notes show note:ID
+```
+
+One-item list with the note and native indexed `elements`, `flags`, `ancestors` and `ordering: "index_rowid_not_document_layout"`. Element IDs and their native parent rowids remain distinct from archive IDs. `--max-text` bounds combined text and each element separately, preserving native kind and IDs. Invalid or missing note IDs fail explicitly.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `title`, `text`, `modified_at`, `captured_at`, `source_observed_at`, `text_truncated`, `ordering`, `elements`, `flags`, `ancestors`.
+
+### notes sources
+
+```sh
+m365crawl notes sources
+```
+
+Lists source health and preserved capture evidence. A locator is a cache registration, never a guessed user/tenant. Notebook Type4 native identities qualify continuity; adding, removing or renaming pages does not create a new source. Verified conflicting notebook evidence creates a separate retained incarnation.
+
+**Shared search:** `search --source notes` uses the independent notes path, without irrelevant Outlook checks or Teams sync. Default `search` includes registered notes alongside legacy sources. `--account`, `--from`, chat-only flags and mail `--folder` exclude unresolved notes with a notice; those flags are usage conflicts with explicit `--source notes`. `--since`/`--until` filter native modified time, not capture time. Each hit has `source: "notes"` and follows up through `notes show note:ID`, never a fabricated thread or author. Participating notes disable a chat-only `total`, even with zero note hits.
+
+`--fields` keys: `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
 
 ## doctor
 
@@ -245,7 +306,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`.
+`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `modified_at`, `captured_at`, `source_observed_at`.
 
 ## people
 

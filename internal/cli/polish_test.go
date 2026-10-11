@@ -101,7 +101,7 @@ func TestTotalAppearsOnlyWhenTruncated(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	for _, args := range [][]string{
-		{"search", "Fixture"}, {"messages"}, {"unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"},
+		{"search", "Fixture", "--source", "chats"}, {"messages"}, {"unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"},
 		{"conversations"}, {"people"}, {"activity"}, {"thread", "19:topicchannel1@thread.tacv2", "1700000045000"},
 	} {
 		code, stdout, stderr := e.run(append(append([]string{"--max-age", "0"}, args...), "--limit", "1")...)

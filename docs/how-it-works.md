@@ -4,6 +4,18 @@ m365crawl turns two local caches into one SQLite archive: the new Teams app's Ch
 
 A sync reads Teams first (steps 1 to 7b), then each Outlook profile (steps 7c and 7d), and writes each source in its own transaction (step 8). A failure in one source never undoes another.
 
+## OneNote indexed notes: a separate local capture
+
+`notes sync` registers available Mac OneNote indexes or explicit supported directories; it does not extend the existing Teams/Outlook all-source success clock. Notes-only commands and search schedule their own registered inputs and carry independent source coverage.
+
+For each rollback-mode SQLite index, we hold one source descriptor under SQLite-compatible SHARED byte-range locks. POSIX uses fcntl and Windows uses nonexclusive LockFileEx: protect the pending byte, acquire the entire shared range, release the pending byte, retain shared protection. Acquisitions are serialized because closing another descriptor to the same inode could release POSIX process locks. Actual tests use a separate real SQLite process to prove reader permission, blocked writer commits, EXCLUSIVE refusal and recovery after release; this is SQLite protocol protection, not defense against arbitrary non-SQLite writes.
+
+Under that protection, capture checks native/path identity, regular unlinked files, size/header and companion state, copies at most64MiB in64KiB chunks into a private root, compares copied-byte digests, reads only the immutable private copy, and finally revalidates before unlock/close/cleanup. A30s deadline is capped by the caller; individual native calls are not claimed to be forcibly interruptible. WAL, nonempty journals and SHM are refused. No source-side SQLite open, mode change, network, hydration or app launch occurs.
+
+An ordered locator-scoped attempt precedes acquisition. The archive transaction admits note projections and matching source state together. Notebook Type4 native IDs define a qualified cache incarnation; titles, filenames, page inventories and digests do not identify a person or prove continuity. Partial batches retain existing page representations and capture IDs; a loss-free indexed batch can replace present pages but cannot infer deletion of absent pages. Unchanged bytes inherit prior losses. Late results are retained as terminal history without overwriting newer content or current diagnostics.
+
+Metadata signatures throttle recent attempted input independently of copied content digests. Changed evidence permits another automatic attempt; explicit sync retries immediately. Rootless reads revisit registered explicit/default locators without discovering new indexes, and max-age0 performs no capture. Source coverage accompanies retained content and zero hits. Unknown account/author evidence excludes notes from ownership-filtered mixed search rather than leaking unqualified results.
+
 ## The Teams cache
 
 The new Teams app is a Microsoft Edge WebView2 shell. Its web app stores messages, conversations and the activity feed in the browser's IndexedDB, in the app's user data directory (`~/Library/Containers/com.microsoft.teams2/Data/Library/Application Support/Microsoft/MSTeams/EBWebView` on macOS, `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView` on Windows). Each profile (`WV2Profile_*`) has one directory per origin, `IndexedDB/https_teams.microsoft.com_0.indexeddb.leveldb`, plus a sibling `.indexeddb.blob` directory for values too large to sit in the database.
