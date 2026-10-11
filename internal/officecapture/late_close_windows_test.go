@@ -6,21 +6,31 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestWindowsSourceScopeCloseFailureIsTerminalAfterSuccessfulOpen(t *testing.T) {
 	for _, operation := range []string{"observe", "capture"} {
 		t.Run(operation, func(t *testing.T) {
 			path, _ := ordinaryFixture(t)
-			closeFile := jsonClose
-			t.Cleanup(func() { jsonClose = closeFile })
-			root := filepath.VolumeName(path) + `\`
+			closeFile, openRoot := jsonClose, inputWinRoot
+			t.Cleanup(func() { jsonClose, inputWinRoot = closeFile, openRoot })
+			original := windows.InvalidHandle
+			inputWinRoot = func(name *uint16, access, share uint32, security *windows.SecurityAttributes,
+				disposition, options uint32, template windows.Handle) (windows.Handle, error) {
+				handle, err := openRoot(name, access, share, security, disposition, options, template)
+				if err == nil && original == windows.InvalidHandle {
+					original = handle
+				}
+				return handle, err
+			}
 			refused := false
 			jsonClose = func(file *os.File) error {
+				isOriginal := windows.Handle(file.Fd()) == original
 				err := closeFile(file)
-				if file.Name() == root {
+				if isOriginal {
 					refused = true
 					return errors.Join(err, os.ErrPermission)
 				}
