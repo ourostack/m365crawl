@@ -40,6 +40,10 @@ var commandFields = map[string][]fieldSet{
 	"mail unread":      {{keys: listKeys}},
 	"transcripts":      {{keys: typeKeys[transcriptItem]}},
 	"transcripts show": {{keys: typeKeys[transcriptShow]}},
+	"notes list":       {{keys: typeKeys[noteItem]}},
+	"notes search":     {{keys: typeKeys[noteItem]}},
+	"notes show":       {{keys: typeKeys[noteDetailItem]}},
+	"notes sources":    {{keys: typeKeys[noteSourceItem]}},
 }
 
 // fieldsOf is the --fields keys cmd accepts in the mode when names ("" for its plain result).

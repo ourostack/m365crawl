@@ -132,6 +132,45 @@ func TestSyncNotesZeroAgeNeverDiscoversOrWrites(t *testing.T) {
 	}
 }
 
+func TestSyncNotesUnregisteredOrdinaryReadDoesNotCreateOrRepairLegacyArchive(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "not-created.db")
+	if _, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, MaxAge: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatal("ordinary unregistered notes created an archive")
+	}
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`drop table sync_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncNotes(ctx, NotesOptions{DBPath: dbPath, MaxAge: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	ro, err := store.OpenReadOnly(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ro.Close() }()
+	if _, err := ro.NeedsUpgrade(ctx); err == nil {
+		t.Fatal("notes-only read silently repaired a broken legacy sync log")
+	}
+}
+
 func TestSyncNotesExplicitRootDoesNotCaptureUnrelatedRegistration(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "archive.db")
 	first, err := filepath.EvalSymlinks(t.TempDir())

@@ -210,7 +210,7 @@ func TestOverviewWhereMailIsNotRead(t *testing.T) {
 func TestUnknownCommandIsNamed(t *testing.T) {
 	e := newEnv(t)
 	for words, want := range map[string]string{
-		"nope":       `unknown command "nope"`,
+		"xyzzy":      `unknown command "xyzzy"`,
 		"serch":      `unknown command "serch", did you mean "search"?`,
 		"mial list":  `unknown command "mial", did you mean "mail list"?`,
 		"mial nope":  `unknown command "mial", did you mean "mail"?`,

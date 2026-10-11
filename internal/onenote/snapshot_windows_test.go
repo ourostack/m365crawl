@@ -82,3 +82,16 @@ func TestSnapshotWindowsIdentityFailures(t *testing.T) {
 		t.Fatal("unsupported identity fabricated")
 	}
 }
+
+func TestCaptureIndexWindowsHardLinkRefused(t *testing.T) {
+	path, err := filepath.EvalSymlinks(indexFixture(t, "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(path, path+".alias"); err != nil {
+		t.Fatal(err)
+	}
+	if capture, err := CaptureIndex(context.Background(), path); capture != nil || err == nil {
+		t.Fatal("multiply linked Windows source admitted")
+	}
+}

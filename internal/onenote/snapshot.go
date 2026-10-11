@@ -27,17 +27,18 @@ const (
 var indexCaptureGate = make(chan struct{}, 1)
 
 var (
-	snapshotOpen   = os.Open
-	snapshotRoot   = teamsdesktop.NewPrivateSnapshotRoot
-	snapshotCreate = teamsdesktop.CreatePrivateSnapshotFile
-	snapshotRemove = os.Remove
-	snapshotRead   = (*os.File).Read
-	snapshotReadAt = (*os.File).ReadAt
-	snapshotWrite  = (*os.File).Write
-	snapshotClose  = (*os.File).Close
-	snapshotAbs    = filepath.Abs
-	snapshotEval   = filepath.EvalSymlinks
-	snapshotLstat  = os.Lstat
+	snapshotOpen    = os.Open
+	snapshotRoot    = teamsdesktop.NewPrivateSnapshotRoot
+	snapshotCreate  = teamsdesktop.CreatePrivateSnapshotFile
+	snapshotRemove  = os.Remove
+	snapshotRead    = (*os.File).Read
+	snapshotReadAt  = (*os.File).ReadAt
+	snapshotWrite   = (*os.File).Write
+	snapshotClose   = (*os.File).Close
+	snapshotAbs     = filepath.Abs
+	snapshotEval    = filepath.EvalSymlinks
+	snapshotLstat   = os.Lstat
+	snapshotAcquire = acquireIndexCapture
 )
 
 type IndexCapture struct {
@@ -51,6 +52,7 @@ type IndexCapture struct {
 	sourcePath  string
 	info        os.FileInfo
 	privateInfo os.FileInfo
+	privatePath string
 	root        string
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -108,13 +110,20 @@ func ObserveIndex(path string) (string, error) {
 	return signature, nil
 }
 
-func CaptureIndex(ctx context.Context, path string) (_ *IndexCapture, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func acquireIndexCapture(ctx context.Context) error {
 	select {
 	case indexCaptureGate <- struct{}{}:
+		return nil
 	case <-ctx.Done():
+		return snapshotError(ctx)
+	}
+}
+
+func CaptureIndex(ctx context.Context, path string) (_ *IndexCapture, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := snapshotAcquire(ctx); err != nil {
 		cancel()
-		return nil, snapshotError(ctx)
+		return nil, err
 	}
 	capture := &IndexCapture{ctx: ctx, cancel: cancel}
 	defer func() {
@@ -159,6 +168,7 @@ func CaptureIndex(ctx context.Context, path string) (_ *IndexCapture, err error)
 		return nil, snapshotError(ctx)
 	}
 	capture.Path = filepath.Join(capture.root, "index.db")
+	capture.privatePath = capture.Path
 	output, err := snapshotCreate(capture.Path)
 	if err != nil {
 		return nil, snapshotError(ctx)
@@ -250,6 +260,9 @@ func snapshotDigest(ctx context.Context, input, output *os.File, size int64) (st
 }
 
 func (c *IndexCapture) verifyContent() error {
+	if c.Path != c.privatePath {
+		return snapshotError(c.ctx)
+	}
 	digest, err := c.copy(nil)
 	if err != nil || digest != c.ContentDigest {
 		return snapshotError(c.ctx)
@@ -301,7 +314,7 @@ func (c *IndexCapture) dispose() error {
 		}
 		c.source = nil
 	}
-	for _, path := range []string{c.Path, c.root} {
+	for _, path := range []string{c.privatePath, c.root} {
 		if path != "" {
 			if removeErr := snapshotRemove(path); removeErr != nil && !os.IsNotExist(removeErr) {
 				err = errors.Join(err, snapshotError(c.ctx))

@@ -33,8 +33,19 @@ func manifest() control.Manifest {
 		Title: "transcripts: recorded meetings and what of their transcripts is in the archive (offline)"}
 	m.Commands["transcripts show"] = control.Command{Argv: []string{"m365crawl", "--json", "transcripts", "show", "<meeting>"}, JSON: true,
 		Title: "transcripts show (<meeting> is a placeholder: use a call_id printed by transcripts)"}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store"}}
+	for _, command := range []string{"notes sync", "notes list", "notes search", "notes show", "notes sources"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "notes search":
+			argv = append(argv, "<words>")
+		case "notes show":
+			argv = append(argv, "<note-id>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "notes sync",
+			Title: command + " (notes show needs an actual note:ID; notes search needs actual words)"}
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes"}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index"}}
 	return m
 }
 

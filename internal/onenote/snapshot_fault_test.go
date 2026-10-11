@@ -184,6 +184,53 @@ func TestSnapshotDigestRecognizesWrappedTerminalEOF(t *testing.T) {
 	}
 }
 
+func TestCaptureIndexExportedPathCannotRedirectCleanupToSource(t *testing.T) {
+	path, err := filepath.EvalSymlinks(indexFixture(t, "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture, err := CaptureIndex(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := capture.Path
+	capture.Path = path
+	if err := capture.Close(); err == nil {
+		t.Fatal("modified public capture path admitted")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("mutable public path redirected cleanup to application source")
+	}
+	if _, err := os.Stat(filepath.Dir(private)); !os.IsNotExist(err) {
+		t.Fatal("original private root not cleaned")
+	}
+}
+
+func TestCaptureIndexHeldPathMetadataFailureRefusesAdmission(t *testing.T) {
+	path, err := filepath.EvalSymlinks(indexFixture(t, "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture, err := CaptureIndex(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lstat := snapshotLstat
+	t.Cleanup(func() { snapshotLstat = lstat; _ = capture.Close() })
+	snapshotLstat = func(name string) (os.FileInfo, error) {
+		if name == path {
+			return nil, os.ErrPermission
+		}
+		return lstat(name)
+	}
+	if err := capture.Close(); err == nil {
+		t.Fatal("unverifiable held/path identity admitted")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("path refusal modified source")
+	}
+}
+
 func TestCaptureIndexPostCopyFaults(t *testing.T) {
 	for _, fault := range []string{"companion", "second-read", "content-changed"} {
 		t.Run(fault, func(t *testing.T) {

@@ -1,6 +1,6 @@
 ---
 name: m365crawl
-description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail, calendar or meeting transcripts on this Mac or Windows PC, offline, through the local `m365crawl` CLI, which mirrors them into one SQLite archive.
+description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail, calendar, meeting transcripts or OneNote indexed notes, offline, through the local `m365crawl` CLI and its shared archive.
 ---
 
 # m365crawl
@@ -40,6 +40,15 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 | Cross-source and meeting prep | `m365crawl search "words"` (chats and mail), `m365crawl calendar`, then `m365crawl calendar event <event_id>`: one meeting with its `chat` (its newest messages in `chat.recent_messages`, kept by `--fields chat`) and `related_mail`, matched by invite or by subject from 14 days before to 7 days after the start; `m365crawl people --query <name>` finds Teams people and mail correspondents (`id` `mail:<address>`) |
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
 | Meeting transcripts | `m365crawl transcripts` lists recorded meetings and which parts' text is in the archive; `m365crawl transcripts show <meeting>` prints one in time order with each seam marked; `transcripts fetch` brings the text from SharePoint; `m365crawl search "words" --source transcripts` finds what was said (`--from` matches the speaker); `calendar event` lists an occurrence's recorded calls in `transcripts` |
+| Indexed notes | Explicitly run `m365crawl notes sync` once for available Mac indexes, or `notes sync --root DIR` for supported rollback-mode index copies. Then `notes search "words"` or shared `search`, followed by `notes show note:ID`; inspect `notes sources` before treating missing results as absence. |
+
+## Indexed notes and source coverage
+
+Notes are the local indexed cache, not a complete notebook export or original page layout. They preserve native text/OCR, elements, flags and indexed hierarchy. Partial/failed capture retains last-good representations; missing pages are retained. `source_coverage` survives `--fields`, truncation and zero hits; look at source status, losses and nullable attempt/admission/complete clocks. A failed automatic refresh may serve retained text with an explicit `refresh_error`.
+
+Ordinary reads refresh **registered** participating locators only; new indexes need explicit `notes sync`. `--max-age 0` disables capture. Notes-only commands and `search --source notes` do not require Teams/Outlook or certify their freshness. `--source ID` on notes list/search chooses an archive-local source; it does not identify a user. Native notebook evidence never proves account ownership.
+
+Shared search includes notes only without account, author, chat-only or mail-only constraints. Those constraints exclude unresolved notes with a notice; explicit `--source notes` rejects them. Date filters use native modified time, with unknown timestamps excluded. Expand note hits with `notes show note:ID`, never `thread`, invented authors or guessed page web URLs. Default Windows app-cache discovery and live WAL capture remain unsupported; supported explicit index copies work on Mac, Windows and Linux.
 
 ## Hosts
 

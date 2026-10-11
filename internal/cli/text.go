@@ -68,7 +68,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.renderOverview(r)
 	case *listResult:
 		rt.listTable(r)
+		rt.renderNoteDetails(r)
 		_, _ = fmt.Fprintln(w)
+		rt.renderNoteCoverage(r.SourceCoverage)
 		if r.CoverageGap != nil && *r.CoverageGap {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
 		}
@@ -89,7 +91,16 @@ func (rt *runtime) renderText(label string, v any) error {
 			}
 		}
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%s items%s", count, more), color))
-		metaLines(w, r.meta, color)
+		if r.sourceOnly {
+			if r.Note != "" {
+				_, _ = fmt.Fprintf(w, "note: %s\n", r.Note)
+			}
+		} else {
+			metaLines(w, r.meta, color)
+		}
+	case notesSyncResult:
+		_, _ = fmt.Fprintf(w, "notes: %d captured, %d unchanged, %d skipped, %d failed\n", r.Captured, r.Unchanged, r.Skipped, r.Failed)
+		rt.renderNoteCoverage(r.SourceCoverage)
 	case syncer.Report:
 		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)
 		_, _ = fmt.Fprintln(w)
@@ -291,6 +302,18 @@ func (rt *runtime) listTable(r *listResult) {
 				text = fmt.Sprintf("(%d matches) %s", x.Matches, text)
 			}
 			rows = append(rows, []string{stamp(at), x.Source, firstOf(oneLine(searchVal(x.Title)), "(untitled)"), searchVal(x.Speaker), x.CallID, text})
+		case noteItem:
+			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), oneLine(x.Text)})
+		case searchNoteItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "notes show " + x.ID, oneLine(x.Text)})
+		case noteDetailItem:
+			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.Text})
+		case noteSourceItem:
+			cols, textCol = []string{"source", "status", "coverage", "locator", "reason"}, -1
+			rows = append(rows, []string{strconv.FormatInt(x.ID, 10), x.Status, x.Coverage, x.Locator, x.Reason})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})

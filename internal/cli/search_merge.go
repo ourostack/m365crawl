@@ -29,7 +29,13 @@ const (
 	searchChats       = "chats"
 	searchMail        = "mail"
 	searchTranscripts = "transcripts"
+	searchNotes       = "notes"
 )
+
+type searchNoteItem struct {
+	Source string `json:"source"`
+	noteItem
+}
 
 // searchChatItem is a Teams message in a search result: the message as every Teams command prints
 // it, plus the source it came from.
@@ -105,6 +111,7 @@ type searchSources struct {
 	Chats       *sourceCount `json:"chats,omitempty"`
 	Mail        *sourceCount `json:"mail,omitempty"`
 	Transcripts *sourceCount `json:"transcripts,omitempty"`
+	Notes       *sourceCount `json:"notes,omitempty"`
 }
 
 func searchNZ(s string) *string {
@@ -166,13 +173,20 @@ func searchKeys() []string {
 			keys = append(keys, k)
 		}
 	}
+	for _, key := range jsonKeys(reflect.TypeFor[searchNoteItem]()) {
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
 	return keys
 }
 
 // searchPlan says which sources a search reads and what it tells the reader about the ones it skips.
 type searchPlan struct {
 	chats, mail, transcripts bool
+	indexedNotes             bool
 	notes                    []string
+	noteExclusion            string
 }
 
 // chatOnlyFlags names the flags that only Teams chats understand, in the order the help lists them.
@@ -222,6 +236,12 @@ func sourceConflict(msg string) error {
 func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	p := searchPlan{chats: true, mail: true, transcripts: true}
 	chatFlags := c.chatOnlyFlags()
+	if c.Source == searchNotes {
+		if len(chatFlags) > 0 || c.Folder != "" || c.From != "" || rt.g.Account != "" {
+			return p, sourceConflict("--source notes cannot use account, author, chat-only or mail-only filters")
+		}
+		return searchPlan{indexedNotes: true}, nil
+	}
 	mailAccount := isSearchMailAccount(rt.g.Account)
 	switch {
 	case mailAccount && c.Source == searchChats:
@@ -271,6 +291,13 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 		}
 		p.mail = false
 		p.notes = append(p.notes, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only")
+	}
+	if c.Source == "all" {
+		if len(chatFlags) == 0 && c.Folder == "" && rt.g.Account == "" && c.From == "" {
+			p.indexedNotes = true
+		} else {
+			p.noteExclusion = "indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership"
+		}
 	}
 	return p, nil
 }
@@ -359,11 +386,26 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if tr.note != "" {
 		notes = append(notes, tr.note)
 	}
+	noteTruncated := false
+	if p.indexedNotes && st != nil {
+		rows, truncated, err := st.Notes(rt.ctx, store.NoteFilter{Query: c.Query, Since: f.Since, Until: f.Until, Limit: f.Limit})
+		if err != nil {
+			return nil, err
+		}
+		noteTruncated = truncated
+		for _, row := range rows {
+			var at time.Time
+			if row.ModifiedAt != nil {
+				at = *row.ModifiedAt
+			}
+			hits = append(hits, searchHit{at: at, item: searchNoteItem{Source: searchNotes, noteItem: noteItemOf(row, rt.g.MaxText)}, source: searchNotes})
+		}
+	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].at.After(hits[j].at) })
-	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated}
+	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated}
 	// The chats' total is the result's only while no other source gave or held back an item.
-	chatTotalIsAll := !searchMailNow && len(tr.hits) == 0 && !tr.truncated
-	truncated := chatTrunc || mailTrunc || tr.truncated
+	chatTotalIsAll := !p.indexedNotes && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
+	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated
 	if len(hits) > f.Limit {
 		truncated = true
 		for _, h := range hits[f.Limit:] {
@@ -378,6 +420,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		count[h.source]++
 	}
 	res := newList(shape(rt, out), truncated)
+	if p.noteExclusion != "" {
+		res.addNotice(p.noteExclusion)
+	}
 	res.Sources = &searchSources{}
 	if p.chats {
 		res.Sources.Chats = &sourceCount{Count: count[searchChats], Truncated: trunc[searchChats]}
@@ -387,6 +432,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if tr.searched {
 		res.Sources.Transcripts = &sourceCount{Count: count[searchTranscripts], Truncated: trunc[searchTranscripts]}
+	}
+	if p.indexedNotes {
+		res.Sources.Notes = &sourceCount{Count: count[searchNotes], Truncated: trunc[searchNotes]}
+		res.SourceCoverage = rt.noteCoverage
 	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)
@@ -398,6 +447,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if cause != "" {
 			notes = append(notes, cause)
+		}
+		if p.indexedNotes && rt.noteCoverage != nil && len(rt.noteCoverage.Sources) > 0 {
+			notes = append(notes, "no indexed note matched; source_coverage describes captured input")
 		}
 	}
 	res.Note = strings.Join(notes, "; ")

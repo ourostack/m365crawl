@@ -9,7 +9,7 @@
 
 Find the conversation. Recover the context. Walk into the meeting prepared.
 
-`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail** and **meetings with their recaps and action items**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
+`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
 **Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
 
@@ -25,6 +25,8 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 | Prep me for my 2 pm | `m365crawl calendar` then `m365crawl calendar event <id>` — attendees, body, the meeting chat and related mail |
 | Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
 | What's in the archive and how fresh is it? | `m365crawl` |
+| Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
+| Read the note and check its coverage | `m365crawl notes show note:ID` · `m365crawl notes sources` |
 
 ## Give your agent the context, not another inbox
 
@@ -41,7 +43,9 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 
 m365crawl is built around the maintainer's own Microsoft 365 usage: support grows from data we can inspect and workflows we can test on real machines. The name is the direction, not a claim that every Microsoft 365 app is supported. Your apps, account configuration and cached history may differ.
 
-**Available now:** Teams chats and channels, Outlook mail on macOS, the calendar, meeting recaps and action items, and meeting transcript text through an explicit browser fetch. The platform differences and cache limits are described below; an archived recap action item is not a Planner or To Do task.
+**Available now:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, meeting recaps and action items, meeting transcript text through an explicit browser fetch, and local OneNote indexed notes. The platform differences and cache limits are described below; an archived recap action item is not a Planner or To Do task.
+
+**OneNote, without pretending an index is a notebook export.** `notes sync` registers the available Mac indexes; `notes sync --root DIR` accepts supported rollback-mode index copies on Mac, Windows and Linux. Shared search joins their titles, text and OCR to conversations and mail. `notes show note:ID` preserves native elements, flags and hierarchy; `notes sources` shows coverage, failures and last-good capture. Partial or failed captures keep prior text. No original visual layout, page web link, author or tenant ownership is invented. Native Windows app-cache discovery and live WAL capture remain deferred.
 
 **Planned expansion, not shipped support:**
 
@@ -49,7 +53,7 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 | --- | --- | --- |
 | People and meetings | Connect identities across sources and read fuller attendee lists | Identity ambiguity, source coverage and platform-specific mappings |
 | Office and OneDrive | Join recent documents, sharing activity and library metadata to people and conversations | Changing cache layouts, link resolution and Windows data sources; metadata is not document text |
-| OneNote | Search locally indexed page text alongside chats and mail | Freshness, page links and Windows data sources; an index is not a complete notebook export |
+| More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
 | Archived bot citations and Loop | Expose citations in archived bot replies and version-qualified cached Loop content | Preserve Teams provenance, snapshot versions and partial coverage; this is not private Copilot history |
 | Browser-backed content | Read cloud document text, Stream transcripts, SharePoint pages and News, and used Engage surfaces | A tested read path and archive integration for each service; transcript fetching does not prove another service works |
 
@@ -112,6 +116,17 @@ m365crawl doctor
 m365crawl sync
 m365crawl skill
 ```
+
+If you use OneNote on Mac, add its locally indexed notes explicitly:
+
+```sh
+m365crawl notes sync
+m365crawl notes sources
+m365crawl search "launch checklist"
+m365crawl notes show note:ID
+```
+
+Ordinary note reads refresh registered sources only. New indexes need another explicit `notes sync`; `--max-age 0` performs no capture. Account, author, chat-only and mail-only filters exclude unresolved notes from combined search with a notice. Use `--source notes` for an independent notes-only search that does not require Teams or Outlook.
 
 Give the `skill` output to your agent. It is the guide for the version you installed, including commands, context-budget flags and how to interpret missing data. Then ask for a concrete job:
 

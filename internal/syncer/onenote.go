@@ -76,6 +76,12 @@ func SyncNotes(ctx context.Context, options NotesOptions) (NotesReport, error) {
 	if !options.Explicit && options.MaxAge == 0 {
 		return readNotesSources(ctx, options)
 	}
+	if !options.Explicit && !options.Discover {
+		report, err := readNotesSources(ctx, options)
+		if err != nil || len(report.Sources) == 0 {
+			return report, err
+		}
+	}
 	release, err := notesAcquire(options.DBPath)
 	if err != nil {
 		return NotesReport{}, err
@@ -176,11 +182,13 @@ func syncNotes(ctx context.Context, st *store.Store, options NotesOptions) (Note
 }
 
 func captureNotes(ctx context.Context, st *store.Store, attempt store.KnowledgeAttempt, previous store.KnowledgeSource, signature string) (string, error) {
-	capture, err := notesCapture(ctx, previous.Locator)
+	captureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	capture, err := notesCapture(captureCtx, previous.Locator)
 	if err != nil {
 		return "failed", recordNotesFailure(ctx, st, attempt, signature, err, previous.Locator)
 	}
-	result, readErr := notesRead(ctx, capture.Path)
+	result, readErr := notesRead(captureCtx, capture.Path)
 	closeErr := capture.Close()
 	if err := errors.Join(readErr, closeErr); err != nil {
 		return "failed", recordNotesFailure(ctx, st, attempt, capture.AcquisitionSignature, err, previous.Locator)

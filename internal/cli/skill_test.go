@@ -100,7 +100,8 @@ func skillKeys() []string {
 	keys := []string{errs.CodeMailUnsupportedPlatform, errs.CodeSigninRequired}
 	for _, typ := range []reflect.Type{reflect.TypeFor[listResult](), reflect.TypeFor[meta](), reflect.TypeFor[messageItem](), reflect.TypeFor[mailListItem](),
 		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource](),
-		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage]()} {
+		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage](),
+		reflect.TypeFor[noteCoverage](), reflect.TypeFor[noteItem](), reflect.TypeFor[noteSourceItem]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
 	return keys

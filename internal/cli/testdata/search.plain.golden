@@ -3,6 +3,10 @@ at                source  where           who            thread                 
 2023-11-14 22:13  chats   Fixture chat 1  Alex Fixture   19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000001000  Hello from Alex F...
 2023-11-14 22:13  chats   Fixture chat 2  Blair Fixture  19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000001000  Hello from Blair ...
 
+notes coverage: unknown (onenote_indexed_cache)
+source  status  coverage  reason
+------  ------  --------  ------
+no rows
 2 items
 note: mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)
 archive age: <age>

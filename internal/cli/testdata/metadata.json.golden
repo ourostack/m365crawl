@@ -77,6 +77,59 @@
       ],
       "json": true
     },
+    "notes list": {
+      "title": "notes list (notes show needs an actual note:ID; notes search needs actual words)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "notes",
+        "list"
+      ],
+      "json": true
+    },
+    "notes search": {
+      "title": "notes search (notes show needs an actual note:ID; notes search needs actual words)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "notes",
+        "search",
+        "\u003cwords\u003e"
+      ],
+      "json": true
+    },
+    "notes show": {
+      "title": "notes show (notes show needs an actual note:ID; notes search needs actual words)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "notes",
+        "show",
+        "\u003cnote-id\u003e"
+      ],
+      "json": true
+    },
+    "notes sources": {
+      "title": "notes sources (notes show needs an actual note:ID; notes search needs actual words)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "notes",
+        "sources"
+      ],
+      "json": true
+    },
+    "notes sync": {
+      "title": "notes sync (notes show needs an actual note:ID; notes search needs actual words)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "notes",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "overview": {
       "title": "overview (m365crawl with no command): what the archive holds per source and where to start",
       "argv": [
@@ -141,14 +194,16 @@
     "chats",
     "mail",
     "calendar",
-    "transcripts"
+    "transcripts",
+    "notes"
   ],
   "privacy": {
     "contains_private_messages": true,
     "exports_secrets": false,
     "local_only_scopes": [
       "teams_cache",
-      "outlook_store"
+      "outlook_store",
+      "onenote_index"
     ]
   }
 }

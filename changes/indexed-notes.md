@@ -1,0 +1,3 @@
+### Added
+- Capture and read local OneNote indexed notes with `notes sync/list/search/show/sources`, stable note IDs, indexed text/OCR, native hierarchy and source coverage; shared search joins note hits to chats, mail and fetched transcripts without inventing authors or account ownership.
+- Protect rollback-mode source indexes with SQLite-compatible shared locking and private copies; retain last-good page text and flags across partial/failed captures, keep source attempt history, and independently refresh registered locators. Default discovery is Mac OneNote; supported explicit index copies work on Mac, Windows and Linux. Live WAL capture, Windows native app discovery, page web URLs and original visual layout remain unsupported.
