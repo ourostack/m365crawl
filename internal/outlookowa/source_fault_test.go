@@ -203,7 +203,7 @@ func TestValidateRegularLeafAndNonregularAncestor(t *testing.T) {
 }
 
 func TestDiscoverLateSourceFailures(t *testing.T) {
-	for _, where := range []string{"indexeddb-enumeration", "matched-origin-validation"} {
+	for _, where := range []string{"indexeddb-validation", "indexeddb-enumeration", "matched-origin-validation"} {
 		t.Run(where, func(t *testing.T) {
 			restoreSourceIO(t)
 			root := sourceTempDir(t)
@@ -218,6 +218,10 @@ func TestDiscoverLateSourceFailures(t *testing.T) {
 			sourceLstat = func(path string) (os.FileInfo, error) {
 				if path == idb {
 					idbStats++
+					if where == "indexeddb-validation" && idbStats == 2 {
+						faults++
+						return nil, &fs.PathError{Op: "synthetic-private-operation", Path: "synthetic-private-path", Err: fs.ErrPermission}
+					}
 				}
 				if where == "matched-origin-validation" && path == p.Source.LevelDBDir {
 					if !enumerated || idbStats < 2 {
@@ -242,8 +246,11 @@ func TestDiscoverLateSourceFailures(t *testing.T) {
 				return read(path)
 			}
 			found, refused, err := Discover(root)
-			if faults != 1 || !enumerated || err != nil || len(found) != 0 || len(refused) != 1 {
+			if faults != 1 || enumerated != (where != "indexeddb-validation") || err != nil || len(found) != 0 || len(refused) != 1 {
 				t.Fatal("late_discovery_fault_returned_partial_or_success")
+			}
+			if where == "indexeddb-validation" && idbStats != 2 {
+				t.Fatal("indexeddb_fault_not_after_successful_existence_check")
 			}
 			wantReason, wantError := "unsafe_source", "outlookowa: source_unreadable"
 			if where == "indexeddb-enumeration" {
