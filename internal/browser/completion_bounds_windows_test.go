@@ -3,6 +3,7 @@
 package browser
 
 import (
+	"encoding/binary"
 	"testing"
 	"time"
 	"unsafe"
@@ -76,7 +77,7 @@ func TestCompletionNativeArgvBufferBoundaries(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			completionQueryProcess = func(_ windows.Handle, _ int32, ptr unsafe.Pointer, _ uint32, n *uint32) error {
+			completionQueryProcess = func(_ windows.Handle, _ int32, ptr unsafe.Pointer, size uint32, n *uint32) error {
 				calls++
 				if ptr == nil {
 					*n = tc.size
@@ -84,7 +85,21 @@ func TestCompletionNativeArgvBufferBoundaries(t *testing.T) {
 				}
 				header := (*windows.NTUnicodeString)(ptr)
 				header.Length, header.MaximumLength = tc.length, tc.maximum
-				header.Buffer = (*uint16)(unsafe.Add(ptr, tc.offset))
+				if uintptr(size) < unsafe.Sizeof(*header) {
+					t.Fatal("synthetic header exceeds query allocation")
+				}
+				address := uintptr(ptr) + uintptr(tc.offset)
+				// Native headers can contain invalid addresses; do not construct an invalid Go pointer.
+				bytes := unsafe.Slice((*byte)(ptr), int(unsafe.Sizeof(*header)))
+				field := bytes[unsafe.Offsetof(header.Buffer):]
+				switch unsafe.Sizeof(header.Buffer) {
+				case 4:
+					binary.LittleEndian.PutUint32(field, uint32(address))
+				case 8:
+					binary.LittleEndian.PutUint64(field, uint64(address))
+				default:
+					t.Fatal("unsupported native pointer width")
+				}
 				*n = tc.returned
 				return nil
 			}
