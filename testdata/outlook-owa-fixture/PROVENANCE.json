@@ -1,0 +1,22 @@
+{
+  "browser": "msedge",
+  "browser_versions": [
+    "154.0.4258.48",
+    "154.0.4258.48",
+    "154.0.4258.48",
+    "154.0.4258.48",
+    "154.0.4258.48"
+  ],
+  "generated_at": "2026-10-09T19:55:02.151Z",
+  "origin": "https://outlook.office.com",
+  "intercepted": true,
+  "synthetic_only": true,
+  "truncated_body": "IsTruncated=true retains available cached HTML inline; not server completeness",
+  "scenarios": [
+    "mail",
+    "unknown",
+    "multiple",
+    "missing-store",
+    "empty"
+  ]
+}

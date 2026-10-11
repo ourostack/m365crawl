@@ -155,7 +155,7 @@ func calendarScratch(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "m365crawl-acceptance-calendar-")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("scratch_create_failed")
 	}
 	if runtime.GOOS == "windows" {
 		setCurrentUserAndSystemOnly(t, dir)

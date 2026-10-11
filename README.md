@@ -87,7 +87,7 @@ go install github.com/ourostack/m365crawl/cmd/m365crawl@latest
 
 Download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Add that directory to `PATH` to call it without the full path. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`.
 
-On Windows, m365crawl reads Teams chats and the calendar. Outlook mail on Windows is coming next; until then every `mail` command says so and names a command that works.
+On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's OWA cached mail under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Mail commands, search, overview, status and doctor work with that cache. OWA calendar is not read in this release; Windows calendar parity is next release.
 
 crawlkit's `crawlctl discover --app m365crawl` finds it.
 
@@ -237,7 +237,7 @@ Run it in the background and read its stdout; Ctrl-C (or SIGTERM) stops it with 
 
 ## Outlook mail
 
-m365crawl reads messages, folders, read and flag state, recipients, attachments (as metadata) and bodies as text from the new Outlook for Mac's local store.
+m365crawl reads messages, folders, read and flag state, recipients, attachments (as metadata) and bodies as text from new Outlook's local cache: HxStore on Mac and OWA IndexedDB on Windows. Explicit supported copied OWA roots work portably. Windows exposes ordered To/Cc/Bcc roles and conversation identities; Mac roles and missing conversation identities are null. Cache coverage is not server history or server totals. See [source differences](docs/outlook-store.md#windows-owa-cached-mail) for unavailable fields, layout refusals and calendar limits.
 
 ```sh
 m365crawl mail list --folder inbox --unread

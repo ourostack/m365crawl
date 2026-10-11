@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -9,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -66,7 +66,7 @@ func mailBlockOf(t *testing.T, doc map[string]any) map[string]any {
 // status carries a mail block: the counts of what a sync read and the state of reading mail.
 func TestStatusMailBlock(t *testing.T) {
 	if goruntime.GOOS == "windows" {
-		t.Skip("a Windows sync does not read mail")
+		t.Skip("explicit HxStore on Windows preserves its calendar-only source contract; native OWA status is tested separately")
 	}
 	e := textEnv(t)
 	root := mailStoreRoot(t)
@@ -107,6 +107,9 @@ func TestStatusMailBlock(t *testing.T) {
 func TestStatusMailStates(t *testing.T) {
 	t.Run("no archive and no Outlook", func(t *testing.T) {
 		forceMailSupported(t)
+		old := outlookDefaultRoot
+		outlookDefaultRoot = func() (string, error) { return filepath.Join(createdOWARoot(t), "absent"), nil }
+		t.Cleanup(func() { outlookDefaultRoot = old })
 		e := newEnv(t)
 		_, out, _ := e.runDefault("status")
 		if m := mailBlockOf(t, decode(t, out)); m["state"] != "no_profile" || m["messages"] != float64(0) {
@@ -223,7 +226,7 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 	})
 	t.Run("no profile", func(t *testing.T) {
 		none := *rt
-		none.outlookRoot = t.TempDir()
+		none.outlookRoot = createdOWARoot(t)
 		if c := none.mailReadableCheck(st); !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
 			t.Fatalf("%+v", c)
 		}
@@ -234,7 +237,13 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 		t.Cleanup(func() { outlookDefaultRoot = old })
 		none := *rt
 		none.outlookRoot = ""
-		if c := none.mailReadableCheck(st); !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
+		none.outlookDefault = true
+		c := none.mailReadableCheck(st)
+		if goruntime.GOOS == "windows" {
+			if !c.OK || !c.Warn || !strings.Contains(c.Detail, "outlook_profile_unreadable") {
+				t.Fatalf("%+v", c)
+			}
+		} else if !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
 			t.Fatalf("%+v", c)
 		}
 	})
@@ -242,10 +251,51 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 		old := mailSupported
 		mailSupported = func() bool { return false }
 		t.Cleanup(func() { mailSupported = old })
-		if c := rt.mailReadableCheck(st); !c.OK || c.Warn || c.Detail != errs.MailUnsupportedPlatform().Message {
+		if c := rt.mailReadableCheck(st); !c.OK || c.Warn || c.Detail != "mail is not supported on this operating system" {
 			t.Fatalf("%+v", c)
 		}
 	})
+}
+
+func TestDoctorMailReadableDefaultResolutionMarkers(t *testing.T) {
+	oldPlatform, oldRoot, oldSupported := mailPlatform, outlookDefaultRoot, mailSupported
+	t.Cleanup(func() { mailPlatform, outlookDefaultRoot, mailSupported = oldPlatform, oldRoot, oldSupported })
+	mailSupported = func() bool { return true }
+	for _, platform := range []string{"darwin", "windows"} {
+		for _, optional := range []bool{true, false} {
+			for _, failure := range []error{outlookdesktop.ErrNotSupported, errors.New("synthetic-private-resolution")} {
+				name := platform + "/explicit"
+				if optional {
+					name = platform + "/optional"
+				}
+				if errors.Is(failure, outlookdesktop.ErrNotSupported) {
+					name += "/unsupported"
+				} else {
+					name += "/unreadable"
+				}
+				t.Run(name, func(t *testing.T) {
+					mailPlatform = platform
+					outlookDefaultRoot = func() (string, error) { return "", failure }
+					rt := &runtime{outlookOn: true, outlookRoot: "", outlookDefault: optional}
+					c := rt.mailReadableCheck(&store.Store{})
+					wantWarn := platform == "windows" || !optional || !errors.Is(failure, outlookdesktop.ErrNotSupported)
+					if !c.OK || c.Warn != wantWarn {
+						t.Fatal("default resolution warning classification mismatch")
+					}
+					if wantWarn {
+						if !strings.Contains(c.Detail, "outlook_profile_unreadable") || c.Fix == "" {
+							t.Fatal("unreadable resolution missing fixed diagnosis")
+						}
+					} else if c.Detail != "no new Outlook profile; no mail to read" || c.Fix != "" {
+						t.Fatal("optional unsupported resolution is not a clean nonwarning")
+					}
+					if strings.Contains(c.Detail+c.Fix, "synthetic-private") {
+						t.Fatal("resolution source value leaked")
+					}
+				})
+			}
+		}
+	}
 }
 
 // mail_archive_mode warns when other users can read the archive and says nothing of its content.

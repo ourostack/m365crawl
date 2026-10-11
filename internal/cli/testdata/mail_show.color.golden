@@ -11,13 +11,13 @@
 [2msent               [0m[2m : [0m2026-09-05 07:59
 [2mstate              [0m[2m : [0munread
 
-[2mrecipient (To and Cc not yet told apart)[0m  [2maddress[0m           [2mkind_raw[0m
-[2m----------------------------------------[0m  [2m----------------[0m  [2m--------[0m
-Bob Reader                                bob@example.test  1
-Cy Copy                                   cy@example.test   2
-Di Dee                                    di@example.test   2
-[2m-[0m                                         eve@example.test  2
-No Address                                [2m-[0m                 2
+[2mrecipient[0m   [2maddress[0m           [2mrole (unknown on Mac)[0m  [2mkind_raw[0m
+[2m----------[0m  [2m----------------[0m  [2m---------------------[0m  [2m--------[0m
+Bob Reader  bob@example.test  [2m-[0m                      1
+Cy Copy     cy@example.test   [2m-[0m                      2
+Di Dee      di@example.test   [2m-[0m                      2
+[2m-[0m           eve@example.test  [2m-[0m                      2
+No Address  [2m-[0m                 [2m-[0m                      2
 
 [2mattachment[0m  [2mbytes[0m  [2mtype[0m
 [2m----------[0m  [2m-----[0m  [2m---------------[0m

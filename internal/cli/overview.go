@@ -109,7 +109,11 @@ func (overviewCmd) Run(rt *runtime) error {
 		for _, s := range []string{"chats", "mail", "calendar"} {
 			src := overviewSource{Source: s, State: overviewNoArchive}
 			if s == "mail" && !mailSupported() {
-				src.State, src.Note = overviewUnsupported, errs.MailUnsupportedPlatform().Message
+				src.State, src.Note = overviewUnsupported, "mail is not supported on this operating system"
+			} else if s == "mail" && rt.outlookOn {
+				if problem := rt.discoverOutlookMail().problem(rt.outlookDefault); problem != nil {
+					src.State, src.Note = mailStateUnavailable, mailSourceNote(problem)
+				}
 			}
 			res.Sources = append(res.Sources, src)
 		}
@@ -195,8 +199,10 @@ func (rt *runtime) overviewMail(st *store.Store) (overviewSource, error) {
 	}
 	src := overviewSource{Source: "mail", State: overviewOK, Messages: &b.Messages, NewestAt: at(b.NewestAt), OldestAt: at(b.OldestAt), LastSyncAt: at(b.SyncedAt)}
 	switch {
+	case b.SourceError != nil:
+		src.State, src.Note = mailStateUnavailable, mailSourceNote(b.SourceError)
 	case b.State == mailStateUnsupportedPlatform:
-		return overviewSource{Source: "mail", State: overviewUnsupported, Note: errs.MailUnsupportedPlatform().Message}, nil
+		return overviewSource{Source: "mail", State: overviewUnsupported, Note: "mail is not supported on this operating system"}, nil
 	case account != "" && b.Messages == 0:
 		src.State, src.Note = overviewEmpty, "no mail is archived for account "+account+": m365crawl mail folders lists the Outlook accounts with mail"
 	case b.Messages > 0 && !rt.outlookOn:
@@ -218,10 +224,12 @@ const noMailYet = "no mail has been read yet: run m365crawl sync; m365crawl doct
 // Outlook source is off, there is no Outlook profile, the read found none, or none was read yet.
 func (rt *runtime) whyNoMail(b *mailStatusBlock) (state, note string) {
 	switch {
+	case b.SourceError != nil:
+		return mailStateUnavailable, mailSourceNote(b.SourceError)
 	case !rt.outlookOn:
 		return overviewOff, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
 	case b.State == mailStateNoProfile:
-		return overviewNoProfile, "no new Outlook for Mac profile on this machine, so there is no mail to read"
+		return overviewNoProfile, "no supported Outlook profile on this machine, so there is no mail to read"
 	case b.State == mailStateOK:
 		return overviewEmpty, "mail was read and the Outlook cache holds no messages"
 	}

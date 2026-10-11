@@ -5,7 +5,7 @@ description: Use when an agent needs to read the user's Microsoft Teams chats an
 
 # m365crawl
 
-m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, the new Outlook for Mac's mail, and the Teams and Outlook calendar) into one local SQLite archive, and answers from it offline and read-only. It cannot send, reply, react or mark anything read. It knows only what the desktop apps cached, so old history can be missing. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
+m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, new Outlook cached mail on Mac and Windows, and the Teams calendar plus Outlook calendar on Mac) into one local SQLite archive, and answers from it offline and read-only. It cannot send, reply, react or mark anything read. It knows only what the desktop apps cached, so old history can be missing and counts are not server totals. `m365crawl skill` prints this guide for the installed version; SPEC.md in https://github.com/ourostack/m365crawl is the full contract.
 
 ## Privacy
 
@@ -44,5 +44,5 @@ Run `m365crawl` first: with no command it says what the archive holds per source
 ## Hosts
 
 - macOS: `brew install ourostack/tap/m365crawl` or the release tarball. The app that runs m365crawl needs Full Disk Access; `m365crawl doctor` names it.
-- Windows: the release zip. Its binaries are intentionally unsigned. Teams chats and the calendar work; mail is read on macOS only for now, so the mail commands fail with `mail_unsupported_platform`.
-- Homebrew is macOS-only. Linux has no Teams desktop cache to read.
+- Windows: the release zip. Its binaries are intentionally unsigned. Teams chats, the Teams calendar and new Outlook OWA cached mail work; mail has ordered To/Cc/Bcc roles and conversation grouping. Mac recipient roles are unknown/null. OWA calendar is not read in this release; Windows calendar parity is next release. Windows attachments are metadata only (downloaded=false, missing size=0), to_me=false and in_reply_to=null; unknown HasAttachments is not inferred, cached HTML may be truncated, and multiple content mailboxes per profile are a coded refusal. The mail group's help states these limits.
+- Homebrew is macOS-only. Linux has no Teams desktop cache to read, but explicit copied supported OWA sources work. Explicit HxStore mail on Windows retains `mail_unsupported_platform`; that legacy route does not describe native OWA mail.

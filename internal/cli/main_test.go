@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/browser"
@@ -24,9 +25,12 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	for _, k := range []string{"HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA"} {
+	for _, k := range []string{"HOME", "USERPROFILE"} {
 		_ = os.Setenv(k, home)
 	}
+	_ = os.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	_ = os.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	_ = os.Setenv("M365CRAWL_REAL_CACHE", "0")
 	// doctor names the browser transcripts fetch would run: the same one on every machine.
 	findBrowser = func(string) (string, browser.Kind, error) { return testBrowserPath, browser.KindEdge, nil }
 	code := m.Run()

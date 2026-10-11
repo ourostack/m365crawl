@@ -403,7 +403,7 @@ func (rt *runtime) checkOutlookRoot() *errs.Coded {
 	if err != nil {
 		c.Message = how + root + " cannot be read: " + oneLine(err.Error())
 	}
-	c.Fix = "Point --outlook-root at the directory of Outlook profiles (one directory per profile, each holding HxStore.hxd), or turn the Outlook source off with --outlook-root none."
+	c.Fix = "Point --outlook-root at the Windows Olk EBWebView directory containing Outlook IndexedDB profiles, or the Mac profiles directory containing HxStore.hxd; turn the Outlook source off with --outlook-root none."
 	return c
 }
 

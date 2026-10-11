@@ -153,7 +153,7 @@ func TestSyncOutlookImplicit(t *testing.T) {
 	if sourceKeyed(t, r, "outlook|Main").Status != StatusOK || r.Status != StatusOK {
 		t.Fatalf("%s %+v", r.Status, r.Sources)
 	}
-	for name, dir := range map[string]string{"no directory": filepath.Join(root, "missing"), "no profile": t.TempDir()} {
+	for name, dir := range map[string]string{"no directory": filepath.Join(root, "missing"), "no profile": createdOutlookRoot(t)} {
 		r, _, err := Run(context.Background(), implicitOpts(newDB(t), dir))
 		if err != nil || r.Status != StatusOK || len(r.Sources) == 0 {
 			t.Fatalf("%s: %v %s", name, err, r.Status)
@@ -165,7 +165,7 @@ func TestSyncOutlookImplicit(t *testing.T) {
 		}
 	}
 	// Not asked for by name, and the same directory fails when it is.
-	if _, _, err := Run(context.Background(), outlookOpts(newDB(t), t.TempDir())); err == nil {
+	if _, _, err := Run(context.Background(), outlookOpts(newDB(t), createdOutlookRoot(t))); err == nil {
 		t.Fatal("a directory with no profile must fail an Outlook source that was asked for")
 	}
 }
@@ -223,7 +223,7 @@ func TestSyncOutlookImplicitWithoutTeams(t *testing.T) {
 	if r, _ := run(t, o); len(r.Sources) != 2 || r.Sources[0].Status != StatusOK || r.Sources[1].Status != StatusOK {
 		t.Fatalf("%+v", r.Sources)
 	}
-	o = implicitOpts(newDB(t), t.TempDir())
+	o = implicitOpts(newDB(t), createdOutlookRoot(t))
 	o.Root = t.TempDir()
 	if _, _, err := Run(context.Background(), o); err == nil {
 		t.Fatal("no Teams and no Outlook is the Teams error")

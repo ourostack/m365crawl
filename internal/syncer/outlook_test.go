@@ -23,11 +23,20 @@ const outlookFixture = "../../testdata/outlook-fixture"
 // outlookRoot is a profiles directory with one profile, "Main", holding the named fixture store.
 func outlookRoot(t *testing.T, store string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := createdOutlookRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "Main"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	putOutlookStore(t, root, store)
+	return root
+}
+
+func createdOutlookRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("synthetic_outlook_root_canonicalization_failed")
+	}
 	return root
 }
 
@@ -423,7 +432,7 @@ func TestSyncOutlookNoProfiles(t *testing.T) {
 		}
 		return sourceKeyed(t, rep, "outlook").Error
 	}
-	empty := t.TempDir()
+	empty := createdOutlookRoot(t)
 	if e := fail(empty); e.Code != CodeNoOutlookProfiles || !strings.Contains(e.Message, empty) {
 		t.Fatal(e)
 	}
@@ -431,7 +440,7 @@ func TestSyncOutlookNoProfiles(t *testing.T) {
 		t.Fatalf("fix: %q", e.Fix)
 	}
 	// The store file directly in the root: the fix says to pass the parent directory.
-	direct := t.TempDir()
+	direct := createdOutlookRoot(t)
 	putStoreAt(t, filepath.Join(direct, "HxStore.hxd"))
 	if e := fail(direct); e.Code != CodeNoOutlookProfiles || !strings.Contains(e.Fix, "directly in "+direct) || !strings.Contains(e.Fix, "parent") {
 		t.Fatalf("fix: %q", e.Fix)
@@ -444,7 +453,7 @@ func TestSyncOutlookNoProfiles(t *testing.T) {
 		}
 	}
 	// A classic-only profile is a note and not a profile.
-	classic := t.TempDir()
+	classic := createdOutlookRoot(t)
 	if err := os.MkdirAll(filepath.Join(classic, "Old", "Data"), 0o750); err != nil {
 		t.Fatal(err)
 	}

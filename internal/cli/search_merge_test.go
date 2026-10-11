@@ -73,9 +73,6 @@ func searchEnv(t *testing.T) *env {
 	e := textEnv(t)
 	t.Setenv("M365CRAWL_TEAMS_ROOT", e.root)
 	t.Setenv("M365CRAWL_OUTLOOK_ROOT", outlookProfiles(t, "Main"))
-	oldPlatform := searchMailPlatform
-	searchMailPlatform = "darwin"
-	t.Cleanup(func() { searchMailPlatform = oldPlatform })
 	return e
 }
 
@@ -457,11 +454,13 @@ func TestSearchWithoutMailInTheArchiveReturnsChatsWithANote(t *testing.T) {
 	}
 }
 
-func TestSearchOnWindowsReturnsChatsWithANote(t *testing.T) {
+func TestSearchOnUnsupportedPlatformReturnsChatsWithANote(t *testing.T) {
 	e := searchMailEnv(t)
-	searchMailPlatform = "windows"
+	old := mailPlatform
+	mailPlatform = "plan9"
+	t.Cleanup(func() { mailPlatform = old })
 	m := searchJSON(t, e, "Hello")
-	if m["note"] != "mail is not yet read on Windows; searched Teams chats and meeting transcripts only" || m["count"] != float64(2) {
+	if m["note"] != "mail is not supported on this operating system; searched Teams chats and meeting transcripts only" || m["count"] != float64(2) {
 		t.Fatalf("windows: %v", m)
 	}
 	// A chats-only flag already explains why mail is out; Windows adds nothing.
@@ -470,7 +469,7 @@ func TestSearchOnWindowsReturnsChatsWithANote(t *testing.T) {
 		t.Fatalf("note = %v", m["note"])
 	}
 	er := searchFails(t, e, 3, "Hello", "--source", "mail")
-	if er["code"] != "mail_unsupported_platform" || !strings.Contains(er["message"].(string), "not yet read on Windows") {
+	if er["code"] != "mail_unsupported_platform" || !strings.Contains(er["message"].(string), "not supported on this operating system") {
 		t.Fatalf("windows mail only: %v", er)
 	}
 }

@@ -13,7 +13,8 @@ require (
 	github.com/mattn/go-runewidth v0.0.30
 	github.com/openclaw/crawlkit v0.16.7
 	github.com/syndtr/goleveldb v1.0.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/net v0.61.0
+	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.60.1
 )
 

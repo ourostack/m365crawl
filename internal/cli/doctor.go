@@ -33,7 +33,7 @@ var (
 	readCalendarSources = func(st *store.Store, ctx context.Context, f store.CalendarSourcesFilter) (store.CalendarSources, error) {
 		return st.CalendarSources(ctx, f)
 	}
-	outlookDefaultRoot  = outlookdesktop.DefaultRoot
+	outlookDefaultRoot  = defaultMailRoot
 	outlookDiscover     = outlookdesktop.Discover
 	outlookOpenStore    = hxstore.OpenFile
 	needsArchiveUpgrade = func(st *store.Store, ctx context.Context) (bool, error) { return st.NeedsUpgrade(ctx) }
@@ -355,17 +355,21 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 	if !rt.outlookOn {
 		return check{Name: name, OK: true, Detail: "the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root); name --outlook-root DIR to turn it on"}
 	}
-	root := rt.outlookRoot
-	if root == "" {
-		var err error
-		if root, err = outlookDefaultRoot(); err != nil {
-			return check{Name: name, OK: true, Detail: "the new Outlook is not read on this machine: " + err.Error()}
-		}
+	source := rt.discoverOutlookMail()
+	if source.owa {
+		return rt.outlookNativeCheck(source, st)
 	}
-	profiles, classic, skipped, err := outlookDiscover(root)
+	root, profiles, classic, skipped, err := source.root, source.legacy, source.classic, source.skipped, source.err
+	if errors.Is(err, outlookdesktop.ErrNotSupported) {
+		return check{Name: name, OK: true, Detail: "the new Outlook is not read on this machine: " + err.Error()}
+	}
+	if rt.outlookDefault && root == "" && err != nil {
+		problem := source.problem(true)
+		return check{Name: name, OK: true, Warn: true, Detail: mailSourceNote(problem), Fix: problem.Fix}
+	}
 	var coded *errs.Coded
 	switch {
-	case rt.outlookDefault && errors.Is(err, outlookdesktop.ErrRootNotFound):
+	case rt.outlookDefault && root != "" && errors.Is(err, outlookdesktop.ErrRootNotFound):
 		return check{Name: name, OK: true, Detail: "the new Outlook for Mac is not installed (no profiles directory); nothing to read"}
 	case errors.As(err, &coded):
 		return check{Name: name, OK: true, Warn: true, Detail: coded.Message, Fix: coded.Fix}

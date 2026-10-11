@@ -195,7 +195,7 @@ func TestOverviewWhereMailIsNotRead(t *testing.T) {
 		_, out, _ := e.run("--json")
 		m := decode(t, out)
 		mail := m["sources"].([]any)[1].(map[string]any)
-		if mail["source"] != "mail" || mail["state"] != "unsupported" || !strings.Contains(mail["note"].(string), "Windows") {
+		if mail["source"] != "mail" || mail["state"] != "unsupported" || !strings.Contains(mail["note"].(string), "not supported") {
 			t.Fatalf("mail = %v", mail)
 		}
 		for _, n := range m["next"].([]any) {
@@ -318,11 +318,11 @@ func TestOverviewSaysWhyThereIsNoMail(t *testing.T) {
 	pinMailSupported(t, true)
 	e := newEnv(t)
 	teamsArchive(t, e)
-	empty := t.TempDir()
+	empty := createdOWARoot(t)
 	if m := overviewSourceOf(t, e, 1); m["state"] != "off" || !strings.Contains(m["note"].(string), "Outlook source is off") {
 		t.Errorf("off: %v", m)
 	}
-	if m := overviewSourceOf(t, e, 1, "--outlook-root", empty); m["state"] != "no_profile" || !strings.Contains(m["note"].(string), "no new Outlook for Mac profile") {
+	if m := overviewSourceOf(t, e, 1, "--outlook-root", empty); m["state"] != "no_profile" || !strings.Contains(m["note"].(string), "no supported Outlook profile") {
 		t.Errorf("no profile: %v", m)
 	}
 	old := outlookDiscover

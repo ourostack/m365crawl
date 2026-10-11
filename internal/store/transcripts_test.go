@@ -133,7 +133,7 @@ func TestMigrate6To7(t *testing.T) {
 		t.Fatalf("open v6 archive: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != 7 || SchemaVersion != 7 {
+	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion {
 		t.Fatalf("version %d, SchemaVersion %d", v, SchemaVersion)
 	}
 	if ok, err := s.HasTranscriptTables(ctx); !ok || err != nil {
@@ -155,17 +155,17 @@ func TestMigrate6To7(t *testing.T) {
 	}
 }
 
-func TestOpenVersion8ArchiveNewer(t *testing.T) {
+func TestOpenNextVersionArchiveNewer(t *testing.T) {
 	ctx := context.Background()
 	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.qExec(t, `update schema_migrations set version = 8`)
+	s.qExec(t, `update schema_migrations set version = ?`, SchemaVersion+1)
 	_ = s.Close()
 	var coded *errs.Coded
-	if _, err := Open(ctx, path); !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, "schema version 8; this build writes version 7") {
+	if _, err := Open(ctx, path); !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || !strings.Contains(coded.Message, fmt.Sprintf("schema version %d; this build writes version %d", SchemaVersion+1, SchemaVersion)) {
 		t.Fatalf("Open = %v, want archive_newer", err)
 	}
 	if _, err := OpenReadOnly(ctx, path); !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer {

@@ -17,6 +17,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookcal"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/outlookmail"
+	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -53,7 +54,7 @@ var (
 	outlookMapperVersion     = outlookcal.MapperVersion
 	outlookMailMapperVersion = outlookmail.MapperVersion
 	outlookNow               = func() time.Time { return time.Now().UTC() }
-	outlookDefaultRoot       = outlookdesktop.DefaultRoot
+	outlookDefaultRoot       = defaultOutlookRoot
 	outlookDiscover          = outlookdesktop.Discover
 	outlookSnapshot          = outlookdesktop.Snapshot
 )
@@ -81,6 +82,13 @@ func (r *runner) outlookSources(ctx context.Context, rep *Report) []outlookOutco
 		if root, err = outlookDefaultRoot(); err != nil {
 			return r.noOutlook(err)
 		}
+	}
+	owa, err := r.outlookOWARoute(root)
+	if err != nil {
+		return r.noOutlook(err)
+	}
+	if owa {
+		return r.outlookOWASources(ctx, rep)
 	}
 	profiles, classic, skipped, err := outlookDiscover(root)
 	if err != nil {
@@ -129,6 +137,14 @@ func (r *runner) outlookPresent() bool {
 		if root, err = outlookDefaultRoot(); err != nil {
 			return false
 		}
+	}
+	owa, err := r.outlookOWARoute(root)
+	if err != nil {
+		return false
+	}
+	if owa {
+		profiles, skipped, _ := outlookowa.Discover(root)
+		return len(profiles)+len(skipped) > 0
 	}
 	profiles, _, skipped, _ := outlookDiscover(root)
 	return len(profiles)+len(skipped) > 0

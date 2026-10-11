@@ -68,7 +68,7 @@ func TestOverviewMailFollowsTheAccount(t *testing.T) {
 	teamsArchive(t, e)
 	seedMail(t, e, seedMessages())
 	seedMailAs(t, e, "outlook/Work")
-	on := []string{"--outlook-root", t.TempDir()} // the Outlook source is on, so no note says it is off
+	on := []string{"--outlook-root", createdOWARoot(t)} // the Outlook source is on, so no note says it is off
 	src := func(flags ...string) map[string]any { return overviewSourceOf(t, e, 1, append(flags, on...)...) }
 	all := src()
 	if all["messages"] != float64(len(seedMessages())+1) || all["note"] != nil {
@@ -100,7 +100,7 @@ func TestSearchSaysWhyMailIsMissing(t *testing.T) {
 		want  string
 	}{
 		{nil, "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"},
-		{[]string{"--outlook-root", t.TempDir()}, "no new Outlook for Mac profile on this machine, so there is no mail to read"},
+		{[]string{"--outlook-root", createdOWARoot(t)}, "no supported Outlook profile on this machine, so there is no mail to read"},
 		{[]string{"--outlook-root", outlookProfiles(t, "Main")}, "mail is not in the archive yet; run m365crawl sync"},
 	} {
 		if got := noteOf(t, e, append(c.flags, "search", "x", "--source", "mail")...); got != c.want {
