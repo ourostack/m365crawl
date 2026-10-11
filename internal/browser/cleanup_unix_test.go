@@ -390,3 +390,27 @@ func TestWorthSignallingGroupWhenListFails(t *testing.T) {
 		t.Fatal("when the process list cannot be read, clean up")
 	}
 }
+
+func TestStopGroupAfterOwnedProcessReapedAndReleased(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	prepareCmd(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	g, err := adopt(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// Reaping the child ends this generation; release prevents following a reused group ID.
+	g.release()
+	stopGroup(g)
+	if g.alive() {
+		t.Fatal("a released owned group must remain inactive")
+	}
+}
