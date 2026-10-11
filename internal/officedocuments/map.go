@@ -142,6 +142,10 @@ func mapDocument(value any, surface Surface) (Document, int, bool) {
 	return d, m.unknownTimes, m.valid && strings.TrimSpace(d.Title) != "" && strings.TrimSpace(d.URL) != ""
 }
 
+func MetadataText(d Document) string {
+	return strings.Join(documentStrings(d), " ")
+}
+
 func documentStrings(d Document) []string {
 	values := []string{
 		d.Title, d.URL, d.WebURL, d.Extension, d.ResourceID, d.FriendlyPath, d.DriveID, d.ItemID,
