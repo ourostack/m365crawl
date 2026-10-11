@@ -112,7 +112,6 @@ func openInput(path string, directory bool) (_ *guardedInput, result error) {
 		options := uint32(windows.FILE_OPEN_REPARSE_POINT | windows.FILE_OPEN_NO_RECALL | windows.FILE_SYNCHRONOUS_IO_NONALERT)
 		share := uint32(windows.FILE_SHARE_READ)
 		if isDirectory {
-			options |= windows.FILE_DIRECTORY_FILE
 			share |= windows.FILE_SHARE_WRITE
 		} else {
 			options |= windows.FILE_NON_DIRECTORY_FILE
