@@ -93,10 +93,10 @@ func TestCompletionNativeArgvBufferBoundaries(t *testing.T) {
 				bytes := unsafe.Slice((*byte)(ptr), int(unsafe.Sizeof(*header)))
 				field := bytes[unsafe.Offsetof(header.Buffer):]
 				switch unsafe.Sizeof(header.Buffer) {
-				case 4:
-					binary.LittleEndian.PutUint32(field, uint32(address))
-				case 8:
-					binary.LittleEndian.PutUint64(field, uint64(address))
+				case 4, 8:
+					var encoded [8]byte
+					binary.LittleEndian.PutUint64(encoded[:], uint64(address))
+					copy(field[:unsafe.Sizeof(header.Buffer)], encoded[:])
 				default:
 					t.Fatal("unsupported native pointer width")
 				}
