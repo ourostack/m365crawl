@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"io/fs"
-	goruntime "runtime"
 	"strings"
 
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
@@ -45,7 +44,7 @@ type mailSourceError struct {
 func (rt *runtime) discoverOutlookMail() outlookMailSource {
 	s := outlookMailSource{root: rt.outlookRoot}
 	if s.root == "" {
-		s.owa = goruntime.GOOS == "windows"
+		s.owa = mailPlatform == "windows"
 		s.root, s.err = outlookDefaultRoot()
 		if s.err != nil {
 			return s
@@ -64,8 +63,11 @@ func (rt *runtime) discoverOutlookMail() outlookMailSource {
 	return s
 }
 
-// Only an absent resolved optional default is absence; failed resolution/enumeration or refused siblings remain unknown.
+// Resolved optional absence and unsupported legacy defaults are nonwarnings; failed resolution/enumeration or refused siblings remain unknown.
 func (s outlookMailSource) problem(optional bool) *mailSourceError {
+	if optional && !s.owa && s.root == "" && errors.Is(s.err, outlookdesktop.ErrNotSupported) {
+		return nil
+	}
 	if s.err != nil && optional && s.root != "" && (errors.Is(s.err, fs.ErrNotExist) || errors.Is(s.err, outlookdesktop.ErrRootNotFound)) {
 		return nil
 	}

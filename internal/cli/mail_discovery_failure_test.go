@@ -18,7 +18,7 @@ func TestMailDiscoveryFailuresRemainUnknownAcrossReadSurfaces(t *testing.T) {
 			e.emptyArchive()
 			oldRoot, oldDiscover := outlookDefaultRoot, outlookNativeDiscover
 			t.Cleanup(func() { outlookDefaultRoot, outlookNativeDiscover = oldRoot, oldDiscover })
-			root := t.TempDir()
+			root := createdOWARoot(t)
 			outlookDefaultRoot = func() (string, error) { return root, nil }
 			outlookNativeDiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
 				if failure == "refused profile" {
@@ -81,7 +81,7 @@ func TestOutlookRootRepairSupportsBothSourceShapes(t *testing.T) {
 	if code != 3 || er["code"] != "outlook_root_missing" || !strings.Contains(fix, "EBWebView") || !strings.Contains(fix, "HxStore.hxd") || !strings.Contains(fix, "none") {
 		t.Fatalf("repair excludes supported Windows source: exit %d %v", code, er)
 	}
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("supported EBWebView repair did not work: %d %s", code, stderr)

@@ -18,7 +18,7 @@ func TestDoctorMailMetadataRoutesLegacyAndNativeFailures(t *testing.T) {
 	oldLegacy, oldNative := outlookDiscover, outlookNativeDiscover
 	t.Cleanup(func() { outlookDiscover, outlookNativeDiscover = oldLegacy, oldNative })
 	outlookNativeDiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) { return nil, nil, nil }
-	rt := &runtime{outlookOn: true, outlookDefault: true, outlookRoot: t.TempDir()}
+	rt := &runtime{outlookOn: true, outlookDefault: true, outlookRoot: createdOWARoot(t)}
 	for _, tc := range []struct {
 		err  error
 		want string
@@ -107,7 +107,7 @@ func TestMailOWAThreadCancellationNeverReturnsPartialSuccess(t *testing.T) {
 
 func TestMailOWANativeStatusText(t *testing.T) {
 	e := textEnv(t)
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("sync = %d: %s", code, stderr)

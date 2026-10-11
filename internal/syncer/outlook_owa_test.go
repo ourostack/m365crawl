@@ -26,9 +26,7 @@ import (
 
 func owaRoot(t *testing.T, variant string) string {
 	t.Helper()
-	root := t.TempDir()
-	var err error
-	root, err = filepath.EvalSymlinks(root)
+	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +41,36 @@ func owaProfile(root string) outlookowa.Profile {
 		LevelDBDir: filepath.Join(idb, "https_outlook.office.com_0.indexeddb.leveldb"),
 		BlobDir:    filepath.Join(idb, "https_outlook.office.com_0.indexeddb.blob"),
 	}}
+}
+
+func TestOWACreatedFixtureRootIsCanonical(t *testing.T) {
+	check := func(t *testing.T) {
+		t.Helper()
+		root := owaRoot(t, "mail")
+		canonical, err := filepath.EvalSymlinks(root)
+		if err != nil || root != canonical {
+			t.Fatal("created_owa_fixture_not_canonical")
+		}
+		profiles, refused, err := outlookowa.Discover(root)
+		if err != nil || len(profiles) != 1 || len(refused) != 0 {
+			t.Fatal("canonical_owa_fixture_not_discovered")
+		}
+	}
+	t.Run("default", check)
+	if runtime.GOOS != "windows" {
+		t.Run("aliased-temp", func(t *testing.T) {
+			target, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal("synthetic_temp_canonicalization_failed")
+			}
+			link := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal("synthetic_temp_alias_failed")
+			}
+			t.Setenv("TMPDIR", link)
+			check(t)
+		})
+	}
 }
 
 func TestSyncOWAMailOnlyAndUnchanged(t *testing.T) {
@@ -778,7 +806,10 @@ func TestOWADefaultResolutionErrorAndEmptyRootAreExplicit(t *testing.T) {
 	if len(out) != 1 || out[0].err == nil || codedOf(out[0].err).Code != CodeOutlookProfileUnreadable || strings.Contains(out[0].err.Error(), "private") {
 		t.Fatalf("default resolver failure hidden or leaked: %+v", out)
 	}
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("synthetic_owa_root_canonicalization_failed")
+	}
 	outlookDefaultRoot = func() (string, error) { return root, nil }
 	out = r.outlookOWASources(context.Background(), &Report{})
 	if len(out) != 1 || out[0].key != "outlook" || codedOf(out[0].err).Code != CodeNoOutlookProfiles {

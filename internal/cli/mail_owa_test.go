@@ -15,6 +15,15 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
+func createdOWARoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("synthetic_owa_root_canonicalization_failed")
+	}
+	return root
+}
+
 // Catches platform refusal, missing nullable fields, and loss of native recipient order.
 func TestMailOWAArchiveSerialization(t *testing.T) {
 	e := textEnv(t)
@@ -63,7 +72,7 @@ func TestMailOWAArchiveSerialization(t *testing.T) {
 }
 
 func TestMailOWADoctorArchivedStates(t *testing.T) {
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
 	e := textEnv(t)
 	e.emptyArchive()
@@ -101,7 +110,7 @@ func TestMailOWADoctorArchivedStates(t *testing.T) {
 }
 
 func TestMailOWADoctorPathFailures(t *testing.T) {
-	rt := &runtime{outlookOn: true, outlookRoot: t.TempDir()}
+	rt := &runtime{outlookOn: true, outlookRoot: createdOWARoot(t)}
 	if c := rt.outlookStoreCheck(nil); !c.Warn {
 		t.Fatalf("explicit empty source accepted = %+v", c)
 	}
@@ -149,7 +158,7 @@ func TestMailOWAReadableRefusesUnexaminedProfiles(t *testing.T) {
 	outlookNativeDiscover = func(string) ([]outlookowa.Profile, []outlookowa.SkippedProfile, error) {
 		return nil, []outlookowa.SkippedProfile{{Name: "Unreadable", Err: os.ErrPermission}}, nil
 	}
-	rt := &runtime{ctx: context.Background(), outlookOn: true, outlookRoot: t.TempDir()}
+	rt := &runtime{ctx: context.Background(), outlookOn: true, outlookRoot: createdOWARoot(t)}
 	if c := rt.mailReadableCheck(st); !c.Warn || !strings.Contains(c.Detail, "outlook_profile_unreadable") {
 		t.Fatalf("unexamined profile must not look like no mail: %+v", c)
 	}
@@ -173,7 +182,7 @@ func TestMailLegacyNullableFields(t *testing.T) {
 // Catches HxStore-only discovery and inconsistent native search/status/doctor routing.
 func TestMailOWASourceCLI(t *testing.T) {
 	e := textEnv(t)
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
 	code, out, stderr := e.run("--outlook-root", root, "sync")
 	if code != 0 {

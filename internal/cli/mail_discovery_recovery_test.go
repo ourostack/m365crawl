@@ -13,7 +13,7 @@ import (
 func TestMailDiscoveryUnknownPreservesHealthyArchivedResults(t *testing.T) {
 	e := textEnv(t)
 	seedMail(t, e, seedMessages())
-	root := t.TempDir()
+	root := createdOWARoot(t)
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Main"))
 	old := outlookNativeDiscover
 	t.Cleanup(func() { outlookNativeDiscover = old })

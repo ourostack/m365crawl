@@ -225,7 +225,7 @@ func TestDoctorMailReadableCheck(t *testing.T) {
 	})
 	t.Run("no profile", func(t *testing.T) {
 		none := *rt
-		none.outlookRoot = t.TempDir()
+		none.outlookRoot = createdOWARoot(t)
 		if c := none.mailReadableCheck(st); !c.OK || c.Warn || !strings.Contains(c.Detail, "no mail to read") {
 			t.Fatalf("%+v", c)
 		}
