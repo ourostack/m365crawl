@@ -209,9 +209,17 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 				_, _ = io.WriteString(kctx.Stdout, startHereText(stepsHere())+"\n")
 			}
 			err := kong.DefaultHelpPrinter(opts, kctx)
-			if n := kctx.Selected(); err == nil && n != nil && len(n.Children) == 0 {
+			if n := kctx.Selected(); err == nil && n != nil {
+				if commandOf(n.Path()) == "people" && n.DefaultCmd != nil {
+					_, _ = io.WriteString(kctx.Stdout, "\nDefault list options (without a subcommand):\n")
+					for _, flag := range n.DefaultCmd.Flags {
+						_, _ = fmt.Fprintf(kctx.Stdout, "  %s  %s\n", flag.Summary(), flag.Help)
+					}
+				}
 				// A list command's help ends with the --fields keys it accepts.
-				writeFieldsHelp(kctx.Stdout, commandOf(n.Path()))
+				if len(n.Children) == 0 || commandOf(n.Path()) == "people" {
+					writeFieldsHelp(kctx.Stdout, commandOf(n.Path()))
+				}
 			}
 			return err
 		}),

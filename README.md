@@ -180,7 +180,7 @@ m365crawl calendar --days 14
 m365crawl calendar event ev_2da7280856
 ```
 
-`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with.
+`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with. Registered native people get a separate archive-only route to `people sources`; the legacy source table does not assess contact coverage. `people --help` exposes the default list's query, limit, ordering and accepted fields without needing a guide.
 
 Here is what three of those commands print. The output comes from a run against the same synthetic data; the dates follow the day you build the showcase store.
 
