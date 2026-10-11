@@ -24,7 +24,7 @@ type peopleGroup struct {
 }
 
 func (peopleGroup) Help() string {
-	return "Without a subcommand, list existing Teams people and mail correspondents plus registered native Outlook observations. Native copies are evidence, not current contacts: names, email pairs and profile-owner links do not prove subject tenancy or last contact. No native identities are merged into existing people.\n" +
+	return "Without a subcommand, list existing Teams people and mail correspondents plus registered native Outlook observations. Sort: known last_seen_at newest first, then unknown times; ties use display name (ASCII case-insensitive), then source and observation ID for native rows, otherwise person ID. Native copies are evidence, not current contacts: names, email pairs and profile-owner links do not prove subject tenancy or last contact. No native identities are merged into existing people.\n" +
 		"Run `people sync` for available Mac HxStore profiles, or `people sync --root DIR` for supported copied <root>/<profile>/HxStore.hxd inputs. Windows OWA people discovery is unsupported. Ordinary reads refresh registered sources only; --max-age 0 performs no capture. Partial and failed capture retains observations and contradictions.\n" +
 		"Follow person-observation:ID with `people show`; existing Teams/mail IDs retain their previous workflows. Profile link evidence is not a resolved person. Automatic copies respect the five-minute HxStore minimum interval."
 }
@@ -216,6 +216,9 @@ func (c *peopleCmd) connectedPeopleResult(rt *runtime, s *store.Store, coverage 
 	}
 	out.SourceCoverage = peopleCoverage(sources)
 	out.SourceCoverage.RefreshError = coverage.RefreshError
+	if len(items) == 0 {
+		out.Note = "no archived person matched; source_coverage describes captured native input, not contact completeness"
+	}
 	if rt.g.Account != "" {
 		out.addNotice("native Outlook subjects have unresolved account ownership and were excluded; profile-owner links do not prove subject tenancy")
 	}

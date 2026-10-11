@@ -18,7 +18,7 @@ m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, new O
 
 ## Start here
 
-Run `m365crawl` first: with no command it says what the archive holds per source (chats, mail, calendar), how fresh each is and what to run next, and it never syncs. Then read `m365crawl --help` and the `--help` of each command you use: they list every flag, sort order and field, so this guide does not repeat them.
+Run `m365crawl` first: it reports chats, mail and calendar freshness, routes registered native people to independent coverage, and never syncs. Keep an explicit `--db` when following a route. Then read `m365crawl --help` and each command's `--help` for flags, ordering and fields; this guide does not repeat them.
 
 - Output is JSON when stdout is not a terminal; pass `--json` to be sure. An error is one JSON line on stderr with a `fix`: follow it.
 - Read commands sync first when the archive is older than `--max-age` (default 15m); `--max-age 0` reads it as it is.
