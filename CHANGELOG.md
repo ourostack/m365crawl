@@ -4,6 +4,19 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-11
+
+### Added
+
+- Capture and read local OneNote indexed notes with `notes sync/list/search/show/sources`, stable note IDs, indexed text/OCR, native hierarchy and source coverage; shared search joins note hits to chats, mail and fetched transcripts without inventing authors or account ownership.
+- Protect rollback-mode source indexes with SQLite-compatible shared locking and private copies; retain last-good page text and flags across partial/failed captures, keep source attempt history, and independently refresh registered locators. Default discovery is Mac OneNote; supported explicit index copies work on Mac, Windows and Linux. Live WAL capture, Windows native app discovery, page web URLs and original visual layout remain unsupported.
+
+### Fixed
+
+- Measure retained LevelDB entry overhead in an isolated test process, so fixture construction and prior tests cannot inflate the pre-load heap baseline. Accounting constants and calibration tolerances are unchanged.
+- Mail-thread cancellation tests now use explicit cancelled contexts and a real post-seed conversation query instead of relying on platform-dependent context error polling.
+- Windows installation and supported-platform guidance now describes shipped new Outlook cached mail instead of the superseded unsupported-platform error.
+
 ## [0.7.0] - 2026-10-11
 
 ### Added
