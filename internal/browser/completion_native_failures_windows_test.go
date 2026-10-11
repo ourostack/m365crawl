@@ -91,12 +91,13 @@ func TestCompletionNativeTerminationFailureBoundaries(t *testing.T) {
 		{"late-creation", "browser_completion_timeout", 0, 1},
 		{"ended-at-recheck", "", 0, 1},
 		{"late-recheck", "browser_completion_timeout", 0, 1},
+		{"late-denied-poll", "browser_completion_terminate_failed", 1, 1},
 		{"late-termination-error", "browser_completion_terminate_failed", 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCompletionNativeFixture(t)
 			deadline := time.Now().Add(time.Minute)
-			if tc.name == "late-open-error" || tc.name == "late-creation" || tc.name == "late-recheck" || tc.name == "late-termination-error" {
+			if tc.name == "late-open-error" || tc.name == "late-creation" || tc.name == "late-recheck" || tc.name == "late-denied-poll" || tc.name == "late-termination-error" {
 				deadline = time.Now().Add(20 * time.Millisecond)
 			}
 			cause := errors.New("private native failure")
@@ -133,6 +134,17 @@ func TestCompletionNativeTerminationFailureBoundaries(t *testing.T) {
 					consume()
 					return cause
 				}
+			case "late-denied-poll":
+				completionTerminateProcess = func(windows.Handle, uint32) error {
+					f.fallbackKills++
+					return windows.ERROR_ACCESS_DENIED
+				}
+				f.onPoll = func(pid uint32) {
+					if f.polls[pid] == 3 {
+						consume()
+						f.signalled[pid] = true
+					}
+				}
 			}
 			err := terminateCompletionTarget(42, 42, 142, deadline)
 			if tc.code == "" {
@@ -148,6 +160,11 @@ func TestCompletionNativeTerminationFailureBoundaries(t *testing.T) {
 			if tc.name == "late-open-error" || tc.name == "release-error" || tc.name == "late-termination-error" {
 				if !errors.Is(err, cause) {
 					t.Fatal("native cause was lost")
+				}
+			}
+			if tc.name == "late-denied-poll" {
+				if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || f.polls[42] != 3 || errors.Unwrap(err) == nil {
+					t.Fatalf("late signal must preserve denied operation and deadline failure: %v polls=%v", err, f.polls)
 				}
 			}
 		})
