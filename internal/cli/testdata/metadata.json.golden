@@ -138,6 +138,47 @@
       ],
       "json": true
     },
+    "people": {
+      "title": "people (native observations remain unresolved; show needs person-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "people"
+      ],
+      "json": true
+    },
+    "people show": {
+      "title": "people show (native observations remain unresolved; show needs person-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "people",
+        "show",
+        "\u003cperson-observation-id\u003e"
+      ],
+      "json": true
+    },
+    "people sources": {
+      "title": "people sources (native observations remain unresolved; show needs person-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "people",
+        "sources"
+      ],
+      "json": true
+    },
+    "people sync": {
+      "title": "people sync (native observations remain unresolved; show needs person-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "people",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "search": {
       "argv": [
         "m365crawl",
@@ -203,7 +244,8 @@
     "local_only_scopes": [
       "teams_cache",
       "outlook_store",
-      "onenote_index"
+      "onenote_index",
+      "outlook_people"
     ]
   }
 }

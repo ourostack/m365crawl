@@ -566,6 +566,13 @@ func (c *peopleCmd) Run(rt *runtime) error {
 	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
+	coverage, err := rt.refreshPeople()
+	if err != nil {
+		return asCoded(err)
+	}
+	if len(coverage.Sources) > 0 {
+		return c.runConnectedPeople(rt, coverage)
+	}
 	rt.query = listQuery{filtered: c.Query != ""}
 	return rt.read("people", func(st *store.Store) (result, error) {
 		if st == nil {

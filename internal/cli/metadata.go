@@ -41,11 +41,19 @@ func manifest() control.Manifest {
 		case "notes show":
 			argv = append(argv, "<note-id>")
 		}
+		for _, command := range []string{"people", "people sync", "people show", "people sources"} {
+			argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+			if command == "people show" {
+				argv = append(argv, "<person-observation-id>")
+			}
+			m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "people sync",
+				Title: command + " (native observations remain unresolved; show needs person-observation:ID)"}
+		}
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "notes sync",
 			Title: command + " (notes show needs an actual note:ID; notes search needs actual words)"}
 	}
 	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index"}}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people"}}
 	return m
 }
 

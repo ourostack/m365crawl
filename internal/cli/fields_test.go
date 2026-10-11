@@ -44,7 +44,7 @@ func TestHelpListsTheKeysTheCheckAccepts(t *testing.T) {
 	e := newEnv(t)
 	for name, sets := range commandFields {
 		// A group's default command has its own help: calendar agenda, transcripts list.
-		args := append(strings.Fields(map[string]string{"calendar": "calendar agenda", "transcripts": "transcripts list"}[name]), "--help")
+		args := append(strings.Fields(map[string]string{"calendar": "calendar agenda", "transcripts": "transcripts list", "people": "people list"}[name]), "--help")
 		if len(args) == 1 {
 			args = append(strings.Fields(name), "--help")
 		}

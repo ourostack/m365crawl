@@ -62,6 +62,9 @@ func beginSharedPeople(ctx context.Context, s *store.Store, path, signature stri
 	if err != nil {
 		return nil, err
 	}
+	if len(locators) == 0 {
+		return nil, nil
+	}
 	canonical, err := peopleResolve(path)
 	if err != nil {
 		return nil, err

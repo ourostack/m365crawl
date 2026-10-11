@@ -367,14 +367,18 @@ func (rt *runtime) renderNoteCoverage(coverage *noteCoverage) {
 	if coverage == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(rt.stdout, "notes coverage: %s (%s)\n", coverage.State, coverage.Scope)
+	name := "notes"
+	if coverage.Scope == "outlook_native_people_observations" {
+		name = "people"
+	}
+	_, _ = fmt.Fprintf(rt.stdout, "%s coverage: %s (%s)\n", name, coverage.State, coverage.Scope)
 	rows := [][]string{}
 	for _, source := range coverage.Sources {
 		rows = append(rows, []string{strconv.FormatInt(source.ID, 10), source.Status, source.Coverage, source.Reason})
 	}
 	render.Table(rt.stdout, []string{"source", "status", "coverage", "reason"}, rows, rt.color)
 	if coverage.RefreshError != nil {
-		_, _ = fmt.Fprintf(rt.stdout, "notes refresh error: %s: %s (serving retained archive)\n", coverage.RefreshError.Code, coverage.RefreshError.Message)
+		_, _ = fmt.Fprintf(rt.stdout, "%s refresh error: %s: %s (serving retained archive)\n", name, coverage.RefreshError.Code, coverage.RefreshError.Message)
 	}
 }
 

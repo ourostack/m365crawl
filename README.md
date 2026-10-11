@@ -27,6 +27,7 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 | What's in the archive and how fresh is it? | `m365crawl` |
 | Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
 | Read the note and check its coverage | `m365crawl notes show note:ID` · `m365crawl notes sources` |
+| Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
 
 ## Give your agent the context, not another inbox
 
@@ -51,11 +52,13 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the note, then read the evidence. This example is actual CLI output from synthetic notes, not private work data or a complete notebook export.*
 
+**People observations, without invented identity resolution.** `people sync` registers native Mac Outlook HxStore inputs, and `people --query` joins retained observations to the existing people list. `people show person-observation:ID` exposes native email/directory claims, differing copies and conflicts; `people sources` shows independent coverage. Copied supported HxStore roots work with `--root`. Windows OWA people discovery and automatic subject-tenant resolution are not supplied. A profile-owner link is not the subject's tenant, a cache refresh is not last contact, and ambiguous copies remain unresolved rather than becoming a guessed current contact.
+
 **Planned expansion, not shipped support:**
 
 | Area | Direction | What still needs proving |
 | --- | --- | --- |
-| People and meetings | Connect identities across sources and read fuller attendee lists | Identity ambiguity, source coverage and platform-specific mappings |
+| People resolution and meetings | Qualify subject-scoped identity links and read fuller attendee lists | Positive subject tenancy, current-copy ambiguity, source coverage and platform-specific mappings |
 | Office and OneDrive | Join recent documents, sharing activity and library metadata to people and conversations | Changing cache layouts, link resolution and Windows data sources; metadata is not document text |
 | More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
 | Archived bot citations and Loop | Expose citations in archived bot replies and version-qualified cached Loop content | Preserve Teams provenance, snapshot versions and partial coverage; this is not private Copilot history |

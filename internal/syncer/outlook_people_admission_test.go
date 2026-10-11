@@ -95,12 +95,6 @@ func TestPeopleSharedRegistrationAndBeginFailures(t *testing.T) {
 	if pending, err := beginSharedPeople(context.Background(), s, path, "", time.Now(), true); err != nil || pending != nil {
 		t.Fatalf("unregistered shared source: %v", err)
 	}
-	resetPeopleSeams(t)
-	peopleAbs = func(string) (string, error) { return "", errors.New("abs") }
-	if _, err := beginSharedPeople(context.Background(), s, path, "", time.Now(), true); err == nil {
-		t.Fatal("absolute path failure hidden")
-	}
-	peopleAbs = filepath.Abs
 	source, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +102,12 @@ func TestPeopleSharedRegistrationAndBeginFailures(t *testing.T) {
 	if _, err := s.BeginKnowledgeAttempt(context.Background(), store.KnowledgeInput{Kind: "outlook_people", Platform: "synthetic", Locator: source, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
+	resetPeopleSeams(t)
+	peopleAbs = func(string) (string, error) { return "", errors.New("abs") }
+	if _, err := beginSharedPeople(context.Background(), s, path, "", time.Now(), true); err == nil {
+		t.Fatal("absolute path failure hidden")
+	}
+	peopleAbs = filepath.Abs
 	peopleResolve = func(string) (string, error) {
 		peopleSQL(t, db, "drop table knowledge_attempts")
 		return source, nil

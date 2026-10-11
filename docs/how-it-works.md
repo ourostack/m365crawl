@@ -1,5 +1,9 @@
 # How it works
 
+Native people observations use a separate source-admission lane. `people sync` registers supported HxStore profile inputs; ordinary reads use only those registrations. If normal Outlook already needs a private copy, eligible registered people can reuse it without another source copy or a change to calendar/mail freshness. The copied payload and its owned root must be gone before people admission.
+
+Distinct native representations remain immutable, with stable observation IDs, original acquisition/source clocks, capture membership and sticky contradiction evidence. Partial capture adds new claims without pretending older copies disappeared. `people show` reads one coherent snapshot of the original observation, differing copies, conflicts and historical/current profile-owner link evidence. Those links identify the source owner, not the subject's tenant. Native pair claims remain unresolved; no display-name/email merge or guessed current directory person is created.
+
 m365crawl turns two local caches into one SQLite archive: the new Teams app's Chromium databases, and the new Outlook for Mac's `HxStore.hxd` store, which holds mail and the calendar. This page follows one sync from the files on disk to a row you can query. The rules it must keep are in [SPEC.md](../SPEC.md); the code lives under `internal/`, one package per layer.
 
 A sync reads Teams first (steps 1 to 7b), then each Outlook profile (steps 7c and 7d), and writes each source in its own transaction (step 8). A failure in one source never undoes another.

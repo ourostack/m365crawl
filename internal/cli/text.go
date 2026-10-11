@@ -69,6 +69,7 @@ func (rt *runtime) renderText(label string, v any) error {
 	case *listResult:
 		rt.listTable(r)
 		rt.renderNoteDetails(r)
+		rt.renderPeopleDetails(r)
 		_, _ = fmt.Fprintln(w)
 		rt.renderNoteCoverage(r.SourceCoverage)
 		if r.CoverageGap != nil && *r.CoverageGap {
@@ -99,7 +100,11 @@ func (rt *runtime) renderText(label string, v any) error {
 			metaLines(w, r.meta, color)
 		}
 	case notesSyncResult:
-		_, _ = fmt.Fprintf(w, "notes: %d captured, %d unchanged, %d skipped, %d failed\n", r.Captured, r.Unchanged, r.Skipped, r.Failed)
+		name := "notes"
+		if label == "people sync" {
+			name = "people"
+		}
+		_, _ = fmt.Fprintf(w, "%s: %d captured, %d unchanged, %d skipped, %d failed\n", name, r.Captured, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderNoteCoverage(r.SourceCoverage)
 	case syncer.Report:
 		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)
@@ -323,6 +328,12 @@ func (rt *runtime) listTable(r *listResult) {
 		case personItem:
 			cols, textCol = []string{"name", "id", "sources", "last_seen_at"}, -1
 			rows = append(rows, []string{x.DisplayName, x.ID, strings.Join(x.Sources, ","), stamp(x.LastSeenAt)})
+		case peopleObservationItem:
+			cols, textCol = []string{"name", "id", "sources", "last_seen_at"}, -1
+			rows = append(rows, []string{x.DisplayName, x.ID, strings.Join(x.Sources, ","), "-"})
+		case peopleDetailItem:
+			cols, textCol = []string{"name", "id", "sources", "last_seen_at"}, -1
+			rows = append(rows, []string{x.DisplayName, x.ID, strings.Join(x.Sources, ","), "-"})
 		case activityItem:
 			read := "unread"
 			if x.IsRead {
