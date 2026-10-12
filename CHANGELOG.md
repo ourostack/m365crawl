@@ -4,6 +4,12 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-11
+
+### Fixed
+
+- Make native people workflows self-explaining: `people --help` now exposes default-list query, limit, ordering and fields; empty lists explain their independent source coverage; the read-only overview points registered people archives to an archive-only coverage command without inventing contact counts or resolved identities.
+
 ## [0.9.0] - 2026-10-11
 
 ### Added
