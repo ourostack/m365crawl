@@ -169,14 +169,6 @@ func (p *appPublisher) stmt(ctx context.Context, st **sql.Stmt, q string) (*sql.
 	return *st, nil
 }
 
-// publishMessageApplication publishes one revision with statements of its own; batch callers use
-// an appPublisher.
-func publishMessageApplication(ctx context.Context, tx *sql.Tx, message int64, id messageIdentity, raw []byte, rawPresent bool, at time.Time) (string, error) {
-	p := newAppPublisher(tx)
-	defer p.close()
-	return p.publish(ctx, message, id, raw, rawPresent, rawDigest(raw, rawPresent), at)
-}
-
 // publish makes the representation of one accepted raw revision current, in the publisher's
 // transaction, for the message whose rowid is message: it reuses the immutable representation of the same revision when one exists
 // (keeping its first derivation time) and projects the raw JSON otherwise. A mapped

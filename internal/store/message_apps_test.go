@@ -238,16 +238,12 @@ func TestMessageAppAcceptedRevisionOnly(t *testing.T) {
 	}
 
 	// A retained SQL empty string is present empty raw: its digest is the SHA256 of no bytes.
-	m3 := int64(countRows(t, s, `select rowid from messages where id='m3'`))
-	tx, err := s.db.Begin()
-	if err != nil {
-		t.Fatal(err)
+	// The backfill is the path that publishes it: ApplyMessages stores zero-length raw as NULL.
+	s.qExec(t, `update messages set raw_json='' where id='m3'`)
+	s.qExec(t, `delete from meta where key='message_app_mapper_version'`)
+	if rep, err := s.BackfillMessageApplications(context.Background()); err != nil || rep.Failed == 0 {
+		t.Fatalf("backfill present empty: %+v %v", rep, err)
 	}
-	state, err := publishMessageApplication(context.Background(), tx, m3, messageIdentity{acctA.TenantID, acctA.UserID, appConversation, "m3", appSender}, []byte{}, true, base)
-	if err != nil || state != AppStateFailed {
-		t.Fatalf("publish present empty: %s %v", state, err)
-	}
-	must0(tx.Commit())
 	if countRows(t, s, `select count(*) from message_app_observations where message_id='m3' and raw_present=1 and raw_digest=? and failure_code='teams_app_raw_invalid'`, digestOf("")) != 1 {
 		t.Fatal("present empty raw did not get the empty-bytes digest and raw_invalid")
 	}
@@ -301,15 +297,19 @@ func TestMessageAppCorruptStoredEvidence(t *testing.T) {
 		{"digest", `update message_app_observations set raw_digest='00'`},
 		{"sender", `update message_app_observations set sender_id='someone-else'`},
 		{"group", `update message_app_observations set message_id='other'`},
-		{"missing-current-row", `pragma foreign_keys=off; update message_app_current set current_id=999 where message_rowid=(select rowid from messages where id='m1'); update message_app_observations set rowid=rowid`},
 		{"raw-present-mismatch", `update message_app_observations set raw_present=0`},
+		{"missing-current-row", `update message_app_current set current_id=999`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newStore(t)
 			applyApp(t, s, "m1", 1, appSender, `{"properties":{"fromAppMetadata":{"id":"app-1"},"botCitations":[{"id":5,"title":"First"},{"id":6,"title":"Second"}]}}`)
 			applyApp(t, s, "m2", 1, appSender, appRaw("Healthy"))
-			tamper(t, s, tc.setup+` where message_id='m1' or rowid=(select current_id from message_app_current where message_rowid=(select rowid from messages where id='m1'))`)
+			setup := tc.setup + ` where message_id='m1' or rowid=(select current_id from message_app_current where message_rowid=(select rowid from messages where id='m1'))`
+			if strings.HasPrefix(tc.setup, "update message_app_current") { // keyed by message rowid
+				setup = tc.setup + ` where message_rowid=(select rowid from messages where id='m1')`
+			}
+			s.qExec(t, setup)
 			env := appEnvelope(t, s, "m1")
 			if env.State != AppStateFailed || env.FailureCode != AppProjectionCorrupt || env.Served != nil {
 				t.Fatalf("corrupt stored evidence was trusted: %+v", env)
@@ -323,7 +323,7 @@ func TestMessageAppCorruptStoredEvidence(t *testing.T) {
 
 func TestMessageAppCorruptLastGood(t *testing.T) {
 	for name, setup := range map[string]string{
-		"missing":      `pragma foreign_keys=off; update message_app_current set last_good_id=999`,
+		"missing":      `update message_app_current set last_good_id=999`,
 		"json":         `update message_app_observations set projection_json='{}' where state='mapped'`,
 		"not-eligible": `update message_app_current set last_good_id=current_id`,
 	} {
@@ -331,7 +331,7 @@ func TestMessageAppCorruptLastGood(t *testing.T) {
 			s := newStore(t)
 			applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
 			applyApp(t, s, "m1", 2, appSender, failedRaw)
-			tamper(t, s, setup)
+			s.qExec(t, setup)
 			env := appEnvelope(t, s, "m1")
 			if env.State != AppStateFailed || env.FailureCode != AppProjectionCorrupt || env.Served != nil || env.Retained {
 				t.Fatalf("corrupt last good was served: %+v", env)
@@ -496,25 +496,6 @@ func sqlOpen(t *testing.T, path string) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
-}
-
-// tamper runs statements on one connection, so a leading pragma foreign_keys=off lets a test
-// plant a dangling pointer that the schema itself refuses.
-func tamper(t *testing.T, s *Store, script string) {
-	t.Helper()
-	c, err := s.db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = c.Close() }()
-	for _, q := range strings.Split(script, "; ") {
-		if _, err := c.ExecContext(context.Background(), q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-	if _, err := c.ExecContext(context.Background(), `pragma foreign_keys=on`); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestActiveApplicationVersion(t *testing.T) {
