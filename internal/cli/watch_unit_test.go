@@ -343,6 +343,57 @@ func TestWatcherTextLineNamesTheActivityType(t *testing.T) {
 
 // --- the loop ---
 
+func TestWatchCapsEventWaitBeforeTheQuietPeriod(t *testing.T) {
+	e := newEnv(t)
+	sources, _, err := discover(e.root)
+	if err != nil || len(sources) == 0 {
+		t.Fatalf("fixture discovery: %v", err)
+	}
+	oldDiscover, oldFingerprint, oldSync, oldEvents := discover, fingerprintOf, runSync, watchEvents
+	oldQuiet, oldMaxWait := watchQuiet, watchMaxWait
+	t.Cleanup(func() {
+		discover, fingerprintOf, runSync, watchEvents = oldDiscover, oldFingerprint, oldSync, oldEvents
+		watchQuiet, watchMaxWait = oldQuiet, oldMaxWait
+	})
+	discover = func(string) ([]teamsdesktop.Source, []string, error) {
+		return sources[:1], nil, nil
+	}
+	watchQuiet, watchMaxWait = time.Hour, time.Millisecond
+	events := make(chan struct{}, 1)
+	closed, fingerprints, syncs := 0, 0, 0
+	watchEvents = func(context.Context, []string) (<-chan struct{}, func(), error) {
+		return events, func() { closed++ }, nil
+	}
+	fingerprint := "A"
+	fingerprintOf = func(teamsdesktop.Source) (string, error) {
+		fingerprints++
+		return fingerprint, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), watchTestWaitTimeout)
+	defer cancel()
+	runSync = func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
+		syncs++
+		if syncs == 1 {
+			fingerprint = "B"
+			events <- struct{}{}
+		} else {
+			cancel()
+		}
+		return syncer.Report{Status: syncer.StatusUnchanged}, nil, nil
+	}
+	w, _, _ := jsonWatcher(t, e.root, e.db)
+	w.rt.ctx, w.every, w.minInterval = ctx, time.Hour, 0
+	if err := w.run(); err != nil {
+		t.Fatal(err)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatal("the max-wait cap did not trigger the queued event's sync")
+	}
+	if syncs != 2 || fingerprints != 2 || closed != 1 {
+		t.Fatalf("syncs=%d fingerprints=%d event closes=%d; want 2, 2, 1", syncs, fingerprints, closed)
+	}
+}
+
 func runWatcher(t *testing.T, w *watcher) (stop func() error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
