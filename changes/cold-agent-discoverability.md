@@ -6,4 +6,4 @@
 
 ### Changed
 
-- Text output prints every time with its zone name (`2026-10-12 09:30 PDT`), so a text day is not mistaken for the UTC day JSON prints.
+- Text output prints every archived time of day with its zone name (`2026-10-12 09:30 PDT`, and a transcript part's `10:02 PST`), so a text day is not mistaken for the UTC day JSON prints. Date-only values carry no zone.
