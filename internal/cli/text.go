@@ -355,7 +355,7 @@ func (rt *runtime) listTable(r *listResult) {
 			rows = append(rows, loopListRow(x.loopChannelItem))
 		case searchLoopItem:
 			cols, textCol = searchColumns, 5
-			rows = append(rows, []string{"-", x.Source, x.Path, "-", "loop show " + x.ID, "[partial snapshot] " + oneLine(x.Text)})
+			rows = append(rows, []string{"-", x.Source, x.Path, "partial snapshot", "loop show " + x.ID, oneLine(x.Text)})
 		case loopSourceItem:
 			cols, textCol = []string{"source", "status", "coverage", "snapshot_match", "last_snapshot", "reason", "retry"}, -1
 			rows = append(rows, []string{strconv.FormatInt(x.SourceID, 10), x.Status, x.Coverage, x.SnapshotMatch,

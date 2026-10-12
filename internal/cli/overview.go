@@ -309,7 +309,7 @@ func loopOverviewSource(loop store.LoopOverview, unscoped string) overviewSource
 			src.Note = strings.Join(problems, " and ") + ": m365crawl loop sources shows each one, its fix and its retry command"
 		}
 		if pending := loop.ArchivedRecords - loop.Registered; pending > 0 {
-			src.Note = withNote(src.Note, plural(pending, "archived record is", "archived records are")+" not registered: run m365crawl loop sync")
+			src.Note = withNote(src.Note, plural(pending, "archived record is", "archived records are")+" not registered: m365crawl loop sync registers new records and names any it cannot register")
 		}
 		if unscoped != "" {
 			src.Note = withNote(src.Note, unscoped)

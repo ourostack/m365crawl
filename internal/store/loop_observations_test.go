@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -291,6 +292,22 @@ func TestLoopUnchangedReadLoadsNoValue(t *testing.T) {
 	if source := loopSource(t, s, bID); source.SnapshotMatch != "differs" || *reads != 1 {
 		t.Fatalf("fingerprint without a content hash was trusted: %s reads=%d", source.SnapshotMatch, *reads)
 	}
+	// A fingerprint stored without a content hash never matches, even when nothing changed.
+	d := insertLoopRecord(t, s, loopFixtureSource, "d", loopText(t, "delta words"), "", "")
+	updateLoopRecord(t, s, d, "content_hash=''")
+	dID := registerLoop(t, s, d, base)
+	*reads = 0
+	if source := loopSource(t, s, dID); source.SnapshotMatch != "matches" || *reads != 1 {
+		t.Fatalf("empty stored content hash was trusted: %s reads=%d", source.SnapshotMatch, *reads)
+	}
+	// The raw digest and the redaction state are part of the fingerprint.
+	for _, assignment := range []string{"raw_digest=x'01'", "raw_digest=null,value_redacted=1"} {
+		updateLoopRecord(t, s, a, assignment)
+		*reads = 0
+		if source := loopSource(t, s, aID); source.SnapshotMatch != "matches" || *reads != 1 {
+			t.Fatalf("%s did not force a hash: %s reads=%d", assignment, source.SnapshotMatch, *reads)
+		}
+	}
 	// A source that was never admitted has no snapshot to compare, so its value is never loaded.
 	c := insertLoopRecord(t, s, loopFixtureSource, "c", loopText(t, "charlie words"), "", "")
 	var never int64
@@ -493,5 +510,41 @@ func TestMigrationSchema13AddsLoopTablesWithoutTouchingRecords(t *testing.T) {
 	}
 	if got := discover(t, s); len(got) != 1 || got[0].RecordID != record {
 		t.Fatalf("migrated archive discovery: %+v", got)
+	}
+}
+
+// The archive's own writer rewrites the content hash with the value, so a same-length change it
+// makes is seen without a stale match.
+func TestLoopSeesAChangeWrittenByTheArchive(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	write := func(text string, at time.Time) {
+		t.Helper()
+		x, err := s.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := x.UpsertRecords(loopFixtureSource, []teamsdesktop.GenericRecord{{Database: LoopDatabase, Store: LoopStore,
+			KeyJSON: []byte(`"written"`), ValueJSON: []byte(loopText(t, text))}}, at); err != nil {
+			t.Fatal(err)
+		}
+		if err := x.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("alpha words", base)
+	var record int64
+	if err := s.db.QueryRow(`select rowid from records where key_json='"written"'`).Scan(&record); err != nil {
+		t.Fatal(err)
+	}
+	id := registerLoop(t, s, record, base)
+	reads := countValueReads(t)
+	if source := loopSource(t, s, id); source.SnapshotMatch != "matches" || *reads != 0 {
+		t.Fatalf("unchanged: %s reads=%d", source.SnapshotMatch, *reads)
+	}
+	write("alpha wordz", base) // same length, same clock
+	snapshot, err := s.LoopSnapshot(ctx, LoopFilter{})
+	if err != nil || len(snapshot.Rows) != 1 || snapshot.Rows[0].MatchesRetainedValue || snapshot.Sources[0].SnapshotMatch != "differs" {
+		t.Fatalf("same-length change through the archive writer: %+v %v", snapshot, err)
 	}
 }

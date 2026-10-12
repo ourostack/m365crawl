@@ -69,8 +69,15 @@ func TestLoopOverviewRow(t *testing.T) {
 		t.Fatalf("text overview:\n%s", text)
 	}
 	insertLoopCLI(t, db, "later", loopCLIValue(t, 3, [2]string{"c", "charlie words"}))
-	if row := overviewLoop(t, e); !strings.Contains(row["note"].(string), "1 archived record is not registered: run m365crawl loop sync") {
+	if row := overviewLoop(t, e); !strings.Contains(row["note"].(string), "1 archived record is not registered: m365crawl loop sync registers new records") {
 		t.Fatalf("new unregistered record not named: %v", row)
+	}
+	// Records that can never register leave no instruction that cannot be satisfied.
+	insertLoopCLI(t, db, "bad\xff", nil)
+	runOK(t, e, "loop", "sync")
+	if note := overviewLoop(t, e)["note"].(string); strings.Contains(note, "not registered: run m365crawl loop sync") ||
+		!strings.Contains(note, "1 archived record is not registered: m365crawl loop sync registers new records and names any it cannot register") {
+		t.Fatalf("unregistrable record note: %s", note)
 	}
 	scoped := decode(t, runOK(t, e, "--account", "00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002"))
 	for _, raw := range scoped["sources"].([]any) {
@@ -184,7 +191,7 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 			t.Fatalf("text loop show lacks %q:\n%s", want, text)
 		}
 	}
-	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "evidence"); !strings.Contains(search, "[partial snapshot] evidence words") {
+	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "evidence"); !strings.Contains(search, "partial snapshot") || !strings.Contains(search, "  evidence words") || strings.Contains(search, "[partial snapshot]") {
 		t.Fatalf("shared search does not mark the Loop row as a partial snapshot:\n%s", search)
 	}
 	if _, err := db.Exec(`update records set value_json=?,content_hash='next',updated_at='2026-10-12T05:00:00.000Z' where key_json='page'`,

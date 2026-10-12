@@ -446,3 +446,25 @@ func TestLoopChangeOrCancelBeforeValueLoad(t *testing.T) {
 		t.Fatalf("last good rows changed: %+v", rows)
 	}
 }
+
+// A real run that fails after it committed returns what it committed with the error.
+func TestLoopFailureAfterCommitKeepsTheReport(t *testing.T) {
+	a := newLoopArchive(t)
+	a.insert(t, "https://synthetic.invalid", "first", syntheticLoop(t, 1, 1, "first words"))
+	a.insert(t, "https://synthetic.invalid", "second", syntheticLoop(t, 1, 1, "second words"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	read, calls := loopRead, 0
+	loopRead = func(ctx context.Context, value []byte) (loopcache.Result, error) {
+		if calls++; calls == 2 {
+			cancel()
+		}
+		return read(ctx, value)
+	}
+	t.Cleanup(func() { loopRead = read })
+	report, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, Explicit: true, Discover: true})
+	if !errors.Is(err, context.Canceled) || report.Projected != 1 || report.Failed != 1 || len(report.Sources) != 2 ||
+		report.Sources[0].SnapshotMatch != "matches" || report.Sources[1].Health.Reason != "loop_cache_cancelled" {
+		t.Fatalf("failed run lost its report: %+v %v", report, err)
+	}
+}
