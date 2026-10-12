@@ -227,11 +227,12 @@ func (it *applicationItem) truncate(max int) bool {
 
 // applicationCoverageOf summarizes the evidence of the Teams messages a result returned.
 func applicationCoverageOf(envs []store.MessageApplicationEnvelope) *applicationCoverage {
-	c := &applicationCoverage{Scope: appCoverageScope, State: "observed", MapperVersion: store.MessageApplicationVersion, ReturnedMessages: len(envs), States: map[string]int{}}
+	c := &applicationCoverage{Scope: appCoverageScope, State: "observed", MapperVersion: store.ActiveApplicationVersion(), ReturnedMessages: len(envs), States: map[string]int{}}
 	for _, s := range appStates {
 		c.States[s] = 0
 	}
 	for _, env := range envs {
+		c.MapperVersion = env.ActiveMapperVersion // every envelope of one read shares it
 		c.States[env.State]++
 		if env.Retained {
 			c.Retained++

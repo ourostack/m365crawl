@@ -45,3 +45,6 @@ create table if not exists message_app_current(
  primary key(tenant_id,user_id,conversation_id,message_id)
 );
 `
+
+// ActiveApplicationVersion is the mapper version this build projects and reads evidence under.
+func ActiveApplicationVersion() int { return activeApplicationVersion }

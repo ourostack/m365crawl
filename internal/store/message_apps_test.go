@@ -514,3 +514,12 @@ func tamper(t *testing.T, s *Store, script string) {
 		t.Fatal(err)
 	}
 }
+
+func TestActiveApplicationVersion(t *testing.T) {
+	old := activeApplicationVersion
+	t.Cleanup(func() { activeApplicationVersion = old })
+	activeApplicationVersion = 9
+	if ActiveApplicationVersion() != 9 {
+		t.Fatal("ActiveApplicationVersion does not report the active version")
+	}
+}

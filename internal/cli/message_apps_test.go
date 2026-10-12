@@ -412,3 +412,14 @@ func TestApplicationArchiveRef(t *testing.T) {
 		t.Fatal("shellQuote")
 	}
 }
+
+// Coverage reports the mapper version the store read under, not a build constant.
+func TestApplicationCoverageMapperVersion(t *testing.T) {
+	envs := []store.MessageApplicationEnvelope{{State: store.AppStateAbsent, ActiveMapperVersion: 5}}
+	if c := applicationCoverageOf(envs); c.MapperVersion != 5 {
+		t.Fatalf("observed coverage mapper version = %d", c.MapperVersion)
+	}
+	if c := applicationCoverageOf(nil); c.MapperVersion != store.ActiveApplicationVersion() {
+		t.Fatalf("unknown coverage mapper version = %d", c.MapperVersion)
+	}
+}
