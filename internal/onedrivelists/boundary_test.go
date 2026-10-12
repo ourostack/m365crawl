@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -46,30 +47,69 @@ func TestReadIndexCancellationAtScopeLoopIsDeterministic(t *testing.T) {
 }
 
 func (c *checkedContext) Err() error {
-	if c.checks.Add(1) == c.at {
-		c.cancel()
+	// SQL observers may check after the reader returns; only reader-owned checks inject cancellation.
+	var pcs [1]uintptr
+	if runtime.Callers(2, pcs[:]) != 0 {
+		caller, _ := runtime.CallersFrames(pcs[:]).Next()
+		const prefix = "github.com/ourostack/m365crawl/internal/onedrivelists."
+		if caller.Function == prefix+"readIndex" || strings.HasPrefix(caller.Function, prefix+"readIndex.func") ||
+			caller.Function == prefix+"table" || caller.Function == prefix+"safeError" {
+			if c.checks.Add(1) == c.at {
+				c.cancel()
+			}
+		}
 	}
 	return c.Context.Err()
 }
 
+func TestReadIndexCancellationIgnoresExternalContextChecks(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &checkedContext{Context: parent, cancel: cancel, at: 7}
+	observe := func() {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range 100 {
+				_ = ctx.Err()
+			}
+		}()
+		<-done
+	}
+	observe()
+	if parent.Err() != nil || ctx.checks.Load() != 0 {
+		t.Fatalf("external checks armed cancellation: %v; checkpoints=%d", parent.Err(), ctx.checks.Load())
+	}
+	got, err := ReadIndex(ctx, fixture(t, nativeScope(siteA)+`CREATE TABLE "`+inventoryTable(siteA)+`"`+itemSchema+`;CREATE TABLE "`+usersTable(siteA)+`"`+userSchema+`;`))
+	if err != nil || len(got.Scopes) != 1 || ctx.checks.Load() != 6 {
+		t.Fatalf("successful source=%#v,%v; checkpoints=%d", got, err, ctx.checks.Load())
+	}
+	observe()
+	if parent.Err() != nil || ctx.checks.Load() != 6 {
+		t.Fatalf("late external checks armed cancellation: %v; checkpoints=%d", parent.Err(), ctx.checks.Load())
+	}
+}
+
 func TestReadIndexCancellationAtEveryPublicationBoundary(t *testing.T) {
 	path := fixture(t, nativeScope(siteA)+`CREATE TABLE "`+inventoryTable(siteA)+`"`+itemSchema+`;CREATE TABLE "`+usersTable(siteA)+`"`+userSchema+`;`)
-	for at := int64(1); at < 300; at++ {
+	for at := int64(1); at <= 7; at++ {
 		parent, cancel := context.WithCancel(context.Background())
 		ctx := &checkedContext{Context: parent, cancel: cancel, at: at}
 		got, err := ReadIndex(ctx, path)
 		cancelled := parent.Err() != nil
 		cancel()
 		if !cancelled {
-			if err != nil || len(got.Scopes) != 1 {
-				t.Fatalf("uncancelled source=%#v,%v", got, err)
+			if at != 7 || err != nil || len(got.Scopes) != 1 || ctx.checks.Load() != 6 {
+				t.Fatalf("uncancelled source=%#v,%v; threshold=%d, checkpoints=%d", got, err, at, ctx.checks.Load())
 			}
-			break
+			return
 		}
 		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, Result{}) {
-			t.Fatalf("cancelled partial capture=%#v,%v", got, err)
+			t.Fatalf("cancelled partial capture=%#v,%v; threshold=%d", got, err, at)
 		}
 	}
+	t.Fatal("cancellation sweep never reached an uncancelled publication")
 }
 
 func TestReadIndexOpenAndTerminalCloseFailures(t *testing.T) {
