@@ -345,16 +345,16 @@ func posixWords(s string) []string {
 	var cur strings.Builder
 	inWord := false
 	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case c == '\'':
+		switch c := s[i]; c {
+		case '\'':
 			j := strings.IndexByte(s[i+1:], '\'')
 			cur.WriteString(s[i+1 : i+1+j])
 			i, inWord = i+1+j, true
-		case c == '"':
+		case '"':
 			j := strings.IndexByte(s[i+1:], '"')
 			cur.WriteString(s[i+1 : i+1+j])
 			i, inWord = i+1+j, true
-		case c == ' ':
+		case ' ':
 			if inWord {
 				out, inWord = append(out, cur.String()), false
 				cur.Reset()

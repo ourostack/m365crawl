@@ -161,7 +161,7 @@ func TestMigrationCancellationIsNotAnArchiveError(t *testing.T) {
 			inject()
 			_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
 			var coded *errs.Coded
-			if err == nil || errors.As(err, &coded) || !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if cancelled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded); !cancelled || errors.As(err, &coded) {
 				t.Fatalf("cancellation reported as %v", err)
 			}
 		})
