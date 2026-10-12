@@ -2,8 +2,9 @@ package store
 
 // loopObservationsSchemaDDL holds the cached Loop channel projection (schema 13). A Loop source is a
 // knowledge locator of kind loop_cache whose immutable identity is the exact archived record tuple in
-// loop_locator_metadata. loop_attempt_evidence keeps each attempt's observed owner fields and the
-// snapshot it admitted or reused. Snapshots are immutable per locator, value digest and reader
+// loop_locator_metadata. loop_attempt_evidence keeps each attempt's observed owner fields, the
+// snapshot it admitted or reused and the record fingerprint it admitted, which later reads compare
+// before loading a value. Snapshots are immutable per locator, value digest and reader
 // qualification; channels and their FTS rows belong to exactly one snapshot.
 const loopObservationsSchemaDDL = `
 create table if not exists loop_locator_metadata(
@@ -20,7 +21,12 @@ create table if not exists loop_attempt_evidence(
  tenant_id text not null,
  user_id text not null,
  value_digest text,
- snapshot_id integer
+ snapshot_id integer,
+ record_content_hash text,
+ record_value_length integer,
+ record_updated_at text,
+ record_raw_digest blob,
+ record_value_redacted integer
 );
 create table if not exists loop_snapshots(
  id integer primary key,

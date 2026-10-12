@@ -98,7 +98,7 @@ func TestOverviewWithoutOptionalSourcesSaysHowToAddThem(t *testing.T) {
 	}
 	e = newEnv(t)
 	code, out, _ := e.run("--json")
-	if code != 0 || len(decode(t, out)["sources"].([]any)) != 7 {
+	if code != 0 || len(decode(t, out)["sources"].([]any)) != 8 {
 		t.Fatalf("no-archive overview does not list every kind: %s", out)
 	}
 }
@@ -159,7 +159,7 @@ func TestOverviewTranscriptsAndEmptyOrScopedSources(t *testing.T) {
 	pinMailSupported(t, true)
 	e := newEnv(t)
 	seedTranscripts(t, e)
-	tr := overviewSourceOf(t, e, 6)
+	tr := overviewSourceOf(t, e, 7)
 	if tr["state"] != "ok" || tr["calls"] == float64(0) || tr["fetched"] == float64(0) || tr["note"] != nil {
 		t.Fatalf("transcripts row = %v", tr)
 	}
@@ -167,7 +167,7 @@ func TestOverviewTranscriptsAndEmptyOrScopedSources(t *testing.T) {
 		t.Fatalf("text transcripts row:\n%s", out)
 	}
 	e.exec("delete from transcript_fetches")
-	if tr := overviewSourceOf(t, e, 6); tr["fetched"] != float64(0) || !strings.Contains(tr["note"].(string), "transcripts fetch") {
+	if tr := overviewSourceOf(t, e, 7); tr["fetched"] != float64(0) || !strings.Contains(tr["note"].(string), "transcripts fetch") {
 		t.Fatalf("unfetched transcripts row = %v", tr)
 	}
 
@@ -202,20 +202,20 @@ func TestOverviewAccountScopesTeamsPeopleAndNamesWhatItDoesNot(t *testing.T) {
 	e := newEnv(t)
 	teamsArchive(t, e)
 	seedTranscripts(t, e)
-	all := overviewSourceOf(t, e, 5)["people"].(float64)
+	all := overviewSourceOf(t, e, 6)["people"].(float64)
 	e.exec(`insert into people(tenant_id,id,display_name) values('another-tenant','8:orgid:elsewhere','Elsewhere')`)
-	if got := overviewSourceOf(t, e, 5)["people"].(float64); got != all+1 {
+	if got := overviewSourceOf(t, e, 6)["people"].(float64); got != all+1 {
 		t.Fatalf("unscoped people = %v, want %v", got, all+1)
 	}
-	scoped := overviewSourceOf(t, e, 5, "--account", tenantA+"/"+userA)
+	scoped := overviewSourceOf(t, e, 6, "--account", tenantA+"/"+userA)
 	if scoped["people"].(float64) != all || !strings.Contains(scoped["note"].(string), "Teams people are narrowed to the --account tenant") ||
 		!strings.Contains(scoped["note"].(string), "mail correspondents are not narrowed by --account") {
 		t.Fatalf("scoped people row = %v", scoped)
 	}
-	if tr := overviewSourceOf(t, e, 6, "--account", tenantA+"/"+userA); !strings.Contains(tr["note"].(string), "not narrowed by --account") {
+	if tr := overviewSourceOf(t, e, 7, "--account", tenantA+"/"+userA); !strings.Contains(tr["note"].(string), "not narrowed by --account") {
 		t.Fatalf("scoped transcripts row = %v", tr)
 	}
-	if ppl := overviewSourceOf(t, e, 5); ppl["note"] != nil {
+	if ppl := overviewSourceOf(t, e, 6); ppl["note"] != nil {
 		t.Fatalf("unscoped people row has a scope note: %v", ppl)
 	}
 }

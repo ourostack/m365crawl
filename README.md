@@ -68,7 +68,7 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the claim, inspect the source, and leave unresolved links unresolved. This is actual output from synthetic metadata, not private documents or a library export.*
 
-**Cached Loop channels, as partial snapshots.** `loop sync` projects the channel text of Loop snapshot records Teams already cached and `sync` already archived; nothing is fetched and Loop is never opened. Shared search and `loop search` return stable `loop-channel:ID` rows to follow with `loop show`. Each row is one channel of one immutable snapshot version, with its native sequence, pending-operation count and whether the archived record still matches it: partial text, not a full or current page, table, author or history. `loop sources` shows every registration, including failed and metadata-only ones, with the retry command.
+**Cached Loop channels, as partial snapshots.** `loop sync` projects the channel text of Loop snapshot records Teams already cached and `sync` already archived; nothing is fetched and Loop is never opened. Shared search and `loop search` return stable `loop-channel:ID` rows to follow with `loop show`. Each row is one channel of one immutable snapshot version, with its native sequence, pending-operation count and whether the archived record still matches it: partial text, not a full or current page, table, author or history. `loop sync` takes 128 new records per run and says when to run it again. `loop sources` shows every registration, including failed and metadata-only ones, with the retry command.
 
 **Planned expansion, not shipped support:**
 
@@ -192,7 +192,7 @@ m365crawl calendar --days 14
 m365crawl calendar event ev_2da7280856
 ```
 
-`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar, documents, notes, people and transcripts), how fresh each one is, and the commands to start with. Documents and notes that were never registered say which sync command adds them, and failed sources point to their `sources` command. `people --help` explains the recency column, the ID kinds and the `--account` value without needing a guide. Text times carry their zone (`2026-10-08 02:51 PDT`); JSON times are UTC.
+`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar, documents, notes, Loop channels, people and transcripts), how fresh each one is, and the commands to start with. Documents, notes and Loop channels that were never registered say which sync command adds them, and failed sources point to their `sources` command. `people --help` explains the recency column, the ID kinds and the `--account` value without needing a guide. Text times carry their zone (`2026-10-08 02:51 PDT`); JSON times are UTC.
 
 Here is what three of those commands print. The output comes from a run against the same synthetic data; the dates follow the day you build the showcase store.
 
@@ -213,11 +213,13 @@ mail         ok              37 messages from 2026-09-24, newest 2026-10-08 02:3
 calendar     ok              44 events from 2023-11-20 to 2026-10-23; today not fully covered  2026-10-08 02:51 PDT
 documents    not_registered  no sources registered                                             -
 notes        not_registered  no sources registered                                             -
+loop         not_registered  2 archived records; no sources registered                         -
 people       ok              10 people (Teams and mail); no native Outlook people sources      2026-10-08 02:51 PDT
 transcripts  empty           no recorded meetings                                              -
 calendar: today is not fully covered by cached calendar data: run m365crawl sync, or open the calendar in Teams or Outlook
 documents: no Office document sources registered: run m365crawl docs sync (Mac Office) or docs sync --root DIR
 notes: no OneNote indexes registered: run m365crawl notes sync, or notes sync --root DIR
+loop: 2 cached Loop records are archived and none is registered: run m365crawl loop sync
 transcripts: no recorded meetings in the archive yet: run m365crawl sync
 
 Start here:
@@ -230,6 +232,7 @@ Start here:
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
   m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
   m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl loop search "words"   cached Loop channel text (partial snapshots); loop sync registers the archived records
   m365crawl people            Teams people, mail correspondents and native Outlook people observations
 ```
 

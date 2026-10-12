@@ -34,6 +34,7 @@ var startHere = []startStep{
 	{Command: "m365crawl mail list --has-attachments", Does: "mail with files; mail show <id> lists each file's name, size and type", mail: true},
 	{Command: "m365crawl docs list", Does: "Office recent, shared and recommended document metadata; docs sync registers the sources"},
 	{Command: `m365crawl notes search "words"`, Does: "OneNote indexed notes; notes sync registers the indexes"},
+	{Command: `m365crawl loop search "words"`, Does: "cached Loop channel text (partial snapshots); loop sync registers the archived records"},
 	{Command: "m365crawl people", Does: "Teams people, mail correspondents and native Outlook people observations"},
 }
 
@@ -74,7 +75,7 @@ const (
 )
 
 // overviewKinds are the sources the overview reports, in order.
-var overviewKinds = []string{"chats", "mail", "calendar", "documents", "notes", "people", "transcripts"}
+var overviewKinds = []string{"chats", "mail", "calendar", "documents", "notes", "loop", "people", "transcripts"}
 
 // overviewSource is one source in the overview. Counts and times that do not apply to the source
 // are omitted; a time the archive does not have yet is null.
@@ -98,6 +99,11 @@ type overviewSource struct {
 	Fetched       *int       `json:"fetched,omitempty"`
 	Registered    *int       `json:"registered_sources,omitempty"`
 	Failed        *int       `json:"failed_sources,omitempty"`
+	// Loop only: channel observations, sources whose latest snapshot has no channel text, and the
+	// archived cache records a loop sync registers from.
+	Channels        *int `json:"channels,omitempty"`
+	MetadataOnly    *int `json:"metadata_only_sources,omitempty"`
+	ArchivedRecords *int `json:"archived_records,omitempty"`
 	// LastSyncAt is the last sync of chats, mail and the calendar, the last admitted capture of
 	// documents, notes and native people, and the last transcript fetch.
 	LastSyncAt *time.Time `json:"last_sync_at"`
@@ -208,6 +214,11 @@ func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]
 		registeredSource("notes", notes, counts.Notes, "no OneNote indexes registered: run m365crawl notes sync, or notes sync --root DIR",
 			"m365crawl notes sources shows each failure; the last good capture of a failed source stays current", unscoped),
 	}
+	loop, err := st.LoopOverview(rt.ctx)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, loopOverviewSource(loop, unscoped))
 	known := counts.TeamsPeople + counts.MailPeople
 	ppl := overviewSource{Source: "people", State: overviewOK, People: &known, Observations: &counts.PeopleObservations,
 		Registered: intPtr(len(people)), LastSyncAt: at(lastCapture(people, lastChats))}
@@ -264,6 +275,45 @@ func registeredSource(name string, sources []store.KnowledgeSource, rows int, no
 	}
 	if unscoped != "" && len(sources) > 0 {
 		src.Note = withNote(src.Note, unscoped)
+	}
+	return src
+}
+
+// loopOverviewSource is the overview row of cached Loop channels, from counts alone. It tells
+// nothing archived, archived but unregistered, and registered with failed or metadata-only
+// sources apart, and names the command for each.
+func loopOverviewSource(loop store.LoopOverview, unscoped string) overviewSource {
+	src := overviewSource{Source: "loop", State: overviewOK, Registered: &loop.Registered, Failed: &loop.Failed, Channels: &loop.Channels,
+		MetadataOnly: &loop.MetadataOnly, ArchivedRecords: &loop.ArchivedRecords, LastSyncAt: loop.LastProjectedAt}
+	if src.LastSyncAt != nil {
+		src.LastSyncAt = at(*src.LastSyncAt)
+	}
+	switch {
+	case loop.Registered == 0 && loop.ArchivedRecords == 0:
+		src.State, src.Note = overviewNotRegistered, "no cached Loop records are archived yet: run m365crawl sync, then m365crawl loop sync"
+	case loop.Registered == 0:
+		src.State = overviewNotRegistered
+		src.Note = plural(loop.ArchivedRecords, "cached Loop record is", "cached Loop records are") + " archived and none is registered: run m365crawl loop sync"
+	default:
+		if loop.Channels == 0 {
+			src.State = overviewEmpty
+		}
+		problems := []string{}
+		if loop.Failed > 0 {
+			problems = append(problems, plural(loop.Failed, "source", "sources")+" failed the last projection")
+		}
+		if loop.MetadataOnly > 0 {
+			problems = append(problems, plural(loop.MetadataOnly, "source has", "sources have")+" only metadata, no channel text")
+		}
+		if len(problems) > 0 {
+			src.Note = strings.Join(problems, " and ") + ": m365crawl loop sources shows each one, its fix and its retry command"
+		}
+		if pending := loop.ArchivedRecords - loop.Registered; pending > 0 {
+			src.Note = withNote(src.Note, plural(pending, "archived record is", "archived records are")+" not registered: run m365crawl loop sync")
+		}
+		if unscoped != "" {
+			src.Note = withNote(src.Note, unscoped)
+		}
 	}
 	return src
 }
@@ -455,6 +505,10 @@ func overviewHolds(s overviewSource) string {
 		return fmt.Sprintf("%s in %s, newest %s", plural(*s.Messages, "message", "messages"), plural(*s.Conversations, "conversation", "conversations"), overviewTime(s.NewestAt))
 	case s.Messages != nil:
 		return fmt.Sprintf("%s from %s, newest %s", plural(*s.Messages, "message", "messages"), overviewDay(s.OldestAt), overviewTime(s.NewestAt))
+	case s.Channels != nil && *s.Registered == 0:
+		return plural(*s.ArchivedRecords, "archived record", "archived records") + "; no sources registered"
+	case s.Channels != nil:
+		return registeredHolds(*s.Channels, "Loop channel", "Loop channels", s)
 	case s.Registered != nil && *s.Registered == 0 && s.Observations == nil:
 		return "no sources registered"
 	case s.Documents != nil:

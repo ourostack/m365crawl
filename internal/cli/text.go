@@ -75,6 +75,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.renderApplicationDetails(r)
 		rt.renderNoteDetails(r)
 		rt.renderPeopleDetails(r)
+		rt.renderLoopDetails(r)
 		if err := rt.renderDocumentDetails(r); err != nil {
 			return err
 		}
@@ -127,6 +128,9 @@ func (rt *runtime) renderText(label string, v any) error {
 	case loopSyncResult:
 		_, _ = fmt.Fprintf(w, "loop: %d projected, %d unchanged, %d skipped, %d failed\n", r.Projected, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderLoopCoverage(r.LoopCoverage)
+		if r.Notice != "" {
+			_, _ = fmt.Fprintf(w, "notice: %s\n", r.Notice)
+		}
 	case syncer.Report:
 		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)
 		_, _ = fmt.Fprintln(w)
@@ -344,11 +348,14 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
 		case loopChannelItem:
-			cols, textCol = []string{"source", "id", "path", "sequence", "state", "text"}, 5
-			rows = append(rows, []string{strconv.FormatInt(x.SourceID, 10), x.ID, x.Path, strconv.FormatInt(x.Sequence, 10), loopRowState(x), oneLine(x.Text)})
+			cols, textCol = loopListColumns, 5
+			rows = append(rows, loopListRow(x))
+		case loopDetailItem:
+			cols, textCol = loopListColumns, 5
+			rows = append(rows, loopListRow(x.loopChannelItem))
 		case searchLoopItem:
 			cols, textCol = searchColumns, 5
-			rows = append(rows, []string{"-", x.Source, x.Path, "-", "loop show " + x.ID, oneLine(x.Text)})
+			rows = append(rows, []string{"-", x.Source, x.Path, "-", "loop show " + x.ID, "[partial snapshot] " + oneLine(x.Text)})
 		case loopSourceItem:
 			cols, textCol = []string{"source", "status", "coverage", "snapshot_match", "last_snapshot", "reason", "retry"}, -1
 			rows = append(rows, []string{strconv.FormatInt(x.SourceID, 10), x.Status, x.Coverage, x.SnapshotMatch,

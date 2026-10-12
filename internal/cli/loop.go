@@ -31,7 +31,8 @@ func (loopGroup) Help() string {
 	return "Loop channels are text projected from cached Loop snapshot records already in the archive (database fluidDriverCache, store driverStorage.V3).\n" +
 		"Run `loop sync` to register and project them, then `loop list`, `loop search WORDS` or `search WORDS --source loop`, and follow a returned loop-channel:ID with `loop show loop-channel:ID`. `loop sources` lists each registration, its snapshot_match (no_admission, matches, differs, unavailable) and why it failed; a failed or metadata-only source is retried with `loop sync --source-id N`.\n" +
 		loopSemanticsHelp +
-		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --max-age 0 and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice."
+		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --max-age 0 and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice.\n" +
+		fmt.Sprintf("`loop sync` registers at most %d new archived records per run and never fails on a larger backlog: while its result has discovery_remaining true, run it again.", store.LoopDiscoveryBatch)
 }
 
 type loopTupleItem struct {
@@ -73,6 +74,9 @@ type loopChannelItem struct {
 	TextState                  string         `json:"text_state"`
 }
 
+// loopDetailItem is the one channel loop show returns: the same fields, with a detail block in text.
+type loopDetailItem struct{ loopChannelItem }
+
 func loopChannelItemOf(row store.LoopChannelRow, maxText int) loopChannelItem {
 	text, textCut := truncateRunes(row.Channel.Text, maxText)
 	path, pathCut := truncateRunes(row.Channel.Path, maxText)
@@ -110,10 +114,6 @@ func loopError(err error) error {
 	case errors.Is(err, store.ErrLoopChannelNotFound) || errors.Is(err, store.ErrNoArchive):
 		return &errs.Coded{Code: "loop_channel_unknown", Exit: errs.ExitUsage,
 			Message: "Loop channel not found", Fix: "Run `m365crawl loop list` for retained loop-channel:IDs."}
-	case errors.Is(err, store.ErrLoopDiscoveryLimit):
-		return &errs.Coded{Code: "loop_cache_discovery_limit", Exit: errs.ExitEnvironment,
-			Message: fmt.Sprintf("the archive holds more than %d unregistered cached Loop records, so none were registered", store.LoopDiscoveryBatch),
-			Fix:     "Registered sources still refresh with `m365crawl loop sync --source-id N`; open an issue at " + issuesURL + " with the count from `m365crawl stores`."}
 	}
 	return asCoded(err)
 }
@@ -187,22 +187,39 @@ func (rt *runtime) loopRead(label string, sourceID int64, fn func(*store.Store) 
 }
 
 func loopEmptyNote(coverage *loopCoverage) string {
-	if len(coverage.Sources) == 0 {
+	if len(coverage.items) == 0 {
 		return "no Loop source is registered; run m365crawl loop sync"
 	}
 	return "no Loop channel matched; loop_coverage describes each registered source, and m365crawl loop sources shows failures and retries"
 }
 
 type loopSyncResult struct {
-	Projected    int           `json:"projected"`
-	Unchanged    int           `json:"unchanged"`
-	Skipped      int           `json:"skipped"`
-	Failed       int           `json:"failed"`
-	LoopCoverage *loopCoverage `json:"loop_coverage"`
+	Projected int `json:"projected"`
+	Unchanged int `json:"unchanged"`
+	Skipped   int `json:"skipped"`
+	Failed    int `json:"failed"`
+	// InvalidRecords counts unregistered archived records whose identity is outside the reader's
+	// bounds; diagnostics name the first of them by records rowid.
+	InvalidRecords int `json:"invalid_records"`
+	// DiscoveryRemaining says this run registered one full batch and left
+	// DiscoveryRemainingRecords unregistered records for the next run.
+	DiscoveryRemaining        bool          `json:"discovery_remaining"`
+	DiscoveryRemainingRecords int           `json:"discovery_remaining_records"`
+	Notice                    string        `json:"notice,omitempty"`
+	LoopCoverage              *loopCoverage `json:"loop_coverage"`
 }
 
 type loopSyncCmd struct {
 	SourceID int64 `name:"source-id" help:"Refresh only this registered Loop source ID (loop sources lists them); without it, also register new archived records."`
+}
+
+func (loopSyncCmd) Help() string {
+	return fmt.Sprintf("Without --source-id, loop sync refreshes every registered source, then registers and projects new archived records in record order, at most %d per run and one value at a time. "+
+		"When more remain, the result has discovery_remaining true, discovery_remaining_records and a notice: run m365crawl loop sync again to continue. That is not an error; the run exits 0.\n"+
+		"A record whose identity or owner fields are outside the reader's bounds is never registered and never counts toward the %d: invalid_records counts them and diagnostics name the first %d as `records rowid N` "+
+		"(inspect one with m365crawl sql \"select database, store, octet_length(key_json) from records where rowid=N\"); no archived string is printed.\n"+
+		"A source that cannot be read or parsed is still registered and recorded as failed with a fixed reason, and keeps its last good snapshot. If the run itself fails after writing, the result on stdout still reports what it committed.",
+		store.LoopDiscoveryBatch, store.LoopDiscoveryBatch, store.LoopDiagnosticLimit)
 }
 
 func (c *loopSyncCmd) Run(rt *runtime) error {
@@ -213,11 +230,21 @@ func (c *loopSyncCmd) Run(rt *runtime) error {
 		return errs.Usage("--source-id must be a positive Loop source ID")
 	}
 	report, err := runLoopSync(rt.ctx, syncer.LoopOptions{DBPath: rt.dbPath, SourceID: c.SourceID, Explicit: true, Discover: c.SourceID == 0})
+	result := loopSyncResult{Projected: report.Projected, Unchanged: report.Unchanged, Skipped: report.Skipped, Failed: report.Failed,
+		InvalidRecords: report.InvalidRecords, DiscoveryRemaining: report.DiscoveryRemaining,
+		DiscoveryRemainingRecords: report.DiscoveryRemainingRecords, LoopCoverage: loopCoverageOf(report.Sources, report.Diagnostics)}
+	if report.DiscoveryRemaining {
+		result.Notice = fmt.Sprintf("this run registered %d new Loop sources, the most one run takes; %s still unregistered: run m365crawl loop sync again",
+			store.LoopDiscoveryBatch, plural(report.DiscoveryRemainingRecords, "archived record is", "archived records are"))
+	}
 	if err != nil {
+		// A run that failed after writing still reports what it committed, then fails.
+		if report.Projected+report.Unchanged+report.Failed > 0 {
+			_ = rt.write("loop sync", result) // the run's own error is the one to return
+		}
 		return loopError(err)
 	}
-	return rt.write("loop sync", loopSyncResult{Projected: report.Projected, Unchanged: report.Unchanged,
-		Skipped: report.Skipped, Failed: report.Failed, LoopCoverage: loopCoverageOf(report.Sources, report.Diagnostics)})
+	return rt.write("loop sync", result)
 }
 
 const loopOrderHelp = "Order: full channel path (ASCII case-insensitive), source ID, snapshot ID, then channel ID, before --limit."
@@ -306,7 +333,7 @@ func (c *loopShowCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		result := newList(shape(rt, []loopChannelItem{loopChannelItemOf(current, rt.g.MaxText)}), false)
+		result := newList(shape(rt, []loopDetailItem{{loopChannelItemOf(current, rt.g.MaxText)}}), false)
 		result.LoopCoverage = loopSnapshotCoverage(rt, []store.LoopSource{source})
 		return result, nil
 	})
@@ -331,7 +358,7 @@ func (c *loopSourcesCmd) Run(rt *runtime) error {
 		return loopError(err)
 	}
 	coverage := loopCoverageOf(report.Sources, nil)
-	result := newList(shape(rt, coverage.Sources), false)
+	result := newList(shape(rt, coverage.items), false)
 	result.LoopCoverage, result.sourceOnly = coverage, true
 	if result.Count == 0 {
 		result.Note = loopEmptyNote(coverage)

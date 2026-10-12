@@ -2,10 +2,12 @@ package syncer
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -84,7 +86,9 @@ values(?,?,?,?,?,'synthetic',?,?)`, source, store.LoopDatabase, store.LoopStore,
 
 func (a *loopArchive) set(t *testing.T, record int64, value any) {
 	t.Helper()
-	if _, err := a.db.Exec(`update records set value_json=? where rowid=?`, value, record); err != nil {
+	// As a sync does: a changed value changes the record's content hash.
+	if _, err := a.db.Exec(`update records set value_json=?,content_hash=? where rowid=?`, value,
+		fmt.Sprintf("%x", sha256.Sum256(fmt.Append(nil, value))), record); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -127,11 +131,12 @@ func TestLoopDiscoveryIncludesRefusedValues(t *testing.T) {
 	a.insert(t, "https://synthetic.invalid", "metadata", syntheticLoop(t, 4, 4))
 	a.insert(t, "https://synthetic.invalid", "healthy", syntheticLoop(t, 4, 4, "healthy channel words"))
 	report := explicitLoop(t, a.path, 0)
-	if report.Projected != 2 || report.Failed != 3 || len(report.Sources) != 5 || len(report.Diagnostics) != 1 {
+	if report.Projected != 2 || report.Failed != 3 || len(report.Sources) != 5 || len(report.Diagnostics) != 1 ||
+		report.InvalidRecords != 1 || report.DiscoveryRemaining {
 		t.Fatalf("mixed batch: %+v", report)
 	}
 	if strings.Contains(report.Diagnostics[0], "SECRET") || strings.Contains(report.Diagnostics[0], "invalid") ||
-		!strings.Contains(report.Diagnostics[0], "loop_cache_identity_unqualified") {
+		!strings.HasPrefix(report.Diagnostics[0], "loop_cache_identity_unqualified: records rowid ") {
 		t.Fatalf("invalid identity diagnostic: %q", report.Diagnostics[0])
 	}
 	for key, reason := range map[string]string{"unsupported": "loop_cache_snapshot_unsupported",

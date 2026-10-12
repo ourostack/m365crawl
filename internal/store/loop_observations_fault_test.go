@@ -28,20 +28,24 @@ func setupLoopArchive(t *testing.T, s *Store) {
 	failed := insertLoopRecord(t, s, loopFixtureSource, "failed", nil, "", "")
 	registerLoop(t, s, failed, base)
 	updateLoopRecord(t, s, healthy, "removed_at=?", fmtTime(base.Add(time.Hour)))
+	changed := insertLoopRecord(t, s, loopFixtureSource, "changed", loopText(t, "before"), "", "")
+	registerLoop(t, s, changed, base)
+	updateLoopRecord(t, s, changed, "value_json=?,content_hash='changed'", loopText(t, "after"))
 	insertLoopRecord(t, s, loopFixtureSource, "unregistered", loopText(t, "pending"), "", "")
 	insertLoopRecord(t, s, "bad\xff", "invalid", "{}", "", "")
 }
 
 func TestLoopReadFaultsRemainTerminal(t *testing.T) {
 	for name, op := range map[string]func(context.Context, *Store) error{
-		"discovery": func(ctx context.Context, s *Store) error { _, err := s.LoopDiscoveryFrames(ctx); return err },
+		"discovery": func(ctx context.Context, s *Store) error { _, err := s.LoopDiscoveryCandidates(ctx); return err },
 		"raw frame": func(ctx context.Context, s *Store) error { _, err := s.LoopRawFrame(ctx, 1); return err },
-		"sources":   func(ctx context.Context, s *Store) error { _, err := s.LoopSources(ctx); return err },
+		"sources":   func(ctx context.Context, s *Store) error { _, err := s.LoopSources(ctx, 0); return err },
 		"snapshot": func(ctx context.Context, s *Store) error {
 			_, err := s.LoopSnapshot(ctx, LoopFilter{Query: "partial", Limit: 1})
 			return err
 		},
-		"channel": func(ctx context.Context, s *Store) error { _, _, err := s.LoopChannel(ctx, 1); return err },
+		"channel":  func(ctx context.Context, s *Store) error { _, _, err := s.LoopChannel(ctx, 1); return err },
+		"overview": func(ctx context.Context, s *Store) error { _, err := s.LoopOverview(ctx); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
 			sweepReadFaults(t, setupLoopArchive, op)
@@ -206,7 +210,7 @@ func TestLoopReadsBeforeSchema13(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if sources, err := s.LoopSources(ctx); err != nil || len(sources) != 0 {
+	if sources, err := s.LoopSources(ctx, 0); err != nil || len(sources) != 0 {
 		t.Fatalf("old schema sources: %v %v", sources, err)
 	}
 	if snapshot, err := s.LoopSnapshot(ctx, LoopFilter{}); err != nil || len(snapshot.Rows) != 0 || len(snapshot.Sources) != 0 {
@@ -241,13 +245,13 @@ func TestLoopReadsOnClosedArchiveFail(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LoopDiscoveryFrames(ctx); err == nil {
+	if _, err := s.LoopDiscoveryCandidates(ctx); err == nil {
 		t.Fatal("closed discovery succeeded")
 	}
 	if _, err := s.LoopRawFrame(ctx, 1); err == nil || errors.Is(err, ErrKnowledgeSourceUnknown) {
 		t.Fatalf("closed raw frame: %v", err)
 	}
-	if _, err := s.LoopSources(ctx); err == nil {
+	if _, err := s.LoopSources(ctx, 0); err == nil {
 		t.Fatal("closed sources succeeded")
 	}
 	if _, err := s.LoopSnapshot(ctx, LoopFilter{}); err == nil {
@@ -255,5 +259,47 @@ func TestLoopReadsOnClosedArchiveFail(t *testing.T) {
 	}
 	if _, _, err := s.LoopChannel(ctx, 1); err == nil || errors.Is(err, ErrLoopChannelNotFound) {
 		t.Fatalf("closed channel: %v", err)
+	}
+}
+
+// The overview counts come from registrations, attempts and channel rows only: no value is loaded.
+func TestLoopOverviewCountsWithoutValues(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if overview, err := s.LoopOverview(ctx); err != nil || overview != (LoopOverview{}) {
+		t.Fatalf("empty archive: %+v %v", overview, err)
+	}
+	setupLoopArchive(t, s)
+	metadata := insertLoopRecord(t, s, loopFixtureSource, "metadata", loopEnvelope(t, "synthetic-file", 1, 1), "", "")
+	metadataID := registerLoop(t, s, metadata, base.Add(time.Hour))
+	reads := countValueReads(t)
+	overview, err := s.LoopOverview(ctx)
+	if err != nil || overview.ArchivedRecords != 6 || overview.Registered != 4 || overview.Failed != 1 || overview.MetadataOnly != 1 ||
+		overview.Channels != 3 || overview.LastProjectedAt == nil || !overview.LastProjectedAt.Equal(base.Add(time.Hour)) || *reads != 0 {
+		t.Fatalf("overview: %+v %v reads=%d", overview, err, *reads)
+	}
+	// A source projected again under a new reader version is still one registered source.
+	previous := LoopQualification
+	LoopQualification = "loop-cache-v2/mapper-v1"
+	t.Cleanup(func() { LoopQualification = previous })
+	if err := stageLoop(t, s, metadataID, base.Add(2*time.Hour)).commit(s, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := s.LoopOverview(ctx); err != nil || again.Registered != 4 || again.MetadataOnly != 1 {
+		t.Fatalf("overview after a reader change: %+v %v", again, err)
+	}
+	for _, table := range []string{"loop_fts", "loop_channels"} {
+		if _, err := s.db.Exec(`drop table ` + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if old, err := s.LoopOverview(ctx); err != nil || old.ArchivedRecords != 6 || old.Registered != 0 || old.Channels != 0 {
+		t.Fatalf("archive before the Loop tables: %+v %v", old, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LoopOverview(ctx); err == nil {
+		t.Fatal("closed overview succeeded")
 	}
 }

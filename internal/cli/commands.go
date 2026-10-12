@@ -298,13 +298,6 @@ func (c *searchCmd) Run(rt *runtime) error {
 		}
 		rt.documentCoverage = coverage
 	}
-	if p.loop && (p.chats || p.mail || p.transcripts) {
-		coverage, err := rt.refreshLoop(0)
-		if err != nil {
-			return loopError(err)
-		}
-		rt.loopCoverage = coverage
-	}
 	if !p.chats && !p.mail && !p.transcripts {
 		if p.loop {
 			return rt.loopRead("search", 0, func(st *store.Store) (*listResult, error) {
@@ -332,7 +325,17 @@ func (c *searchCmd) Run(rt *runtime) error {
 			return res.(*listResult), nil
 		})
 	}
-	return rt.read("search", func(st *store.Store) (result, error) { return c.search(rt, p, f, st) })
+	return rt.read("search", func(st *store.Store) (result, error) {
+		if p.loop {
+			// After the implicit sync, so Loop projects the records that sync just archived.
+			coverage, err := rt.refreshLoop(0)
+			if err != nil {
+				return nil, loopError(err)
+			}
+			rt.loopCoverage = coverage
+		}
+		return c.search(rt, p, f, st)
+	})
 }
 
 type messagesCmd struct {

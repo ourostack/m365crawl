@@ -70,10 +70,10 @@ func TestOverviewRoutesRegisteredPeopleWithoutSyncOrInventedCounts(t *testing.T)
 			if err := json.Unmarshal([]byte(out), &res); err != nil {
 				t.Fatal(err)
 			}
-			if len(res.Sources) != len(overviewKinds) || res.Sources[5].Source != "people" || res.Sources[5].Observations == nil {
+			if len(res.Sources) != len(overviewKinds) || res.Sources[6].Source != "people" || res.Sources[6].Observations == nil {
 				t.Fatalf("people row missing from the overview: %s", out)
 			}
-			found := strings.Contains(res.Sources[5].Note, "m365crawl --max-age 0 people sources")
+			found := strings.Contains(res.Sources[6].Note, "m365crawl --max-age 0 people sources")
 			if !found {
 				t.Fatal("overview lacks executable people coverage route")
 			}

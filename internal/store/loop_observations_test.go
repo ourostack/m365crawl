@@ -83,13 +83,34 @@ func updateLoopRecord(t testing.TB, s *Store, recordID int64, assignment string,
 	}
 }
 
+// discover acquires every unregistered structural record with its value, in record order: the
+// acquisition a caller performs one record at a time after LoopDiscoveryCandidates.
 func discover(t testing.TB, s *Store) []LoopAcquisition {
 	t.Helper()
-	discovery, err := s.LoopDiscoveryFrames(context.Background())
+	ctx := context.Background()
+	ids, err := loopRecordIDs(ctx, s.db, `select r.rowid from records r where r.database=? and r.store=?
+and not exists(select 1 from loop_locator_metadata m where m.source=r.source and m.key_json=r.key_json) order by r.rowid`, LoopDatabase, LoopStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return discovery.Candidates
+	out := []LoopAcquisition{}
+	for _, id := range ids {
+		acquisition, err := readLoopAcquisition(ctx, s.db, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, acquisition)
+	}
+	return out
+}
+
+func candidates(t testing.TB, s *Store) LoopDiscovery {
+	t.Helper()
+	discovery, err := s.LoopDiscoveryCandidates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return discovery
 }
 
 func countValueReads(t *testing.T) *int {
@@ -189,26 +210,144 @@ func mustBeginLoop(t testing.TB, s *Store, registration LoopRegistration, at tim
 	return attempt
 }
 
-func TestLoopDiscoveryOverflowWritesNothing(t *testing.T) {
+// Discovery loads no value, never blocks on more than one batch and never lets identity-invalid
+// records consume the batch: each run takes the next identity-valid records in record order.
+func TestLoopDiscoveryBatchesWithoutValuesOrBlocking(t *testing.T) {
 	s := newStore(t)
 	reads := countValueReads(t)
-	for i := range LoopDiscoveryBatch {
-		insertLoopRecord(t, s, loopFixtureSource, "key-"+strings.Repeat("x", i), nil, "", "")
+	invalid := []int64{}
+	for i := range LoopDiagnosticLimit + 3 {
+		invalid = append(invalid, insertLoopRecord(t, s, "bad\xff"+strings.Repeat("x", i), "invalid", loopText(t, "refused"), "", ""))
+	}
+	valid := []int64{}
+	for i := range LoopDiscoveryBatch + 5 {
+		valid = append(valid, insertLoopRecord(t, s, loopFixtureSource, "key-"+strings.Repeat("x", i), loopText(t, "valued"), "", ""))
 	}
 	insertLoopRecord(t, s, loopFixtureSource, "elsewhere", "{}", "", "")
 	if _, err := s.db.Exec(`update records set database='otherDatabase' where key_json='elsewhere'`); err != nil {
 		t.Fatal(err)
 	}
-	if candidates := discover(t, s); len(candidates) != LoopDiscoveryBatch {
-		t.Fatalf("batch at the limit lost candidates: %d", len(candidates))
+	first := candidates(t, s)
+	if *reads != 0 {
+		t.Fatalf("discovery loaded %d values, want 0", *reads)
 	}
-	insertLoopRecord(t, s, loopFixtureSource, "overflow", "{}", "", "")
+	if len(first.Candidates) != LoopDiscoveryBatch || first.Remaining != 5 || first.Invalid != len(invalid) ||
+		len(first.InvalidRecords) != LoopDiagnosticLimit || first.InvalidRecords[0] != invalid[0] {
+		t.Fatalf("first pass: %d candidates, %d remaining, %d invalid, %d named", len(first.Candidates), first.Remaining,
+			first.Invalid, len(first.InvalidRecords))
+	}
+	for i, candidate := range first.Candidates {
+		if candidate.RecordID != valid[i] || candidate.Frame != nil || candidate.Registration == nil || candidate.RefusalCode != "" {
+			t.Fatalf("candidate %d out of record order or carrying a value: %+v", i, candidate)
+		}
+		mustBeginLoop(t, s, *candidate.Registration, base)
+	}
+	second := candidates(t, s)
+	if len(second.Candidates) != 5 || second.Remaining != 0 || second.Invalid != len(invalid) || second.Candidates[0].RecordID != valid[LoopDiscoveryBatch] {
+		t.Fatalf("second pass did not continue: %d candidates, %d remaining", len(second.Candidates), second.Remaining)
+	}
+	for _, candidate := range second.Candidates {
+		mustBeginLoop(t, s, *candidate.Registration, base)
+	}
+	if third := candidates(t, s); len(third.Candidates) != 0 || third.Remaining != 0 || third.Invalid != len(invalid) || *reads != 0 {
+		t.Fatalf("drained discovery: %+v reads=%d", third, *reads)
+	}
+}
+
+// A read of an unchanged registered source compares the stored fingerprint and loads no value; a
+// changed record is loaded and hashed, and a selected read touches only its own source.
+func TestLoopUnchangedReadLoadsNoValue(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := insertLoopRecord(t, s, loopFixtureSource, "a", loopText(t, "alpha words"), "", "")
+	b := insertLoopRecord(t, s, loopFixtureSource, "b", loopText(t, "bravo words"), "", "")
+	aID, bID := registerLoop(t, s, a, base), registerLoop(t, s, b, base)
+	reads := countValueReads(t)
+	snapshot, err := s.LoopSnapshot(ctx, LoopFilter{})
+	if err != nil || len(snapshot.Rows) != 2 || !snapshot.Rows[0].MatchesRetainedValue || snapshot.Sources[1].SnapshotMatch != "matches" {
+		t.Fatalf("unchanged snapshot: %+v %v", snapshot, err)
+	}
+	if _, _, err := s.LoopChannel(ctx, snapshot.Rows[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if sources, err := s.LoopSources(ctx, 0); err != nil || len(sources) != 2 {
+		t.Fatalf("sources: %v %v", sources, err)
+	}
+	if *reads != 0 {
+		t.Fatalf("unchanged reads loaded %d values, want 0", *reads)
+	}
+	// Same length and clock, different bytes and content hash: the fingerprint differs, so it is hashed.
+	updateLoopRecord(t, s, b, "value_json=?,content_hash='changed'", loopText(t, "bravo wordz"))
+	if sources, err := s.LoopSources(ctx, aID); err != nil || len(sources) != 1 || sources[0].SnapshotMatch != "matches" || *reads != 0 {
+		t.Fatalf("selected unchanged source loaded a peer: %v %v reads=%d", sources, err, *reads)
+	}
+	if source := loopSource(t, s, bID); source.SnapshotMatch != "differs" || *reads != 1 {
+		t.Fatalf("changed source: %s reads=%d", source.SnapshotMatch, *reads)
+	}
+	// A clock alone never establishes a match: with a matching clock and length but an unknown
+	// content hash, the value is still hashed.
+	updateLoopRecord(t, s, b, "content_hash=''")
 	*reads = 0
-	if _, err := s.LoopDiscoveryFrames(context.Background()); !errors.Is(err, ErrLoopDiscoveryLimit) {
-		t.Fatalf("129 structural rows did not overflow: %v", err)
+	if source := loopSource(t, s, bID); source.SnapshotMatch != "differs" || *reads != 1 {
+		t.Fatalf("fingerprint without a content hash was trusted: %s reads=%d", source.SnapshotMatch, *reads)
 	}
-	if *reads != 0 || loopTableCount(t, s, "loop_locator_metadata") != 0 || loopTableCount(t, s, "knowledge_locators") != 0 {
-		t.Fatalf("overflow loaded values or registered sources: reads=%d", *reads)
+	if _, err := s.LoopSources(ctx, 999); !errors.Is(err, ErrKnowledgeSourceUnknown) {
+		t.Fatalf("unknown selected source: %v", err)
+	}
+	if _, err := s.LoopSources(ctx, -1); !errors.Is(err, ErrKnowledgeSourceUnknown) {
+		t.Fatalf("negative selected source: %v", err)
+	}
+}
+
+// Owner strings of a registered record leave the archive only after the same validation that
+// registration applies.
+func TestLoopInvalidCurrentOwnerIsNeverEchoed(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	for name, assignment := range map[string]string{"invalid UTF-8": "tenant_id=cast(x'ff5345435245' as text)",
+		"blob": "user_id=x'5345435245'", "oversized": "tenant_id='" + strings.Repeat("t", LoopOwnerLimit+1) + "'"} {
+		record := insertLoopRecord(t, s, loopFixtureSource, name, loopText(t, "owned words"), "tenant-a", "user-a")
+		id := registerLoop(t, s, record, base)
+		updateLoopRecord(t, s, record, assignment)
+		source := loopSource(t, s, id)
+		if source.Registration.TenantID != "" || source.Registration.UserID != "" || source.Reason != "loop_cache_identity_unqualified" ||
+			source.SnapshotMatch != "unavailable" || source.LastSnapshotTenantID != "tenant-a" {
+			t.Fatalf("%s owner echoed or not refused: %+v", name, source)
+		}
+		acquisition, err := s.LoopRawFrame(ctx, id)
+		if err != nil || acquisition.Frame != nil || acquisition.Registration.TenantID != "" || acquisition.Registration.UserID != "" {
+			t.Fatalf("%s owner acquired: %+v %v", name, acquisition, err)
+		}
+	}
+}
+
+// Rows are ordered by ASCII-folded path, then registration, snapshot and numeric channel ID, before the limit.
+func TestLoopOrderingBeforeLimit(t *testing.T) {
+	s := newStore(t)
+	// Registered so that channel IDs run against the required order.
+	first := insertLoopRecord(t, s, loopFixtureSource, "first", loopEnvelope(t, "f", 1, 1,
+		loopChannelSpec{name: "zulu", text: "ordered words", sequence: 1}, loopChannelSpec{name: "Bravo", text: "ordered words", sequence: 1}), "", "")
+	second := insertLoopRecord(t, s, loopFixtureSource, "second", loopEnvelope(t, "f", 1, 1,
+		loopChannelSpec{name: "bravo", text: "ordered words", sequence: 1}, loopChannelSpec{name: "alpha", text: "ordered words", sequence: 1}), "", "")
+	firstID := registerLoop(t, s, first, base)
+	secondID := registerLoop(t, s, second, base)
+	want := []string{"channels/alpha", "channels/Bravo", "channels/bravo", "channels/zulu"}
+	snapshot, err := s.LoopSnapshot(context.Background(), LoopFilter{Query: "ordered"})
+	if err != nil || len(snapshot.Rows) != 4 {
+		t.Fatalf("rows: %+v %v", snapshot.Rows, err)
+	}
+	for i, row := range snapshot.Rows {
+		if row.Channel.Path != want[i] {
+			t.Fatalf("row %d is %s, want %s", i, row.Channel.Path, want[i])
+		}
+	}
+	if snapshot.Rows[0].ID < snapshot.Rows[1].ID || snapshot.Rows[1].RegistrationID != firstID || snapshot.Rows[2].RegistrationID != secondID {
+		t.Fatalf("fixture or registration order wrong: %+v", snapshot.Rows)
+	}
+	clipped, err := s.LoopSnapshot(context.Background(), LoopFilter{Query: "ordered", Limit: 2})
+	if err != nil || !clipped.Truncated || len(clipped.Rows) != 2 || clipped.Rows[0].Channel.Path != want[0] ||
+		clipped.Rows[1].Channel.Path != want[1] || clipped.Rows[1].RegistrationID != firstID {
+		t.Fatalf("limit applied before ordering: %+v %v", clipped.Rows, err)
 	}
 }
 
@@ -224,7 +363,7 @@ func TestLoopRegistrationBeforeAdmission(t *testing.T) {
 	if err := s.RecordLoopFailure(ctx, attempt, candidates[0].RefusalCode, base); err != nil {
 		t.Fatal(err)
 	}
-	sources, err := s.LoopSources(ctx)
+	sources, err := s.LoopSources(ctx, 0)
 	if err != nil || len(sources) != 1 || sources[0].Registration.ID != attempt.LocatorID || attempt.LocatorID <= 0 ||
 		sources[0].Health.Status != "failed" || sources[0].Health.Reason != "loop_cache_value_missing" ||
 		sources[0].SnapshotMatch != "no_admission" || sources[0].LastSnapshotID != 0 || sources[0].Health.ID != 0 {
@@ -246,7 +385,7 @@ func TestLoopRegistrationBeforeAdmission(t *testing.T) {
 	if err := s.CommitLoopObservations(ctx, retry, *acquisition.Frame, result, base.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	sources, err = s.LoopSources(ctx)
+	sources, err = s.LoopSources(ctx, 0)
 	if err != nil || sources[0].Registration.ID != attempt.LocatorID || sources[0].LastSnapshotID <= 0 ||
 		sources[0].Health.Coverage != "metadata_only" || sources[0].SnapshotMatch != "matches" || sources[0].Health.ID <= 0 {
 		t.Fatalf("metadata-only admission lost registration identity: %+v %v", sources, err)
@@ -318,7 +457,7 @@ func TestMigrationSchema13AddsLoopTablesWithoutTouchingRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sources, err := ro.LoopSources(ctx); err != nil || len(sources) != 0 {
+	if sources, err := ro.LoopSources(ctx, 0); err != nil || len(sources) != 0 {
 		t.Fatalf("schema 12 read: %v %v", sources, err)
 	}
 	if need, err := ro.NeedsUpgrade(ctx); err != nil || need {

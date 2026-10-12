@@ -534,7 +534,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if p.loop {
 		res.Sources.Loop = &sourceCount{Count: count[searchLoop], Truncated: trunc[searchLoop]}
-		res.LoopCoverage = rt.loopCoverage
+		res.LoopCoverage = rt.loopCoverage.compact()
 	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)
@@ -554,7 +554,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			(rt.documentCoverage != nil && len(rt.documentCoverage.Sources) > 0)) {
 			notes = append(notes, "no document metadata matched; inspect docs sources or register with docs sync")
 		}
-		if p.loop && (c.Source == searchLoop || (rt.loopCoverage != nil && len(rt.loopCoverage.Sources) > 0)) {
+		if p.loop && (c.Source == searchLoop || (rt.loopCoverage != nil && len(rt.loopCoverage.items) > 0)) {
 			notes = append(notes, "no Loop channel matched; inspect loop sources or register with loop sync")
 		}
 	}

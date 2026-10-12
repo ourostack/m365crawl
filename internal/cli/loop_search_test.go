@@ -51,12 +51,11 @@ func TestLoopGlobalLimitCoverageAndClipping(t *testing.T) {
 		t.Fatalf("clipped Loop participation: %v", clipped["sources"])
 	}
 	sources := loopCoverageSources(t, clipped)
-	states := map[string]string{}
+	states := map[string]bool{}
 	for _, source := range sources {
-		states[source["tuple"].(map[string]any)["key_json"].(string)] = source["snapshot_match"].(string) + "/" + source["status"].(string)
+		states[source["snapshot_match"].(string)+"/"+source["state"].(string)] = true
 	}
-	if len(sources) != 3 || states["hello"] != "matches/complete" || states["failed"] != "no_admission/failed" ||
-		!strings.HasPrefix(states["metadata"], "matches/") {
+	if len(sources) != 3 || !states["matches/complete"] || !states["no_admission/failed"] || !states["matches/metadata_only"] {
 		t.Fatalf("participating coverage clipped with rows: %v", states)
 	}
 	zero := decode(t, runOK(t, e, "--max-age", "0", "search", "Meeting", "--limit", "5"))

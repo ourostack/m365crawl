@@ -34,6 +34,8 @@ const (
 	LoopKeyLimit       = 256 << 10
 	LoopOwnerLimit     = 4 << 10
 	LoopDiscoveryBatch = 128
+	// LoopDiagnosticLimit bounds the identity-invalid record IDs one discovery names; the rest are counted.
+	LoopDiagnosticLimit = 16
 )
 
 // loopLocatorLimit bounds the encoded four-string locator (2 MiB). The other bounds keep a real
@@ -49,8 +51,6 @@ var (
 	// ErrLoopInputChanged is a publication refused because the archived record changed in any
 	// dimension after its frame was acquired; nothing was written.
 	ErrLoopInputChanged = errors.New("loop: archived input changed during projection")
-	// ErrLoopDiscoveryLimit is a discovery with more unregistered structural rows than one batch.
-	ErrLoopDiscoveryLimit = errors.New("loop_cache_discovery_limit")
 	// ErrLoopChannelNotFound is an unknown loop-channel ID.
 	ErrLoopChannelNotFound = errors.New("loop: channel not found")
 )
@@ -73,6 +73,29 @@ type LoopRawFrame struct {
 	ValueRedacted    bool
 	UpdatedAt        time.Time
 	RemovedAt        *time.Time
+	fingerprint      loopFingerprint
+}
+
+// loopFingerprint is the cheap state of an archived record that a read compares before it loads
+// and hashes the value: the archive's own content hash, the value's byte length, its update clock,
+// raw digest and redaction state. Equal fingerprints mean the admitted bytes are still current.
+type loopFingerprint struct {
+	contentHash string
+	valueLength int64
+	updated     string
+	rawDigest   []byte
+	redacted    bool
+}
+
+func (f loopFingerprint) matches(current loopFingerprint) bool {
+	return f.contentHash != "" && f.contentHash == current.contentHash && f.valueLength == current.valueLength &&
+		f.updated == current.updated && bytes.Equal(f.rawDigest, current.rawDigest) && f.redacted == current.redacted
+}
+
+// loopRecordState is what the guard query reads of a record without loading its value.
+type loopRecordState struct {
+	fingerprint loopFingerprint
+	removed     sql.NullString
 }
 
 type LoopAcquisition struct {
@@ -82,7 +105,15 @@ type LoopAcquisition struct {
 	RefusalCode  string            // fixed source-local guard reason, never SQL/cancellation
 }
 
-type LoopDiscovery struct{ Candidates []LoopAcquisition }
+// LoopDiscovery is one bounded pass over unregistered archived records in record order. Candidates
+// are identity-valid and carry no value; identity-invalid records are counted and the first few
+// named by record ID; Remaining counts the unregistered records the pass did not reach.
+type LoopDiscovery struct {
+	Candidates     []LoopAcquisition
+	InvalidRecords []int64
+	Invalid        int
+	Remaining      int
+}
 
 type LoopRegistration struct {
 	ID               int64 // knowledge locator ID, the public source_id
@@ -167,106 +198,142 @@ var loopReadValue = func(ctx context.Context, reader knowledgeReader, recordID i
 	return value, err
 }
 
-// readLoopAcquisition reads one structurally matching record: SQL type/length guards first, then
-// the bounded identity/owner strings, then the bounded value.
-func readLoopAcquisition(ctx context.Context, reader knowledgeReader, recordID int64) (LoopAcquisition, error) {
+// readLoopIdentity reads one structurally matching record without its value: SQL type/length
+// guards first, then the bounded identity/owner strings. The refusal code covers identity and every
+// value refusal that needs no load.
+func readLoopIdentity(ctx context.Context, reader knowledgeReader, recordID int64) (LoopAcquisition, loopRecordState, error) {
 	acquisition := LoopAcquisition{RecordID: recordID}
+	var state loopRecordState
 	var sourceType, keyType, tenantType, userType, valueType string
-	var sourceLen, keyLen, tenantLen, userLen, valueLen int64
-	var digest []byte
+	var sourceLen, keyLen, tenantLen, userLen int64
 	var redacted int
-	var updated string
-	var removed sql.NullString
 	if err := reader.QueryRowContext(ctx, `select typeof(source),typeof(key_json),typeof(tenant_id),typeof(user_id),
-coalesce(length(cast(source as blob)),0),coalesce(length(cast(key_json as blob)),0),
-coalesce(length(cast(tenant_id as blob)),0),coalesce(length(cast(user_id as blob)),0),
-typeof(value_json),coalesce(length(cast(value_json as blob)),0),raw_digest,value_redacted,updated_at,removed_at
+coalesce(octet_length(source),0),coalesce(octet_length(key_json),0),
+coalesce(octet_length(tenant_id),0),coalesce(octet_length(user_id),0),
+typeof(value_json),coalesce(octet_length(value_json),0),raw_digest,value_redacted,updated_at,removed_at,
+case when typeof(content_hash)='text' and octet_length(content_hash)<=128 then content_hash else '' end
 from records where rowid=? and database=? and store=?`, recordID, LoopDatabase, LoopStore).Scan(&sourceType, &keyType,
-		&tenantType, &userType, &sourceLen, &keyLen, &tenantLen, &userLen, &valueType, &valueLen, &digest, &redacted,
-		&updated, &removed); err != nil {
-		return acquisition, err
+		&tenantType, &userType, &sourceLen, &keyLen, &tenantLen, &userLen, &valueType, &state.fingerprint.valueLength,
+		&state.fingerprint.rawDigest, &redacted, &state.fingerprint.updated, &state.removed, &state.fingerprint.contentHash); err != nil {
+		return acquisition, state, err
 	}
+	state.fingerprint.redacted = redacted != 0
 	if sourceType != "text" || keyType != "text" || tenantType != "text" || userType != "text" ||
 		sourceLen > LoopSourceLimit || keyLen > LoopKeyLimit || tenantLen > LoopOwnerLimit || userLen > LoopOwnerLimit {
 		acquisition.RefusalCode = "loop_cache_identity_unqualified"
-		return acquisition, nil
+		return acquisition, state, nil
 	}
 	registration := LoopRegistration{Tuple: LoopTuple{Database: LoopDatabase, Store: LoopStore}}
 	if err := reader.QueryRowContext(ctx, `select source,key_json,tenant_id,user_id from records where rowid=?`, recordID).
 		Scan(&registration.Tuple.Source, &registration.Tuple.KeyJSON, &registration.TenantID, &registration.UserID); err != nil {
-		return acquisition, err
+		return acquisition, state, err
 	}
 	if _, ok := loopLocator(registration.Tuple); !ok || !validLoopOwner(registration.TenantID, registration.UserID) {
 		acquisition.RefusalCode = "loop_cache_identity_unqualified"
-		return acquisition, nil
+		return acquisition, state, nil
 	}
 	acquisition.Registration = &registration
-	updatedAt, err := time.Parse(time.RFC3339Nano, updated)
-	var removedAt *time.Time
-	if removed.Valid {
-		at, parseErr := time.Parse(time.RFC3339Nano, removed.String)
-		removedAt, err = &at, errors.Join(err, parseErr)
+	_, err := time.Parse(time.RFC3339Nano, state.fingerprint.updated)
+	if state.removed.Valid {
+		_, parseErr := time.Parse(time.RFC3339Nano, state.removed.String)
+		err = errors.Join(err, parseErr)
 	}
 	switch {
 	case valueType == "null":
 		acquisition.RefusalCode = "loop_cache_value_missing"
 	case valueType != "text" || err != nil:
 		acquisition.RefusalCode = "loop_cache_value_unqualified"
-	case valueLen > LoopValueLimit:
+	case state.fingerprint.valueLength > LoopValueLimit:
 		acquisition.RefusalCode = "loop_cache_value_too_large"
 	}
-	if acquisition.RefusalCode != "" {
-		return acquisition, nil
+	return acquisition, state, nil
+}
+
+// readLoopAcquisition is readLoopIdentity followed, for an unrefused record, by the bounded value.
+func readLoopAcquisition(ctx context.Context, reader knowledgeReader, recordID int64) (LoopAcquisition, error) {
+	acquisition, state, err := readLoopIdentity(ctx, reader, recordID)
+	if err != nil || acquisition.RefusalCode != "" {
+		return acquisition, err
 	}
 	value, err := loopReadValue(ctx, reader, recordID)
 	if err != nil {
 		return acquisition, err
 	}
+	updatedAt, _ := time.Parse(time.RFC3339Nano, state.fingerprint.updated) // parsed by readLoopIdentity
+	registration := acquisition.Registration
 	acquisition.Frame = &LoopRawFrame{RecordID: recordID, Tuple: registration.Tuple, TenantID: registration.TenantID,
-		UserID: registration.UserID, Value: value, ValuePresent: true, ValueDigest: loopDigest(value), RawDigest: digest,
-		ValueRedacted: redacted != 0, UpdatedAt: updatedAt, RemovedAt: removedAt}
+		UserID: registration.UserID, Value: value, ValuePresent: true, ValueDigest: loopDigest(value), RawDigest: state.fingerprint.rawDigest,
+		ValueRedacted: state.fingerprint.redacted, UpdatedAt: updatedAt, RemovedAt: loopClock(state.removed.String), fingerprint: state.fingerprint}
 	return acquisition, nil
 }
 
-// LoopDiscoveryFrames inspects at most one batch of unregistered records with the exact Loop
-// database/store in record order, in one read transaction. More structural rows than a batch is
-// ErrLoopDiscoveryLimit before any value is loaded.
-func (s *Store) LoopDiscoveryFrames(ctx context.Context) (LoopDiscovery, error) {
+// loopDiscoveryPage is how many record IDs one discovery query reads.
+const loopDiscoveryPage = 256
+
+// LoopDiscoveryCandidates inspects unregistered records with the exact Loop database/store in
+// numeric record order, in one read transaction, until it holds one batch of identity-valid
+// candidates. It loads no value: each candidate is registered, then loaded, by its caller.
+// Identity-invalid records never consume the batch.
+func (s *Store) LoopDiscoveryCandidates(ctx context.Context) (LoopDiscovery, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return LoopDiscovery{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `select r.rowid from records r where r.database=? and r.store=?
+	discovery := LoopDiscovery{Candidates: []LoopAcquisition{}, InvalidRecords: []int64{}}
+	const unregistered = `from records r where r.database=? and r.store=? and r.rowid>?
 and not exists(select 1 from loop_locator_metadata m where m.source=r.source and m.database=r.database
-and m.store=r.store and m.key_json=r.key_json) order by r.rowid limit ?`, LoopDatabase, LoopStore, LoopDiscoveryBatch+1)
-	if err != nil {
+and m.store=r.store and m.key_json=r.key_json)`
+	last := int64(0)
+scan:
+	for {
+		ids, err := loopRecordIDs(ctx, tx, `select r.rowid `+unregistered+` order by r.rowid limit ?`, LoopDatabase, LoopStore, last, loopDiscoveryPage)
+		if err != nil {
+			return LoopDiscovery{}, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		for _, id := range ids {
+			if len(discovery.Candidates) == LoopDiscoveryBatch {
+				break scan
+			}
+			last = id
+			candidate, _, err := readLoopIdentity(ctx, tx, id)
+			if err != nil {
+				return LoopDiscovery{}, err
+			}
+			if candidate.Registration != nil {
+				discovery.Candidates = append(discovery.Candidates, candidate)
+				continue
+			}
+			discovery.Invalid++
+			if len(discovery.InvalidRecords) < LoopDiagnosticLimit {
+				discovery.InvalidRecords = append(discovery.InvalidRecords, id)
+			}
+		}
+	}
+	if err := tx.QueryRowContext(ctx, `select count(*) `+unregistered, LoopDatabase, LoopStore, last).Scan(&discovery.Remaining); err != nil {
 		return LoopDiscovery{}, err
+	}
+	return discovery, tx.Commit()
+}
+
+func loopRecordIDs(ctx context.Context, reader knowledgeReader, query string, args ...any) ([]int64, error) {
+	rows, err := reader.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
 	ids := []int64{}
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			_ = rows.Close()
-			return LoopDiscovery{}, err
+			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return LoopDiscovery{}, err
-	}
-	if len(ids) > LoopDiscoveryBatch {
-		return LoopDiscovery{}, ErrLoopDiscoveryLimit
-	}
-	discovery := LoopDiscovery{Candidates: []LoopAcquisition{}}
-	for _, id := range ids {
-		acquisition, err := readLoopAcquisition(ctx, tx, id)
-		if err != nil {
-			return LoopDiscovery{}, err
-		}
-		discovery.Candidates = append(discovery.Candidates, acquisition)
-	}
-	return discovery, tx.Commit()
+	return ids, errors.Join(rows.Err(), rows.Close())
 }
 
 // readLoopRegistration reads the immutable tuple of a registered Loop locator.
@@ -449,8 +516,11 @@ where locator_id=? and boundary='unresolved' and qualification=?`, attempt.Locat
 	for _, loss := range result.Losses {
 		losses[loss.Code] += loss.Count
 	}
-	if _, err := tx.ExecContext(ctx, `update loop_attempt_evidence set value_digest=?,snapshot_id=? where attempt_id=?`,
-		frame.ValueDigest, snapshotID, attempt.ID); err != nil {
+	fingerprint := current.Frame.fingerprint
+	if _, err := tx.ExecContext(ctx, `update loop_attempt_evidence set value_digest=?,snapshot_id=?,record_content_hash=?,
+record_value_length=?,record_updated_at=?,record_raw_digest=?,record_value_redacted=? where attempt_id=?`,
+		frame.ValueDigest, snapshotID, fingerprint.contentHash, fingerprint.valueLength, fingerprint.updated,
+		fingerprint.rawDigest, fingerprint.redacted, attempt.ID); err != nil {
 		return 0, "", nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `update knowledge_sources set admitted_attempt=?,

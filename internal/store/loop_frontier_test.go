@@ -270,6 +270,9 @@ func TestLoopImmutableTransitions(t *testing.T) {
 	if source := loopSource(t, s, id); source.SnapshotMatch != "differs" {
 		t.Fatalf("qualification change still matched: %+v", source)
 	}
+	if rows := loopRows(t, s, LoopFilter{Query: "alpha"}); len(rows) != 1 || rows[0].MatchesRetainedValue || rows[0].Retained {
+		t.Fatalf("row admitted under the old qualification still matches: %+v", rows)
+	}
 	if err := stageLoop(t, s, id, base.Add(7*time.Hour)).commit(s, base.Add(7*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -282,14 +285,32 @@ func TestLoopImmutableTransitions(t *testing.T) {
 	}
 }
 
+// loopPublicationReader runs publish once, right after the first query containing after.
 type loopPublicationReader struct {
 	knowledgeReader
+	after   string
 	publish func()
+}
+
+// publishDuringRead makes the next public Loop read publish between its queries, and reports
+// whether it did.
+func publishDuringRead(t *testing.T, after string, publish func()) *bool {
+	t.Helper()
+	published := false
+	previous := loopReader
+	loopReader = func(tx *sql.Tx) knowledgeReader {
+		if published {
+			return tx
+		}
+		return &loopPublicationReader{knowledgeReader: tx, after: after, publish: func() { published = true; publish() }}
+	}
+	t.Cleanup(func() { loopReader = previous })
+	return &published
 }
 
 func (r *loopPublicationReader) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	rows, err := r.knowledgeReader.QueryContext(ctx, query, args...)
-	if err == nil && r.publish != nil && strings.Contains(query, "from loop_channels c") {
+	if err == nil && r.publish != nil && strings.Contains(query, r.after) {
 		publish := r.publish
 		r.publish = nil
 		publish()
@@ -312,28 +333,38 @@ func TestLoopCoherentZeroHitAndDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = peer.Close() }()
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	published := false
-	reader := &loopPublicationReader{knowledgeReader: tx, publish: func() {
-		updateLoopRecord(t, peer, admitted, "value_json=?", loopText(t, "yankee words"))
-		if err := stageLoop(t, peer, id, base.Add(time.Hour)).commit(peer, base.Add(time.Hour)); err != nil {
+	// Each public read sees one archive state although a peer publishes between its queries.
+	words := []string{"yankee words", "zulu words", "whiskey words"}
+	publish := func() {
+		updateLoopRecord(t, peer, admitted, "value_json=?,content_hash=?", loopText(t, words[0]), words[0])
+		words = words[1:]
+		at := base.Add(time.Duration(4-len(words)) * time.Hour)
+		if err := stageLoop(t, peer, id, at).commit(peer, at); err != nil {
 			t.Fatal(err)
 		}
-		published = true
-	}}
-	snapshot, err := readLoopSnapshot(ctx, reader, LoopFilter{Query: "xray"}, 0)
-	if err != nil || !published || len(snapshot.Rows) != 1 || snapshot.Rows[0].Retained || !snapshot.Rows[0].MatchesRetainedValue ||
+	}
+	published := publishDuringRead(t, "from loop_channels c", publish)
+	snapshot, err := s.LoopSnapshot(ctx, LoopFilter{Query: "xray"})
+	if err != nil || !*published || len(snapshot.Rows) != 1 || snapshot.Rows[0].Retained || !snapshot.Rows[0].MatchesRetainedValue ||
 		len(snapshot.Sources) != 1 || snapshot.Sources[0].SnapshotMatch != "matches" || snapshot.Sources[0].Health.Status != "complete" ||
 		snapshot.Sources[0].LastSnapshotID != snapshot.Rows[0].SnapshotID {
-		t.Fatalf("publication crossed the read snapshot: %+v %v", snapshot, err)
+		t.Fatalf("publication crossed LoopSnapshot: %+v %v", snapshot, err)
 	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
+	current := loopRows(t, s, LoopFilter{Query: "yankee"})
+	published = publishDuringRead(t, "from loop_channels c", publish)
+	row, source, err := s.LoopChannel(ctx, current[0].ID)
+	if err != nil || !*published || row.Retained || !row.MatchesRetainedValue || source.LastSnapshotID != row.SnapshotID ||
+		source.SnapshotMatch != "matches" {
+		t.Fatalf("publication crossed LoopChannel: %+v %+v %v", row, source, err)
 	}
+	before := loopSource(t, s, id)
+	published = publishDuringRead(t, "from loop_locator_metadata m", publish)
+	sources, err := s.LoopSources(ctx, 0)
+	if err != nil || !*published || len(sources) != 1 || sources[0].LastSnapshotID != before.LastSnapshotID ||
+		sources[0].SnapshotMatch != "matches" || sources[0].Health.AdmittedID != before.Health.AdmittedID {
+		t.Fatalf("publication crossed LoopSources: %+v %v", sources, err)
+	}
+	loopReader = func(tx *sql.Tx) knowledgeReader { return tx }
 	// After Y, zero hits still carry explicit source state for every case.
 	missing := insertLoopRecord(t, s, loopFixtureSource, "missing", loopText(t, "kilo"), "", "")
 	missingID := registerLoop(t, s, missing, base)
@@ -363,7 +394,7 @@ func TestLoopCoherentZeroHitAndDetail(t *testing.T) {
 			t.Fatal("removed source reported present")
 		}
 	}
-	row, source, err := s.LoopChannel(ctx, snapshot.Rows[0].ID)
+	row, source, err = s.LoopChannel(ctx, snapshot.Rows[0].ID)
 	if err != nil || row.ID != snapshot.Rows[0].ID || !row.Retained || row.MatchesRetainedValue || source.Registration.ID != id ||
 		source.SnapshotMatch != "matches" || row.Channel.Text != "xray words" {
 		t.Fatalf("detail did not resolve the immutable retained row: %+v %+v %v", row, source, err)

@@ -75,11 +75,6 @@ func TestLoopCommandErrors(t *testing.T) {
 	wantCode(t, e, 2, "loop_source_unknown", "--max-age", "0", "loop", "list", "--source-id", "999")
 	wantCode(t, e, 2, "loop_channel_unknown", "--max-age", "0", "loop", "show", "loop-channel:999")
 	wantCode(t, newEnv(t), 2, "loop_channel_unknown", "--max-age", "0", "loop", "show", "loop-channel:1")
-
-	stubLoopSync(t, func(int, syncer.LoopOptions) (syncer.LoopReport, error) {
-		return syncer.LoopReport{}, store.ErrLoopDiscoveryLimit
-	})
-	wantCode(t, e, 3, "loop_cache_discovery_limit", "loop", "sync")
 }
 
 func TestLoopRefreshFailureServesRetainedArchive(t *testing.T) {
@@ -154,8 +149,8 @@ func TestLoopTextAndCoverageShapes(t *testing.T) {
 	failed := store.LoopSource{Registration: store.LoopRegistration{ID: 4}, LastSnapshotID: 9,
 		Health: store.KnowledgeSource{Status: "failed", Reason: "loop_cache_input_changed"}}
 	coverage := loopCoverageOf([]store.LoopSource{failed}, []string{"synthetic diagnostic"})
-	if coverage.State != "registered" || !strings.Contains(coverage.Sources[0].Effect, "last good snapshot stays current") ||
-		!strings.Contains(coverage.Sources[0].Fix, "m365crawl loop sync --source-id 4") || coverage.Diagnostics[0] != "synthetic diagnostic" {
+	if coverage.State != "registered" || !strings.Contains(coverage.items[0].Effect, "last good snapshot stays current") ||
+		!strings.Contains(coverage.items[0].Fix, "m365crawl loop sync --source-id 4") || coverage.Diagnostics[0] != "synthetic diagnostic" {
 		t.Fatalf("failed coverage: %+v", coverage)
 	}
 	var out bytes.Buffer
