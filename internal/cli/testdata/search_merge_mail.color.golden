@@ -7,4 +7,5 @@
 [2m3 items[0m
 [2mnote: --folder applies to mail only; Teams chats and meeting transcripts were not searched[0m
 [2mnotice: indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership[0m
+[2mnotice: document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents[0m
 [2marchive age: <age>[0m

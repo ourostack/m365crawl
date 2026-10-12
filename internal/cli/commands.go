@@ -224,7 +224,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 type searchCmd struct {
 	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
-	Source         string `default:"all" enum:"chats,mail,transcripts,notes,all" help:"What to search: chats (Teams), mail (Outlook), fetched transcripts, indexed notes or all (the default)."`
+	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata or all."`
 	Folder         string `help:"Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also search deleted messages (Teams chats only)."`
 	MentionsMe     bool   `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only."`
@@ -234,11 +234,13 @@ type searchCmd struct {
 
 // Help is the long help of search.
 func (searchCmd) Help() string {
-	return "Searches Teams chats, Outlook mail and the fetched meeting transcripts together; every item has a source (chats, mail or transcripts) and the result's sources says how many items each source gave and whether it had more. Items are newest first across every source, by sent_at for chats, received_at for mail and at for transcripts.\n" +
+	return "Searches Teams chats, Outlook mail, fetched meeting transcripts and participating registered knowledge sources; every item has a source (chats, mail, transcripts, notes or documents), and sources reports each participant's count and truncation. Items are newest first by sent_at for chats, received_at for mail, at for transcripts and native modified_at for knowledge; unknown dates sort last.\n" +
 		"Registered OneNote indexed notes also participate in unconstrained default search. Note hits have source notes, a stable note:ID, title/text/OCR and native modified_at (unknown dates sort last). Use `notes show note:ID` to expand them, not thread. source_coverage reports indexed scope, retained captures and losses outside item shaping and zero hits.\n" +
+		"Document metadata describes unresolved documents, not current owners, sharing events, local residency or acquired file text. Hits have source documents and document-observation:ID; use `docs show document-observation:ID` to inspect native claims and bounded URL references, not thread. Date filters use native modified_at, never capture/file time; unknown dates are excluded, and a date-only --until includes that local day. source_coverage preserves current independent input state and refresh errors even at zero hits.\n" +
 		"A transcript item is one part of a recorded meeting: the first entry of the part that matched, its speaker and absolute time (at), matches (how many of the part's entries matched) and fetched_at. Only transcripts already fetched into the archive are searched, offline; `m365crawl transcripts` lists what can be fetched.\n" +
-		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with another --source it is a usage error (flag_source_conflict). --from (for transcripts, the speaker), --since, --until, --limit and --fields apply to every source; --fields accepts the keys of every kind of item.\n" +
+		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with another --source it is a usage error (flag_source_conflict). --from applies to chats, mail and transcript speakers, not indexed notes or documents. --since, --until, --limit and --fields apply to every participating source; --fields accepts the keys of every kind of item.\n" +
 		"Notes have unresolved account/author ownership. --account, --from and chat/mail-only flags exclude them from default search with a notice; --source notes rejects those flags and independently bypasses Teams/Outlook freshness and irrelevant source-root checks. Date filters use native note modified times and exclude unknown timestamps in bounded windows. Register new inputs explicitly with `notes sync`; ordinary reads refresh only registered locators and --max-age 0 performs no capture.\n" +
+		"Documents likewise reject account/link/profile and message-only filters with --source documents; those filters exclude documents from --source all with a notice. Document-only search bypasses legacy freshness and irrelevant source roots. Register inputs with `docs sync`; ordinary reads refresh registered participating locators only, and --max-age 0 performs no capture or archive migration.\n" +
 		"note also says when mail is left out and why: it is not in the archive yet, the Outlook source is off, there is no Outlook profile, or mail is not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
 		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only.\n" +
 		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`; for a transcript the call id for `m365crawl transcripts show <call_id>`."
@@ -255,6 +257,9 @@ func (c *searchCmd) Run(rt *runtime) error {
 	if c.Source == searchNotes && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("notes search requires words or --since/--until; use notes list for an unfiltered list")
 	}
+	if c.Source == searchDocuments && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
+		return errs.Usage("document search needs words or --since/--until; use docs list for an unfiltered list")
+	}
 	f, err := rt.filter(c.msgFlags)
 	if err != nil {
 		return err
@@ -269,7 +274,23 @@ func (c *searchCmd) Run(rt *runtime) error {
 		}
 		rt.noteCoverage = coverage
 	}
+	if p.indexedDocuments && (p.chats || p.mail || p.transcripts) {
+		coverage, err := rt.refreshDocuments(0)
+		if err != nil {
+			return documentError(err)
+		}
+		rt.documentCoverage = coverage
+	}
 	if !p.chats && !p.mail && !p.transcripts {
+		if p.indexedDocuments {
+			return rt.documentsRead("search", 0, func(st *store.Store) (*listResult, error) {
+				res, err := c.search(rt, p, f, st)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*listResult), nil
+			})
+		}
 		return rt.notesRead("search", 0, func(st *store.Store) (*listResult, error) {
 			res, err := c.search(rt, p, f, st)
 			if err != nil {

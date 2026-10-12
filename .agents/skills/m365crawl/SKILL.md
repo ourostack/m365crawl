@@ -1,6 +1,6 @@
 ---
 name: m365crawl
-description: Use when an agent needs to read the user's Microsoft Teams chats and channels, Outlook mail, calendar, meeting transcripts or OneNote indexed notes, offline, through the local `m365crawl` CLI and its shared archive.
+description: Use when an agent needs to read the user's Teams chats, Outlook mail, calendar, meeting transcripts, OneNote indexed notes, native people evidence or Office document metadata through the local `m365crawl` CLI and shared archive.
 ---
 
 # m365crawl
@@ -43,6 +43,7 @@ Run `m365crawl` first: it reports chats, mail and calendar freshness, routes reg
 | Attachments | `m365crawl mail list --has-attachments`, `m365crawl mail show <id>` (each file's name, size and type) |
 | Meeting transcripts | `m365crawl transcripts` lists recorded meetings and which parts' text is in the archive; `m365crawl transcripts show <meeting>` prints one in time order with each seam marked; `transcripts fetch` brings the text from SharePoint; `m365crawl search "words" --source transcripts` finds what was said (`--from` matches the speaker); `calendar event` lists an occurrence's recorded calls in `transcripts` |
 | Indexed notes | Explicitly run `m365crawl notes sync` once for available Mac indexes, or `notes sync --root DIR` for supported rollback-mode index copies. Then `notes search "words"` or shared `search`, followed by `notes show note:ID`; inspect `notes sources` before treating missing results as absence. |
+| Document evidence | Explicit `docs sync` or `docs sync --root DIR` registers qualified ordinary local Office JSON. Shared search or `docs search "words"` returns `document-observation:ID` for `docs show`; inspect `docs sources` before interpreting absence. Per-command help defines clocks, retained scope and refusals; the guide is optional. Metadata is not original text, resolved owner/residency or a new sharing event. Never dereference native URLs/friendly paths as qualified local files. |
 
 ## Indexed notes and source coverage
 

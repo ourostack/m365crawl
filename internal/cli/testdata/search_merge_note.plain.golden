@@ -6,4 +6,5 @@ at                source  where           who            thread                 
 2 items
 note: --mentions-me applies to Teams chats only; mail and meeting transcripts were not searched
 notice: indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership
+notice: document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents
 archive age: <age>

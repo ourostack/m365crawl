@@ -99,6 +99,7 @@ type noteDetailItem struct {
 }
 
 type noteSourceItem struct {
+	Kind                 string         `json:"kind,omitempty"`
 	ID                   int64          `json:"source_id"`
 	LocatorID            int64          `json:"locator_id"`
 	AttemptID            int64          `json:"attempt_id"`
@@ -120,10 +121,11 @@ type noteSourceItem struct {
 }
 
 type noteCoverage struct {
-	Scope        string           `json:"scope"`
-	State        string           `json:"state"`
-	Sources      []noteSourceItem `json:"sources"`
-	RefreshError *syncError       `json:"refresh_error,omitempty"`
+	Scope         string               `json:"scope"`
+	State         string               `json:"state"`
+	Sources       []noteSourceItem     `json:"sources"`
+	RefreshError  *syncError           `json:"refresh_error,omitempty"`
+	RefreshErrors map[string]syncError `json:"refresh_errors,omitempty"`
 }
 
 func notesCoverage(sources []store.KnowledgeSource) *noteCoverage {
@@ -368,8 +370,13 @@ func (rt *runtime) renderNoteCoverage(coverage *noteCoverage) {
 		return
 	}
 	name := "notes"
-	if coverage.Scope == "outlook_native_people_observations" {
+	switch coverage.Scope {
+	case "outlook_native_people_observations":
 		name = "people"
+	case "office_json_metadata":
+		name = "documents"
+	case "registered_optional_sources":
+		name = "notes and documents"
 	}
 	_, _ = fmt.Fprintf(rt.stdout, "%s coverage: %s (%s)\n", name, coverage.State, coverage.Scope)
 	rows := [][]string{}

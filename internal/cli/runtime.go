@@ -24,32 +24,33 @@ const defaultMaxAge = 15 * time.Minute
 
 // runtime is what commands share: the validated globals, the output streams and the clock.
 type runtime struct {
-	ctx            context.Context
-	g              *Globals
-	args           []string // the command line, for the typo suggestion of an unknown command
-	stdout, stderr io.Writer
-	stdoutTTY      bool
-	stderrTTY      bool
-	color          bool // ANSI color in text output
-	format         output.Format
-	cmd            string // the running command, for command-specific fixes
-	maxAge         time.Duration
-	fields         []string
-	dbPath         string
-	root           string
-	outlookRoot    string // the Outlook profiles directory; empty means the default
-	outlookOn      bool
-	outlookDefault bool   // on because it is the default, not because a root was named
-	outlookLink    string // --outlook-account: a Teams account as <tenantId>/<userId>, "none", or empty
-	outlookProfile string // --outlook-profile
-	account        *teamsdesktop.Account
-	now            func() time.Time
-	exitErr        error       // a failure while printing for a flag that ends the run (--version)
-	team           string      // --team of the running read command, validated before any implicit sync
-	synced         *syncedInfo // the implicit sync this read ran, if any
-	query          listQuery   // what the running list command asked for, to explain an empty result
-	link           *convLink   // the Teams link the running read's conversation came from, if any
-	noteCoverage   *noteCoverage
+	ctx              context.Context
+	g                *Globals
+	args             []string // the command line, for the typo suggestion of an unknown command
+	stdout, stderr   io.Writer
+	stdoutTTY        bool
+	stderrTTY        bool
+	color            bool // ANSI color in text output
+	format           output.Format
+	cmd              string // the running command, for command-specific fixes
+	maxAge           time.Duration
+	fields           []string
+	dbPath           string
+	root             string
+	outlookRoot      string // the Outlook profiles directory; empty means the default
+	outlookOn        bool
+	outlookDefault   bool   // on because it is the default, not because a root was named
+	outlookLink      string // --outlook-account: a Teams account as <tenantId>/<userId>, "none", or empty
+	outlookProfile   string // --outlook-profile
+	account          *teamsdesktop.Account
+	now              func() time.Time
+	exitErr          error       // a failure while printing for a flag that ends the run (--version)
+	team             string      // --team of the running read command, validated before any implicit sync
+	synced           *syncedInfo // the implicit sync this read ran, if any
+	query            listQuery   // what the running list command asked for, to explain an empty result
+	link             *convLink   // the Teams link the running read's conversation came from, if any
+	noteCoverage     *noteCoverage
+	documentCoverage *noteCoverage
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {

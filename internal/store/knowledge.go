@@ -69,10 +69,6 @@ func knowledgeTimes(values ...sql.NullString) ([]*time.Time, error) {
 	return out, nil
 }
 
-func (s *Store) hasKnowledgeSchema(ctx context.Context) (bool, error) {
-	return hasKnowledgeSchema(ctx, s.db)
-}
-
 type knowledgeReader interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -86,6 +82,10 @@ and name in ('knowledge_locators','knowledge_attempts','knowledge_sources','note
 }
 
 func (s *Store) BeginKnowledgeAttempt(ctx context.Context, input KnowledgeInput) (KnowledgeAttempt, error) {
+	return s.beginKnowledgeAttempt(ctx, input, nil)
+}
+
+func (s *Store) beginKnowledgeAttempt(ctx context.Context, input KnowledgeInput, register func(*sql.Tx, int64) error) (KnowledgeAttempt, error) {
 	if input.Kind == "" || input.Platform == "" || input.Locator == "" || input.At.IsZero() {
 		return KnowledgeAttempt{}, errors.New("knowledge: invalid input")
 	}
@@ -98,6 +98,11 @@ values(?,?,?) on conflict(kind,platform,locator) do nothing`, input.Kind, input.
 		if err := tx.QueryRowContext(ctx, `select id from knowledge_locators where kind=? and platform=? and locator=?`,
 			input.Kind, input.Platform, input.Locator).Scan(&attempt.LocatorID); err != nil {
 			return err
+		}
+		if register != nil {
+			if err := register(tx, attempt.LocatorID); err != nil {
+				return err
+			}
 		}
 		result, err := tx.ExecContext(ctx, `insert into knowledge_attempts(locator_id,started_at,acquisition_signature)
 values(?,?,?)`, attempt.LocatorID, knowledgeTime(input.At), nullableKnowledge(input.AcquisitionSignature))
@@ -297,11 +302,15 @@ complete_attempt=case when ?='indexed' then ? else complete_attempt end,source_o
 }
 
 func (s *Store) KnowledgeSources(ctx context.Context, kind string) ([]KnowledgeSource, error) {
-	available, err := s.hasKnowledgeSchema(ctx)
+	return readKnowledgeSources(ctx, s.db, kind)
+}
+
+func readKnowledgeSources(ctx context.Context, reader knowledgeReader, kind string) ([]KnowledgeSource, error) {
+	available, err := hasKnowledgeSchema(ctx, reader)
 	if err != nil || !available {
 		return []KnowledgeSource{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `select coalesce(s.id,0),l.id,coalesce(a.id,0),coalesce(s.admitted_attempt,0),
+	rows, err := reader.QueryContext(ctx, `select coalesce(s.id,0),l.id,coalesce(a.id,0),coalesce(s.admitted_attempt,0),
 l.kind,l.platform,l.locator,coalesce(s.boundary,''),coalesce(s.qualification,''),
 case when s.id<>current.source_id then 'retained' else coalesce(a.outcome,'unknown') end,
 coalesce(g.coverage,'unknown'),coalesce(a.acquisition_signature,''),coalesce(g.content_digest,''),

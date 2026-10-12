@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into eight groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into nine groups:
 
 | Group | Commands |
 | --- | --- |
@@ -13,6 +13,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
 | Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
+| Document metadata | [`docs sync`](#docs-sync), [`docs list`](#docs-list), [`docs search`](#docs-search), [`docs show`](#docs-show), [`docs sources`](#docs-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## Platform defaults
@@ -86,6 +87,60 @@ Start here:
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
 ```
 
+## Document metadata
+
+Office recent, shared, recommended and dialog observations join the archive as **metadata**, not document text, resolved file identities or sharing events. Start from `m365crawl docs --help`; help, IDs and coded remedies are sufficient without a skill. Mac default discovery uses named Office metadata inputs; `--root DIR` supplies the four finite JSON filenames on a qualified local disk. Windows requires explicit ordinary fixed-drive NTFS copies; native Office discovery is unsupported. Linked, provider/placeholder, remote and unqualified paths are refused. No native URL or friendly path is opened or fetched.
+
+Every read/source result carries `source_coverage` outside `--fields`, item bounds and zero hits. `scope` is `office_json_metadata`, with `state` unknown or registered and per-source status, losses and nullable clocks. Complete means loss-free captured metadata, not library/service completeness. Partial, failed and absent later inputs retain old observations; unchanged capture does not repair partial coverage or alter original clocks. Ordinary reads refresh registered locators only; new registrations require explicit sync. `--max-age 0` disables capture and old read-only archives remain unchanged. Document-only commands ignore Teams/Outlook freshness and irrelevant root paths.
+
+### docs sync
+
+```sh
+m365crawl docs sync [--root DIR | --source-id ID]
+```
+
+Explicit registration/capture. A supplied directory contains `recent.json`, `shared.json`, `recommended.json` and/or `dialog.json`; other files are ignored. `--source-id` refreshes only one positive registered source and cannot combine with `--root`. Returns `captured`, `unchanged`, `skipped`, `failed` and `source_coverage`. Unrecognized or unsafe peers remain source failures, not empty successes. Directory, archive and cancellation errors remain command failures.
+
+### docs list
+
+```sh
+m365crawl docs list [--source-id ID] [--query WORDS] [--since TIME] [--until TIME] [--limit N]
+```
+
+One row per retained native representation, with stable `document-observation:ID`, source/capture IDs, immutable original clocks, application/surface, title, URLs, native claims, retained state and unresolved association/not_captured text state. Order is native modification descending, unknown last, then full ASCII-NOCASE title/source ID/numeric rowid before LIMIT. Limit defaults50; zero returns all. Date filters use native modification, never acquisition time, excluding unknown dates. Display bounds preserve IDs and URLs. `native` uses source-model field names such as `Title`, `ResourceID`, `Sharing` and timestamps `Raw`/`Value`; Value is parsed UTC or null when missing/unrecognized. `captured_at` is original private acquisition; `source_observed_at` is the acquired metadata file's modification time, not document or event time. `retained` means absent from the last admitted capture, not deleted or sharing revoked.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`.
+
+### docs search
+
+```sh
+m365crawl docs search WORDS [--source-id ID] [--since TIME] [--until TIME] [--limit N]
+```
+
+Search native metadata strings, not document contents or JSON property names. Words are optional only with a date filter. The same list ordering, limits and fields apply. Shared `search --source documents` returns metadata-only hits and follow-up IDs; unconstrained default search includes them alongside other sources. Account/author/chat/mail-only filters exclude unresolved metadata with a notice; explicitly selecting documents rejects those filters. No guessed owner, Teams thread or file path is a valid detail follow-up.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`.
+
+### docs show
+
+```sh
+m365crawl docs show document-observation:ID
+```
+
+Read the native representation and up to100 exact URL reference occurrences, with `references_total` and `references_truncated`. References are unresolved evidence, not one resolved document or proof that a file is locally available. Lookup precedes refresh; only this observation's registered source participates, not peers/default roots. Missing/invalid IDs return a coded error pointing to `docs list`.
+
+`--fields` keys: `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `references`, `references_total`, `references_truncated`.
+
+### docs sources
+
+```sh
+m365crawl docs sources [--source-id ID]
+```
+
+Inspect source IDs, kind, admitted/attempted state, coverage and losses. Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
+
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+
 ## Indexed notes
 
 Notes come from OneNote's local full-text indexes, not a complete notebook export. Default discovery is Mac's `~/Library/Containers/com.microsoft.onenote.mac/Data/Library/Application Support/Microsoft User Data/OneNote/15.0/FullTextSearchIndex`. Supported explicit rollback-mode `.db` index copies work on Mac, Windows and Linux; default Windows app discovery and live WAL capture are not supported.
@@ -144,7 +199,7 @@ Lists source health and preserved capture evidence. A locator is a cache registr
 
 **Shared search:** `search --source notes` uses the independent notes path, without irrelevant Outlook checks or Teams sync. Default `search` includes registered notes alongside legacy sources. `--account`, `--from`, chat-only flags and mail `--folder` exclude unresolved notes with a notice; those flags are usage conflicts with explicit `--source notes`. `--since`/`--until` filter native modified time, not capture time. Each hit has `source: "notes"` and follows up through `notes show note:ID`, never a fabricated thread or author. Participating notes disable a chat-only `total`, even with zero note hits.
 
-`--fields` keys: `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
 
 ## doctor
 
@@ -260,7 +315,7 @@ m365crawl watch --every 30s --fields id,type,text --max-text 200
 
 ## search
 
-Full-text search over Teams chats, Outlook mail and fetched meeting transcripts, newest first; default `--limit 50` (check `truncated`).
+Full-text search over Teams chats, Outlook mail, fetched meeting transcripts and participating registered indexed notes/document metadata, newest first; default `--limit 50` (check `truncated`). Knowledge hits use native modification time, with unknown times last; document hits remain metadata-only unresolved observations.
 
 ```
 m365crawl search [<query>] [flags]
@@ -272,10 +327,10 @@ m365crawl search [<query>] [flags]
 
 | Flag | Applies to | Meaning |
 | --- | --- | --- |
-| `--source=chats\|mail\|transcripts\|all` | every source | What to search: `chats` (Teams), `mail` (Outlook), `transcripts` (fetched meeting transcripts) or `all` (every one, the default). |
-| `--from=STRING` | every source | Sender. Chats: a person id or a case-insensitive part of the name. Mail: a case-insensitive part of the sender's name or address. Transcripts: a case-insensitive part of the speaker's name. |
+| `--source=chats\|mail\|transcripts\|notes\|documents\|all` | every source | Choose messages, fetched transcripts, indexed notes, document metadata or all participating sources (default). |
+| `--from=STRING` | chats, mail, transcripts | Sender or transcript speaker; unresolved notes/documents are excluded from `all` and reject this filter when explicitly selected. |
 | `--since=STRING` | every source | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). For transcripts, the time of each entry. |
-| `--until=STRING` | every source | Only messages at or before this time (same formats as `--since`). |
+| `--until=STRING` | every source | Bound source-native time (same formats as `--since`). Document modification timestamps are exclusive upper bounds; a date-only document bound includes its whole local day. Unknown knowledge times do not match bounded windows. |
 | `--limit=50` | every source | Maximum items in the merged list; `truncated` says whether any source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
 | `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
@@ -288,14 +343,15 @@ m365crawl search [<query>] [flags]
 
 How the sources combine:
 
-- Every item has `source`: `chats`, `mail` or `transcripts`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item.
+- Every item has `source`: `chats`, `mail`, `transcripts`, `notes` or `documents`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item. Registered knowledge participates only when its unresolved scope permits the selected filters.
 - A transcript item is one part of a recorded meeting whose fetched text matched: `{"source", "call_id", "event_key", "title", "ordinal", "speaker", "at", "text", "matches", "fetched_at"}`. `speaker`, `text` and `at` (absolute) are those of the part's first matching entry, and `matches` counts the part's matching entries, so a part that says a word fifty times is one item. The words match what was said, not the speaker's name (that is `--from`). Only text already fetched into the archive is searched, offline; with `--source transcripts` and nothing fetched, `note` says `no transcripts are fetched yet; run m365crawl transcripts to see what can be fetched`.
-- Text output has a `thread` column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread`, `<conversation_id> <reply_chain_id, else id>`; for mail the id that `m365crawl mail thread` takes; for a transcript the call id that `m365crawl transcripts show` takes.
-- Items are newest first across every source, by `sent_at` for chats, `received_at` for mail and `at` for transcripts.
-- The result's `sources` says, per source searched, how many items it gave and whether it had more: `{"chats": {"count", "truncated"}, "mail": {"count", "truncated"}, "transcripts": {"count", "truncated"}}`.
+- Knowledge hits have stable `note:ID` or `document-observation:ID`; follow `notes show` or `docs show`, not a message thread. Document metadata remains unresolved, with `text_state=not_captured`; URLs are reference evidence, not resolved files or proof of local residency.
+- Text output names source-specific follow-ups: `thread <conversation_id> <reply_chain_id, else id>` for chats, `mail thread <id>` for mail, `transcripts show <call_id>` for transcripts, and the corresponding knowledge `show` command for notes/documents.
+- Items are newest first by `sent_at` for chats, `received_at` for mail, `at` for transcripts and native `modified_at` for knowledge; unknown knowledge dates sort last.
+- The result's `sources` reports count/truncation for each participating source. Knowledge `source_coverage` stays outside item shaping and zero hits; document rows and their source frontier come from one read snapshot, preserving independent refresh errors.
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched`. With another `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
-- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
+- `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. It excludes unresolved notes/documents from `all`; explicitly selected knowledge rejects it. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
 - `--fields` accepts the keys of every kind of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 
@@ -306,7 +362,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `title`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `modified_at`, `captured_at`, `source_observed_at`.
+`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`.
 
 ## people
 
@@ -341,7 +397,7 @@ Result: a list of person items, known `last_seen_at` newest first, then unknown 
 
 `m365crawl people sources` reports registered native people inputs and their independent attempts, admissions, failures and coverage. Coverage remains outside selected item fields and visible at zero hits. `partial` is useful evidence, not a complete directory; no physical occurrence count is inferred from distinct display representations.
 
-`--fields` keys: `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
 
 ### people sync
 
