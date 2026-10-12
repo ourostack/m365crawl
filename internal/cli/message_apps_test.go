@@ -403,7 +403,8 @@ func TestApplicationArchiveRef(t *testing.T) {
 	if got := (&runtime{dbPath: "rel/a.db"}).archiveRef(); got != filepath.Join(wd, "rel/a.db") {
 		t.Fatalf("relative: %s", got)
 	}
-	if got := (&runtime{dbPath: "/abs/a.db"}).archiveRef(); got != "/abs/a.db" {
+	abs := filepath.Join(t.TempDir(), "a.db") // absolute on every OS, unlike "/abs/a.db" on Windows
+	if got := (&runtime{dbPath: abs}).archiveRef(); got != abs {
 		t.Fatalf("absolute: %s", got)
 	}
 	old := getwd
