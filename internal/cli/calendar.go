@@ -777,6 +777,9 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			ev.truncate(rt.g.MaxText)
 		}
 		res, _ := rt.eventResult(ev) // never fails
+		if d.Chat != nil {
+			res.(*eventResult).appCoverage = applicationCoverageOf(envelopesOf(d.Chat.Recent))
+		}
 		if ev.MeetingChatID == "" {
 			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
 		}
@@ -883,6 +886,10 @@ func (ev *calendarEvent) truncate(max int) {
 			if t, did := truncateRunes(m.Text, max); did {
 				m.Text, m.TextTruncated, ev.TextTruncated = t, true, true
 			}
+			// Built unclipped (max-text 0), the evidence is clipped here like the text.
+			if m.App != nil && m.App.truncate(max) {
+				ev.TextTruncated = true
+			}
 		}
 	}
 	for i := range ev.RelatedMail {
@@ -904,8 +911,9 @@ func (ev *calendarEvent) truncate(max int) {
 // eventResult is calendar event's document: the event, or only the keys --fields kept, then the
 // archive's age and any sync error like every read.
 type eventResult struct {
-	event *calendarEvent
-	keys  []string
+	event       *calendarEvent
+	keys        []string
+	appCoverage *applicationCoverage // of the chat's recent messages; nil without a meeting chat
 	meta
 }
 
@@ -926,7 +934,11 @@ func (r *eventResult) MarshalJSON() ([]byte, error) {
 		}
 		body = p
 	}
-	return joinJSON(body, r.meta)
+	// Both documents are this package's own structs, which always encode.
+	withCoverage, _ := joinJSON(body, struct {
+		Coverage *applicationCoverage `json:"application_evidence_coverage,omitempty"`
+	}{r.appCoverage})
+	return joinJSON(json.RawMessage(withCoverage), r.meta)
 }
 
 // joinJSON merges the keys of two JSON objects, the first's first.

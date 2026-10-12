@@ -77,6 +77,9 @@ type listResult struct {
 	// it had more. Nil on every other list.
 	Sources        *searchSources `json:"sources,omitempty"`
 	SourceCoverage *noteCoverage  `json:"source_coverage,omitempty"`
+	// ApplicationEvidenceCoverage summarizes the application evidence of the Teams messages the
+	// result returned, whatever --fields kept. Nil on results that read no Teams messages.
+	ApplicationEvidenceCoverage *applicationCoverage `json:"application_evidence_coverage,omitempty"`
 	// ChannelsExcluded says channels were left out (--include-channels not set) so an agent
 	// does not read the result as covering every conversation. Omitted otherwise.
 	ChannelsExcluded bool `json:"channels_excluded,omitempty"`

@@ -66,6 +66,11 @@ type messageItem struct {
 	// nobody has answered has reply_count 0, so a missing key means "not a channel root".
 	ReplyCount  *int      `json:"reply_count,omitempty"`
 	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
+	// app_observation is the message's native application, reply and citation evidence (see
+	// applicationItem) on messages, unread, thread, search and calendar event chat messages. It is
+	// omitted when --fields leaves it out, which says nothing about the evidence itself:
+	// application_evidence_coverage outside the items still counts it.
+	App *applicationItem `json:"app_observation,omitempty"`
 }
 
 type conversationItem struct {
@@ -150,6 +155,10 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 			MentionsMe: r.MentionsMe, MentionKind: r.MentionKind, Links: r.Links, Subject: r.Subject, Importance: r.Importance, Pinned: r.Pinned, Link: r.Link,
 			ReplyCount: r.ReplyCount, LastReplyAt: r.LastReplyAt,
 		}
+		if r.Application.State != "" { // rows read by key (watch) carry no evidence
+			app := applicationItemOf(r.Application, maxText)
+			it.App = &app
+		}
 		for _, m := range r.Mentions {
 			it.Mentions = append(it.Mentions, mention{ID: m.ID, DisplayName: m.DisplayName})
 		}
@@ -182,7 +191,9 @@ func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.
 	if err != nil {
 		return nil, err
 	}
-	return newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated).withTotal(total), nil
+	res := newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated).withTotal(total)
+	res.ApplicationEvidenceCoverage = applicationCoverageOf(envelopesOf(rows))
+	return res, nil
 }
 
 // msgFlags are the filters messages, search and unread share.
@@ -243,7 +254,8 @@ func (searchCmd) Help() string {
 		"Documents likewise reject account/link/profile and message-only filters with --source documents; those filters exclude documents from --source all with a notice. Document-only search bypasses legacy freshness and irrelevant source roots. Register inputs with `docs sync`; ordinary reads refresh registered participating locators only, and --max-age 0 performs no capture or archive migration.\n" +
 		"note also says when mail is left out and why: it is not in the archive yet, the Outlook source is off, there is no Outlook profile, or mail is not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
 		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only.\n" +
-		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`; for a transcript the call id for `m365crawl transcripts show <call_id>`."
+		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`; for a transcript the call id for `m365crawl transcripts show <call_id>`.\n" +
+		"Chat hits carry app_observation and the result carries application_evidence_coverage for the chat hits that survive the merged --limit.\n" + applicationEvidenceHelp
 }
 
 func (c *searchCmd) Run(rt *runtime) error {

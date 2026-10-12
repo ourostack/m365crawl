@@ -448,6 +448,21 @@ func TestMessageAppOlderArchiveReadonly(t *testing.T) {
 	}
 }
 
+// An alpha.1-shaped archive has no meta table; its evidence is not derived, never a database error.
+func TestMessageAppArchiveWithoutMeta(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
+	s.qExec(t, `drop table meta`)
+	rows, _, err := s.Messages(ctx, Filter{Account: &acctA})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("read without meta: %d %v", len(rows), err)
+	}
+	if env := rows[0].Application; env.State != AppStateNotDerived || !env.BackfillPending || env.Served != nil {
+		t.Fatalf("without meta: %+v", env)
+	}
+}
+
 func fileDigest(t *testing.T, path string) string {
 	t.Helper()
 	var all []byte

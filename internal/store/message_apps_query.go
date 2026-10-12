@@ -14,7 +14,7 @@ var afterMessageSelection = func() {}
 
 const (
 	appSchemaQuery = `select
- (select count(*) from sqlite_master where type='table' and name in ('message_app_observations','message_app_current')),
+ (select count(*) from sqlite_master where type='table' and name in ('message_app_observations','message_app_current','meta')),
  (select count(*) from pragma_table_info('messages') where name='raw_digest')`
 	appFactsQuery = `select m.raw_json is not null, coalesce(m.raw_digest,''), m.raw_digest is not null, coalesce(p.current_id,0), coalesce(p.last_good_id,0)
  from messages m left join message_app_current p on p.tenant_id=m.tenant_id and p.user_id=m.user_id and p.conversation_id=m.conversation_id and p.message_id=m.id
@@ -35,7 +35,7 @@ type appFacts struct {
 // loadMessageApplications sets Application on rows already selected through q, the read
 // transaction that selected them, so a message body is never paired with the evidence of a later
 // revision. It reads at most the current and one last good representation per message and never
-// writes: an archive without the evidence tables, a message whose digest or pointer is missing and
+// writes: an archive without the evidence tables or meta (alpha.1), a message whose digest or pointer is missing and
 // evidence of an older mapper version are not_derived. Stored evidence that does not validate is a
 // per-message teams_app_projection_corrupt failure; only database errors and cancellation fail the
 // read.
@@ -47,7 +47,7 @@ func loadMessageApplications(ctx context.Context, q knowledgeReader, rows []Mess
 	if err := q.QueryRowContext(ctx, appSchemaQuery).Scan(&tables, &column); err != nil {
 		return nil, err
 	}
-	derived, pending, facts := tables == 2 && column == 1, true, legacyAppFactsQuery
+	derived, pending, facts := tables == 3 && column == 1, true, legacyAppFactsQuery
 	if derived {
 		var marker string
 		if err := q.QueryRowContext(ctx, `select coalesce((select value from meta where key=?),'')`, messageAppKey).Scan(&marker); err != nil {

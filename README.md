@@ -267,6 +267,7 @@ m365crawl messages --team "Fixture team 1" --since 2023-11-14 --max-text 80
 - **Mentions.** An @-mention shows in `text` as the person's plain name. `mentions` lists who was mentioned, `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned. `--direct-mentions` keeps only `person` mentions.
 - **System pseudo-conversations.** `48:notifications`, `48:calllogs` and `48:annotations` duplicate real messages, so they are hidden by default; `--include-system` brings them back. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 - **Unread.** Channels are left out of `unread` by default because their unread counts are noise; `--include-channels` adds them. Use `--since` for "what needs my attention", because old read markers leave stale chats with hundreds of unread messages.
+- **App and citation evidence.** Each Teams message item carries `app_observation`: the app, reply and citation claims of its archived native JSON (for example a bot reply with its cited sources), with a state of `mapped`, `partial`, `absent`, `failed` or `not_derived`. The result's `application_evidence_coverage` counts those states for the messages it returned. The claims are the message's own, not a verified app identity, and a message stays one item. The first sync after upgrading derives this evidence offline from the archive.
 - **Accounts.** `--account <tenantId>/<userId>` limits any command to one signed-in account; `m365crawl whoami` lists them.
 
 ### Watch for changes

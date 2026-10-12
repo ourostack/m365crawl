@@ -69,7 +69,13 @@ func checkCommandFields(rt *runtime, cmd, when string) error {
 
 // watchKeys are the keys of a watch event: those of a message and of an activity item.
 func watchKeys() []string {
-	return dedupe(append(typeKeys[messageItem](), typeKeys[activityItem]()...))
+	var keys []string
+	for _, k := range dedupe(append(typeKeys[messageItem](), typeKeys[activityItem]()...)) {
+		if k != "app_observation" { // watch reads messages by key and carries no application evidence
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // helpWidth is the width the --fields section of a command's help is wrapped to.

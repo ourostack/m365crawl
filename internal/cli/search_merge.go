@@ -334,6 +334,7 @@ type searchHit struct {
 	at     time.Time
 	item   any
 	source string
+	app    store.MessageApplicationEnvelope // a chat hit's evidence, counted only if the hit survives the limit
 }
 
 // search runs the plan against the archive and merges what each source found, newest first.
@@ -380,7 +381,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		chatTrunc = trunc
 		for i, it := range messageItems(rows, rt.g.MaxText, html) {
-			hits = append(hits, searchHit{at: rows[i].SentAt, item: searchChatItem{Source: searchChats, messageItem: it}, source: searchChats})
+			hits = append(hits, searchHit{at: rows[i].SentAt, item: searchChatItem{Source: searchChats, messageItem: it}, source: searchChats, app: rows[i].Application})
 		}
 	}
 	if searchMailNow {
@@ -452,11 +453,18 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	count := map[string]int{}
 	out := make([]any, len(hits))
+	envs := []store.MessageApplicationEnvelope{}
 	for i, h := range hits {
 		out[i] = h.item
 		count[h.source]++
+		if h.source == searchChats {
+			envs = append(envs, h.app)
+		}
 	}
 	res := newList(shape(rt, out), truncated)
+	if p.chats && st != nil {
+		res.ApplicationEvidenceCoverage = applicationCoverageOf(envs)
+	}
 	if p.noteExclusion != "" {
 		res.addNotice(p.noteExclusion)
 	}
