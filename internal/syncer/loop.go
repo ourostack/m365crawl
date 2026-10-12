@@ -19,6 +19,9 @@ type LoopOptions struct {
 	SourceID           int64
 	Explicit, Discover bool
 	MaxAge             time.Duration
+	// Probe is for a caller that reads the sources itself afterwards: an ordinary run with nothing
+	// due reads no registered record and reports no Sources.
+	Probe bool
 }
 
 // LoopReport is what a refresh did. Sources are the participating registrations after it;
@@ -51,7 +54,11 @@ func SyncLoop(ctx context.Context, options LoopOptions) (LoopReport, error) {
 	if options.SourceID < 0 || options.MaxAge < 0 || (options.Discover && (!options.Explicit || options.SourceID != 0)) {
 		return LoopReport{}, errors.New("loop: invalid source selection")
 	}
-	if !options.Explicit {
+	if !options.Explicit && options.Probe {
+		if due, err := loopAnyDue(ctx, options); err != nil || !due {
+			return LoopReport{Sources: []store.LoopSource{}}, err
+		}
+	} else if !options.Explicit {
 		report, err := readLoopSources(ctx, options)
 		if err != nil || options.MaxAge == 0 || !slices.ContainsFunc(report.Sources, func(source store.LoopSource) bool {
 			return loopDue(source, options.MaxAge)
@@ -76,6 +83,37 @@ func SyncLoop(ctx context.Context, options LoopOptions) (LoopReport, error) {
 // loopDue says whether an ordinary read may refresh the source: its last attempt is older than maxAge.
 func loopDue(source store.LoopSource, maxAge time.Duration) bool {
 	return source.Health.AttemptedAt == nil || loopNow().Sub(*source.Health.AttemptedAt) >= maxAge
+}
+
+// loopAnyDue says whether an ordinary run has a selected registered source to refresh. It reads
+// attempt times only, never a registered record, and never locks, migrates or writes.
+func loopAnyDue(ctx context.Context, options LoopOptions) (bool, error) {
+	st, err := loopReadOnly(ctx, options.DBPath)
+	if errors.Is(err, store.ErrNoArchive) {
+		if options.SourceID != 0 {
+			return false, store.ErrKnowledgeSourceUnknown
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	health, readErr := st.KnowledgeSources(ctx, store.LoopKind)
+	if err := errors.Join(readErr, st.Close()); err != nil {
+		return false, err
+	}
+	due, known := false, options.SourceID == 0
+	for _, source := range health {
+		if source.Status == "retained" || (options.SourceID != 0 && source.LocatorID != options.SourceID) {
+			continue
+		}
+		known = true
+		due = due || loopDue(store.LoopSource{Health: source}, options.MaxAge)
+	}
+	if !known {
+		return false, store.ErrKnowledgeSourceUnknown
+	}
+	return due && options.MaxAge > 0, nil
 }
 
 // readLoopSources is the archive-only path: no lock, migration, discovery or projection.

@@ -139,7 +139,8 @@ func compareLoopRaw(ctx context.Context, reader knowledgeReader, state *loopSour
 		if acquirable = identity.RefusalCode == ""; acquirable {
 			source.RawValuePresent = true
 			state.currentDigest = state.digest
-			if state.digest == "" || !state.admitted.matches(record.fingerprint) {
+			// Without an admitted snapshot there is nothing to compare, so nothing is loaded.
+			if source.LastSnapshotID != 0 && !state.admitted.matches(record.fingerprint) {
 				value, err := loopReadValue(ctx, reader, recordID)
 				if err != nil {
 					return err

@@ -146,6 +146,9 @@ func TestLoopSearchRefreshesAfterImplicitSync(t *testing.T) {
 	e := newEnv(t)
 	synced := -1
 	stubLoopSync(t, func(_ int, opts syncer.LoopOptions) (syncer.LoopReport, error) {
+		if !opts.Probe {
+			t.Error("the shared-search refresh read the sources a second time")
+		}
 		if opts.MaxAge > 0 && synced < 0 {
 			synced = 0
 			if db, err := sql.Open("sqlite", e.db); err == nil {

@@ -239,3 +239,62 @@ func TestLoopAgeZeroAndRootlessReads(t *testing.T) {
 		}
 	}
 }
+
+// A caller that reads the sources itself asks only whether a refresh is due: when none is, the
+// registered records are not read at all, so the caller's own read is the only one.
+func TestLoopProbeReadsNoSourceWhenNothingIsDue(t *testing.T) {
+	ctx := context.Background()
+	missing := newDB(t)
+	if report, err := SyncLoop(ctx, LoopOptions{DBPath: missing, MaxAge: time.Hour, Probe: true}); err != nil || len(report.Sources) != 0 {
+		t.Fatalf("probe of a missing archive: %+v %v", report, err)
+	}
+	if _, err := SyncLoop(ctx, LoopOptions{DBPath: missing, SourceID: 1, Probe: true}); !errors.Is(err, store.ErrKnowledgeSourceUnknown) {
+		t.Fatalf("selected source in a missing archive: %v", err)
+	}
+	a := newLoopArchive(t)
+	a.insert(t, "https://synthetic.invalid", "probed", syntheticLoop(t, 1, 1, "first words"))
+	id := explicitLoop(t, a.path, 0).Sources[0].Registration.ID
+	if _, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, SourceID: id + 1, MaxAge: time.Hour, Probe: true}); !errors.Is(err, store.ErrKnowledgeSourceUnknown) {
+		t.Fatalf("unknown selected source: %v", err)
+	}
+	now := loopNow
+	t.Cleanup(func() { loopNow = now })
+	loopNow = func() time.Time { return now().Add(2 * time.Hour) }
+	if report, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, SourceID: id, MaxAge: time.Hour, Probe: true}); err != nil ||
+		report.Unchanged != 1 || len(report.Sources) != 1 {
+		t.Fatalf("due probe did not refresh: %+v %v", report, err)
+	}
+	loopNow = now
+	// The record table is unreadable from here on: only a run that reads no record can succeed.
+	attempts := a.count(t, `select count(*) from knowledge_attempts`)
+	if _, err := a.db.Exec(`alter table records rename to records_moved`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, MaxAge: time.Hour}); err == nil {
+		t.Fatal("a full source read succeeded without the record table")
+	}
+	for _, options := range []LoopOptions{{MaxAge: time.Hour}, {MaxAge: 0}, {MaxAge: time.Hour, SourceID: id}} {
+		options.DBPath, options.Probe = a.path, true
+		if report, err := SyncLoop(ctx, options); err != nil || len(report.Sources) != 0 || report.Skipped != 0 {
+			t.Fatalf("probe %+v read the sources: %+v %v", options, report, err)
+		}
+	}
+	if n := a.count(t, `select count(*) from knowledge_attempts`); n != attempts {
+		t.Fatal("a probe with nothing due began an attempt")
+	}
+	if _, err := a.db.Exec(`alter table knowledge_attempts rename column started_at to moved_at`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, MaxAge: time.Hour, Probe: true}); err == nil {
+		t.Fatal("probe without readable attempts succeeded")
+	}
+	if err := a.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(a.path, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncLoop(ctx, LoopOptions{DBPath: a.path, MaxAge: time.Hour, Probe: true}); err == nil {
+		t.Fatal("probe of an unreadable archive succeeded")
+	}
+}

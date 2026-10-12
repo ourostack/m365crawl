@@ -128,7 +128,8 @@ func (rt *runtime) loopFlags() error {
 // refreshLoop runs the participating refresh of registered sources. A source or archive failure is
 // served as refresh_error beside the retained sources; cancellation is the command's error.
 func (rt *runtime) refreshLoop(sourceID int64) (*loopCoverage, error) {
-	report, refreshErr := runLoopSync(rt.ctx, syncer.LoopOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
+	// Every caller reads the sources again with its rows, so a run with nothing due reads none.
+	report, refreshErr := runLoopSync(rt.ctx, syncer.LoopOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge, Probe: true})
 	if refreshErr == nil {
 		return loopCoverageOf(report.Sources, report.Diagnostics), nil
 	}

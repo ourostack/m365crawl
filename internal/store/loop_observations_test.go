@@ -291,6 +291,22 @@ func TestLoopUnchangedReadLoadsNoValue(t *testing.T) {
 	if source := loopSource(t, s, bID); source.SnapshotMatch != "differs" || *reads != 1 {
 		t.Fatalf("fingerprint without a content hash was trusted: %s reads=%d", source.SnapshotMatch, *reads)
 	}
+	// A source that was never admitted has no snapshot to compare, so its value is never loaded.
+	c := insertLoopRecord(t, s, loopFixtureSource, "c", loopText(t, "charlie words"), "", "")
+	var never int64
+	for _, candidate := range discover(t, s) {
+		if candidate.RecordID == c {
+			attempt := mustBeginLoop(t, s, *candidate.Registration, base)
+			if err := s.RecordLoopFailure(ctx, attempt, "loop_cache_snapshot_unsupported", base); err != nil {
+				t.Fatal(err)
+			}
+			never = attempt.LocatorID
+		}
+	}
+	*reads = 0
+	if source := loopSource(t, s, never); source.SnapshotMatch != "no_admission" || !source.RawValuePresent || *reads != 0 {
+		t.Fatalf("never-admitted source: %s present=%v reads=%d", source.SnapshotMatch, source.RawValuePresent, *reads)
+	}
 	if _, err := s.LoopSources(ctx, 999); !errors.Is(err, ErrKnowledgeSourceUnknown) {
 		t.Fatalf("unknown selected source: %v", err)
 	}
