@@ -565,3 +565,15 @@ func TestMessageAppLoadPreparesOnce(t *testing.T) {
 		t.Fatalf("6 messages cost %d direct queries and %d prepares", c.rows, c.prepares)
 	}
 }
+
+// A reused representation whose stored JSON no longer decodes never becomes last good.
+func TestMessageAppDamagedReuseNotLastGood(t *testing.T) {
+	s := newStore(t)
+	applyApp(t, s, "m1", 1, appSender, appRaw("Alpha")) // mapped, last good
+	applyApp(t, s, "m1", 2, appSender, absentRaw)       // absent clears last good
+	s.qExec(t, `update message_app_observations set projection_json='{"app_id":null}' where state='mapped'`)
+	applyApp(t, s, "m1", 3, appSender, appRaw("Alpha")) // reuses the damaged mapped row
+	if n := countRows(t, s, `select count(*) from message_app_current where last_good_id is not null`); n != 0 {
+		t.Fatalf("a damaged reused representation became last good (%d)", n)
+	}
+}

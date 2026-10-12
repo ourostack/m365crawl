@@ -138,6 +138,7 @@ func publishMessageApplication(ctx context.Context, tx *sql.Tx, id messageIdenti
  where tenant_id=? and user_id=? and conversation_id=? and message_id=? and sender_id=? and raw_present=? and raw_digest=? and mapper_version=?`, key...).
 		Scan(&rowid, &state, &payloadJSON)
 	var payload ApplicationPayload
+	valid := true // a representation this call projects is valid by construction
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		projected, err := projectApplication(ctx, id.MessageID, id.SenderID, raw, rawPresent)
@@ -156,11 +157,11 @@ func publishMessageApplication(ctx context.Context, tx *sql.Tx, id messageIdenti
 	case err != nil:
 		return "", err
 	default:
-		payload, _ = decodePayload(payloadJSON) // a damaged reused row admits no claims; reads report it
+		payload, valid = decodePayload(payloadJSON) // a damaged reused row is never last good; reads report it
 	}
 	keep, lastGood := 1, any(nil)
 	switch {
-	case lastGoodEligible(state, payload):
+	case valid && lastGoodEligible(state, payload):
 		keep, lastGood = 0, rowid
 	case state == AppStateAbsent:
 		keep = 0
