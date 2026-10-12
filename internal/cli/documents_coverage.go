@@ -21,6 +21,7 @@ func mergedOptionalCoverage(notes, documents *noteCoverage) *noteCoverage {
 		RefreshErrors: map[string]syncError{}}
 	out.Sources = append(out.Sources, notes.Sources...)
 	out.Sources = append(out.Sources, documents.Sources...)
+	out.Notices = append(append(out.Notices, notes.Notices...), documents.Notices...)
 	if len(out.Sources) > 0 {
 		out.State = "registered"
 	}

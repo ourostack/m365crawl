@@ -80,6 +80,9 @@ func readJSON(ctx context.Context, source io.Reader, surface Surface, limits rea
 			inner, _ := root["documents_group"].(map[string]any)
 			value = inner["documents"]
 		}
+		if value == nil && emptyServiceResponse(root, surface) {
+			return Result{}, nil
+		}
 	}
 	rows, ok := value.([]any)
 	if !ok {
@@ -118,6 +121,65 @@ func readJSON(ctx context.Context, source io.Reader, surface Surface, limits rea
 		result.Losses = append(result.Losses, Loss{Code: code, Count: losses[code]})
 	}
 	return result, nil
+}
+
+// emptyServiceResponse recognizes a successful Office response whose document
+// container is absent. Office omits the container when it lists no documents;
+// a present but malformed container, an error payload or an unmarked object
+// stays unrecognized.
+func emptyServiceResponse(root map[string]any, surface Surface) bool {
+	if !containerAbsent(root, surface) {
+		return false
+	}
+	if errorData, present := root["error_data"]; present {
+		if details, ok := errorData.(map[string]any); !ok || len(details) != 0 {
+			return false
+		}
+	}
+	marked := false
+	if code, present := root["response_code"]; present {
+		if code != json.Number("0") && code != json.Number("1") {
+			return false
+		}
+		marked = true
+	}
+	if diagnostics, present := root["diagnostics_data"]; present {
+		details, ok := diagnostics.(map[string]any)
+		if !ok {
+			return false
+		}
+		if status, present := details["http_status_code"]; present {
+			if status != json.Number("200") {
+				return false
+			}
+			marked = true
+		}
+	}
+	return marked
+}
+
+func containerAbsent(root map[string]any, surface Surface) bool {
+	path := containerPaths[surface]
+	current := root
+	for _, key := range path[:len(path)-1] {
+		value, present := current[key]
+		if !present {
+			return true
+		}
+		next, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		current = next
+	}
+	_, present := current[path[len(path)-1]]
+	return !present
+}
+
+var containerPaths = map[Surface][]string{
+	Recent:      {"documents", "items"},
+	Shared:      {"shared_documents"},
+	Recommended: {"documents_group", "documents"},
 }
 
 type contextInput struct {

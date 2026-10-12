@@ -126,6 +126,7 @@ type noteCoverage struct {
 	Sources       []noteSourceItem     `json:"sources"`
 	RefreshError  *syncError           `json:"refresh_error,omitempty"`
 	RefreshErrors map[string]syncError `json:"refresh_errors,omitempty"`
+	Notices       []string             `json:"notices,omitempty"`
 }
 
 func notesCoverage(sources []store.KnowledgeSource) *noteCoverage {
@@ -384,6 +385,9 @@ func (rt *runtime) renderNoteCoverage(coverage *noteCoverage) {
 		rows = append(rows, []string{strconv.FormatInt(source.ID, 10), source.Status, source.Coverage, source.Reason})
 	}
 	render.Table(rt.stdout, []string{"source", "status", "coverage", "reason"}, rows, rt.color)
+	for _, notice := range coverage.Notices {
+		_, _ = fmt.Fprintf(rt.stdout, "notice: %s\n", notice)
+	}
 	if coverage.RefreshError != nil {
 		_, _ = fmt.Fprintf(rt.stdout, "%s refresh error: %s: %s (serving retained archive)\n", name, coverage.RefreshError.Code, coverage.RefreshError.Message)
 	}

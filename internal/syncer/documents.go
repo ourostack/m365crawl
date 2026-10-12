@@ -207,15 +207,17 @@ func captureDocuments(ctx context.Context, st *store.Store, attempt store.Knowle
 	if digest == "" || metadata.AcquiredAt == nil || metadata.SourceObservedAt == nil {
 		return "failed", recordDocumentFailure(ctx, st, attempt, signature, errors.New("documents: capture result unavailable"))
 	}
-	status := "complete"
+	status, reason := "complete", ""
 	if len(result.Losses) > 0 {
 		status = "partial"
+	} else if len(result.Documents) == 0 {
+		reason = officedocuments.NoDocumentsListed
 	}
 	if previous.AdmittedID > 0 && previous.ContentDigest == digest && previous.Qualification == store.DocumentQualification {
 		status = "unchanged"
 		result = officedocuments.Result{}
 	}
-	outcome := store.KnowledgeOutcome{Status: status, ContentDigest: digest, AcquisitionSignature: observedSignature,
+	outcome := store.KnowledgeOutcome{Status: status, Reason: reason, ContentDigest: digest, AcquisitionSignature: observedSignature,
 		Qualification: store.DocumentQualification, SourceObservedAt: *metadata.SourceObservedAt, At: documentsNow().UTC()}
 	if err := st.CommitDocumentObservations(ctx, attempt, outcome, result, metadata); err != nil {
 		if errors.Is(err, store.ErrStaleKnowledgeAttempt) {

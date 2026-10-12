@@ -99,7 +99,7 @@ Every read/source result carries `source_coverage` outside `--fields`, item boun
 m365crawl docs sync [--root DIR | --source-id ID]
 ```
 
-Explicit registration/capture. A supplied directory contains `recent.json`, `shared.json`, `recommended.json` and/or `dialog.json`; other files are ignored. `--source-id` refreshes only one positive registered source and cannot combine with `--root`. Returns `captured`, `unchanged`, `skipped`, `failed` and `source_coverage`. Unrecognized or unsafe peers remain source failures, not empty successes. Directory, archive and cancellation errors remain command failures.
+Explicit registration/capture. A supplied directory contains `recent.json`, `shared.json`, `recommended.json` and/or `dialog.json`; other files are ignored. `--source-id` refreshes only one positive registered source and cannot combine with `--root`. Returns `captured`, `unchanged`, `skipped`, `failed` and `source_coverage`. Unrecognized or unsafe peers remain source failures, not empty successes. A recognized successful Office response that lists no documents (a numeric `response_code` or `http_status_code` 200, no error details, and no document list) is a complete capture with zero rows and reason `office_response_listed_no_documents`, explained by a `source_coverage.notices` entry; earlier observations from that source stay in the archive with `retained` true. The reason describes that saved response, not the account's documents in the cloud. Directory, archive and cancellation errors remain command failures.
 
 ### docs list
 
@@ -137,7 +137,7 @@ Read the native representation and up to100 exact URL reference occurrences, wit
 m365crawl docs sources [--source-id ID]
 ```
 
-Inspect source IDs, kind, admitted/attempted state, coverage and losses. Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
+Inspect source IDs, kind, admitted/attempted state, coverage, reason and losses. Reason `office_response_listed_no_documents` on a complete source means its last saved Office response listed no documents. Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
 
 `--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
 

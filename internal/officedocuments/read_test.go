@@ -306,3 +306,56 @@ func TestContextInputDoesNotReadAfterCancellation(t *testing.T) {
 		t.Fatalf("cancelled input advanced source: n=%d, error=%v, remaining=%d", n, err, source.Len())
 	}
 }
+
+func TestReadJSONSuccessfulResponseWithoutDocumentContainerIsEmpty(t *testing.T) {
+	for _, tt := range []struct {
+		surface Surface
+		json    string
+	}{
+		{Recent, `{"response_code":1,"delta_token":"synthetic-token","diagnostics_data":{"http_status_code":200}}`},
+		{Recent, `{"response_code":0,"documents":{}}`},
+		{Recent, `{"diagnostics_data":{"http_status_code":200,"other":"x"}}`},
+		{Shared, `{"response_code":0,"error_data":{},"diagnostics_data":{"http_status_code":200}}`},
+		{Recommended, `{"response_code":0,"error_data":{},"documents_group":{"title":"Synthetic","ranker":"r","digest":"d"}}`},
+		{Recommended, `{"response_code":1,"diagnostics_data":{}}`},
+	} {
+		got, err := ReadJSON(context.Background(), strings.NewReader(tt.json), tt.surface)
+		if err != nil || len(got.Documents) != 0 || len(got.Losses) != 0 {
+			t.Fatalf("successful empty %s response %s = %#v, %v", tt.surface, tt.json, got, err)
+		}
+	}
+}
+
+func TestReadJSONUnrecognizedResponsesWithoutDocumentsStillRefuse(t *testing.T) {
+	for _, tt := range []struct {
+		surface Surface
+		json    string
+	}{
+		{Recent, `{"delta_token":"synthetic-token"}`},
+		{Recent, `{"diagnostics_data":{}}`},
+		{Recent, `{"response_code":"1"}`},
+		{Recent, `{"response_code":2}`},
+		{Recent, `{"response_code":1.5}`},
+		{Recent, `{"response_code":null}`},
+		{Recent, `{"response_code":1,"error_data":{"code":"synthetic"}}`},
+		{Recent, `{"response_code":1,"error_data":[]}`},
+		{Recent, `{"response_code":1,"error_data":null}`},
+		{Recent, `{"response_code":1,"diagnostics_data":[]}`},
+		{Recent, `{"response_code":1,"diagnostics_data":{"http_status_code":500}}`},
+		{Recent, `{"diagnostics_data":{"http_status_code":"200"}}`},
+		{Recent, `{"response_code":1,"documents":[]}`},
+		{Recent, `{"response_code":1,"documents":{"items":null}}`},
+		{Recent, `{"response_code":1,"documents":{"items":{}}}`},
+		{Shared, `{"response_code":0,"shared_documents":{}}`},
+		{Shared, `{"response_code":0,"shared_documents":null}`},
+		{Recommended, `{"response_code":0,"documents_group":null}`},
+		{Recommended, `{"response_code":0,"documents_group":{"documents":{}}}`},
+		{Dialog, `{"response_code":0}`},
+	} {
+		got, err := ReadJSON(context.Background(), strings.NewReader(tt.json), tt.surface)
+		var typed *ReadError
+		if !errors.As(err, &typed) || typed.Code != "office_json_unrecognized" || !reflect.DeepEqual(got, Result{}) {
+			t.Fatalf("unrecognized %s response %s = %#v, %v", tt.surface, tt.json, got, err)
+		}
+	}
+}

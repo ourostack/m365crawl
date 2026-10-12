@@ -26,7 +26,7 @@ type documentsGroup struct {
 func (documentsGroup) Help() string {
 	return "Documents are retained Office recent/shared/recommended/dialog metadata observations, not original document text, resolved identities or a complete library export.\n" +
 		"Register once with `docs sync` for named Mac Office caches, or `docs sync --root DIR` for ordinary local recent.json/shared.json/recommended.json/dialog.json copies. Windows accepts qualified explicit ordinary NTFS inputs, not default Office discovery. Unknown/provider/reparse/dataless inputs are refused; no document URL or friendly path is opened, no hydration or network fallback.\n" +
-		"Then use `docs list --query WORDS --limit 10`, `docs search WORDS`, or `search WORDS --source documents`. Follow a returned document-observation:ID with `docs show document-observation:ID`; `docs sources` lists source IDs and coverage. Ordinary reads refresh only registered sources; --max-age 0 is archive-only, and docs sources never captures. Partial/failed inputs keep last-good observations.\n" +
+		"Then use `docs list --query WORDS --limit 10`, `docs search WORDS`, or `search WORDS --source documents`. Follow a returned document-observation:ID with `docs show document-observation:ID`; `docs sources` lists source IDs and coverage. Ordinary reads refresh only registered sources; --max-age 0 is archive-only, and docs sources never captures. Partial/failed inputs keep last-good observations. A successful Office response that lists no documents is complete with reason office_response_listed_no_documents (earlier rows become retained); it does not mean the account has none.\n" +
 		"--since/--until use native document modification time, not opened/shared/file/capture time; unknown dates do not match bounded windows. Native sharing/activity are source claims, not counted new events. Account/author/chat/mail filters cannot qualify these unresolved documents. Text state is not_captured; there is no docs read/text command."
 }
 
@@ -103,11 +103,19 @@ var runDocumentsSync = syncer.SyncDocuments
 func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := notesCoverage(sources)
 	out.Scope = "office_json_metadata"
+	listedNone := false
 	for i := range sources {
 		out.Sources[i].Kind = sources[i].Kind
+		listedNone = listedNone || sources[i].Reason == officedocuments.NoDocumentsListed
+	}
+	if listedNone {
+		out.Notices = append(out.Notices, documentsListedNoneNotice)
 	}
 	return out
 }
+
+const documentsListedNoneNotice = officedocuments.NoDocumentsListed + ": each source with this reason last saved a successful Office response that listed no documents, so its capture is complete with zero rows. " +
+	"This describes the saved response, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
 
 func documentError(err error) error {
 	var source *officecapture.ReadError

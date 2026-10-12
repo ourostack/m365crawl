@@ -55,6 +55,11 @@ type Document struct {
 	Sharing                                                 *Sharing
 }
 
+// NoDocumentsListed is the source reason for a complete capture whose saved
+// response listed no documents. It says nothing about the account's documents
+// in the cloud.
+const NoDocumentsListed = "office_response_listed_no_documents"
+
 type Loss struct {
 	Code  string
 	Count int
