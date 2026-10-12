@@ -20,6 +20,11 @@ func (rt *runtime) renderDocumentDetails(result *listResult) error {
 		_, _ = fmt.Fprintf(rt.stdout, "native source claims:\n%s\n", encoded)
 		_, _ = fmt.Fprintf(rt.stdout, "URL reference occurrences: %d (returned %d; truncated=%t)\n",
 			detail.ReferencesTotal, len(detail.References), detail.ReferencesTruncated)
+		_, _ = fmt.Fprintf(rt.stdout, "surface %s: %s\nassociation %s: %s\nclocks: %s\n", detail.Surface, documentSurfaces[detail.Surface],
+			detail.AssociationState, documentAssociationHelp, documentClocksHelp)
+		if detail.Native.Sharing != nil {
+			_, _ = fmt.Fprintln(rt.stdout, "Sharing.Type is Office's SharingType number as written, kept unmapped")
+		}
 	}
 	return nil
 }

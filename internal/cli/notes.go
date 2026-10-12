@@ -100,7 +100,7 @@ type noteDetailItem struct {
 
 type noteSourceItem struct {
 	Kind                 string         `json:"kind,omitempty"`
-	ID                   int64          `json:"source_id"`
+	ID                   *int64         `json:"source_id"` // null until a capture of the locator is admitted
 	LocatorID            int64          `json:"locator_id"`
 	AttemptID            int64          `json:"attempt_id"`
 	AdmittedID           int64          `json:"admitted_id"`
@@ -118,6 +118,33 @@ type noteSourceItem struct {
 	CompleteAt           *time.Time     `json:"complete_at"`
 	SourceObservedAt     *time.Time     `json:"source_observed_at"`
 	Losses               map[string]int `json:"losses"`
+	// LocatorTail is the locator's last two path elements, enough to tell sources apart in a table.
+	LocatorTail string `json:"locator_tail"`
+	// Fix and Effect are a failed document source's remedy and what the failure does to listed
+	// documents; omitted for healthy sources.
+	Fix    string `json:"fix,omitempty"`
+	Effect string `json:"effect,omitempty"`
+}
+
+// sourceID is a source ID as JSON: null for a locator that has no admitted source yet.
+func sourceID(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
+}
+
+// locatorTail is the last two elements of a source path, "account/x-rec-en-US-sr.json".
+func locatorTail(locator string) string {
+	parts := strings.FieldsFunc(locator, func(r rune) bool { return r == '/' || r == '\\' })
+	return strings.Join(parts[max(len(parts)-2, 0):], "/")
+}
+
+func sourceLabel(id *int64) string {
+	if id == nil {
+		return "-"
+	}
+	return strconv.FormatInt(*id, 10)
 }
 
 type noteCoverage struct {
@@ -133,7 +160,7 @@ func notesCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := &noteCoverage{Scope: "onenote_indexed_cache", State: "unknown", Sources: []noteSourceItem{}}
 	for _, source := range sources {
 		out.State = "registered"
-		out.Sources = append(out.Sources, noteSourceItem{ID: source.ID, LocatorID: source.LocatorID,
+		out.Sources = append(out.Sources, noteSourceItem{Kind: source.Kind, ID: sourceID(source.ID), LocatorID: source.LocatorID, LocatorTail: locatorTail(source.Locator),
 			AttemptID: source.AttemptID, AdmittedID: source.AdmittedID, Platform: source.Platform, Locator: source.Locator,
 			Boundary: source.Boundary, Status: source.Status, Coverage: source.Coverage, Qualification: source.Qualification,
 			AcquisitionSignature: source.AcquisitionSignature, ContentDigest: source.ContentDigest, Reason: source.Reason,
@@ -251,6 +278,7 @@ type notesListCmd struct {
 	Since  string `help:"Native modified time at or after this date/time/relative age."`
 	Until  string `help:"Native modified time before this time; unknown timestamps are excluded."`
 	Limit  int    `default:"50" help:"Maximum notes to return; check truncated."`
+	label  string // the result label: notes search runs this command under its own name
 }
 
 func (c *notesListCmd) Run(rt *runtime) error {
@@ -268,7 +296,7 @@ func (c *notesListCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
-	return rt.notesRead("notes list", c.Source, func(st *store.Store) (*listResult, error) {
+	return rt.notesRead(firstOf(c.label, "notes list"), c.Source, func(st *store.Store) (*listResult, error) {
 		if st == nil {
 			return newList(nil, false), nil
 		}
@@ -296,7 +324,7 @@ func (c *notesSearchCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "notes search", ""); err != nil {
 		return err
 	}
-	return (&notesListCmd{Source: c.Source, Query: c.Query, Since: c.Since, Until: c.Until, Limit: c.Limit}).Run(rt)
+	return (&notesListCmd{Source: c.Source, Query: c.Query, Since: c.Since, Until: c.Until, Limit: c.Limit, label: "notes search"}).Run(rt)
 }
 
 type notesShowCmd struct {
@@ -382,9 +410,14 @@ func (rt *runtime) renderNoteCoverage(coverage *noteCoverage) {
 	_, _ = fmt.Fprintf(rt.stdout, "%s coverage: %s (%s)\n", name, coverage.State, coverage.Scope)
 	rows := [][]string{}
 	for _, source := range coverage.Sources {
-		rows = append(rows, []string{strconv.FormatInt(source.ID, 10), source.Status, source.Coverage, source.Reason})
+		rows = append(rows, []string{sourceLabel(source.ID), source.Kind, source.Status, source.Coverage, source.LocatorTail, source.Reason})
 	}
-	render.Table(rt.stdout, []string{"source", "status", "coverage", "reason"}, rows, rt.color)
+	render.Table(rt.stdout, []string{"source", "kind", "status", "coverage", "locator", "reason"}, rows, rt.color)
+	for _, source := range coverage.Sources {
+		if source.Fix != "" {
+			_, _ = fmt.Fprintf(rt.stdout, "%s %s: %s %s. %s.\n  fix: %s\n", source.Kind, source.LocatorTail, source.Status, source.Reason, source.Effect, source.Fix)
+		}
+	}
 	for _, notice := range coverage.Notices {
 		_, _ = fmt.Fprintf(rt.stdout, "notice: %s\n", notice)
 	}

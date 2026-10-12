@@ -10,8 +10,8 @@ at                source       where           who               thread         
 2023-11-09 08:00  mail         Inbox           ann@example.test  outlook/SearchTest:205                                                                                     Bare hello
 
 notes and documents coverage: unknown (registered_optional_sources)
-source  status  coverage  reason
-------  ------  --------  ------
+source  kind  status  coverage  locator  reason
+------  ----  ------  --------  -------  ------
 no rows
 8 items
 archive age: <age>

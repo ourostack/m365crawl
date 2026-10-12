@@ -335,8 +335,8 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.Text})
 		case noteSourceItem:
-			cols, textCol = []string{"source", "status", "coverage", "locator", "reason"}, -1
-			rows = append(rows, []string{strconv.FormatInt(x.ID, 10), x.Status, x.Coverage, x.Locator, x.Reason})
+			cols, textCol = []string{"source", "kind", "status", "coverage", "locator", "reason"}, -1
+			rows = append(rows, []string{sourceLabel(x.ID), x.Kind, x.Status, x.Coverage, x.LocatorTail, x.Reason})
 		case conversationItem:
 			cols, textCol = []string{"last_message_at", "kind", "name", "members"}, -1
 			rows = append(rows, []string{stamp(x.LastMessageAt), x.Kind, x.DisplayName, strconv.Itoa(x.MemberCount)})
