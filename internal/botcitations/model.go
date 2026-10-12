@@ -15,8 +15,8 @@ type Observation struct {
 }
 
 type Loss struct {
-	Code  string
-	Count int
+	Code  string `json:"code"`
+	Count int    `json:"count"`
 }
 
 type Result struct {

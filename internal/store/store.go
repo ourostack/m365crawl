@@ -128,8 +128,10 @@ var chmodFile = os.Chmod
 // in one transaction (SQLite's ALTER TABLE is transactional), so a failure keeps none of them.
 // Version 8 adds mail conversation ids and recipient roles. Its conversation index is created
 // here, after the column exists, because the schema DDL runs before migration on old archives.
+// Version 12 adds messages.raw_digest, NULL until the application backfill or a changed message
+// fills it.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has, digest, redacted, conversation, role, conversationIndex int
+	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -137,10 +139,14 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('records') where name='value_redacted'),
   (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
   (select count(*) from pragma_table_info('mail_recipients') where name='role'),
-  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex); err != nil {
+  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation'),
+  (select count(*) from pragma_table_info('messages') where name='raw_digest')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest); err != nil {
 		return err
 	}
 	var stmts []string
+	if messageDigest == 0 {
+		stmts = append(stmts, `alter table messages add column raw_digest text`)
+	}
 	if digest == 0 {
 		stmts = append(stmts, `alter table records add column raw_digest blob`)
 	}
