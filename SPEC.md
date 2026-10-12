@@ -130,7 +130,7 @@ Schema 12 adds `messages.raw_digest` (the 32-byte SHA-256 of the archived native
 | `typed_memo` | `(source, database, key_json)` | Internal read memory (section 4.1): not part of the contract. `digest`, `effects`. |
 | `message_fts`, `conversation_fts`, `transcript_fts` | rowid of the owning row | FTS5 indexes over message text, conversation titles and transcript cues (`speaker`, `text`) |
 
-Every table also carries internal bookkeeping columns (`content_hash`, and `updated_at` except on `records`, where it is the time the value last changed) that are not part of the contract. The `sql` command can read every table above. Column names listed here are stable; adding a column is compatible, renaming or removing one is a breaking change recorded in the changelog.
+Every table also carries internal bookkeeping columns (`content_hash`, and `updated_at` except on `records`, where it is the time the value last changed) that are not part of the contract. The `sql` command can read every table above; it prints BLOB values (such as `records.raw_digest` and `messages.raw_digest`) as lowercase hex in every output format. Column names listed here are stable; adding a column is compatible, renaming or removing one is a breaking change recorded in the changelog.
 
 A message's `text` (`content_text`) is plain text derived from the HTML body: tags dropped, entities decoded, an @-mention shown as the person's name, whitespace collapsed. For bot cards (Adaptive, hero and connector cards), call and meeting events, thread events and call recording or transcript notices, `text` is a readable summary (`Call ended · 23m`, `Member added`), never raw JSON. The original record stays in `raw_json`.
 

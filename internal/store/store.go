@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -303,7 +304,7 @@ func rawOrNil(b []byte) any {
 // SQL runs a read-only query and streams its rows, stopping once limit rows are read; truncated
 // says whether more rows existed. It is only available on a store opened with OpenReadOnly. The
 // statement check (CheckSQL) is a friendly early error; the connection is also read-only at the
-// file level, which is what actually stops writes.
+// file level, which is what actually stops writes. BLOB values come back as lowercase hex.
 func (s *Store) SQL(ctx context.Context, q string, limit int) (cols []string, out [][]any, truncated bool, err error) {
 	if !s.readOnly {
 		return nil, nil, false, errors.New("sql requires a read-only archive connection")
@@ -331,8 +332,8 @@ func (s *Store) SQL(ctx context.Context, q string, limit int) (cols []string, ou
 		}
 		_ = rows.Scan(ptrs...) // scanning into *any cannot fail
 		for i, v := range values {
-			if b, ok := v.([]byte); ok {
-				values[i] = string(b)
+			if b, ok := v.([]byte); ok { // a BLOB: hex keeps digests readable and intact in JSON
+				values[i] = hex.EncodeToString(b)
 			}
 		}
 		out = append(out, values)

@@ -470,7 +470,7 @@ m365crawl sql <query> [flags]
 | `<query>` | One SELECT (or WITH, EXPLAIN or VALUES) statement. |
 | `--limit=50` | Maximum rows to return; the query stops there and `truncated` says whether more rows exist. |
 
-Result: `{"columns", "rows", "count", "truncated"}`. It stops reading at `--limit`, so there is no `total`. Returns every account's rows regardless of `--account`. The mail tables are `mail_messages`, `mail_folders`, `mail_recipients`, `mail_attachments` and `mail_coverage`.
+Result: `{"columns", "rows", "count", "truncated"}`. It stops reading at `--limit`, so there is no `total`. BLOB values (such as `messages.raw_digest`) are printed as lowercase hex in every format. Returns every account's rows regardless of `--account`. The mail tables are `mail_messages`, `mail_folders`, `mail_recipients`, `mail_attachments` and `mail_coverage`.
 
 ```sh
 m365crawl sql "select kind, count(*) as n from conversations group by kind"

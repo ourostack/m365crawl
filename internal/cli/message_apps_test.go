@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -434,4 +436,26 @@ func TestApplicationCoverageMapperVersion(t *testing.T) {
 	if c := applicationCoverageOf(nil); c.MapperVersion != store.ActiveApplicationVersion() {
 		t.Fatalf("unknown coverage mapper version = %d", c.MapperVersion)
 	}
+}
+
+// sql prints a blob column such as messages.raw_digest as lowercase hex in every format, never as
+// raw bytes that JSON would replace.
+func TestSQLRendersBlobsAsHex(t *testing.T) {
+	e := appEnv(t)
+	want := digestHex(appCitRaw)
+	q := "select raw_digest from messages where id='app-1'"
+	m := jsonRun(t, e, "sql", q)
+	if row := m["rows"].([]any)[0].([]any); row[0] != want {
+		t.Fatalf("json raw_digest = %v, want %s", row[0], want)
+	}
+	for _, format := range []string{"text", "log"} {
+		if _, out, _ := e.run("--max-age", "0", "--format", format, "sql", q); !strings.Contains(out, want) {
+			t.Fatalf("%s output lacks %s:\n%s", format, want, out)
+		}
+	}
+}
+
+func digestHex(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
