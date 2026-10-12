@@ -13,15 +13,17 @@ type OverviewCounts struct {
 var overviewCountQueries = []struct {
 	table, query string
 	into         func(*OverviewCounts) *int
+	byTenant     bool // the query takes the tenant: only Teams people carry one
 }{
-	{"note_entities", `select count(*) from note_entities where type=1`, func(c *OverviewCounts) *int { return &c.Notes }},
-	{"document_observations", `select count(*) from document_observations`, func(c *OverviewCounts) *int { return &c.Documents }},
-	{"people_observations", `select count(*) from people_observations`, func(c *OverviewCounts) *int { return &c.PeopleObservations }},
-	{"people", `select count(*) from people`, func(c *OverviewCounts) *int { return &c.TeamsPeople }},
+	{"note_entities", `select count(*) from note_entities where type=1`, func(c *OverviewCounts) *int { return &c.Notes }, false},
+	{"document_observations", `select count(*) from document_observations`, func(c *OverviewCounts) *int { return &c.Documents }, false},
+	{"people_observations", `select count(*) from people_observations`, func(c *OverviewCounts) *int { return &c.PeopleObservations }, false},
+	{"people", `select count(*) from people where ? in ('', tenant_id)`, func(c *OverviewCounts) *int { return &c.TeamsPeople }, true},
 }
 
-// OverviewCounts counts the archive's notes, documents and people. It only reads.
-func (s *Store) OverviewCounts(ctx context.Context) (OverviewCounts, error) {
+// OverviewCounts counts the archive's notes, documents and people. A non-empty tenant narrows the
+// Teams people; nothing else in it records a tenant. It only reads.
+func (s *Store) OverviewCounts(ctx context.Context, tenant string) (OverviewCounts, error) {
 	var out OverviewCounts
 	for _, q := range overviewCountQueries {
 		var present bool
@@ -31,7 +33,11 @@ func (s *Store) OverviewCounts(ctx context.Context) (OverviewCounts, error) {
 		if !present {
 			continue
 		}
-		if err := s.db.QueryRowContext(ctx, q.query).Scan(q.into(&out)); err != nil {
+		var args []any
+		if q.byTenant {
+			args = append(args, tenant)
+		}
+		if err := s.db.QueryRowContext(ctx, q.query, args...).Scan(q.into(&out)); err != nil {
 			return OverviewCounts{}, err
 		}
 	}

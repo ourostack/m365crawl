@@ -196,3 +196,26 @@ func TestOverviewTranscriptsAndEmptyOrScopedSources(t *testing.T) {
 		t.Fatalf("scoped documents row = %v", docs)
 	}
 }
+
+// Under --account the overview counts only that tenant's Teams people and says which rows it does not narrow.
+func TestOverviewAccountScopesTeamsPeopleAndNamesWhatItDoesNot(t *testing.T) {
+	e := newEnv(t)
+	teamsArchive(t, e)
+	seedTranscripts(t, e)
+	all := overviewSourceOf(t, e, 5)["people"].(float64)
+	e.exec(`insert into people(tenant_id,id,display_name) values('another-tenant','8:orgid:elsewhere','Elsewhere')`)
+	if got := overviewSourceOf(t, e, 5)["people"].(float64); got != all+1 {
+		t.Fatalf("unscoped people = %v, want %v", got, all+1)
+	}
+	scoped := overviewSourceOf(t, e, 5, "--account", tenantA+"/"+userA)
+	if scoped["people"].(float64) != all || !strings.Contains(scoped["note"].(string), "Teams people are narrowed to the --account tenant") ||
+		!strings.Contains(scoped["note"].(string), "mail correspondents are not narrowed by --account") {
+		t.Fatalf("scoped people row = %v", scoped)
+	}
+	if tr := overviewSourceOf(t, e, 6, "--account", tenantA+"/"+userA); !strings.Contains(tr["note"].(string), "not narrowed by --account") {
+		t.Fatalf("scoped transcripts row = %v", tr)
+	}
+	if ppl := overviewSourceOf(t, e, 5); ppl["note"] != nil {
+		t.Fatalf("unscoped people row has a scope note: %v", ppl)
+	}
+}

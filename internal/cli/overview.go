@@ -171,7 +171,11 @@ func (overviewCmd) Run(rt *runtime) error {
 // already holds: no source is read or captured.
 // chatsSynced is the chats row's last sync, which people inherit when no native capture is newer.
 func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]overviewSource, error) {
-	counts, err := st.OverviewCounts(rt.ctx)
+	tenant := ""
+	if rt.account != nil {
+		tenant = rt.account.TenantID
+	}
+	counts, err := st.OverviewCounts(rt.ctx, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +220,9 @@ func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]
 			ppl.Note += "; native Outlook observations are " + unscoped
 		}
 	}
+	if rt.account != nil {
+		ppl.Note = withNote(ppl.Note, "Teams people are narrowed to the --account tenant; mail correspondents are not narrowed by --account")
+	}
 	out = append(out, ppl)
 	tr := overviewSource{Source: "transcripts", State: overviewEmpty, Calls: intPtr(0), Parts: intPtr(0), Fetched: intPtr(0),
 		Note: "no recorded meetings in the archive yet: run m365crawl sync"}
@@ -225,6 +232,9 @@ func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]
 		if transcripts.Fetched == 0 {
 			tr.Note = "transcript text is fetched explicitly: m365crawl transcripts lists meetings, transcripts fetch <meeting> reads one"
 		}
+	}
+	if rt.account != nil {
+		tr.Note = withNote(tr.Note, "not narrowed by --account")
 	}
 	return append(out, tr), nil
 }
@@ -253,7 +263,7 @@ func registeredSource(name string, sources []store.KnowledgeSource, rows int, no
 		src.State = overviewEmpty
 	}
 	if unscoped != "" && len(sources) > 0 {
-		src.Note = strings.TrimPrefix(src.Note+"; "+unscoped, "; ")
+		src.Note = withNote(src.Note, unscoped)
 	}
 	return src
 }
@@ -481,3 +491,6 @@ func registeredHolds(rows int, one, many string, s overviewSource) string {
 	}
 	return holds
 }
+
+// withNote appends a clause to a row's note.
+func withNote(note, clause string) string { return strings.TrimPrefix(note+"; "+clause, "; ") }
