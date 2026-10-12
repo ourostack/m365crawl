@@ -96,6 +96,9 @@ func (rt *runtime) renderText(label string, v any) error {
 			if r.Note != "" {
 				_, _ = fmt.Fprintf(w, "note: %s\n", r.Note)
 			}
+			for _, notice := range r.Notices {
+				_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+notice, color))
+			}
 		} else {
 			metaLines(w, r.meta, color)
 		}
