@@ -163,7 +163,7 @@ func TestApplicationMessageRoutes(t *testing.T) {
 
 func TestApplicationNotDerivedAndFailedText(t *testing.T) {
 	e := appEnv(t)
-	e.exec(`delete from message_app_current where message_id='plain-1'`)
+	e.exec(`delete from message_app_current where message_rowid=(select rowid from messages where id='plain-1')`)
 	seedTeams(t, e, nil, appMsg(appChat, "bad-1", "evidence broken", `{"properties":{},"properties":{}}`, appT0.Add(2*time.Minute)))
 	m := jsonRun(t, e, "messages", "--conversation", appChat)
 	nd := byID(t, items(t, m), "plain-1")["app_observation"].(map[string]any)

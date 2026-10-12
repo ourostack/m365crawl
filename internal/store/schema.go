@@ -95,7 +95,7 @@ create table if not exists messages(
   raw_json text,
   content_hash text not null default '',
   updated_at text not null,
-  raw_digest text,
+  raw_digest blob,
   primary key(tenant_id, user_id, conversation_id, id)
 );
 create index if not exists messages_sent_at on messages(sent_at desc);

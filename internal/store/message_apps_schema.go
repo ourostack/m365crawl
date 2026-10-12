@@ -28,7 +28,12 @@ const messageAppKey = "message_app_mapper_version"
 // per-message current and last-good pointers. A representation is unique by the complete message
 // key, the source sender, whether raw JSON was present, the SHA256 of the exact retained raw bytes
 // (empty when raw is absent) and the mapper version; it is never updated or deleted. rowid is the
-// public observation id (message-app-observation:N), which `sql` can read back.
+// public observation id (message-app-observation:N), which `sql` can read back. The pointers are
+// keyed by the message's rowid, which is stable because messages are never deleted and the archive
+// is never vacuumed (the text index relies on the same), so publishing appends instead of inserting
+// into a string-keyed b-tree; reads still check every representation against the message's key.
+// The pointers are not declared foreign keys: SQLite's checks doubled the cost of a large sync, and
+// a read already reports a dangling or inconsistent pointer as teams_app_projection_corrupt.
 const messageApplicationsSchemaDDL = `
 create table if not exists message_app_observations(
  rowid integer primary key,
@@ -47,13 +52,9 @@ create table if not exists message_app_observations(
  unique(tenant_id,user_id,conversation_id,message_id,sender_id,raw_present,raw_digest,mapper_version)
 );
 create table if not exists message_app_current(
- tenant_id text not null,
- user_id text not null,
- conversation_id text not null,
- message_id text not null,
- current_id integer not null references message_app_observations(rowid),
- last_good_id integer references message_app_observations(rowid),
- primary key(tenant_id,user_id,conversation_id,message_id)
+ message_rowid integer primary key,
+ current_id integer not null,
+ last_good_id integer
 );
 `
 

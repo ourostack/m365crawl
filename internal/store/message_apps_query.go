@@ -15,8 +15,8 @@ const (
 	appSchemaQuery = `select
  (select count(*) from sqlite_master where type='table' and name in ('message_app_observations','message_app_current','meta')),
  (select count(*) from pragma_table_info('messages') where name='raw_digest')`
-	appFactsQuery = `select m.raw_json is not null, coalesce(m.raw_digest,''), m.raw_digest is not null, coalesce(p.current_id,0), coalesce(p.last_good_id,0)
- from messages m left join message_app_current p on p.tenant_id=m.tenant_id and p.user_id=m.user_id and p.conversation_id=m.conversation_id and p.message_id=m.id
+	appFactsQuery = `select m.raw_json is not null, coalesce(lower(hex(m.raw_digest)),''), m.raw_digest is not null, coalesce(p.current_id,0), coalesce(p.last_good_id,0)
+ from messages m left join message_app_current p on p.message_rowid=m.rowid
  where m.tenant_id=? and m.user_id=? and m.conversation_id=? and m.id=?`
 	// legacyAppFactsQuery reads an archive from before the evidence tables: raw presence only.
 	legacyAppFactsQuery    = `select m.raw_json is not null, '', 0, 0, 0 from messages m where m.tenant_id=? and m.user_id=? and m.conversation_id=? and m.id=?`

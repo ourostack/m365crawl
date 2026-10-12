@@ -162,7 +162,7 @@ func TestMessageAppRevisionPointers(t *testing.T) {
 		applyApp(t, s, "m2", 1, appSender, appRaw("Other"))
 		applyApp(t, s, "m1", 2, appSender, failedRaw)
 		other := appEnvelope(t, s, "m2").Served.ID
-		s.qExec(t, `update message_app_current set last_good_id=`+strconv.FormatInt(other, 10)+` where message_id='m1'`)
+		s.qExec(t, `update message_app_current set last_good_id=`+strconv.FormatInt(other, 10)+` where message_rowid=(select rowid from messages where id='m1')`)
 		env := appEnvelope(t, s, "m1")
 		if env.State != AppStateFailed || env.FailureCode != AppProjectionCorrupt || env.Served != nil || env.Retained {
 			t.Fatalf("wrong-group pointer served: %+v", env)
@@ -238,11 +238,12 @@ func TestMessageAppAcceptedRevisionOnly(t *testing.T) {
 	}
 
 	// A retained SQL empty string is present empty raw: its digest is the SHA256 of no bytes.
+	m3 := int64(countRows(t, s, `select rowid from messages where id='m3'`))
 	tx, err := s.db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := publishMessageApplication(context.Background(), tx, messageIdentity{acctA.TenantID, acctA.UserID, appConversation, "m3", appSender}, []byte{}, true, base)
+	state, err := publishMessageApplication(context.Background(), tx, m3, messageIdentity{acctA.TenantID, acctA.UserID, appConversation, "m3", appSender}, []byte{}, true, base)
 	if err != nil || state != AppStateFailed {
 		t.Fatalf("publish present empty: %s %v", state, err)
 	}
@@ -300,7 +301,7 @@ func TestMessageAppCorruptStoredEvidence(t *testing.T) {
 		{"digest", `update message_app_observations set raw_digest='00'`},
 		{"sender", `update message_app_observations set sender_id='someone-else'`},
 		{"group", `update message_app_observations set message_id='other'`},
-		{"missing-current-row", `pragma foreign_keys=off; update message_app_current set current_id=999`},
+		{"missing-current-row", `pragma foreign_keys=off; update message_app_current set current_id=999 where message_rowid=(select rowid from messages where id='m1'); update message_app_observations set rowid=rowid`},
 		{"raw-present-mismatch", `update message_app_observations set raw_present=0`},
 	}
 	for _, tc := range cases {
@@ -308,7 +309,7 @@ func TestMessageAppCorruptStoredEvidence(t *testing.T) {
 			s := newStore(t)
 			applyApp(t, s, "m1", 1, appSender, `{"properties":{"fromAppMetadata":{"id":"app-1"},"botCitations":[{"id":5,"title":"First"},{"id":6,"title":"Second"}]}}`)
 			applyApp(t, s, "m2", 1, appSender, appRaw("Healthy"))
-			tamper(t, s, tc.setup+` where message_id='m1' or rowid=(select current_id from message_app_current where message_id='m1')`)
+			tamper(t, s, tc.setup+` where message_id='m1' or rowid=(select current_id from message_app_current where message_rowid=(select rowid from messages where id='m1'))`)
 			env := appEnvelope(t, s, "m1")
 			if env.State != AppStateFailed || env.FailureCode != AppProjectionCorrupt || env.Served != nil {
 				t.Fatalf("corrupt stored evidence was trusted: %+v", env)
@@ -344,7 +345,7 @@ func TestMessageAppNotDerived(t *testing.T) {
 	applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
 	applyApp(t, s, "m2", 1, appSender, appRaw("Beta"))
 	s.qExec(t, `update messages set raw_digest=null where id='m1'`)
-	s.qExec(t, `delete from message_app_current where message_id='m2'`)
+	s.qExec(t, `delete from message_app_current where message_rowid=(select rowid from messages where id='m2')`)
 	for _, id := range []string{"m1", "m2"} {
 		env := appEnvelope(t, s, id)
 		if env.State != AppStateNotDerived || env.Served != nil || !env.BackfillPending || !env.Current.RawPresent {

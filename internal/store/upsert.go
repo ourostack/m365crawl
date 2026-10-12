@@ -335,6 +335,8 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 		}
 		defer func() { _ = ftsIns.Close() }()
 		now, derivedAt := nowText(), time.Now().UTC()
+		apps := newAppPublisher(tx)
+		defer apps.close()
 		for _, m := range ms {
 			n.Seen++
 			if m.TenantID == "" || m.UserID == "" || m.ConversationID == "" || m.ID == "" {
@@ -349,8 +351,9 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			// incoming bytes are stored as NULL, so they are absent raw here too.
 			rawPresent := raw != nil
 			var digest any
+			digestText := rawDigest(m.Raw, rawPresent)
 			if rawPresent {
-				digest = rawDigest(m.Raw, true)
+				digest = digestBlob(digestText)
 			}
 			var rowid, version int64
 			var old string
@@ -397,7 +400,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			}
 			// Only an accepted insert or update publishes evidence: an older or unchanged copy above
 			// never moves the current or last good pointer.
-			if _, err := publishMessageApplication(ctx, tx, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, derivedAt); err != nil {
+			if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
 				return err
 			}
 			rows = append(rows, RowState{rowid, hash, true})

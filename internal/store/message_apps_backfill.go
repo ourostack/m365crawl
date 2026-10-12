@@ -54,6 +54,8 @@ func backfillMessageApplications(ctx context.Context, tx *sql.Tx, at time.Time) 
 	if appMarkerSettled(marker) {
 		return rep, nil
 	}
+	apps := newAppPublisher(tx)
+	defer apps.close()
 	for last := int64(0); ; {
 		batch, err := readAppBackfillBatch(ctx, tx, last)
 		if err != nil {
@@ -69,13 +71,13 @@ func backfillMessageApplications(ctx context.Context, tx *sql.Tx, at time.Time) 
 			if m.digestPresent != m.rawPresent || m.digest != want {
 				var digest any
 				if m.rawPresent {
-					digest = want
+					digest = digestBlob(want)
 				}
 				if _, err := tx.ExecContext(ctx, `update messages set raw_digest=? where rowid=?`, digest, m.rowid); err != nil {
 					return rep, err
 				}
 			}
-			state, err := publishMessageApplication(ctx, tx, m.id, raw, m.rawPresent, at)
+			state, err := apps.publish(ctx, m.rowid, m.id, raw, m.rawPresent, want, at)
 			if err != nil {
 				return rep, err
 			}
@@ -95,7 +97,7 @@ func backfillMessageApplications(ctx context.Context, tx *sql.Tx, at time.Time) 
 // readAppBackfillBatch reads the next batch of retained messages after rowid last, closing its rows
 // before the caller writes.
 func readAppBackfillBatch(ctx context.Context, tx *sql.Tx, last int64) ([]appBackfillRow, error) {
-	rows, err := tx.QueryContext(ctx, `select rowid, tenant_id, user_id, conversation_id, id, sender_id, coalesce(raw_json,''), raw_json is not null, coalesce(raw_digest,''), raw_digest is not null
+	rows, err := tx.QueryContext(ctx, `select rowid, tenant_id, user_id, conversation_id, id, sender_id, coalesce(raw_json,''), raw_json is not null, coalesce(lower(hex(raw_digest)),''), raw_digest is not null
  from messages where rowid>? order by rowid limit ?`, last, appBackfillBatch)
 	if err != nil {
 		return nil, err

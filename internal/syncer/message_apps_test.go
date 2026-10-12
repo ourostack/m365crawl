@@ -40,8 +40,7 @@ func legacyMessages(t *testing.T, db string) string {
 
 func appDerived(t *testing.T, db string) int {
 	t.Helper()
-	return recordsQuery(t, db, `select count(*) from messages m join message_app_current p on p.tenant_id=m.tenant_id and p.user_id=m.user_id
- and p.conversation_id=m.conversation_id and p.message_id=m.id where (m.raw_json is null) = (m.raw_digest is null)`)
+	return recordsQuery(t, db, `select count(*) from messages m join message_app_current p on p.message_rowid=m.rowid where (m.raw_json is null) = (m.raw_digest is null)`)
 }
 
 func TestApplicationBackfillWithUnchangedCache(t *testing.T) {

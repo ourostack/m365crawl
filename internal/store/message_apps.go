@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +106,13 @@ func rawDigest(raw []byte, present bool) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// digestBlob is a hex digest from rawDigest as the 32 bytes messages.raw_digest stores; the hex
+// text is the representation key and the output form, the bytes keep message rows small.
+func digestBlob(hexText string) []byte {
+	b, _ := hex.DecodeString(hexText) // rawDigest's own output: it cannot fail
+	return b
+}
+
 func encodePayload(p ApplicationPayload) string {
 	b, _ := json.Marshal(p) // plain strings, ints and pointers: it cannot fail
 	return string(b)
@@ -122,41 +128,95 @@ func payloadOf(p teamsdesktop.ApplicationProjection) ApplicationPayload {
 	return out
 }
 
-// publishMessageApplication makes the representation of one accepted raw revision current, in the
-// caller's transaction: it reuses the immutable representation of the same revision when one
-// exists (keeping its first derivation time) and projects the raw JSON otherwise. A mapped
+// appPublisher publishes application evidence within one transaction, preparing its three
+// statements on first use and reusing them for every message of the batch.
+type appPublisher struct {
+	tx            *sql.Tx
+	sel, ins, cur *sql.Stmt
+}
+
+const (
+	appSelectRepresentation = `select rowid, state, projection_json from message_app_observations
+ where tenant_id=? and user_id=? and conversation_id=? and message_id=? and sender_id=? and raw_present=? and raw_digest=? and mapper_version=?`
+	appInsertRepresentation = `insert into message_app_observations(tenant_id,user_id,conversation_id,message_id,sender_id,raw_present,raw_digest,mapper_version,state,failure_code,projection_json,derived_at)
+ values(?,?,?,?,?,?,?,?,?,?,?,?)
+ on conflict(tenant_id,user_id,conversation_id,message_id,sender_id,raw_present,raw_digest,mapper_version) do nothing`
+	appUpsertPointer = `insert into message_app_current(message_rowid,current_id,last_good_id) values(?,?,?)
+ on conflict(message_rowid) do update set current_id=excluded.current_id,
+ last_good_id=case when ?=1 then message_app_current.last_good_id else excluded.last_good_id end`
+)
+
+func newAppPublisher(tx *sql.Tx) *appPublisher { return &appPublisher{tx: tx} }
+
+// close releases the prepared statements; the transaction stays the caller's.
+func (p *appPublisher) close() {
+	for _, st := range []*sql.Stmt{p.sel, p.ins, p.cur} {
+		if st != nil {
+			_ = st.Close()
+		}
+	}
+}
+
+// stmt prepares q into *st once.
+func (p *appPublisher) stmt(ctx context.Context, st **sql.Stmt, q string) (*sql.Stmt, error) {
+	if *st == nil {
+		prepared, err := p.tx.PrepareContext(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		*st = prepared
+	}
+	return *st, nil
+}
+
+// publishMessageApplication publishes one revision with statements of its own; batch callers use
+// an appPublisher.
+func publishMessageApplication(ctx context.Context, tx *sql.Tx, message int64, id messageIdentity, raw []byte, rawPresent bool, at time.Time) (string, error) {
+	p := newAppPublisher(tx)
+	defer p.close()
+	return p.publish(ctx, message, id, raw, rawPresent, rawDigest(raw, rawPresent), at)
+}
+
+// publish makes the representation of one accepted raw revision current, in the publisher's
+// transaction, for the message whose rowid is message: it reuses the immutable representation of the same revision when one exists
+// (keeping its first derivation time) and projects the raw JSON otherwise. A mapped
 // representation, or a partial one with an admitted claim, becomes the last good one; an absent one
 // clears it; a failed one, or a partial one without claims, leaves it. It returns the current
 // state. Only cancellation and database errors fail it; a raw revision that cannot be read is a
 // failed representation.
-func publishMessageApplication(ctx context.Context, tx *sql.Tx, id messageIdentity, raw []byte, rawPresent bool, at time.Time) (string, error) {
-	digest := rawDigest(raw, rawPresent)
+func (p *appPublisher) publish(ctx context.Context, message int64, id messageIdentity, raw []byte, rawPresent bool, digest string, at time.Time) (string, error) {
 	key := []any{id.TenantID, id.UserID, id.ConversationID, id.MessageID, id.SenderID, bool01(rawPresent), digest, activeApplicationVersion}
+	// Almost every accepted revision is new, so the representation is inserted first.
+	projected, err := projectApplication(ctx, id.MessageID, id.SenderID, raw, rawPresent)
+	if err != nil {
+		return "", err
+	}
+	ins, err := p.stmt(ctx, &p.ins, appInsertRepresentation)
+	if err != nil {
+		return "", err
+	}
+	state, payload := projected.State, payloadOf(projected)
+	res, err := ins.ExecContext(ctx, append(key, state, projected.FailureCode, encodePayload(payload), fmtTime(at))...)
+	if err != nil {
+		return "", err
+	}
 	var rowid int64
-	var state, payloadJSON string
-	err := tx.QueryRowContext(ctx, `select rowid, state, projection_json from message_app_observations
- where tenant_id=? and user_id=? and conversation_id=? and message_id=? and sender_id=? and raw_present=? and raw_digest=? and mapper_version=?`, key...).
-		Scan(&rowid, &state, &payloadJSON)
-	var payload ApplicationPayload
 	valid := true // a representation this call projects is valid by construction
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		projected, err := projectApplication(ctx, id.MessageID, id.SenderID, raw, rawPresent)
-		if err != nil {
-			return "", err
-		}
-		state, payload = projected.State, payloadOf(projected)
-		res, err := tx.ExecContext(ctx, `insert into message_app_observations(tenant_id,user_id,conversation_id,message_id,sender_id,raw_present,raw_digest,mapper_version,state,failure_code,projection_json,derived_at)
- values(?,?,?,?,?,?,?,?,?,?,?,?)`, append(key, state, projected.FailureCode, encodePayload(payload), fmtTime(at))...)
-		if err != nil {
-			return "", err
-		}
+	// A conflict (the same revision published before) inserts nothing and reads the existing row
+	// back; so would a driver that cannot count rows, which then finds the row it just inserted.
+	if inserted, _ := res.RowsAffected(); inserted == 1 {
 		if rowid, err = res.LastInsertId(); err != nil {
 			return "", err
 		}
-	case err != nil:
-		return "", err
-	default:
+	} else {
+		sel, err := p.stmt(ctx, &p.sel, appSelectRepresentation)
+		if err != nil {
+			return "", err
+		}
+		var payloadJSON string
+		if err := sel.QueryRowContext(ctx, key...).Scan(&rowid, &state, &payloadJSON); err != nil {
+			return "", err
+		}
 		payload, valid = decodePayload(payloadJSON) // a damaged reused row is never last good; reads report it
 	}
 	keep, lastGood := 1, any(nil)
@@ -166,10 +226,11 @@ func publishMessageApplication(ctx context.Context, tx *sql.Tx, id messageIdenti
 	case state == AppStateAbsent:
 		keep = 0
 	}
-	_, err = tx.ExecContext(ctx, `insert into message_app_current(tenant_id,user_id,conversation_id,message_id,current_id,last_good_id) values(?,?,?,?,?,?)
- on conflict(tenant_id,user_id,conversation_id,message_id) do update set current_id=excluded.current_id,
- last_good_id=case when ?=1 then message_app_current.last_good_id else excluded.last_good_id end`,
-		id.TenantID, id.UserID, id.ConversationID, id.MessageID, rowid, lastGood, keep)
+	cur, err := p.stmt(ctx, &p.cur, appUpsertPointer)
+	if err != nil {
+		return "", err
+	}
+	_, err = cur.ExecContext(ctx, message, rowid, lastGood, keep)
 	return state, err
 }
 

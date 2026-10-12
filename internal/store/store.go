@@ -145,7 +145,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	var stmts []string
 	if messageDigest == 0 {
-		stmts = append(stmts, `alter table messages add column raw_digest text`)
+		stmts = append(stmts, `alter table messages add column raw_digest blob`)
 	}
 	if digest == 0 {
 		stmts = append(stmts, `alter table records add column raw_digest blob`)
