@@ -138,3 +138,32 @@ func TestApplicationChangedMessageAtomicPublication(t *testing.T) {
 		t.Fatalf("changed messages did not publish their evidence with their rows: %+v %+v", r.Messages, r.ApplicationBackfill)
 	}
 }
+
+// A cancelled rederivation or backfill is reported as cancellation, not as an archive error.
+func TestMigrationCancellationIsNotAnArchiveError(t *testing.T) {
+	for name, inject := range map[string]func(){
+		"rederive": func() {
+			old := rederiveArchive
+			rederiveArchive = func(context.Context, *store.Store) (*store.Migration, error) { return nil, context.Canceled }
+			t.Cleanup(func() { rederiveArchive = old })
+		},
+		"backfill": func() {
+			old := backfillApplications
+			backfillApplications = func(*store.Store, context.Context) (store.ApplicationBackfillReport, error) {
+				return store.ApplicationBackfillReport{}, context.DeadlineExceeded
+			}
+			t.Cleanup(func() { backfillApplications = old })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolateTmp(t)
+			root, db := syncedStart(t)
+			inject()
+			_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
+			var coded *errs.Coded
+			if err == nil || errors.As(err, &coded) || !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				t.Fatalf("cancellation reported as %v", err)
+			}
+		})
+	}
+}

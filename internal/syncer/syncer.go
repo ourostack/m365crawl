@@ -98,7 +98,7 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	}
 	if err != nil {
 		_ = record(StatusFailed)
-		return Report{}, nil, errs.DBError(err)
+		return Report{}, nil, migrationError(err)
 	}
 	// Application evidence is backfilled from the raw JSON the archive already holds: on its own
 	// marker, whether or not the rederivation above had work, and before any cache is read, so an
@@ -107,7 +107,7 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	err = contained(func() (e error) { apps, e = backfillApplications(st, ctx); return })
 	if err != nil {
 		_ = record(StatusFailed)
-		return Report{}, nil, errs.DBError(err)
+		return Report{}, nil, migrationError(err)
 	}
 	// An archive whose calendar tables were derived by another mapper, or under other scrub rules
 	// (or never: it is from before the calendar), gets them rebuilt from the records it already
@@ -801,6 +801,15 @@ func (w *writer) peopleList() []teamsdesktop.Person {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+// migrationError is a failed archive rederivation or backfill: cancellation as itself, anything else
+// (a contained panic included) as an archive error.
+func migrationError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return errs.DBError(err)
 }
 
 // asCoded leaves coded and cancellation errors alone and wraps everything else as an archive error.
