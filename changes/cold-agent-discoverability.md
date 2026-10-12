@@ -6,4 +6,6 @@
 
 ### Changed
 
+- **Breaking:** the overview JSON no longer carries the top-level `note` about registered native Outlook people observations or the `next` step that pointed to `people sources`. The people row now holds that information: its `observations` and `registered_sources` counts, and a `note` that names `m365crawl --max-age 0 people sources` when native sources are registered.
+
 - Text output prints every archived time of day with its zone name (`2026-10-12 09:30 PDT`, and a transcript part's `10:02 PST`), so a text day is not mistaken for the UTC day JSON prints. Date-only values carry no zone.
