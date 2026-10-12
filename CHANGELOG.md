@@ -4,6 +4,28 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-12
+
+### Added
+
+- The overview (bare `m365crawl`) reports documents, notes, people and transcripts beside chats, mail and the calendar, with counts, registered and failed sources, and the last capture or fetch, all from what the archive already holds. Documents and notes with nothing registered have state `not_registered` and name the sync command. "Start here" gains `docs list`, `notes search` and `people`. Under `--account` the people row counts only that tenant's Teams people, and every row `--account` does not narrow says so in its note.
+- An unscoped `people` list carries a notice, in text and JSON, saying it included Teams people and mail correspondents of every account and, when people sources are registered, native Outlook observations whose account ownership is unresolved.
+- `people --help` explains that `last_seen_at` is the newest time a person appears in archived data, not the last chat with you, points to `conversations` and `messages --conversation` for chat recency, names the ID kinds (`8:orgid:` people, `28:` bots and apps, `19:` chats and teams named in mentions, `everyone`, `mail:`), and says `--account` takes the `<tenant_id>/<user_id>` that `whoami` lists.
+- `docs list` and `docs search` take `--application` (Word, Excel, PowerPoint, or supplied for `--root` files) and `--surface` (recent, shared, recommended, dialog); other values are usage errors that name the accepted ones. Both narrow the rows only; `source_coverage` still lists every source.
+- `docs --help`, `docs list --help` and `docs show` define the four surfaces, `association_state` and `boundary` `unresolved`, the native `Sharing.Type` number, and the `modified_at`, `captured_at` and `source_observed_at` clocks, and state the list order and what a null `modified_at` means.
+
+### Changed
+
+- **Breaking:** the overview JSON no longer carries the top-level `note` about registered native Outlook people observations or the `next` step that pointed to `people sources`. The people row now holds that information: its `observations` and `registered_sources` counts, and a `note` that names `m365crawl --max-age 0 people sources` when native sources are registered.
+- Text output prints every archived time of day with its zone name (`2026-10-12 09:30 PDT`, and a transcript part's `10:02 PST`), so a text day is not mistaken for the UTC day JSON prints. Date-only values carry no zone.
+- **Breaking:** `source_id` in `docs sources`, `notes sources` and `people sources` rows (and in each command's `source_coverage`) is now null, not 0, for a locator that has never had a capture admitted. A consumer that reads it as a number must accept null; `kind` and `locator_tail` identify such a row. Observation rows keep an integer `source_id`.
+
+### Fixed
+
+- `--format log` no longer fails with `invalid log label` for subcommands such as `docs list`: the log key is the command path with `_` for spaces (`docs_list={...}`).
+- A failed document source is now identifiable and actionable: every source row carries `locator_tail`, text tables show `kind` and the path tail, and failed or cancelled rows carry `fix`, the remedy for their reason, and `effect`, which says whether the last good capture stays current. Every remedy that retries names plain `m365crawl docs sync`, which also reaches a source whose `source_id` is null. `notes sources` and `people sources` rows gain `kind` and `locator_tail`.
+- `docs sync` no longer reports a failure for an Office recent or recommended file that is a successful service response listing no documents, in the exact empty shape observed in real files. The source is now complete with zero rows and reason `office_response_listed_no_documents`, and `source_coverage.notices` explains that the saved response listed none, not that the account has none. Earlier observations from the source stay in the archive as retained. Malformed, error, throttled and unknown responses, any response with an unexpected top-level key, and shared files without documents still fail as `office_json_unrecognized`. A dialog list or a supplied `docs sync --root` file that lists no documents gets reason `office_json_listed_no_documents` instead, with a notice that describes only the saved file.
+
 ## [0.9.2] - 2026-10-12
 
 ### Added
