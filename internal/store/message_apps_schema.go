@@ -1,11 +1,22 @@
 package store
 
+import "strconv"
+
 // MessageApplicationVersion numbers how teamsdesktop.ProjectApplication turns a retained Teams
 // message into application, reply and citation evidence. Raise it when the projection changes what
 // it admits: the next writable sync then projects every retained message once more under the new
 // version (BackfillMessageApplications), and evidence of the older version stays readable only as
-// an explicitly retained fallback.
-const MessageApplicationVersion = 1
+// an explicitly retained fallback. Version 2 decodes a JSON-string properties.botMetadata, the
+// container's native encoding, as the object it holds.
+const MessageApplicationVersion = 2
+
+// appMarkerSettled reports whether the backfill marker stored in meta records a complete backfill
+// at or above the active version. An older binary on a newer archive is settled, so it neither
+// reprocesses nor rewrites the marker; an unreadable marker is not.
+func appMarkerSettled(marker string) bool {
+	v, err := strconv.Atoi(marker)
+	return err == nil && v >= activeApplicationVersion
+}
 
 // activeApplicationVersion is MessageApplicationVersion; tests raise it to exercise a version change.
 var activeApplicationVersion = MessageApplicationVersion

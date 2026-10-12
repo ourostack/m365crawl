@@ -174,13 +174,14 @@ func TestMessageAppRevisionPointers(t *testing.T) {
 	t.Run("active mapper failure falls back to an older mapper version", func(t *testing.T) {
 		s := newStore(t)
 		applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
-		setApplicationVersion(t, 2)
-		if env := appEnvelope(t, s, "m1"); env.State != AppStateNotDerived || env.Served != nil || env.ActiveMapperVersion != 2 {
+		next := MessageApplicationVersion + 1
+		setApplicationVersion(t, next)
+		if env := appEnvelope(t, s, "m1"); env.State != AppStateNotDerived || env.Served != nil || env.ActiveMapperVersion != next {
 			t.Fatalf("obsolete-version current must be not_derived: %+v", env)
 		}
 		applyApp(t, s, "m1", 2, appSender, failedRaw)
 		env := appEnvelope(t, s, "m1")
-		if env.State != AppStateFailed || !env.Retained || env.Served.Revision.MapperVersion != 1 || env.Current.MapperVersion != 2 || servedName(env) != "Alpha" {
+		if env.State != AppStateFailed || !env.Retained || env.Served.Revision.MapperVersion != MessageApplicationVersion || env.Current.MapperVersion != next || servedName(env) != "Alpha" {
 			t.Fatalf("older mapper fallback: %+v served=%+v", env, env.Served)
 		}
 	})

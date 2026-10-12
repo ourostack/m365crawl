@@ -51,7 +51,7 @@ func backfillMessageApplications(ctx context.Context, tx *sql.Tx, at time.Time) 
 	if err := tx.QueryRowContext(ctx, `select coalesce((select value from meta where key=?),'')`, messageAppKey).Scan(&marker); err != nil {
 		return rep, err
 	}
-	if marker == version {
+	if appMarkerSettled(marker) {
 		return rep, nil
 	}
 	for last := int64(0); ; {

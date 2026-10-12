@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strconv"
 	"time"
 )
 
@@ -61,7 +60,7 @@ func loadMessageApplications(ctx context.Context, q appReader, rows []MessageRow
 		if err := q.QueryRowContext(ctx, `select coalesce((select value from meta where key=?),'')`, messageAppKey).Scan(&marker); err != nil {
 			return nil, err
 		}
-		pending, facts = marker != strconv.Itoa(activeApplicationVersion), appFactsQuery
+		pending, facts = !appMarkerSettled(marker), appFactsQuery
 	}
 	factsStmt, err := q.PrepareContext(ctx, facts)
 	if err != nil {

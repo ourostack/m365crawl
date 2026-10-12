@@ -40,6 +40,11 @@ func ProjectApplication(ctx context.Context, messageID, senderID string, raw []b
 	if parseErr != nil || !object {
 		return applicationFailure("teams_app_raw_invalid"), nil
 	}
+	if decodeErr := decodeStringBotMetadata(&budget, message); errors.Is(decodeErr, strictjson.ErrTooLarge) {
+		return applicationFailure("teams_app_raw_too_large"), nil
+	} else if decodeErr != nil {
+		return ApplicationProjection{}, decodeErr
+	}
 	if messageID == "" || !utf8.ValidString(messageID) {
 		return applicationFailure("teams_app_identity_unqualified"), nil
 	}
@@ -111,4 +116,28 @@ func possibleApplicationClaims(message map[string]any) bool {
 	}
 	citations, array := value.([]any)
 	return !array || len(citations) > 0
+}
+
+// decodeStringBotMetadata replaces a JSON-string properties.botMetadata, the container's native
+// encoding, with the one object it holds, decoded within the record's own budget from the
+// container's depth (root, properties, botMetadata). A string that does not hold exactly one valid
+// object stays in place, so the mapper reports it as unmapped; only exhaustion and cancellation are
+// errors. No other string property is reinterpreted.
+func decodeStringBotMetadata(budget *strictjson.Budget, message map[string]any) error {
+	properties, _ := message["properties"].(map[string]any)
+	encoded, isString := properties["botMetadata"].(string)
+	if !isString {
+		return nil
+	}
+	value, err := budget.ParseAt([]byte(encoded), 3)
+	if errors.Is(err, strictjson.ErrInvalid) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if object, ok := value.(map[string]any); ok {
+		properties["botMetadata"] = object
+	}
+	return nil
 }

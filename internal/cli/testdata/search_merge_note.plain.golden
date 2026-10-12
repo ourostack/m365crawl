@@ -3,7 +3,7 @@ at                    source  where           who            thread             
 2023-11-14 22:13 UTC  chats   Fixture chat 1  Alex Fixture   19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000006000  Pat Example pleas...
 2023-11-14 22:13 UTC  chats   Fixture chat 2  Blair Fixture  19:00000000-0000-4000-8000-0000000000a2_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces 1700000006000  Pat Example pleas...
 
-app evidence of 2 returned Teams messages (mapper v1): 2 absent
+app evidence of 2 returned Teams messages (mapper v2): 2 absent
 2 items
 note: --mentions-me applies to Teams chats only; mail and meeting transcripts were not searched
 notice: indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership

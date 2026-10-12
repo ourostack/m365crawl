@@ -82,3 +82,35 @@ func TestBudgetNilConfigurationAndInclusiveDepth(t *testing.T) {
 		}
 	}
 }
+
+// ParseAt continues a budget at a container's real depth and shares its member count, so a nested
+// string-encoded value cannot widen the limits of the record that holds it.
+func TestParseAtSharesDepthAndMembers(t *testing.T) {
+	ctx := context.Background()
+	b := Budget{Context: ctx, MaxDepth: 4, MaxMembers: 100}
+	if v, err := b.ParseAt([]byte(`{"a":1}`), 3); err != nil || v.(map[string]any)["a"] == nil {
+		t.Fatalf("depth 4 at start 3: %v %v", v, err)
+	}
+	if _, err := b.ParseAt([]byte(`{"a":{"b":1}}`), 3); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("depth 5 at start 3: %v", err)
+	}
+	m := Budget{Context: ctx, MaxDepth: 64, MaxMembers: 3}
+	if _, err := m.Parse([]byte(`{"x":"s","y":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ParseAt([]byte(`{"a":1}`), 3); err != nil {
+		t.Fatalf("third member: %v", err)
+	}
+	if _, err := m.ParseAt([]byte(`{"b":1}`), 3); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("fourth member shared across parses: %v", err)
+	}
+	for _, raw := range []string{`{"a":1,"a":2}`, `{} 1`, `"\ud800"`, ``} {
+		inner := Budget{Context: ctx, MaxDepth: 64, MaxMembers: 100}
+		if _, err := inner.ParseAt([]byte(raw), 3); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q: %v", raw, err)
+		}
+	}
+	if _, err := (*Budget)(nil).ParseAt([]byte(`{}`), 3); !errors.Is(err, ErrInvalid) {
+		t.Fatal("nil budget")
+	}
+}

@@ -154,7 +154,7 @@ func TestApplicationMessageRoutes(t *testing.T) {
 	for _, want := range []string{"[app: Synthetic", "message app-1 (thread: 19:app-evidence@thread.v2 app-1)", `app "Synthetic Helper", app id "app-synthetic", claimed by the message itself`,
 		`native reply-to id "native-reply-1" (not a verified thread root)`, "citations: 2 of 2 admitted shown; 1 source rows refused",
 		`[0] id 9223372036854775807 "First source"`, "full record: m365crawl --db ",
-		"app evidence of 2 returned Teams messages (mapper v1): 1 partial, 1 absent"} {
+		"app evidence of 2 returned Teams messages (mapper v2): 1 partial, 1 absent"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("text lacks %q:\n%s", want, out)
 		}
@@ -186,7 +186,7 @@ func TestApplicationNotDerivedAndFailedText(t *testing.T) {
 		t.Fatalf("retained: %v", retained)
 	}
 	_, out, _ := e.run("--max-age", "0", "--format", "text", "search", "evidence", "--source", "chats")
-	if !strings.Contains(out, "served is the last good observation of this message, from mapper version 1") || !strings.Contains(out, "[app id: only-id]") ||
+	if !strings.Contains(out, "served is the last good observation of this message, from mapper version 2") || !strings.Contains(out, "[app id: only-id]") ||
 		!strings.Contains(out, `app id "only-id", claimed by the message itself`) || !strings.Contains(out, "1 retained") {
 		t.Fatalf("search text:\n%s", out)
 	}
@@ -305,7 +305,7 @@ func TestCalendarAppEvidenceBounds(t *testing.T) {
 		t.Fatalf("--fields subject dropped coverage or kept chat: %v", keysOf(f))
 	}
 	_, out, _ := e.run("--max-age", "0", "--format", "text", "--account", tenantA+"/"+userA, "calendar", "event", id)
-	if !strings.Contains(out, "app evidence of 10 returned Teams messages (mapper v1): 1 mapped, 9 absent") || !strings.Contains(out, "application evidence mapped") {
+	if !strings.Contains(out, "app evidence of 10 returned Teams messages (mapper v2): 1 mapped, 9 absent") || !strings.Contains(out, "application evidence mapped") {
 		t.Fatalf("calendar text:\n%s", out)
 	}
 }

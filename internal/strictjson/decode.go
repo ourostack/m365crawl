@@ -21,7 +21,14 @@ type Budget struct {
 	members              int
 }
 
+// Parse decodes raw as a whole record whose root is at depth 1.
 func (b *Budget) Parse(raw []byte) (value any, err error) {
+	return b.ParseAt(raw, 1)
+}
+
+// ParseAt decodes raw as a value whose root sits at startDepth inside a record this budget already
+// parsed, sharing that record's depth and member limits.
+func (b *Budget) ParseAt(raw []byte, startDepth int) (value any, err error) {
 	if b == nil || b.Context == nil {
 		return nil, ErrInvalid
 	}
@@ -35,7 +42,7 @@ func (b *Budget) Parse(raw []byte) (value any, err error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	value, err = b.value(decoder, 1)
+	value, err = b.value(decoder, startDepth)
 	if err != nil {
 		return nil, err
 	}

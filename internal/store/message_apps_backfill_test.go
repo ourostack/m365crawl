@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ourostack/m365crawl/internal/botcitations"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
@@ -83,12 +84,12 @@ func TestApplicationBackfillIndependent(t *testing.T) {
 	}
 
 	// A new active mapper version reprocesses every retained raw revision exactly once.
-	setApplicationVersion(t, 2)
+	setApplicationVersion(t, MessageApplicationVersion+1)
 	if env := appEnvelope(t, s, "m1"); env.State != AppStateNotDerived || !env.BackfillPending {
 		t.Fatalf("before the new version's backfill: %+v", env)
 	}
 	next, err := s.BackfillMessageApplications(ctx)
-	if err != nil || next.Processed != 4 || next.MapperVersion != 2 {
+	if err != nil || next.Processed != 4 || next.MapperVersion != MessageApplicationVersion+1 {
 		t.Fatalf("new version: %+v %v", next, err)
 	}
 	if again, _ := s.BackfillMessageApplications(ctx); again.Processed != 0 {
@@ -178,4 +179,67 @@ func dumpTable(t *testing.T, s *Store, table string) string {
 		}
 	}
 	return strings.Join(keep, "\n")
+}
+
+// Version 2 decodes string-encoded bot metadata: its backfill reprocesses a version-1 archive once,
+// and the version-1 representations stay as retained history.
+func TestApplicationBackfillVersionOneArchive(t *testing.T) {
+	ctx := context.Background()
+	// Version 1 left the string in place: one teams_bot_metadata_unmapped loss, partial.
+	setApplicationVersion(t, 1)
+	oldProject := projectApplication
+	t.Cleanup(func() { projectApplication = oldProject })
+	projectApplication = func(context.Context, string, string, []byte, bool) (teamsdesktop.ApplicationProjection, error) {
+		return teamsdesktop.ApplicationProjection{State: AppStatePartial, Losses: []botcitations.Loss{{Code: "teams_bot_metadata_unmapped", Count: 1}}}, nil
+	}
+	s := newStore(t)
+	applyApp(t, s, "m1", 1, appSender, `{"properties":{"botMetadata":"{\"replyToId\":\"r1\"}"}}`)
+	if env := appEnvelope(t, s, "m1"); env.State != AppStatePartial {
+		t.Fatalf("version 1 archive: %+v", env)
+	}
+	if _, err := s.BackfillMessageApplications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	projectApplication = oldProject
+	activeApplicationVersion = MessageApplicationVersion
+	if rep, err := s.BackfillMessageApplications(ctx); err != nil || rep.Processed != 1 || rep.MapperVersion != 2 {
+		t.Fatalf("version 2 backfill: %+v %v", rep, err)
+	}
+	if rep, _ := s.BackfillMessageApplications(ctx); rep.Processed != 0 {
+		t.Fatalf("version 2 reprocessed twice: %+v", rep)
+	}
+	env := appEnvelope(t, s, "m1")
+	if env.State != AppStateMapped || env.Served.Payload.ReplyToID == nil || *env.Served.Payload.ReplyToID != "r1" {
+		t.Fatalf("version 2 evidence: %+v", env)
+	}
+	if countRows(t, s, `select count(*) from message_app_observations where mapper_version=1`) != 1 {
+		t.Fatal("version 1 history was not retained")
+	}
+}
+
+// An older binary on a newer archive neither reprocesses nor rewrites the marker, and does not
+// claim a backfill it will never run is pending.
+func TestApplicationBackfillNewerMarker(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
+	s.qExec(t, `insert into meta(key,value) values('message_app_mapper_version','3') on conflict(key) do update set value=excluded.value`)
+	before := dumpTable(t, s, "message_app_observations") + dumpTable(t, s, "message_app_current")
+	if rep, err := s.BackfillMessageApplications(ctx); err != nil || rep.Processed != 0 {
+		t.Fatalf("older binary backfilled a newer archive: %+v %v", rep, err)
+	}
+	var marker string
+	if err := s.db.QueryRow(`select value from meta where key='message_app_mapper_version'`).Scan(&marker); err != nil || marker != "3" {
+		t.Fatalf("marker = %q %v", marker, err)
+	}
+	if dumpTable(t, s, "message_app_observations")+dumpTable(t, s, "message_app_current") != before {
+		t.Fatal("older binary wrote evidence")
+	}
+	if env := appEnvelope(t, s, "m1"); env.BackfillPending {
+		t.Fatalf("pending claimed on a newer archive: %+v", env)
+	}
+	s.qExec(t, `update meta set value='not-a-version' where key='message_app_mapper_version'`)
+	if rep, err := s.BackfillMessageApplications(ctx); err != nil || rep.Processed != 1 {
+		t.Fatalf("an unreadable marker must reprocess: %+v %v", rep, err)
+	}
 }
