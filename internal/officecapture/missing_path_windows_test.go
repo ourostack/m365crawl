@@ -4,12 +4,53 @@ package officecapture
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+type windowsMissingStatusClaim []byte
+
+func (windowsMissingStatusClaim) Error() string { return "wrapped native absence claim" }
+
+func (windowsMissingStatusClaim) As(target any) bool {
+	status, ok := target.(*windows.NTStatus)
+	if ok {
+		*status = windows.STATUS_OBJECT_NAME_NOT_FOUND
+	}
+	return ok
+}
+
+func TestWindowsOnlyDirectNativeAbsenceIsSkippable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cause   error
+		missing bool
+	}{
+		{"direct-missing", windows.STATUS_OBJECT_NAME_NOT_FOUND, true},
+		{"direct-permission", windows.STATUS_ACCESS_DENIED, false},
+		{"wrapped-missing", fmt.Errorf("wrapped: %w", windows.STATUS_OBJECT_NAME_NOT_FOUND), false},
+		{"joined-missing", errors.Join(windows.STATUS_OBJECT_NAME_NOT_FOUND, os.ErrPermission), false},
+		{"noncomparable-as-claim", windowsMissingStatusClaim{1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, _ := ordinaryFixture(t)
+			create := inputNTCreate
+			t.Cleanup(func() { inputNTCreate = create })
+			inputNTCreate = func(*windows.Handle, uint32, *windows.OBJECT_ATTRIBUTES,
+				*windows.IO_STATUS_BLOCK, *int64, uint32, uint32, uint32, uint32, uintptr, uint32) error {
+				return tc.cause
+			}
+			input, err := openInput(path, false)
+			if input != nil || err == nil || errors.Is(err, os.ErrNotExist) != tc.missing {
+				t.Fatal("wrapped or joined native status crossed the direct-only absence boundary")
+			}
+		})
+	}
+}
 
 func TestWindowsMissingOrdinaryDirectoryIsRecognizableAbsence(t *testing.T) {
 	path, _ := ordinaryFixture(t)

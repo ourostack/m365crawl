@@ -131,9 +131,9 @@ m365crawl doctor
 After installing, check access and build the archive:
 
 ```sh
+m365crawl --help
 m365crawl doctor
 m365crawl sync
-m365crawl skill
 ```
 
 If you use OneNote on Mac, add its locally indexed notes explicitly:
@@ -147,7 +147,7 @@ m365crawl notes show note:ID
 
 Ordinary note reads refresh registered sources only. New indexes need another explicit `notes sync`; `--max-age 0` performs no capture. Account, author, chat-only and mail-only filters exclude unresolved notes from combined search with a notice. Use `--source notes` for an independent notes-only search that does not require Teams or Outlook.
 
-Give the `skill` output to your agent. It is the guide for the version you installed, including commands, context-budget flags and how to interpret missing data. Then ask for a concrete job:
+Start with command help and focused queries. For a compact, version-matched workflow guide, run `m365crawl skill` and give its output to your agent. The guide supplements help; basic options, scope and follow-ups should not depend on it. Then ask for a concrete job:
 
 > What needs my attention from the last week? Group unread chats by conversation, check unread and flagged mail, and cite the items you use.
 

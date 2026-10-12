@@ -78,7 +78,7 @@ func openInput(path string, directory bool) (_ *guardedInput, result error) {
 	defer func() {
 		if result != nil {
 			closeErr := input.close()
-			status, nativeStatus := result.(windows.NTStatus)
+			status, nativeStatus := result.(windows.NTStatus) //nolint:errorlint // Only direct native errors qualify; wrappers may carry cleanup failures.
 			if closeErr == nil && nativeStatus && errors.Is(status.Errno(), os.ErrNotExist) {
 				result = status.Errno()
 			} else {
