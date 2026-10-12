@@ -4,6 +4,16 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-12
+
+### Added
+
+- Search and inspect source-qualified Office document metadata alongside messages and indexed notes. `docs sync` captures supported recent/shared/recommended/dialog caches, while `docs list`, `docs search`, `docs show` and `docs sources` preserve stable observations, original capture clocks, rolling-list history and independent coverage. Native URLs, sharing and activity remain unresolved source claims; no document bytes, implicit hydration or cloud fetch are included.
+
+### Fixed
+
+- Source-only text results preserve their existing notices, including why native people were excluded by an unresolved subject-account filter. JSON meanings and independent source freshness remain unchanged.
+
 ## [0.9.1] - 2026-10-11
 
 ### Fixed
