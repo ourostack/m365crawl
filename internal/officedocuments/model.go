@@ -60,6 +60,11 @@ type Document struct {
 // in the cloud.
 const NoDocumentsListed = "office_response_listed_no_documents"
 
+// FileListedNoDocuments is the source reason for a complete capture of a dialog list
+// or a supplied --root file that listed no documents. Those files are not Office
+// service responses, so their reason claims only what the saved JSON held.
+const FileListedNoDocuments = "office_json_listed_no_documents"
+
 type Loss struct {
 	Code  string
 	Count int

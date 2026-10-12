@@ -39,3 +39,31 @@ func TestDocumentsCoverageExplainsResponseThatListedNoDocuments(t *testing.T) {
 		t.Fatalf("merged coverage dropped document notice: %#v", merged.Notices)
 	}
 }
+
+// A dialog list or supplied file is not an Office service response, so its notice claims only what the file held.
+func TestDocumentsCoverageExplainsFileThatListedNoDocumentsNeutrally(t *testing.T) {
+	coverage := documentsCoverage([]store.KnowledgeSource{
+		{ID: 1, Kind: "office_dialog", Status: "complete", Coverage: "observations", Reason: officedocuments.FileListedNoDocuments},
+		{ID: 2, Kind: "office_recent", Status: "complete", Coverage: "observations", Reason: officedocuments.NoDocumentsListed},
+	})
+	if len(coverage.Notices) != 2 || !strings.HasPrefix(coverage.Notices[1], officedocuments.FileListedNoDocuments+":") ||
+		strings.Contains(coverage.Notices[1], "Office response") || !strings.Contains(coverage.Notices[1], "saved Office JSON file") {
+		t.Fatalf("file notice = %#v", coverage.Notices)
+	}
+}
+
+// A never-admitted source has a null source_id, so --source-id cannot target it; every remedy names plain docs sync.
+func TestDocumentRemediesNamePlainDocsSync(t *testing.T) {
+	for reason, fix := range documentFailureFix {
+		if strings.Contains(fix, "docs sync") && !strings.Contains(fix, "m365crawl docs sync") {
+			t.Errorf("%s remedy names docs sync without the command: %s", reason, fix)
+		}
+		if strings.Contains(fix, "--source-id") {
+			t.Errorf("%s remedy names --source-id, which a never-admitted source cannot use: %s", reason, fix)
+		}
+	}
+	never := documentsCoverage([]store.KnowledgeSource{{LocatorID: 3, Kind: "office_recent", Status: "failed", Reason: "office_json_cancelled"}})
+	if !strings.Contains(never.Sources[0].Fix, "m365crawl docs sync") {
+		t.Fatalf("never-admitted fix = %q", never.Sources[0].Fix)
+	}
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +176,18 @@ func TestDocumentsApplicationAndSurfaceFilters(t *testing.T) {
 	_, stdout, _ := e.run("docs", "list", "--help")
 	if !strings.Contains(stdout, "--application") || !strings.Contains(stdout, "--surface") {
 		t.Fatalf("docs list --help lacks the filters:\n%s", stdout)
+	}
+}
+
+// --application and --surface narrow observation rows only; source_coverage still lists every source.
+func TestDocumentFilterHelpSaysCoverageIsUnfiltered(t *testing.T) {
+	for _, command := range []any{documentsListCmd{}, documentsSearchCmd{}} {
+		kind := reflect.TypeOf(command)
+		for _, name := range []string{"Application", "Surface"} {
+			field, _ := kind.FieldByName(name)
+			if help := field.Tag.Get("help"); !strings.Contains(help, "not source_coverage") {
+				t.Errorf("%s.%s help = %q", kind.Name(), name, help)
+			}
+		}
 	}
 }

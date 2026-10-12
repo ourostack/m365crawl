@@ -130,9 +130,10 @@ var runDocumentsSync = syncer.SyncDocuments
 func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := notesCoverage(sources)
 	out.Scope = "office_json_metadata"
-	listedNone := false
+	listedNone, fileListedNone := false, false
 	for i, source := range sources {
 		listedNone = listedNone || source.Reason == officedocuments.NoDocumentsListed
+		fileListedNone = fileListedNone || source.Reason == officedocuments.FileListedNoDocuments
 		if documentFailureFix[source.Reason] == "" && source.Status != "failed" && source.Status != "cancelled" {
 			continue
 		}
@@ -144,6 +145,9 @@ func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	}
 	if listedNone {
 		out.Notices = append(out.Notices, documentsListedNoneNotice)
+	}
+	if fileListedNone {
+		out.Notices = append(out.Notices, documentsFileListedNoneNotice)
 	}
 	return out
 }
@@ -157,21 +161,24 @@ var documentFailureReasons = []string{"office_json_unrecognized", "office_json_t
 const documentsIssue = "https://github.com/ourostack/m365crawl/issues"
 
 var documentFailureFix = map[string]string{
-	"office_json_unrecognized": "the saved file is not JSON, or is JSON in a shape this m365crawl version does not read. Upgrade m365crawl and run docs sync again; if the newest version still fails, open an issue at " +
+	"office_json_unrecognized": "the saved file is not JSON, or is JSON in a shape this m365crawl version does not read. Upgrade m365crawl and run m365crawl docs sync again; if the newest version still fails, open an issue at " +
 		documentsIssue + " asking for support for this shape, with the source kind and the file's top-level key names (no values)",
 	"office_json_too_large":             "the file is larger than the reader accepts (8 MiB, or too many rows, fields or nesting levels), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
-	"office_json_unreadable":            "the file could not be read to the end. Run docs sync again; if it keeps failing, check that the file is complete and readable",
+	"office_json_unreadable":            "the file could not be read to the end. Run m365crawl docs sync again; if it keeps failing, check that the file is complete and readable",
 	"office_surface_unknown":            "the source is registered for a surface this version does not read. Upgrade m365crawl",
-	"office_json_input_unqualified":     "the path is missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file, so it was refused before reading. A file Office removed needs nothing; otherwise copy it to an ordinary local folder and run docs sync --root DIR",
-	"office_json_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run docs sync again; run m365crawl doctor if it keeps failing",
-	"office_json_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run docs sync again",
-	"office_json_policy_restore_failed": "a capture safety setting could not be restored. Run docs sync again; if it repeats, open an issue at " + documentsIssue,
-	"office_json_cancelled":             "the capture was interrupted or timed out. Run docs sync again",
-	"stale_attempt":                     "another capture of the same source finished first, so this one was not admitted. Run docs sources to see the current state",
+	"office_json_input_unqualified":     "the path is missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file, so it was refused before reading. A file Office removed needs nothing; otherwise copy it to an ordinary local folder and run m365crawl docs sync --root DIR",
+	"office_json_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl docs sync again; run m365crawl doctor if it keeps failing",
+	"office_json_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
+	"office_json_policy_restore_failed": "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
+	"office_json_cancelled":             "the capture was interrupted or timed out. Run m365crawl docs sync again",
+	"stale_attempt":                     "another capture of the same source finished first, so this one was not admitted. Run m365crawl docs sources to see the current state",
 }
 
 const documentsListedNoneNotice = officedocuments.NoDocumentsListed + ": each source with this reason last saved a successful Office response that listed no documents, so its capture is complete with zero rows. " +
 	"This describes the saved response, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
+
+const documentsFileListedNoneNotice = officedocuments.FileListedNoDocuments + ": each source with this reason last saved an Office dialog list or a supplied file (docs sync --root) that listed no documents, so its capture is complete with zero rows. " +
+	"This describes the saved Office JSON file, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
 
 func documentError(err error) error {
 	var source *officecapture.ReadError
@@ -298,8 +305,8 @@ type documentsListCmd struct {
 	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded."`
 	Until       string `help:"Native modification time before this time; a date includes its whole day."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
-	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root." placeholder:"APP"`
-	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each." placeholder:"SURFACE"`
+	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
 	label       string // the result label: docs search runs this command under its own name
 }
 
@@ -388,8 +395,8 @@ type documentsSearchCmd struct {
 	Since       string `help:"Native modification time at or after this date/time."`
 	Until       string `help:"Native modification time before this time; unknown dates excluded."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
-	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root." placeholder:"APP"`
-	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each." placeholder:"SURFACE"`
+	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
 }
 
 func (documentsSearchCmd) Help() string { return documentEvidenceHelp }

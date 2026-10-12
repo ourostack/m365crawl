@@ -212,6 +212,9 @@ func captureDocuments(ctx context.Context, st *store.Store, attempt store.Knowle
 		status = "partial"
 	} else if len(result.Documents) == 0 {
 		reason = officedocuments.NoDocumentsListed
+		if input.Surface == officedocuments.Dialog || input.Application == "supplied" {
+			reason = officedocuments.FileListedNoDocuments
+		}
 	}
 	if previous.AdmittedID > 0 && previous.ContentDigest == digest && previous.Qualification == store.DocumentQualification {
 		status = "unchanged"
