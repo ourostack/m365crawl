@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -137,16 +138,33 @@ func fullInspection(id int64, db string) string {
 	if id <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(`m365crawl --db %s --max-age 0 sql "select projection_json from message_app_observations where rowid=%d" --limit 1`, shellQuote(db), id)
+	return fmt.Sprintf(`m365crawl --db %s --max-age 0 sql "select projection_json from message_app_observations where rowid=%d" --limit 1`, quoteArg(db), id)
 }
 
-// shellQuote is s as one POSIX shell word: bare when it holds only safe characters, else single
-// quoted.
-func shellQuote(s string) string {
-	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-") == "" {
-		return s
+// quoteArg quotes the archive path in a printed follow-up for this platform's shells.
+var quoteArg = quoteFor(goruntime.GOOS)
+
+// argSafe is the characters a path may hold and still be one bare word in every supported shell.
+const argSafe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-"
+
+// quoteFor quotes one command word for goos: bare when it holds only safe characters, else in
+// double quotes on Windows (cmd.exe rejects single quotes; a Windows path cannot contain '"') and
+// POSIX single quotes elsewhere.
+func quoteFor(goos string) func(string) string {
+	if goos == "windows" {
+		return func(s string) string {
+			if s != "" && strings.Trim(s, argSafe+`\`) == "" {
+				return s
+			}
+			return `"` + s + `"`
+		}
 	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return func(s string) string {
+		if s != "" && strings.Trim(s, argSafe) == "" {
+			return s
+		}
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
 }
 
 // getwd is os.Getwd; tests make it fail.
@@ -387,7 +405,7 @@ func (rt *runtime) renderApplicationDetails(r *listResult) {
 }
 
 // applicationEvidenceHelp is the long help every command that returns archived Teams messages shares.
-const applicationEvidenceHelp = "Application evidence: each returned Teams message carries app_observation, the app, reply and citation claims of its archived native JSON. Claims are under served: app_id, app_name, reply_to_id and citations (id as a decimal string, title, link, content_type), previewing at most 100 citations of total_admitted; losses counts native fields that could not be read, and full_inspection is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the complete stored representation; it names the same --db archive the read used (as an absolute, shell-quoted path), so run it as printed. These are the message's own claims, not a verified app identity or citation target, and one message stays one item.\n" +
+const applicationEvidenceHelp = "Application evidence: each returned Teams message carries app_observation, the app, reply and citation claims of its archived native JSON. Claims are under served: app_id, app_name, reply_to_id and citations (id as a decimal string, title, link, content_type), previewing at most 100 citations of total_admitted; losses counts native fields that could not be read, and full_inspection is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the complete stored representation; it names the same --db archive the read used (as an absolute path, double-quoted on Windows and single-quoted elsewhere when it needs quoting), so run it as printed. These are the message's own claims, not a verified app identity or citation target, and one message stays one item.\n" +
 	"app_observation.state is mapped (claims read), partial (some read; see losses), absent (no app or citation claims), failed (the native JSON could not be read; failure_code says why) or not_derived (not projected yet: run a writable `m365crawl sync`; --max-age 0 never derives it). When the current representation failed, served is the last good one, with retained true and retained_reason current_failed. application_evidence_coverage counts the states of the Teams messages actually returned (after --limit); when none is returned its state is unknown, not absent.\n"
 
 func (messagesCmd) Help() string { return applicationEvidenceHelp }

@@ -373,7 +373,11 @@ func posixWords(s string) []string {
 // The full_inspection follow-up names the archive it came from, so running it as printed reads
 // the same representation even when --db is not the default.
 func TestApplicationFullInspectionKeepsArchive(t *testing.T) {
-	if got, want := fullInspection(7, "/tmp/a b/it's.db"), `m365crawl --db '/tmp/a b/it'\''s.db' --max-age 0 sql "select projection_json from message_app_observations where rowid=7" --limit 1`; got != want {
+	old := quoteArg
+	quoteArg = quoteFor("linux")
+	got7 := fullInspection(7, "/tmp/a b/it's.db")
+	quoteArg = old
+	if got, want := got7, `m365crawl --db '/tmp/a b/it'\''s.db' --max-age 0 sql "select projection_json from message_app_observations where rowid=7" --limit 1`; got != want {
 		t.Fatalf("template:\n got %s\nwant %s", got, want)
 	}
 	e := appEnv(t)
@@ -408,8 +412,15 @@ func TestApplicationArchiveRef(t *testing.T) {
 	if got := (&runtime{dbPath: "rel/a.db"}).archiveRef(); got != "rel/a.db" {
 		t.Fatalf("without a working directory: %s", got)
 	}
-	if shellQuote("/plain/a.db") != "/plain/a.db" || shellQuote("") != "''" {
-		t.Fatal("shellQuote")
+	posix, windows := quoteFor("darwin"), quoteFor("windows")
+	if posix("/plain/a.db") != "/plain/a.db" || posix("") != "''" || posix("/a b/it's.db") != `'/a b/it'\''s.db'` {
+		t.Fatal("POSIX quoting")
+	}
+	// cmd.exe rejects single quotes; double quotes work in cmd.exe and PowerShell, and a Windows path
+	// cannot contain one.
+	if windows(`C:\Users\a\m365crawl.db`) != `C:\Users\a\m365crawl.db` || windows("") != `""` ||
+		windows(`C:\Users\A B\it's.db`) != `"C:\Users\A B\it's.db"` {
+		t.Fatal("Windows quoting")
 	}
 }
 
