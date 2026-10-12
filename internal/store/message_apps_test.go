@@ -523,3 +523,45 @@ func TestActiveApplicationVersion(t *testing.T) {
 		t.Fatal("ActiveApplicationVersion does not report the active version")
 	}
 }
+
+// countingReader counts what an evidence load asks of its read transaction.
+type countingReader struct {
+	*sql.Tx
+	rows, prepares int
+}
+
+func (c *countingReader) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	c.rows++
+	return c.Tx.QueryRowContext(ctx, q, args...)
+}
+
+func (c *countingReader) PrepareContext(ctx context.Context, q string) (*sql.Stmt, error) {
+	c.prepares++
+	return c.Tx.PrepareContext(ctx, q)
+}
+
+// An evidence load prepares its per-message statements once per read, whatever the row count.
+func TestMessageAppLoadPreparesOnce(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	for i := range 6 {
+		applyApp(t, s, "m"+strconv.Itoa(i), 1, appSender, appRaw("Alpha"))
+	}
+	rows, _, err := s.Messages(ctx, Filter{Account: &acctA})
+	if err != nil || len(rows) != 6 {
+		t.Fatalf("%d %v", len(rows), err)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	c := &countingReader{Tx: tx}
+	out, err := loadMessageApplications(ctx, c, rows)
+	if err != nil || out[0].Application.State == AppStateNotDerived {
+		t.Fatalf("load: %v %+v", err, out[0].Application)
+	}
+	if c.rows > 2 || c.prepares > 2 {
+		t.Fatalf("6 messages cost %d direct queries and %d prepares", c.rows, c.prepares)
+	}
+}

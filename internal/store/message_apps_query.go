@@ -25,6 +25,12 @@ const (
  from message_app_observations where rowid=?`
 )
 
+// appReader is the read transaction an evidence load runs in.
+type appReader interface {
+	knowledgeReader
+	PrepareContext(context.Context, string) (*sql.Stmt, error)
+}
+
 // appFacts is what the archive says about one selected message's application evidence.
 type appFacts struct {
 	rawPresent, digestPresent bool
@@ -39,7 +45,9 @@ type appFacts struct {
 // evidence of an older mapper version are not_derived. Stored evidence that does not validate is a
 // per-message teams_app_projection_corrupt failure; only database errors and cancellation fail the
 // read.
-func loadMessageApplications(ctx context.Context, q knowledgeReader, rows []MessageRow) ([]MessageRow, error) {
+//
+// The per-message statements are prepared once per load.
+func loadMessageApplications(ctx context.Context, q appReader, rows []MessageRow) ([]MessageRow, error) {
 	if len(rows) == 0 {
 		return rows, nil
 	}
@@ -55,14 +63,26 @@ func loadMessageApplications(ctx context.Context, q knowledgeReader, rows []Mess
 		}
 		pending, facts = marker != strconv.Itoa(activeApplicationVersion), appFactsQuery
 	}
+	factsStmt, err := q.PrepareContext(ctx, facts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = factsStmt.Close() }()
+	var repStmt *sql.Stmt // only an archive with the evidence tables has representations to read
+	if derived {
+		if repStmt, err = q.PrepareContext(ctx, appRepresentationQuery); err != nil {
+			return nil, err
+		}
+		defer func() { _ = repStmt.Close() }()
+	}
 	for i := range rows {
 		r := &rows[i]
 		var f appFacts
-		if err := q.QueryRowContext(ctx, facts, r.TenantID, r.UserID, r.ConversationID, r.ID).
+		if err := factsStmt.QueryRowContext(ctx, r.TenantID, r.UserID, r.ConversationID, r.ID).
 			Scan(&f.rawPresent, &f.digest, &f.digestPresent, &f.currentID, &f.lastGoodID); err != nil {
 			return nil, err
 		}
-		env, err := resolveApplication(ctx, q, *r, f, derived, pending)
+		env, err := resolveApplication(ctx, repStmt, *r, f, derived, pending)
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +91,7 @@ func loadMessageApplications(ctx context.Context, q knowledgeReader, rows []Mess
 	return rows, nil
 }
 
-func resolveApplication(ctx context.Context, q knowledgeReader, r MessageRow, f appFacts, derived, pending bool) (MessageApplicationEnvelope, error) {
+func resolveApplication(ctx context.Context, q *sql.Stmt, r MessageRow, f appFacts, derived, pending bool) (MessageApplicationEnvelope, error) {
 	env := MessageApplicationEnvelope{State: AppStateNotDerived, ActiveMapperVersion: activeApplicationVersion, BackfillPending: pending,
 		Current: ApplicationRevision{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, MessageID: r.ID, SenderID: r.SenderID,
 			RawDigest: f.digest, RawPresent: f.rawPresent, MapperVersion: activeApplicationVersion}}
@@ -116,11 +136,11 @@ func sameMessage(a, b ApplicationRevision) bool {
 
 // loadRepresentation reads one representation. ok is false when the row is missing or does not
 // validate: its typed JSON, its state and failure code, or its first derivation time.
-func loadRepresentation(ctx context.Context, q knowledgeReader, id int64) (ApplicationRepresentation, bool, error) {
+func loadRepresentation(ctx context.Context, q *sql.Stmt, id int64) (ApplicationRepresentation, bool, error) {
 	rep := ApplicationRepresentation{ID: id}
 	v := &rep.Revision
 	var payload, derived string
-	err := q.QueryRowContext(ctx, appRepresentationQuery, id).Scan(&v.TenantID, &v.UserID, &v.ConversationID, &v.MessageID, &v.SenderID,
+	err := q.QueryRowContext(ctx, id).Scan(&v.TenantID, &v.UserID, &v.ConversationID, &v.MessageID, &v.SenderID,
 		&v.RawPresent, &v.RawDigest, &v.MapperVersion, &rep.State, &rep.FailureCode, &payload, &derived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return rep, false, nil
