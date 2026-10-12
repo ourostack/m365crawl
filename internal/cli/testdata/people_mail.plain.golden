@@ -1,9 +1,10 @@
 name         id                          sources  last_seen_at
------------  --------------------------  -------  ----------------
-me1          mail:me1@example.invalid    mail     2023-11-28 09:00
-Pat Example  mail:pat@example.invalid    mail     2023-11-28 09:00
-Quinn Mail   mail:quinn@example.invalid  mail     2023-11-21 12:00
-Sam Example  mail:sam@example.invalid    mail     2023-11-19 10:00
+-----------  --------------------------  -------  --------------------
+me1          mail:me1@example.invalid    mail     2023-11-28 09:00 UTC
+Pat Example  mail:pat@example.invalid    mail     2023-11-28 09:00 UTC
+Quinn Mail   mail:quinn@example.invalid  mail     2023-11-21 12:00 UTC
+Sam Example  mail:sam@example.invalid    mail     2023-11-19 10:00 UTC
 
 4 items
+notice: included Teams people and mail correspondents of every account; no native Outlook people sources are registered (m365crawl people sync adds them)
 archive age: <age>

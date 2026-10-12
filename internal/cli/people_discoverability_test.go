@@ -70,13 +70,10 @@ func TestOverviewRoutesRegisteredPeopleWithoutSyncOrInventedCounts(t *testing.T)
 			if err := json.Unmarshal([]byte(out), &res); err != nil {
 				t.Fatal(err)
 			}
-			if len(res.Sources) != 3 || res.Note == "" {
-				t.Fatalf("legacy source scope or notice changed: %s", out)
+			if len(res.Sources) != len(overviewKinds) || res.Sources[5].Source != "people" || res.Sources[5].Observations == nil {
+				t.Fatalf("people row missing from the overview: %s", out)
 			}
-			found := false
-			for _, step := range res.Next {
-				found = found || step.Command == "m365crawl --max-age 0 people sources"
-			}
+			found := strings.Contains(res.Sources[5].Note, "m365crawl --max-age 0 people sources")
 			if !found {
 				t.Fatal("overview lacks executable people coverage route")
 			}
@@ -180,7 +177,7 @@ func TestOverviewPeopleRouteIsRegistrationScoped(t *testing.T) {
 			m := decode(t, out)
 			hasPeople := strings.Contains(out, "people sources")
 			wantPeople := state != "unregistered" && state != "without-optional-schema"
-			if hasPeople != wantPeople || len(m["sources"].([]any)) != 3 {
+			if hasPeople != wantPeople || len(m["sources"].([]any)) != len(overviewKinds) {
 				t.Fatalf("registration scope: %s", out)
 			}
 			if state == "account" && !strings.Contains(out, "omit --account") {

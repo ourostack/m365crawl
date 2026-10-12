@@ -54,6 +54,8 @@ Output is JSON when stdout is not a terminal and text on a terminal. In JSON mod
 - **Lists** are `{"items": [...], "count": N, "truncated": bool}`. `--limit` defaults to 50. A truncated list also carries `total` when the exact count is known.
 - **`note`** is one plain sentence on an empty list, for Teams, calendar and mail lists alike. It says why the list is empty: no archive yet, no data of that source yet, a time range outside what the archive holds (naming the window), filters that matched nothing, a source this operating system does not read, or an `--account` the archive does not hold. A list with items has no `note`, except where a command documents its own use: `search` (a source a flag left out), `mail list --unread`, `mail unread` and `mail thread`.
 - **Freshness.** Legacy read results carry `archive_age_seconds`, counted from the last fully successful sync of the accounts they cover. An archive with no complete legacy sync adds `"needs_sync": true` and `"hint": "run m365crawl sync"`. Notes have independent `source_coverage`; notes-only commands/search do not consult or certify Teams/Outlook freshness.
+- **Text times** are local time followed by the zone's name, for example `2026-10-12 09:30 PDT` (a zone without an abbreviation prints its offset name, such as `+03`). JSON times are UTC, so a text day can differ from the JSON day.
+- **Log format.** `--format log` prints one `label=JSON` line, where the label is the command path with `_` for spaces, for example `docs_list={...}`. `skill` and `metadata` print their document in every format.
 - **Errors** go to stderr as `{"error": {"code", "message", "fix"}}`, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. [SPEC.md](../SPEC.md) section 6 lists every error code.
 
 ## Overview
@@ -69,8 +71,14 @@ In text mode it prints the banner, one row per source with its state, what it ho
 - **chats:** message and conversation counts and the newest message.
 - **mail:** message count, the oldest cached and the newest received message.
 - **calendar:** event count, the window from the earliest to the latest covered day, and whether today is fully covered (`coverage_gap`).
+- **documents:** Office document observations, registered sources and failed sources, with the last admitted capture. A failure note points to `docs sources`.
+- **notes:** OneNote indexed notes, registered sources and failed sources, with the last admitted capture.
+- **people:** Teams people and mail correspondents, and native Outlook people observations with their registered sources. With native sources it points to `people sources`.
+- **transcripts:** recorded meetings, transcript parts and how many are fetched, with the last fetch.
 
-`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a genuinely unsupported operating system), `off` (the Outlook source is off for this run) or `no_profile` (no supported Outlook profile on this machine). Windows OWA mail is supported. `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
+These rows come from what the archive already holds; the overview reads and captures nothing for them. Documents, notes and native people are not narrowed by `--account`, because their ownership is unresolved, and say so in their note.
+
+`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar"|"documents"|"notes"|"people"|"transcripts", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "documents"?, "notes"?, "people"?, "observations"?, "calls"?, "parts"?, "fetched"?, "registered_sources"?, "failed_sources"?, "last_sync_at", "note"?}`. `last_sync_at` is the last sync for chats, mail and the calendar, the last admitted capture for documents, notes and native people, and the last fetch for transcripts. `state` is `ok`, `empty`, `no_archive`, `not_registered` (documents or notes with no registered source; the note names the sync command), `unsupported` (a genuinely unsupported operating system), `off` (the Outlook source is off for this run) or `no_profile` (no supported Outlook profile on this machine). Windows OWA mail is supported. `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
 
 The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one, and the error's `fix` then names that command's `--help`. A likely synonym counts as close: `chats` suggests `conversations`, `email` suggests `mail`, `events` and `meetings` suggest `calendar`, and `transcript` suggests `transcripts`. The synonym itself is never accepted.
 
@@ -85,6 +93,9 @@ Start here:
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
+  m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
+  m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl people            Teams people, mail correspondents and native Outlook people observations
 ```
 
 ## Document metadata
@@ -391,7 +402,11 @@ m365crawl search "release date" --source transcripts --from ada
 
 ## people
 
-List existing Teams people and mail correspondents alongside explicitly registered native Outlook observations. Legacy `last_seen_at` keeps its original meaning, including Teams membership; it is not uniformly a last-contact time. Native observations have no value for that clock and remain unresolved source evidence.
+List existing Teams people and mail correspondents alongside explicitly registered native Outlook observations. `last_seen_at` is the newest time the person appears in archived data: sent or was mentioned in a Teams message, was a member of a chat at its last message, or sent or received archived mail. It is not the last chat with you; use `conversations` (`last_message_at`) or `messages --conversation` for chat recency. Native observations have no value for that clock and remain unresolved source evidence.
+
+IDs: `8:orgid:<guid>` is a person, `28:<id>` is a bot or app, `19:<id>@thread...` is a chat, channel or team named in a mention, `everyone` is the @everyone mention, `mail:<address>` is a mail correspondent, and `person-observation:ID` is a native Outlook observation. `--account` takes `<tenant_id>/<user_id>` as `whoami` (or `status`) lists the accounts.
+
+An unscoped list carries a notice that says what it included: Teams people and mail correspondents of every account, plus native Outlook observations when people sources are registered, with the caveat that native subjects have unresolved account ownership.
 
 ```
 m365crawl people [flags]
@@ -407,7 +422,7 @@ Result: a list of person items, known `last_seen_at` newest first, then unknown 
 - **A Teams person** has `sources: ["chats"]` and no `email`, because Teams keeps no address for a person.
 - **A mail correspondent** is a sender or recipient with an address; gone messages do not count. It has `id: "mail:<address>"`, `email` (the address, lower case), `sources: ["mail"]`, an empty `tenant_id`, and as `display_name` the newest name it was given, or the address when it never had one.
 - **Sources are never silently merged**, so the same person can appear in several sources or native representations.
-- `--account` narrows the Teams people only.
+- `--account` narrows the Teams people to that account's tenant; mail correspondents are not narrowed.
 - Registered native observations expose `person-observation:ID`, native class/key/version/framing, exact email/directory pair claims, separate refresh/capture/source clocks and ambiguity/conflicts. Account-filtered lists exclude those unqualified subjects with a notice; the source profile owner's account is not the subject's tenant.
 
 `--fields` keys: `tenant_id`, `id`, `display_name`, `email`, `sources`, `last_seen_at`, `source_id`, `capture_id`, `native_class`, `native_key`, `native_parent`, `version_raw`, `resynced`, `first_name`, `last_name`, `alternate_email`, `teams_id`, `refreshed_at`, `captured_at`, `source_observed_at`, `retained`, `ambiguous`, `conflicting`, `identity_state`, `text_truncated`.

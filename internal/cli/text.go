@@ -20,11 +20,14 @@ import (
 // displayZone is the zone text output shows times in; tests pin it.
 var displayZone = time.Local
 
+// stamp is t in displayZone followed by the zone's name ("2026-10-12 09:30 PDT"; zones without an
+// abbreviation print their offset name, such as "+03"), so a text time is never mistaken for the
+// UTC that JSON prints.
 func stamp(t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	return t.In(displayZone).Format("2006-01-02 15:04")
+	return t.In(displayZone).Format("2006-01-02 15:04 MST")
 }
 
 func metaLines(w io.Writer, m meta, color bool) {

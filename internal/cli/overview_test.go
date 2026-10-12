@@ -25,6 +25,9 @@ const startHereBlock = `Start here:
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
+  m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
+  m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl people            Teams people, mail correspondents and native Outlook people observations
 `
 
 // pinMailSupported makes the overview treat mail as readable (or not) whatever the host is.
@@ -244,6 +247,8 @@ func TestOverviewReportsArchiveFailures(t *testing.T) {
 	}
 	failing("chats", func(e *env) { e.exec("drop table messages"); e.exec("create table messages (x)") })
 	failing("mail", func(e *env) { e.exec("drop table mail_messages"); e.exec("create table mail_messages (x)") })
+	failing("notes count", func(e *env) { e.exec("drop table note_entities"); e.exec("create table note_entities (x)") })
+	failing("transcripts", func(e *env) { e.exec("drop table transcript_parts"); e.exec("create table transcript_parts (x)") })
 	failing("calendar sources", func(e *env) {
 		old := calendarSourcesOf
 		calendarSourcesOf = func(*store.Store, context.Context, store.CalendarSourcesFilter) (store.CalendarSources, error) {
