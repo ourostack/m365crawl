@@ -98,7 +98,16 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	}
 	if err != nil {
 		_ = record(StatusFailed)
-		return Report{}, nil, errs.DBError(err)
+		return Report{}, nil, migrationError(err)
+	}
+	// Application evidence is backfilled from the raw JSON the archive already holds: on its own
+	// marker, whether or not the rederivation above had work, and before any cache is read, so an
+	// absent, unchanged or failing capture never delays it. A settled archive does nothing.
+	var apps store.ApplicationBackfillReport
+	err = contained(func() (e error) { apps, e = backfillApplications(st, ctx); return })
+	if err != nil {
+		_ = record(StatusFailed)
+		return Report{}, nil, migrationError(err)
 	}
 	// An archive whose calendar tables were derived by another mapper, or under other scrub rules
 	// (or never: it is from before the calendar), gets them rebuilt from the records it already
@@ -121,6 +130,9 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		return rep, changes, err
 	}
 	rep.Migrated = migrated
+	if apps.Processed > 0 {
+		rep.ApplicationBackfill = &apps
+	}
 	if rerr := record(rep.Status); rerr != nil && err == nil {
 		// The sources committed, but the run could not be recorded: it is not a fresh sync.
 		return rep, changes, errs.DBError(rerr)
@@ -791,6 +803,15 @@ func (w *writer) peopleList() []teamsdesktop.Person {
 	return out
 }
 
+// migrationError is a failed archive rederivation or backfill: cancellation as itself, anything else
+// (a contained panic included) as an archive error.
+func migrationError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return errs.DBError(err)
+}
+
 // asCoded leaves coded and cancellation errors alone and wraps everything else as an archive error.
 func asCoded(err error) error {
 	var coded *errs.Coded
@@ -815,11 +836,13 @@ var (
 	deriveTranscripts = (*store.Session).DeriveTranscriptParts
 	calendarZone      = func() *time.Location { return time.Local }
 	rederiveArchive   = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
-	batchSize         = 2000
-	beforeFlush       = func(kind string, n int) error { return nil }
-	afterSnapshot     = func() {}
-	afterApply        = func(*writer) {}
-	beforeRead        = func(*writer) {}
-	memoSignature     = teamsdesktop.MemoSignature
-	conflictFn        = (*memo).conflict
+	// backfillApplications is store.BackfillMessageApplications; tests make it fail.
+	backfillApplications = (*store.Store).BackfillMessageApplications
+	batchSize            = 2000
+	beforeFlush          = func(kind string, n int) error { return nil }
+	afterSnapshot        = func() {}
+	afterApply           = func(*writer) {}
+	beforeRead           = func(*writer) {}
+	memoSignature        = teamsdesktop.MemoSignature
+	conflictFn           = (*memo).conflict
 )

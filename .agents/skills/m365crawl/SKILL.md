@@ -33,7 +33,7 @@ Run `m365crawl` first: it reports chats, mail and calendar freshness, routes reg
 
 | Job | Commands |
 | --- | --- |
-| Read a chat or channel | `m365crawl conversations --query <name>` to find it, then `m365crawl messages --conversation <id> --since 7d` |
+| Read a chat or channel | `m365crawl conversations --query <name>` to find it, then `m365crawl messages --conversation <id> --since 7d`. Each Teams message carries `app_observation` (its own app, reply and citation claims, not a verified identity) and results add `application_evidence_coverage`; not derived means run a writable `m365crawl sync` |
 | What someone said in a chat yesterday | `m365crawl messages --conversation <id> --from <name> --since <date>` (yesterday as YYYY-MM-DD), or `m365crawl search --from <name> --since 1d` across every chat |
 | Mentions of me | `m365crawl search --mentions-me --since 7d` (`--direct-mentions` leaves out @channel and @team), `m365crawl activity --unread` |
 | Triage: what needs me | `m365crawl unread --by-conversation --since 7d`, `m365crawl mail unread`, `m365crawl activity --unread` |

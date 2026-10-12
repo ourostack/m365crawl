@@ -15,7 +15,11 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 8 adds native mail identity mappings, conversation ids and nullable recipient roles.
 // Version 9 adds optional indexed notes and their independent source admission history.
 // Version 10 adds retained native people observations and immutable capture evidence.
-const SchemaVersion = 11
+// Version 11 adds retained Office document metadata observations.
+// Version 12 adds messages.raw_digest and the Teams message application evidence tables
+// (message_apps_schema.go); an archive at version 11 gains them on its next writable open, and the
+// sync's application backfill fills them from the raw JSON the archive already holds.
+const SchemaVersion = 12
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -91,6 +95,7 @@ create table if not exists messages(
   raw_json text,
   content_hash text not null default '',
   updated_at text not null,
+  raw_digest blob,
   primary key(tenant_id, user_id, conversation_id, id)
 );
 create index if not exists messages_sent_at on messages(sent_at desc);
@@ -189,4 +194,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL

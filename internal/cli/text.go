@@ -71,12 +71,16 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.renderOverview(r)
 	case *listResult:
 		rt.listTable(r)
+		rt.renderApplicationDetails(r)
 		rt.renderNoteDetails(r)
 		rt.renderPeopleDetails(r)
 		if err := rt.renderDocumentDetails(r); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintln(w)
+		if c := r.ApplicationEvidenceCoverage; c != nil {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(appCoverageLine(c), color))
+		}
 		rt.renderNoteCoverage(r.SourceCoverage)
 		if r.CoverageGap != nil && *r.CoverageGap {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
@@ -137,6 +141,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		render.Table(w, []string{"kind", "seen", "inserted", "updated", "unchanged"}, rows, color)
 		if m := r.Migrated; m != nil {
 			_, _ = fmt.Fprintf(w, "migrated: %d rows re-derived from stored records (derivation %d to %d); not counted as updates\n", m.Rows, m.From, m.To)
+		}
+		if a := r.ApplicationBackfill; a != nil {
+			_, _ = fmt.Fprintf(w, "application evidence: %d archived messages projected (mapper v%d; %d failed, %d with no application claims); not counted as updates\n", a.Processed, a.MapperVersion, a.Failed, a.Absent)
 		}
 		keys := make([]string, 0, len(r.Omissions))
 		for k := range r.Omissions {
@@ -276,7 +283,7 @@ func (rt *runtime) listTable(r *listResult) {
 		switch x := it.(type) {
 		case messageItem:
 			cols, textCol = []string{"sent_at", "conversation", "sender", "text"}, 3
-			text := oneLine(x.Text)
+			text := appMarker(x.App) + oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
@@ -288,7 +295,7 @@ func (rt *runtime) listTable(r *listResult) {
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
 			cols, textCol = searchColumns, 5
-			text := oneLine(x.Text)
+			text := appMarker(x.App) + oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
 			}
@@ -702,10 +709,18 @@ func (rt *runtime) eventBlock(r *eventResult) {
 	if ev.Chat != nil && len(ev.Chat.RecentMessages) > 0 {
 		_, _ = fmt.Fprintln(w)
 		rows := make([][]string, len(ev.Chat.RecentMessages))
+		var details []string
 		for i, m := range ev.Chat.RecentMessages {
-			rows[i] = []string{stamp(m.SentAt), render.Truncate(m.SenderName, 30), render.Truncate(oneLine(m.Text), eventTextWidth)}
+			rows[i] = []string{stamp(m.SentAt), render.Truncate(m.SenderName, 30), render.Truncate(appMarker(m.App)+oneLine(m.Text), eventTextWidth)}
+			details = append(details, appDetailLines("chat message "+m.ID, m.App)...)
 		}
 		render.Table(w, []string{"sent_at", "chat sender", "message"}, rows, color)
+		for _, line := range details {
+			_, _ = fmt.Fprintln(w, line)
+		}
+	}
+	if r.appCoverage != nil {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(appCoverageLine(r.appCoverage), color))
 	}
 	if len(ev.RelatedMail) > 0 {
 		_, _ = fmt.Fprintln(w)

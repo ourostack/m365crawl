@@ -7,6 +7,7 @@ at                    source  where           who               thread          
 2023-11-10 09:00 UTC  mail    Inbox           Ann Sender        outlook/SearchTest:202                                                                                     Hello again - pre...
 2023-11-09 08:00 UTC  mail    Inbox           ann@example.test  outlook/SearchTest:205                                                                                     Bare hello
 
+app evidence of 2 returned Teams messages (mapper v2): 2 absent
 notes and documents coverage: unknown (registered_optional_sources)
 source  kind  status  coverage  locator  reason
 ------  ----  ------  --------  -------  ------

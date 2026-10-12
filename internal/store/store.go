@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,8 +129,10 @@ var chmodFile = os.Chmod
 // in one transaction (SQLite's ALTER TABLE is transactional), so a failure keeps none of them.
 // Version 8 adds mail conversation ids and recipient roles. Its conversation index is created
 // here, after the column exists, because the schema DDL runs before migration on old archives.
+// Version 12 adds messages.raw_digest, NULL until the application backfill or a changed message
+// fills it.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has, digest, redacted, conversation, role, conversationIndex int
+	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -137,10 +140,14 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('records') where name='value_redacted'),
   (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
   (select count(*) from pragma_table_info('mail_recipients') where name='role'),
-  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex); err != nil {
+  (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation'),
+  (select count(*) from pragma_table_info('messages') where name='raw_digest')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest); err != nil {
 		return err
 	}
 	var stmts []string
+	if messageDigest == 0 {
+		stmts = append(stmts, `alter table messages add column raw_digest blob`)
+	}
 	if digest == 0 {
 		stmts = append(stmts, `alter table records add column raw_digest blob`)
 	}
@@ -297,7 +304,7 @@ func rawOrNil(b []byte) any {
 // SQL runs a read-only query and streams its rows, stopping once limit rows are read; truncated
 // says whether more rows existed. It is only available on a store opened with OpenReadOnly. The
 // statement check (CheckSQL) is a friendly early error; the connection is also read-only at the
-// file level, which is what actually stops writes.
+// file level, which is what actually stops writes. BLOB values come back as lowercase hex.
 func (s *Store) SQL(ctx context.Context, q string, limit int) (cols []string, out [][]any, truncated bool, err error) {
 	if !s.readOnly {
 		return nil, nil, false, errors.New("sql requires a read-only archive connection")
@@ -325,8 +332,8 @@ func (s *Store) SQL(ctx context.Context, q string, limit int) (cols []string, ou
 		}
 		_ = rows.Scan(ptrs...) // scanning into *any cannot fail
 		for i, v := range values {
-			if b, ok := v.([]byte); ok {
-				values[i] = string(b)
+			if b, ok := v.([]byte); ok { // a BLOB: hex keeps digests readable and intact in JSON
+				values[i] = hex.EncodeToString(b)
 			}
 		}
 		out = append(out, values)

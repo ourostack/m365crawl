@@ -440,7 +440,7 @@ func TestEventOfCountsResponsesAndTruncates(t *testing.T) {
 		Recaps: []store.CalendarRecap{{CallID: "c", ShortSummary: "0123456789", Outline: "0123456789", Headline: "0123456789", RecordingURL: "https://r.example.invalid",
 			ActionItems: []store.CalendarRecapItem{{Text: "0123456789"}}, Mentions: []store.CalendarRecapItem{{Text: "0123456789"}}}},
 	}
-	ev := eventOf(d)
+	ev := eventOf(d, "")
 	if c := ev.ResponseCounts; c == nil || c.Accepted != 1 || c.Tentative != 1 || c.Declined != 1 || c.None != 2 {
 		t.Fatalf("%+v", ev.ResponseCounts)
 	}
@@ -451,7 +451,7 @@ func TestEventOfCountsResponsesAndTruncates(t *testing.T) {
 	if !ev.TextTruncated || ev.BodyText == "0123456789" || ev.Recaps[0].ActionItems[0].Text == "0123456789" || ev.Recaps[0].Mentions[0].Text == "0123456789" || ev.Recaps[0].Headline == "0123456789" {
 		t.Fatalf("%+v", ev)
 	}
-	short := eventOf(store.CalendarDetail{CalendarRow: store.CalendarRow{DetailLevel: calendar.DetailBasic}})
+	short := eventOf(store.CalendarDetail{CalendarRow: store.CalendarRow{DetailLevel: calendar.DetailBasic}}, "")
 	short.truncate(100)
 	if short.TextTruncated || short.Organizer != nil || short.ResponseCounts != nil {
 		t.Fatalf("%+v", short)

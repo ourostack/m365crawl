@@ -314,12 +314,12 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			return err
 		}
 		defer func() { _ = sel.Close() }()
-		ins, err := tx.PrepareContext(ctx, `insert into messages(tenant_id,user_id,conversation_id,id,reply_chain_id,parent_message_id,client_message_id,sender_id,sender_name,sent_at,edited_at,deleted_at,message_type,content_type,content_html,content_text,version,mentions_json,mentions_me,reactions_json,files_json,links_json,subject,importance,pinned,link,raw_json,content_hash,updated_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		ins, err := tx.PrepareContext(ctx, `insert into messages(tenant_id,user_id,conversation_id,id,reply_chain_id,parent_message_id,client_message_id,sender_id,sender_name,sent_at,edited_at,deleted_at,message_type,content_type,content_html,content_text,version,mentions_json,mentions_me,reactions_json,files_json,links_json,subject,importance,pinned,link,raw_json,content_hash,updated_at,raw_digest) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = ins.Close() }()
-		upd, err := tx.PrepareContext(ctx, `update messages set reply_chain_id=?,parent_message_id=?,client_message_id=?,sender_id=?,sender_name=?,sent_at=?,edited_at=?,deleted_at=?,message_type=?,content_type=?,content_html=?,content_text=?,version=?,mentions_json=?,mentions_me=?,reactions_json=?,files_json=?,links_json=?,subject=?,importance=?,pinned=?,link=?,raw_json=?,content_hash=?,updated_at=? where rowid=?`)
+		upd, err := tx.PrepareContext(ctx, `update messages set reply_chain_id=?,parent_message_id=?,client_message_id=?,sender_id=?,sender_name=?,sent_at=?,edited_at=?,deleted_at=?,message_type=?,content_type=?,content_html=?,content_text=?,version=?,mentions_json=?,mentions_me=?,reactions_json=?,files_json=?,links_json=?,subject=?,importance=?,pinned=?,link=?,raw_json=?,content_hash=?,updated_at=?,raw_digest=? where rowid=?`)
 		if err != nil {
 			return err
 		}
@@ -334,7 +334,9 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			return err
 		}
 		defer func() { _ = ftsIns.Close() }()
-		now := nowText()
+		now, derivedAt := nowText(), time.Now().UTC()
+		apps := newAppPublisher(tx)
+		defer apps.close()
 		for _, m := range ms {
 			n.Seen++
 			if m.TenantID == "" || m.UserID == "" || m.ConversationID == "" || m.ID == "" {
@@ -345,6 +347,14 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				sent = "" // sent_at is NOT NULL; a message with no time sorts first
 			}
 			mentions, reactions, files, links, raw := jsonOrNil(m.Mentions), jsonOrNil(m.Reactions), jsonOrNil(m.Files), jsonOrNil(m.Links), rawOrNil(m.Raw)
+			// The canonical raw value decides both the stored digest and the projection: zero-length
+			// incoming bytes are stored as NULL, so they are absent raw here too.
+			rawPresent := raw != nil
+			var digest any
+			digestText := rawDigest(m.Raw, rawPresent)
+			if rawPresent {
+				digest = digestBlob(digestText)
+			}
 			var rowid, version int64
 			var old string
 			var oldDeleted sql.NullString
@@ -356,7 +366,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			key := m.TenantID + "|" + m.UserID + "|" + m.ConversationID + "|" + m.ID
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
-				res, err := ins.ExecContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now)
+				res, err := ins.ExecContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now, digest)
 				if err != nil {
 					return err
 				}
@@ -372,7 +382,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				rows = append(rows, RowState{rowid, old, false})
 				continue
 			default:
-				if _, err := upd.ExecContext(ctx, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now, rowid); err != nil {
+				if _, err := upd.ExecContext(ctx, m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, bool01(m.MentionsMe), reactions, files, links, m.Subject, m.Importance, bool01(m.Pinned), m.Link, raw, hash, now, digest, rowid); err != nil {
 					return err
 				}
 				if _, err := ftsDel.ExecContext(ctx, rowid); err != nil {
@@ -386,6 +396,11 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				}
 			}
 			if _, err := ftsIns.ExecContext(ctx, rowid, key, m.ContentText); err != nil {
+				return err
+			}
+			// Only an accepted insert or update publishes evidence: an older or unchanged copy above
+			// never moves the current or last good pointer.
+			if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
 				return err
 			}
 			rows = append(rows, RowState{rowid, hash, true})

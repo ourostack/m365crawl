@@ -108,6 +108,11 @@ type MessageRow struct {
 	ReplyCount  *int      `json:"reply_count,omitempty"`
 	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
 
+	// Application is the message's application, reply and citation evidence, read in the same
+	// transaction as the row (see loadMessageApplications). Zero on rows read by key (MessagesByKey,
+	// which watch uses), because those reads never load evidence.
+	Application MessageApplicationEnvelope `json:"-"`
+
 	replyRoot bool // a channel thread root: its replies are counted by fillReplies
 }
 
@@ -348,8 +353,26 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 // truncation. When the result is truncated and total is not nil, total receives the number of
 // matching messages.
 func (s *Store) runMessages(ctx context.Context, from string, w *where, limit int, total *int) ([]MessageRow, bool, error) {
+	return s.runMessagesWith(ctx, from, w, limit, total, true)
+}
+
+// runMessagesWith is runMessages; evidence false leaves Application zero and reads no evidence.
+func (s *Store) runMessagesWith(ctx context.Context, from string, w *where, limit int, total *int, evidence bool) ([]MessageRow, bool, error) {
 	q := `select ` + msgCols + from + w.sql() + ` order by m.sent_at desc, m.id desc limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
-	rows, err := s.db.QueryContext(ctx, q, append(w.args, limit+1)...)
+	return s.selectMessages(ctx, q, append(w.args, limit+1), limit, evidence, func(tx *sql.Tx) error { return countTotalIn(ctx, tx, total, from, w) })
+}
+
+// selectMessages runs one canonical message selection and everything read about the selected rows
+// (the total, the reply counts and the application evidence) in one read transaction, so a body
+// is never paired with the evidence of a revision published after it was selected. The rows are
+// closed before the evidence is read; any error, a failed commit included, returns no rows.
+func (s *Store) selectMessages(ctx context.Context, q string, args []any, limit int, evidence bool, count func(tx *sql.Tx) error) ([]MessageRow, bool, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }() // after Commit it does nothing
+	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -360,11 +383,20 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 	trunc := len(out) > limit
 	if trunc {
 		out = out[:limit]
-		if err := s.countTotal(ctx, total, from, w); err != nil {
+		if err := count(tx); err != nil {
 			return nil, false, err
 		}
 	}
-	if err := s.fillReplies(ctx, out); err != nil {
+	if err := fillReplies(ctx, tx, out); err != nil {
+		return nil, false, err
+	}
+	if evidence {
+		afterMessageSelection()
+		if out, err = loadMessageApplications(ctx, tx, out); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, false, err
 	}
 	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
@@ -377,7 +409,9 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 
 // fillReplies sets ReplyCount and LastReplyAt on the channel thread roots among rows: the live
 // replies stored under the root's reply chain, and the newest one's send time.
-func (s *Store) fillReplies(ctx context.Context, rows []MessageRow) error {
+func fillReplies(ctx context.Context, q interface {
+	PrepareContext(context.Context, string) (*sql.Stmt, error)
+}, rows []MessageRow) error {
 	var stmt *sql.Stmt
 	defer func() {
 		if stmt != nil {
@@ -391,7 +425,7 @@ func (s *Store) fillReplies(ctx context.Context, rows []MessageRow) error {
 		}
 		if stmt == nil {
 			var err error
-			if stmt, err = s.db.PrepareContext(ctx, `select count(*),max(sent_at) from messages where tenant_id=? and user_id=? and conversation_id=? and reply_chain_id=? and id<>? and deleted_at is null`); err != nil {
+			if stmt, err = q.PrepareContext(ctx, `select count(*),max(sent_at) from messages where tenant_id=? and user_id=? and conversation_id=? and reply_chain_id=? and id<>? and deleted_at is null`); err != nil {
 				return err
 			}
 		}
@@ -408,13 +442,18 @@ func (s *Store) fillReplies(ctx context.Context, rows []MessageRow) error {
 // countTotal stores in total the number of rows the query "select ... <from> <where>" matches
 // without its limit. A nil total means the caller does not want it.
 func (s *Store) countTotal(ctx context.Context, total *int, from string, w *where) error {
+	return countTotalIn(ctx, s.db, total, from, w)
+}
+
+// countTotalIn is countTotal read through q, such as the read transaction of a message selection.
+func countTotalIn(ctx context.Context, q knowledgeReader, total *int, from string, w *where) error {
 	if total == nil {
 		return nil
 	}
 	if pruneJoinsOff {
-		return s.db.QueryRowContext(ctx, `select count(*)`+from+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
+		return q.QueryRowContext(ctx, `select count(*)`+from+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	}
-	return s.db.QueryRowContext(ctx, `select count(*)`+pruneJoins(from, w.sql())+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	return q.QueryRowContext(ctx, `select count(*)`+pruneJoins(from, w.sql())+w.sql(), w.args...).Scan(total) //nolint:gosec // G202: fragments are package constants; values are placeholders
 }
 
 // pruneJoinsOff makes countTotal count over the full from clause; a test sets it to compare.
@@ -602,30 +641,10 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 	if !f.IncludeSystem {
 		w.add(notSystemCond(`m.conversation_id`))
 	}
-	rows, err := s.db.QueryContext(ctx, `select `+msgCols+` from messages m`+msgJoin+w.sql()+` order by m.sent_at, m.id limit ?`, append(w.args, f.limit()+1)...) //nolint:gosec // G202: fragments are package constants; values are placeholders
-	if err != nil {
-		return nil, false, err
-	}
-	out, err := scanMessages(rows)
-	if err != nil {
-		return nil, false, err
-	}
-	trunc := len(out) > f.limit()
-	if trunc {
-		out = out[:f.limit()]
-		if err := s.countTotal(ctx, f.Total, ` from messages m`+msgJoin, &w); err != nil {
-			return nil, false, err
-		}
-	}
-	if err := s.fillReplies(ctx, out); err != nil {
-		return nil, false, err
-	}
-	if err := nameUntitled(ctx, s, out, func(r *MessageRow) (convRef, *string) {
-		return convRef{r.TenantID, r.UserID, r.ConversationID}, &r.ConversationDisplayName
-	}); err != nil {
-		return nil, false, err
-	}
-	return out, trunc, nil
+	q := `select ` + msgCols + ` from messages m` + msgJoin + w.sql() + ` order by m.sent_at, m.id limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
+	return s.selectMessages(ctx, q, append(w.args, f.limit()+1), f.limit(), true, func(tx *sql.Tx) error {
+		return countTotalIn(ctx, tx, f.Total, ` from messages m`+msgJoin, &w)
+	})
 }
 
 // Conversations lists conversations by latest activity. kind is a case-insensitive exact match

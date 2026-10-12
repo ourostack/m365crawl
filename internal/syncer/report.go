@@ -52,9 +52,13 @@ type Report struct {
 	OutlookClassicOnly []string `json:"outlook_classic_only,omitempty"`
 	// Migrated is set when this run first recomputed an older archive's derived fields from their
 	// stored raw_json (see store.DerivationVersion). Those rows count as no update and no edit.
-	Migrated   *store.Migration `json:"migrated,omitempty"`
-	StartedAt  time.Time        `json:"started_at"`
-	FinishedAt time.Time        `json:"finished_at"`
+	Migrated *store.Migration `json:"migrated,omitempty"`
+	// ApplicationBackfill is set when this run projected retained Teams messages' application,
+	// reply and citation evidence from their stored raw_json: the first sync after an upgrade, or
+	// after a new mapper version. Those messages count as no update and no edit.
+	ApplicationBackfill *store.ApplicationBackfillReport `json:"application_backfill,omitempty"`
+	StartedAt           time.Time                        `json:"started_at"`
+	FinishedAt          time.Time                        `json:"finished_at"`
 }
 
 // SourceReport is one Teams origin's outcome.

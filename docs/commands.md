@@ -315,7 +315,7 @@ m365crawl sync [flags]
 | --- | --- |
 | `--full-read` | Read every record in full, even from a cache that has not changed since the last sync, instead of skipping the records whose bytes are unchanged. The archive comes out the same either way; this is a check, not a repair (`$M365CRAWL_FULL_READ`). |
 
-Result: the sync report (SPEC.md sections 4 and 5), with one entry per source in `sources`. A Teams source carries counts for `conversations`, `messages`, `people`, `activity`, `records` and `calendar` (`events`, `recaps`, `recap_items`, `gone`, `linked`, `refused` and the link counts). HxStore profiles have separate calendar and mail sources; OWA profiles contribute `outlook|<profile>|mail` only, with `mail: {added, updated, replaced, gone, evicted, withheld}` counts. A mail failure does not fail another source's progress. Explicit Windows HxStore mail retains its `unavailable`/`mail_unsupported_platform` result; native OWA is supported and decoding failures are coded errors, not successful fallbacks.
+Result: the sync report (SPEC.md sections 4 and 5), with one entry per source in `sources`. A Teams source carries counts for `conversations`, `messages`, `people`, `activity`, `records` and `calendar` (`events`, `recaps`, `recap_items`, `gone`, `linked`, `refused` and the link counts). HxStore profiles have separate calendar and mail sources; OWA profiles contribute `outlook|<profile>|mail` only, with `mail: {added, updated, replaced, gone, evicted, withheld}` counts. A mail failure does not fail another source's progress. When an archive has messages whose application evidence was never projected under the current mapper version, the sync projects them offline first and reports `application_backfill` (`mapper_version`, `processed`, `failed`, `absent`); a failed backfill fails the sync before any capture and the next sync retries it. Explicit Windows HxStore mail retains its `unavailable`/`mail_unsupported_platform` result; native OWA is supported and decoding failures are coded errors, not successful fallbacks.
 
 Exit 0 for `ok`, `ok_with_omissions` and `unchanged`. Status `partial` (some sources committed, others failed) prints the report on stdout, a `partial_sync` error on stderr and exits 1. `--account` limits the run to one account and skips the unchanged shortcut.
 
@@ -388,6 +388,7 @@ How the sources combine:
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched`. With another `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
 - `note` also says when mail is left out because it is not in the archive yet (`mail is not in the archive yet; run m365crawl sync`) or not read on this system.
 - `--account` takes a Teams account (`<tenantId>/<userId>`), which narrows chats and searches all mail, or a mail account (`outlook/<profile>`), which narrows mail and skips chats and transcripts. It excludes unresolved notes/documents from `all`; explicitly selected knowledge rejects it. The other source's flag with it, or a `--source` it rules out, is a `flag_source_conflict`.
+- Chat hits carry `app_observation` as in `messages`. `application_evidence_coverage` counts the chat hits that survive the merged `--limit`, so mail, transcript and knowledge hits never count, and a result without chat hits has coverage `unknown`.
 - `--fields` accepts the keys of every kind of item, plus `source`.
 - A query with a syntax error (an unbalanced quote) is one usage error, not one per source.
 
@@ -398,7 +399,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`.
+`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`.
 
 ## people
 
@@ -469,7 +470,7 @@ m365crawl sql <query> [flags]
 | `<query>` | One SELECT (or WITH, EXPLAIN or VALUES) statement. |
 | `--limit=50` | Maximum rows to return; the query stops there and `truncated` says whether more rows exist. |
 
-Result: `{"columns", "rows", "count", "truncated"}`. It stops reading at `--limit`, so there is no `total`. Returns every account's rows regardless of `--account`. The mail tables are `mail_messages`, `mail_folders`, `mail_recipients`, `mail_attachments` and `mail_coverage`.
+Result: `{"columns", "rows", "count", "truncated"}`. It stops reading at `--limit`, so there is no `total`. BLOB values (such as `messages.raw_digest`) are printed as lowercase hex in every format. Returns every account's rows regardless of `--account`. The mail tables are `mail_messages`, `mail_folders`, `mail_recipients`, `mail_attachments` and `mail_coverage`.
 
 ```sh
 m365crawl sql "select kind, count(*) as n from conversations group by kind"
@@ -502,12 +503,20 @@ m365crawl messages [flags]
 
 Result: a list of message items, oldest first. Each carries a `link` (a Teams deep link). Text output has a `thread` column with the two arguments of `m365crawl thread` for the message's thread: `<conversation_id> <reply_chain_id, else id>`. Channel thread roots carry `reply_count` and `last_reply_at`; items that mention you carry `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone` or `other`).
 
+Application evidence. Every Teams message item carries `app_observation`, the app, reply and citation claims of its archived native JSON, and the result carries `application_evidence_coverage`. The claims are the message's own, not a verified app identity or citation target, and one message stays one item. `messages`, `unread`, `thread`, chat hits of `search` and the recent messages of `calendar event` share this shape.
+
+- `app_observation.state` is `mapped` (claims read), `partial` (some read; `served.losses` counts what was not), `absent` (no app or citation claims), `failed` (the native JSON could not be read; `failure_code` says why, for example `teams_app_projection_corrupt`) or `not_derived` (not projected yet; run a writable `m365crawl sync`, because `--max-age 0` never derives it).
+- `served` holds the claims: `app_id`, `app_name`, `reply_to_id` and `citations` (`position`, `id` as a decimal string, `title`, `link`, `content_type`, `nested_content_present`). At most 100 citations are previewed; `total_admitted` and `citations_truncated` say how many exist. `full_inspection` is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the complete stored representation. It names the same `--db` archive the read used, as an absolute path (double-quoted on Windows, POSIX single-quoted elsewhere, when it needs quoting), so run it as printed.
+- When the current representation failed, `served` is the last good one, with `retained: true` and `retained_reason: "current_failed"`. `current` describes the message as archived now (`sender_id`, `raw_present`, `raw_digest`, `mapper_version`).
+- `application_evidence_coverage` counts the states (`mapped`, `partial`, `absent`, `failed`, `not_derived`) and `retained` of the Teams messages actually returned, after `--limit`. With no Teams message returned, its `state` is `unknown`, not absent. It is not app, service or Copilot completeness.
+- Text output marks an app message `[app: NAME]` in the text column, lists its citations under the table and ends with an `app evidence of N returned Teams messages` line.
+
 ```sh
 m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text 80
 m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`.
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`.
 
 ## unread
 
@@ -528,14 +537,14 @@ m365crawl unread [flags]
 | `--by-conversation` | One item per conversation with its unread count, oldest and newest unread time and a link, most unread first. Ignores `--html`. |
 | `--include-system` | Also include Teams' system pseudo-conversations. |
 
-Result: a list of message items, newest first; with `--by-conversation`, one overview item per conversation. Results carry `channels_excluded: true` when channels are left out.
+Result: a list of message items, newest first, with `app_observation` and `application_evidence_coverage` as in `messages`; with `--by-conversation`, one overview item per conversation and no application evidence. Results carry `channels_excluded: true` when channels are left out.
 
 ```sh
 m365crawl unread --limit 5
 m365crawl unread --by-conversation --since 7d
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
 
 ## thread
 
@@ -554,14 +563,14 @@ m365crawl thread <target> [<root>] [flags]
 | `--html` | Add each message's HTML body as `html`. |
 | `--include-system` | Also include Teams' system pseudo-conversations. |
 
-Result: a list of message items, root first.
+Result: a list of message items, root first, with `app_observation` and `application_evidence_coverage` as in `messages`. The thread is read in one archive snapshot.
 
 ```sh
 m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
 m365crawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`.
+`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`.
 
 ## conversations
 
@@ -830,7 +839,7 @@ Result: the agenda item, plus:
 
 - `organizer`, `attendees`, `attendees_as_of`, `response_counts`, `body_text`, `body_html`, `body_type`, `attachments`, `categories`, `reminder_minutes` and `series` (`key`, `rule`, `master_event_id`, `occurrence_count_known`).
 - `recaps`, each with `call_id`, `headline`, `short_summary`, `outline`, `summary_sections`, `action_items`, `mentions`, `speakers`, `topics`, `recording`, `meeting_start`, `meeting_end`, `expires_at`, `link_method`, `attendance_status` and `attendees_count`.
-- `chat`: the Teams meeting chat (`conversation_id`, `display_name`, `message_count`) and `recent_messages`, its newest 20 live messages, newest first, each in the `messages` item shape. `chat` is null when the archive holds no meeting chat for the event. An event with no Teams meeting chat at all, such as one only Outlook holds, also gets a `notices` entry saying so.
+- `chat`: the Teams meeting chat (`conversation_id`, `display_name`, `message_count`) and `recent_messages`, its newest 20 live messages, newest first, each in the `messages` item shape with its `app_observation`; the event's `application_evidence_coverage` counts those messages. `chat` is null when the archive holds no meeting chat for the event. An event with no Teams meeting chat at all, such as one only Outlook holds, also gets a `notices` entry saying so.
 - `related_mail`: the Outlook mail about this occurrence, at most 20, always a list (empty when there is none). Gone messages are left out.
   - First, invites (`match: "invite"`): mail whose `ical_uid` is the event's iCal UID, ignoring case.
   - Then, newest first (`match: "subject"`): mail with the same subject once reply and forward prefixes are stripped (`re:`, `fw:`, `fwd:`, `aw:`, `wg:`, `sv:`, ignoring case), received from 14 days before to 7 days after the occurrence's start. When the event names any attendee or organizer address, the mail must also be sent or received by at least one of them. Your own addresses (those signed in to an Outlook profile) do not count toward that, because you are in nearly every meeting; they count only when you are the event's only participant.

@@ -1,0 +1,9 @@
+### Added
+
+- Teams message results (`messages`, `unread`, `thread`, chat hits of `search` and the recent messages of `calendar event`) carry `app_observation`: the app, native reply-to and citation claims of each message's archived native JSON, with a state of `mapped`, `partial`, `absent`, `failed` or `not_derived`, a bounded preview of 100 citations and an archive-only `full_inspection` command. Each result adds `application_evidence_coverage` for the Teams messages it returned, after `--limit`. `properties.botMetadata` held as a JSON string, the way Teams stores it, is decoded under the record's own strict limits, so its `replyToId` is read instead of being reported as unmapped. One message is still one item and one search hit.
+- The archive moves to schema 12: immutable, versioned application evidence representations with current and last-good pointers, published in the same transaction as the message they describe. A failed current representation serves the last good one as retained.
+- The first writable `sync` after the upgrade derives application evidence offline from the archive, before any capture, and reports `application_backfill`. On a large archive this first sync needs up to about 0.75 GB of temporary free disk space for the write-ahead log, which is returned when it finishes. Reads with `--max-age 0` never derive it and report `not_derived`.
+
+### Changed
+
+- `sql` prints BLOB columns, such as `records.raw_digest` and the new `messages.raw_digest`, as lowercase hex in every output format instead of raw bytes that JSON could not preserve.

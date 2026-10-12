@@ -10,7 +10,8 @@ const byKeyChunk = 200
 
 // MessagesByKey returns the messages named by the keys Change.Key carries
 // ("<tenant>|<user>|<conversation>|<id>"), deleted ones included, in the order of keys. Keys that
-// are malformed or match no row are skipped.
+// are malformed or match no row are skipped. It reads no application evidence: watch lines carry
+// none.
 func (s *Store) MessagesByKey(ctx context.Context, keys []string) ([]MessageRow, error) {
 	byKey := map[string]MessageRow{}
 	for lo := 0; lo < len(keys); lo += byKeyChunk {
@@ -29,7 +30,7 @@ func (s *Store) MessagesByKey(ctx context.Context, keys []string) ([]MessageRow,
 			continue
 		}
 		w.add(`(`+strings.Join(conds, ` or `)+`)`, args...)
-		rows, _, err := s.runMessages(ctx, ` from messages m`+msgJoin, &w, byKeyChunk, nil)
+		rows, _, err := s.runMessagesWith(ctx, ` from messages m`+msgJoin, &w, byKeyChunk, nil, false)
 		if err != nil {
 			return nil, err
 		}

@@ -79,9 +79,9 @@ func TestSQLStreamsAndStopsAtTheLimit(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0][0] != "m1" {
 		t.Fatalf("literal attach: %v %v", rows, err)
 	}
-	// Blobs come back as strings.
-	_, rows, _, err = ro.SQL(ctx, "select cast('x' as blob)", 1)
-	if err != nil || rows[0][0] != "x" {
+	// Blobs come back as lowercase hex, so a digest survives JSON; text stays text.
+	_, rows, _, err = ro.SQL(ctx, "select cast('x' as blob), x'00FF', 'text'", 1)
+	if err != nil || rows[0][0] != "78" || rows[0][1] != "00ff" || rows[0][2] != "text" {
 		t.Fatalf("blob: %v %v", rows, err)
 	}
 	// An engine error is not a refusal.
