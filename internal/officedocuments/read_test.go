@@ -307,55 +307,69 @@ func TestContextInputDoesNotReadAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestReadJSONSuccessfulResponseWithoutDocumentContainerIsEmpty(t *testing.T) {
+// emptyRecent and emptyRecommended are the two empty service responses observed in real Office
+// aggmru files, as key shapes with synthetic values.
+const (
+	emptyRecent      = `{"response_code":1,"delta_token":"synthetic-token","diagnostics_data":{"http_status_code":200,"extra":"x"}}`
+	emptyRecommended = `{"diagnostics_data":{"http_status_code":200},"error_data":{},"response_code":0,` +
+		`"documents_group":{"title":"Synthetic","ranker":"r","digest":"d"},"prefetch_documents_group":{}}`
+)
+
+func TestReadJSONObservedEmptyServiceResponsesAreEmpty(t *testing.T) {
 	for _, tt := range []struct {
 		surface Surface
 		json    string
 	}{
-		{Recent, `{"response_code":1,"delta_token":"synthetic-token","diagnostics_data":{"http_status_code":200}}`},
-		{Recent, `{"response_code":0,"documents":{}}`},
-		{Recent, `{"diagnostics_data":{"http_status_code":200,"other":"x"}}`},
-		{Shared, `{"response_code":0,"error_data":{},"diagnostics_data":{"http_status_code":200}}`},
-		{Recommended, `{"response_code":0,"error_data":{},"documents_group":{"title":"Synthetic","ranker":"r","digest":"d"}}`},
-		{Recommended, `{"response_code":1,"diagnostics_data":{}}`},
+		{Recent, emptyRecent},
+		{Recommended, emptyRecommended},
+		{Recommended, `{"diagnostics_data":{"http_status_code":200},"error_data":{},"response_code":0,"documents_group":{},"prefetch_documents_group":{}}`},
 	} {
 		got, err := ReadJSON(context.Background(), strings.NewReader(tt.json), tt.surface)
 		if err != nil || len(got.Documents) != 0 || len(got.Losses) != 0 {
-			t.Fatalf("successful empty %s response %s = %#v, %v", tt.surface, tt.json, got, err)
+			t.Fatalf("observed empty %s response %s = %#v, %v", tt.surface, tt.json, got, err)
 		}
 	}
 }
 
-func TestReadJSONUnrecognizedResponsesWithoutDocumentsStillRefuse(t *testing.T) {
+func TestReadJSONUnobservedResponsesWithoutDocumentsStillRefuse(t *testing.T) {
+	recommended := func(edit string) string { return strings.Replace(emptyRecommended, `"response_code":0`, edit, 1) }
 	for _, tt := range []struct {
 		surface Surface
 		json    string
 	}{
-		{Recent, `{"delta_token":"synthetic-token"}`},
-		{Recent, `{"diagnostics_data":{}}`},
-		{Recent, `{"response_code":"1"}`},
-		{Recent, `{"response_code":2}`},
-		{Recent, `{"response_code":1.5}`},
-		{Recent, `{"response_code":null}`},
-		{Recent, `{"response_code":1,"error_data":{"code":"synthetic"}}`},
-		{Recent, `{"response_code":1,"error_data":[]}`},
-		{Recent, `{"response_code":1,"error_data":null}`},
-		{Recent, `{"response_code":1,"diagnostics_data":[]}`},
-		{Recent, `{"response_code":1,"diagnostics_data":{"http_status_code":500}}`},
-		{Recent, `{"diagnostics_data":{"http_status_code":"200"}}`},
-		{Recent, `{"response_code":1,"documents":[]}`},
-		{Recent, `{"response_code":1,"documents":{"items":null}}`},
-		{Recent, `{"response_code":1,"documents":{"items":{}}}`},
-		{Shared, `{"response_code":0,"shared_documents":{}}`},
-		{Shared, `{"response_code":0,"shared_documents":null}`},
-		{Recommended, `{"response_code":0,"documents_group":null}`},
-		{Recommended, `{"response_code":0,"documents_group":{"documents":{}}}`},
-		{Dialog, `{"response_code":0}`},
+		{Recent, `{"response_code":0,"error":{"code":"TooManyRequests"}}`},
+		{Recent, `{"response_code":1,"retry_after":30}`},
+		{Recent, `{"response_code":1}`},
+		{Recent, `{"response_code":1,"delta_token":"t"}`},
+		{Recent, `{"response_code":1,"diagnostics_data":{"http_status_code":200}}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":{"http_status_code":200},"retry_after":30}`},
+		{Recent, `{"response_code":0,"delta_token":"t","diagnostics_data":{"http_status_code":200}}`},
+		{Recent, `{"response_code":"1","delta_token":"t","diagnostics_data":{"http_status_code":200}}`},
+		{Recent, `{"response_code":1,"delta_token":7,"diagnostics_data":{"http_status_code":200}}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":{"http_status_code":500}}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":{}}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":[]}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":{"http_status_code":200},"documents":{}}`},
+		{Recent, `{"response_code":1,"delta_token":"t","diagnostics_data":{"http_status_code":200},"documents":{"items":null}}`},
+		{Recommended, `{"response_code":1,"diagnostics_data":{}}`},
+		{Recommended, `{"response_code":0,"error":{"code":"x"}}`},
+		{Recommended, recommended(`"response_code":1`)},
+		{Recommended, strings.Replace(emptyRecommended, `"error_data":{}`, `"error_data":{"code":"x"}`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"prefetch_documents_group":{}`, `"prefetch_documents_group":{"documents":[]}`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"prefetch_documents_group":{}`, `"retry_after":30`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"digest":"d"`, `"digest":"d","documents":null`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"digest":"d"`, `"digest":"d","next":"x"`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"documents_group":{"title":"Synthetic","ranker":"r","digest":"d"}`, `"documents_group":[]`, 1)},
+		{Recommended, strings.Replace(emptyRecommended, `"http_status_code":200`, `"http_status_code":429`, 1)},
+		{Shared, `{"response_code":0,"error_data":{},"diagnostics_data":{"http_status_code":200}}`},
+		{Shared, emptyRecent},
+		{Recent, emptyRecommended},
+		{Dialog, emptyRecent},
 	} {
 		got, err := ReadJSON(context.Background(), strings.NewReader(tt.json), tt.surface)
 		var typed *ReadError
 		if !errors.As(err, &typed) || typed.Code != "office_json_unrecognized" || !reflect.DeepEqual(got, Result{}) {
-			t.Fatalf("unrecognized %s response %s = %#v, %v", tt.surface, tt.json, got, err)
+			t.Fatalf("unobserved %s response %s = %#v, %v", tt.surface, tt.json, got, err)
 		}
 	}
 }

@@ -123,63 +123,50 @@ func readJSON(ctx context.Context, source io.Reader, surface Surface, limits rea
 	return result, nil
 }
 
-// emptyServiceResponse recognizes a successful Office response whose document
-// container is absent. Office omits the container when it lists no documents;
-// a present but malformed container, an error payload or an unmarked object
-// stays unrecognized.
+// emptyServiceResponse recognizes the two empty replies seen in real Office aggmru files, key for
+// key: Recent's {response_code 1, delta_token, diagnostics_data} and Recommended's {response_code 0,
+// error_data {}, diagnostics_data, documents_group without documents, prefetch_documents_group {}}.
+// Any other key, value or surface, including Shared, whose empty reply has not been seen, stays
+// unrecognized, so an error or throttle reply is never admitted as an empty capture.
 func emptyServiceResponse(root map[string]any, surface Surface) bool {
-	if !containerAbsent(root, surface) {
+	if !onlyKeys(root, emptyResponseKeys[surface]...) || !succeeded(root) {
 		return false
 	}
-	if errorData, present := root["error_data"]; present {
-		if details, ok := errorData.(map[string]any); !ok || len(details) != 0 {
-			return false
-		}
+	if surface == Recent {
+		token, ok := root["delta_token"].(string)
+		return ok && token != "" && root["response_code"] == json.Number("1")
 	}
-	marked := false
-	if code, present := root["response_code"]; present {
-		if code != json.Number("0") && code != json.Number("1") {
-			return false
-		}
-		marked = true
-	}
-	if diagnostics, present := root["diagnostics_data"]; present {
-		details, ok := diagnostics.(map[string]any)
-		if !ok {
-			return false
-		}
-		if status, present := details["http_status_code"]; present {
-			if status != json.Number("200") {
-				return false
-			}
-			marked = true
-		}
-	}
-	return marked
+	// Only Recommended remains: emptyResponseKeys names no other surface.
+	errorData, _ := root["error_data"].(map[string]any)
+	prefetch, _ := root["prefetch_documents_group"].(map[string]any)
+	group, _ := root["documents_group"].(map[string]any)
+	return root["response_code"] == json.Number("0") && errorData != nil && len(errorData) == 0 &&
+		prefetch != nil && len(prefetch) == 0 && group != nil && subsetKeys(group, "title", "ranker", "digest")
 }
 
-func containerAbsent(root map[string]any, surface Surface) bool {
-	path := containerPaths[surface]
-	current := root
-	for _, key := range path[:len(path)-1] {
-		value, present := current[key]
-		if !present {
-			return true
-		}
-		next, ok := value.(map[string]any)
-		if !ok {
-			return false
-		}
-		current = next
-	}
-	_, present := current[path[len(path)-1]]
-	return !present
+var emptyResponseKeys = map[Surface][]string{
+	Recent:      {"response_code", "delta_token", "diagnostics_data"},
+	Recommended: {"response_code", "error_data", "diagnostics_data", "documents_group", "prefetch_documents_group"},
 }
 
-var containerPaths = map[Surface][]string{
-	Recent:      {"documents", "items"},
-	Shared:      {"shared_documents"},
-	Recommended: {"documents_group", "documents"},
+// succeeded says diagnostics_data reports HTTP status 200.
+func succeeded(root map[string]any) bool {
+	diagnostics, _ := root["diagnostics_data"].(map[string]any)
+	return diagnostics["http_status_code"] == json.Number("200")
+}
+
+// onlyKeys says object has exactly these keys; no keys means no surface qualifies.
+func onlyKeys(object map[string]any, keys ...string) bool {
+	return len(keys) > 0 && len(object) == len(keys) && subsetKeys(object, keys...)
+}
+
+func subsetKeys(object map[string]any, keys ...string) bool {
+	for key := range object {
+		if !slices.Contains(keys, key) {
+			return false
+		}
+	}
+	return true
 }
 
 type contextInput struct {
