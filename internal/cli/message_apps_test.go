@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -150,7 +153,7 @@ func TestApplicationMessageRoutes(t *testing.T) {
 	code, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
 	for _, want := range []string{"[app: Synthetic", "message app-1 (thread: 19:app-evidence@thread.v2 app-1)", `app "Synthetic Helper", app id "app-synthetic", claimed by the message itself`,
 		`native reply-to id "native-reply-1" (not a verified thread root)`, "citations: 2 of 2 admitted shown; 1 source rows refused",
-		`[0] id 9223372036854775807 "First source"`, "full record (keep the same --db): m365crawl --max-age 0 sql",
+		`[0] id 9223372036854775807 "First source"`, "full record: m365crawl --db ",
 		"app evidence of 2 returned Teams messages (mapper v1): 1 partial, 1 absent"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("text lacks %q:\n%s", want, out)
@@ -308,13 +311,13 @@ func TestCalendarAppEvidenceBounds(t *testing.T) {
 }
 
 func TestApplicationItemHelpers(t *testing.T) {
-	if fullInspection(0) != "" || fullInspection(-1) != "" {
+	if fullInspection(0, "/a.db") != "" || fullInspection(-1, "/a.db") != "" {
 		t.Fatal("a non-positive id produced a follow-up command")
 	}
 	name, title := "ABCDEFGH", "abcdefgh"
 	env := store.MessageApplicationEnvelope{State: store.AppStateMapped, ActiveMapperVersion: 1, Served: &store.ApplicationRepresentation{ID: 4, State: store.AppStateMapped,
 		Payload: store.ApplicationPayload{AppName: &name, Citations: []store.ApplicationCitation{{ID: "1", Title: title}}}}}
-	it := applicationItemOf(env, 0)
+	it := applicationItemOf(env, 0, "/a.db")
 	if it.TextTruncated || it.truncate(0) || !it.truncate(3) || *it.Served.AppName != "ABC…" || it.Served.Citations[0].Title != "abc…" {
 		t.Fatalf("clip: %+v", it.Served.applicationPayloadItem)
 	}
@@ -326,11 +329,86 @@ func TestApplicationItemHelpers(t *testing.T) {
 	}
 	retained := store.MessageApplicationEnvelope{State: store.AppStateFailed, FailureCode: "teams_app_raw_invalid", Retained: true,
 		Served: &store.ApplicationRepresentation{ID: 2, State: store.AppStateMapped, Revision: store.ApplicationRevision{MapperVersion: 1}}}
-	if it := applicationItemOf(retained, 0); appMarker(&it) != "[app evidence, retained] " || !strings.Contains(it.Meaning, "last good") {
+	if it := applicationItemOf(retained, 0, ""); appMarker(&it) != "[app evidence, retained] " || !strings.Contains(it.Meaning, "last good") {
 		t.Fatalf("retained: %q %q", appMarker(&it), it.Meaning)
 	}
 	corrupt := store.MessageApplicationEnvelope{State: store.AppStateFailed, FailureCode: store.AppProjectionCorrupt}
-	if it := applicationItemOf(corrupt, 0); !strings.Contains(it.Meaning, "failed validation") || len(appDetailLines("x", &it)) != 1 {
+	if it := applicationItemOf(corrupt, 0, ""); !strings.Contains(it.Meaning, "failed validation") || len(appDetailLines("x", &it)) != 1 {
 		t.Fatalf("corrupt: %+v", it)
+	}
+}
+
+// posixWords splits a POSIX shell command line with single and double quotes, enough for the
+// follow-up commands this package prints.
+func posixWords(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inWord := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\'':
+			j := strings.IndexByte(s[i+1:], '\'')
+			cur.WriteString(s[i+1 : i+1+j])
+			i, inWord = i+1+j, true
+		case c == '"':
+			j := strings.IndexByte(s[i+1:], '"')
+			cur.WriteString(s[i+1 : i+1+j])
+			i, inWord = i+1+j, true
+		case c == ' ':
+			if inWord {
+				out, inWord = append(out, cur.String()), false
+				cur.Reset()
+			}
+		default:
+			cur.WriteByte(c)
+			inWord = true
+		}
+	}
+	if inWord {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+// The full_inspection follow-up names the archive it came from, so running it as printed reads
+// the same representation even when --db is not the default.
+func TestApplicationFullInspectionKeepsArchive(t *testing.T) {
+	if got, want := fullInspection(7, "/tmp/a b/it's.db"), `m365crawl --db '/tmp/a b/it'\''s.db' --max-age 0 sql "select projection_json from message_app_observations where rowid=7" --limit 1`; got != want {
+		t.Fatalf("template:\n got %s\nwant %s", got, want)
+	}
+	e := appEnv(t)
+	served := byID(t, items(t, jsonRun(t, e, "messages", "--conversation", appChat)), "app-1")["app_observation"].(map[string]any)["served"].(map[string]any)
+	cmd := served["full_inspection"].(string)
+	words := posixWords(cmd)
+	if words[0] != "m365crawl" || !strings.Contains(cmd, "--db ") {
+		t.Fatalf("follow-up does not name the archive: %s", cmd)
+	}
+	t.Setenv("HOME", t.TempDir()) // the default archive is elsewhere and empty
+	t.Setenv("M365CRAWL_DB", "")
+	var out, errb strings.Builder
+	if code := Main(append(words[1:], "--json"), &out, &errb); code != 0 || !strings.Contains(out.String(), "Synthetic Helper") {
+		t.Fatalf("running %s: exit %d %s %s", cmd, code, out.String(), errb.String())
+	}
+}
+
+func TestApplicationArchiveRef(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (&runtime{dbPath: "rel/a.db"}).archiveRef(); got != filepath.Join(wd, "rel/a.db") {
+		t.Fatalf("relative: %s", got)
+	}
+	if got := (&runtime{dbPath: "/abs/a.db"}).archiveRef(); got != "/abs/a.db" {
+		t.Fatalf("absolute: %s", got)
+	}
+	old := getwd
+	t.Cleanup(func() { getwd = old })
+	getwd = func() (string, error) { return "", errors.New("no working directory") }
+	if got := (&runtime{dbPath: "rel/a.db"}).archiveRef(); got != "rel/a.db" {
+		t.Fatalf("without a working directory: %s", got)
+	}
+	if shellQuote("/plain/a.db") != "/plain/a.db" || shellQuote("") != "''" {
+		t.Fatal("shellQuote")
 	}
 }

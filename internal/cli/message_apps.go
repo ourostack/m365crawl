@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -129,16 +131,42 @@ func digestOrNil(d string) *string {
 }
 
 // fullInspection is the archive-only command that prints an observation's complete stored JSON.
-// It is a fixed template around the generated positive row id, never source text.
-func fullInspection(id int64) string {
+// It is a fixed template around the generated positive row id and the archive path db, which it
+// names with --db so the command reads the archive the result came from; never source text.
+func fullInspection(id int64, db string) string {
 	if id <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(`m365crawl --max-age 0 sql "select projection_json from message_app_observations where rowid=%d" --limit 1`, id)
+	return fmt.Sprintf(`m365crawl --db %s --max-age 0 sql "select projection_json from message_app_observations where rowid=%d" --limit 1`, shellQuote(db), id)
+}
+
+// shellQuote is s as one POSIX shell word: bare when it holds only safe characters, else single
+// quoted.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// getwd is os.Getwd; tests make it fail.
+var getwd = os.Getwd
+
+// archiveRef is the archive path a printed follow-up command names: absolute, so it reads the
+// same archive from any directory.
+func (rt *runtime) archiveRef() string {
+	if filepath.IsAbs(rt.dbPath) {
+		return rt.dbPath
+	}
+	wd, err := getwd()
+	if err != nil {
+		return rt.dbPath
+	}
+	return filepath.Join(wd, rt.dbPath)
 }
 
 // applicationItemOf builds a message's app_observation, clipping descriptive text to maxText runes.
-func applicationItemOf(env store.MessageApplicationEnvelope, maxText int) applicationItem {
+func applicationItemOf(env store.MessageApplicationEnvelope, maxText int, db string) applicationItem {
 	it := applicationItem{State: env.State, FailureCode: env.FailureCode, MapperVersion: env.ActiveMapperVersion, BackfillPending: env.BackfillPending,
 		Current:  applicationCurrent{SenderID: env.Current.SenderID, RawPresent: env.Current.RawPresent, RawDigest: digestOrNil(env.Current.RawDigest), MapperVersion: env.Current.MapperVersion},
 		Retained: env.Retained, RetainedReason: env.RetainedReason, Meaning: appMeaning(env)}
@@ -147,17 +175,17 @@ func applicationItemOf(env store.MessageApplicationEnvelope, maxText int) applic
 			State: rep.State, FailureCode: rep.FailureCode, SenderID: rep.Revision.SenderID, RawPresent: rep.Revision.RawPresent,
 			RawDigest: digestOrNil(rep.Revision.RawDigest), DerivedAt: rep.DerivedAt.UTC()}
 		if rep.State == store.AppStateMapped || rep.State == store.AppStatePartial {
-			it.Served.applicationPayloadItem = payloadItemOf(rep)
+			it.Served.applicationPayloadItem = payloadItemOf(rep, db)
 		}
 	}
 	it.truncate(maxText)
 	return it
 }
 
-func payloadItemOf(rep *store.ApplicationRepresentation) *applicationPayloadItem {
+func payloadItemOf(rep *store.ApplicationRepresentation, db string) *applicationPayloadItem {
 	p := rep.Payload
 	out := &applicationPayloadItem{AppID: p.AppID, AppName: p.AppName, ReplyToID: p.ReplyToID, Citations: []applicationCitationItem{},
-		TotalAdmitted: len(p.Citations), SourceSlots: p.SourceSlots, Losses: append([]botcitations.Loss{}, p.Losses...), FullInspection: fullInspection(rep.ID)}
+		TotalAdmitted: len(p.Citations), SourceSlots: p.SourceSlots, Losses: append([]botcitations.Loss{}, p.Losses...), FullInspection: fullInspection(rep.ID, db)}
 	for i, c := range p.Citations {
 		if i == appCitationPreview {
 			out.CitationsTruncated = true
@@ -308,7 +336,7 @@ func appDetailLines(where string, it *applicationItem) []string {
 	for _, l := range p.Losses {
 		lines = append(lines, fmt.Sprintf("  native fields not read: %s x%d", l.Code, l.Count))
 	}
-	lines = append(lines, "  full record (keep the same --db): "+p.FullInspection)
+	lines = append(lines, "  full record: "+p.FullInspection)
 	return lines
 }
 
@@ -358,7 +386,7 @@ func (rt *runtime) renderApplicationDetails(r *listResult) {
 }
 
 // applicationEvidenceHelp is the long help every command that returns archived Teams messages shares.
-const applicationEvidenceHelp = "Application evidence: each returned Teams message carries app_observation, the app, reply and citation claims of its archived native JSON. Claims are under served: app_id, app_name, reply_to_id and citations (id as a decimal string, title, link, content_type), previewing at most 100 citations of total_admitted; losses counts native fields that could not be read, and full_inspection is an archive-only `m365crawl --max-age 0 sql` command that prints the complete stored representation. These are the message's own claims, not a verified app identity or citation target, and one message stays one item.\n" +
+const applicationEvidenceHelp = "Application evidence: each returned Teams message carries app_observation, the app, reply and citation claims of its archived native JSON. Claims are under served: app_id, app_name, reply_to_id and citations (id as a decimal string, title, link, content_type), previewing at most 100 citations of total_admitted; losses counts native fields that could not be read, and full_inspection is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the complete stored representation; it names the same --db archive the read used (as an absolute, shell-quoted path), so run it as printed. These are the message's own claims, not a verified app identity or citation target, and one message stays one item.\n" +
 	"app_observation.state is mapped (claims read), partial (some read; see losses), absent (no app or citation claims), failed (the native JSON could not be read; failure_code says why) or not_derived (not projected yet: run a writable `m365crawl sync`; --max-age 0 never derives it). When the current representation failed, served is the last good one, with retained true and retained_reason current_failed. application_evidence_coverage counts the states of the Teams messages actually returned (after --limit); when none is returned its state is unknown, not absent.\n"
 
 func (messagesCmd) Help() string { return applicationEvidenceHelp }

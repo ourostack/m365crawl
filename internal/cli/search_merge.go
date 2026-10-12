@@ -380,7 +380,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		chatTrunc = trunc
-		for i, it := range messageItems(rows, rt.g.MaxText, html) {
+		for i, it := range messageItems(rows, rt.g.MaxText, html, rt.archiveRef()) {
 			hits = append(hits, searchHit{at: rows[i].SentAt, item: searchChatItem{Source: searchChats, messageItem: it}, source: searchChats, app: rows[i].Application})
 		}
 	}

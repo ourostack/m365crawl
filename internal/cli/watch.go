@@ -471,7 +471,7 @@ func (w *watcher) items(changes []syncer.Change) (map[string]watchItem, error) {
 			return nil, errs.DBError(err)
 		}
 	}
-	for i, it := range messageItems(mrows, w.rt.g.MaxText, html) {
+	for i, it := range messageItems(mrows, w.rt.g.MaxText, html, "") {
 		r := mrows[i]
 		if keep(r.TenantID, r.UserID, r.ConversationID) {
 			out["message\x00"+r.TenantID+"|"+r.UserID+"|"+r.ConversationID+"|"+r.ID] = watchItem{item: it, at: r.SentAt, conv: r.ConversationDisplayName, sender: r.SenderName, text: it.Text}

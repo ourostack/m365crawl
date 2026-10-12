@@ -763,7 +763,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		ev := eventOf(d)
+		ev := eventOf(d, rt.archiveRef())
 		related, err := st.EventMail(rt.ctx, d.Event, store.EventMailLimit)
 		if err != nil {
 			return nil, err
@@ -792,7 +792,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 }
 
 // eventOf renders one event.
-func eventOf(d store.CalendarDetail) *calendarEvent {
+func eventOf(d store.CalendarDetail, db string) *calendarEvent {
 	e := d.Event
 	ev := &calendarEvent{calendarItem: itemOf(d.CalendarRow)}
 	x := &ev.calendarExtras
@@ -835,7 +835,7 @@ func eventOf(d store.CalendarDetail) *calendarEvent {
 	}
 	if d.Chat != nil {
 		x.Chat = &calendarChat{ConversationID: d.Chat.ConversationID, DisplayName: d.Chat.DisplayName, MessageCount: d.Chat.MessageCount,
-			RecentMessages: messageItems(d.Chat.Recent, 0, nil)}
+			RecentMessages: messageItems(d.Chat.Recent, 0, nil, db)}
 	}
 	x.RelatedMail = []relatedMail{}
 	x.Recordings = recordingsOf(d.Recordings)

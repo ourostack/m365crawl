@@ -143,7 +143,8 @@ func activityItems(rows []store.ActivityRow, maxText int) []activityItem {
 	return items
 }
 
-func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKey]string) []messageItem {
+// db is the archive path follow-up commands name (see fullInspection).
+func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKey]string, db string) []messageItem {
 	out := make([]messageItem, len(rows))
 	for i, r := range rows {
 		text, cut := truncateRunes(r.ContentText, maxText)
@@ -156,7 +157,7 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 			ReplyCount: r.ReplyCount, LastReplyAt: r.LastReplyAt,
 		}
 		if r.Application.State != "" { // rows read by key (watch) carry no evidence
-			app := applicationItemOf(r.Application, maxText)
+			app := applicationItemOf(r.Application, maxText, db)
 			it.App = &app
 		}
 		for _, m := range r.Mentions {
@@ -191,7 +192,7 @@ func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.
 	if err != nil {
 		return nil, err
 	}
-	res := newList(shape(rt, messageItems(rows, rt.g.MaxText, html)), truncated).withTotal(total)
+	res := newList(shape(rt, messageItems(rows, rt.g.MaxText, html, rt.archiveRef())), truncated).withTotal(total)
 	res.ApplicationEvidenceCoverage = applicationCoverageOf(envelopesOf(rows))
 	return res, nil
 }
