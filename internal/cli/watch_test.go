@@ -329,6 +329,9 @@ func TestWatchSyncsOnChange(t *testing.T) {
 		if it["id"] == nil || it["conversation_id"] == nil || it["conversation_display_name"] == nil {
 			t.Fatalf("item has the messages shape: %v", l)
 		}
+		if _, ok := it["app_observation"]; ok {
+			t.Fatalf("watch lines carry no application evidence: %v", l)
+		}
 	}
 	if changes["new"] != 1 || changes["edited"] != 1 {
 		t.Fatalf("changes = %v\n%s", changes, w.out.String())

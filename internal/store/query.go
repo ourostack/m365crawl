@@ -109,7 +109,8 @@ type MessageRow struct {
 	LastReplyAt time.Time `json:"last_reply_at,omitzero"`
 
 	// Application is the message's application, reply and citation evidence, read in the same
-	// transaction as the row (see loadMessageApplications). Zero on rows read by key.
+	// transaction as the row (see loadMessageApplications). Zero on rows read by key (MessagesByKey,
+	// which watch uses), because those reads never load evidence.
 	Application MessageApplicationEnvelope `json:"-"`
 
 	replyRoot bool // a channel thread root: its replies are counted by fillReplies
@@ -352,15 +353,20 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 // truncation. When the result is truncated and total is not nil, total receives the number of
 // matching messages.
 func (s *Store) runMessages(ctx context.Context, from string, w *where, limit int, total *int) ([]MessageRow, bool, error) {
+	return s.runMessagesWith(ctx, from, w, limit, total, true)
+}
+
+// runMessagesWith is runMessages; evidence false leaves Application zero and reads no evidence.
+func (s *Store) runMessagesWith(ctx context.Context, from string, w *where, limit int, total *int, evidence bool) ([]MessageRow, bool, error) {
 	q := `select ` + msgCols + from + w.sql() + ` order by m.sent_at desc, m.id desc limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
-	return s.selectMessages(ctx, q, append(w.args, limit+1), limit, func(tx *sql.Tx) error { return countTotalIn(ctx, tx, total, from, w) })
+	return s.selectMessages(ctx, q, append(w.args, limit+1), limit, evidence, func(tx *sql.Tx) error { return countTotalIn(ctx, tx, total, from, w) })
 }
 
 // selectMessages runs one canonical message selection and everything read about the selected rows
 // (the total, the reply counts and the application evidence) in one read transaction, so a body
 // is never paired with the evidence of a revision published after it was selected. The rows are
 // closed before the evidence is read; any error, a failed commit included, returns no rows.
-func (s *Store) selectMessages(ctx context.Context, q string, args []any, limit int, count func(tx *sql.Tx) error) ([]MessageRow, bool, error) {
+func (s *Store) selectMessages(ctx context.Context, q string, args []any, limit int, evidence bool, count func(tx *sql.Tx) error) ([]MessageRow, bool, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, false, err
@@ -384,9 +390,11 @@ func (s *Store) selectMessages(ctx context.Context, q string, args []any, limit 
 	if err := fillReplies(ctx, tx, out); err != nil {
 		return nil, false, err
 	}
-	afterMessageSelection()
-	if out, err = loadMessageApplications(ctx, tx, out); err != nil {
-		return nil, false, err
+	if evidence {
+		afterMessageSelection()
+		if out, err = loadMessageApplications(ctx, tx, out); err != nil {
+			return nil, false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, false, err
@@ -634,7 +642,7 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 		w.add(notSystemCond(`m.conversation_id`))
 	}
 	q := `select ` + msgCols + ` from messages m` + msgJoin + w.sql() + ` order by m.sent_at, m.id limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
-	return s.selectMessages(ctx, q, append(w.args, f.limit()+1), f.limit(), func(tx *sql.Tx) error {
+	return s.selectMessages(ctx, q, append(w.args, f.limit()+1), f.limit(), true, func(tx *sql.Tx) error {
 		return countTotalIn(ctx, tx, f.Total, ` from messages m`+msgJoin, &w)
 	})
 }

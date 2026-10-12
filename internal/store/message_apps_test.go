@@ -463,6 +463,18 @@ func TestMessageAppArchiveWithoutMeta(t *testing.T) {
 	}
 }
 
+// watch reads changed messages by key; those reads carry no application evidence and never read it.
+func TestMessagesByKeyWithoutApplicationEvidence(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	applyApp(t, s, "m1", 1, appSender, appRaw("Alpha"))
+	s.qExec(t, `drop table message_app_current`)
+	rows, err := s.MessagesByKey(ctx, []string{acctA.TenantID + "|" + acctA.UserID + "|" + appConversation + "|m1"})
+	if err != nil || len(rows) != 1 || rows[0].Application.State != "" {
+		t.Fatalf("by-key read: %+v %v", rows, err)
+	}
+}
+
 func fileDigest(t *testing.T, path string) string {
 	t.Helper()
 	var all []byte
