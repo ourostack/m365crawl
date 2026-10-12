@@ -7,11 +7,11 @@ folder              : Inbox
 from                : ann@example.test
 id                  : outlook/Main:104
 importance (likely) : normal
-received            : 2026-09-08 08:00
+received            : 2026-09-08 08:00 UTC
 state               : unknown
 
 recipient   address           role (unknown on Mac)  kind_raw
 ----------  ----------------  ---------------------  --------
 Bob Reader  bob@example.test  -                      1
 archive age: <age> synced
-synced <stamp> · cache covers since 2026-08-01
+synced <stamp> UTC · cache covers since 2026-08-01

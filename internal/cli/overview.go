@@ -32,6 +32,9 @@ var startHere = []startStep{
 	{Command: "m365crawl mail unread", Does: "unread mail by folder", mail: true},
 	{Command: "m365crawl unread", Does: "unread Teams chats"},
 	{Command: "m365crawl mail list --has-attachments", Does: "mail with files; mail show <id> lists each file's name, size and type", mail: true},
+	{Command: "m365crawl docs list", Does: "Office recent, shared and recommended document metadata; docs sync registers the sources"},
+	{Command: `m365crawl notes search "words"`, Does: "OneNote indexed notes; notes sync registers the indexes"},
+	{Command: "m365crawl people", Does: "Teams people, mail correspondents and native Outlook people observations"},
 }
 
 // startHereColumn is where the descriptions of the block start, after a two-space indent.
@@ -65,7 +68,13 @@ const (
 	overviewEmpty       = "empty"
 	overviewNoArchive   = "no_archive"
 	overviewUnsupported = "unsupported"
+	// overviewNotRegistered is a documents or notes source with nothing registered: only its
+	// explicit sync command adds one.
+	overviewNotRegistered = "not_registered"
 )
+
+// overviewKinds are the sources the overview reports, in order.
+var overviewKinds = []string{"chats", "mail", "calendar", "documents", "notes", "people", "transcripts"}
 
 // overviewSource is one source in the overview. Counts and times that do not apply to the source
 // are omitted; a time the archive does not have yet is null.
@@ -80,8 +89,19 @@ type overviewSource struct {
 	WindowStart   *time.Time `json:"window_start,omitempty"`
 	WindowEnd     *time.Time `json:"window_end,omitempty"`
 	CoverageGap   *bool      `json:"coverage_gap,omitempty"`
-	LastSyncAt    *time.Time `json:"last_sync_at"`
-	Note          string     `json:"note,omitempty"`
+	Documents     *int       `json:"documents,omitempty"`
+	Notes         *int       `json:"notes,omitempty"`
+	People        *int       `json:"people,omitempty"`       // Teams people and mail correspondents
+	Observations  *int       `json:"observations,omitempty"` // native Outlook people observations
+	Calls         *int       `json:"calls,omitempty"`
+	Parts         *int       `json:"parts,omitempty"`
+	Fetched       *int       `json:"fetched,omitempty"`
+	Registered    *int       `json:"registered_sources,omitempty"`
+	Failed        *int       `json:"failed_sources,omitempty"`
+	// LastSyncAt is the last sync of chats, mail and the calendar, the last admitted capture of
+	// documents, notes and native people, and the last transcript fetch.
+	LastSyncAt *time.Time `json:"last_sync_at"`
+	Note       string     `json:"note,omitempty"`
 }
 
 // overviewResult is what a bare `m365crawl` prints.
@@ -106,7 +126,7 @@ func (overviewCmd) Run(rt *runtime) error {
 	switch {
 	case errors.Is(err, store.ErrNoArchive):
 		res.Note = noArchiveYet
-		for _, s := range []string{"chats", "mail", "calendar"} {
+		for _, s := range overviewKinds {
 			src := overviewSource{Source: s, State: overviewNoArchive}
 			if s == "mail" && !mailSupported() {
 				src.State, src.Note = overviewUnsupported, "mail is not supported on this operating system"
@@ -139,16 +159,126 @@ func (overviewCmd) Run(rt *runtime) error {
 		}
 		res.Sources = append(res.Sources, src)
 	}
-	people, err := st.KnowledgeSources(rt.ctx, "outlook_people")
+	more, err := rt.overviewArchived(st, res.Sources[0].LastSyncAt)
 	if err != nil {
 		return asCoded(err)
 	}
-	if len(people) > 0 {
-		res.Note = "registered native Outlook people observations are available separately; identities remain unresolved and the source table above does not assess their coverage"
-		res.Next = append(res.Next, startStep{Command: "m365crawl --max-age 0 people sources", Does: "inspect independent native people coverage; keep --db, omit --account; m365crawl people lists observations"})
-	}
+	res.Sources = append(res.Sources, more...)
 	return rt.write("overview", res)
 }
+
+// overviewArchived is the documents, notes, people and transcripts rows, from what the archive
+// already holds: no source is read or captured.
+// chatsSynced is the chats row's last sync, which people inherit when no native capture is newer.
+func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]overviewSource, error) {
+	tenant := ""
+	if rt.account != nil {
+		tenant = rt.account.TenantID
+	}
+	counts, err := st.OverviewCounts(rt.ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	registered := map[string][]store.KnowledgeSource{}
+	for _, kind := range []string{"documents", "notes", "outlook_people"} {
+		read := func() ([]store.KnowledgeSource, error) { return st.KnowledgeSources(rt.ctx, kind) }
+		if kind == "documents" {
+			read = func() ([]store.KnowledgeSource, error) { return st.DocumentSources(rt.ctx) }
+		}
+		if registered[kind], err = read(); err != nil {
+			return nil, err
+		}
+	}
+	documents, notes, people := registered["documents"], registered["notes"], registered["outlook_people"]
+	transcripts, err := transcriptStatus(rt, st)
+	if err != nil {
+		return nil, err
+	}
+	var lastChats time.Time
+	if chatsSynced != nil {
+		lastChats = *chatsSynced
+	}
+	unscoped := ""
+	if rt.account != nil {
+		unscoped = "not narrowed by --account: source ownership is unresolved"
+	}
+	out := []overviewSource{
+		registeredSource("documents", documents, counts.Documents, "no Office document sources registered: run m365crawl docs sync (Mac Office) or docs sync --root DIR",
+			"m365crawl docs sources shows each failure and its fix; the last good capture of a failed source stays current", unscoped),
+		registeredSource("notes", notes, counts.Notes, "no OneNote indexes registered: run m365crawl notes sync, or notes sync --root DIR",
+			"m365crawl notes sources shows each failure; the last good capture of a failed source stays current", unscoped),
+	}
+	known := counts.TeamsPeople + counts.MailPeople
+	ppl := overviewSource{Source: "people", State: overviewOK, People: &known, Observations: &counts.PeopleObservations,
+		Registered: intPtr(len(people)), LastSyncAt: at(lastCapture(people, lastChats))}
+	if known+counts.PeopleObservations == 0 {
+		ppl.State, ppl.Note = overviewEmpty, "no people archived yet: run m365crawl sync; m365crawl people sync adds native Outlook people observations"
+	}
+	if len(people) > 0 {
+		ppl.Note = "native observation identities stay unresolved; m365crawl --max-age 0 people sources shows their coverage (keep --db, omit --account)"
+		if rt.account != nil {
+			ppl.Note += "; native Outlook observations are " + unscoped
+		}
+	}
+	if rt.account != nil {
+		ppl.Note = withNote(ppl.Note, "Teams people are narrowed to the --account tenant; mail correspondents are not narrowed by --account")
+	}
+	out = append(out, ppl)
+	tr := overviewSource{Source: "transcripts", State: overviewEmpty, Calls: intPtr(0), Parts: intPtr(0), Fetched: intPtr(0),
+		Note: "no recorded meetings in the archive yet: run m365crawl sync"}
+	if transcripts != nil && transcripts.Calls > 0 {
+		tr = overviewSource{Source: "transcripts", State: overviewOK, Calls: &transcripts.Calls, Parts: &transcripts.Parts,
+			Fetched: &transcripts.Fetched, LastSyncAt: transcripts.LastFetchAt}
+		if transcripts.Fetched == 0 {
+			tr.Note = "transcript text is fetched explicitly: m365crawl transcripts lists meetings, transcripts fetch <meeting> reads one"
+		}
+	}
+	if rt.account != nil {
+		tr.Note = withNote(tr.Note, "not narrowed by --account")
+	}
+	return append(out, tr), nil
+}
+
+// registeredSource is the overview row of a source that only an explicit sync registers.
+func registeredSource(name string, sources []store.KnowledgeSource, rows int, none, failedNote, unscoped string) overviewSource {
+	src := overviewSource{Source: name, State: overviewOK, Registered: intPtr(len(sources)), LastSyncAt: at(lastCapture(sources, time.Time{}))}
+	failed := 0
+	for _, s := range sources {
+		if s.Status == "failed" || s.Status == "cancelled" {
+			failed++
+		}
+	}
+	src.Failed = &failed
+	if name == "documents" {
+		src.Documents = &rows
+	} else {
+		src.Notes = &rows
+	}
+	switch {
+	case len(sources) == 0:
+		src.State, src.Note = overviewNotRegistered, none
+	case failed > 0:
+		src.Note = plural(failed, "source", "sources") + " failed the last capture: " + failedNote
+	case rows == 0:
+		src.State = overviewEmpty
+	}
+	if unscoped != "" && len(sources) > 0 {
+		src.Note = withNote(src.Note, unscoped)
+	}
+	return src
+}
+
+// lastCapture is the newest admitted capture of sources, or since when it is newer.
+func lastCapture(sources []store.KnowledgeSource, since time.Time) time.Time {
+	for _, s := range sources {
+		if s.AdmittedAt != nil && s.AdmittedAt.After(since) {
+			since = *s.AdmittedAt
+		}
+	}
+	return since
+}
+
+func intPtr(n int) *int { return &n }
 
 // at is t as a JSON time, or nil when it is zero.
 func at(t time.Time) *time.Time {
@@ -293,9 +423,6 @@ func (rt *runtime) renderOverview(r *overviewResult) {
 				_, _ = fmt.Fprintf(w, "%s\n", render.Dim(s.Source+": "+s.Note, color))
 			}
 		}
-		if r.Note != "" {
-			_, _ = fmt.Fprintln(w, render.Dim(r.Note, color))
-		}
 		_, _ = fmt.Fprintln(w)
 	}
 	_, _ = io.WriteString(w, startHereText(r.Next))
@@ -328,6 +455,21 @@ func overviewHolds(s overviewSource) string {
 		return fmt.Sprintf("%s in %s, newest %s", plural(*s.Messages, "message", "messages"), plural(*s.Conversations, "conversation", "conversations"), overviewTime(s.NewestAt))
 	case s.Messages != nil:
 		return fmt.Sprintf("%s from %s, newest %s", plural(*s.Messages, "message", "messages"), overviewDay(s.OldestAt), overviewTime(s.NewestAt))
+	case s.Registered != nil && *s.Registered == 0 && s.Observations == nil:
+		return "no sources registered"
+	case s.Documents != nil:
+		return registeredHolds(*s.Documents, "document observation", "document observations", s)
+	case s.Notes != nil:
+		return registeredHolds(*s.Notes, "note", "notes", s)
+	case s.People != nil && *s.Registered == 0:
+		return plural(*s.People, "person", "people") + " (Teams and mail); no native Outlook people sources"
+	case s.People != nil:
+		return fmt.Sprintf("%s (Teams and mail); %s from %s",
+			plural(*s.People, "person", "people"), plural(*s.Observations, "native Outlook observation", "native Outlook observations"), plural(*s.Registered, "source", "sources"))
+	case s.Calls != nil && *s.Calls == 0:
+		return "no recorded meetings"
+	case s.Calls != nil:
+		return fmt.Sprintf("%s, %s, %d fetched", plural(*s.Calls, "recorded meeting", "recorded meetings"), plural(*s.Parts, "transcript part", "transcript parts"), *s.Fetched)
 	case s.Events != nil:
 		gap := ""
 		if s.CoverageGap != nil {
@@ -340,3 +482,15 @@ func overviewHolds(s overviewSource) string {
 	}
 	return "-"
 }
+
+// registeredHolds is a registered source's rows, sources and failures in one phrase.
+func registeredHolds(rows int, one, many string, s overviewSource) string {
+	holds := plural(rows, one, many) + " from " + plural(*s.Registered, "source", "sources")
+	if s.Failed != nil && *s.Failed > 0 {
+		holds += fmt.Sprintf("; %d failed", *s.Failed)
+	}
+	return holds
+}
+
+// withNote appends a clause to a row's note.
+func withNote(note, clause string) string { return strings.TrimPrefix(note+"; "+clause, "; ") }

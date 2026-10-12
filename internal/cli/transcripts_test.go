@@ -382,7 +382,7 @@ func TestShowMarksMissingPartAtSeam(t *testing.T) {
 		t.Fatalf("segment 2 %v", s2)
 	}
 	_, out, _ := e.tr("--format", "text", "transcripts", "show", "call-1")
-	if !strings.Contains(out, "── part 2 of 3 · 10:02 · not fetched: SharePoint refused access (HTTP 403); you may have lost access to this file ──\n── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch call-1 ──") {
+	if !strings.Contains(out, "── part 2 of 3 · 10:02 UTC · not fetched: SharePoint refused access (HTTP 403); you may have lost access to this file ──\n── part 3 of 3 · 10:40 UTC · not fetched yet; run m365crawl transcripts fetch call-1 ──") {
 		t.Fatalf("the gap is not marked at its seam:\n%s", out)
 	}
 	if !strings.Contains(out, "source: archive · 1 of 3 parts fetched") {
@@ -667,5 +667,15 @@ func TestTranscriptsUnresolvedKindIsUnknown(t *testing.T) {
 	_, out, _ = e.tr("--format", "text", "transcripts", "show", "call-5")
 	if !strings.Contains(out, "── part 1 of 1 · - · not fetched: Teams posted a transcript notice but no file reference ──") {
 		t.Fatalf("seam:\n%s", out)
+	}
+}
+
+// A part's start time of day names its zone, as every text stamp does.
+func TestClockNamesItsZone(t *testing.T) {
+	old := displayZone
+	displayZone = time.FixedZone("PDT", -7*3600)
+	t.Cleanup(func() { displayZone = old })
+	if got := clock(time.Date(2026, 10, 12, 16, 30, 0, 0, time.UTC)); got != "09:30 PDT" {
+		t.Fatalf("clock = %q", got)
 	}
 }

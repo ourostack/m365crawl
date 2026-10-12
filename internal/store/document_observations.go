@@ -39,6 +39,8 @@ type DocumentObservationSnapshot struct {
 type DocumentFilter struct {
 	Query                        string
 	SourceID                     int64
+	Application                  string
+	Surface                      officedocuments.Surface
 	ModifiedSince, ModifiedUntil time.Time
 	Limit                        int
 }

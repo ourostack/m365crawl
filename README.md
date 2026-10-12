@@ -60,7 +60,7 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the name, inspect the claims, and keep uncertainty visible. These are synthetic observations, not private contacts or a directory export.*
 
-**Document evidence, without opening the document.** `docs sync` captures available Mac Office recent/shared/recommended/dialog metadata; shared search then connects native titles, URLs and sharing/person claims to the conversation. Follow `document-observation:ID` with `docs show` and inspect `docs sources` for losses, failed inputs and retained claims. Explicit ordinary local JSON copies use `docs sync --root DIR`; provider/placeholder and linked inputs are refused. Metadata is not document text, a resolved file identity, current sharing or proof of local residency. Native URLs and friendly paths are never opened or hydrated, and identical sharing claims are not counted as new events. Start from `docs --help`: the embedded guide adds workflow strategy, not missing command contracts.
+**Document evidence, without opening the document.** `docs sync` captures available Mac Office recent/shared/recommended/dialog metadata; shared search then connects native titles, URLs and sharing/person claims to the conversation. Follow `document-observation:ID` with `docs show`, narrow lists with `--application Word|Excel|PowerPoint` and `--surface recent|shared|recommended|dialog`, and inspect `docs sources` for losses, failed inputs with their remedy, and retained claims. Explicit ordinary local JSON copies use `docs sync --root DIR`; provider/placeholder and linked inputs are refused. Metadata is not document text, a resolved file identity, current sharing or proof of local residency. Native URLs and friendly paths are never opened or hydrated, and identical sharing claims are not counted as new events. Start from `docs --help`: the embedded guide adds workflow strategy, not missing command contracts.
 
 <p align="center"><img src="docs/document-observations.png" alt="Actual synthetic CLI output: recent and shared document observations, stable detail IDs, unresolved identity, uncaptured text and independent source coverage" width="1000"></p>
 
@@ -188,7 +188,7 @@ m365crawl calendar --days 14
 m365crawl calendar event ev_2da7280856
 ```
 
-`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar), how fresh each one is, and the commands to start with. Registered native people get a separate archive-only route to `people sources`; the legacy source table does not assess contact coverage. `people --help` exposes the default list's query, limit, ordering and accepted fields without needing a guide.
+`m365crawl` with no arguments prints an overview: what the archive holds per source (chats, mail, calendar, documents, notes, people and transcripts), how fresh each one is, and the commands to start with. Documents and notes that were never registered say which sync command adds them, and failed sources point to their `sources` command. `people --help` explains the recency column, the ID kinds and the `--account` value without needing a guide. Text times carry their zone (`2026-10-08 02:51 PDT`); JSON times are UTC.
 
 Here is what three of those commands print. The output comes from a run against the same synthetic data; the dates follow the day you build the showcase store.
 
@@ -202,12 +202,19 @@ Here is what three of those commands print. The output comes from a run against 
 ██   ██ ▀████▀ ▀████▀ ▀████▀ ▀████ ██    ▀█▄██  ██▀██  ██
 local-first Microsoft 365 mirror for SQLite  |  overview
 
-source    state  holds                                                             last sync
---------  -----  ----------------------------------------------------------------  ----------------
-chats     ok     120 messages in 14 conversations, newest 2023-12-05 10:31         2026-10-08 02:51
-mail      ok     37 messages from 2026-09-24, newest 2026-10-08 02:39              2026-10-08 02:51
-calendar  ok     44 events from 2023-11-20 to 2026-10-23; today not fully covered  2026-10-08 02:51
+source       state           holds                                                             last sync
+-----------  --------------  ----------------------------------------------------------------  --------------------
+chats        ok              120 messages in 14 conversations, newest 2023-12-05 10:31 PST     2026-10-08 02:51 PDT
+mail         ok              37 messages from 2026-09-24, newest 2026-10-08 02:39 PDT          2026-10-08 02:51 PDT
+calendar     ok              44 events from 2023-11-20 to 2026-10-23; today not fully covered  2026-10-08 02:51 PDT
+documents    not_registered  no sources registered                                             -
+notes        not_registered  no sources registered                                             -
+people       ok              10 people (Teams and mail); no native Outlook people sources      2026-10-08 02:51 PDT
+transcripts  empty           no recorded meetings                                              -
 calendar: today is not fully covered by cached calendar data: run m365crawl sync, or open the calendar in Teams or Outlook
+documents: no Office document sources registered: run m365crawl docs sync (Mac Office) or docs sync --root DIR
+notes: no OneNote indexes registered: run m365crawl notes sync, or notes sync --root DIR
+transcripts: no recorded meetings in the archive yet: run m365crawl sync
 
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
@@ -217,17 +224,20 @@ Start here:
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
+  m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
+  m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl people            Teams people, mail correspondents and native Outlook people observations
 ```
 
 `m365crawl search planning --limit 4`: chats and mail together, newest first, with the `thread` to open next:
 
 ```
-at                source  where                      who           thread                                          text
-----------------  ------  -------------------------  ------------  ----------------------------------------------  ---------------------------------------------
-2026-10-07 00:51  mail    Inbox                      Casey Brooks  outlook/Main:3007                               Q4 planning offsite agenda - Draft agenda ...
-2026-10-03 00:51  mail    Sent Items                 Riley Chen    outlook/Main:3023                               Re: Q4 planning offsite agenda - Added a s...
-2023-11-14 14:14  chats   Fixture team 1 › Planning  Pat Example   19:planningchannel1@thread.tacv2 1700000047000  Planning channel message
-2023-11-14 14:14  chats   Fixture team 2 › Planning  Pat Example   19:planningchannel2@thread.tacv2 1700000047000  Planning channel message
+at                    source  where                      who           thread                                          text
+--------------------  ------  -------------------------  ------------  ----------------------------------------------  ---------------------------------------------
+2026-10-07 00:51 PDT  mail    Inbox                      Casey Brooks  outlook/Main:3007                               Q4 planning offsite agenda - Draft agenda ...
+2026-10-03 00:51 PDT  mail    Sent Items                 Riley Chen    outlook/Main:3023                               Re: Q4 planning offsite agenda - Added a s...
+2023-11-14 14:14 PST  chats   Fixture team 1 › Planning  Pat Example   19:planningchannel1@thread.tacv2 1700000047000  Planning channel message
+2023-11-14 14:14 PST  chats   Fixture team 2 › Planning  Pat Example   19:planningchannel2@thread.tacv2 1700000047000  Planning channel message
 
 4 items
 archive age: 1m15s

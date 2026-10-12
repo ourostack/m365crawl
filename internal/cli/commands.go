@@ -608,7 +608,11 @@ func (c *peopleCmd) Run(rt *runtime) error {
 		for i, r := range rows {
 			items[i] = personItem{TenantID: r.TenantID, ID: r.ID, DisplayName: r.DisplayName, Email: r.Email, Sources: r.Sources, LastSeenAt: r.LastSeenAt}
 		}
-		return newList(shape(rt, items), trunc).withTotal(total), nil
+		res := newList(shape(rt, items), trunc).withTotal(total)
+		if rt.g.Account == "" {
+			res.addNotice(peopleIncludedNotice(0))
+		}
+		return res, nil
 	})
 }
 

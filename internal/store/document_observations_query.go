@@ -146,6 +146,14 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 		where += " and d.source_id=?"
 		args = append(args, filter.SourceID)
 	}
+	if filter.Application != "" {
+		where += " and d.application=?"
+		args = append(args, filter.Application)
+	}
+	if filter.Surface != "" {
+		where += " and d.surface=?"
+		args = append(args, filter.Surface)
+	}
 	if strings.HasPrefix(filter.Query, "document-observation:") {
 		queryID, err := strconv.ParseInt(strings.TrimPrefix(filter.Query, "document-observation:"), 10, 64)
 		if err != nil || queryID <= 0 {

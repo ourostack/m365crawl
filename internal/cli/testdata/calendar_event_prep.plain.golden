@@ -10,7 +10,7 @@ organizer : Pat Example
 response  : accepted
 rooms     : Fixture Room Alpha, Fixture Room Beta
 status    : confirmed
-when      : 2023-11-20 17:00 to 2023-11-20 18:00
+when      : 2023-11-20 17:00 UTC to 2023-11-20 18:00 UTC
 unknown: recurrence
 
 attendee            role      response
@@ -29,20 +29,20 @@ Alex Fixture  Book Fixture Room Beta
 
 Fixture summary: the plan was reviewed.
 
-sent_at           chat sender   message
-----------------  ------------  --------------------------------------
-2023-12-05 18:31  Alex Fixture  Fixture standup recording 3Recording 3
-2023-11-23 18:31  Alex Fixture  Fixture standup recording 2Recording 2
-2023-11-22 18:32  Alex Fixture  Fixture standup transcript
-2023-11-22 18:31  Alex Fixture  Fixture standup recording 1Recording 1
-2023-11-22 18:00  Alex Fixture  Call ended
-2023-11-14 22:13  Alex Fixture  Filler 23 6u1s
-2023-11-14 22:13  Alex Fixture  Filler 18 emp6
-2023-11-14 22:13  Alex Fixture  Filler 13 hxs5
-2023-11-14 22:13  Alex Fixture  Filler 3 f3w3
+sent_at               chat sender   message
+--------------------  ------------  --------------------------------------
+2023-12-05 18:31 UTC  Alex Fixture  Fixture standup recording 3Recording 3
+2023-11-23 18:31 UTC  Alex Fixture  Fixture standup recording 2Recording 2
+2023-11-22 18:32 UTC  Alex Fixture  Fixture standup transcript
+2023-11-22 18:31 UTC  Alex Fixture  Fixture standup recording 1Recording 1
+2023-11-22 18:00 UTC  Alex Fixture  Call ended
+2023-11-14 22:13 UTC  Alex Fixture  Filler 23 6u1s
+2023-11-14 22:13 UTC  Alex Fixture  Filler 18 emp6
+2023-11-14 22:13 UTC  Alex Fixture  Filler 13 hxs5
+2023-11-14 22:13 UTC  Alex Fixture  Filler 3 f3w3
 
-received_at       mail from    subject                      match
-----------------  -----------  ---------------------------  -------
-2023-11-13 09:00  Pat Example  Fixture planning review      invite
-2023-11-19 10:00  Sam Example  RE: Fixture planning review  subject
+received_at           mail from    subject                      match
+--------------------  -----------  ---------------------------  -------
+2023-11-13 09:00 UTC  Pat Example  Fixture planning review      invite
+2023-11-19 10:00 UTC  Sam Example  RE: Fixture planning review  subject
 archive age: <age>

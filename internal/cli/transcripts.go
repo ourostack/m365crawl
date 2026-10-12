@@ -472,7 +472,7 @@ func clock(t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	return t.In(displayZone).Format("15:04")
+	return t.In(displayZone).Format("15:04 MST")
 }
 
 // callBlock prints one call and the table of its parts.

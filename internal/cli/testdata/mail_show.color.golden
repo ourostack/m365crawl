@@ -7,8 +7,8 @@
 [2mfrom               [0m[2m : [0mAnn Sender <ann@example.test>
 [2mid                 [0m[2m : [0moutlook/Main:101
 [2mimportance (likely)[0m[2m : [0mhigh
-[2mreceived           [0m[2m : [0m2026-09-05 08:00
-[2msent               [0m[2m : [0m2026-09-05 07:59
+[2mreceived           [0m[2m : [0m2026-09-05 08:00 UTC
+[2msent               [0m[2m : [0m2026-09-05 07:59 UTC
 [2mstate              [0m[2m : [0munread
 
 [2mrecipient[0m   [2maddress[0m           [2mrole (unknown on Mac)[0m  [2mkind_raw[0m
@@ -25,4 +25,4 @@ plan.pdf    2048   application/pdf
 
 body of Quarterly plan
 [2marchive age: <age> synced[0m
-[2msynced <stamp> · cache covers since 2026-08-01[0m
+[2msynced <stamp> UTC · cache covers since 2026-08-01[0m

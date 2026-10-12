@@ -54,6 +54,8 @@ Output is JSON when stdout is not a terminal and text on a terminal. In JSON mod
 - **Lists** are `{"items": [...], "count": N, "truncated": bool}`. `--limit` defaults to 50. A truncated list also carries `total` when the exact count is known.
 - **`note`** is one plain sentence on an empty list, for Teams, calendar and mail lists alike. It says why the list is empty: no archive yet, no data of that source yet, a time range outside what the archive holds (naming the window), filters that matched nothing, a source this operating system does not read, or an `--account` the archive does not hold. A list with items has no `note`, except where a command documents its own use: `search` (a source a flag left out), `mail list --unread`, `mail unread` and `mail thread`.
 - **Freshness.** Legacy read results carry `archive_age_seconds`, counted from the last fully successful sync of the accounts they cover. An archive with no complete legacy sync adds `"needs_sync": true` and `"hint": "run m365crawl sync"`. Notes have independent `source_coverage`; notes-only commands/search do not consult or certify Teams/Outlook freshness.
+- **Text times** of day from the archive are local time followed by the zone's name, for example `2026-10-12 09:30 PDT` or a transcript part's `10:02 PST` (a zone without an abbreviation prints its offset name, such as `+03`). Date-only values carry no zone, and `watch` prefixes its own lines with this machine's clock. JSON times are UTC, so a text day can differ from the JSON day.
+- **Log format.** `--format log` prints one `label=JSON` line, where the label is the command path with `_` for spaces, for example `docs_list={...}`. `skill` and `metadata` print their document in every format.
 - **Errors** go to stderr as `{"error": {"code", "message", "fix"}}`, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. [SPEC.md](../SPEC.md) section 6 lists every error code.
 
 ## Overview
@@ -69,8 +71,14 @@ In text mode it prints the banner, one row per source with its state, what it ho
 - **chats:** message and conversation counts and the newest message.
 - **mail:** message count, the oldest cached and the newest received message.
 - **calendar:** event count, the window from the earliest to the latest covered day, and whether today is fully covered (`coverage_gap`).
+- **documents:** Office document observations, registered sources and failed sources, with the last admitted capture. A failure note points to `docs sources`.
+- **notes:** OneNote indexed notes, registered sources and failed sources, with the last admitted capture.
+- **people:** Teams people and mail correspondents, and native Outlook people observations with their registered sources. With native sources it points to `people sources`.
+- **transcripts:** recorded meetings, transcript parts and how many are fetched, with the last fetch.
 
-`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "last_sync_at", "note"?}`. `state` is `ok`, `empty`, `no_archive`, `unsupported` (a genuinely unsupported operating system), `off` (the Outlook source is off for this run) or `no_profile` (no supported Outlook profile on this machine). Windows OWA mail is supported. `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
+These rows come from what the archive already holds; the overview reads and captures nothing for them. Under `--account`, the people row counts only that account's tenant's Teams people; mail correspondents, documents, notes, native people observations and transcripts are not narrowed by `--account`, and each such row says so in its note. Documents, notes and native people stay unnarrowed because their ownership is unresolved.
+
+`--json` gives `{"archive_path", "archive_exists", "sources": [...], "next": [...], "note"?}`. Each source is `{"source": "chats"|"mail"|"calendar"|"documents"|"notes"|"people"|"transcripts", "state", "conversations"?, "messages"?, "events"?, "newest_at"?, "oldest_at"?, "window_start"?, "window_end"?, "coverage_gap"?, "documents"?, "notes"?, "people"?, "observations"?, "calls"?, "parts"?, "fetched"?, "registered_sources"?, "failed_sources"?, "last_sync_at", "note"?}`. `last_sync_at` is the last sync for chats, mail and the calendar, the last admitted capture for documents, notes and native people, and the last fetch for transcripts. `state` is `ok`, `empty`, `no_archive`, `not_registered` (documents or notes with no registered source; the note names the sync command), `unsupported` (a genuinely unsupported operating system), `off` (the Outlook source is off for this run) or `no_profile` (no supported Outlook profile on this machine). Windows OWA mail is supported. `next` lists the "Start here" commands that apply on this operating system, each as `{"command", "does"}`.
 
 The overview opens the archive read-only and never runs the implicit sync. With no archive yet it prints "no archive yet; run m365crawl sync" and the "Start here" block, and exits 0. A word that is not a command is the `usage` error `unknown command "<word>"`, with the closest command when there is one, and the error's `fix` then names that command's `--help`. A likely synonym counts as close: `chats` suggests `conversations`, `email` suggests `mail`, `events` and `meetings` suggest `calendar`, and `transcript` suggests `transcripts`. The synonym itself is never accepted.
 
@@ -85,6 +93,9 @@ Start here:
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
+  m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
+  m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl people            Teams people, mail correspondents and native Outlook people observations
 ```
 
 ## Document metadata
@@ -93,19 +104,29 @@ Office recent, shared, recommended and dialog observations join the archive as *
 
 Every read/source result carries `source_coverage` outside `--fields`, item bounds and zero hits. `scope` is `office_json_metadata`, with `state` unknown or registered and per-source status, losses and nullable clocks. Complete means loss-free captured metadata, not library/service completeness. Partial, failed and absent later inputs retain old observations; unchanged capture does not repair partial coverage or alter original clocks. Ordinary reads refresh registered locators only; new registrations require explicit sync. `--max-age 0` disables capture and old read-only archives remain unchanged. Document-only commands ignore Teams/Outlook freshness and irrelevant root paths.
 
+Terms, as `docs --help` defines them:
+
+- Surfaces: `dialog` is the app's local Open-dialog recent list (often `file://` paths); `recent` is Office's Recent list of files the account opened; `recommended` is Office's Recommended list, with its activity badge; `shared` is Office's Shared with me list, with the sharer and date Office reported. Application `supplied` means a file given with `--root`.
+- `association_state` `unresolved`: the row is not linked to a file, owner, account, chat or mail. `boundary` `unresolved` (sources): a source file is not proven to belong to one account.
+- native `Sharing.Type` is Office's SharingType number as written; m365crawl does not map it.
+- Clocks: `modified_at` is the native document modification time Office reported, null when Office gave none or it did not parse (`Raw` keeps the text); `captured_at` is when m365crawl first copied the file holding that exact row; `source_observed_at` is that file's modification time on disk when copied.
+- Order of `docs list` and `docs search`: `modified_at` newest first, null last, then title (ASCII case-insensitive), source ID and observation ID.
+
 ### docs sync
 
 ```sh
 m365crawl docs sync [--root DIR | --source-id ID]
 ```
 
-Explicit registration/capture. A supplied directory contains `recent.json`, `shared.json`, `recommended.json` and/or `dialog.json`; other files are ignored. `--source-id` refreshes only one positive registered source and cannot combine with `--root`. Returns `captured`, `unchanged`, `skipped`, `failed` and `source_coverage`. Unrecognized or unsafe peers remain source failures, not empty successes. Directory, archive and cancellation errors remain command failures.
+Explicit registration/capture. A supplied directory contains `recent.json`, `shared.json`, `recommended.json` and/or `dialog.json`; other files are ignored. `--source-id` refreshes only one positive registered source and cannot combine with `--root`. Returns `captured`, `unchanged`, `skipped`, `failed` and `source_coverage`. Unrecognized or unsafe peers remain source failures, not empty successes. A successful Office response that lists no documents, in one of the two empty shapes observed in real files, is a complete capture with zero rows and reason `office_response_listed_no_documents`, explained by a `source_coverage.notices` entry; earlier observations from that source stay in the archive with `retained` true. The reason describes that saved response, not the account's documents in the cloud. The recent empty shape has exactly `response_code` 1, a non-empty `delta_token` and `diagnostics_data` with `http_status_code` 200. The recommended empty shape has exactly `response_code` 0, an empty `error_data`, that same `diagnostics_data`, an empty `prefetch_documents_group` and a `documents_group` holding only `title`, `ranker` and `digest`. Any other top-level key, any other code, and every shared file without documents still fail as `office_json_unrecognized`. A dialog list (`[]`) or a supplied `--root` file that lists no documents is not an Office service response, so its complete zero-row capture carries reason `office_json_listed_no_documents` and a notice that describes only the saved file. Directory, archive and cancellation errors remain command failures.
 
 ### docs list
 
 ```sh
-m365crawl docs list [--source-id ID] [--query WORDS] [--since TIME] [--until TIME] [--limit N]
+m365crawl docs list [--source-id ID] [--query WORDS] [--application APP] [--surface SURFACE] [--since TIME] [--until TIME] [--limit N]
 ```
+
+`--application` takes `Word`, `Excel` or `PowerPoint` in any case, or `supplied` for files given with `docs sync --root`; `--surface` takes `recent`, `shared`, `recommended` or `dialog`. Any other value is a usage error that names the accepted values. Both filters narrow the observation rows only; `source_coverage` still lists every document source and its notices.
 
 One row per retained native representation, with stable `document-observation:ID`, source/capture IDs, immutable original clocks, application/surface, title, URLs, native claims, retained state and unresolved association/not_captured text state. Order is native modification descending, unknown last, then full ASCII-NOCASE title/source ID/numeric rowid before LIMIT. Limit defaults50; zero returns all. Date filters use native modification, never acquisition time, excluding unknown dates. Display bounds preserve IDs and URLs. `native` uses source-model field names such as `Title`, `ResourceID`, `Sharing` and timestamps `Raw`/`Value`; Value is parsed UTC or null when missing/unrecognized. `captured_at` is original private acquisition; `source_observed_at` is the acquired metadata file's modification time, not document or event time. `retained` means absent from the last admitted capture, not deleted or sharing revoked.
 
@@ -114,10 +135,10 @@ One row per retained native representation, with stable `document-observation:ID
 ### docs search
 
 ```sh
-m365crawl docs search WORDS [--source-id ID] [--since TIME] [--until TIME] [--limit N]
+m365crawl docs search WORDS [--source-id ID] [--application APP] [--surface SURFACE] [--since TIME] [--until TIME] [--limit N]
 ```
 
-Search native metadata strings, not document contents or JSON property names. Words are optional only with a date filter. The same list ordering, limits and fields apply. Shared `search --source documents` returns metadata-only hits and follow-up IDs; unconstrained default search includes them alongside other sources. Account/author/chat/mail-only filters exclude unresolved metadata with a notice; explicitly selecting documents rejects those filters. No guessed owner, Teams thread or file path is a valid detail follow-up.
+Search native metadata strings, not document contents or JSON property names. Words are optional with a date, `--application` or `--surface` filter. The same list ordering, limits and fields apply. Shared `search --source documents` returns metadata-only hits and follow-up IDs; unconstrained default search includes them alongside other sources. Account/author/chat/mail-only filters exclude unresolved metadata with a notice; explicitly selecting documents rejects those filters. No guessed owner, Teams thread or file path is a valid detail follow-up.
 
 `--fields` keys: `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`.
 
@@ -137,9 +158,22 @@ Read the native representation and up to100 exact URL reference occurrences, wit
 m365crawl docs sources [--source-id ID]
 ```
 
-Inspect source IDs, kind, admitted/attempted state, coverage and losses. Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
+Inspect source IDs, kind, admitted/attempted state, coverage, reason and losses. Reason `office_response_listed_no_documents` on a complete source means its last saved Office response listed no documents. Reason `office_json_listed_no_documents` means the same for a dialog list or a supplied `--root` file. `source_id` is null for a locator that has never had a capture admitted; `kind` and `locator_tail` (the path's last two elements) tell such rows apart, and the text table shows both. A failed or cancelled source carries `fix`, the remedy for its reason (a retry is plain `m365crawl docs sync`, because a source with null `source_id` cannot be targeted with `--source-id`), and `effect`, which says whether the last good capture stays current (its documents stay listed) or nothing was ever captured.
 
-`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+| Reason | Meaning and remedy |
+|---|---|
+| `office_json_unrecognized` | Not JSON, or JSON in a shape this version does not read. Upgrade; if the newest version still fails, open an issue at https://github.com/ourostack/m365crawl/issues asking for the shape, with the source kind and top-level key names (no values). |
+| `office_json_too_large` | Larger than the reader accepts (8 MiB, or too many rows, fields or nesting levels); nothing was kept. Open an issue if Office wrote it. |
+| `office_json_unreadable` | Could not be read to the end. Sync again; check that the file is complete. |
+| `office_surface_unknown` | Registered for a surface this version does not read. Upgrade. |
+| `office_json_input_unqualified` | Missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file; refused before reading. Copy it to an ordinary local folder and use `docs sync --root DIR`. |
+| `office_json_capture_failed` | The private copy or its checks failed, often because the file changed while copied. Sync again; run `doctor` if it repeats. |
+| `office_json_cleanup_failed` | The private temporary copy could not be removed. Check the temporary directory's space and permissions. |
+| `office_json_policy_restore_failed` | A capture safety setting could not be restored. Sync again; open an issue if it repeats. |
+| `office_json_cancelled` | Interrupted or timed out. Sync again. |
+| `stale_attempt` | Another capture of the same source finished first. Run `docs sources`. | Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
+
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
 
 ## Indexed notes
 
@@ -199,7 +233,9 @@ Lists source health and preserved capture evidence. A locator is a cache registr
 
 **Shared search:** `search --source notes` uses the independent notes path, without irrelevant Outlook checks or Teams sync. Default `search` includes registered notes alongside legacy sources. `--account`, `--from`, chat-only flags and mail `--folder` exclude unresolved notes with a notice; those flags are usage conflicts with explicit `--source notes`. `--since`/`--until` filter native modified time, not capture time. Each hit has `source: "notes"` and follows up through `notes show note:ID`, never a fabricated thread or author. Participating notes disable a chat-only `total`, even with zero note hits.
 
-`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+`source_id` is null until a capture of the locator is admitted; `kind` and `locator_tail` identify the row.
+
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
 
 ## doctor
 
@@ -366,7 +402,11 @@ m365crawl search "release date" --source transcripts --from ada
 
 ## people
 
-List existing Teams people and mail correspondents alongside explicitly registered native Outlook observations. Legacy `last_seen_at` keeps its original meaning, including Teams membership; it is not uniformly a last-contact time. Native observations have no value for that clock and remain unresolved source evidence.
+List existing Teams people and mail correspondents alongside explicitly registered native Outlook observations. `last_seen_at` is the newest time the person appears in archived data: sent or was mentioned in a Teams message, was a member of a chat at its last message, or sent or received archived mail. It is not the last chat with you; use `conversations` (`last_message_at`) or `messages --conversation` for chat recency. Native observations have no value for that clock and remain unresolved source evidence.
+
+IDs: `8:orgid:<guid>` is a person, `28:<id>` is a bot or app, `19:<id>@thread...` is a chat, channel or team named in a mention, `everyone` is the @everyone mention, `mail:<address>` is a mail correspondent, and `person-observation:ID` is a native Outlook observation. `--account` takes `<tenant_id>/<user_id>` as `whoami` (or `status`) lists the accounts.
+
+An unscoped list carries a notice that says what it included: Teams people and mail correspondents of every account, plus native Outlook observations when people sources are registered, with the caveat that native subjects have unresolved account ownership.
 
 ```
 m365crawl people [flags]
@@ -382,7 +422,7 @@ Result: a list of person items, known `last_seen_at` newest first, then unknown 
 - **A Teams person** has `sources: ["chats"]` and no `email`, because Teams keeps no address for a person.
 - **A mail correspondent** is a sender or recipient with an address; gone messages do not count. It has `id: "mail:<address>"`, `email` (the address, lower case), `sources: ["mail"]`, an empty `tenant_id`, and as `display_name` the newest name it was given, or the address when it never had one.
 - **Sources are never silently merged**, so the same person can appear in several sources or native representations.
-- `--account` narrows the Teams people only.
+- `--account` narrows the Teams people to that account's tenant; mail correspondents are not narrowed.
 - Registered native observations expose `person-observation:ID`, native class/key/version/framing, exact email/directory pair claims, separate refresh/capture/source clocks and ambiguity/conflicts. Account-filtered lists exclude those unqualified subjects with a notice; the source profile owner's account is not the subject's tenant.
 
 `--fields` keys: `tenant_id`, `id`, `display_name`, `email`, `sources`, `last_seen_at`, `source_id`, `capture_id`, `native_class`, `native_key`, `native_parent`, `version_raw`, `resynced`, `first_name`, `last_name`, `alternate_email`, `teams_id`, `refreshed_at`, `captured_at`, `source_observed_at`, `retained`, `ambiguous`, `conflicting`, `identity_state`, `text_truncated`.
@@ -397,7 +437,9 @@ Result: a list of person items, known `last_seen_at` newest first, then unknown 
 
 `m365crawl people sources` reports registered native people inputs and their independent attempts, admissions, failures and coverage. Coverage remains outside selected item fields and visible at zero hits. `partial` is useful evidence, not a complete directory; no physical occurrence count is inferred from distinct display representations.
 
-`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`.
+`source_id` is null until a capture of the locator is admitted; `kind` and `locator_tail` identify the row.
+
+`--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
 
 ### people sync
 
@@ -902,7 +944,7 @@ m365crawl transcripts show <meeting>
 
 Result: `{"call_id", "event_key", "title", "source": "archive", "complete", "segments": [{"ordinal", "transcribe_only", "starts_at", "fetched_at", "state", "reason", "entries": [{"speaker", "start", "end", "offset", "text"}]}], "text_truncated"?}`. A part with no text keeps its place as a segment with no entries and its `reason`, and `complete` is false. `start` and `end` are absolute times; `offset` (h:mm:ss) is from the start of the part. When `<meeting>` names several recorded calls the newest is shown and a notice says how to pick another. `--max-text` cuts each entry's text and sets `text_truncated`.
 
-In text mode each seam is one line, such as `── part 2 of 3 · 10:02 · fetched 2026-11-09 08:00 ──`, `── part 3 of 3 · 10:40 · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
+In text mode each seam is one line, such as `── part 2 of 3 · 10:02 PST · fetched 2026-11-09 08:00 PST ──`, `── part 3 of 3 · 10:40 PST · not fetched yet; run m365crawl transcripts fetch <call-id> ──` or, after a failed attempt, `── part 2 of 3 · 10:02 PST · not fetched: <reason> ──`; consecutive lines of one speaker are joined, and the last line says how many parts are fetched.
 
 `--fields` keys: `call_id`, `event_key`, `title`, `source`, `complete`, `segments`, `text_truncated`.
 

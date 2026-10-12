@@ -26,8 +26,35 @@ type documentsGroup struct {
 func (documentsGroup) Help() string {
 	return "Documents are retained Office recent/shared/recommended/dialog metadata observations, not original document text, resolved identities or a complete library export.\n" +
 		"Register once with `docs sync` for named Mac Office caches, or `docs sync --root DIR` for ordinary local recent.json/shared.json/recommended.json/dialog.json copies. Windows accepts qualified explicit ordinary NTFS inputs, not default Office discovery. Unknown/provider/reparse/dataless inputs are refused; no document URL or friendly path is opened, no hydration or network fallback.\n" +
-		"Then use `docs list --query WORDS --limit 10`, `docs search WORDS`, or `search WORDS --source documents`. Follow a returned document-observation:ID with `docs show document-observation:ID`; `docs sources` lists source IDs and coverage. Ordinary reads refresh only registered sources; --max-age 0 is archive-only, and docs sources never captures. Partial/failed inputs keep last-good observations.\n" +
+		"Then use `docs list --query WORDS --limit 10`, `docs search WORDS`, or `search WORDS --source documents`. Follow a returned document-observation:ID with `docs show document-observation:ID`; `docs sources` lists source IDs and coverage. Ordinary reads refresh only registered sources; --max-age 0 is archive-only, and docs sources never captures. Partial/failed inputs keep last-good observations. A successful Office response that lists no documents is complete with reason office_response_listed_no_documents (earlier rows become retained); it does not mean the account has none.\n" +
+		documentTerms() +
 		"--since/--until use native document modification time, not opened/shared/file/capture time; unknown dates do not match bounded windows. Native sharing/activity are source claims, not counted new events. Account/author/chat/mail filters cannot qualify these unresolved documents. Text state is not_captured; there is no docs read/text command."
+}
+
+// documentSurfaces says what each surface is, for docs --help and docs show.
+var documentSurfaces = map[officedocuments.Surface]string{
+	officedocuments.Dialog:      "the app's local Open-dialog recent list, often file:// paths",
+	officedocuments.Recent:      "Office's Recent list of files the account opened, from Office's service cache",
+	officedocuments.Recommended: "Office's Recommended list of files its service suggests, with its activity badge",
+	officedocuments.Shared:      "Office's Shared with me list, with the sharer and date Office reported",
+}
+
+const (
+	documentAssociationHelp = "m365crawl has not linked the row to a file, owner, account, chat or mail; URLs are evidence only"
+	documentClocksHelp      = "modified_at is the native document modification time Office reported (null when Office gave none or it did not parse; Raw keeps the text); captured_at is when m365crawl first copied the file holding this exact row; source_observed_at is that file's modification time on disk when copied"
+	documentOrderHelp       = "Order: modified_at newest first, null modified_at last, then title (ASCII case-insensitive), source ID and observation ID."
+)
+
+// documentTerms defines the surfaces, unresolved states, Sharing.Type, clocks and order for docs --help.
+func documentTerms() string {
+	surfaces := []string{}
+	for _, surface := range []officedocuments.Surface{officedocuments.Dialog, officedocuments.Recent, officedocuments.Recommended, officedocuments.Shared} {
+		surfaces = append(surfaces, string(surface)+": "+documentSurfaces[surface])
+	}
+	return "Surfaces: " + strings.Join(surfaces, "; ") + ". Application supplied means a file given with --root, so the Office app is unknown.\n" +
+		"association_state unresolved: " + documentAssociationHelp + ". boundary unresolved (docs sources): a source file is not proven to belong to one account. " +
+		"native Sharing.Type is Office's SharingType number as written, kept unmapped: m365crawl does not know its meanings.\n" +
+		"Clocks: " + documentClocksHelp + ". " + documentOrderHelp + "\n"
 }
 
 type documentItem struct {
@@ -103,11 +130,55 @@ var runDocumentsSync = syncer.SyncDocuments
 func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := notesCoverage(sources)
 	out.Scope = "office_json_metadata"
-	for i := range sources {
-		out.Sources[i].Kind = sources[i].Kind
+	listedNone, fileListedNone := false, false
+	for i, source := range sources {
+		listedNone = listedNone || source.Reason == officedocuments.NoDocumentsListed
+		fileListedNone = fileListedNone || source.Reason == officedocuments.FileListedNoDocuments
+		if documentFailureFix[source.Reason] == "" && source.Status != "failed" && source.Status != "cancelled" {
+			continue
+		}
+		out.Sources[i].Fix = firstOf(documentFailureFix[source.Reason], documentFailureFix["office_json_capture_failed"])
+		out.Sources[i].Effect = "nothing has been captured from this source yet, so it adds no listed documents"
+		if source.AdmittedID > 0 {
+			out.Sources[i].Effect = "the last good capture stays current, so the documents it listed are still listed"
+		}
+	}
+	if listedNone {
+		out.Notices = append(out.Notices, documentsListedNoneNotice)
+	}
+	if fileListedNone {
+		out.Notices = append(out.Notices, documentsFileListedNoneNotice)
 	}
 	return out
 }
+
+// documentFailureReasons are the reasons a document source capture fails or is cancelled, as
+// docs/commands.md documents them; each has a remedy in documentFailureFix.
+var documentFailureReasons = []string{"office_json_unrecognized", "office_json_too_large", "office_json_unreadable",
+	"office_surface_unknown", "office_json_input_unqualified", "office_json_capture_failed", "office_json_cleanup_failed",
+	"office_json_policy_restore_failed", "office_json_cancelled", "stale_attempt"}
+
+const documentsIssue = "https://github.com/ourostack/m365crawl/issues"
+
+var documentFailureFix = map[string]string{
+	"office_json_unrecognized": "the saved file is not JSON, or is JSON in a shape this m365crawl version does not read. Upgrade m365crawl and run m365crawl docs sync again; if the newest version still fails, open an issue at " +
+		documentsIssue + " asking for support for this shape, with the source kind and the file's top-level key names (no values)",
+	"office_json_too_large":             "the file is larger than the reader accepts (8 MiB, or too many rows, fields or nesting levels), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
+	"office_json_unreadable":            "the file could not be read to the end. Run m365crawl docs sync again; if it keeps failing, check that the file is complete and readable",
+	"office_surface_unknown":            "the source is registered for a surface this version does not read. Upgrade m365crawl",
+	"office_json_input_unqualified":     "the path is missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file, so it was refused before reading. A file Office removed needs nothing; otherwise copy it to an ordinary local folder and run m365crawl docs sync --root DIR",
+	"office_json_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl docs sync again; run m365crawl doctor if it keeps failing",
+	"office_json_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
+	"office_json_policy_restore_failed": "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
+	"office_json_cancelled":             "the capture was interrupted or timed out. Run m365crawl docs sync again",
+	"stale_attempt":                     "another capture of the same source finished first, so this one was not admitted. Run m365crawl docs sources to see the current state",
+}
+
+const documentsListedNoneNotice = officedocuments.NoDocumentsListed + ": each source with this reason last saved a successful Office response that listed no documents, so its capture is complete with zero rows. " +
+	"This describes the saved response, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
+
+const documentsFileListedNoneNotice = officedocuments.FileListedNoDocuments + ": each source with this reason last saved an Office dialog list or a supplied file (docs sync --root) that listed no documents, so its capture is complete with zero rows. " +
+	"This describes the saved Office JSON file, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
 
 func documentError(err error) error {
 	var source *officecapture.ReadError
@@ -229,15 +300,41 @@ func (c *documentsSyncCmd) Run(rt *runtime) error {
 }
 
 type documentsListCmd struct {
-	SourceID int64  `name:"source-id" help:"Only this registered document source ID; docs sources lists IDs."`
-	Query    string `help:"Words in document title, native URLs/IDs or source sharing/person metadata."`
-	Since    string `help:"Native modification time at or after this date/time; unknown dates excluded."`
-	Until    string `help:"Native modification time before this time; a date includes its whole day."`
-	Limit    int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
+	SourceID    int64  `name:"source-id" help:"Only this registered document source ID; docs sources lists IDs."`
+	Query       string `help:"Words in document title, native URLs/IDs or source sharing/person metadata."`
+	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded."`
+	Until       string `help:"Native modification time before this time; a date includes its whole day."`
+	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
+	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
+	label       string // the result label: docs search runs this command under its own name
+}
+
+// documentApplication is --application's value as stored, or a usage error naming the accepted values.
+func documentApplication(raw string) (string, error) {
+	for _, app := range []string{"Word", "Excel", "PowerPoint", "supplied"} {
+		if strings.EqualFold(raw, app) {
+			return app, nil
+		}
+	}
+	if raw == "" {
+		return "", nil
+	}
+	return "", errs.Usage("--application must be Word, Excel, PowerPoint or supplied (a file given with docs sync --root), not " + strconv.Quote(raw))
+}
+
+// documentSurface is --surface's value, or a usage error naming the accepted values.
+func documentSurface(raw string) (officedocuments.Surface, error) {
+	surface := officedocuments.Surface(strings.ToLower(raw))
+	if raw == "" || documentSurfaces[surface] != "" {
+		return surface, nil
+	}
+	return "", errs.Usage("--surface must be one of recent, shared, recommended, dialog, not " + strconv.Quote(raw))
 }
 
 const documentEvidenceHelp = "Each row is an immutable native metadata representation, not a resolved file/owner or a newly occurring sharing event. Identical sharing claims and repeat capture do not create new events; missing native sharing/activity dates stay unknown.\n" +
 	"capture_id and captured_at identify the representation's original private acquisition, not its most recent check. source_observed_at is the acquired input file's modification time, not native document/sharing time or admission time. Later checks do not overwrite these original clocks. retained means this representation was absent from the last admitted capture; absence does not mean deletion or revoked sharing.\n" +
+	documentOrderHelp + " docs --help defines surfaces, unresolved states, Sharing.Type and each clock.\n" +
 	"Native timestamps keep exact source text in Raw; Value is parsed UTC or null when missing/unrecognized. They are never replaced with file/capture time. modified_at is the native document modification time or null; bounded date windows exclude unknown values. text_state=not_captured means original document contents were not acquired."
 
 func (documentsListCmd) Help() string { return documentEvidenceHelp }
@@ -258,12 +355,20 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 		return err
 	}
 	until = documentUpperBound(until, c.Until)
-	return rt.documentsRead("docs list", c.SourceID, func(st *store.Store) (*listResult, error) {
+	application, err := documentApplication(c.Application)
+	if err != nil {
+		return err
+	}
+	surface, err := documentSurface(c.Surface)
+	if err != nil {
+		return err
+	}
+	return rt.documentsRead(firstOf(c.label, "docs list"), c.SourceID, func(st *store.Store) (*listResult, error) {
 		if st == nil {
 			return newList(nil, false), nil
 		}
 		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
-			SourceID: c.SourceID, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit})
+			SourceID: c.SourceID, Application: application, Surface: surface, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit})
 		if err != nil {
 			return nil, err
 		}
@@ -285,11 +390,13 @@ func documentUpperBound(until time.Time, raw string) time.Time {
 }
 
 type documentsSearchCmd struct {
-	Query    string `arg:"" optional:"" help:"Words in archived document metadata; required unless a date filter is supplied."`
-	SourceID int64  `name:"source-id" help:"Only this registered document source ID."`
-	Since    string `help:"Native modification time at or after this date/time."`
-	Until    string `help:"Native modification time before this time; unknown dates excluded."`
-	Limit    int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
+	Query       string `arg:"" optional:"" help:"Words in archived document metadata; required unless a date, --application or --surface filter is supplied."`
+	SourceID    int64  `name:"source-id" help:"Only this registered document source ID."`
+	Since       string `help:"Native modification time at or after this date/time."`
+	Until       string `help:"Native modification time before this time; unknown dates excluded."`
+	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
+	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
 }
 
 func (documentsSearchCmd) Help() string { return documentEvidenceHelp }
@@ -298,10 +405,11 @@ func (c *documentsSearchCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "docs search", ""); err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
-		return errs.Usage("docs search needs words or a native date filter; use docs list for an unfiltered list")
+	if strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" && c.Application == "" && c.Surface == "" {
+		return errs.Usage("docs search needs words, a native date filter, --application or --surface; use docs list for an unfiltered list")
 	}
-	return (&documentsListCmd{Query: c.Query, SourceID: c.SourceID, Since: c.Since, Until: c.Until, Limit: c.Limit}).Run(rt)
+	return (&documentsListCmd{Query: c.Query, SourceID: c.SourceID, Since: c.Since, Until: c.Until, Limit: c.Limit,
+		Application: c.Application, Surface: c.Surface, label: "docs search"}).Run(rt)
 }
 
 type documentsShowCmd struct {

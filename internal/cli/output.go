@@ -167,7 +167,18 @@ func (rt *runtime) write(label string, v any) error {
 		}
 		return enc.Encode(v)
 	}
-	return output.Write(rt.stdout, rt.format, label, v)
+	return output.Write(rt.stdout, rt.format, logLabel(label), v)
+}
+
+// logLabel is a command's label as the log format's key: crawlkit accepts only letters, digits, _,
+// . and -, so the space of a subcommand path becomes _ ("docs list" prints docs_list={...}).
+func logLabel(label string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '.' || r == '-' {
+			return r
+		}
+		return '_'
+	}, label)
 }
 
 type errorDoc struct {

@@ -28,6 +28,18 @@
     {
       "command": "m365crawl mail list --has-attachments",
       "does": "mail with files; mail show <id> lists each file's name, size and type"
+    },
+    {
+      "command": "m365crawl docs list",
+      "does": "Office recent, shared and recommended document metadata; docs sync registers the sources"
+    },
+    {
+      "command": "m365crawl notes search \"words\"",
+      "does": "OneNote indexed notes; notes sync registers the indexes"
+    },
+    {
+      "command": "m365crawl people",
+      "does": "Teams people, mail correspondents and native Outlook people observations"
     }
   ],
   "sources": [
@@ -51,6 +63,42 @@
       "last_sync_at": null,
       "note": "no calendar archived yet: run m365crawl sync",
       "source": "calendar",
+      "state": "empty"
+    },
+    {
+      "documents": 0,
+      "failed_sources": 0,
+      "last_sync_at": null,
+      "note": "no Office document sources registered: run m365crawl docs sync (Mac Office) or docs sync --root DIR",
+      "registered_sources": 0,
+      "source": "documents",
+      "state": "not_registered"
+    },
+    {
+      "failed_sources": 0,
+      "last_sync_at": null,
+      "note": "no OneNote indexes registered: run m365crawl notes sync, or notes sync --root DIR",
+      "notes": 0,
+      "registered_sources": 0,
+      "source": "notes",
+      "state": "not_registered"
+    },
+    {
+      "last_sync_at": null,
+      "note": "no people archived yet: run m365crawl sync; m365crawl people sync adds native Outlook people observations",
+      "observations": 0,
+      "people": 0,
+      "registered_sources": 0,
+      "source": "people",
+      "state": "empty"
+    },
+    {
+      "calls": 0,
+      "fetched": 0,
+      "last_sync_at": null,
+      "note": "no recorded meetings in the archive yet: run m365crawl sync",
+      "parts": 0,
+      "source": "transcripts",
       "state": "empty"
     }
   ]
