@@ -1,0 +1,6 @@
+### Added
+
+- `loop sync`, `loop list`, `loop search`, `loop show` and `loop sources` project and read the channel text of cached Loop snapshot records already in the archive (database `fluidDriverCache`, store `driverStorage.V3`). Nothing is fetched and Loop is never opened. Each row is one channel of one immutable snapshot version with a stable `loop-channel:ID`, its native sequence, pending-operation count and whether the archived record still matches it: partial text, not a full or current Loop page.
+- `search` includes cached Loop channels (`--source loop`, and `--source all` without date, account, author, chat-only, mail-only or profile filters). Loop hits have no native date, so they follow every dated hit. Results that searched Loop carry `loop_coverage`, which survives `--fields`, `--limit` and zero hits.
+- Every registered Loop source keeps a stable `source_id` from its first attempt, so a failed or metadata-only source can be inspected with `loop sources` and retried with `loop sync --source-id N`. A failed refresh keeps the last good snapshot.
+- The archive moves to schema 13: additive Loop registration, snapshot, loss, channel and full-text tables. Existing rows are not rewritten.

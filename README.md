@@ -29,6 +29,8 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 | Read the note and check its coverage | `m365crawl notes show note:ID` · `m365crawl notes sources` |
 | Find the document mentioned in that work | `m365crawl docs sync` once, then shared `search` or `docs search "words"` |
 | Inspect the document claim, not a guessed file | `m365crawl docs show document-observation:ID` · `m365crawl docs sources` |
+| Find text from a Loop component Teams cached | `m365crawl loop sync` once, then `m365crawl loop search "words"` or shared `search` |
+| Inspect one cached Loop channel and its snapshot version | `m365crawl loop show loop-channel:ID` · `m365crawl loop sources` |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
 
 ## Give your agent the context, not another inbox
@@ -66,6 +68,8 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the claim, inspect the source, and leave unresolved links unresolved. This is actual output from synthetic metadata, not private documents or a library export.*
 
+**Cached Loop channels, as partial snapshots.** `loop sync` projects the channel text of Loop snapshot records Teams already cached and `sync` already archived; nothing is fetched and Loop is never opened. Shared search and `loop search` return stable `loop-channel:ID` rows to follow with `loop show`. Each row is one channel of one immutable snapshot version, with its native sequence, pending-operation count and whether the archived record still matches it: partial text, not a full or current page, table, author or history. `loop sources` shows every registration, including failed and metadata-only ones, with the retry command.
+
 **Planned expansion, not shipped support:**
 
 | Area | Direction | What still needs proving |
@@ -73,7 +77,7 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 | People resolution and meetings | Qualify subject-scoped identity links and read fuller attendee lists | Positive subject tenancy, current-copy ambiguity, source coverage and platform-specific mappings |
 | Office and OneDrive | Resolve file/library associations and add separately qualified local document text | Provider/residency evidence, ambiguous identities and Windows-specific sources; metadata alone is not file or text access |
 | More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
-| Archived bot citations and Loop | Expose citations in archived bot replies and version-qualified cached Loop content | Preserve Teams provenance, snapshot versions and partial coverage; this is not private Copilot history |
+| Archived bot citations and Loop | Expose citations in archived bot replies; link cached Loop channels to their pages, messages and authors | Preserve Teams provenance, snapshot versions and partial coverage; cached channel text is not a full page, and this is not private Copilot history |
 | Browser-backed content | Read cloud document text, Stream transcripts, SharePoint pages and News, and used Engage surfaces | A tested read path and archive integration for each service; transcript fetching does not prove another service works |
 
 **Not included in the current expansion:** assigned Planner/To Do tasks and private Copilot history. Our probes have not established a representative, account-qualified read contract for those sources. Recap action items are not assigned tasks, and Teams bot citations are not private Copilot history. Parsing OneDrive's local sync-cache database is backend groundwork only: coherent capture while OneDrive is changing that database is not yet qualified. This limitation concerns OneDrive's cache, not m365crawl's existing `sync` command.

@@ -51,6 +51,7 @@ type runtime struct {
 	link             *convLink   // the Teams link the running read's conversation came from, if any
 	noteCoverage     *noteCoverage
 	documentCoverage *noteCoverage
+	loopCoverage     *loopCoverage
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {

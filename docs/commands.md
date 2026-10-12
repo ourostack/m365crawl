@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into nine groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into ten groups:
 
 | Group | Commands |
 | --- | --- |
@@ -14,6 +14,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
 | Document metadata | [`docs sync`](#docs-sync), [`docs list`](#docs-list), [`docs search`](#docs-search), [`docs show`](#docs-show), [`docs sources`](#docs-sources) |
+| Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## Platform defaults
@@ -29,7 +30,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts` and `transcripts show`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts`, `transcripts show`, and `loop list`, `loop search`, `loop show` and `loop sources`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -174,6 +175,80 @@ Inspect source IDs, kind, admitted/attempted state, coverage, reason and losses.
 | `stale_attempt` | Another capture of the same source finished first. Run `docs sources`. | Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
 
 `--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
+
+## Cached Loop channels
+
+Loop channels are text that m365crawl projects from cached Loop snapshot records Teams already wrote and `sync` already archived (database `fluidDriverCache`, store `driverStorage.V3`). Each row is one channel of one immutable cached snapshot: partial channel text, not a full or current Loop page, table, author or server history. m365crawl never fetches a component, replays operations or opens Loop. Start from `m365crawl loop --help`; help, IDs and coded remedies are enough without a skill.
+
+- **IDs.** `source_id` is the stable registration ID of one archived record tuple (`source`, `database`, `store`, `key_json`). `loop sync` allocates it when it first sees the tuple, before any successful projection, so failed and metadata-only sources have one too. `snapshot_id` names one admitted version of that record (its exact value digest and reader qualification). `loop-channel:ID` names one channel of one snapshot and never moves to a newer channel.
+- **Clocks.** `modified_at` is always null: the cache records no native modification time. `record_updated_at_at_admission` is the archive record's update clock when the snapshot was first admitted, and `projected_at` when it was first projected; neither is native edit time. `raw_updated_at` and `raw_removed_at` are the archived record's current clocks.
+- **Match state.** `matches_retained_value` says the archived record's current bytes and reader version are exactly this snapshot's. `retained` says a newer admitted snapshot of the same source exists. `raw_present` false means the record left Teams' cache, not that anything was deleted. `loop_coverage.sources[].snapshot_match` is `no_admission`, `matches`, `differs` or `unavailable`.
+- **Sequences.** `sequence`, `snapshot_sequence` and `latest_sequence` are native signed 64-bit numbers, printed exactly in JSON, `--fields` and text; decode them with an exact-integer parser. `pending_operations` counts cached operations m365crawl did not apply; zero still does not mean the text is current.
+- **Freshness.** Ordinary Loop reads refresh registered sources whose last attempt is older than `--max-age`; `--max-age 0` and `loop sources` only read the archive and never create one. New tuples are registered only by `loop sync` without `--source-id`. Loop commands ignore Teams/Outlook freshness and refuse `--account`, `--outlook-account` and `--outlook-profile`.
+- **Coverage.** Every Loop result carries `loop_coverage` (`scope` `loop_cache_channels`, `state` `unknown` or `registered`, `sources`, and `refresh_error` and `diagnostics` when a refresh failed) outside `--fields`, `--limit` and zero hits.
+- Order of `loop list` and `loop search`: full channel path (ASCII case-insensitive), source ID, snapshot ID, then channel ID, before `--limit`.
+
+### loop sync
+
+```sh
+m365crawl loop sync [--source-id ID]
+```
+
+Explicit registration and projection from the archive only. Without `--source-id` it refreshes every registered source and then registers and projects new archived tuples, at most 128 at a time: more than 128 unregistered tuples is `loop_cache_discovery_limit` and registers none. `--source-id` refreshes only that registration. Returns `projected`, `unchanged`, `skipped`, `failed` and `loop_coverage`. A source failure is recorded on that source and leaves its last good snapshot and its peers in place; archive and cancellation errors are command failures.
+
+### loop list
+
+```sh
+m365crawl loop list [--source-id ID] [--query WORDS] [--limit N]
+```
+
+One row per retained channel observation, current and retained snapshots alike. `--query` matches words in channel text or path. Limit defaults to 50; 0 returns all. `--max-text` bounds `text` and `path` and sets `text_truncated` and `path_truncated` without changing IDs.
+
+`--fields` keys: `id`, `source_id`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `text`, `text_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `losses`, `modified_at`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `retained`, `snapshot_tenant_id`, `snapshot_user_id`, `association_state`, `text_state`.
+
+### loop search
+
+```sh
+m365crawl loop search WORDS [--source-id ID] [--limit N]
+```
+
+Search channel text and paths; words are required. The same ordering, limits and fields as `loop list` apply. Shared `search --source loop` returns the same rows with `source` `loop`; unconstrained `search` includes them after every dated hit. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: `--source loop` refuses them with `flag_source_conflict`, and `--source all` leaves Loop out with a notice.
+
+`--fields` keys: `id`, `source_id`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `text`, `text_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `losses`, `modified_at`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `retained`, `snapshot_tenant_id`, `snapshot_user_id`, `association_state`, `text_state`.
+
+### loop show
+
+```sh
+m365crawl loop show loop-channel:ID
+```
+
+Resolve the stored channel first, refresh only its own source, then return the same immutable channel with its snapshot versions, losses and source state. A newer snapshot never replaces it; the channel then has `retained` true. A missing or malformed ID is `loop_channel_unknown` or `usage`, pointing to `loop list`.
+
+`--fields` keys: `id`, `source_id`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `text`, `text_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `losses`, `modified_at`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `retained`, `snapshot_tenant_id`, `snapshot_user_id`, `association_state`, `text_state`.
+
+### loop sources
+
+```sh
+m365crawl loop sources [--source-id ID]
+```
+
+Inspect each registration: its exact `tuple`, `status` (`complete`, `partial`, `failed`, `cancelled`), `coverage` (`channels`, `partial`, `metadata_only`), `reason` (the latest attempt's), `raw_reason` (why the archived record could not be read now, if it cannot), `snapshot_match`, the current and admitted owner IDs, attempt and admission clocks, `losses` and `retry` (`m365crawl loop sync --source-id N`). A failed, cancelled or metadata-only source adds `fix` and `effect`. It never projects, registers or creates an archive. An unknown positive source is `loop_source_unknown`.
+
+| Reason | Meaning and remedy |
+|---|---|
+| `loop_cache_identity_unqualified` | The record's identity or owner fields exceed the reader's bounds or are not UTF-8, so they were not read. Shown as a `loop sync` diagnostic; nothing is registered. |
+| `loop_cache_record_missing` | The archived record is gone. Nothing can be projected until Teams caches it again and `m365crawl sync` archives it. |
+| `loop_cache_value_missing` | The archived record holds no value. Run `m365crawl sync`, then retry. |
+| `loop_cache_value_too_large` | The archived value is larger than 8 MiB, so it was not loaded. |
+| `loop_cache_value_unqualified` | The archived value or its clocks are not in the text form the reader accepts. |
+| `loop_cache_snapshot_unsupported` | The cached value is not a Loop snapshot shape this version reads. Upgrade, then retry. |
+| `loop_cache_snapshot_too_large` | The snapshot exceeds the reader's blob, channel, segment or nesting limits. |
+| `loop_cache_reader_failed` | The reader failed unexpectedly. Retry, and open an issue at https://github.com/ourostack/m365crawl/issues if it repeats. |
+| `loop_cache_input_changed` | The archived record changed while it was projected, usually because a sync ran at the same time. Retry. |
+| `loop_cache_cancelled` | The projection was interrupted. Retry. |
+| `stale_attempt` | Another projection of the same source finished first. Run `loop sources`. |
+
+`--fields` keys: `source_id`, `kind`, `tuple`, `status`, `coverage`, `reason`, `raw_reason`, `attempt_id`, `admitted_attempt_id`, `incarnation_id`, `last_snapshot_id`, `snapshot_match`, `qualification`, `snapshot_qualification`, `raw_present`, `raw_value_present`, `raw_updated_at`, `raw_removed_at`, `current_tenant_id`, `current_user_id`, `snapshot_tenant_id`, `snapshot_user_id`, `attempted_at`, `admitted_at`, `losses`, `retry`, `effect`, `fix`.
 
 ## Indexed notes
 
@@ -351,7 +426,7 @@ m365crawl watch --every 30s --fields id,type,text --max-text 200
 
 ## search
 
-Full-text search over Teams chats, Outlook mail, fetched meeting transcripts and participating registered indexed notes/document metadata, newest first; default `--limit 50` (check `truncated`). Knowledge hits use native modification time, with unknown times last; document hits remain metadata-only unresolved observations.
+Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, participating registered indexed notes/document metadata and cached Loop channels, newest first; default `--limit 50` (check `truncated`). Knowledge hits use native modification time, with unknown times last; document hits remain metadata-only unresolved observations.
 
 ```
 m365crawl search [<query>] [flags]
@@ -363,7 +438,7 @@ m365crawl search [<query>] [flags]
 
 | Flag | Applies to | Meaning |
 | --- | --- | --- |
-| `--source=chats\|mail\|transcripts\|notes\|documents\|all` | every source | Choose messages, fetched transcripts, indexed notes, document metadata or all participating sources (default). |
+| `--source=chats\|mail\|transcripts\|notes\|documents\|loop\|all` | every source | Choose messages, fetched transcripts, indexed notes, document metadata, cached Loop channels or all participating sources (default). |
 | `--from=STRING` | chats, mail, transcripts | Sender or transcript speaker; unresolved notes/documents are excluded from `all` and reject this filter when explicitly selected. |
 | `--since=STRING` | every source | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). For transcripts, the time of each entry. |
 | `--until=STRING` | every source | Bound source-native time (same formats as `--since`). Document modification timestamps are exclusive upper bounds; a date-only document bound includes its whole local day. Unknown knowledge times do not match bounded windows. |
@@ -379,10 +454,11 @@ m365crawl search [<query>] [flags]
 
 How the sources combine:
 
-- Every item has `source`: `chats`, `mail`, `transcripts`, `notes` or `documents`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item. Registered knowledge participates only when its unresolved scope permits the selected filters.
+- Every item has `source`: `chats`, `mail`, `transcripts`, `notes`, `documents` or `loop`. A chat item has the shape of a `messages` item; a mail item has the shape of a `mail list` item. Registered knowledge participates only when its unresolved scope permits the selected filters.
 - A transcript item is one part of a recorded meeting whose fetched text matched: `{"source", "call_id", "event_key", "title", "ordinal", "speaker", "at", "text", "matches", "fetched_at"}`. `speaker`, `text` and `at` (absolute) are those of the part's first matching entry, and `matches` counts the part's matching entries, so a part that says a word fifty times is one item. The words match what was said, not the speaker's name (that is `--from`). Only text already fetched into the archive is searched, offline; with `--source transcripts` and nothing fetched, `note` says `no transcripts are fetched yet; run m365crawl transcripts to see what can be fetched`.
 - Knowledge hits have stable `note:ID` or `document-observation:ID`; follow `notes show` or `docs show`, not a message thread. Document metadata remains unresolved, with `text_state=not_captured`; URLs are reference evidence, not resolved files or proof of local residency.
-- Text output names source-specific follow-ups: `thread <conversation_id> <reply_chain_id, else id>` for chats, `mail thread <id>` for mail, `transcripts show <call_id>` for transcripts, and the corresponding knowledge `show` command for notes/documents.
+- Loop hits are `loop list` rows plus `source`, with a stable `loop-channel:ID` to follow with `loop show`. They have no native date (`modified_at` null), so they follow every dated hit in path order. `--source loop` needs words and refuses date, account, author, chat-only, mail-only and profile filters with `flag_source_conflict`; `--source all` with any of them leaves Loop out with a notice. `loop_coverage` lists every participating Loop source outside `--fields`, `--limit` and zero hits, and a mixed result never advertises a chat-only `total`.
+- Text output names source-specific follow-ups: `thread <conversation_id> <reply_chain_id, else id>` for chats, `mail thread <id>` for mail, `transcripts show <call_id>` for transcripts, the corresponding knowledge `show` command for notes/documents, and `loop show <id>` for Loop channels.
 - Items are newest first by `sent_at` for chats, `received_at` for mail, `at` for transcripts and native `modified_at` for knowledge; unknown knowledge dates sort last.
 - The result's `sources` reports count/truncation for each participating source. Knowledge `source_coverage` stays outside item shaping and zero hits; document rows and their source frontier come from one read snapshot, preserving independent refresh errors.
 - With `--source all`, a flag that belongs to one source narrows the search to that source and `note` says so, for example `--mentions-me applies to Teams chats only; mail and meeting transcripts were not searched`. With another `--source`, the same flag is the usage error `flag_source_conflict`, which names the flag.
@@ -399,7 +475,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`.
+`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `losses`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `snapshot_tenant_id`, `snapshot_user_id`.
 
 ## people
 

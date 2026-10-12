@@ -8,4 +8,5 @@ app evidence of 2 returned Teams messages (mapper v2): 2 absent
 note: --mentions-me applies to Teams chats only; mail and meeting transcripts were not searched
 notice: indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership
 notice: document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents
+notice: Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner
 archive age: <age>

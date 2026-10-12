@@ -50,6 +50,10 @@ var commandFields = map[string][]fieldSet{
 	"docs search":      {{keys: typeKeys[documentItem]}},
 	"docs show":        {{keys: documentDetailKeys}},
 	"docs sources":     {{keys: typeKeys[noteSourceItem]}},
+	"loop list":        {{keys: typeKeys[loopChannelItem]}},
+	"loop search":      {{keys: typeKeys[loopChannelItem]}},
+	"loop show":        {{keys: typeKeys[loopChannelItem]}},
+	"loop sources":     {{keys: typeKeys[loopSourceItem]}},
 }
 
 // fieldsOf is the --fields keys cmd accepts in the mode when names ("" for its plain result).

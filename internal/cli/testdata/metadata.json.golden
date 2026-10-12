@@ -81,6 +81,59 @@
       ],
       "json": true
     },
+    "loop list": {
+      "title": "loop list (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "loop",
+        "list"
+      ],
+      "json": true
+    },
+    "loop search": {
+      "title": "loop search (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "loop",
+        "search",
+        "\u003cwords\u003e"
+      ],
+      "json": true
+    },
+    "loop show": {
+      "title": "loop show (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "loop",
+        "show",
+        "\u003cloop-channel-id\u003e"
+      ],
+      "json": true
+    },
+    "loop sources": {
+      "title": "loop sources (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "loop",
+        "sources"
+      ],
+      "json": true
+    },
+    "loop sync": {
+      "title": "loop sync (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "loop",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "mail folders": {
       "argv": [
         "m365crawl",
@@ -290,7 +343,8 @@
     "calendar",
     "transcripts",
     "notes",
-    "documents"
+    "documents",
+    "loop"
   ],
   "privacy": {
     "contains_private_messages": true,

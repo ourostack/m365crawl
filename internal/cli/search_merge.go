@@ -31,6 +31,7 @@ const (
 	searchTranscripts = "transcripts"
 	searchNotes       = "notes"
 	searchDocuments   = "documents"
+	searchLoop        = "loop"
 )
 
 type searchNoteItem struct {
@@ -41,6 +42,11 @@ type searchNoteItem struct {
 type searchDocumentItem struct {
 	Source string `json:"source"`
 	documentItem
+}
+
+type searchLoopItem struct {
+	Source string `json:"source"`
+	loopChannelItem
 }
 
 // searchChatItem is a Teams message in a search result: the message as every Teams command prints
@@ -119,6 +125,7 @@ type searchSources struct {
 	Transcripts *sourceCount `json:"transcripts,omitempty"`
 	Notes       *sourceCount `json:"notes,omitempty"`
 	Documents   *sourceCount `json:"documents,omitempty"`
+	Loop        *sourceCount `json:"loop,omitempty"`
 }
 
 func searchNZ(s string) *string {
@@ -186,6 +193,11 @@ func searchKeys() []string {
 			}
 		}
 	}
+	for _, key := range typeKeys[loopChannelItem]() {
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
 	return keys
 }
 
@@ -194,9 +206,11 @@ type searchPlan struct {
 	chats, mail, transcripts bool
 	indexedNotes             bool
 	indexedDocuments         bool
+	loop                     bool
 	notes                    []string
 	noteExclusion            string
 	documentExclusion        string
+	loopExclusion            string
 }
 
 // chatOnlyFlags names the flags that only Teams chats understand, in the order the help lists them.
@@ -246,6 +260,14 @@ func sourceConflict(msg string) error {
 func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	p := searchPlan{chats: true, mail: true, transcripts: true}
 	chatFlags := c.chatOnlyFlags()
+	loopScoped := len(chatFlags) > 0 || c.Folder != "" || c.From != "" || c.Since != "" || c.Until != "" ||
+		rt.g.Account != "" || rt.g.OutlookAccount != "" || rt.g.OutlookProfile != ""
+	if c.Source == searchLoop {
+		if loopScoped {
+			return p, sourceConflict("--source loop cannot use date, account/author, chat-only, mail-only or profile filters: cached Loop channels have no native date or resolved owner")
+		}
+		return searchPlan{loop: true}, nil
+	}
 	if c.Source == searchDocuments {
 		if len(chatFlags) > 0 || c.Folder != "" || c.From != "" || rt.g.Account != "" ||
 			rt.g.OutlookAccount != "" || rt.g.OutlookProfile != "" {
@@ -320,6 +342,11 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 			p.indexedDocuments = true
 		} else {
 			p.documentExclusion = "document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents"
+		}
+		if loopScoped {
+			p.loopExclusion = "Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner"
+		} else {
+			p.loop = true
 		}
 	}
 	return p, nil
@@ -439,11 +466,24 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		rt.documentCoverage = documentSnapshotCoverage(rt, snapshot.Sources)
 	}
+	loopTruncated := false
+	if p.loop && st != nil {
+		snapshot, err := st.LoopSnapshot(rt.ctx, store.LoopFilter{Query: c.Query, Limit: f.Limit})
+		if err != nil {
+			return nil, err
+		}
+		loopTruncated = snapshot.Truncated
+		for _, row := range snapshot.Rows {
+			// No native time: Loop hits follow every dated hit, in the snapshot's path order.
+			hits = append(hits, searchHit{item: searchLoopItem{Source: searchLoop, loopChannelItem: loopChannelItemOf(row, rt.g.MaxText)}, source: searchLoop})
+		}
+		rt.loopCoverage = loopSnapshotCoverage(rt, snapshot.Sources)
+	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].at.After(hits[j].at) })
-	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated, searchDocuments: documentTruncated}
+	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated, searchDocuments: documentTruncated, searchLoop: loopTruncated}
 	// The chats' total is the result's only while no other source gave or held back an item.
-	chatTotalIsAll := !p.indexedNotes && !p.indexedDocuments && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
-	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated || documentTruncated
+	chatTotalIsAll := !p.indexedNotes && !p.indexedDocuments && !p.loop && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
+	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated || documentTruncated || loopTruncated
 	if len(hits) > f.Limit {
 		truncated = true
 		for _, h := range hits[f.Limit:] {
@@ -471,6 +511,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.documentExclusion != "" {
 		res.addNotice(p.documentExclusion)
 	}
+	if p.loopExclusion != "" {
+		res.addNotice(p.loopExclusion)
+	}
 	res.Sources = &searchSources{}
 	if p.chats {
 		res.Sources.Chats = &sourceCount{Count: count[searchChats], Truncated: trunc[searchChats]}
@@ -489,6 +532,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		res.Sources.Documents = &sourceCount{Count: count[searchDocuments], Truncated: trunc[searchDocuments]}
 		res.SourceCoverage = mergedOptionalCoverage(res.SourceCoverage, rt.documentCoverage)
 	}
+	if p.loop {
+		res.Sources.Loop = &sourceCount{Count: count[searchLoop], Truncated: trunc[searchLoop]}
+		res.LoopCoverage = rt.loopCoverage
+	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)
 	}
@@ -506,6 +553,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		if p.indexedDocuments && (c.Source == searchDocuments ||
 			(rt.documentCoverage != nil && len(rt.documentCoverage.Sources) > 0)) {
 			notes = append(notes, "no document metadata matched; inspect docs sources or register with docs sync")
+		}
+		if p.loop && (c.Source == searchLoop || (rt.loopCoverage != nil && len(rt.loopCoverage.Sources) > 0)) {
+			notes = append(notes, "no Loop channel matched; inspect loop sources or register with loop sync")
 		}
 	}
 	res.Note = strings.Join(notes, "; ")

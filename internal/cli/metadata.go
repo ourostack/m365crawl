@@ -63,7 +63,18 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "docs sync",
 			Title: command + " (local metadata only; show needs document-observation:ID; no document opened or fetched)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents"}
+	for _, command := range []string{"loop sync", "loop list", "loop search", "loop show", "loop sources"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "loop search":
+			argv = append(argv, "<words>")
+		case "loop show":
+			argv = append(argv, "<loop-channel-id>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "loop sync",
+			Title: command + " (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)"}
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents", "loop"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata"}}
 	return m
 }
