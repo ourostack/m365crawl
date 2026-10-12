@@ -82,10 +82,11 @@ and name in ('knowledge_locators','knowledge_attempts','knowledge_sources','note
 }
 
 func (s *Store) BeginKnowledgeAttempt(ctx context.Context, input KnowledgeInput) (KnowledgeAttempt, error) {
-	return s.beginKnowledgeAttempt(ctx, input, nil)
+	return s.beginKnowledgeAttempt(ctx, input, nil, nil)
 }
 
-func (s *Store) beginKnowledgeAttempt(ctx context.Context, input KnowledgeInput, register func(*sql.Tx, int64) error) (KnowledgeAttempt, error) {
+// register runs after the locator exists and before the attempt; started runs after the attempt.
+func (s *Store) beginKnowledgeAttempt(ctx context.Context, input KnowledgeInput, register func(*sql.Tx, int64) error, started func(*sql.Tx, KnowledgeAttempt) error) (KnowledgeAttempt, error) {
 	if input.Kind == "" || input.Platform == "" || input.Locator == "" || input.At.IsZero() {
 		return KnowledgeAttempt{}, errors.New("knowledge: invalid input")
 	}
@@ -113,8 +114,13 @@ values(?,?,?)`, attempt.LocatorID, knowledgeTime(input.At), nullableKnowledge(in
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `update knowledge_locators set latest_attempt=? where id=?`, attempt.ID, attempt.LocatorID)
-		return err
+		if _, err = tx.ExecContext(ctx, `update knowledge_locators set latest_attempt=? where id=?`, attempt.ID, attempt.LocatorID); err != nil {
+			return err
+		}
+		if started != nil {
+			return started(tx, attempt)
+		}
+		return nil
 	})
 	if err != nil {
 		return KnowledgeAttempt{}, err
