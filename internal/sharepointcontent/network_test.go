@@ -1,4 +1,4 @@
-package sharepointcontent
+package sharepointcontent_test
 
 import (
 	"context"

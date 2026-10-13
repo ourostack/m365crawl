@@ -33,15 +33,25 @@ var (
 	}
 	// openBrowser launches the browser and attaches to its tab. The caller owns the Closer and
 	// closes it on every path; on an error nothing is left running.
-	openBrowser = func(ctx context.Context, o browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+	openBrowser = func(ctx context.Context, o browser.LaunchOptions) (page transcripts.PageDriver, closer io.Closer, err error) {
 		b, err := launchBrowser(ctx, o)
 		if err != nil {
 			return nil, nil, err
 		}
+		defer func() {
+			if recover() != nil {
+				page, closer, err = nil, nil, errs.BrowserFailed("could not open the browser tab")
+				if b.Close() != nil {
+					err = errs.BrowserFailed("could not open the browser tab and could not close its browser")
+				}
+			}
+		}()
 		p, err := b.Page(ctx)
 		if err != nil {
-			_ = b.Close()
-			return nil, nil, errs.BrowserFailed("could not open the browser tab: " + err.Error())
+			if b.Close() != nil {
+				return nil, nil, errs.BrowserFailed("could not open the browser tab and could not close its browser")
+			}
+			return nil, nil, errs.BrowserFailed("could not open the browser tab")
 		}
 		return p, b, nil
 	}
@@ -480,18 +490,28 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 	if err := c.agree(rt, kind); err != nil {
 		return err
 	}
+	result,err:=rt.signinWindow(exe,kind,host,site)
+	if err!=nil{return err}
+	return rt.write("transcripts signin",result)
+}
+
+func (rt *runtime)signinWindow(exe string,kind browser.Kind,host,site string)(result *signinResult,err error){
 	rt.progressLine(fmt.Sprintf("opening a visible %s window with m365crawl's own browser profile", browserName(kind)))
 	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: "https://" + host + site + "/"})
 	if err != nil {
-		return err
+		return nil,err
 	}
-	defer func() { _ = closer.Close() }()
+	defer func(){
+		if recover()!=nil{result,err=nil,errs.BrowserFailed("sign-in browser failed")}
+		if closer.Close()!=nil{result,err=nil,errs.BrowserFailed("could not close the sign-in browser")}
+		if rt.ctx.Err()!=nil{result,err=nil,rt.ctx.Err()}
+	}()
 	rt.progressLine(fmt.Sprintf("waiting for you to sign in to SharePoint in that window (up to %s)", compactDuration(signinWait)))
 	if err := waitForHost(rt.ctx, page, host); err != nil {
-		return err
+		return nil,err
 	}
 	rt.progressLine("signed in; closing the window")
-	return rt.write("transcripts signin", &signinResult{SignedIn: true, Browser: string(kind), Next: "m365crawl transcripts fetch <meeting>"})
+	return &signinResult{SignedIn: true, Browser: string(kind), Next: "m365crawl transcripts fetch <meeting>"},nil
 }
 
 // signinTarget says where the sign-in window opens: a host (the one given, or else the host most
