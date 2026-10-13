@@ -1,10 +1,17 @@
 package store
 
+// Schema 14 adds the variant discriminator to the locator, observation and capture rows, and the
+// registry payload and opened time to observations. An Office JSON row keeps variant office_json,
+// its surface, application and document_json, and has no registry payload. An Office registry row
+// has variant office_registry, an empty surface, the fixed source label registry, an empty
+// document_json, the complete native observation in registry_json and a null modified_at.
+// Existing tables gain the columns in Store.migrate; nothing below may index or reference them.
 const documentObservationsSchemaDDL = `
 create table if not exists document_locator_metadata(
  locator_id integer primary key,
  surface text not null,
- application text not null
+ application text not null,
+ variant text not null default 'office_json'
 );
 create table if not exists document_observations(
  rowid integer primary key,
@@ -19,6 +26,9 @@ create table if not exists document_observations(
  web_url text not null,
  modified_at text,
  document_json text not null,
+ variant text not null default 'office_json',
+ registry_json text,
+ opened_at text,
  unique(source_id,representation_digest)
 );
 create index if not exists document_observations_source on document_observations(source_id,modified_at);
@@ -36,7 +46,8 @@ create table if not exists document_capture_metadata(
  acquired_at text,
  source_observed_at text,
  reused integer not null,
- physical_observations integer not null
+ physical_observations integer not null,
+ variant text not null default 'office_json'
 );
 create virtual table if not exists document_fts using fts5(title,metadata);
 `

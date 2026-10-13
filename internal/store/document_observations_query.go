@@ -20,13 +20,18 @@ func (s *Store) DocumentSources(ctx context.Context) ([]KnowledgeSource, error) 
 }
 
 func readDocumentSources(ctx context.Context, reader knowledgeReader) ([]KnowledgeSource, error) {
-	available, err := hasDocumentObservations(ctx, reader)
+	available, variants, err := documentSchema(ctx, reader)
 	if err != nil || !available {
 		return []KnowledgeSource{}, err
 	}
+	kinds := []string{DocumentKind(officedocuments.Recent), DocumentKind(officedocuments.Shared),
+		DocumentKind(officedocuments.Recommended), DocumentKind(officedocuments.Dialog)}
+	if variants {
+		kinds = append(kinds, RegistryDocumentKind)
+	}
 	out := []KnowledgeSource{}
-	for _, surface := range []officedocuments.Surface{officedocuments.Recent, officedocuments.Shared, officedocuments.Recommended, officedocuments.Dialog} {
-		sources, err := readKnowledgeSources(ctx, reader, DocumentKind(surface))
+	for _, kind := range kinds {
+		sources, err := readKnowledgeSources(ctx, reader, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -132,9 +137,14 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 	if filter.Limit < 0 || filter.Limit == math.MaxInt {
 		return nil, false, errors.New("documents: invalid limit")
 	}
-	available, err := hasDocumentObservations(ctx, reader)
+	available, variants, err := documentSchema(ctx, reader)
 	if err != nil || !available {
 		return []DocumentObservationRow{}, false, err
+	}
+	// An archive from before schema 14 has no variant columns: every row is Office JSON.
+	variantColumns := "'" + DocumentVariantJSON + "',null,null"
+	if variants {
+		variantColumns = "d.variant,d.registry_json,d.opened_at"
 	}
 	where := "1=1"
 	args := []any{}
@@ -183,11 +193,12 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 		args = append(args, filter.Limit+1)
 	}
 	rows, err := reader.QueryContext(ctx, `select d.rowid,d.source_id,d.capture_id,d.document_json,d.application,d.surface,
-c.acquired_at,c.source_observed_at,s.id,
+c.acquired_at,c.source_observed_at,s.id,`+variantColumns+`,coalesce(l.kind,''),
 not exists(select 1 from document_capture_members m where m.capture_id=s.admitted_attempt and m.observation_rowid=d.rowid)
 or not exists(select 1 from knowledge_attempts a join knowledge_locators l on l.last_admitted=a.id where l.id=s.locator_id and a.source_id=d.source_id)
 from document_observations d join document_capture_metadata c on c.capture_id=d.capture_id
-left join knowledge_sources s on s.id=d.source_id where `+where+`
+left join knowledge_sources s on s.id=d.source_id
+left join knowledge_locators l on l.id=s.locator_id where `+where+`
 order by d.modified_at desc,d.title collate nocase,d.source_id,d.rowid`+limit, args...)
 	if err != nil {
 		return nil, false, err
@@ -195,12 +206,12 @@ order by d.modified_at desc,d.title collate nocase,d.source_id,d.rowid`+limit, a
 	out := []DocumentObservationRow{}
 	for rows.Next() {
 		var row DocumentObservationRow
-		var encoded string
-		var surface officedocuments.Surface
+		var stored documentStored
 		var acquired, observed sql.NullString
 		var linkedSource sql.NullInt64
-		if err := rows.Scan(&row.ID, &row.SourceID, &row.CaptureID, &encoded, &row.Application,
-			&surface, &acquired, &observed, &linkedSource, &row.Retained); err != nil {
+		if err := rows.Scan(&row.ID, &row.SourceID, &row.CaptureID, &stored.document, &row.Application,
+			&stored.surface, &acquired, &observed, &linkedSource, &row.Variant, &stored.registry, &stored.opened,
+			&stored.kind, &row.Retained); err != nil {
 			_ = rows.Close()
 			return nil, false, err
 		}
@@ -208,7 +219,7 @@ order by d.modified_at desc,d.title collate nocase,d.source_id,d.rowid`+limit, a
 			_ = rows.Close()
 			return nil, false, ErrKnowledgeSourceUnknown
 		}
-		if err := decodeDocumentRow(&row, encoded, surface, acquired, observed); err != nil {
+		if err := decodeDocumentRow(&row, stored, acquired, observed); err != nil {
 			_ = rows.Close()
 			return nil, false, err
 		}
@@ -224,12 +235,33 @@ order by d.modified_at desc,d.title collate nocase,d.source_id,d.rowid`+limit, a
 	return out, truncated, nil
 }
 
-func decodeDocumentRow(row *DocumentObservationRow, encoded string, surface officedocuments.Surface, acquired, observed sql.NullString) error {
-	if err := json.Unmarshal([]byte(encoded), &row.Document); err != nil {
-		return err
-	}
-	if row.Document.Surface != surface || !validDocumentBinding(surface, row.Application) {
-		return errors.New("documents: invalid stored representation")
+// documentStored is a stored row's raw discriminated payload, before validation.
+type documentStored struct {
+	document, kind   string
+	surface          officedocuments.Surface
+	registry, opened sql.NullString
+}
+
+// decodeDocumentRow validates the discriminator, kind and payload combination of every row it
+// returns: a corrupt combination is an error, never an empty success.
+func decodeDocumentRow(row *DocumentObservationRow, stored documentStored, acquired, observed sql.NullString) error {
+	switch row.Variant {
+	case DocumentVariantJSON:
+		if stored.registry.Valid || stored.opened.Valid {
+			return errors.New("documents: invalid stored representation")
+		}
+		if err := json.Unmarshal([]byte(stored.document), &row.Document); err != nil {
+			return err
+		}
+		if row.Document.Surface != stored.surface || !validDocumentBinding(stored.surface, row.Application) {
+			return errors.New("documents: invalid stored representation")
+		}
+	case RegistryDocumentKind:
+		if err := decodeRegistryRow(row, stored); err != nil {
+			return err
+		}
+	default:
+		return errors.New("documents: invalid stored variant")
 	}
 	times, err := knowledgeTimes(acquired, observed)
 	if err != nil {
@@ -244,6 +276,13 @@ from document_observations where url<>'' and (url=? or url=?)
 union all
 select rowid as observation_id,source_id,capture_id,'web_url' as field,web_url as reference_url,application,surface
 from document_observations where web_url<>'' and (web_url=? or web_url=?)`
+
+// documentPathReferencesSQL adds the literal FriendlyPath occurrences among registry rows. The
+// path is compared as stored text; it is never normalized, resolved or looked up on disk.
+const documentPathReferencesSQL = `
+union all
+select rowid as observation_id,source_id,capture_id,'friendly_path' as field,json_extract(registry_json,'$.FriendlyPath') as reference_url,application,surface
+from document_observations where variant='office_registry' and ?<>'' and json_extract(registry_json,'$.FriendlyPath')=?`
 
 func (s *Store) DocumentObservation(ctx context.Context, id int64) (DocumentObservationDetail, error) {
 	if id <= 0 {
@@ -262,7 +301,20 @@ func (s *Store) DocumentObservation(ctx context.Context, id int64) (DocumentObse
 		return DocumentObservationDetail{}, ErrDocumentObservationNotFound
 	}
 	detail := DocumentObservationDetail{Observation: rows[0], References: []DocumentReferenceObservation{}}
-	sources, err := readKnowledgeSources(ctx, tx, DocumentKind(detail.Observation.Document.Surface))
+	kind, urls, path := DocumentKind(detail.Observation.Document.Surface),
+		[]string{detail.Observation.Document.URL, detail.Observation.Document.WebURL}, ""
+	referencesSQL := documentReferencesSQL
+	if detail.Observation.Variant == RegistryDocumentKind {
+		kind, urls, path = RegistryDocumentKind, []string{detail.Observation.Registry.URL, ""}, detail.Observation.Registry.FriendlyPath
+	}
+	args := []any{urls[0], urls[1], urls[0], urls[1]}
+	if _, variants, err := documentSchema(ctx, tx); err != nil {
+		return DocumentObservationDetail{}, err
+	} else if variants {
+		referencesSQL += documentPathReferencesSQL
+		args = append(args, path, path)
+	}
+	sources, err := readKnowledgeSources(ctx, tx, kind)
 	if err != nil {
 		return DocumentObservationDetail{}, err
 	}
@@ -275,13 +327,11 @@ func (s *Store) DocumentObservation(ctx context.Context, id int64) (DocumentObse
 	if detail.Source.ID == 0 {
 		return DocumentObservationDetail{}, ErrKnowledgeSourceUnknown
 	}
-	doc := detail.Observation.Document
-	args := []any{doc.URL, doc.WebURL, doc.URL, doc.WebURL}
-	if err := tx.QueryRowContext(ctx, `select count(*) from (`+documentReferencesSQL+`)`, args...).
+	if err := tx.QueryRowContext(ctx, `select count(*) from (`+referencesSQL+`)`, args...).
 		Scan(&detail.ReferencesTotal); err != nil {
 		return DocumentObservationDetail{}, err
 	}
-	references, err := tx.QueryContext(ctx, `select * from (`+documentReferencesSQL+`) order by observation_id,field limit 100`, args...)
+	references, err := tx.QueryContext(ctx, `select * from (`+referencesSQL+`) order by observation_id,field limit 100`, args...)
 	if err != nil {
 		return DocumentObservationDetail{}, err
 	}

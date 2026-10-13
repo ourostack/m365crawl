@@ -130,9 +130,10 @@ var chmodFile = os.Chmod
 // Version 8 adds mail conversation ids and recipient roles. Its conversation index is created
 // here, after the column exists, because the schema DDL runs before migration on old archives.
 // Version 12 adds messages.raw_digest, NULL until the application backfill or a changed message
-// fills it.
+// fills it. Version 14 adds the document variant, registry_json and opened_at columns.
 func (s *Store) migrate(ctx context.Context) error {
 	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest int
+	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -141,7 +142,13 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
   (select count(*) from pragma_table_info('mail_recipients') where name='role'),
   (select count(*) from sqlite_master where type='index' and name='mail_messages_conversation'),
-  (select count(*) from pragma_table_info('messages') where name='raw_digest')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest); err != nil {
+  (select count(*) from pragma_table_info('messages') where name='raw_digest'),
+  (select count(*) from pragma_table_info('document_locator_metadata') where name='variant'),
+  (select count(*) from pragma_table_info('document_observations') where name='variant'),
+  (select count(*) from pragma_table_info('document_observations') where name='registry_json'),
+  (select count(*) from pragma_table_info('document_observations') where name='opened_at'),
+  (select count(*) from pragma_table_info('document_capture_metadata') where name='variant')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant); err != nil {
 		return err
 	}
 	var stmts []string
@@ -170,6 +177,20 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if conversationIndex == 0 {
 		stmts = append(stmts, `create index if not exists mail_messages_conversation on mail_messages(account, conversation_id)`)
+	}
+	for _, column := range []struct {
+		present      int
+		table, added string
+	}{
+		{locatorVariant, "document_locator_metadata", "variant text not null default 'office_json'"},
+		{observationVariant, "document_observations", "variant text not null default 'office_json'"},
+		{registryJSON, "document_observations", "registry_json text"},
+		{openedAt, "document_observations", "opened_at text"},
+		{captureVariant, "document_capture_metadata", "variant text not null default 'office_json'"},
+	} {
+		if column.present == 0 {
+			stmts = append(stmts, "alter table "+column.table+" add column "+column.added)
+		}
 	}
 	if len(stmts) == 0 {
 		return nil
