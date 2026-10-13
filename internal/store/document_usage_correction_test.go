@@ -87,7 +87,7 @@ func TestUsageCopiedCaptureArchiveOnly(t *testing.T) {
 			if err := ro.db.QueryRow(schemaSQL).Scan(&schemaAfter); err != nil || schemaBefore != schemaAfter {
 				t.Fatalf("archive-only schema changed: %v", err)
 			}
-			if n := rowCount(t, ro, `select max(version) from schema_migrations`); n != 15 {
+			if n := rowCount(t, ro, `select max(version) from schema_migrations`); n != SchemaVersion {
 				t.Fatalf("schema version changed: %d", n)
 			}
 			if err := ro.Close(); err != nil {

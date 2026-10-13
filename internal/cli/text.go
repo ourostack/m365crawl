@@ -90,6 +90,12 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
+		if r.ContentCoverage != nil {
+			_, _ = fmt.Fprintln(w, "content: explicit archived observations; retained bodies are not current service content")
+			for _, source := range r.ContentCoverage.Sources {
+				_, _ = fmt.Fprintf(w, "  registration %d: %s / %s; selection %s; %s\n", source.RegistrationID, source.State, source.Scope, source.SelectionMatch, source.Retry)
+			}
+		}
 		if r.CoverageGap != nil && *r.CoverageGap {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
 		}
@@ -392,6 +398,15 @@ func (rt *runtime) listTable(r *listResult) {
 		case loopChannelItem:
 			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x))
+		case cloudItem:
+			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(searchVal(x.Title)), oneLine(x.Text)})
+		case searchCloudItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(searchVal(x.Title)), "-", "content show " + x.ID, oneLine(x.Text)})
+		case cloudSourceItem:
+			cols, textCol = []string{"registration", "source", "state", "scope", "selection", "retry"}, -1
+			rows = append(rows, []string{strconv.FormatInt(x.RegistrationID, 10), sourceLabel(x.SourceID), x.State, x.Scope, x.SelectionMatch, x.Retry})
 		case loopDetailItem:
 			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x.loopChannelItem))

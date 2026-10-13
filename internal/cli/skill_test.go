@@ -225,10 +225,10 @@ func TestSkillThreadTakesTheRoot(t *testing.T) {
 	}
 }
 
-// The guide names the transcript commands, and that fetch alone uses the network.
+// The guide names both explicit browser workflows, not implicit network reads.
 func TestSkillNamesTranscriptsCommands(t *testing.T) {
 	text := skillText(t)
-	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "`transcripts fetch` and `transcripts signin` are the only commands that use the network"} {
+	for _, want := range []string{"`m365crawl transcripts`", "`m365crawl transcripts show <meeting>`", "`transcripts fetch`", "--source transcripts`", "Only explicit `transcripts fetch/signin` and `content fetch/signin` use the network", "then offline `content list/search/show/sources`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SKILL.md does not say %s", want)
 		}

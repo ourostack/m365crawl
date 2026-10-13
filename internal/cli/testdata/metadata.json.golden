@@ -20,6 +20,86 @@
       ],
       "json": true
     },
+    "content fetch page": {
+      "title": "content fetch page (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "fetch",
+        "page",
+        "\u003csupported-url\u003e"
+      ],
+      "json": true,
+      "mutates": true
+    },
+    "content fetch stream": {
+      "title": "content fetch stream (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "fetch",
+        "stream",
+        "\u003csupported-url\u003e"
+      ],
+      "json": true,
+      "mutates": true
+    },
+    "content list": {
+      "title": "content list (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "list"
+      ],
+      "json": true
+    },
+    "content search": {
+      "title": "content search (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "search",
+        "\u003cwords\u003e"
+      ],
+      "json": true
+    },
+    "content show": {
+      "title": "content show (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "show",
+        "\u003ccloud-observation-id\u003e"
+      ],
+      "json": true
+    },
+    "content signin": {
+      "title": "content signin (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "signin",
+        "\u003csupported-url\u003e"
+      ],
+      "json": true,
+      "mutates": true
+    },
+    "content sources": {
+      "title": "content sources (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "sources"
+      ],
+      "json": true
+    },
     "docs list": {
       "title": "docs list (local metadata only; show needs document-observation:ID; no document opened or fetched)",
       "argv": [
@@ -344,7 +424,8 @@
     "transcripts",
     "notes",
     "documents",
-    "loop"
+    "loop",
+    "content"
   ],
   "privacy": {
     "contains_private_messages": true,

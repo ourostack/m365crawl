@@ -7,6 +7,7 @@ var networkJS = sharepointcontent.TestNetworkJS
 var admit = sharepointcontent.TestAdmit
 var decode = sharepointcontent.TestDecode
 var nativeResult = sharepointcontent.TestNativeResult
+
 type admittedRequest = sharepointcontent.TestAdmittedRequest
 type scriptResult = sharepointcontent.TestScriptResult
 type Request = sharepointcontent.Request

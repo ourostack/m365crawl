@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into ten groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into eleven groups:
 
 | Group | Commands |
 | --- | --- |
@@ -15,7 +15,108 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
 | Document metadata | [`docs sync`](#docs-sync), [`docs list`](#docs-list), [`docs search`](#docs-search), [`docs show`](#docs-show), [`docs sources`](#docs-sources) |
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
+| Explicit cloud content | [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
+
+## Content: explicit acquisition, offline reads
+
+```text
+m365crawl content fetch page [URL] [--registration-id N] [--browser BROWSER] [--timeout 10m]
+m365crawl content fetch stream [URL] [--transcript-id ID] [--registration-id N] [--browser BROWSER] [--timeout 10m]
+m365crawl content signin URL [--browser BROWSER] [--user-agreed]
+m365crawl content list [--source-id N] [--modified-since DATE] [--modified-until DATE] [--limit 50]
+m365crawl content search WORDS [--source-id N] [--modified-since DATE] [--modified-until DATE] [--limit 50]
+m365crawl content show cloud-observation:N
+m365crawl content sources [--source-id N]
+m365crawl search WORDS --source content [--since DATE] [--until DATE] [--limit 50]
+```
+
+URL is one supported HTTPS SharePoint tenant modern page (`/sites/NAME` or
+`/teams/NAME`, `/SitePages/NAME.aspx`) or same-site Stream
+`/_layouts/15/stream.aspx?id=ENCODED_FILE_PATH`. Tenant hosts end in
+`.sharepoint.com` or `.sharepoint-df.com`. No tickets, implicit fetch, rendered
+export, library crawl or automatic retry. URL and registration retry are mutually
+exclusive; a supplied empty transcript ID is invalid, absent stays absent.
+Registration IDs select retries; source IDs select admitted native file/account
+instances. Cross-family registration retries are refused.
+
+Fetch uses the tool-owned headless profile, releases the archive during capture,
+and closes the browser before atomic publication. Sign-in opens a visible
+tool-owned window only after `--user-agreed` or interactive Enter. Ask the user
+first; no token/password/cookie export or everyday profile copying.
+
+All content reads and `search --source content` stay offline even when max-age
+is nonzero; `content sources` never migrates/captures. Pages are always partial
+supported rich-text projections. Stream complete covers one verified selected
+body, not all variants; metadata-only/no-transcript/selection-required has no
+selected body. Retained bodies keep their own file/account/native selection and
+clocks alongside latest metadata/source coverage. `selection_match` is matches,
+differs or unavailable, never a fabricated selected ID.
+
+List/search/show/sources accept global `--fields` and `--max-text`; fields are
+listed by each command's help. `content_coverage` is outside shaping/global
+limits and includes zero-hit failed/unadmitted/metadata-only registrations.
+Cloud results carry immutable observation/registration/source/capture IDs,
+nullable native title/modified_at, captured_at (local completion, not edit time),
+retained/state/scope/selection_match/losses and original native file/account evidence.
+Account/author/chat/mail-only/profile filters cannot qualify this unresolved service
+identity: explicit content rejects them, all-source search excludes it with a notice.
+Date filters use native file-modified clocks; unknown stays null/excluded.
+
+`controls_preview` has the first100 supported control-text occurrences, with native
+control/text ordinals; `entries_preview` has first100 native transcript entries
+with stated speaker/raw and parsed offsets, no invented absolute meeting time.
+Totals and `preview_truncated` describe omitted occurrences. Transcript/entry/
+requested selection identifiers use explicit `native_id_prefix` (128 Unicode
+runes) and `native_id_truncated`. Full values/controls/entries use the generated
+`full_text_sql`, for example:
+
+```sh
+m365crawl --db SAME_ARCHIVE sql 'select result_json from cloud_observations where rowid=1'
+```
+
+Native Windows acquisition remains unqualified. Synthetic browser/portable offline
+contracts do not certify native Windows sign-in, tenant permissions or broad page
+completeness. [Synthetic rendered example](content-synthetic.svg).
+
+Native synthetic tests use fresh disposable profiles with an explicit mock-keychain
+launch option to isolate macOS fixture HOME from the user's keychain. This is not a
+CLI flag or a product authentication default; ordinary fetch/sign-in profiles never
+opt in.
+
+Shared search includes source `content`. Equal timestamp legacy relative order is
+unchanged; legacy hits precede cloud, and only cloud ties use full pre-clipping
+title/source/numeric observation ID. The final global limit follows that ordering.
+
+### content list
+
+Offline `content list [--source-id N] [--modified-since DATE] [--modified-until DATE] [--limit 50]`.
+Native date bounds exclude unknown clocks. Source ID selects a native instance;
+registration ID belongs only to explicit retries. No max-age capture or migration.
+
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`.
+
+### content search
+
+Offline `content search WORDS`, with the same source/date/limit flags as content list.
+Only retained supported text/title/native metadata is indexed.
+
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`.
+
+### content show
+
+Offline `content show cloud-observation:N`; N is a positive decimal int64.
+First100 ordered control-text/entry occurrences, explicit totals/clipping and
+same-archive `full_text_sql` retain full evidence independently of the preview.
+
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`.
+
+### content sources
+
+Offline `content sources [--source-id N]` includes registered failed/unadmitted/
+metadata-only sources. Coverage is independent of hits, shaping and global limits.
+
+`--fields` keys: `registration_id`, `source_id`, `kind`, `state`, `scope`, `reason`, `requested_selection`, `current_selection`, `last_good_observation_id`, `selection_match`, `attempted_at`, `admitted_at`, `source_observed_at`, `losses`, `retry`.
 
 ## Platform defaults
 
@@ -518,7 +619,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `losses`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
+`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `registration_id`, `kind`, `descriptive_fields_truncated`, `state`, `scope`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `partial`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
 
 ## people
 

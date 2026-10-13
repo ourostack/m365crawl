@@ -32,7 +32,13 @@ const (
 	searchNotes       = "notes"
 	searchDocuments   = "documents"
 	searchLoop        = "loop"
+	searchContent     = "content"
 )
+
+type searchCloudItem struct {
+	Source string `json:"source"`
+	cloudItem
+}
 
 type searchNoteItem struct {
 	Source string `json:"source"`
@@ -156,6 +162,7 @@ func (s *searchSources) hints() []string {
 		{s.Chats, "chat hit", "chat hits", searchChats}, {s.Mail, "mail hit", "mail hits", searchMail},
 		{s.Transcripts, "transcript hit", "transcript hits", searchTranscripts}, {s.Notes, "note hit", "note hits", searchNotes},
 		{s.Documents, "document hit", "document hits", searchDocuments}, {s.Loop, "Loop hit", "Loop hits", searchLoop},
+		{s.Content, "content hit", "content hits", searchContent},
 	} {
 		if src.count == nil {
 			continue
@@ -193,7 +200,7 @@ func (s *searchSources) floorNote() string {
 	for _, src := range []struct {
 		count *sourceCount
 		name  string
-	}{{s.Chats, searchChats}, {s.Mail, searchMail}, {s.Transcripts, searchTranscripts}, {s.Notes, searchNotes}, {s.Documents, searchDocuments}, {s.Loop, searchLoop}} {
+	}{{s.Chats, searchChats}, {s.Mail, searchMail}, {s.Transcripts, searchTranscripts}, {s.Notes, searchNotes}, {s.Documents, searchDocuments}, {s.Loop, searchLoop}, {s.Content, searchContent}} {
 		if src.count != nil && src.count.MatchedAtLeast != nil {
 			names = append(names, src.name)
 		}
@@ -216,6 +223,7 @@ type searchSources struct {
 	Notes       *sourceCount `json:"notes,omitempty"`
 	Documents   *sourceCount `json:"documents,omitempty"`
 	Loop        *sourceCount `json:"loop,omitempty"`
+	Content     *sourceCount `json:"content,omitempty"`
 	// selected is the --source of the search and limit its --limit: what a hint may advise.
 	selected string
 	limit    int
@@ -290,6 +298,11 @@ func searchKeys() []string {
 		if !slices.Contains(keys, key) {
 			keys = append(keys, key)
 		}
+		for _, key := range typeKeys[cloudItem]() {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
 	}
 	return keys
 }
@@ -300,10 +313,12 @@ type searchPlan struct {
 	indexedNotes             bool
 	indexedDocuments         bool
 	loop                     bool
+	content                  bool
 	notes                    []string
 	noteExclusion            string
 	documentExclusion        string
 	loopExclusion            string
+	contentExclusion         string
 }
 
 // chatOnlyFlags names the flags that only Teams chats understand, in the order the help lists them.
@@ -355,6 +370,13 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	chatFlags := c.chatOnlyFlags()
 	loopScoped := len(chatFlags) > 0 || c.Folder != "" || c.From != "" || c.Since != "" || c.Until != "" ||
 		rt.g.Account != "" || rt.g.OutlookAccount != "" || rt.g.OutlookProfile != ""
+	contentScoped := len(chatFlags) > 0 || c.Folder != "" || c.From != "" || rt.g.Account != "" || rt.g.OutlookAccount != "" || rt.g.OutlookProfile != ""
+	if c.Source == searchContent {
+		if contentScoped {
+			return p, sourceConflict("--source content cannot use account/author, chat/mail-only or profile filters")
+		}
+		return searchPlan{content: true}, nil
+	}
 	if c.Source == searchLoop {
 		if loopScoped {
 			return p, sourceConflict("--source loop cannot use date, account/author, chat-only, mail-only or profile filters: cached Loop channels have no native date or resolved owner")
@@ -425,6 +447,11 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 		p.notes = append(p.notes, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only")
 	}
 	if c.Source == "all" {
+		if contentScoped {
+			p.contentExclusion = "cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities"
+		} else {
+			p.content = true
+		}
 		if len(chatFlags) == 0 && c.Folder == "" && rt.g.Account == "" && c.From == "" {
 			p.indexedNotes = true
 		} else {
@@ -451,10 +478,37 @@ func isSearchMailAccount(account string) bool { return strings.HasPrefix(account
 
 // searchHit is one result item with the time it is ordered by.
 type searchHit struct {
-	at     time.Time
-	item   any
-	source string
-	app    store.MessageApplicationEnvelope // a chat hit's evidence, counted only if the hit survives the limit
+	at                                time.Time
+	item                              any
+	source                            string
+	app                               store.MessageApplicationEnvelope // a chat hit's evidence, counted only if the hit survives the limit
+	cloudLabel                        string
+	cloudSourceID, cloudObservationID int64
+}
+
+func sortSearchHits(hits []searchHit) {
+	sort.SliceStable(hits, func(i, j int) bool {
+		a, b := hits[i], hits[j]
+		if !a.at.Equal(b.at) {
+			return a.at.After(b.at)
+		}
+		if a.source != searchContent && b.source != searchContent {
+			return false
+		}
+		if a.source != searchContent {
+			return true
+		}
+		if b.source != searchContent {
+			return false
+		}
+		if a.cloudLabel != b.cloudLabel {
+			return a.cloudLabel < b.cloudLabel
+		}
+		if a.cloudSourceID != b.cloudSourceID {
+			return a.cloudSourceID < b.cloudSourceID
+		}
+		return a.cloudObservationID < b.cloudObservationID
+	})
 }
 
 // search runs the plan against the archive and merges what each source found, newest first.
@@ -588,11 +642,36 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		rt.loopCoverage = loopSnapshotCoverage(rt, snapshot.Sources)
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].at.After(hits[j].at) })
+	cloudTruncated := false
+	cloudCoverage := cloudCoverageOf(nil, rt.g.MaxText)
+	if p.content && st != nil {
+		snapshot, err := st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
+		if err != nil {
+			return nil, contentError(err)
+		}
+		cloudTruncated = snapshot.Truncated
+		matched[searchContent] = len(snapshot.Rows)
+		atLeast[searchContent] = snapshot.Truncated
+		cloudCoverage = cloudCoverageOf(snapshot.Sources, rt.g.MaxText)
+		for _, row := range snapshot.Rows {
+			at := time.Time{}
+			if row.Result.File.ModifiedAt != nil {
+				at = *row.Result.File.ModifiedAt
+			}
+			label := ""
+			if row.Result.File.Title != nil {
+				label = *row.Result.File.Title
+			}
+			hits = append(hits, searchHit{at: at, source: searchContent, cloudLabel: label, cloudSourceID: row.SourceID, cloudObservationID: row.ID,
+				item: searchCloudItem{Source: searchContent, cloudItem: cloudItemOf(row, cloudSourceFor(snapshot.Sources, row.SourceID), rt.g.MaxText)}})
+		}
+	}
+	sortSearchHits(hits)
 	trunc := map[string]bool{searchChats: chatTrunc, searchMail: mailTrunc, searchTranscripts: tr.truncated, searchNotes: noteTruncated, searchDocuments: documentTruncated, searchLoop: loopTruncated}
 	// The chats' total is the result's only while no other source gave or held back an item.
-	chatTotalIsAll := !p.indexedNotes && !p.indexedDocuments && !p.loop && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
-	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated || documentTruncated || loopTruncated
+	trunc[searchContent] = cloudTruncated
+	chatTotalIsAll := !p.indexedNotes && !p.indexedDocuments && !p.loop && matched[searchContent] == 0 && !cloudTruncated && !searchMailNow && len(tr.hits) == 0 && !tr.truncated
+	truncated := chatTrunc || mailTrunc || tr.truncated || noteTruncated || documentTruncated || loopTruncated || cloudTruncated
 	if len(hits) > f.Limit {
 		truncated = true
 		for _, h := range hits[f.Limit:] {
@@ -623,6 +702,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.loopExclusion != "" {
 		res.addNotice(p.loopExclusion)
 	}
+	if p.contentExclusion != "" {
+		res.addNotice(p.contentExclusion)
+	}
 	if undated != "" {
 		res.addNotice(undated)
 	}
@@ -650,6 +732,12 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.loop {
 		res.Sources.Loop = sourceOf(searchLoop)
 		res.LoopCoverage = rt.loopCoverage.compact()
+	}
+	if p.content {
+		res.Sources.Content = sourceOf(searchContent)
+		if c.Source == searchContent || len(cloudCoverage.Sources) > 0 {
+			res.ContentCoverage = cloudCoverage
+		}
 	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)

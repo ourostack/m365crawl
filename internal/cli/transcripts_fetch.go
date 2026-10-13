@@ -490,28 +490,36 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 	if err := c.agree(rt, kind); err != nil {
 		return err
 	}
-	result,err:=rt.signinWindow(exe,kind,host,site)
-	if err!=nil{return err}
-	return rt.write("transcripts signin",result)
+	result, err := rt.signinWindow(exe, kind, host, site)
+	if err != nil {
+		return err
+	}
+	return rt.write("transcripts signin", result)
 }
 
-func (rt *runtime)signinWindow(exe string,kind browser.Kind,host,site string)(result *signinResult,err error){
+func (rt *runtime) signinWindow(exe string, kind browser.Kind, host, site string) (result *signinResult, err error) {
 	rt.progressLine(fmt.Sprintf("opening a visible %s window with m365crawl's own browser profile", browserName(kind)))
 	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: "https://" + host + site + "/"})
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
-	defer func(){
-		if recover()!=nil{result,err=nil,errs.BrowserFailed("sign-in browser failed")}
-		if closer.Close()!=nil{result,err=nil,errs.BrowserFailed("could not close the sign-in browser")}
-		if rt.ctx.Err()!=nil{result,err=nil,rt.ctx.Err()}
+	defer func() {
+		if recover() != nil {
+			result, err = nil, errs.BrowserFailed("sign-in browser failed")
+		}
+		if closer.Close() != nil {
+			result, err = nil, errs.BrowserFailed("could not close the sign-in browser")
+		}
+		if rt.ctx.Err() != nil {
+			result, err = nil, rt.ctx.Err()
+		}
 	}()
 	rt.progressLine(fmt.Sprintf("waiting for you to sign in to SharePoint in that window (up to %s)", compactDuration(signinWait)))
 	if err := waitForHost(rt.ctx, page, host); err != nil {
-		return nil,err
+		return nil, err
 	}
 	rt.progressLine("signed in; closing the window")
-	return &signinResult{SignedIn: true, Browser: string(kind), Next: "m365crawl transcripts fetch <meeting>"},nil
+	return &signinResult{SignedIn: true, Browser: string(kind), Next: "m365crawl transcripts fetch <meeting>"}, nil
 }
 
 // signinTarget says where the sign-in window opens: a host (the one given, or else the host most

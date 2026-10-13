@@ -1,5 +1,78 @@
 # m365crawl specification
 
+## Explicit cloud content (schema 16)
+
+The concrete SharePoint/Stream backend feeds only explicit one-target
+`content fetch page URL` / `content fetch stream URL [--transcript-id ID]`.
+Page targets are `/sites/NAME` or `/teams/NAME` modern `SitePages/*.aspx`;
+Stream targets are the same site's `/_layouts/15/stream.aspx?id=FILE_PATH`.
+HTTPS, validated SharePoint host and once-decoded path/selection identity,
+8192-byte URL, 4096-byte path and 256KiB requested transcript bounds remain
+the backend's contract. Canonical safe requests preserve the admitted raw
+path/id encoding, normalize host/443 and discard every nonidentity query.
+Locator identity is ordered JSON kind/host/site/path/transcript string-or-null,
+never an unescaped delimiter or original sharing ticket.
+
+Only the tool-owned normal profile captures headlessly. Allocate an attempt under
+a short exclusive archive lock; release/close that store before browser launch.
+Close the exact owned browser before reacquiring publication lock, on success,
+failure, cancel or panic. Cleanup/cancel wins over staged data. A wrapper failure
+publishes no candidate. No silent interactive sign-in; `content signin URL
+--user-agreed` is the explicit admitted-site-root workflow. Diagnostics are finite
+fixed codes, never raw browser errors, URLs or content.
+
+Existing knowledge locator/attempt/source machinery supplies the monotonic
+publication frontier. A cloud registration binds kind/platform/canonical locator;
+an instance additionally binds host/site/web/file/account ID/LoginName as literal
+JSON tuple components. Caller-requested selections register separately. Native
+selected transcript IDs belong to bodies, not metadata boundaries. Native
+file/account changes cannot borrow another instance's last-good body.
+
+Schema 16 adds `cloud_locator_metadata`, `cloud_observations`,
+`cloud_capture_members`, `cloud_capture_metadata`, `cloud_source_body_state` and
+`cloud_fts`. Full typed backend result JSON and reader qualification determine
+immutable representation digest. A-B-A reuses A's original ID/capture/completion
+clock. Current verified metadata and last-good-body pointers update atomically.
+Later metadata-only/empty/denied states carry null selected transcript, preserve
+old body T with its own evidence and report selection unavailable; later body U
+leaves historical T explicitly differing. Fatal attempts record diagnostics only.
+SourceObservedAt is null. Acquisition completion is not native modification.
+
+Pages always have partial scope, including empty supported projections. Stream
+complete scope `selected_transcript` means one verified selected body with no
+losses, never collection/service completeness. No-transcript and selection-required
+states are verified metadata, not invented transcript objects. Backend limits remain
+eight reads, 2MiB each/8MiB combined, 1MiB selected text, 256KiB retained string,
+4096 controls/65536 DOM nodes/depth128, 128 collection items/16384 entries.
+Write and read validation reuse the backend typed finite contract; corrupt state
+is refused, including at zero hits.
+
+Content reads, sources and content-only shared search are archive-only on every
+max-age: no migration, browser, auth, source app file or implicit retry. Old
+read-only schemas expose optional absence. FTS indexes supported retained text,
+titles and native metadata. Filter source_id by admitted instance, and retry
+registration_id only with explicit fetch. Unknown native modified clocks fail
+bounded date windows. Content order is known modified newest, full title, source ID,
+numeric observation ID. Shared timestamp ties preserve every pre-existing family's
+relative order, put cloud afterward, and only cloud/cloud ties use full unpreviewed
+native keys before the final global limit.
+
+Account/author/chat/mail-only/profile filters reject explicit content and exclude
+it from all with a notice. Coherent content_coverage stays outside item fields and
+global clipping, includes failed/unadmitted/metadata-only/no-transcript sources and
+does not assert no content at zero hits. Detail ID syntax is positive decimal
+int64 `cloud-observation:N`. First100 native ordered control-text/entry occurrences
+are previews, totals and clipping explicit. Native transcript/entry/requested IDs
+are at most128 Unicode-rune `native_id_prefix` with `native_id_truncated`; full
+values remain archived. Full structured follow-up is static SQL over generated
+positive internal rowid in this same database, never native text as SQL.
+
+`content_unknown` is a usage error: inspect sources/list or explicitly register a
+supported target. `content_signin_required` is a usage error: obtain user agreement
+to content signin, then retry explicitly. Other browser/database errors retain
+existing fixed codes. Native Windows service acquisition is unqualified; portable
+offline reads and synthetic tests are not native acceptance claims.
+
 Status: normative for v0.2.0.
 
 This document defines what m365crawl does and what its output promises. Where this document and the code disagree, that is a bug in one of them and is fixed in the same change that finds it. The words MUST, MUST NOT and SHOULD carry their usual meaning. Command-by-command flag tables live in [docs/commands.md](docs/commands.md); the reading path through the Teams cache lives in [docs/how-it-works.md](docs/how-it-works.md).
@@ -453,7 +526,9 @@ Every error code:
 | `doctor_failed` | 3 | At least one required `doctor` check failed. The `doctor` result is on stdout; the message lists the failing checks. | `Resolve the failing checks listed by `m365crawl doctor`, then run again.` |
 | `archive_newer` | 3 | The archive was written by a newer m365crawl (higher derivation version or higher schema version). `sync`, `watch` and the implicit sync refuse before any write; read commands still work. | `Upgrade m365crawl (brew upgrade ourostack/tap/m365crawl), or point --db at a different archive.` |
 | `unknown_meeting` | 2 | `transcripts <meeting>` or `transcripts show <meeting>` names no recorded call in the archive: no call id, meeting chat or calendar event with a recording notice matches. | `List meetings with recordings: m365crawl transcripts` |
-| `signin_needs_agreement` | 2 | `transcripts signin` was run with stdin not a terminal (an agent) and without `--user-agreed`. | `Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline.` |
+| `content_unknown` | 2 | Content observation, native source instance or registration is absent or belongs to a different source family. | Inspect `content sources` / `content list`, or explicitly fetch one supported URL to register it. |
+| `content_signin_required` | 2 | Explicit content fetch found the tool-owned profile unsigned-in; nothing is admitted. | Obtain user agreement, then `content signin URL --user-agreed` with the supported target and retry the explicit fetch. |
+| `signin_needs_agreement` | 2 | `transcripts signin` or `content signin URL` was run with stdin not a terminal (an agent) and without `--user-agreed`. | Ask the user before the explicit visible-window workflow; run that same command with `--user-agreed` only after agreement. If enrollment is required, stop retrying and keep using offline archive reads. |
 | `transcripts_no_browser` | 3 | `transcripts fetch` or `transcripts signin` found no Edge or Chrome, or `--browser` names no executable. | `Install Microsoft Edge, or pass --browser with the path to Edge or Chrome.` |
 | `transcripts_signin_required` | 3 | The fetch landed on a Microsoft sign-in page, or SharePoint answered as if nobody were signed in. Parts saved before it keep their state; the rest stay `not_fetched`. | `Ask the user before running `m365crawl transcripts signin`: it opens a visible Edge window where they sign in to Microsoft 365 once. Run it only after they say yes. If the window asks to enroll or register this device, the organization signs in only from managed devices: tell the user, do not run it again, and keep using the commands that read the archive offline.` |
 | `transcripts_browser_failed` | 1 | The browser did not start, did not publish its debugging port, stopped answering, the fetch ran past `--timeout`, or the sign-in window was closed or timed out. | `The browser did not start with remote debugging. A managed policy can block remote debugging; try --browser chrome, or pass --browser with the path to another Edge or Chrome.` (past `--timeout`: run again or raise it; sign-in: ask the user and run `transcripts signin` again.) |

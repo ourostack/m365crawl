@@ -62,7 +62,7 @@ func TestContentCaptureTabCleanup(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	saved := launchBrowser
 	t.Cleanup(func() { launchBrowser = saved })
-	for _, b := range []*cloudTabless{{failClose: true}, {panicPage: true}} {
+	for _, b := range []*cloudTabless{{failClose: true}, {panicPage: true}, {panicPage: true, failClose: true}} {
 		launchBrowser = func(context.Context, browser.LaunchOptions) (launchedBrowser, error) { return b, nil }
 		_, _, err := openBrowser(context.Background(), browser.LaunchOptions{Profile: t.TempDir(), Headless: true})
 		if err == nil || b.n != 1 {

@@ -7,5 +7,6 @@ var TestNetworkJS = networkJS
 var TestAdmit = admit
 var TestDecode = decode
 var TestNativeResult = nativeResult
+
 type TestAdmittedRequest = admittedRequest
 type TestScriptResult = scriptResult

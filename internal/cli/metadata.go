@@ -74,7 +74,20 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "loop sync",
 			Title: command + " (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents", "loop"}
+	for _, command := range []string{"content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content signin"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "content search":
+			argv = append(argv, "<words>")
+		case "content show":
+			argv = append(argv, "<cloud-observation-id>")
+		case "content fetch page", "content fetch stream", "content signin":
+			argv = append(argv, "<supported-url>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: strings.HasPrefix(command, "content fetch") || command == "content signin",
+			Title: command + " (fetch explicit only; reads offline; native Windows acquisition not yet qualified)"}
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents", "loop", "content"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata"}}
 	return m
 }

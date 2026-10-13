@@ -465,7 +465,7 @@ func TestSearchIsDescribedByEverySourceItSearches(t *testing.T) {
 		}
 	}
 	help := strings.Join(strings.Fields(helpOf(t)), " ")
-	if !strings.Contains(help, "Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata and cached Loop channels") {
+	if !strings.Contains(help, "Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata, cached Loop channels and offline cloud content") {
 		t.Fatalf("top-level help does not say what search covers:\n%s", help)
 	}
 }

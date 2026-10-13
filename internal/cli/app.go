@@ -64,7 +64,7 @@ type cliApp struct {
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Outlook, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Read Teams chats, Outlook mail and the calendar into the archive once and print what changed."`
 	Status        statusCmd        `cmd:"" help:"Show archive counts per account for chats and mail, the last sync and other Teams origins."`
-	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata and cached Loop channels, newest first, each item marked with its source; default --limit 50 (check `truncated`; `sources` says what each source matched and returned).\""
+	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata, cached Loop channels and offline cloud content, newest first, each item marked with its source; default --limit 50 (check `truncated`; `sources` says what each source matched and returned).\""
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). Teams chats and channels; for Outlook mail use `m365crawl mail list`.\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
@@ -75,6 +75,7 @@ type cliApp struct {
 	Notes         notesGroup       `cmd:"" help:"Capture and read local OneNote indexed notes, text and OCR with retained content and explicit source coverage."`
 	Docs          documentsGroup   `cmd:"" help:"Capture and inspect Office document metadata and sharing claims; no implicit file opening or text fetch."`
 	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive; every row names the one cached snapshot it comes from. No fetch, replay or full page."`
+	Content       contentGroup     `cmd:"" help:"Explicitly fetch supported SharePoint page/Stream evidence; read and search retained observations offline."`
 	Transcripts   transcriptsGroup `cmd:"" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive. With <meeting> (an event id or key, a meeting chat link or thread id, or a call id) it lists that meeting's parts. The list flags (--since, --until, --state, --limit) are listed by: m365crawl transcripts list --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
@@ -167,7 +168,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 

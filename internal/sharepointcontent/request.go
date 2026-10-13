@@ -20,7 +20,6 @@ func NormalizeRequest(request Request) (CanonicalRequest, error) {
 		return CanonicalRequest{}, err
 	}
 	u, _ := url.Parse(request.URL) // admit already parsed and validated the same bytes
-	u.Scheme, u.Host = "https", a.Host
 	query := ""
 	if a.Kind == "stream" {
 		// Keep the admitted raw encoding rather than expanding a short Unicode URL.
@@ -33,8 +32,13 @@ func NormalizeRequest(request Request) (CanonicalRequest, error) {
 			}
 		}
 	}
-	u.RawQuery, u.ForceQuery = query, false
-	request.URL = u.String()
+	authority := strings.Index(request.URL, "://") + 3
+	pathStart := authority + strings.Index(request.URL[authority:], "/")
+	rawPath, _, _ := strings.Cut(request.URL[pathStart:], "?")
+	request.URL = "https://" + a.Host + rawPath
+	if query != "" {
+		request.URL += "?" + query
+	}
 	var selection *string
 	if request.TranscriptID != "" {
 		selection = &request.TranscriptID
