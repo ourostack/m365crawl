@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,12 +13,13 @@ import (
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/officecapture"
 	"github.com/ourostack/m365crawl/internal/officedocuments"
+	"github.com/ourostack/m365crawl/internal/officeregistry"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 type documentsGroup struct {
-	Sync    documentsSyncCmd    `cmd:"" help:"Register and capture ordinary local Office JSON metadata; never opens a referenced document."`
+	Sync    documentsSyncCmd    `cmd:"" help:"Register and capture ordinary local Office JSON and Office registry metadata; never opens a referenced document."`
 	List    documentsListCmd    `cmd:"" help:"List document observations with stable IDs and source coverage."`
 	Search  documentsSearchCmd  `cmd:"" help:"Search retained document metadata, native URLs and sharing/person claims."`
 	Show    documentsShowCmd    `cmd:"" help:"Inspect one document observation, raw native claims and unresolved URL references."`
@@ -24,8 +27,9 @@ type documentsGroup struct {
 }
 
 func (documentsGroup) Help() string {
-	return "Documents are retained Office recent/shared/recommended/dialog metadata observations, not original document text, resolved identities or a complete library export.\n" +
-		"Register once with `docs sync` for named Mac Office caches, or `docs sync --root DIR` for ordinary local recent.json/shared.json/recommended.json/dialog.json copies. Windows accepts qualified explicit ordinary NTFS inputs, not default Office discovery. Unknown/provider/reparse/dataless inputs are refused; no document URL or friendly path is opened, no hydration or network fallback.\n" +
+	return "Documents are retained Office recent/shared/recommended/dialog metadata observations and Office registry recently-opened entries, not original document text, resolved identities or a complete library export.\n" +
+		"Register once with `docs sync` for named Mac Office caches and the Mac Office registry, `docs sync --root DIR` for ordinary local recent.json/shared.json/recommended.json/dialog.json copies, or `docs sync --registry-file FILE` for one ordinary local copy of an Office registry file. Windows accepts qualified explicit ordinary NTFS inputs, not default Office discovery. Unknown/provider/reparse/dataless inputs are refused; no document URL or friendly path is opened, no hydration or network fallback.\n" +
+		documentRegistryHelp + "\n" +
 		"Then use `docs list --query WORDS --limit 10`, `docs search WORDS`, or `search WORDS --source documents`. Follow a returned document-observation:ID with `docs show document-observation:ID`; `docs sources` lists source IDs and coverage. Ordinary reads refresh only registered sources; --max-age 0 is archive-only, and docs sources never captures. Partial/failed inputs keep last-good observations. A successful Office response that lists no documents is complete with reason office_response_listed_no_documents (earlier rows become retained); it does not mean the account has none.\n" +
 		documentTerms() +
 		"--since/--until use native document modification time, not opened/shared/file/capture time; unknown dates do not match bounded windows. Native sharing/activity are source claims, not counted new events. Account/author/chat/mail filters cannot qualify these unresolved documents. Text state is not_captured; there is no docs read/text command."
@@ -39,6 +43,12 @@ var documentSurfaces = map[officedocuments.Surface]string{
 	officedocuments.Shared:      "Office's Shared with me list, with the sharer and date Office reported",
 }
 
+// documentRegistryHelp says what a registry row is and how it differs from an Office JSON row.
+const documentRegistryHelp = "Registry rows (variant office_registry, application registry, no surface) are entries of Office's local recently-opened list, kept in registry_native exactly as the registry file states them: title, URL, friendly path, the Office app the entry sits under, size and pin state. " +
+	"opened_at is the registry's own opened time as UTC, or null when the entry has none or it is not an RFC 3339 time with an explicit offset; registry_native.OpenedRaw keeps the exact text. " +
+	"The registry states no modification time, so modified_at is always null for these rows and --since/--until never match them. " +
+	"They are metadata only: the document itself, its URL and its friendly path are never opened, checked or resolved."
+
 const (
 	documentAssociationHelp = "m365crawl has not linked the row to a file, owner, account, chat or mail; URLs are evidence only"
 	documentClocksHelp      = "modified_at is the native document modification time Office reported (null when Office gave none or it did not parse; Raw keeps the text); captured_at is when m365crawl first copied the file holding this exact row; source_observed_at is that file's modification time on disk when copied"
@@ -51,7 +61,7 @@ func documentTerms() string {
 	for _, surface := range []officedocuments.Surface{officedocuments.Dialog, officedocuments.Recent, officedocuments.Recommended, officedocuments.Shared} {
 		surfaces = append(surfaces, string(surface)+": "+documentSurfaces[surface])
 	}
-	return "Surfaces: " + strings.Join(surfaces, "; ") + ". Application supplied means a file given with --root, so the Office app is unknown.\n" +
+	return "Surfaces: " + strings.Join(surfaces, "; ") + ". Application supplied means a file given with --root, so the Office app is unknown; application registry means an Office registry row, whose own app claim is registry_native.ApplicationPath.\n" +
 		"association_state unresolved: " + documentAssociationHelp + ". boundary unresolved (docs sources): a source file is not proven to belong to one account. " +
 		"native Sharing.Type is Office's SharingType number as written, kept unmapped: m365crawl does not know its meanings.\n" +
 		"Clocks: " + documentClocksHelp + ". " + documentOrderHelp + "\n"
@@ -66,7 +76,7 @@ type documentItem struct {
 	Title            string                  `json:"title"`
 	URL              string                  `json:"url"`
 	WebURL           string                  `json:"web_url"`
-	Native           documentNative          `json:"native"`
+	Native           *documentNative         `json:"native,omitempty"`
 	ModifiedAt       *time.Time              `json:"modified_at"`
 	CapturedAt       *time.Time              `json:"captured_at"`
 	SourceObservedAt *time.Time              `json:"source_observed_at"`
@@ -74,9 +84,40 @@ type documentItem struct {
 	AssociationState string                  `json:"association_state"`
 	TextState        string                  `json:"text_state"`
 	TextTruncated    bool                    `json:"text_truncated,omitempty"`
+	// Variant, RegistryNative and OpenedAt are present only on Office registry rows, so an Office
+	// JSON row keeps exactly the keys it always had.
+	Variant        string                      `json:"variant,omitempty"`
+	RegistryNative *officeregistry.Observation `json:"registry_native,omitempty"`
+	OpenedAt       *documentOpened             `json:"opened_at,omitempty"`
+}
+
+// documentOpened is a registry row's opened time. It always encodes, as a UTC time or as null,
+// so an unparsed registry clock is a visible null rather than a missing key.
+type documentOpened struct{ At *time.Time }
+
+func (o documentOpened) MarshalJSON() ([]byte, error) { return json.Marshal(o.At) }
+
+// registryItemOf is the item of an Office registry row: its native claims with the descriptive
+// strings clipped to maxText, and no Office JSON claims.
+func registryItemOf(row store.DocumentObservationRow, maxText int) documentItem {
+	native := *row.Registry
+	truncated := false
+	for _, field := range []*string{&native.Title, &native.FriendlyPath, &native.ApplicationPath, &native.ApplicationValue} {
+		var cut bool
+		*field, cut = truncateRunes(*field, maxText)
+		truncated = truncated || cut
+	}
+	return documentItem{ID: fmt.Sprintf("document-observation:%d", row.ID), SourceID: row.SourceID,
+		CaptureID: row.CaptureID, Application: row.Application, Title: native.Title, URL: native.URL,
+		CapturedAt: row.CapturedAt, SourceObservedAt: row.SourceObservedAt, Retained: row.Retained,
+		AssociationState: "unresolved", TextState: "not_captured", TextTruncated: truncated,
+		Variant: row.Variant, RegistryNative: &native, OpenedAt: &documentOpened{At: row.OpenedAt}}
 }
 
 func documentItemOf(row store.DocumentObservationRow, maxText int) documentItem {
+	if row.Registry != nil {
+		return registryItemOf(row, maxText)
+	}
 	native := row.Document
 	title, truncated := truncateRunes(native.Title, maxText)
 	native.Title = title
@@ -106,9 +147,10 @@ func documentItemOf(row store.DocumentObservationRow, maxText int) documentItem 
 		}
 		native.Activity = &activity
 	}
+	claims := documentNative(native)
 	return documentItem{ID: fmt.Sprintf("document-observation:%d", row.ID), SourceID: row.SourceID,
 		CaptureID: row.CaptureID, Application: row.Application, Surface: row.Document.Surface,
-		Title: title, URL: row.Document.URL, WebURL: row.Document.WebURL, Native: documentNative(native),
+		Title: title, URL: row.Document.URL, WebURL: row.Document.WebURL, Native: &claims,
 		ModifiedAt: searchTime(row.Document.Modified.Value), CapturedAt: row.CapturedAt,
 		SourceObservedAt: row.SourceObservedAt, Retained: row.Retained,
 		AssociationState: "unresolved", TextState: "not_captured", TextTruncated: truncated}
@@ -129,49 +171,83 @@ var runDocumentsSync = syncer.SyncDocuments
 
 func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := notesCoverage(sources)
-	out.Scope = "office_json_metadata"
-	listedNone, fileListedNone := false, false
+	out.Scope = "office_document_metadata"
+	seen := map[string]bool{}
 	for i, source := range sources {
-		listedNone = listedNone || source.Reason == officedocuments.NoDocumentsListed
-		fileListedNone = fileListedNone || source.Reason == officedocuments.FileListedNoDocuments
+		seen[source.Reason] = true
+		if source.Losses["office_registry_document_unmapped"] > 0 {
+			seen["office_registry_document_unmapped"] = true
+		}
 		if documentFailureFix[source.Reason] == "" && source.Status != "failed" && source.Status != "cancelled" {
 			continue
 		}
-		out.Sources[i].Fix = firstOf(documentFailureFix[source.Reason], documentFailureFix["office_json_capture_failed"])
+		fallback := "office_json_capture_failed"
+		if source.Kind == store.RegistryDocumentKind {
+			fallback = "office_registry_capture_failed"
+		}
+		fix := firstOf(documentFailureFix[source.Reason], documentFailureFix[fallback])
+		if source.Kind == store.RegistryDocumentKind {
+			// A locator with no admitted capture has no source ID to name, so its retry route is the file.
+			retry := "m365crawl docs sync --registry-file " + shellArg(source.Locator)
+			if source.ID > 0 {
+				retry = "m365crawl docs sync --source-id " + strconv.FormatInt(source.ID, 10)
+			}
+			fix += ". Retry this source with " + retry
+		}
+		out.Sources[i].Fix = fix
 		out.Sources[i].Effect = "nothing has been captured from this source yet, so it adds no listed documents"
 		if source.AdmittedID > 0 {
 			out.Sources[i].Effect = "the last good capture stays current, so the documents it listed are still listed"
 		}
 	}
-	if listedNone {
-		out.Notices = append(out.Notices, documentsListedNoneNotice)
-	}
-	if fileListedNone {
-		out.Notices = append(out.Notices, documentsFileListedNoneNotice)
+	for _, notice := range documentNotices {
+		if seen[notice.code] {
+			out.Notices = append(out.Notices, notice.text)
+		}
 	}
 	return out
+}
+
+// shellArg quotes one path for the retry command a fix prints.
+func shellArg(path string) string {
+	if strings.Contains(path, `\`) { // a Windows path: cmd and PowerShell both take double quotes
+		return `"` + path + `"`
+	}
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // documentFailureReasons are the reasons a document source capture fails or is cancelled, as
 // docs/commands.md documents them; each has a remedy in documentFailureFix.
 var documentFailureReasons = []string{"office_json_unrecognized", "office_json_too_large", "office_json_unreadable",
 	"office_surface_unknown", "office_json_input_unqualified", "office_json_capture_failed", "office_json_cleanup_failed",
-	"office_json_policy_restore_failed", "office_json_cancelled", "stale_attempt"}
+	"office_json_policy_restore_failed", "office_json_cancelled", "stale_attempt",
+	"office_registry_input_unqualified", "office_registry_source_busy", "office_registry_index_unreadable",
+	"office_registry_index_too_large", "office_registry_index_unrecognized", "office_registry_capture_failed",
+	"office_registry_cleanup_failed", "office_registry_policy_restore_failed", "office_registry_cancelled"}
 
 const documentsIssue = "https://github.com/ourostack/m365crawl/issues"
 
 var documentFailureFix = map[string]string{
 	"office_json_unrecognized": "the saved file is not JSON, or is JSON in a shape this m365crawl version does not read. Upgrade m365crawl and run m365crawl docs sync again; if the newest version still fails, open an issue at " +
 		documentsIssue + " asking for support for this shape, with the source kind and the file's top-level key names (no values)",
-	"office_json_too_large":             "the file is larger than the reader accepts (8 MiB, or too many rows, fields or nesting levels), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
-	"office_json_unreadable":            "the file could not be read to the end. Run m365crawl docs sync again; if it keeps failing, check that the file is complete and readable",
-	"office_surface_unknown":            "the source is registered for a surface this version does not read. Upgrade m365crawl",
-	"office_json_input_unqualified":     "the path is missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file, so it was refused before reading. A file Office removed needs nothing; otherwise copy it to an ordinary local folder and run m365crawl docs sync --root DIR",
-	"office_json_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl docs sync again; run m365crawl doctor if it keeps failing",
-	"office_json_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
-	"office_json_policy_restore_failed": "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
-	"office_json_cancelled":             "the capture was interrupted or timed out. Run m365crawl docs sync again",
-	"stale_attempt":                     "another capture of the same source finished first, so this one was not admitted. Run m365crawl docs sources to see the current state",
+	"office_json_too_large":                 "the file is larger than the reader accepts (8 MiB, or too many rows, fields or nesting levels), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
+	"office_json_unreadable":                "the file could not be read to the end. Run m365crawl docs sync again; if it keeps failing, check that the file is complete and readable",
+	"office_surface_unknown":                "the source is registered for a surface this version does not read. Upgrade m365crawl",
+	"office_json_input_unqualified":         "the path is missing, a link, on a cloud or placeholder provider, remote, or not an ordinary local file, so it was refused before reading. A file Office removed needs nothing; otherwise copy it to an ordinary local folder and run m365crawl docs sync --root DIR",
+	"office_json_capture_failed":            "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl docs sync again; run m365crawl doctor if it keeps failing",
+	"office_json_cleanup_failed":            "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
+	"office_json_policy_restore_failed":     "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
+	"office_json_cancelled":                 "the capture was interrupted or timed out. Run m365crawl docs sync again",
+	"office_registry_input_unqualified":     "the registry file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. Copy the registry file alone to an ordinary local folder",
+	"office_registry_source_busy":           "an Office app was writing the registry file (it held a write lock or left a rollback journal), so nothing was read. Close the Office apps or wait a moment",
+	"office_registry_index_unreadable":      "the registry file could not be read as a database to the end. Check that the file is a complete copy",
+	"office_registry_index_too_large":       "the registry file is larger than the reader accepts (64 MiB, or too many rows), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
+	"office_registry_index_unrecognized":    "the file is not an Office registry database, or has a shape this m365crawl version does not read. Upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
+	"office_registry_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl doctor if it keeps failing",
+	"office_registry_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory",
+	"office_registry_policy_restore_failed": "a capture safety setting could not be restored. If it repeats, open an issue at " + documentsIssue,
+	"office_registry_cancelled":             "the capture was interrupted or timed out",
+	"stale_attempt":                         "another capture of the same source finished first, so this one was not admitted. Run m365crawl docs sources to see the current state",
 }
 
 const documentsListedNoneNotice = officedocuments.NoDocumentsListed + ": each source with this reason last saved a successful Office response that listed no documents, so its capture is complete with zero rows. " +
@@ -180,12 +256,54 @@ const documentsListedNoneNotice = officedocuments.NoDocumentsListed + ": each so
 const documentsFileListedNoneNotice = officedocuments.FileListedNoDocuments + ": each source with this reason last saved an Office dialog list or a supplied file (docs sync --root) that listed no documents, so its capture is complete with zero rows. " +
 	"This describes the saved Office JSON file, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
 
+const documentsRegistryListedNoneNotice = syncer.RegistryListedNoDocuments + ": each source with this reason is an Office registry file whose recently-opened list held no documents, so its capture is complete with zero rows. " +
+	"This describes the registry file, not whether the account has documents; earlier observations from the source stay in the archive with retained=true."
+
+const documentsRegistryUnmappedNotice = "office_registry_document_unmapped: a registry source with this loss holds recently-opened entries this m365crawl version could not map to a document (for example no title or no URL), so its coverage is partial. The mapped entries are listed; the unmapped ones are counted, not kept."
+
+// documentNotices explain, in a fixed order, a complete capture that listed nothing and a
+// registry capture that could not map every entry.
+var documentNotices = []struct{ code, text string }{
+	{officedocuments.NoDocumentsListed, documentsListedNoneNotice},
+	{officedocuments.FileListedNoDocuments, documentsFileListedNoneNotice},
+	{syncer.RegistryListedNoDocuments, documentsRegistryListedNoneNotice},
+	{"office_registry_document_unmapped", documentsRegistryUnmappedNotice},
+}
+
+// documentDiscoveryItem is one default discovery family's outcome in docs sync: what was not found
+// or was refused, and how to supply that family's input by hand. It names no source.
+type documentDiscoveryItem struct {
+	Kind    string `json:"kind"`
+	Code    string `json:"code"`
+	Meaning string `json:"meaning"`
+}
+
+var documentDiscoveryMeaning = map[string]string{
+	"office_registry_unavailable":         "no default Office registry was found: this machine has no Mac Office registry folder, or it holds no registry file",
+	"office_registry_default_unsupported": "this platform has no default Office registry location",
+	"office_registry_input_unqualified":   "the default Office registry folder is not an ordinary local folder, or holds more files than the reader accepts, so it was refused before reading",
+	"office_json_input_unqualified":       "the default Office JSON caches are missing or are not ordinary local files, so they were refused before reading",
+}
+
+func documentDiscoveryItems(outcomes []syncer.DocumentDiscovery) []documentDiscoveryItem {
+	out := []documentDiscoveryItem{}
+	for _, outcome := range outcomes {
+		route, what := "m365crawl docs sync --root DIR", "the default Office JSON caches could not be used"
+		if outcome.Kind == store.RegistryDocumentKind {
+			route, what = "m365crawl docs sync --registry-file FILE", "the default Office registry could not be used"
+		}
+		out = append(out, documentDiscoveryItem{Kind: outcome.Kind, Code: outcome.Code,
+			Meaning: firstOf(documentDiscoveryMeaning[outcome.Code], what) + ". Nothing was registered or read for this family; registered sources and the other family were still tried. Supply an ordinary local copy with " + route})
+	}
+	return out
+}
+
 func documentError(err error) error {
 	var source *officecapture.ReadError
 	if errors.As(err, &source) {
 		return &errs.Coded{Code: source.Code, Exit: errs.ExitEnvironment,
 			Message: "Office document metadata input was refused; no document was opened or fetched",
-			Fix:     "Use supported ordinary local Office JSON copies on a qualified local disk with `docs sync --root DIR`; provider/placeholder, linked and unrecognized inputs are not accepted."}
+			Fix:     "Use supported ordinary local Office JSON copies on a qualified local disk with `docs sync --root DIR`, or one ordinary local Office registry copy with `docs sync --registry-file FILE`; provider/placeholder, linked and unrecognized inputs are not accepted."}
 	}
 	if errors.Is(err, store.ErrKnowledgeSourceUnknown) {
 		return &errs.Coded{Code: "document_source_unknown", Exit: errs.ExitUsage,
@@ -270,7 +388,7 @@ func (rt *runtime) documentsRead(label string, sourceID int64, fn func(*store.St
 	result.sourceOnly = true
 	if result.Count == 0 {
 		if len(result.SourceCoverage.Sources) == 0 {
-			result.Note = "no document metadata captured yet; run m365crawl docs sync or docs sync --root DIR"
+			result.Note = "no document metadata captured yet; run m365crawl docs sync, docs sync --root DIR or docs sync --registry-file FILE"
 		} else {
 			result.Note = "no document metadata matched; source_coverage describes retained or unavailable inputs"
 		}
@@ -279,24 +397,42 @@ func (rt *runtime) documentsRead(label string, sourceID int64, fn func(*store.St
 }
 
 type documentsSyncCmd struct {
-	Root     string `help:"Ordinary local directory with recent.json, shared.json, recommended.json or dialog.json; never a provider/placeholder path." placeholder:"DIR"`
-	SourceID int64  `name:"source-id" help:"Refresh only this positive registered document source ID; mutually exclusive with --root."`
+	Root         string `help:"Ordinary local directory with recent.json, shared.json, recommended.json or dialog.json; never a provider/placeholder path. Office JSON only." placeholder:"DIR"`
+	RegistryFile string `name:"registry-file" help:"One ordinary local Office registry file (a copy of MicrosoftRegistrationDB_*.reg), as a clean absolute path; never a provider/placeholder path. Registry only." placeholder:"FILE"`
+	SourceID     int64  `name:"source-id" help:"Refresh only this positive registered document source ID. --root, --registry-file and --source-id are mutually exclusive."`
+}
+
+func (documentsSyncCmd) Help() string {
+	return "With no selection, docs sync refreshes every registered document source and tries both default families on their own: the named Mac Office JSON caches and the Mac Office registry (" +
+		"~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/MicrosoftRegistrationDB_*.reg, at most 16 files). A family that is absent or refused is reported under discovery with a fixed code and never stops the other family or a registered source. There is no default discovery on Windows or Linux.\n" +
+		"--root DIR reads only Office JSON files in DIR; --registry-file FILE reads only that one registry file; --source-id N refreshes only that registered source. Each failed source keeps its own status, reason and fix in source_coverage; a source that has never been captured has source_id null and its fix names the --registry-file retry.\n" +
+		"A registry file is read from a private copy taken while Office is held out of writing it; a file Office is writing, or one with a write-ahead log beside it, is refused: run the sync again later. " + documentRegistryHelp
 }
 
 func (c *documentsSyncCmd) Run(rt *runtime) error {
 	if err := rt.documentFlags(); err != nil {
 		return err
 	}
-	if c.SourceID < 0 || (c.SourceID != 0 && c.Root != "") {
-		return errs.Usage("choose --root DIR or one positive --source-id, not both")
+	selections := 0
+	for _, selected := range []bool{c.Root != "", c.RegistryFile != "", c.SourceID != 0} {
+		if selected {
+			selections++
+		}
 	}
-	report, err := runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, Root: c.Root,
+	if c.SourceID < 0 || selections > 1 {
+		return errs.Usage("choose one of --root DIR, --registry-file FILE or one positive --source-id, not several")
+	}
+	if c.RegistryFile != "" && (!filepath.IsAbs(c.RegistryFile) || filepath.Clean(c.RegistryFile) != c.RegistryFile) {
+		return errs.Usage("--registry-file must be a clean absolute path to one Office registry file")
+	}
+	report, err := runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, Root: c.Root, RegistryFile: c.RegistryFile,
 		SourceID: c.SourceID, Explicit: true, Discover: c.SourceID == 0})
 	if err != nil {
 		return documentError(err)
 	}
 	return rt.write("docs sync", notesSyncResult{Captured: report.Captured, Unchanged: report.Unchanged,
-		Skipped: report.Skipped, Failed: report.Failed, SourceCoverage: documentsCoverage(report.Sources)})
+		Skipped: report.Skipped, Failed: report.Failed, SourceCoverage: documentsCoverage(report.Sources),
+		Discovery: documentDiscoveryItems(report.Discovery)})
 }
 
 type documentsListCmd struct {
@@ -305,14 +441,14 @@ type documentsListCmd struct {
 	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded."`
 	Until       string `help:"Native modification time before this time; a date includes its whole day."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
-	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
-	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
+	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, or registry for Office registry rows. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`
 	label       string // the result label: docs search runs this command under its own name
 }
 
 // documentApplication is --application's value as stored, or a usage error naming the accepted values.
 func documentApplication(raw string) (string, error) {
-	for _, app := range []string{"Word", "Excel", "PowerPoint", "supplied"} {
+	for _, app := range []string{"Word", "Excel", "PowerPoint", "supplied", store.RegistryDocumentSource} {
 		if strings.EqualFold(raw, app) {
 			return app, nil
 		}
@@ -320,7 +456,7 @@ func documentApplication(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	return "", errs.Usage("--application must be Word, Excel, PowerPoint or supplied (a file given with docs sync --root), not " + strconv.Quote(raw))
+	return "", errs.Usage("--application must be Word, Excel, PowerPoint, supplied (a file given with docs sync --root) or registry (an Office registry row), not " + strconv.Quote(raw))
 }
 
 // documentSurface is --surface's value, or a usage error naming the accepted values.
@@ -335,6 +471,7 @@ func documentSurface(raw string) (officedocuments.Surface, error) {
 const documentEvidenceHelp = "Each row is an immutable native metadata representation, not a resolved file/owner or a newly occurring sharing event. Identical sharing claims and repeat capture do not create new events; missing native sharing/activity dates stay unknown.\n" +
 	"capture_id and captured_at identify the representation's original private acquisition, not its most recent check. source_observed_at is the acquired input file's modification time, not native document/sharing time or admission time. Later checks do not overwrite these original clocks. retained means this representation was absent from the last admitted capture; absence does not mean deletion or revoked sharing.\n" +
 	documentOrderHelp + " docs --help defines surfaces, unresolved states, Sharing.Type and each clock.\n" +
+	"A registry row (variant office_registry) carries registry_native and opened_at instead of native: opened_at is the registry's opened time or null, modified_at is always null, and no surface applies.\n" +
 	"Native timestamps keep exact source text in Raw; Value is parsed UTC or null when missing/unrecognized. They are never replaced with file/capture time. modified_at is the native document modification time or null; bounded date windows exclude unknown values. text_state=not_captured means original document contents were not acquired."
 
 func (documentsListCmd) Help() string { return documentEvidenceHelp }
@@ -395,8 +532,8 @@ type documentsSearchCmd struct {
 	Since       string `help:"Native modification time at or after this date/time."`
 	Until       string `help:"Native modification time before this time; unknown dates excluded."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
-	Application string `help:"Only this Office app: Word, Excel or PowerPoint (any case), or supplied for files given with docs sync --root. Narrows rows, not source_coverage." placeholder:"APP"`
-	Surface     string `help:"Only this surface: recent, shared, recommended or dialog; docs --help defines each. Narrows rows, not source_coverage." placeholder:"SURFACE"`
+	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, or registry for Office registry rows. Narrows rows, not source_coverage." placeholder:"APP"`
+	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`
 }
 
 func (documentsSearchCmd) Help() string { return documentEvidenceHelp }
@@ -479,7 +616,7 @@ func (c *documentsSourcesCmd) Run(rt *runtime) error {
 	result := newList(shape(rt, coverage.Sources), false)
 	result.SourceCoverage, result.sourceOnly = coverage, true
 	if result.Count == 0 {
-		result.Note = "no document sources registered; run m365crawl docs sync or docs sync --root DIR"
+		result.Note = "no document sources registered; run m365crawl docs sync, docs sync --root DIR or docs sync --registry-file FILE"
 	}
 	return rt.write("docs sources", result)
 }

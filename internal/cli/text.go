@@ -125,6 +125,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		_, _ = fmt.Fprintf(w, "%s: %d captured, %d unchanged, %d skipped, %d failed\n", name, r.Captured, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderNoteCoverage(r.SourceCoverage)
+		for _, outcome := range r.Discovery {
+			_, _ = fmt.Fprintf(w, "discovery %s: %s: %s\n", outcome.Kind, outcome.Code, outcome.Meaning)
+		}
 	case loopSyncResult:
 		_, _ = fmt.Fprintf(w, "loop: %d projected, %d unchanged, %d skipped, %d failed\n", r.Projected, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderLoopCoverage(r.LoopCoverage)
@@ -340,7 +343,7 @@ func (rt *runtime) listTable(r *listResult) {
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), oneLine(x.Text)})
 		case documentItem:
 			cols, textCol = []string{"modified_at", "source", "id", "application", "surface", "title", "text_state"}, 5
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, string(x.Surface), oneLine(x.Title), x.TextState})
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(x.Title), x.TextState})
 		case documentDetailItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text_state"}, 3
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.TextState})
