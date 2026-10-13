@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +212,18 @@ func TestRegistryJSONRefusalCannotReleaseShared(t *testing.T) {
 	}
 	release()
 	released = true
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		// This platform has no input qualification: every Office input is refused before it is
+		// opened, as it is for a user. The refusal must still leave the writer free.
+		var fixed *ReadError
+		if _, err := ObserveJSON(context.Background(), path); !errors.As(err, &fixed) || fixed.Code != "office_json_input_unqualified" {
+			t.Fatalf("unqualified platform did not refuse the input: %v", err)
+		}
+		if output := officeWriterProbe(t, path); !strings.Contains(output, "WRITE_OK") {
+			t.Fatalf("writer did not recover after cleanup: %s", output)
+		}
+		return
+	}
 	// After owned cleanup the same calls run, fail closed on format, and leave no lock behind.
 	if _, err := ObserveJSON(context.Background(), path); err != nil {
 		t.Fatalf("observation retry after cleanup: %v", err)
