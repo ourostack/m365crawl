@@ -12,33 +12,29 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/sourcecapture"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
-const (
-	snapshotLimit = 64 << 20
-	pendingByte   = 1073741824
-	sharedFirst   = 1073741826
-	sharedBytes   = 510
-)
-
-// POSIX locks are process-scoped: another capture must not close a descriptor
-// for the same inode while the first capture's reader is still using its copy.
-var indexCaptureGate = make(chan struct{}, 1)
+const snapshotLimit = 64 << 20
 
 var (
-	snapshotOpen    = os.Open
-	snapshotRoot    = teamsdesktop.NewPrivateSnapshotRoot
-	snapshotCreate  = teamsdesktop.CreatePrivateSnapshotFile
-	snapshotRemove  = os.Remove
-	snapshotRead    = (*os.File).Read
-	snapshotReadAt  = (*os.File).ReadAt
-	snapshotWrite   = (*os.File).Write
-	snapshotClose   = (*os.File).Close
-	snapshotAbs     = filepath.Abs
-	snapshotEval    = filepath.EvalSymlinks
-	snapshotLstat   = os.Lstat
-	snapshotAcquire = acquireIndexCapture
+	snapshotOpen   = os.Open
+	snapshotRoot   = teamsdesktop.NewPrivateSnapshotRoot
+	snapshotCreate = teamsdesktop.CreatePrivateSnapshotFile
+	snapshotRemove = os.Remove
+	snapshotRead   = (*os.File).Read
+	snapshotReadAt = (*os.File).ReadAt
+	snapshotWrite  = (*os.File).Write
+	snapshotClose  = (*os.File).Close
+	snapshotAbs    = filepath.Abs
+	snapshotEval   = filepath.EvalSymlinks
+	snapshotLstat  = os.Lstat
+	// POSIX locks are process-scoped: no other capture may close a descriptor for the
+	// same inode while this capture's reader is still using its copy, so the capture owns
+	// the shared source lifetime from before opening until dispose completes.
+	snapshotAcquire = sourcecapture.Acquire
+	snapshotLock    = sourcecapture.LockSQLite
 )
 
 type IndexCapture struct {
@@ -57,6 +53,7 @@ type IndexCapture struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	unlock      func() error
+	release     func()
 	closed      bool
 	closeErr    error
 }
@@ -110,22 +107,14 @@ func ObserveIndex(path string) (string, error) {
 	return signature, nil
 }
 
-func acquireIndexCapture(ctx context.Context) error {
-	select {
-	case indexCaptureGate <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return snapshotError(ctx)
-	}
-}
-
 func CaptureIndex(ctx context.Context, path string) (_ *IndexCapture, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	if err := snapshotAcquire(ctx); err != nil {
+	release, err := snapshotAcquire(ctx)
+	if err != nil {
 		cancel()
-		return nil, err
+		return nil, snapshotError(ctx)
 	}
-	capture := &IndexCapture{ctx: ctx, cancel: cancel}
+	capture := &IndexCapture{ctx: ctx, cancel: cancel, release: release}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, capture.dispose())
@@ -154,7 +143,7 @@ func CaptureIndex(ctx context.Context, path string) (_ *IndexCapture, err error)
 	if err := snapshotSingleLink(capture.source); err != nil {
 		return nil, snapshotError(ctx)
 	}
-	capture.unlock, err = lockIndex(capture.source)
+	capture.unlock, err = snapshotLock(capture.source)
 	if err != nil {
 		return nil, snapshotError(ctx)
 	}
@@ -322,6 +311,6 @@ func (c *IndexCapture) dispose() error {
 		}
 	}
 	c.cancel()
-	<-indexCaptureGate
+	c.release()
 	return err
 }

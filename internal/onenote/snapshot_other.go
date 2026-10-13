@@ -7,10 +7,6 @@ import (
 	"os"
 )
 
-func lockIndex(*os.File) (func() error, error) {
-	return nil, errors.New("unsupported SQLite locking platform")
-}
-
 func snapshotSingleLink(*os.File) error {
 	return errors.New("unsupported SQLite file identity")
 }
