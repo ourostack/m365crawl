@@ -324,22 +324,20 @@ func TestUsageUnresolvedFollowups(t *testing.T) {
 			t.Fatalf("%v: %d %s", args, code, stderr)
 		}
 		// Every printed command is the row's own archive-only SQL inspection or the documented
-		// docs show route; none names the claimed thread, person or address.
-		rest := stdout
-		for {
-			at := strings.Index(rest, "m365crawl ")
-			if at < 0 {
-				break
+		// docs show route; none names the claimed thread, person or address. JSON output is
+		// decoded first: a Windows archive path is escaped inside a JSON string.
+		for _, printed := range printedStrings(stdout) {
+			for rest := printed; ; {
+				at := strings.Index(rest, "m365crawl ")
+				if at < 0 {
+					break
+				}
+				command, _, _ := strings.Cut(rest[at:], "\n")
+				if !strings.HasPrefix(command, allowed) && !strings.HasPrefix(command, "m365crawl has not linked the row") {
+					t.Fatalf("%v printed a follow-up that is not the row's own SQL inspection: %s", args, command)
+				}
+				rest = rest[at+len("m365crawl "):]
 			}
-			command := rest[at:]
-			if end := strings.IndexAny(command, "\n"); end >= 0 {
-				command = command[:end]
-			}
-			if !strings.HasPrefix(command, strings.ReplaceAll(allowed, `"`, `\"`)) && !strings.HasPrefix(command, allowed) &&
-				!strings.HasPrefix(command, "m365crawl has not linked the row") {
-				t.Fatalf("%v printed a follow-up that is not the row's own SQL inspection: %s", args, command)
-			}
-			rest = rest[at+len("m365crawl "):]
 		}
 		for _, runnable := range []string{"thread " + conversation, "messages --chat", "chats ", "people show", "person:", "--chat " + conversation,
 			"--author", "mail list --from", "alias"} {
@@ -844,5 +842,51 @@ func TestUsageSearchSourceCounts(t *testing.T) {
 		if strings.Contains(text, "not shown") || !strings.Contains(text, "more exist; raise --limit") {
 			t.Fatalf("%v: a cut search must say to raise --limit without inventing a hidden count:\n%s", args, text)
 		}
+	}
+}
+
+// printedStrings is what a command printed, as the reader sees it: every string value of a JSON
+// document, or the text itself.
+func printedStrings(stdout string) []string {
+	var doc any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		return []string{stdout}
+	}
+	var out []string
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case string:
+			out = append(out, typed)
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(doc)
+	return out
+}
+
+// The follow-up scan reads JSON output as decoded strings, so an archive path with backslashes
+// (every Windows path) is compared as the reader sees it and not as JSON escapes it.
+func TestPrintedStringsDecodeJSONPaths(t *testing.T) {
+	command := `m365crawl --db "C:\\synthetic dir\\m365crawl.db" --max-age 0 sql`
+	encoded, err := json.Marshal(map[string]any{"items": []any{map[string]any{"full_inspection": command}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), command) {
+		t.Fatal("the fixture path is not escaped by JSON, so it proves nothing")
+	}
+	if got := printedStrings(string(encoded)); len(got) != 1 || got[0] != command {
+		t.Fatalf("decoded strings = %q", got)
+	}
+	if got := printedStrings("plain text\n" + command); len(got) != 1 || !strings.Contains(got[0], command) {
+		t.Fatalf("text output = %q", got)
 	}
 }
