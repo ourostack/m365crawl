@@ -71,7 +71,7 @@ func (s *Store) CommitRegistryDocumentObservations(ctx context.Context, attempt 
 	}
 	admission := documentAdmission{
 		binding:       documentBinding{Variant: RegistryDocumentKind, Application: RegistryDocumentSource},
-		qualification: RegistryDocumentQualification, unmappedLoss: "office_registry_document_unmapped",
+		qualification: RegistryDocumentQualification, unmappedLosses: []string{"office_registry_document_unmapped"},
 		documents: len(result.Documents), acquired: capture.AcquiredAt, observed: capture.SourceObservedAt,
 		apply: func(ctx context.Context, tx *sql.Tx, sourceID, captureID int64) error {
 			return applyRegistryObservations(ctx, tx, attempt.LocatorID, sourceID, captureID, result)
@@ -97,7 +97,7 @@ func applyRegistryObservations(ctx context.Context, tx *sql.Tx, locatorID, sourc
 		if at := ParseRegistryOpened(document.OpenedRaw); at != nil {
 			opened = knowledgeTime(*at)
 		}
-		err := publishDocumentObservation(ctx, tx, documentPublication{sourceID: sourceID, captureID: captureID,
+		_, err := publishDocumentObservation(ctx, tx, documentPublication{sourceID: sourceID, captureID: captureID,
 			digest:  hashOf(strings.Join([]string{RegistryDocumentKind, RegistryDocumentQualification, platform, locator, string(encoded)}, "\x00")),
 			ordinal: ordinal, variant: RegistryDocumentKind, application: RegistryDocumentSource,
 			title: document.Title, url: document.URL, registryJSON: string(encoded), opened: opened,
@@ -119,7 +119,7 @@ func registryMetadataText(document officeregistry.Observation) string {
 // decodeRegistryRow validates a stored registry row's discriminator, label and payload together
 // and attaches the native observation and its parsed opened time.
 func decodeRegistryRow(row *DocumentObservationRow, stored documentStored) error {
-	if !stored.registry.Valid || stored.document != "" || stored.surface != "" || row.Application != RegistryDocumentSource ||
+	if !stored.registry.Valid || stored.usage.Valid || stored.document != "" || stored.surface != "" || row.Application != RegistryDocumentSource ||
 		stored.kind != RegistryDocumentKind {
 		return errors.New("documents: invalid stored registry representation")
 	}
