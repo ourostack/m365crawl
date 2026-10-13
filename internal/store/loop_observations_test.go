@@ -502,8 +502,8 @@ func TestMigrationSchema13AddsLoopTablesWithoutTouchingRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion || SchemaVersion != 13 {
-		t.Fatalf("schema %d, want 13", n)
+	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion {
+		t.Fatalf("schema %d, want %d", n, SchemaVersion)
 	}
 	if after := recordsState(s); after != before {
 		t.Fatal("migration changed existing rows")

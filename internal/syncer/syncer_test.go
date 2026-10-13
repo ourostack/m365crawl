@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/officecapture"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -188,6 +189,10 @@ func TestMain(m *testing.M) {
 	// Mail is read on every platform here, so the tests do not depend on the one they run on; the
 	// test of the platform that does not read mail sets the seam itself.
 	outlookMailSupported = func() bool { return true }
+	// A default document sync never reads this machine's Office registry from a test.
+	documentsRegistryDiscover = func(context.Context) ([]officecapture.RegistryInput, error) {
+		return nil, &officecapture.ReadError{Code: "office_registry_unavailable"}
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

@@ -62,11 +62,37 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 *Find the name, inspect the claims, and keep uncertainty visible. These are synthetic observations, not private contacts or a directory export.*
 
-**Document evidence, without opening the document.** `docs sync` captures available Mac Office recent/shared/recommended/dialog metadata; shared search then connects native titles, URLs and sharing/person claims to the conversation. Follow `document-observation:ID` with `docs show`, narrow lists with `--application Word|Excel|PowerPoint` and `--surface recent|shared|recommended|dialog`, and inspect `docs sources` for losses, failed inputs with their remedy, and retained claims. Explicit ordinary local JSON copies use `docs sync --root DIR`; provider/placeholder and linked inputs are refused. Metadata is not document text, a resolved file identity, current sharing or proof of local residency. Native URLs and friendly paths are never opened or hydrated, and identical sharing claims are not counted as new events. Start from `docs --help`: the embedded guide adds workflow strategy, not missing command contracts.
+**Document evidence, without opening the document.** `docs sync` captures available Mac Office recent/shared/recommended/dialog metadata; shared search then connects native titles, URLs and sharing/person claims to the conversation. Follow `document-observation:ID` with `docs show`, narrow lists with `--application Word|Excel|PowerPoint` and `--surface recent|shared|recommended|dialog`, and inspect `docs sources` for losses, failed inputs with their remedy, and retained claims. Explicit ordinary local JSON copies use `docs sync --root DIR`; provider/placeholder and linked inputs are refused. `docs sync` also reads the Mac Office registry's recently-opened list, and `docs sync --registry-file FILE` reads one ordinary local copy of a registry file: those rows carry the registry's own opened time (`opened_at`, null when it does not parse) and no modification time, so date filters never match them. Metadata is not document text, a resolved file identity, current sharing or proof of local residency. Native URLs and friendly paths are never opened or hydrated, and identical sharing claims are not counted as new events. Start from `docs --help`: the embedded guide adds workflow strategy, not missing command contracts.
 
-<p align="center"><img src="docs/document-observations.png" alt="Actual synthetic CLI output: recent and shared document observations, stable detail IDs, unresolved identity, uncaptured text and independent source coverage" width="1000"></p>
+```text
+$ m365crawl --fields id,title,application,surface,opened_at,text_state docs list --query Orion
+id                      title                           application  surface  opened_at             text_state
+----------------------  ------------------------------  -----------  -------  --------------------  ------------
+document-observation:3  Synthetic Orion budget draft    registry     -        2026-10-09T12:34:56Z  not_captured
+document-observation:1  Synthetic Orion planning notes  supplied     recent   -                     not_captured
+document-observation:2  Synthetic Orion shared plan     supplied     shared   -                     not_captured
 
-*Find the claim, inspect the source, and leave unresolved links unresolved. This is actual output from synthetic metadata, not private documents or a library export.*
+documents coverage: registered (office_document_metadata)
+source  kind             status    coverage      locator                                         reason
+------  ---------------  --------  ------------  ----------------------------------------------  ------
+1       office_recent    complete  observations  office/recent.json                              -
+2       office_shared    complete  observations  office/shared.json                              -
+3       office_registry  complete  observations  registry/MicrosoftRegistrationDB_synthetic.reg  -
+3 items
+
+$ m365crawl --fields id,title,variant,opened_at,modified_at,association_state,text_state docs show document-observation:3
+id                      title                         variant          opened_at             modified_at  association_state  text_state
+----------------------  ----------------------------  ---------------  --------------------  -----------  -----------------  ------------
+document-observation:3  Synthetic Orion budget draft  office_registry  2026-10-09T12:34:56Z  -            unresolved         not_captured
+
+documents coverage: registered (office_document_metadata)
+source  kind             status    coverage      locator                                         reason
+------  ---------------  --------  ------------  ----------------------------------------------  ------
+3       office_registry  complete  observations  registry/MicrosoftRegistrationDB_synthetic.reg  -
+1 items
+```
+
+*Find the claim, inspect the source, and leave unresolved links unresolved. This is actual output of this version from synthetic Office JSON files and a synthetic registry file (times in UTC), not private documents or a library export.*
 
 **Cached Loop channels, as partial snapshots.** `loop sync` projects the channel text of Loop snapshot records Teams already cached and `sync` already archived; nothing is fetched and Loop is never opened. Shared search and `loop search` return stable `loop-channel:ID` rows to follow with `loop show`. Each row is one channel of one immutable snapshot version, with its native sequence, pending-operation count and whether the archived record still matches it: partial text, not a full or current page, table, author or history. `loop sync` takes 128 new records per run and says when to run it again. `loop sources` shows every registration, including failed and metadata-only ones, with the retry command.
 

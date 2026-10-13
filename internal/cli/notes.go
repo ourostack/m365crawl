@@ -254,6 +254,8 @@ type notesSyncResult struct {
 	Skipped        int           `json:"skipped"`
 	Failed         int           `json:"failed"`
 	SourceCoverage *noteCoverage `json:"source_coverage"`
+	// Discovery is docs sync's default-family outcomes; other sync commands have none.
+	Discovery []documentDiscoveryItem `json:"discovery,omitempty"`
 }
 
 func (c *notesSyncCmd) Run(rt *runtime) error {
@@ -402,7 +404,7 @@ func (rt *runtime) renderNoteCoverage(coverage *noteCoverage) {
 	switch coverage.Scope {
 	case "outlook_native_people_observations":
 		name = "people"
-	case "office_json_metadata":
+	case "office_document_metadata":
 		name = "documents"
 	case "registered_optional_sources":
 		name = "notes and documents"

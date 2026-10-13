@@ -4,51 +4,10 @@ package onenote
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
-
-	"golang.org/x/sys/unix"
 )
-
-func TestCaptureIndexLockFaultsReleaseNativeProtection(t *testing.T) {
-	for _, failCall := range []int{1, 2, 3, 4} {
-		t.Run(strconv.Itoa(failCall), func(t *testing.T) {
-			path, err := filepath.EvalSymlinks(indexFixture(t, "index.db", hierarchyFixture))
-			if err != nil {
-				t.Fatal(err)
-			}
-			original := snapshotFcntl
-			t.Cleanup(func() { snapshotFcntl = original })
-			calls := 0
-			snapshotFcntl = func(fd uintptr, cmd int, lock *unix.Flock_t) error {
-				calls++
-				if calls == failCall {
-					return errors.New("lock fault")
-				}
-				return original(fd, cmd, lock)
-			}
-			capture, err := CaptureIndex(context.Background(), path)
-			if failCall == 4 {
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := capture.Close(); err == nil {
-					t.Fatal("unlock failure hidden")
-				}
-			} else if err == nil || capture != nil {
-				t.Fatal("lock failure admitted")
-			}
-			snapshotFcntl = original
-			if output := sqliteWriterProbe(t, path); !strings.Contains(output, "WRITE_OK") {
-				t.Fatalf("lock leak after fault: %s", output)
-			}
-		})
-	}
-}
 
 func TestCaptureIndexHardLinkRefused(t *testing.T) {
 	path, err := filepath.EvalSymlinks(indexFixture(t, "index.db"))

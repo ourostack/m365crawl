@@ -354,7 +354,8 @@
       "outlook_store",
       "onenote_index",
       "outlook_people",
-      "office_json_metadata"
+      "office_json_metadata",
+      "office_registry_metadata"
     ]
   }
 }

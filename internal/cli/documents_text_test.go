@@ -9,7 +9,7 @@ import (
 
 func TestDocumentsTextCoverageNamesParticipatingSources(t *testing.T) {
 	for _, sample := range []struct{ scope, want string }{
-		{"office_json_metadata", "documents coverage:"},
+		{"office_document_metadata", "documents coverage:"},
 		{"registered_optional_sources", "notes and documents coverage:"},
 	} {
 		var out bytes.Buffer

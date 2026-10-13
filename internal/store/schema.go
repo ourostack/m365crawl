@@ -22,7 +22,11 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 13 adds the cached Loop channel projection (loop_observations_schema.go): registered
 // archive-tuple sources, immutable snapshots, channels and their FTS index; the tables are
 // additive and stay empty until `loop sync` registers a source.
-const SchemaVersion = 13
+// Version 14 adds the Office registry variant to document observations: a variant discriminator
+// on document locators, observations and captures, and observations' registry_json and opened_at.
+// Existing rows keep variant office_json; an archive at version 13 gains the columns on its next
+// writable open, and reads of an older archive treat every row as Office JSON.
+const SchemaVersion = 14
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as

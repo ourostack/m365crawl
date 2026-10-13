@@ -440,12 +440,7 @@ func TestCaptureIndexAcquisitionFaultsCleanExactRoot(t *testing.T) {
 				}
 			}
 			// Failures must release serialization as well as the descriptor.
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-			select {
-			case indexCaptureGate <- struct{}{}:
-				<-indexCaptureGate
-			case <-ctx.Done():
+			if !sourceGateFree(t) {
 				t.Fatal("failed acquisition retained capture gate")
 			}
 		})

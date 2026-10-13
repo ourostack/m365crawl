@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/officedocuments"
+	"github.com/ourostack/m365crawl/internal/sourcecapture"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
@@ -29,7 +30,22 @@ var (
 	jsonNow      = time.Now
 	jsonSettle   = settleJSON
 	captureGuard = withInputGuard
+	// sourceAcquire is the one process-wide source lifetime shared with notes and registry
+	// captures. Public entry points take it before any source open and hold it through cleanup;
+	// helpers inside that lifetime never take it again.
+	sourceAcquire = sourcecapture.Acquire
 )
+
+// withSourceLifetime runs operation inside the shared source lifetime. A wait that ends by
+// cancellation or timeout opens nothing.
+func withSourceLifetime(ctx context.Context, code string, operation func() error) error {
+	release, err := sourceAcquire(ctx)
+	if err != nil {
+		return errors.Join(&ReadError{Code: code}, err)
+	}
+	defer release()
+	return operation()
+}
 
 type DocumentInput struct {
 	Path        string
@@ -185,63 +201,65 @@ func WithJSONCapture(ctx context.Context, input DocumentInput, consume func(*JSO
 	if !validDocumentInput(input) || consume == nil {
 		return jsonError(ctx, "office_json_input_unqualified")
 	}
-	return captureGuard(ctx, func() (result error) {
-		if ctx.Err() != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		source, err := openInput(input.Path, false)
-		if err != nil {
-			return jsonError(ctx, "office_json_input_unqualified")
-		}
-		defer func() {
-			if err := source.close(); err != nil {
-				result = errors.Join(result, jsonError(ctx, "office_json_capture_failed"))
+	return withSourceLifetime(ctx, "office_json_capture_failed", func() error {
+		return captureGuard(ctx, func() (result error) {
+			if ctx.Err() != nil {
+				return jsonError(ctx, "office_json_capture_failed")
 			}
-		}()
-		info, err := source.file().Stat()
-		if err != nil || info.Size() > jsonLimit || info.Size() < 0 {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		c := &JSONCapture{ctx: ctx, signature: source.stamps[len(source.stamps)-1],
-			modified: info.ModTime(), surface: input.Surface}
-		defer func() { result = errors.Join(result, c.Close(), c.validateFields()) }()
-		c.root, err = jsonRoot()
-		if err != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		// Canonicalizing our own freshly created root is not source-path repair.
-		originalRoot := c.root
-		c.root, err = filepath.EvalSymlinks(c.root)
-		if err != nil {
-			c.root = originalRoot
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		c.privatePath = filepath.Join(c.root, "source.json")
-		output, err := jsonCreate(c.privatePath)
-		if err != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		digest := sha256.New()
-		count, copyErr := copyJSON(ctx, io.MultiWriter(fileWriter{output}, digest), source.file())
-		c.privateInfo, err = output.Stat()
-		closeErr := jsonClose(output)
-		if copyErr != nil || err != nil || closeErr != nil || count != info.Size() {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		c.acquired = jsonNow().UTC()
-		c.digest = fmt.Sprintf("%x", digest.Sum(nil))
-		c.Path, c.ContentDigest, c.AcquisitionSignature = c.privatePath, c.digest, c.signature
-		c.AcquiredAt, c.SourceModified = c.acquired, c.modified
-		if err := jsonSettle(ctx); err != nil || source.validate() != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		if err := consume(c); err != nil {
-			return readerFailure(ctx, err)
-		}
-		if ctx.Err() != nil || source.validate() != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		return nil
+			source, err := openInput(input.Path, false)
+			if err != nil {
+				return jsonError(ctx, "office_json_input_unqualified")
+			}
+			defer func() {
+				if err := source.close(); err != nil {
+					result = errors.Join(result, jsonError(ctx, "office_json_capture_failed"))
+				}
+			}()
+			info, err := source.file().Stat()
+			if err != nil || info.Size() > jsonLimit || info.Size() < 0 {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			c := &JSONCapture{ctx: ctx, signature: source.stamps[len(source.stamps)-1],
+				modified: info.ModTime(), surface: input.Surface}
+			defer func() { result = errors.Join(result, c.Close(), c.validateFields()) }()
+			c.root, err = jsonRoot()
+			if err != nil {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			// Canonicalizing our own freshly created root is not source-path repair.
+			originalRoot := c.root
+			c.root, err = filepath.EvalSymlinks(c.root)
+			if err != nil {
+				c.root = originalRoot
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			c.privatePath = filepath.Join(c.root, "source.json")
+			output, err := jsonCreate(c.privatePath)
+			if err != nil {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			digest := sha256.New()
+			count, copyErr := copyJSON(ctx, io.MultiWriter(fileWriter{output}, digest), source.file())
+			c.privateInfo, err = output.Stat()
+			closeErr := jsonClose(output)
+			if copyErr != nil || err != nil || closeErr != nil || count != info.Size() {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			c.acquired = jsonNow().UTC()
+			c.digest = fmt.Sprintf("%x", digest.Sum(nil))
+			c.Path, c.ContentDigest, c.AcquisitionSignature = c.privatePath, c.digest, c.signature
+			c.AcquiredAt, c.SourceModified = c.acquired, c.modified
+			if err := jsonSettle(ctx); err != nil || source.validate() != nil {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			if err := consume(c); err != nil {
+				return readerFailure(ctx, err)
+			}
+			if ctx.Err() != nil || source.validate() != nil {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			return nil
+		})
 	})
 }
 
@@ -296,16 +314,18 @@ func settleJSON(ctx context.Context) error {
 func ObserveJSON(ctx context.Context, path string) (signature string, result error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	result = withInputGuard(ctx, func() error {
-		input, err := openInput(path, false)
-		if err != nil {
-			return jsonError(ctx, "office_json_input_unqualified")
-		}
-		signature = input.stamps[len(input.stamps)-1]
-		if err := input.close(); err != nil {
-			return jsonError(ctx, "office_json_capture_failed")
-		}
-		return nil
+	result = withSourceLifetime(ctx, "office_json_capture_failed", func() error {
+		return withInputGuard(ctx, func() error {
+			input, err := openInput(path, false)
+			if err != nil {
+				return jsonError(ctx, "office_json_input_unqualified")
+			}
+			signature = input.stamps[len(input.stamps)-1]
+			if err := input.close(); err != nil {
+				return jsonError(ctx, "office_json_capture_failed")
+			}
+			return nil
+		})
 	})
 	if result != nil {
 		signature = ""

@@ -10,9 +10,14 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/officedocuments"
+	"github.com/ourostack/m365crawl/internal/officeregistry"
 )
 
-const DocumentQualification = "office-json-v1/mapper-v1"
+const (
+	DocumentQualification = "office-json-v1/mapper-v1"
+	// DocumentVariantJSON is the variant of every Office JSON locator, observation and capture.
+	DocumentVariantJSON = "office_json"
+)
 
 var ErrDocumentObservationNotFound = errors.New("documents: observation not found")
 
@@ -22,9 +27,16 @@ type DocumentCaptureMetadata struct {
 	AcquiredAt, SourceObservedAt *time.Time
 }
 
+// DocumentObservationRow is one immutable native representation. Variant says which native
+// payload it carries: an Office JSON row has Document and no Registry; an Office registry row has
+// Registry, a zero Document, the fixed Application "registry" and OpenedAt, the registry's own
+// opened time parsed to UTC or nil. A registry row never has a native modified time.
 type DocumentObservationRow struct {
 	ID, SourceID, CaptureID      int64
+	Variant                      string
 	Document                     officedocuments.Document
+	Registry                     *officeregistry.Observation
+	OpenedAt                     *time.Time
 	Application                  string
 	CapturedAt, SourceObservedAt *time.Time
 	Retained                     bool
@@ -79,57 +91,96 @@ func validDocumentBinding(surface officedocuments.Surface, application string) b
 	return DocumentKind(surface) != "" && slices.Contains([]string{"Word", "Excel", "PowerPoint", "supplied"}, application)
 }
 
+// documentBinding is a locator's immutable native binding.
+type documentBinding struct {
+	Variant     string
+	Surface     officedocuments.Surface
+	Application string
+}
+
+// kind is the knowledge kind a binding belongs to, or "" when the combination is invalid.
+func (b documentBinding) kind() string {
+	switch {
+	case b.Variant == DocumentVariantJSON && validDocumentBinding(b.Surface, b.Application):
+		return DocumentKind(b.Surface)
+	case b.Variant == RegistryDocumentKind && b.Surface == "" && b.Application == RegistryDocumentSource:
+		return RegistryDocumentKind
+	}
+	return ""
+}
+
 func (s *Store) BeginDocumentAttempt(ctx context.Context, input KnowledgeInput, surface officedocuments.Surface, application string) (KnowledgeAttempt, error) {
 	if !validDocumentBinding(surface, application) || input.Kind != DocumentKind(surface) {
 		return KnowledgeAttempt{}, errors.New("documents: invalid source binding")
 	}
+	return s.beginDocumentAttempt(ctx, input, documentBinding{Variant: DocumentVariantJSON, Surface: surface, Application: application})
+}
+
+func (s *Store) beginDocumentAttempt(ctx context.Context, input KnowledgeInput, binding documentBinding) (KnowledgeAttempt, error) {
 	return s.beginKnowledgeAttempt(ctx, input, func(tx *sql.Tx, locatorID int64) error {
-		if _, err := tx.ExecContext(ctx, `insert into document_locator_metadata(locator_id,surface,application)
-values(?,?,?) on conflict(locator_id) do nothing`, locatorID, surface, application); err != nil {
+		if _, err := tx.ExecContext(ctx, `insert into document_locator_metadata(locator_id,surface,application,variant)
+values(?,?,?,?) on conflict(locator_id) do nothing`, locatorID, binding.Surface, binding.Application, binding.Variant); err != nil {
 			return err
 		}
-		registeredSurface, registeredApp, err := readDocumentLocator(ctx, tx, locatorID)
+		registered, err := readDocumentLocator(ctx, tx, locatorID, true)
 		if err != nil {
 			return err
 		}
-		if registeredSurface != surface || registeredApp != application {
+		if registered != binding {
 			return errors.New("documents: source binding changed")
 		}
 		return nil
 	}, nil)
 }
 
-func readDocumentLocator(ctx context.Context, reader knowledgeReader, id int64) (officedocuments.Surface, string, error) {
-	var surface officedocuments.Surface
-	var application, kind string
-	err := reader.QueryRowContext(ctx, `select d.surface,d.application,l.kind
+// readDocumentLocator reads a locator's binding and refuses any variant, surface, application and
+// kind combination that no capture could have registered. variants is false on an archive from
+// before schema 14, where every locator is Office JSON.
+func readDocumentLocator(ctx context.Context, reader knowledgeReader, id int64, variants bool) (documentBinding, error) {
+	var binding documentBinding
+	var kind string
+	variant := "'" + DocumentVariantJSON + "'"
+	if variants {
+		variant = "d.variant"
+	}
+	err := reader.QueryRowContext(ctx, `select d.surface,d.application,l.kind,`+variant+`
 from document_locator_metadata d join knowledge_locators l on l.id=d.locator_id where d.locator_id=?`, id).
-		Scan(&surface, &application, &kind)
+		Scan(&binding.Surface, &binding.Application, &kind, &binding.Variant)
 	if err != nil {
-		return "", "", err
+		return documentBinding{}, err
 	}
-	if !validDocumentBinding(surface, application) || kind != DocumentKind(surface) {
-		return "", "", errors.New("documents: invalid stored source binding")
+	if kind == "" || binding.kind() != kind {
+		return documentBinding{}, errors.New("documents: invalid stored source binding")
 	}
-	return surface, application, nil
+	return binding, nil
 }
 
+// DocumentLocatorInput returns a registered locator's surface and application. An Office registry
+// locator has an empty surface and the fixed source label "registry".
 func (s *Store) DocumentLocatorInput(ctx context.Context, id int64) (officedocuments.Surface, string, error) {
-	available, err := hasDocumentObservations(ctx, s.db)
+	available, variants, err := documentSchema(ctx, s.db)
 	if err != nil {
 		return "", "", err
 	}
 	if !available || id <= 0 {
 		return "", "", ErrKnowledgeSourceUnknown
 	}
-	return readDocumentLocator(ctx, s.db, id)
+	binding, err := readDocumentLocator(ctx, s.db, id, variants)
+	return binding.Surface, binding.Application, err
 }
 
-func hasDocumentObservations(ctx context.Context, reader knowledgeReader) (bool, error) {
-	var count int
-	err := reader.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table'
-and name in ('document_observations','document_capture_members','document_capture_metadata','document_fts','document_locator_metadata')`).Scan(&count)
-	return count == 5, err
+// documentSchema reports whether the document tables exist and whether they carry the schema 14
+// variant columns. A read-only archive from before schema 14 has the tables without the columns:
+// its rows are all Office JSON, and it has no registry rows to read.
+func documentSchema(ctx context.Context, reader knowledgeReader) (tables, variants bool, err error) {
+	var tableCount, columnCount int
+	err = reader.QueryRowContext(ctx, `select
+(select count(*) from sqlite_master where type='table'
+ and name in ('document_observations','document_capture_members','document_capture_metadata','document_fts','document_locator_metadata')),
+(select count(*) from pragma_table_info('document_observations') where name in ('variant','registry_json','opened_at'))+
+(select count(*) from pragma_table_info('document_locator_metadata') where name='variant')+
+(select count(*) from pragma_table_info('document_capture_metadata') where name='variant')`).Scan(&tableCount, &columnCount)
+	return tableCount == 5, columnCount == 5, err
 }
 
 func (s *Store) CommitDocumentObservations(ctx context.Context, attempt KnowledgeAttempt, outcome KnowledgeOutcome, result officedocuments.Result, capture DocumentCaptureMetadata) error {
@@ -150,18 +201,41 @@ func (s *Store) CommitDocumentObservations(ctx context.Context, attempt Knowledg
 			return errors.New("documents: invalid source loss")
 		}
 	}
-	return s.finishKnowledge(ctx, attempt, outcome, DocumentKind(capture.Surface),
-		func(ctx context.Context, tx *sql.Tx, attempt KnowledgeAttempt, outcome KnowledgeOutcome) (int64, string, map[string]int, error) {
-			return admitDocumentObservations(ctx, tx, attempt, outcome, result, capture)
-		})
+	admission := documentAdmission{
+		binding:       documentBinding{Variant: DocumentVariantJSON, Surface: capture.Surface, Application: capture.Application},
+		qualification: DocumentQualification, unmappedLoss: "office_document_unmapped", documents: len(result.Documents),
+		acquired: capture.AcquiredAt, observed: capture.SourceObservedAt,
+		apply: func(ctx context.Context, tx *sql.Tx, sourceID, captureID int64) error {
+			return applyDocumentObservations(ctx, tx, sourceID, captureID, result, capture.Application)
+		},
+	}
+	for _, loss := range result.Losses {
+		admission.losses = append(admission.losses, documentLoss{loss.Code, loss.Count})
+	}
+	return s.finishKnowledge(ctx, attempt, outcome, DocumentKind(capture.Surface), admission.admit)
 }
 
-func admitDocumentObservations(ctx context.Context, tx *sql.Tx, attempt KnowledgeAttempt, outcome KnowledgeOutcome, result officedocuments.Result, capture DocumentCaptureMetadata) (int64, string, map[string]int, error) {
-	surface, application, err := readDocumentLocator(ctx, tx, attempt.LocatorID)
+type documentLoss struct {
+	code  string
+	count int
+}
+
+// documentAdmission is one variant's capture, admitted through the shared source frontier.
+type documentAdmission struct {
+	binding                     documentBinding
+	qualification, unmappedLoss string
+	documents                   int
+	losses                      []documentLoss
+	acquired, observed          *time.Time
+	apply                       func(ctx context.Context, tx *sql.Tx, sourceID, captureID int64) error
+}
+
+func (d documentAdmission) admit(ctx context.Context, tx *sql.Tx, attempt KnowledgeAttempt, outcome KnowledgeOutcome) (int64, string, map[string]int, error) {
+	registered, err := readDocumentLocator(ctx, tx, attempt.LocatorID, true)
 	if err != nil {
 		return 0, "", nil, err
 	}
-	if surface != capture.Surface || application != capture.Application {
+	if registered != d.binding {
 		return 0, "", nil, errors.New("documents: capture binding mismatch")
 	}
 	var previous, previousSource int64
@@ -175,7 +249,7 @@ join knowledge_sources s on s.id=a.source_id where l.id=?`, attempt.LocatorID).
 	}
 	losses := map[string]int{}
 	if outcome.Status == "unchanged" {
-		if previous == 0 || digest != outcome.ContentDigest || qualification != DocumentQualification {
+		if previous == 0 || digest != outcome.ContentDigest || qualification != d.qualification {
 			return 0, "", nil, errors.New("documents: unchanged input not previously admitted")
 		}
 		if err := json.Unmarshal([]byte(encoded), &losses); err != nil {
@@ -186,24 +260,24 @@ join knowledge_sources s on s.id=a.source_id where l.id=?`, attempt.LocatorID).
 		if outcome.Status == "partial" {
 			coverage = "partial"
 		}
-		for _, loss := range result.Losses {
-			losses[loss.Code] += loss.Count
+		for _, loss := range d.losses {
+			losses[loss.code] += loss.count
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `insert into knowledge_sources(locator_id,boundary,qualification)
-values(?,'unresolved',?) on conflict(locator_id,boundary,qualification) do nothing`, attempt.LocatorID, DocumentQualification); err != nil {
+values(?,'unresolved',?) on conflict(locator_id,boundary,qualification) do nothing`, attempt.LocatorID, d.qualification); err != nil {
 		return 0, "", nil, err
 	}
 	var sourceID, frontier int64
 	if err := tx.QueryRowContext(ctx, `select id,coalesce(admitted_attempt,0) from knowledge_sources
-where locator_id=? and boundary='unresolved' and qualification=?`, attempt.LocatorID, DocumentQualification).
+where locator_id=? and boundary='unresolved' and qualification=?`, attempt.LocatorID, d.qualification).
 		Scan(&sourceID, &frontier); err != nil {
 		return 0, "", nil, err
 	}
 	if frontier >= attempt.ID {
 		return 0, "", nil, ErrStaleKnowledgeAttempt
 	}
-	physical := len(result.Documents) + losses["office_document_unmapped"]
+	physical := d.documents + losses[d.unmappedLoss]
 	if outcome.Status == "unchanged" {
 		if previousSource != sourceID {
 			return 0, "", nil, errors.New("documents: unchanged source mismatch")
@@ -213,9 +287,9 @@ where locator_id=? and boundary='unresolved' and qualification=?`, attempt.Locat
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `insert into document_capture_metadata(capture_id,surface,application,
-acquired_at,source_observed_at,reused,physical_observations) values(?,?,?,?,?,?,?)`,
-		attempt.ID, surface, application, optionalPeopleTime(capture.AcquiredAt), optionalPeopleTime(capture.SourceObservedAt),
-		outcome.Status == "unchanged", physical); err != nil {
+acquired_at,source_observed_at,reused,physical_observations,variant) values(?,?,?,?,?,?,?,?)`,
+		attempt.ID, registered.Surface, registered.Application, optionalPeopleTime(d.acquired), optionalPeopleTime(d.observed),
+		outcome.Status == "unchanged", physical, registered.Variant); err != nil {
 		return 0, "", nil, err
 	}
 	if outcome.Status == "unchanged" {
@@ -223,7 +297,7 @@ acquired_at,source_observed_at,reused,physical_observations) values(?,?,?,?,?,?,
 select ?,observation_rowid from document_capture_members where capture_id=?`, attempt.ID, previous); err != nil {
 			return 0, "", nil, err
 		}
-	} else if err := applyDocumentObservations(ctx, tx, sourceID, attempt.ID, result, application); err != nil {
+	} else if err := d.apply(ctx, tx, sourceID, attempt.ID); err != nil {
 		return 0, "", nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `update knowledge_sources set admitted_attempt=?,
@@ -243,30 +317,51 @@ func applyDocumentObservations(ctx context.Context, tx *sql.Tx, sourceID, captur
 		if err != nil {
 			return err
 		}
-		digest := hashOf(application + "\x00" + string(encoded))
-		if _, err := tx.ExecContext(ctx, `insert into document_observations(source_id,capture_id,representation_digest,
-ordinal,surface,application,title,url,web_url,modified_at,document_json) values(?,?,?,?,?,?,?,?,?,?,?)
-on conflict(source_id,representation_digest) do nothing`, sourceID, captureID, digest, document.Ordinal,
-			document.Surface, application, document.Title, document.URL, document.WebURL, knowledgeTime(document.Modified.Value), string(encoded)); err != nil {
+		err = publishDocumentObservation(ctx, tx, documentPublication{sourceID: sourceID, captureID: captureID,
+			digest: hashOf(application + "\x00" + string(encoded)), ordinal: document.Ordinal, variant: DocumentVariantJSON,
+			surface: document.Surface, application: application, title: document.Title, url: document.URL, webURL: document.WebURL,
+			modified: knowledgeTime(document.Modified.Value), documentJSON: string(encoded),
+			metadata: officedocuments.MetadataText(document)})
+		if err != nil {
 			return err
 		}
-		var rowID int64
-		if err := tx.QueryRowContext(ctx, `select rowid from document_observations where source_id=? and representation_digest=?`, sourceID, digest).Scan(&rowID); err != nil {
+	}
+	return nil
+}
+
+// documentPublication is one immutable representation with its capture membership and FTS text.
+type documentPublication struct {
+	sourceID, captureID                      int64
+	digest, variant, application, title, url string
+	webURL, documentJSON, metadata           string
+	surface                                  officedocuments.Surface
+	ordinal                                  int
+	modified, registryJSON, opened           any
+}
+
+func publishDocumentObservation(ctx context.Context, tx *sql.Tx, p documentPublication) error {
+	if _, err := tx.ExecContext(ctx, `insert into document_observations(source_id,capture_id,representation_digest,
+ordinal,surface,application,title,url,web_url,modified_at,document_json,variant,registry_json,opened_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+on conflict(source_id,representation_digest) do nothing`, p.sourceID, p.captureID, p.digest, p.ordinal,
+		p.surface, p.application, p.title, p.url, p.webURL, p.modified, p.documentJSON, p.variant, p.registryJSON, p.opened); err != nil {
+		return err
+	}
+	var rowID int64
+	if err := tx.QueryRowContext(ctx, `select rowid from document_observations where source_id=? and representation_digest=?`, p.sourceID, p.digest).Scan(&rowID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `insert into document_capture_members(capture_id,observation_rowid)
+values(?,?) on conflict(capture_id,observation_rowid) do nothing`, p.captureID, rowID); err != nil {
+		return err
+	}
+	var indexed int
+	if err := tx.QueryRowContext(ctx, `select count(*) from document_fts where rowid=?`, rowID).Scan(&indexed); err != nil {
+		return err
+	}
+	if indexed == 0 {
+		if _, err := tx.ExecContext(ctx, `insert into document_fts(rowid,title,metadata) values(?,?,?)`,
+			rowID, p.title, p.metadata); err != nil {
 			return err
-		}
-		if _, err := tx.ExecContext(ctx, `insert into document_capture_members(capture_id,observation_rowid)
-values(?,?) on conflict(capture_id,observation_rowid) do nothing`, captureID, rowID); err != nil {
-			return err
-		}
-		var indexed int
-		if err := tx.QueryRowContext(ctx, `select count(*) from document_fts where rowid=?`, rowID).Scan(&indexed); err != nil {
-			return err
-		}
-		if indexed == 0 {
-			if _, err := tx.ExecContext(ctx, `insert into document_fts(rowid,title,metadata) values(?,?,?)`,
-				rowID, document.Title, officedocuments.MetadataText(document)); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
