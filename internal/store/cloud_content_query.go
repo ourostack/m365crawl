@@ -54,6 +54,82 @@ func (s *Store) CloudRequest(ctx context.Context, registrationID int64) (sharepo
 	return readCloudRequest(ctx, s.db, registrationID)
 }
 
+const cloudObservationSelect = `select o.rowid,o.source_id,o.capture_id,
+case when octet_length(o.result_json)<=16777216 then o.result_json else '' end,
+c.completed_at,l.last_admitted is not s.admitted_attempt or not exists(
+select 1 from cloud_capture_members m where m.capture_id=s.admitted_attempt and m.observation_rowid=o.rowid),
+o.representation_digest,o.kind,o.title,o.file_modified_at,s.qualification,s.boundary,
+a.source_id,a.locator_id,a.content_digest,a.finished_at,
+exists(select 1 from cloud_capture_members original where original.capture_id=o.capture_id and original.observation_rowid=o.rowid),
+s.locator_id
+from cloud_observations o join knowledge_sources s on s.id=o.source_id
+join knowledge_locators l on l.id=s.locator_id
+left join cloud_capture_metadata c on c.capture_id=o.capture_id
+left join knowledge_attempts a on a.id=o.capture_id`
+
+type cloudObservationBinding struct {
+	row                                                   CloudObservationRow
+	encoded, clock, digest, kind, qualification, boundary string
+	title, modified                                       sql.NullString
+	captureSourceID, captureLocatorID, locatorID          int64
+	captureDigest, finished                               string
+	originalMember                                        bool
+}
+
+func scanCloudObservation(scanner interface{ Scan(...any) error }) (cloudObservationBinding, error) {
+	var binding cloudObservationBinding
+	err := scanner.Scan(&binding.row.ID, &binding.row.SourceID, &binding.row.CaptureID,
+		&binding.encoded, &binding.clock, &binding.row.Retained, &binding.digest, &binding.kind,
+		&binding.title, &binding.modified, &binding.qualification, &binding.boundary,
+		&binding.captureSourceID, &binding.captureLocatorID, &binding.captureDigest, &binding.finished,
+		&binding.originalMember, &binding.locatorID)
+	return binding, err
+}
+
+func validateCloudObservation(ctx context.Context, request sharepointcontent.CanonicalRequest, registrationID int64, binding cloudObservationBinding) (CloudObservationRow, error) {
+	row := binding.row
+	if err := json.Unmarshal([]byte(binding.encoded), &row.Result); err != nil {
+		return row, errors.New("cloud: corrupt observation")
+	}
+	at, err := time.Parse(time.RFC3339Nano, binding.clock)
+	if err != nil {
+		return row, errors.New("cloud: corrupt capture clock")
+	}
+	row.CapturedAt = at
+	if err := validateCloudCapture(ctx, CloudCapture{request, row.Result, at}); err != nil {
+		return row, err
+	}
+	expectedKind, qualification := cloudKind(request)
+	title, modified := "", ""
+	if row.Result.File.Title != nil {
+		title = *row.Result.File.Title
+	}
+	if row.Result.File.ModifiedAt != nil {
+		modified = knowledgeTime(*row.Result.File.ModifiedAt).(string)
+	}
+	if binding.kind != expectedKind || binding.qualification != qualification ||
+		binding.digest != hashOf(qualification+binding.encoded) ||
+		binding.title.String != title || binding.title.Valid != (row.Result.File.Title != nil) ||
+		binding.modified.String != modified || binding.modified.Valid != (row.Result.File.ModifiedAt != nil) ||
+		binding.boundary != cloudBoundary(expectedKind, row.Result) {
+		return row, errors.New("cloud: corrupt observation binding")
+	}
+	if binding.captureSourceID != row.SourceID || binding.captureLocatorID != registrationID ||
+		binding.locatorID != registrationID || binding.captureDigest != binding.digest ||
+		binding.finished != binding.clock || !binding.originalMember {
+		return row, errors.New("cloud: corrupt observation capture")
+	}
+	return row, nil
+}
+
+func readCloudObservation(ctx context.Context, reader knowledgeReader, request sharepointcontent.CanonicalRequest, registrationID, sourceID, id int64) (CloudObservationRow, error) {
+	binding, err := scanCloudObservation(reader.QueryRowContext(ctx, cloudObservationSelect+` where o.rowid=? and o.source_id=?`, id, sourceID))
+	if err != nil {
+		return CloudObservationRow{}, err
+	}
+	return validateCloudObservation(ctx, request, registrationID, binding)
+}
+
 func readCloudSources(ctx context.Context, reader knowledgeReader, sourceID int64) ([]CloudSource, error) {
 	ok, err := hasCloudSchema(ctx, reader)
 	if err != nil {
@@ -100,48 +176,38 @@ func readCloudSources(ctx context.Context, reader knowledgeReader, sourceID int6
 				}
 				var requested, current sql.NullString
 				var currentBody sql.NullInt64
-				var currentJSON string
-				if err := reader.QueryRowContext(ctx, `select c.requested_transcript_id,c.current_transcript_id,c.body_observation_id,o.result_json
+				var currentObservationID int64
+				var currentDigest string
+				if err := reader.QueryRowContext(ctx, `select c.requested_transcript_id,c.current_transcript_id,c.body_observation_id,o.rowid,o.representation_digest
 from cloud_capture_metadata c join cloud_capture_members m on m.capture_id=c.capture_id
 join cloud_observations o on o.rowid=m.observation_rowid and o.source_id=?
-where c.capture_id=? and octet_length(o.result_json)<=?`, source.ID, source.AdmittedID, cloudJSONLimit).Scan(&requested, &current, &currentBody, &currentJSON); err != nil {
+where c.capture_id=? and octet_length(o.result_json)<=?`, source.ID, source.AdmittedID, cloudJSONLimit).Scan(&requested, &current, &currentBody, &currentObservationID, &currentDigest); err != nil {
 					return nil, err
 				}
 				if requested.String != request.Request.TranscriptID || requested.Valid != (request.Request.TranscriptID != "") || selected != current {
 					return nil, errors.New("cloud: corrupt capture selection")
 				}
-				var currentResult sharepointcontent.Result
-				if err := json.Unmarshal([]byte(currentJSON), &currentResult); err != nil {
-					return nil, errors.New("cloud: corrupt current metadata")
-				}
-				if _, err := sharepointcontent.ValidateResult(ctx, request, currentResult); err != nil {
+				currentRow, err := readCloudObservation(ctx, reader, request, source.LocatorID, source.ID, currentObservationID)
+				if err != nil {
 					return nil, err
 				}
+				currentResult := currentRow.Result
 				expectedKind, qual := cloudKind(request)
-				if source.Qualification != qual || source.Boundary != cloudBoundary(expectedKind, currentResult) || source.ContentDigest != hashOf(qual+currentJSON) {
+				if source.Qualification != qual || source.Boundary != cloudBoundary(expectedKind, currentResult) || source.ContentDigest != currentDigest {
 					return nil, errors.New("cloud: corrupt current binding")
 				}
 				hasBody := currentResult.State == "page_observations" || currentResult.Transcript != nil
-				if currentBody.Valid != hasBody || (hasBody && (!body.Valid || body.Int64 != currentBody.Int64)) ||
+				if currentBody.Valid != hasBody || (hasBody && (!body.Valid || body.Int64 != currentBody.Int64 || currentBody.Int64 != currentRow.ID)) ||
 					(currentResult.Transcript != nil && (!selected.Valid || selected.String != currentResult.Transcript.ID)) ||
 					(currentResult.Transcript == nil && selected.Valid) {
 					return nil, errors.New("cloud: corrupt body frontier")
 				}
 				if body.Valid {
-					var encoded string
-					if err := reader.QueryRowContext(ctx, `select result_json from cloud_observations where rowid=? and source_id=? and octet_length(result_json)<=?`, body.Int64, source.ID, cloudJSONLimit).Scan(&encoded); err != nil {
+					row, err := readCloudObservation(ctx, reader, request, source.LocatorID, source.ID, body.Int64)
+					if err != nil {
 						return nil, err
 					}
-					var result sharepointcontent.Result
-					if err := json.Unmarshal([]byte(encoded), &result); err != nil {
-						return nil, errors.New("cloud: corrupt body")
-					}
-					if _, err := sharepointcontent.ValidateResult(ctx, request, result); err != nil {
-						return nil, err
-					}
-					if source.Boundary != cloudBoundary(expectedKind, result) {
-						return nil, errors.New("cloud: corrupt retained body binding")
-					}
+					result := row.Result
 					if result.Transcript == nil && result.State != "page_observations" {
 						return nil, errors.New("cloud: invalid body selection")
 					}
@@ -243,34 +309,18 @@ func (s *Store) cloudSnapshot(ctx context.Context, filter CloudFilter, id int64)
 		limit = " limit ?"
 		args = append(args, filter.Limit+1)
 	}
-	rows, err := reader.QueryContext(ctx, `select o.rowid,o.source_id,o.capture_id,
-case when octet_length(o.result_json)<=16777216 then o.result_json else '' end,
-c.completed_at,not exists(select 1 from cloud_capture_members m where m.capture_id=s.admitted_attempt and m.observation_rowid=o.rowid),
-o.representation_digest,o.kind,o.title,o.file_modified_at,s.qualification,s.boundary
-from cloud_observations o join knowledge_sources s on s.id=o.source_id
-join cloud_capture_metadata c on c.capture_id=o.capture_id where `+where+`
+	rows, err := reader.QueryContext(ctx, cloudObservationSelect+` where `+where+`
 order by o.file_modified_at is null,o.file_modified_at desc,coalesce(o.title,''),o.source_id,o.rowid`+limit, args...)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
-		var row CloudObservationRow
-		var encoded, clock, digest, kind, qualification, boundary string
-		var title, modified sql.NullString
-		if err := rows.Scan(&row.ID, &row.SourceID, &row.CaptureID, &encoded, &clock, &row.Retained, &digest, &kind, &title, &modified, &qualification, &boundary); err != nil {
+		binding, err := scanCloudObservation(rows)
+		if err != nil {
 			_ = rows.Close()
 			return out, err
 		}
-		if err := json.Unmarshal([]byte(encoded), &row.Result); err != nil {
-			_ = rows.Close()
-			return out, errors.New("cloud: corrupt observation")
-		}
-		at, err := time.Parse(time.RFC3339Nano, clock)
-		if err != nil {
-			_ = rows.Close()
-			return out, errors.New("cloud: corrupt capture clock")
-		}
-		row.CapturedAt = at
+		row := binding.row
 		var src *CloudSource
 		for i := range sources {
 			if sources[i].Source.ID == row.SourceID {
@@ -287,22 +337,10 @@ order by o.file_modified_at is null,o.file_modified_at desc,coalesce(o.title,'')
 			_ = rows.Close()
 			return out, err
 		}
-		if err := validateCloudCapture(ctx, CloudCapture{request, row.Result, at}); err != nil {
+		row, err = validateCloudObservation(ctx, request, src.RegistrationID, binding)
+		if err != nil {
 			_ = rows.Close()
 			return out, err
-		}
-		expectedKind, qual := cloudKind(request)
-		actualTitle := ""
-		if row.Result.File.Title != nil {
-			actualTitle = *row.Result.File.Title
-		}
-		actualModified := ""
-		if row.Result.File.ModifiedAt != nil {
-			actualModified = knowledgeTime(*row.Result.File.ModifiedAt).(string)
-		}
-		if kind != expectedKind || qualification != qual || digest != hashOf(qual+encoded) || title.String != actualTitle || modified.String != actualModified || boundary != cloudBoundary(expectedKind, row.Result) {
-			_ = rows.Close()
-			return out, errors.New("cloud: corrupt observation binding")
 		}
 		out.Rows = append(out.Rows, row)
 	}

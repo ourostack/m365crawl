@@ -16,7 +16,8 @@ type contentSigninCmd struct {
 }
 
 func (contentSigninCmd) Help() string {
-	return "Explicit visible-window sign-in; never runs during content reads or fetch automatically. " + (transcriptsSigninCmd{}).Help()
+	return "Explicit visible-window sign-in; never runs during content reads or fetch automatically. " +
+		strings.ReplaceAll((transcriptsSigninCmd{}).Help(), "m365crawl transcripts signin", "m365crawl content signin URL --user-agreed")
 }
 func (c *contentSigninCmd) Run(rt *runtime) error {
 	if err := rt.contentFlags(); err != nil {

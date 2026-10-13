@@ -131,7 +131,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts`, `transcripts show`, and `loop list`, `loop search`, `loop show` and `loop sources`); on any other command they are a `usage` error.
+Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts`, `transcripts show`, `loop list`, `loop search`, `loop show`, `loop sources`, `content list`, `content search`, `content show` and `content sources`); on any other command they are a `usage` error.
 
 | Flag | Meaning |
 | --- | --- |
@@ -191,7 +191,7 @@ The overview opens the archive read-only and never runs the implicit sync. With 
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
   m365crawl                   what the archive holds and how fresh it is
-  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata and Loop text
+  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata, Loop text and archived cloud content
   m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats

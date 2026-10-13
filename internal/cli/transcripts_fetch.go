@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -499,7 +500,8 @@ func (c *transcriptsSigninCmd) Run(rt *runtime) error {
 
 func (rt *runtime) signinWindow(exe string, kind browser.Kind, host, site string) (result *signinResult, err error) {
 	rt.progressLine(fmt.Sprintf("opening a visible %s window with m365crawl's own browser profile", browserName(kind)))
-	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: "https://" + host + site + "/"})
+	target := url.URL{Scheme: "https", Host: host, Path: site + "/"}
+	page, closer, err := openBrowser(rt.ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath), StartURL: target.String()})
 	if err != nil {
 		return nil, err
 	}

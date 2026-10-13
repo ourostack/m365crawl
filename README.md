@@ -284,7 +284,7 @@ transcripts: no recorded meetings in the archive yet: run m365crawl sync
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
   m365crawl                   what the archive holds and how fresh it is
-  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata and Loop text
+  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata, Loop text and archived cloud content
   m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
@@ -445,7 +445,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 ## Privacy
 
-The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token. Everything else comes from files Teams and Outlook already keep on this machine. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
+The archive holds your real chats, mail, meetings and explicitly retained cloud content. It stays in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). Only explicit `transcripts fetch`, `transcripts signin`, `content fetch page/stream` and `content signin URL` reach SharePoint through the tool-owned browser; m365crawl never sees a password or token. Ordinary content reads are archive-only regardless of max-age and never fetch or sign in. Other reads use the local archive or desktop caches. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
 
 ## Limits
 

@@ -27,7 +27,7 @@ type startStep struct {
 var startHere = []startStep{
 	{Command: "m365crawl sync", Does: "read Teams, Outlook mail and the calendar into the archive"},
 	{Command: "m365crawl", Does: "what the archive holds and how fresh it is"},
-	{Command: `m365crawl search "words"`, Does: "search chats, mail, fetched transcripts, notes, document metadata and Loop text"},
+	{Command: `m365crawl search "words"`, Does: "search chats, mail, fetched transcripts, notes, document metadata, Loop text and archived cloud content"},
 	{Command: "m365crawl calendar", Does: "today's meetings; calendar event <id> for one meeting with its chat and mail"},
 	{Command: "m365crawl mail unread", Does: "unread mail by folder", mail: true},
 	{Command: "m365crawl unread", Does: "unread Teams chats"},
