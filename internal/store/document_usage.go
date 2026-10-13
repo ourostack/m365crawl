@@ -76,7 +76,8 @@ func usageNativeID(native UsageNative) string {
 	return id
 }
 
-// usageNativeKey is the full native tie key of a usage row: Type, ID and Format.
+// usageNativeKey retains the stored schema-15 payload check. Its delimiter encoding is not
+// collision-free, so identity and ordering must use the literal components, not this string.
 func usageNativeKey(native UsageNative) string {
 	id, format, _ := native.identity()
 	return native.Type + "\x1f" + id + "\x1f" + format
@@ -139,12 +140,14 @@ func (s *Store) CommitUsageDocumentObservations(ctx context.Context, attempt Kno
 		(outcome.Status != "unchanged" && (len(result.Losses) > 0) != (outcome.Status == "partial")) {
 		return errors.New("documents: unqualified usage outcome")
 	}
-	keys := map[string]bool{}
+	keys := map[[3]string]bool{}
 	for _, record := range records {
-		if _, _, ok := record.identity(); !ok || keys[usageNativeKey(record)] {
+		id, format, ok := record.identity()
+		key := [3]string{record.Type, id, format}
+		if !ok || keys[key] {
 			return errors.New("documents: invalid native usage representation")
 		}
-		keys[usageNativeKey(record)] = true
+		keys[key] = true
 	}
 	admission := documentAdmission{binding: usageBinding, qualification: UsageDocumentQualification,
 		unmappedLosses: usageUnmappedLosses, documents: len(records), acquired: capture.AcquiredAt, observed: capture.SourceObservedAt,

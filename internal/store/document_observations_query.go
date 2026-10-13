@@ -155,12 +155,14 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 		variantColumns = "d.variant,d.registry_json,d.opened_at"
 	}
 	// A source's current rows are the members of the capture that owns its admitted capture's
-	// membership: the admitted capture itself, or the one an unchanged capture names. Before
-	// schema 15 every capture owns its own.
-	membersOf := "s.admitted_attempt"
+	// membership: the admitted capture itself, or the one an unchanged capture names.
+	owner, err := documentMembersOwner(ctx, reader, "o")
+	if err != nil {
+		return nil, false, err
+	}
+	membersOf := "(select " + owner + " from document_capture_metadata o where o.capture_id=s.admitted_attempt)"
 	if usage {
-		usageColumns, nativeOrder = "d.usage_json,d.native_key", "d.native_key,"
-		membersOf = "(select coalesce(o.members_capture,o.capture_id) from document_capture_metadata o where o.capture_id=s.admitted_attempt)"
+		usageColumns, nativeOrder = "d.usage_json,d.native_key", usageNativeOrder+","
 	}
 	where, args, err := documentWhere(filter, id)
 	if err != nil {

@@ -116,15 +116,49 @@ func TestDocsDateWindowCountsUndatedRows(t *testing.T) {
 			t.Fatalf("%v reports rows left out of a date window: %q", args, notices(doc))
 		}
 	}
-	// The flag's own help says which rows it never matches; docs --help says why for OneDrive.
+	// The flag's own help distinguishes unknown recent clocks from the type itself.
 	for _, command := range [][]string{{"docs", "list"}, {"docs", "search"}} {
 		help := strings.Join(strings.Fields(helpOf(t, command...)), " ")
-		if !strings.Contains(help, "Never matches a registry row, a OneDrive usage recent row or a collaborator row") {
-			t.Fatalf("%v --since/--until help does not say which rows never match:\n%s", command, help)
+		if !strings.Contains(help, "Never matches a registry row or a collaborator row") ||
+			!strings.Contains(help, "Recent rows match only when their file-modification clock has a parsed explicit offset") {
+			t.Fatalf("%v --since/--until help misstates recent clock filtering:\n%s", command, help)
 		}
 	}
 	if help := strings.Join(strings.Fields(helpOf(t, "docs")), " "); !strings.Contains(help, "every clock of a recent row is written without a zone") {
 		t.Fatal("docs --help does not state that recent-row clocks carry no zone")
+	}
+}
+
+func TestUsageRecentDateWindowsRespectOffset(t *testing.T) {
+	e := newEnv(t)
+	zoneLess := usageCLIRecent("zone-less")
+	zoneLess.FileModifiedRaw = "2026-10-09 12:34:56"
+	offset := usageCLIRecent("explicit-offset")
+	offset.FileModifiedRaw = "2026-10-09T14:34:56+02:00"
+	seedUsageCLI(t, e, "/fictional/Business_clock/Microsoft.FileUsageSync.db",
+		onedriveusage.Result{Recent: []onedriveusage.RecentObservation{zoneLess, offset}})
+	for _, command := range [][]string{{"docs", "list"}, {"docs", "search"}} {
+		doc, _ := usageCLIRun(t, e, append(command, "--application", "onedrive",
+			"--since", "2026-10-01T00:00:00Z", "--until", "2026-10-10T00:00:00Z")...)
+		rows := items(t, doc)
+		if len(rows) != 1 || rows[0]["modified_at"] != "2026-10-09T12:34:56Z" ||
+			rows[0]["usage_native"].(map[string]any)["Recent"].(map[string]any)["ID"] != "explicit-offset" {
+			t.Fatalf("%v offset recent result: %v", command, rows)
+		}
+		help := strings.Join(strings.Fields(helpOf(t, command...)), " ")
+		if strings.Contains(help, "Never matches a registry row, a OneDrive usage recent row") ||
+			!strings.Contains(help, "Recent rows match only when their file-modification clock has a parsed explicit offset") {
+			t.Fatalf("%v help contradicts admitted recent clock: %s", command, help)
+		}
+	}
+	all, _ := usageCLIRun(t, e, "docs", "list", "--application", "onedrive")
+	if rows := items(t, all); len(rows) != 2 {
+		t.Fatalf("zone-less recent evidence lost: %v", rows)
+	}
+	help := strings.Join(strings.Fields(helpOf(t, "docs")), " ")
+	if !strings.Contains(help, "In the OneDrive files examined so far") ||
+		!strings.Contains(help, "A recent row with a parsed explicit-offset FileModified clock can match a date window") {
+		t.Fatalf("docs help confuses measured clocks with a type restriction: %s", help)
 	}
 }
 

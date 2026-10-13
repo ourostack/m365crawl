@@ -196,9 +196,10 @@ func (s *Store) DocumentLocatorInput(ctx context.Context, id int64) (officedocum
 }
 
 // documentSchema reports whether the document tables exist, whether they carry the schema 14
-// variant columns, and whether they carry the schema 15 usage payload, native key, relation table
-// and membership pointer. A read-only archive from before schema 14 has the tables without the variant columns: its
-// rows are all Office JSON. One from before schema 15 has no usage rows to read. Neither is migrated.
+// variant columns, and whether they carry the schema 15 usage payload, native key and relation
+// table. The optional membership pointer is detected independently. A read-only archive from
+// before schema 14 has the tables without the variant columns: its rows are all Office JSON.
+// One from before schema 15 has no usage rows to read. Neither is migrated.
 func documentSchema(ctx context.Context, reader knowledgeReader) (tables, variants, usage bool, err error) {
 	var tableCount, columnCount, usageCount int
 	err = reader.QueryRowContext(ctx, `select
@@ -208,9 +209,19 @@ func documentSchema(ctx context.Context, reader knowledgeReader) (tables, varian
 (select count(*) from pragma_table_info('document_locator_metadata') where name='variant')+
 (select count(*) from pragma_table_info('document_capture_metadata') where name='variant'),
 (select count(*) from pragma_table_info('document_observations') where name in ('usage_json','native_key'))+
-(select count(*) from sqlite_master where type='table' and name='document_usage_relations')+
-(select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture')`).Scan(&tableCount, &columnCount, &usageCount)
-	return tableCount == 5, columnCount == 5, columnCount == 5 && usageCount == 4, err
+(select count(*) from sqlite_master where type='table' and name='document_usage_relations')`).Scan(&tableCount, &columnCount, &usageCount)
+	return tableCount == 5, columnCount == 5, columnCount == 5 && usageCount == 3, err
+}
+
+// documentMembersOwner handles both shared membership and older physical schemas whose
+// unchanged captures copied their own members and relations.
+func documentMembersOwner(ctx context.Context, reader knowledgeReader, alias string) (string, error) {
+	var pointers int
+	err := reader.QueryRowContext(ctx, `select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture'`).Scan(&pointers)
+	if pointers == 0 {
+		return alias + ".capture_id", err
+	}
+	return "coalesce(" + alias + ".members_capture," + alias + ".capture_id)", err
 }
 
 func (s *Store) CommitDocumentObservations(ctx context.Context, attempt KnowledgeAttempt, outcome KnowledgeOutcome, result officedocuments.Result, capture DocumentCaptureMetadata) error {
