@@ -9,7 +9,7 @@
 - A usage source whose first capture failed has no source ID, so its `fix` names the retry `m365crawl docs sync --onedrive-usage-file FILE` with the file's path, quoted so that pasting it cannot run text from the file name.
 - The archive moves to schema 15: additive `usage_json` and `native_key` columns and a `document_usage_relations` table. Existing rows are not rewritten, and reading a schema 14 archive does not migrate it.
 - The `metadata` manifest's privacy scopes add `onedrive_usage_metadata`.
-- Limit: OneDrive keeps a write-ahead log beside the usage file while it runs. A file with one is refused with `onedrive_usage_input_unqualified` and never consolidated, so the default Mac files are usually readable only after OneDrive has quit.
+- Limit: a usage file with a write-ahead log or shared-memory file beside it is refused with `onedrive_usage_input_unqualified` and never consolidated.
 - Limit: only the usage file is read. OneDrive's library and sync databases are not read yet, there is no default discovery on Windows or Linux, and only Business account folders are read by default.
 - Limit: names, addresses, thread IDs and collaborator profiles in a usage row are the file's claims. They are not linked to archived people, chats, mail or accounts, and no command follows them.
 
