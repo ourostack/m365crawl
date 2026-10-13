@@ -18,7 +18,7 @@ func TestInitScriptActualNavigationAndRemoval(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	b, err := Launch(ctx, LaunchOptions{Exe: exe, Kind: kind, Profile: filepath.Join(t.TempDir(), "archive", "profile"), Headless: true})
+	b, err := Launch(ctx, LaunchOptions{Exe: exe, Kind: kind, Profile: filepath.Join(t.TempDir(), "archive", "profile"), Headless: true, DisposableFixture: true})
 	if err != nil {
 		t.Fatal(err)
 	}

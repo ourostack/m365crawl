@@ -11,7 +11,7 @@
     },
     {
       "command": "m365crawl search \"words\"",
-      "does": "search chats, mail, fetched transcripts, notes, document metadata and Loop text"
+      "does": "search chats, mail, fetched transcripts, notes, document metadata, Loop text and archived cloud content"
     },
     {
       "command": "m365crawl calendar",

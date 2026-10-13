@@ -1,5 +1,38 @@
 # m365crawl — Your Microsoft 365 work, ready for your agents
 
+### Explicit SharePoint / Stream content
+
+`m365crawl content fetch page URL` explicitly acquires one supported rich-text
+projection. `content fetch stream URL [--transcript-id ID]` acquires one verified
+selected native transcript, or verified file/account metadata with no selected
+body. Nothing is fetched by ordinary `content list`, `content search WORDS`,
+`content show cloud-observation:N`, `content sources` or `search WORDS --source content`,
+regardless of `--max-age`.
+
+Supported targets are HTTPS `tenant.sharepoint.com` / `tenant.sharepoint-df.com`,
+under `/sites/NAME` or `/teams/NAME`, ending in `/SitePages/NAME.aspx` or
+`/_layouts/15/stream.aspx?id=ENCODED_FILE_PATH`. Sharing tickets and tracking
+queries are never retained/replayed. The file path must belong to the admitted site.
+This is not a library crawl, rendered layout, Office-file download or meeting transcript.
+
+When the tool-owned browser profile needs sign-in, first ask the user to agree
+to `content signin URL --user-agreed`. No ordinary browser authentication is copied.
+Page scope is always partial; Stream completeness covers one selected bounded body,
+not every variant. A retained body keeps its own account/file/selection and clocks,
+alongside current source coverage and `selection_match` (matches/differs/unavailable).
+`registration_id` retries an explicit target, `source_id` filters an admitted instance,
+and `cloud-observation:N` never moves to a newer representation.
+
+`content show` previews the first100 text/entry occurrences. Native selections and
+entry IDs are explicitly labeled `native_id_prefix` (at most128 Unicode runes)
+with `native_id_truncated`; complete structured evidence remains in `result_json`.
+Run `m365crawl --db SAME_ARCHIVE sql 'select result_json from cloud_observations where rowid=N'`
+using the generated positive N in `full_text_sql`. Native unknown modification
+times/speakers stay unknown. Native Windows acquisition is not yet qualified;
+portable offline archive reads do not imply Windows browser/service acceptance.
+
+![Synthetic archived content example](docs/content-synthetic.svg)
+
 [![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?include_prereleases&style=flat-square)](https://github.com/ourostack/m365crawl/releases)
 [![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
@@ -251,7 +284,7 @@ transcripts: no recorded meetings in the archive yet: run m365crawl sync
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
   m365crawl                   what the archive holds and how fresh it is
-  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata and Loop text
+  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata, Loop text and archived cloud content
   m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
@@ -412,7 +445,7 @@ Text output is colored on a terminal. `--no-color` or `NO_COLOR` turns color off
 
 ## Privacy
 
-The archive holds your real chats, mail and meetings. It stays on your machine in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). Every command is offline except `transcripts fetch` and `transcripts signin`, which reach SharePoint only through a browser m365crawl starts with its own profile; m365crawl never sees a password or token. Everything else comes from files Teams and Outlook already keep on this machine. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
+The archive holds your real chats, mail, meetings and explicitly retained cloud content. It stays in a private directory (`~/.m365crawl/` on macOS, `%LOCALAPPDATA%\m365crawl\` on Windows). Only explicit `transcripts fetch`, `transcripts signin`, `content fetch page/stream` and `content signin URL` reach SharePoint through the tool-owned browser; m365crawl never sees a password or token. Ordinary content reads are archive-only regardless of max-age and never fetch or sign in. Other reads use the local archive or desktop caches. Treat the database like the mailbox it contains: do not commit it, sync it to shared storage or paste it into tools you would not show the original messages to. Tests and this README use only synthetic fixture data. [`docs/privacy.md`](docs/privacy.md) lists what is read, what is stored and what is never touched.
 
 ## Limits
 

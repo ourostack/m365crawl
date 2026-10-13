@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="230" viewBox="0 0 900 230">
+<rect width="900" height="230" rx="12" fill="#111827"/>
+<g font-family="monospace" font-size="16" fill="#e5e7eb">
+<text x="24" y="36">Synthetic example — no service data</text>
+<text x="24" y="70" fill="#93c5fd">m365crawl content show cloud-observation:1</text>
+<text x="24" y="106">Synthetic page · partial supported projection · retained</text>
+<text x="24" y="138">selection: unavailable · modified_at: unknown</text>
+<text x="24" y="170">preview: 100 / 101 ordered text occurrences</text>
+<text x="24" y="202" fill="#a7f3d0">Offline full text: SQL result_json WHERE rowid=1, same archive</text>
+</g></svg>

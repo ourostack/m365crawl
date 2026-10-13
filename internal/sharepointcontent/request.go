@@ -1,10 +1,91 @@
 package sharepointcontent
 
 import (
+	"context"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"unicode/utf8"
 )
+
+// CanonicalRequest retains only admitted identity, never tracking or sharing tickets.
+type CanonicalRequest struct {
+	Request    Request
+	LocatorKey string
+}
+
+func NormalizeRequest(request Request) (CanonicalRequest, error) {
+	a, err := admit(request)
+	if err != nil {
+		return CanonicalRequest{}, err
+	}
+	u, _ := url.Parse(request.URL) // admit already parsed and validated the same bytes
+	query := ""
+	if a.Kind == "stream" {
+		// Keep the admitted raw encoding rather than expanding a short Unicode URL.
+		for _, pair := range strings.Split(u.RawQuery, "&") {
+			key, _, _ := strings.Cut(pair, "=")
+			decoded, _ := url.QueryUnescape(key)
+			if decoded == "id" {
+				query = pair
+				break
+			}
+		}
+	}
+	authority := strings.Index(request.URL, "://") + 3
+	pathStart := authority + strings.Index(request.URL[authority:], "/")
+	rawPath, _, _ := strings.Cut(request.URL[pathStart:], "?")
+	request.URL = "https://" + a.Host + rawPath
+	if query != "" {
+		request.URL += "?" + query
+	}
+	var selection *string
+	if request.TranscriptID != "" {
+		selection = &request.TranscriptID
+	}
+	key, _ := json.Marshal(struct {
+		Kind         string  `json:"kind"`
+		Host         string  `json:"host"`
+		Site         string  `json:"site"`
+		Path         string  `json:"path"`
+		TranscriptID *string `json:"transcript_id"`
+	}{a.Kind, a.Host, a.Site, a.Path, selection})
+	return CanonicalRequest{Request: request, LocatorKey: string(key)}, nil
+}
+
+// ValidateResult reuses the backend decoder at the archive boundary. Derived clocks and
+// losses are re-established from raw evidence, not trusted from the caller or archive.
+func ValidateResult(ctx context.Context, request CanonicalRequest, result Result) (Result, error) {
+	canonical, err := NormalizeRequest(request.Request)
+	if err != nil || canonical != request {
+		return Result{}, &ReadError{Code: "invalid_input"}
+	}
+	a, _ := admit(request.Request)
+	raw := scriptResult{State: result.State, HTTPStatus: result.HTTPStatus, Account: result.SourceAccount,
+		File: result.File, PageControls: result.PageControls, Transcript: result.Transcript}
+	for _, loss := range result.Losses {
+		if loss.Code != "transcript_offset_unmapped" && loss.Code != "transcript_offset_reversed" {
+			raw.Losses = append(raw.Losses, loss)
+		}
+	}
+	decoded, err := decode(ctx, a, raw)
+	if err != nil {
+		return Result{}, err
+	}
+	// Empty collections have one canonical JSON representation.
+	if len(result.Losses) == 0 {
+		result.Losses = decoded.Losses
+	}
+	if len(result.PageControls) == 0 {
+		result.PageControls = decoded.PageControls
+	}
+	before, _ := json.Marshal(result)
+	after, _ := json.Marshal(decoded)
+	if string(before) != string(after) {
+		return Result{}, &ReadError{Code: "malformed"}
+	}
+	return decoded, nil
+}
 
 type admittedRequest struct {
 	Kind, Host, Site, Path, TranscriptID string

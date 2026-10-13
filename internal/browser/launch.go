@@ -17,7 +17,8 @@ import (
 )
 
 // LaunchFlags is the whole browser command line apart from the profile, the optional headless
-// flag and the start page. Pipe mode (--remote-debugging-pipe) was considered and rejected:
+// flag, disposable-fixture keychain opt-in and the start page. Pipe mode
+// (--remote-debugging-pipe) was considered and rejected:
 // Go's ExtraFiles is not supported on Windows, so the debugging port is used on every platform
 // and is exposed on loopback for the length of one run.
 //
@@ -36,6 +37,9 @@ type LaunchOptions struct {
 	Headless bool
 	StartURL string // the page the browser opens; empty means about:blank
 	Timeout  time.Duration
+	// DisposableFixture is only for fresh synthetic profiles, never authenticated product
+	// profiles. Chromium's mock keychain avoids macOS dialogs under an isolated test HOME.
+	DisposableFixture bool
 }
 
 // Argv is the exact command line (without the executable) Launch uses.
@@ -44,6 +48,9 @@ func Argv(o LaunchOptions) []string {
 	args = append(args, strings.Fields(LaunchFlags)...)
 	if o.Headless {
 		args = append(args, "--headless=new")
+	}
+	if o.DisposableFixture {
+		args = append(args, "--use-mock-keychain")
 	}
 	start := o.StartURL
 	if start == "" {

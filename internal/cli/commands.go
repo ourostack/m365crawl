@@ -238,7 +238,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 type searchCmd struct {
 	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
-	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,loop,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata, cached Loop channels or all."`
+	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,loop,content,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata, cached Loop channels, offline cloud content or all."`
 	Folder         string `help:"Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also search deleted messages (Teams chats only)."`
 	MentionsMe     bool   `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only."`
@@ -248,7 +248,8 @@ type searchCmd struct {
 
 // Help is the long help of search.
 func (searchCmd) Help() string {
-	return "Searches Teams chats, Outlook mail, fetched meeting transcripts and participating registered knowledge sources; every item has a source (chats, mail, transcripts, notes, documents or loop). sources reports, for each source searched, returned (its items in this result; count is the same number), how many it matched before --limit, and truncated (it had more than the result holds). matched is exact: chats and loop always give it, and every other source gives it when it read all its hits. A source that stops reading at --limit gives matched_at_least instead, the hits it read, never an invented total. matched_at_least is a floor, not a total: that source stopped reading once it had --limit hits and may hold more, so raise --limit until it reports matched; text output names each such source. With no archive nothing is searched, and neither is present. A source can match and return nothing when newer hits of other sources fill the limit: text output then prints a line such as `3 Loop hits not shown; use --source loop`, with `and raise --limit` when that source alone matched more than --limit. The line never names the source already selected: with --source loop it says `1 Loop hit not shown; raise --limit`. Items are newest first by sent_at for chats, received_at for mail, at for transcripts and native modified_at for knowledge; unknown dates sort last.\n" +
+	return "Cloud content participates as --source content: archive-only SharePoint page and selected Stream transcript observations; never fetches, signs in or migrates on reads, regardless of --max-age. Native file-modified date bounds exclude unknown clocks. content_coverage remains outside --fields and global clipping, including zero-hit failed/metadata-only registrations. Account/author, chat/mail-only and profile filters reject explicit content or exclude it from all with a notice. Equal-time legacy hits keep their original relative order and precede cloud hits; cloud-only ties use full native title, source ID and numeric observation ID before clipping. Use content show cloud-observation:N for first100 structured occurrences and full_text_sql for the same archive's complete result_json.\n" +
+		"Searches Teams chats, Outlook mail, fetched meeting transcripts and participating registered knowledge sources; every item has a source (chats, mail, transcripts, notes, documents, loop or content). sources reports, for each source searched, returned (its items in this result; count is the same number), how many it matched before --limit, and truncated (it had more than the result holds). matched is exact: chats and loop always give it, and every other source gives it when it read all its hits. A source that stops reading at --limit gives matched_at_least instead, the hits it read, never an invented total. matched_at_least is a floor, not a total: that source stopped reading once it had --limit hits and may hold more, so raise --limit until it reports matched; text output names each such source. With no archive nothing is searched, and neither is present. A source can match and return nothing when newer hits of other sources fill the limit: text output then prints a line such as `3 Loop hits not shown; use --source loop`, with `and raise --limit` when that source alone matched more than --limit. The line never names the source already selected: with --source loop it says `1 Loop hit not shown; raise --limit`. Items are newest first by sent_at for chats, received_at for mail, at for transcripts and native modified_at for knowledge; unknown dates sort last.\n" +
 		"Registered OneNote indexed notes also participate in unconstrained default search. Note hits have source notes, a stable note:ID, title/text/OCR and native modified_at (unknown dates sort last). Use `notes show note:ID` to expand them, not thread. source_coverage reports indexed scope, retained captures and losses outside item shaping and zero hits.\n" +
 		"Document metadata describes unresolved documents, not current owners, sharing events, local residency or acquired file text. Hits have source documents and document-observation:ID; use `docs show document-observation:ID` to inspect native claims and bounded URL references, not thread. Date filters use native modified_at, never capture/file time; unknown dates are excluded, and a date-only --until includes that local day. source_coverage preserves current independent input state and refresh errors even at zero hits.\n" +
 		"A transcript item is one part of a recorded meeting: the first entry of the part that matched, its speaker and absolute time (at), matches (how many of the part's entries matched) and fetched_at. Only transcripts already fetched into the archive are searched, offline; `m365crawl transcripts` lists what can be fetched.\n" +
@@ -276,6 +277,9 @@ func (c *searchCmd) Run(rt *runtime) error {
 	if c.Source == searchLoop && strings.TrimSpace(c.Query) == "" {
 		return errs.Usage("Loop search needs words; use loop list for an unfiltered list")
 	}
+	if c.Source == searchContent && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
+		return errs.Usage("content search needs words or native modified date bounds; use content list")
+	}
 	if c.Source == searchDocuments && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("document search needs words or --since/--until; use docs list for an unfiltered list")
 	}
@@ -301,6 +305,15 @@ func (c *searchCmd) Run(rt *runtime) error {
 		rt.documentCoverage = coverage
 	}
 	if !p.chats && !p.mail && !p.transcripts {
+		if p.content {
+			return rt.contentRead("search", func(st *store.Store) (*listResult, error) {
+				res, err := c.search(rt, p, f, st)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*listResult), nil
+			})
+		}
 		if p.loop {
 			return rt.loopRead("search", 0, func(st *store.Store) (*listResult, error) {
 				res, err := c.search(rt, p, f, st)

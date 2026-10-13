@@ -580,8 +580,8 @@ func TestUsageSnapshotAndMigrationRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion || SchemaVersion != 15 {
-		t.Fatalf("schema %d, want 15", n)
+	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion {
+		t.Fatalf("schema %d, want %d", n, SchemaVersion)
 	}
 	if after := state(s); after != before {
 		t.Fatal("migration changed existing rows, their index text or their membership")

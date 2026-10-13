@@ -1,4 +1,4 @@
-package sharepointcontent
+package sharepointcontent_test
 
 import (
 	"context"
@@ -24,13 +24,16 @@ func scriptPage(t *testing.T) (context.Context, *browser.Page) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
 	profile := filepath.Join(t.TempDir(), "archive", "profile")
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, StartURL: "about:blank"})
+	t.Logf("creating disposable synthetic profile: %s", profile)
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, StartURL: "about:blank", DisposableFixture: true})
 	if err != nil {
 		t.Fatalf("synthetic script browser launch failed: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := b.Close(); err != nil {
 			t.Error("synthetic script browser cleanup failed")
+		} else {
+			t.Log("disposable synthetic browser closed")
 		}
 	})
 	page, err := b.Page(ctx)
