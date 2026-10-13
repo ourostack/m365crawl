@@ -183,6 +183,31 @@ func (s *searchSources) hints() []string {
 	return out
 }
 
+// floorNote is the text line that names the sources whose match count is a floor because they
+// stopped reading at the limit; empty when every count is exact.
+func (s *searchSources) floorNote() string {
+	if s == nil {
+		return ""
+	}
+	var names []string
+	for _, src := range []struct {
+		count *sourceCount
+		name  string
+	}{{s.Chats, searchChats}, {s.Mail, searchMail}, {s.Transcripts, searchTranscripts}, {s.Notes, searchNotes}, {s.Documents, searchDocuments}, {s.Loop, searchLoop}} {
+		if src.count != nil && src.count.MatchedAtLeast != nil {
+			names = append(names, src.name)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0] + " stopped reading at --limit, so its match count (matched_at_least in JSON) is a floor, not a total; raise --limit to read further"
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] +
+		" stopped reading at --limit, so their match counts (matched_at_least in JSON) are floors, not totals; raise --limit to read further"
+}
+
 // searchSources is the per-source part of a search result. A source that was not searched is absent.
 type searchSources struct {
 	Chats       *sourceCount `json:"chats,omitempty"`
@@ -529,7 +554,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			hits = append(hits, searchHit{at: at, item: searchNoteItem{Source: searchNotes, noteItem: noteItemOf(row, rt.g.MaxText)}, source: searchNotes})
 		}
 	}
-	documentTruncated := false
+	documentTruncated, undated := false, ""
 	if p.indexedDocuments && st != nil {
 		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
 			ModifiedSince: f.Since, ModifiedUntil: documentUpperBound(f.Until, c.Until), Limit: f.Limit})
@@ -539,10 +564,15 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		documentTruncated = snapshot.Truncated
 		matched[searchDocuments], atLeast[searchDocuments] = len(snapshot.Rows), snapshot.Truncated
 		for _, row := range snapshot.Rows {
-			hits = append(hits, searchHit{at: row.Document.Modified.Value, item: searchDocumentItem{
-				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText)}, source: searchDocuments})
+			at := row.Document.Modified.Value
+			if row.ModifiedAt != nil { // a usage row's modification time is its own column
+				at = *row.ModifiedAt
+			}
+			hits = append(hits, searchHit{at: at, item: searchDocumentItem{
+				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText, rt.archiveRef())}, source: searchDocuments})
 		}
 		rt.documentCoverage = documentSnapshotCoverage(rt, snapshot.Sources)
+		undated = undatedNotice(snapshot.Undated)
 	}
 	loopTruncated := false
 	if p.loop && st != nil {
@@ -592,6 +622,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if p.loopExclusion != "" {
 		res.addNotice(p.loopExclusion)
+	}
+	if undated != "" {
+		res.addNotice(undated)
 	}
 	res.Sources = &searchSources{selected: c.Source, limit: f.Limit}
 	sourceOf := func(name string) *sourceCount {

@@ -193,6 +193,10 @@ func TestMain(m *testing.M) {
 	documentsRegistryDiscover = func(context.Context) ([]officecapture.RegistryInput, error) {
 		return nil, &officecapture.ReadError{Code: "office_registry_unavailable"}
 	}
+	// Nor this machine's OneDrive usage files.
+	documentsUsageDiscover = func(context.Context) (officecapture.UsageDiscovery, error) {
+		return officecapture.UsageDiscovery{}, &officecapture.ReadError{Code: "onedrive_usage_unavailable"}
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

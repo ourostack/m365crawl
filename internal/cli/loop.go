@@ -306,9 +306,15 @@ func (c *loopListCmd) Run(rt *runtime) error {
 		}
 		result := newList(shape(rt, out), snapshot.Truncated)
 		result.LoopCoverage = loopSnapshotCoverage(rt, snapshot.Sources)
+		if len(out) > 0 {
+			result.rowsHint = loopRowsHint
+		}
 		return result, nil
 	})
 }
+
+// loopRowsHint is the text line under a Loop channel table that returned rows.
+const loopRowsHint = "partial snapshots of cached text, not full or current pages"
 
 type loopSearchCmd struct {
 	Query    string `arg:"" help:"Words in channel text or path; required."`

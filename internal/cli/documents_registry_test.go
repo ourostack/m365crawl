@@ -504,7 +504,7 @@ func TestRegistryDefaultSyncExitCode(t *testing.T) {
 	code, stdout, stderr = e.run("docs", "sync")
 	doc := decode(t, stdout)
 	discovery, _ := doc["discovery"].([]any)
-	if code != 0 || len(discovery) != 2 || len(coverageSources(t, doc)) != 1 {
+	if code != 0 || len(discovery) != 3 || len(coverageSources(t, doc)) != 1 {
 		t.Fatalf("a registered source was attempted, so the sync reports: %d %s %s", code, stdout, stderr)
 	}
 	run := runDocumentsSync

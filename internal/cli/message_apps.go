@@ -79,6 +79,8 @@ type applicationSummary struct {
 	AppID          *string `json:"app_id"`
 	ReplyToID      *string `json:"reply_to_id"`
 	CitationsTotal *int    `json:"citations_total"`
+	// LossesTotal is the sum of the counts in served.losses: how many native fields were not read.
+	LossesTotal *int `json:"losses_total"`
 }
 
 // summary is the item's compact form, with the same clipped app name.
@@ -87,9 +89,12 @@ func (it *applicationItem) summary() *applicationSummary {
 	switch {
 	case it.Served != nil && it.Served.applicationPayloadItem != nil:
 		p := it.Served.applicationPayloadItem
-		out.AppName, out.AppID, out.ReplyToID, out.CitationsTotal = p.AppName, p.AppID, p.ReplyToID, &p.TotalAdmitted
+		out.AppName, out.AppID, out.ReplyToID, out.CitationsTotal, out.LossesTotal = p.AppName, p.AppID, p.ReplyToID, &p.TotalAdmitted, new(int)
+		for _, loss := range p.Losses {
+			*out.LossesTotal += loss.Count
+		}
 	case it.State == store.AppStateAbsent: // read, and it holds no claim
-		out.CitationsTotal = new(int)
+		out.CitationsTotal, out.LossesTotal = new(int), new(int)
 	}
 	return out
 }
@@ -118,7 +123,11 @@ func appSummaryCell(raw []byte) string {
 	if s.ReplyToID != nil {
 		parts = append(parts, fmt.Sprintf("reply to %q", appText(*s.ReplyToID)))
 	}
-	return strings.Join(append(parts, plural(*s.CitationsTotal, "citation", "citations")), "; ")
+	parts = append(parts, plural(*s.CitationsTotal, "citation", "citations"))
+	if s.LossesTotal != nil && *s.LossesTotal > 0 {
+		parts = append(parts, plural(*s.LossesTotal, "native field not read", "native fields not read"))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // appSummaryField is the --fields key that adds app_summary to each returned message.
@@ -578,7 +587,7 @@ const applicationEvidenceHelp = "Application evidence: each returned Teams messa
 	"app_observation.state is mapped (claims read), partial (some read; see losses), absent (no app or citation claims), failed (the native JSON could not be read; failure_code says why) or not_derived (not projected yet: run a writable `m365crawl sync`; --max-age 0 never derives it). mapped means the claims were read, not that an app or bot posted the message: a message names an app only when served.app_id or served.app_name is set. When the current representation failed, served is the last good one, with retained true and retained_reason current_failed. application_evidence_coverage counts the states of the Teams messages actually returned (after --limit), and its posted_by_app counts those whose served evidence names an app by app_id or app_name (the rows text output marks [app: NAME]); it is a lower bound, and the note says so, when a returned message is not_derived or failed with nothing served. When none is returned its state is unknown, not absent.\n"
 
 // appSummaryHelp is the help of --fields app_summary, on the commands that accept the key.
-const appSummaryHelp = "--fields app_summary gives each message a compact app_summary instead of the whole app_observation: state, app_name, app_id, reply_to_id and citations_total. citations_total is every citation read from the message (served.total_admitted), not the at most 100 an item shows; it and the three claims are null when nothing is served (not_derived, or failed with nothing retained). It is printed only when --fields asks for it.\n"
+const appSummaryHelp = "--fields app_summary gives each message a compact app_summary instead of the whole app_observation: state, app_name, app_id, reply_to_id, citations_total and losses_total. citations_total is every citation read from the message (served.total_admitted), not the at most 100 an item shows. losses_total is the sum of the counts in served.losses, the native fields that could not be read; 0 means none. Both totals and the three claims are null when nothing is served (not_derived, or failed with nothing retained). It is printed only when --fields asks for it.\n"
 
 // appCodeCommands are the commands whose help ends with the application evidence codes.
 var appCodeCommands = []string{"messages", "unread", "thread", "search", "calendar event"}

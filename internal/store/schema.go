@@ -26,7 +26,14 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // on document locators, observations and captures, and observations' registry_json and opened_at.
 // Existing rows keep variant office_json; an archive at version 13 gains the columns on its next
 // writable open, and reads of an older archive treat every row as Office JSON.
-const SchemaVersion = 14
+// Version 15 adds the OneDrive usage variant: observations' usage_json and native_key, and the
+// document_usage_relations table of capture-owned edges between a recent row and its formatted
+// variants, and document_capture_metadata.members_capture: an unchanged capture of any document
+// source stores no membership of its own and names there the capture whose document_capture_members
+// and document_usage_relations rows it shares (null: the capture owns its rows, as every capture
+// written before version 15 does). The change is additive; an archive at version 14 gains it on its
+// next writable open, and reads of an older archive have no usage rows.
+const SchemaVersion = 15
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as

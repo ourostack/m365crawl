@@ -171,8 +171,11 @@ func TestMigrationSchema14RepairsPartialColumnsAndRollsBack(t *testing.T) {
 	s := newStore(t)
 	setupDocumentObservation(t, s)
 	before := dump(t, s)
+	// Re-added columns go to the end of the table, so the later columns are dropped with it: the
+	// repaired table then has the same column order and the dumps compare value for value.
 	for _, statement := range []string{"alter table document_observations drop column registry_json",
-		"alter table document_locator_metadata drop column variant"} {
+		"alter table document_observations drop column opened_at", "alter table document_observations drop column usage_json",
+		"alter table document_observations drop column native_key", "alter table document_locator_metadata drop column variant"} {
 		if _, err := s.db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}

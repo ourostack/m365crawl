@@ -286,7 +286,7 @@ func TestFieldsAppSummary(t *testing.T) {
 		m := jsonRun(t, e, append([]string{"--fields", "id,app_summary"}, args...)...)
 		got := byID(t, items(t, m), "app-1")
 		summary := got["app_summary"].(map[string]any)
-		if len(got) != 2 || len(summary) != 5 || summary["state"] != "partial" || summary["app_name"] != "Synthetic Helper" || summary["app_id"] != "app-synthetic" ||
+		if len(got) != 2 || len(summary) != 6 || summary["state"] != "partial" || summary["app_name"] != "Synthetic Helper" || summary["app_id"] != "app-synthetic" ||
 			summary["reply_to_id"] != "native-reply-1" || summary["citations_total"] != float64(2) {
 			t.Fatalf("%v app_summary: %v", args, got)
 		}
@@ -332,7 +332,8 @@ func TestLoopRowsSayLatestCachedSnapshot(t *testing.T) {
 			t.Fatalf("text loop list lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "current") {
+	// The one line that says the rows are not current pages is the only place the word appears.
+	if strings.Contains(strings.Replace(text, loopRowsHint, "", 1), "current") {
 		t.Fatalf("text loop list still says current:\n%s", text)
 	}
 	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Hello", "--source", "loop"); !strings.Contains(search, "partial_snapshot") {

@@ -355,7 +355,8 @@
       "onenote_index",
       "outlook_people",
       "office_json_metadata",
-      "office_registry_metadata"
+      "office_registry_metadata",
+      "onedrive_usage_metadata"
     ]
   }
 }

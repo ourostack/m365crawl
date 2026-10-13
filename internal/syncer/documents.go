@@ -13,22 +13,25 @@ import (
 	"github.com/ourostack/m365crawl/internal/officecapture"
 	"github.com/ourostack/m365crawl/internal/officedocuments"
 	"github.com/ourostack/m365crawl/internal/officeregistry"
+	"github.com/ourostack/m365crawl/internal/onedriveusage"
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // DocumentOptions selects what a document sync touches. Root (an Office JSON directory),
-// RegistryFile (one Office registry SQLite file) and SourceID (one registered source) are mutually
-// exclusive; with none of them, an explicit discovering sync tries both default families.
+// RegistryFile (one Office registry SQLite file), UsageFile (one OneDrive usage SQLite file) and
+// SourceID (one registered source) are mutually exclusive; with none of them, an explicit
+// discovering sync tries every default family on its own.
 type DocumentOptions struct {
-	DBPath, Root, RegistryFile string
-	SourceID                   int64
-	MaxAge                     time.Duration
-	Explicit, Discover         bool
+	DBPath, Root, RegistryFile, UsageFile string
+	SourceID                              int64
+	MaxAge                                time.Duration
+	Explicit, Discover                    bool
 }
 
-// DocumentDiscovery is one default discovery family's fixed unavailable or refused outcome. It
-// has no source: nothing was registered or opened for it.
-type DocumentDiscovery struct{ Kind, Code string }
+// DocumentDiscovery is one default discovery outcome with a fixed code: a family that was
+// unavailable or refused, or, with Locator set, one named default location of a family that
+// yielded no input. It has no source: nothing was registered or opened for it.
+type DocumentDiscovery struct{ Kind, Code, Locator string }
 
 // DocumentFamilyJSON names the Office JSON family in a DocumentDiscovery.
 const DocumentFamilyJSON = "office_json"
@@ -49,9 +52,13 @@ var (
 	documentsRegistryDiscover = officecapture.DiscoverRegistry
 	documentsRegistryObserve  = officecapture.ObserveRegistry
 	documentsRegistryCapture  = officecapture.WithRegistryCapture
-	documentsOpen             = store.Open
-	documentsRead             = store.OpenReadOnly
-	documentsAcquire          = store.AcquireLock
+	// The OneDrive usage family's own discovery, observation and capture.
+	documentsUsageDiscover = officecapture.DiscoverOneDriveUsage
+	documentsUsageObserve  = officecapture.ObserveOneDriveUsage
+	documentsUsageCapture  = officecapture.WithOneDriveUsageCapture
+	documentsOpen          = store.Open
+	documentsRead          = store.OpenReadOnly
+	documentsAcquire       = store.AcquireLock
 )
 
 func readDocumentSources(ctx context.Context, options DocumentOptions) (DocumentReport, error) {
@@ -95,17 +102,23 @@ func selectedDocumentSources(ctx context.Context, st *store.Store, sourceID int6
 
 func SyncDocuments(ctx context.Context, options DocumentOptions) (DocumentReport, error) {
 	selections := 0
-	for _, selected := range []bool{options.Root != "", options.RegistryFile != "", options.SourceID != 0} {
+	supplied := options.Root != "" || options.RegistryFile != "" || options.UsageFile != ""
+	for _, selected := range []bool{options.Root != "", options.RegistryFile != "", options.UsageFile != "", options.SourceID != 0} {
 		if selected {
 			selections++
 		}
 	}
 	if options.SourceID < 0 || options.MaxAge < 0 || selections > 1 ||
-		(options.Discover && !options.Explicit) || ((options.Root != "" || options.RegistryFile != "") && !options.Discover) {
+		(options.Discover && !options.Explicit) || (supplied && !options.Discover) {
 		return DocumentReport{}, errors.New("documents: invalid source selection")
 	}
 	if options.RegistryFile != "" {
 		if err := CheckRegistryFile(options.DBPath, options.RegistryFile); err != nil {
+			return DocumentReport{}, err
+		}
+	}
+	if options.UsageFile != "" {
+		if err := CheckUsageFile(options.DBPath, options.UsageFile); err != nil {
 			return DocumentReport{}, err
 		}
 	}
@@ -147,38 +160,42 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 			}
 		}
 	}
-	addRegistry := func(discovered []officecapture.RegistryInput) {
-		for _, input := range discovered {
-			found := slices.ContainsFunc(locators, func(source store.KnowledgeSource) bool {
-				return source.Locator == input.Path && source.Kind == store.RegistryDocumentKind
-			})
-			if !found {
-				locators = append(locators, store.KnowledgeSource{Kind: store.RegistryDocumentKind,
-					Platform: documentsPlatform, Locator: input.Path})
-			}
+	// addFile adds one SQLite file of a single-file family unless it is already registered.
+	addFile := func(kind, path string) {
+		found := slices.ContainsFunc(locators, func(source store.KnowledgeSource) bool {
+			return source.Locator == path && source.Kind == kind
+		})
+		if !found {
+			locators = append(locators, store.KnowledgeSource{Kind: kind, Platform: documentsPlatform, Locator: path})
 		}
+	}
+	// onlyFile keeps the one supplied file of a single-file family: never another family, another
+	// file or a default location.
+	onlyFile := func(kind, path string) {
+		locators = slices.DeleteFunc(locators, func(source store.KnowledgeSource) bool {
+			return source.Kind != kind || source.Locator != path
+		})
+		addFile(kind, path)
 	}
 	switch {
 	case !options.Discover:
 	case options.RegistryFile != "":
-		// Registry-only: the one supplied file, never the JSON family or the default directory.
-		locators = slices.DeleteFunc(locators, func(source store.KnowledgeSource) bool {
-			return source.Kind != store.RegistryDocumentKind || source.Locator != options.RegistryFile
-		})
-		addRegistry([]officecapture.RegistryInput{{Path: options.RegistryFile}})
+		onlyFile(store.RegistryDocumentKind, options.RegistryFile)
+	case options.UsageFile != "":
+		onlyFile(store.UsageDocumentKind, options.UsageFile)
 	case options.Root != "":
-		// JSON-only: the supplied directory, never the registry family.
+		// JSON-only: the supplied directory, never a single-file family.
 		discovered, err := documentsDiscover(ctx, options.Root)
 		if err != nil {
 			return report, err
 		}
 		locators = slices.DeleteFunc(locators, func(source store.KnowledgeSource) bool {
-			return source.Kind == store.RegistryDocumentKind || filepath.Dir(source.Locator) != options.Root
+			return fileFamilies[source.Kind] != nil || filepath.Dir(source.Locator) != options.Root
 		})
 		addJSON(discovered)
 	default:
 		// Each default family is tried on its own: one absent or refused family is a fixed
-		// outcome in the report and never suppresses the other or the registered sources.
+		// outcome in the report and never suppresses the others or the registered sources.
 		discovered, err := documentsDiscover(ctx, "")
 		if outcome, err := discoveryOutcome(ctx, DocumentFamilyJSON, err); err != nil {
 			return report, err
@@ -192,7 +209,21 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 		} else if outcome != nil {
 			report.Discovery = append(report.Discovery, *outcome)
 		}
-		addRegistry(registry)
+		for _, input := range registry {
+			addFile(store.RegistryDocumentKind, input.Path)
+		}
+		usage, err := documentsUsageDiscover(ctx)
+		if outcome, err := discoveryOutcome(ctx, store.UsageDocumentKind, err); err != nil {
+			return report, err
+		} else if outcome != nil {
+			report.Discovery = append(report.Discovery, *outcome)
+		}
+		for _, input := range usage.Inputs {
+			addFile(store.UsageDocumentKind, input.Path)
+		}
+		for _, outcome := range usage.Outcomes {
+			report.Discovery = append(report.Discovery, DocumentDiscovery{Kind: store.UsageDocumentKind, Code: outcome.Code, Locator: outcome.Locator})
+		}
 	}
 	participating := map[string]bool{}
 	slices.SortFunc(locators, func(a, b store.KnowledgeSource) int {
@@ -209,9 +240,9 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 			return report, ctx.Err()
 		}
 		participating[participant(source)] = true
-		registry := source.Kind == store.RegistryDocumentKind
+		file := fileFamilies[source.Kind]
 		input, discovered := inputs[source.Locator]
-		if !registry && !discovered {
+		if file == nil && !discovered {
 			surface, application, err := st.DocumentLocatorInput(ctx, source.LocatorID)
 			if err != nil {
 				return report, err
@@ -219,22 +250,27 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 			input = officecapture.DocumentInput{Path: source.Locator, Surface: surface, Application: application}
 		}
 		observe, family := documentsObserve, jsonFamily
-		if registry {
-			observe, family = documentsRegistryObserve, registryFamily
+		if file != nil {
+			observe, family = file.observe(), file.documentFamily
 		}
 		signature, observeErr := observe(ctx, source.Locator)
 		now := documentsNow().UTC()
 		recent := source.AttemptedAt != nil && now.Sub(*source.AttemptedAt) < options.MaxAge
 		same := signature == source.AcquisitionSignature
-		if !options.Explicit && recent && same {
+		// A registry or usage file can be hundreds of megabytes, and a capture holds its writer out
+		// for the whole copy. A read's own refresh therefore never re-captures one whose observed
+		// signature is the one already captured and whose last attempt settled, however old that
+		// attempt is. An explicit sync, a changed signature and a failed attempt still capture.
+		settled := file != nil && observeErr == nil && slices.Contains([]string{"complete", "partial", "unchanged"}, source.Status)
+		if !options.Explicit && same && (recent || settled) {
 			report.Skipped++
 			continue
 		}
 		knowledge := store.KnowledgeInput{Kind: source.Kind, Platform: source.Platform,
 			Locator: source.Locator, AcquisitionSignature: signature, At: now}
 		var attempt store.KnowledgeAttempt
-		if registry {
-			attempt, err = st.BeginRegistryDocumentAttempt(ctx, knowledge)
+		if file != nil {
+			attempt, err = file.begin(ctx, st, knowledge)
 		} else {
 			attempt, err = st.BeginDocumentAttempt(ctx, knowledge, input.Surface, input.Application)
 		}
@@ -249,8 +285,8 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 			continue
 		}
 		var status string
-		if registry {
-			status, err = captureRegistry(ctx, st, attempt, source, signature)
+		if file != nil {
+			status, err = file.capture(ctx, st, attempt, source, signature)
 		} else {
 			status, err = captureDocuments(ctx, st, attempt, source, input, signature)
 		}
@@ -331,6 +367,30 @@ type documentFamily struct {
 	reasons           []string
 }
 
+// fileFamily is a capture family whose source is one SQLite file with no surface or application:
+// how it is observed, registered and captured.
+type fileFamily struct {
+	documentFamily
+	observe func() func(context.Context, string) (string, error)
+	begin   func(context.Context, *store.Store, store.KnowledgeInput) (store.KnowledgeAttempt, error)
+	capture func(context.Context, *store.Store, store.KnowledgeAttempt, store.KnowledgeSource, string) (string, error)
+}
+
+// fileFamilies are the single-file families by knowledge kind. observe is read at call time so a
+// test seam set after start-up is honoured.
+var fileFamilies = map[string]*fileFamily{
+	store.RegistryDocumentKind: {documentFamily: registryFamily,
+		observe: func() func(context.Context, string) (string, error) { return documentsRegistryObserve },
+		begin: func(ctx context.Context, st *store.Store, input store.KnowledgeInput) (store.KnowledgeAttempt, error) {
+			return st.BeginRegistryDocumentAttempt(ctx, input)
+		}, capture: captureRegistry},
+	store.UsageDocumentKind: {documentFamily: usageFamily,
+		observe: func() func(context.Context, string) (string, error) { return documentsUsageObserve },
+		begin: func(ctx context.Context, st *store.Store, input store.KnowledgeInput) (store.KnowledgeAttempt, error) {
+			return st.BeginUsageDocumentAttempt(ctx, input)
+		}, capture: captureUsage},
+}
+
 var (
 	jsonFamily = documentFamily{failed: "office_json_capture_failed", cancelled: "office_json_cancelled",
 		reasons: []string{"office_json_input_unqualified", "office_json_capture_failed",
@@ -340,6 +400,10 @@ var (
 		reasons: []string{"office_registry_input_unqualified", "office_registry_capture_failed", "office_registry_cleanup_failed",
 			"office_registry_policy_restore_failed", "office_registry_source_busy", "office_registry_index_unreadable",
 			"office_registry_index_too_large", "office_registry_index_unrecognized"}}
+	usageFamily = documentFamily{failed: "onedrive_usage_capture_failed", cancelled: "onedrive_usage_cancelled",
+		reasons: []string{"onedrive_usage_input_unqualified", "onedrive_usage_capture_failed", "onedrive_usage_cleanup_failed",
+			"onedrive_usage_policy_restore_failed", "onedrive_usage_source_busy", "onedrive_usage_index_unreadable",
+			"onedrive_usage_index_too_large", "onedrive_usage_index_unrecognized"}}
 )
 
 // discoveryOutcome turns a default family's discovery error into its fixed outcome. Cancellation
@@ -412,6 +476,64 @@ func safeRegistryCapture(ctx context.Context, input officecapture.RegistryInput,
 	return documentsRegistryCapture(ctx, input, consume)
 }
 
+// UsageListedNothing is the reason of a complete usage capture that listed no recent row, no
+// formatted document and no collaborator.
+const UsageListedNothing = "onedrive_usage_listed_nothing"
+
+// captureUsage stages the decoded usage result inside the capture wrapper and commits it only
+// after the wrapper returned success: its late validation, private-copy removal, unlock, source
+// close and policy restoration have all succeeded by then.
+func captureUsage(ctx context.Context, st *store.Store, attempt store.KnowledgeAttempt, previous store.KnowledgeSource, signature string) (string, error) {
+	var result onedriveusage.Result
+	var metadata store.UsageCaptureMetadata
+	var digest, observedSignature string
+	err := safeUsageCapture(ctx, officecapture.UsageInput{Path: previous.Locator}, func(c *officecapture.UsageCapture) error {
+		var err error
+		result, err = c.ReadUsage(ctx)
+		if err != nil {
+			return err
+		}
+		digest, observedSignature = c.ContentDigest, c.AcquisitionSignature
+		acquired, modified := c.AcquiredAt, c.SourceModified
+		metadata = store.UsageCaptureMetadata{AcquiredAt: &acquired, SourceObservedAt: &modified}
+		return nil
+	})
+	if err != nil {
+		return "failed", recordDocumentFailure(ctx, st, attempt, signature, err, usageFamily)
+	}
+	if digest == "" || metadata.AcquiredAt == nil || metadata.SourceObservedAt == nil {
+		return "failed", recordDocumentFailure(ctx, st, attempt, signature, errors.New("documents: capture result unavailable"), usageFamily)
+	}
+	status, reason := "complete", ""
+	if len(result.Losses) > 0 {
+		status = "partial"
+	} else if len(result.Recent)+len(result.Documents)+len(result.Collaborators) == 0 {
+		reason = UsageListedNothing
+	}
+	if previous.AdmittedID > 0 && previous.ContentDigest == digest && previous.Qualification == store.UsageDocumentQualification {
+		status = "unchanged"
+		result = onedriveusage.Result{}
+	}
+	outcome := store.KnowledgeOutcome{Status: status, Reason: reason, ContentDigest: digest, AcquisitionSignature: observedSignature,
+		Qualification: store.UsageDocumentQualification, SourceObservedAt: *metadata.SourceObservedAt, At: documentsNow().UTC()}
+	if err := st.CommitUsageDocumentObservations(ctx, attempt, outcome, result, metadata); err != nil {
+		if errors.Is(err, store.ErrStaleKnowledgeAttempt) {
+			return "", err
+		}
+		return "", errors.Join(err, recordDocumentFailure(ctx, st, attempt, observedSignature, err, usageFamily))
+	}
+	return status, nil
+}
+
+func safeUsageCapture(ctx context.Context, input officecapture.UsageInput, consume func(*officecapture.UsageCapture) error) (result error) {
+	defer func() {
+		if recover() != nil {
+			result = &officecapture.ReadError{Code: "onedrive_usage_capture_failed"}
+		}
+	}()
+	return documentsUsageCapture(ctx, input, consume)
+}
+
 func recordDocumentFailure(ctx context.Context, st *store.Store, attempt store.KnowledgeAttempt, signature string, cause error, family documentFamily) error {
 	status, reason := "failed", family.failed
 	var typed *officecapture.ReadError
@@ -431,22 +553,43 @@ func recordDocumentFailure(ctx context.Context, st *store.Store, attempt store.K
 // of the archive's own files. Nothing is registered for it.
 var ErrRegistryFileUnusable = errors.New("documents: registry file is missing, not a regular file, or the archive itself")
 
+// ErrUsageFileUnusable is the same refusal of a supplied OneDrive usage file.
+var ErrUsageFileUnusable = errors.New("documents: OneDrive usage file is missing, not a regular file, or the archive itself")
+
 var documentsLstat = os.Lstat
 
 // CheckRegistryFile refuses a supplied registry file before anything is registered or opened. It
 // only reads directory metadata: opening and closing a descriptor of the archive database would
 // release this process's own SQLite locks on it.
 func CheckRegistryFile(dbPath, file string) error {
+	if !suppliedFileUsable(dbPath, file) {
+		return ErrRegistryFileUnusable
+	}
+	return nil
+}
+
+// CheckUsageFile refuses a supplied OneDrive usage file in the same way, before anything is
+// registered or opened.
+func CheckUsageFile(dbPath, file string) error {
+	if !suppliedFileUsable(dbPath, file) {
+		return ErrUsageFileUnusable
+	}
+	return nil
+}
+
+// suppliedFileUsable reports whether file is an existing regular file other than the archive
+// database and its own companion files.
+func suppliedFileUsable(dbPath, file string) bool {
 	info, err := documentsLstat(file)
 	if err != nil || !info.Mode().IsRegular() {
-		return ErrRegistryFileUnusable
+		return false
 	}
 	archive := filepath.Clean(dbPath)
 	for _, suffix := range []string{"", "-wal", "-shm", "-journal", ".lock"} {
 		own, err := documentsLstat(archive + suffix)
 		if filepath.Clean(file) == archive+suffix || (err == nil && os.SameFile(info, own)) {
-			return ErrRegistryFileUnusable
+			return false
 		}
 	}
-	return nil
+	return true
 }

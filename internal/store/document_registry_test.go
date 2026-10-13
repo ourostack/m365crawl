@@ -350,8 +350,8 @@ func TestMigrationSchema14AddsRegistryVariantWithoutTouchingJSONRows(t *testing.
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion || SchemaVersion != 14 {
-		t.Fatalf("schema %d, want 14", n)
+	if n := rowCount(t, s, `select max(version) from schema_migrations`); n != SchemaVersion || SchemaVersion < 14 {
+		t.Fatalf("schema %d, want the current version, 14 or later", n)
 	}
 	if after := state(s); after != before {
 		t.Fatal("migration changed existing JSON rows or their FTS payloads")

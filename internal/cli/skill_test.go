@@ -102,10 +102,10 @@ func skillKeys() []string {
 		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource](),
 		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage](),
 		reflect.TypeFor[noteCoverage](), reflect.TypeFor[noteItem](), reflect.TypeFor[noteSourceItem](),
-		reflect.TypeFor[loopChannelItem](), reflect.TypeFor[loopSourceItem](), reflect.TypeFor[loopSyncResult]()} {
+		reflect.TypeFor[loopChannelItem](), reflect.TypeFor[loopSourceItem](), reflect.TypeFor[loopSyncResult](), reflect.TypeFor[documentItem]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
-	return keys
+	return append(keys, documentFailureReasons...)
 }
 
 var (

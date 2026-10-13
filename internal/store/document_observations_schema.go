@@ -5,6 +5,11 @@ package store
 // its surface, application and document_json, and has no registry payload. An Office registry row
 // has variant office_registry, an empty surface, the fixed source label registry, an empty
 // document_json, the complete native observation in registry_json and a null modified_at.
+// Schema 15 adds the OneDrive usage variant: variant onedrive_usage, an empty surface, the fixed
+// source label onedrive, an empty document_json, the complete native record in usage_json, and the
+// full native Type, ID and Format in native_key (empty for every other variant). A title or URL is
+// stored only where the record states one. document_usage_relations holds, per capture, the edge
+// from each recent row to every formatted variant with the same native ID.
 // Existing tables gain the columns in Store.migrate; nothing below may index or reference them.
 const documentObservationsSchemaDDL = `
 create table if not exists document_locator_metadata(
@@ -29,6 +34,8 @@ create table if not exists document_observations(
  variant text not null default 'office_json',
  registry_json text,
  opened_at text,
+ usage_json text,
+ native_key text not null default '',
  unique(source_id,representation_digest)
 );
 create index if not exists document_observations_source on document_observations(source_id,modified_at);
@@ -47,7 +54,15 @@ create table if not exists document_capture_metadata(
  source_observed_at text,
  reused integer not null,
  physical_observations integer not null,
- variant text not null default 'office_json'
+ variant text not null default 'office_json',
+ members_capture integer
 );
 create virtual table if not exists document_fts using fts5(title,metadata);
+create table if not exists document_usage_relations(
+ capture_id integer not null,
+ recent_rowid integer not null,
+ document_rowid integer not null,
+ primary key(capture_id,recent_rowid,document_rowid)
+);
+create index if not exists document_usage_relations_document on document_usage_relations(capture_id,document_rowid);
 `

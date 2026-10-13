@@ -214,7 +214,7 @@ func TestAppSummaryCitationsTotalAndNulls(t *testing.T) {
 	for id, state := range map[string]string{"plain-1": "not_derived", "bad-1": "failed"} {
 		got := summary(id)
 		total, has := got["citations_total"]
-		if got["state"] != state || !has || total != nil || got["app_id"] != nil || got["app_name"] != nil || got["reply_to_id"] != nil || len(got) != 5 {
+		if got["state"] != state || !has || total != nil || got["app_id"] != nil || got["app_name"] != nil || got["reply_to_id"] != nil || got["losses_total"] != nil || len(got) != 6 {
 			t.Fatalf("%s serves nothing, so its claims are unknown (null): %v", id, got)
 		}
 	}
