@@ -71,8 +71,14 @@ func sourceByLocator(t *testing.T, sources []store.KnowledgeSource, locator stri
 
 func stubDocumentDiscovery(t *testing.T, jsonInputs func() ([]officecapture.DocumentInput, error), registryInputs func() ([]officecapture.RegistryInput, error)) {
 	t.Helper()
-	discover, registry := documentsDiscover, documentsRegistryDiscover
-	t.Cleanup(func() { documentsDiscover, documentsRegistryDiscover = discover, registry })
+	discover, registry, usage := documentsDiscover, documentsRegistryDiscover, documentsUsageDiscover
+	t.Cleanup(func() {
+		documentsDiscover, documentsRegistryDiscover, documentsUsageDiscover = discover, registry, usage
+	})
+	// The usage family finds nothing and reports nothing here; its own tests stub it after this.
+	documentsUsageDiscover = func(context.Context) (officecapture.UsageDiscovery, error) {
+		return officecapture.UsageDiscovery{}, nil
+	}
 	documentsDiscover = func(_ context.Context, root string) ([]officecapture.DocumentInput, error) {
 		if root != "" {
 			return discover(context.Background(), root)

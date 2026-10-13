@@ -32,7 +32,7 @@ var startHere = []startStep{
 	{Command: "m365crawl mail unread", Does: "unread mail by folder", mail: true},
 	{Command: "m365crawl unread", Does: "unread Teams chats"},
 	{Command: "m365crawl mail list --has-attachments", Does: "mail with files; mail show <id> lists each file's name, size and type", mail: true},
-	{Command: "m365crawl docs list", Does: "Office recent, shared and recommended document metadata; docs sync registers the sources"},
+	{Command: "m365crawl docs list", Does: "Office recent, shared and recommended document metadata and OneDrive usage records; docs sync registers the sources"},
 	{Command: `m365crawl notes search "words"`, Does: "OneNote indexed notes; notes sync registers the indexes"},
 	{Command: `m365crawl loop search "words"`, Does: "cached Loop channel text (partial snapshots); loop sync registers the archived records"},
 	{Command: "m365crawl people", Does: "Teams people, mail correspondents and native Outlook people observations"},

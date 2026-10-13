@@ -12,7 +12,7 @@ func TestDocumentsDisplayBoundsIncludeNativeTitlesAndActivityText(t *testing.T) 
 		SiteTitle: "Long site title", TeamsChannelTitle: "Long channel title",
 		Activity: &officedocuments.Activity{MessageFormat: "Long activity description"},
 	}
-	item := documentItemOf(store.DocumentObservationRow{ID: 1, Document: model}, 4)
+	item := documentItemOf(store.DocumentObservationRow{ID: 1, Document: model}, 4, "")
 	if !item.TextTruncated || item.Native.SiteTitle != "Long…" || item.Native.TeamsChannelTitle != "Long…" ||
 		item.Native.Activity.MessageFormat != "Long…" {
 		t.Fatal("native descriptive fields escaped max-text display bounds")

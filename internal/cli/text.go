@@ -137,7 +137,11 @@ func (rt *runtime) renderText(label string, v any) error {
 		_, _ = fmt.Fprintf(w, "%s: %d captured, %d unchanged, %d skipped, %d failed\n", name, r.Captured, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderNoteCoverage(r.SourceCoverage)
 		for _, outcome := range r.Discovery {
-			_, _ = fmt.Fprintf(w, "discovery %s: %s: %s\n", outcome.Kind, outcome.Code, outcome.Meaning)
+			where := outcome.Kind
+			if outcome.Locator != "" {
+				where += " " + locatorTail(outcome.Locator)
+			}
+			_, _ = fmt.Fprintf(w, "discovery %s: %s: %s\n", where, outcome.Code, outcome.Meaning)
 		}
 	case loopSyncResult:
 		_, _ = fmt.Fprintf(w, "loop: %d projected, %d unchanged, %d skipped, %d failed\n", r.Projected, r.Unchanged, r.Skipped, r.Failed)
@@ -362,13 +366,21 @@ func (rt *runtime) listTable(r *listResult) {
 				opened = stamp(*x.OpenedAt.At)
 			}
 			cols, textCol = []string{"modified_at", "opened_at", "source", "id", "application", "surface", "title", "text_state"}, 6
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), opened, strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(x.Title), x.TextState})
+			title := x.Title
+			if x.UsageNative != nil {
+				title = usageLabel(x)
+			}
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), opened, strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(title), x.TextState})
 		case documentDetailItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text_state"}, 3
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.TextState})
 		case searchDocumentItem:
 			cols, textCol = searchColumns, 5
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
+			title := x.Title
+			if x.UsageNative != nil {
+				title = usageLabel(x.documentItem)
+			}
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
 		case loopChannelItem:
 			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x))

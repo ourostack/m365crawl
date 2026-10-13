@@ -16,6 +16,10 @@ func (rt *runtime) renderDocumentDetails(result *listResult) error {
 			rt.renderRegistryDetail(detail)
 			continue
 		}
+		if detail.UsageNative != nil {
+			rt.renderUsageDetail(detail)
+			continue
+		}
 		encoded, err := json.MarshalIndent(detail.Native, "", "  ")
 		if err != nil {
 			return err
@@ -49,5 +53,23 @@ func (rt *runtime) renderRegistryDetail(detail documentDetailItem) {
 	_, _ = fmt.Fprintf(rt.stdout, "URL reference occurrences: %d (returned %d; truncated=%t)\n",
 		detail.ReferencesTotal, len(detail.References), detail.ReferencesTruncated)
 	_, _ = fmt.Fprintf(rt.stdout, "association %s: %s\nThe document, its URL and its friendly path were never opened, checked or resolved; this is the registry's metadata only.\n",
+		detail.AssociationState, documentAssociationHelp)
+}
+
+// renderUsageDetail prints a OneDrive usage row: what kind of record it is, its bounded native
+// claims, its modification time and preview counts in words, its relations, and what the row
+// does not prove. It names no surface, and offers no thread or person command for a claim.
+func (rt *runtime) renderUsageDetail(detail documentDetailItem) {
+	encoded, _ := json.MarshalIndent(detail.UsageNative, "", "  ") // strings, integers, booleans, times and nullable scalars always encode
+	lines := usageDetailLines(detail)
+	_, _ = fmt.Fprintf(rt.stdout, "\n%s: %s\nsource %d; %s; association %s; text %s\n",
+		detail.ID, usageLabel(detail.documentItem), detail.SourceID, lines[0], detail.AssociationState, detail.TextState)
+	_, _ = fmt.Fprintf(rt.stdout, "usage native claims:\n%s\n", encoded)
+	for _, line := range lines[1:] {
+		_, _ = fmt.Fprintln(rt.stdout, line)
+	}
+	_, _ = fmt.Fprintf(rt.stdout, "URL reference occurrences: %d (returned %d; truncated=%t)\n",
+		detail.ReferencesTotal, len(detail.References), detail.ReferencesTruncated)
+	_, _ = fmt.Fprintf(rt.stdout, "association %s: %s\nNames, addresses, thread IDs and collaborator profiles are the usage file's claims, not linked to an archived person, chat or account. The document and its URL were never opened, checked or resolved; this is OneDrive's local metadata only.\n",
 		detail.AssociationState, documentAssociationHelp)
 }

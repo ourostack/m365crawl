@@ -31,7 +31,7 @@
     },
     {
       "command": "m365crawl docs list",
-      "does": "Office recent, shared and recommended document metadata; docs sync registers the sources"
+      "does": "Office recent, shared and recommended document metadata and OneDrive usage records; docs sync registers the sources"
     },
     {
       "command": "m365crawl notes search \"words\"",

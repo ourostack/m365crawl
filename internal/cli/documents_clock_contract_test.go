@@ -17,7 +17,7 @@ func TestDocumentsNativeJSONMissingTimesAreNullNotYearOneClaims(t *testing.T) {
 		Sharing:  &officedocuments.Sharing{At: officedocuments.Timestamp{Raw: "unrecognized native value"}},
 		Activity: &officedocuments.Activity{},
 	}
-	raw, err := json.Marshal(documentItemOf(store.DocumentObservationRow{ID: 1, Document: model}, 0))
+	raw, err := json.Marshal(documentItemOf(store.DocumentObservationRow{ID: 1, Document: model}, 0, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

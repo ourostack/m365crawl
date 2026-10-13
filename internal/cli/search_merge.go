@@ -539,8 +539,12 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		documentTruncated = snapshot.Truncated
 		matched[searchDocuments], atLeast[searchDocuments] = len(snapshot.Rows), snapshot.Truncated
 		for _, row := range snapshot.Rows {
-			hits = append(hits, searchHit{at: row.Document.Modified.Value, item: searchDocumentItem{
-				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText)}, source: searchDocuments})
+			at := row.Document.Modified.Value
+			if row.ModifiedAt != nil { // a usage row's modification time is its own column
+				at = *row.ModifiedAt
+			}
+			hits = append(hits, searchHit{at: at, item: searchDocumentItem{
+				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText, rt.archiveRef())}, source: searchDocuments})
 		}
 		rt.documentCoverage = documentSnapshotCoverage(rt, snapshot.Sources)
 	}
