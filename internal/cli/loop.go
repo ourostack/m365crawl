@@ -33,7 +33,7 @@ const loopRecoveryHelp = "retry_needed is true on a failed or cancelled source, 
 
 func (loopGroup) Help() string {
 	return "Loop channels are text projected from cached Loop snapshot records already in the archive (database fluidDriverCache, store driverStorage.V3).\n" +
-		"Run `loop sync` to register and project them, then `loop list`, `loop search WORDS` or `search WORDS --source loop`, and follow a returned loop-channel:ID with `loop show loop-channel:ID`. `loop sources` lists each registration, its snapshot_match (no_admission, matches, differs, unavailable) and why it failed; a failed or metadata-only source is retried with `loop sync --source-id N`.\n" +
+		"Run `loop sync` to register and project them, then `loop list`, `loop search WORDS` or `search WORDS --source loop`, and follow a returned loop-channel:ID with `loop show loop-channel:ID`. `loop sources` lists each registration, its snapshot_match (no_admission, matches, differs, unavailable) and why it failed; a failed or cancelled source is retried with `loop sync --source-id N`.\n" +
 		loopSemanticsHelp + loopRecoveryHelp +
 		"archive_age_seconds on a Loop result is the age of the last complete `m365crawl sync`, the sync that archives the cached records Loop is projected from; it is null when no sync has completed, and it is not the age of the Loop text.\n" +
 		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --max-age 0 and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice.\n" +

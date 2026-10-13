@@ -15,10 +15,14 @@ import (
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
-// loopHitsEnv is the search fixture plus one Loop source whose three channels all say Hello.
+// loopHitsEnv is the search fixture plus one Loop source whose three channels all say Hello. It
+// syncs its own archive instead of copying the shared template: these tests open it for writing,
+// and on Windows the store refuses an archive file it did not create.
 func loopHitsEnv(t *testing.T) *env {
 	t.Helper()
-	e := searchTranscriptEnv(t)
+	e := searchEnv(t)
+	searchSeed(t, e, searchMessages())
+	seedSearchTranscripts(t, e)
 	insertLoopCLI(t, loopRecords(t, e), "three", loopCLIValue(t, 5, [2]string{"one", "Hello one"}, [2]string{"two", "Hello two"}, [2]string{"three", "Hello three"}))
 	runOK(t, e, "loop", "sync")
 	return e
