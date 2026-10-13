@@ -183,6 +183,31 @@ func (s *searchSources) hints() []string {
 	return out
 }
 
+// floorNote is the text line that names the sources whose match count is a floor because they
+// stopped reading at the limit; empty when every count is exact.
+func (s *searchSources) floorNote() string {
+	if s == nil {
+		return ""
+	}
+	var names []string
+	for _, src := range []struct {
+		count *sourceCount
+		name  string
+	}{{s.Chats, searchChats}, {s.Mail, searchMail}, {s.Transcripts, searchTranscripts}, {s.Notes, searchNotes}, {s.Documents, searchDocuments}, {s.Loop, searchLoop}} {
+		if src.count != nil && src.count.MatchedAtLeast != nil {
+			names = append(names, src.name)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0] + " stopped reading at --limit, so its match count (matched_at_least in JSON) is a floor, not a total; raise --limit to read further"
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] +
+		" stopped reading at --limit, so their match counts (matched_at_least in JSON) are floors, not totals; raise --limit to read further"
+}
+
 // searchSources is the per-source part of a search result. A source that was not searched is absent.
 type searchSources struct {
 	Chats       *sourceCount `json:"chats,omitempty"`

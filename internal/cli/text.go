@@ -113,8 +113,11 @@ func (rt *runtime) renderText(label string, v any) error {
 		for _, hint := range r.Sources.hints() {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(hint, color))
 		}
-		if r.orderHint != "" {
-			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(r.orderHint, color))
+		if note := r.Sources.floorNote(); note != "" {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(note, color))
+		}
+		if r.rowsHint != "" {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(r.rowsHint, color))
 		}
 		if r.sourceOnly {
 			if r.LoopCoverage != nil {

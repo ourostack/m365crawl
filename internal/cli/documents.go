@@ -680,7 +680,7 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 			result.addNotice(notice)
 		}
 		if undated {
-			result.orderHint = documentOrderHint
+			result.rowsHint = documentOrderHint
 		}
 		return result, nil
 	})

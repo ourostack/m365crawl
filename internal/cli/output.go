@@ -66,8 +66,9 @@ type result interface {
 // listResult is the shape of every list command.
 type listResult struct {
 	sourceOnly bool
-	// orderHint is a text-only line about the order of the rows; empty on most lists.
-	orderHint string
+	// rowsHint is a text-only line about the returned rows (their order, or what they are); empty
+	// on most lists.
+	rowsHint  string
 	Items     []any `json:"items"`
 	Count     int   `json:"count"`
 	Truncated bool  `json:"truncated"`
