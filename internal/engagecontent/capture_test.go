@@ -22,7 +22,7 @@ func nativeScriptPage(t *testing.T) (context.Context, *browser.Page) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: filepath.Join(t.TempDir(), "archive", "profile"), Headless: true})
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: filepath.Join(t.TempDir(), "archive", "profile"), Headless: true, DisposableFixture: true})
 	if err != nil {
 		t.Fatal(err)
 	}

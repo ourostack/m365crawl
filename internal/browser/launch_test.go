@@ -58,6 +58,52 @@ func TestArgv(t *testing.T) {
 	}
 }
 
+func TestArgvMockKeychainOnlyForDisposableFixture(t *testing.T) {
+	for _, headless := range []bool{false, true} {
+		product := LaunchOptions{Profile: "/explicit-auth-profile", Headless: headless, StartURL: "https://fixture.sharepoint.com/"}
+		defaultArgs := Argv(product)
+		product.DisposableFixture = true
+		fixtureArgs := Argv(product)
+		mockCount := 0
+		var withoutMock []string
+		for _, arg := range fixtureArgs {
+			if arg == "--use-mock-keychain" {
+				mockCount++
+			} else {
+				withoutMock = append(withoutMock, arg)
+			}
+		}
+		if mockCount != 1 || strings.Join(withoutMock, "\n") != strings.Join(defaultArgs, "\n") {
+			t.Fatalf("fixture argv changes auth/profile defaults: %v versus %v", fixtureArgs, defaultArgs)
+		}
+		for _, arg := range defaultArgs {
+			if arg == "--use-mock-keychain" {
+				t.Fatal("default authenticated launch uses mock keychain")
+			}
+		}
+		if strings.Contains(LaunchFlags, "--use-mock-keychain") {
+			t.Fatal("mock keychain became a global product flag")
+		}
+	}
+}
+
+func TestLaunchDisposableFixtureArgs(t *testing.T) {
+	_, profile, err := launchFake(t, nil, func(o *LaunchOptions) { o.DisposableFixture = true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(readFakeFile(t, profile, browsertest.ArgvFile), "\n")
+	count := 0
+	for _, arg := range args {
+		if arg == "--use-mock-keychain" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("fixture opt-in not propagated to executable: %v", args)
+	}
+}
+
 func TestLaunchHeadlessArgs(t *testing.T) {
 	b, profile, err := launchFake(t, nil, nil)
 	if err != nil {
