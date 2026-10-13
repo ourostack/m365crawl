@@ -71,6 +71,8 @@ type messageItem struct {
 	// omitted when --fields leaves it out, which says nothing about the evidence itself:
 	// application_evidence_coverage outside the items still counts it.
 	App *applicationItem `json:"app_observation,omitempty"`
+	// app_summary is the compact form of app_observation, printed only when --fields names it.
+	AppSummary *applicationSummary `json:"app_summary,omitempty"`
 }
 
 type conversationItem struct {
@@ -192,7 +194,7 @@ func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.
 	if err != nil {
 		return nil, err
 	}
-	res := newList(shape(rt, messageItems(rows, rt.g.MaxText, html, rt.archiveRef())), truncated).withTotal(total)
+	res := newList(shape(rt, rt.withAppSummary(messageItems(rows, rt.g.MaxText, html, rt.archiveRef()))), truncated).withTotal(total)
 	res.ApplicationEvidenceCoverage = applicationCoverageOf(envelopesOf(rows))
 	return res, nil
 }
@@ -246,7 +248,7 @@ type searchCmd struct {
 
 // Help is the long help of search.
 func (searchCmd) Help() string {
-	return "Searches Teams chats, Outlook mail, fetched meeting transcripts and participating registered knowledge sources; every item has a source (chats, mail, transcripts, notes or documents), and sources reports each participant's count and truncation. Items are newest first by sent_at for chats, received_at for mail, at for transcripts and native modified_at for knowledge; unknown dates sort last.\n" +
+	return "Searches Teams chats, Outlook mail, fetched meeting transcripts and participating registered knowledge sources; every item has a source (chats, mail, transcripts, notes, documents or loop). sources reports, for each source searched, returned (its items in this result; count is the same number), how many it matched before --limit, and truncated (it had more than the result holds). matched is exact: chats and loop always give it, and every other source gives it when it read all its hits. A source that stops reading at --limit gives matched_at_least instead, the hits it read, never an invented total. A source can match and return nothing when newer hits of other sources fill the limit: text output then prints a line such as `3 Loop hits not shown; use --source loop`. Items are newest first by sent_at for chats, received_at for mail, at for transcripts and native modified_at for knowledge; unknown dates sort last.\n" +
 		"Registered OneNote indexed notes also participate in unconstrained default search. Note hits have source notes, a stable note:ID, title/text/OCR and native modified_at (unknown dates sort last). Use `notes show note:ID` to expand them, not thread. source_coverage reports indexed scope, retained captures and losses outside item shaping and zero hits.\n" +
 		"Document metadata describes unresolved documents, not current owners, sharing events, local residency or acquired file text. Hits have source documents and document-observation:ID; use `docs show document-observation:ID` to inspect native claims and bounded URL references, not thread. Date filters use native modified_at, never capture/file time; unknown dates are excluded, and a date-only --until includes that local day. source_coverage preserves current independent input state and refresh errors even at zero hits.\n" +
 		"A transcript item is one part of a recorded meeting: the first entry of the part that matched, its speaker and absolute time (at), matches (how many of the part's entries matched) and fetched_at. Only transcripts already fetched into the archive are searched, offline; `m365crawl transcripts` lists what can be fetched.\n" +

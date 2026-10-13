@@ -42,7 +42,7 @@ var panicHook func()
 
 // Globals are the flags every command accepts.
 type Globals struct {
-	Format         string `help:"Output format: text, json or log. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
+	Format         string `help:"Output format: text, json or log. log prints each result as one label={json} line: the command name with spaces as underscores (docs_list={...}), then the same JSON document as json, compact. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
 	JSON           bool   `name:"json" help:"Alias for --format json."`
 	DB             string `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
 	TeamsRoot      string `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
@@ -64,7 +64,7 @@ type cliApp struct {
 	Doctor        doctorCmd        `cmd:"" help:"Check that Teams, Outlook, Full Disk Access and the archive are ready."`
 	Sync          syncCmd          `cmd:"" help:"Read Teams chats, Outlook mail and the calendar into the archive once and print what changed."`
 	Status        statusCmd        `cmd:"" help:"Show archive counts per account for chats and mail, the last sync and other Teams origins."`
-	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats, Outlook mail and fetched meeting transcripts, newest first, each item marked with its source; default --limit 50 (check `truncated`).\""
+	Search        searchCmd        "cmd:\"\" help:\"Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata and cached Loop channels, newest first, each item marked with its source; default --limit 50 (check `truncated`; `sources` says what each source matched and returned).\""
 	Messages      messagesCmd      "cmd:\"\" help:\"List messages in chronological order (oldest first; with --limit, the newest matches); default --limit 50 (check `truncated`). Teams chats and channels; for Outlook mail use `m365crawl mail list`.\""
 	Conversations conversationsCmd "cmd:\"\" help:\"List conversations, sorted by last activity, newest first; default --limit 50 (check `truncated`).\""
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
@@ -74,7 +74,7 @@ type cliApp struct {
 	Mail          mailGroup        `cmd:"" help:"Read Outlook cached mail offline on Mac and Windows: list, show, thread, folders and unread. Every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
 	Notes         notesGroup       `cmd:"" help:"Capture and read local OneNote indexed notes, text and OCR with retained content and explicit source coverage."`
 	Docs          documentsGroup   `cmd:"" help:"Capture and inspect Office document metadata and sharing claims; no implicit file opening or text fetch."`
-	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive, with exact snapshot versions; no fetch, replay or full page."`
+	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive; every row names the one cached snapshot it comes from. No fetch, replay or full page."`
 	Transcripts   transcriptsGroup `cmd:"" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive. With <meeting> (an event id or key, a meeting chat link or thread id, or a call id) it lists that meeting's parts. The list flags (--since, --until, --state, --limit) are listed by: m365crawl transcripts list --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
 	Records       recordsCmd       `cmd:"" help:"List archived records of one database (or a prefix of its name), newest change first; value_json and key_json are parsed JSON; default --limit 50 (check truncated)."`
@@ -82,7 +82,7 @@ type cliApp struct {
 	Thread        threadCmd        "cmd:\"\" help:\"Show one thread: <conversation> <root-message-id>, or a Teams message link. Teams chats and channels; for Outlook mail use `m365crawl mail thread <id>`.\""
 	Watch         watchCmd         `cmd:"" help:"Stream one JSON line per new, edited or deleted message or activity item as Teams writes its cache (runs until interrupted)."`
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
-	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive."`
+	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive; --help lists its tables and how to see their columns."`
 	Skill         skillCmd         `cmd:"" help:"Print the agent guide (SKILL.md) for this version, as Markdown in every output mode."`
 	Metadata      metadataCmd      `cmd:"" help:"Print the crawlkit app manifest (for crawlctl discovery)."`
 	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the m365crawl version, commit and build date."`
@@ -219,6 +219,8 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 					}
 				}
 				// A list command's help ends with the --fields keys it accepts.
+				writeAppCodesHelp(kctx.Stdout, commandOf(n.Path()))
+				writeSQLHelp(kctx.Stdout, commandOf(n.Path()))
 				if len(n.Children) == 0 || commandOf(n.Path()) == "people" {
 					writeFieldsHelp(kctx.Stdout, commandOf(n.Path()))
 				}

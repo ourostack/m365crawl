@@ -93,7 +93,7 @@ func TestLoopRefreshFailureServesRetainedArchive(t *testing.T) {
 		}
 	}
 	text := runOK(t, e, "--format", "text", "loop", "list")
-	if !strings.Contains(text, "loop refresh error: db_error") || !strings.Contains(text, "current") {
+	if !strings.Contains(text, "loop refresh error: db_error") || !strings.Contains(text, "latest cached snapshot") {
 		t.Fatalf("text refresh error:\n%s", text)
 	}
 
@@ -143,13 +143,13 @@ func TestLoopTextAndCoverageShapes(t *testing.T) {
 		Channel:  loopcache.Channel{Path: "channels/long", Text: "synthetic text"},
 		Snapshot: loopcache.Result{Losses: []loopcache.Loss{{Code: "synthetic_loss", Count: 2}, {Code: "synthetic_loss", Count: 1}}}}, 5)
 	if item.Losses["synthetic_loss"] != 3 || !item.TextTruncated || !item.PathTruncated || item.RawUpdatedAt.Location() != time.UTC ||
-		item.ModifiedAt != nil || loopRowState(item) != "retained, raw differs, raw removed" {
+		item.ModifiedAt != nil || loopRowState(item) != "older cached snapshot, archived record differs, archived record gone from the app's cache" {
 		t.Fatalf("channel item: %+v %s", item, loopRowState(item))
 	}
 	failed := store.LoopSource{Registration: store.LoopRegistration{ID: 4}, LastSnapshotID: 9,
 		Health: store.KnowledgeSource{Status: "failed", Reason: "loop_cache_input_changed"}}
 	coverage := loopCoverageOf([]store.LoopSource{failed}, []string{"synthetic diagnostic"})
-	if coverage.State != "registered" || !strings.Contains(coverage.items[0].Effect, "last good snapshot stays current") ||
+	if coverage.State != "registered" || !strings.Contains(coverage.items[0].Effect, "last good snapshot stays the latest cached snapshot") ||
 		!strings.Contains(coverage.items[0].Fix, "m365crawl loop sync --source-id 4") || coverage.Diagnostics[0] != "synthetic diagnostic" {
 		t.Fatalf("failed coverage: %+v", coverage)
 	}

@@ -251,7 +251,7 @@ transcripts: no recorded meetings in the archive yet: run m365crawl sync
 Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
   m365crawl                   what the archive holds and how fresh it is
-  m365crawl search "words"    find anything across chats and mail
+  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata and Loop text
   m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats
@@ -300,7 +300,7 @@ m365crawl messages --team "Fixture team 1" --since 2023-11-14 --max-text 80
 - **Mentions.** An @-mention shows in `text` as the person's plain name. `mentions` lists who was mentioned, `mentions_me` is exact and `mention_kind` (`person`, `channel`, `team`, `tag`, `everyone`) says how you were mentioned. `--direct-mentions` keeps only `person` mentions.
 - **System pseudo-conversations.** `48:notifications`, `48:calllogs` and `48:annotations` duplicate real messages, so they are hidden by default; `--include-system` brings them back. Bot cards, call events and thread events read as plain text (`Call ended · 23m`), never raw JSON.
 - **Unread.** Channels are left out of `unread` by default because their unread counts are noise; `--include-channels` adds them. Use `--since` for "what needs my attention", because old read markers leave stale chats with hundreds of unread messages.
-- **App and citation evidence.** Each Teams message item carries `app_observation`: the app, reply and citation claims of its archived native JSON (for example a bot reply with its cited sources), with a state of `mapped`, `partial`, `absent`, `failed` or `not_derived`. The result's `application_evidence_coverage` counts those states for the messages it returned. The claims are the message's own, not a verified app identity, and a message stays one item. The first sync after upgrading derives this evidence offline from the archive.
+- **App and citation evidence.** Each Teams message item carries `app_observation`: the app, reply and citation claims of its archived native JSON (for example a bot reply with its cited sources), with a state of `mapped`, `partial`, `absent`, `failed` or `not_derived`. The result's `application_evidence_coverage` counts those states for the messages it returned, and its `posted_by_app` counts the ones that name an app; `--fields app_summary` gives the compact form. The claims are the message's own, not a verified app identity, and a message stays one item. The first sync after upgrading derives this evidence offline from the archive.
 - **Accounts.** `--account <tenantId>/<userId>` limits any command to one signed-in account; `m365crawl whoami` lists them.
 
 ### Watch for changes
@@ -383,7 +383,7 @@ Flags that matter for agents:
 | | `whoami` | The accounts in the archive and the archive's state. |
 | | `sync` | Reads Teams, Outlook mail and the calendar into the archive once and prints what changed. |
 | | `watch` | Runs until interrupted and streams one JSON line per new, edited or deleted Teams message or activity item. |
-| Across sources | `search [query]` | Full-text search over Teams chats and Outlook mail, newest first; `--source chats\|mail\|all` picks the sources. |
+| Across sources | `search [query]` | Full-text search over Teams chats, Outlook mail, fetched meeting transcripts, indexed notes, document metadata and cached Loop channels, newest first; `--source` picks one, and `sources` says what each matched and returned. |
 | | `people` | People seen in Teams and in mail (one row per mail address); use it to resolve `--from`. |
 | | `sql <query>` | One read-only SELECT against the archive. |
 | Teams | `messages` | Messages in time order, with the same filters as `search`, plus `--unread`. |

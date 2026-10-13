@@ -142,6 +142,7 @@ type LoopChannelRow struct {
 	MatchesRetainedValue, Retained, RawPresent bool
 	RawUpdatedAt, RawRemovedAt                 *time.Time
 	valueDigest, qualification                 string
+	matched                                    int // rows the filter matched before its limit
 }
 
 type LoopFilter struct {
@@ -150,10 +151,13 @@ type LoopFilter struct {
 	Limit    int
 }
 
+// LoopQuerySnapshot is the filtered channel rows with their sources. Matched is the exact number
+// of rows the filter matched before its limit.
 type LoopQuerySnapshot struct {
 	Rows      []LoopChannelRow
 	Sources   []LoopSource
 	Truncated bool
+	Matched   int
 }
 
 func hasLoopSchema(ctx context.Context, reader knowledgeReader) (bool, error) {

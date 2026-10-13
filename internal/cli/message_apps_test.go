@@ -153,9 +153,9 @@ func TestApplicationMessageRoutes(t *testing.T) {
 	}
 	// Text output names the claim, the citations, the refusal and the archive-only follow-up.
 	code, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
-	for _, want := range []string{"[app: Synthetic", "message app-1 (thread: 19:app-evidence@thread.v2 app-1)", `app "Synthetic Helper", app id "app-synthetic", claimed by the message itself`,
-		`native reply-to id "native-reply-1" (not a verified thread root)`, "citations: 2 of 2 admitted shown; 1 source rows refused",
-		`[0] id 9223372036854775807 "First source"`, "full record: m365crawl --db ",
+	for _, want := range []string{"[app: Synthetic Helper] ", "message app-1 (thread: 19:app-evidence@thread.v2 app-1)", `app "Synthetic Helper", app id "app-synthetic", claimed by the message itself`,
+		`native reply-to id "native-reply-1" (not a verified thread root)`, "citations: 2 read from the message, 2 shown; 1 more could not be read",
+		`[0] id 9223372036854775807 "First source"`, "full record (the stored projection as a JSON string to decode again; not the raw message): m365crawl --db ",
 		"app evidence of 2 returned Teams messages (mapper v2): 1 partial, 1 absent"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("text lacks %q:\n%s", want, out)

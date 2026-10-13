@@ -17,7 +17,7 @@ type loopGroup struct {
 	Sync    loopSyncCmd    `cmd:"" help:"Register archived cached Loop snapshot records and project their channels; reads only the archive."`
 	List    loopListCmd    `cmd:"" help:"List retained Loop channel observations with stable IDs and source coverage."`
 	Search  loopSearchCmd  `cmd:"" help:"Search retained Loop channel text and paths."`
-	Show    loopShowCmd    `cmd:"" help:"Inspect one loop-channel:ID with its snapshot versions and source state."`
+	Show    loopShowCmd    `cmd:"" help:"Inspect one loop-channel:ID: that one channel of one cached snapshot, with its snapshot and source state."`
 	Sources loopSourcesCmd `cmd:"" help:"Inspect registered Loop sources, raw-match state and failures without projecting."`
 }
 
@@ -25,12 +25,17 @@ const loopSemanticsHelp = "Each row is one channel of one immutable cached snaps
 	"source_id is the stable registration ID of one archived record tuple (source, database, store, key_json); it is allocated when `loop sync` first sees the tuple, before any successful projection, so a failed or metadata-only source has one too. snapshot_id names one admitted version of that record (its exact value digest and reader qualification); id loop-channel:N names one channel of one snapshot and never moves to a newer channel.\n" +
 	"sequence is the channel's native sequence number; snapshot_sequence and latest_sequence are the snapshot's. pending_operations counts operations the cache held but m365crawl did not apply; zero is still not a claim of service-current content.\n" +
 	"modified_at is always null: the cache records no native modification time. record_updated_at_at_admission is the archive record's update clock when this snapshot was first admitted and projected_at when it was first projected; neither is native edit time. raw_updated_at and raw_removed_at are the archived record's current clocks.\n" +
-	"matches_retained_value says the archived record's current bytes and reader version are this snapshot's (compared by the record fingerprint the archive stored at admission, so an edit made outside m365crawl that leaves content_hash unchanged is not detected); retained says the snapshot is no longer the source's latest admitted one; raw_present=false means the record left Teams' cache (raw_removed_at), not that anything was deleted.\n"
+	"matches_retained_value says the archived record's current bytes and reader version are this snapshot's (compared by the record fingerprint the archive stored at admission, so an edit made outside m365crawl that leaves content_hash unchanged is not detected); latest_cached_snapshot says the row comes from the newest snapshot m365crawl has admitted for its source: the latest cached snapshot, which is still not the current Loop page. retained is its inverse, true on a row of an older cached snapshot. raw_present=false means the archived record is gone from the app's cache (it left Teams' cache at raw_removed_at); the archive keeps its last bytes and nothing was deleted.\n"
+
+// loopRecoveryHelp says when a retry helps and what loop sync can and cannot recover.
+const loopRecoveryHelp = "retry_needed is true on a failed or metadata-only source, the ones `loop sync --source-id N` (the source's retry command) is for; on a healthy source that command only refreshes. " +
+	"loop sync reads only the archive. When the archived record is gone from the app's cache (raw_present false) the archive still holds its last bytes: loop sync can project those again, and it cannot recover anything they lack, such as missing blobs (missing_blobs, loss loop_cache_blob_missing) or later edits. Those arrive only after Teams caches the component again and `m365crawl sync` archives it.\n"
 
 func (loopGroup) Help() string {
 	return "Loop channels are text projected from cached Loop snapshot records already in the archive (database fluidDriverCache, store driverStorage.V3).\n" +
 		"Run `loop sync` to register and project them, then `loop list`, `loop search WORDS` or `search WORDS --source loop`, and follow a returned loop-channel:ID with `loop show loop-channel:ID`. `loop sources` lists each registration, its snapshot_match (no_admission, matches, differs, unavailable) and why it failed; a failed or metadata-only source is retried with `loop sync --source-id N`.\n" +
-		loopSemanticsHelp +
+		loopSemanticsHelp + loopRecoveryHelp +
+		"archive_age_seconds on a Loop result is the age of the last complete `m365crawl sync`, the sync that archives the cached records Loop is projected from; it is null when no sync has completed, and it is not the age of the Loop text.\n" +
 		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --max-age 0 and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice.\n" +
 		fmt.Sprintf("`loop sync` registers at most %d new archived records per run and never fails on a larger backlog: while its result has discovery_remaining true, run it again.", store.LoopDiscoveryBatch)
 }
@@ -68,6 +73,7 @@ type loopChannelItem struct {
 	RawPresent                 bool           `json:"raw_present"`
 	MatchesRetainedValue       bool           `json:"matches_retained_value"`
 	Retained                   bool           `json:"retained"`
+	LatestCachedSnapshot       bool           `json:"latest_cached_snapshot"`
 	SnapshotTenantID           string         `json:"snapshot_tenant_id"`
 	SnapshotUserID             string         `json:"snapshot_user_id"`
 	AssociationState           string         `json:"association_state"`
@@ -91,7 +97,7 @@ func loopChannelItemOf(row store.LoopChannelRow, maxText int) loopChannelItem {
 		SnapshotPendingOperations: row.Snapshot.PendingOperations, MissingBlobs: row.Snapshot.MissingBlobs,
 		Partial: row.Snapshot.Partial, Losses: losses, RecordUpdatedAtAtAdmission: row.RecordUpdatedAtAtAdmission.UTC(),
 		ProjectedAt: row.ProjectedAt.UTC(), RawUpdatedAt: utcPointer(row.RawUpdatedAt), RawRemovedAt: utcPointer(row.RawRemovedAt),
-		RawPresent: row.RawPresent, MatchesRetainedValue: row.MatchesRetainedValue, Retained: row.Retained,
+		RawPresent: row.RawPresent, MatchesRetainedValue: row.MatchesRetainedValue, Retained: row.Retained, LatestCachedSnapshot: !row.Retained,
 		SnapshotTenantID: row.SnapshotTenantID, SnapshotUserID: row.SnapshotUserID,
 		AssociationState: "unresolved", TextState: "partial_snapshot"}
 }
@@ -181,10 +187,28 @@ func (rt *runtime) loopRead(label string, sourceID int64, fn func(*store.Store) 
 	result.LoopCoverage.RefreshError = coverage.RefreshError
 	result.LoopCoverage.Diagnostics = coverage.Diagnostics
 	result.sourceOnly = true
+	result.ArchiveAgeSeconds = rt.loopArchiveAge()
 	if result.Count == 0 && result.Note == "" {
 		result.Note = loopEmptyNote(result.LoopCoverage)
 	}
 	return rt.write(label, result)
+}
+
+// loopArchiveAge is archive_age_seconds of a Loop result: the seconds since the last complete
+// sync, which archives the cached records Loop is projected from. It is nil when no sync has
+// completed, or the archive is missing or cannot say.
+func (rt *runtime) loopArchiveAge() *int64 {
+	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = st.Close() }()
+	last, err := rt.freshness(st)
+	if err != nil || last.IsZero() {
+		return nil
+	}
+	age := max(int64(rt.now().Sub(last).Seconds()), 0)
+	return &age
 }
 
 func loopEmptyNote(coverage *loopCoverage) string {
@@ -219,7 +243,8 @@ func (loopSyncCmd) Help() string {
 		"When more remain, the result has discovery_remaining true, discovery_remaining_records and a notice: run m365crawl loop sync again to continue. That is not an error; the run exits 0.\n"+
 		"A record whose identity or owner fields are outside the reader's bounds is never registered and never counts toward the %d: invalid_records counts them and diagnostics name the first %d as `records rowid N` "+
 		"(inspect one with m365crawl sql \"select database, store, octet_length(key_json) from records where rowid=N\"); no archived string is printed.\n"+
-		"A source that cannot be read or parsed is still registered and recorded as failed with a fixed reason, and keeps its last good snapshot. If the run itself fails after writing, the result on stdout still reports what it committed.",
+		"A source that cannot be read or parsed is still registered and recorded as failed with a fixed reason, and keeps its last good snapshot. If the run itself fails after writing, the result on stdout still reports what it committed.\n"+
+		loopRecoveryHelp,
 		store.LoopDiscoveryBatch, store.LoopDiscoveryBatch, store.LoopDiagnosticLimit)
 }
 
@@ -305,7 +330,8 @@ type loopShowCmd struct {
 }
 
 func (loopShowCmd) Help() string {
-	return loopSemanticsHelp + "The ID is resolved to its original source before that source alone is refreshed; the same immutable channel is returned even when a newer snapshot exists (then retained=true)."
+	return "loop show returns exactly one item: one channel of one snapshot, with that snapshot's id, sequence numbers, losses and clocks. It does not list the source's other snapshots: `loop list --source-id N` lists every retained channel row of a source, rows of older snapshots included.\n" +
+		loopSemanticsHelp + "The ID is resolved to its original source before that source alone is refreshed; the same immutable channel is returned even when a newer snapshot exists (then latest_cached_snapshot=false and retained=true)."
 }
 
 func (c *loopShowCmd) Run(rt *runtime) error {
@@ -361,6 +387,7 @@ func (c *loopSourcesCmd) Run(rt *runtime) error {
 	coverage := loopCoverageOf(report.Sources, nil)
 	result := newList(shape(rt, coverage.items), false)
 	result.LoopCoverage, result.sourceOnly = coverage, true
+	result.ArchiveAgeSeconds = rt.loopArchiveAge()
 	if result.Count == 0 {
 		result.Note = loopEmptyNote(coverage)
 	}

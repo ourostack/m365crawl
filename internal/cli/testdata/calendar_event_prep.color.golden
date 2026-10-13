@@ -40,7 +40,8 @@ Fixture summary: the plan was reviewed.
 2023-11-14 22:13 UTC  Alex Fixture  Filler 18 emp6
 2023-11-14 22:13 UTC  Alex Fixture  Filler 13 hxs5
 2023-11-14 22:13 UTC  Alex Fixture  Filler 3 f3w3
-[2mapp evidence of 9 returned Teams messages (mapper v2): 9 absent[0m
+[2mapp evidence of 9 returned Teams messages (mapper v2): 9 absent
+posted by an app (names an app id): 0 of 9[0m
 
 [2mreceived_at[0m           [2mmail from[0m    [2msubject[0m                      [2mmatch[0m
 [2m--------------------[0m  [2m-----------[0m  [2m---------------------------[0m  [2m-------[0m

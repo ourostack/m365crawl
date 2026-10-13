@@ -27,7 +27,7 @@ type startStep struct {
 var startHere = []startStep{
 	{Command: "m365crawl sync", Does: "read Teams, Outlook mail and the calendar into the archive"},
 	{Command: "m365crawl", Does: "what the archive holds and how fresh it is"},
-	{Command: `m365crawl search "words"`, Does: "find anything across chats and mail"},
+	{Command: `m365crawl search "words"`, Does: "search chats, mail, fetched transcripts, notes, document metadata and Loop text"},
 	{Command: "m365crawl calendar", Does: "today's meetings; calendar event <id> for one meeting with its chat and mail"},
 	{Command: "m365crawl mail unread", Does: "unread mail by folder", mail: true},
 	{Command: "m365crawl unread", Does: "unread Teams chats"},
@@ -104,8 +104,11 @@ type overviewSource struct {
 	Channels        *int `json:"channels,omitempty"`
 	MetadataOnly    *int `json:"metadata_only_sources,omitempty"`
 	ArchivedRecords *int `json:"archived_records,omitempty"`
+	// LastProjectedAt is Loop's last_sync_at under its plain name: the last Loop projection, not an
+	// edit time. Loop only.
+	LastProjectedAt *time.Time `json:"last_projected_at,omitempty"`
 	// LastSyncAt is the last sync of chats, mail and the calendar, the last admitted capture of
-	// documents, notes and native people, and the last transcript fetch.
+	// documents, notes and native people, the last Loop projection, and the last transcript fetch.
 	LastSyncAt *time.Time `json:"last_sync_at"`
 	Note       string     `json:"note,omitempty"`
 }
@@ -287,6 +290,7 @@ func loopOverviewSource(loop store.LoopOverview, unscoped string) overviewSource
 		MetadataOnly: &loop.MetadataOnly, ArchivedRecords: &loop.ArchivedRecords, LastSyncAt: loop.LastProjectedAt}
 	if src.LastSyncAt != nil {
 		src.LastSyncAt = at(*src.LastSyncAt)
+		src.LastProjectedAt = src.LastSyncAt
 	}
 	switch {
 	case loop.Registered == 0 && loop.ArchivedRecords == 0:
@@ -314,9 +318,15 @@ func loopOverviewSource(loop store.LoopOverview, unscoped string) overviewSource
 		if unscoped != "" {
 			src.Note = withNote(src.Note, unscoped)
 		}
+		src.Note = withNote(src.Note, loopOverviewMeaning)
 	}
 	return src
 }
+
+// loopOverviewMeaning says what the Loop row's time and counts mean, on every row with a
+// registered source.
+const loopOverviewMeaning = "last_sync_at is the last Loop projection (last_projected_at), not an edit time; channels are partial snapshots of cached text, not full or current pages; " +
+	"an archived record is one cached Loop record in the archive, registered as one source; a source holds any number of channels, or none"
 
 // lastCapture is the newest admitted capture of sources, or since when it is newer.
 func lastCapture(sources []store.KnowledgeSource, since time.Time) time.Time {
@@ -465,7 +475,11 @@ func (rt *runtime) renderOverview(r *overviewResult) {
 	} else {
 		rows := make([][]string, len(r.Sources))
 		for i, s := range r.Sources {
-			rows[i] = []string{s.Source, s.State, overviewHolds(s), overviewTime(s.LastSyncAt)}
+			when := overviewTime(s.LastSyncAt)
+			if s.LastProjectedAt != nil {
+				when += " (last projection)"
+			}
+			rows[i] = []string{s.Source, s.State, overviewHolds(s), when}
 		}
 		render.Table(w, []string{"source", "state", "holds", "last sync"}, rows, color)
 		for _, s := range r.Sources {
@@ -508,7 +522,7 @@ func overviewHolds(s overviewSource) string {
 	case s.Channels != nil && *s.Registered == 0:
 		return plural(*s.ArchivedRecords, "archived record", "archived records") + "; no sources registered"
 	case s.Channels != nil:
-		return registeredHolds(*s.Channels, "Loop channel", "Loop channels", s)
+		return registeredHolds(*s.Channels, "Loop channel (partial snapshot)", "Loop channels (partial snapshots)", s)
 	case s.Registered != nil && *s.Registered == 0 && s.Observations == nil:
 		return "no sources registered"
 	case s.Documents != nil:

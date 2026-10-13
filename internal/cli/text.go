@@ -38,13 +38,18 @@ func metaLines(w io.Writer, m meta, color bool) {
 	for _, n := range m.Notices {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
 	}
+	ageLine(w, m, color)
+	if m.SyncError != nil {
+		_, _ = fmt.Fprintf(w, "sync error: %s: %s\n", m.SyncError.Code, m.SyncError.Message)
+	}
+}
+
+// ageLine prints the age of the last complete sync, or that there was none.
+func ageLine(w io.Writer, m meta, color bool) {
 	if m.ArchiveAgeSeconds != nil {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("archive age: "+(time.Duration(*m.ArchiveAgeSeconds)*time.Second).String(), color))
 	} else {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("archive age: never synced", color))
-	}
-	if m.SyncError != nil {
-		_, _ = fmt.Fprintf(w, "sync error: %s: %s\n", m.SyncError.Code, m.SyncError.Message)
 	}
 }
 
@@ -105,7 +110,13 @@ func (rt *runtime) renderText(label string, v any) error {
 			}
 		}
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(fmt.Sprintf("%s items%s", count, more), color))
+		for _, hint := range r.Sources.hints() {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(hint, color))
+		}
 		if r.sourceOnly {
+			if r.LoopCoverage != nil {
+				ageLine(w, r.meta, color)
+			}
 			if r.Note != "" {
 				_, _ = fmt.Fprintf(w, "note: %s\n", r.Note)
 			}
@@ -291,10 +302,12 @@ func (rt *runtime) listTable(r *listResult) {
 	var cols []string
 	var rows [][]string
 	textCol := -1
+	leads := map[int]string{} // row index to the application marker its text starts with
 	for _, it := range r.Items {
 		switch x := it.(type) {
 		case messageItem:
 			cols, textCol = []string{"sent_at", "conversation", "sender", "text"}, 3
+			leads[len(rows)] = appMarker(x.App)
 			text := appMarker(x.App) + oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
@@ -307,6 +320,7 @@ func (rt *runtime) listTable(r *listResult) {
 			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
 			cols, textCol = searchColumns, 5
+			leads[len(rows)] = appMarker(x.App)
 			text := appMarker(x.App) + oneLine(x.Text)
 			if !x.DeletedAt.IsZero() {
 				text += " (deleted)"
@@ -356,18 +370,22 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
 		case loopChannelItem:
-			cols, textCol = loopListColumns, 5
+			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x))
 		case loopDetailItem:
-			cols, textCol = loopListColumns, 5
+			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x.loopChannelItem))
 		case searchLoopItem:
 			cols, textCol = searchColumns, 5
-			rows = append(rows, []string{"-", x.Source, x.Path, "partial snapshot", "loop show " + x.ID, oneLine(x.Text)})
+			rows = append(rows, []string{"-", x.Source, x.Path, x.TextState, "loop show " + x.ID, oneLine(x.Text)})
 		case loopSourceItem:
 			cols, textCol = []string{"source", "status", "coverage", "snapshot_match", "last_snapshot", "reason", "retry"}, -1
+			retry := "-" // a healthy source needs none
+			if x.RetryNeeded {
+				retry = x.Retry
+			}
 			rows = append(rows, []string{strconv.FormatInt(x.SourceID, 10), x.Status, x.Coverage, x.SnapshotMatch,
-				strconv.FormatInt(x.LastSnapshotID, 10), firstOf(x.Reason, x.RawReason), x.Retry})
+				strconv.FormatInt(x.LastSnapshotID, 10), firstOf(x.Reason, x.RawReason), retry})
 		case searchNoteItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "notes show " + x.ID, oneLine(x.Text)})
@@ -466,7 +484,7 @@ func (rt *runtime) listTable(r *listResult) {
 	}
 	for _, row := range rows {
 		for i := range row {
-			if i != textCol && cols[i] != "database" && cols[i] != "thread" { // a cut id is no use
+			if i != textCol && cols[i] != "database" && cols[i] != "thread" && cols[i] != loopSnapshotColumn { // a cut id or state is no use
 				row[i] = render.Truncate(row[i], 40)
 			}
 		}
@@ -484,8 +502,10 @@ func (rt *runtime) listTable(r *listResult) {
 			used += w
 		}
 		room := max(rt.termWidth()-used, 20)
-		for _, row := range rows {
-			row[textCol] = render.Truncate(row[textCol], room)
+		for i, row := range rows {
+			// The application marker is never cut: only the text after it is clipped.
+			lead := leads[i]
+			row[textCol] = lead + render.Truncate(strings.TrimPrefix(row[textCol], lead), max(room-runewidth.StringWidth(lead), 12))
 		}
 	}
 	render.Table(rt.stdout, cols, rows, rt.color)

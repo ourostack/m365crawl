@@ -41,6 +41,7 @@ sent_at               chat sender   message
 2023-11-14 22:13 UTC  Alex Fixture  Filler 13 hxs5
 2023-11-14 22:13 UTC  Alex Fixture  Filler 3 f3w3
 app evidence of 9 returned Teams messages (mapper v2): 9 absent
+posted by an app (names an app id): 0 of 9
 
 received_at           mail from    subject                      match
 --------------------  -----------  ---------------------------  -------

@@ -200,6 +200,9 @@ func readLoopSnapshot(ctx context.Context, reader knowledgeReader, filter LoopFi
 	}
 	byID := map[int64]loopSourceState{}
 	out := LoopQuerySnapshot{Rows: rows, Sources: make([]LoopSource, len(states)), Truncated: truncated}
+	if len(rows) > 0 {
+		out.Matched = rows[0].matched // the same count on every row: the window spans the whole match
+	}
 	for i, state := range states {
 		byID[state.source.Registration.ID] = state
 		out.Sources[i] = state.source
@@ -244,7 +247,7 @@ func readLoopChannels(ctx context.Context, reader knowledgeReader, filter LoopFi
 	rows, err := reader.QueryContext(ctx, `select c.id,sn.locator_id,sn.id,c.path,c.sequence,c.text,c.markers,c.pending_operations,
 sn.file_id,sn.sequence,sn.latest_sequence,sn.pending_operations,sn.missing_blobs,sn.partial,sn.tenant_id,sn.user_id,
 sn.record_updated_at_at_admission,sn.projected_at,sn.value_digest,sn.qualification,
-coalesce(e.snapshot_id,0)<>sn.id
+coalesce(e.snapshot_id,0)<>sn.id,count(*) over()
 from loop_channels c join loop_snapshots sn on sn.id=c.snapshot_id
 join knowledge_locators l on l.id=sn.locator_id
 left join loop_attempt_evidence e on e.attempt_id=l.last_admitted
@@ -259,7 +262,7 @@ where `+where+` order by c.path collate nocase,sn.locator_id,sn.id,c.id`+limit, 
 		if err := rows.Scan(&row.ID, &row.RegistrationID, &row.SnapshotID, &row.Channel.Path, &row.Channel.Sequence,
 			&row.Channel.Text, &row.Channel.Markers, &row.Channel.PendingOperations, &row.Snapshot.FileID, &row.Snapshot.Sequence,
 			&row.Snapshot.LatestSequence, &row.Snapshot.PendingOperations, &row.Snapshot.MissingBlobs, &row.Snapshot.Partial,
-			&row.SnapshotTenantID, &row.SnapshotUserID, &observed, &projected, &row.valueDigest, &row.qualification, &row.Retained); err != nil {
+			&row.SnapshotTenantID, &row.SnapshotUserID, &observed, &projected, &row.valueDigest, &row.qualification, &row.Retained, &row.matched); err != nil {
 			_ = rows.Close()
 			return nil, false, err
 		}

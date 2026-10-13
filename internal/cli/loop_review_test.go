@@ -65,7 +65,7 @@ func TestLoopOverviewRow(t *testing.T) {
 		t.Fatalf("registered with a failure: %v", row)
 	}
 	text := runOK(t, e, "--format", "text")
-	if !strings.Contains(text, "2 Loop channels from 3 sources; 1 failed") || !strings.Contains(text, "loop: ") {
+	if !strings.Contains(text, "2 Loop channels (partial snapshots) from 3 sources; 1 failed") || !strings.Contains(text, "loop: ") {
 		t.Fatalf("text overview:\n%s", text)
 	}
 	insertLoopCLI(t, db, "later", loopCLIValue(t, 3, [2]string{"c", "charlie words"}))
@@ -184,14 +184,14 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 	zone := time.Date(2026, 10, 12, 1, 0, 0, 0, time.UTC).In(displayZone).Format("2006-01-02 15:04 MST")
 	for _, want := range []string{id + "  channels/native", "text state: partial_snapshot", "not a full or current Loop page",
 		"sequence 7 (snapshot 7, latest 7)", "pending operations 0 (snapshot 0)", "markers 0", "missing blobs 1", "partial: yes",
-		"losses: loop_cache_blob_missing 1", "current; archived record matches this snapshot: yes; raw present: yes",
+		"losses: loop_cache_blob_missing 1", "latest cached snapshot of this source; archived record matches this snapshot: yes; archived record still in the app's cache: yes",
 		"record updated at admission: " + zone, "projected: ", "raw updated: " + zone, "raw removed: -",
 		"modified: unknown (the cache records no native modification time)", "association: unresolved", "\nevidence words\n"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text loop show lacks %q:\n%s", want, text)
 		}
 	}
-	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "evidence"); !strings.Contains(search, "partial snapshot") || !strings.Contains(search, "  evidence words") || strings.Contains(search, "[partial snapshot]") {
+	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "evidence"); !strings.Contains(search, "partial_snapshot") || !strings.Contains(search, "  evidence words") || strings.Contains(search, "[partial_snapshot]") {
 		t.Fatalf("shared search does not mark the Loop row as a partial snapshot:\n%s", search)
 	}
 	if _, err := db.Exec(`update records set value_json=?,content_hash='next',updated_at='2026-10-12T05:00:00.000Z' where key_json='page'`,
@@ -200,7 +200,7 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 	}
 	runOK(t, e, "loop", "sync")
 	old := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id)
-	for _, want := range []string{"retained (a newer snapshot of this source exists); archived record matches this snapshot: no; raw present: yes", "\nevidence words\n"} {
+	for _, want := range []string{"older cached snapshot (a newer snapshot of this source exists); archived record matches this snapshot: no; archived record still in the app's cache: yes", "\nevidence words\n"} {
 		if !strings.Contains(old, want) {
 			t.Fatalf("retained text loop show lacks %q:\n%s", want, old)
 		}
