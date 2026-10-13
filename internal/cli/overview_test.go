@@ -27,6 +27,7 @@ const startHereBlock = `Start here:
   m365crawl mail list --has-attachments   mail with files; mail show <id> lists each file's name, size and type
   m365crawl docs list         Office recent, shared and recommended document metadata; docs sync registers the sources
   m365crawl notes search "words"   OneNote indexed notes; notes sync registers the indexes
+  m365crawl loop search "words"   cached Loop channel text (partial snapshots); loop sync registers the archived records
   m365crawl people            Teams people, mail correspondents and native Outlook people observations
 `
 
@@ -245,6 +246,7 @@ func TestOverviewReportsArchiveFailures(t *testing.T) {
 			}
 		})
 	}
+	failing("loop", func(e *env) { e.exec("drop table records"); e.exec("create table records (x)") })
 	failing("chats", func(e *env) { e.exec("drop table messages"); e.exec("create table messages (x)") })
 	failing("mail", func(e *env) { e.exec("drop table mail_messages"); e.exec("create table mail_messages (x)") })
 	failing("notes count", func(e *env) { e.exec("drop table note_entities"); e.exec("create table note_entities (x)") })

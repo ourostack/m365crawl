@@ -236,7 +236,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 type searchCmd struct {
 	Query string `arg:"" optional:"" help:"Words to find; \"quoted phrases\" and a trailing * for prefixes are supported. Optional when a filter (--mentions-me, --direct-mentions, --from, --conversation, --team, --folder, --since, --until) is given: then the filters alone select the messages."`
 	msgFlags
-	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata or all."`
+	Source         string `default:"all" enum:"chats,mail,transcripts,notes,documents,loop,all" help:"What to search: Teams chats, Outlook mail, meeting transcripts, indexed notes, document metadata, cached Loop channels or all."`
 	Folder         string `help:"Only mail in this folder, by name or kind (inbox, sent, ...). Mail only: with --source all it leaves Teams chats out."`
 	IncludeDeleted bool   `name:"include-deleted" help:"Also search deleted messages (Teams chats only)."`
 	MentionsMe     bool   `name:"mentions-me" help:"Only messages that mention you (by name, or through a channel, team, tag or @everyone mention; see mention_kind). Teams chats only."`
@@ -253,6 +253,7 @@ func (searchCmd) Help() string {
 		"--mentions-me, --direct-mentions, --conversation, --team, --include-system, --include-deleted and --html belong to Teams chats; --folder belongs to mail. With --source all, such a flag narrows the search to its own source and note says so; with another --source it is a usage error (flag_source_conflict). --from applies to chats, mail and transcript speakers, not indexed notes or documents. --since, --until, --limit and --fields apply to every participating source; --fields accepts the keys of every kind of item.\n" +
 		"Notes have unresolved account/author ownership. --account, --from and chat/mail-only flags exclude them from default search with a notice; --source notes rejects those flags and independently bypasses Teams/Outlook freshness and irrelevant source-root checks. Date filters use native note modified times and exclude unknown timestamps in bounded windows. Register new inputs explicitly with `notes sync`; ordinary reads refresh only registered locators and --max-age 0 performs no capture.\n" +
 		"Documents likewise reject account/link/profile and message-only filters with --source documents; those filters exclude documents from --source all with a notice. Document-only search bypasses legacy freshness and irrelevant source roots. Register inputs with `docs sync`; ordinary reads refresh registered participating locators only, and --max-age 0 performs no capture or archive migration.\n" +
+		"Cached Loop channels (source loop) are partial snapshot text already in the archive, not full or current pages. They have no native date, so they follow every dated hit in path order and carry modified_at null; `loop show loop-channel:ID` expands one. Date, account, author, chat-only, mail-only and profile filters are refused with --source loop and leave Loop out of --source all with a notice. loop_coverage reports each registered Loop source's snapshot_match and failures outside --fields, clipping and zero hits.\n" +
 		"note also says when mail is left out and why: it is not in the archive yet, the Outlook source is off, there is no Outlook profile, or mail is not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
 		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only.\n" +
 		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`; for a transcript the call id for `m365crawl transcripts show <call_id>`.\n" +
@@ -269,6 +270,9 @@ func (c *searchCmd) Run(rt *runtime) error {
 	}
 	if c.Source == searchNotes && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("notes search requires words or --since/--until; use notes list for an unfiltered list")
+	}
+	if c.Source == searchLoop && strings.TrimSpace(c.Query) == "" {
+		return errs.Usage("Loop search needs words; use loop list for an unfiltered list")
 	}
 	if c.Source == searchDocuments && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("document search needs words or --since/--until; use docs list for an unfiltered list")
@@ -295,6 +299,15 @@ func (c *searchCmd) Run(rt *runtime) error {
 		rt.documentCoverage = coverage
 	}
 	if !p.chats && !p.mail && !p.transcripts {
+		if p.loop {
+			return rt.loopRead("search", 0, func(st *store.Store) (*listResult, error) {
+				res, err := c.search(rt, p, f, st)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*listResult), nil
+			})
+		}
 		if p.indexedDocuments {
 			return rt.documentsRead("search", 0, func(st *store.Store) (*listResult, error) {
 				res, err := c.search(rt, p, f, st)
@@ -312,7 +325,17 @@ func (c *searchCmd) Run(rt *runtime) error {
 			return res.(*listResult), nil
 		})
 	}
-	return rt.read("search", func(st *store.Store) (result, error) { return c.search(rt, p, f, st) })
+	return rt.read("search", func(st *store.Store) (result, error) {
+		if p.loop {
+			// After the implicit sync, so Loop projects the records that sync just archived.
+			coverage, err := rt.refreshLoop(0)
+			if err != nil {
+				return nil, loopError(err)
+			}
+			rt.loopCoverage = coverage
+		}
+		return c.search(rt, p, f, st)
+	})
 }
 
 type messagesCmd struct {

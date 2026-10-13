@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.renderApplicationDetails(r)
 		rt.renderNoteDetails(r)
 		rt.renderPeopleDetails(r)
+		rt.renderLoopDetails(r)
 		if err := rt.renderDocumentDetails(r); err != nil {
 			return err
 		}
@@ -82,6 +84,7 @@ func (rt *runtime) renderText(label string, v any) error {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(appCoverageLine(c), color))
 		}
 		rt.renderNoteCoverage(r.SourceCoverage)
+		rt.renderLoopCoverage(r.LoopCoverage)
 		if r.CoverageGap != nil && *r.CoverageGap {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
 		}
@@ -122,6 +125,12 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		_, _ = fmt.Fprintf(w, "%s: %d captured, %d unchanged, %d skipped, %d failed\n", name, r.Captured, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderNoteCoverage(r.SourceCoverage)
+	case loopSyncResult:
+		_, _ = fmt.Fprintf(w, "loop: %d projected, %d unchanged, %d skipped, %d failed\n", r.Projected, r.Unchanged, r.Skipped, r.Failed)
+		rt.renderLoopCoverage(r.LoopCoverage)
+		if r.Notice != "" {
+			_, _ = fmt.Fprintf(w, "notice: %s\n", r.Notice)
+		}
 	case syncer.Report:
 		render.Block(w, "Sync", map[string]any{"status": r.Status}, color)
 		_, _ = fmt.Fprintln(w)
@@ -338,6 +347,19 @@ func (rt *runtime) listTable(r *listResult) {
 		case searchDocumentItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
+		case loopChannelItem:
+			cols, textCol = loopListColumns, 5
+			rows = append(rows, loopListRow(x))
+		case loopDetailItem:
+			cols, textCol = loopListColumns, 5
+			rows = append(rows, loopListRow(x.loopChannelItem))
+		case searchLoopItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{"-", x.Source, x.Path, "partial snapshot", "loop show " + x.ID, oneLine(x.Text)})
+		case loopSourceItem:
+			cols, textCol = []string{"source", "status", "coverage", "snapshot_match", "last_snapshot", "reason", "retry"}, -1
+			rows = append(rows, []string{strconv.FormatInt(x.SourceID, 10), x.Status, x.Coverage, x.SnapshotMatch,
+				strconv.FormatInt(x.LastSnapshotID, 10), firstOf(x.Reason, x.RawReason), x.Retry})
 		case searchNoteItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.Title), "-", "notes show " + x.ID, oneLine(x.Text)})
@@ -417,7 +439,9 @@ func (rt *runtime) listTable(r *listResult) {
 			row := make([]string, len(cols))
 			for i, k := range cols {
 				var v any
-				_ = json.Unmarshal(x.vals[k], &v)
+				dec := json.NewDecoder(bytes.NewReader(x.vals[k]))
+				dec.UseNumber() // a large integer, such as a Loop sequence, prints exactly
+				_ = dec.Decode(&v)
 				if v != nil {
 					row[i] = oneLine(fmt.Sprint(v))
 				}

@@ -19,7 +19,10 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 12 adds messages.raw_digest and the Teams message application evidence tables
 // (message_apps_schema.go); an archive at version 11 gains them on its next writable open, and the
 // sync's application backfill fills them from the raw JSON the archive already holds.
-const SchemaVersion = 12
+// Version 13 adds the cached Loop channel projection (loop_observations_schema.go): registered
+// archive-tuple sources, immutable snapshots, channels and their FTS index; the tables are
+// additive and stay empty until `loop sync` registers a source.
+const SchemaVersion = 13
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -194,4 +197,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL

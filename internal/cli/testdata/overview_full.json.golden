@@ -38,6 +38,10 @@
       "does": "OneNote indexed notes; notes sync registers the indexes"
     },
     {
+      "command": "m365crawl loop search \"words\"",
+      "does": "cached Loop channel text (partial snapshots); loop sync registers the archived records"
+    },
+    {
       "command": "m365crawl people",
       "does": "Teams people, mail correspondents and native Outlook people observations"
     }
@@ -85,6 +89,17 @@
       "notes": 0,
       "registered_sources": 0,
       "source": "notes",
+      "state": "not_registered"
+    },
+    {
+      "archived_records": 0,
+      "channels": 0,
+      "failed_sources": 0,
+      "last_sync_at": null,
+      "metadata_only_sources": 0,
+      "note": "no cached Loop records are archived yet: run m365crawl sync, then m365crawl loop sync",
+      "registered_sources": 0,
+      "source": "loop",
       "state": "not_registered"
     },
     {

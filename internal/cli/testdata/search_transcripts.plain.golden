@@ -15,4 +15,5 @@ source  kind  status  coverage  locator  reason
 ------  ----  ------  --------  -------  ------
 no rows
 8 items
+notice: Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner
 archive age: <age>

@@ -96,7 +96,7 @@ values(?,?,?) on conflict(locator_id) do nothing`, locatorID, surface, applicati
 			return errors.New("documents: source binding changed")
 		}
 		return nil
-	})
+	}, nil)
 }
 
 func readDocumentLocator(ctx context.Context, reader knowledgeReader, id int64) (officedocuments.Surface, string, error) {

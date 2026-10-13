@@ -77,6 +77,9 @@ type listResult struct {
 	// it had more. Nil on every other list.
 	Sources        *searchSources `json:"sources,omitempty"`
 	SourceCoverage *noteCoverage  `json:"source_coverage,omitempty"`
+	// LoopCoverage is the participating Loop sources of a Loop or shared search result, outside
+	// --fields, clipping and zero hits.
+	LoopCoverage *loopCoverage `json:"loop_coverage,omitempty"`
 	// ApplicationEvidenceCoverage summarizes the application evidence of the Teams messages the
 	// result returned, whatever --fields kept. Nil on results that read no Teams messages.
 	ApplicationEvidenceCoverage *applicationCoverage `json:"application_evidence_coverage,omitempty"`
