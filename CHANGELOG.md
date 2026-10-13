@@ -4,6 +4,44 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-13
+
+### Added
+
+- `application_evidence_coverage` has `posted_by_app`: how many returned Teams messages name an app, by `app_id` or `app_name`, in their served evidence. `mapped` only says the claims were read. Text output prints it as `posted by an app (names an app): K of N`. When a returned message is not derived or failed with nothing served, the count is a lower bound and the note and the text line say so.
+- `--fields app_summary` on `messages`, `unread`, `thread` and `search` gives each message a compact `app_summary` (`state`, `app_name`, `app_id`, `reply_to_id`, `citations_total`) instead of the whole `app_observation`. `citations_total` is every citation read from the message; it and the claims are `null` when nothing is served. Text output prints the summary as one readable cell.
+- Each entry of `app_observation.served.losses` has a `meaning`, and the help of `messages`, `unread`, `thread`, `search` and `calendar event` ends with every loss code and failure code and its one-line meaning. A partial or failed message repeats the meaning of its own codes.
+- `sql --help` lists every table of the archive with what it holds, shows how to list a table's columns (`pragma_table_info()`), and says that `raw_digest` is the SHA-256 of the archived raw JSON as lowercase hex.
+- The global `--help` says what `--format log` prints: one `label={json}` line per result.
+- `search` reports, in `sources`, what each source matched before `--limit`: `returned` and either `matched` (exact) or `matched_at_least` (a source that stopped reading at the limit). Text output prints a line such as `3 Loop hits not shown; use --source loop` for a source crowded out by newer hits, also when it returned nothing; it says `raise --limit` when the source alone matched more than the limit, and never names the source already selected. With no archive, no matched count is reported.
+- Loop channel items have `latest_cached_snapshot`, the plain inverse of `retained`. Loop sources have `retry_needed`, true on a failed or cancelled source, where a retry can help.
+- The overview's Loop row has `last_projected_at` and a note that says its time is the last projection, not an edit time, that channels are partial snapshots, and what an archived record is.
+- `loop list`, `loop search`, `loop show`, `loop sources` and `search --source loop` fill `archive_age_seconds` with the age of the last complete sync, and text output prints it.
+- `docs sync` reads the Office registry's recently-opened list: the Mac default registry files, or one ordinary local copy given with `docs sync --registry-file FILE` on Mac or Windows. Each entry is a document observation with `variant` `office_registry`, application `registry`, the registry's own claims in `registry_native` and its opened time in `opened_at` (null when the registry gives none or it is not an RFC 3339 time with an offset; the raw text is kept). The registry states no modification time, so `modified_at` is null and `--since`/`--until` never match these rows. Nothing the registry refers to is opened, checked or resolved.
+- `docs list` and `docs search` accept `--application registry`. Shared `search` returns registry rows with the other document metadata.
+- A default `docs sync` tries the Office JSON caches and the Office registry independently and reports a family that is absent or refused under `discovery`, with a fixed code and the supplied-input command to use instead.
+- A registry source whose first capture failed has no source ID, so its `fix` names the retry `m365crawl docs sync --registry-file FILE` with the file's path, quoted so that pasting it cannot run text from the file name. A failed source stays listed until a later sync of it succeeds; there is no command to remove one.
+- The archive moves to schema 14: additive `variant`, `registry_json` and `opened_at` columns for document observations. Existing rows are not rewritten.
+
+### Changed
+
+- Text output of application evidence is in plain words: `citations: N read from the message, M shown; K more could not be read` replaces "admitted shown" and "source rows refused", and the `full record` line says it is the stored projection as a JSON string, not the raw message. The `[app: NAME]` marker is no longer clipped with the text column.
+- The help of the message commands says that `full_inspection` prints the stored projection (a JSON string to decode a second time, in a row that is never updated or deleted), that a citation's `link` is the stored value and is never derived at read time, and what `total_admitted`, `citations_count` and `refused_citation_rows` count.
+- Text output of Loop rows no longer says "current": `loop list` has a `text_state` column and a `snapshot` column that says `latest cached snapshot` or `older cached snapshot`, and a row whose record left the app's cache says `archived record gone from the app's cache`. Loop rows of text `search` show `partial_snapshot`. `loop sources` text shows the retry command only on a source that needs it.
+- The help of `loop` and `loop sync` says what `loop sync` can and cannot recover when the archived record is gone from the app's cache, and the help of `loop show` says it returns one channel of one snapshot instead of promising "snapshot versions".
+- A failed Loop source with an earlier snapshot now has the `effect` "the last good snapshot stays the latest cached snapshot, so its channels are still listed" (it said "stays current"), and the `fix` of a metadata-only source says that a retry now changes nothing.
+- The `note` of `application_evidence_coverage` is longer: it defines `posted_by_app` and says when it is a lower bound.
+- The `[app: NAME]` marker shortens a name wider than 24 terminal columns, and the overview's text note on the Loop row uses plain words instead of JSON field names.
+- "Start here" and the top-level help describe `search` by every source it searches. The overview's Loop row says `Loop channels (partial snapshots)` and marks its time `(last projection)`.
+- **Breaking:** document `source_coverage.scope` is renamed from `office_json_metadata` to `office_document_metadata`, because it now covers Office JSON and Office registry sources. The `metadata` manifest's privacy scopes are a separate list: it keeps `office_json_metadata` and adds `office_registry_metadata`.
+- **Breaking:** a default `docs sync` whose Office JSON caches are missing or refused exits 0 when a registered source was attempted or the Office registry was usable, and reports the refusal under `discovery`; before, it failed with the refusal's code and exit 3 without trying the registered sources. When neither family is usable and no source is registered it still fails with that code and exit 3. `docs sync --root DIR` still fails on a refused directory.
+- `--root`, `--registry-file` and `--source-id` of `docs sync` are mutually exclusive. A `--registry-file` that does not exist, is not a regular file, or is the archive database is a usage error and registers nothing.
+- Text `docs list` and `docs search` have an `opened_at` column for registry rows; it is `-` for Office JSON rows.
+
+### Fixed
+
+- Reading OneNote indexes and Office files in one process can no longer release a lock another capture still holds: one gate now serializes every open and close of those source files.
+
 ## [0.9.5] - 2026-10-13
 
 ### Added
