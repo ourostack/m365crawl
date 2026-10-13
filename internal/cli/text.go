@@ -342,8 +342,13 @@ func (rt *runtime) listTable(r *listResult) {
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), oneLine(x.Text)})
 		case documentItem:
-			cols, textCol = []string{"modified_at", "source", "id", "application", "surface", "title", "text_state"}, 5
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(x.Title), x.TextState})
+			// opened_at is a registry row's own clock, in its own column: it is never a modification time.
+			opened := "-"
+			if x.OpenedAt != nil && x.OpenedAt.At != nil {
+				opened = stamp(*x.OpenedAt.At)
+			}
+			cols, textCol = []string{"modified_at", "opened_at", "source", "id", "application", "surface", "title", "text_state"}, 6
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), opened, strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(x.Title), x.TextState})
 		case documentDetailItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text_state"}, 3
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.TextState})

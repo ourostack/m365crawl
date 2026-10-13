@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/officeregistry"
@@ -55,15 +57,21 @@ func TestRegistryEntryPointRefusals(t *testing.T) {
 	}
 	closeFile := jsonClose
 	t.Cleanup(func() { jsonClose = closeFile })
+	// The fault targets only the bound data handle: a platform's own metadata-only handle of the
+	// same name, closed inside the open, is not the source lifetime this test is about.
+	closes := 0
 	jsonClose = func(f *os.File) error {
 		if f.Name() == filepath.Base(path) {
-			return errors.Join(closeFile(f), os.ErrPermission)
+			if closes++; closes > leafCloseBeforeBound {
+				return errors.Join(closeFile(f), os.ErrPermission)
+			}
 		}
 		return closeFile(f)
 	}
 	if signature, err := ObserveRegistry(context.Background(), path); signature != "" || registryCode(err) != "office_registry_capture_failed" {
-		t.Fatal("unclosed observation published evidence")
+		t.Fatalf("unclosed observation published evidence: %q %v", signature, err)
 	}
+	closes = 0
 	if err := WithRegistryCapture(context.Background(), RegistryInput{Path: path}, func(*RegistryCapture) error { return nil }); registryCode(err) != "office_registry_capture_failed" {
 		t.Fatal("source close failure admitted")
 	}
@@ -119,6 +127,17 @@ func TestRegistryAcquisitionFaults(t *testing.T) {
 				registryPrivate, jsonClose, jsonRemove, jsonLstat = private, closeFile, remove, lstat
 			})
 			reads := 0
+			writeRefused := false
+			// mutate appends one byte to the held source. A platform whose held handle denies
+			// writers refuses the append instead, and the capture then rightly succeeds.
+			mutate := func() {
+				err := appendByte(path)
+				if err != nil && heldSourceDeniesWrite(err) {
+					writeRefused = true
+				} else if err != nil {
+					t.Error(err)
+				}
+			}
 			switch fault {
 			case "stat":
 				registryStat = func(*os.File) (os.FileInfo, error) { return nil, os.ErrPermission }
@@ -157,9 +176,7 @@ func TestRegistryAcquisitionFaults(t *testing.T) {
 			case "mutate-after-lock":
 				registryLock = func(f *os.File) (func() error, error) {
 					unlock, err := lock(f)
-					if appendErr := appendByte(path); appendErr != nil {
-						t.Error(appendErr)
-					}
+					mutate()
 					return unlock, err
 				}
 			case "mutate-after-locked":
@@ -167,9 +184,7 @@ func TestRegistryAcquisitionFaults(t *testing.T) {
 				t.Cleanup(func() { registryStage = stage })
 				registryStage = func(name string) {
 					if name == "locked" {
-						if err := appendByte(path); err != nil {
-							t.Error(err)
-						}
+						mutate()
 					}
 				}
 			case "write":
@@ -218,6 +233,19 @@ func TestRegistryAcquisitionFaults(t *testing.T) {
 					return info, err
 				}
 			}
+			// Every lock the capture takes must be released by its own unlock, and every descriptor
+			// it opens closed, on each failure path: a leaked lock would hold Office out of writing.
+			locks, unlocks := 0, 0
+			faulted := registryLock
+			registryLock = func(f *os.File) (func() error, error) {
+				unlock, err := faulted(f)
+				if err != nil {
+					return unlock, err
+				}
+				locks++
+				return func() error { unlocks++; return unlock() }, nil
+			}
+			descriptors := openDescriptors(t)
 			called := false
 			err := WithRegistryCapture(context.Background(), RegistryInput{Path: path}, func(c *RegistryCapture) error {
 				called = true
@@ -226,10 +254,27 @@ func TestRegistryAcquisitionFaults(t *testing.T) {
 				}
 				return nil
 			})
-			if err == nil {
+			if writeRefused {
+				if err != nil {
+					t.Fatalf("a refused write failed the capture: %v", err)
+				}
+			} else if err == nil {
 				t.Fatalf("%s fault admitted a capture (called=%t)", fault, called)
 			}
-			jsonRemove, jsonLstat = remove, lstat
+			if called && slices.Contains([]string{"private-open", "private-digest", "private-close"}, fault) {
+				t.Fatalf("%s: the consumer saw a private copy that failed its post-copy check", fault)
+			}
+			registryStat, registryReadAt, registryLock, jsonRoot, jsonCreate, jsonWrite = stat, readAt, lock, root, create, write
+			registryPrivate, jsonClose, jsonRemove, jsonLstat = private, closeFile, remove, lstat
+			if locks != unlocks {
+				t.Fatalf("%s: %d SQLite locks taken, %d released", fault, locks, unlocks)
+			}
+			if after := openDescriptors(t); after != descriptors {
+				t.Fatalf("%s: open descriptors went from %d to %d", fault, descriptors, after)
+			}
+			if output := officeWriterProbe(t, path); !strings.Contains(output, "WRITE_OK") {
+				t.Fatalf("%s: a writer is still held out after the capture returned: %s", fault, output)
+			}
 		})
 	}
 }

@@ -285,3 +285,34 @@ func TestRegistryRunnerEmptyIndexFamilySelectionAndDiscoveryFault(t *testing.T) 
 		t.Fatalf("an unclassified discovery fault became a family outcome: %v", err)
 	}
 }
+
+func TestRegistryFileMustBeAnOrdinaryFileOtherThanTheArchive(t *testing.T) {
+	good := registryFileFixture(t, "MicrosoftRegistrationDB_good.reg")
+	path := newDB(t)
+	ctx := context.Background()
+	if _, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, RegistryFile: good, Explicit: true, Discover: true}); err != nil {
+		t.Fatal(err)
+	}
+	capture := documentsRegistryCapture
+	t.Cleanup(func() { documentsRegistryCapture = capture })
+	documentsRegistryCapture = func(context.Context, officecapture.RegistryInput, func(*officecapture.RegistryCapture) error) error {
+		t.Error("an unusable registry file reached capture")
+		return nil
+	}
+	for name, file := range map[string]string{"missing": good + ".missing", "directory": filepath.Dir(good), "archive": path,
+		"archive-wal": path + "-wal", "archive-shm": path + "-shm", "archive-journal": path + "-journal", "archive-lock": path + ".lock",
+		"archive-other-spelling": filepath.Dir(path) + string(filepath.Separator) + "." + string(filepath.Separator) + filepath.Base(path)} {
+		report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, RegistryFile: file, Explicit: true, Discover: true})
+		if !errors.Is(err, ErrRegistryFileUnusable) || len(report.Sources) != 0 {
+			t.Fatalf("%s: %+v %v", name, report, err)
+		}
+	}
+	s, err := store.OpenReadOnly(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := s.DocumentSources(ctx)
+	if closeErr := s.Close(); err != nil || closeErr != nil || len(sources) != 1 {
+		t.Fatalf("an unusable registry file registered a source: %+v %v %v", sources, err, closeErr)
+	}
+}

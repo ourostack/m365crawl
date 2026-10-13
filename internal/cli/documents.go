@@ -188,7 +188,7 @@ func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 		fix := firstOf(documentFailureFix[source.Reason], documentFailureFix[fallback])
 		if source.Kind == store.RegistryDocumentKind {
 			// A locator with no admitted capture has no source ID to name, so its retry route is the file.
-			retry := "m365crawl docs sync --registry-file " + shellArg(source.Locator)
+			retry := registryRetry(source.Platform, source.Locator)
 			if source.ID > 0 {
 				retry = "m365crawl docs sync --source-id " + strconv.FormatInt(source.ID, 10)
 			}
@@ -208,12 +208,33 @@ func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	return out
 }
 
-// shellArg quotes one path for the retry command a fix prints.
-func shellArg(path string) string {
-	if strings.Contains(path, `\`) { // a Windows path: cmd and PowerShell both take double quotes
-		return `"` + path + `"`
+// windowsQuotable is what a Windows path may hold and still be literal inside double quotes in
+// both cmd.exe and PowerShell: no $, backtick, %, ', &, ^ or !.
+const windowsQuotable = argSafeWindows + ` ()~#[]{}`
+
+const argSafeWindows = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@+=,-" + `\`
+
+// registryRetry is the command that retries a registry source with no source ID. A fix is text an
+// agent may paste into a shell, so the file name is quoted for the platform the source was
+// registered on. A Windows name that no single quoting keeps literal in both cmd.exe and
+// PowerShell is not interpolated: the fix names the locator field instead.
+func registryRetry(platform, locator string) string {
+	const command = "m365crawl docs sync --registry-file "
+	if platform != "windows" {
+		return command + quoteFor("")(locator)
 	}
-	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+	if locator != "" && strings.Trim(locator, argSafeWindows) == "" {
+		return command + locator
+	}
+	if strings.Trim(locator, windowsQuotable) == "" {
+		return command + `"` + locator + `"`
+	}
+	return command + "FILE, where FILE is this source's locator passed as one literal argument (its name holds characters a shell would expand, so it is not repeated here)"
+}
+
+// registryFileArg is the --registry-file argument registryRetry prints for a quotable path.
+func registryFileArg(platform, locator string) string {
+	return strings.TrimPrefix(registryRetry(platform, locator), "m365crawl docs sync --registry-file ")
 }
 
 // documentFailureReasons are the reasons a document source capture fails or is cancelled, as
@@ -238,8 +259,8 @@ var documentFailureFix = map[string]string{
 	"office_json_cleanup_failed":            "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
 	"office_json_policy_restore_failed":     "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
 	"office_json_cancelled":                 "the capture was interrupted or timed out. Run m365crawl docs sync again",
-	"office_registry_input_unqualified":     "the registry file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. Copy the registry file alone to an ordinary local folder",
-	"office_registry_source_busy":           "an Office app was writing the registry file (it held a write lock or left a rollback journal), so nothing was read. Close the Office apps or wait a moment",
+	"office_registry_input_unqualified":     "the registry file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. Copy the registry file alone to an ordinary local folder. On Windows also pass the path with the exact letter case and long names the directory lists (not an 8.3 short name such as RUNNER~1), keep every folder above the file to at most 4096 entries (not Downloads or Temp), and retry a just-written copy after a few seconds, because the directory's recorded size and time can lag",
+	"office_registry_source_busy":           "an Office app was writing the registry file (it held a write lock or left a rollback journal), so nothing was read. Wait a moment and retry. If it stays busy, a rollback journal was left beside the file: it stays busy until Office opens the file again and finishes its write, so start the Office app that owns it, let it settle, and retry; m365crawl never replays or removes the journal",
 	"office_registry_index_unreadable":      "the registry file could not be read as a database to the end. Check that the file is a complete copy",
 	"office_registry_index_too_large":       "the registry file is larger than the reader accepts (64 MiB, or too many rows), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
 	"office_registry_index_unrecognized":    "the file is not an Office registry database, or has a shape this m365crawl version does not read. Upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
@@ -298,12 +319,32 @@ func documentDiscoveryItems(outcomes []syncer.DocumentDiscovery) []documentDisco
 	return out
 }
 
+// documentsNothingUsable is the coded failure of a default sync in which neither discovery family
+// was usable and no registered source was attempted: nothing was read, so it is not a success.
+// The code is the Office JSON family's, as it was before the registry family existed.
+func documentsNothingUsable(report syncer.DocumentReport) error {
+	families := map[string]string{}
+	for _, outcome := range report.Discovery {
+		families[outcome.Kind] = firstOf(families[outcome.Kind], outcome.Code)
+	}
+	if len(report.Sources) > 0 || families[syncer.DocumentFamilyJSON] == "" || families[store.RegistryDocumentKind] == "" {
+		return nil
+	}
+	return &errs.Coded{Code: families[syncer.DocumentFamilyJSON], Exit: errs.ExitEnvironment,
+		Message: "no Office document input was usable and no document source is registered (office_json: " + families[syncer.DocumentFamilyJSON] +
+			"; office_registry: " + families[store.RegistryDocumentKind] + "); nothing was read",
+		Fix: "Supply ordinary local copies: `m365crawl docs sync --root DIR` for Office JSON files, or `m365crawl docs sync --registry-file FILE` for an Office registry file."}
+}
+
 func documentError(err error) error {
 	var source *officecapture.ReadError
 	if errors.As(err, &source) {
 		return &errs.Coded{Code: source.Code, Exit: errs.ExitEnvironment,
 			Message: "Office document metadata input was refused; no document was opened or fetched",
 			Fix:     "Use supported ordinary local Office JSON copies on a qualified local disk with `docs sync --root DIR`, or one ordinary local Office registry copy with `docs sync --registry-file FILE`; provider/placeholder, linked and unrecognized inputs are not accepted."}
+	}
+	if errors.Is(err, syncer.ErrRegistryFileUnusable) {
+		return errs.Usage("--registry-file must name an existing regular file that is not the archive database or one of its own files; nothing was registered")
 	}
 	if errors.Is(err, store.ErrKnowledgeSourceUnknown) {
 		return &errs.Coded{Code: "document_source_unknown", Exit: errs.ExitUsage,
@@ -406,7 +447,9 @@ func (documentsSyncCmd) Help() string {
 	return "With no selection, docs sync refreshes every registered document source and tries both default families on their own: the named Mac Office JSON caches and the Mac Office registry (" +
 		"~/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB/MicrosoftRegistrationDB_*.reg, at most 16 files). A family that is absent or refused is reported under discovery with a fixed code and never stops the other family or a registered source. There is no default discovery on Windows or Linux.\n" +
 		"--root DIR reads only Office JSON files in DIR; --registry-file FILE reads only that one registry file; --source-id N refreshes only that registered source. Each failed source keeps its own status, reason and fix in source_coverage; a source that has never been captured has source_id null and its fix names the --registry-file retry.\n" +
-		"A registry file is read from a private copy taken while Office is held out of writing it; a file Office is writing, or one with a write-ahead log beside it, is refused: run the sync again later. " + documentRegistryHelp
+		"--registry-file FILE must be an existing regular file that is not the archive database: otherwise the command is a usage error and registers nothing. A file that was opened and then refused is registered as a failed source, so its reason and fix stay visible in docs sources and every docs read. There is no command to remove a source: it stays listed as failed until a later sync of it succeeds.\n" +
+		"A registry file is read from a private copy taken while Office is held out of writing it; a file Office is writing, or one with a write-ahead log beside it, is refused: run the sync again later. A rollback journal left beside the file (Office is mid-write, or quit before finishing) keeps the source at office_registry_source_busy until Office opens the file again and finishes; m365crawl never replays or removes the journal. " +
+		"On Windows the path must use the folder and file names exactly as the directory lists them (same letter case, long names not 8.3 short names), and every folder above the file must hold at most 4096 entries, so copy the file to a small folder rather than Downloads or Temp.\n" + documentRegistryHelp
 }
 
 func (c *documentsSyncCmd) Run(rt *runtime) error {
@@ -425,10 +468,16 @@ func (c *documentsSyncCmd) Run(rt *runtime) error {
 	if c.RegistryFile != "" && (!filepath.IsAbs(c.RegistryFile) || filepath.Clean(c.RegistryFile) != c.RegistryFile) {
 		return errs.Usage("--registry-file must be a clean absolute path to one Office registry file")
 	}
+	if c.RegistryFile != "" && syncer.CheckRegistryFile(rt.dbPath, c.RegistryFile) != nil {
+		return errs.Usage("--registry-file must name an existing regular file that is not the archive database or one of its own files; nothing was registered")
+	}
 	report, err := runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, Root: c.Root, RegistryFile: c.RegistryFile,
 		SourceID: c.SourceID, Explicit: true, Discover: c.SourceID == 0})
 	if err != nil {
 		return documentError(err)
+	}
+	if err := documentsNothingUsable(report); err != nil {
+		return err
 	}
 	return rt.write("docs sync", notesSyncResult{Captured: report.Captured, Unchanged: report.Unchanged,
 		Skipped: report.Skipped, Failed: report.Failed, SourceCoverage: documentsCoverage(report.Sources),

@@ -138,6 +138,8 @@ func TestRegistryAnchoredLateSubstitution(t *testing.T) {
 	for _, tc := range []struct{ binding, stage string }{
 		{"source", "copied"}, {"parent", "copied"}, {"companion", "copied"}, {"new-companion", "copied"},
 		{"source", "before-reader"}, {"parent", "after-reader"}, {"companion", "after-callback"},
+		// Each of these differs from the held source in exactly one checked property.
+		{"same-shape-source", "copied"}, {"linked-companion", "copied"}, {"linked-source", "copied"},
 	} {
 		t.Run(tc.binding+"@"+tc.stage, func(t *testing.T) {
 			path := registrySource(t)
@@ -164,6 +166,22 @@ func TestRegistryAnchoredLateSubstitution(t *testing.T) {
 					if err == nil {
 						err = os.Rename(replacement, path)
 					}
+				case "same-shape-source":
+					// Same bytes, size, flags and modification time: only the inode differs.
+					var held os.FileInfo
+					if held, err = os.Stat(path); err == nil {
+						err = os.WriteFile(replacement, data, 0o600) //nolint:gosec // test-owned synthetic path
+					}
+					if err == nil {
+						err = os.Chtimes(replacement, held.ModTime(), held.ModTime())
+					}
+					if err == nil {
+						err = os.Rename(replacement, path)
+					}
+				case "linked-companion":
+					err = os.Link(path+"-journal", path+".journal-link")
+				case "linked-source":
+					err = os.Link(path, path+".link")
 				case "parent":
 					parent := filepath.Dir(path)
 					err = os.Rename(parent, parent+".moved")
@@ -266,5 +284,42 @@ func TestRegistryLockSafeValidationFaults(t *testing.T) {
 	}
 	if err := input.validateSQLite(context.Background()); err == nil {
 		t.Fatal("missing anchored edge passed")
+	}
+}
+
+// With the leaf's inode unchanged, each further anchored comparison of its directory edge with
+// the held descriptor must fail alone: size, modification time, flags and link count.
+func TestRegistryLeafEdgeMetadataIsolated(t *testing.T) {
+	path := registrySource(t)
+	input, err := openInput(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = input.close() })
+	statat := registryStatat
+	t.Cleanup(func() { registryStatat = statat })
+	for name, change := range map[string]func(*unix.Stat_t){
+		"size":       func(info *unix.Stat_t) { info.Size++ },
+		"mtime":      func(info *unix.Stat_t) { info.Mtim.Nsec ^= 1 },
+		"flags":      func(info *unix.Stat_t) { info.Flags ^= unix.UF_NODUMP },
+		"link-count": func(info *unix.Stat_t) { info.Nlink = 2 },
+		"file-type":  func(info *unix.Stat_t) { info.Mode = info.Mode&^unix.S_IFMT | unix.S_IFLNK },
+		"inode":      func(info *unix.Stat_t) { info.Ino++ },
+		"device":     func(info *unix.Stat_t) { info.Dev++ },
+	} {
+		registryStatat = statat
+		if err := input.validateSQLite(context.Background()); err != nil {
+			t.Fatalf("unchanged held source refused: %v", err)
+		}
+		registryStatat = func(dirfd int, leaf string, info *unix.Stat_t, flags int) error {
+			err := statat(dirfd, leaf, info, flags)
+			if err == nil && leaf == filepath.Base(path) {
+				change(info)
+			}
+			return err
+		}
+		if err := input.validateSQLite(context.Background()); err == nil {
+			t.Fatalf("a leaf edge whose %s differs from the held descriptor passed", name)
+		}
 	}
 }

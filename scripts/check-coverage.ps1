@@ -55,6 +55,8 @@ $requiredFiles = @(
     'internal/browser/sweep_windows.go',
     'internal/cli/platform_windows.go',
     'internal/errs/no_full_disk_access_windows.go',
+    'internal/officecapture/input_sqlite_windows.go',
+    'internal/sourcecapture/sqlite_windows.go',
     'internal/store/lock_windows.go',
     'internal/store/security_windows.go',
     'internal/teamsdesktop/defaultroot_windows.go',

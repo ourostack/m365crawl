@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -102,6 +103,11 @@ func SyncDocuments(ctx context.Context, options DocumentOptions) (DocumentReport
 	if options.SourceID < 0 || options.MaxAge < 0 || selections > 1 ||
 		(options.Discover && !options.Explicit) || ((options.Root != "" || options.RegistryFile != "") && !options.Discover) {
 		return DocumentReport{}, errors.New("documents: invalid source selection")
+	}
+	if options.RegistryFile != "" {
+		if err := CheckRegistryFile(options.DBPath, options.RegistryFile); err != nil {
+			return DocumentReport{}, err
+		}
 	}
 	if !options.Explicit {
 		report, err := readDocumentSources(ctx, options)
@@ -419,4 +425,28 @@ func recordDocumentFailure(ctx context.Context, st *store.Store, attempt store.K
 	defer cancel()
 	return st.RecordKnowledgeFailure(diagnosticCtx, attempt, store.KnowledgeOutcome{
 		Status: status, Reason: reason, AcquisitionSignature: signature, At: documentsNow().UTC()})
+}
+
+// ErrRegistryFileUnusable is a supplied registry file that is missing, not a regular file, or one
+// of the archive's own files. Nothing is registered for it.
+var ErrRegistryFileUnusable = errors.New("documents: registry file is missing, not a regular file, or the archive itself")
+
+var documentsLstat = os.Lstat
+
+// CheckRegistryFile refuses a supplied registry file before anything is registered or opened. It
+// only reads directory metadata: opening and closing a descriptor of the archive database would
+// release this process's own SQLite locks on it.
+func CheckRegistryFile(dbPath, file string) error {
+	info, err := documentsLstat(file)
+	if err != nil || !info.Mode().IsRegular() {
+		return ErrRegistryFileUnusable
+	}
+	archive := filepath.Clean(dbPath)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal", ".lock"} {
+		own, err := documentsLstat(archive + suffix)
+		if filepath.Clean(file) == archive+suffix || (err == nil && os.SameFile(info, own)) {
+			return ErrRegistryFileUnusable
+		}
+	}
+	return nil
 }

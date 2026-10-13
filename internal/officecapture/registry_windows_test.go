@@ -33,6 +33,18 @@ type nativeIDBothDirInfo struct {
 	FileName        [1]uint16
 }
 
+// leafCloseBeforeBound is how many handles named like the leaf an open closes before the bound
+// one: the metadata-only handle that is compared with the data handle and then closed.
+const leafCloseBeforeBound = 1
+
+// heldSourceDeniesWrite reports whether err is the sharing violation a held source handle, which
+// shares read access only, gives a writer.
+func heldSourceDeniesWrite(err error) bool { return errors.Is(err, windows.ERROR_SHARING_VIOLATION) }
+
+// openDescriptors is not counted on Windows: the runtime's own handle count is not stable enough
+// to compare. The lock and writer checks still run.
+func openDescriptors(*testing.T) int { return 0 }
+
 func TestRegistryDirectoryInfoABI(t *testing.T) {
 	var info nativeIDBothDirInfo
 	for name, got := range map[string]uintptr{
@@ -129,5 +141,106 @@ func TestRegistryDirectoryEnumerationFaults(t *testing.T) {
 	}
 	if _, err := listDirectory(context.Background(), 0); err == nil {
 		t.Fatal("directory overflow accepted")
+	}
+}
+
+// patchLeafRecord flips one byte of the named entry's directory record after the native call.
+func patchLeafRecord(t *testing.T, leaf string, offset int) {
+	t.Helper()
+	original := registryDirectoryInfo
+	t.Cleanup(func() { registryDirectoryInfo = original })
+	registryDirectoryInfo = func(handle windows.Handle, class uint32, buffer *byte, size uint32) error {
+		if err := original(handle, class, buffer, size); err != nil {
+			return err
+		}
+		records := unsafe.Slice(buffer, size) //nolint:gosec // the caller's own buffer
+		for at := 0; at+directoryRecordHeader <= len(records); {
+			next := int(binary.LittleEndian.Uint32(records[at:]))
+			length := int(binary.LittleEndian.Uint32(records[at+60:]))
+			if at+directoryRecordHeader+length > len(records) {
+				break
+			}
+			units := make([]uint16, length/2)
+			for i := range units {
+				units[i] = binary.LittleEndian.Uint16(records[at+directoryRecordHeader+2*i:])
+			}
+			if string(utf16.Decode(units)) == leaf {
+				records[at+offset] ^= 1
+			}
+			if next == 0 {
+				break
+			}
+			at += next
+		}
+		return nil
+	}
+}
+
+// Each anchored leaf comparison must fail alone: the directory entry's identity, attributes, size
+// and last-write time are each compared with the held handle.
+func TestRegistryLeafDirectoryEntryIsolated(t *testing.T) {
+	for name, offset := range map[string]int{"identity": 96, "attributes": 56, "size": 40, "last-write": 24} {
+		t.Run(name, func(t *testing.T) {
+			path := registrySource(t)
+			input, err := openInput(path, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = input.close() }()
+			if err := input.validateSQLite(context.Background()); err != nil {
+				t.Fatalf("unchanged held source refused: %v", err)
+			}
+			patchLeafRecord(t, filepath.Base(path), offset)
+			if err := input.validateSQLite(context.Background()); err == nil {
+				t.Fatalf("a directory entry whose %s differs from the held handle passed", name)
+			}
+		})
+	}
+}
+
+func TestRegistryLockSafeValidationRefusalsOnWindows(t *testing.T) {
+	path := registrySource(t)
+	input, err := openInput(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = input.close() }()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := input.validateSQLite(cancelled); err == nil {
+		t.Fatal("cancelled validation passed")
+	}
+	directory, err := openInput(filepath.Dir(path), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = directory.close() }()
+	if err := directory.validateSQLite(context.Background()); err == nil {
+		t.Fatal("directory accepted as a bound source")
+	}
+	if _, err := registryCompanions(context.Background(), directory); registryCode(err) != "office_registry_input_unqualified" {
+		t.Fatal("directory companions inspected")
+	}
+	stamp := input.stamps[1]
+	input.stamps[1] = "changed"
+	if err := input.validateSQLite(context.Background()); err == nil {
+		t.Fatal("changed held stamp passed")
+	}
+	input.stamps[1] = stamp
+	// A supplied path must use the directory entry's exact long name: another case is refused.
+	parts, err := input.sourceParts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := listDirectory(context.Background(), windows.Handle(input.files[len(input.files)-2].Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := parts[len(parts)-1]
+	if _, found, err := exactEntry(entries, "MICROSOFTREGISTRATIONDB_SYNTHETIC.REG"); found || err == nil {
+		t.Fatalf("a differently cased name matched %s: %t %v", leaf, found, err)
+	}
+	if _, found, err := exactEntry(entries, leaf+".absent"); found || err != nil {
+		t.Fatalf("absent name: %t %v", found, err)
 	}
 }

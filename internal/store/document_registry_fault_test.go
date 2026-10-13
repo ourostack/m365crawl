@@ -115,6 +115,8 @@ func TestRegistryDocumentInvalidInputsAndCorruptDiscriminators(t *testing.T) {
 		"update document_observations set registry_json=null",
 		"update document_observations set registry_json='bad'",
 		`update document_observations set registry_json='{"NodeID":1,"Invented":true}'`,
+		// The complete valid payload plus one unknown field: only strict decoding refuses it.
+		"update document_observations set registry_json=json_set(registry_json,'$.Invented',1)",
 		"update document_observations set opened_at=null",
 		"update document_observations set opened_at='bad'",
 		"update document_observations set opened_at='2026-10-09T12:34:57.000000000Z'",
