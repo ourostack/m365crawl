@@ -275,20 +275,20 @@ var documentFailureFix = map[string]string{
 	"office_json_cleanup_failed":            "the private temporary copy could not be removed. Check free space and permissions of the temporary directory, then run m365crawl docs sync again",
 	"office_json_policy_restore_failed":     "a capture safety setting could not be restored. Run m365crawl docs sync again; if it repeats, open an issue at " + documentsIssue,
 	"office_json_cancelled":                 "the capture was interrupted or timed out. Run m365crawl docs sync again",
-	"office_registry_input_unqualified":     "the registry file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. Copy the registry file alone to an ordinary local folder. On Windows also pass the path with the exact letter case and long names the directory lists (not an 8.3 short name such as RUNNER~1), keep every folder above the file to at most 4096 entries (not Downloads or Temp), and retry a just-written copy after a few seconds, because the directory's recorded size and time can lag",
+	"office_registry_input_unqualified":     "the registry file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. A database in write-ahead mode stays refused however often the sync is retried. Otherwise copy the registry file alone to an ordinary local folder. On Windows also pass the path with the exact letter case and long names the directory lists (not an 8.3 short name such as RUNNER~1), keep every folder above the file to at most 4096 entries (not Downloads or Temp), and retry a just-written copy after a few seconds, because the directory's recorded size and time can lag",
 	"office_registry_source_busy":           "an Office app was writing the registry file (it held a write lock or left a rollback journal), so nothing was read. Wait a moment and retry. If it stays busy, a rollback journal was left beside the file: it stays busy until Office opens the file again and finishes its write, so start the Office app that owns it, let it settle, and retry; m365crawl never replays or removes the journal",
 	"office_registry_index_unreadable":      "the registry file could not be read as a database to the end. Check that the file is a complete copy",
 	"office_registry_index_too_large":       "the registry file is larger than the reader accepts (64 MiB, or too many rows), so nothing from it was kept. If Office wrote it, open an issue at " + documentsIssue,
-	"office_registry_index_unrecognized":    "the file is not an Office registry database, or has a shape this m365crawl version does not read. Upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
+	"office_registry_index_unrecognized":    "the file is not an Office registry database, or has a shape this m365crawl version does not read. If it is a OneDrive usage file, register it with m365crawl docs sync --onedrive-usage-file FILE instead; this source stays listed as failed, because a file's kind is known only after it has been registered and read. Otherwise upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
 	"office_registry_capture_failed":        "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl doctor if it keeps failing",
 	"office_registry_cleanup_failed":        "the private temporary copy could not be removed. Check free space and permissions of the temporary directory",
 	"office_registry_policy_restore_failed": "a capture safety setting could not be restored. If it repeats, open an issue at " + documentsIssue,
 	"office_registry_cancelled":             "the capture was interrupted or timed out",
-	"onedrive_usage_input_unqualified":      "the OneDrive usage file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. m365crawl never consolidates a write-ahead log: run the sync again later, or copy the usage file alone, once it has no -wal or -shm file beside it, to an ordinary local folder. On Windows also pass the path with the exact letter case and long names the directory lists, and keep every folder above the file to at most 4096 entries",
+	"onedrive_usage_input_unqualified":      "the OneDrive usage file is missing, a link, hard-linked, on a cloud or placeholder provider, remote, not an ordinary local file, not a SQLite database in rollback-journal format, or has a write-ahead log or shared-memory file beside it, so it was refused before reading. m365crawl never consolidates a write-ahead log. A database in write-ahead mode stays refused however often the sync is retried. One in rollback-journal mode that only has a -wal or -shm file beside it can pass later: run the sync again, or copy the usage file alone, once it has neither file beside it, to an ordinary local folder. On Windows also pass the path with the exact letter case and long names the directory lists, and keep every folder above the file to at most 4096 entries",
 	"onedrive_usage_source_busy":            "OneDrive was writing the usage file (it held a write lock or left a rollback journal), so nothing was read. Wait a moment and retry; m365crawl never replays or removes the journal",
 	"onedrive_usage_index_unreadable":       "the usage file could not be read as a database to the end. Check that the file is a complete copy",
 	"onedrive_usage_index_too_large":        "the usage file is larger than the reader accepts (512 MiB, 65536 recent rows, 65536 documents, 4096 collaborators, 262144 sharing instances or participants, a 1 MiB field or 64 MiB of text), so nothing from it was kept. If OneDrive wrote it, open an issue at " + documentsIssue,
-	"onedrive_usage_index_unrecognized":     "the file is not a OneDrive usage database, or has a shape this m365crawl version does not read. Upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
+	"onedrive_usage_index_unrecognized":     "the file is not a OneDrive usage database, or has a shape this m365crawl version does not read. If it is an Office registry file, register it with m365crawl docs sync --registry-file FILE instead; this source stays listed as failed, because a file's kind is known only after it has been registered and read. Otherwise upgrade m365crawl; if the newest version still fails, open an issue at " + documentsIssue + " with the table and column names (no values)",
 	"onedrive_usage_capture_failed":         "the private copy or its checks failed, often because the file changed while it was copied. Run m365crawl doctor if it keeps failing",
 	"onedrive_usage_cleanup_failed":         "the private temporary copy could not be removed. Check free space and permissions of the temporary directory",
 	"onedrive_usage_policy_restore_failed":  "a capture safety setting could not be restored. If it repeats, open an issue at " + documentsIssue,
@@ -554,12 +554,14 @@ func (c *documentsSyncCmd) Run(rt *runtime) error {
 type documentsListCmd struct {
 	SourceID    int64  `name:"source-id" help:"Only this registered document source ID; docs sources lists IDs."`
 	Query       string `help:"Words in document title, native URLs/IDs or source sharing/person metadata."`
-	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded."`
-	Until       string `help:"Native modification time before this time; a date includes its whole day."`
+	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded. Never matches a registry row, a OneDrive usage recent row or a collaborator row: none has a modification time m365crawl can place, and the result counts the rows left out."`
+	Until       string `help:"Native modification time before this time; a date includes its whole day. Never matches a registry row, a OneDrive usage recent row or a collaborator row: none has a modification time m365crawl can place, and the result counts the rows left out."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
 	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, registry for Office registry rows, or onedrive for OneDrive usage rows. Narrows rows, not source_coverage." placeholder:"APP"`
 	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry and OneDrive usage rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`
+	OrderBy     string `name:"order-by" enum:"modified_at,opened_at" default:"modified_at" help:"modified_at (the default order) or opened_at: rows that state an opened time first, newest first, then the rest in the default order. Only registry rows state one." placeholder:"KEY"`
 	label       string // the result label: docs search runs this command under its own name
+	search      bool   // docs search: it accepts no --order-by, so no hint names it
 }
 
 // documentApplication is --application's value as stored, or a usage error naming the accepted values.
@@ -591,7 +593,46 @@ const documentEvidenceHelp = "Each row is an immutable native metadata represent
 	"A OneDrive usage row (variant onedrive_usage) carries usage_native and full_inspection instead of native: usage_native.Type is recent, document or collaborator, title and url are a document row's own and empty otherwise, modified_at is the file modification time or null, and no surface applies. Sharing history and participants are previewed at 100 with full counts; docs --help defines every usage field.\n" +
 	"Native timestamps keep exact source text in Raw; Value is parsed UTC or null when missing/unrecognized. They are never replaced with file/capture time. modified_at is the native document modification time or null; bounded date windows exclude unknown values. text_state=not_captured means original document contents were not acquired."
 
-func (documentsListCmd) Help() string { return documentEvidenceHelp }
+func (documentsListCmd) Help() string {
+	return documentEvidenceHelp + "\n--order-by opened_at lists the most recently opened first: `m365crawl docs list --application registry --order-by opened_at --limit 5` is the five registry documents opened last. Rows without an opened time follow in the default order. OneDrive usage rows state no opened time: a recent row's LastAccessed is kept as the file wrote it, without a zone in the files examined so far, and is not used for ordering."
+}
+
+// documentOrderHint is the text line of a default-order list in which no returned row has a
+// modification time: the order is then by title, and the flag that orders by opened time exists.
+const documentOrderHint = "no returned row states a modification time, so they are in title order; --order-by opened_at puts rows that state an opened time (registry rows) first, newest first"
+
+// undatedKinds are the kinds of row a date window can leave out for want of a modification time,
+// in the order the notice names them, each with its singular, its plural and the reason.
+var undatedKinds = []struct{ key, one, many, why string }{
+	{store.DocumentVariantJSON, "Office JSON row", "Office JSON rows", "Office gave no modification time that parses"},
+	{store.RegistryDocumentKind, "Office registry row", "Office registry rows", "the registry states none"},
+	{store.UsageDocumentKind + "_" + store.UsageTypeRecent, "OneDrive usage recent row", "OneDrive usage recent rows", "its clock has no zone or is missing, so it is not placed in time"},
+	{store.UsageDocumentKind + "_" + store.UsageTypeDocument, "OneDrive usage document row", "OneDrive usage document rows", "its clock is missing or has no zone"},
+	{store.UsageDocumentKind + "_" + store.UsageTypeCollaborator, "OneDrive usage collaborator row", "OneDrive usage collaborator rows", "a profile has none"},
+}
+
+// undatedNotice says how many rows a date window left out because they have no modification
+// time, by kind and with the reason, or is empty when it left none out.
+func undatedNotice(undated map[string]int) string {
+	total, parts := 0, []string{}
+	for _, kind := range undatedKinds {
+		if n := undated[kind.key]; n > 0 {
+			total += n
+			parts = append(parts, plural(n, kind.one, kind.many)+" ("+kind.why+")")
+		}
+	}
+	if total == 0 {
+		return ""
+	}
+	list := parts[0]
+	if len(parts) > 1 {
+		list = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+	if total == 1 {
+		return "--since/--until left out 1 row that otherwise matched because it has no modification time: " + list + ". Drop the date filter to list it"
+	}
+	return fmt.Sprintf("--since/--until left out %d rows that otherwise matched because they have no modification time: %s. Drop the date filter to list them", total, list)
+}
 
 func (c *documentsListCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "docs list", ""); err != nil {
@@ -622,16 +663,25 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 			return newList(nil, false), nil
 		}
 		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
-			SourceID: c.SourceID, Application: application, Surface: surface, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit})
+			SourceID: c.SourceID, Application: application, Surface: surface, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit,
+			OrderBy: c.OrderBy})
 		if err != nil {
 			return nil, err
 		}
 		items := make([]documentItem, len(snapshot.Rows))
+		undated := len(items) > 0 && !c.search && c.OrderBy != store.DocumentOrderOpened
 		for i, row := range snapshot.Rows {
 			items[i] = documentItemOf(row, rt.g.MaxText, rt.archiveRef())
+			undated = undated && items[i].ModifiedAt == nil
 		}
 		result := newList(shape(rt, items), snapshot.Truncated)
 		result.SourceCoverage = documentsCoverage(snapshot.Sources)
+		if notice := undatedNotice(snapshot.Undated); notice != "" {
+			result.addNotice(notice)
+		}
+		if undated {
+			result.orderHint = documentOrderHint
+		}
 		return result, nil
 	})
 }
@@ -646,8 +696,8 @@ func documentUpperBound(until time.Time, raw string) time.Time {
 type documentsSearchCmd struct {
 	Query       string `arg:"" optional:"" help:"Words in archived document metadata; required unless a date, --application or --surface filter is supplied."`
 	SourceID    int64  `name:"source-id" help:"Only this registered document source ID."`
-	Since       string `help:"Native modification time at or after this date/time."`
-	Until       string `help:"Native modification time before this time; unknown dates excluded."`
+	Since       string `help:"Native modification time at or after this date/time. Never matches a registry row, a OneDrive usage recent row or a collaborator row: none has a modification time m365crawl can place, and the result counts the rows left out."`
+	Until       string `help:"Native modification time before this time; unknown dates excluded. Never matches a registry row, a OneDrive usage recent row or a collaborator row: none has a modification time m365crawl can place, and the result counts the rows left out."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
 	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, registry for Office registry rows, or onedrive for OneDrive usage rows. Narrows rows, not source_coverage." placeholder:"APP"`
 	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry and OneDrive usage rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`
@@ -663,7 +713,7 @@ func (c *documentsSearchCmd) Run(rt *runtime) error {
 		return errs.Usage("docs search needs words, a native date filter, --application or --surface; use docs list for an unfiltered list")
 	}
 	return (&documentsListCmd{Query: c.Query, SourceID: c.SourceID, Since: c.Since, Until: c.Until, Limit: c.Limit,
-		Application: c.Application, Surface: c.Surface, label: "docs search"}).Run(rt)
+		Application: c.Application, Surface: c.Surface, label: "docs search", search: true}).Run(rt)
 }
 
 type documentsShowCmd struct {

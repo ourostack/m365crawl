@@ -113,6 +113,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		for _, hint := range r.Sources.hints() {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(hint, color))
 		}
+		if r.orderHint != "" {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(r.orderHint, color))
+		}
 		if r.sourceOnly {
 			if r.LoopCoverage != nil {
 				ageLine(w, r.meta, color)
@@ -365,22 +368,24 @@ func (rt *runtime) listTable(r *listResult) {
 			if x.OpenedAt != nil && x.OpenedAt.At != nil {
 				opened = stamp(*x.OpenedAt.At)
 			}
-			cols, textCol = []string{"modified_at", "opened_at", "source", "id", "application", "surface", "title", "text_state"}, 6
-			title := x.Title
+			// usage_type is a OneDrive usage row's native type, in its own column so the title
+			// column holds only what the file states.
+			cols, textCol = []string{"modified_at", "opened_at", "source", "id", "application", "surface", "usage_type", "title", "text_state"}, 7
+			title, usageType := x.Title, "-"
 			if x.UsageNative != nil {
-				title = usageLabel(x)
+				title, usageType = usageLabel(x), x.UsageNative.Type
 			}
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), opened, strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), oneLine(title), x.TextState})
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), opened, strconv.FormatInt(x.SourceID, 10), x.ID, x.Application, firstOf(string(x.Surface), "-"), usageType, oneLine(title), x.TextState})
 		case documentDetailItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text_state"}, 3
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.Title), x.TextState})
 		case searchDocumentItem:
 			cols, textCol = searchColumns, 5
-			title := x.Title
-			if x.UsageNative != nil {
-				title = usageLabel(x.documentItem)
+			title, state := x.Title, "metadata only; "+x.TextState
+			if x.UsageNative != nil { // the row's type leads the text column, where clipping keeps it
+				title, state = usageLabel(x.documentItem), usageKind(x.UsageNative.Type)+"; "+state
 			}
-			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(title), "-", "docs show " + x.ID, "metadata only; " + x.TextState})
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(title), "-", "docs show " + x.ID, state})
 		case loopChannelItem:
 			cols, textCol = loopListColumns, loopTextColumn
 			rows = append(rows, loopListRow(x))

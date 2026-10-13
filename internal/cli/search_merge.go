@@ -529,7 +529,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			hits = append(hits, searchHit{at: at, item: searchNoteItem{Source: searchNotes, noteItem: noteItemOf(row, rt.g.MaxText)}, source: searchNotes})
 		}
 	}
-	documentTruncated := false
+	documentTruncated, undated := false, ""
 	if p.indexedDocuments && st != nil {
 		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
 			ModifiedSince: f.Since, ModifiedUntil: documentUpperBound(f.Until, c.Until), Limit: f.Limit})
@@ -547,6 +547,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText, rt.archiveRef())}, source: searchDocuments})
 		}
 		rt.documentCoverage = documentSnapshotCoverage(rt, snapshot.Sources)
+		undated = undatedNotice(snapshot.Undated)
 	}
 	loopTruncated := false
 	if p.loop && st != nil {
@@ -596,6 +597,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if p.loopExclusion != "" {
 		res.addNotice(p.loopExclusion)
+	}
+	if undated != "" {
+		res.addNotice(undated)
 	}
 	res.Sources = &searchSources{selected: c.Source, limit: f.Limit}
 	sourceOf := func(name string) *sourceCount {

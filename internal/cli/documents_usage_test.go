@@ -501,11 +501,11 @@ func TestUsageCLIReadOnlyAndClocks(t *testing.T) {
 			t.Fatalf("usage detail lines lack %q:\n%s", want, lines)
 		}
 	}
-	if label := usageLabel(documentItem{UsageNative: &usageNativeItem{Document: &usageDocumentItem{ID: "native-untitled"}}}); label != "(untitled) native-untitled" {
+	if label := usageLabel(documentItem{UsageNative: &usageNativeItem{Document: &usageDocumentItem{ID: "native-untitled"}}}); label != "native-untitled (untitled)" {
 		t.Fatalf("untitled document label = %q", label)
 	}
 	text = usageCLIText(t, e, "--format", "text", "docs", "list", "--application", "onedrive")
-	for _, want := range []string{"Clock usage document", "(recent row)", "(collaborator)", "onedrive"} {
+	for _, want := range []string{"Clock usage document", "usage_type", "recent", "collaborator", "onedrive"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage text list lacks %q:\n%s", want, text)
 		}

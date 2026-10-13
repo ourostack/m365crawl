@@ -51,7 +51,17 @@ type DocumentObservationSnapshot struct {
 	Rows      []DocumentObservationRow
 	Sources   []KnowledgeSource
 	Truncated bool
+	// Undated counts the rows a date window excluded because they have no modification time,
+	// among the rows the other filters select: by variant, and for a OneDrive usage row by
+	// variant, an underscore and its native type. Nil when no window was asked for.
+	Undated map[string]int
 }
+
+// The orders of a document list. Each is total: ties fall through to the default order's keys.
+const (
+	DocumentOrderModified = "modified_at"
+	DocumentOrderOpened   = "opened_at"
+)
 
 type DocumentFilter struct {
 	Query                        string
@@ -60,6 +70,8 @@ type DocumentFilter struct {
 	Surface                      officedocuments.Surface
 	ModifiedSince, ModifiedUntil time.Time
 	Limit                        int
+	// OrderBy is DocumentOrderModified (the default, also when empty) or DocumentOrderOpened.
+	OrderBy string
 }
 
 type DocumentReferenceObservation struct {

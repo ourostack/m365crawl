@@ -66,9 +66,11 @@ type result interface {
 // listResult is the shape of every list command.
 type listResult struct {
 	sourceOnly bool
-	Items      []any `json:"items"`
-	Count      int   `json:"count"`
-	Truncated  bool  `json:"truncated"`
+	// orderHint is a text-only line about the order of the rows; empty on most lists.
+	orderHint string
+	Items     []any `json:"items"`
+	Count     int   `json:"count"`
+	Truncated bool  `json:"truncated"`
 	// Total is the exact number of matches ignoring --limit. It is present only when truncated is
 	// true: counting costs one extra query, and a result that is not truncated is its own total
 	// (count).
