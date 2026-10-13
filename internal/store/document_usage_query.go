@@ -8,8 +8,9 @@ import (
 // usageRelationPreview is how many related observations a detail returns; the total is exact.
 const usageRelationPreview = 100
 
-// readUsageRelations binds a usage row's relations to the capture it is served from: the source's
-// admitted capture when the row is in it, otherwise the last capture that held the row. A recent
+// readUsageRelations binds a usage row's relations to the capture that owns them: the capture
+// whose membership the source's admitted capture has (its own, or the one an unchanged capture
+// names) when the row is in it, otherwise the last capture whose own membership held the row. A recent
 // row relates to every formatted variant of that capture with its native ID, and a variant to its
 // recent row; a collaborator has none. An edge to a missing or mistyped observation is an error.
 func readUsageRelations(ctx context.Context, reader knowledgeReader, detail *DocumentObservationDetail) error {
@@ -19,8 +20,8 @@ func readUsageRelations(ctx context.Context, reader knowledgeReader, detail *Doc
 		return nil
 	}
 	if err := reader.QueryRowContext(ctx, `select coalesce(
-(select s.admitted_attempt from knowledge_sources s join document_capture_members m
- on m.capture_id=s.admitted_attempt and m.observation_rowid=? where s.id=?),
+(select m.capture_id from knowledge_sources s join document_capture_metadata o on o.capture_id=s.admitted_attempt
+ join document_capture_members m on m.capture_id=coalesce(o.members_capture,o.capture_id) and m.observation_rowid=? where s.id=?),
 (select max(capture_id) from document_capture_members where observation_rowid=?),0)`,
 		row.ID, row.SourceID, row.ID).Scan(&detail.UsageRelationsCaptureID); err != nil {
 		return err

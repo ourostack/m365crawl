@@ -151,11 +151,6 @@ func (s *Store) CommitUsageDocumentObservations(ctx context.Context, attempt Kno
 		apply: func(ctx context.Context, tx *sql.Tx, sourceID, captureID int64) error {
 			return applyUsageObservations(ctx, tx, attempt.LocatorID, sourceID, captureID, records)
 		},
-		reuse: func(ctx context.Context, tx *sql.Tx, previous, captureID int64) error {
-			_, err := tx.ExecContext(ctx, `insert into document_usage_relations(capture_id,recent_rowid,document_rowid)
-select ?,recent_rowid,document_rowid from document_usage_relations where capture_id=?`, captureID, previous)
-			return err
-		},
 	}
 	for _, loss := range result.Losses {
 		if loss.Code == "" || loss.Count <= 0 {

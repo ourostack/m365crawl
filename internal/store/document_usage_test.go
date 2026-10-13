@@ -302,7 +302,8 @@ func TestUsageRetainedHistoryAndFrontiers(t *testing.T) {
 		t.Fatalf("unchanged capture lost partial losses: %+v %v", sources, err)
 	}
 	original, _ = documents()
-	if detail := usageRelations(t, s, original.ID); original.Retained || detail.UsageRelationsCaptureID != four.ID || detail.UsageRelationsTotal != 1 {
+	// The unchanged capture shares the membership and relations of the capture that owns them.
+	if detail := usageRelations(t, s, original.ID); original.Retained || detail.UsageRelationsCaptureID != three.ID || detail.UsageRelationsTotal != 1 {
 		t.Fatalf("unchanged capture lost membership or relations: %+v", detail)
 	}
 	// Failed after good: the last good frontier, its rows and their clocks stay as they were.
@@ -343,8 +344,8 @@ func TestUsageRetainedHistoryAndFrontiers(t *testing.T) {
 		}
 	}
 	original, _ = documents()
-	if detail := usageRelations(t, s, original.ID); detail.UsageRelationsCaptureID != four.ID || detail.UsageRelationsTotal != 1 {
-		t.Fatalf("retained row is not served from the last capture that held it: %+v", detail)
+	if detail := usageRelations(t, s, original.ID); detail.UsageRelationsCaptureID != three.ID || detail.UsageRelationsTotal != 1 {
+		t.Fatalf("retained row is not served from the last capture whose membership held it: %+v", detail)
 	}
 }
 
@@ -541,9 +542,10 @@ func TestUsageSnapshotAndMigrationRollback(t *testing.T) {
 		return out
 	}
 	before := state(s)
-	// Back to schema 14: no usage payload, no native key, no relation table.
+	// Back to schema 14: no usage payload, no native key, no relation table, no membership pointer.
 	for _, statement := range []string{"alter table document_observations drop column usage_json",
 		"alter table document_observations drop column native_key", "drop table document_usage_relations",
+		"alter table document_capture_metadata drop column members_capture",
 		"update schema_migrations set version=14"} {
 		if _, err := s.db.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -586,6 +588,9 @@ func TestUsageSnapshotAndMigrationRollback(t *testing.T) {
 	}
 	if n := rowCount(t, s, `select count(*) from document_observations where usage_json is null and native_key=''`); n != 2 {
 		t.Fatal("existing rows did not receive the empty usage defaults")
+	}
+	if n := rowCount(t, s, `select count(*) from document_capture_metadata where members_capture is null`); n != 2 {
+		t.Fatal("existing captures do not own their membership after the upgrade")
 	}
 	// A partial earlier migration is repaired; a statement that cannot run rolls the others back.
 	for _, statement := range []string{"alter table document_observations drop column native_key"} {

@@ -150,8 +150,13 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 	if variants {
 		variantColumns = "d.variant,d.registry_json,d.opened_at"
 	}
+	// A source's current rows are the members of the capture that owns its admitted capture's
+	// membership: the admitted capture itself, or the one an unchanged capture names. Before
+	// schema 15 every capture owns its own.
+	membersOf := "s.admitted_attempt"
 	if usage {
 		usageColumns, nativeOrder = "d.usage_json,d.native_key", "d.native_key,"
+		membersOf = "(select coalesce(o.members_capture,o.capture_id) from document_capture_metadata o where o.capture_id=s.admitted_attempt)"
 	}
 	where := "1=1"
 	args := []any{}
@@ -201,7 +206,7 @@ func readDocumentObservations(ctx context.Context, reader knowledgeReader, filte
 	}
 	rows, err := reader.QueryContext(ctx, `select d.rowid,d.source_id,d.capture_id,d.document_json,d.application,d.surface,
 c.acquired_at,c.source_observed_at,s.id,`+variantColumns+`,`+usageColumns+`,d.modified_at,coalesce(l.kind,''),
-not exists(select 1 from document_capture_members m where m.capture_id=s.admitted_attempt and m.observation_rowid=d.rowid)
+not exists(select 1 from document_capture_members m where m.capture_id=`+membersOf+` and m.observation_rowid=d.rowid)
 or not exists(select 1 from knowledge_attempts a join knowledge_locators l on l.last_admitted=a.id where l.id=s.locator_id and a.source_id=d.source_id)
 from document_observations d join document_capture_metadata c on c.capture_id=d.capture_id
 left join knowledge_sources s on s.id=d.source_id

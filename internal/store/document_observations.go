@@ -184,8 +184,8 @@ func (s *Store) DocumentLocatorInput(ctx context.Context, id int64) (officedocum
 }
 
 // documentSchema reports whether the document tables exist, whether they carry the schema 14
-// variant columns, and whether they carry the schema 15 usage payload, native key and relation
-// table. A read-only archive from before schema 14 has the tables without the variant columns: its
+// variant columns, and whether they carry the schema 15 usage payload, native key, relation table
+// and membership pointer. A read-only archive from before schema 14 has the tables without the variant columns: its
 // rows are all Office JSON. One from before schema 15 has no usage rows to read. Neither is migrated.
 func documentSchema(ctx context.Context, reader knowledgeReader) (tables, variants, usage bool, err error) {
 	var tableCount, columnCount, usageCount int
@@ -196,8 +196,9 @@ func documentSchema(ctx context.Context, reader knowledgeReader) (tables, varian
 (select count(*) from pragma_table_info('document_locator_metadata') where name='variant')+
 (select count(*) from pragma_table_info('document_capture_metadata') where name='variant'),
 (select count(*) from pragma_table_info('document_observations') where name in ('usage_json','native_key'))+
-(select count(*) from sqlite_master where type='table' and name='document_usage_relations')`).Scan(&tableCount, &columnCount, &usageCount)
-	return tableCount == 5, columnCount == 5, columnCount == 5 && usageCount == 3, err
+(select count(*) from sqlite_master where type='table' and name='document_usage_relations')+
+(select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture')`).Scan(&tableCount, &columnCount, &usageCount)
+	return tableCount == 5, columnCount == 5, columnCount == 5 && usageCount == 4, err
 }
 
 func (s *Store) CommitDocumentObservations(ctx context.Context, attempt KnowledgeAttempt, outcome KnowledgeOutcome, result officedocuments.Result, capture DocumentCaptureMetadata) error {
@@ -238,8 +239,7 @@ type documentLoss struct {
 }
 
 // documentAdmission is one variant's capture, admitted through the shared source frontier.
-// unmappedLosses are the loss codes that each count one physical source row. reuse, when set,
-// copies a variant's own capture-owned rows from the previous capture to an unchanged one.
+// unmappedLosses are the loss codes that each count one physical source row.
 type documentAdmission struct {
 	binding            documentBinding
 	qualification      string
@@ -248,7 +248,6 @@ type documentAdmission struct {
 	losses             []documentLoss
 	acquired, observed *time.Time
 	apply              func(ctx context.Context, tx *sql.Tx, sourceID, captureID int64) error
-	reuse              func(ctx context.Context, tx *sql.Tx, previous, captureID int64) error
 }
 
 func (d documentAdmission) admit(ctx context.Context, tx *sql.Tx, attempt KnowledgeAttempt, outcome KnowledgeOutcome) (int64, string, map[string]int, error) {
@@ -302,32 +301,31 @@ where locator_id=? and boundary='unresolved' and qualification=?`, attempt.Locat
 	for _, code := range d.unmappedLosses {
 		physical += losses[code]
 	}
+	// Membership is stored once. An unchanged capture holds none of its own: members_capture names
+	// the capture whose members, and usage relations, it shares, so repeating a check of a large
+	// source adds one metadata row and no row per observation. Null means the capture owns its rows.
+	var members any
 	if outcome.Status == "unchanged" {
 		if previousSource != sourceID {
 			return 0, "", nil, errors.New("documents: unchanged source mismatch")
 		}
-		if err := tx.QueryRowContext(ctx, `select physical_observations from document_capture_metadata where capture_id=?`, previous).Scan(&physical); err != nil {
+		var owner int64
+		if err := tx.QueryRowContext(ctx, `select physical_observations,coalesce(members_capture,capture_id)
+from document_capture_metadata where capture_id=?`, previous).Scan(&physical, &owner); err != nil {
 			return 0, "", nil, err
 		}
+		members = owner
 	}
 	if _, err := tx.ExecContext(ctx, `insert into document_capture_metadata(capture_id,surface,application,
-acquired_at,source_observed_at,reused,physical_observations,variant) values(?,?,?,?,?,?,?,?)`,
+acquired_at,source_observed_at,reused,physical_observations,variant,members_capture) values(?,?,?,?,?,?,?,?,?)`,
 		attempt.ID, registered.Surface, registered.Application, optionalPeopleTime(d.acquired), optionalPeopleTime(d.observed),
-		outcome.Status == "unchanged", physical, registered.Variant); err != nil {
+		outcome.Status == "unchanged", physical, registered.Variant, members); err != nil {
 		return 0, "", nil, err
 	}
-	if outcome.Status == "unchanged" {
-		if _, err := tx.ExecContext(ctx, `insert into document_capture_members(capture_id,observation_rowid)
-select ?,observation_rowid from document_capture_members where capture_id=?`, attempt.ID, previous); err != nil {
+	if outcome.Status != "unchanged" {
+		if err := d.apply(ctx, tx, sourceID, attempt.ID); err != nil {
 			return 0, "", nil, err
 		}
-		if d.reuse != nil {
-			if err := d.reuse(ctx, tx, previous, attempt.ID); err != nil {
-				return 0, "", nil, err
-			}
-		}
-	} else if err := d.apply(ctx, tx, sourceID, attempt.ID); err != nil {
-		return 0, "", nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `update knowledge_sources set admitted_attempt=?,
 complete_attempt=case when ?='observations' then ? else complete_attempt end,source_observed_at=? where id=?`,

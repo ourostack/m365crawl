@@ -54,7 +54,8 @@ create table if not exists document_capture_metadata(
  source_observed_at text,
  reused integer not null,
  physical_observations integer not null,
- variant text not null default 'office_json'
+ variant text not null default 'office_json',
+ members_capture integer
 );
 create virtual table if not exists document_fts using fts5(title,metadata);
 create table if not exists document_usage_relations(
