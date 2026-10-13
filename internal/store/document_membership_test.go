@@ -62,6 +62,12 @@ func TestUnchangedCapturesShareMembership(t *testing.T) {
 	if !reflect.DeepEqual(view(), before) {
 		t.Fatal("unchanged captures changed the served rows")
 	}
+	// The raw SQL that sql --help and SPEC.md give for the rows and relations of a capture.
+	owner := `(select coalesce(members_capture, capture_id) from document_capture_metadata where capture_id = ?)`
+	if m, r := rowCount(t, s, `select count(*) from document_capture_members where capture_id = `+owner, last.ID),
+		rowCount(t, s, `select count(*) from document_usage_relations where capture_id = `+owner, last.ID); m != members || r != relations {
+		t.Fatalf("the documented raw SQL finds %d members and %d relations of the unchanged capture, want %d and %d", m, r, members, relations)
+	}
 	sources, err := s.DocumentSources(ctx)
 	if err != nil || len(sources) != 1 || sources[0].AdmittedID != last.ID || sources[0].Status != "unchanged" || !sources[0].AdmittedAt.Equal(at(4).Add(time.Second)) {
 		t.Fatalf("unchanged capture did not advance the frontier: %+v %v", sources, err)
