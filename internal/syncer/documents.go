@@ -257,7 +257,12 @@ func syncDocuments(ctx context.Context, st *store.Store, options DocumentOptions
 		now := documentsNow().UTC()
 		recent := source.AttemptedAt != nil && now.Sub(*source.AttemptedAt) < options.MaxAge
 		same := signature == source.AcquisitionSignature
-		if !options.Explicit && recent && same {
+		// A registry or usage file can be hundreds of megabytes, and a capture holds its writer out
+		// for the whole copy. A read's own refresh therefore never re-captures one whose observed
+		// signature is the one already captured and whose last attempt settled, however old that
+		// attempt is. An explicit sync, a changed signature and a failed attempt still capture.
+		settled := file != nil && observeErr == nil && slices.Contains([]string{"complete", "partial", "unchanged"}, source.Status)
+		if !options.Explicit && same && (recent || settled) {
 			report.Skipped++
 			continue
 		}

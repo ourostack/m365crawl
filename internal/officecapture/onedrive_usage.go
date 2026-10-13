@@ -26,6 +26,9 @@ const (
 var (
 	usageLimit     int64 = 512 << 20
 	usageReadIndex       = onedriveusage.ReadIndex
+	// usageDeadline bounds one discovery, observation or capture, including its wait for the
+	// source lifetime another capture holds.
+	usageDeadline = 30 * time.Second
 	// usageAccount is the one account directory grammar default discovery admits. The spelling is
 	// kept as the directory lists it: it is a local name, never an account or tenant identity.
 	usageAccount = regexp.MustCompile(`^Business_[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$`)
@@ -92,7 +95,7 @@ func usageNames(ctx context.Context, path string) ([]string, error) {
 // accounts than the policy admits, refuses the whole family and returns no input. It reads
 // directory names and held metadata only, never content.
 func DiscoverOneDriveUsage(ctx context.Context) (discovery UsageDiscovery, result error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, usageDeadline)
 	defer cancel()
 	if !discoveryMac {
 		return UsageDiscovery{}, usageError(ctx, "onedrive_usage_default_unsupported")
@@ -159,7 +162,7 @@ func DiscoverOneDriveUsage(ctx context.Context) (discovery UsageDiscovery, resul
 // ObserveOneDriveUsage is retry evidence from held metadata: the source stamp and its anchored
 // companions. It never reads content.
 func ObserveOneDriveUsage(ctx context.Context, path string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, usageDeadline)
 	defer cancel()
 	signature, err := observeRollback(ctx, path)
 	if err != nil {
@@ -174,7 +177,7 @@ func ObserveOneDriveUsage(ctx context.Context, path string) (string, error) {
 // every late validation, private removal, unlock, source close and policy restoration has
 // already succeeded.
 func WithOneDriveUsageCapture(ctx context.Context, input UsageInput, consume func(*UsageCapture) error) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, usageDeadline)
 	defer cancel()
 	if !validRegistryPath(input.Path) || consume == nil {
 		return usageError(ctx, "onedrive_usage_input_unqualified")

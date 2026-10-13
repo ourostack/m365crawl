@@ -72,6 +72,18 @@ func TestUnchangedCapturesShareMembership(t *testing.T) {
 	if detail := usageRelations(t, s, recent.ID); detail.UsageRelationsCaptureID != a.ID || detail.UsageRelationsTotal != 2 || len(detail.UsageRelations) != 2 {
 		t.Fatalf("relations of a row under a shared membership: %+v", detail)
 	}
+	// An unchanged outcome states no rows and no losses of its own: one that carries either is refused.
+	for name, result := range map[string]onedriveusage.Result{"rows": stateB,
+		"losses": {Losses: []onedriveusage.Loss{{Code: "onedrive_usage_document_unmapped", Count: 1}}}} {
+		refused := beginUsage(t, s, usageLocator, at(4))
+		if err := s.CommitUsageDocumentObservations(ctx, refused, KnowledgeOutcome{Status: "unchanged", ContentDigest: "digest-a",
+			Qualification: UsageDocumentQualification, At: at(4)}, result, UsageCaptureMetadata{}); err == nil {
+			t.Fatalf("an unchanged outcome with %s was admitted", name)
+		}
+	}
+	if m, r, kept := membershipCounts(t, s); m != members || r != relations || kept != 0 || !reflect.DeepEqual(view(), before) {
+		t.Fatalf("a refused unchanged outcome changed the archive: %d members, %d relations, %d retained", m, r, kept)
+	}
 	// A failed attempt after an unchanged one changes nothing, and an unchanged one after the
 	// failure still shares the same owner.
 	failed := beginUsage(t, s, usageLocator, at(5))

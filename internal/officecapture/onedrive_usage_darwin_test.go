@@ -119,7 +119,8 @@ func TestUsageDiscoveryFinite(t *testing.T) {
 	})
 	t.Run("unsupported shapes and missing leaves are scoped outcomes", func(t *testing.T) {
 		_, root := usageHome(t, 2)
-		for _, name := range []string{"Business_short", "Business_" + strings.Repeat("g", 36), "Personal_synthetic", "business_lowercase", "Unrelated"} {
+		personal := strings.Replace(usageAccountName(7), "Business_", "Personal_", 1)
+		for _, name := range []string{"Business_short", "Business_" + strings.Repeat("g", 36), "Personal_synthetic", personal, "business_lowercase", "Unrelated"} {
 			if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -135,6 +136,8 @@ func TestUsageDiscoveryFinite(t *testing.T) {
 			{Locator: filepath.Join(root, "Business_"+strings.Repeat("g", 36)), Code: "onedrive_usage_discovery_unsupported"},
 			{Locator: filepath.Join(root, "Business_short"), Code: "onedrive_usage_discovery_unsupported"},
 			{Locator: filepath.Join(root, "Personal_synthetic"), Code: "onedrive_usage_discovery_unsupported"},
+			// A personal account folder is never read, even when the rest of its name is a GUID.
+			{Locator: filepath.Join(root, personal), Code: "onedrive_usage_discovery_unsupported"},
 			{Locator: filepath.Join(root, usageAccountName(1), usageLeaf), Code: "onedrive_usage_unavailable"},
 		}
 		slices.SortFunc(want, func(a, b UsageDiscoveryOutcome) int { return strings.Compare(a.Locator, b.Locator) })
@@ -150,7 +153,7 @@ func TestUsageDiscoveryFinite(t *testing.T) {
 			t.Fatal(err)
 		}
 		discovery, err = DiscoverOneDriveUsage(context.Background())
-		if err != nil || len(discovery.Inputs) != 0 || len(discovery.Outcomes) != 3 {
+		if err != nil || len(discovery.Inputs) != 0 || len(discovery.Outcomes) != 4 {
 			t.Fatalf("unsupported-only discovery = %+v, %v", discovery, err)
 		}
 	})

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ourostack/m365crawl/internal/officedocuments"
 	"github.com/ourostack/m365crawl/internal/onenote"
@@ -249,6 +250,9 @@ func TestUsageSourceDescriptorIsolation(t *testing.T) {
 		blocked("JSON format failure")
 		if notes, err := onenote.CaptureIndex(shortContext(t), path); err == nil || notes != nil {
 			t.Error("notes capture entered the held source lifetime")
+			if notes != nil { // release what it took, so the failure is this assertion and not a later hang
+				_ = notes.Close()
+			}
 		}
 		blocked("notes capture")
 		if _, err := ObserveRegistry(shortContext(t), path); err == nil {
@@ -294,10 +298,13 @@ func TestUsageSourceDescriptorIsolation(t *testing.T) {
 // A wait for the source lifetime that ends by timeout opens nothing, and the next capture runs.
 func TestUsageGateWaitOpensNothing(t *testing.T) {
 	path := usageSource(t)
-	release, err := sourcecapture.Acquire(context.Background())
+	bounded, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := sourcecapture.Acquire(bounded)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("the source lifetime is still held by an earlier capture: %v", err)
 	}
+	t.Cleanup(release)
 	stat := registryStat
 	t.Cleanup(func() { registryStat = stat })
 	opened := false
@@ -337,5 +344,42 @@ func TestUsageUnqualifiedPlatformRefusal(t *testing.T) {
 	}
 	if output := officeWriterProbe(t, path); !strings.Contains(output, "WRITE_OK") {
 		t.Fatalf("a refused input left a writer held out: %s", output)
+	}
+}
+
+// Every usage entry point has one 30-second deadline of its own that covers the wait for the
+// source lifetime: a caller without a deadline does not wait forever for another capture.
+func TestUsageEntryPointsHaveTheirOwnDeadline(t *testing.T) {
+	if usageDeadline != 30*time.Second {
+		t.Fatalf("usage deadline = %v, want 30s", usageDeadline)
+	}
+	path := usageSource(t)
+	bounded, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := sourcecapture.Acquire(bounded)
+	if err != nil {
+		t.Fatalf("the source lifetime is still held by an earlier capture: %v", err)
+	}
+	t.Cleanup(release)
+	deadline, mac := usageDeadline, discoveryMac
+	t.Cleanup(func() { usageDeadline, discoveryMac = deadline, mac })
+	usageDeadline, discoveryMac = 50*time.Millisecond, true
+	for name, call := range map[string]func() error{
+		"capture": func() error {
+			return WithOneDriveUsageCapture(context.Background(), UsageInput{Path: path}, func(*UsageCapture) error { return nil })
+		},
+		"observation": func() error { _, err := ObserveOneDriveUsage(context.Background(), path); return err },
+		"discovery":   func() error { _, err := DiscoverOneDriveUsage(context.Background()); return err },
+	} {
+		done := make(chan error, 1)
+		go func() { done <- call() }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) || !strings.HasPrefix(usageCode(err), "onedrive_usage_") {
+				t.Fatalf("%s without a caller deadline, behind a held source lifetime: %v", name, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s has no deadline of its own: it is still waiting for the source lifetime", name)
+		}
 	}
 }

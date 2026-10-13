@@ -1,12 +1,16 @@
 package syncer
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/url"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -287,7 +291,7 @@ func TestUsageSyncIndependentAndRetry(t *testing.T) {
 }
 
 func TestUsageRunnerFailureBoundaries(t *testing.T) {
-	for _, fault := range []string{"read", "empty-capture", "panic", "refused", "cancel-capture", "commit", "stale"} {
+	for _, fault := range []string{"read", "empty-capture", "panic", "refused", "cancel-capture", "late-wrapper", "commit", "stale"} {
 		t.Run(fault, func(t *testing.T) {
 			file := usageFileFixture(t, "usage-fault.db")
 			path := newDB(t)
@@ -310,6 +314,19 @@ func TestUsageRunnerFailureBoundaries(t *testing.T) {
 					return &officecapture.ReadError{Code: "onedrive_usage_source_busy"}
 				case "cancel-capture":
 					return context.Canceled
+				case "late-wrapper":
+					// The reader succeeded and its result is staged; the wrapper then fails, as it
+					// does when the private copy cannot be removed.
+					staged := false
+					err := capture(ctx, input, func(c *officecapture.UsageCapture) error {
+						err := consume(c)
+						staged = err == nil
+						return err
+					})
+					if err != nil || !staged {
+						t.Fatalf("the late-failure fault staged nothing: %t %v", staged, err)
+					}
+					return &officecapture.ReadError{Code: "onedrive_usage_cleanup_failed"}
 				case "stale":
 					if err := capture(ctx, input, consume); err != nil {
 						return err
@@ -342,7 +359,7 @@ func TestUsageRunnerFailureBoundaries(t *testing.T) {
 			}
 			want := map[string][2]string{"read": {"failed", "onedrive_usage_capture_failed"}, "empty-capture": {"failed", "onedrive_usage_capture_failed"},
 				"panic": {"failed", "onedrive_usage_capture_failed"}, "refused": {"failed", "onedrive_usage_source_busy"},
-				"cancel-capture": {"cancelled", "onedrive_usage_cancelled"}}[fault]
+				"cancel-capture": {"cancelled", "onedrive_usage_cancelled"}, "late-wrapper": {"failed", "onedrive_usage_cleanup_failed"}}[fault]
 			if err != nil || report.Failed != 1 || len(report.Sources) != 1 || report.Sources[0].Status != want[0] ||
 				report.Sources[0].Reason != want[1] || report.Sources[0].ID != 0 {
 				t.Fatalf("usage source failure: %+v %v", report, err)
@@ -426,4 +443,146 @@ func TestUsageSuppliedFileOnUnqualifiedPlatform(t *testing.T) {
 		report.Sources[0].Reason != "onedrive_usage_input_unqualified" {
 		t.Fatalf("unqualified platform: %+v %v", report, err)
 	}
+}
+
+// A read's own refresh never re-captures a single-file source whose observed signature is the one
+// already captured and whose last attempt settled: not inside the freshness window and not after
+// it. It takes no SQLite lock on the source and records no attempt. An explicit sync, a changed
+// signature and a failed predecessor still capture.
+func TestFileSourcesSkipUnchangedOnRead(t *testing.T) {
+	file := usageFileFixture(t, "usage-read.db")
+	registry := registryFileFixture(t, "MicrosoftRegistrationDB_read.reg")
+	path := newDB(t)
+	ctx := context.Background()
+	stubUsageDiscovery(t, func() (officecapture.UsageDiscovery, error) { return officecapture.UsageDiscovery{}, nil })
+	for _, options := range []DocumentOptions{{DBPath: path, UsageFile: file, Explicit: true, Discover: true},
+		{DBPath: path, RegistryFile: registry, Explicit: true, Discover: true}} {
+		if report, err := SyncDocuments(ctx, options); err != nil || report.Captured != 1 {
+			t.Fatalf("first capture: %+v %v", report, err)
+		}
+	}
+	attempts := func() (n int) {
+		t.Helper()
+		st, err := store.OpenReadOnly(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources, err := st.DocumentSources(ctx)
+		if closeErr := st.Close(); err != nil || closeErr != nil || len(sources) != 2 {
+			t.Fatal(err, closeErr, len(sources))
+		}
+		return int(sources[0].AttemptID + sources[1].AttemptID)
+	}
+	settled := attempts()
+	now, usageCapture, registryCapture := documentsNow, documentsUsageCapture, documentsRegistryCapture
+	t.Cleanup(func() {
+		documentsNow, documentsUsageCapture, documentsRegistryCapture = now, usageCapture, registryCapture
+	})
+	later := now().Add(48 * time.Hour)
+	documentsNow = func() time.Time { return later }
+	captured := 0
+	documentsUsageCapture = func(ctx context.Context, input officecapture.UsageInput, consume func(*officecapture.UsageCapture) error) error {
+		captured++
+		return usageCapture(ctx, input, consume)
+	}
+	documentsRegistryCapture = func(ctx context.Context, input officecapture.RegistryInput, consume func(*officecapture.RegistryCapture) error) error {
+		captured++
+		return registryCapture(ctx, input, consume)
+	}
+	// Long after the freshness window, with another process holding SQLite's exclusive lock on
+	// the usage file: a capture would fail as busy, so a skip proves no lock was asked for.
+	release := holdSourceLock(t, file)
+	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, MaxAge: time.Minute})
+	if err != nil || report.Skipped != 2 || report.Captured+report.Unchanged+report.Failed != 0 || captured != 0 || attempts() != settled {
+		t.Fatalf("a read past the freshness window re-captured an unchanged file source: %+v %v (%d captures)", report, err, captured)
+	}
+	for _, source := range report.Sources {
+		if source.Status == "failed" || source.AdmittedID != source.AttemptID {
+			t.Fatalf("the skipped source changed state: %+v", source)
+		}
+	}
+	// The probe is real: an explicit sync asks for the lock and reports the writer.
+	report, err = SyncDocuments(ctx, DocumentOptions{DBPath: path, UsageFile: file, Explicit: true, Discover: true})
+	if err != nil || report.Failed != 1 || report.Sources[0].Reason != "onedrive_usage_source_busy" || captured != 1 {
+		t.Fatalf("explicit sync under a writer: %+v %v", report, err)
+	}
+	release()
+	// A failed predecessor is retried by the next read past the window, and the retry settles it.
+	later = later.Add(time.Hour)
+	report, err = SyncDocuments(ctx, DocumentOptions{DBPath: path, MaxAge: time.Minute})
+	if err != nil || report.Unchanged != 1 || report.Skipped != 1 || captured != 2 {
+		t.Fatalf("read after a failed attempt: %+v %v (%d captures)", report, err, captured)
+	}
+	// A changed signature is captured by a read.
+	usageExec(t, file, usageFormattedSQL(t, "recent-only", "variant-a", "Synthetic later title"))
+	report, err = SyncDocuments(ctx, DocumentOptions{DBPath: path, MaxAge: time.Minute})
+	if err != nil || report.Captured != 1 || report.Skipped != 1 || captured != 3 {
+		t.Fatalf("read after the file changed: %+v %v (%d captures)", report, err, captured)
+	}
+}
+
+// TestSourceLockHolderChild is the separate process of holdSourceLock: it takes SQLite's exclusive
+// lock on the file, says so, and holds it until its input closes.
+func TestSourceLockHolderChild(t *testing.T) {
+	path := os.Getenv("M365CRAWL_SYNCER_LOCK_HOLDER")
+	if path == "" {
+		return
+	}
+	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(path), "/")}).String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), "begin exclusive"); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("LOCKED")
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	if _, err := conn.ExecContext(context.Background(), "rollback"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// holdSourceLock holds SQLite's exclusive lock on path from another process until release is
+// called. Locks of one process never conflict with each other, so the holder cannot be this one.
+func holdSourceLock(t *testing.T, path string) (release func()) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := osexec.Command(executable, "-test.run=^TestSourceLockHolderChild$", "-test.count=1") //nolint:gosec // reexecutes only the current test binary with literal arguments
+	cmd.Env = append(os.Environ(), "M365CRAWL_SYNCER_LOCK_HOLDER="+path)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := false
+	release = func() {
+		if done {
+			return
+		}
+		done = true
+		_ = stdin.Close()
+		if err := cmd.Wait(); err != nil {
+			t.Errorf("lock holder: %v", err)
+		}
+	}
+	t.Cleanup(release)
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil || strings.TrimSpace(line) != "LOCKED" {
+		t.Fatalf("lock holder did not take the lock: %q %v", line, err)
+	}
+	return release
 }
