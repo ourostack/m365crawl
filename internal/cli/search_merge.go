@@ -115,7 +115,8 @@ func searchTranscriptItemOf(h store.TranscriptHit, maxText int) searchTranscript
 // it (returned; count is the same number under its older name), how many it matched before the
 // limit, and whether it had more than the result holds. matched is exact. A source that stops
 // reading at the limit cannot give an exact number: it reports matched_at_least instead, the hits
-// it read, and never an invented total.
+// it read, and never an invented total. A source that was not searched (no archive yet) reports
+// neither.
 type sourceCount struct {
 	Count          int  `json:"count"`
 	Returned       int  `json:"returned"`
@@ -124,9 +125,13 @@ type sourceCount struct {
 	Truncated      bool `json:"truncated"`
 }
 
-// newSourceCount builds one source's counts. matched is exact unless atLeast is set.
-func newSourceCount(returned, matched int, atLeast, truncated bool) *sourceCount {
+// newSourceCount builds one source's counts. matched is exact unless atLeast is set, and absent
+// when the source was not searched.
+func newSourceCount(returned, matched int, atLeast, truncated, searched bool) *sourceCount {
 	out := &sourceCount{Count: returned, Returned: returned, Truncated: truncated}
+	if !searched {
+		return out
+	}
 	if atLeast {
 		out.MatchedAtLeast = &matched
 	} else {
@@ -136,7 +141,8 @@ func newSourceCount(returned, matched int, atLeast, truncated bool) *sourceCount
 }
 
 // hints are the text lines that say which sources had hits the result does not show, in the order
-// the sources are listed.
+// the sources are listed, and what shows them: --source for a source other than the one selected,
+// and a higher --limit when the source alone matched more than the limit.
 func (s *searchSources) hints() []string {
 	if s == nil {
 		return nil
@@ -154,13 +160,25 @@ func (s *searchSources) hints() []string {
 		if src.count == nil {
 			continue
 		}
-		lead, matched := "", src.count.Matched
+		lead, matched, beyond := "", src.count.Matched, false
 		if matched == nil {
-			lead, matched = "at least ", src.count.MatchedAtLeast
+			lead, matched, beyond = "at least ", src.count.MatchedAtLeast, true // it stopped reading at the limit
 		}
-		if hidden := *matched - src.count.Returned; hidden > 0 {
-			out = append(out, lead+plural(hidden, src.one, src.many)+" not shown; use --source "+src.flag)
+		if matched == nil { // not searched
+			continue
 		}
+		hidden := *matched - src.count.Returned
+		if hidden <= 0 {
+			continue
+		}
+		advice := "use --source " + src.flag
+		switch beyond = beyond || *matched > s.limit; {
+		case s.selected == src.flag:
+			advice = "raise --limit"
+		case beyond:
+			advice += " and raise --limit"
+		}
+		out = append(out, lead+plural(hidden, src.one, src.many)+" not shown; "+advice)
 	}
 	return out
 }
@@ -173,6 +191,9 @@ type searchSources struct {
 	Notes       *sourceCount `json:"notes,omitempty"`
 	Documents   *sourceCount `json:"documents,omitempty"`
 	Loop        *sourceCount `json:"loop,omitempty"`
+	// selected is the --source of the search and limit its --limit: what a hint may advise.
+	selected string
+	limit    int
 }
 
 func searchNZ(s string) *string {
@@ -572,9 +593,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.loopExclusion != "" {
 		res.addNotice(p.loopExclusion)
 	}
-	res.Sources = &searchSources{}
+	res.Sources = &searchSources{selected: c.Source, limit: f.Limit}
 	sourceOf := func(name string) *sourceCount {
-		return newSourceCount(count[name], matched[name], atLeast[name], trunc[name])
+		return newSourceCount(count[name], matched[name], atLeast[name], trunc[name], st != nil)
 	}
 	if p.chats {
 		res.Sources.Chats = sourceOf(searchChats)

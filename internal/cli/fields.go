@@ -109,16 +109,20 @@ func writeFieldsHelp(w io.Writer, cmd string) {
 
 // wrapWords prints text as lines of at most helpWidth columns: the first indented by indent, the
 // rest by two more spaces.
-func wrapWords(indent, text string) string {
+func wrapWords(indent, text string) string { return wrapHanging(indent, indent+"  ", text) }
+
+// wrapHanging prints text as lines of at most helpWidth columns: the first after lead, the rest
+// after hang.
+func wrapHanging(lead, hang, text string) string {
 	var b strings.Builder
-	line := indent
+	line := lead
 	for i, word := range strings.Fields(text) {
 		switch {
 		case i == 0:
 			line += word
 		case len(line)+1+len(word) > helpWidth:
 			b.WriteString(line + "\n")
-			line = indent + "  " + word
+			line = hang + word
 		default:
 			line += " " + word
 		}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -14,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/ourostack/m365crawl/internal/botcitations"
+	"github.com/ourostack/m365crawl/internal/render"
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
@@ -68,23 +70,55 @@ type applicationLossItem struct {
 }
 
 // applicationSummary is --fields app_summary: the claims an agent most often wants, without the
-// nested observation. citations_count is every citation read from the message (total_admitted).
+// nested observation. citations_total is every citation read from the message (served.total_admitted),
+// not the at most 100 an item shows (served.citations_count). It is null, like the other claims,
+// when nothing is served (not_derived, or failed with nothing retained): unknown, not zero.
 type applicationSummary struct {
 	State          string  `json:"state"`
 	AppName        *string `json:"app_name"`
 	AppID          *string `json:"app_id"`
 	ReplyToID      *string `json:"reply_to_id"`
-	CitationsCount int     `json:"citations_count"`
+	CitationsTotal *int    `json:"citations_total"`
 }
 
 // summary is the item's compact form, with the same clipped app name.
 func (it *applicationItem) summary() *applicationSummary {
 	out := &applicationSummary{State: it.State}
-	if it.Served != nil && it.Served.applicationPayloadItem != nil {
+	switch {
+	case it.Served != nil && it.Served.applicationPayloadItem != nil:
 		p := it.Served.applicationPayloadItem
-		out.AppName, out.AppID, out.ReplyToID, out.CitationsCount = p.AppName, p.AppID, p.ReplyToID, p.TotalAdmitted
+		out.AppName, out.AppID, out.ReplyToID, out.CitationsTotal = p.AppName, p.AppID, p.ReplyToID, &p.TotalAdmitted
+	case it.State == store.AppStateAbsent: // read, and it holds no claim
+		out.CitationsTotal = new(int)
 	}
 	return out
+}
+
+// appSummaryCell is the text-output cell of one app_summary, given as its JSON; empty when it
+// cannot be read.
+func appSummaryCell(raw []byte) string {
+	var s applicationSummary
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	if s.CitationsTotal == nil {
+		return s.State + "; nothing served"
+	}
+	parts := []string{s.State}
+	switch {
+	case s.AppName != nil && s.AppID != nil:
+		parts = append(parts, fmt.Sprintf("app %q (id %q)", appText(*s.AppName), appText(*s.AppID)))
+	case s.AppName != nil:
+		parts = append(parts, fmt.Sprintf("app %q", appText(*s.AppName)))
+	case s.AppID != nil:
+		parts = append(parts, fmt.Sprintf("app id %q", appText(*s.AppID)))
+	default:
+		parts = append(parts, "no app named")
+	}
+	if s.ReplyToID != nil {
+		parts = append(parts, fmt.Sprintf("reply to %q", appText(*s.ReplyToID)))
+	}
+	return strings.Join(append(parts, plural(*s.CitationsTotal, "citation", "citations")), "; ")
 }
 
 // appSummaryField is the --fields key that adds app_summary to each returned message.
@@ -109,7 +143,7 @@ func (rt *runtime) withAppSummary(items []messageItem) []messageItem {
 var appFailureMeanings = map[string]string{
 	"teams_app_raw_missing":          "the archive holds no raw JSON for this message revision",
 	"teams_app_raw_too_large":        "the raw JSON is larger than 8 MiB, or nests or repeats beyond the reader's bounds",
-	"teams_app_raw_invalid":          "the raw JSON is not one well-formed JSON object",
+	"teams_app_raw_invalid":          "the raw JSON is not one well-formed JSON object, or an object in it repeats a key",
 	"teams_app_identity_unqualified": "the message id or sender id is empty or not valid UTF-8, so its claims cannot be attributed",
 	"teams_bot_input_unsupported":    "the mapper was given no message, message id or sender id it can read",
 	"teams_bot_input_too_large":      "an app, reply or citation field is longer than 256 KiB, the claims total more than 4 MiB, or the message has more than 4096 citation rows",
@@ -166,12 +200,15 @@ type applicationCoverage struct {
 	MapperVersion    int            `json:"mapper_version"`
 	ReturnedMessages int            `json:"returned_messages"`
 	States           map[string]int `json:"states"`
-	// PostedByApp counts the returned messages whose served evidence names an app_id: mapped only
-	// says the claims were read.
+	// PostedByApp counts the returned messages whose served evidence names an app, by app_id or
+	// app_name: mapped only says the claims were read. It is a lower bound when unserved > 0.
 	PostedByApp     int    `json:"posted_by_app"`
 	Retained        int    `json:"retained"`
 	BackfillPending bool   `json:"backfill_pending"`
 	Note            string `json:"note"`
+	// unserved counts the returned messages that serve nothing (not_derived, or failed with nothing
+	// retained), so whether they name an app is unknown.
+	unserved int
 }
 
 const (
@@ -339,8 +376,11 @@ func applicationCoverageOf(envs []store.MessageApplicationEnvelope) *application
 		if env.Retained {
 			c.Retained++
 		}
-		if s := env.Served; s != nil && s.Payload.AppID != nil && *s.Payload.AppID != "" {
+		switch {
+		case namesApp(env.Served):
 			c.PostedByApp++
+		case env.State == store.AppStateNotDerived, env.State == store.AppStateFailed && !env.Retained:
+			c.unserved++
 		}
 		c.BackfillPending = c.BackfillPending || env.BackfillPending
 	}
@@ -349,12 +389,24 @@ func applicationCoverageOf(envs []store.MessageApplicationEnvelope) *application
 		c.State, c.Note = "unknown", "no Teams message was returned, so application evidence is unknown here, not absent"
 	default:
 		c.Note = "counts cover only the returned Teams messages; app, reply and citation fields are each message's own native claims, not verified bot identity, Copilot history or resolved documents; " +
-			"posted_by_app counts the returned messages whose served evidence names an app_id, and mapped means the claims were read, not that an app or bot posted the message"
+			"posted_by_app counts the returned messages whose served evidence names an app by app_id or app_name, and mapped means the claims were read, not that an app or bot posted the message"
+	}
+	if c.unserved > 0 {
+		c.Note += "; posted_by_app is a lower bound: " + plural(c.unserved, "returned message is", "returned messages are") + " not_derived or failed with nothing served, so whether they name an app is unknown"
 	}
 	if c.States[store.AppStateNotDerived] > 0 {
 		c.Note += "; not_derived messages have no evidence yet: " + appSyncRemedy
 	}
 	return c
+}
+
+// namesApp reports whether a served representation names an app, by a non-empty app id or name:
+// what the text marker shows as [app: NAME] or [app id: ID].
+func namesApp(rep *store.ApplicationRepresentation) bool {
+	if rep == nil {
+		return false
+	}
+	return (rep.Payload.AppID != nil && *rep.Payload.AppID != "") || (rep.Payload.AppName != nil && *rep.Payload.AppName != "")
 }
 
 func envelopesOf(rows []store.MessageRow) []store.MessageApplicationEnvelope {
@@ -376,9 +428,19 @@ func appText(s string) string {
 	}, oneLine(s))
 }
 
-// appMarkerName is how many characters of an app name or id the text marker keeps, so the marker
-// stays short enough to print whole on every row.
-const appMarkerName = 32
+// appMarkerName is how many terminal columns of an app name or id the text marker keeps, so the
+// marker stays short enough to print whole on every row.
+const appMarkerName = 24
+
+// markerName is an app name or id cut to appMarkerName columns, with the three dots the table uses
+// for a cut cell, also where --max-text already cut the name.
+func markerName(s string) string {
+	s = appText(s)
+	if cut := strings.TrimSuffix(s, "…"); cut != s {
+		s = cut + "..."
+	}
+	return render.Truncate(s, appMarkerName)
+}
 
 // appMarker is the short tag a message's text column starts with when it carries served
 // application evidence; empty otherwise. The table never clips it.
@@ -389,11 +451,9 @@ func appMarker(it *applicationItem) string {
 	tag := "app evidence"
 	switch p := it.Served.applicationPayloadItem; {
 	case p.AppName != nil && *p.AppName != "":
-		name, _ := truncateRunes(appText(*p.AppName), appMarkerName)
-		tag = "app: " + name
+		tag = "app: " + markerName(*p.AppName)
 	case p.AppID != nil && *p.AppID != "":
-		id, _ := truncateRunes(appText(*p.AppID), appMarkerName)
-		tag = "app id: " + id
+		tag = "app id: " + markerName(*p.AppID)
 	}
 	if it.Retained {
 		tag += ", retained"
@@ -478,7 +538,11 @@ func appCoverageLine(c *applicationCoverage) string {
 	if c.Retained > 0 {
 		line += fmt.Sprintf("; %d retained", c.Retained)
 	}
-	line += fmt.Sprintf("\nposted by an app (names an app id): %d of %d", c.PostedByApp, c.ReturnedMessages)
+	if c.unserved > 0 {
+		line += fmt.Sprintf("\nposted by an app (names an app): at least %d of %d\n%d not derived or failed, so whether they name an app is unknown", c.PostedByApp, c.ReturnedMessages, c.unserved)
+	} else {
+		line += fmt.Sprintf("\nposted by an app (names an app): %d of %d", c.PostedByApp, c.ReturnedMessages)
+	}
 	if c.States[store.AppStateNotDerived] > 0 {
 		line += "\nnot derived yet: " + appSyncRemedy
 	}
@@ -511,8 +575,10 @@ func (rt *runtime) renderApplicationDetails(r *listResult) {
 // applicationEvidenceHelp is the long help every command that returns archived Teams messages shares.
 const applicationEvidenceHelp = "Application evidence: each returned Teams message carries app_observation, the app, reply and citation claims of its archived native JSON. Claims are under served: app_id, app_name, reply_to_id and citations (id as a decimal string, title, link, content_type). total_admitted is how many citations were read from the message and citations_count how many of them this item shows (at most 100; citations_truncated says when some are left out); refused_citation_rows counts the citation rows of the message that could not be read (not an object, or a field of the wrong type). A citation's link is the stored value, null when the message gave none: nothing derives it at read time, and the item's own link is the Teams link to the message, not a citation target. losses lists each kind of native field that could not be read, with its code, count and meaning; the codes are listed below, after the flags. These are the message's own claims, not a verified app identity or citation target, and one message stays one item.\n" +
 	"full_inspection is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the stored projection: app_id, app_name, reply_to_id, every citation that was read, losses and source_slots. It is not the raw message: rows that could not be read and nested citation content are not in it, and the raw message is messages.raw_json (see `m365crawl sql --help`). The command returns projection_json as a JSON string: decode it a second time. It selects by rowid, the number in observation_id; a row of message_app_observations is never updated or deleted, so the rowid always names the same projection. It names the same --db archive the read used (as an absolute path, double-quoted on Windows and single-quoted elsewhere when it needs quoting), so run it as printed.\n" +
-	"app_observation.state is mapped (claims read), partial (some read; see losses), absent (no app or citation claims), failed (the native JSON could not be read; failure_code says why) or not_derived (not projected yet: run a writable `m365crawl sync`; --max-age 0 never derives it). mapped means the claims were read, not that an app or bot posted the message: a message names an app only when served.app_id is set. When the current representation failed, served is the last good one, with retained true and retained_reason current_failed. application_evidence_coverage counts the states of the Teams messages actually returned (after --limit), and its posted_by_app counts those whose served evidence names an app_id; when none is returned its state is unknown, not absent.\n" +
-	"--fields app_summary gives each message a compact app_summary instead of the whole app_observation: state, app_name, app_id, reply_to_id and citations_count (every citation read from the message, as total_admitted). It is printed only when --fields asks for it.\n"
+	"app_observation.state is mapped (claims read), partial (some read; see losses), absent (no app or citation claims), failed (the native JSON could not be read; failure_code says why) or not_derived (not projected yet: run a writable `m365crawl sync`; --max-age 0 never derives it). mapped means the claims were read, not that an app or bot posted the message: a message names an app only when served.app_id or served.app_name is set. When the current representation failed, served is the last good one, with retained true and retained_reason current_failed. application_evidence_coverage counts the states of the Teams messages actually returned (after --limit), and its posted_by_app counts those whose served evidence names an app by app_id or app_name (the rows text output marks [app: NAME]); it is a lower bound, and the note says so, when a returned message is not_derived or failed with nothing served. When none is returned its state is unknown, not absent.\n"
+
+// appSummaryHelp is the help of --fields app_summary, on the commands that accept the key.
+const appSummaryHelp = "--fields app_summary gives each message a compact app_summary instead of the whole app_observation: state, app_name, app_id, reply_to_id and citations_total. citations_total is every citation read from the message (served.total_admitted), not the at most 100 an item shows; it and the three claims are null when nothing is served (not_derived, or failed with nothing retained). It is printed only when --fields asks for it.\n"
 
 // appCodeCommands are the commands whose help ends with the application evidence codes.
 var appCodeCommands = []string{"messages", "unread", "thread", "search", "calendar event"}
@@ -535,9 +601,9 @@ func writeAppCodesHelp(w io.Writer, cmd string) {
 	_, _ = io.WriteString(w, b.String())
 }
 
-func (messagesCmd) Help() string { return applicationEvidenceHelp }
-func (unreadCmd) Help() string   { return applicationEvidenceHelp }
-func (threadCmd) Help() string   { return applicationEvidenceHelp }
+func (messagesCmd) Help() string { return applicationEvidenceHelp + appSummaryHelp }
+func (unreadCmd) Help() string   { return applicationEvidenceHelp + appSummaryHelp }
+func (threadCmd) Help() string   { return applicationEvidenceHelp + appSummaryHelp }
 func (calendarEventCmd) Help() string {
 	return "The meeting chat's recent messages carry app_observation like `m365crawl messages`, and the event's application_evidence_coverage counts them.\n" + applicationEvidenceHelp
 }

@@ -89,7 +89,8 @@ type loopSourceItem struct {
 	AdmittedAt            *time.Time     `json:"admitted_at"`
 	Losses                map[string]int `json:"losses"`
 	Retry                 string         `json:"retry"`
-	// RetryNeeded says the retry command is worth running: the source failed or holds only metadata.
+	// RetryNeeded says the retry command can help now: the latest attempt failed or was cancelled.
+	// A metadata-only source was read whole, so a retry changes nothing until its record changes.
 	RetryNeeded bool   `json:"retry_needed"`
 	Effect      string `json:"effect,omitempty"`
 	Fix         string `json:"fix,omitempty"`
@@ -144,7 +145,7 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 			}
 		} else if health.Coverage == "metadata_only" {
 			item.Effect = "the latest snapshot has no channel this version reads, so it adds no channel; earlier snapshots stay listed with retained=true"
-			item.Fix = "nothing to fix; after Teams caches more of the component and m365crawl sync archives it, run " + retry
+			item.Fix = "nothing to fix, and a retry now changes nothing: the snapshot was read and holds no channel text; after Teams caches more of the component and m365crawl sync archives it, run " + retry
 		}
 		switch {
 		case failed:
@@ -152,7 +153,7 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 		case health.Coverage == "metadata_only":
 			out.Totals.MetadataOnly++
 		}
-		item.RetryNeeded = failed || health.Coverage == "metadata_only"
+		item.RetryNeeded = failed
 		switch source.SnapshotMatch {
 		case "matches":
 			out.Totals.Matches++

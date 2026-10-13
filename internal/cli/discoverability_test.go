@@ -37,14 +37,14 @@ func TestApplicationCoverageCountsPostedByApp(t *testing.T) {
 	m := jsonRun(t, e, "messages", "--conversation", appChat)
 	c := coverageOf(t, m)
 	if c["posted_by_app"] != float64(1) || states(c) != "mapped=1 partial=1 absent=1 failed=0 not_derived=0" ||
-		!strings.Contains(c["note"].(string), "posted_by_app counts the returned messages whose served evidence names an app_id") {
+		!strings.Contains(c["note"].(string), "posted_by_app counts the returned messages whose served evidence names an app by app_id or app_name") {
 		t.Fatalf("coverage: %v", c)
 	}
 	if none := coverageOf(t, jsonRun(t, e, "search", "zzzznomatch", "--source", "chats")); none["posted_by_app"] != float64(0) {
 		t.Fatalf("zero hits: %v", none)
 	}
 	_, text, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
-	if !strings.Contains(text, "1 mapped, 1 partial, 1 absent\nposted by an app (names an app id): 1 of 3\n") {
+	if !strings.Contains(text, "1 mapped, 1 partial, 1 absent\nposted by an app (names an app): 1 of 3\n") {
 		t.Fatalf("text coverage line:\n%s", text)
 	}
 	for _, cmd := range [][]string{{"messages"}, {"unread"}, {"thread"}, {"search"}, {"calendar", "event"}} {
@@ -122,7 +122,7 @@ func TestSQLHelpListsEveryTable(t *testing.T) {
 	}
 }
 
-var appCodePattern = regexp.MustCompile(`"(teams_(?:bot|app)_[a-z_]+)"`)
+var appCodePattern = regexp.MustCompile(`"(teams_(?:bot|app)_[a-z0-9_]+)"`)
 
 // Every application-evidence code the source can emit has a one-line explanation in the help.
 func TestEveryApplicationCodeIsExplained(t *testing.T) {
@@ -268,7 +268,7 @@ func TestApplicationTextIsPlainAndKeepsTheMarker(t *testing.T) {
 	long := strings.Repeat("N", 80)
 	name := &long
 	it := applicationItem{Served: &applicationServed{applicationPayloadItem: &applicationPayloadItem{AppName: name}}}
-	if marker := appMarker(&it); marker != "[app: "+strings.Repeat("N", appMarkerName)+"…] " {
+	if marker := appMarker(&it); marker != "[app: "+strings.Repeat("N", appMarkerName-3)+"...] " {
 		t.Fatalf("a long app name is not bounded inside the marker: %q", marker)
 	}
 	help := helpOf(t, "messages")
@@ -287,7 +287,7 @@ func TestFieldsAppSummary(t *testing.T) {
 		got := byID(t, items(t, m), "app-1")
 		summary := got["app_summary"].(map[string]any)
 		if len(got) != 2 || len(summary) != 5 || summary["state"] != "partial" || summary["app_name"] != "Synthetic Helper" || summary["app_id"] != "app-synthetic" ||
-			summary["reply_to_id"] != "native-reply-1" || summary["citations_count"] != float64(2) {
+			summary["reply_to_id"] != "native-reply-1" || summary["citations_total"] != float64(2) {
 			t.Fatalf("%v app_summary: %v", args, got)
 		}
 		if plain := jsonRun(t, e, args...); byID(t, items(t, plain), "app-1")["app_summary"] != nil {
@@ -299,7 +299,7 @@ func TestFieldsAppSummary(t *testing.T) {
 	absent := byID(t, items(t, m), "plain-1")["app_summary"].(map[string]any)
 	cited := byID(t, items(t, m), "cite-only")["app_summary"].(map[string]any)
 	if clipped["app_name"] != "Synth…" || absent["state"] != "absent" || absent["app_id"] != nil || absent["app_name"] != nil || absent["reply_to_id"] != nil ||
-		absent["citations_count"] != float64(0) || cited["state"] != "mapped" || cited["app_id"] != nil || cited["citations_count"] != float64(1) {
+		absent["citations_total"] != float64(0) || cited["state"] != "mapped" || cited["app_id"] != nil || cited["citations_total"] != float64(1) {
 		t.Fatalf("summaries: %v %v %v", clipped, absent, cited)
 	}
 	for _, cmd := range []string{"messages", "unread", "thread", "search"} {
@@ -409,17 +409,17 @@ func TestSearchReportsMatchedPerSource(t *testing.T) {
 }
 
 func TestSourceCountOf(t *testing.T) {
-	exact := newSourceCount(2, 5, false, true)
+	exact := newSourceCount(2, 5, false, true, true)
 	if *exact.Matched != 5 || exact.MatchedAtLeast != nil || exact.Returned != 2 || exact.Count != 2 || !exact.Truncated {
 		t.Fatalf("exact: %+v", exact)
 	}
-	atLeast := newSourceCount(1, 50, true, true)
+	atLeast := newSourceCount(1, 50, true, true, true)
 	if atLeast.Matched != nil || *atLeast.MatchedAtLeast != 50 {
 		t.Fatalf("at least: %+v", atLeast)
 	}
-	sources := &searchSources{Mail: atLeast, Loop: exact, Notes: newSourceCount(3, 3, false, false)}
+	sources := &searchSources{Mail: atLeast, Loop: exact, Notes: newSourceCount(3, 3, false, false, true), limit: 5}
 	hints := sources.hints()
-	if len(hints) != 2 || hints[0] != "at least 49 mail hits not shown; use --source mail" || hints[1] != "3 Loop hits not shown; use --source loop" {
+	if len(hints) != 2 || hints[0] != "at least 49 mail hits not shown; use --source mail and raise --limit" || hints[1] != "3 Loop hits not shown; use --source loop" {
 		t.Fatalf("hints: %v", hints)
 	}
 	if (*searchSources)(nil).hints() != nil {
@@ -480,11 +480,11 @@ func TestLoopRetryOnlyWhereItHelps(t *testing.T) {
 			t.Fatalf("no retry_needed, or retry removed: %v", source)
 		}
 	}
-	if needed["hello"] || !needed["failed"] || !needed["metadata"] {
+	if needed["hello"] || !needed["failed"] || needed["metadata"] {
 		t.Fatalf("retry_needed: %v", needed)
 	}
 	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "sources")
-	if strings.Count(text, "m365crawl loop sync --source-id") != 2+2 { // two table cells and two fix lines
+	if strings.Count(text, "m365crawl loop sync --source-id") != 1+2 { // one table cell and two fix lines
 		t.Fatalf("text shows a retry on a healthy source:\n%s", text)
 	}
 	for _, cmd := range [][]string{{"loop"}, {"loop", "sync"}} {

@@ -471,6 +471,9 @@ func (rt *runtime) listTable(r *listResult) {
 				if v != nil {
 					row[i] = oneLine(fmt.Sprint(v))
 				}
+				if k == appSummaryField {
+					row[i] = appSummaryCell(x.vals[k]) // a readable cell, not a map
+				}
 				if k == "text" {
 					textCol = i
 				}
@@ -484,7 +487,7 @@ func (rt *runtime) listTable(r *listResult) {
 	}
 	for _, row := range rows {
 		for i := range row {
-			if i != textCol && cols[i] != "database" && cols[i] != "thread" && cols[i] != loopSnapshotColumn { // a cut id or state is no use
+			if i != textCol && cols[i] != "database" && cols[i] != "thread" && cols[i] != loopSnapshotColumn && cols[i] != appSummaryField { // a cut id or state is no use
 				row[i] = render.Truncate(row[i], 40)
 			}
 		}

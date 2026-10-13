@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"strings"
 )
@@ -14,7 +15,7 @@ type sqlTable struct{ Name, Holds string }
 var sqlTables = []sqlTable{
 	{"accounts", "one row per Teams account: tenant_id, user_id, profile, when it was last synced"},
 	{"conversations", "Teams chats, channels, teams and meeting chats"},
-	{"messages", "Teams messages: sender, sent_at, text, raw_json (the archived native message) and raw_digest"},
+	{"messages", "Teams messages: sender_id, sender_name, sent_at, content_text, raw_json (the archived native message) and raw_digest"},
 	{"people", "Teams people by tenant and id"},
 	{"activity", "Teams activity-feed items (mentions, replies, reactions)"},
 	{"message_app_observations", "application evidence of messages: one immutable row per message revision, with projection_json (a JSON string)"},
@@ -88,11 +89,12 @@ func writeSQLHelp(w io.Writer, cmd string) {
 		width = max(width, len(t.Name))
 	}
 	var b strings.Builder
-	b.WriteString("\nTables:\n")
+	fmt.Fprintf(&b, "\nTables (%d, without SQLite's own and the full-text shadow tables):\n", len(sqlTables))
+	hang := strings.Repeat(" ", width+4)
 	for _, t := range sqlTables {
-		b.WriteString("  " + t.Name + strings.Repeat(" ", width-len(t.Name)) + "  " + t.Holds + "\n") // one table, one line: never wrapped
+		b.WriteString(wrapHanging("  "+t.Name+strings.Repeat(" ", width-len(t.Name))+"  ", hang, t.Holds))
 	}
-	b.WriteString("\nColumns of a table:\n  m365crawl sql \"select name, type from pragma_table_info('messages')\"\n" +
+	b.WriteString("\nColumns of a table (--limit 200 fits the widest table; the default is 50):\n  m365crawl sql \"select name, type from pragma_table_info('messages')\" --limit 200\n" +
 		"Tables of this archive, and the statement that created one:\n  m365crawl sql \"select name from sqlite_master where type='table' order by name\" --limit 200\n" +
 		"  m365crawl sql \"select sql from sqlite_master where name='messages'\"\n")
 	_, _ = io.WriteString(w, b.String())

@@ -328,6 +328,10 @@ func loopOverviewSource(loop store.LoopOverview, unscoped string) overviewSource
 const loopOverviewMeaning = "last_sync_at is the last Loop projection (last_projected_at), not an edit time; channels are partial snapshots of cached text, not full or current pages; " +
 	"an archived record is one cached Loop record in the archive, registered as one source; a source holds any number of channels, or none"
 
+// loopOverviewPlain is loopOverviewMeaning for text output, without JSON field names.
+const loopOverviewPlain = "the time shown is the last Loop projection, not an edit time; channels are partial snapshots of cached text, not full or current pages; " +
+	"an archived record is one cached Loop record in the archive, registered as one source; a source holds any number of channels, or none"
+
 // lastCapture is the newest admitted capture of sources, or since when it is newer.
 func lastCapture(sources []store.KnowledgeSource, since time.Time) time.Time {
 	for _, s := range sources {
@@ -484,7 +488,7 @@ func (rt *runtime) renderOverview(r *overviewResult) {
 		render.Table(w, []string{"source", "state", "holds", "last sync"}, rows, color)
 		for _, s := range r.Sources {
 			if s.Note != "" {
-				_, _ = fmt.Fprintf(w, "%s\n", render.Dim(s.Source+": "+s.Note, color))
+				_, _ = fmt.Fprintf(w, "%s\n", render.Dim(s.Source+": "+strings.Replace(s.Note, loopOverviewMeaning, loopOverviewPlain, 1), color))
 			}
 		}
 		_, _ = fmt.Fprintln(w)
