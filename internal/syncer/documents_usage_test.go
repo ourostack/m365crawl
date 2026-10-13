@@ -6,8 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/url"
 	"os"
 	osexec "os/exec"
@@ -491,7 +489,14 @@ func TestFileSourcesSkipUnchangedOnRead(t *testing.T) {
 	}
 	// Long after the freshness window, with another process holding SQLite's exclusive lock on
 	// the usage file: a capture would fail as busy, so a skip proves no lock was asked for.
+	signature, err := officecapture.ObserveOneDriveUsage(ctx, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	release := holdSourceLock(t, file)
+	if observed, err := officecapture.ObserveOneDriveUsage(ctx, file); err != nil || observed != signature {
+		t.Fatalf("the lock holder prevented unchanged metadata observation: %q %v", observed, err)
+	}
 	report, err := SyncDocuments(ctx, DocumentOptions{DBPath: path, MaxAge: time.Minute})
 	if err != nil || report.Skipped != 2 || report.Captured+report.Unchanged+report.Failed != 0 || captured != 0 || attempts() != settled {
 		t.Fatalf("a read past the freshness window re-captured an unchanged file source: %+v %v (%d captures)", report, err, captured)
@@ -528,23 +533,7 @@ func TestSourceLockHolderChild(t *testing.T) {
 	if path == "" {
 		return
 	}
-	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(path), "/")}).String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := conn.ExecContext(context.Background(), "begin exclusive"); err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println("LOCKED")
-	_, _ = io.Copy(io.Discard, os.Stdin)
-	if _, err := conn.ExecContext(context.Background(), "rollback"); err != nil {
-		t.Fatal(err)
-	}
+	runSourceLockHolder(t, path)
 }
 
 // holdSourceLock holds SQLite's exclusive lock on path from another process until release is
