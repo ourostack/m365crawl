@@ -17,7 +17,8 @@ func TestUsageCopiedCaptureArchiveOnly(t *testing.T) {
 	for _, pointer := range []string{"absent", "null"} {
 		t.Run(pointer, func(t *testing.T) {
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "copied-usage.db")
+			// Let Open create and secure the archive parent instead of trusting the runner's temp-directory ACL.
+			path := filepath.Join(t.TempDir(), "private", "copied-usage.db")
 			s, err := Open(ctx, path)
 			if err != nil {
 				t.Fatal(err)
