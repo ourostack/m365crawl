@@ -56,7 +56,7 @@ func TestUsageCopiedCaptureArchiveOnly(t *testing.T) {
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			before, err := os.ReadFile(path)
+			before, err := os.ReadFile(path) //nolint:gosec // G304: this test's own synthetic archive under t.TempDir
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +92,7 @@ func TestUsageCopiedCaptureArchiveOnly(t *testing.T) {
 			if err := ro.Close(); err != nil {
 				t.Fatal(err)
 			}
-			after, err := os.ReadFile(path)
+			after, err := os.ReadFile(path) //nolint:gosec // G304: this test's own synthetic archive under t.TempDir
 			afterInfo, statErr := os.Stat(path)
 			if err != nil || statErr != nil || !bytes.Equal(before, after) || !info.ModTime().Equal(afterInfo.ModTime()) {
 				t.Fatalf("archive-only main bytes/mtime changed: %v %v", err, statErr)
