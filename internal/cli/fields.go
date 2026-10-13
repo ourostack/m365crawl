@@ -75,7 +75,7 @@ func checkCommandFields(rt *runtime, cmd, when string) error {
 func watchKeys() []string {
 	var keys []string
 	for _, k := range dedupe(append(typeKeys[messageItem](), typeKeys[activityItem]()...)) {
-		if k != "app_observation" { // watch reads messages by key and carries no application evidence
+		if k != "app_observation" && k != appSummaryField { // watch reads messages by key and carries no application evidence
 			keys = append(keys, k)
 		}
 	}
@@ -105,6 +105,30 @@ func writeFieldsHelp(w io.Writer, cmd string) {
 		b.WriteString(wrapList("Only in `calendar event` (refused here): ", eventOnlyKeys))
 	}
 	_, _ = io.WriteString(w, b.String())
+}
+
+// wrapWords prints text as lines of at most helpWidth columns: the first indented by indent, the
+// rest by two more spaces.
+func wrapWords(indent, text string) string { return wrapHanging(indent, indent+"  ", text) }
+
+// wrapHanging prints text as lines of at most helpWidth columns: the first after lead, the rest
+// after hang.
+func wrapHanging(lead, hang, text string) string {
+	var b strings.Builder
+	line := lead
+	for i, word := range strings.Fields(text) {
+		switch {
+		case i == 0:
+			line += word
+		case len(line)+1+len(word) > helpWidth:
+			b.WriteString(line + "\n")
+			line = hang + word
+		default:
+			line += " " + word
+		}
+	}
+	b.WriteString(line + "\n")
+	return b.String()
 }
 
 // wrapList prints lead and the keys, comma separated, as lines of at most helpWidth columns

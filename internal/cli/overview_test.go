@@ -20,7 +20,7 @@ import (
 const startHereBlock = `Start here:
   m365crawl sync              read Teams, Outlook mail and the calendar into the archive
   m365crawl                   what the archive holds and how fresh it is
-  m365crawl search "words"    find anything across chats and mail
+  m365crawl search "words"    search chats, mail, fetched transcripts, notes, document metadata and Loop text
   m365crawl calendar          today's meetings; calendar event <id> for one meeting with its chat and mail
   m365crawl mail unread       unread mail by folder
   m365crawl unread            unread Teams chats

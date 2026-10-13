@@ -112,10 +112,75 @@ func searchTranscriptItemOf(h store.TranscriptHit, maxText int) searchTranscript
 }
 
 // sourceCount is what one source contributed to a search: the items of the result that came from
-// it, and whether it had more than the result holds.
+// it (returned; count is the same number under its older name), how many it matched before the
+// limit, and whether it had more than the result holds. matched is exact. A source that stops
+// reading at the limit cannot give an exact number: it reports matched_at_least instead, the hits
+// it read, and never an invented total. A source that was not searched (no archive yet) reports
+// neither.
 type sourceCount struct {
-	Count     int  `json:"count"`
-	Truncated bool `json:"truncated"`
+	Count          int  `json:"count"`
+	Returned       int  `json:"returned"`
+	Matched        *int `json:"matched,omitempty"`
+	MatchedAtLeast *int `json:"matched_at_least,omitempty"`
+	Truncated      bool `json:"truncated"`
+}
+
+// newSourceCount builds one source's counts. matched is exact unless atLeast is set, and absent
+// when the source was not searched.
+func newSourceCount(returned, matched int, atLeast, truncated, searched bool) *sourceCount {
+	out := &sourceCount{Count: returned, Returned: returned, Truncated: truncated}
+	if !searched {
+		return out
+	}
+	if atLeast {
+		out.MatchedAtLeast = &matched
+	} else {
+		out.Matched = &matched
+	}
+	return out
+}
+
+// hints are the text lines that say which sources had hits the result does not show, in the order
+// the sources are listed, and what shows them: --source for a source other than the one selected,
+// and a higher --limit when the source alone matched more than the limit.
+func (s *searchSources) hints() []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for _, src := range []struct {
+		count     *sourceCount
+		one, many string
+		flag      string
+	}{
+		{s.Chats, "chat hit", "chat hits", searchChats}, {s.Mail, "mail hit", "mail hits", searchMail},
+		{s.Transcripts, "transcript hit", "transcript hits", searchTranscripts}, {s.Notes, "note hit", "note hits", searchNotes},
+		{s.Documents, "document hit", "document hits", searchDocuments}, {s.Loop, "Loop hit", "Loop hits", searchLoop},
+	} {
+		if src.count == nil {
+			continue
+		}
+		lead, matched, beyond := "", src.count.Matched, false
+		if matched == nil {
+			lead, matched, beyond = "at least ", src.count.MatchedAtLeast, true // it stopped reading at the limit
+		}
+		if matched == nil { // not searched
+			continue
+		}
+		hidden := *matched - src.count.Returned
+		if hidden <= 0 {
+			continue
+		}
+		advice := "use --source " + src.flag
+		switch beyond = beyond || *matched > s.limit; {
+		case s.selected == src.flag:
+			advice = "raise --limit"
+		case beyond:
+			advice += " and raise --limit"
+		}
+		out = append(out, lead+plural(hidden, src.one, src.many)+" not shown; "+advice)
+	}
+	return out
 }
 
 // searchSources is the per-source part of a search result. A source that was not searched is absent.
@@ -126,6 +191,9 @@ type searchSources struct {
 	Notes       *sourceCount `json:"notes,omitempty"`
 	Documents   *sourceCount `json:"documents,omitempty"`
 	Loop        *sourceCount `json:"loop,omitempty"`
+	// selected is the --source of the search and limit its --limit: what a hint may advise.
+	selected string
+	limit    int
 }
 
 func searchNZ(s string) *string {
@@ -397,6 +465,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	var hits []searchHit
 	var chatTrunc, mailTrunc bool
+	// matched is what each source matched before any limit; atLeast marks a source that stopped
+	// reading at the limit, so its number is only a lower bound.
+	matched, atLeast := map[string]int{}, map[string]bool{}
 	if p.chats && st != nil {
 		rows, trunc, err := st.Search(rt.ctx, c.Query, f)
 		if err != nil {
@@ -407,7 +478,10 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		chatTrunc = trunc
-		for i, it := range messageItems(rows, rt.g.MaxText, html, rt.archiveRef()) {
+		if matched[searchChats] = len(rows); trunc {
+			matched[searchChats] = *f.Total // the store counts exactly when it cuts
+		}
+		for i, it := range rt.withAppSummary(messageItems(rows, rt.g.MaxText, html, rt.archiveRef())) {
 			hits = append(hits, searchHit{at: rows[i].SentAt, item: searchChatItem{Source: searchChats, messageItem: it}, source: searchChats, app: rows[i].Application})
 		}
 	}
@@ -422,6 +496,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		mailTrunc = trunc
+		matched[searchMail], atLeast[searchMail] = len(rows), trunc
 		if rt.g.Account != "" && !isSearchMailAccount(rt.g.Account) {
 			notes = append(notes, "--account names a Teams account; mail was searched across all Outlook accounts")
 		}
@@ -434,6 +509,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		return nil, err
 	}
 	hits = append(hits, tr.hits...)
+	matched[searchTranscripts], atLeast[searchTranscripts] = len(tr.hits), tr.truncated
 	if tr.note != "" {
 		notes = append(notes, tr.note)
 	}
@@ -444,6 +520,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		noteTruncated = truncated
+		matched[searchNotes], atLeast[searchNotes] = len(rows), truncated
 		for _, row := range rows {
 			var at time.Time
 			if row.ModifiedAt != nil {
@@ -460,6 +537,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		documentTruncated = snapshot.Truncated
+		matched[searchDocuments], atLeast[searchDocuments] = len(snapshot.Rows), snapshot.Truncated
 		for _, row := range snapshot.Rows {
 			hits = append(hits, searchHit{at: row.Document.Modified.Value, item: searchDocumentItem{
 				Source: searchDocuments, documentItem: documentItemOf(row, rt.g.MaxText)}, source: searchDocuments})
@@ -473,6 +551,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			return nil, err
 		}
 		loopTruncated = snapshot.Truncated
+		matched[searchLoop] = snapshot.Matched
 		for _, row := range snapshot.Rows {
 			// No native time: Loop hits follow every dated hit, in the snapshot's path order.
 			hits = append(hits, searchHit{item: searchLoopItem{Source: searchLoop, loopChannelItem: loopChannelItemOf(row, rt.g.MaxText)}, source: searchLoop})
@@ -514,26 +593,29 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	if p.loopExclusion != "" {
 		res.addNotice(p.loopExclusion)
 	}
-	res.Sources = &searchSources{}
+	res.Sources = &searchSources{selected: c.Source, limit: f.Limit}
+	sourceOf := func(name string) *sourceCount {
+		return newSourceCount(count[name], matched[name], atLeast[name], trunc[name], st != nil)
+	}
 	if p.chats {
-		res.Sources.Chats = &sourceCount{Count: count[searchChats], Truncated: trunc[searchChats]}
+		res.Sources.Chats = sourceOf(searchChats)
 	}
 	if searchMailNow {
-		res.Sources.Mail = &sourceCount{Count: count[searchMail], Truncated: trunc[searchMail]}
+		res.Sources.Mail = sourceOf(searchMail)
 	}
 	if tr.searched {
-		res.Sources.Transcripts = &sourceCount{Count: count[searchTranscripts], Truncated: trunc[searchTranscripts]}
+		res.Sources.Transcripts = sourceOf(searchTranscripts)
 	}
 	if p.indexedNotes {
-		res.Sources.Notes = &sourceCount{Count: count[searchNotes], Truncated: trunc[searchNotes]}
+		res.Sources.Notes = sourceOf(searchNotes)
 		res.SourceCoverage = rt.noteCoverage
 	}
 	if p.indexedDocuments {
-		res.Sources.Documents = &sourceCount{Count: count[searchDocuments], Truncated: trunc[searchDocuments]}
+		res.Sources.Documents = sourceOf(searchDocuments)
 		res.SourceCoverage = mergedOptionalCoverage(res.SourceCoverage, rt.documentCoverage)
 	}
 	if p.loop {
-		res.Sources.Loop = &sourceCount{Count: count[searchLoop], Truncated: trunc[searchLoop]}
+		res.Sources.Loop = sourceOf(searchLoop)
 		res.LoopCoverage = rt.loopCoverage.compact()
 	}
 	if chatTotalIsAll {

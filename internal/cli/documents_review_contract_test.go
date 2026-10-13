@@ -89,6 +89,7 @@ func TestDocumentPublicRowsAndCoverageShareCurrentSnapshot(t *testing.T) {
 func TestSharedSearchHelpExplainsDocumentEvidence(t *testing.T) {
 	e := newEnv(t)
 	code, out, stderr := e.run("search", "--help")
+	out = strings.Join(strings.Fields(out), " ") // help is wrapped: compare words
 	if code != 0 || !strings.Contains(out, "docs show") || !strings.Contains(out, "unresolved documents") {
 		t.Fatalf("shared search cannot explain document hit/filter: %d %s %s", code, out, stderr)
 	}

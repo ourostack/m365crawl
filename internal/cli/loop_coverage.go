@@ -89,8 +89,11 @@ type loopSourceItem struct {
 	AdmittedAt            *time.Time     `json:"admitted_at"`
 	Losses                map[string]int `json:"losses"`
 	Retry                 string         `json:"retry"`
-	Effect                string         `json:"effect,omitempty"`
-	Fix                   string         `json:"fix,omitempty"`
+	// RetryNeeded says the retry command can help now: the latest attempt failed or was cancelled.
+	// A metadata-only source was read whole, so a retry changes nothing until its record changes.
+	RetryNeeded bool   `json:"retry_needed"`
+	Effect      string `json:"effect,omitempty"`
+	Fix         string `json:"fix,omitempty"`
 }
 
 // loopFailureFix is the remedy of each fixed Loop failure reason, as docs/commands.md lists them.
@@ -138,11 +141,11 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 			item.Fix = strings.ReplaceAll(fix, "{retry}", retry)
 			item.Effect = "nothing has been projected from this source yet, so it adds no channel"
 			if source.LastSnapshotID > 0 {
-				item.Effect = "the last good snapshot stays current, so its channels are still listed"
+				item.Effect = "the last good snapshot stays the latest cached snapshot, so its channels are still listed"
 			}
 		} else if health.Coverage == "metadata_only" {
 			item.Effect = "the latest snapshot has no channel this version reads, so it adds no channel; earlier snapshots stay listed with retained=true"
-			item.Fix = "nothing to fix; after Teams caches more of the component and m365crawl sync archives it, run " + retry
+			item.Fix = "nothing to fix, and a retry now changes nothing: the snapshot was read and holds no channel text; after Teams caches more of the component and m365crawl sync archives it, run " + retry
 		}
 		switch {
 		case failed:
@@ -150,6 +153,7 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 		case health.Coverage == "metadata_only":
 			out.Totals.MetadataOnly++
 		}
+		item.RetryNeeded = failed
 		switch source.SnapshotMatch {
 		case "matches":
 			out.Totals.Matches++
@@ -202,26 +206,36 @@ func (rt *runtime) renderLoopCoverage(coverage *loopCoverage) {
 	}
 }
 
-// loopRowState is the text table's state column: whether the row is the source's latest admitted
-// snapshot and whether the archived record still holds exactly its bytes.
+// loopRowState is the text table's snapshot column: whether the row is the source's latest cached
+// snapshot or an older one, never "current" (no row is the current Loop page), and whether the
+// archived record still holds exactly its bytes and is still in the app's cache.
 func loopRowState(item loopChannelItem) string {
-	state := "current"
+	state := "latest cached snapshot"
 	if item.Retained {
-		state = "retained"
+		state = "older cached snapshot"
 	}
 	if !item.MatchesRetainedValue {
-		state += ", raw differs"
+		state += ", archived record differs"
 	}
 	if !item.RawPresent {
-		state += ", raw removed"
+		state += ", " + loopRecordGone
 	}
 	return state
 }
 
-var loopListColumns = []string{"source", "id", "path", "sequence", "state", "text"}
+// loopRecordGone is what text output says of a row whose raw_present is false.
+const loopRecordGone = "archived record gone from the app's cache"
+
+// loopSnapshotColumn is the text column that holds loopRowState; it is never clipped.
+const loopSnapshotColumn = "snapshot"
+
+var loopListColumns = []string{"source", "id", "path", "sequence", "text_state", loopSnapshotColumn, "text"}
+
+// loopTextColumn is the index of the clipped text column of loopListColumns.
+const loopTextColumn = 6
 
 func loopListRow(x loopChannelItem) []string {
-	return []string{strconv.FormatInt(x.SourceID, 10), x.ID, x.Path, strconv.FormatInt(x.Sequence, 10), loopRowState(x), oneLine(x.Text)}
+	return []string{strconv.FormatInt(x.SourceID, 10), x.ID, x.Path, strconv.FormatInt(x.Sequence, 10), x.TextState, loopRowState(x), oneLine(x.Text)}
 }
 
 func yesNo(v bool) string {
@@ -246,9 +260,13 @@ func (rt *runtime) renderLoopDetails(result *listResult) {
 		if !ok {
 			continue
 		}
-		state := "current"
+		state := "latest cached snapshot of this source"
 		if detail.Retained {
-			state = "retained (a newer snapshot of this source exists)"
+			state = "older cached snapshot (a newer snapshot of this source exists)"
+		}
+		record := "archived record still in the app's cache: yes"
+		if !detail.RawPresent {
+			record = loopRecordGone
 		}
 		losses := "none"
 		if len(detail.Losses) > 0 {
@@ -266,8 +284,8 @@ func (rt *runtime) renderLoopDetails(result *listResult) {
 			detail.Sequence, detail.SnapshotSequence, detail.LatestSequence, detail.PendingOperations, detail.SnapshotPendingOperations,
 			detail.Markers, detail.MissingBlobs, yesNo(detail.Partial))
 		_, _ = fmt.Fprintf(rt.stdout, "losses: %s\n", losses)
-		_, _ = fmt.Fprintf(rt.stdout, "%s; archived record matches this snapshot: %s; raw present: %s\n", state,
-			yesNo(detail.MatchesRetainedValue), yesNo(detail.RawPresent))
+		_, _ = fmt.Fprintf(rt.stdout, "%s; archived record matches this snapshot: %s; %s\n", state,
+			yesNo(detail.MatchesRetainedValue), record)
 		_, _ = fmt.Fprintf(rt.stdout, "record updated at admission: %s; projected: %s; raw updated: %s; raw removed: %s\n",
 			stamp(detail.RecordUpdatedAtAtAdmission), stamp(detail.ProjectedAt), loopStamp(detail.RawUpdatedAt), loopStamp(detail.RawRemovedAt))
 		_, _ = fmt.Fprintln(rt.stdout, "modified: unknown (the cache records no native modification time)")
