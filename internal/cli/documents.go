@@ -210,9 +210,9 @@ func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 
 // windowsQuotable is what a Windows path may hold and still be literal inside double quotes in
 // both cmd.exe and PowerShell: no $, backtick, %, ', &, ^ or !.
-const windowsQuotable = argSafeWindows + ` ()~#[]{}`
+const windowsQuotable = argSafeWindows + ` ,()~#[]{}`
 
-const argSafeWindows = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@+=,-" + `\`
+const argSafeWindows = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@+=-" + `\`
 
 // registryRetry is the command that retries a registry source with no source ID. A fix is text an
 // agent may paste into a shell, so the file name is quoted for the platform the source was

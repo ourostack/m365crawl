@@ -420,6 +420,7 @@ func TestRegistryRetryCommandNeverRunsFileNameText(t *testing.T) {
 	for locator, want := range map[string]string{
 		`C:\synthetic\Registration_1.reg`: `--registry-file C:\synthetic\Registration_1.reg`,
 		`C:\synthetic\copy one (2).reg`:   `--registry-file "C:\synthetic\copy one (2).reg"`,
+		`C:\synthetic\a,b.reg`:            `--registry-file "C:\synthetic\a,b.reg"`, // a bare comma is PowerShell's array operator
 	} {
 		if got := fix("windows", locator); !strings.HasSuffix(got, "m365crawl docs sync "+want) {
 			t.Fatalf("windows retry for %q = %q", locator, got)
