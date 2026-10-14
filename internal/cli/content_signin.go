@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/sharepointcontent"
 )
@@ -22,6 +23,24 @@ func (contentSigninCmd) Help() string {
 func (c *contentSigninCmd) Run(rt *runtime) error {
 	if err := rt.contentFlags(); err != nil {
 		return err
+	}
+	if engageSigninTarget(c.URL) {
+		if err := checkKeys(rt, typeKeys[EngageSigninReport]()); err != nil {
+			return err
+		}
+		exe, kind, err := findBrowser(c.Browser)
+		if err != nil {
+			return err
+		}
+		agreement := transcriptsSigninCmd{UserAgreed: c.UserAgreed}
+		if err := agreement.agree(rt, kind); err != nil {
+			return contentSigninError(err, rt.contentCommand("signin", c.URL))
+		}
+		result, err := rt.signinEngage(browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath)})
+		if err != nil {
+			return err
+		}
+		return rt.write("content signin", result)
 	}
 	request, err := sharepointcontent.NormalizeRequest(sharepointcontent.Request{Kind: "page", URL: c.URL})
 	if err != nil {

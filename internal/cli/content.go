@@ -23,8 +23,9 @@ type contentGroup struct {
 	Sources contentSourcesCmd `cmd:"" help:"Read registered source coverage offline, including failed and metadata-only zero-hit participants."`
 }
 type contentFetchGroup struct {
-	Page   contentFetchPageCmd   `cmd:"" help:"Explicitly acquire a supported rich-text page projection (always partial)."`
-	Stream contentFetchStreamCmd `cmd:"" help:"Explicitly acquire one verified selected transcript, or verified metadata without a selected body."`
+	EngageHome contentFetchEngageHomeCmd `cmd:"" help:"Explicitly capture bounded native Engage Home-session thread-starter observations (always partial; no URL or account selector)."`
+	Page       contentFetchPageCmd       `cmd:"" help:"Explicitly acquire a supported rich-text page projection (always partial)."`
+	Stream     contentFetchStreamCmd     `cmd:"" help:"Explicitly acquire one verified selected transcript, or verified metadata without a selected body."`
 }
 
 const contentHelp = "Explicit fetch only: `content fetch page URL` or `content fetch stream URL [--transcript-id ID]`. Supported HTTPS tenant.sharepoint.com or tenant.sharepoint-df.com /sites/NAME or /teams/NAME targets: /SitePages/NAME.aspx, or /_layouts/15/stream.aspx?id=ENCODED_NATIVE_FILE_PATH. No sharing-ticket replay, library crawl or automatic retry.\n" +
