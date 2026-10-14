@@ -47,10 +47,10 @@ func TestClientDeadTransportContextPrecedence(t *testing.T) {
 				pending: map[int]chan reply{7: pending},
 				dead:    disconnected,
 			}
-			if err := c.call(tc.ctx, "S1", "Runtime.evaluate", nil, nil); err != tc.want {
+			if err := c.call(tc.ctx, "S1", "Runtime.evaluate", nil, nil); !errors.Is(err, tc.want) {
 				t.Errorf("call = %v, want %v", err, tc.want)
 			}
-			if c.dead != disconnected || c.nextID != 7 || len(c.pending) != 1 || c.pending[7] != pending || len(pending) != 0 {
+			if !errors.Is(c.dead, disconnected) || c.nextID != 7 || len(c.pending) != 1 || c.pending[7] != pending || len(pending) != 0 {
 				t.Fatal("dead-transport call changed transport or pending command state")
 			}
 		})
