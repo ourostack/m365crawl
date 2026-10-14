@@ -134,6 +134,10 @@ can be a kind mismatch or another unsupported package: inspect its actual format
 A differing recognized filename extension can offer an explicit alternative request
 without `--kind`, never a guessed verified kind or guaranteed repair. A corrected
 request keeps the original failed intent and any explicitly selected `--from` origin.
+Generic Stream sign-in does not know a requested transcript: its `next` reads
+`content sources` in that archive. Choose the stored registration retry or make
+an explicit request; never infer a transcript choice from the sign-in URL.
+Page sign-in can continue to its exact page fetch.
 `local_content_coverage` survives fields, zero hits and global clipping. Failed first
 captures still report a registration ID and explicit file retry, not source-id0.
 `full_text_sql` returns the complete same-archive record, for example:

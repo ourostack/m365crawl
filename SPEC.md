@@ -76,6 +76,9 @@
   registered selection. Unsupported package recovery inspects format rather than
   blindly repeating rejected intent; a differing recognized extension can propose
   an explicit alternative request, not a guessed verified format or guaranteed fix.
+  Generic Stream sign-in has no exact transcript request context; its Next lists
+  archive sources for an explicit registration retry/selection, never a default
+  transcript fetch inferred from the URL. Page sign-in may continue its exact fetch.
   Static positive-row-ID `full_text_sql` reads the full record from this same DB.
 - Local known filesystem-modified clocks sort newest, unknown last; bounded windows
   exclude unknown. Timestamp ties preserve all old legacy/cloud order before local;

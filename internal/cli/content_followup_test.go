@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/url"
 	"os"
@@ -406,6 +407,103 @@ func TestContentFollowupRecoveryGuidancePortable(t *testing.T) {
 		if capture != tc.capture {
 			t.Fatalf("format recovery classification: %+v %s", tc, fix)
 		}
+	}
+}
+
+func TestContentSelectedStreamSigninNextRequiresExplicitStoredChoice(t *testing.T) {
+	e := contentFollowupEnv(t)
+	page := newTrPage()
+	page.host = "fixture.sharepoint.com"
+	closer, _ := fakeBrowser(t, page)
+	signinTTY(t, false, "")
+	signinDriver := openBrowser
+	openBrowser = func(context.Context, browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		return &cloudFixturePage{host: "login.microsoftonline.com"}, closer, nil
+	}
+	target := "https://fixture.sharepoint.com/sites/sample/_layouts/15/stream.aspx?id=%2Fsites%2Fsample%2FVideos%2FVideo.mp4"
+	code, _, stderr := e.run("content", "fetch", "stream", target, "--transcript-id", "T")
+	if code == 0 || errorOf(t, stderr)["code"] != "content_signin_required" {
+		t.Fatal("expected explicit T sign-in refusal")
+	}
+	var signin, retry string
+	for _, command := range contentFixCommands(errorOf(t, stderr)["fix"].(string)) {
+		words := requireContentFollowupArchive(t, e, command)
+		if slices.Contains(words, "signin") {
+			signin = command
+		}
+		if slices.Contains(words, "--registration-id") {
+			retry = command
+		}
+	}
+	if signin == "" || retry == "" {
+		t.Fatal("missing scoped sign-in or exact registration retry")
+	}
+	openBrowser = signinDriver
+	code, out, stderr := replayContentFollowup(t, e, signin)
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	next := decode(t, out)["next"].(string)
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(cloudStreamRaw(t, "transcript_observations")), &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["transcript"].(map[string]any)["ID"] = "U"
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendCalls := 0
+	openBrowser = func(context.Context, browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		backendCalls++
+		return &cloudFixturePage{host: "fixture.sharepoint.com", raw: string(encoded)}, closer, nil
+	}
+	code, continued, stderr := replayContentFollowup(t, e, next)
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	st, err := store.OpenReadOnly(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := st.CloudSnapshot(context.Background(), store.CloudFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Rows) != 0 || len(snapshot.Sources) != 1 || snapshot.Sources[0].RequestedTranscriptID == nil || *snapshot.Sources[0].RequestedTranscriptID != "T" || backendCalls != 0 {
+		t.Fatalf("generated sign-in Next silently acquired default U instead of retaining explicit T: rows=%d registrations=%d backend_calls=%d next=%s",
+			len(snapshot.Rows), len(snapshot.Sources), backendCalls, next)
+	}
+	if !slices.Contains(requireContentFollowupArchive(t, e, next), "sources") {
+		t.Fatal("generic Stream sign-in must route to stored explicit choices")
+	}
+	choices := items(t, decode(t, continued))
+	if len(choices) != 1 || choices[0]["retry"] != retry {
+		t.Fatal("continuation lost exact original registration retry")
+	}
+	if code, _, _ := replayContentFollowup(t, e, retry); code == 0 {
+		t.Fatal("exact T registration admitted mismatched U")
+	}
+	encoded = []byte(cloudStreamRaw(t, "transcript_observations"))
+	if code, _, stderr := replayContentFollowup(t, e, retry); code != 0 {
+		t.Fatal(stderr)
+	}
+	st, err = store.OpenReadOnly(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = st.CloudSnapshot(context.Background(), store.CloudFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Sources) != 1 || snapshot.Sources[0].RequestedTranscriptID == nil || *snapshot.Sources[0].RequestedTranscriptID != "T" || len(snapshot.Rows) != 1 || snapshot.Rows[0].Result.Transcript == nil || snapshot.Rows[0].Result.Transcript.ID != "T" {
+		t.Fatal("explicit exact retry changed requested/verified transcript identity")
 	}
 }
 
