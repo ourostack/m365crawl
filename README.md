@@ -1,3 +1,9 @@
+<!-- ourostack:brand:start -->
+<p align="center">
+  <a href="https://github.com/ourostack"><img src="https://raw.githubusercontent.com/ourostack/.github/main/brand/ouro.png" alt="Ourostack" width="96" height="96"></a>
+</p>
+<!-- ourostack:brand:end -->
+
 # m365crawl — Your Microsoft 365 work, ready for your agents
 
 ### Explicit resident Office text
