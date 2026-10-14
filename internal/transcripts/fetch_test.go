@@ -479,7 +479,7 @@ func TestFetchArgsJSONEncoded(t *testing.T) {
 func TestFetchSkipsMalformedRef(t *testing.T) {
 	page := newFakePage()
 	bad := tpart("a.sharepoint.example.invalid", "I1", 1)
-	bad.Host = `a.example.invalid"/x`
+	bad.ItemID = `I1"/x`
 	share := tpart("a.sharepoint.example.invalid", "I2", 2)
 	share.RefQuality = RefShareOnly
 	var s saved

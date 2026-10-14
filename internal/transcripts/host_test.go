@@ -18,14 +18,14 @@ func TestSharePointHostsOnly(t *testing.T) {
 			t.Errorf("%q is not a SharePoint host", h)
 		}
 	}
-	// A cached notice that names any other host is unfetchable, with the malformed reason.
+	// A cached notice that names any other host is unfetchable, with a host-specific reason.
 	p := tpart("a"+testSuffix, "I1", 1)
 	if !p.Fetchable() {
 		t.Fatal("the fixture host must pass")
 	}
 	p.Host = "attacker.example"
-	if p.ValidRef() || p.Fetchable() || Reason(p, PartState(p, "", false)) != "the cached file reference is malformed" {
-		t.Fatalf("%+v must be unfetchable as malformed", p)
+	if p.ValidRef() || p.Fetchable() || Reason(p, PartState(p, "", false)) != "the cached file reference names an unsupported SharePoint host" {
+		t.Fatalf("%+v must be unfetchable as an unsupported host", p)
 	}
 	// Without the test allowance the synthetic host is refused too.
 	restore := AllowHostSuffixForTests("")

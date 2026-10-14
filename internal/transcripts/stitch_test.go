@@ -69,7 +69,7 @@ func TestStitchUnfetchedPartKeepsPlace(t *testing.T) {
 		{StateUnfetchable, "only a sharing link is cached for this part; m365crawl cannot fetch it from ids"},
 		{StateUnfetchable, "only a Teams media-service link is cached; it is not a SharePoint file"},
 		{StateUnfetchable, "Teams posted a transcript notice but no file reference"},
-		{StateUnfetchable, "the cached file reference is malformed"},
+		{StateUnfetchable, "the cached file reference names an unsupported SharePoint host"},
 		{StateOK, ""},
 		{StateNotFetched, "not fetched yet; run m365crawl transcripts fetch call-x"},
 	}
