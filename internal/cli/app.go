@@ -168,7 +168,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources", "content capture"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
