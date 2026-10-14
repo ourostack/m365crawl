@@ -217,6 +217,19 @@ func (c *TextCapture) ReadText(ctx context.Context) (documenttext.Result, error)
 	ctx, cancel := context.WithCancel(c.ctx)
 	stop := context.AfterFunc(caller, cancel)
 	defer func() { stop(); cancel() }()
+	var result documenttext.Result
+	err := captureGuard(ctx, func() error {
+		var err error
+		result, err = c.readText(ctx)
+		return err
+	})
+	if err != nil {
+		return documenttext.Result{}, textFailure(ctx, err)
+	}
+	return result, nil
+}
+
+func (c *TextCapture) readText(ctx context.Context) (documenttext.Result, error) {
 	if err := c.validateSource(); err != nil {
 		return documenttext.Result{}, err
 	}
@@ -246,10 +259,13 @@ func (c *TextCapture) Close() error {
 	c.closed = true
 	c.closeErr = errors.Join(c.validateFields(), c.ctx.Err())
 	if c.privateInfo != nil {
-		f, err := c.privateReader()
-		if f != nil {
-			err = errors.Join(err, f.close())
-		}
+		err := captureGuard(context.WithoutCancel(c.ctx), func() error {
+			f, err := c.privateReader()
+			if f != nil {
+				err = errors.Join(err, f.close())
+			}
+			return err
+		})
 		c.closeErr = errors.Join(c.closeErr, err)
 	}
 	for _, path := range []string{c.privatePath, c.root} {
