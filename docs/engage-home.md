@@ -1,5 +1,13 @@
 # Engage Home-session observations
 
+Mixed content and shared search put every known native clock before every unknown
+clock, then order newest-first and retain established equal-clock family ties.
+Engage's explicitly known Go-zero remains known; legacy zero-without-presence
+remains unknown. The exceptional old order of an undated legacy item before a
+known pre-year-one item changes intentionally; stored evidence is unchanged.
+Text output uses separate consecutive tables when row schemas differ, so
+registration diagnostics and native instance/session evidence keep their own labels.
+
 ![Synthetic Engage archive workflow](engage-home-archive.svg)
 
 Explicitly capture native access-session thread starters:

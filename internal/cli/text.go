@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -347,6 +348,7 @@ func (rt *runtime) listTable(r *listResult) {
 	textCol := -1
 	leads := map[int]string{} // row index to the application marker its text starts with
 	for _, it := range r.Items {
+		previousCols, previousTextCol, previousRows := cols, textCol, len(rows)
 		switch x := it.(type) {
 		case messageItem:
 			cols, textCol = []string{"sent_at", "conversation", "sender", "text"}, 3
@@ -358,9 +360,9 @@ func (rt *runtime) listTable(r *listResult) {
 			if rt.cmd == "messages" { // what `m365crawl thread` takes to read on
 				cols, textCol = []string{"sent_at", "conversation", "sender", "thread", "text"}, 4
 				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
-				continue
+			} else {
+				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 			}
-			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
 			cols, textCol = searchColumns, 5
 			leads[len(rows)] = appMarker(x.App)
@@ -563,11 +565,24 @@ func (rt *runtime) listTable(r *listResult) {
 			}
 			rows = append(rows, row)
 		}
+		// Keep chronological row order, but never put cells under another schema.
+		// Projected rows deliberately share their existing union-of-fields table.
+		_, isProjection := it.(projected)
+		if previousRows > 0 && !isProjection && (!slices.Equal(previousCols, cols) || previousTextCol != textCol) {
+			rt.renderListRows(previousCols, rows[:previousRows], previousTextCol, leads)
+			rows = rows[previousRows:]
+			leads = map[int]string{0: leads[previousRows]}
+		}
 	}
 	if len(rows) == 0 {
 		render.Table(rt.stdout, []string{"items"}, nil, rt.color)
 		return
 	}
+	rt.renderListRows(cols, rows, textCol, leads)
+}
+
+// renderListRows clips and measures only rows belonging to this exact schema.
+func (rt *runtime) renderListRows(cols []string, rows [][]string, textCol int, leads map[int]string) {
 	for _, row := range rows {
 		for i := range row {
 			if i != textCol && cols[i] != "database" && cols[i] != "thread" && cols[i] != loopSnapshotColumn && cols[i] != appSummaryField { // a cut id or state is no use

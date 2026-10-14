@@ -42,6 +42,17 @@ parser/order/filter key. Pointer/raw flag presence distinguishes known Go-zero
 from absence. Existing family ties precede Engage; new ties use full label,
 source/session/ordinal/numeric archive ID before clipping.
 
+Every mixed content/shared-search comparison MUST put known clocks before unknown
+clocks, then compare native instants newest-first with range-safe Time comparisons,
+then apply established family/tie order. Engage's explicit presence retains a known
+Go-zero; legacy hits without independent presence retain zero-means-absent semantics.
+This deliberately changes the exceptional old legacy unknown-versus-pre-year-one
+order: unknown no longer precedes a known early instant. Normal legacy chronology
+and equal-clock family precedence are unchanged; stored clocks/IDs/bytes do not change.
+Text lists MUST render differing column schemas as separately labeled consecutive
+tables, preserving selected row order. Registration outcome/account_state/reason/retry
+MUST NOT be printed under instance source/current_session/coverage headers.
+
 `engage-observation:N` is a positive archive occurrence ID. Preview is first100
 ordered blocks with empty/duplicate occurrences preserved; clipping copies
 slices/pointers and never alters full native IDs/flags/version/raw clocks.

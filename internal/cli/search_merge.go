@@ -502,17 +502,18 @@ type searchHit struct {
 func sortSearchHits(hits []searchHit) {
 	sort.SliceStable(hits, func(i, j int) bool {
 		a, b := hits[i], hits[j]
-		if a.engage || b.engage {
-			ak, bk := !a.at.IsZero(), !b.at.IsZero()
-			if a.engage {
-				ak = a.engageKnown
-			}
-			if b.engage {
-				bk = b.engageKnown
-			}
-			if ak != bk {
-				return ak
-			}
+		// Knownness is one global ordering tier, not an operand-family exception.
+		// Engage has explicit native presence, including an observed Go-zero.
+		// Legacy hits retain their zero-means-absent convention.
+		ak, bk := !a.at.IsZero(), !b.at.IsZero()
+		if a.engage {
+			ak = a.engageKnown
+		}
+		if b.engage {
+			bk = b.engageKnown
+		}
+		if ak != bk {
+			return ak
 		}
 		if !a.at.Equal(b.at) {
 			return a.at.After(b.at)
