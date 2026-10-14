@@ -2,7 +2,7 @@
 
 ## Explicit resident Office text (schema 17)
 
-- Commands: `content capture --file FILE [--kind docx|xlsx|pptx]` or
+- Resident commands: `content capture --file FILE [--kind docx|xlsx|pptx]` or
   `content capture --from document-observation:N [--kind ...]`, mutually exclusive
   nonempty flags. Exact absolute clean UTF8 paths only. Extension inference is
   separate per-attempt origin evidence; explicit requested kind never waives package

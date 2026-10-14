@@ -10,5 +10,5 @@ note: --mentions-me applies to Teams chats only; mail and meeting transcripts we
 notice: indexed notes were not searched: account/author or chat/mail-only filters do not apply to unresolved note ownership
 notice: document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents
 notice: Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner
-notice: cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities
+notice: cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities; local Office content was not searched because these filters cannot qualify unresolved file ownership
 archive age: <age>
