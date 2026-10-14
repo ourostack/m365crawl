@@ -36,7 +36,9 @@ func heldTextEvidence(file *os.File) (FileEvidence, error) {
 		return FileEvidence{}, err
 	}
 	if known {
-		e.ModifiedAt = &at
+		if _, err := at.MarshalJSON(); err == nil {
+			e.ModifiedAt = &at
+		}
 	}
 	qualifyEvidence(&e)
 	return e, ValidateFileEvidence(e)

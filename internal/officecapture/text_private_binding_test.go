@@ -35,3 +35,35 @@ func TestTextPrivateIncarnationCheckedBeforeContent(t *testing.T) {
 		t.Fatal("read bytes before checking private incarnation")
 	}
 }
+
+func TestTextInclusiveSourceLimit(t *testing.T) {
+	path := textFixture(t)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := root.OpenFile(filepath.Base(path), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(64 << 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Close(); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err = WithTextCapture(context.Background(), TextInput{path, "docx"}, func(c *TextCapture) error {
+		called = true
+		if c.Evidence.Size != 64<<20 || len(c.SourceByteDigest) != 64 {
+			t.Fatal("inclusive source bound lost")
+		}
+		return nil
+	})
+	if err != nil || !called {
+		t.Fatalf("inclusive resident source refused: %v", err)
+	}
+}

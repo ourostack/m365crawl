@@ -24,7 +24,7 @@ func TestTextDarwinHeldEvidenceFaultsAndZeros(t *testing.T) {
 	if _, err := heldTextEvidence(file); err == nil {
 		t.Fatal("native stat failure")
 	}
-	for _, mode := range []string{"zero", "modified-invalid", "creation-invalid", "generation", "creation", "negative-device"} {
+	for _, mode := range []string{"zero", "modified-invalid", "creation-invalid", "generation", "creation", "negative-device", "unsupported-clock"} {
 		inputStat = func(_ int, st *unix.Stat_t) error {
 			st.Dev, st.Ino, st.Size = 1, 2, 8
 			switch mode {
@@ -40,6 +40,8 @@ func TestTextDarwinHeldEvidenceFaultsAndZeros(t *testing.T) {
 				st.Btim.Sec = 3
 			case "negative-device":
 				st.Dev = -1
+			case "unsupported-clock":
+				st.Mtim.Sec = 1 << 62
 			}
 			return nil
 		}
