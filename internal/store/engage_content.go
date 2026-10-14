@@ -136,8 +136,14 @@ func (s *Store) BeginEngageAttempt(ctx context.Context, input KnowledgeInput) (K
 	}
 	return s.beginKnowledgeAttempt(ctx, input, func(tx *sql.Tx, id int64) error {
 		var target string
-		if _, err := tx.ExecContext(ctx, `insert into engage_locator_metadata(locator_id,target_url) values(?,?) on conflict(locator_id) do nothing`, id, EngageHomeURL); err != nil {
+		var priorAttempts int
+		if err := tx.QueryRowContext(ctx, `select count(*) from knowledge_attempts where locator_id=?`, id).Scan(&priorAttempts); err != nil {
 			return err
+		}
+		if priorAttempts == 0 {
+			if _, err := tx.ExecContext(ctx, `insert into engage_locator_metadata(locator_id,target_url) values(?,?)`, id, EngageHomeURL); err != nil {
+				return err
+			}
 		}
 		if err := tx.QueryRowContext(ctx, `select target_url from engage_locator_metadata where locator_id=?`, id).Scan(&target); err != nil {
 			return err
@@ -145,7 +151,7 @@ func (s *Store) BeginEngageAttempt(ctx context.Context, input KnowledgeInput) (K
 		if target != EngageHomeURL {
 			return errEngageIntegrity
 		}
-		_, err := readEngage(ctx, tx, EngageFilter{}, 0, false)
+		_, err := readEngage(ctx, tx, EngageFilter{}, 0, false, id)
 		return err
 	}, nil)
 }
@@ -161,7 +167,7 @@ func (s *Store) CommitEngageCapture(ctx context.Context, a KnowledgeAttempt, c E
 	outcome := KnowledgeOutcome{Status: "partial", Qualification: EngageQualification, At: c.AdmittedAt}
 	return s.finishKnowledge(ctx, a, outcome, EngageKind, func(ctx context.Context, tx *sql.Tx, a KnowledgeAttempt, _ KnowledgeOutcome) (int64, string, map[string]int, error) {
 		// Reuse is not a repair path. Audit the complete prior namespace first.
-		if _, err := readEngage(ctx, tx, EngageFilter{}, 0, false); err != nil {
+		if _, err := readEngage(ctx, tx, EngageFilter{}, 0, false, 0); err != nil {
 			return 0, "", nil, err
 		}
 		boundary := engageBoundary(c.Result.Account)

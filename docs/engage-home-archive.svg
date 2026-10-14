@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="480" viewBox="0 0 1100 480" role="img" aria-labelledby="title desc">
+<title id="title">Synthetic Engage archive workflow</title>
+<desc id="desc">Explicit partial native sessions become immutable ordered observations. Registration diagnostics remain separate from verified instances. Offline search leads to a bounded preview and complete original session SQL.</desc>
+<rect width="1100" height="480" fill="#101827"/>
+<g font-family="system-ui,sans-serif" fill="#e5edf9">
+<text x="40" y="54" font-size="28" font-weight="700">Engage: preserve the observation, not a guessed feed</text>
+<text x="40" y="86" font-size="16" fill="#9eabc1">Synthetic illustration • explicit capture • partial native access-session evidence</text>
+<g fill="#1e2e46" stroke="#446083" stroke-width="2">
+<rect x="40" y="120" width="310" height="190" rx="12"/>
+<rect x="395" y="120" width="310" height="190" rx="12"/>
+<rect x="750" y="120" width="310" height="190" rx="12"/>
+</g>
+<g font-size="18" font-weight="700" fill="#83ded3">
+<text x="60" y="153">1  Explicit native session</text><text x="415" y="153">2  Immutable archive</text><text x="770" y="153">3  Offline follow-up</text>
+</g>
+<g font-size="16">
+<text x="60" y="190">content fetch engage-home</text><text x="60" y="222">Fixed root • early observer</text><text x="60" y="254">Native identity + terminal Close</text><text x="60" y="286">No replies / pagination / feed claim</text>
+<text x="415" y="190">Session A → B → A reuses A IDs</text><text x="415" y="222">Thread / block duplicates retained</text><text x="415" y="254">Own session losses + first clocks</text><text x="415" y="286">History and typed FTS validated</text>
+<text x="770" y="190">search → engage-observation:N</text><text x="770" y="222">First100 ordered blocks</text><text x="770" y="254">full_text_sql → original Result</text><text x="770" y="286">No browser / refresh / migration</text>
+</g>
+<path d="M355 215h32m-10-8 10 8-10 8M710 215h32m-10-8 10 8-10 8" fill="none" stroke="#83ded3" stroke-width="3"/>
+<rect x="40" y="345" width="1020" height="92" fill="#293046" rx="10"/>
+<text x="60" y="377" font-size="18" font-weight="700" fill="#f4ce83">A-success → B-success → unknown failure</text>
+<text x="60" y="408" font-size="16">Registration diagnosis stays unknown. A/B clocks and own coverage stay unchanged. Last success ≠ active account.</text>
+</g></svg>

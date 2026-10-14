@@ -1,4 +1,4 @@
-package engagecontent
+package engagecontent_test
 
 import "testing"
 

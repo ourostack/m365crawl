@@ -85,9 +85,9 @@ func ValidateResult(ctx context.Context, r Result) error {
 				unknownClocks++
 			}
 		}
-		for _, s := range []*string{thread.SenderID, thread.Language, thread.Title} {
+		for fieldIndex, s := range []*string{thread.SenderID, thread.Language, thread.Title} {
 			if s != nil {
-				if err := v.string(*s, s == thread.Title, true); err != nil {
+				if err := v.string(*s, fieldIndex == 2, true); err != nil {
 					return err
 				}
 			}

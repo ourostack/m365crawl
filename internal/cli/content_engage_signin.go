@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/browser"
@@ -23,7 +24,7 @@ type EngageSigninReport struct {
 
 func engageSigninTarget(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && (u.Host == "engage.cloud.microsoft" || u.Host == "engage.cloud.microsoft:443") && u.User == nil && (u.Path == "" || u.Path == "/") && u.RawPath == "" && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.RawFragment == ""
+	return err == nil && u.Scheme == "https" && (u.Host == "engage.cloud.microsoft" || u.Host == "engage.cloud.microsoft:443") && u.User == nil && (u.Path == "" || u.Path == "/") && u.RawPath == "" && u.RawQuery == "" && !u.ForceQuery && !strings.Contains(raw, "#") && u.Fragment == "" && u.RawFragment == ""
 }
 func (rt *runtime) engageSigninError() error {
 	return &errs.Coded{Code: "engage_signin_unverified", Exit: errs.ExitUsage, Message: "Engage native service session was not verified; authentication unknown",
@@ -33,6 +34,7 @@ func (rt *runtime) signinEngage(options browser.LaunchOptions) (report EngageSig
 	work, cancel := context.WithTimeout(rt.ctx, signinWait)
 	defer cancel()
 	options.StartURL, options.Headless = "", false
+	rt.progressLine("opening a visible Engage window with the tool-owned profile")
 	page, closer, err := openBrowser(work, options)
 	if err != nil {
 		return EngageSigninReport{}, rt.engageSigninError()
@@ -41,6 +43,7 @@ func (rt *runtime) signinEngage(options browser.LaunchOptions) (report EngageSig
 		if recover() != nil {
 			err = rt.engageSigninError()
 		}
+		rt.progressLine("closing owned Engage window; verification requires successful terminal Close")
 		if closeEngageBrowser(closer) != nil {
 			err = rt.engageSigninError()
 		}
@@ -60,6 +63,7 @@ func (rt *runtime) signinEngage(options browser.LaunchOptions) (report EngageSig
 	if err := driver.Navigate(work, store.EngageHomeURL); err != nil {
 		return EngageSigninReport{}, rt.engageSigninError()
 	}
+	rt.progressLine("waiting for preliminary native Home readiness within the bounded sign-in lifetime; Home alone is not authentication")
 	for {
 		call, stop := context.WithTimeout(work, signinCallTimeout)
 		ready, err := engagecontent.HomeReady(call, driver)
@@ -76,6 +80,7 @@ func (rt *runtime) signinEngage(options browser.LaunchOptions) (report EngageSig
 	if time.Until(deadline) < 45*time.Second {
 		return EngageSigninReport{}, rt.engageSigninError()
 	}
+	rt.progressLine("performing one bounded native session verification; captured content will be discarded")
 	result, err := observeEngageHome(work, driver)
 	if err == nil {
 		err = engagecontent.ValidateResult(work, result)

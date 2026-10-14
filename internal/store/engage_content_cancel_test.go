@@ -33,7 +33,7 @@ func TestEngageHistoryCancellation(t *testing.T) {
 			cancel()
 			t.Fatal(err)
 		}
-		_, err = readEngage(ctx, tx, EngageFilter{}, 0, true)
+		_, err = readEngage(ctx, tx, EngageFilter{}, 0, true, 0)
 		cancel()
 		_ = tx.Rollback()
 		if errors.Is(err, context.Canceled) {

@@ -39,7 +39,7 @@ func TestEngageWriteFaultSweeps(t *testing.T) {
 }
 func TestEngageReadFaultSweeps(t *testing.T) {
 	setup := func(t *testing.T, s *Store) { commitEngage(t, s, engageResult("A"), base) }
-	for _, name := range []string{"sources", "snapshot", "detail"} {
+	for _, name := range []string{"sources", "snapshot", "detail", "receipt"} {
 		t.Run(name, func(t *testing.T) {
 			op := func(ctx context.Context, s *Store) error {
 				switch name {
@@ -48,6 +48,9 @@ func TestEngageReadFaultSweeps(t *testing.T) {
 					return err
 				case "snapshot":
 					_, err := s.EngageSnapshot(ctx, EngageFilter{Query: "syntheticword", Limit: 1})
+					return err
+				case "receipt":
+					_, _, err := s.EngageAttemptReceipt(ctx, KnowledgeAttempt{ID: 1, LocatorID: 1})
 					return err
 				default:
 					_, err := s.EngageDetail(ctx, 1)

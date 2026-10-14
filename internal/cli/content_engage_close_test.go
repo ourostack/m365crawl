@@ -36,7 +36,7 @@ func TestEngageTerminalClosePanicDiscards(t *testing.T) {
 	if err == nil || r.Account.Host != "" {
 		t.Fatal("close panic published")
 	}
-	rt := &runtime{ctx: context.Background(), g: &Globals{}, dbPath: e.db}
+	rt := &runtime{ctx: context.Background(), g: &Globals{}, dbPath: e.db, stdout: io.Discard, stderr: io.Discard}
 	s, err := rt.signinEngage(browser.LaunchOptions{})
 	if err == nil || s.AuthState != "" {
 		t.Fatal("signin close panic published")

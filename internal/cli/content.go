@@ -15,11 +15,11 @@ import (
 
 type contentGroup struct {
 	Capture contentCaptureCmd `cmd:"" help:"Explicitly capture one guarded already-resident Office file or selected original native file reference."`
-	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire one supported page or selected Stream transcript using the tool-owned headless browser."`
+	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire a supported page, selected Stream transcript or bounded Engage Home session through the tool-owned headless browser."`
 	Signin  contentSigninCmd  `cmd:"" help:"Explicit user-agreed visible window for the tool-owned profile."`
-	List    contentListCmd    `cmd:"" help:"List immutable retained observations offline, known native file-modified newest first."`
+	List    contentListCmd    `cmd:"" help:"List immutable retained observations offline, known native text-modified newest first."`
 	Search  contentSearchCmd  `cmd:"" help:"Search supported retained text/title/native metadata offline."`
-	Show    contentShowCmd    `cmd:"" help:"Read one cloud-observation:N or local-text-observation:N offline, with first100 occurrences and full archive SQL."`
+	Show    contentShowCmd    `cmd:"" help:"Read one cloud/local-text/engage-observation:N offline, with first100 occurrences and full archive SQL."`
 	Sources contentSourcesCmd `cmd:"" help:"Read registered source coverage offline, including failed and metadata-only zero-hit participants."`
 }
 type contentFetchGroup struct {
@@ -32,8 +32,8 @@ const contentHelp = "Explicit fetch only: `content fetch page URL` or `content f
 	"Reads and search are archive-only, regardless of --max-age. Pages are supported rich-text projections, always partial, never rendered layouts. Stream complete means only one verified selected native transcript; no_transcript and metadata_only have no selected body. Last-good body keeps its original file/account/selection and clocks; retained is not current content.\n" +
 	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Generated retries/fixes/next commands name this same absolute --db archive; run them as printed. A retry preserves the original request, not an automatic format correction. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
-func (contentGroup) Help() string      { return localContentHelp + contentHelp }
-func (contentFetchGroup) Help() string { return contentHelp }
+func (contentGroup) Help() string      { return engageHelp + localContentHelp + contentHelp }
+func (contentFetchGroup) Help() string { return engageHelp + contentHelp }
 func splitContentSite(path string) string {
 	parts := strings.Split(path, "/")
 	return "/" + parts[1] + "/" + parts[2]
@@ -62,8 +62,8 @@ func (rt *runtime) contentError(err error) error {
 
 type contentListCmd struct {
 	SourceID      int64  `help:"Only this admitted native instance ID (not registration retry ID)."`
-	ModifiedSince string `help:"Native file-modified lower bound; unknown clocks excluded."`
-	ModifiedUntil string `help:"Native file-modified upper bound; unknown clocks excluded."`
+	ModifiedSince string `help:"Native file-modified (Engage starter-updated) lower bound; unknown clocks excluded, explicit year-one is present."`
+	ModifiedUntil string `help:"Native file-modified (Engage starter-updated) upper bound; unknown clocks excluded."`
 	Limit         int    `default:"50" help:"Maximum returned observations; inspect truncated."`
 }
 type contentSearchCmd struct {
@@ -71,18 +71,22 @@ type contentSearchCmd struct {
 	contentListCmd
 }
 type contentShowCmd struct {
-	ID string `arg:"" help:"Positive decimal cloud-observation:N or local-text-observation:N ID."`
+	ID string `arg:"" help:"Positive decimal cloud-observation:N, local-text-observation:N or engage-observation:N ID."`
 }
 type contentSourcesCmd struct {
 	SourceID int64 `help:"Only this admitted instance ID; zero reads all registrations and instances."`
 }
 
-func (contentListCmd) Help() string   { return localContentHelp + contentHelp }
-func (contentSearchCmd) Help() string { return localContentHelp + contentHelp }
-func (contentShowCmd) Help() string {
-	return localContentHelp + contentHelp + "Preview has first100 text/entry occurrences in native order. Cloud native_id_prefix and native_id_truncated describe at most128 Unicode runes, never a complete clipped identifier. Local native IDs are complete strings. full_text_sql uses a generated internal row ID against this same archive, not a native identifier."
+func (contentListCmd) Help() string {
+	return engageHelp + localContentHelp + contentHelp + "Engage order/filter uses native starter_updated_at only, preserving original offsets and known Go-zero; unknown clocks do not match bounded windows. engage_content_coverage is independent of fields, limits and zero hits. Native IDs remain complete. Original session losses are distinct from current coverage and unknown registration attempts."
 }
-func (contentSourcesCmd) Help() string          { return localContentHelp + contentHelp }
+func (contentSearchCmd) Help() string { return (contentListCmd{}).Help() }
+func (contentShowCmd) Help() string {
+	return engageHelp + localContentHelp + contentHelp + "Preview has first100 text/entry/block occurrences in native order, including empty/duplicate blocks. cloud-observation:N, local-text-observation:N and engage-observation:N are positive archive IDs. Cloud native_id_prefix and native_id_truncated describe at most128 Unicode runes, never a complete clipped identifier. Local and Engage native IDs are complete strings. full_text_sql uses a generated internal row ID against this same archive, not a native identifier. Engage detail keeps original session losses distinct from own current-session coverage and unknown registration diagnostics."
+}
+func (contentSourcesCmd) Help() string {
+	return engageHelp + localContentHelp + contentHelp + "Engage registration attempts and verified instances are separate: an unknown failure never advances instance clocks or labels an active account. last_successful_instance_id is historical; current_session is a body-free own-instance summary, not a full Result."
+}
 func (c *contentListCmd) Run(rt *runtime) error { return c.run(rt, "content list", "") }
 func (c *contentSearchCmd) Run(rt *runtime) error {
 	if strings.TrimSpace(c.Query) == "" {
@@ -115,6 +119,9 @@ func (c *contentListCmd) run(rt *runtime, label, query string) error {
 func (c *contentShowCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "content show", ""); err != nil {
 		return err
+	}
+	if strings.HasPrefix(c.ID, "engage-observation:") {
+		return rt.showEngage(c.ID)
 	}
 	if strings.HasPrefix(c.ID, "local-text-observation:") {
 		id, err := localObservationID(c.ID)
@@ -163,6 +170,7 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 	return rt.contentRead("content sources", func(st *store.Store) (*listResult, error) {
 		sources := []store.CloudSource{}
 		local := []store.LocalTextSource{}
+		engage := store.EngageSnapshot{}
 		if st != nil {
 			var err error
 			sources, err = st.CloudSources(rt.ctx, 0)
@@ -173,13 +181,21 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 			if err != nil {
 				return nil, err
 			}
+			engage, err = st.EngageSources(rt.ctx)
+			if err != nil {
+				return nil, err
+			}
 		} else if c.SourceID > 0 {
 			return nil, store.ErrKnowledgeSourceUnknown
 		}
 		if c.SourceID > 0 {
 			sources = slices.DeleteFunc(sources, func(s store.CloudSource) bool { return s.Source.ID != c.SourceID })
 			local = slices.DeleteFunc(local, func(s store.LocalTextSource) bool { return s.Source.ID != c.SourceID })
-			if len(sources)+len(local) == 0 {
+			engage.Sources = slices.DeleteFunc(engage.Sources, func(s store.EngageSource) bool { return s.ID != c.SourceID })
+			if len(engage.Sources) == 0 {
+				engage.Registrations = nil
+			}
+			if len(sources)+len(local)+len(engage.Sources) == 0 {
 				return nil, store.ErrKnowledgeSourceUnknown
 			}
 		}
@@ -195,6 +211,15 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 		res := newList(shape(rt, out), false)
 		res.ContentCoverage = coverage
 		res.LocalContentCoverage = localCoverage
+		res.EngageContentCoverage = rt.engageCoverageOf(engage)
+		for _, item := range res.EngageContentCoverage.Registrations {
+			out = append(out, item)
+		}
+		for _, item := range res.EngageContentCoverage.Instances {
+			out = append(out, item)
+		}
+		res.Items = shape(rt, out)
+		res.Count = len(out)
 		return res, nil
 	})
 }
@@ -233,7 +258,7 @@ func (rt *runtime) contentRead(label string, fn func(*store.Store) (*listResult,
 	}
 	res.sourceOnly = true
 	if res.Count == 0 {
-		res.Note = "no matching archived content; inspect content sources, explicitly content capture --file FILE or content fetch page/stream URL"
+		res.Note = "no matching archived content; inspect content sources, explicitly content capture --file FILE or content fetch page/stream URL or content fetch engage-home"
 	}
 	return rt.write(label, res)
 }

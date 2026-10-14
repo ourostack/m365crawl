@@ -41,7 +41,7 @@ func engageSummary(s EngageSession) EngageSessionSummary {
 // readEngage streams canonical sessions, auditing every membership/index binding
 // before filtering. Only bounded selected rows and body-free source summaries
 // survive a session iteration. The reader is always the caller's transaction.
-func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID int64, wantRows bool) (EngageSnapshot, error) {
+func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID int64, wantRows bool, creatingLocatorID int64) (EngageSnapshot, error) {
 	out := EngageSnapshot{Rows: []EngageObservationRow{}, Registrations: []EngageRegistration{}, Sources: []EngageSource{}}
 	ok, err := hasEngageSchema(ctx, r)
 	if err != nil || !ok {
@@ -51,14 +51,20 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 	var bad int
 	err = r.QueryRowContext(ctx, `select
  (select count(*) from knowledge_locators l left join engage_locator_metadata m on m.locator_id=l.id where l.kind='engage_home' and m.locator_id is null)+
+ (select count(*) from knowledge_locators l where l.kind='engage_home' and l.latest_attempt is null and l.id<>?)+
+ (select count(*) from knowledge_locators l where l.kind='engage_home' and
+ (l.latest_attempt is not (select max(a.id) from knowledge_attempts a where a.locator_id=l.id) or
+ l.last_admitted is not (select max(a.id) from knowledge_attempts a where a.locator_id=l.id and a.source_id is not null)))+
  (select count(*) from engage_locator_metadata m left join knowledge_locators l on l.id=m.locator_id where l.id is null or l.kind<>'engage_home' or l.platform<>'browser' or l.locator<>'https://engage.cloud.microsoft/' or m.target_url<>l.locator)+
  (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id left join engage_source_metadata m on m.source_id=s.id left join engage_source_state st on st.source_id=s.id where l.kind='engage_home' and (m.source_id is null or st.source_id is null))+
- (select count(*) from engage_source_metadata m left join knowledge_sources s on s.id=m.source_id left join knowledge_locators l on l.id=s.locator_id where s.id is null or l.kind<>'engage_home')+
+ (select count(*) from engage_source_metadata m left join knowledge_sources s on s.id=m.source_id left join knowledge_locators l on l.id=s.locator_id where s.id is null or l.id is null or l.kind<>'engage_home')+
+ (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id where l.kind='engage_home' and
+ not exists(select 1 from knowledge_attempts a where a.id=s.admitted_attempt and a.source_id=s.id and a.locator_id=s.locator_id))+
  (select count(*) from engage_source_state st left join engage_source_metadata m on m.source_id=st.source_id where m.source_id is null)+
  (select count(*) from engage_sessions e left join engage_source_metadata m on m.source_id=e.source_id where m.source_id is null)+
  (select count(*) from engage_occurrences o left join engage_sessions e on e.rowid=o.session_id where e.rowid is null)+
  (select count(*) from engage_fts f left join engage_occurrences o on o.rowid=f.rowid where o.rowid is null)+
- (select count(*) from engage_capture_members m left join knowledge_attempts a on a.id=m.capture_id left join engage_sessions e on e.rowid=m.session_id where a.id is null or e.rowid is null or a.source_id is not e.source_id)`).Scan(&bad)
+ (select count(*) from engage_capture_members m left join knowledge_attempts a on a.id=m.capture_id left join engage_sessions e on e.rowid=m.session_id where a.id is null or e.rowid is null or a.source_id is not e.source_id)`, creatingLocatorID).Scan(&bad)
 	if err != nil {
 		return out, err
 	}
@@ -66,8 +72,6 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 		return out, errEngageIntegrity
 	}
 	regs, err := r.QueryContext(ctx, `select l.id,l.latest_attempt,l.last_admitted,
- (select max(id) from knowledge_attempts where locator_id=l.id),
- (select max(id) from knowledge_attempts where locator_id=l.id and source_id is not null),
  a.started_at,a.finished_at,coalesce(a.outcome,'pending'),a.reason,g.source_id
  from knowledge_locators l join knowledge_attempts a on a.id=l.latest_attempt
  left join knowledge_attempts g on g.id=l.last_admitted where l.kind='engage_home' order by l.id`)
@@ -76,16 +80,11 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 	}
 	for regs.Next() {
 		var reg EngageRegistration
-		var admitted, maxGood, goodSource sql.NullInt64
-		var maxID int64
+		var admitted, goodSource sql.NullInt64
 		var started, finished sql.NullString
-		if err := regs.Scan(&reg.ID, &reg.LatestAttemptID, &admitted, &maxID, &maxGood, &started, &finished, &reg.Outcome, &reg.Reason, &goodSource); err != nil {
+		if err := regs.Scan(&reg.ID, &reg.LatestAttemptID, &admitted, &started, &finished, &reg.Outcome, &reg.Reason, &goodSource); err != nil {
 			_ = regs.Close()
 			return out, err
-		}
-		if reg.LatestAttemptID != maxID || admitted != maxGood {
-			_ = regs.Close()
-			return out, errEngageIntegrity
 		}
 		times, err := knowledgeTimes(started, finished)
 		if err != nil {
@@ -433,12 +432,15 @@ func (s *Store) engageSnapshot(ctx context.Context, f EngageFilter, id int64, wa
 	if f.SourceID < 0 || f.Limit < 0 || f.Limit == math.MaxInt {
 		return EngageSnapshot{}, errors.New("engage: invalid filter")
 	}
+	if f.Limit == 0 && wantRows {
+		f.Limit = 128
+	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return EngageSnapshot{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	out, err := readEngage(ctx, tx, f, id, wantRows)
+	out, err := readEngage(ctx, tx, f, id, wantRows, 0)
 	if err != nil {
 		return EngageSnapshot{}, err
 	}
@@ -447,6 +449,9 @@ func (s *Store) engageSnapshot(ctx context.Context, f EngageFilter, id int64, wa
 	}
 	return out, nil
 }
+
+// EngageSnapshot defaults an unspecified output limit to128; Truncated reports
+// additional matches. This is an archive-output bound, not a producer limit.
 func (s *Store) EngageSnapshot(ctx context.Context, f EngageFilter) (EngageSnapshot, error) {
 	return s.engageSnapshot(ctx, f, 0, true)
 }

@@ -11,8 +11,15 @@ func HomeReady(ctx context.Context, page Driver) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if page == nil || (reflect.ValueOf(page).Kind() == reflect.Pointer && reflect.ValueOf(page).IsNil()) {
+	if page == nil {
 		return false, &ReadError{Code: "invalid_driver"}
+	}
+	value := reflect.ValueOf(page)
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		if value.IsNil() {
+			return false, &ReadError{Code: "invalid_driver"}
+		}
 	}
 	host, err := page.Host(ctx)
 	if err != nil {

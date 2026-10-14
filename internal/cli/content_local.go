@@ -406,10 +406,10 @@ func localSourceFor(sources []store.LocalTextSource, id int64) store.LocalTextSo
 }
 
 func contentKeys() []string {
-	return dedupe(append(typeKeys[cloudItem](), typeKeys[LocalTextItem]()...))
+	return dedupe(append(append(typeKeys[cloudItem](), typeKeys[LocalTextItem]()...), typeKeys[EngageContentItem]()...))
 }
 func contentSourceKeys() []string {
-	return dedupe(append(typeKeys[cloudSourceItem](), typeKeys[localSourceItem]()...))
+	return dedupe(append(append(append(typeKeys[cloudSourceItem](), typeKeys[localSourceItem]()...), typeKeys[engageRegistrationItem]()...), typeKeys[engageSourceItem]()...))
 }
 
 func LocalPreviewText(item LocalTextItem) string {
@@ -426,6 +426,7 @@ func LocalPreviewText(item LocalTextItem) string {
 func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query string, since, until time.Time) (*listResult, error) {
 	cloud := store.CloudSnapshot{}
 	local := store.LocalTextSnapshot{}
+	engage := store.EngageSnapshot{}
 	if st != nil {
 		var err error
 		cloud, err = st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: query, ModifiedSince: since, ModifiedUntil: until})
@@ -436,17 +437,24 @@ func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query str
 		if err != nil {
 			return nil, err
 		}
+		engage, err = st.EngageSnapshot(rt.ctx, store.EngageFilter{Query: query, SourceID: c.SourceID, ModifiedSince: engageBounds(c.ModifiedSince, since), ModifiedUntil: engageBounds(c.ModifiedUntil, until), Limit: c.Limit})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if c.SourceID > 0 {
 		cloud.Sources = slices.DeleteFunc(cloud.Sources, func(s store.CloudSource) bool { return s.Source.ID != c.SourceID })
 		local.Sources = slices.DeleteFunc(local.Sources, func(s store.LocalTextSource) bool { return s.Source.ID != c.SourceID })
 		cloud.Rows = slices.DeleteFunc(cloud.Rows, func(r store.CloudObservationRow) bool { return r.SourceID != c.SourceID })
 		local.Rows = slices.DeleteFunc(local.Rows, func(r store.LocalTextRow) bool { return r.SourceID != c.SourceID })
-		if len(cloud.Sources)+len(local.Sources) == 0 {
+		if len(cloud.Sources)+len(local.Sources)+len(engage.Sources) == 0 {
 			return nil, store.ErrKnowledgeSourceUnknown
 		}
 	}
 	hits := []searchHit{}
+	for _, row := range engage.Rows {
+		hits = append(hits, engageHit(rt, row, engage.Sources, false))
+	}
 	for _, row := range cloud.Rows {
 		at, label := time.Time{}, ""
 		if row.Result.File.ModifiedAt != nil {
@@ -466,7 +474,7 @@ func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query str
 		hits = append(hits, searchHit{at: at, source: searchContent, localText: true, cloudLabel: src.Path, cloudSourceID: row.SourceID, cloudObservationID: row.ID, item: localItemOf(row, src, rt.g.MaxText)})
 	}
 	sortSearchHits(hits)
-	truncated := cloud.Truncated || local.Truncated || len(hits) > c.Limit
+	truncated := cloud.Truncated || local.Truncated || engage.Truncated || len(hits) > c.Limit
 	hits = hits[:min(c.Limit, len(hits))]
 	items := make([]any, len(hits))
 	for i, h := range hits {
@@ -475,5 +483,6 @@ func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query str
 	out := newList(shape(rt, items), truncated)
 	out.ContentCoverage = rt.cloudCoverageOf(cloud.Sources)
 	out.LocalContentCoverage = rt.localCoverageOf(local.Sources)
+	out.EngageContentCoverage = rt.engageCoverageOf(engage)
 	return out, nil
 }

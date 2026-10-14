@@ -71,6 +71,13 @@ var sqlTables = []sqlTable{
 	{"local_text_attempt_metadata", "explicit versus extension request origin per successful attempt"},
 	{"local_text_references", "selected document origin per attempt; reference_locator_match is not global file identity"},
 	{"local_text_fts", "retained paragraph/cell values and scoped native part/reference metadata"},
+	{"engage_locator_metadata", "fixed Engage root registration, independent of native account evidence"},
+	{"engage_source_metadata", "positive native Host/NetworkID/UserID, never a Teams account"},
+	{"engage_sessions", "immutable complete bounded native Result, first clocks and source-bound representation digest"},
+	{"engage_occurrences", "ordered duplicate thread-starter occurrences; rowid is N in engage-observation:N"},
+	{"engage_capture_members", "every successful attempt's immutable session membership, including reuse"},
+	{"engage_source_state", "own current archived session and last-good content session per verified instance; never complete feed"},
+	{"engage_fts", "exact title/ordered block text and scoped native provenance per occurrence"},
 	{"knowledge_locators", "registered notes, documents, people, Loop and explicit cloud sources"},
 	{"knowledge_attempts", "every capture or projection attempt of a registered source"},
 	{"knowledge_sources", "the admitted and complete capture of each registered source"},
@@ -88,8 +95,9 @@ var sqlTables = []sqlTable{
 }
 
 const sqlHelp = "The archive is opened read-only, so nothing a query does can change it. One statement per run: SELECT, WITH, EXPLAIN or VALUES. PRAGMA statements are refused; read a table's columns with the pragma_table_info() table function, as shown below.\n" +
+	"For immutable content full_text_sql follow-ups, keep the same explicit --db and pass --max-age 0: SQL otherwise retains the generic implicit freshness workflow before its read-only query.\n" +
 	"Blob columns print as lowercase hex. messages.raw_digest is the SHA-256 of the archived raw JSON (the exact bytes of messages.raw_json), stored as 32 bytes and printed as 64 lowercase hex characters; it is null when no raw JSON is archived. raw_digest in app_observation and in message_app_observations is the same digest as lowercase hex text.\n" +
-	"Times are UTC text. A column named *_json holds JSON as text: a query returns it as a JSON string, to decode a second time or to read with json_extract().\n"
+	"Archive clocks are UTC text. Engage canonical Result clocks preserve original native offsets; engage_occurrences.starter_modified_at is checked derived evidence only, may have extended UTC years and must not be used as an RFC3339 parser, lexical ordering or filter key. A column named *_json holds JSON as text: a query returns it as a JSON string, to decode a second time or to read with json_extract().\n"
 
 func (sqlCmd) Help() string { return sqlHelp }
 

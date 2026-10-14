@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestEngageSigninInsufficientBudget(t *testing.T) {
 	saved := signinWait
 	signinWait = time.Second
 	t.Cleanup(func() { signinWait = saved })
-	rt := &runtime{ctx: context.Background(), g: &Globals{}, dbPath: e.db}
+	rt := &runtime{ctx: context.Background(), g: &Globals{}, dbPath: e.db, stdout: io.Discard, stderr: io.Discard}
 	if r, err := rt.signinEngage(browser.LaunchOptions{}); err == nil || r.AuthState != "" {
 		t.Fatal("extended native budget")
 	}

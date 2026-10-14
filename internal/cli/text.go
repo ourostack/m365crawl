@@ -90,6 +90,14 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
+		rt.renderEngageCoverage(r.EngageContentCoverage)
+		if rt.cmd == "content show" {
+			for _, item := range r.Items {
+				if engage, ok := item.(EngageContentItem); ok {
+					_, _ = fmt.Fprintf(w, "original session %d losses (not per-thread): %v; first %d of %d blocks; preview_truncated=%t text_truncated=%t\nfull record in this archive: %s\n", engage.SessionID, engage.SessionLosses, len(engage.Blocks), engage.BlocksTotal, engage.PreviewTruncated, engage.TextTruncated, engage.FullTextCommand)
+				}
+			}
+		}
 		if r.ContentCoverage != nil {
 			_, _ = fmt.Fprintln(w, "content: explicit archived observations; retained bodies are not current service content")
 			for _, source := range r.ContentCoverage.Sources {
@@ -420,6 +428,18 @@ func (rt *runtime) listTable(r *listResult) {
 		case cloudItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(searchVal(x.Title)), oneLine(x.Text)})
+		case EngageContentItem:
+			cols, textCol = []string{"starter_updated_at", "source", "id", "title", "text"}, 4
+			rows = append(rows, []string{noteStamp(x.StarterUpdatedAt), engageSourceLabel(x.SourceID), x.ID, oneLine(searchVal(x.Title)), oneLine(strings.Join(x.Blocks, "\n"))})
+		case searchEngageItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.StarterUpdatedAt), x.Source, oneLine(searchVal(x.Title)), "-", rt.contentCommand("show", x.ID), oneLine(strings.Join(x.Blocks, "\n"))})
+		case engageRegistrationItem:
+			cols, textCol = []string{"registration", "outcome", "account_state", "reason", "retry"}, -1
+			rows = append(rows, []string{engageSourceLabel(x.RegistrationID), x.Outcome, x.AccountState, x.Reason, x.Retry})
+		case engageSourceItem:
+			cols, textCol = []string{"registration", "source", "current_session", "coverage", "last_successful_instance"}, -1
+			rows = append(rows, []string{engageSourceLabel(x.RegistrationID), engageSourceLabel(x.SourceID), engageSourceLabel(x.CurrentSessionID), x.Coverage, strconv.FormatBool(x.IsLastSuccessfulInstance)})
 		case LocalTextItem:
 			cols, textCol = []string{"file_modified_at", "source", "id", "file", "requested", "verified", "state", "snapshot_match", "text"}, 8
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.FileLabel), x.RequestedKind, searchVal(x.VerifiedKind), x.State, x.SnapshotMatch, oneLine(LocalPreviewText(x))})

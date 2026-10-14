@@ -65,8 +65,15 @@ func (c *contentFetchEngageHomeCmd) Run(rt *runtime) error {
 }
 
 func earlyEngagePage(page transcripts.PageDriver) (engagecontent.Driver, error) {
-	if page == nil || (reflect.ValueOf(page).Kind() == reflect.Pointer && reflect.ValueOf(page).IsNil()) {
+	if page == nil {
 		return nil, &engagecontent.ReadError{Code: "early_observer_unsupported"}
+	}
+	value := reflect.ValueOf(page)
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		if value.IsNil() {
+			return nil, &engagecontent.ReadError{Code: "early_observer_unsupported"}
+		}
 	}
 	driver, ok := page.(engagecontent.Driver)
 	if !ok {
@@ -195,21 +202,15 @@ func (rt *runtime) fetchEngage(options browser.LaunchOptions) (EngageFetchReport
 		if err := st.CommitEngageCapture(rt.ctx, attempt, store.EngageCapture{Result: result, AcquiredAt: acquired, AdmittedAt: transcriptsNow()}); err != nil {
 			return err
 		}
-		snap, err := st.EngageSnapshot(rt.ctx, store.EngageFilter{})
+		src, ids, err := st.EngageAttemptReceipt(rt.ctx, attempt)
 		if err != nil {
 			return err
 		}
-		for _, src := range snap.Sources {
-			if src.AdmittedAttemptID == attempt.ID {
-				id, session := src.ID, src.CurrentSessionID
-				report.SourceID, report.SessionID = &id, &session
-				report.Reused = src.CurrentSession.CaptureID != attempt.ID
-				for _, row := range snap.Rows {
-					if row.SessionID == session {
-						report.ObservationIDs = append(report.ObservationIDs, fmt.Sprintf("engage-observation:%d", row.ID))
-					}
-				}
-			}
+		id, session := src.ID, src.CurrentSessionID
+		report.SourceID, report.SessionID = &id, &session
+		report.Reused = src.CurrentSession.CaptureID != attempt.ID
+		for _, id := range ids {
+			report.ObservationIDs = append(report.ObservationIDs, fmt.Sprintf("engage-observation:%d", id))
 		}
 		return nil
 	})
