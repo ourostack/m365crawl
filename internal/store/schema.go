@@ -35,7 +35,8 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // next writable open, and reads of an older archive have no usage rows.
 // Version 16 adds immutable explicitly fetched SharePoint/Stream observations and body state.
 // Version 17 adds explicitly captured resident Office text and immutable native file snapshots.
-const SchemaVersion = 17
+// Version 18 adds immutable bounded Engage Home access-session observations.
+const SchemaVersion = 18
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -210,4 +211,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL
+const schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL + engageContentSchemaDDL
