@@ -109,8 +109,8 @@ func TestCloudReadOnlySchema15DoesNotMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if version := rowCount(t, s, "select max(version) from schema_migrations"); version != 16 {
-		t.Fatal("schema16 not sequential")
+	if version := rowCount(t, s, "select max(version) from schema_migrations"); version != SchemaVersion {
+		t.Fatal("schema migration not sequential")
 	}
 }
 
