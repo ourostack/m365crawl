@@ -118,11 +118,14 @@ func TestFetchScriptInRealHeadlessChrome(t *testing.T) {
 	t.Cleanup(func() { _ = browser.SweepOrphan(profile) })
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true})
+	options := browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, DisposableFixture: true}
+	requireDisposableFixture(t, options)
+	b, err := browser.Launch(ctx, options)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 	defer func() { _ = b.Close() }()
+	requireFixtureBrowserProcess(t, profile)
 	page, err := b.Page(ctx)
 	if err != nil {
 		t.Fatalf("Page: %v", err)
@@ -189,4 +192,5 @@ func TestFetchScriptInRealHeadlessChrome(t *testing.T) {
 	if err := b.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	requireProfileClosed(t, profile)
 }

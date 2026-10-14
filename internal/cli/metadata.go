@@ -74,21 +74,23 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "loop sync",
 			Title: command + " (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)"}
 	}
-	for _, command := range []string{"content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content signin"} {
+	for _, command := range []string{"content capture", "content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content signin"} {
 		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
 		switch command {
+		case "content capture":
+			argv = append(argv, "--file", "<absolute-resident-office-file>")
 		case "content search":
 			argv = append(argv, "<words>")
 		case "content show":
-			argv = append(argv, "<cloud-observation-id>")
+			argv = append(argv, "<cloud-or-local-text-observation-id>")
 		case "content fetch page", "content fetch stream", "content signin":
 			argv = append(argv, "<supported-url>")
 		}
-		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: strings.HasPrefix(command, "content fetch") || command == "content signin",
-			Title: command + " (fetch explicit only; reads offline; native Windows acquisition not yet qualified)"}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "content capture" || strings.HasPrefix(command, "content fetch") || command == "content signin",
+			Title: command + " (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)"}
 	}
 	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents", "loop", "content"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata"}}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text"}}
 	return m
 }
 

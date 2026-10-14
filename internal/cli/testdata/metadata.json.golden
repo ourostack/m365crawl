@@ -20,8 +20,21 @@
       ],
       "json": true
     },
+    "content capture": {
+      "title": "content capture (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "capture",
+        "--file",
+        "\u003cabsolute-resident-office-file\u003e"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "content fetch page": {
-      "title": "content fetch page (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content fetch page (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -34,7 +47,7 @@
       "mutates": true
     },
     "content fetch stream": {
-      "title": "content fetch stream (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content fetch stream (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -47,7 +60,7 @@
       "mutates": true
     },
     "content list": {
-      "title": "content list (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content list (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -57,7 +70,7 @@
       "json": true
     },
     "content search": {
-      "title": "content search (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content search (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -68,18 +81,18 @@
       "json": true
     },
     "content show": {
-      "title": "content show (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content show (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
         "content",
         "show",
-        "\u003ccloud-observation-id\u003e"
+        "\u003ccloud-or-local-text-observation-id\u003e"
       ],
       "json": true
     },
     "content signin": {
-      "title": "content signin (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content signin (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -91,7 +104,7 @@
       "mutates": true
     },
     "content sources": {
-      "title": "content sources (fetch explicit only; reads offline; native Windows acquisition not yet qualified)",
+      "title": "content sources (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
         "m365crawl",
         "--json",
@@ -437,7 +450,8 @@
       "outlook_people",
       "office_json_metadata",
       "office_registry_metadata",
-      "onedrive_usage_metadata"
+      "onedrive_usage_metadata",
+      "explicit_resident_office_text"
     ]
   }
 }

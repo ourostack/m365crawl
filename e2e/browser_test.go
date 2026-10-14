@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,35 +21,70 @@ import (
 // those runners have Edge, and a skipped run would prove nothing about leftover processes.
 const requireBrowserEnv = "M365CRAWL_REQUIRE_BROWSER"
 
-// profileProcessCount counts the processes whose command line mentions the profile directory.
-func profileProcessCount(t *testing.T, profile string) int {
+// profileProcesses lists only processes whose command line mentions this fixture's profile.
+func profileProcesses(t *testing.T, profile string) []string {
 	t.Helper()
+	var out []byte
+	var err error
 	if runtime.GOOS == "windows" {
 		script := `$p = $env:M365CRAWL_PROFILE; ` +
-			`@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($p) }).Count`
+			`Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($p) } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`
 		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 		cmd.Env = append(os.Environ(), "M365CRAWL_PROFILE="+profile)
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("listing processes: %v", err)
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-		if err != nil {
-			t.Fatalf("process count %q: %v", out, err)
-		}
-		return n
+		out, err = cmd.Output()
+	} else {
+		out, err = exec.Command("ps", "-axww", "-o", "pid=,args=").Output()
 	}
-	out, err := exec.Command("ps", "-axww", "-o", "pid=,args=").Output()
 	if err != nil {
 		t.Fatalf("listing processes: %v", err)
 	}
-	n := 0
+	var processes []string
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.Contains(line, profile) && !strings.HasPrefix(strings.TrimSpace(line), strconv.Itoa(os.Getpid())+" ") {
-			n++
+			processes = append(processes, line)
 		}
 	}
-	return n
+	return processes
+}
+
+func profileProcessCount(t *testing.T, profile string) int {
+	t.Helper()
+	return len(profileProcesses(t, profile))
+}
+
+func requireDisposableFixture(t *testing.T, options browser.LaunchOptions) {
+	t.Helper()
+	if !options.Headless || !options.DisposableFixture {
+		t.Fatal("synthetic browser must explicitly opt in to headless disposable fixture policy before Launch")
+	}
+}
+
+func requireFixtureBrowserProcess(t *testing.T, profile string) {
+	t.Helper()
+	for _, line := range profileProcesses(t, profile) {
+		if strings.Contains(line, "--type=") {
+			continue
+		}
+		flags := strings.Fields(line)
+		if !slices.Contains(flags, "--use-mock-keychain") || !slices.Contains(flags, "--headless=new") {
+			t.Fatalf("fixture browser lacks explicit live mock-keychain/headless flags: %s", line)
+		}
+		t.Logf("live disposable fixture browser: %s", strings.TrimSpace(line))
+		return
+	}
+	t.Fatal("no live fixture browser leader; flag check is blind")
+}
+
+func requireProfileClosed(t *testing.T, profile string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for profileProcessCount(t, profile) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d processes started with the profile are still running after Close", profileProcessCount(t, profile))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Logf("fixture profile processes closed: %s", profile)
 }
 
 // TestRealBrowserLeavesNoProcess launches the real browser headless on a temporary profile,
@@ -68,7 +104,9 @@ func TestRealBrowserLeavesNoProcess(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true})
+	options := browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, DisposableFixture: true}
+	requireDisposableFixture(t, options)
+	b, err := browser.Launch(ctx, options)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -78,6 +116,7 @@ func TestRealBrowserLeavesNoProcess(t *testing.T) {
 			_ = b.Close()
 		}
 	}()
+	requireFixtureBrowserProcess(t, profile)
 	page, err := b.Page(ctx)
 	if err != nil {
 		t.Fatalf("Page: %v", err)
@@ -96,11 +135,5 @@ func TestRealBrowserLeavesNoProcess(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	closed = true
-	deadline := time.Now().Add(5 * time.Second)
-	for profileProcessCount(t, profile) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("%d processes started with the profile are still running after Close", profileProcessCount(t, profile))
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	requireProfileClosed(t, profile)
 }

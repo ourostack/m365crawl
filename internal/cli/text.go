@@ -96,6 +96,25 @@ func (rt *runtime) renderText(label string, v any) error {
 				_, _ = fmt.Fprintf(w, "  registration %d: %s / %s; selection %s; %s\n", source.RegistrationID, source.State, source.Scope, source.SelectionMatch, source.Retry)
 			}
 		}
+		if r.LocalContentCoverage != nil {
+			_, _ = fmt.Fprintln(w, "local content: CURRENT/snapshot match is the archived acquisition for THIS source instance, not locator-wide or live; an old instance can be retained while its own snapshot matches")
+			for _, source := range r.LocalContentCoverage.Sources {
+				_, _ = fmt.Fprintf(w, "  registration %d: %s / %s; snapshot %s; %s\n", source.RegistrationID, source.State, source.Scope, source.SnapshotMatch, source.Retry)
+			}
+		}
+		if rt.cmd == "content show" || rt.cmd == "content capture" {
+			for _, item := range r.Items {
+				local, ok := item.(LocalTextItem)
+				if !ok {
+					continue
+				}
+				_, _ = fmt.Fprintf(w, "%s: %d occurrences (returned %d; preview truncated=%t; text truncated=%t); retained=%t partial=%t; losses=%v\n"+
+					"source-byte digest: %s\nrepresentation digest: %s\nclock domain: %s; file modified: %s; acquisition/admission are not document clocks\n"+
+					"own snapshot %d; current archived snapshot match for THIS source instance: %s (not locator-wide or live; retained can still match)\nfull archive SQL: %s\n",
+					local.ID, local.OccurrencesTotal, len(local.Paragraphs)+len(local.Cells), local.PreviewTruncated, local.TextTruncated, local.Retained, local.Partial, local.Losses,
+					local.Snapshot.SourceByteDigest, local.RepresentationDigest, local.ClockDomain, noteStamp(local.ModifiedAt), local.Snapshot.ID, local.SnapshotMatch, local.FullTextSQL)
+			}
+		}
 		if r.CoverageGap != nil && *r.CoverageGap {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(uncoveredNote(r), color))
 		}
@@ -401,6 +420,15 @@ func (rt *runtime) listTable(r *listResult) {
 		case cloudItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(searchVal(x.Title)), oneLine(x.Text)})
+		case LocalTextItem:
+			cols, textCol = []string{"file_modified_at", "source", "id", "file", "requested", "verified", "state", "snapshot_match", "text"}, 8
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.FileLabel), x.RequestedKind, searchVal(x.VerifiedKind), x.State, x.SnapshotMatch, oneLine(LocalPreviewText(x))})
+		case searchLocalTextItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(x.FileLabel), "-", "content show " + x.ID, oneLine(LocalPreviewText(x.LocalTextItem))})
+		case localSourceItem:
+			cols, textCol = []string{"registration", "source", "state", "scope", "snapshot_match", "retry"}, -1
+			rows = append(rows, []string{strconv.FormatInt(x.RegistrationID, 10), sourceLabel(x.SourceID), x.State, x.Scope, x.SnapshotMatch, x.Retry})
 		case searchCloudItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(searchVal(x.Title)), "-", "content show " + x.ID, oneLine(x.Text)})

@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,11 +14,12 @@ import (
 )
 
 type contentGroup struct {
+	Capture contentCaptureCmd `cmd:"" help:"Explicitly capture one guarded already-resident Office file or selected original native file reference."`
 	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire one supported page or selected Stream transcript using the tool-owned headless browser."`
 	Signin  contentSigninCmd  `cmd:"" help:"Explicit user-agreed visible window for the tool-owned profile."`
 	List    contentListCmd    `cmd:"" help:"List immutable retained observations offline, known native file-modified newest first."`
 	Search  contentSearchCmd  `cmd:"" help:"Search supported retained text/title/native metadata offline."`
-	Show    contentShowCmd    `cmd:"" help:"Read one cloud-observation:N offline, with first100 structured occurrences and full archive SQL."`
+	Show    contentShowCmd    `cmd:"" help:"Read one cloud-observation:N or local-text-observation:N offline, with first100 occurrences and full archive SQL."`
 	Sources contentSourcesCmd `cmd:"" help:"Read registered source coverage offline, including failed and metadata-only zero-hit participants."`
 }
 type contentFetchGroup struct {
@@ -29,7 +31,7 @@ const contentHelp = "Explicit fetch only: `content fetch page URL` or `content f
 	"Reads and search are archive-only, regardless of --max-age. Pages are supported rich-text projections, always partial, never rendered layouts. Stream complete means only one verified selected native transcript; no_transcript and metadata_only have no selected body. Last-good body keeps its original file/account/selection and clocks; retained is not current content.\n" +
 	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
-func (contentGroup) Help() string      { return contentHelp }
+func (contentGroup) Help() string      { return localContentHelp + contentHelp }
 func (contentFetchGroup) Help() string { return contentHelp }
 func splitContentSite(path string) string {
 	parts := strings.Split(path, "/")
@@ -37,14 +39,14 @@ func splitContentSite(path string) string {
 }
 func (rt *runtime) contentFlags() error {
 	if rt.g.Account != "" || rt.g.OutlookAccount != "" || rt.g.OutlookProfile != "" {
-		return errs.Usage("cloud service account evidence is unresolved; content does not accept account or Outlook profile filters")
+		return errs.Usage("cloud service account and local file ownership evidence are unresolved; content does not accept account or Outlook profile filters")
 	}
 	return nil
 }
 func contentError(err error) error {
 	if errors.Is(err, store.ErrKnowledgeSourceUnknown) || errors.Is(err, store.ErrNoArchive) {
 		return &errs.Coded{Code: "content_unknown", Exit: errs.ExitUsage, Message: "content observation, source or registration not found",
-			Fix: "Read `m365crawl content sources` or `content list`; explicitly fetch a supported URL to register a new target."}
+			Fix: "Read `m365crawl content sources` or `content list`; explicitly content capture --file FILE for a resident Office file, or fetch a supported page/Stream URL."}
 	}
 	return asCoded(err)
 }
@@ -60,18 +62,18 @@ type contentSearchCmd struct {
 	contentListCmd
 }
 type contentShowCmd struct {
-	ID string `arg:"" help:"Positive decimal cloud-observation:N ID."`
+	ID string `arg:"" help:"Positive decimal cloud-observation:N or local-text-observation:N ID."`
 }
 type contentSourcesCmd struct {
 	SourceID int64 `help:"Only this admitted instance ID; zero reads all registrations and instances."`
 }
 
-func (contentListCmd) Help() string   { return contentHelp }
-func (contentSearchCmd) Help() string { return contentHelp }
+func (contentListCmd) Help() string   { return localContentHelp + contentHelp }
+func (contentSearchCmd) Help() string { return localContentHelp + contentHelp }
 func (contentShowCmd) Help() string {
-	return contentHelp + "Preview has first100 text/entry occurrences in native order. native_id_prefix and native_id_truncated describe at most128 Unicode runes, never a complete clipped identifier. full_text_sql uses a generated internal row ID against this same archive, not a native identifier."
+	return localContentHelp + contentHelp + "Preview has first100 text/entry occurrences in native order. Cloud native_id_prefix and native_id_truncated describe at most128 Unicode runes, never a complete clipped identifier. Local native IDs are complete strings. full_text_sql uses a generated internal row ID against this same archive, not a native identifier."
 }
-func (contentSourcesCmd) Help() string          { return contentHelp }
+func (contentSourcesCmd) Help() string          { return localContentHelp + contentHelp }
 func (c *contentListCmd) Run(rt *runtime) error { return c.run(rt, "content list", "") }
 func (c *contentSearchCmd) Run(rt *runtime) error {
 	if strings.TrimSpace(c.Query) == "" {
@@ -98,28 +100,32 @@ func (c *contentListCmd) run(rt *runtime, label, query string) error {
 		return err
 	}
 	return rt.contentRead(label, func(st *store.Store) (*listResult, error) {
-		snapshot := store.CloudSnapshot{Rows: []store.CloudObservationRow{}, Sources: []store.CloudSource{}}
-		if st != nil {
-			var err error
-			snapshot, err = st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: query, SourceID: c.SourceID, ModifiedSince: since, ModifiedUntil: until, Limit: c.Limit})
-			if err != nil {
-				return nil, err
-			}
-		} else if c.SourceID > 0 {
-			return nil, store.ErrKnowledgeSourceUnknown
-		}
-		out := make([]any, len(snapshot.Rows))
-		for i, row := range snapshot.Rows {
-			out[i] = cloudItemOf(row, cloudSourceFor(snapshot.Sources, row.SourceID), rt.g.MaxText)
-		}
-		res := newList(shape(rt, out), snapshot.Truncated)
-		res.ContentCoverage = cloudCoverageOf(snapshot.Sources, rt.g.MaxText)
-		return res, nil
+		return contentListResult(rt, st, *c, query, since, until)
 	})
 }
 func (c *contentShowCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "content show", ""); err != nil {
 		return err
+	}
+	if strings.HasPrefix(c.ID, "local-text-observation:") {
+		id, err := localObservationID(c.ID)
+		if err != nil {
+			return err
+		}
+		return rt.contentRead("content show", func(st *store.Store) (*listResult, error) {
+			if st == nil {
+				return nil, store.ErrKnowledgeSourceUnknown
+			}
+			detail, err := st.LocalTextDetail(rt.ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			item := localItemOf(detail.Observation, detail.Source, rt.g.MaxText)
+			item.References, item.ReferencesTotal, item.ReferencesTruncated = detail.References, detail.ReferencesTotal, detail.ReferencesTruncated
+			res := newList(shape(rt, []any{item}), false)
+			res.LocalContentCoverage = localCoverageOf([]store.LocalTextSource{detail.Source}, rt.g.MaxText)
+			return res, nil
+		})
 	}
 	id, err := cloudObservationID(c.ID)
 	if err != nil {
@@ -147,22 +153,39 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 	}
 	return rt.contentRead("content sources", func(st *store.Store) (*listResult, error) {
 		sources := []store.CloudSource{}
+		local := []store.LocalTextSource{}
 		if st != nil {
 			var err error
-			sources, err = st.CloudSources(rt.ctx, c.SourceID)
+			sources, err = st.CloudSources(rt.ctx, 0)
+			if err != nil {
+				return nil, err
+			}
+			local, err = st.LocalTextSources(rt.ctx, 0)
 			if err != nil {
 				return nil, err
 			}
 		} else if c.SourceID > 0 {
 			return nil, store.ErrKnowledgeSourceUnknown
 		}
+		if c.SourceID > 0 {
+			sources = slices.DeleteFunc(sources, func(s store.CloudSource) bool { return s.Source.ID != c.SourceID })
+			local = slices.DeleteFunc(local, func(s store.LocalTextSource) bool { return s.Source.ID != c.SourceID })
+			if len(sources)+len(local) == 0 {
+				return nil, store.ErrKnowledgeSourceUnknown
+			}
+		}
 		coverage := cloudCoverageOf(sources, rt.g.MaxText)
+		localCoverage := localCoverageOf(local, rt.g.MaxText)
 		out := make([]any, len(coverage.Sources))
 		for i, item := range coverage.Sources {
 			out[i] = item
 		}
+		for _, item := range localCoverage.Sources {
+			out = append(out, item)
+		}
 		res := newList(shape(rt, out), false)
 		res.ContentCoverage = coverage
+		res.LocalContentCoverage = localCoverage
 		return res, nil
 	})
 }
@@ -201,7 +224,7 @@ func (rt *runtime) contentRead(label string, fn func(*store.Store) (*listResult,
 	}
 	res.sourceOnly = true
 	if res.Count == 0 {
-		res.Note = "no matching archived content; inspect content sources or explicitly content fetch page/stream URL"
+		res.Note = "no matching archived content; inspect content sources, explicitly content capture --file FILE or content fetch page/stream URL"
 	}
 	return rt.write(label, res)
 }

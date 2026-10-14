@@ -10,6 +10,7 @@ m365crawl reads the Teams and Outlook caches already on your computer and writes
 | Outlook mail and calendar (macOS) | The new Outlook for Mac's `HxStore.hxd`, one per profile | Copied to a private temporary file and read from the copy. |
 | Outlook message bodies (macOS) | Body files under the Outlook profile's `Files` directory | Opened read-only, only for messages the sync reads, only below `Files`. |
 | Explicit SharePoint page / Stream evidence | One supported target URL selected by the caller | Acquired only by `content fetch` through the tool-owned headless profile; supported projection/selected body, not a crawl or rendered export. Native Windows acquisition remains unqualified. |
+| Explicit resident Office text | One absolute ordinary local DOCX/XLSX/PPTX file, or selected original native local file URL | `content capture` only, under positive no-hydration/no-recall native guards; production parser reads a bound private copy. No Office launch, network, discovery or implicit capture. |
 
 On macOS reading these needs Full Disk Access for the app that runs m365crawl ([full-disk-access.md](full-disk-access.md)). On Windows m365crawl reads only the Teams cache; Outlook is not read there yet.
 
@@ -28,6 +29,7 @@ The archive is one SQLite file. It holds content verbatim, including anything pe
 - **Mail:** each message's subject, sender, recipients (names and addresses), times, folder, read and flag state, Message-ID, the body as text, and the body HTML, compressed, so the text can be derived again later. Attachment names are stored too, and they can be sensitive.
 - **Calendar:** events from Teams and Outlook with attendees, bodies, recaps and action items.
 - **Explicit cloud content:** verified native file/account metadata, supported page controls or one selected Stream transcript; retained bodies keep their original identity, qualification and clocks. No sharing tickets or temporary download URLs are retained.
+- **Explicit resident Office text:** exact native snapshot/clock evidence, source-byte and representation digests, supported paragraphs/cached cell values, partial/loss counts and per-attempt selected reference claims. Original file bytes are not archived. Ordinary content reads stay archive-only, never inspect source paths or hydrate them. Treat retained text as sensitively as the selected original file.
 - **Signed-in addresses:** to link an Outlook profile to your Teams account, the archive keeps the addresses signed in to each profile, lower case, in its `meta` table. They are never printed, logged or put in an error or a report.
 
 Mail and messages that leave the apps' caches stay in the archive, marked `evicted` or `gone`, until you delete the archive.

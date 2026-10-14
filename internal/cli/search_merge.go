@@ -39,6 +39,10 @@ type searchCloudItem struct {
 	Source string `json:"source"`
 	cloudItem
 }
+type searchLocalTextItem struct {
+	Source string `json:"source"`
+	LocalTextItem
+}
 
 type searchNoteItem struct {
 	Source string `json:"source"`
@@ -302,6 +306,11 @@ func searchKeys() []string {
 			if !slices.Contains(keys, key) {
 				keys = append(keys, key)
 			}
+			for _, key := range typeKeys[LocalTextItem]() {
+				if !slices.Contains(keys, key) {
+					keys = append(keys, key)
+				}
+			}
 		}
 	}
 	return keys
@@ -448,7 +457,7 @@ func (c *searchCmd) plan(rt *runtime) (searchPlan, error) {
 	}
 	if c.Source == "all" {
 		if contentScoped {
-			p.contentExclusion = "cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities"
+			p.contentExclusion = "cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities; local Office content was not searched because these filters cannot qualify unresolved file ownership"
 		} else {
 			p.content = true
 		}
@@ -484,6 +493,7 @@ type searchHit struct {
 	app                               store.MessageApplicationEnvelope // a chat hit's evidence, counted only if the hit survives the limit
 	cloudLabel                        string
 	cloudSourceID, cloudObservationID int64
+	localText                         bool
 }
 
 func sortSearchHits(hits []searchHit) {
@@ -500,6 +510,9 @@ func sortSearchHits(hits []searchHit) {
 		}
 		if b.source != searchContent {
 			return false
+		}
+		if a.localText != b.localText {
+			return !a.localText
 		}
 		if a.cloudLabel != b.cloudLabel {
 			return a.cloudLabel < b.cloudLabel
@@ -644,6 +657,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	cloudTruncated := false
 	cloudCoverage := cloudCoverageOf(nil, rt.g.MaxText)
+	localCoverage := localCoverageOf(nil, rt.g.MaxText)
 	if p.content && st != nil {
 		snapshot, err := st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
@@ -664,6 +678,23 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			}
 			hits = append(hits, searchHit{at: at, source: searchContent, cloudLabel: label, cloudSourceID: row.SourceID, cloudObservationID: row.ID,
 				item: searchCloudItem{Source: searchContent, cloudItem: cloudItemOf(row, cloudSourceFor(snapshot.Sources, row.SourceID), rt.g.MaxText)}})
+		}
+		local, err := st.LocalTextSnapshot(rt.ctx, store.LocalTextFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
+		if err != nil {
+			return nil, contentError(err)
+		}
+		cloudTruncated = cloudTruncated || local.Truncated
+		matched[searchContent] += len(local.Rows)
+		atLeast[searchContent] = atLeast[searchContent] || local.Truncated
+		localCoverage = localCoverageOf(local.Sources, rt.g.MaxText)
+		for _, row := range local.Rows {
+			at := time.Time{}
+			if row.Snapshot.Evidence.ModifiedAt != nil {
+				at = *row.Snapshot.Evidence.ModifiedAt
+			}
+			src := localSourceFor(local.Sources, row.SourceID)
+			hits = append(hits, searchHit{at: at, source: searchContent, localText: true, cloudLabel: src.Path, cloudSourceID: row.SourceID, cloudObservationID: row.ID,
+				item: searchLocalTextItem{Source: searchContent, LocalTextItem: localItemOf(row, src, rt.g.MaxText)}})
 		}
 	}
 	sortSearchHits(hits)
@@ -737,6 +768,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		res.Sources.Content = sourceOf(searchContent)
 		if c.Source == searchContent || len(cloudCoverage.Sources) > 0 {
 			res.ContentCoverage = cloudCoverage
+		}
+		if c.Source == searchContent || len(localCoverage.Sources) > 0 {
+			res.LocalContentCoverage = localCoverage
 		}
 	}
 	if chatTotalIsAll {

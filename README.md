@@ -1,5 +1,41 @@
 # m365crawl — Your Microsoft 365 work, ready for your agents
 
+### Explicit resident Office text
+
+Select one already-local ordinary file: `m365crawl content capture --file
+/absolute/synthetic.docx [--kind docx|xlsx|pptx]`. Or follow a remembered native
+file URL with `content capture --from document-observation:N`. Only the selected
+original URL authorizes that proposal; FriendlyPath and titles never do.
+No Office application, network, download, placeholder hydration or discovery
+is involved. The native guard requires resident APFS with materialization disabled
+on Mac or fixed NTFS with no recall/reparse on Windows. Linux acquisition is not
+supported; archive reads are portable. Native platform qualification remains a
+release gate, separate from synthetic parser tests and Windows cross-compilation.
+
+Then use offline `content list/search/show/sources` or `search WORDS --source
+content`. `local-text-observation:N` preserves supported paragraphs or cached
+Excel values in order, including repeated occurrences and formula-cached flags.
+Requested kind is intent; verified kind is null for compound unreadable files.
+That state proves neither encryption nor a healthy empty document. Readable empty
+projections supersede earlier nonempty text; partial/loss counts remain visible.
+PDF, legacy Office, OCR, layout, decryption and recalculation are not supported.
+
+Each item carries its **own** immutable native snapshot, whole-file byte digest,
+structured representation digest and filesystem clock, separately from the
+current archived explicit acquisition for **THAT source instance** and its coverage,
+not the locator's newest incarnation or live source. An old instance may be retained
+even when its own snapshot matches (`snapshot_match_scope`). Matching text does not
+prove matching file bytes or native incarnation. Unknown generation creates
+independent instances; observed zeros and unavailable clocks are not fabricated.
+Year-one sentinel parsed clocks remain null with their exact raw evidence retained.
+Ordinary reads never check the source, migrate or implicitly capture it.
+Previews copy the first100 occurrences, clip only displayed values/file labels,
+and keep exact native IDs. `full_text_sql` reads the complete structured record
+from the same archive. `local_content_coverage` survives fields, zero hits and
+global clipping, with explicit file retry routes even after a failed first capture.
+
+![Synthetic resident Office workflow](docs/local-office-text-synthetic.svg)
+
 ### Explicit SharePoint / Stream content
 
 `m365crawl content fetch page URL` explicitly acquires one supported rich-text

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="320" viewBox="0 0 980 320" role="img" aria-labelledby="title desc">
+  <title id="title">Explicit resident Office capture and offline reading</title>
+  <desc id="desc">Synthetic CLI fixture: supported DOCX text, own snapshot versus current archived acquisition, and offline full-record follow-up.</desc>
+  <rect width="980" height="320" rx="14" fill="#101820"/>
+  <g fill="#e8eff7" font-family="monospace" font-size="17">
+    <text x="24" y="36">SYNTHETIC RESIDENT OFFICE TEXT · NO PRIVATE DOCUMENT DATA</text>
+    <text x="24" y="76">$ m365crawl content capture --file /owned/synthetic.docx</text>
+    <text x="24" y="110">local-text-observation:1   requested: docx   verified: docx</text>
+    <text x="24" y="144">text_observations · residentword long text</text>
+    <text x="24" y="184">OWN snapshot + whole-file digest ≠ structured representation digest</text>
+    <text x="24" y="218">THIS source instance: CURRENT archived snapshot · not live/locator-current</text>
+    <text x="24" y="258">$ m365crawl content show local-text-observation:1</text>
+    <text x="24" y="292">first100 copy-only occurrences → full_text_sql in the SAME archive</text>
+  </g>
+</svg>
