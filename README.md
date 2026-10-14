@@ -22,9 +22,12 @@ PDF, legacy Office, OCR, layout, decryption and recalculation are not supported.
 
 Each item carries its **own** immutable native snapshot, whole-file byte digest,
 structured representation digest and filesystem clock, separately from the
-current archived explicit acquisition and its coverage. Matching text does not
+current archived explicit acquisition for **THAT source instance** and its coverage,
+not the locator's newest incarnation or live source. An old instance may be retained
+even when its own snapshot matches (`snapshot_match_scope`). Matching text does not
 prove matching file bytes or native incarnation. Unknown generation creates
 independent instances; observed zeros and unavailable clocks are not fabricated.
+Year-one sentinel parsed clocks remain null with their exact raw evidence retained.
 Ordinary reads never check the source, migrate or implicitly capture it.
 Previews copy the first100 occurrences, clip only displayed values/file labels,
 and keep exact native IDs. `full_text_sql` reads the complete structured record

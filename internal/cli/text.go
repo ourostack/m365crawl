@@ -97,7 +97,7 @@ func (rt *runtime) renderText(label string, v any) error {
 			}
 		}
 		if r.LocalContentCoverage != nil {
-			_, _ = fmt.Fprintln(w, "local content: explicit archived resident observations; never a live source check")
+			_, _ = fmt.Fprintln(w, "local content: CURRENT/snapshot match is the archived acquisition for THIS source instance, not locator-wide or live; an old instance can be retained while its own snapshot matches")
 			for _, source := range r.LocalContentCoverage.Sources {
 				_, _ = fmt.Fprintf(w, "  registration %d: %s / %s; snapshot %s; %s\n", source.RegistrationID, source.State, source.Scope, source.SnapshotMatch, source.Retry)
 			}
@@ -110,7 +110,7 @@ func (rt *runtime) renderText(label string, v any) error {
 				}
 				_, _ = fmt.Fprintf(w, "%s: %d occurrences (returned %d; preview truncated=%t; text truncated=%t); retained=%t partial=%t; losses=%v\n"+
 					"source-byte digest: %s\nrepresentation digest: %s\nclock domain: %s; file modified: %s; acquisition/admission are not document clocks\n"+
-					"own snapshot %d; current archived snapshot match: %s (not a live source check)\nfull archive SQL: %s\n",
+					"own snapshot %d; current archived snapshot match for THIS source instance: %s (not locator-wide or live; retained can still match)\nfull archive SQL: %s\n",
 					local.ID, local.OccurrencesTotal, len(local.Paragraphs)+len(local.Cells), local.PreviewTruncated, local.TextTruncated, local.Retained, local.Partial, local.Losses,
 					local.Snapshot.SourceByteDigest, local.RepresentationDigest, local.ClockDomain, noteStamp(local.ModifiedAt), local.Snapshot.ID, local.SnapshotMatch, local.FullTextSQL)
 			}

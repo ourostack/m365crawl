@@ -29,6 +29,9 @@ var (
 	inputFS            = unix.Fstatfs
 )
 
+const permittedInputFlags = unix.UF_NODUMP | unix.UF_IMMUTABLE | unix.UF_APPEND | unix.UF_OPAQUE | unix.UF_HIDDEN | unix.UF_COMPRESSED | unix.UF_TRACKED |
+	unix.SF_ARCHIVED | unix.SF_IMMUTABLE | unix.SF_APPEND | unix.SF_RESTRICTED | unix.SF_NOUNLINK
+
 func loadPolicy() {
 	lib, err := policyOpen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_LOCAL)
 	if err != nil {
@@ -93,7 +96,7 @@ func inputSignature(file *os.File, directory bool) (string, error) {
 		return "", err
 	}
 	if unix.ByteSliceToString(fs.Fstypename[:]) != "apfs" || fs.Flags&unix.MNT_LOCAL == 0 ||
-		info.Flags&unix.SF_DATALESS != 0 {
+		info.Flags & ^uint32(permittedInputFlags) != 0 {
 		return "", errors.New("unqualified local input")
 	}
 	if directory {

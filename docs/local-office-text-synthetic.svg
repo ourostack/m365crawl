@@ -8,7 +8,7 @@
     <text x="24" y="110">local-text-observation:1   requested: docx   verified: docx</text>
     <text x="24" y="144">text_observations · residentword long text</text>
     <text x="24" y="184">OWN snapshot + whole-file digest ≠ structured representation digest</text>
-    <text x="24" y="218">CURRENT archived acquisition / coverage · not a live source check</text>
+    <text x="24" y="218">THIS source instance: CURRENT archived snapshot · not live/locator-current</text>
     <text x="24" y="258">$ m365crawl content show local-text-observation:1</text>
     <text x="24" y="292">first100 copy-only occurrences → full_text_sql in the SAME archive</text>
   </g>

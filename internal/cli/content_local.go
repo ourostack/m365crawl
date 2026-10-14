@@ -27,10 +27,12 @@ type contentCaptureCmd struct {
 	Kind string `help:"Requested docx, xlsx or pptx intent; absent infers recognized extension. Package verification is still required."`
 }
 
+const localSnapshotMatchScope = "current_archived_acquisition_for_this_source_instance"
+
 const localContentHelp = "Explicit resident capture: `content capture --file /absolute/file.docx [--kind docx|xlsx|pptx]` or `content capture --from document-observation:N`. Requested kind is intent, not verified format. Only guarded ordinary resident APFS/no-materialization (Mac) or fixed NTFS/no-recall (Windows) files qualify; no Office launch, discovery, network, hydration, decryption or Linux acquisition.\n" +
 	"Supported OOXML text/cached cell values are not layout or recalculated formulas. Compound unreadable has no verified format/body; readable empty supersedes old text. Limits remain source64MiB, member32MiB, selected64MiB, text4MiB, sharedStrings4MiB, entries8192, XML tokens8388608, depth128, paragraphs65536, cells131072, parts512 (inclusive); caller limits never raise them.\n" +
 	"Archive admission additionally bounds the complete serialized structured result at32MiB; exceeding it is an error, never a clipped success.\n" +
-	"local-text-observation:N reads first100 occurrences in native order. Own immutable snapshot/source-byte digest differs from representation digest and CURRENT archived acquisition. File modified clocks are filesystem clocks, not cached document/server/capture clocks. matches means archived snapshot equality with qualified observed incarnation, never a live source check. Unknown generation is independent; raw observed zeros remain visible.\n"
+	"local-text-observation:N reads first100 occurrences in native order. CURRENT/current_snapshot and snapshot_match mean the current archived acquisition for THIS source instance, not the latest incarnation at its locator and never a live source check. An old instance can be retained=true while its own snapshot matches. Own immutable snapshot/source-byte digest differs from representation digest. File modified clocks are filesystem clocks, not cached document/server/capture clocks; year-one/unavailable parsed clocks are null with exact raw evidence retained. Unknown generation is independent; raw observed zeros remain visible.\n"
 
 func (contentCaptureCmd) Help() string { return localContentHelp + contentHelp }
 
@@ -268,6 +270,7 @@ type LocalTextItem struct {
 	ClockDomain          string                               `json:"clock_domain"`
 	CapturedAt           time.Time                            `json:"captured_at"`
 	SnapshotMatch        string                               `json:"snapshot_match"`
+	SnapshotMatchScope   string                               `json:"snapshot_match_scope"`
 	FullTextSQL          string                               `json:"full_text_sql"`
 	References           []store.LocalTextReferenceOccurrence `json:"references,omitempty"`
 	ReferencesTotal      int                                  `json:"references_total,omitempty"`
@@ -286,7 +289,7 @@ func shapeLocalText(row store.LocalTextRow, maxText int) LocalTextItem {
 	item := LocalTextItem{ID: fmt.Sprintf("local-text-observation:%d", row.ID), Kind: store.LocalTextKind, SourceID: row.SourceID, CaptureID: row.CaptureID,
 		RepresentationDigest: row.RepresentationDigest, Snapshot: cloneLocalSnapshot(row.Snapshot), RequestedKind: row.Capture.RequestedKind,
 		State: r.State, Retained: row.Retained, Partial: r.Partial, Losses: slices.Clone(r.Losses), OccurrencesTotal: len(r.Paragraphs) + len(r.Cells),
-		ClockDomain: "native_filesystem_modified", CapturedAt: row.CapturedAt, SnapshotMatch: "unavailable",
+		ClockDomain: "native_filesystem_modified", CapturedAt: row.CapturedAt, SnapshotMatch: "unavailable", SnapshotMatchScope: localSnapshotMatchScope,
 		FullTextSQL: fmt.Sprintf("SELECT o.*, n.* FROM local_text_observations AS o JOIN local_file_snapshots AS n ON n.rowid=o.snapshot_id WHERE o.rowid=%d;", row.ID)}
 	if row.Capture.VerifiedKind != nil {
 		v := *row.Capture.VerifiedKind
@@ -339,6 +342,7 @@ type localSourceItem struct {
 	CurrentSnapshot       *store.LocalFileSnapshot `json:"current_snapshot"`
 	LastGoodObservationID *string                  `json:"last_good_observation_id"`
 	SnapshotMatch         string                   `json:"snapshot_match"`
+	SnapshotMatchScope    string                   `json:"snapshot_match_scope"`
 	Losses                map[string]int           `json:"losses"`
 	AttemptedAt           *time.Time               `json:"attempted_at"`
 	AdmittedAt            *time.Time               `json:"admitted_at"`
@@ -353,7 +357,7 @@ func localCoverageOf(sources []store.LocalTextSource, maxText int) *localCoverag
 	out := &localCoverage{Scope: "explicit_archived_resident_observations", Sources: []localSourceItem{}}
 	for _, s := range sources {
 		item := localSourceItem{RegistrationID: s.RegistrationID, Kind: store.LocalTextKind, State: s.Source.Status, Scope: s.Source.Coverage, Reason: s.Source.Reason,
-			RequestedKind: s.RequestedKind, SnapshotMatch: s.SnapshotMatch, Losses: maps.Clone(s.Source.Losses), AttemptedAt: s.Source.AttemptedAt, AdmittedAt: s.Source.AdmittedAt,
+			RequestedKind: s.RequestedKind, SnapshotMatch: s.SnapshotMatch, SnapshotMatchScope: localSnapshotMatchScope, Losses: maps.Clone(s.Source.Losses), AttemptedAt: s.Source.AttemptedAt, AdmittedAt: s.Source.AdmittedAt,
 			Retry: "m365crawl content capture --file " + strconv.Quote(s.Path) + " --kind " + s.RequestedKind}
 		item.FileLabel, item.FileLabelTruncated = truncateRunes(s.Path, maxText)
 		if s.Source.ID > 0 {

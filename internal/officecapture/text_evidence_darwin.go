@@ -16,9 +16,7 @@ func heldTextEvidence(file *os.File) (FileEvidence, error) {
 	if err := inputStat(int(file.Fd()), &st); err != nil {
 		return FileEvidence{}, err
 	}
-	const permitted = unix.UF_NODUMP | unix.UF_IMMUTABLE | unix.UF_APPEND | unix.UF_OPAQUE | unix.UF_HIDDEN | unix.UF_COMPRESSED | unix.UF_TRACKED |
-		unix.SF_ARCHIVED | unix.SF_IMMUTABLE | unix.SF_APPEND | unix.SF_RESTRICTED | unix.SF_NOUNLINK
-	if st.Flags & ^uint32(permitted) != 0 {
+	if st.Flags & ^uint32(permittedInputFlags) != 0 {
 		return FileEvidence{}, errors.New("unqualified native flags")
 	}
 	gen := strconv.FormatUint(uint64(st.Gen), 10)

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"math"
 	"slices"
 
@@ -132,9 +133,12 @@ func readLocalRows(ctx context.Context, r knowledgeReader) ([]LocalTextRow, erro
 		}
 		row.Snapshot.AcquiredAt, row.Snapshot.CapturedAt, row.CapturedAt = *times[0], *times[1], *times[2]
 		row.Capture.Evidence, row.Capture.SourceByteDigest, row.Capture.AcquiredAt = row.Snapshot.Evidence, row.Snapshot.SourceByteDigest, row.Snapshot.AcquiredAt
+		if err := validateLocalTextRow(ctx, row); err != nil {
+			return nil, err
+		}
 		expectedModified := ""
 		if row.Capture.Evidence.ModifiedAt != nil {
-			expectedModified = knowledgeTime(*row.Capture.Evidence.ModifiedAt).(string)
+			expectedModified = row.Capture.Evidence.ModifiedAt.UTC().Format("2006-01-02T15:04:05.000000000Z")
 		}
 		canonicalEvidence, _ := json.Marshal(row.Snapshot.Evidence)
 		canonicalResult, _ := json.Marshal(row.Capture.Result)
@@ -144,9 +148,6 @@ func readLocalRows(ctx context.Context, r knowledgeReader) ([]LocalTextRow, erro
 			nativeSource != row.SourceID || nativeLocator != locator || nativeFinished != snapshotClock || !nativeMember ||
 			qual != LocalTextQualification || !validLocalDigest(row.RepresentationDigest) {
 			return nil, errors.New("local text: corrupt observation binding")
-		}
-		if err := validateLocalTextRow(ctx, row); err != nil {
-			return nil, err
 		}
 		out = append(out, row)
 		bindings = append(bindings, binding{locator, boundary, qual})
@@ -166,6 +167,9 @@ func readLocalRows(ctx context.Context, r knowledgeReader) ([]LocalTextRow, erro
 		if row.Capture.RequestedKind != input.RequestedKind || localBoundary(input, platform, row.Capture.Evidence, row.CaptureID) != b.boundary ||
 			localRepresentation(input, platform, b.boundary, row.Capture) != row.RepresentationDigest {
 			return nil, errors.New("local text: corrupt representation or incarnation")
+		}
+		if err := validateLocalFTSRow(ctx, r, row.ID, localTextLabel(input, platform), LocalTextValues(row.Capture.Result), input.Path); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
@@ -257,6 +261,68 @@ where l.kind=? and s.admitted_attempt is not (select max(a.id) from knowledge_at
 	if corrupt != 0 {
 		return errors.New("local text: corrupt incarnation frontier")
 	}
+	err = r.QueryRowContext(ctx, `select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id
+where l.kind=? and s.complete_attempt is not
+(select max(a.id) from knowledge_attempts a where a.source_id=s.id and a.outcome='complete')`, LocalTextKind).Scan(&corrupt)
+	if err != nil {
+		return err
+	}
+	if corrupt != 0 {
+		return errors.New("local text: corrupt complete frontier")
+	}
+	return nil
+}
+
+func validateLocalAttemptOutcomes(ctx context.Context, r knowledgeReader, observations []LocalTextRow) error {
+	byID := map[int64]LocalTextRow{}
+	for _, row := range observations {
+		byID[row.ID] = row
+	}
+	rows, err := r.QueryContext(ctx, `select m.observation_rowid,a.outcome,a.coverage,a.losses_json,a.reason
+from local_text_capture_members m join knowledge_attempts a on a.id=m.capture_id order by a.id`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var status, coverage, encoded, reason string
+		if err := rows.Scan(&id, &status, &coverage, &encoded, &reason); err != nil {
+			return err
+		}
+		wantStatus, wantCoverage, wantLosses := localTextOutcome(byID[id].Capture.Result)
+		var losses map[string]int
+		if err := json.Unmarshal([]byte(encoded), &losses); err != nil {
+			return errors.New("local text: corrupt attempt losses")
+		}
+		canonical, _ := json.Marshal(wantLosses)
+		if status != wantStatus || coverage != wantCoverage || !maps.Equal(losses, wantLosses) || encoded != string(canonical) || reason != "" {
+			return errors.New("local text: corrupt successful attempt outcome")
+		}
+	}
+	return rows.Err()
+}
+
+func validateLocalFTSOrphans(ctx context.Context, r knowledgeReader) error {
+	var count int
+	if err := r.QueryRowContext(ctx, `select count(*) from local_text_fts f left join local_text_observations o on o.rowid=f.rowid where o.rowid is null`).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return errors.New("local text: orphan typed index")
+	}
+	return nil
+}
+
+func validateLocalFTSRow(ctx context.Context, r knowledgeReader, id int64, label, text, metadata string) error {
+	var count, matching int
+	if err := r.QueryRowContext(ctx, `select count(*),coalesce(sum(label is ? and text is ? and metadata is ?),0)
+from local_text_fts where rowid=?`, label, text, metadata, id).Scan(&count, &matching); err != nil {
+		return err
+	}
+	if count != 1 || matching != 1 {
+		return errors.New("local text: corrupt typed index binding")
+	}
 	return nil
 }
 
@@ -270,8 +336,14 @@ func readLocalState(ctx context.Context, r knowledgeReader) (LocalTextSnapshot, 
 	if err := validateLocalMemberships(ctx, r); err != nil {
 		return out, nil, err
 	}
+	if err := validateLocalFTSOrphans(ctx, r); err != nil {
+		return out, nil, err
+	}
 	out.Rows, err = readLocalRows(ctx, r)
 	if err != nil {
+		return out, nil, err
+	}
+	if err := validateLocalAttemptOutcomes(ctx, r, out.Rows); err != nil {
 		return out, nil, err
 	}
 	sources, err := readKnowledgeSources(ctx, r, LocalTextKind)

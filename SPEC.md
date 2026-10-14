@@ -23,8 +23,9 @@
   sharedStrings4MiB, entries8192/tokens8388608/depth128/paragraphs65536/cells131072/
   parts512, inclusive. No higher caller limits. Supported text/cached values are not
   layout, recalculation, OCR, decryption, legacy Office or PDF.
-  The archive consumer additionally refuses complete serialized structured results
-  above32MiB instead of allocating unbounded repeated metadata or clipping success.
+  The32MiB complete serialized Result bound protects archive ingress/reads and exceeds
+  the unchanged producer's admitted budget, including repeated Part/Reference/Type/Value
+  charged to4MiB TextBytes. No additional Part-name length cap is imposed.
 - Registration identity is canonical JSON `[exactPath,requestedKind]`, separate from
   family/platform. Native instance boundary includes volume/file identity and selected
   positive generation/creation under `native-file-incarnation-v1`. Mac retains BOTH Gen
@@ -63,8 +64,13 @@
   paragraph/cell occurrences, preserves order/repeats/Part/Index/Reference/Type/
   FormulaCached and own Partial/Losses, clips only displayed Text/Value/file labels,
   never full native IDs, digests, policy or raw clocks. Own immutable snapshot and
-  nullable CURRENT archived acquisition remain separate. `snapshot_match` is matches/
-  differs/unavailable against archived explicit acquisition, never a live check.
+  nullable CURRENT archived acquisition remain separate. CURRENT/current_snapshot and
+  `snapshot_match` mean the archived acquisition for THIS native source instance, not
+  the newest incarnation at the registration's locator and never a live check.
+  An old instance can be `retained=true` while its own snapshot `matches`.
+  `snapshot_match_scope` explicitly records this source-instance interpretation.
+  Year-one/unavailable parsed modified clocks are null while exact raw evidence stays
+  intact; contradictory raw/parsed/SQL clocks return errors, never panics.
   Static positive-row-ID `full_text_sql` reads the full record from this same DB.
 - Local known filesystem-modified clocks sort newest, unknown last; bounded windows
   exclude unknown. Timestamp ties preserve all old legacy/cloud order before local;

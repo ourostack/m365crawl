@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +20,8 @@ import (
 const LocalTextKind = "local_document_text"
 const LocalTextQualification = "resident-ooxml-v1/parser-v1"
 const localJSONLimit = 32 << 20
+
+var localInsertAffected = sql.Result.RowsAffected
 
 type LocalTextCapture struct {
 	RequestedKind    string
@@ -153,7 +154,7 @@ func validateLocalTextCommit(ctx context.Context, commit LocalTextCommit) error 
 			return errors.New("local text: invalid paragraph")
 		}
 		parts[p.Part] = true
-		total += int64(len(p.Text))
+		total += int64(len(p.Part) + len(p.Text))
 	}
 	for _, c := range r.Cells {
 		if !validLocalPart(c.Part) || !utf8.ValidString(c.Value) || len(c.Reference) > 64 || c.Reference == "" ||
@@ -161,7 +162,7 @@ func validateLocalTextCommit(ctx context.Context, commit LocalTextCommit) error 
 			return errors.New("local text: invalid cell")
 		}
 		parts[c.Part] = true
-		total += int64(len(c.Value))
+		total += int64(len(c.Part) + len(c.Reference) + len(c.Type) + len(c.Value))
 	}
 	if total > limits.TextBytes || len(parts) > limits.Parts {
 		return errors.New("local text: text bound")
@@ -182,7 +183,7 @@ func validateLocalTextCommit(ctx context.Context, commit LocalTextCommit) error 
 }
 
 func validLocalPart(part string) bool {
-	return utf8.ValidString(part) && len(part) <= 32768 && part != "" && !strings.Contains(part, `\`) &&
+	return utf8.ValidString(part) && part != "" && !strings.Contains(part, `\`) &&
 		!strings.HasPrefix(part, "/") && path.Clean(part) == part && part != ".." && !strings.HasPrefix(part, "../")
 }
 
@@ -217,10 +218,32 @@ func LocalTextValues(r documenttext.Result) string {
 	for _, p := range r.Paragraphs {
 		text = append(text, p.Part, p.Text)
 	}
+
 	for _, c := range r.Cells {
 		text = append(text, c.Part, c.Reference, c.Value)
 	}
 	return strings.Join(text, "\n")
+}
+
+func localTextOutcome(result documenttext.Result) (string, string, map[string]int) {
+	losses := map[string]int{}
+	for _, loss := range result.Losses {
+		losses[loss.Code] = loss.Count
+	}
+	if result.State == "compound_unreadable" {
+		return "partial", "compound_unreadable", losses
+	}
+	if result.Partial {
+		return "partial", "partial", losses
+	}
+	return "complete", "supported_text", losses
+}
+
+func localTextLabel(input officecapture.TextInput, platform string) string {
+	if platform == "windows" {
+		return input.Path[strings.LastIndex(input.Path, `\`)+1:]
+	}
+	return path.Base(input.Path)
 }
 
 func OriginalDocumentURL(row DocumentObservationRow) string {
@@ -264,17 +287,7 @@ func (s *Store) CommitLocalText(ctx context.Context, attempt KnowledgeAttempt, c
 	}
 	boundary := localBoundary(input, platform, c.Evidence, attempt.ID)
 	digest := localRepresentation(input, platform, boundary, c)
-	losses := map[string]int{}
-	for _, loss := range c.Result.Losses {
-		losses[loss.Code] = loss.Count
-	}
-	status, coverage := "complete", "supported_text"
-	if c.Result.Partial {
-		status, coverage = "partial", "partial"
-	}
-	if c.Result.State == "compound_unreadable" {
-		status, coverage = "partial", "compound_unreadable"
-	}
+	status, coverage, losses := localTextOutcome(c.Result)
 	o := KnowledgeOutcome{Status: status, ContentDigest: digest, Qualification: LocalTextQualification, At: time.Now().UTC()}
 	return s.finishKnowledge(ctx, attempt, o, LocalTextKind, func(ctx context.Context, tx *sql.Tx, a KnowledgeAttempt, o KnowledgeOutcome) (int64, string, map[string]int, error) {
 		stored, p, err := readLocalRequest(ctx, tx, a.LocatorID)
@@ -283,6 +296,9 @@ func (s *Store) CommitLocalText(ctx context.Context, attempt KnowledgeAttempt, c
 		}
 		if stored != input || p != platform || stored.RequestedKind != c.RequestedKind {
 			return 0, "", nil, errors.New("local text: request binding mismatch")
+		}
+		if err := validateLocalFTSOrphans(ctx, tx); err != nil {
+			return 0, "", nil, err
 		}
 		if commit.Reference != nil {
 			if err := validateLocalReference(ctx, tx, *commit.Reference); err != nil {
@@ -312,10 +328,15 @@ on conflict(source_id,source_byte_digest,evidence_json,qualification) do nothing
 			verified = *c.VerifiedKind
 		}
 		if c.Evidence.ModifiedAt != nil {
-			modified = knowledgeTime(*c.Evidence.ModifiedAt)
+			modified = c.Evidence.ModifiedAt.UTC().Format("2006-01-02T15:04:05.000000000Z")
 		}
-		if _, err := tx.ExecContext(ctx, `insert into local_text_observations(source_id,capture_id,snapshot_id,representation_digest,requested_kind,verified_kind,result_json,file_modified_at) values(?,?,?,?,?,?,?,?)
-on conflict(source_id,representation_digest) do nothing`, sourceID, a.ID, snapshotID, digest, c.RequestedKind, verified, string(encoded), modified); err != nil {
+		inserted, err := tx.ExecContext(ctx, `insert into local_text_observations(source_id,capture_id,snapshot_id,representation_digest,requested_kind,verified_kind,result_json,file_modified_at) values(?,?,?,?,?,?,?,?)
+on conflict(source_id,representation_digest) do nothing`, sourceID, a.ID, snapshotID, digest, c.RequestedKind, verified, string(encoded), modified)
+		if err != nil {
+			return 0, "", nil, err
+		}
+		created, err := localInsertAffected(inserted)
+		if err != nil {
 			return 0, "", nil, err
 		}
 		var rowID int64
@@ -334,14 +355,13 @@ on conflict(source_id,representation_digest) do nothing`, sourceID, a.ID, snapsh
 				return 0, "", nil, err
 			}
 		}
-		var indexed int
-		if err := tx.QueryRowContext(ctx, `select count(*) from local_text_fts where rowid=?`, rowID).Scan(&indexed); err != nil {
-			return 0, "", nil, err
-		}
-		if indexed == 0 {
-			if _, err := tx.ExecContext(ctx, `insert into local_text_fts(rowid,label,text,metadata) values(?,?,?,?)`, rowID, filepath.Base(input.Path), LocalTextValues(c.Result), input.Path); err != nil {
+		label := localTextLabel(input, platform)
+		if created == 1 {
+			if _, err := tx.ExecContext(ctx, `insert into local_text_fts(rowid,label,text,metadata) values(?,?,?,?)`, rowID, label, LocalTextValues(c.Result), input.Path); err != nil {
 				return 0, "", nil, err
 			}
+		} else if err := validateLocalFTSRow(ctx, tx, rowID, label, LocalTextValues(c.Result), input.Path); err != nil {
+			return 0, "", nil, err
 		}
 		var body any
 		if c.Result.State == "text_observations" {

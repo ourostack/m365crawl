@@ -75,7 +75,8 @@ func nativeClock(raw string) (time.Time, bool, error) {
 		if err != nil || strconv.FormatInt(s, 10) != sec || nerr != nil || n > 999999999 {
 			return time.Time{}, false, errors.New("invalid native clock")
 		}
-		return time.Unix(s, int64(n)).UTC(), s != 0 || n != 0, nil
+		at := time.Unix(s, int64(n)).UTC()
+		return at, (s != 0 || n != 0) && !at.IsZero(), nil
 	}
 	n, err := canonicalUnsigned(raw)
 	if err != nil {
