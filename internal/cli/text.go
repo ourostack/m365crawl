@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,6 +91,14 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
+		rt.renderEngageCoverage(r.EngageContentCoverage)
+		if rt.cmd == "content show" {
+			for _, item := range r.Items {
+				if engage, ok := item.(EngageContentItem); ok {
+					_, _ = fmt.Fprintf(w, "original session %d losses (not per-thread): %v; first %d of %d blocks; preview_truncated=%t text_truncated=%t\nfull record in this archive: %s\n", engage.SessionID, engage.SessionLosses, len(engage.Blocks), engage.BlocksTotal, engage.PreviewTruncated, engage.TextTruncated, engage.FullTextCommand)
+				}
+			}
+		}
 		if r.ContentCoverage != nil {
 			_, _ = fmt.Fprintln(w, "content: explicit archived observations; retained bodies are not current service content")
 			for _, source := range r.ContentCoverage.Sources {
@@ -339,6 +348,7 @@ func (rt *runtime) listTable(r *listResult) {
 	textCol := -1
 	leads := map[int]string{} // row index to the application marker its text starts with
 	for _, it := range r.Items {
+		previousCols, previousTextCol, previousRows := cols, textCol, len(rows)
 		switch x := it.(type) {
 		case messageItem:
 			cols, textCol = []string{"sent_at", "conversation", "sender", "text"}, 3
@@ -350,9 +360,9 @@ func (rt *runtime) listTable(r *listResult) {
 			if rt.cmd == "messages" { // what `m365crawl thread` takes to read on
 				cols, textCol = []string{"sent_at", "conversation", "sender", "thread", "text"}, 4
 				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, threadTarget(x.ConversationID, x.ReplyChainID, x.ID), text})
-				continue
+			} else {
+				rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 			}
-			rows = append(rows, []string{stamp(x.SentAt), x.ConversationDisplayName, x.SenderName, text})
 		case searchChatItem:
 			cols, textCol = searchColumns, 5
 			leads[len(rows)] = appMarker(x.App)
@@ -420,6 +430,18 @@ func (rt *runtime) listTable(r *listResult) {
 		case cloudItem:
 			cols, textCol = []string{"modified_at", "source", "id", "title", "text"}, 4
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(searchVal(x.Title)), oneLine(x.Text)})
+		case EngageContentItem:
+			cols, textCol = []string{"starter_updated_at", "source", "id", "title", "text"}, 4
+			rows = append(rows, []string{noteStamp(x.StarterUpdatedAt), engageSourceLabel(x.SourceID), x.ID, oneLine(searchVal(x.Title)), oneLine(strings.Join(x.Blocks, "\n"))})
+		case searchEngageItem:
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{noteStamp(x.StarterUpdatedAt), x.Source, oneLine(searchVal(x.Title)), "-", rt.contentCommand("show", x.ID), oneLine(strings.Join(x.Blocks, "\n"))})
+		case engageRegistrationItem:
+			cols, textCol = []string{"registration", "outcome", "account_state", "reason", "retry"}, -1
+			rows = append(rows, []string{engageSourceLabel(x.RegistrationID), x.Outcome, x.AccountState, x.Reason, x.Retry})
+		case engageSourceItem:
+			cols, textCol = []string{"registration", "source", "current_session", "coverage", "last_successful_instance"}, -1
+			rows = append(rows, []string{engageSourceLabel(x.RegistrationID), engageSourceLabel(x.SourceID), engageSourceLabel(x.CurrentSessionID), x.Coverage, strconv.FormatBool(x.IsLastSuccessfulInstance)})
 		case LocalTextItem:
 			cols, textCol = []string{"file_modified_at", "source", "id", "file", "requested", "verified", "state", "snapshot_match", "text"}, 8
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), strconv.FormatInt(x.SourceID, 10), x.ID, oneLine(x.FileLabel), x.RequestedKind, searchVal(x.VerifiedKind), x.State, x.SnapshotMatch, oneLine(LocalPreviewText(x))})
@@ -543,11 +565,24 @@ func (rt *runtime) listTable(r *listResult) {
 			}
 			rows = append(rows, row)
 		}
+		// Keep chronological row order, but never put cells under another schema.
+		// Projected rows deliberately share their existing union-of-fields table.
+		_, isProjection := it.(projected)
+		if previousRows > 0 && !isProjection && (!slices.Equal(previousCols, cols) || previousTextCol != textCol) {
+			rt.renderListRows(previousCols, rows[:previousRows], previousTextCol, leads)
+			rows = rows[previousRows:]
+			leads = map[int]string{0: leads[previousRows]}
+		}
 	}
 	if len(rows) == 0 {
 		render.Table(rt.stdout, []string{"items"}, nil, rt.color)
 		return
 	}
+	rt.renderListRows(cols, rows, textCol, leads)
+}
+
+// renderListRows clips and measures only rows belonging to this exact schema.
+func (rt *runtime) renderListRows(cols []string, rows [][]string, textCol int, leads map[int]string) {
 	for _, row := range rows {
 		for i := range row {
 			if i != textCol && cols[i] != "database" && cols[i] != "thread" && cols[i] != loopSnapshotColumn && cols[i] != appSummaryField { // a cut id or state is no use

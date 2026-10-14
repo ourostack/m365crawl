@@ -6,6 +6,20 @@
 
 # m365crawl — Your Microsoft 365 work, ready for your agents
 
+### Engage Home-session archive
+
+Explicitly `m365crawl content fetch engage-home`, then search/read offline with
+`content search "words"`, `content show engage-observation:N` or shared
+`search "words" --source content`. Preserve bounded native thread starters,
+duplicate/empty blocks, immutable session IDs and original-session losses—not a
+complete feed, replies, mentions, targeted thread or current revision.
+`engage_content_coverage` separates unknown registration failures from unchanged
+verified instances. Preview100 and full-record SQL keep follow-up bounded and exact.
+Optional agreed exact-root sign-in requires native identity plus terminal Close;
+visible Home alone is not authentication. [Workflow, limits and synthetic visual](docs/engage-home.md).
+Offline reads are portable; live Windows/Linux acquisition and interactive
+challenge/expiry remain unqualified.
+
 ### Explicit resident Office text
 
 Select one already-local ordinary file: `m365crawl content capture --file

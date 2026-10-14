@@ -1,5 +1,14 @@
 # Privacy
 
+Explicit `content fetch engage-home` is the additional fixed-root Engage browser
+workflow. It retains bounded partial native thread-starter sessions, not a feed,
+and never reads credentials, copies an ordinary browser profile or infers a
+Teams/person identity. Unknown attempts are registration diagnostics, not an
+account diagnosis. Agreed native sign-in discards content and registers nothing.
+Ordinary reads, including expired max-age, remain archive-only. Protect retained
+Engage bodies like other private messages; never put them in fixtures/issues.
+See [Engage scope and platform limitations](engage-home.md).
+
 m365crawl reads the Teams and Outlook caches already on your computer and writes one private archive on the same computer. The archive stays on the machine. Only explicit `transcripts fetch`, `transcripts signin`, `content fetch page/stream` and `content signin URL` reach SharePoint, through a tool-owned browser profile; m365crawl never sees a password or token. Ordinary content reads are archive-only regardless of max-age and never fetch or sign in. Other reads use the local archive or desktop caches. The archive holds real chats, mail, meetings and explicitly retained cloud content, so protect it like the mailbox it contains. [SPEC.md](../SPEC.md) section 8 is the normative version of this page.
 
 ## What m365crawl reads

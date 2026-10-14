@@ -10,4 +10,5 @@
 [2mnotice: document metadata was not searched: account/author or chat/mail-only filters cannot qualify unresolved documents[0m
 [2mnotice: Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner[0m
 [2mnotice: cloud content was not searched: account/author, chat/mail-only or profile filters cannot qualify unresolved native service identities; local Office content was not searched because these filters cannot qualify unresolved file ownership[0m
+[2mnotice: Engage Home-session observations were not searched: these filters do not qualify native service accounts or sender identities[0m
 [2marchive age: <age>[0m

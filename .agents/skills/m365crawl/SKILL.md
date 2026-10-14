@@ -18,7 +18,7 @@ m365crawl mirrors Microsoft 365 on this machine (Teams chats and channels, new O
 
 ## Start here
 
-Run `m365crawl` first: it reports chats, mail and calendar freshness, routes registered native people to independent coverage, and never syncs. Keep an explicit `--db` when following a route. Then read `m365crawl --help` and each command's `--help` for flags, ordering and fields; this guide does not repeat them.
+Run `m365crawl` first: it reports chats, mail and calendar freshness, routes registered native people to independent coverage, and never syncs. Keep an explicit `--db` when following a route. Then read `m365crawl --help` and each command's `--help` for flags, ordering and fields; this guide does not repeat them. For Engage, explicitly `content fetch engage-home`, then offline `content list/search/show/sources` and `engage-observation:N`; inspect independent `engage_content_coverage` and original-session losses, preview100/full SQL. Partial native sessions are not complete feeds/current threads/replies/mentions or resolved people. Unknown registration attempts never diagnose the last-successful instance. Exact-root agreed sign-in requires positive native identity plus terminal Close, discards content and admits nothing; live Windows/interactive expiry remains unqualified.
 
 - Output is JSON when stdout is not a terminal; pass `--json` to be sure. An error is one JSON line on stderr with a `fix`: follow it.
 - Read commands sync first when the archive is older than `--max-age` (default 15m); `--max-age 0` reads it as it is.

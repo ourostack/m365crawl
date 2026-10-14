@@ -494,13 +494,32 @@ type searchHit struct {
 	cloudLabel                        string
 	cloudSourceID, cloudObservationID int64
 	localText                         bool
+	engage, engageKnown               bool
+	engageSessionID                   int64
+	engageOrdinal                     int
 }
 
 func sortSearchHits(hits []searchHit) {
 	sort.SliceStable(hits, func(i, j int) bool {
 		a, b := hits[i], hits[j]
+		// Knownness is one global ordering tier, not an operand-family exception.
+		// Engage has explicit native presence, including an observed Go-zero.
+		// Legacy hits retain their zero-means-absent convention.
+		ak, bk := !a.at.IsZero(), !b.at.IsZero()
+		if a.engage {
+			ak = a.engageKnown
+		}
+		if b.engage {
+			bk = b.engageKnown
+		}
+		if ak != bk {
+			return ak
+		}
 		if !a.at.Equal(b.at) {
 			return a.at.After(b.at)
+		}
+		if a.engage != b.engage {
+			return !a.engage
 		}
 		if a.source != searchContent && b.source != searchContent {
 			return false
@@ -519,6 +538,12 @@ func sortSearchHits(hits []searchHit) {
 		}
 		if a.cloudSourceID != b.cloudSourceID {
 			return a.cloudSourceID < b.cloudSourceID
+		}
+		if a.engage && a.engageSessionID != b.engageSessionID {
+			return a.engageSessionID < b.engageSessionID
+		}
+		if a.engage && a.engageOrdinal != b.engageOrdinal {
+			return a.engageOrdinal < b.engageOrdinal
 		}
 		return a.cloudObservationID < b.cloudObservationID
 	})
@@ -658,6 +683,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	cloudTruncated := false
 	cloudCoverage := rt.cloudCoverageOf(nil)
 	localCoverage := rt.localCoverageOf(nil)
+	engageCoverage := rt.engageCoverageOf(store.EngageSnapshot{})
 	if p.content && st != nil {
 		snapshot, err := st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
@@ -695,6 +721,17 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			src := localSourceFor(local.Sources, row.SourceID)
 			hits = append(hits, searchHit{at: at, source: searchContent, localText: true, cloudLabel: src.Path, cloudSourceID: row.SourceID, cloudObservationID: row.ID,
 				item: searchLocalTextItem{Source: searchContent, LocalTextItem: localItemOf(row, src, rt.g.MaxText)}})
+		}
+		engage, err := st.EngageSnapshot(rt.ctx, store.EngageFilter{Query: c.Query, ModifiedSince: engageBounds(c.Since, f.Since), ModifiedUntil: engageBounds(c.Until, f.Until), Limit: f.Limit})
+		if err != nil {
+			return nil, rt.contentError(err)
+		}
+		engageCoverage = rt.engageCoverageOf(engage)
+		cloudTruncated = cloudTruncated || engage.Truncated
+		matched[searchContent] += len(engage.Rows)
+		atLeast[searchContent] = atLeast[searchContent] || engage.Truncated
+		for _, row := range engage.Rows {
+			hits = append(hits, engageHit(rt, row, engage.Sources, true))
 		}
 	}
 	sortSearchHits(hits)
@@ -735,6 +772,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if p.contentExclusion != "" {
 		res.addNotice(p.contentExclusion)
+		res.addNotice("Engage Home-session observations were not searched: these filters do not qualify native service accounts or sender identities")
 	}
 	if undated != "" {
 		res.addNotice(undated)
@@ -771,6 +809,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		if c.Source == searchContent || len(localCoverage.Sources) > 0 {
 			res.LocalContentCoverage = localCoverage
+		}
+		if c.Source == searchContent || len(engageCoverage.Registrations) > 0 {
+			res.EngageContentCoverage = engageCoverage
 		}
 	}
 	if chatTotalIsAll {

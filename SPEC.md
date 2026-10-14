@@ -1,5 +1,79 @@
 # m365crawl specification
 
+## Engage Home-session archive (schema 18)
+
+The concrete `engage_home` content family MUST follow the
+[Engage evidence/clock/lifecycle contract](docs/engage-home.md).
+`content fetch engage-home` has no target arguments and captures only the fixed
+native root/Home access-session path. Product browser defaults and the delivered
+45/30/10/3-second bounds and retained-string/cardinality limits MUST NOT increase.
+Early capability checking and registration precede acquisition navigation;
+verified terminal Close and cancellation barriers precede publication.
+
+One additive migration18 stores immutable canonical complete bounded Result JSON
+(64MiB ingress/read envelope above the proven51,576,832-byte maximum),
+source-bound mapper digests, first physical acquisition/admission clocks, ordered
+occurrences, every successful attempt membership and exact typed FTS.
+Account boundary is canonical `[Host,NetworkID,UserID]` plus
+`engage-native-home-v1/mapper-v1`, never a Teams identity.
+Identical A-B-A sessions reuse A occurrence/session IDs and first clocks, while
+appending membership; changed order/metadata/clocks/flags/losses changes identity.
+Every successful session is partial; complete frontier MUST remain NULL.
+Metadata-only differs from empty admitted blocks and MUST retain old readable history.
+
+Every zero-Result/discarded-candidate failure MUST be registration-level
+account-unknown. A-success → B-success → unknown failure MUST retain A/B own clocks,
+coverage and pointers. The historical last-successful-instance pointer MUST NOT
+be labeled active/current signed-in account. Coverage is body-free and independent
+of fields/limits/zero hits. Detail carries original-session losses separately;
+losses MUST NOT be attributed per thread or multiplied per hit.
+
+Reads MUST audit all canonical results/accounts/duplicate columns/digests,
+original/intermediate/reused membership, outcome/loss/coverage/reason, frontiers
+and exact occurrence FTS provenance before filtering. Stream session history with
+cancellation and check blob length before decode. Ordinary reads/reuse MUST NOT
+repair corruption. Optional old-schema absence is read-only empty coverage;
+current missing/partial tables are errors.
+
+Only native starter-updated time orders/filters Engage text. Preserve original
+raw strings and JSON-serializable offsets, including UTC-year10000/-1 spill.
+Use range-safe Time comparisons, never UnixNano or derived UTC text as a
+parser/order/filter key. Pointer/raw flag presence distinguishes known Go-zero
+from absence. Existing family ties precede Engage; new ties use full label,
+source/session/ordinal/numeric archive ID before clipping.
+
+Every mixed content/shared-search comparison MUST put known clocks before unknown
+clocks, then compare native instants newest-first with range-safe Time comparisons,
+then apply established family/tie order. Engage's explicit presence retains a known
+Go-zero; legacy hits without independent presence retain zero-means-absent semantics.
+This deliberately changes the exceptional old legacy unknown-versus-pre-year-one
+order: unknown no longer precedes a known early instant. Normal legacy chronology
+and equal-clock family precedence are unchanged; stored clocks/IDs/bytes do not change.
+Text lists MUST render differing column schemas as separately labeled consecutive
+tables, preserving selected row order. Registration outcome/account_state/reason/retry
+MUST NOT be printed under instance source/current_session/coverage headers.
+
+`engage-observation:N` is a positive archive occurrence ID. Preview is first100
+ordered blocks with empty/duplicate occurrences preserved; clipping copies
+slices/pointers and never alters full native IDs/flags/version/raw clocks.
+`full_text_sql` uses only the generated positive archive ID to join the full
+occurrence and original session Result in the same archive, never a native ID.
+No fabricated URL/person/document/task join is allowed.
+The additive `full_text_command` MUST preserve the selected absolute archive and
+`--max-age 0` alongside the exact static SQL, so a follow-up cannot refresh a
+different/default archive. Fetch receipt projection MUST audit history without
+materializing all historical observations; `EngageAttemptReceipt` returns only
+the admitted current attempt's body-free source and ordered occurrence IDs.
+An unspecified Store snapshot output limit defaults to128 with `Truncated`;
+this is not a lower ingress/producer budget or a history-validation shortcut.
+
+Exact-root/default443 agreed sign-in has a five-minute productive deadline,
+preliminary Home readiness and one native observer verification only with at
+least45s remaining. It discards content and has no archive admission side effect.
+Positive native evidence plus successful Close is required; generic unavailable,
+redirect, identity and timeout remain auth-unknown. Native interactive expiry/
+challenge and live Windows/Linux service behavior remain unqualified.
+
 ## Explicit resident Office text (schema 17)
 
 - Resident commands: `content capture --file FILE [--kind docx|xlsx|pptx]` or
@@ -621,6 +695,17 @@ Every error code:
 | `archive_newer` | 3 | The archive was written by a newer m365crawl (higher derivation version or higher schema version). `sync`, `watch` and the implicit sync refuse before any write; read commands still work. | `Upgrade m365crawl (brew upgrade ourostack/tap/m365crawl), or point --db at a different archive.` |
 | `unknown_meeting` | 2 | `transcripts <meeting>` or `transcripts show <meeting>` names no recorded call in the archive: no call id, meeting chat or calendar event with a recording notice matches. | `List meetings with recordings: m365crawl transcripts` |
 | `content_unknown` | 2 | Content observation, native source instance or registration is absent or belongs to a different source family. | Inspect `content sources` / `content list`, or explicitly fetch one supported URL to register it. |
+| `engage_unavailable` | 2 | Fixed native service workflow unavailable; authentication/account unknown. | Inspect registration diagnostics; explicitly retry fixed fetch or optionally agreed exact-root sign-in. |
+| `engage_cancelled` | 2 | Explicit capture cancelled; no candidate admitted. | Retry explicitly when ready; own historical instance evidence stays unchanged. |
+| `engage_timeout` | 2 | Bounded capture timed out; authentication unknown. | Explicit retry, never extend the native observer limits. |
+| `engage_browser_failed` | 2 | Browser discovery/acquisition failed; unknown registration attempt remains visible. | Fix browser availability and explicitly retry in the same archive. |
+| `engage_early_observer_unsupported` | 2 | Factory page lacks checked early-observer capability. | Use a supported build; no fallback or source navigation. |
+| `engage_cleanup_failed` | 2 | Terminal observer/browser cleanup failed; staged content discarded. | Inspect the owned browser lifecycle before explicit retry. |
+| `engage_identity_unverified` | 2 | Native viewer/network evidence missing or contradictory; auth unknown. | Explicit retry or optional user-agreed native sign-in; never borrow a prior account. |
+| `engage_too_large` | 2 | Native bounded evidence exceeded unchanged producer limits. | Preserve bounded scope; do not raise budgets or replay requests. |
+| `engage_malformed` | 2 | Native bounded evidence failed the final contract. | Inspect source-specific diagnostics; do not infer sign-in fixes it. |
+| `engage_capture_failed` | 2 | Explicit capture failed without qualified identity. | Explicit retry; registration only, no account diagnosis. |
+| `engage_signin_unverified` | 2 | Native session verification or terminal Close failed/insufficient budget. | No content was registered; optional agreed exact-root retry only. |
 | `local_text_input_unqualified` | 2 | Native path/residency/filesystem/ancestry/type/link evidence is absent or unsafe. | Select one ordinary already-local absolute file explicitly; never hydrate or use a weaker reader. |
 | `local_text_too_large` | 2 | Inclusive source or unchanged production parser bound exceeded. | Select a supported bounded file; never silently clip into success. |
 | `local_text_unsupported`, `local_text_malformed`, `local_text_read_failed` | 2 | The explicit candidate is unsupported, malformed or unreadable. | Inspect source coverage and retry a supported ordinary file explicitly; no invented encryption or verified format. |

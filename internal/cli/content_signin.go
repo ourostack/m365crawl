@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/sharepointcontent"
 )
@@ -16,12 +17,30 @@ type contentSigninCmd struct {
 }
 
 func (contentSigninCmd) Help() string {
-	return "Explicit visible-window sign-in; never runs during content reads or fetch automatically. Stream sign-in has no exact transcript selection: Next lists this archive's sources; choose the stored registration retry or an explicit request, never infer a transcript from the URL. Page sign-in can continue to its exact page fetch. " +
+	return engageHelp + "Explicit visible-window sign-in; never runs during content reads or fetch automatically. Engage accepts only its exact HTTPS root (optional default443); positive native identity and terminal Close are required, content is discarded and no archive registration occurs. Insufficient remaining45s refuses verification. Stream sign-in has no exact transcript selection: Next lists this archive's sources; choose the stored registration retry or an explicit request, never infer a transcript from the URL. Page sign-in can continue to its exact page fetch. " +
 		strings.ReplaceAll((transcriptsSigninCmd{}).Help(), "m365crawl transcripts signin", "m365crawl content signin URL --user-agreed")
 }
 func (c *contentSigninCmd) Run(rt *runtime) error {
 	if err := rt.contentFlags(); err != nil {
 		return err
+	}
+	if engageSigninTarget(c.URL) {
+		if err := checkKeys(rt, typeKeys[EngageSigninReport]()); err != nil {
+			return err
+		}
+		exe, kind, err := findBrowser(c.Browser)
+		if err != nil {
+			return err
+		}
+		agreement := transcriptsSigninCmd{UserAgreed: c.UserAgreed}
+		if err := agreement.agree(rt, kind); err != nil {
+			return contentSigninError(err, rt.contentCommand("signin", c.URL))
+		}
+		result, err := rt.signinEngage(browser.LaunchOptions{Exe: exe, Kind: kind, Profile: browser.ProfileDir(rt.dbPath)})
+		if err != nil {
+			return err
+		}
+		return rt.write("content signin", result)
 	}
 	request, err := sharepointcontent.NormalizeRequest(sharepointcontent.Request{Kind: "page", URL: c.URL})
 	if err != nil {

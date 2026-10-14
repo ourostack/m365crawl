@@ -210,7 +210,7 @@ from knowledge_locators l join knowledge_attempts a on a.locator_id=l.id where a
 		}
 		encoded, _ := json.Marshal(losses) // map[string]int has no unsupported or cyclic JSON values
 		_, err := tx.ExecContext(ctx, `update knowledge_attempts set source_id=?,finished_at=?,outcome=?,
-acquisition_signature=coalesce(?,acquisition_signature),content_digest=?,coverage=?,losses_json=?,reason=? where id=?`,
+acquisition_signature=coalesce(?,acquisition_signature),content_digest=coalesce(?,content_digest),coverage=?,losses_json=?,reason=? where id=?`,
 			sourceID, knowledgeTime(outcome.At), outcome.Status, nullableKnowledge(outcome.AcquisitionSignature),
 			nullableKnowledge(outcome.ContentDigest), coverage, string(encoded), outcome.Reason, attempt.ID)
 		return err

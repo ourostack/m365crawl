@@ -20,6 +20,33 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 
 ## Content: explicit acquisition, offline reads
 
+Engage uses `content fetch engage-home` with **no target arguments**:
+`--browser` uses M365CRAWL_BROWSER/tool-owned profile and `--timeout` defaults10m
+(positive only, native observer still capped45s). It archives bounded partial
+native access-session thread starters, not a feed/current revision/replies/tasks.
+Use `content signin https://engage.cloud.microsoft/ --user-agreed` only after
+agreement; optional default443 is accepted, no path/query/fragment/userinfo.
+Visible Home is preliminary, verification requires native identity plus terminal
+Close; content is discarded with no registration. Unknown failures never mean
+signin_required or no_access.
+
+`engage-observation:N` selects one immutable ordered occurrence. List/search/show
+preview first100 duplicate/empty blocks with total/truncation flags. Native
+IDs/version/flags/raw clocks are complete. `full_text_sql` reads the full
+occurrence and original canonical session from the same archive.
+`full_text_command` is its executable same-archive `--max-age 0` follow-up;
+run it as printed. Native IDs are never interpolated into SQL.
+`engage_content_coverage` contains separate registration diagnostics and body-free
+own-instance session summaries, independent of fields/limits/zero hits.
+Last-successful instance is historical, not active account. Original session
+losses are distinct from current-session losses, never per hit. Date windows use
+native starter-updated pointer/raw flag presence, including known Go-zero and
+original-offset UTC spills; unknown clocks do not match bounded windows.
+Equal-time old families precede Engage; new ties use full label/source/session/
+ordinal/numeric ID before clipping. All reads audit history before filtering
+and never acquire/repair/migrate, even at max-age1ns. See
+[full contract and synthetic visual](engage-home.md).
+
 ```text
 m365crawl content capture --file /absolute/file.docx [--kind docx|xlsx|pptx]
 m365crawl content capture --from document-observation:N [--kind docx|xlsx|pptx]
@@ -161,14 +188,14 @@ Offline `content list [--source-id N] [--modified-since DATE] [--modified-until 
 Native date bounds exclude unknown clocks. Source ID selects a native instance;
 registration ID belongs only to explicit retries. No max-age capture or migration.
 
-`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`.
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`, `session_id`, `qualification`, `source_account`, `ordinal`, `native_thread_id`, `native_network_id`, `native_group_id`, `native_starter_id`, `native_sender_id`, `language`, `version`, `is_deleted`, `is_draft`, `created_raw`, `updated_raw`, `starter_created_raw`, `starter_updated_raw`, `created_at`, `updated_at`, `starter_created_at`, `starter_updated_at`, `blocks`, `blocks_total`, `session_losses`, `session_scope`, `acquired_at`, `full_text_command`.
 
 ### content search
 
 Offline `content search WORDS`, with the same source/date/limit flags as content list.
 Only retained supported text/title/native metadata is indexed.
 
-`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`.
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`, `session_id`, `qualification`, `source_account`, `ordinal`, `native_thread_id`, `native_network_id`, `native_group_id`, `native_starter_id`, `native_sender_id`, `language`, `version`, `is_deleted`, `is_draft`, `created_raw`, `updated_raw`, `starter_created_raw`, `starter_updated_raw`, `created_at`, `updated_at`, `starter_created_at`, `starter_updated_at`, `blocks`, `blocks_total`, `session_losses`, `session_scope`, `acquired_at`, `full_text_command`.
 
 ### content show
 
@@ -176,14 +203,14 @@ Offline `content show cloud-observation:N` or `local-text-observation:N`; N is a
 First100 ordered control-text/entry occurrences, explicit totals/clipping and
 same-archive `full_text_sql` retain full evidence independently of the preview.
 
-`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`.
+`--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`, `session_id`, `qualification`, `source_account`, `ordinal`, `native_thread_id`, `native_network_id`, `native_group_id`, `native_starter_id`, `native_sender_id`, `language`, `version`, `is_deleted`, `is_draft`, `created_raw`, `updated_raw`, `starter_created_raw`, `starter_updated_raw`, `created_at`, `updated_at`, `starter_created_at`, `starter_updated_at`, `blocks`, `blocks_total`, `session_losses`, `session_scope`, `acquired_at`, `full_text_command`.
 
 ### content sources
 
 Offline `content sources [--source-id N]` includes registered failed/unadmitted/
 metadata-only sources. Coverage is independent of hits, shaping and global limits.
 
-`--fields` keys: `registration_id`, `source_id`, `kind`, `state`, `scope`, `reason`, `requested_selection`, `current_selection`, `last_good_observation_id`, `selection_match`, `attempted_at`, `admitted_at`, `source_observed_at`, `losses`, `retry`, `file_label`, `file_label_truncated`, `requested_kind`, `current_snapshot`, `snapshot_match`, `snapshot_match_scope`.
+`--fields` keys: `registration_id`, `source_id`, `kind`, `state`, `scope`, `reason`, `requested_selection`, `current_selection`, `last_good_observation_id`, `selection_match`, `attempted_at`, `admitted_at`, `source_observed_at`, `losses`, `retry`, `file_label`, `file_label_truncated`, `requested_kind`, `current_snapshot`, `snapshot_match`, `snapshot_match_scope`, `latest_attempt_id`, `target`, `outcome`, `account_state`, `finished_at`, `last_successful_instance_id`, `admitted_attempt_id`, `current_session_id`, `source_account`, `qualification`, `coverage`, `last_good_session_id`, `current_session`, `is_last_successful_instance`.
 
 ## Platform defaults
 

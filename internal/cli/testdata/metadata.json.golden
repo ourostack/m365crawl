@@ -33,6 +33,18 @@
       "json": true,
       "mutates": true
     },
+    "content fetch engage-home": {
+      "title": "content fetch engage-home (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "fetch",
+        "engage-home"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "content fetch page": {
       "title": "content fetch page (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
@@ -87,7 +99,7 @@
         "--json",
         "content",
         "show",
-        "\u003ccloud-or-local-text-observation-id\u003e"
+        "\u003ccloud-local-text-or-engage-observation-id\u003e"
       ],
       "json": true
     },

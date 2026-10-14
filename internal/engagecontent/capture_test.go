@@ -1,14 +1,19 @@
-package engagecontent
+package engagecontent_test
 
 import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/browser"
+	"github.com/ourostack/m365crawl/internal/engagecontent"
 )
 
 func nativeScriptPage(t *testing.T) (context.Context, *browser.Page) {
@@ -22,25 +27,104 @@ func nativeScriptPage(t *testing.T) (context.Context, *browser.Page) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: filepath.Join(t.TempDir(), "archive", "profile"), Headless: true, DisposableFixture: true})
+	profile := filepath.Join(t.TempDir(), "archive", "profile")
+	t.Logf("owned synthetic profile (normal test cleanup): %s", profile)
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Exe: exe, Kind: kind, Profile: profile, Headless: true, DisposableFixture: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	var owned map[int]fixtureProcess
 	t.Cleanup(func() {
+		closed := true
 		if err := b.Close(); err != nil {
 			t.Error(err)
+			closed = false
+		}
+		if runtime.GOOS == "darwin" {
+			after := fixtureProcessCensus(t)
+			for pid, p := range after {
+				original, known := owned[pid]
+				if strings.Contains(p.argv, profile) || (known && p.born == original.born) {
+					closed = false
+					t.Errorf("owned synthetic generation remains: pid=%d birth=%s profile=%s", pid, p.born, profile)
+				}
+			}
+			t.Logf("synthetic generation closure verified=%t profile=%s generations=%d", closed, profile, len(owned))
 		}
 	})
 	p, err := b.Page(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "darwin" {
+		all := fixtureProcessCensus(t)
+		owned = map[int]fixtureProcess{}
+		root := 0
+		for pid, p := range all {
+			if strings.Contains(p.argv, "--user-data-dir="+profile) && !strings.Contains(p.argv, "--type=") {
+				root = pid
+				if !strings.Contains(p.argv, "--headless") || !strings.Contains(p.argv, "--use-mock-keychain") {
+					t.Fatal("actual disposable launch flags missing")
+				}
+			}
+			if strings.Contains(p.argv, profile) {
+				owned[pid] = p
+			}
+		}
+		if root == 0 {
+			t.Fatal("owned synthetic root generation not found")
+		}
+		for changed := true; changed; {
+			changed = false
+			for pid, p := range all {
+				if _, known := owned[pid]; known {
+					continue
+				}
+				if _, parent := owned[p.ppid]; parent {
+					owned[pid] = p
+					changed = true
+				}
+			}
+		}
+		for pid, p := range owned {
+			t.Logf("owned synthetic process generation pid=%d birth=%s profile=%s root=%d root_flags_verified=headless,mock-keychain", pid, p.born, profile, root)
+		}
+	}
 	return ctx, p
+}
+
+type fixtureProcess struct {
+	ppid       int
+	born, argv string
+}
+
+func fixtureProcessCensus(t *testing.T) map[int]fixtureProcess {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(ctx, "/bin/ps", "-axo", "pid=,ppid=,lstart=,command=").Output()
+	if err != nil {
+		t.Fatal("synthetic generation census failed:", err)
+	}
+	out := map[int]fixtureProcess{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 8 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(fields[0])
+		ppid, e2 := strconv.Atoi(fields[1])
+		if e1 != nil || e2 != nil {
+			t.Fatal("invalid process generation census")
+		}
+		out[pid] = fixtureProcess{ppid, strings.Join(fields[2:7], " "), strings.Join(fields[7:], " ")}
+	}
+	return out
 }
 
 func captureSources(t *testing.T) string {
 	t.Helper()
-	return initScript
+	return engagecontent.InitScriptForTest
 }
 
 func runCapture(t *testing.T, body string, out any) {
