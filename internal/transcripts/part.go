@@ -63,7 +63,7 @@ var (
 
 // sharePointSuffixes are the domains SharePoint Online serves its sites from. A fetch opens a
 // signed-in browser on the part's host, so no other host is ever fetched.
-var sharePointSuffixes = []string{".sharepoint.com", ".sharepoint.us", ".sharepoint-mil.us", ".sharepoint.cn", ".sharepoint.de"}
+var sharePointSuffixes = []string{".sharepoint.com", ".sharepoint-df.com", ".sharepoint.us", ".sharepoint-mil.us", ".sharepoint.cn", ".sharepoint.de"}
 
 // allowedTestSuffix is one more suffix a test allows, for the synthetic hosts of its fixtures.
 var allowedTestSuffix string

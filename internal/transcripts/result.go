@@ -61,6 +61,10 @@ func Reason(p Part, state string) string {
 		return ""
 	case StateUnfetchable:
 		switch p.RefQuality {
+		case RefDriveItem:
+			if !IsSharePointHost(p.Host) {
+				return "the cached file reference names an unsupported SharePoint host"
+			}
 		case RefShareOnly:
 			return "only a sharing link is cached for this part; m365crawl cannot fetch it from ids"
 		case RefAMSOnly:
