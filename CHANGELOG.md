@@ -4,6 +4,31 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-14
+
+### Added
+
+- Explicit `content fetch engage-home` archives bounded native Engage access-session
+  thread-starter observations with immutable sessions, ordered duplicate occurrences
+  and portable offline search/detail/full-record SQL. Additive schema18 keeps
+  registration-level unknown failures separate from verified native account instances.
+- Exact-root, user-agreed Engage sign-in verifies positive native session evidence
+  only after browser Close and discards content. Preview100, original-session losses,
+  native clocks and independent source coverage are discoverable in CLI help.
+- Scope remains partial native observations, not a complete feed, replies, mentions,
+  targeted-thread retrieval or current revisions. Live Windows/Linux service acquisition
+  and interactive challenge/expiry are not qualified by synthetic fixtures.
+
+### Fixed
+
+- Mixed content and source text output now uses correctly labeled consecutive
+  tables instead of mixing incompatible columns or relabeling Engage registration
+  diagnostics as native instance evidence.
+- Mixed search consistently puts known clocks before unknown clocks, including
+  early native instants and explicitly known Engage Go-zero. This intentionally
+  changes the exceptional legacy unknown-before-pre-year-one order; normal
+  chronology and equal-clock family precedence remain unchanged.
+
 ## [0.9.10] - 2026-10-14
 
 ### Fixed
