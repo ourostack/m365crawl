@@ -71,6 +71,11 @@
   `snapshot_match_scope` explicitly records this source-instance interpretation.
   Year-one/unavailable parsed modified clocks are null while exact raw evidence stays
   intact; contradictory raw/parsed/SQL clocks return errors, never panics.
+  Generated content retries/error recovery/post-sign-in commands name the same
+  absolute archive with platform argument quoting. Exact retries retain the original
+  registered selection. Unsupported package recovery inspects format rather than
+  blindly repeating rejected intent; a differing recognized extension can propose
+  an explicit alternative request, not a guessed verified format or guaranteed fix.
   Static positive-row-ID `full_text_sql` reads the full record from this same DB.
 - Local known filesystem-modified clocks sort newest, unknown last; bounded windows
   exclude unknown. Timestamp ties preserve all old legacy/cloud order before local;

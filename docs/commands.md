@@ -127,6 +127,13 @@ states this interpretation in every item/source. Unknown continuity stays
 unavailable/independent; observed zeros stay raw. Year-one sentinel parsed display
 clocks are null while exact raw clocks stay retained. Contradictions fail as errors.
 The Part-name budget is the production TextBytes budget, with no extra32768 cap.
+Generated content retries, fixes and post-sign-in commands carry the same absolute
+`--db` archive and platform-quoted arguments; run them as printed. Source retries
+replay the exact registered request, not a format correction. `local_text_unsupported`
+can be a kind mismatch or another unsupported package: inspect its actual format.
+A differing recognized filename extension can offer an explicit alternative request
+without `--kind`, never a guessed verified kind or guaranteed repair. A corrected
+request keeps the original failed intent and any explicitly selected `--from` origin.
 `local_content_coverage` survives fields, zero hits and global clipping. Failed first
 captures still report a registration ID and explicit file retry, not source-id0.
 `full_text_sql` returns the complete same-archive record, for example:

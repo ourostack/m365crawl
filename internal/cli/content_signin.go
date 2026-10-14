@@ -38,21 +38,21 @@ func (c *contentSigninCmd) Run(rt *runtime) error {
 	}
 	agreement := transcriptsSigninCmd{UserAgreed: c.UserAgreed}
 	if err := agreement.agree(rt, kind); err != nil {
-		return contentSigninError(err)
+		return contentSigninError(err, rt.contentCommand("signin", request.Request.URL))
 	}
 	result, err := rt.signinWindow(exe, kind, u.Host, parts)
 	if err != nil {
-		return contentSigninError(err)
+		return contentSigninError(err, rt.contentCommand("signin", request.Request.URL))
 	}
-	result.Next = "m365crawl content fetch page URL or m365crawl content fetch stream URL"
+	result.Next = rt.contentCommand("fetch", request.Request.Kind, request.Request.URL)
 	return rt.write("content signin", result)
 }
 
-func contentSigninError(err error) error {
+func contentSigninError(err error, command string) error {
 	var coded *errs.Coded
 	if errors.As(err, &coded) {
 		copy := *coded
-		copy.Fix = strings.ReplaceAll(copy.Fix, "m365crawl transcripts signin", "m365crawl content signin URL")
+		copy.Fix = strings.ReplaceAll(copy.Fix, "m365crawl transcripts signin", command)
 		return &copy
 	}
 	return err

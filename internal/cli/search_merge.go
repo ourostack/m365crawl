@@ -656,17 +656,17 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		rt.loopCoverage = loopSnapshotCoverage(rt, snapshot.Sources)
 	}
 	cloudTruncated := false
-	cloudCoverage := cloudCoverageOf(nil, rt.g.MaxText)
-	localCoverage := localCoverageOf(nil, rt.g.MaxText)
+	cloudCoverage := rt.cloudCoverageOf(nil)
+	localCoverage := rt.localCoverageOf(nil)
 	if p.content && st != nil {
 		snapshot, err := st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
-			return nil, contentError(err)
+			return nil, rt.contentError(err)
 		}
 		cloudTruncated = snapshot.Truncated
 		matched[searchContent] = len(snapshot.Rows)
 		atLeast[searchContent] = snapshot.Truncated
-		cloudCoverage = cloudCoverageOf(snapshot.Sources, rt.g.MaxText)
+		cloudCoverage = rt.cloudCoverageOf(snapshot.Sources)
 		for _, row := range snapshot.Rows {
 			at := time.Time{}
 			if row.Result.File.ModifiedAt != nil {
@@ -681,12 +681,12 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		local, err := st.LocalTextSnapshot(rt.ctx, store.LocalTextFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
-			return nil, contentError(err)
+			return nil, rt.contentError(err)
 		}
 		cloudTruncated = cloudTruncated || local.Truncated
 		matched[searchContent] += len(local.Rows)
 		atLeast[searchContent] = atLeast[searchContent] || local.Truncated
-		localCoverage = localCoverageOf(local.Sources, rt.g.MaxText)
+		localCoverage = rt.localCoverageOf(local.Sources)
 		for _, row := range local.Rows {
 			at := time.Time{}
 			if row.Snapshot.Evidence.ModifiedAt != nil {
