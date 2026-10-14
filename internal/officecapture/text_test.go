@@ -98,13 +98,24 @@ func TestTextCaptureBoundNativeSnapshot(t *testing.T) {
 }
 
 func TestTextDeadlineIncludesGateWaiting(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", "")
+	path, err := filepath.Abs(filepath.Join(root, "synthetic.docx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := TextInput{path, "docx"}
+	if !ValidTextInput(input) {
+		t.Fatalf("noncanonical absolute native fixture: %q", input.Path)
+	}
 	release, err := sourcecapture.Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Millisecond)
 	defer cancel()
-	err = WithTextCapture(ctx, TextInput{filepath.Join(filepath.VolumeName(os.Getenv("TMPDIR"))+string(filepath.Separator), "synthetic.docx"), "docx"}, func(*TextCapture) error {
+	err = WithTextCapture(ctx, input, func(*TextCapture) error {
 		t.Fatal("opened while gate held")
 		return nil
 	})

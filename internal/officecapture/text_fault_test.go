@@ -13,13 +13,24 @@ import (
 )
 
 func TestTextOwnedOperationDeadlineBackgroundParent(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", "")
+	path, err := filepath.Abs(filepath.Join(root, "synthetic.docx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := TextInput{path, "docx"}
+	if !ValidTextInput(input) {
+		t.Fatalf("noncanonical absolute native fixture: %q", input.Path)
+	}
 	release, err := sourcecapture.Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
 	done := make(chan error, 1)
 	go func() {
-		done <- WithTextCapture(context.Background(), TextInput{filepath.Join(filepath.VolumeName(os.Getenv("TMPDIR"))+string(filepath.Separator), "synthetic.docx"), "docx"}, func(*TextCapture) error { t.Error("held gate opened"); return nil })
+		done <- WithTextCapture(context.Background(), input, func(*TextCapture) error { t.Error("held gate opened"); return nil })
 	}()
 	select {
 	case err := <-done:
