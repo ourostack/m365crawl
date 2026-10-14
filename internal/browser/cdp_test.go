@@ -25,6 +25,38 @@ func testPage(t *testing.T, s *browsertest.Server) *Page {
 	return p
 }
 
+func TestClientDeadTransportContextPrecedence(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, expire := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer expire()
+	disconnected := errors.Join(ErrDisconnected, errors.New("synthetic closed transport"))
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{"canceled", canceled, context.Canceled},
+		{"deadline", expired, context.DeadlineExceeded},
+		{"live", context.Background(), disconnected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pending := make(chan reply, 1)
+			c := &client{
+				nextID:  7,
+				pending: map[int]chan reply{7: pending},
+				dead:    disconnected,
+			}
+			if err := c.call(tc.ctx, "S1", "Runtime.evaluate", nil, nil); err != tc.want {
+				t.Errorf("call = %v, want %v", err, tc.want)
+			}
+			if c.dead != disconnected || c.nextID != 7 || len(c.pending) != 1 || c.pending[7] != pending || len(pending) != 0 {
+				t.Fatal("dead-transport call changed transport or pending command state")
+			}
+		})
+	}
+}
+
 func TestClientNoOriginHeader(t *testing.T) {
 	s := browsertest.NewServer(t)
 	testPage(t, s)

@@ -129,7 +129,7 @@ func (c *client) call(ctx context.Context, sessionID, method string, params, out
 	if c.dead != nil {
 		err := c.dead
 		c.mu.Unlock()
-		return err
+		return ctxErr(ctx, err)
 	}
 	c.nextID++
 	id := c.nextID
