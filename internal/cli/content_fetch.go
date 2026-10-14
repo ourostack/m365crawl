@@ -56,12 +56,12 @@ func (c *contentFetchOptions) run(rt *runtime, kind string, selection *string) e
 	if c.RegistrationID > 0 {
 		st, openErr := store.OpenReadOnly(rt.ctx, rt.dbPath)
 		if openErr != nil {
-			return contentError(openErr)
+			return rt.contentError(openErr)
 		}
 		request, err = st.CloudRequest(rt.ctx, c.RegistrationID)
 		err = errors.Join(err, st.Close())
 		if err != nil {
-			return contentError(err)
+			return rt.contentError(err)
 		}
 		if request.Request.Kind != kind {
 			return errs.Usage("registration belongs to a different content kind")
@@ -87,7 +87,7 @@ func (c *contentFetchOptions) run(rt *runtime, kind string, selection *string) e
 	defer func() { rt.ctx = previous }()
 	report, err := rt.fetchCloud(request, browser.LaunchOptions{Exe: exe, Kind: browserKind, Profile: browser.ProfileDir(rt.dbPath), Headless: true})
 	if err != nil {
-		return contentError(err)
+		return rt.contentError(err)
 	}
 	return rt.write("content fetch "+kind, report)
 }
@@ -160,7 +160,8 @@ func (rt *runtime) fetchCloud(request sharepointcontent.CanonicalRequest, option
 		}
 		if diagnostic == "cloud_signin_required" {
 			return report, &errs.Coded{Code: "content_signin_required", Exit: errs.ExitUsage, Message: "content profile is not signed in",
-				Fix: "Ask the user to agree, then run `m365crawl content signin URL --user-agreed` with the supported target URL; retry the explicit fetch."}
+				Fix: "Ask the user to agree, then run `" + rt.contentCommand("signin", request.Request.URL, "--user-agreed") +
+					"`; retry the exact stored request with `" + rt.contentCommand("fetch", request.Request.Kind, "--registration-id", fmt.Sprint(attempt.LocatorID)) + "`."}
 		}
 		return report, err
 	}

@@ -32,6 +32,7 @@ const localSnapshotMatchScope = "current_archived_acquisition_for_this_source_in
 const localContentHelp = "Explicit resident capture: `content capture --file /absolute/file.docx [--kind docx|xlsx|pptx]` or `content capture --from document-observation:N`. Requested kind is intent, not verified format. Only guarded ordinary resident APFS/no-materialization (Mac) or fixed NTFS/no-recall (Windows) files qualify; no Office launch, discovery, network, hydration, decryption or Linux acquisition.\n" +
 	"Supported OOXML text/cached cell values are not layout or recalculated formulas. Compound unreadable has no verified format/body; readable empty supersedes old text. Limits remain source64MiB, member32MiB, selected64MiB, text4MiB, sharedStrings4MiB, entries8192, XML tokens8388608, depth128, paragraphs65536, cells131072, parts512 (inclusive); caller limits never raise them.\n" +
 	"Archive admission additionally bounds the complete serialized structured result at32MiB; exceeding it is an error, never a clipped success.\n" +
+	"local_text_unsupported can mean mismatched requested kind or another unsupported package; inspect actual format before correcting selection. A differing recognized filename extension may propose an explicit alternative request, never a verified format or guaranteed fix. Original failed intent remains archived.\n" +
 	"local-text-observation:N reads first100 occurrences in native order. CURRENT/current_snapshot and snapshot_match mean the current archived acquisition for THIS source instance, not the latest incarnation at its locator and never a live source check. An old instance can be retained=true while its own snapshot matches. Own immutable snapshot/source-byte digest differs from representation digest. File modified clocks are filesystem clocks, not cached document/server/capture clocks; year-one/unavailable parsed clocks are null with exact raw evidence retained. Unknown generation is independent; raw observed zeros remain visible.\n"
 
 func (contentCaptureCmd) Help() string { return localContentHelp + contentHelp }
@@ -60,7 +61,7 @@ func (c *contentCaptureCmd) Run(rt *runtime) error {
 		var err error
 		st, err = store.OpenReadOnly(rt.ctx, rt.dbPath)
 		if err != nil {
-			return contentError(err)
+			return rt.contentError(err)
 		}
 	}
 	input, ref, err := localTextInput(rt.ctx, st, *c)
@@ -68,7 +69,7 @@ func (c *contentCaptureCmd) Run(rt *runtime) error {
 		err = errors.Join(err, st.Close())
 	}
 	if err != nil {
-		return err
+		return rt.contentError(err)
 	}
 	origin := "explicit"
 	if c.Kind == "" {
@@ -89,7 +90,7 @@ func localTextInput(ctx context.Context, st *store.Store, c contentCaptureCmd) (
 			return officecapture.TextInput{}, nil, err
 		}
 		if st == nil {
-			return officecapture.TextInput{}, nil, contentError(store.ErrNoArchive)
+			return officecapture.TextInput{}, nil, store.ErrNoArchive
 		}
 		detail, err := st.DocumentObservation(ctx, id)
 		if err != nil {
@@ -209,7 +210,7 @@ func (rt *runtime) captureLocalText(input officecapture.TextInput, origin string
 				return errors.Join(err, recordErr)
 			}
 			return &errs.Coded{Code: code, Exit: errs.ExitUsage, Message: fmt.Sprintf("explicit resident capture refused; registration_id=%d retained for diagnostics", a.LocatorID),
-				Fix: "Inspect content sources; retry explicitly with content capture --file " + strconv.Quote(input.Path) + " --kind " + input.RequestedKind}
+				Fix: rt.localCaptureFix(input, ref, code)}
 		}
 		if err := st.CommitLocalText(rt.ctx, a, store.LocalTextCommit{Capture: capture, RequestOrigin: origin, Reference: ref}); err != nil {
 			return err
@@ -222,10 +223,28 @@ func (rt *runtime) captureLocalText(input officecapture.TextInput, origin string
 		return err
 	})
 	if err != nil {
-		return contentError(err)
+		return rt.contentError(err)
 	}
 	report.sourceOnly = true
 	return rt.write("content capture", report)
+}
+
+func (rt *runtime) localCaptureFix(input officecapture.TextInput, ref *store.LocalTextReference, code string) string {
+	selection := []string{"capture", "--file", input.Path}
+	if ref != nil {
+		selection = []string{"capture", "--from", fmt.Sprintf("document-observation:%d", ref.DocumentObservationID)}
+	}
+	if code == "local_text_unsupported" {
+		guidance := "The file did not verify under requested kind " + input.RequestedKind +
+			"; this can mean a mismatched or unsupported package format. Inspect the actual format before correcting the file or requested --kind; do not repeat the unchanged rejected selection."
+		extension := strings.ToLower(strings.TrimPrefix(filepath.Ext(input.Path), "."))
+		if extension != input.RequestedKind && slices.Contains([]string{"docx", "xlsx", "pptx"}, extension) {
+			return guidance + " To explicitly try filename-extension intent instead (not a verified format), run `" + rt.contentCommand(selection...) + "`."
+		}
+		return guidance + " Read `" + rt.contentCommand("sources") + "` for the original failed request."
+	}
+	return "Inspect `" + rt.contentCommand("sources") + "`; remedy the refusal before explicitly retrying `" +
+		rt.contentCommand(append(selection, "--kind", input.RequestedKind)...) + "`."
 }
 
 func localCaptureResult(rt *runtime, snapshot store.LocalTextSnapshot, attemptID int64) (*listResult, error) {
@@ -236,7 +255,7 @@ func localCaptureResult(rt *runtime, snapshot store.LocalTextSnapshot, attemptID
 		for _, row := range snapshot.Rows {
 			if row.SourceID == src.Source.ID && !row.Retained {
 				report := newList(shape(rt, []any{localItemOf(row, src, rt.g.MaxText)}), false)
-				report.LocalContentCoverage = localCoverageOf([]store.LocalTextSource{src}, rt.g.MaxText)
+				report.LocalContentCoverage = rt.localCoverageOf([]store.LocalTextSource{src})
 				return report, nil
 			}
 		}
@@ -353,13 +372,13 @@ type localCoverage struct {
 	Sources []localSourceItem `json:"sources"`
 }
 
-func localCoverageOf(sources []store.LocalTextSource, maxText int) *localCoverage {
+func (rt *runtime) localCoverageOf(sources []store.LocalTextSource) *localCoverage {
 	out := &localCoverage{Scope: "explicit_archived_resident_observations", Sources: []localSourceItem{}}
 	for _, s := range sources {
 		item := localSourceItem{RegistrationID: s.RegistrationID, Kind: store.LocalTextKind, State: s.Source.Status, Scope: s.Source.Coverage, Reason: s.Source.Reason,
 			RequestedKind: s.RequestedKind, SnapshotMatch: s.SnapshotMatch, SnapshotMatchScope: localSnapshotMatchScope, Losses: maps.Clone(s.Source.Losses), AttemptedAt: s.Source.AttemptedAt, AdmittedAt: s.Source.AdmittedAt,
-			Retry: "m365crawl content capture --file " + strconv.Quote(s.Path) + " --kind " + s.RequestedKind}
-		item.FileLabel, item.FileLabelTruncated = truncateRunes(s.Path, maxText)
+			Retry: rt.contentCommand("capture", "--file", s.Path, "--kind", s.RequestedKind)}
+		item.FileLabel, item.FileLabelTruncated = truncateRunes(s.Path, rt.g.MaxText)
 		if s.Source.ID > 0 {
 			id := s.Source.ID
 			item.SourceID = &id
@@ -454,7 +473,7 @@ func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query str
 		items[i] = h.item
 	}
 	out := newList(shape(rt, items), truncated)
-	out.ContentCoverage = cloudCoverageOf(cloud.Sources, rt.g.MaxText)
-	out.LocalContentCoverage = localCoverageOf(local.Sources, rt.g.MaxText)
+	out.ContentCoverage = rt.cloudCoverageOf(cloud.Sources)
+	out.LocalContentCoverage = rt.localCoverageOf(local.Sources)
 	return out, nil
 }

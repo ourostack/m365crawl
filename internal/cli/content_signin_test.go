@@ -20,7 +20,7 @@ func TestContentSigninExplicitAgreement(t *testing.T) {
 	url := "https://fixture.sharepoint.com/sites/sample/SitePages/Page.aspx"
 	if code, _, stderr := e.run("content", "signin", url); code == 0 {
 		t.Fatal("visible window without agreement")
-	} else if fix, _ := errorOf(t, stderr)["fix"].(string); !strings.Contains(fix, "content signin URL") || strings.Contains(fix, "transcripts signin") {
+	} else if fix, _ := errorOf(t, stderr)["fix"].(string); !strings.Contains(fix, "content signin "+url) || strings.Contains(fix, "transcripts signin") {
 		t.Fatalf("wrong explicit sign-in route: %s", fix)
 	}
 
@@ -101,12 +101,12 @@ func TestContentSigninCancellationDuringClose(t *testing.T) {
 func TestContentSigninErrorPreservesSharedBoundary(t *testing.T) {
 	original := errs.SigninNeedsAgreement()
 	before := original.Fix
-	err := contentSigninError(original)
+	err := contentSigninError(original, "m365crawl content signin URL")
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != original.Code || coded.Exit != original.Exit || !strings.Contains(coded.Fix, "content signin URL") || original.Fix != before {
 		t.Fatal("content error changed shared code or original transcript error")
 	}
-	if !errors.Is(contentSigninError(context.Canceled), context.Canceled) || contentSigninError(nil) != nil {
+	if !errors.Is(contentSigninError(context.Canceled, ""), context.Canceled) || contentSigninError(nil, "") != nil {
 		t.Fatal("content error masked cancellation or success")
 	}
 }

@@ -16,7 +16,7 @@ type contentSigninCmd struct {
 }
 
 func (contentSigninCmd) Help() string {
-	return "Explicit visible-window sign-in; never runs during content reads or fetch automatically. " +
+	return "Explicit visible-window sign-in; never runs during content reads or fetch automatically. Stream sign-in has no exact transcript selection: Next lists this archive's sources; choose the stored registration retry or an explicit request, never infer a transcript from the URL. Page sign-in can continue to its exact page fetch. " +
 		strings.ReplaceAll((transcriptsSigninCmd{}).Help(), "m365crawl transcripts signin", "m365crawl content signin URL --user-agreed")
 }
 func (c *contentSigninCmd) Run(rt *runtime) error {
@@ -38,21 +38,24 @@ func (c *contentSigninCmd) Run(rt *runtime) error {
 	}
 	agreement := transcriptsSigninCmd{UserAgreed: c.UserAgreed}
 	if err := agreement.agree(rt, kind); err != nil {
-		return contentSigninError(err)
+		return contentSigninError(err, rt.contentCommand("signin", request.Request.URL))
 	}
 	result, err := rt.signinWindow(exe, kind, u.Host, parts)
 	if err != nil {
-		return contentSigninError(err)
+		return contentSigninError(err, rt.contentCommand("signin", request.Request.URL))
 	}
-	result.Next = "m365crawl content fetch page URL or m365crawl content fetch stream URL"
+	result.Next = rt.contentCommand("fetch", request.Request.Kind, request.Request.URL)
+	if request.Request.Kind == "stream" {
+		result.Next = rt.contentCommand("sources")
+	}
 	return rt.write("content signin", result)
 }
 
-func contentSigninError(err error) error {
+func contentSigninError(err error, command string) error {
 	var coded *errs.Coded
 	if errors.As(err, &coded) {
 		copy := *coded
-		copy.Fix = strings.ReplaceAll(copy.Fix, "m365crawl transcripts signin", "m365crawl content signin URL")
+		copy.Fix = strings.ReplaceAll(copy.Fix, "m365crawl transcripts signin", command)
 		return &copy
 	}
 	return err

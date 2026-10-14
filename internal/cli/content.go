@@ -29,7 +29,7 @@ type contentFetchGroup struct {
 
 const contentHelp = "Explicit fetch only: `content fetch page URL` or `content fetch stream URL [--transcript-id ID]`. Supported HTTPS tenant.sharepoint.com or tenant.sharepoint-df.com /sites/NAME or /teams/NAME targets: /SitePages/NAME.aspx, or /_layouts/15/stream.aspx?id=ENCODED_NATIVE_FILE_PATH. No sharing-ticket replay, library crawl or automatic retry.\n" +
 	"Reads and search are archive-only, regardless of --max-age. Pages are supported rich-text projections, always partial, never rendered layouts. Stream complete means only one verified selected native transcript; no_transcript and metadata_only have no selected body. Last-good body keeps its original file/account/selection and clocks; retained is not current content.\n" +
-	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
+	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Generated retries/fixes/next commands name this same absolute --db archive; run them as printed. A retry preserves the original request, not an automatic format correction. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
 func (contentGroup) Help() string      { return localContentHelp + contentHelp }
 func (contentFetchGroup) Help() string { return contentHelp }
@@ -43,10 +43,18 @@ func (rt *runtime) contentFlags() error {
 	}
 	return nil
 }
-func contentError(err error) error {
+func (rt *runtime) contentCommand(args ...string) string {
+	words := []string{"m365crawl", "--db", quoteArg(rt.archiveRef()), "--max-age", "0", "content"}
+	for _, arg := range args {
+		words = append(words, quoteArg(arg))
+	}
+	return strings.Join(words, " ")
+}
+
+func (rt *runtime) contentError(err error) error {
 	if errors.Is(err, store.ErrKnowledgeSourceUnknown) || errors.Is(err, store.ErrNoArchive) {
 		return &errs.Coded{Code: "content_unknown", Exit: errs.ExitUsage, Message: "content observation, source or registration not found",
-			Fix: "Read `m365crawl content sources` or `content list`; explicitly content capture --file FILE for a resident Office file, or fetch a supported page/Stream URL."}
+			Fix: "Read `" + rt.contentCommand("sources") + "` or `" + rt.contentCommand("list") + "`; select a registered retry or an explicit supported file/URL."}
 	}
 	return asCoded(err)
 }
@@ -123,7 +131,7 @@ func (c *contentShowCmd) Run(rt *runtime) error {
 			item := localItemOf(detail.Observation, detail.Source, rt.g.MaxText)
 			item.References, item.ReferencesTotal, item.ReferencesTruncated = detail.References, detail.ReferencesTotal, detail.ReferencesTruncated
 			res := newList(shape(rt, []any{item}), false)
-			res.LocalContentCoverage = localCoverageOf([]store.LocalTextSource{detail.Source}, rt.g.MaxText)
+			res.LocalContentCoverage = rt.localCoverageOf([]store.LocalTextSource{detail.Source})
 			return res, nil
 		})
 	}
@@ -140,7 +148,7 @@ func (c *contentShowCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		res := newList(shape(rt, []any{cloudItemOf(row, source, rt.g.MaxText)}), false)
-		res.ContentCoverage = cloudCoverageOf([]store.CloudSource{source}, rt.g.MaxText)
+		res.ContentCoverage = rt.cloudCoverageOf([]store.CloudSource{source})
 		return res, nil
 	})
 }
@@ -174,8 +182,8 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 				return nil, store.ErrKnowledgeSourceUnknown
 			}
 		}
-		coverage := cloudCoverageOf(sources, rt.g.MaxText)
-		localCoverage := localCoverageOf(local, rt.g.MaxText)
+		coverage := rt.cloudCoverageOf(sources)
+		localCoverage := rt.localCoverageOf(local)
 		out := make([]any, len(coverage.Sources))
 		for i, item := range coverage.Sources {
 			out[i] = item
@@ -213,14 +221,14 @@ func (rt *runtime) contentRead(label string, fn func(*store.Store) (*listResult,
 	if errors.Is(err, store.ErrNoArchive) {
 		st = nil
 	} else if err != nil {
-		return contentError(err)
+		return rt.contentError(err)
 	}
 	res, readErr := fn(st)
 	if st != nil {
 		readErr = errors.Join(readErr, st.Close())
 	}
 	if readErr != nil {
-		return contentError(readErr)
+		return rt.contentError(readErr)
 	}
 	res.sourceOnly = true
 	if res.Count == 0 {
@@ -268,7 +276,7 @@ type cloudCoverage struct {
 	Sources []cloudSourceItem `json:"sources"`
 }
 
-func cloudCoverageOf(sources []store.CloudSource, _ int) *cloudCoverage {
+func (rt *runtime) cloudCoverageOf(sources []store.CloudSource) *cloudCoverage {
 	coverage := &cloudCoverage{Scope: "explicit_archived_observations", Sources: []cloudSourceItem{}}
 	for _, source := range sources {
 		item := cloudSourceItem{RegistrationID: source.RegistrationID, Kind: source.Source.Kind, State: source.Source.Status,
@@ -287,7 +295,7 @@ func cloudCoverageOf(sources []store.CloudSource, _ int) *cloudCoverage {
 		if source.Source.Kind == store.CloudStreamKind {
 			kind = "stream"
 		}
-		item.Retry = fmt.Sprintf("m365crawl content fetch %s --registration-id %d", kind, source.RegistrationID)
+		item.Retry = rt.contentCommand("fetch", kind, "--registration-id", strconv.FormatInt(source.RegistrationID, 10))
 		coverage.Sources = append(coverage.Sources, item)
 	}
 	return coverage
