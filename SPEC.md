@@ -1,5 +1,79 @@
 # m365crawl specification
 
+## Explicit resident Office text (schema 17)
+
+- Commands: `content capture --file FILE [--kind docx|xlsx|pptx]` or
+  `content capture --from document-observation:N [--kind ...]`, mutually exclusive
+  nonempty flags. Exact absolute clean UTF8 paths only. Extension inference is
+  separate per-attempt origin evidence; explicit requested kind never waives package
+  verification. `--from` reads the selected observation/source offline in one transaction
+  and uses only its original native local file URL, not FriendlyPath, title or WebURL.
+  Empty/localhost authority only, no userinfo/query/fragment/UNC/traversal/ADS,
+  once decoding only; unsupported cloud Office URLs fail before source I/O.
+- The archive lock precedes the shared process source-descriptor gate. One30s operation
+  deadline begins before waiting. APFS/materialization-OFF or fixed NTFS/metadata-before-data,
+  no recall/reparse, held ancestry and single-link qualification remain positive requirements.
+  No Linux acquisition, app launch, discovery, hydration, network or weak fallback.
+  Copy64KiB chunks from the original held handle into an exclusive private0600 file/0700
+  parent. Production Extract reads only the bound private inode. Original chain, byte
+  equality and private binding are checked before/after parsing and terminal cleanup.
+  Publication follows exact cleanup/source close/policy restoration; staged callbacks
+  never publish. Failure/cancellation discards the candidate.
+- Default parser caps remain source64MiB/member32MiB/selected64MiB/text4MiB/
+  sharedStrings4MiB, entries8192/tokens8388608/depth128/paragraphs65536/cells131072/
+  parts512, inclusive. No higher caller limits. Supported text/cached values are not
+  layout, recalculation, OCR, decryption, legacy Office or PDF.
+  The archive consumer additionally refuses complete serialized structured results
+  above32MiB instead of allocating unbounded repeated metadata or clipping success.
+- Registration identity is canonical JSON `[exactPath,requestedKind]`, separate from
+  family/platform. Native instance boundary includes volume/file identity and selected
+  positive generation/creation under `native-file-incarnation-v1`. Mac retains BOTH Gen
+  and creation even when Gen selects continuity; Windows retains creation FILETIME.
+  Native IDs/attributes are canonical unsigned decimal strings; Mac clocks are signed
+  seconds:unsigned nanoseconds0..999999999, Windows clocks unsigned64 FILETIME.
+  Absence stays null, observed zero stays raw zero/unqualified where applicable.
+  Parsed filesystem modified clocks agree with raw evidence or are null. Unknown
+  generation creates an independent attempt instance, not continuity inferred from mtime.
+  This is bounded observed consistency, not global identity or anti-spoof proof.
+- Schema17 adds immutable `local_text_locator_metadata`, `local_file_snapshots`,
+  `local_text_observations`, `local_text_capture_members`, `local_text_source_state`,
+  `local_text_attempt_metadata`, `local_text_references` and typed `local_text_fts`.
+  Whole-file source-byte SHA256 differs from full structured representation SHA256.
+  Representation includes registration/platform/native boundary, bytes/evidence/
+  qualification/requested and verified format/state/occurrences/Partial/counted Losses,
+  excluding acquisition/admission/check clocks. Same-instance exact A-B-A reuses A's
+  own ID/clocks. Changed bytes, unselected ZIP bytes, raw clock, creation or native
+  policy change never hides behind equal supported text.
+- Snapshot/projection/FTS/membership/current frontier and selected original reference
+  commit atomically, including reuse. `reference_locator_match` is only the selected
+  remembered locator claim, not global document identity, ownership or cached version
+  equality. Each attempt retains its own origin; direct files have no invented origin.
+  Stale completions cannot regress pointers. Successful supported readable EMPTY
+  replaces last-good nonempty text. Compound unreadable retains requested intent and
+  NULL verified format, never invents encryption or a healthy empty body. Prior text
+  stays historical with its own snapshot, partial qualification, losses and clocks.
+  New incarnations never borrow another source's body.
+- `content list/search/show/sources` and `search --source content` are archive-only on
+  all max-age values; no source read, hydration, browser, migration or implicit retry.
+  Complete current AND retained registration/source/snapshot/capture/membership/hash/
+  clock bindings validate in the same read transaction, even with zero hits or clipping.
+  Older read-only schemas expose optional absence without migration; corruption fails.
+  Superseded source memberships do not make those observations current.
+- `local-text-observation:N` is a positive decimal int64 ID. Preview copies first100
+  paragraph/cell occurrences, preserves order/repeats/Part/Index/Reference/Type/
+  FormulaCached and own Partial/Losses, clips only displayed Text/Value/file labels,
+  never full native IDs, digests, policy or raw clocks. Own immutable snapshot and
+  nullable CURRENT archived acquisition remain separate. `snapshot_match` is matches/
+  differs/unavailable against archived explicit acquisition, never a live check.
+  Static positive-row-ID `full_text_sql` reads the full record from this same DB.
+- Local known filesystem-modified clocks sort newest, unknown last; bounded windows
+  exclude unknown. Timestamp ties preserve all old legacy/cloud order before local;
+  local/local uses full unpreviewed label/source/numeric ID. Account/author/chat/mail/
+  profile filters reject explicit content or exclude unresolved content from all with
+  notice. `local_content_coverage` stays outside fields/global clipping/zero hits,
+  including failed registrations with nonzero registration ID and explicit file retry.
+  Native Windows fixture compilation is not actual native qualification or delivery.
+
 ## Explicit cloud content (schema 16)
 
 The concrete SharePoint/Stream backend feeds only explicit one-target
@@ -533,6 +607,10 @@ Every error code:
 | `archive_newer` | 3 | The archive was written by a newer m365crawl (higher derivation version or higher schema version). `sync`, `watch` and the implicit sync refuse before any write; read commands still work. | `Upgrade m365crawl (brew upgrade ourostack/tap/m365crawl), or point --db at a different archive.` |
 | `unknown_meeting` | 2 | `transcripts <meeting>` or `transcripts show <meeting>` names no recorded call in the archive: no call id, meeting chat or calendar event with a recording notice matches. | `List meetings with recordings: m365crawl transcripts` |
 | `content_unknown` | 2 | Content observation, native source instance or registration is absent or belongs to a different source family. | Inspect `content sources` / `content list`, or explicitly fetch one supported URL to register it. |
+| `local_text_input_unqualified` | 2 | Native path/residency/filesystem/ancestry/type/link evidence is absent or unsafe. | Select one ordinary already-local absolute file explicitly; never hydrate or use a weaker reader. |
+| `local_text_too_large` | 2 | Inclusive source or unchanged production parser bound exceeded. | Select a supported bounded file; never silently clip into success. |
+| `local_text_unsupported`, `local_text_malformed`, `local_text_read_failed` | 2 | The explicit candidate is unsupported, malformed or unreadable. | Inspect source coverage and retry a supported ordinary file explicitly; no invented encryption or verified format. |
+| `local_text_capture_failed`, `local_text_cleanup_failed`, `local_text_policy_restore_failed`, `local_text_cancelled` | 2 | Guarded acquisition/terminal validation/cleanup/policy restoration/cancellation failed; no candidate published. | Inspect coverage and retry explicitly after resolving the failure; retained evidence keeps its own clocks and qualification. |
 | `content_signin_required` | 2 | Explicit content fetch found the tool-owned profile unsigned-in; nothing is admitted. | Obtain user agreement, then `content signin URL --user-agreed` with the supported target and retry the explicit fetch. |
 | `signin_needs_agreement` | 2 | `transcripts signin` or `content signin URL` was run with stdin not a terminal (an agent) and without `--user-agreed`. | Ask the user before the explicit visible-window workflow; run that same command with `--user-agreed` only after agreement. If enrollment is required, stop retrying and keep using offline archive reads. |
 | `transcripts_no_browser` | 3 | `transcripts fetch` or `transcripts signin` found no Edge or Chrome, or `--browser` names no executable. | `Install Microsoft Edge, or pass --browser with the path to Edge or Chrome.` |
