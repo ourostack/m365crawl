@@ -78,8 +78,9 @@ type listResult struct {
 	Total int `json:"total,omitempty"`
 	// Sources is search's: per source searched, how many items of the result it gave and whether
 	// it had more. Nil on every other list.
-	Sources        *searchSources `json:"sources,omitempty"`
-	SourceCoverage *noteCoverage  `json:"source_coverage,omitempty"`
+	Sources                *searchSources            `json:"sources,omitempty"`
+	SourceCoverage         *noteCoverage             `json:"source_coverage,omitempty"`
+	NativeAttendeeEvidence *AttendeeEvidenceCoverage `json:"native_attendee_evidence,omitempty"`
 	// LoopCoverage is the participating Loop sources of a Loop or shared search result, outside
 	// --fields, clipping and zero hits.
 	LoopCoverage          *loopCoverage          `json:"loop_coverage,omitempty"`

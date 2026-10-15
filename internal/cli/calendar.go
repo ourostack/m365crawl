@@ -257,10 +257,11 @@ type rangeInfo struct {
 
 // calendarGroup is the calendar command: with no subcommand it is the agenda.
 type calendarGroup struct {
-	Agenda  calendarCmd        `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
-	Sources calendarSourcesCmd `cmd:"" help:"Per account and source: the days the archive holds, when each was last verified, event and recap counts, and for Outlook the read status, the read interval and the layouts this version does not know."`
-	Actions calendarActionsCmd `cmd:"" help:"Action items of the meeting recaps held by the events of a range, with owners; --mine keeps yours."`
-	Event   calendarEventCmd   `cmd:"" help:"One event with everything the archive holds about it, to prepare for the meeting: attendees, body, recaps, action items, the recordings that belong to this occurrence, the meeting chat with its newest messages, and the related Outlook mail (the invite, and mail with the same subject around the meeting)."`
+	Attendees calendarAttendeesGroup `cmd:"" help:"Native source-selected attendee evidence: explicit capture plus strictly offline sources/list/show. Separate from the displayed calendar roster."`
+	Agenda    calendarCmd            `cmd:"" default:"withargs" hidden:"" help:"The agenda for a range."`
+	Sources   calendarSourcesCmd     `cmd:"" help:"Per account and source: the days the archive holds, when each was last verified, event and recap counts, and for Outlook the read status, the read interval and the layouts this version does not know."`
+	Actions   calendarActionsCmd     `cmd:"" help:"Action items of the meeting recaps held by the events of a range, with owners; --mine keeps yours."`
+	Event     calendarEventCmd       `cmd:"" help:"One event with everything the archive holds about it, to prepare for the meeting: attendees, body, recaps, action items, the recordings that belong to this occurrence, the meeting chat with its newest messages, and the related Outlook mail (the invite, and mail with the same subject around the meeting)."`
 }
 
 type calendarCmd struct {
@@ -777,6 +778,8 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			ev.truncate(rt.g.MaxText)
 		}
 		res, _ := rt.eventResult(ev) // never fails
+		nativeCoverage := rt.attendeeCoverage(d.NativeAttendeeEvidence)
+		res.(*eventResult).nativeCoverage = nativeCoverage
 		if d.Chat != nil {
 			res.(*eventResult).appCoverage = applicationCoverageOf(envelopesOf(d.Chat.Recent))
 		}
@@ -911,9 +914,10 @@ func (ev *calendarEvent) truncate(max int) {
 // eventResult is calendar event's document: the event, or only the keys --fields kept, then the
 // archive's age and any sync error like every read.
 type eventResult struct {
-	event       *calendarEvent
-	keys        []string
-	appCoverage *applicationCoverage // of the chat's recent messages; nil without a meeting chat
+	nativeCoverage *AttendeeEvidenceCoverage
+	event          *calendarEvent
+	keys           []string
+	appCoverage    *applicationCoverage // of the chat's recent messages; nil without a meeting chat
 	meta
 }
 
@@ -935,9 +939,14 @@ func (r *eventResult) MarshalJSON() ([]byte, error) {
 		body = p
 	}
 	// Both documents are this package's own structs, which always encode.
+	nativeCoverage := r.nativeCoverage
+	if nativeCoverage == nil {
+		nativeCoverage = emptyAttendeeCoverage()
+	}
 	withCoverage, _ := joinJSON(body, struct {
-		Coverage *applicationCoverage `json:"application_evidence_coverage,omitempty"`
-	}{r.appCoverage})
+		Coverage       *applicationCoverage      `json:"application_evidence_coverage,omitempty"`
+		NativeCoverage *AttendeeEvidenceCoverage `json:"native_attendee_evidence"`
+	}{r.appCoverage, nativeCoverage})
 	return joinJSON(json.RawMessage(withCoverage), r.meta)
 }
 

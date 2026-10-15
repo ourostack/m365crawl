@@ -6,6 +6,28 @@
 
 # m365crawl — Your Microsoft 365 work, ready for your agents
 
+### Native meeting attendee evidence
+
+Explicitly run `m365crawl calendar attendees sync` for Mac HxStore discovery,
+or `calendar attendees sync --root DIR` for a supported copied profile root.
+Then use strictly offline `calendar attendees sources`, `list <event>` and
+`show attendee-observation:N`, even with `--max-age 1ns`.
+Inspect `native_attendee_evidence` separately from the existing event roster:
+it records the actual reader-selected source detail, not retained/unioned display
+attendees, active people, resolved identities or current membership.
+
+Own-snapshot ambiguity, original losses/clocks and independent event/detail
+bindings survive preview100, fields and zero hits. Exact full-record SQL extracts
+one complete indexed native object; full-capture SQL reads its immutable snapshot.
+Follow emitted routes with their selected absolute archive and `--max-age 0`.
+Shared ordinary Outlook capture refreshes registered lanes from the same copy;
+standalone capture leaves mail intact and ensures the next eligible ordinary read
+still catches up mail. Native Windows/OWA acquisition remains unqualified;
+portable archive reads and fixture cross-compilation do not prove it.
+[Command contract](docs/commands.md#calendar-attendees-sync).
+
+![Synthetic native attendee evidence flow](docs/outlook-attendee-evidence-synthetic.svg)
+
 ### Engage Home-session archive
 
 Explicitly `m365crawl content fetch engage-home`, then search/read offline with
@@ -112,6 +134,7 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 | Find that thing someone sent me | `m365crawl search "budget review"` — chats and mail together, each hit labelled with its `source` |
 | Show me the whole conversation | `m365crawl thread <link>` (Teams) · `m365crawl mail thread <id>` (the reply chain) |
 | Prep me for my 2 pm | `m365crawl calendar` then `m365crawl calendar event <id>` — attendees, body, the meeting chat and related mail |
+| Inspect the native evidence behind a meeting roster | Explicit `calendar attendees sync` once, then offline `calendar attendees list <event>` and `show attendee-observation:N`; compare independent source scope, never substitute it for the displayed roster |
 | Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
 | What's in the archive and how fresh is it? | `m365crawl` |
 | Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
@@ -189,7 +212,7 @@ source  kind             status    coverage      locator                        
 
 | Area | Direction | What still needs proving |
 | --- | --- | --- |
-| People resolution and meetings | Qualify subject-scoped identity links and read fuller attendee lists | Positive subject tenancy, current-copy ambiguity, source coverage and platform-specific mappings |
+| People resolution and meetings | Qualify subject-scoped identity links and current membership beyond the available native attendee evidence | Positive subject tenancy, current-membership evidence and additional platform-specific mappings |
 | Office and OneDrive | Resolve file/library associations and add separately qualified local document text | Provider/residency evidence, ambiguous identities and Windows-specific sources; metadata alone is not file or text access |
 | More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
 | Archived bot citations and Loop | Expose citations in archived bot replies; link cached Loop channels to their pages, messages and authors | Preserve Teams provenance, snapshot versions and partial coverage; cached channel text is not a full page, and this is not private Copilot history |
@@ -206,6 +229,11 @@ The goal is one connected archive, not an unrelated crawler per app. New sources
 For example:
 
 > Add support for my Microsoft 365 app so my agent can answer this question: [the job]. I use [app and version] on [operating system]. Today m365crawl [what it does or cannot do]. Please investigate the available data, explain any coverage limits, and propose how it would join the existing archive.
+
+For meeting requests, say whether you need displayed roster detail, source-selected
+native observations, resolved subjects or current membership. Include the host/app
+version and synthetic scope examples; native HxStore evidence does not imply
+Windows/OWA acquisition or directory identity support.
 
 Search [existing issues](https://github.com/ourostack/m365crawl/issues) first, then [open a prompt request](https://github.com/ourostack/m365crawl/issues/new?template=prompt-request.yml). The form starts with the job you want your agent to do; technical evidence is optional. Requests help choose the next integrations; they are not a promise of support or a delivery date. Do not attach real mail, chats, document contents, cache files, archive databases, credentials or tokens to public issues. Use synthetic examples and non-sensitive counts, formats and field names.
 
@@ -491,6 +519,7 @@ Flags that matter for agents:
 | | `calendar event <id>` | One meeting with attendees, body, recaps, the meeting chat and related mail. |
 | | `calendar actions` | Action items from the recaps in a range, with owners. |
 | | `calendar sources` | What the archive holds per account and source, and how fresh it is. |
+| | `calendar attendees sync/sources/list/show` | Explicit native HxStore capture plus offline source-selected observations, own ambiguity, protected read/link scope and exact full-record routes; separate from the displayed/current roster. |
 | Tooling | `metadata` | The crawlkit app manifest, for `crawlctl discover`. |
 | | `skill` | The agent guide for this version. |
 | | `version` | Version, commit and build date. |

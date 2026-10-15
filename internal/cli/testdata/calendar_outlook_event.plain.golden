@@ -12,3 +12,7 @@ unknown: attachments, attendees, body, categories, has_attachments, is_organizer
 outlook is the only source of this event; not known: attendees, body
 notice: this event has no Teams meeting chat, so chat is null
 archive age: <age>
+Native attendee evidence: native_source_selected_detail_not_display_roster; bindings 0 of 0 (truncated=false)
+notice: Reader-selected source detail is not the retained/unioned displayed attendee roster or current membership.
+notice: Archived read/origin/link matches do not certify live application state; source losses belong to their original snapshot, not each returned row.
+notice: Current reads audit relevant current candidates, not unrelated undisplayed historical bodies; --history and show audit their own relevant retained evidence.

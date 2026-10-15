@@ -36,6 +36,16 @@ var sqlTables = []sqlTable{
 	{"calendar_account_links", "which Outlook account belongs to which Teams account"},
 	{"calendar_matches", "which event of a source is which event key, and how it was matched"},
 	{"calendar_losses", "what the calendar derivation could not use of a record"},
+	{"outlook_calendar_reads", "unique immutable successful ordinary calendar decodes, exact canonical origin/fingerprint/mapper/read clock and receipt digest"},
+	{"outlook_calendar_read_state", "current read receipt per exact calendar account; unchanged checks allocate none"},
+	{"outlook_link_events", "AUTOINCREMENT mutation identities, independent of equal/backward link clocks"},
+	{"outlook_link_state", "independent current link frontier; nullable baseline is not owner-incarnation proof"},
+	{"outlook_attendee_sources", "positive immutable native origin/account namespace, not resolved attendee subjects"},
+	{"outlook_attendee_requests", "canonical exact root/source/discovery request per registered attempt"},
+	{"outlook_attendee_snapshots", "immutable complete canonical native evidence stored once; result_json contains ordered selections/attendees/ambiguities/parents/losses"},
+	{"outlook_attendee_occurrences", "physical native observations stored once per snapshot, ordered ordinal; rowid is N in attendee-observation:N"},
+	{"outlook_attendee_bindings", "independent actual selected event/detail receipts, not duplicated people or the displayed roster"},
+	{"outlook_attendee_members", "protected attempt/read/link/census/input/clock membership, including A-B-A reuse"},
 	{"transcript_parts", "the parts of each recorded meeting"},
 	{"transcript_fetches", "what a transcript fetch brought back for a part"},
 	{"transcript_entries", "fetched transcript text, one row per spoken entry"},
@@ -95,6 +105,7 @@ var sqlTables = []sqlTable{
 }
 
 const sqlHelp = "The archive is opened read-only, so nothing a query does can change it. One statement per run: SELECT, WITH, EXPLAIN or VALUES. PRAGMA statements are refused; read a table's columns with the pragma_table_info() table function, as shown below.\n" +
+	"Native attendee full_record_sql joins the occurrence to its own snapshot and extracts exactly its indexed JSON object plus own losses/ambiguity; it does not repeat the entire capture blob for every observation. Full-capture SQL reads the snapshot separately. All native follow-ups keep the selected absolute --db, --max-age 0 and unbounded --max-text 0.\n" +
 	"For immutable content full_text_sql follow-ups, keep the same explicit --db and pass --max-age 0: SQL otherwise retains the generic implicit freshness workflow before its read-only query.\n" +
 	"Blob columns print as lowercase hex. messages.raw_digest is the SHA-256 of the archived raw JSON (the exact bytes of messages.raw_json), stored as 32 bytes and printed as 64 lowercase hex characters; it is null when no raw JSON is archived. raw_digest in app_observation and in message_app_observations is the same digest as lowercase hex text.\n" +
 	"Archive clocks are UTC text. Engage canonical Result clocks preserve original native offsets; engage_occurrences.starter_modified_at is checked derived evidence only, may have extended UTC years and must not be used as an RFC3339 parser, lexical ordering or filter key. A column named *_json holds JSON as text: a query returns it as a JSON string, to decode a second time or to read with json_extract().\n"

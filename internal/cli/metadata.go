@@ -89,8 +89,19 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "content capture" || strings.HasPrefix(command, "content fetch") || command == "content signin",
 			Title: command + " (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "transcripts", "notes", "documents", "loop", "content"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text"}}
+	for _, command := range []string{"calendar attendees sync", "calendar attendees sources", "calendar attendees list", "calendar attendees show"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "calendar attendees list":
+			argv = append(argv, "<event>")
+		case "calendar attendees show":
+			argv = append(argv, "<attendee-observation-id>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "calendar attendees sync",
+			Title: command + " (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)"}
+	}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "native_calendar_attendee_evidence", "transcripts", "notes", "documents", "loop", "content"}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "outlook_attendee_evidence", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text"}}
 	return m
 }
 

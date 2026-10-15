@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 420" role="img" aria-labelledby="title desc">
+  <title id="title">Synthetic native attendee evidence workflow</title>
+  <desc id="desc">Illustrative synthetic example, not a native platform qualification. A displayed roster stays separate from selected source detail, physical observations and protected archive follow-ups.</desc>
+  <rect width="1040" height="420" rx="16" fill="#101827"/>
+  <g font-family="monospace" fill="#e2e8f0">
+    <text x="28" y="40" font-size="22">SYNTHETIC EXAMPLE — NOT A CURRENT ROSTER</text>
+    <rect x="24" y="66" width="470" height="110" rx="8" fill="#243248"/>
+    <text x="42" y="96" font-size="18">calendar event: displayed detail</text>
+    <text x="42" y="126" font-size="15">Legacy A + Legacy B (retained / unioned)</text>
+    <text x="42" y="153" font-size="15">Attendee counts / responses unchanged</text>
+    <rect x="518" y="66" width="498" height="110" rx="8" fill="#173b46"/>
+    <text x="536" y="96" font-size="18">native_attendee_evidence</text>
+    <text x="536" y="126" font-size="15">actual read 2 → selected detail B</text>
+    <text x="536" y="153" font-size="15">origin matched / link drifted → retained</text>
+    <text x="28" y="218" font-size="17">calendar attendees list EVENT --history</text>
+    <text x="28" y="252" font-size="16">attendee-observation:1  Native A  ambiguous=true</text>
+    <text x="28" y="280" font-size="16">Physical IDs stored once; bindings are separate.</text>
+    <text x="28" y="308" font-size="16">Preview100 + own losses/clocks + full indexed JSON object.</text>
+    <text x="28" y="348" font-size="15" fill="#8ee0c4">Follow-ups: selected absolute --db / --max-age 0 / unclipped SQL</text>
+    <text x="28" y="382" font-size="14" fill="#a8b6cc">No identity resolution, active membership or Windows/OWA native proof.</text>
+  </g>
+</svg>

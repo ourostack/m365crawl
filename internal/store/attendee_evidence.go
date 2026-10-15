@@ -59,6 +59,7 @@ type AttendeeBinding struct {
 	Retained, MatchesRead, MatchesOrigin, MatchesLink, CalendarRowPresent bool
 }
 type AttendeeSourceSummary struct {
+	Request                                                     AttendeeRequest
 	RegistrationID                                              int64
 	SourceID, AttemptID, AdmittedID, SnapshotID, CalendarReadID *int64
 	LinkRevision, CurrentReadID, CurrentLinkRevision            *int64

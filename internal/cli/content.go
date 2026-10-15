@@ -45,7 +45,15 @@ func (rt *runtime) contentFlags() error {
 	return nil
 }
 func (rt *runtime) contentCommand(args ...string) string {
-	words := []string{"m365crawl", "--db", quoteArg(rt.archiveRef()), "--max-age", "0", "content"}
+	return rt.archiveCommand(append([]string{"content"}, args...)...)
+}
+
+func (rt *runtime) archiveCommand(args ...string) string {
+	return archiveScopedCommand(rt.archiveRef(), args...)
+}
+
+func archiveScopedCommand(db string, args ...string) string {
+	words := []string{"m365crawl", "--db", quoteArg(db), "--max-age", "0"}
 	for _, arg := range args {
 		words = append(words, quoteArg(arg))
 	}

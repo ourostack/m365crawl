@@ -61,6 +61,9 @@ var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, 
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
+	if native, ok := v.(interface{ renderAttendees(*runtime) error }); ok {
+		return native.renderAttendees(rt)
+	}
 	w, color := rt.stdout, rt.color
 	if textBanners[label] {
 		render.Banner(w, label, color)
@@ -233,6 +236,11 @@ func (rt *runtime) renderText(label string, v any) error {
 		metaLines(w, r.meta, color)
 	case *eventResult:
 		rt.eventBlock(r)
+		coverage := r.nativeCoverage
+		if coverage == nil {
+			coverage = emptyAttendeeCoverage()
+		}
+		return rt.renderAttendeeCoverage(coverage)
 	case *whoamiResult:
 		rows := [][]string{}
 		for _, a := range r.Accounts {

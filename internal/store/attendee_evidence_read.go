@@ -173,6 +173,11 @@ left join outlook_attendee_sources n on n.source_id=s.id where l.kind=? order by
 			return nil, ErrAttendeeArchiveCorrupt
 		}
 		summary.RegistrationID, summary.Locator, summary.AttemptID, summary.Status, summary.Reason, summary.AttemptedAt = registration, locator, attendeePointer(attempt), status, reason, &at
+		request, err := readAttendeeRequest(ctx, q, attempt)
+		if err != nil {
+			return nil, err
+		}
+		summary.Request = AttendeeRequest{Root: request.Root, SourceID: request.SourceID, Discover: request.Discover}
 		out = append(out, summary)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
