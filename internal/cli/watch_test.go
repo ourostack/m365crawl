@@ -356,7 +356,7 @@ func TestWatchFieldsMaxTextAndAccount(t *testing.T) {
 			t.Errorf("--fields leaked %q", k)
 		}
 	}
-	if txt, _ := it["text"].(string); len([]rune(txt)) > 6 { // 5 characters and an ellipsis
+	if txt, _ := it["text"].(string); len([]rune(txt)) > 5 { // marker is within the five-code-point bound
 		t.Errorf("--max-text not applied: %q", txt)
 	}
 	if l["kind"] != "message" || l["change"] != "new" {

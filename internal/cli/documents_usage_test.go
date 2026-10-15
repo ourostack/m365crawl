@@ -258,14 +258,14 @@ func TestUsagePreviewAndZeroHitCoverage(t *testing.T) {
 	short := items(t, decode(t, clipped))[0]
 	document = short["usage_native"].(map[string]any)["Document"].(map[string]any)
 	first = document["History"].([]any)[0].(map[string]any)
-	if clipped != again || short["text_truncated"] != true || short["title"] != "Quart…" || document["Title"] != "Quart…" || document["Owner"] != "Synth…" ||
-		first["DisplayName"] != "First…" || first["Subject"] != "Synth…" || first["Participants"].([]any)[0].(map[string]any)["DisplayName"] != "Parti…" ||
+	if clipped != again || short["text_truncated"] != true || short["title"] != "Quar…" || document["Title"] != "Quar…" || document["Owner"] != "Synt…" ||
+		first["DisplayName"] != "Firs…" || first["Subject"] != "Synt…" || first["Participants"].([]any)[0].(map[string]any)["DisplayName"] != "Part…" ||
 		document["ID"] != "native-over" || document["URL"] != over.URL || short["url"] != over.URL || document["UniqueID"] != "unique-native-over" ||
 		first["SMTP"] != "sharer@example.invalid" || first["ConversationID"] != "19:synthetic-thread@thread.v2" ||
 		first["At"].(map[string]any)["Raw"] != "2026-10-08T09:00:00Z" {
 		t.Fatalf("clipping changed an identifier or was not stable: %v", document["Title"])
 	}
-	if reclipped, cut := truncateRunes(short["title"].(string), 5); reclipped != short["title"] || !cut {
+	if reclipped, cut := truncateRunes(short["title"].(string), 5); reclipped != short["title"] || cut {
 		t.Fatalf("clipping a clipped value changed it: %q", reclipped)
 	}
 }

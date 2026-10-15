@@ -395,14 +395,14 @@ func TestShowMaxText(t *testing.T) {
 	m := trJSON(t, e, "--max-text", "5", "transcripts", "show", "call-1")
 	es := m["segments"].([]any)[0].(map[string]any)["entries"].([]any)
 	first, third := es[0].(map[string]any), es[2].(map[string]any)
-	if first["text"] != "Good …" || first["text_truncated"] != true || third["text"] != "Yes, …" || m["text_truncated"] != true {
+	if first["text"] != "Good…" || first["text_truncated"] != true || third["text"] != "Yes,…" || m["text_truncated"] != true {
 		t.Fatalf("entries %v", es)
 	}
 	if m := trJSON(t, e, "transcripts", "show", "call-1"); m["text_truncated"] != nil {
 		t.Fatal("nothing cut, no text_truncated")
 	}
 	_, out, _ := e.tr("--format", "text", "--max-text", "5", "transcripts", "show", "call-1")
-	if !strings.Contains(out, "entries cut by --max-text") || !strings.Contains(out, "Ada Example: Good … Shall…") {
+	if !strings.Contains(out, "entries cut by --max-text") || !strings.Contains(out, "Ada Example: Good… Shal…") {
 		t.Fatalf("text:\n%s", out)
 	}
 	// --fields with text keeps text_truncated beside it.

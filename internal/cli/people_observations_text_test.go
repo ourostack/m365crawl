@@ -33,7 +33,7 @@ func TestPeopleObservationsBoundedNamesPreserveIdentityEvidence(t *testing.T) {
 	item := peopleItem(store.PeopleObservationRow{Person: outlookpeople.Person{
 		DisplayName: "Long fixture display", FirstName: "Fixture", LastName: "Example",
 		Email: "fixture@example.invalid", TeamsID: "8:orgid:fixture"}}, 4)
-	if !item.TextTruncated || item.DisplayName != "Long…" || item.Email != "fixture@example.invalid" || item.TeamsID != "8:orgid:fixture" {
+	if !item.TextTruncated || item.DisplayName != "Lon…" || item.Email != "fixture@example.invalid" || item.TeamsID != "8:orgid:fixture" {
 		t.Fatalf("bounded names must not truncate identity evidence: %+v", item)
 	}
 }

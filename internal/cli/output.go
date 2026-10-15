@@ -359,13 +359,14 @@ func splitFields(s string) []string {
 	return out
 }
 
-// truncateRunes cuts s to max runes and appends an ellipsis; max <= 0 disables truncation.
+// truncateRunes bounds s to max Unicode code points, including a cut's ellipsis.
+// max <= 0 disables truncation; exact-bound strings are unchanged.
 func truncateRunes(s string, max int) (string, bool) {
 	if max <= 0 || utf8.RuneCountInString(s) <= max {
 		return s, false
 	}
 	r := []rune(s)
-	return string(r[:max]) + "…", true
+	return string(r[:max-1]) + "…", true
 }
 
 var relativeDur = regexp.MustCompile(`^(\d+(?:\.\d+)?)([dw])$`)

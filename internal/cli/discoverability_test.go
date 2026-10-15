@@ -298,7 +298,7 @@ func TestFieldsAppSummary(t *testing.T) {
 	clipped := byID(t, items(t, m), "app-1")["app_summary"].(map[string]any)
 	absent := byID(t, items(t, m), "plain-1")["app_summary"].(map[string]any)
 	cited := byID(t, items(t, m), "cite-only")["app_summary"].(map[string]any)
-	if clipped["app_name"] != "Synth…" || absent["state"] != "absent" || absent["app_id"] != nil || absent["app_name"] != nil || absent["reply_to_id"] != nil ||
+	if clipped["app_name"] != "Synt…" || absent["state"] != "absent" || absent["app_id"] != nil || absent["app_name"] != nil || absent["reply_to_id"] != nil ||
 		absent["citations_total"] != float64(0) || cited["state"] != "mapped" || cited["app_id"] != nil || cited["citations_total"] != float64(1) {
 		t.Fatalf("summaries: %v %v %v", clipped, absent, cited)
 	}

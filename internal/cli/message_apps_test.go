@@ -299,7 +299,7 @@ func TestCalendarAppEvidenceBounds(t *testing.T) {
 	obs := recent["app_observation"].(map[string]any)
 	app = obs["served"].(map[string]any)
 	cit := app["citations"].([]any)[0].(map[string]any)
-	if cut["text_truncated"] != true || app["app_name"] != "NNNNN…" || app["app_name_truncated"] != true || cit["title"] != "NNNNN…" || cit["title_truncated"] != true ||
+	if cut["text_truncated"] != true || app["app_name"] != "NNNN…" || app["app_name_truncated"] != true || cit["title"] != "NNNN…" || cit["title_truncated"] != true ||
 		obs["text_truncated"] != true || app["app_id"] != "app-long" {
 		t.Fatalf("calendar clipping bypassed application bounds: %v", obs)
 	}
@@ -320,10 +320,10 @@ func TestApplicationItemHelpers(t *testing.T) {
 	env := store.MessageApplicationEnvelope{State: store.AppStateMapped, ActiveMapperVersion: 1, Served: &store.ApplicationRepresentation{ID: 4, State: store.AppStateMapped,
 		Payload: store.ApplicationPayload{AppName: &name, Citations: []store.ApplicationCitation{{ID: "1", Title: title}}}}}
 	it := applicationItemOf(env, 0, "/a.db")
-	if it.TextTruncated || it.truncate(0) || !it.truncate(3) || *it.Served.AppName != "ABC…" || it.Served.Citations[0].Title != "abc…" {
+	if it.TextTruncated || it.truncate(0) || !it.truncate(3) || *it.Served.AppName != "AB…" || it.Served.Citations[0].Title != "ab…" {
 		t.Fatalf("clip: %+v", it.Served.applicationPayloadItem)
 	}
-	if !it.truncate(3) || *it.Served.AppName != "ABC…" || it.Served.Citations[0].Title != "abc…" || name != "ABCDEFGH" {
+	if !it.truncate(3) || *it.Served.AppName != "AB…" || it.Served.Citations[0].Title != "ab…" || name != "ABCDEFGH" {
 		t.Fatal("clipping is not idempotent or changed the store's strings")
 	}
 	if appMarker(nil) != "" || appDetailLines("x", nil) != nil || appText("a\x1b[31mb\n c") != "a?[31mb c" {

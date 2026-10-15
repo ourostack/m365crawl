@@ -315,11 +315,11 @@ func TestMailFieldsAndMaxText(t *testing.T) {
 		t.Fatalf("fields = %v", got)
 	}
 	m = mailJSON(t, e, "--max-text", "5", "mail", "list", "--folder", "inbox", "--unread")
-	if it := items(t, m)[0]; it["preview"] != "Short…" || it["text_truncated"] != true {
+	if it := items(t, m)[0]; it["preview"] != "Shor…" || it["text_truncated"] != true {
 		t.Fatalf("max-text = %v", it)
 	}
 	m = mailJSON(t, e, "--max-text", "5", "mail", "show", "outlook/Main:101")
-	if m["body_text"] != "body …" || m["text_truncated"] != true {
+	if m["body_text"] != "body…" || m["text_truncated"] != true {
 		t.Fatalf("show max-text = %v", m)
 	}
 	m = mailJSON(t, e, "--fields", "id,body_text", "mail", "show", "outlook/Main:101")

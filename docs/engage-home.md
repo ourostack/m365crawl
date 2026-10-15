@@ -54,6 +54,12 @@ column is evidence to check, never a lexical date/order key or parser input.
 
 ## Preview, complete evidence and integrity
 
+`--max-text N` caps each displayed block and title independently at N Unicode
+code points, including a truncation ellipsis. A cut keeps N−1 code points plus
+`…`; N=1 is only the marker. Exact-bound/shorter values stay unchanged and0 keeps
+all text. This is not a byte, grapheme, terminal-width or aggregate-session
+budget, and never changes native IDs, raw clocks or complete archived evidence.
+
 List/search/detail preview the first **100 ordered blocks**, including empty
 and repeated blocks. `blocks_total`, `preview_truncated` and `text_truncated`
 explain clipping. Native IDs, raw clocks, version and nullable flags stay exact;
