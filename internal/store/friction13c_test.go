@@ -168,7 +168,7 @@ func TestTeams(t *testing.T) {
 		mk(acctA, "t1-b", "Topic", "Releases", "t1", base.Add(time.Hour), base.Add(time.Minute)),
 		mk(acctA, "t2", "Space", "Design", "t2", base.Add(2*time.Hour), time.Time{}),
 		mk(acctA, "t2-a", "Topic", "Reviews", "t2", time.Time{}, time.Time{}),
-		mk(acctA, "t3", "Space", "Childless", "t3", base.Add(9*time.Hour), time.Time{}), // no channels archived: not listed
+		mk(acctA, "t3", "Space", "Childless", "t3", base.Add(9*time.Hour), time.Time{}),
 		mk(acctA, "chat", "Chat", "A chat", "", base.Add(10*time.Hour), base),
 		mk(acctB, "t4", "Space", "Other account", "t4", base.Add(4*time.Hour), time.Time{}),
 		mk(acctB, "t4-a", "Topic", "Elsewhere", "t4", base.Add(4*time.Hour), base),
@@ -189,10 +189,13 @@ func TestTeams(t *testing.T) {
 	}))
 
 	rows, trunc, err := s.Teams(ctx, Filter{})
-	if err != nil || trunc || len(rows) != 3 {
+	if err != nil || trunc || len(rows) != 4 {
 		t.Fatalf("%v %v %+v", err, trunc, rows)
 	}
-	t4, t1, t2 := rows[0], rows[1], rows[2]
+	t3, t4, t1, t2 := rows[0], rows[1], rows[2], rows[3]
+	if t3.ID != "t3" || t3.ChannelCount != 0 || t3.UnreadCount != 0 || !t3.LastActivityAt.Equal(base.Add(9*time.Hour)) {
+		t.Errorf("t3 = %+v", t3)
+	}
 	if t4.ID != "t4" || t4.DisplayName != "Other account" || t4.ChannelCount != 1 || t4.UnreadCount != 1 || !t4.LastActivityAt.Equal(base.Add(4*time.Hour)) || t4.TenantID != acctB.TenantID || t4.UserID != acctB.UserID {
 		t.Errorf("t4 = %+v", t4)
 	}
@@ -205,12 +208,12 @@ func TestTeams(t *testing.T) {
 	}
 
 	one, _, _ := s.Teams(ctx, Filter{Account: &acctA})
-	if len(one) != 2 || one[0].ID != "t1" {
+	if len(one) != 3 || one[0].ID != "t3" {
 		t.Errorf("account filter: %+v", one)
 	}
 	var total int
 	cut, trunc, err := s.Teams(ctx, Filter{Limit: 2, Total: &total})
-	if err != nil || !trunc || len(cut) != 2 || total != 3 {
+	if err != nil || !trunc || len(cut) != 2 || total != 4 {
 		t.Errorf("limit: %v %v %d total %d", err, trunc, len(cut), total)
 	}
 }
