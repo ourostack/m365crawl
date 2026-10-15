@@ -16,12 +16,12 @@ import (
 const maxTeamMatches = 10
 
 // resolveTeam turns a --team value (a team id, or a team name compared case-insensitively and
-// exactly) into one team id. A team is a conversation other conversations point at through
-// team_id (chats point at themselves, so they never qualify). No match, or a name shared by
+// exactly) into one team id. A team is a Space conversation or one other conversations point at
+// through team_id. A self-referencing chat alone does not qualify. No match, or a name shared by
 // several teams, is a usage error that names how to continue.
 func (s *Store) resolveTeam(ctx context.Context, acct *teamsdesktop.Account, q string) (string, error) {
 	var w where
-	w.add(`exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id)`)
+	w.add(teamsExists)
 	w.add(`(t.id=? or lower(`+teamName+`)=lower(?))`, q, q)
 	if acct != nil {
 		w.add(`t.tenant_id=? and t.user_id=?`, acct.TenantID, acct.UserID)
@@ -178,20 +178,19 @@ func unnamedConversation(kind, id string, members int) string {
 	return fmt.Sprintf("Unnamed %s (%d members, id %s)", noun, members, short)
 }
 
-// TeamRow is one team: a conversation other conversations point at through team_id.
+// TeamRow is one team: a Space conversation or one named by another conversation's team_id.
 type TeamRow struct {
 	TenantID, UserID, ID string
 	DisplayName          string
-	ChannelCount         int       // conversations that belong to the team, not counting its own
+	ChannelCount         int       // cached conversations that belong to the team, not counting its own
 	LastActivityAt       time.Time // newest message time across the team's own conversation and channels
 	UnreadCount          int       // unread messages in the team's channels (and its own conversation)
 }
 
-// teamsFrom and teamsExists select the teams: conversations that other conversations name as
-// their team.
+// teamsFrom and teamsExists select explicit Space roots and teams inferred from cached children.
 const (
 	teamsFrom   = ` from conversations t`
-	teamsExists = `exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id)`
+	teamsExists = `(lower(t.kind)='space' or exists(select 1 from conversations x where x.tenant_id=t.tenant_id and x.user_id=t.user_id and x.team_id=t.id and x.id<>t.id))`
 )
 
 // Teams lists the archived teams, newest channel activity first. f.Account narrows to one
