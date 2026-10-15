@@ -8,6 +8,7 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ### Fixed
 
+- Browser commands preserve the caller's cancellation or deadline error when the browser connection has already closed, rather than reporting a disconnected browser.
 - Transcript fetches recognize Microsoft dogfood SharePoint tenant hosts under
   `.sharepoint-df.com`, including personal sites, without weakening host-label,
   site-root, identifier or reference-quality checks. Unsupported hosts now have
