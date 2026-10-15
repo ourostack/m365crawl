@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/store"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -1401,12 +1403,57 @@ func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
 	}
 }
 
-// makeAlpha1 turns a current archive into the exact alpha.1 shape: no meta table and no
-// sync_runs.accounts_json column.
+// makeAlpha1 simulates alpha.1's missing derivation/run metadata while retaining the current
+// schema version and its guards. Genuine old-schema migration is covered by store's schema tests.
 func makeAlpha1(t *testing.T, path string) {
 	t.Helper()
-	archiveExec(t, path, `drop table meta`)
+	archiveExec(t, path, `delete from meta`)
 	archiveExec(t, path, `alter table sync_runs drop column accounts_json`)
+}
+
+func TestE2EAlpha1PhysicalSchemaUpgrade(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	for _, name := range []string{
+		"outlook_attendee_link_insert", "outlook_attendee_link_insert_event",
+		"outlook_attendee_link_update_old", "outlook_attendee_link_update_new",
+		"outlook_attendee_link_delete", "outlook_attendee_source_insert",
+		"outlook_attendee_event_insert",
+	} {
+		archiveExec(t, e.db, `drop trigger `+name)
+	}
+	for _, name := range []string{
+		"outlook_attendee_members", "outlook_attendee_bindings",
+		"outlook_attendee_occurrences", "outlook_attendee_snapshots",
+		"outlook_attendee_requests", "outlook_attendee_sources",
+		"outlook_calendar_read_state", "outlook_calendar_reads",
+		"outlook_link_state", "outlook_link_events",
+	} {
+		archiveExec(t, e.db, `drop table `+name)
+	}
+	archiveExec(t, e.db, `drop table meta`)
+	archiveExec(t, e.db, `alter table sync_runs drop column accounts_json`)
+	archiveExec(t, e.db, `update schema_migrations set version=1`)
+	before := archiveCount(t, e.db, `select count(*) from messages`)
+	res := e.cmd("messages", "--max-age", "0")
+	mustExit(t, res, 0)
+	if whole := mustJSON(t, res.stdout); whole["needs_sync"] != true || whole["sync_error"] != nil {
+		t.Fatalf("old physical schema must remain readable without repair: %s", res.stdout)
+	}
+	if got := archiveCount(t, e.db, `select max(version) from schema_migrations`); got != 1 {
+		t.Fatalf("read migrated old schema to %d", got)
+	}
+	e.sync()
+	if got := archiveCount(t, e.db, `select max(version) from schema_migrations`); got != store.SchemaVersion {
+		t.Fatalf("sync schema = %d, want %d", got, store.SchemaVersion)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from sqlite_master where type='trigger' and name like 'outlook_attendee_%'`); got != 7 {
+		t.Fatalf("migrated native guards = %d, want 7", got)
+	}
+	if got := archiveCount(t, e.db, `select count(*) from messages`); got != before {
+		t.Fatalf("migration lost retained messages: %d -> %d", before, got)
+	}
+	mustExit(t, e.cmd("messages", "--max-age", "0"), 0)
 }
 
 // hostWarning says a doctor warning comes from the fixture or the host, not from the archive: the
