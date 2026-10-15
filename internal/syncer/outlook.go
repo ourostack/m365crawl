@@ -57,6 +57,7 @@ var (
 	outlookDefaultRoot       = defaultOutlookRoot
 	outlookDiscover          = outlookdesktop.Discover
 	outlookSnapshot          = outlookdesktop.Snapshot
+	outlookCalendarClose     = (*os.File).Close
 )
 
 // outlookOutcome is one profile's result, or the failure of finding profiles at all (key "outlook").
@@ -269,19 +270,25 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 		return SourceReport{}, false, nil, errs.DBError(err)
 	}
 	pending, pendingErr := beginSharedPeople(ctx, r.st, p.StorePath, fp, begun, r.o.FullRead)
+	native, nativeErr := beginSharedAttendee(ctx, r.st, p.StorePath, fp, begun, r.o.FullRead)
 	info, cleanup, err := outlookSnapshot(ctx, p.StorePath)
 	if pending != nil {
 		pending.acquired = peopleNow().UTC()
 	}
+	if native != nil {
+		native.acquired = outlookNow()
+	}
+	var selections *outlookcal.AttendeeSelections
+	var readID int64
+	var nativeCalendarErr error
 	defer func() {
-		if pending == nil {
-			cleanup()
-			if pendingErr != nil {
-				outcomes = append(outcomes, optionalPeopleOutcome(p.Name, pendingErr))
-			}
-			return
+		outcomes = append(outcomes, finishSharedOutlook(ctx, r.st, p.Name, info, cleanup, err, pending, native, selections, readID, nativeCalendarErr, begun)...)
+		if pendingErr != nil {
+			outcomes = append(outcomes, optionalPeopleOutcome(p.Name, pendingErr))
 		}
-		outcomes = append(outcomes, finishSharedPeople(ctx, r.st, p.Name, info, cleanup, err, *pending))
+		if nativeErr != nil {
+			outcomes = append(outcomes, optionalAttendeeOutcome(p.Name, nativeErr))
+		}
 	}()
 	if err != nil {
 		return SourceReport{}, false, nil, err
@@ -310,7 +317,13 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if outlookSourceOrigin(p.StorePath) != origin {
 		origin = ""
 	}
-	sr, decoded, calErr := r.outlookCalendar(ctx, info, rep, prior, key, account, fp, origin, begun)
+	var calErr error
+	if native != nil {
+		sr, decoded, selections, readID, calErr = r.outlookCalendarEvidence(ctx, info, rep, prior, key, account, fp, origin, begun, true)
+	} else {
+		sr, decoded, calErr = r.outlookCalendar(ctx, info, rep, prior, key, account, fp, origin, begun)
+	}
+	nativeCalendarErr = calErr
 	afterCalendar()
 	if ctx.Err() != nil {
 		return sr, decoded, nil, calErr
@@ -328,9 +341,20 @@ var afterCalendar = func() {}
 
 // outlookCalendar reads the calendar from the private copy and commits it in one transaction.
 func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp, origin string, begun time.Time) (SourceReport, bool, error) {
-	res, err := collectOutlook(ctx, info, account, prior.HoldsEvents)
+	report, decoded, _, _, err := r.outlookCalendarEvidence(ctx, info, rep, prior, key, account, fp, origin, begun, false)
+	return report, decoded, err
+}
+
+func (r *runner) outlookCalendarEvidence(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp, origin string, begun time.Time, want bool) (SourceReport, bool, *outlookcal.AttendeeSelections, int64, error) {
+	var res outlookcal.Result
+	var err error
+	if want {
+		res, err = collectOutlookSelections(ctx, info, account, prior.HoldsEvents, true)
+	} else {
+		res, err = collectOutlook(ctx, info, account, prior.HoldsEvents)
+	}
 	if err != nil {
-		return SourceReport{}, false, err
+		return SourceReport{}, false, nil, 0, err
 	}
 	zone := calendarZone()
 	// An event Outlook deleted leaves the store, with no tombstone, once Outlook compacts (docs/outlook-store.md).
@@ -346,11 +370,11 @@ func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, 
 			return store.Run{StartedAt: begun, FinishedAt: outlookNow(), Source: key, Fingerprint: fp, Status: status, Counts: runCounts{Calendar: cal.Counts}, Omissions: omissions}
 		})
 	if err != nil {
-		return SourceReport{}, false, asCoded(err)
+		return SourceReport{}, false, nil, 0, asCoded(err)
 	}
 	rep.Calendar.Add(cal.Counts)
 	r.progress("%s: %s (%d events)", key, status, len(res.Events))
-	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{account}, Counts: &SourceCounts{Calendar: cal.Counts}}, true, nil
+	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{account}, Counts: &SourceCounts{Calendar: cal.Counts}}, true, res.AttendeeSelections, cal.OutlookReadID, nil
 }
 
 // outlookHeadroom is how much more than it holds when the read starts the runtime may hold before
@@ -376,19 +400,27 @@ const outlookGCPercent = 25
 // collectOutlook opens the private copy and reads it. A guard refusal comes back as a coded
 // error that carries the guard's code.
 func collectOutlook(ctx context.Context, info outlookdesktop.Info, account string, had bool) (outlookcal.Result, error) {
+	return collectOutlookSelections(ctx, info, account, had, false)
+}
+
+func collectOutlookSelections(ctx context.Context, info outlookdesktop.Info, account string, had, want bool) (res outlookcal.Result, returnErr error) {
 	f, err := os.Open(info.Path)
 	if err != nil {
 		return outlookcal.Result{}, errs.Internal(err)
 	}
-	defer func() { _ = f.Close() }()
-	var res outlookcal.Result
+	defer func() {
+		returnErr = errors.Join(returnErr, outlookCalendarClose(f))
+		if returnErr != nil {
+			res = outlookcal.Result{}
+		}
+	}()
 	s, err := outlookcal.OpenStore(f, info.Size)
 	if err == nil {
 		// The read inflates about 400 MB of payloads. Hand back what the earlier sources freed, and
 		// hand back the read's garbage after.
 		debug.FreeOSMemory()
 		defer debug.FreeOSMemory()
-		if res, err = outlookcal.Collect(ctx, s, account, outlookcal.Options{ExpectEvents: had}); err == nil {
+		if res, err = outlookcal.Collect(ctx, s, account, outlookcal.Options{ExpectEvents: had, AttendeeSelections: want}); err == nil {
 			return res, nil
 		}
 	}

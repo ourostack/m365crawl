@@ -105,6 +105,9 @@ func TestAttendeeSchemaUpgradeAndSecondOpen(t *testing.T) {
 	if got, err := ro.CalendarEvent(ctx, nil, calendar.Key(outlookEvent(calendar.TriFalse, base))); err != nil || len(got.NativeAttendeeEvidence.Coverage.Sources) != 0 {
 		t.Fatal("old archive lost legacy event or invented native summary", err)
 	}
+	if _, err := ro.AttendeeCaptureReused(ctx, KnowledgeAttempt{ID: 1, LocatorID: 1}); !errors.Is(err, ErrKnowledgeSourceUnknown) {
+		t.Fatal("old archive invented reuse receipt", err)
+	}
 	if err := ro.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 // outlookMailSupported says whether this operating system reads Outlook mail (a test seam). Mail
 // follows the Outlook source: where Outlook is read and mail is not, a sync says so and goes on.
 var outlookMailSupported = func() bool { return runtime.GOOS != "windows" }
+var outlookMailClose = (*os.File).Close
 
 // mailKey is the source key of a profile's mail in sync_runs and in the report.
 func mailKey(profileKey string) string { return profileKey + "|mail" }
@@ -101,13 +102,17 @@ func (r *runner) readMail(ctx context.Context, p outlookdesktop.Profile, info ou
 
 // collectMail opens the private copy and reads its mail, with the same memory care as the
 // calendar read (the caller sets the GC target). A guard refusal comes back as a coded error that carries the guard's code.
-func collectMail(ctx context.Context, info outlookdesktop.Info, profileDir, account string, opt outlookmail.Options) (outlookmail.Result, error) {
+func collectMail(ctx context.Context, info outlookdesktop.Info, profileDir, account string, opt outlookmail.Options) (res outlookmail.Result, returnErr error) {
 	f, err := os.Open(info.Path)
 	if err != nil {
 		return outlookmail.Result{}, errs.Internal(err)
 	}
-	defer func() { _ = f.Close() }()
-	var res outlookmail.Result
+	defer func() {
+		returnErr = errors.Join(returnErr, outlookMailClose(f))
+		if returnErr != nil {
+			res = outlookmail.Result{}
+		}
+	}()
 	s, err := hxstore.OpenStore(f, info.Size)
 	if err == nil {
 		debug.FreeOSMemory()

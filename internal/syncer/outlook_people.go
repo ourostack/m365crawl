@@ -2,8 +2,6 @@ package syncer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -58,6 +56,13 @@ type pendingPeople struct {
 	acquired  time.Time
 }
 
+type stagedPeople struct {
+	pending pendingPeople
+	result  outlookpeople.Result
+	digest  string
+	err     error
+}
+
 func beginSharedPeople(ctx context.Context, s *store.Store, path, signature string, at time.Time, full bool) (*pendingPeople, error) {
 	locators, err := s.KnowledgeKindLocators(ctx, "outlook_people", 0)
 	if err != nil {
@@ -108,10 +113,20 @@ func finishSharedPeople(ctx context.Context, s *store.Store, profile string, inf
 		err := recordPeopleFailure(ctx, s, pending.attempt, pending.signature, captureErr, pending.previous.Locator)
 		return optionalPeopleOutcome(profile, errors.Join(captureErr, err))
 	}
+	stage := stageSharedPeople(ctx, info, pending)
+	return finishStagedPeople(ctx, s, profile, info, stage, peopleCleanupVerified(info, cleanup))
+}
+
+func stageSharedPeople(ctx context.Context, info outlookdesktop.Info, pending pendingPeople) stagedPeople {
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, digest, readErr := safePeopleCollect(readCtx, info)
-	cause := errors.Join(readErr, peopleCleanupVerified(info, cleanup), readCtx.Err())
+	return stagedPeople{pending: pending, result: result, digest: digest, err: errors.Join(readErr, readCtx.Err())}
+}
+
+func finishStagedPeople(ctx context.Context, s *store.Store, profile string, info outlookdesktop.Info, stage stagedPeople, common error) outlookOutcome {
+	pending, result, digest := stage.pending, stage.result, stage.digest
+	cause := errors.Join(stage.err, common, ctx.Err())
 	if cause != nil {
 		err := recordPeopleFailure(ctx, s, pending.attempt, pending.signature, cause, pending.previous.Locator)
 		return optionalPeopleOutcome(profile, errors.Join(cause, err))
@@ -299,22 +314,18 @@ func collectPeopleCapture(ctx context.Context, info outlookdesktop.Info) (outloo
 	if err != nil {
 		return outlookpeople.Result{}, "", err
 	}
-	result, readErr := outlookpeople.Collect(ctx, s)
-	closeErr := s.Close()
-	if err := errors.Join(readErr, closeErr); err != nil {
+	result, readErr := func() (result outlookpeople.Result, returnErr error) {
+		defer func() { returnErr = errors.Join(returnErr, s.Close()) }()
+		return outlookpeople.Collect(ctx, s)
+	}()
+	if err := readErr; err != nil {
 		return outlookpeople.Result{}, "", err
 	}
-	f, err := peopleHashOpen(info.Path)
+	digest, err := hashOutlookCapture(ctx, info.Path)
 	if err != nil {
 		return outlookpeople.Result{}, "", err
 	}
-	h := sha256.New()
-	_, copyErr := io.Copy(h, f)
-	closeErr = f.Close()
-	if err := errors.Join(copyErr, closeErr, ctx.Err()); err != nil {
-		return outlookpeople.Result{}, "", err
-	}
-	return result, hex.EncodeToString(h.Sum(nil)), nil
+	return result, digest, nil
 }
 
 func peopleCleanupVerified(info outlookdesktop.Info, cleanup func()) error {
