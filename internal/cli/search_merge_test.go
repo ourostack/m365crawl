@@ -619,7 +619,7 @@ func TestSearchMaxTextCutsMailPreviews(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
 	it := items(t, decode(t, out))[0]
-	if it["text_truncated"] != true || !strings.HasPrefix(it["preview"].(string), "previ") {
+	if it["text_truncated"] != true || it["preview"] != "prev…" {
 		t.Fatalf("preview: %v", it)
 	}
 }

@@ -97,7 +97,7 @@ func TestSearchTranscriptsSource(t *testing.T) {
 		t.Fatalf("fields: %v", got)
 	}
 	m = searchJSON(t, e, "hello", "--source", "transcripts", "--max-text", "5")
-	if got := items(t, m)[0]; got["text"] != "and h…" || got["text_truncated"] != true {
+	if got := items(t, m)[0]; got["text"] != "and …" || got["text_truncated"] != true {
 		t.Fatalf("max-text: %v", got)
 	}
 	// Bounds are by each entry's time.

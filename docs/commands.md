@@ -225,7 +225,7 @@ On Windows the default archive path is private by construction. A custom `--db` 
 
 ## Global flags
 
-Every command accepts these. `--fields` and `--max-text` apply to the list and read commands only (`search`, `messages`, `conversations`, `teams`, `people`, `activity`, `stores`, `records`, `unread`, `thread`, `watch`, every `mail` command, `calendar`, `calendar event`, `calendar actions`, `transcripts`, `transcripts show`, `loop list`, `loop search`, `loop show`, `loop sources`, `content list`, `content search`, `content show` and `content sources`); on any other command they are a `usage` error.
+Every command accepts these global flags, but `--fields` and `--max-text` apply only to supported item/preview-output commands. These include applicable list/search/detail/read surfaces such as `content list`, `content search`, `content show` and `content sources`, and the existing `content capture` receipt. Each command's help lists its applicable fields; unsupported use is a `usage` error. This does not make every field or a full SQL record subject to clipping.
 
 | Flag | Meaning |
 | --- | --- |
@@ -240,7 +240,7 @@ Every command accepts these. `--fields` and `--max-text` apply to the list and r
 | `--no-color` | Disable colored output (also `NO_COLOR`). `CLICOLOR_FORCE=1` forces color. |
 | `--max-age=DURATION` | Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d); `0` disables the implicit sync (`$M365CRAWL_MAX_AGE`). When a read syncs first, stderr gets one line before it starts: in text mode `m365crawl: syncing — archive is 2h14m old (max-age 15m)`, in json and log mode `{"notice":"syncing","reason":"stale","archive_age_seconds":N,"max_age_seconds":N}`. The result then gains `synced: {seconds, status}`. |
 | `--fields=a,b,c` | Keep only these top-level keys of each item, comma separated. An unknown key is a `usage` error. Each list command's `--help` ends with the keys it accepts, and each command below lists them under "`--fields` keys". |
-| `--max-text=N` | Truncate each item's text to N characters, including the trailing `…`, and set `text_truncated`. `0` keeps all of it. |
+| `--max-text=N` | Cap each supported displayed text/preview field at N Unicode code points, including any trailing `…`, and set applicable truncation flags. Applies on supported list/search/detail/read surfaces, not native IDs/full records/coverage or one aggregate budget. `0` keeps all text; clipped N=1 is only `…`, exact-N/shorter values stay unchanged. |
 | `--version` | Print the version, commit and build date, then exit. |
 
 ## Output

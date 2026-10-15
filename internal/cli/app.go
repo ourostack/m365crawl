@@ -53,7 +53,7 @@ type Globals struct {
 	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
 	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
 	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A list command's --help ends with the keys it accepts. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
-	MaxText        int    `name:"max-text" help:"List commands only: truncate each item's text to N characters and set text_truncated. 0 keeps all of it." placeholder:"N"`
+	MaxText        int    `name:"max-text" help:"Supported commands: cap each applicable text/preview field at N Unicode code points, including any … marker, and set truncation flags. 0 keeps all text." placeholder:"N"`
 }
 
 type cliApp struct {
@@ -294,8 +294,8 @@ func (rt *runtime) checkListOnly() error {
 	if (rt.g.Fields == "" && rt.g.MaxText == 0) || contains(listCommands, rt.cmd) {
 		return nil
 	}
-	c := errs.Usage(fmt.Sprintf("--fields and --max-text apply to list commands only (%s), not %q", strings.Join(listCommands, ", "), rt.cmd))
-	c.Fix = "Drop the flag, or use it with a list command, for example `m365crawl search <query> --fields id,text`."
+	c := errs.Usage(fmt.Sprintf("--fields and --max-text apply to supported commands only (%s), not %q", strings.Join(listCommands, ", "), rt.cmd))
+	c.Fix = "Drop the flag, or use it with a supported command, for example `m365crawl search <query> --fields id,text`."
 	return c
 }
 

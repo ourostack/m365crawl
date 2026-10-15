@@ -123,7 +123,7 @@ func TestCalendarEventPrepAddsRelatedMailAndRecentChat(t *testing.T) {
 	cut := eventDoc(t, e, id, "--max-text", "3", "--fields", "chat,related_mail")
 	msg0 := cut["chat"].(map[string]any)["recent_messages"].([]any)[0].(map[string]any)
 	mail0 := cut["related_mail"].([]any)[0].(map[string]any)
-	if cut["text_truncated"] != true || msg0["text"] != "Fix…" || msg0["text_truncated"] != true || mail0["preview"] != "Abo…" {
+	if cut["text_truncated"] != true || msg0["text"] != "Fi…" || msg0["text_truncated"] != true || mail0["preview"] != "Ab…" {
 		t.Fatalf("max-text: %v %v %v", cut["text_truncated"], msg0, mail0)
 	}
 	// The agenda points to calendar event for related_mail.

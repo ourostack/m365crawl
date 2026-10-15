@@ -541,7 +541,7 @@ func TestFieldsAndMaxText(t *testing.T) {
 			t.Fatalf("projection kept extra keys: %v", it)
 		}
 		txt := it["text"].(string)
-		if txt != "Hello…" || it["text_truncated"] != true {
+		if txt != "Hell…" || it["text_truncated"] != true {
 			t.Fatalf("truncation: %v", it)
 		}
 	}
@@ -674,7 +674,7 @@ func TestFieldsMaxTextOnNonListCommands(t *testing.T) {
 			code, _, stderr := e.run(append(args, "--json")...)
 			er := errorOf(t, stderr)
 			msg, _ := er["message"].(string)
-			if code != 2 || er["code"] != "usage" || !strings.Contains(msg, "list commands") || !strings.Contains(msg, "search") {
+			if code != 2 || er["code"] != "usage" || !strings.Contains(msg, "supported commands") || !strings.Contains(msg, "search") {
 				t.Errorf("%v: exit %d, %v", args, code, er)
 			}
 		}

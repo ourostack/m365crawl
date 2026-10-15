@@ -61,7 +61,7 @@ func TestParseMaxAge(t *testing.T) {
 }
 
 func TestTruncateRunes(t *testing.T) {
-	if s, cut := truncateRunes("héllo wörld", 5); s != "héllo…" || !cut {
+	if s, cut := truncateRunes("héllo wörld", 5); s != "héll…" || !cut {
 		t.Fatalf("%q %v", s, cut)
 	}
 	if s, cut := truncateRunes("short", 5); s != "short" || cut {
@@ -70,7 +70,7 @@ func TestTruncateRunes(t *testing.T) {
 	if s, cut := truncateRunes("anything", 0); s != "anything" || cut {
 		t.Fatalf("0 disables: %q %v", s, cut)
 	}
-	if s, _ := truncateRunes("👨‍👩‍👧x", 1); s != "👨…" {
+	if s, _ := truncateRunes("👨‍👩‍👧x", 1); s != "…" {
 		t.Fatalf("rune based: %q", s)
 	}
 }

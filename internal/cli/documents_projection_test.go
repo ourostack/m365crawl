@@ -18,7 +18,7 @@ func TestDocumentsProjectionBoundsDoNotRewriteNativeIDsOrStoredModel(t *testing.
 		Activity: &officedocuments.Activity{Users: []officedocuments.Person{{DisplayName: "Long activity user"}}}}
 	row := store.DocumentObservationRow{ID: 10, SourceID: 1, CaptureID: 1, Application: "Word", Document: document}
 	item := documentItemOf(row, 4, "")
-	if !item.TextTruncated || item.Title != "Long…" || item.Native.FriendlyPath != "/syn…" ||
+	if !item.TextTruncated || item.Title != "Lon…" || item.Native.FriendlyPath != "/sy…" ||
 		item.URL != document.URL || item.Native.ResourceID != document.ResourceID ||
 		item.Native.Creator.UPN != document.Creator.UPN || item.ModifiedAt != nil {
 		t.Fatal("projection lost native IDs, invented time or omitted display bounds")

@@ -297,8 +297,8 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 	_, stdout, _ = e.run("--max-age", "0", "--max-text", "5", "docs", "list", "--application", "registry", "--limit", "1")
 	clipped := items(t, decode(t, stdout))[0]
 	clippedNative := clipped["registry_native"].(map[string]any)
-	if clipped["text_truncated"] != true || len([]rune(clipped["title"].(string))) > 6 || clipped["title"] != clippedNative["Title"] ||
-		len([]rune(clippedNative["FriendlyPath"].(string))) > 6 || !strings.HasPrefix(clipped["url"].(string), "file://") || clipped["url"] != clippedNative["URL"] {
+	if clipped["text_truncated"] != true || len([]rune(clipped["title"].(string))) > 5 || clipped["title"] != clippedNative["Title"] ||
+		len([]rune(clippedNative["FriendlyPath"].(string))) > 5 || !strings.HasPrefix(clipped["url"].(string), "file://") || clipped["url"] != clippedNative["URL"] {
 		t.Fatalf("max-text clipping: %v", clipped)
 	}
 	id := bad["id"].(string)
