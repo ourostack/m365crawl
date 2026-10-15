@@ -80,3 +80,5 @@ type Summary struct {
 }
 
 type Visitor func(int, outlookattendees.Attendee) error
+
+type SelectionVisitor func(int, outlookcal.SelectionReceipt) error

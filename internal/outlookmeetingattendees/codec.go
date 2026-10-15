@@ -223,6 +223,14 @@ func Audit(ctx context.Context, raw []byte, visitor Visitor) (Summary, error) {
 }
 
 func auditBounded(ctx context.Context, raw []byte, visitor Visitor, limit int) (Summary, error) {
+	return auditVisitorsBounded(ctx, raw, visitor, nil, limit)
+}
+
+func AuditVisitors(ctx context.Context, raw []byte, visitor Visitor, selections SelectionVisitor) (Summary, error) {
+	return auditVisitorsBounded(ctx, raw, visitor, selections, MaxEnvelopeBytes)
+}
+
+func auditVisitorsBounded(ctx context.Context, raw []byte, visitor Visitor, selections SelectionVisitor, limit int) (Summary, error) {
 	var staged Summary
 	if err := checkEnvelopeSize(len(raw), limit); err != nil {
 		return Summary{}, err
@@ -231,11 +239,11 @@ func auditBounded(ctx context.Context, raw []byte, visitor Visitor, limit int) (
 		return Summary{}, err
 	}
 	// Pass one validates every relationship before publishing any selected rows.
-	if err := scanEvidence(ctx, raw, &staged, nil, nil); err != nil {
+	if err := scanEvidence(ctx, raw, &staged, nil, nil, nil); err != nil {
 		return Summary{}, err
 	}
-	if visitor != nil {
-		if err := scanEvidence(ctx, raw, nil, visitor, nil); err != nil {
+	if visitor != nil || selections != nil {
+		if err := scanEvidence(ctx, raw, nil, visitor, nil, selections); err != nil {
 			return Summary{}, err
 		}
 	}
@@ -248,13 +256,13 @@ func Decode(ctx context.Context, raw []byte) (Evidence, error) {
 	}
 	e := Evidence{Attendees: []outlookattendees.Attendee{}, AmbiguousKeys: []uint32{},
 		Parents: []outlookattendees.Evidence{}, Losses: []outlookattendees.Loss{}, Selections: []outlookcal.SelectionReceipt{}}
-	if err := scanEvidence(ctx, raw, nil, nil, &e); err != nil {
+	if err := scanEvidence(ctx, raw, nil, nil, &e, nil); err != nil {
 		return Evidence{}, err
 	}
 	return e, nil
 }
 
-func scanEvidence(ctx context.Context, raw []byte, summary *Summary, visitor Visitor, e *Evidence) error {
+func scanEvidence(ctx context.Context, raw []byte, summary *Summary, visitor Visitor, e *Evidence, selectionVisitor SelectionVisitor) error {
 	c := cursor{raw: raw}
 	if err := c.literal(`{"format":"outlook-attendee-evidence-v1","selections":[`); err != nil {
 		return err
@@ -271,7 +279,7 @@ func scanEvidence(ctx context.Context, raw []byte, summary *Summary, visitor Vis
 	selectionCopies := map[[32]byte]bool{}
 	idBytes := 0
 	selections := 0
-	if err := c.array(ctx, 65536, func(_ int) error {
+	if err := c.array(ctx, 65536, func(i int) error {
 		var s selectionRow
 		if err := c.row(&s); err != nil {
 			return err
@@ -303,6 +311,9 @@ func scanEvidence(ctx context.Context, raw []byte, summary *Summary, visitor Vis
 		selections++
 		if e != nil {
 			e.Selections = append(e.Selections, s.receipt())
+		}
+		if selectionVisitor != nil {
+			return selectionVisitor(i, s.receipt())
 		}
 		return nil
 	}); err != nil {

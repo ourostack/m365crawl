@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/calendar"
 )
 
 func TestAttendeeSchemaNamespace(t *testing.T) {
@@ -71,7 +73,7 @@ func TestAttendeeSchemaUpgradeAndSecondOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitOutlook(t, s, time.UTC, "same")
+	commitOutlook(t, s, time.UTC, "same", outlookEvent(calendar.TriFalse, base))
 	for name := range attendeeTriggerSQL {
 		s.qExec(t, `drop trigger `+name)
 	}
@@ -90,6 +92,18 @@ func TestAttendeeSchemaUpgradeAndSecondOpen(t *testing.T) {
 	receipt, err := ro.OutlookReadReceipt(ctx, "outlook/Main")
 	if err != nil || receipt.ID != 0 {
 		t.Fatal("old optional namespace fabricated a read")
+	}
+	if got, err := ro.AttendeeSources(ctx, 0); err != nil || len(got.Coverage.Sources) != 0 {
+		t.Fatal("old optional namespace invented sources", err)
+	}
+	if _, err := ro.AttendeeDetail(ctx, nil, 1); !errors.Is(err, ErrKnowledgeSourceUnknown) {
+		t.Fatal("old optional namespace invented detail", err)
+	}
+	if got, err := ro.AttendeeEventEvidence(ctx, nil, calendar.Key(outlookEvent(calendar.TriFalse, base)), AttendeeFilter{Limit: 1}); err != nil || len(got.Rows) != 0 {
+		t.Fatal("old optional namespace invented event evidence", err)
+	}
+	if got, err := ro.CalendarEvent(ctx, nil, calendar.Key(outlookEvent(calendar.TriFalse, base))); err != nil || len(got.NativeAttendeeEvidence.Coverage.Sources) != 0 {
+		t.Fatal("old archive lost legacy event or invented native summary", err)
 	}
 	if err := ro.Close(); err != nil {
 		t.Fatal(err)
