@@ -70,9 +70,10 @@ func (c *CalendarCounts) Add(b CalendarCounts) {
 
 // CalendarResult is a derivation's counts and the omissions it counted by code.
 type CalendarResult struct {
-	Counts    CalendarCounts
-	Omissions map[string]int
-	losses    []loss
+	OutlookReadID int64
+	Counts        CalendarCounts
+	Omissions     map[string]int
+	losses        []loss
 	// failure is the error a rolled-back derivation was counted for; the omission is what readers see.
 	failure error
 }

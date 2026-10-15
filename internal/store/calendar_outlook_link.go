@@ -50,7 +50,9 @@ func teamsAddresses(ctx context.Context, tx *sql.Tx) (map[string]map[string]bool
 	for rows.Next() {
 		var tenant, user string
 		var raw sql.NullString
-		_ = rows.Scan(&tenant, &user, &raw) // text columns that cannot be NULL, and a NullString
+		if err := rows.Scan(&tenant, &user, &raw); err != nil {
+			return nil, err
+		}
 		var v struct {
 			UPN   string `json:"userPrincipalName"`
 			Mail  string `json:"mail"`
@@ -88,6 +90,9 @@ type outlookLinkRow struct {
 // ended.
 func (s *Store) AutoLinkOutlook(ctx context.Context, at time.Time) (res AutoLinkResult, err error) {
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := auditAttendeeNamespace(ctx, tx); err != nil {
+			return err
+		}
 		teams, err := teamsAddresses(ctx, tx)
 		if err != nil {
 			return err
@@ -179,7 +184,9 @@ func outlookIdentities(ctx context.Context, tx *sql.Tx) (map[string][]string, er
 	out := map[string][]string{}
 	for rows.Next() {
 		var account, addrs string
-		_ = rows.Scan(&account, &addrs) // a key suffix and a text value
+		if err := rows.Scan(&account, &addrs); err != nil {
+			return nil, err
+		}
 		out[account] = nil
 		for _, a := range strings.Split(strings.ToLower(addrs), "\n") {
 			if a != "" {
@@ -200,7 +207,9 @@ func outlookLinkRows(ctx context.Context, tx *sql.Tx) (map[string]outlookLinkRow
 	for rows.Next() {
 		var account string
 		var r outlookLinkRow
-		_ = rows.Scan(&account, &r.method, &r.principal, &r.active) // NOT NULL text columns and a boolean
+		if err := rows.Scan(&account, &r.method, &r.principal, &r.active); err != nil {
+			return nil, err
+		}
 		out[account] = r
 	}
 	return out, rows.Err()

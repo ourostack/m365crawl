@@ -245,9 +245,15 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	if err != nil {
 		return SourceReport{}, false, nil, errs.DBError(err)
 	}
+	origin := outlookSourceOrigin(p.StorePath)
+	receipt, err := r.st.OutlookReadReceipt(ctx, account)
+	if err != nil {
+		return SourceReport{}, false, nil, errs.DBError(err)
+	}
 	// An archive that never read the account's mail (an upgrade, or a failed read) reads it even
 	// when the store did not change.
-	if prior.Fingerprint == fp && !r.o.FullRead && prior.IdentityRead && (!mailOn || mailState.Read) {
+	if prior.Fingerprint == fp && !r.o.FullRead && prior.IdentityRead && (!mailOn || mailState.Read) &&
+		receipt.ID > 0 && origin != "" && receipt.Origin == origin {
 		status := StatusUnchanged
 		if lost(prior.Omissions) > 0 {
 			status = StatusOmissions
@@ -301,7 +307,10 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 			return SourceReport{}, false, nil, errs.DBError(err)
 		}
 	}
-	sr, decoded, calErr := r.outlookCalendar(ctx, info, rep, prior, key, account, fp, begun)
+	if outlookSourceOrigin(p.StorePath) != origin {
+		origin = ""
+	}
+	sr, decoded, calErr := r.outlookCalendar(ctx, info, rep, prior, key, account, fp, origin, begun)
 	afterCalendar()
 	if ctx.Err() != nil {
 		return sr, decoded, nil, calErr
@@ -318,7 +327,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 var afterCalendar = func() {}
 
 // outlookCalendar reads the calendar from the private copy and commits it in one transaction.
-func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp string, begun time.Time) (SourceReport, bool, error) {
+func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, rep *Report, prior store.OutlookState, key, account, fp, origin string, begun time.Time) (SourceReport, bool, error) {
 	res, err := collectOutlook(ctx, info, account, prior.HoldsEvents)
 	if err != nil {
 		return SourceReport{}, false, err
@@ -329,7 +338,7 @@ func (r *runner) outlookCalendar(ctx context.Context, info outlookdesktop.Info, 
 	// would not map could hide a live event, and then every unseen event stays.
 	var omissions map[string]int
 	status := StatusOK
-	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0, Addresses: res.AccountAddresses},
+	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Origin: origin, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0, Addresses: res.AccountAddresses},
 		func(cal store.CalendarResult) store.Run {
 			if omissions = outlookOmissions(res, cal); lost(omissions) > 0 {
 				status = StatusOmissions
