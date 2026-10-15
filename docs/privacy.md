@@ -31,10 +31,11 @@ m365crawl reads the Teams and Outlook caches already on your computer and writes
 | Outlook mail and calendar (macOS) | The new Outlook for Mac's `HxStore.hxd`, one per profile | Copied to a private temporary file and read from the copy. |
 | Native attendee evidence | Explicit Mac HxStore discovery or supported copied profiles | Explicit sync or an already-required ordinary copy for registered lanes; native Windows/OWA acquisition remains unqualified, offline archive reads are portable. |
 | Outlook message bodies (macOS) | Body files under the Outlook profile's `Files` directory | Opened read-only, only for messages the sync reads, only below `Files`. |
+| Outlook mail (Windows) | New Outlook's OWA cache under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`, one IndexedDB origin per profile | Read from a validated private snapshot, allowlisted mail stores only; never credential stores or attachment payloads. The OWA calendar is not read in this release. |
 | Explicit SharePoint page / Stream evidence | One supported target URL selected by the caller | Acquired only by `content fetch` through the tool-owned headless profile; supported projection/selected body, not a crawl or rendered export. Native Windows acquisition remains unqualified. |
 | Explicit resident Office text | One absolute ordinary local DOCX/XLSX/PPTX file, or selected original native local file URL | `content capture` only, under positive no-hydration/no-recall native guards; production parser reads a bound private copy. No Office launch, network, discovery or implicit capture. |
 
-On macOS reading these needs Full Disk Access for the app that runs m365crawl ([full-disk-access.md](full-disk-access.md)). On Windows m365crawl reads only the Teams cache; Outlook is not read there yet.
+On macOS reading these needs Full Disk Access for the app that runs m365crawl ([full-disk-access.md](full-disk-access.md)). On Windows m365crawl reads the Teams cache and new Outlook's cached mail, and needs no extra permission.
 
 ## What m365crawl never does
 
@@ -70,7 +71,7 @@ The copy of the Teams cache includes Teams' sign-in database, which m365crawl ne
 
 ## Tests and documentation
 
-The repository's tests, fixtures and documentation use synthetic data only. Checks against a real cache run on the developer's own machine and record counts, timings and pass or fail, never content.
+The repository's tests, fixtures and documentation examples use synthetic data only. The one exception is the README's `m365crawl doctor` screenshot: a real run, scrubbed so that it shows only checks and archive counts, never names, addresses or content. Checks against a real cache run on the developer's own machine and record counts, timings and pass or fail, never content.
 
 ## Deleting your data
 

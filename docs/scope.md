@@ -1,0 +1,41 @@
+# Scope, roadmap and prompt requests
+
+m365crawl is built around the maintainer's own Microsoft 365 usage: support grows from data we can inspect and workflows we can test on real machines. The name is the direction, not a claim that every Microsoft 365 app is supported. Your apps, account configuration and cached history may differ.
+
+## Available now
+
+- **From `sync`:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, and meeting recaps and action items. Teams messages carry the app, reply and citation claims of archived bot replies (`app_observation`).
+- **From their own explicit `sync`:** local OneNote indexed notes, source-qualified Outlook people observations, native meeting attendee evidence from Mac HxStore or supported copied profiles, Office and OneDrive document metadata, and the text of cached Loop channels as partial snapshots ([local sources](local-sources.md)).
+- **Only when you ask:** meeting transcript text through `transcripts fetch`, the text of one resident Word, Excel or PowerPoint file through `content capture`, one SharePoint page or Stream transcript per `content fetch page/stream`, and bounded Engage Home sessions through `content fetch engage-home` ([explicit content capture](content.md)).
+
+An archived recap action item is not a Planner or To Do task, a native people observation is not a resolved directory identity, and an archived bot citation is not private Copilot history. Native attendee evidence describes the reader-selected source detail, not a resolved person or current attendance; native Windows/OWA acquisition remains unqualified even though archive reads are portable. The platform differences and cache limits are in the [README](../README.md#limits), the [usage guide](guide.md) and the pages linked above.
+
+## A complement to Graph and MCP tools
+
+m365crawl is not a replacement for every job. Use Graph or MCP tools when you need to send or react, retrieve data the desktop apps never cached, or work on an unsupported host or app. Keep m365crawl for local recall, archive search and context-building from the sources it actually covers. Missing or stale cache data stays visible rather than becoming a claim that the work does not exist.
+
+## Planned expansion, not shipped support
+
+| Area | Direction | What still needs proving |
+| --- | --- | --- |
+| People resolution and meetings | Qualify subject-scoped identity links and additional native attendee platforms | Positive subject tenancy and platform-specific mappings; existing native attendee evidence preserves own-snapshot ambiguity and source/read/link scope rather than resolving identity or current attendance |
+| Office and OneDrive | Resolve file/library associations, and discover document sources natively on Windows | Provider/residency evidence, ambiguous identities and Windows-specific sources; metadata alone is not file or text access |
+| More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
+| Loop links | Link cached Loop channels to their pages, messages and authors | Preserve Teams provenance, snapshot versions and partial coverage; cached channel text is not a full page |
+| Browser-backed content beyond one target | Read cloud document text and SharePoint News, go beyond one explicit page or Stream transcript, and cover Engage surfaces other than Home | A tested read path and archive integration for each service; one working service does not prove another, and native Windows acquisition is still unqualified |
+
+**Not included in the current expansion:** assigned Planner/To Do tasks and private Copilot history. Our probes have not established a representative, account-qualified read contract for those sources. Recap action items are not assigned tasks, and Teams bot citations are not private Copilot history. Parsing OneDrive's local sync-cache database is backend groundwork only: coherent capture while OneDrive is changing that database is not yet qualified. This limitation concerns OneDrive's cache, not m365crawl's existing `sync` command.
+
+Lists can follow a working SharePoint reader when there is data and a concrete use. Forms, Whiteboard, Viva Insights and separate Bookings support are deferred: they are not part of the current implementation commitment. Security and identity apps are outside the work-content scope. These are priorities, not declarations that those products can never be supported.
+
+The goal is one connected archive, not an unrelated crawler per app. New sources should improve shared search, people resolution or links between work items, preserve the distinction between cached and fetched data, and make missing or stale content visible. Planned capabilities will be documented as available only after they ship and their platform support is verified.
+
+## Request support with a prompt request
+
+**Missing something you use? Work with your agent to open a GitHub issue as a "prompt request".** Describe the job you want the agent to do, the Microsoft 365 app, your operating system and app version, and what happens today. Your agent can help check whether a readable cache or a browser read path exists, but you do not need to reverse-engineer it or submit code before asking.
+
+For example:
+
+> Add support for my Microsoft 365 app so my agent can answer this question: [the job]. I use [app and version] on [operating system]. Today m365crawl [what it does or cannot do]. Please investigate the available data, explain any coverage limits, and propose how it would join the existing archive.
+
+Search [existing issues](https://github.com/ourostack/m365crawl/issues) first, then [open a prompt request](https://github.com/ourostack/m365crawl/issues/new?template=prompt-request.yml). The form starts with the job you want your agent to do; technical evidence is optional. Requests help choose the next integrations; they are not a promise of support or a delivery date. Do not attach real mail, chats, document contents, cache files, archive databases, credentials or tokens to public issues. Use synthetic examples and non-sensitive counts, formats and field names.
