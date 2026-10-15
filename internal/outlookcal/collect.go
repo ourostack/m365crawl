@@ -40,7 +40,8 @@ type Options struct {
 	// ExpectEvents is set when the last successful read of this store found events: a
 	// store that now holds none is then refused, so a change to the envelope itself cannot
 	// read as an empty calendar.
-	ExpectEvents bool
+	ExpectEvents       bool
+	AttendeeSelections bool
 }
 
 // Loss is one counted loss code.
@@ -101,11 +102,12 @@ type Result struct {
 	// AccountAddresses are the addresses of the accounts signed in to the profile, lower case, distinct
 	// and sorted: the addresses its account objects carry. They link the profile to the Teams account
 	// that has one of them.
-	AccountAddresses []string
-	Notes            Notes
-	Losses           []Loss
-	UnknownLayouts   []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
-	Stats            hxstore.Stats
+	AccountAddresses   []string
+	Notes              Notes
+	Losses             []Loss
+	UnknownLayouts     []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
+	Stats              hxstore.Stats
+	AttendeeSelections *AttendeeSelections
 }
 
 type winner struct {
@@ -119,17 +121,29 @@ type winner struct {
 // the pinned one, no event objects in a store that had some, or an object walk that covers
 // under 80% of the payload bytes. A torn or invalid block is a counted loss, not a refusal.
 func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options) (Result, error) {
+	return collectSelections(ctx, s, account, opt, defaultSelectionLimits())
+}
+
+func collectSelections(ctx context.Context, s *hxstore.Store, account string, opt Options, cap selectionLimits) (Result, error) {
 	rule := opt.Rule
 	if rule == "" {
 		rule = CurrentVersionRule
 	}
 	var res Result
+	var selections *selectionState
+	if opt.AttendeeSelections {
+		res.AttendeeSelections = &AttendeeSelections{}
+		selections = &selectionState{result: res.AttendeeSelections, cap: cap, details: map[uint32]detailCounts{}}
+	}
 	winners := map[string]winner{}
 	details := map[uint32]hxstore.Object{}
 	differing := map[uint32]bool{}
 	badTags := map[uint16]int{}
 	addresses := map[string]bool{}
 	stats, err := s.Walk(ctx, hxstore.WalkOptions{}, func(o hxstore.Object) error {
+		if selections != nil {
+			selections.observe(o)
+		}
 		switch {
 		case o.Class == classEvent && o.Tag != tagEvent:
 			badTags[o.Tag]++
@@ -182,7 +196,14 @@ func Collect(ctx context.Context, s *hxstore.Store, account string, opt Options)
 	if rej := stats.BlocksRejected(); rej*100 > stats.BlocksFound*damagedBlocksPercent {
 		res.Losses = append(res.Losses, Loss{CodeBlocksDamaged, rej})
 	}
-	mapAll(&res, winners, details, account)
+	mapAll(&res, winners, details, account, selections, differing)
+	if err := ctx.Err(); err != nil {
+		if res.AttendeeSelections != nil {
+			res.AttendeeSelections.Rows = nil
+			res.AttendeeSelections.Err = err
+		}
+		return res, err
+	}
 	return res, nil
 }
 
@@ -258,7 +279,7 @@ func unknownLayouts(st hxstore.Stats) []PairCount {
 }
 
 // mapAll maps the winners in id order and folds the per-event notes into the result.
-func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.Object, account string) {
+func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.Object, account string, selections *selectionState, differing map[uint32]bool) {
 	ids := make([]string, 0, len(winners))
 	for id := range winners {
 		ids = append(ids, id)
@@ -311,6 +332,9 @@ func mapAll(res *Result, winners map[string]winner, details map[uint32]hxstore.O
 			continue
 		}
 		res.Events = append(res.Events, e)
+		if selections != nil {
+			selections.emit(e.SourceID, ev, link, d != nil, differing[link])
+		}
 		n.add(mn, zones)
 		if mn.BodyNULTrimmed && !nulKeys[link] {
 			nulKeys[link] = true // events sharing one detail object count once
