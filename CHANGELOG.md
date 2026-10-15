@@ -4,6 +4,12 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-10-15
+
+### Fixed
+
+- `teams` and `--team` now recognize archived `Space` roots without cached child channels. Team-filtered reads include root messages, and a zero channel count describes the cache, not the service.
+
 ## [0.9.13] - 2026-10-14
 
 ### Fixed
