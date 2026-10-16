@@ -1,5 +1,17 @@
 # Privacy
 
+Native `calendar attendees sync` reads only a guarded private HxStore copy.
+Calendar, mail and eligible registered optional lanes share that copy; all readers
+close before one verified cleanup and optional admission. Standalone attendee
+capture never reads or erases mail. `calendar attendees sources/list/show` are
+strictly archive-only, including expired max-age: no native path inspection,
+registration, copy, browser, credentials, network, migration or repair.
+The archive retains literal nullable native names/emails, physical geometry,
+canonical source paths, exact requests, input/representation digests, original
+clocks, losses and read/link membership. These can be private even when ambiguous
+or unlinked; they do not resolve a person or establish current attendance.
+Never include real source/archive contents in examples, logs, fixtures or issues.
+
 Explicit `content fetch engage-home` is the additional fixed-root Engage browser
 workflow. It retains bounded partial native thread-starter sessions, not a feed,
 and never reads credentials, copies an ordinary browser profile or infers a
@@ -17,6 +29,7 @@ m365crawl reads the Teams and Outlook caches already on your computer and writes
 | --- | --- | --- |
 | Teams chats, channels, activity feed and calendar | The new Teams app's cache (`EBWebView`; see [commands.md](commands.md#platform-defaults) for the path) | Copied to a private temporary directory and read from the copy. |
 | Outlook mail and calendar (macOS) | The new Outlook for Mac's `HxStore.hxd`, one per profile | Copied to a private temporary file and read from the copy. |
+| Native attendee evidence | Explicit Mac HxStore discovery or supported copied profiles | Explicit sync or an already-required ordinary copy for registered lanes; native Windows/OWA acquisition remains unqualified, offline archive reads are portable. |
 | Outlook message bodies (macOS) | Body files under the Outlook profile's `Files` directory | Opened read-only, only for messages the sync reads, only below `Files`. |
 | Outlook mail (Windows) | New Outlook's OWA cache under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`, one IndexedDB origin per profile | Read from a validated private snapshot, allowlisted mail stores only; never credential stores or attachment payloads. The OWA calendar is not read in this release. |
 | Explicit SharePoint page / Stream evidence | One supported target URL selected by the caller | Acquired only by `content fetch` through the tool-owned headless profile; supported projection/selected body, not a crawl or rendered export. Native Windows acquisition remains unqualified. |
@@ -38,6 +51,7 @@ The archive is one SQLite file. It holds content verbatim, including anything pe
 - **Teams:** messages with their text and HTML, conversations, people, the activity feed, unread state, and every other non-credential Teams database as raw records. `raw_json` keeps each full original record.
 - **Mail:** each message's subject, sender, recipients (names and addresses), times, folder, read and flag state, Message-ID, the body as text, and the body HTML, compressed, so the text can be derived again later. Attachment names are stored too, and they can be sensitive.
 - **Calendar:** events from Teams and Outlook with attendees, bodies, recaps and action items.
+- **Native attendee evidence:** immutable ordered physical observations and separate selected-detail bindings, own complete ambiguity and original losses/clocks, per-attempt source/read/origin/link/census evidence. This is not a resolved directory or current roster.
 - **Explicit cloud content:** verified native file/account metadata, supported page controls or one selected Stream transcript; retained bodies keep their original identity, qualification and clocks. No sharing tickets or temporary download URLs are retained.
 - **Explicit resident Office text:** exact native snapshot/clock evidence, source-byte and representation digests, supported paragraphs/cached cell values, partial/loss counts and per-attempt selected reference claims. Original file bytes are not archived. Ordinary content reads stay archive-only, never inspect source paths or hydrate them. Treat retained text as sensitively as the selected original file.
 - **Signed-in addresses:** to link an Outlook profile to your Teams account, the archive keeps the addresses signed in to each profile, lower case, in its `meta` table. They are never printed, logged or put in an error or a report.

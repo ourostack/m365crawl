@@ -468,8 +468,8 @@ func TestEventResultJSONAndJoin(t *testing.T) {
 	if b, err := (&eventResult{event: ev, keys: []string{"subject", "nope"}}).MarshalJSON(); err != nil || !strings.HasPrefix(string(b), `{"subject":"S"`) {
 		t.Errorf("%s %v", b, err)
 	}
-	// With no event the document is the meta keys alone.
-	if b, err := (&eventResult{}).MarshalJSON(); err != nil || !strings.HasPrefix(string(b), `{"archive_age_seconds"`) {
+	// Even without an event, independent native scope remains explicit beside meta.
+	if b, err := (&eventResult{}).MarshalJSON(); err != nil || !strings.HasPrefix(string(b), `{"native_attendee_evidence"`) || !strings.Contains(string(b), `"archive_age_seconds":null`) {
 		t.Errorf("%s %v", b, err)
 	}
 	bad := make(chan int)

@@ -5,10 +5,10 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 ## Available now
 
 - **From `sync`:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, and meeting recaps and action items. Teams messages carry the app, reply and citation claims of archived bot replies (`app_observation`).
-- **From their own explicit `sync`:** local OneNote indexed notes, source-qualified Outlook people observations, Office and OneDrive document metadata, and the text of cached Loop channels as partial snapshots ([notes, documents, people and Loop](local-sources.md)).
+- **From their own explicit `sync`:** local OneNote indexed notes, source-qualified Outlook people observations, native meeting attendee evidence from Mac HxStore or supported copied profiles, Office and OneDrive document metadata, and the text of cached Loop channels as partial snapshots ([local sources](local-sources.md)).
 - **Only when you ask:** meeting transcript text through `transcripts fetch`, the text of one resident Word, Excel or PowerPoint file through `content capture`, one SharePoint page or Stream transcript per `content fetch page/stream`, and bounded Engage Home sessions through `content fetch engage-home` ([explicit content capture](content.md)).
 
-An archived recap action item is not a Planner or To Do task, a native people observation is not a resolved directory identity, and an archived bot citation is not private Copilot history. The platform differences and cache limits are in the [README](../README.md#limits), the [usage guide](guide.md) and the pages linked above.
+An archived recap action item is not a Planner or To Do task, a native people observation is not a resolved directory identity, and an archived bot citation is not private Copilot history. Native attendee evidence describes the reader-selected source detail, not a resolved person or current attendance; native Windows/OWA acquisition remains unqualified even though archive reads are portable. The platform differences and cache limits are in the [README](../README.md#limits), the [usage guide](guide.md) and the pages linked above.
 
 ## A complement to Graph and MCP tools
 
@@ -18,7 +18,7 @@ m365crawl is not a replacement for every job. Use Graph or MCP tools when you ne
 
 | Area | Direction | What still needs proving |
 | --- | --- | --- |
-| People resolution and meetings | Qualify subject-scoped identity links and read fuller attendee lists | Positive subject tenancy, current-copy ambiguity, source coverage and platform-specific mappings |
+| People resolution and meetings | Qualify subject-scoped identity links and additional native attendee platforms | Positive subject tenancy and platform-specific mappings; existing native attendee evidence preserves own-snapshot ambiguity and source/read/link scope rather than resolving identity or current attendance |
 | Office and OneDrive | Resolve file/library associations, and discover document sources natively on Windows | Provider/residency evidence, ambiguous identities and Windows-specific sources; metadata alone is not file or text access |
 | More OneNote coverage | Qualify additional native app layouts and page links | Windows app-cache discovery, coherent WAL capture and account-qualified page URLs; an index is not a complete notebook export |
 | Loop links | Link cached Loop channels to their pages, messages and authors | Preserve Teams provenance, snapshot versions and partial coverage; cached channel text is not a full page |

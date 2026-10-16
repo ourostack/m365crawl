@@ -6,15 +6,17 @@ import (
 	"slices"
 )
 
-// Find returns the merged event of one principal that is stored under key, or that a read joined
-// the key's group into (JoinedKeys): a timed key that later became all-day names the same event as
-// its twin's date key. It loads the group the way Agenda does, around the key's own rows, so the
-// result is the item an agenda over the event's days returns. ok is false when no row of the
-// principal's accounts holds the key.
-func Find(ctx context.Context, db *sql.DB, principal, key string) (item AgendaItem, ok bool, err error) {
+// Find resolves the same joined event group as Agenda, including historical
+// timed/date keys. FindWithRows also exposes its actual source-qualified rows.
+func Find(ctx context.Context, db *sql.DB, principal, key string) (AgendaItem, bool, error) {
+	item, _, ok, err := FindWithRows(ctx, db, principal, key)
+	return item, ok, err
+}
+
+func FindWithRows(ctx context.Context, db querier, principal, key string) (item AgendaItem, sourceRows []Event, ok bool, err error) {
 	principals, err := LoadPrincipals(ctx, db)
 	if err != nil {
-		return item, false, err
+		return item, nil, false, err
 	}
 	scope := principals.Accounts(principal)
 	cols := selectColumns(false)
@@ -23,7 +25,7 @@ func Find(ctx context.Context, db *sql.DB, principal, key string) (item AgendaIt
 		args: append([]any{key}, anys(scope)...),
 	})
 	if err != nil || len(rows) == 0 {
-		return item, false, err
+		return item, nil, false, err
 	}
 	from, to := rows[0].Start, rows[0].End
 	for _, r := range rows {
@@ -37,23 +39,22 @@ func Find(ctx context.Context, db *sql.DB, principal, key string) (item AgendaIt
 	if to.Before(from) {
 		to = from
 	}
-	// A day either side reaches the twin's rows; the load widens all-day dates by another day.
 	from, to = from.UTC().AddDate(0, 0, -1), to.UTC().AddDate(0, 0, 1)
 	groups, joined, err := loadGroupsJoined(ctx, db, principals, scope, from, to, from.Format(dateLayout), to.Format(dateLayout))
 	if err != nil {
-		return item, false, err
+		return item, nil, false, err
 	}
 	windows, err := loadWindows(ctx, db, scope)
 	if err != nil {
-		return item, false, err
+		return item, nil, false, err
 	}
 	fresh, _ := freshness(windows, principals)
 	for k, g := range groups {
 		if k.principal == principal && (k.key == key || slices.Contains(joined[k], key)) {
-			return mergeItem(k, g, fresh[principal], joined[k]), true, nil
+			return mergeItem(k, g, fresh[principal], joined[k]), append([]Event(nil), g...), true, nil
 		}
 	}
-	return item, false, nil
+	return item, nil, false, nil
 }
 
 func anys(ss []string) []any {

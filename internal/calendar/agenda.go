@@ -431,7 +431,7 @@ func CheckStoredTimes(ctx context.Context, db *sql.DB) (int, error) {
 // queryKeyed runs one SELECT built with selectSQL and scans its rows. A stored time that does not
 // parse fails the load when its row is scanned, so a corrupt row inside the window is an error, not
 // an omission.
-func queryKeyed(ctx context.Context, db *sql.DB, cols []column, q eventQuery) ([]keyedEvent, error) {
+func queryKeyed(ctx context.Context, db querier, cols []column, q eventQuery) ([]keyedEvent, error) {
 	rows, err := db.QueryContext(ctx, q.sql, q.args...)
 	if err != nil {
 		return nil, err
@@ -463,7 +463,7 @@ func loadGroups(ctx context.Context, db *sql.DB, p Principals, scope []string, f
 }
 
 // loadGroupsJoined is loadGroups and also says, for each group, which other keys joined it.
-func loadGroupsJoined(ctx context.Context, db *sql.DB, p Principals, scope []string, from, to time.Time, fromDate, toDate string) (map[groupKey][]Event, map[groupKey][]string, error) {
+func loadGroupsJoined(ctx context.Context, db querier, p Principals, scope []string, from, to time.Time, fromDate, toDate string) (map[groupKey][]Event, map[groupKey][]string, error) {
 	first, _ := time.Parse(dateLayout, fromDate)
 	last, _ := time.Parse(dateLayout, toDate)
 	idCols := []column{eventColumns[1]} // account_id
@@ -683,7 +683,7 @@ func accountClause(accounts []string) (string, []any) {
 	return "account_id IN (" + placeholders(len(accounts)) + ")", args
 }
 
-func loadWindows(ctx context.Context, db *sql.DB, accounts []string) ([]Window, error) {
+func loadWindows(ctx context.Context, db querier, accounts []string) ([]Window, error) {
 	where, args := accountClause(accounts)
 	rows, err := db.QueryContext(ctx, strings.Replace(`SELECT source, account_id, window_start, window_end, synced_at, cache_fresh_at
 	  FROM calendar_sources WHERE @where ORDER BY source, account_id`, "@where", where, 1), args...)

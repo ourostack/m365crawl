@@ -58,6 +58,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := checkSchemaNotNewer(ctx, path); err != nil {
 		return nil, err
 	}
+	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
+		return nil, err
+	}
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: schemaDDL, SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err

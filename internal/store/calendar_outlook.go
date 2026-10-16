@@ -29,6 +29,7 @@ const (
 
 // OutlookBatch is one Outlook profile's events, read whole from its store copy.
 type OutlookBatch struct {
+	Origin  string
 	Account string // "outlook/<profile directory name>"
 	Events  []calendar.Event
 	FreshAt time.Time // the store file's modification time: when Outlook last wrote it
@@ -102,6 +103,12 @@ func OutlookStamp(mapper int, zone *time.Location) string {
 // zone, and takes them again. Events the batch does not hold are left as they are.
 func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(CalendarResult) Run) (res CalendarResult, err error) {
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := auditAttendeeNamespace(ctx, tx); err != nil {
+			return err
+		}
+		if err := ensureAttendeeAccount(ctx, tx, b.Account); err != nil {
+			return err
+		}
 		var aerr error
 		if res, aerr = isolated(ctx, tx, func() (CalendarResult, error) { return applyOutlook(ctx, tx, b) }); aerr == nil {
 			aerr = res.failure
@@ -120,8 +127,16 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
 			return err
 		}
-		return recordRun(ctx, tx, run(res))
+		record := run(res)
+		res.OutlookReadID, aerr = insertOutlookRead(ctx, tx, b, record.Fingerprint)
+		if aerr != nil {
+			return aerr
+		}
+		return recordRun(ctx, tx, record)
 	})
+	if err != nil {
+		res.OutlookReadID = 0
+	}
 	return res, err
 }
 
@@ -466,6 +481,9 @@ const (
 // another Outlook account) comes back as its usage-class error and nothing changes.
 func (s *Store) SetOutlookLink(ctx context.Context, account, principal string, at time.Time) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := auditAttendeeNamespace(ctx, tx); err != nil {
+			return err
+		}
 		var method, linked string
 		var ended sql.NullString
 		err := tx.QueryRowContext(ctx, `select method, principal_id, unlinked_at from calendar_account_links where source=? and account_id=?`, string(calendar.SourceOutlook), account).Scan(&method, &linked, &ended)

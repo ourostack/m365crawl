@@ -48,3 +48,7 @@ received_at           mail from    subject                      match
 2023-11-13 09:00 UTC  Pat Example  Fixture planning review      invite
 2023-11-19 10:00 UTC  Sam Example  RE: Fixture planning review  subject
 archive age: <age>
+Native attendee evidence: native_source_selected_detail_not_display_roster; bindings 0 of 0 (truncated=false)
+notice: Reader-selected source detail is not the retained/unioned displayed attendee roster or current membership.
+notice: Archived read/origin/link matches do not certify live application state; source losses belong to their original snapshot, not each returned row.
+notice: Current reads audit relevant current candidates, not unrelated undisplayed historical bodies; --history and show audit their own relevant retained evidence.

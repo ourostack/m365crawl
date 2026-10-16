@@ -1,5 +1,110 @@
 # m365crawl specification
 
+## Native calendar attendee evidence (schema 19)
+
+`calendar attendees sync [--root DIR | --source-id ID]` MUST be explicit.
+Default discovery is Mac HxStore; a supported copied profile root is portable.
+This does not qualify Windows/OWA native acquisition. `sources`, `list <event>`
+and `show attendee-observation:N` MUST open only the selected existing archive
+read-only, never refresh, register, copy, migrate or repair, even at expired
+max-age. Source selectors and observation IDs are positive archive int64s;
+new archive IDs/native64 values use exact decimal string transport.
+
+Native observations describe the reader-selected detail group of an actual
+successful calendar decode. They MUST NOT replace, filter or re-count the
+retained/unioned displayed calendar roster, response, room or Teams fields.
+They do not resolve subjects, establish tenancy or prove current membership.
+The fixed scope is `native_source_selected_detail_not_display_roster`.
+An unchanged source-local unlinked scope may display unscoped; it does not
+satisfy a Teams account filter.
+
+The actual calendar winner path emits requested-only receipts after successful
+mapping. Distinct raw event IDs mapping to one public UID remain distinct.
+No second winner algorithm or pre-emission candidate cache is permitted.
+Auxiliary charging precedes filters: at most524288 selected objects and65536
+detail keys, including unused/resynced ones. Overflow clears all optional
+bookkeeping/rows with `outlook_attendee_selection_too_large`, retaining healthy
+legacy output. Unrequested receipt state stays nil.
+
+Owned evidence is immutable canonical JSON with fixed order, strict unknown/
+duplicate/noncanonical refusal and nullable literal text preserved. The limits
+are262144 native observations,65536 receipts/geometry keys,262144 bytes per
+native scalar,16MiB combined name/email bytes and8MiB combined selected IDs.
+Attempt-scope strings are individually262144 bytes and jointly1MiB; census is
+4MiB and transports every Stats scalar and all three bounded pair maps.
+The384MiB evidence envelope exceeds the counting-writer-proven266MiB maximum;
+there MUST NOT be a hidden smaller budget. Readers check SQL byte length
+before body/census materialization. Health auditing streams the full relevant
+canonical model with bounded relationship/ambiguity state, not full attendee
+DTO arrays merely to show source health.
+
+One additive schema19 stores `outlook_calendar_reads/read_state`,
+`outlook_link_events/link_state`, and
+`outlook_attendee_sources/requests/snapshots/occurrences/bindings/members`.
+Every successful ordinary calendar decode, including an unregistered one,
+allocates a unique atomic immutable read ID. Equal/backward/known-zero clocks
+are not identities; unchanged checks allocate none. Receipt digests use
+canonical component arrays and retain original-offset known-zero read clocks.
+Standalone origin conflicts, existing unknown origins and unknown continuity refuse
+before calendar overwrite, mail invalidation or positive native admission. A
+genuinely new partition is distinct from an existing unqualified one. Old unknown
+origins bootstrap only through eligible actual ordinary decode without mapper
+bump or rich-detail blanking; recovery preserves the selected archive and exact
+requested Outlook root, requires verifying the original source, and never forces
+full-read or bypasses the copy interval.
+Source-ID recovery obtains a separate original root only from validated admitted
+request history of that source, including when newer requests are source-ID-only.
+The retry request remains exclusively source-ID. No admitted root means explicit
+bounded unavailability, never a guessed locator parent or widened discovery.
+
+Link mutation identity uses AUTOINCREMENT events plus an independent current
+frontier, account-qualified FK and explicit null baseline. Exact owned table/
+trigger definitions, missing state/tail and wrong-account references are
+audited before zero hits/filtering and before a writer can repair them.
+A→none→A at repeated clocks cannot regain old scope.
+
+Snapshots and physical rows are stored once. A-B-A reuses A's snapshot/physical
+IDs and first clocks, with new request/read/link/census/attempt membership.
+Representation identity binds qualification, decimal source ID and complete
+owned evidence, not the input-file hash, census or attempt clocks. Membership
+digests protect those separate fields, exact request, read receipt, captured
+owner/link revision and streamed binding/occurrence index. This is corruption
+consistency, not authentication against coordinated digest rewrites.
+
+Native association resolves actual typed `(source,account_id,source_id)` rows,
+aliases/joined keys, origins, reads and link/native frontiers in one transaction.
+Merged UIDs, subjects and all accounts of a principal cannot select a parent.
+Namespace intent is audited before projection. Body audits cover current
+candidates for default reads, associated retained candidates for history, own
+snapshot for detail, and admitted bodies supplying source counts. Unrelated
+undisplayed history is not certified. Reuse/new admission cannot hide or repair
+corrupt old evidence. Own-snapshot ambiguity survives parent/100-row/field
+projection and remains identical in store, shape, text, JSON and full SQL.
+
+One guarded private copy/lifecycle owner stages all eligible readers and closes
+them before verified cleanup, then independently admits optional lanes.
+Lane-local failures do not poison a healthy peer; common cleanup/cancellation
+prevents optional positive admission. Diagnostics are bounded to10 seconds on
+WithoutCancel. Ordinary capture uses registered lanes only and never repeatedly
+recopies merely to repair optional native state. Standalone invalidates the
+mail-read marker before advancing the shared fingerprint, without reading or
+erasing mail; the next eligible ordinary unchanged-input read still captures
+mail. The common five-minute interval and single outer archive lease remain.
+
+`native_attendee_evidence` is independent of fields, zero hits and item limits.
+Bindings are separate bounded previews, not duplicated people. First100
+physical observations retain full totals; copied display-name clipping never
+changes literal stored text, email claims, native IDs or another result.
+Full-record SQL extracts one indexed native attendee JSON object with own
+losses/ambiguity; full capture reads the snapshot separately. Independent
+`own_captures` recovery routes name the positive own snapshot IDs of previewed
+rows/bindings, including historical detail. They survive fields, deduplicate at
+most200 IDs (100 rows plus100 bindings), and never substitute current source
+coverage for an old capture or embed full source blobs per row. Every executable
+route MUST preserve the selected absolute `--db`, `--max-age 0` and full
+unclipped SQL payload. Initial failures retain nullable source ID and the exact
+original request, never a guessed parent directory or source ID0.
+
 ## Engage Home-session archive (schema 18)
 
 The concrete `engage_home` content family MUST follow the

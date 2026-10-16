@@ -20,6 +20,53 @@
       ],
       "json": true
     },
+    "calendar attendees list": {
+      "title": "calendar attendees list (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "calendar",
+        "attendees",
+        "list",
+        "\u003cevent\u003e"
+      ],
+      "json": true
+    },
+    "calendar attendees show": {
+      "title": "calendar attendees show (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "calendar",
+        "attendees",
+        "show",
+        "\u003cattendee-observation-id\u003e"
+      ],
+      "json": true
+    },
+    "calendar attendees sources": {
+      "title": "calendar attendees sources (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "calendar",
+        "attendees",
+        "sources"
+      ],
+      "json": true
+    },
+    "calendar attendees sync": {
+      "title": "calendar attendees sync (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "calendar",
+        "attendees",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "content capture": {
       "title": "content capture (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [
@@ -446,6 +493,7 @@
     "chats",
     "mail",
     "calendar",
+    "native_calendar_attendee_evidence",
     "transcripts",
     "notes",
     "documents",
@@ -460,6 +508,7 @@
       "outlook_store",
       "onenote_index",
       "outlook_people",
+      "outlook_attendee_evidence",
       "office_json_metadata",
       "office_registry_metadata",
       "onedrive_usage_metadata",

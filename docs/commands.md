@@ -1226,6 +1226,94 @@ m365crawl calendar sources
 
 `--fields` keys: `source`, `account_id`, `principal`, `link`, `tenant_id`, `user_id`, `window_start`, `window_end`, `covered_days`, `last_verified_at`, `synced_at`, `cache_fresh_at`, `events_live`, `events_removed`, `events_with_detail`, `events_with_attendees`, `events_with_body`, `events_online`, `recaps_total`, `recaps_with_content`, `recaps_linked`, `recap_action_items`, `unknown_time_zones`, `status`, `last_read_at`, `last_attempt_at`, `last_checked_at`, `census_as_of`, `next_read_after`, `read_interval_seconds`, `unknown_layouts`, `blocks_invalid_ratio`, `unmapped_values`, `deletions`, `error`.
 
+### calendar attendees sync
+
+`calendar attendees sync [--root DIR | --source-id ID]` is the only attendee
+command that acquires input. Default explicit discovery is Mac HxStore; an
+explicit supported copied `<root>/<profile>/HxStore.hxd` input is portable.
+This is not Windows/OWA native acquisition qualification. Source IDs must be
+positive archive int64s. Root/source conflicts and unsupported fields fail
+before registration or writes. The common five-minute copy interval applies.
+One guarded private copy supplies the actual ordinary calendar decode and native
+evidence; every eligible reader closes and cleanup is verified before optional
+admission. Standalone capture does not fetch or erase mail and invalidates its
+read marker before advancing the shared fingerprint, so the next eligible
+ordinary unchanged-input sync still reads pending mail.
+
+Native errors are fixed, scoped diagnostics: selection overflow is
+`outlook_attendee_selection_too_large`; invalid/oversized owned evidence is
+`outlook_attendee_evidence_invalid` / `outlook_attendee_evidence_too_large`;
+unqualified/replaced origins are `outlook_attendee_origin_unknown` /
+`outlook_attendee_origin_conflict`; a missing compatible actual read is
+`outlook_attendee_calendar_unassociated`; common cleanup is
+`outlook_attendee_cleanup_failed`. Contradictory archive structure/body/membership
+is `outlook_attendee_archive_corrupt`, never an invitation to read-repair.
+Native reader layout/read codes and cancellation remain visible. Unknown
+archive IDs use `outlook_attendee_unknown`. Failure remedies retain the selected
+absolute archive and exact root/source request; they never automatically fetch.
+An existing unknown origin refuses before calendar/mail/native state changes.
+Verify the requested root is the original source, then use its emitted ordinary
+`sync --outlook-root DIR` bootstrap route against the same archive. This preserves
+ordinary eligibility/copy intervals and configured Teams capture; it does not
+force full-read or make a same-basename foreign root authoritative. Retry the
+original root/source selector only after ordinary bootstrap qualifies it.
+For `--source-id`, the bootstrap root comes separately from audited admitted
+request history, not the latest retry selector or locator geometry. Successful
+source-ID-only retries do not erase that original request. If no admitted root
+exists, the error explicitly declines to emit an ordinary bootstrap command;
+verify the original source independently rather than guessing or rediscovering.
+
+### calendar attendees sources
+
+`calendar attendees sources [--source-id ID]` is strictly archive-only, including
+with `--max-age 1ns`. Failed initial registrations have a registration ID and
+nullable source ID, not a fake positive source. The independent
+`native_attendee_evidence` envelope carries source scope, original losses/clocks,
+bounded binding previews and exact selected-archive retry/full-capture routes.
+It survives `--fields`, zero hits and limits. No native observation arrays are
+serialized merely to report source health.
+
+On list/show, `native_attendee_evidence.own_captures` preserves full-capture
+SQL/commands for the own snapshot IDs of previewed rows and bindings, independently
+of `--fields`. Routes are deduplicated and bounded by the100-row plus100-binding
+previews (at most200 IDs). A historical observation's truncated bindings recover
+from its own snapshot, while `sources[].full_capture_command` still names the
+independent current source. Every route uses positive static snapshot SQL and
+the selected absolute `--db`, `--max-age 0`, `--max-text 0`; no source blob is
+duplicated per physical observation.
+
+`--fields` keys: `registration_id`, `source_id`, `attempt_id`, `admitted_id`, `snapshot_id`, `calendar_read_id`, `link_revision`, `current_read_id`, `current_link_revision`, `locator`, `account`, `status`, `reason`, `representation_digest`, `qualification`, `origin_state`, `calendar_state`, `link_state`, `scope_state`, `captured_profile_link`, `current_profile_link`, `attendees_total`, `parents_total`, `bindings_total`, `loss_scope`, `losses`, `attempted_at`, `admitted_at`, `acquired_at`, `source_observed_at`, `retry`, `full_capture_sql`, `full_capture_command`.
+
+### calendar attendees list
+
+`calendar attendees list <event> [--source-id ID] [--history] [--limit N]`
+reads physical native observations from the event's actual source-qualified
+calendar rows, not a merged UID, same subject, all profiles or a retained display
+roster. The default/hard preview is100, minimum limit1; full totals and separate
+parent bindings remain. `--history` retains original associated snapshots without
+making their old read/link scope current; an account filter still requires
+compatible captured/current owner scope. Current reads audit relevant current
+candidates, not unrelated undisplayed historical bodies.
+
+`--fields` keys: `id`, `source_id`, `snapshot_id`, `capture_id`, `representation_digest`, `qualification`, `ordinal`, `native_key`, `detail_key`, `version_raw`, `block_offset`, `payload_pos`, `name`, `email`, `resynced`, `ambiguous`, `retained`, `acquired_at`, `source_observed_at`, `loss_scope`, `source_losses`, `scope`, `scope_state`, `text_truncated`, `full_record_sql`, `full_record_command`.
+
+### calendar attendees show
+
+`calendar attendees show attendee-observation:N` accepts only a positive
+canonical archive int64, not a native key, name or URL. It audits the observation's
+own immutable snapshot and complete ambiguity set before preview or field
+projection. Identical repeated physical copies remain separate; shared parents
+do not multiply rows. Full-record SQL extracts the indexed complete native JSON
+object and its own losses/ambiguity, rather than repeating the full source blob
+per observation. Every executable follow-up retains the selected absolute
+`--db`, `--max-age 0` and unbounded full-record text. Names are copied before
+display clipping; literal nullable email/name and exact decimal native64/IDs are
+preserved. None of this establishes a resolved person, active membership or
+current attendee roster. Existing `calendar event` attendees, responses and room
+fields retain their previous semantics.
+
+`--fields` keys: `id`, `source_id`, `snapshot_id`, `capture_id`, `representation_digest`, `qualification`, `ordinal`, `native_key`, `detail_key`, `version_raw`, `block_offset`, `payload_pos`, `name`, `email`, `resynced`, `ambiguous`, `retained`, `acquired_at`, `source_observed_at`, `loss_scope`, `source_losses`, `scope`, `scope_state`, `text_truncated`, `full_record_sql`, `full_record_command`.
+
 ## transcripts
 
 Read meeting transcripts offline. A recorded meeting is one call. A call has one part for each stretch that was recorded or transcribed, and each part's transcript is a file of its own in SharePoint. A sync lists the parts from the recording notices it already archived from the meeting chat; nothing is fetched, and `transcripts` and `transcripts show` read only the archive (no network, no browser).

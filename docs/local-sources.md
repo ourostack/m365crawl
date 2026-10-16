@@ -1,15 +1,16 @@
-# Notes, documents, people and Loop
+# Notes, documents, people, attendees and Loop
 
-Teams chats, Outlook mail and the calendar arrive with `sync`. Four more local sources each have their own explicit `sync` that registers them, and their own `sources` command that shows coverage. Nothing on this page is fetched from the network, and every example is synthetic.
+Teams chats, Outlook mail and the calendar arrive with `sync`. Five more local sources each have their own explicit `sync` that registers them, and their own `sources` command that shows coverage. Nothing on this page is fetched from the network, and every example is synthetic.
 
 | Source | Register | Follow up | Reference |
 | --- | --- | --- | --- |
 | [OneNote indexed notes](#onenote-indexed-notes) | `notes sync` | `notes show note:ID` · `notes sources` | [commands](commands.md#indexed-notes) |
 | [People observations](#people-observations) | `people sync` | `people show person-observation:ID` · `people sources` | [commands](commands.md#people) |
+| [Native meeting attendee evidence](#native-meeting-attendee-evidence) | `calendar attendees sync` | `calendar attendees list <event>` · `calendar attendees show attendee-observation:N` · `calendar attendees sources` | [commands](commands.md#calendar-attendees-sync) |
 | [Document metadata](#document-metadata) | `docs sync` | `docs show document-observation:ID` · `docs sources` | [commands](commands.md#document-metadata) |
 | [Cached Loop channels](#cached-loop-channels) | `loop sync` | `loop show loop-channel:ID` · `loop sources` | [commands](commands.md#cached-loop-channels) |
 
-Shared `search` joins all four to chats and mail once they are registered.
+Shared `search` joins notes, people, documents and Loop to chats and mail once they are registered. Native meeting attendee evidence is inspected through its calendar commands, not added to the people index or shared search.
 
 ## OneNote indexed notes
 
@@ -45,6 +46,43 @@ m365crawl people show person-observation:ID
 <p align="center"><img src="people-observations.png" alt="Actual synthetic CLI output: two conflicting native people claims, a stable observation follow-up, unresolved identity and partial source coverage" width="1000"></p>
 
 *Find the name, inspect the claims, and keep uncertainty visible. These are synthetic observations, not private contacts or a directory export.*
+
+## Native meeting attendee evidence
+
+Explicitly run `m365crawl calendar attendees sync` for Mac HxStore discovery,
+or `calendar attendees sync --root DIR` for a supported copied profile root.
+Then use strictly offline `calendar attendees sources`, `list <event>` and
+`show attendee-observation:N`, even with `--max-age 1ns`.
+Inspect `native_attendee_evidence` separately from the existing event roster:
+it records the actual reader-selected source detail, not retained/unioned display
+attendees, active people, resolved identities or current membership.
+
+Own-snapshot ambiguity, original losses/clocks and independent event/detail
+bindings survive preview100, fields and zero hits. Physical observation IDs are
+unique per result; multiple parent bindings are separate relationships, not
+additional people. Exact full-record SQL extracts one complete indexed native
+object; full-capture SQL reads its immutable snapshot. Follow emitted routes
+with their selected absolute archive and `--max-age 0`.
+Use independent `own_captures` routes to recover the full historical snapshot,
+including bindings beyond the100-entry preview. These deduplicated routes survive
+fields and are bounded by at most100 rows plus100 bindings; current source health
+and its capture route remain separately current, not relabeled as history.
+
+Shared ordinary Outlook capture refreshes registered lanes from the same private
+copy. All eligible readers close before one verified cleanup and optional admission.
+Standalone capture leaves mail intact and ensures the next eligible ordinary read
+still catches up mail. It does not force repeated global recapture.
+An existing unknown calendar origin refuses standalone capture before changing
+calendar/mail/native state. After verifying the requested original source,
+bootstrap through the emitted ordinary eligible-sync route for that exact root
+and selected archive, then retry the original request. A same profile basename
+never proves ownership of the old partition.
+Native Windows/OWA acquisition remains unqualified; portable archive reads and
+fixture cross-compilation do not prove it. Current and historical results audit
+their relevant canonical bodies, not unrelated unshown history.
+[Command contract](commands.md#calendar-attendees-sync).
+
+![Synthetic native attendee evidence flow](outlook-attendee-evidence-synthetic.svg)
 
 ## Document metadata
 

@@ -284,13 +284,14 @@ type CalendarSeries struct {
 // CalendarDetail is one event with everything the archive holds about it.
 type CalendarDetail struct {
 	CalendarRow
-	Attendees             []CalendarAttendee
-	Recaps                []CalendarRecap
-	Chat                  *CalendarChat
-	Series                CalendarSeries
-	Recordings            []CalendarRecording
-	SeriesRecordings      []CalendarRecording
-	SeriesRecordingsTotal int
+	NativeAttendeeEvidence AttendeeSnapshot
+	Attendees              []CalendarAttendee
+	Recaps                 []CalendarRecap
+	Chat                   *CalendarChat
+	Series                 CalendarSeries
+	Recordings             []CalendarRecording
+	SeriesRecordings       []CalendarRecording
+	SeriesRecordingsTotal  int
 	// calls is the recorded calls that belong to this occurrence (chatRecordings.occurrence), sorted.
 	calls []string
 }
@@ -322,36 +323,35 @@ func (s *Store) calendarEvent(ctx context.Context, acct *teamsdesktop.Account, r
 	if !ok {
 		return d, false, ErrNoCalendarTables
 	}
-	principals, err := calendar.LoadPrincipals(ctx, s.db)
-	if err != nil {
-		return d, false, err
-	}
-	cands, err := s.matchRef(ctx, principals, accountString(acct), ref)
-	if err != nil {
-		return d, false, err
-	}
-	// Find loads each candidate's group; two candidates that are one joined group are one event.
-	seen := map[refCandidate]bool{}
-	var items []calendar.AgendaItem
-	for _, c := range cands {
-		it, ok, err := calendar.Find(ctx, s.db, c.principal, c.key)
+	var principals calendar.Principals
+	var it calendar.AgendaItem
+	d.NativeAttendeeEvidence = emptyAttendeeSnapshot()
+	err = s.attendeeView(ctx, func(reader knowledgeReader, available bool) error {
+		groups, p, err := resolveCalendarGroups(ctx, reader, accountString(acct), ref)
 		if err != nil {
-			return d, false, err
+			return err
 		}
-		g := refCandidate{it.Principal, it.Key}
-		if ok && !seen[g] {
-			seen[g] = true
-			items = append(items, it)
+		switch len(groups) {
+		case 0:
+			return nil
+		case 1:
+		default:
+			items := make([]calendar.AgendaItem, len(groups))
+			for i, g := range groups {
+				items[i] = g.item
+			}
+			return ambiguousEvent(ref, items)
 		}
+		principals, it, found = p, groups[0].item, true
+		d.NativeAttendeeEvidence.EventID = EventID(it.Principal, it.Key)
+		if available {
+			return attendeeEventInView(ctx, reader, acct, groups[0], AttendeeFilter{Limit: 0}, &d.NativeAttendeeEvidence)
+		}
+		return nil
+	})
+	if err != nil || !found {
+		return d, false, err
 	}
-	switch len(items) {
-	case 0:
-		return d, false, nil
-	case 1:
-	default:
-		return d, false, ambiguousEvent(ref, items)
-	}
-	it := items[0]
 	rec := &recordingCache{s: s, principals: principals, byChat: map[string]*chatRecordings{}}
 	if d.CalendarRow, err = s.rowOf(ctx, it, principals, rec); err != nil {
 		return d, false, err
@@ -413,17 +413,17 @@ func ambiguousEvent(ref string, items []calendar.AgendaItem) *errs.Coded {
 // matchRef finds the (principal, key) pairs ref names. A reference that is exactly a key, an event
 // id or a legacy id (the id computed from an account of the principal and the key, as an earlier
 // state printed it) wins over prefixes.
-func (s *Store) matchRef(ctx context.Context, p calendar.Principals, account, ref string) ([]refCandidate, error) {
+func matchCalendarRef(ctx context.Context, reader knowledgeReader, p calendar.Principals, account, ref string) ([]refCandidate, error) {
 	where, args := "1", []any(nil)
 	if account != "" {
 		scope := p.Resolve(account)
 		where, args = "account_id in "+inList(len(scope)), stringArgs(scope)
 	}
-	history, err := s.linkHistory(ctx)
+	history, err := calendarLinkHistory(ctx, reader)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.query(ctx, `select distinct account_id, event_key from calendar_source_events where `+where, args...)
+	rows, err := reader.QueryContext(ctx, `select distinct account_id, event_key from calendar_source_events where `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +475,11 @@ func (s *Store) matchRef(ctx context.Context, p calendar.Principals, account, re
 // to, ended links included, so an id printed while it was linked still resolves after the link
 // ends.
 func (s *Store) linkHistory(ctx context.Context) (map[string][]string, error) {
-	rows, err := s.query(ctx, `select account_id, principal_id from calendar_account_links where source<>? order by account_id, principal_id`, string(calendar.SourceTeams))
+	return calendarLinkHistory(ctx, s.db)
+}
+
+func calendarLinkHistory(ctx context.Context, reader knowledgeReader) (map[string][]string, error) {
+	rows, err := reader.QueryContext(ctx, `select account_id, principal_id from calendar_account_links where source<>? order by account_id, principal_id`, string(calendar.SourceTeams))
 	if err != nil {
 		return nil, err
 	}

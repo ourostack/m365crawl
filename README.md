@@ -65,6 +65,7 @@ For an offline-only read, use `--max-age 0`: ordinary reads can otherwise refres
 | Find that thing someone sent me | `m365crawl search "budget review"` — chats and mail together, each hit labelled with its `source` |
 | Show me the whole conversation | `m365crawl thread <link>` (Teams) · `m365crawl mail thread <id>` (the reply chain) |
 | Prep me for my 2 pm | `m365crawl calendar` then `m365crawl calendar event <id>` — attendees, body, the meeting chat and related mail |
+| Inspect the native evidence behind a meeting roster | Explicit `calendar attendees sync`, then offline `calendar attendees list <event>` and `show attendee-observation:N`; [keep source evidence separate from the displayed roster](docs/local-sources.md#native-meeting-attendee-evidence) |
 | Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
 | What's in the archive and how fresh is it? | `m365crawl` |
 | Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
@@ -82,6 +83,7 @@ For an offline-only read, use `--max-age 0`: ordinary reads can otherwise refres
 | Teams chats, channels, activity, unread state and mentions | `sync`, from the new Teams app's cache | [Usage guide: Teams](docs/guide.md#teams) |
 | Outlook mail | `sync`, from new Outlook's cache on Mac and Windows | [Usage guide: Outlook mail](docs/guide.md#outlook-mail) |
 | Calendar, recaps and action items | `sync`, from Teams and the new Outlook for Mac | [Usage guide: Calendar](docs/guide.md#calendar) |
+| Native meeting attendee evidence | Explicit Mac HxStore discovery or supported copied profiles; registered lanes reuse an ordinary Outlook copy. Offline archive reads are portable, not native Windows/OWA qualification. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
 | OneNote indexed notes, Office document metadata, cached Loop channels, native people observations | Their own explicit `notes`, `docs`, `loop` and `people sync` | [Notes, documents, people and Loop](docs/local-sources.md) |
 | Meeting transcript text | Explicit `transcripts fetch`, through the tool-owned browser | [Commands: transcripts](docs/commands.md#transcripts) |
 | Resident Office text, SharePoint pages, Stream transcripts, Engage Home sessions | Explicit `content capture` or `content fetch` only. Acquisition is not yet qualified on native Windows and is not supported on Linux; offline archive reads are portable. | [Explicit content capture](docs/content.md) · [Engage Home](docs/engage-home.md) |
