@@ -92,6 +92,17 @@ erasing mail; the next eligible ordinary unchanged-input read still captures
 mail. The common five-minute interval and single outer archive lease remain.
 
 `native_attendee_evidence` is independent of fields, zero hits and item limits.
+Explicit-account read notices distinguish source profile provenance from the
+compatible captured/current linked owner required by native list/show. Empty
+scoped results do not prove absence of archived evidence. Sources remain
+archive-wide diagnostics, not owner-filtered by `--account`; `--source-id` only
+narrows list/sources, never show. Source-local inspection requires an explicit
+repeat of the same read/selected archive/ID without `--account`, changing
+inspection scope without proving ownership or current membership. There is no
+automatic retry or acquisition. Account-scoped unavailable detail keeps exit2
+and `outlook_attendee_unknown`; its generic message/fix is identical for valid
+absent, foreign and unlinked IDs and comes from request context only. Existing
+corruption/audit/error precedence and the separate sync-account refusal remain.
 Bindings are separate bounded previews, not duplicated people. First100
 physical observations retain full totals; copied display-name clipping never
 changes literal stored text, email claims, native IDs or another result.

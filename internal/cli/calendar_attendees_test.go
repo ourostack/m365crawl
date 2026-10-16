@@ -25,6 +25,11 @@ var (
 
 func attendeeCLIArchive(t *testing.T, e *env, copies int, ambiguous bool) string {
 	t.Helper()
+	return attendeeCLIArchiveWithOwner(t, e, copies, ambiguous, "")
+}
+
+func attendeeCLIArchiveWithOwner(t *testing.T, e *env, copies int, ambiguous bool, owner string) string {
+	t.Helper()
 	ctx := context.Background()
 	s, err := store.Open(ctx, e.db)
 	if err != nil {
@@ -49,6 +54,11 @@ func attendeeCLIArchive(t *testing.T, e *env, copies int, ambiguous bool) string
 	}
 	if cal.Counts.Events.Inserted != 1 {
 		t.Fatalf("synthetic calendar admission failed: %+v", cal)
+	}
+	if owner != "" {
+		if err := s.SetOutlookLink(ctx, "outlook/Main", owner, at); err != nil {
+			t.Fatal(err)
+		}
 	}
 	a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic", Locator: attendeeCLIFixtureOrigin, AcquisitionSignature: "synthetic", At: at},
 		store.AttendeeRequest{Root: attendeeCLIFixtureRoot, Discover: true})

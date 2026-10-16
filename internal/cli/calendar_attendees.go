@@ -22,10 +22,17 @@ type calendarAttendeesGroup struct {
 	Show    attendeeShowCmd    `cmd:"" help:"Read one positive attendee-observation:ID, its own snapshot ambiguity and independent parent bindings. Always offline."`
 }
 
+const attendeeAccountContext = "For native list/show, --account requires compatible captured and current linked owner scope; the source profile account is provenance, not owner qualification. Shown sources are diagnostics, not account-matching observations. An empty scoped result does not prove absence of archived source evidence."
+
+const attendeeLocalInspection = "To explicitly inspect source-local evidence, repeat the same read against the same selected --db and the same event/observation ID without --account. This changes inspection scope, not ownership or current membership. No automatic retry or acquisition is performed."
+
+const attendeeSourcesContext = "Sources are archive-wide diagnostics: --account does not owner-filter them. --source-id narrows list/sources, not show, and does not establish ownership."
+
 func (calendarAttendeesGroup) Help() string {
 	return "Native HxStore observations are source-selected detail evidence, not active people, resolved identities, responses or a current attendee roster. Existing calendar event attendees remain retained/unioned display detail.\n" +
 		"Only sync acquires input. Default explicit discovery is Mac HxStore; --root accepts a supported copied <root>/<profile>/HxStore.hxd input. Windows/OWA native acquisition is not qualified. Shared ordinary Outlook capture refreshes registered lanes only, respecting its copy interval.\n" +
-		"list, show and sources never refresh, discover, register, copy or migrate, even with --max-age 1ns. --history includes retained associated copies without making them current; --account still requires compatible captured/current owner scope. Absence is not evidence that a person or meeting does not exist.\n" +
+		"list, show and sources never refresh, discover, register, copy or migrate, even with --max-age 1ns. --history includes retained associated copies without making them current. Absence is not evidence that a person or meeting does not exist.\n" +
+		attendeeAccountContext + "\n" + attendeeLocalInspection + "\n" + attendeeSourcesContext + "\n" +
 		"native_attendee_evidence survives fields, zero hits and preview limits. Native physical rows are not multiplied by event bindings. Own-snapshot ambiguity is computed before parent/100-row projection. Full-record/capture routes retain the selected absolute archive and --max-age 0. Current source capture and own_captures recovery are distinct: own routes are deduplicated from at most100 rows plus100 bindings and survive --fields."
 }
 
@@ -44,6 +51,18 @@ type attendeeListCmd struct {
 }
 type attendeeShowCmd struct {
 	ID string `arg:"" help:"Positive canonical attendee-observation:ID printed by list; not a native key/name/URL."`
+}
+
+func (attendeeListCmd) Help() string {
+	return attendeeAccountContext + "\n" + attendeeLocalInspection
+}
+
+func (attendeeShowCmd) Help() string {
+	return attendeeAccountContext + "\n" + attendeeLocalInspection
+}
+
+func (attendeeSourcesCmd) Help() string {
+	return attendeeSourcesContext + "\n" + attendeeAccountContext + "\n" + attendeeLocalInspection
 }
 
 type attendeeLoss struct {
@@ -311,6 +330,14 @@ func (rt *runtime) attendeeCoverage(snapshot store.AttendeeSnapshot) *AttendeeEv
 	return out
 }
 
+func (rt *runtime) attendeeReadCoverage(snapshot store.AttendeeSnapshot) *AttendeeEvidenceCoverage {
+	out := rt.attendeeCoverage(snapshot)
+	if rt.account != nil {
+		out.Notices = append(out.Notices, attendeeAccountContext+" "+attendeeLocalInspection)
+	}
+	return out
+}
+
 func (rt *runtime) attendeeError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrAttendeeArchiveCorrupt):
@@ -324,6 +351,19 @@ func (rt *runtime) attendeeError(err error) error {
 	}
 }
 
+func (rt *runtime) attendeeReadError(err error) error {
+	result := rt.attendeeError(err)
+	var coded *errs.Coded
+	if errors.As(result, &coded) && coded.Code == "outlook_attendee_unknown" && rt.account != nil {
+		scoped := *coded
+		scoped.Message = "the requested archived event, source or native observation is unavailable in the requested account scope"
+		scoped.Fix = attendeeAccountContext + " " + attendeeLocalInspection + " " + attendeeSourcesContext +
+			" Read `" + rt.archiveCommand("calendar", "attendees", "sources") + "` for archive-wide source diagnostics."
+		return &scoped
+	}
+	return result
+}
+
 func (rt *runtime) attendeeRead(label string, read func(*store.Store) (result, error)) error {
 	if !filepath.IsAbs(rt.archiveRef()) {
 		return errs.Usage("the selected archive must resolve to an absolute path")
@@ -332,14 +372,14 @@ func (rt *runtime) attendeeRead(label string, read func(*store.Store) (result, e
 	if errors.Is(err, store.ErrNoArchive) {
 		s = nil
 	} else if err != nil {
-		return rt.attendeeError(err)
+		return rt.attendeeReadError(err)
 	}
 	res, readErr := read(s)
 	if s != nil {
 		readErr = errors.Join(readErr, s.Close())
 	}
 	if readErr != nil {
-		return rt.attendeeError(readErr)
+		return rt.attendeeReadError(readErr)
 	}
 	return rt.write(label, res)
 }
@@ -372,7 +412,7 @@ func (c *attendeeListCmd) Run(rt *runtime) error {
 		out.Count = len(out.Items)
 		out.Total = int(snapshot.Total)
 		out.Items = rt.shapeAttendeeItems(out.Items)
-		coverage := rt.attendeeCoverage(snapshot)
+		coverage := rt.attendeeReadCoverage(snapshot)
 		out.NativeAttendeeEvidence = coverage
 		return &attendeeResult{out}, nil
 	})
@@ -394,7 +434,7 @@ func (c *attendeeShowCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		coverage := rt.attendeeCoverage(store.AttendeeSnapshot{Coverage: detail.Coverage, Rows: []store.AttendeeRow{detail.Row}, Bindings: detail.Bindings, BindingsTotal: detail.BindingsTotal, BindingsTruncated: detail.BindingsTruncated})
+		coverage := rt.attendeeReadCoverage(store.AttendeeSnapshot{Coverage: detail.Coverage, Rows: []store.AttendeeRow{detail.Row}, Bindings: detail.Bindings, BindingsTotal: detail.BindingsTotal, BindingsTruncated: detail.BindingsTruncated})
 		out := newList(rt.shapeAttendeeItems([]any{shapeAttendee(detail.Row, rt.g.MaxText, rt.archiveRef())}), false)
 		out.sourceOnly = true
 		out.NativeAttendeeEvidence = coverage
@@ -419,7 +459,8 @@ func (c *attendeeSourcesCmd) Run(rt *runtime) error {
 				return nil, err
 			}
 		}
-		coverage := rt.attendeeCoverage(snapshot)
+		coverage := rt.attendeeReadCoverage(snapshot)
+		coverage.Notices = append(coverage.Notices, attendeeSourcesContext)
 		out := newList(shape(rt, coverage.Sources), false)
 		out.sourceOnly = true
 		out.NativeAttendeeEvidence = coverage
