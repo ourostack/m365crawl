@@ -4,6 +4,13 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.16] - 2026-10-16
+
+### Fixed
+
+- Native attendee reads now explain explicit account filtering and archive-wide source diagnostics without changing owner qualification or read selection.
+- Root help and the embedded guide explicitly distinguish cached bot/recap evidence from deferred private Copilot history and Planner/Microsoft To Do assigned-task ingestion.
+
 ## [0.9.15] - 2026-10-16
 
 ### Added
