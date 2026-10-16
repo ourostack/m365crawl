@@ -18,3 +18,8 @@
 - Standalone calendar/native capture invalidates the mail-read marker before the
   shared fingerprint advances, preserving pending mail for the next eligible
   ordinary unchanged-input sync without reading or erasing mail itself.
+- Existing unknown calendar origins cannot be claimed by standalone capture:
+  refusal precedes calendar/mail/native changes, with exact ordinary-bootstrap
+  recovery after source verification.
+- Historical observation/binding previews retain bounded own-snapshot capture
+  routes independently of current source health and field projection.

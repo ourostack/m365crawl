@@ -45,9 +45,13 @@ Every successful ordinary calendar decode, including an unregistered one,
 allocates a unique atomic immutable read ID. Equal/backward/known-zero clocks
 are not identities; unchanged checks allocate none. Receipt digests use
 canonical component arrays and retain original-offset known-zero read clocks.
-Standalone origin conflicts/unknown continuity refuse before calendar overwrite;
-old unknown origins bootstrap through actual ordinary decode without mapper
-bump or rich-detail blanking.
+Standalone origin conflicts, existing unknown origins and unknown continuity refuse
+before calendar overwrite, mail invalidation or positive native admission. A
+genuinely new partition is distinct from an existing unqualified one. Old unknown
+origins bootstrap only through eligible actual ordinary decode without mapper
+bump or rich-detail blanking; recovery preserves the selected archive and exact
+requested Outlook root, requires verifying the original source, and never forces
+full-read or bypasses the copy interval.
 
 Link mutation identity uses AUTOINCREMENT events plus an independent current
 frontier, account-qualified FK and explicit null baseline. Exact owned table/
@@ -88,7 +92,11 @@ Bindings are separate bounded previews, not duplicated people. First100
 physical observations retain full totals; copied display-name clipping never
 changes literal stored text, email claims, native IDs or another result.
 Full-record SQL extracts one indexed native attendee JSON object with own
-losses/ambiguity; full capture reads the snapshot separately. Every executable
+losses/ambiguity; full capture reads the snapshot separately. Independent
+`own_captures` recovery routes name the positive own snapshot IDs of previewed
+rows/bindings, including historical detail. They survive fields, deduplicate at
+most200 IDs (100 rows plus100 bindings), and never substitute current source
+coverage for an old capture or embed full source blobs per row. Every executable
 route MUST preserve the selected absolute `--db`, `--max-age 0` and full
 unclipped SQL payload. Initial failures retain nullable source ID and the exact
 original request, never a guessed parent directory or source ID0.

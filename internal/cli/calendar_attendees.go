@@ -26,7 +26,7 @@ func (calendarAttendeesGroup) Help() string {
 	return "Native HxStore observations are source-selected detail evidence, not active people, resolved identities, responses or a current attendee roster. Existing calendar event attendees remain retained/unioned display detail.\n" +
 		"Only sync acquires input. Default explicit discovery is Mac HxStore; --root accepts a supported copied <root>/<profile>/HxStore.hxd input. Windows/OWA native acquisition is not qualified. Shared ordinary Outlook capture refreshes registered lanes only, respecting its copy interval.\n" +
 		"list, show and sources never refresh, discover, register, copy or migrate, even with --max-age 1ns. --history includes retained associated copies without making them current; --account still requires compatible captured/current owner scope. Absence is not evidence that a person or meeting does not exist.\n" +
-		"native_attendee_evidence survives fields, zero hits and preview limits. Native physical rows are not multiplied by event bindings. Own-snapshot ambiguity is computed before parent/100-row projection. Full-record/capture routes retain the selected absolute archive and --max-age 0."
+		"native_attendee_evidence survives fields, zero hits and preview limits. Native physical rows are not multiplied by event bindings. Own-snapshot ambiguity is computed before parent/100-row projection. Full-record/capture routes retain the selected absolute archive and --max-age 0. Current source capture and own_captures recovery are distinct: own routes are deduplicated from at most100 rows plus100 bindings and survive --fields."
 }
 
 type attendeeSyncCmd struct {
@@ -137,6 +137,12 @@ type attendeeSourceItem struct {
 	FullCaptureCommand   string         `json:"full_capture_command,omitempty"`
 }
 
+type attendeeCaptureItem struct {
+	SnapshotID         string `json:"snapshot_id"`
+	FullCaptureSQL     string `json:"full_capture_sql"`
+	FullCaptureCommand string `json:"full_capture_command"`
+}
+
 type AttendeeEvidenceCoverage struct {
 	Scope             string                `json:"scope"`
 	EventID           string                `json:"event_id,omitempty"`
@@ -145,6 +151,7 @@ type AttendeeEvidenceCoverage struct {
 	BindingsTotal     string                `json:"bindings_total"`
 	BindingsTruncated bool                  `json:"bindings_truncated"`
 	Notices           []string              `json:"notices"`
+	OwnCaptures       []attendeeCaptureItem `json:"own_captures,omitempty"`
 }
 
 type attendeeResult struct{ *listResult }
@@ -185,6 +192,15 @@ func attendeeDecimal(value *int64) *string {
 	}
 	text := strconv.FormatInt(*value, 10)
 	return &text
+}
+
+func shapeAttendeeCapture(id int64, db string) (attendeeCaptureItem, bool) {
+	if id <= 0 {
+		return attendeeCaptureItem{}, false
+	}
+	query := fmt.Sprintf("SELECT * FROM outlook_attendee_snapshots WHERE rowid=%d", id)
+	return attendeeCaptureItem{SnapshotID: strconv.FormatInt(id, 10), FullCaptureSQL: query,
+		FullCaptureCommand: archiveScopedCommand(db, "--max-text", "0", "sql", query)}, true
 }
 
 func attendeeFullSQL(id int64) string {
@@ -262,8 +278,8 @@ func (rt *runtime) attendeeCoverage(snapshot store.AttendeeSnapshot) *AttendeeEv
 			item.Retry = rt.archiveCommand("calendar", "attendees", "sync", "--root", source.Request.Root)
 		}
 		if source.SnapshotID != nil {
-			item.FullCaptureSQL = fmt.Sprintf("SELECT * FROM outlook_attendee_snapshots WHERE rowid=%d", *source.SnapshotID)
-			item.FullCaptureCommand = rt.archiveCommand("--max-text", "0", "sql", item.FullCaptureSQL)
+			capture, _ := shapeAttendeeCapture(*source.SnapshotID, rt.archiveRef())
+			item.FullCaptureSQL, item.FullCaptureCommand = capture.FullCaptureSQL, capture.FullCaptureCommand
 		}
 		out.Sources = append(out.Sources, item)
 	}
@@ -274,6 +290,23 @@ func (rt *runtime) attendeeCoverage(snapshot store.AttendeeSnapshot) *AttendeeEv
 			BlockOffset: strconv.FormatInt(selection.BlockOffset, 10), PayloadPos: strconv.Itoa(selection.PayloadPos), DetailCopies: strconv.Itoa(selection.DetailCopies),
 			DetailResyncedCopies: strconv.Itoa(selection.DetailResyncedCopies), DetailPresent: selection.DetailPresent, DetailDiffering: selection.DetailDiffering,
 			Retained: binding.Retained, MatchesRead: binding.MatchesRead, MatchesOrigin: binding.MatchesOrigin, MatchesLink: binding.MatchesLink, CalendarRowPresent: binding.CalendarRowPresent})
+	}
+	seen := map[int64]bool{}
+	addOwn := func(id int64) {
+		// At most100 physical rows plus100 bindings are previewed by the store.
+		if seen[id] || len(out.OwnCaptures) >= 200 {
+			return
+		}
+		if capture, valid := shapeAttendeeCapture(id, rt.archiveRef()); valid {
+			seen[id] = true
+			out.OwnCaptures = append(out.OwnCaptures, capture)
+		}
+	}
+	for _, row := range snapshot.Rows {
+		addOwn(row.SnapshotID)
+	}
+	for _, binding := range snapshot.Bindings {
+		addOwn(binding.SnapshotID)
 	}
 	return out
 }
@@ -361,7 +394,7 @@ func (c *attendeeShowCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		coverage := rt.attendeeCoverage(store.AttendeeSnapshot{Coverage: detail.Coverage, Bindings: detail.Bindings, BindingsTotal: detail.BindingsTotal, BindingsTruncated: detail.BindingsTruncated})
+		coverage := rt.attendeeCoverage(store.AttendeeSnapshot{Coverage: detail.Coverage, Rows: []store.AttendeeRow{detail.Row}, Bindings: detail.Bindings, BindingsTotal: detail.BindingsTotal, BindingsTruncated: detail.BindingsTruncated})
 		out := newList(rt.shapeAttendeeItems([]any{shapeAttendee(detail.Row, rt.g.MaxText, rt.archiveRef())}), false)
 		out.sourceOnly = true
 		out.NativeAttendeeEvidence = coverage
@@ -424,6 +457,22 @@ func (c *attendeeSyncCmd) Run(rt *runtime) error {
 				args = append(args, "--root", c.Root)
 			}
 			copy.Fix = "Inspect `" + rt.archiveCommand("calendar", "attendees", "sources") + "`; retry only `" + rt.archiveCommand(args...) + "` after resolving the reported failure. No automatic archive repair or unrelated source fetch."
+			if copy.Code == "outlook_attendee_origin_unknown" {
+				root := c.Root
+				var bootstrap *syncer.AttendeeBootstrapRequired
+				if errors.As(err, &bootstrap) {
+					root = bootstrap.Root
+				}
+				if root != "" {
+					ordinary := []string{"sync", "--outlook-root", root}
+					if rt.g.TeamsRoot != "" {
+						ordinary = append(ordinary, "--teams-root", rt.g.TeamsRoot)
+					}
+					copy.Fix = "First verify this requested root is the original calendar source, not a same-name foreign copy. Bootstrap only through an eligible ordinary decode with `" +
+						rt.archiveCommand(ordinary...) + "` (normal configured Teams capture also applies; copy interval and unchanged checks remain). Then retry `" +
+						rt.archiveCommand(args...) + "`. Standalone sync never claims an existing unknown origin."
+				}
+			}
 			return errors.Join(&copy, failure)
 		}
 		return failure
@@ -478,6 +527,11 @@ func (rt *runtime) renderAttendeeCoverage(coverage *AttendeeEvidenceCoverage) er
 			if _, err := fmt.Fprintf(rt.stdout, "  full capture: %s\n", source.FullCaptureCommand); err != nil {
 				return err
 			}
+		}
+	}
+	for _, capture := range coverage.OwnCaptures {
+		if _, err := fmt.Fprintf(rt.stdout, "  own snapshot %s full capture: %s\n", capture.SnapshotID, capture.FullCaptureCommand); err != nil {
+			return err
 		}
 	}
 	for _, binding := range coverage.Bindings {

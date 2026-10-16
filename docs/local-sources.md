@@ -63,11 +63,20 @@ unique per result; multiple parent bindings are separate relationships, not
 additional people. Exact full-record SQL extracts one complete indexed native
 object; full-capture SQL reads its immutable snapshot. Follow emitted routes
 with their selected absolute archive and `--max-age 0`.
+Use independent `own_captures` routes to recover the full historical snapshot,
+including bindings beyond the100-entry preview. These deduplicated routes survive
+fields and are bounded by at most100 rows plus100 bindings; current source health
+and its capture route remain separately current, not relabeled as history.
 
 Shared ordinary Outlook capture refreshes registered lanes from the same private
 copy. All eligible readers close before one verified cleanup and optional admission.
 Standalone capture leaves mail intact and ensures the next eligible ordinary read
 still catches up mail. It does not force repeated global recapture.
+An existing unknown calendar origin refuses standalone capture before changing
+calendar/mail/native state. After verifying the requested original source,
+bootstrap through the emitted ordinary eligible-sync route for that exact root
+and selected archive, then retry the original request. A same profile basename
+never proves ownership of the old partition.
 Native Windows/OWA acquisition remains unqualified; portable archive reads and
 fixture cross-compilation do not prove it. Current and historical results audit
 their relevant canonical bodies, not unrelated unshown history.

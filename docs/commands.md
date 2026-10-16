@@ -1250,7 +1250,13 @@ unqualified/replaced origins are `outlook_attendee_origin_unknown` /
 is `outlook_attendee_archive_corrupt`, never an invitation to read-repair.
 Native reader layout/read codes and cancellation remain visible. Unknown
 archive IDs use `outlook_attendee_unknown`. Failure remedies retain the selected
-absolute archive and exact root/source request; they never fetch other profiles.
+absolute archive and exact root/source request; they never automatically fetch.
+An existing unknown origin refuses before calendar/mail/native state changes.
+Verify the requested root is the original source, then use its emitted ordinary
+`sync --outlook-root DIR` bootstrap route against the same archive. This preserves
+ordinary eligibility/copy intervals and configured Teams capture; it does not
+force full-read or make a same-basename foreign root authoritative. Retry the
+original root/source selector only after ordinary bootstrap qualifies it.
 
 ### calendar attendees sources
 
@@ -1261,6 +1267,15 @@ nullable source ID, not a fake positive source. The independent
 bounded binding previews and exact selected-archive retry/full-capture routes.
 It survives `--fields`, zero hits and limits. No native observation arrays are
 serialized merely to report source health.
+
+On list/show, `native_attendee_evidence.own_captures` preserves full-capture
+SQL/commands for the own snapshot IDs of previewed rows and bindings, independently
+of `--fields`. Routes are deduplicated and bounded by the100-row plus100-binding
+previews (at most200 IDs). A historical observation's truncated bindings recover
+from its own snapshot, while `sources[].full_capture_command` still names the
+independent current source. Every route uses positive static snapshot SQL and
+the selected absolute `--db`, `--max-age 0`, `--max-text 0`; no source blob is
+duplicated per physical observation.
 
 `--fields` keys: `registration_id`, `source_id`, `attempt_id`, `admitted_id`, `snapshot_id`, `calendar_read_id`, `link_revision`, `current_read_id`, `current_link_revision`, `locator`, `account`, `status`, `reason`, `representation_digest`, `qualification`, `origin_state`, `calendar_state`, `link_state`, `scope_state`, `captured_profile_link`, `current_profile_link`, `attendees_total`, `parents_total`, `bindings_total`, `loss_scope`, `losses`, `attempted_at`, `admitted_at`, `acquired_at`, `source_observed_at`, `retry`, `full_capture_sql`, `full_capture_command`.
 

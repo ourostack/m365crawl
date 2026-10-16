@@ -30,6 +30,17 @@ type AttendeeReport struct {
 	Captured, Reused, Skipped, Failed int
 }
 
+// AttendeeBootstrapRequired retains the exact requested root, not authority over the old partition.
+type AttendeeBootstrapRequired struct{ Root string }
+
+func (e *AttendeeBootstrapRequired) Error() string {
+	return attendeeError("outlook_attendee_origin_unknown").Error()
+}
+
+func (e *AttendeeBootstrapRequired) Unwrap() error {
+	return attendeeError("outlook_attendee_origin_unknown")
+}
+
 var (
 	attendeeCollect = collectAttendeeCapture
 	attendeeIndex   = hxstore.OpenFile
@@ -319,6 +330,9 @@ func captureAttendee(ctx context.Context, s *store.Store, target attendeeTarget)
 	}
 	if state == "conflict" {
 		return "failed", attendeeError("outlook_attendee_origin_conflict")
+	}
+	if state == "unknown" {
+		return "failed", &AttendeeBootstrapRequired{Root: target.request.Root}
 	}
 	prior, err := s.OutlookState(ctx, target.profile.Name, outlookKey(target.profile.Name), account)
 	if err != nil {

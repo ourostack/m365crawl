@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/store"
 )
@@ -51,19 +53,42 @@ func TestAttendeeExplicitIntervalAndSourceRetry(t *testing.T) {
 func TestAttendeeUnknownOriginBootstrap(t *testing.T) {
 	isolateTmp(t)
 	utcDays(t)
-	root, db := attendeeTestRoot(t, false), newDB(t)
+	root, foreign, db := attendeeTestRoot(t, true), attendeeTestRoot(t, true), newDB(t)
 	now := fakeClock(t, time.Date(2031, 3, 5, 9, 0, 0, 0, time.UTC))
 	old := peopleResolve
+	t.Cleanup(func() { peopleResolve = old })
 	peopleResolve = func(string) (string, error) { return "", errors.New("synthetic unknown origin") }
 	run(t, outlookOpts(db, root))
 	peopleResolve = old
-	t.Cleanup(func() { peopleResolve = old })
+	*now = now.Add(6 * time.Minute)
+	before := attendeeArchiveState(t, db)
+	for _, candidate := range []string{foreign, root} {
+		report, err := SyncAttendees(context.Background(), AttendeeOptions{DBPath: db, Root: candidate, Explicit: true, Discover: true})
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != "outlook_attendee_origin_unknown" || report.Failed != 1 {
+			t.Fatalf("standalone claimed existing unknown partition: report=%+v err=%v", report, err)
+		}
+		if strings.Contains(err.Error(), candidate) || !strings.Contains(err.Error(), "native Outlook attendee evidence") {
+			t.Fatal("unknown-origin diagnostic lost its fixed private message")
+		}
+		if after := attendeeArchiveState(t, db); after != before {
+			t.Fatal("unknown refusal changed calendar/read/native/mail/archive state")
+		}
+	}
+	*now = now.Add(6 * time.Minute)
+	run(t, outlookOpts(db, root))
+	if count(t, db, `select count(*) from outlook_calendar_reads`) != 2 {
+		t.Fatal("eligible ordinary origin bootstrap lacked a unique decode identity")
+	}
 	*now = now.Add(6 * time.Minute)
 	if r, err := SyncAttendees(context.Background(), AttendeeOptions{DBPath: db, Root: root, Explicit: true, Discover: true}); err != nil || r.Captured != 1 {
-		t.Fatal("ordinary unknown origin did not bootstrap through actual decode", r, err)
+		t.Fatal("matched root after eligible ordinary bootstrap refused", r, err)
 	}
-	if count(t, db, `select count(*) from outlook_calendar_reads`) != 2 {
-		t.Fatal("origin bootstrap lacked unique ordinary read")
+	before = attendeeArchiveState(t, db)
+	_, err := SyncAttendees(context.Background(), AttendeeOptions{DBPath: db, Root: foreign, Explicit: true, Discover: true})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != "outlook_attendee_origin_conflict" || attendeeArchiveState(t, db) != before {
+		t.Fatal("ordinary bootstrap authorized same-basename foreign root", err)
 	}
 }
 

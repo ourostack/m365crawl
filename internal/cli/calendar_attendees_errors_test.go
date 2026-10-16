@@ -97,13 +97,14 @@ func TestAttendeeReadOutputAndUsageFailures(t *testing.T) {
 
 func TestAttendeeTextOutputFailures(t *testing.T) {
 	coverage := &AttendeeEvidenceCoverage{Scope: store.AttendeeScope, BindingsTotal: "1",
-		Sources:  []attendeeSourceItem{{RegistrationID: "1", FullCaptureCommand: "synthetic full capture"}},
-		Bindings: []attendeeBindingItem{{ID: "1", NativeEventID: "AA11", DetailKey: 3}}, Notices: []string{"synthetic scope"}}
+		Sources:     []attendeeSourceItem{{RegistrationID: "1", FullCaptureCommand: "synthetic full capture"}},
+		OwnCaptures: []attendeeCaptureItem{{SnapshotID: "1", FullCaptureCommand: "synthetic own capture"}},
+		Bindings:    []attendeeBindingItem{{ID: "1", NativeEventID: "AA11", DetailKey: 3}}, Notices: []string{"synthetic scope"}}
 	rt := &runtime{stdout: io.Discard}
 	if err := rt.renderAttendeeCoverage(nil); err != nil {
 		t.Fatal(err)
 	}
-	for n := 1; n <= 5; n++ {
+	for n := 1; n <= 6; n++ {
 		rt.stdout = &attendeeFailWriter{at: n}
 		if err := rt.renderAttendeeCoverage(coverage); !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatal("coverage output failure disappeared", n, err)
