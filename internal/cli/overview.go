@@ -12,9 +12,9 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
-// appDescription is the one sentence that says what m365crawl is: the root help's description and
+// appDescription says what m365crawl covers: the root help's description and
 // the crawlkit manifest's.
-const appDescription = "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline."
+const appDescription = "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline. Private Copilot history and Planner/Microsoft To Do assigned-task ingestion are not included and remain uncommitted/deferred. Shared-chat bot/citation claims and recap action items are not substitutes for those workflows."
 
 // startStep is one line of the "Start here" block: a command and what it is for.
 type startStep struct {

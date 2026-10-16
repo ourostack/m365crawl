@@ -2,7 +2,7 @@
   "schema_version": "crawlkit.control.v1",
   "id": "m365crawl",
   "display_name": "m365crawl",
-  "description": "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline.",
+  "description": "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline. Private Copilot history and Planner/Microsoft To Do assigned-task ingestion are not included and remain uncommitted/deferred. Shared-chat bot/citation claims and recap action items are not substitutes for those workflows.",
   "binary": {
     "name": "m365crawl"
   },

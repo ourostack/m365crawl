@@ -1266,7 +1266,10 @@ verify the original source independently rather than guessing or rediscovering.
 ### calendar attendees sources
 
 `calendar attendees sources [--source-id ID]` is strictly archive-only, including
-with `--max-age 1ns`. Failed initial registrations have a registration ID and
+with `--max-age 1ns`. Sources are archive-wide diagnostics: `--account` does not
+owner-filter them; `--source-id` may narrow them. A source's `account` is calendar
+profile provenance, not qualification of an observation for an account-filtered
+read. Failed initial registrations have a registration ID and
 nullable source ID, not a fake positive source. The independent
 `native_attendee_evidence` envelope carries source scope, original losses/clocks,
 bounded binding previews and exact selected-archive retry/full-capture routes.
@@ -1295,6 +1298,17 @@ making their old read/link scope current; an account filter still requires
 compatible captured/current owner scope. Current reads audit relevant current
 candidates, not unrelated undisplayed historical bodies.
 
+For native list/show, `--account` requires both captured and current linked owner
+scope to match; equality with a source profile's `account` does not qualify it.
+Account-context notices survive `--fields`, zero hits and preview limits. Shown
+sources are diagnostic, not proof that observations matched the account filter;
+an empty scoped result does not prove absence of archived source evidence.
+To explicitly inspect source-local evidence, repeat the same read against the
+same selected `--db` and the same event/observation ID without `--account`.
+This changes inspection scope, not ownership or current membership; there is no
+automatic retry, link, resolver, sync or acquisition. `--source-id` only narrows
+list/sources, never show, and is not owner qualification.
+
 `--fields` keys: `id`, `source_id`, `snapshot_id`, `capture_id`, `representation_digest`, `qualification`, `ordinal`, `native_key`, `detail_key`, `version_raw`, `block_offset`, `payload_pos`, `name`, `email`, `resynced`, `ambiguous`, `retained`, `acquired_at`, `source_observed_at`, `loss_scope`, `source_losses`, `scope`, `scope_state`, `text_truncated`, `full_record_sql`, `full_record_command`.
 
 ### calendar attendees show
@@ -1311,6 +1325,15 @@ display clipping; literal nullable email/name and exact decimal native64/IDs are
 preserved. None of this establishes a resolved person, active membership or
 current attendee roster. Existing `calendar event` attendees, responses and room
 fields retain their previous semantics.
+
+With `--account`, a syntactically valid unavailable observation still returns
+exit2 and `outlook_attendee_unknown`, with the same generic account-scope
+message/fix for absent, foreign-owner and source-local/unlinked IDs. This guidance
+comes only from request context, not another unfiltered lookup. Corrupt-archive
+and other error precedence is unchanged. Deliberate source-local inspection
+means keeping this same selected archive and observation ID and explicitly
+removing `--account`; show has no `--source-id` flag. Source diagnostics are
+archive-wide and do not establish owner identity.
 
 `--fields` keys: `id`, `source_id`, `snapshot_id`, `capture_id`, `representation_digest`, `qualification`, `ordinal`, `native_key`, `detail_key`, `version_raw`, `block_offset`, `payload_pos`, `name`, `email`, `resynced`, `ambiguous`, `retained`, `acquired_at`, `source_observed_at`, `loss_scope`, `source_losses`, `scope`, `scope_state`, `text_truncated`, `full_record_sql`, `full_record_command`.
 
