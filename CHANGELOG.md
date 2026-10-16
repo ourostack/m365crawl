@@ -18,6 +18,10 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 - One additive schema19 with unique successful ordinary calendar read receipts,
   protected link frontiers and immutable per-attempt native evidence membership.
 
+### Changed
+
+- Real-cache Outlook acceptance reports actual cache size, timing and memory use instead of enforcing assumed performance cutoffs. Capture, sync, measurement-protocol and source-safety failures remain blocking, and unavailable metrics remain explicit. Production resource bounds are unchanged.
+
 ### Fixed
 
 - Calendar/native/people readers share one private-copy lifecycle and close before
