@@ -14,7 +14,17 @@ import (
 
 const costCaseEnv = "M365CRAWL_ACCEPTANCE_COST_CASE"
 
+func outlookCostTestRoot(t *testing.T) string {
+	t.Helper()
+	root := calendarScratch(t)
+	t.Setenv("TMPDIR", root)
+	t.Setenv("TMP", root)
+	t.Setenv("TEMP", root)
+	return root
+}
+
 func TestOutlookCostPolicy(t *testing.T) {
+	outlookCostTestRoot(t)
 	for _, tc := range []struct {
 		name    string
 		fails   bool
@@ -90,6 +100,7 @@ func TestOutlookCostSyntheticChild(t *testing.T) {
 }
 
 func TestOutlookCostChildRejectsUnexpectedSyncFailure(t *testing.T) {
+	outlookCostTestRoot(t)
 	for _, mode := range []string{"baseline", "outlook"} {
 		t.Run(mode, func(t *testing.T) {
 			_, _, ok, failure := childPeaks(t.TempDir(), t.TempDir(), mode)
@@ -101,7 +112,8 @@ func TestOutlookCostChildRejectsUnexpectedSyncFailure(t *testing.T) {
 }
 
 func TestOutlookCostChildAcceptsExpectedBaselineAbsence(t *testing.T) {
-	_, _, _, failure := childPeaks(filepath.Join(t.TempDir(), "baseline.db"), t.TempDir(), "baseline")
+	root := outlookCostTestRoot(t)
+	_, _, _, failure := childPeaks(filepath.Join(root, "baseline.db"), t.TempDir(), "baseline")
 	if failure != "" {
 		t.Fatalf("expected no-source baseline failed: %s", failure)
 	}
