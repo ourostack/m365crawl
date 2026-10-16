@@ -4,6 +4,41 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-10-16
+
+### Added
+
+- Native Outlook attendee evidence through explicit `calendar attendees sync` and
+  strictly offline `sources`, `list` and `show`: immutable physical rows, separate
+  selected-detail bindings, source-local ambiguity, original losses/clocks and
+  selected-archive full-record/capture routes. Native observations remain separate
+  from the retained/unioned displayed roster and never establish current membership
+  or resolved identity. Mac default HxStore and supported copied profiles are
+  scoped separately from unqualified native Windows/OWA acquisition.
+- One additive schema19 with unique successful ordinary calendar read receipts,
+  protected link frontiers and immutable per-attempt native evidence membership.
+
+### Changed
+
+- Real-cache Outlook acceptance reports actual cache size, timing and memory use instead of enforcing assumed performance cutoffs. Capture, sync, measurement-protocol and source-safety failures remain blocking, and unavailable metrics remain explicit. Production resource bounds are unchanged.
+
+### Fixed
+
+- Calendar/native/people readers share one private-copy lifecycle and close before
+  verified cleanup. Optional failures remain lane-local; cleanup/cancellation
+  prevents optional positive admission.
+- Standalone calendar/native capture invalidates the mail-read marker before the
+  shared fingerprint advances, preserving pending mail for the next eligible
+  ordinary unchanged-input sync without reading or erasing mail itself.
+- Existing unknown calendar origins cannot be claimed by standalone capture:
+  refusal precedes calendar/mail/native changes, with exact ordinary-bootstrap
+  recovery after source verification.
+- Historical observation/binding previews retain bounded own-snapshot capture
+  routes independently of current source health and field projection.
+- Source-ID unknown-origin recovery retains a separately audited admitted
+  original root across source-ID-only retries, without combining selectors,
+  rewriting history or guessing a missing bootstrap root.
+
 ## [0.9.14] - 2026-10-15
 
 ### Fixed
