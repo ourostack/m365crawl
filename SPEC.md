@@ -52,6 +52,10 @@ origins bootstrap only through eligible actual ordinary decode without mapper
 bump or rich-detail blanking; recovery preserves the selected archive and exact
 requested Outlook root, requires verifying the original source, and never forces
 full-read or bypasses the copy interval.
+Source-ID recovery obtains a separate original root only from validated admitted
+request history of that source, including when newer requests are source-ID-only.
+The retry request remains exclusively source-ID. No admitted root means explicit
+bounded unavailability, never a guessed locator parent or widened discovery.
 
 Link mutation identity uses AUTOINCREMENT events plus an independent current
 frontier, account-qualified FK and explicit null baseline. Exact owned table/

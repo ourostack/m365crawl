@@ -23,3 +23,6 @@
   recovery after source verification.
 - Historical observation/binding previews retain bounded own-snapshot capture
   routes independently of current source health and field projection.
+- Source-ID unknown-origin recovery retains a separately audited admitted
+  original root across source-ID-only retries, without combining selectors,
+  rewriting history or guessing a missing bootstrap root.

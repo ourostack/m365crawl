@@ -471,6 +471,10 @@ func (c *attendeeSyncCmd) Run(rt *runtime) error {
 					copy.Fix = "First verify this requested root is the original calendar source, not a same-name foreign copy. Bootstrap only through an eligible ordinary decode with `" +
 						rt.archiveCommand(ordinary...) + "` (normal configured Teams capture also applies; copy interval and unchanged checks remain). Then retry `" +
 						rt.archiveCommand(args...) + "`. Standalone sync never claims an existing unknown origin."
+				} else if bootstrap != nil {
+					copy.Fix = "No original bootstrap root is available in validated admitted request history, so no ordinary bootstrap command can be emitted safely. Do not guess from the locator or widen discovery. Inspect `" +
+						rt.archiveCommand("calendar", "attendees", "sources") + "`; verify the original source independently and qualify it through ordinary sync in this selected archive before retrying `" +
+						rt.archiveCommand(args...) + "`."
 				}
 			}
 			return errors.Join(&copy, failure)

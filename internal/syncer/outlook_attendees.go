@@ -332,7 +332,15 @@ func captureAttendee(ctx context.Context, s *store.Store, target attendeeTarget)
 		return "failed", attendeeError("outlook_attendee_origin_conflict")
 	}
 	if state == "unknown" {
-		return "failed", &AttendeeBootstrapRequired{Root: target.request.Root}
+		root := target.request.Root
+		if target.request.SourceID > 0 {
+			saved, err := s.AttendeeBootstrapRequest(ctx, target.request.SourceID)
+			if err != nil {
+				return "failed", err
+			}
+			root = saved.Root
+		}
+		return "failed", &AttendeeBootstrapRequired{Root: root}
 	}
 	prior, err := s.OutlookState(ctx, target.profile.Name, outlookKey(target.profile.Name), account)
 	if err != nil {

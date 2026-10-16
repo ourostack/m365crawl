@@ -1257,6 +1257,11 @@ Verify the requested root is the original source, then use its emitted ordinary
 ordinary eligibility/copy intervals and configured Teams capture; it does not
 force full-read or make a same-basename foreign root authoritative. Retry the
 original root/source selector only after ordinary bootstrap qualifies it.
+For `--source-id`, the bootstrap root comes separately from audited admitted
+request history, not the latest retry selector or locator geometry. Successful
+source-ID-only retries do not erase that original request. If no admitted root
+exists, the error explicitly declines to emit an ordinary bootstrap command;
+verify the original source independently rather than guessing or rediscovering.
 
 ### calendar attendees sources
 
