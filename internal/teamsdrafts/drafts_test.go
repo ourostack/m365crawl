@@ -216,4 +216,7 @@ func TestMetadataMatchesCompound(t *testing.T) {
 	if match, _ := MetadataMatches(b, m); match {
 		t.Fatal("target-only match")
 	}
+	if _, err := DecodeMetadata([]byte(`{"sourceThreadId":"target"}`)); err == nil {
+		t.Fatal("incomplete possible match accepted as irrelevant")
+	}
 }

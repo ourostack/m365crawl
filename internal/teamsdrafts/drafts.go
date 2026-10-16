@@ -295,7 +295,13 @@ func DecodeMetadata(raw []byte) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, err
 	}
-	return Metadata{Claim: claim(m), ConversationType: presence(m, "conversationType")}, nil
+	result := Metadata{Claim: claim(m), ConversationType: presence(m, "conversationType")}
+	for _, p := range []Presence{result.Claim.SourceThreadID, result.Claim.SourceMessageID, result.Claim.ClientMessageID} {
+		if p.State != "value" || p.Value == nil || *p.Value == "" {
+			return Metadata{}, errors.New("incomplete metadata identity")
+		}
+	}
+	return result, nil
 }
 func same(a, b Presence) bool {
 	return a.State == "value" && b.State == "value" && a.Value != nil && b.Value != nil && *a.Value != "" && *a.Value == *b.Value
