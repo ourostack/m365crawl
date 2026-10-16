@@ -85,10 +85,6 @@ var calendarThresholds = struct {
 	// ids first, so a wrong value fails loudly instead of finding nothing.
 	EventClassPrefix string
 
-	// Cost budgets (fail): the plan's targets, assumed until this run measures them.
-	StoreSizeMax    int64         // store file, bytes
-	SnapshotWallMax time.Duration // copy plus scan
-	RSSOverTeamsMax int64         // whole-run peak RSS over the Teams-only peak, bytes
 	// WatchWindow and WatchSample size the ten-minute watch simulation (opt-in, reporting only).
 	WatchWindow, WatchSample time.Duration
 }{
@@ -113,10 +109,7 @@ var calendarThresholds = struct {
 	UnwalkedOnlyIDsMax: 0,
 	EventClassPrefix:   "040000008200E00074C5B7101A82E008",
 
-	StoreSizeMax:    100 << 20,
-	SnapshotWallMax: 8 * time.Second,
-	RSSOverTeamsMax: 150 << 20,
-	WatchWindow:     10 * time.Minute, WatchSample: 15 * time.Second,
+	WatchWindow: 10 * time.Minute, WatchSample: 15 * time.Second,
 }
 
 // calendarTeamsRoot is the Teams root of the calendar checks.
@@ -188,9 +181,8 @@ type teamsRun struct {
 	db   string
 	rep  syncer.Report
 	wall time.Duration
-	// before and after are the process usage around the sync: the peak RSS after is the Teams-only
-	// peak the Outlook budget is measured from. When before already equals it, earlier tests of
-	// this process set the peak, and the budget is lenient (run make acceptance-calendar).
+	// Earlier tests can set the process peak. The cost check uses independent fresh children
+	// instead of treating this combined process's peak as the Outlook read's own cost.
 	before, after usage
 }
 
