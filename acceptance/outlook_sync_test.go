@@ -42,6 +42,14 @@ type syncMeasure struct {
 	ok         bool // usage was available
 }
 
+func teamsSyncMeasure(teams teamsRun) syncMeasure {
+	return syncMeasure{
+		rep: teams.rep, wall: teams.wall, cpu: teams.after.cpu - teams.before.cpu,
+		peakBefore: teams.before.peakRSS, peakAfter: teams.after.peakRSS,
+		ok: teams.before.ok && teams.after.ok,
+	}
+}
+
 // outlookStatuses lists the status of each Outlook source of a report.
 func (m syncMeasure) outlookStatuses() map[string]int {
 	out := map[string]int{}
@@ -175,7 +183,7 @@ func outlookSyncs(t *testing.T) outlookRunData {
 		d.root = root
 		d.profile = outlookStore(t, root)
 		d.account = pickAccount(t, teams.db)
-		d.teams = syncMeasure{rep: teams.rep, wall: teams.wall, peakBefore: teams.before.peakRSS, peakAfter: teams.after.peakRSS, ok: teams.after.ok}
+		d.teams = teamsSyncMeasure(teams)
 
 		d.rootBefore, d.profileBefore = namesIn(root), namesIn(d.profile.Dir)
 		d.lockBefore = factsOf(filepath.Join(d.profile.Dir, "HxStore.lock"))

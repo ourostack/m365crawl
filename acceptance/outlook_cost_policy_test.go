@@ -25,6 +25,7 @@ func outlookCostTestRoot(t *testing.T) string {
 
 func TestOutlookCostPolicy(t *testing.T) {
 	outlookCostTestRoot(t)
+	t.Setenv(watchEnv, "1")
 	for _, tc := range []struct {
 		name    string
 		fails   bool
@@ -78,6 +79,7 @@ func TestOutlookCostSyntheticChild(t *testing.T) {
 		t.Skip("runs only in an isolated synthetic cost process")
 	}
 	t.Setenv("M365CRAWL_REAL_CACHE", "1")
+	t.Setenv(watchEnv, "")
 	t.Setenv(outlookRootEnv, t.TempDir())
 	teamsOnce.Do(func() {})
 	outlookOnce.Do(func() {})
@@ -153,6 +155,32 @@ func TestOutlookCostChildProtocol(t *testing.T) {
 			}
 			if !tc.fails && (before != tc.before || after != tc.after) {
 				t.Fatalf("peaks %d/%d, want %d/%d", before, after, tc.before, tc.after)
+			}
+		})
+	}
+}
+
+func TestOutlookCostTeamsMetrics(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		before, after bool
+		available     bool
+	}{
+		{name: "measured", before: true, after: true, available: true},
+		{name: "before unavailable", after: true},
+		{name: "after unavailable", before: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := teamsSyncMeasure(teamsRun{
+				wall:   4 * time.Second,
+				before: usage{cpu: 3 * time.Second, peakRSS: 4096, ok: tc.before},
+				after:  usage{cpu: 5 * time.Second, peakRSS: 8192, ok: tc.after},
+			})
+			if got.ok != tc.available {
+				t.Fatalf("availability=%v, want %v", got.ok, tc.available)
+			}
+			if got.ok && (got.cpu != 2*time.Second || got.wall != 4*time.Second || got.peakBefore != 4096 || got.peakAfter != 8192) {
+				t.Fatalf("CPU=%v wall=%v peaks=%d/%d, want 2s/4s/4096/8192", got.cpu, got.wall, got.peakBefore, got.peakAfter)
 			}
 		})
 	}
