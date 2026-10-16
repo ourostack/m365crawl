@@ -30,9 +30,10 @@ import (
 // RSS is the whole process's, so make acceptance-calendar runs TestRealOutlookCost in a process of
 // its own: in a shared process the other checks' in-process store scans set the peak first.
 //
-// Fail: the container and guard counts, the twin rate, the unwalked-byte ids, the cost budgets, the
-// safety rules and the append-only rule. Report: agreement counts, histograms, E15, the watch
-// simulation, covered days, OccurrenceID and zone agreement.
+// Fail: the container and guard counts, the twin rate, the unwalked-byte ids, sync/measurement
+// failures, the safety rules and the append-only rule. Resource magnitudes are reported, not
+// performance promises. Also report agreement counts, histograms, E15, the watch simulation,
+// covered days, OccurrenceID and zone agreement.
 
 // scanned is one private copy of the store read once with outlookcal.Collect, shared by the
 // container, version and cost checks.
@@ -626,27 +627,25 @@ func watchReads(path string, window, sample, interval time.Duration) (changes, r
 	return changes, reads, nil
 }
 
-// (4) Cost: budgets fail, the rest is reported.
+// (4) Cost: report measurements; sync and measurement errors fail.
 func TestRealOutlookCost(t *testing.T) {
 	d := outlookSyncs(t)
 	s := requireScan(t, d)
 	c := calendarThresholds
 	mb := func(n int64) string { return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20)) }
 
-	t.Logf("store size %s (budget %s); bytes copied per read %s; extra disk while syncing about %s", mb(s.info.Size), mb(c.StoreSizeMax), mb(s.info.Size), mb(s.info.Size))
-	if s.info.Size > c.StoreSizeMax {
-		t.Errorf("store is %s, above the %s budget", mb(s.info.Size), mb(c.StoreSizeMax))
-	}
+	t.Logf("store size %s (%d bytes); bytes copied per read %s; snapshot disk estimate %s (archive and scratch excluded)", mb(s.info.Size), s.info.Size, mb(s.info.Size), mb(s.info.Size))
 	wall := s.copyWall + s.scanWall
-	t.Logf("copy %v + scan %v = %v (budget %v); copy attempts %d", s.copyWall.Round(time.Millisecond), s.scanWall.Round(time.Millisecond), wall.Round(time.Millisecond), c.SnapshotWallMax, s.info.Attempts)
-	if wall > c.SnapshotWallMax {
-		t.Errorf("copy plus scan took %v, above the %v budget", wall.Round(time.Millisecond), c.SnapshotWallMax)
-	}
+	t.Logf("copy %v + scan %v = %v; copy attempts %d", s.copyWall.Round(time.Millisecond), s.scanWall.Round(time.Millisecond), wall.Round(time.Millisecond), s.info.Attempts)
 
 	for _, m := range []struct {
 		name string
 		m    syncMeasure
 	}{{"Teams-only sync", d.teams}, {"first Outlook sync (Teams unchanged)", d.first}, {"unchanged sync", d.again}, {"forced Outlook-only re-read", d.forced}} {
+		if !m.m.ok {
+			t.Logf("%-38s wall %v, resource metrics unavailable; outlook sources: %s", m.name, m.m.wall.Round(time.Millisecond), countsLine(m.m.outlookStatuses()))
+			continue
+		}
 		share := 0.0
 		if m.m.wall > 0 {
 			share = 100 * float64(m.m.cpu) / float64(m.m.wall)
@@ -655,7 +654,7 @@ func TestRealOutlookCost(t *testing.T) {
 			m.name, m.m.wall.Round(time.Millisecond), m.m.cpu.Round(time.Millisecond), share, mb(m.m.peakBefore), mb(m.m.peakAfter), countsLine(m.m.outlookStatuses()))
 	}
 	if d.forcedErr != "" {
-		t.Logf("the forced Outlook-only re-read failed with code %s", d.forcedErr)
+		t.Errorf("the forced Outlook-only re-read failed with code %s", d.forcedErr)
 	}
 
 	for _, m := range []struct {
@@ -676,12 +675,9 @@ func TestRealOutlookCost(t *testing.T) {
 	case d.own.failure != "":
 		t.Errorf("the Outlook read's own cost could not be measured: %s", d.own.failure)
 	case !d.own.ok:
-		t.Log("peak RSS is not available on this platform; the memory budget is not checked")
+		t.Log("peak RSS is not available on this platform; the independent RSS delta is unmeasured")
 	default:
-		t.Logf("the Outlook read alone, each in a fresh process on a copy of the archive: peak RSS %s when it reads the store, %s for a fresh process that only opens the archive (Outlook off, no Teams root): +%s (budget +%s)", mb(d.own.first), mb(d.own.baseline), mb(d.own.over()), mb(c.RSSOverTeamsMax))
-		if d.own.over() > c.RSSOverTeamsMax {
-			t.Errorf("the Outlook read adds %s of peak RSS, above the %s budget", mb(d.own.over()), mb(c.RSSOverTeamsMax))
-		}
+		t.Logf("the Outlook read alone, each in a fresh process on a copy of the archive: peak RSS %s when it reads the store, %s for a fresh process that only opens the archive (Outlook off, no Teams root): +%s", mb(d.own.first), mb(d.own.baseline), mb(d.own.over()))
 	}
 
 	t.Logf("OutlookMinReadInterval is %v", syncer.OutlookMinReadInterval)

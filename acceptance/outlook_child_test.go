@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
@@ -49,10 +50,11 @@ func TestChildOutlookSync(t *testing.T) {
 		OutlookEnabled: os.Getenv(childModeEnv) != "baseline", OutlookRoot: root, OutlookMinReadInterval: -1,
 	})
 	code := "none"
-	if err != nil && os.Getenv(childModeEnv) == "baseline" {
-		code = "none" // no Teams root and no Outlook: nothing to sync is the expected end
-	} else if err != nil {
+	if err != nil {
 		code = errCode(err)
+		if os.Getenv(childModeEnv) == "baseline" && code == errs.CodeTeamsNotInstalled {
+			code = "none"
+		}
 	}
 	after := processUsage()
 	fmt.Printf("%s %d %d %s %v\n", childMarker, before.peakRSS, after.peakRSS, code, before.ok && after.ok)
@@ -64,22 +66,44 @@ func childPeaks(db, root, mode string) (before, after int64, ok bool, failure st
 	cmd.Env = append(os.Environ(), childDBEnv+"="+db, childRootEnv+"="+root, childModeEnv+"="+mode)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	return parseChildPeaks(out.Bytes(), err)
+}
+
+func parseChildPeaks(out []byte, runErr error) (before, after int64, ok bool, failure string) {
+	if runErr != nil {
 		return 0, 0, false, "the child process failed"
 	}
-	for _, line := range strings.Split(out.String(), "\n") {
+	found := false
+	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
-		if len(f) != 5 || f[0] != childMarker {
+		if len(f) == 0 || f[0] != childMarker {
 			continue
 		}
-		before, _ = strconv.ParseInt(f[1], 10, 64)
-		after, _ = strconv.ParseInt(f[2], 10, 64)
-		if f[3] != "none" {
-			return before, after, false, "the child's sync failed with code " + f[3]
+		if found || len(f) != 5 {
+			return 0, 0, false, "the child printed an invalid resource result"
 		}
-		return before, after, f[4] == "true", ""
+		found = true
+		b, beforeErr := strconv.ParseInt(f[1], 10, 64)
+		a, afterErr := strconv.ParseInt(f[2], 10, 64)
+		if beforeErr != nil || afterErr != nil || b < 0 || a < 0 || (f[4] != "true" && f[4] != "false") {
+			return 0, 0, false, "the child printed invalid resource metrics"
+		}
+		if f[3] != "none" {
+			return 0, 0, false, "the child's sync failed with code " + f[3]
+		}
+		if f[4] == "false" {
+			continue
+		}
+		if b == 0 || a < b {
+			return 0, 0, false, "the child printed invalid resource peaks"
+		}
+		before, after, ok = b, a, true
 	}
-	return 0, 0, false, "the child printed no result"
+	if !found {
+		return 0, 0, false, "the child printed no result"
+	}
+	return before, after, ok, ""
 }
 
 // copyArchive copies the archive database and its write-ahead files to dst.
