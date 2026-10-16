@@ -52,7 +52,7 @@ func TestAttendeeAdmissionFaultSweep(t *testing.T) {
 		}
 
 		readID = result.OutlookReadID
-		attempt, err = s.BeginAttendeeAttempt(context.Background(), KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, AcquisitionSignature: "synthetic", At: base}, AttendeeRequest{Root: "/synthetic/native", Discover: true})
+		attempt, err = s.BeginAttendeeAttempt(context.Background(), KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, AcquisitionSignature: "synthetic", At: base}, AttendeeRequest{Root: attendeeFixtureRoot, Discover: true})
 		if err != nil {
 			t.Fatal(err)
 		}

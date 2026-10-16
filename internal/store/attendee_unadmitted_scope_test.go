@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,11 +59,11 @@ func TestAttendeeUnadmittedScopeFaults(t *testing.T) {
 			if profile == "Other" {
 				e.SourceID, e.GlobalID, e.ICalUID, e.SeriesKey = "BB22", "BB22", "BB22", "BB22"
 			}
-			origin := "/synthetic/native/" + profile + "/HxStore.hxd"
+			origin := filepath.Join(attendeeFixtureRoot, profile, "HxStore.hxd")
 			if _, err := s.CommitOutlook(ctx, OutlookBatch{Account: e.AccountID, Origin: origin, At: base, Zone: time.UTC, Events: []calendar.Event{e}}, outlookRun); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: origin, At: base}, AttendeeRequest{Root: "/synthetic/native", Discover: true}); err != nil {
+			if _, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: origin, At: base}, AttendeeRequest{Root: attendeeFixtureRoot, Discover: true}); err != nil {
 				t.Fatal(err)
 			}
 		}

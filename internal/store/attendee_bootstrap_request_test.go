@@ -20,7 +20,7 @@ func TestAttendeeBootstrapUsesAdmittedRequestHistory(t *testing.T) {
 			model := attendeeModel(t, "Synthetic", 3)
 			initial := AttendeeRequest{SourceID: 1}
 			if hasRoot {
-				initial = AttendeeRequest{Root: "/synthetic/native", Discover: true}
+				initial = AttendeeRequest{Root: attendeeFixtureRoot, Discover: true}
 			}
 			cal, err := s.CommitOutlook(ctx, OutlookBatch{Account: "outlook/Main", Origin: attendeeFixtureOrigin,
 				At: base, Zone: time.UTC, Stamp: "same"}, func(CalendarResult) Run {
@@ -51,7 +51,7 @@ func TestAttendeeBootstrapUsesAdmittedRequestHistory(t *testing.T) {
 			request, err := s.AttendeeBootstrapRequest(ctx, 1)
 			want := ""
 			if hasRoot {
-				want = "/synthetic/native"
+				want = attendeeFixtureRoot
 			}
 			if err != nil || request.Root != want || request.SourceID != 0 || request.Discover != hasRoot {
 				t.Fatal("bootstrap guessed, used a failed request or lost original intent", request, err)

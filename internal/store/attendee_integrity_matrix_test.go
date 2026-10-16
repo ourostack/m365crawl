@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +109,7 @@ func TestAttendeeAdmissionAssociationAndReuseRefusal(t *testing.T) {
 
 func TestAttendeeCoherentLinkBarrier(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +163,7 @@ func TestAttendeeCoherentLinkBarrier(t *testing.T) {
 
 func TestAttendeeCoherentAdmissionBarrier(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)

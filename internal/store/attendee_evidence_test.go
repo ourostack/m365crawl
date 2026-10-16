@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,7 +16,10 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookmeetingattendees"
 )
 
-const attendeeFixtureOrigin = "/synthetic/native/Main/HxStore.hxd"
+var (
+	attendeeFixtureRoot   = filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "synthetic", "native")
+	attendeeFixtureOrigin = filepath.Join(attendeeFixtureRoot, "Main", "HxStore.hxd")
+)
 
 func attendeeModel(t *testing.T, label string, key uint32) outlookmeetingattendees.Evidence {
 	t.Helper()
@@ -46,7 +51,7 @@ func admitAttendeeFixture(t *testing.T, s *Store, e outlookmeetingattendees.Evid
 		t.Fatal(err)
 	}
 	a, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, AcquisitionSignature: "synthetic", At: at},
-		AttendeeRequest{Root: "/synthetic/native", Discover: true})
+		AttendeeRequest{Root: attendeeFixtureRoot, Discover: true})
 	if err != nil {
 		t.Fatal(err)
 	}

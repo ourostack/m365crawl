@@ -43,8 +43,8 @@ func TestAttendeeHistoricalOwnCaptureRouteExecutes(t *testing.T) {
 	admit := func() {
 		t.Helper()
 		a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic",
-			Locator: "/synthetic/native/Main/HxStore.hxd", AcquisitionSignature: "synthetic", At: at},
-			store.AttendeeRequest{Root: "/synthetic/native", Discover: true})
+			Locator: attendeeCLIFixtureOrigin, AcquisitionSignature: "synthetic", At: at},
+			store.AttendeeRequest{Root: attendeeCLIFixtureRoot, Discover: true})
 		if err != nil {
 			t.Fatal(err)
 		}

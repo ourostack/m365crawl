@@ -2,9 +2,12 @@ package cli
 
 import (
 	"bytes"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
+
+var attendeeCommandPlatform = goruntime.GOOS
 
 func attendeeCommandWords(t *testing.T, command string) []string {
 	t.Helper()
@@ -20,7 +23,7 @@ func attendeeCommandWords(t *testing.T, command string) []string {
 			started = true
 			continue
 		}
-		if quote == 0 && c == '\\' {
+		if quote == 0 && c == '\\' && attendeeCommandPlatform != "windows" {
 			escaped = true
 			started = true
 			continue
@@ -35,7 +38,14 @@ func attendeeCommandWords(t *testing.T, command string) []string {
 			continue
 		}
 		switch c {
-		case '\'', '"':
+		case '\'':
+			if attendeeCommandPlatform == "windows" {
+				word.WriteRune(c)
+			} else {
+				quote = c
+			}
+			started = true
+		case '"':
 			quote = c
 			started = true
 		case ' ', '\n', '\t':

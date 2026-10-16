@@ -95,7 +95,7 @@ func TestAttendeeNewAdmissionCannotHideCorruptCurrentBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, AcquisitionSignature: "synthetic", At: base}, AttendeeRequest{Root: "/synthetic/native", Discover: true})
+	a, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, AcquisitionSignature: "synthetic", At: base}, AttendeeRequest{Root: attendeeFixtureRoot, Discover: true})
 	if err != nil {
 		t.Fatal(err)
 	}

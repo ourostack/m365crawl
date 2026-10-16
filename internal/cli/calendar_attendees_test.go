@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,11 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookmeetingattendees"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
+)
+
+var (
+	attendeeCLIFixtureRoot   = filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "synthetic", "native")
+	attendeeCLIFixtureOrigin = filepath.Join(attendeeCLIFixtureRoot, "Main", "HxStore.hxd")
 )
 
 func attendeeCLIArchive(t *testing.T, e *env, copies int, ambiguous bool) string {
@@ -34,7 +40,7 @@ func attendeeCLIArchive(t *testing.T, e *env, copies int, ambiguous bool) string
 		UnknownDeclared: true,
 		EventType:       calendar.EventSingle, Start: at, End: at.Add(time.Hour), AllDay: calendar.TriFalse, Subject: "Synthetic attendee meeting",
 		AttendeesJSON: `[{"name":"Legacy A","address":"a@example.invalid"},{"name":"Legacy B","address":"b@example.invalid"}]`}
-	cal, err := s.CommitOutlook(ctx, store.OutlookBatch{Account: "outlook/Main", Origin: "/synthetic/native/Main/HxStore.hxd", At: at, Zone: time.UTC, Stamp: "synthetic", Events: []calendar.Event{event}},
+	cal, err := s.CommitOutlook(ctx, store.OutlookBatch{Account: "outlook/Main", Origin: attendeeCLIFixtureOrigin, At: at, Zone: time.UTC, Stamp: "synthetic", Events: []calendar.Event{event}},
 		func(store.CalendarResult) store.Run {
 			return store.Run{StartedAt: at, FinishedAt: at, Source: "outlook|Main", Fingerprint: "synthetic", Status: "ok"}
 		})
@@ -44,8 +50,8 @@ func attendeeCLIArchive(t *testing.T, e *env, copies int, ambiguous bool) string
 	if cal.Counts.Events.Inserted != 1 {
 		t.Fatalf("synthetic calendar admission failed: %+v", cal)
 	}
-	a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic", Locator: "/synthetic/native/Main/HxStore.hxd", AcquisitionSignature: "synthetic", At: at},
-		store.AttendeeRequest{Root: "/synthetic/native", Discover: true})
+	a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic", Locator: attendeeCLIFixtureOrigin, AcquisitionSignature: "synthetic", At: at},
+		store.AttendeeRequest{Root: attendeeCLIFixtureRoot, Discover: true})
 	if err != nil {
 		t.Fatal(err)
 	}

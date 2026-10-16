@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +18,9 @@ func TestAttendeeInitialFailureExactRootRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	root := "/synthetic/exact copied root"
-	a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic", Locator: "/synthetic/native/Other/HxStore.hxd", At: time.Now().UTC()},
+	a, err := s.BeginAttendeeAttempt(ctx, store.KnowledgeInput{Kind: store.AttendeeKind, Platform: "synthetic", Locator: filepath.Join(attendeeCLIFixtureRoot, "Other", "HxStore.hxd"), At: time.Now().UTC()},
 		store.AttendeeRequest{Root: root, Discover: true})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +40,7 @@ func TestAttendeeInitialFailureExactRootRetry(t *testing.T) {
 		t.Fatal("failure invented positive native source", row)
 	}
 	retry := row["retry"].(string)
-	if !strings.Contains(retry, root) || strings.Contains(retry, "/synthetic/native/Other") || strings.Contains(retry, "--source-id 0") {
+	if !strings.Contains(retry, root) || strings.Contains(retry, filepath.Join(attendeeCLIFixtureRoot, "Other", "HxStore.hxd")) || strings.Contains(retry, "--source-id 0") {
 		t.Fatal("retry guessed a root/source", retry)
 	}
 	old := runAttendeeSync

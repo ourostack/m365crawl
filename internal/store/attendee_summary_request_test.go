@@ -16,7 +16,7 @@ func TestAttendeeSummaryCarriesExactRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := got.Coverage.Sources[0].Request
-	if request.Root != "/synthetic/native" || !request.Discover || request.SourceID != 0 {
+	if request.Root != attendeeFixtureRoot || !request.Discover || request.SourceID != 0 {
 		t.Fatal("summary lost exact in-transaction retry request", request)
 	}
 }

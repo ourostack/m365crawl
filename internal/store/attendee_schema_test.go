@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ func TestAttendeeSchemaNamespace(t *testing.T) {
 	ctx := context.Background()
 	for _, fault := range []string{"table", "column", "trigger"} {
 		t.Run(fault, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := writableArchivePath(t)
 			s, err := Open(ctx, path)
 			if err != nil {
 				t.Fatal(err)
@@ -68,7 +67,7 @@ func TestAttendeeIdentityFaultSweeps(t *testing.T) {
 
 func TestAttendeeSchemaUpgradeAndSecondOpen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ import (
 
 func nativeAttempt(t *testing.T, s *Store) KnowledgeAttempt {
 	t.Helper()
-	a, err := s.BeginAttendeeAttempt(context.Background(), KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, At: base}, AttendeeRequest{Root: "/synthetic/native", Discover: true})
+	a, err := s.BeginAttendeeAttempt(context.Background(), KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, At: base}, AttendeeRequest{Root: attendeeFixtureRoot, Discover: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestAttendeeAttemptFailureAndRetry(t *testing.T) {
 	s := newStore(t)
 	a := nativeAttempt(t, s)
 	request, err := s.AttendeeRequestForLocator(ctx, a.LocatorID)
-	if err != nil || request.Root != "/synthetic/native" || !request.Discover || request.SourceID != 0 {
+	if err != nil || request.Root != attendeeFixtureRoot || !request.Discover || request.SourceID != 0 {
 		t.Fatalf("retry changed request: %#v %v", request, err)
 	}
 	if _, err := s.AttendeeRequestForLocator(ctx, 999); err == nil {
@@ -50,7 +50,7 @@ func TestAttendeeAttemptFailureAndRetry(t *testing.T) {
 
 func TestAttendeeAttemptFaultSweeps(t *testing.T) {
 	sweepFaults(t, func(*testing.T, *Store) {}, func(ctx context.Context, s *Store) error {
-		_, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, At: base}, AttendeeRequest{Root: "/synthetic/native", Discover: true})
+		_, err := s.BeginAttendeeAttempt(ctx, KnowledgeInput{Kind: AttendeeKind, Platform: "fixture", Locator: attendeeFixtureOrigin, At: base}, AttendeeRequest{Root: attendeeFixtureRoot, Discover: true})
 		return err
 	})
 	var a KnowledgeAttempt
