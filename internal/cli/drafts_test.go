@@ -328,6 +328,30 @@ func TestDraftsExplicitFlags(t *testing.T) {
 		t.Fatal(code, out, err)
 	}
 }
+
+func TestDraftsShowRejectsNonemptyFieldsBeforeArchive(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("PATH", "") // This guard needs neither a shell nor an existing archive.
+	id := "teams-draft:" + strings.Repeat("a", 64)
+	for _, args := range [][]string{
+		{"--fields", "id", "drafts", "show", id},
+		{"--fields=id", "drafts", "show", id},
+		{"drafts", "show", id, "--fields", "id"},
+	} {
+		code, out, stderr := draftRun(e, args...)
+		body := errorOf(t, stderr)
+		if code != errs.ExitUsage || out != "" || body["code"] != "usage" || body["message"] != "--fields is list-only, not drafts show" {
+			t.Fatalf("nonempty show fields must fail before archive lookup: args=%v exit=%d out=%q error=%s", args, code, out, stderr)
+		}
+		if strings.Contains(stderr, id) {
+			t.Fatal("list-only usage error disclosed requested ID", stderr)
+		}
+	}
+	if _, err := os.Stat(e.db); !os.IsNotExist(err) {
+		t.Fatal("flag validation created or opened an archive", err)
+	}
+}
+
 func TestDraftsScopeErrorParity(t *testing.T) {
 	e := draftCLI(t)
 	id := draftOne(t, e)["id"].(string)
