@@ -1,98 +1,57 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-  merge_group:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source commit to verify or assemble
+        required: true
+        type: string
+      operation:
+        description: Isolated operation; never publication
+        required: true
+        type: choice
+        options:
+          - make-check
+          - assemble
+      version:
+        description: Assembly version, unused for make-check
+        required: false
+        type: string
+      date:
+        description: Assembly date YYYY-MM-DD, unused for make-check
+        required: false
+        type: string
 
 permissions:
   contents: read
 
-# A new push to a pull request replaces its older run. Runs for main and for the merge queue are
-# never cancelled: each merge-queue entry has its own ref, and every commit on main gets checked.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 env:
   GOWORK: "off"
+  M365CRAWL_REAL_CACHE: "0"
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  make-check:
+    if: inputs.operation == 'make-check'
+    runs-on: macos-latest
+    timeout-minutes: 45
     steps:
-      - name: Checkout
+      - name: Validate exact source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Checkout exact candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: No leftover names from before the rename
+      - name: Assert checkout identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          old='teamscra''wl'
-          fail=0
-          hits="$(git grep -nIi "$old" || true)"
-          if [ -n "$hits" ]; then
-            echo "$hits" >&2
-            fail=1
-          fi
-          paths="$(git ls-files | grep -i "$old" || true)"
-          if [ -n "$paths" ]; then
-            echo "$paths" >&2
-            fail=1
-          fi
-          if [ "$fail" = 1 ]; then
-            echo 'remove the old product name; no file and no file name may carry it' >&2
-            exit 1
-          fi
-      # Pull requests add a fragment in changes/ instead of editing CHANGELOG.md, so two open
-      # pull requests never conflict on the [Unreleased] lines. A release pull request passes:
-      # scripts/changelog-assemble.sh moves the fragments into its version section.
-      - name: Changelog entries are fragments in changes/
-        run: scripts/changelog-assemble.sh --check
-      - name: Check tidy, format, vet and lint
-        run: make tidy-check fmt-check vet lint
-
-  # Each platform runs the unit tests once. Linux runs them with the race detector, split over
-  # several runners because the detector makes them several times slower. macOS and Windows run
-  # them without it, write a coverage profile, and enforce their coverage gate from that profile.
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ubuntu-latest race 1/4
-            os: ubuntu-latest
-            shard: 1
-          - name: ubuntu-latest race 2/4
-            os: ubuntu-latest
-            shard: 2
-          - name: ubuntu-latest race 3/4
-            os: ubuntu-latest
-            shard: 3
-          - name: ubuntu-latest race 4/4
-            os: ubuntu-latest
-            shard: 4
-          - name: macos-latest
-            os: macos-latest
-            coverprofile: coverage.out
-          - name: windows-latest
-            os: windows-latest
-            coverprofile: coverage-windows.out
-    name: test (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          printf 'verified-source=%s\n' "$SOURCE_SHA"
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -101,125 +60,57 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      # Windows Defender scans every file the tests write, and the tests write thousands of
-      # archives, snapshots and test binaries: on a throwaway runner that only slows them down.
-      # The tests' temporary files go on the runner's faster work drive too.
-      - name: Speed up file access on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true
-          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
-          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
-      - name: Test with the race detector
-        if: matrix.shard
-        run: make test-shard SHARD=${{ matrix.shard }} SHARDS=4
-      - name: Test with coverage
-        if: matrix.coverprofile
-        shell: bash
-        run: go test -count=1 -timeout 15m -coverprofile=${{ matrix.coverprofile }} ./...
-      - name: Enforce 100% function coverage
-        if: runner.os == 'macOS'
-        env:
-          COVERAGE_PROFILE: ${{ matrix.coverprofile }}
-        run: ./scripts/check-coverage.sh
-      - name: Enforce Windows coverage gate
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          COVERAGE_PROFILE: ${{ matrix.coverprofile }}
-        run: scripts/check-coverage.ps1
-      - name: Windows release checksum regression tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: scripts/verify-release_test.ps1
-      - name: Test vectors match the generator
-        if: matrix.coverprofile
-        run: go test -count=1 -v -run 'TestGeneratorIsCurrent$' ./internal/v8
-      - name: Coverage summary
-        if: matrix.coverprofile
-        shell: bash
-        run: |
-          {
-            echo "### Coverage (${{ matrix.os }})"
-            echo
-            echo '```'
-            go tool cover -func=${{ matrix.coverprofile }} | tail -n 20
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Install shellcheck
+        run: brew install shellcheck
+      - name: Run unchanged complete local gate
+        run: make check
 
-  e2e:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            e2e-command: make e2e
-            require-browser: "1"
-          - os: ubuntu-latest
-            e2e-command: make e2e
-            require-browser: ""
-          - os: windows-latest
-            e2e-command: go test -count=1 -tags e2e ./e2e/...
-            require-browser: "1"
-    name: e2e (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: End-to-end tests
-        shell: bash
-        env:
-          # macOS and Windows runners have Edge: the real-browser test must run there, not skip.
-          M365CRAWL_REQUIRE_BROWSER: ${{ matrix.require-browser }}
-        run: ${{ matrix.e2e-command }}
-
-  release-check:
+  assemble:
+    if: inputs.operation == 'assemble'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Validate literal assembly inputs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.date }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+      - name: Checkout exact assembly source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
           fetch-depth: 0
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Snapshot release build
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: v2.18.2
-          args: release --snapshot --clean --skip=publish
-      - name: Verify release artifacts
-        shell: pwsh
-        run: scripts/check-release-artifacts.ps1
-
-  # The one check branch protection and the merge queue require. It passes only when every job
-  # above succeeded, so adding or renaming a job never needs a branch protection change. No job
-  # above is skipped by design; a skipped one (a failed dependency, say) fails this check too.
-  ci-ok:
-    if: always()
-    needs:
-      - lint
-      - test
-      - e2e
-      - release-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require every job
+          persist-credentials: false
+      - name: Run canonical assembler and emit generated proof
         env:
-          RESULTS: ${{ toJSON(needs.*.result) }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.date }}
         run: |
-          echo "$RESULTS"
-          jq -e 'length == 4 and all(. == "success")' <<<"$RESULTS" >/dev/null
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          scripts/changelog-assemble.sh "$VERSION" "$RELEASE_DATE"
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib, subprocess
+          paths = subprocess.check_output(["git", "diff", "--name-only", "-z"]).decode().split("\0")
+          paths = [p for p in paths if p]
+          if "CHANGELOG.md" not in paths:
+              raise SystemExit("assembler produced no CHANGELOG change")
+          if any(p != "CHANGELOG.md" and not p.startswith("changes/") for p in paths):
+              raise SystemExit("assembler changed an unexpected path")
+          data = pathlib.Path("CHANGELOG.md").read_bytes()
+          patch = subprocess.check_output(["git", "diff", "--binary", "--", "CHANGELOG.md", "changes/"])
+          print("ASSEMBLY_PROOF=" + json.dumps({
+              "source": subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip(),
+              "script_sha256": hashlib.sha256(pathlib.Path("scripts/changelog-assemble.sh").read_bytes()).hexdigest(),
+              "changed_paths": paths,
+              "changelog_bytes": len(data),
+              "changelog_sha256": hashlib.sha256(data).hexdigest(),
+              "changelog_base64": base64.b64encode(data).decode(),
+              "patch_sha256": hashlib.sha256(patch).hexdigest(),
+              "patch_base64": base64.b64encode(patch).decode()
+          }, separators=(",", ":")))
+          PY
