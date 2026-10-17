@@ -175,6 +175,54 @@ func digest(v any) string {
 	return hex.EncodeToString(h[:])
 }
 
+func representationCategory(m map[string]any, key string) string {
+	v, ok := m[key]
+	if !ok {
+		return "missing"
+	}
+	if undefined(v) {
+		return "undefined"
+	}
+	switch v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case json.Number:
+		return "number"
+	case bool:
+		return "boolean"
+	case []any:
+		return "array"
+	default:
+		return "object"
+	}
+}
+func guardDiagnostic(field string, m, p, a, c map[string]any) Diagnostic {
+	prefix, key, _ := strings.Cut(field, ".")
+	obj := m
+	switch prefix {
+	case "properties":
+		obj = p
+	case "activity":
+		obj = a
+	case "clientDraftProperties":
+		obj = c
+	}
+	category := representationCategory(obj, key)
+	code := "unsupported_guard_representation"
+	switch field {
+	case "message.creator", "activity.sourceUserId":
+		code = "ownership_unqualified"
+	case "message.type", "message.draftType", "message.threadType", "message.messageType", "message.contentType", "message.state", "message.isSentByCurrentUser", "activity.activityType", "activity.activitySubtype":
+		code = "unsupported_discriminator"
+		if category == "missing" {
+			code = "missing_discriminator"
+		}
+	}
+	return Diagnostic{code, field, category, 1}
+}
+
 func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int) (WrapperResult, error) {
 	out := WrapperResult{Complete: true}
 	if err := ctx.Err(); err != nil {
@@ -186,7 +234,7 @@ func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int
 	}
 	w, err := validateObject(raw)
 	var key []string
-	if err != nil || json.Unmarshal([]byte(e.KeyJSON), &key) != nil || len(key) != 2 || key[0] == "" || key[1] == "" || key[0] != stringOf(w["conversationId"]) || key[1] != stringOf(w["replyChainId"]) {
+	if err != nil || !utf8.ValidString(e.KeyJSON) || json.Unmarshal([]byte(e.KeyJSON), &key) != nil || len(key) != 2 || key[0] == "" || key[1] == "" || key[0] != stringOf(w["conversationId"]) || key[1] != stringOf(w["replyChainId"]) {
 		return WrapperResult{}, nil
 	}
 	members := object(w["messageMap"])
@@ -202,8 +250,13 @@ func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int
 		if err := ctx.Err(); err != nil {
 			return WrapperResult{}, err
 		}
+		if out.VisitedMembers >= memberBudget {
+			out.Complete = false
+			out.Bodies = nil
+			return out, nil
+		}
 		out.VisitedMembers++
-		if out.VisitedMembers > memberBudget || k == "" || stringOf(object(members[k])["id"]) == "" {
+		if k == "" || stringOf(object(members[k])["id"]) == "" {
 			out.Complete = false
 			out.Bodies = nil
 			return out, nil
@@ -213,18 +266,21 @@ func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int
 		a := object(p["activity"])
 		c := object(object(m["draftDetails"])["clientDraftProperties"])
 		field := ""
-		if stringOf(m["creator"]) != "8:orgid:"+e.UserID || stringOf(a["sourceUserId"]) != "8:orgid:"+e.UserID {
-			field = "ownership"
+		if stringOf(m["creator"]) != "8:orgid:"+e.UserID {
+			field = "message.creator"
+		} else if stringOf(a["sourceUserId"]) != "8:orgid:"+e.UserID {
+			field = "activity.sourceUserId"
 		}
 		for _, g := range []struct {
 			obj    map[string]any
 			prefix string
-			fields map[string]string
+			fields [][2]string
 		}{
-			{m, "message.", map[string]string{"type": "Message", "draftType": "RegularDraft", "threadType": "streamofdrafts", "messageType": "RichText/Html", "contentType": "Text", "lieType": "Send"}},
-			{a, "activity.", map[string]string{"activityType": "Draft", "activitySubtype": "Draft"}},
+			{m, "message.", [][2]string{{"type", "Message"}, {"draftType", "RegularDraft"}, {"threadType", "streamofdrafts"}, {"messageType", "RichText/Html"}, {"contentType", "Text"}, {"lieType", "Send"}}},
+			{a, "activity.", [][2]string{{"activityType", "Draft"}, {"activitySubtype", "Draft"}}},
 		} {
-			for name, want := range g.fields {
+			for _, pair := range g.fields {
+				name, want := pair[0], pair[1]
 				if stringOf(g.obj[name]) != want && field == "" {
 					field = g.prefix + name
 				}
@@ -256,13 +312,14 @@ func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int
 				field = "clientDraftProperties." + name
 			}
 		}
-		for name, want := range map[string]string{"forwardAppIdsToInstall": "[]", "forwardMessageIds": "[]", "forwardMessageRecipients": "[]", "forwardMessageCardContents": "null"} {
+		for _, pair := range [][2]string{{"forwardAppIdsToInstall", "[]"}, {"forwardMessageIds", "[]"}, {"forwardMessageRecipients", "[]"}, {"forwardMessageCardContents", "null"}} {
+			name, want := pair[0], pair[1]
 			if stringOf(c[name]) != want && field == "" {
 				field = "clientDraftProperties." + name
 			}
 		}
 		if field != "" {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"unsupported_guard_representation", field, "withheld", 1})
+			out.Diagnostics = append(out.Diagnostics, guardDiagnostic(field, m, p, a, c))
 			continue
 		}
 		body := Body{Envelope: e, WrapperConversationID: key[0], WrapperReplyChainID: key[1], MemberKey: k, MessageID: stringOf(m["id"]), ClientDraftID: presence(c, "clientDraftId"), LastEdit: editClock(c), VersioningTimestamp: presence(c, "versioningTimestamp"), Claim: claim(a)}
@@ -287,7 +344,10 @@ func DecodeWrapper(ctx context.Context, e Envelope, raw []byte, memberBudget int
 		body.BodyRevision = digest([]any{"teams-draft-body-v1", string(tupleJSON), string(raw), e.RemovedAt != nil, e.RemovedAt, DecoderQualification, ProjectorQualification})
 		out.Bodies = append(out.Bodies, body)
 	}
-	return out, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return WrapperResult{}, err
+	}
+	return out, nil
 }
 
 func DecodeMetadata(raw []byte) (Metadata, error) {

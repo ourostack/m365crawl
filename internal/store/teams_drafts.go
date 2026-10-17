@@ -66,6 +66,23 @@ type TeamsDraftSnapshot struct {
 	Truncated bool
 }
 
+func (c TeamsDraftCoverage) MarshalJSON() ([]byte, error) {
+	type coverage TeamsDraftCoverage
+	type account struct {
+		TenantID string `json:"tenant_id"`
+		UserID   string `json:"user_id"`
+	}
+	var selected *account
+	if c.SelectedAccount != nil {
+		selected = &account{c.SelectedAccount.TenantID, c.SelectedAccount.UserID}
+	}
+	return json.Marshal(struct {
+		coverage
+		Selected    *account `json:"selected_account"`
+		Acquisition string   `json:"acquisition"`
+	}{coverage(c), selected, "none"})
+}
+
 var (
 	ErrTeamsDraftUnknown             = errors.New("unknown cached draft")
 	ErrTeamsDraftRemoved             = errors.New("cached draft is archive-removed")
@@ -133,8 +150,8 @@ func (b *draftBudget) text(ctx context.Context, r knowledgeReader, table string,
 	if err := r.QueryRowContext(ctx, "select "+strings.Join(columns, ",")+q, args...).Scan(dest...); err != nil {
 		return nil, false, err
 	}
-	for _, v := range values {
-		if v.Valid && !utf8.ValidString(v.String) {
+	for i, v := range values {
+		if v.Valid != (types[i] != "null") || int64(len(v.String)) != lengths[i] || v.Valid && !utf8.ValidString(v.String) {
 			return nil, false, nil
 		}
 	}
@@ -175,6 +192,9 @@ func draftEnvelope(v []sql.NullString) (teamsdrafts.Envelope, bool) {
 		if !v[i].Valid {
 			return teamsdrafts.Envelope{}, false
 		}
+		if !json.Valid([]byte(v[5].String)) {
+			return teamsdrafts.Envelope{}, false
+		}
 	}
 	e := teamsdrafts.Envelope{Source: v[0].String, TenantID: v[1].String, UserID: v[2].String, Database: v[3].String, Store: v[4].String, KeyJSON: v[5].String, FirstSeenAt: v[7].String, UpdatedAt: v[8].String}
 	if v[9].Valid {
@@ -200,6 +220,31 @@ func (s *Store) TeamsDrafts(ctx context.Context, f TeamsDraftFilter) (TeamsDraft
 		return TeamsDraftSnapshot{}, err
 	}
 	return out, nil
+}
+
+func selectTeamsDraft(rows []TeamsDraftRow, f TeamsDraftFilter, complete bool) ([]TeamsDraftRow, error) {
+	selected := []TeamsDraftRow{}
+	for _, row := range rows {
+		if row.Body.ID == f.ID {
+			selected = append(selected, row)
+		}
+	}
+	if len(selected) == 0 {
+		if !complete {
+			return nil, ErrTeamsDraftScanIncomplete
+		}
+		return nil, ErrTeamsDraftUnknown
+	}
+	if selected[0].Body.Envelope.RemovedAt != nil && !f.IncludeRemoved {
+		return nil, ErrTeamsDraftRemoved
+	}
+	if len(selected) > 1 {
+		return nil, ErrTeamsDraftAmbiguous
+	}
+	if f.BodyRevision != "" && selected[0].Body.BodyRevision != f.BodyRevision {
+		return nil, ErrTeamsDraftBodyRevisionChanged
+	}
+	return selected, nil
 }
 
 func readTeamsDrafts(ctx context.Context, r knowledgeReader, f TeamsDraftFilter) (TeamsDraftSnapshot, error) {
@@ -373,7 +418,7 @@ func readTeamsDrafts(ctx context.Context, r knowledgeReader, f TeamsDraftFilter)
 		return out, err
 	}
 	out.Coverage.ScanComplete = bodyComplete && out.Coverage.AssociationScanComplete && auxComplete
-	out.Coverage.LossesComplete = bodyComplete && auxComplete
+	out.Coverage.LossesComplete = bodyComplete && out.Coverage.AssociationScanComplete && auxComplete
 	if !bodyComplete {
 		out.Coverage.Ordering = "bounded_prefix_tuple_order"
 	}
@@ -381,26 +426,9 @@ func readTeamsDrafts(ctx context.Context, r knowledgeReader, f TeamsDraftFilter)
 	out.Coverage.VisitedMembers = budget.members
 	out.Coverage.InputBytes = budget.bytes
 	if f.ID != "" {
-		selected := []TeamsDraftRow{}
-		for _, row := range out.Rows {
-			if row.Body.ID == f.ID {
-				selected = append(selected, row)
-			}
-		}
-		if len(selected) == 0 {
-			if !bodyComplete {
-				return TeamsDraftSnapshot{}, ErrTeamsDraftScanIncomplete
-			}
-			return TeamsDraftSnapshot{}, ErrTeamsDraftUnknown
-		}
-		if selected[0].Body.Envelope.RemovedAt != nil && !f.IncludeRemoved {
-			return TeamsDraftSnapshot{}, ErrTeamsDraftRemoved
-		}
-		if len(selected) > 1 {
-			return TeamsDraftSnapshot{}, ErrTeamsDraftAmbiguous
-		}
-		if f.BodyRevision != "" && selected[0].Body.BodyRevision != f.BodyRevision {
-			return TeamsDraftSnapshot{}, ErrTeamsDraftBodyRevisionChanged
+		selected, err := selectTeamsDraft(out.Rows, f, bodyComplete)
+		if err != nil {
+			return TeamsDraftSnapshot{}, err
 		}
 		out.Rows = selected
 		return out, nil
@@ -412,14 +440,17 @@ func readTeamsDrafts(ctx context.Context, r knowledgeReader, f TeamsDraftFilter)
 		}
 	}
 	out.Rows = retained
+	if len(bodies) > 0 && len(retained) == 0 && !f.IncludeRemoved {
+		out.Coverage.ScopeState = "removed_only"
+	}
 	sort.Slice(out.Rows, func(i, j int) bool {
 		a, b := out.Rows[i].Body, out.Rows[j].Body
-		for _, pair := range [][2]string{{a.Envelope.Source, b.Envelope.Source}, {a.Envelope.Database, b.Envelope.Database}, {a.Envelope.KeyJSON, b.Envelope.KeyJSON}, {a.MemberKey, b.MemberKey}} {
+		for _, pair := range [][2]string{{a.Envelope.Source, b.Envelope.Source}, {a.Envelope.Database, b.Envelope.Database}, {a.Envelope.KeyJSON, b.Envelope.KeyJSON}} {
 			if pair[0] != pair[1] {
 				return pair[0] < pair[1]
 			}
 		}
-		return false
+		return a.MemberKey < b.MemberKey
 	})
 	if bodyComplete {
 		total := len(out.Rows)
@@ -443,16 +474,18 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 		keys = append(keys, key)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		for n := range keys[i] {
+		for n := range 2 {
 			if keys[i][n] != keys[j][n] {
 				return keys[i][n] < keys[j][n]
 			}
 		}
-		return false
+		return keys[i][2] < keys[j][2]
 	})
 	sources := map[string]bool{}
+	scopeAccounts := map[string]bool{}
 	for _, key := range keys {
 		sources[key[0]] = true
+		scopeAccounts[key[1]+"/"+key[2]] = true
 		ids, done, err := draftRowIDs(ctx, r, "records", "source=? and tenant_id=? and user_id=? and store='drafts-internal-items' and database like 'Teams:messaging-slice-manager:%'", []any{key[0], key[1], key[2]}, draftRowCap-budget.rows)
 		if err != nil {
 			return false, err
@@ -462,6 +495,9 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 			v, ok, err := budget.text(ctx, r, "records", draftRecordColumns, id)
 			if err != nil {
 				return false, err
+			}
+			if ok {
+				_, ok = draftEnvelope(v)
 			}
 			if !ok || !v[6].Valid || !json.Valid([]byte(v[6].String)) {
 				complete = false
@@ -476,8 +512,29 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 			c.AdvisoryState = "incomplete"
 		}
 	}
+	if c.SelectedAccount != nil {
+		scopeAccounts[c.SelectedAccount.TenantID+"/"+c.SelectedAccount.UserID] = true
+	}
+	accountNames := make([]string, 0, len(scopeAccounts))
+	for account := range scopeAccounts {
+		accountNames = append(accountNames, account)
+	}
+	sort.Strings(accountNames)
+	sourceNames := make([]string, 0, len(sources))
+	for source := range sources {
+		sourceNames = append(sourceNames, source)
+	}
+	sort.Strings(sourceNames)
+	runWhere := "source=''"
+	runArgs := []any{}
+	if len(sourceNames) > 0 {
+		runWhere += " or source in (" + strings.TrimSuffix(strings.Repeat("?,", len(sourceNames)), ",") + ")"
+		for _, source := range sourceNames {
+			runArgs = append(runArgs, source)
+		}
+	}
 	// Run-level account receipts and source attempts are distinct universes.
-	ids, done, err := draftRowIDs(ctx, r, "sync_runs", "source='' or source in (select source from records where store='drafts' and database like 'Teams:streams-replychain-manager:%')", nil, draftRowCap-budget.rows)
+	ids, done, err := draftRowIDs(ctx, r, "sync_runs", runWhere, runArgs, draftRowCap-budget.rows)
 	if err != nil {
 		return false, err
 	}
@@ -492,9 +549,6 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 			continue
 		}
 		source, status := v[0].String, v[1].String
-		if source != "" && !sources[source] {
-			continue
-		}
 		if source == "" {
 			if !v[4].Valid {
 				continue
@@ -504,10 +558,10 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 				complete = false
 				continue
 			}
-			for _, key := range keys {
+			for _, selectedAccount := range accountNames {
 				covered := false
 				for _, account := range accounts {
-					if account == "*" || account == key[1]+"/"+key[2] {
+					if account == "*" || account == selectedAccount {
 						covered = true
 					}
 				}
@@ -517,7 +571,7 @@ func draftAuxiliary(ctx context.Context, r knowledgeReader, budget *draftBudget,
 						at = v[2]
 					}
 					if at.Valid {
-						c.Clocks = append(c.Clocks, TeamsDraftClock{Scope: key[1] + "/" + key[2], Kind: "account_success_not_draft_store", At: &at.String})
+						c.Clocks = append(c.Clocks, TeamsDraftClock{Scope: selectedAccount, Kind: "account_success_not_draft_store", At: &at.String})
 					}
 				}
 			}

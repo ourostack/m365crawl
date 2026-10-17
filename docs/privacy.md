@@ -1,5 +1,14 @@
 # Privacy
 
+`drafts list/show` can expose private, never-communicated compose material from
+the selected archive. They do not sync, discover, register, migrate, start a
+browser, use network/authentication, send, edit or discard. Draft content is
+excluded from shared messages/search/thread/unread/activity/FTS. Raw HTML is data,
+not executed or hydrated; assets/cards/links are not fetched. Do not quote compose
+material as something already communicated. Unknown ownership/representations
+are withheld; absence and removal are not server lifecycle facts. Body guards
+exclude freshly read metadata/target evidence and do not create immutable history.
+
 Native `calendar attendees sync` reads only a guarded private HxStore copy.
 Calendar, mail and eligible registered optional lanes share that copy; all readers
 close before one verified cleanup and optional admission. Standalone attendee

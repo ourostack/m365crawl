@@ -13,6 +13,13 @@ func manifest() control.Manifest {
 	m.Description = appDescription // the root help's sentence
 	m.Paths.DefaultDatabase = "~/.m365crawl/m365crawl.db"
 	m.Paths.ConfigEnv = "M365CRAWL_DB"
+	for _, name := range []string{"drafts list", "drafts show"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(name)...)
+		if name == "drafts show" {
+			argv = append(argv, "<teams-draft-id>")
+		}
+		m.Commands[name] = control.Command{Argv: argv, JSON: true, Mutates: false, Title: name + " (archive-only cached own compose projection; no current-unsent guarantee)"}
+	}
 	for _, name := range []string{"status", "sync", "doctor", "search"} {
 		m.Commands[name] = control.Command{Argv: []string{"m365crawl", "--json", name}, JSON: true, Mutates: name == "sync"}
 	}

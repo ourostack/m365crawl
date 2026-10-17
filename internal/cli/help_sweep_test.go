@@ -44,6 +44,8 @@ func helpTexts(t *testing.T) map[string]string {
 // teamsHelp lists every help string that may say "Teams", and why: the command or flag is
 // Teams-only, or the text names Teams beside Outlook. Every other help string speaks of the archive.
 var teamsHelp = map[string]string{
+	"drafts":                         "Teams-only: retained own cached compose projections, never acquisition or send",
+	"drafts show <id>":               "Teams-only: a projection locator, not a native Teams address",
 	"--account":                      "names both: a Teams account or an Outlook account",
 	"--outlook-account":              "names both: links an Outlook profile to a Teams account",
 	"--teams-root":                   "Teams-only: the Teams cache directory",

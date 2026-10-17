@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -65,6 +66,34 @@ func TestDecodeWrapperSeparateIdentities(t *testing.T) {
 	r, err := DecodeWrapper(context.Background(), e, raw, 4096)
 	if err != nil || r.Complete || len(r.Bodies) != 0 {
 		t.Fatal(r, err)
+	}
+	invalid := e
+	invalid.KeyJSON = "[\"" + string([]byte{0xff}) + "\",\"reply\"]"
+	w["conversationId"] = "�"
+	if r := decode(t, invalid, w); r.Complete {
+		t.Fatal("invalid UTF-8 key admitted")
+	}
+}
+
+func TestDecodeWrapperDiagnosticCategories(t *testing.T) {
+	for _, tc := range []struct {
+		value    any
+		category string
+	}{
+		{"0", "string"}, {false, "boolean"}, {json.Number("1"), "number"}, {nil, "null"}, {[]any{}, "array"}, {map[string]any{"other": true}, "object"}, {map[string]any{"$undefined": true}, "undefined"},
+	} {
+		e, w, m := fixture(t)
+		m["state"] = tc.value
+		r := decode(t, e, w)
+		if len(r.Diagnostics) != 1 || r.Diagnostics[0].Field != "message.state" || r.Diagnostics[0].Category != tc.category {
+			t.Fatal(tc.category, r.Diagnostics)
+		}
+	}
+	e, w, m := fixture(t)
+	delete(m, "type")
+	r := decode(t, e, w)
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Category != "missing" || r.Diagnostics[0].Code != "missing_discriminator" {
+		t.Fatal(r.Diagnostics)
 	}
 }
 
@@ -186,13 +215,23 @@ func TestDecodeWrapperBodyFrameRevision(t *testing.T) {
 func TestDecodeWrapperMemberBudgetAndCancellation(t *testing.T) {
 	e, w, m := fixture(t)
 	members := map[string]any{}
-	for i := 0; i < 4097; i++ {
-		members[strings.Repeat("x", i+1)] = m
+	for i := 0; i < 4096; i++ {
+		members[strconv.Itoa(i)] = map[string]any{"id": "unsupported"}
+	}
+	w["messageMap"] = members
+	r := decode(t, e, w)
+	if !r.Complete || r.VisitedMembers != 4096 {
+		t.Fatal("exact member boundary", r.Complete, r.VisitedMembers)
+	}
+	members["overflow"] = map[string]any{"id": "unsupported"}
+	r = decode(t, e, w)
+	if r.Complete || len(r.Bodies) != 0 || r.VisitedMembers != 4096 {
+		t.Fatal("member cap", r.Complete, r.VisitedMembers)
 	}
 	// Exercise the same member exhaustion using a small caller allowance.
 	w["messageMap"] = map[string]any{"a": m, "b": m}
 	r, err := DecodeWrapper(context.Background(), e, encode(t, w), 1)
-	if err != nil || r.Complete || len(r.Bodies) != 0 || r.VisitedMembers != 2 {
+	if err != nil || r.Complete || len(r.Bodies) != 0 || r.VisitedMembers != 1 {
 		t.Fatal(r, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,5 +257,70 @@ func TestMetadataMatchesCompound(t *testing.T) {
 	}
 	if _, err := DecodeMetadata([]byte(`{"sourceThreadId":"target"}`)); err == nil {
 		t.Fatal("incomplete possible match accepted as irrelevant")
+	}
+}
+
+type cancellingContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	calls, at int
+}
+
+func (c *cancellingContext) Err() error {
+	c.calls++
+	if c.calls == c.at {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+func TestDecodeWrapperTerminalCancellation(t *testing.T) {
+	e, w, _ := fixture(t)
+	for _, at := range []int{2, 3, 4} {
+		ctx, cancel := context.WithCancel(context.Background())
+		c := &cancellingContext{Context: ctx, cancel: cancel, at: at}
+		r, err := DecodeWrapper(c, e, encode(t, w), 4096)
+		cancel()
+		if !errors.Is(err, context.Canceled) || len(r.Bodies) != 0 {
+			t.Fatalf("checkpoint%d: %+v %v", at, r, err)
+		}
+	}
+}
+
+func TestDecodeWrapperMalformedBoundaries(t *testing.T) {
+	e, _, _ := fixture(t)
+	for _, raw := range [][]byte{{0xff}, []byte(`{} {}`), []byte(`null`), []byte(`[]`), []byte(`{`), []byte(`{"x":`), []byte(`{"x"`), []byte(`{"x":[}`), []byte(`{"conversationId":"wrapper","replyChainId":"reply"}`), []byte(`{"conversationId":"wrapper","replyChainId":"reply","messageMap":{"":{"id":"x"}}}`)} {
+		r, err := DecodeWrapper(context.Background(), e, raw, 4096)
+		if err != nil || r.Complete || len(r.Bodies) != 0 {
+			t.Fatal(string(raw), r, err)
+		}
+	}
+	if _, err := DecodeMetadata([]byte(`[]`)); err == nil {
+		t.Fatal("metadata array")
+	}
+	e, w, m := fixture(t)
+	m["properties"].(map[string]any)["activity"].(map[string]any)["sourceUserId"] = "other"
+	if len(decode(t, e, w).Bodies) != 0 {
+		t.Fatal("activity ownership ignored")
+	}
+	e, w, m = fixture(t)
+	m["sendPipelineStatus"] = map[string]any{"$undefined": true, "extra": true}
+	if len(decode(t, e, w).Bodies) != 0 {
+		t.Fatal("extra undefined member admitted")
+	}
+	e, w, m = fixture(t)
+	m["content"] = "<p>one</p>"
+	delete(m["draftDetails"].(map[string]any)["clientDraftProperties"].(map[string]any), "lastEditTimestamp")
+	if b := decode(t, e, w).Bodies[0]; b.LastEdit.State != "missing" {
+		t.Fatal(b.LastEdit)
+	}
+	d := json.NewDecoder(strings.NewReader(`[1]`))
+	if _, err := d.Token(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Token(); err != nil {
+		t.Fatal(err)
+	}
+	if err := uniqueValue(d); err == nil {
+		t.Fatal("unexpected closing delimiter accepted")
 	}
 }

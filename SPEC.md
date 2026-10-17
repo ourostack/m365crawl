@@ -1,5 +1,110 @@
 # m365crawl specification
 
+## Archived Teams cached-compose bodies
+
+`drafts list [--include-removed] [--limit N]` and
+`drafts show teams-draft:HASH [--body-revision DIGEST] [--include-removed]`
+MUST read only the selected archive/account. They MUST NOT acquire, refresh,
+discover, register, migrate, fetch, start a browser, hydrate, mutate app data,
+send/edit/discard or enter shared search/messages/thread/unread/activity/FTS.
+`--max-age` is syntax-validated but acquisition-inert. Explicit CLI acquisition/
+link flags MUST be rejected, unused inherited live-source values ignored.
+List alone supports fields; explicit empty fields on show is still invalid.
+Show supports max-text, including explicit0 for full text. List defaults50 and
+text preview300 Unicode code points; show defaults full text/unexecuted HTML.
+
+Source eligibility requires exactly one `|`, nonempty profile other than `.`/`..`
+without slash/backslash/NUL, and ASCII origin matching
+`^https_teams\.(microsoft\.com|cloud\.microsoft)_[0-9]+$`.
+Preserve exact source strings; this syntax is not archive authenticity or live
+profile attestation. The existing Teams database parser MUST establish exact
+manager/store and nonempty tenant/user matching archive envelope. Qualify
+`streams-replychain-manager/drafts` object members only after complete wrapper/
+key/member-namespace validation. Two nonempty wrapper-key strings MUST equal
+wrapper conversationId/replyChainId. Member key and nested message.id MUST be
+nonempty but MUST NOT be required equal. Creator and activity sourceUserId MUST
+both exactly equal `8:orgid:<envelope user>` with Boolean isSentByCurrentUser true.
+
+Required exact tokens: `type=Message`, `draftType=RegularDraft`,
+`threadType=streamofdrafts`, `messageType=RichText/Html`, `contentType=Text`,
+unquoted numeric token `state=0`, activityType/activitySubtype `Draft`.
+State0, lieType Send and false flags are format tokens, not lifecycle meanings.
+Let U mean EXACT object `{"$undefined":true}` with no extra members, N native null.
+All following fields MUST be present with these representations:
+
+| Field | Required representation |
+| --- | --- |
+| clientDraftProperties.scheduledSendTime | N |
+| properties.sendAt; sendPipelineStatus; sendPipelineOAMState; streamingMetadata; skypeeditedid; originalNonLieMessage | U |
+| lieType | exact string Send |
+| clientDraftProperties.isForwardedMessage; forwardPrivateReply | Boolean false |
+| clientDraftProperties.forwardAppIdsToInstall; forwardMessageIds; forwardMessageRecipients | exact string `[]`, not native array |
+| clientDraftProperties.forwardMessageCardContents | exact string `null`, not native null |
+| clientDraftProperties.forwardMessageCardsCount; forwardMessageOriginalConvId; forwardTeamId | N, not zero/string-null |
+
+Missing/U/N/wrong type/token MUST withhold except exactly as shown. Do not
+recursively decode serialized strings, normalize whitespace or interpret unknown
+optional client properties. Body authority is message.content ONLY; preserve
+readable/empty/missing/undefined/null/invalid, with no activity-preview fallback.
+Existing HTMLToText provides a cached projection, not native editor rendering.
+Native lastEditTimestamp is checked numeric integer milliseconds; fractions,
+overflow/strings stay invalid. VersioningTimestamp is independent string/presence;
+archive first-seen/update/removal clocks are not editor/server clocks.
+
+ID is `teams-draft:` plus FULL lowercase SHA-256 of deterministic Go JSON encoding:
+`["teams-draft-id-v1",source,tenant,user,database,store,canonical_key_json,member_key]`.
+The key string is the exact archived canonical key, not reformatted JSON.
+Body revision is FULL lowercase SHA-256 of deterministic Go JSON ordered frame:
+`["teams-draft-body-v1",identity_tuple_json_string,actual_complete_retained_wrapper_utf8_string,removed_boolean,removed_at_string_or_null,decoder_qualification,projector_qualification]`.
+Initial qualifications are `teams-draft-decoder-v1` and `teams-html-to-text-v1`.
+No content_hash shortcut or normalized wrapper semantics. Metadata/conversation/
+advisory/receipt clocks and archive updated_at are excluded. Every success states
+`body_guard_scope=retained_wrapper_body_frame_only`, `target_guarded=false`.
+A guarded call can return changed target/title. A→B→A can reuse its digest;
+there is no immutable/monotonic history or overwritten-body recovery.
+
+One read-only transaction MUST cover descriptor/fetch/body/association/
+conversation/coverage. Before materializing ANY payload/key/identity/used auxiliary
+string into Go, SQL MUST report native type and `length(CAST(column AS BLOB))`.
+Require allowed types, per-input8MiB, cumulative64MiB PRECHARGED before fetch/
+decode, repeated SQL type/length guards on fetch, at most4096 visited rows and
+4096 visited message-map members across phases. Include ALL used conversation
+id/kind/title/team and source/run strings. Null/presence is not empty text.
+Cancellation and SQL/I/O/schema failures remain failures. These policy caps do
+not bound RSS/CPU or represent operator-supplied thresholds.
+
+Relevant association universe is ALL same exact source/account
+messaging-slice-manager/drafts-metadata-items across locale/removal. Require
+three nonempty exact sourceThreadId/sourceMessageId/clientMessageId equalities;
+two usable supplied sourceReplyChainId claims cannot conflict. Wrapper is not
+target. Exhaust possible matches before unique/resolved. A capped/malformed/
+oversized possible match makes association incomplete, even after one match.
+Missing/ambiguous/incomplete metadata permits an independently complete own body.
+Conversations are auxiliary account-scoped archive evidence, NOT same-profile/
+capture/UI evidence. Full resolution requires completed consistent auxiliary lookup;
+removed association is historical. Preserve Space team-side, Topic channel, Chat.
+
+Incomplete requested frame MUST emit no body/token; unsuccessful incomplete scope
+MUST yield teams_draft_scan_incomplete, not unknown. A complete own body can succeed
+with unrelated/global/association incompleteness. Eligibility precedes removed,
+completed eligible-identity ambiguity and revision mismatch, in that order.
+Foreign/non-own/unsupported ids share teams_draft_unknown with absent after complete
+scope; no per-id withholding/native identity leak. Aggregate diagnostics are scoped,
+not requested-id dependent. Exact body totals, including0, require complete body
+scan; prefix ordering never implies newest/global completeness. draft_coverage
+survives fields/limits/clipping/zero, with body/scope/association completeness,
+lower-bound/unknown losses and independently qualified source/account clocks.
+Advisory counts never substitute totals. Not-marked-removed can contain old bytes
+after source decode failure; removed never means sent/discarded.
+
+Ordinary full_inspection MUST preserve exact absolute selected DB, account,
+removal opt-in, ID and body guard with max-age0/max-text0 and safe platform shell
+quoting. No raw SQL/full client blob or misleading --revision alias is required.
+Native qualification remains one fresh Mac Space/team-side body and removed
+historical Chat shapes only; not current chat/UI/editor/server-unsent, native
+Windows, app-version/lifecycle/key continuity or all-drafts completeness.
+Source-wide host-object omissions have unknown per-draft-store allocation.
+
 ## Native calendar attendee evidence (schema 19)
 
 `calendar attendees sync [--root DIR | --source-id ID]` MUST be explicit.
