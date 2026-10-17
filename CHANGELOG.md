@@ -4,6 +4,12 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-17
+
+### Fixed
+
+- Clarify the stable-major public compatibility contract, directional archive schema support, supported per-field text clipping routes and mandatory macOS release signing without changing runtime behavior.
+
 ## [0.9.17] - 2026-10-17
 
 ### Added
