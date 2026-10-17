@@ -233,6 +233,27 @@
       ],
       "json": true
     },
+    "drafts list": {
+      "title": "drafts list (archive-only cached own compose projection; no current-unsent guarantee)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "drafts",
+        "list"
+      ],
+      "json": true
+    },
+    "drafts show": {
+      "title": "drafts show (archive-only cached own compose projection; no current-unsent guarantee)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "drafts",
+        "show",
+        "\u003cteams-draft-id\u003e"
+      ],
+      "json": true
+    },
     "loop list": {
       "title": "loop list (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)",
       "argv": [

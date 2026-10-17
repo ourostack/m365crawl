@@ -75,6 +75,7 @@ type cliApp struct {
 	Notes         notesGroup       `cmd:"" help:"Capture and read local OneNote indexed notes, text and OCR with retained content and explicit source coverage."`
 	Docs          documentsGroup   `cmd:"" help:"Capture and inspect Office document metadata and sharing claims; no implicit file opening or text fetch."`
 	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive; every row names the one cached snapshot it comes from. No fetch, replay or full page."`
+	Drafts        draftsGroup      `cmd:"" help:"Inspect own cached Teams compose-body projections already archived; never refresh or send."`
 	Content       contentGroup     `cmd:"" help:"Explicitly fetch supported SharePoint page/Stream evidence; read and search retained observations offline."`
 	Transcripts   transcriptsGroup `cmd:"" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive. With <meeting> (an event id or key, a meeting chat link or thread id, or a call id) it lists that meeting's parts. The list flags (--since, --until, --state, --limit) are listed by: m365crawl transcripts list --help."`
 	Stores        storesCmd        `cmd:"" help:"List every database and object store archived without a typed table, with record counts; the database name is what records --database takes."`
@@ -168,7 +169,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources", "content capture"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources", "content capture", "drafts list"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
@@ -248,6 +249,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		return rt.fail(err)
 	}
 	rt.cmd = commandName(kctx)
+	kctx.Bind(explicitDraftFlags(kctx))
 	if err := rt.setup(); err != nil {
 		return rt.fail(err)
 	}
@@ -291,6 +293,15 @@ func commandOf(path string) string {
 
 // checkListOnly rejects --fields and --max-text on commands that do not return item lists.
 func (rt *runtime) checkListOnly() error {
+	if rt.cmd == "drafts show" {
+		if rt.g.Fields != "" {
+			return errs.Usage("--fields is list-only, not drafts show")
+		}
+		return nil
+	}
+	if rt.cmd == "drafts list" {
+		return nil
+	}
 	if (rt.g.Fields == "" && rt.g.MaxText == 0) || contains(listCommands, rt.cmd) {
 		return nil
 	}

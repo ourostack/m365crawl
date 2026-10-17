@@ -18,6 +18,7 @@ func typeKeys[T any]() []string { return jsonKeys(reflect.TypeFor[T]()) }
 // commandFields is the one source of the --fields keys of every list command: the validators read
 // it and each command's --help prints it, so the help cannot drift from what a command accepts.
 var commandFields = map[string][]fieldSet{
+	"drafts list":                {{keys: typeKeys[draftItem]}},
 	"search":                     {{keys: searchKeys}},
 	"messages":                   {{keys: typeKeys[messageItem]}},
 	"conversations":              {{keys: typeKeys[conversationItem]}},

@@ -1,5 +1,26 @@
 # Usage guide
 
+## Cached Teams compose bodies
+
+Use `m365crawl drafts list` to inspect narrow own cached regular-compose bodies
+already in the selected archive, then execute the item's `full_inspection`.
+Use its `full_inspection_shell`: Windows requires PowerShell7.3+ (`pwsh`),
+with the emitted scoped Standard argument mode, not CMD/batch or Windows
+PowerShell5.1; Mac/Linux use POSIX shells. Literal selected paths are preserved.
+No command in this group refreshes, even with expired max-age. Refresh through
+ordinary sync only as an explicit separate action. List defaults50 items and300
+text code points; explicit `--max-text 0` requests full text, while show defaults
+full text and unexecuted HTML. Only list accepts fields.
+
+Keep `draft_coverage` separate from body/association completeness: incomplete
+search is not no drafts, and missing/ambiguous target evidence does not erase
+a complete body. Body revision guards retained wrapper bytes only; freshly read
+metadata/title/target is unguarded. Archive removal never means sent/discarded;
+not-marked-removed never proves current editor/server-unsent state. Current chat,
+UI routing, native Windows, lifecycle and complete draft coverage are unqualified.
+See [the full command contract](commands.md#drafts); no draft content enters shared
+message/search surfaces or supports send/edit/discard.
+
 This guide follows the README's quick start: a walkthrough on synthetic data, then Teams, Outlook mail, the calendar and the output contract agents rely on. Notes, document metadata, people observations and cached Loop channels are in [local-sources.md](local-sources.md); explicit Office, SharePoint, Stream and Engage capture is in [content.md](content.md). [commands.md](commands.md) has every command and flag; [SPEC.md](../SPEC.md) is normative.
 
 ## Try it on synthetic data

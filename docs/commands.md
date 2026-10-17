@@ -2,7 +2,7 @@
 
 This page lists every m365crawl command and flag, with the shape of each result. `m365crawl <command> --help` prints the same flags from the installed binary. The normative behaviour is in [SPEC.md](../SPEC.md).
 
-Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into eleven groups:
+Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into these groups:
 
 | Group | Commands |
 | --- | --- |
@@ -15,8 +15,80 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
 | Document metadata | [`docs sync`](#docs-sync), [`docs list`](#docs-list), [`docs search`](#docs-search), [`docs show`](#docs-show), [`docs sources`](#docs-sources) |
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
+| Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
 | Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
+
+## Drafts
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] drafts list [--include-removed] [--limit 50]
+m365crawl [--db PATH] [--account TENANT/USER] drafts show teams-draft:HASH [--body-revision DIGEST] [--include-removed]
+```
+
+These are strictly qualified own cached regular-compose **body projections**, not
+editor rendering, service-unsent state or a complete draft census. They never
+refresh/discover/register/migrate/fetch, regardless of max-age; valid max-age
+syntax remains required. Explicit teams-root/outlook-root/outlook-account/
+outlook-profile flags are refused, while unused inherited live-source settings
+are ignored. Refresh only through an explicitly separate ordinary sync.
+
+List previews text at300 Unicode code points by default; explicit `--max-text`
+overrides, including0 for full text. Show defaults full text/unexecuted HTML;
+explicit clipping has separate text/HTML flags and never renders HTML.
+`--fields` is list-only, rejected on show even when supplied empty.
+
+### drafts list
+
+List keys: `archive_presence`, `archive_source`, `association`, `body_frame_complete`,
+`body_guard_scope`, `body_revision`, `body_state`, `classification`, `client_draft_id`,
+`database`, `first_seen_at`, `full_inspection`, `full_inspection_shell`, `html`, `html_truncated`, `id`,
+`last_edit`, `message_id`, `message_map_key`, `record_removed_at`, `record_updated_at`,
+`render_fidelity`, `source`, `store`, `target_claim`, `target_guarded`, `tenant_id`,
+`text`, `text_origin`, `text_state`, `text_truncated`, `ui_state`, `unsent_now`,
+`user_id`, `versioning_timestamp`, `wrapper_conversation_id`, `wrapper_reply_chain_id`.
+List omits HTML; show includes it as unexecuted data. Presence distinguishes
+missing/undefined/null/value/invalid. Body adds readable/empty rather than
+inventing text from activity preview.
+
+`draft_coverage` is independent of item fields/limits/clipping/zero hits, with
+separate body/scope/association completeness, observed lower-bound losses,
+source-wide attempt/omission and account-success clocks where available.
+`total_exact` appears only after complete eligible body scan, including zero;
+item truncation is not scan incompleteness. Tuple ordering is not newest-first;
+incomplete scans expose only a bounded tuple-ordered prefix.
+
+Follow emitted `full_inspection`: it preserves absolute selected DB/account,
+removal opt-in, full locator and body revision, with max-age0/max-text0.
+The item's `full_inspection_shell` declares the dialect: `posix` on Mac/Linux;
+`powershell_7_3_standard` on Windows, requiring PowerShell7.3+ (`pwsh`).
+The Windows command guards that version and uses scoped Standard native argument
+passing and verbatim single-quoted arguments, including escaped ASCII/smart
+apostrophes. It is **not** CMD/batch or Windows PowerShell5.1 syntax. Do not wrap
+it in `cmd /c` or a stop-parsing token: percent environment references must stay
+literal. Actual Windows shell/native-process round-trip tests run in the normal
+Windows test gate; shell compatibility does not qualify Windows native capture.
+The guard covers only complete actual retained wrapper bytes/removal/qualification.
+Metadata and conversation evidence is freshly read **outside** that guard:
+`target_guarded:false`. A successful guard may return a changed target/title.
+No `--revision` alias, immutable history or A→B→A continuity is promised.
+Missing/ambiguous/incomplete association does not suppress a complete own body.
+Incomplete requested frame or incomplete unsuccessful lookup returns
+`teams_draft_scan_incomplete`, never unknown or revision-changed. Excluded
+account/non-own/unsupported ids share generic `teams_draft_unknown` after
+complete scoped lookup. Only an eligible complete own frame can yield removed,
+eligible-identity ambiguity or body-revision-changed errors, in that order.
+When the selected archive is missing, show keeps `teams_draft_unknown` but explains
+that ID-independent archive state without suggesting acquisition.
+
+`not_marked_removed` may retain older bytes after source decode failure.
+Removed does not mean sent/discarded. One fresh Mac Space/team-side body and
+removed historical Chat shapes are qualified; current chat, named channel UI,
+app-version range, native Windows, editor/server state, lifecycle and complete
+coverage are not. Dedicated drafts are not included in messages/thread/unread/
+activity/shared search or FTS and have no message actions.
+
+`--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`, `full_inspection_shell`.
 
 ## Content: explicit acquisition, offline reads
 

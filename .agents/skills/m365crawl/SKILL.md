@@ -33,6 +33,7 @@ Run `m365crawl` first: it reports chats, mail and calendar freshness, routes reg
 
 | Job | Commands |
 | --- | --- |
+| Inspect a cached own Teams compose body | `m365crawl drafts list`, then emitted guarded `full_inspection` in `full_inspection_shell` (Windows: PowerShell7.3+ with emitted Standard mode, NOT CMD/Windows PowerShell5.1; elsewhere POSIX), or `drafts show teams-draft:HASH`; never refreshes, even at expired max-age. `draft_coverage` survives fields/limits/zero; unknown is not no drafts. Body guard excludes freshly read target evidence (`target_guarded=false`); removed is not sent/discarded. No current-unsent/editor/all-drafts claim, shared search or send/edit/discard. |
 | Read a chat or channel | `m365crawl conversations --query <name>` to find it, then `m365crawl messages --conversation <id> --since 7d`. Each Teams message carries `app_observation` (its own app, reply and citation claims, not a verified identity) and results add `application_evidence_coverage`; not derived means run a writable `m365crawl sync` |
 | What someone said in a chat yesterday | `m365crawl messages --conversation <id> --from <name> --since <date>` (yesterday as YYYY-MM-DD), or `m365crawl search --from <name> --since 1d` across every chat |
 | Mentions of me | `m365crawl search --mentions-me --since 7d` (`--direct-mentions` leaves out @channel and @team), `m365crawl activity --unread` |
@@ -54,7 +55,6 @@ Ordinary reads refresh **registered** participating locators only; new indexes n
 Shared search includes notes only without account, author, chat-only or mail-only constraints. Those constraints exclude unresolved notes with a notice; explicit `--source notes` rejects them. Date filters use native modified time, with unknown timestamps excluded. Expand note hits with `notes show note:ID`, never `thread`, invented authors or guessed page web URLs. Default Windows app-cache discovery and live WAL capture remain unsupported; supported explicit index copies work on Mac, Windows and Linux.
 
 ## Hosts
-
 - macOS: `brew install ourostack/tap/m365crawl` or the release tarball. The app that runs m365crawl needs Full Disk Access; `m365crawl doctor` names it.
 - Windows: the release zip. Its binaries are intentionally unsigned. Teams chats, the Teams calendar and new Outlook OWA cached mail work; mail has ordered To/Cc/Bcc roles and conversation grouping. Mac recipient roles are unknown/null. OWA calendar is not read in this release; Windows OWA calendar support is planned. Windows attachments are metadata only (downloaded=false, missing size=0), to_me=false and in_reply_to=null; unknown HasAttachments is not inferred, cached HTML may be truncated, and multiple content mailboxes per profile are a coded refusal. The mail group's help states these limits.
 - Homebrew is macOS-only. Linux has no Teams desktop cache to read, but explicit copied supported OWA sources work. Explicit HxStore mail on Windows retains `mail_unsupported_platform`; that legacy route does not describe native OWA mail.

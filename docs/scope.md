@@ -4,6 +4,16 @@ m365crawl is built around the maintainer's own Microsoft 365 usage: support grow
 
 ## Available now
 
+`drafts list/show` inspect only strict own-account regular-compose bodies already
+retained as generic records. This is an archive-only cached projection, not a
+current-unsent feature or editor renderer. Native evidence is one fresh Mac
+Space/team-side body (October 16, 2026) and four removed historical Chat bodies
+as shape evidence, not current chat. Named channel UI, native Windows, app-version
+range, lifecycle/key continuity and all-drafts completeness are unqualified.
+Unknown representations are withheld; source-wide omissions cannot be allocated
+to a draft store. A later empty cache does not erase prior evidence or prove send/
+discard. These commands do not block independently usable archive workflows.
+
 - **From `sync`:** Teams chats and channels, Outlook mail on macOS and Windows, the calendar, and meeting recaps and action items. Teams messages carry the app, reply and citation claims of archived bot replies (`app_observation`).
 - **From their own explicit `sync`:** local OneNote indexed notes, source-qualified Outlook people observations, native meeting attendee evidence from Mac HxStore or supported copied profiles, Office and OneDrive document metadata, and the text of cached Loop channels as partial snapshots ([local sources](local-sources.md)).
 - **Only when you ask:** meeting transcript text through `transcripts fetch`, the text of one resident Word, Excel or PowerPoint file through `content capture`, one SharePoint page or Stream transcript per `content fetch page/stream`, and bounded Engage Home sessions through `content fetch engage-home` ([explicit content capture](content.md)).
