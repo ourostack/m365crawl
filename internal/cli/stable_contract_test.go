@@ -92,6 +92,35 @@ func TestStableV1DocumentationContract(t *testing.T) {
 			`human prose.*key order.*whitespace.*internal columns`,
 			`cache.*(universal|universality)`,
 		}, nil)
+		for _, tc := range []struct {
+			label, body, row    string
+			required, forbidden []string
+		}{
+			{"SPEC global max-age", section(t, spec, "### 6.1 Global flags and environment"), "| `--max-age DURATION`",
+				[]string{`archive-only.*no-acquisition`, `registered-source reads may refresh registered inputs`},
+				[]string{`archive-only and registered-source reads.*no-acquisition`}},
+			{"SPEC public defaults", version, "| Supported commands, flags and defaults |",
+				[]string{
+					`content.*drafts.*native-attendee.*archive-only`,
+					`registered-source reads.*native people.*notes.*docs.*Loop.*may refresh.*registered inputs`,
+					`max-age.*minimum-interval.*qualification`,
+					`native people.*max-age 0.*no capture.*discovery.*archive repair`,
+					`people reads never implicitly discover unregistered sources`,
+				},
+				[]string{`archive-only reads.*native people/attendees and registered-source reads.*do not.*acquire`}},
+		} {
+			row := ""
+			for _, line := range strings.Split(tc.body, "\n") {
+				if strings.HasPrefix(line, tc.row) {
+					row = line
+					break
+				}
+			}
+			if row == "" {
+				t.Fatalf("%s: missing table row %q", tc.label, tc.row)
+			}
+			check(t, tc.label, row, tc.required, tc.forbidden)
+		}
 		check(t, "SPEC 6.5 records", section(t, spec, "### 6.5 Item shapes"),
 			[]string{`value_json.*parsed JSON`, `JSON string.*text_truncated`}, nil)
 		check(t, "SPEC 7", section(t, spec, "## 7. `watch`"),
