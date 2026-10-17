@@ -99,7 +99,18 @@ after source decode failure; removed never means sent/discarded.
 
 Ordinary full_inspection MUST preserve exact absolute selected DB, account,
 removal opt-in, ID and body guard with max-age0/max-text0 and safe platform shell
-quoting. No raw SQL/full client blob or misleading --revision alias is required.
+quoting. `full_inspection_shell` MUST identify `posix` on non-Windows hosts and
+`powershell_7_3_standard` on Windows. The Windows command requires PowerShell7.3+
+(`pwsh`), guards that minimum version, and scopes Standard native argument passing
+to its invocation. It is NOT cmd.exe, a batch command or Windows PowerShell5.1
+syntax. All variable arguments use verbatim single-quoted literals, doubling
+ASCII apostrophes and interpreted smart single quotes (U+2018–U+201B); dollar,
+backtick, percent/exclamation environment tokens and Windows-valid Unicode path
+characters MUST round-trip unchanged through the actual shell/native argv.
+No selected valid path is refused or replaced by a placeholder. Missing-archive
+show retains generic teams_draft_unknown plus ID-independent selected-archive-
+missing context, never an acquisition remedy. No raw SQL/full client blob or
+misleading --revision alias is required.
 Native qualification remains one fresh Mac Space/team-side body and removed
 historical Chat shapes only; not current chat/UI/editor/server-unsent, native
 Windows, app-version/lifecycle/key continuity or all-drafts completeness.

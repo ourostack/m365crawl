@@ -42,7 +42,7 @@ explicit clipping has separate text/HTML flags and never renders HTML.
 
 List keys: `archive_presence`, `archive_source`, `association`, `body_frame_complete`,
 `body_guard_scope`, `body_revision`, `body_state`, `classification`, `client_draft_id`,
-`database`, `first_seen_at`, `full_inspection`, `html`, `html_truncated`, `id`,
+`database`, `first_seen_at`, `full_inspection`, `full_inspection_shell`, `html`, `html_truncated`, `id`,
 `last_edit`, `message_id`, `message_map_key`, `record_removed_at`, `record_updated_at`,
 `render_fidelity`, `source`, `store`, `target_claim`, `target_guarded`, `tenant_id`,
 `text`, `text_origin`, `text_state`, `text_truncated`, `ui_state`, `unsent_now`,
@@ -59,8 +59,16 @@ item truncation is not scan incompleteness. Tuple ordering is not newest-first;
 incomplete scans expose only a bounded tuple-ordered prefix.
 
 Follow emitted `full_inspection`: it preserves absolute selected DB/account,
-removal opt-in, full locator and body revision, with max-age0/max-text0. The
-guard covers only complete actual retained wrapper bytes/removal/qualification.
+removal opt-in, full locator and body revision, with max-age0/max-text0.
+The item's `full_inspection_shell` declares the dialect: `posix` on Mac/Linux;
+`powershell_7_3_standard` on Windows, requiring PowerShell7.3+ (`pwsh`).
+The Windows command guards that version and uses scoped Standard native argument
+passing and verbatim single-quoted arguments, including escaped ASCII/smart
+apostrophes. It is **not** CMD/batch or Windows PowerShell5.1 syntax. Do not wrap
+it in `cmd /c` or a stop-parsing token: percent environment references must stay
+literal. Actual Windows shell/native-process round-trip tests run in the normal
+Windows test gate; shell compatibility does not qualify Windows native capture.
+The guard covers only complete actual retained wrapper bytes/removal/qualification.
 Metadata and conversation evidence is freshly read **outside** that guard:
 `target_guarded:false`. A successful guard may return a changed target/title.
 No `--revision` alias, immutable history or A→B→A continuity is promised.
@@ -70,6 +78,8 @@ Incomplete requested frame or incomplete unsuccessful lookup returns
 account/non-own/unsupported ids share generic `teams_draft_unknown` after
 complete scoped lookup. Only an eligible complete own frame can yield removed,
 eligible-identity ambiguity or body-revision-changed errors, in that order.
+When the selected archive is missing, show keeps `teams_draft_unknown` but explains
+that ID-independent archive state without suggesting acquisition.
 
 `not_marked_removed` may retain older bytes after source decode failure.
 Removed does not mean sent/discarded. One fresh Mac Space/team-side body and
@@ -78,7 +88,7 @@ app-version range, native Windows, editor/server state, lifecycle and complete
 coverage are not. Dedicated drafts are not included in messages/thread/unread/
 activity/shared search or FTS and have no message actions.
 
-`--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`.
+`--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`, `full_inspection_shell`.
 
 ## Content: explicit acquisition, offline reads
 

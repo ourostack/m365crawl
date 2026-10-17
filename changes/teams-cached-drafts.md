@@ -7,3 +7,6 @@
   shared-search inclusion or message action. Native evidence is one Mac
   Space/team-side body plus historical removed Chat shapes, not current chat,
   lifecycle, native Windows or all-drafts qualification.
+  Windows emitted follow-ups explicitly require PowerShell7.3+ Standard argument
+  passing (not CMD) and preserve literal expansion characters and smart quotes;
+  missing selected archives retain generic unknown with archive-missing context.

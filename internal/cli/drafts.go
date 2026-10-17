@@ -2,8 +2,10 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -20,7 +22,7 @@ type draftsGroup struct {
 const draftCacheWarning = "Cached compose projection only: not_marked_removed is not latest-capture, editor-visible or server-unsent proof; decode failure may retain older bytes. Removed does not mean sent or discarded. Target evidence is freshly read and NOT body-guarded."
 
 func (draftsGroup) Help() string {
-	return "Inspect only the narrow archived Teams regular-draft format. " + draftCacheWarning + "\nNo acquisition, discovery, browser, send, edit, discard or shared-search inclusion. --max-age is syntax-checked but never refreshes; refresh_policy=explicit_ordinary_sync_only. Use ordinary sync explicitly and separately to refresh the archive; there is no drafts sync.\nList preview defaults to 300 Unicode code points; explicit --max-text 0 keeps full text. Show defaults full text/unexecuted HTML, never editor rendering. Native qualification: one Mac Space/team-side body; removed historical Chat shape only. Current chat/UI, native Windows, app-version range, lifecycle and all-drafts completeness are unqualified. draft_coverage survives fields/limits/zero results."
+	return "Inspect only the narrow archived Teams regular-draft format. " + draftCacheWarning + "\nNo acquisition, discovery, browser, send, edit, discard or shared-search inclusion. --max-age is syntax-checked but never refreshes; refresh_policy=explicit_ordinary_sync_only. Use ordinary sync explicitly and separately to refresh the archive; there is no drafts sync.\nList preview defaults to 300 Unicode code points; explicit --max-text 0 keeps full text. Show defaults full text/unexecuted HTML, never editor rendering. Follow full_inspection_shell: Windows full_inspection requires PowerShell 7.3+ (pwsh), uses scoped Standard native argument passing, and is NOT cmd.exe or Windows PowerShell 5.1 syntax; other hosts use a POSIX shell. Native qualification: one Mac Space/team-side body; removed historical Chat shape only. Current chat/UI, native Windows, app-version range, lifecycle and all-drafts completeness are unqualified. draft_coverage survives fields/limits/zero results."
 }
 
 type draftsListCmd struct {
@@ -101,6 +103,7 @@ type draftItem struct {
 	TextTruncated         bool                        `json:"text_truncated"`
 	HTMLTruncated         bool                        `json:"html_truncated"`
 	FullInspection        string                      `json:"full_inspection"`
+	FullInspectionShell   string                      `json:"full_inspection_shell"`
 }
 
 var draftHashSyntax = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -151,7 +154,7 @@ func (rt *runtime) draftsRead(f store.TeamsDraftFilter) (*draftsResult, error) {
 	st, err := store.OpenReadOnly(rt.ctx, db)
 	if errors.Is(err, store.ErrNoArchive) {
 		if f.ID != "" {
-			return nil, draftError(store.ErrTeamsDraftUnknown)
+			return nil, draftError(fmt.Errorf("%w: selected archive is missing; no acquisition was performed", store.ErrTeamsDraftUnknown))
 		}
 		zero := 0
 		list := newList(nil, false)
@@ -223,18 +226,37 @@ func draftItems(result *draftsResult, rt *runtime, max int, show, includeRemoved
 		if e.RemovedAt != nil {
 			presence = "removed"
 		}
-		out = append(out, draftItem{ID: b.ID, Source: "teams_draft", Classification: "cached_regular_draft_projection", ArchiveSource: e.Source, TenantID: e.TenantID, UserID: e.UserID, Database: e.Database, Store: e.Store, WrapperConversationID: b.WrapperConversationID, WrapperReplyChainID: b.WrapperReplyChainID, MessageMapKey: b.MemberKey, MessageID: b.MessageID, ClientDraftID: b.ClientDraftID, BodyState: b.BodyState, Text: text, HTML: html, TextOrigin: "message.content", TextState: "cached_projection", RenderFidelity: "not_editor_rendering", BodyRevision: b.BodyRevision, BodyFrameComplete: true, BodyGuardScope: "retained_wrapper_body_frame_only", TargetGuarded: false, LastEdit: b.LastEdit, VersioningTimestamp: b.VersioningTimestamp, FirstSeenAt: e.FirstSeenAt, RecordUpdatedAt: e.UpdatedAt, RecordRemovedAt: e.RemovedAt, ArchivePresence: presence, TargetClaim: b.Claim, Association: row.Association, UnsentNow: "unknown", UIState: "unverified", TextTruncated: textTruncated, HTMLTruncated: htmlTruncated, FullInspection: draftInspectionCommand(result.archive, account, b.ID, b.BodyRevision, includeRemoved)})
+		out = append(out, draftItem{ID: b.ID, Source: "teams_draft", Classification: "cached_regular_draft_projection", ArchiveSource: e.Source, TenantID: e.TenantID, UserID: e.UserID, Database: e.Database, Store: e.Store, WrapperConversationID: b.WrapperConversationID, WrapperReplyChainID: b.WrapperReplyChainID, MessageMapKey: b.MemberKey, MessageID: b.MessageID, ClientDraftID: b.ClientDraftID, BodyState: b.BodyState, Text: text, HTML: html, TextOrigin: "message.content", TextState: "cached_projection", RenderFidelity: "not_editor_rendering", BodyRevision: b.BodyRevision, BodyFrameComplete: true, BodyGuardScope: "retained_wrapper_body_frame_only", TargetGuarded: false, LastEdit: b.LastEdit, VersioningTimestamp: b.VersioningTimestamp, FirstSeenAt: e.FirstSeenAt, RecordUpdatedAt: e.UpdatedAt, RecordRemovedAt: e.RemovedAt, ArchivePresence: presence, TargetClaim: b.Claim, Association: row.Association, UnsentNow: "unknown", UIState: "unverified", TextTruncated: textTruncated, HTMLTruncated: htmlTruncated, FullInspection: draftInspectionCommand(goruntime.GOOS, result.archive, account, b.ID, b.BodyRevision, includeRemoved), FullInspectionShell: draftInspectionShell(goruntime.GOOS)})
 	}
 	return out
 }
-func draftInspectionCommand(db, account, id, revision string, includeRemoved bool) string {
-	words := []string{"m365crawl", "--db", quoteArg(db), "--max-age", "0", "--max-text", "0"}
-	if account != "" {
-		words = append(words, "--account", quoteArg(account))
+func draftInspectionCommand(goos, db, account, id, revision string, includeRemoved bool) string {
+	quote := quoteFor(goos)
+	if goos == "windows" {
+		quote = draftPowerShellLiteral
 	}
-	words = append(words, "drafts", "show", quoteArg(id), "--body-revision", quoteArg(revision))
+	words := []string{"m365crawl", "--db", quote(db), "--max-age", "0", "--max-text", "0"}
+	if account != "" {
+		words = append(words, "--account", quote(account))
+	}
+	words = append(words, "drafts", "show", quote(id), "--body-revision", quote(revision))
 	if includeRemoved {
 		words = append(words, "--include-removed")
 	}
-	return strings.Join(words, " ")
+	command := strings.Join(words, " ")
+	if goos == "windows" {
+		return "& { if ($PSVersionTable.PSVersion -lt [version]'7.3') { throw 'PowerShell 7.3+ required for draft follow-up' }; $PSNativeCommandArgumentPassing = 'Standard'; & " + command + " }"
+	}
+	return command
+}
+
+func draftPowerShellLiteral(s string) string {
+	return "'" + strings.NewReplacer("'", "''", "‘", "‘‘", "’", "’’", "‚", "‚‚", "‛", "‛‛").Replace(s) + "'"
+}
+
+func draftInspectionShell(goos string) string {
+	if goos == "windows" {
+		return "powershell_7_3_standard"
+	}
+	return "posix"
 }

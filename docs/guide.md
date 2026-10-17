@@ -4,6 +4,9 @@
 
 Use `m365crawl drafts list` to inspect narrow own cached regular-compose bodies
 already in the selected archive, then execute the item's `full_inspection`.
+Use its `full_inspection_shell`: Windows requires PowerShell7.3+ (`pwsh`),
+with the emitted scoped Standard argument mode, not CMD/batch or Windows
+PowerShell5.1; Mac/Linux use POSIX shells. Literal selected paths are preserved.
 No command in this group refreshes, even with expired max-age. Refresh through
 ordinary sync only as an explicit separate action. List defaults50 items and300
 text code points; explicit `--max-text 0` requests full text, while show defaults

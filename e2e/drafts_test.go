@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 
 func TestDraftsOfflineProcess(t *testing.T) {
 	e := newEnv(t)
+	e.db = filepath.Join(filepath.Dir(e.db), "compose's $HOME ` %DRAFT_PATH% !DRAFT_PATH! ‘‚‛’ & 🌱.db")
 	st, err := store.Open(context.Background(), e.db)
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +54,13 @@ func TestDraftsOfflineProcess(t *testing.T) {
 		t.Fatal(doc)
 	}
 	item := rows[0].(map[string]any)
+	shell := "posix"
+	if runtime.GOOS == "windows" {
+		shell = "powershell_7_3_standard"
+	}
+	if item["full_inspection_shell"] != shell {
+		t.Fatal("follow-up dialect missing", item)
+	}
 	res = e.runWith(nil, "--db", e.db, "--max-text", "0", "drafts", "show", item["id"].(string), "--body-revision", item["body_revision"].(string))
 	if res.code != 0 || !strings.Contains(res.stdout, "authored synthetic compose") {
 		t.Fatal(res)

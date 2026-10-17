@@ -6,9 +6,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +20,136 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
+
+func TestDraftsWindowsEmitterLiteral(t *testing.T) {
+	id := "teams-draft:" + strings.Repeat("a", 64)
+	revision := strings.Repeat("b", 64)
+	got := draftInspectionCommand("windows", `C:\review\%REVIEW_ARCHIVE%\cached.db`, "tenant/user", id, revision, true)
+	for _, text := range []string{"& {", "$PSNativeCommandArgumentPassing = 'Standard'", `--db 'C:\review\%REVIEW_ARCHIVE%\cached.db'`, "--account 'tenant/user'", "--max-age 0 --max-text 0", "--include-removed"} {
+		if !strings.Contains(got, text) {
+			t.Fatalf("Windows emitter is not declared literal PowerShell: missing %q in %s", text, got)
+		}
+	}
+}
+
+func TestDraftsShellMetadata(t *testing.T) {
+	if draftInspectionShell("windows") != "powershell_7_3_standard" || draftInspectionShell("darwin") != "posix" {
+		t.Fatal("follow-up shell dialect is not explicit")
+	}
+	if got := draftPowerShellLiteral("'‘’‚‛$`%!&🌱"); got != "'"+"''‘‘’’‚‚‛‛$`%!&🌱"+"'" {
+		t.Fatal("ASCII or interpreted smart quote not literal", got)
+	}
+	e := draftCLI(t)
+	row := draftOne(t, e)
+	if row["full_inspection_shell"] != draftInspectionShell(goruntime.GOOS) {
+		t.Fatal(row)
+	}
+}
+
+func TestDraftsMissingArchiveExplanation(t *testing.T) {
+	e := newEnv(t)
+	var previous string
+	for _, digit := range []string{"a", "b"} {
+		id := "teams-draft:" + strings.Repeat(digit, 64)
+		code, out, stderr := draftRun(e, "drafts", "show", id)
+		body := errorOf(t, stderr)
+		if code == 0 || out != "" || body["code"] != "teams_draft_unknown" || !strings.Contains(stderr, "selected archive is missing") || strings.Contains(stderr, id) {
+			t.Fatal("missing selected archive context lost or leaked", code, out, stderr)
+		}
+		if previous != "" && previous != stderr {
+			t.Fatal("missing-archive error depends on requested ID")
+		}
+		previous = stderr
+	}
+	if _, err := os.Stat(e.db); !os.IsNotExist(err) {
+		t.Fatal("missing archive was acquired", err)
+	}
+}
+
+func TestDraftsPowerShellArgvHelper(t *testing.T) {
+	if os.Getenv("M365CRAWL_DRAFT_ARGV_HELPER") != "1" {
+		return
+	}
+	i := slices.Index(os.Args, "--")
+	if i < 0 {
+		t.Fatal("missing helper delimiter")
+	}
+	data, err := json.Marshal(os.Args[i+1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("DRAFT_ARGV:%s\n", data)
+}
+
+func draftPowerShellWords(t *testing.T, command string) []string {
+	t.Helper()
+	name := "pwsh"
+	if goruntime.GOOS == "windows" {
+		name = "pwsh.exe"
+	}
+	shell, err := exec.LookPath(name)
+	if err != nil {
+		if goruntime.GOOS == "windows" {
+			t.Fatal("required actual Windows PowerShell7.3+ gate is unavailable", err)
+		}
+		t.Skip("PowerShell unavailable locally; actual Windows gate remains pending")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `if ($PSVersionTable.PSVersion -lt [version]'7.3') { throw 'PowerShell7.3+ required' }
+$PSNativeCommandArgumentPassing = 'Legacy'
+function m365crawl { & $env:M365CRAWL_DRAFT_TEST_EXE '-test.run=^TestDraftsPowerShellArgvHelper$' '--' @args; if ($LASTEXITCODE -ne 0) { throw 'native argv helper failed' } }
+` + command + `
+if ($PSNativeCommandArgumentPassing -ne 'Legacy') { exit 73 }`
+	cmd := exec.Command("pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-")
+	if goruntime.GOOS == "windows" {
+		cmd = exec.Command("pwsh.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-")
+	}
+	cmd.Stdin = strings.NewReader(script + "\n")
+	cmd.Env = append(os.Environ(), "M365CRAWL_DRAFT_ARGV_HELPER=1", "M365CRAWL_DRAFT_TEST_EXE="+exe, "REVIEW_ARCHIVE=expanded-wrong-archive", "DRAFT_PATH=expanded-wrong-archive", "TERM=dumb")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("actual %s shell/native argv roundtrip on %s: %v\n%s", shell, goruntime.GOOS, err, out)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if _, data, ok := strings.Cut(line, "DRAFT_ARGV:"); ok {
+			var args []string
+			if err := json.NewDecoder(strings.NewReader(data)).Decode(&args); err != nil {
+				t.Fatal(err)
+			}
+			return append([]string{"m365crawl"}, args...)
+		}
+	}
+	t.Fatalf("actual shell did not execute native argv helper: %s", out)
+	return nil
+}
+
+func draftFollowupWords(t *testing.T, command string) []string {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		return draftPowerShellWords(t, command)
+	}
+	return contentFollowupWords(t, command)
+}
+
+func TestDraftsPowerShellArgumentRoundTrip(t *testing.T) {
+	id, revision := "teams-draft:"+strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for _, db := range []string{
+		`C:\review\%REVIEW_ARCHIVE%\cached.db`,
+		"C:\\review\\compose's $HOME ` %DRAFT_PATH% !DRAFT_PATH! ‘left’ ‚low‛ “double” & (1) 🌱.db",
+	} {
+		account := "tenant/user's $HOME ` %DRAFT_PATH% !DRAFT_PATH! ‘‚‛’ \"quoted\""
+		command := draftInspectionCommand("windows", db, account, id, revision, true)
+		got := draftPowerShellWords(t, command)
+		want := []string{"m365crawl", "--db", db, "--max-age", "0", "--max-text", "0", "--account", account, "drafts", "show", id, "--body-revision", revision, "--include-removed"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("actual %s shell/native argv changed selected context:\ngot %#v\nwant %#v", goruntime.GOOS, got, want)
+		}
+	}
+	t.Logf("actual PowerShell/native-process argv roundtrip host=%s; non-Windows result is not Windows-host acceptance", goruntime.GOOS)
+}
 
 func TestDraftsRelativeArchiveFollowup(t *testing.T) {
 	e := draftCLI(t)
@@ -40,7 +173,7 @@ func TestDraftsRelativeArchiveFollowup(t *testing.T) {
 	if len(rows) != 1 || calls != 1 {
 		t.Fatal("archive resolved more than once", calls, rows)
 	}
-	words := contentFollowupWords(t, rows[0]["full_inspection"].(string))
+	words := draftFollowupWords(t, rows[0]["full_inspection"].(string))
 	found := false
 	for i, word := range words {
 		if word == "--db" && i+1 < len(words) {
@@ -104,10 +237,7 @@ func TestDraftsErrorAndOutputBranches(t *testing.T) {
 func draftCLI(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
-	name := "compose's $HOME & (1).db"
-	if goruntime.GOOS == "windows" {
-		name = "compose & (1).db"
-	}
+	name := "compose's $HOME ` %DRAFT_PATH% !DRAFT_PATH! ‘left’ ‚low‛ “double” & (1) 🌱.db"
 	e.db = filepath.Join(filepath.Dir(e.db), name)
 	s, err := store.Open(context.Background(), e.db)
 	if err != nil {
@@ -267,7 +397,7 @@ func TestDraftsGuardedFollowupReplay(t *testing.T) {
 	e := draftCLI(t)
 	b := draftOne(t, e)
 	cmd := b["full_inspection"].(string)
-	words := contentFollowupWords(t, cmd)
+	words := draftFollowupWords(t, cmd)
 	if !strings.Contains(cmd, "--max-age 0") || !strings.Contains(cmd, "--max-text 0") || !strings.Contains(cmd, "--body-revision") {
 		t.Fatal(cmd)
 	}
