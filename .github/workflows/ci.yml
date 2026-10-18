@@ -238,7 +238,7 @@ jobs:
           $profile = Join-Path $env:GITHUB_WORKSPACE 'owner-windows.out'
           $rows = @(Get-Content -LiteralPath $profile)
           if ($rows.Count -lt 2 -or $rows[0] -cnotmatch '^mode: (set|count|atomic)$') { throw 'Missing or invalid profile' }
-          $expected = @(
+          $expected = [string[]]@(
             'github.com/ourostack/m365crawl/internal/snapshotowner/owner.go',
             'github.com/ourostack/m365crawl/internal/snapshotowner/process_windows.go'
           )
@@ -277,7 +277,7 @@ jobs:
           $package = ($packageJSON -join "`n") | ConvertFrom-Json
           $nativeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
           foreach ($name in $package.GoFiles) { [void]$nativeFiles.Add($name) }
-          if (-not $nativeFiles.SetEquals(@('owner.go', 'process_windows.go'))) { throw 'Unexpected native source selection' }
+          if (-not $nativeFiles.SetEquals([string[]]@('owner.go', 'process_windows.go'))) { throw 'Unexpected native source selection' }
           $sdkProof = [ordered]@{
             GOVERSION = $sdk.GOVERSION
             GOOS = $sdk.GOOS
