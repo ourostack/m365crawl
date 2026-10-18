@@ -152,8 +152,14 @@ jobs:
         id: native-tests
         shell: pwsh
         run: |
-          go test -count=1 -timeout 15m -parallel 1 -coverprofile=owner-windows.out ./internal/snapshotowner
+          go test -count=1 -timeout 15m -parallel 1 '-coverprofile=owner-windows.out' ./internal/snapshotowner
           if ($LASTEXITCODE -ne 0) { throw 'Native owner tests failed' }
+      - name: Execute exact native Windows recovery regressions
+        id: native-cli-tests
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 5m -parallel 1 -v ./internal/cli '-run=^(TestRecoveryWindowsPrefixGlobalsRefuseExpansion|TestRecoveryWindowsLiteralLinkPolicy)$'
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows recovery regressions failed' }
       - name: Emit native SDK profile observations for mandatory independent validation
         if: always()
         shell: pwsh
