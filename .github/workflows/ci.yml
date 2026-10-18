@@ -14,6 +14,7 @@ on:
         options:
           - make-check
           - assemble
+          - windows-owner-coverage
       version:
         description: Assembly version, unused for make-check
         required: false
@@ -114,3 +115,134 @@ jobs:
               "patch_base64": base64.b64encode(patch).decode()
           }, separators=(",", ":")))
           PY
+
+  windows-owner-coverage:
+    if: inputs.operation == 'windows-owner-coverage'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate exact source identity
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if ($env:SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid source SHA' }
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert checkout and reserve owned temporary root
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:SOURCE_SHA) { throw 'Source identity mismatch' }
+          Write-Output "verified-source=$head"
+          $scratch = Join-Path $env:RUNNER_TEMP ("m365crawl-owner-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")
+          New-Item -ItemType Directory -Path $scratch -ErrorAction Stop | Out-Null
+          foreach ($key in @('TMP', 'TEMP', 'GOTMPDIR')) { "$key=$scratch" >> $env:GITHUB_ENV }
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Execute native owner tests with coverage
+        id: native-tests
+        shell: pwsh
+        run: |
+          go test -count=1 -timeout 15m -parallel 1 -coverprofile=owner-windows.out ./internal/snapshotowner
+          if ($LASTEXITCODE -ne 0) { throw 'Native owner tests failed' }
+      - name: Emit native SDK profile observations for mandatory independent validation
+        if: always()
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TEST_OUTCOME: ${{ steps.native-tests.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profile = Join-Path $env:GITHUB_WORKSPACE 'owner-windows.out'
+          $rows = @(Get-Content -LiteralPath $profile)
+          if ($rows.Count -lt 2 -or $rows[0] -cnotmatch '^mode: (set|count|atomic)$') { throw 'Missing or invalid profile' }
+          $expected = @(
+            'github.com/ourostack/m365crawl/internal/snapshotowner/owner.go',
+            'github.com/ourostack/m365crawl/internal/snapshotowner/process_windows.go'
+          )
+          $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $blocks = 0
+          $statements = 0L
+          $zero = @()
+          foreach ($line in $rows[1..($rows.Count - 1)]) {
+            $m = [regex]::Match($line, '^(?<file>[^:]+):(?<start>[0-9]+\.[0-9]+),(?<end>[0-9]+\.[0-9]+) (?<statements>[0-9]+) (?<hits>[0-9]+)$')
+            if (-not $m.Success) { throw 'Malformed coverage block' }
+            $file = $m.Groups['file'].Value
+            if ($expected -cnotcontains $file) { throw 'Unexpected coverage source' }
+            [void]$seen.Add($file)
+            $n = [long]$m.Groups['statements'].Value
+            $hits = [long]$m.Groups['hits'].Value
+            $blocks++
+            $statements += $n
+            if ($n -gt 0 -and $hits -eq 0) { $zero += $line }
+          }
+          if (-not $seen.SetEquals($expected) -or $statements -le 0) { throw 'Incomplete coverage source set' }
+          $summary = @(& go tool cover "-func=$profile" 2>&1 | ForEach-Object { "$_" })
+          if ($LASTEXITCODE -ne 0 -or $summary.Count -eq 0) { throw 'Function summary failed' }
+          $badFunctions = @($summary | Where-Object { $_.Trim() -ne '' -and $_ -cnotmatch '\s100\.0%$' })
+          $sourceHashes = [ordered]@{}
+          foreach ($name in @('owner.go', 'process_windows.go')) {
+            $sourceHashes[$name] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'internal/snapshotowner' $name)).Hash.ToLowerInvariant()
+          }
+          $sdkJSON = @(& go env -json GOVERSION GOOS GOARCH GOHOSTOS GOHOSTARCH GOROOT GOTOOLDIR)
+          if ($LASTEXITCODE -ne 0) { throw 'SDK identity query failed' }
+          $sdk = ($sdkJSON -join "`n") | ConvertFrom-Json
+          if ($sdk.GOVERSION -cne 'go1.27.2' -or $sdk.GOOS -cne 'windows' -or $sdk.GOHOSTOS -cne 'windows' -or $sdk.GOARCH -cne $sdk.GOHOSTARCH) {
+            throw 'Expected native Windows Go 1.27.2'
+          }
+          $packageJSON = @(& go list -json ./internal/snapshotowner)
+          if ($LASTEXITCODE -ne 0) { throw 'Native build selection query failed' }
+          $package = ($packageJSON -join "`n") | ConvertFrom-Json
+          $nativeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          foreach ($name in $package.GoFiles) { [void]$nativeFiles.Add($name) }
+          if (-not $nativeFiles.SetEquals(@('owner.go', 'process_windows.go'))) { throw 'Unexpected native source selection' }
+          $sdkProof = [ordered]@{
+            GOVERSION = $sdk.GOVERSION
+            GOOS = $sdk.GOOS
+            GOARCH = $sdk.GOARCH
+            GOHOSTOS = $sdk.GOHOSTOS
+            GOHOSTARCH = $sdk.GOHOSTARCH
+            go_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sdk.GOROOT 'bin/go.exe')).Hash.ToLowerInvariant()
+            cover_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sdk.GOTOOLDIR 'cover.exe')).Hash.ToLowerInvariant()
+          }
+          $sdkInventory = [ordered]@{}
+          foreach ($name in @('owner.go', 'process_windows.go')) {
+            $instrumented = Join-Path $env:GOTMPDIR ("sdk-instrumented-$name")
+            go tool cover -mode=count -var=CoverageProof "-o=$instrumented" (Join-Path 'internal/snapshotowner' $name)
+            if ($LASTEXITCODE -ne 0) { throw 'Native SDK instrumentation failed' }
+            $sdkInventory[$name] = [ordered]@{
+              sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $instrumented).Hash.ToLowerInvariant()
+              base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($instrumented))
+            }
+          }
+          $proof = [ordered]@{
+            source = $env:SOURCE_SHA
+            test_outcome = $env:TEST_OUTCOME
+            source_sha256 = $sourceHashes
+            profile_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $profile).Hash.ToLowerInvariant()
+            profile_base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($profile))
+            source_files = @($seen | Sort-Object)
+            blocks = $blocks
+            statements = $statements
+            zero_hit_blocks = @($zero)
+            function_summary = $summary
+            incomplete_function_lines = $badFunctions
+            required_independent_consumer = 'native-owner-sdk-manifest-v1'
+            sdk = $sdkProof
+            sdk_inventory = $sdkInventory
+            native_go_files = @($nativeFiles | Sort-Object)
+          }
+          Write-Output ('OWNER_COVERAGE_OBSERVATION=' + ($proof | ConvertTo-Json -Compress -Depth 6))
+          $summary | ForEach-Object { Write-Output $_ }
+          if ($env:TEST_OUTCOME -cne 'success' -or $zero.Count -ne 0 -or $badFunctions.Count -ne 0) {
+            throw 'Native owner tests and observed statement/function checks must pass; independent SDK completeness validation is also mandatory'
+          }
