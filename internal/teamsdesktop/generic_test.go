@@ -666,11 +666,12 @@ func TestGenericTruncatedObservationWithholdsAbsence(t *testing.T) {
 				t.Fatalf("wrong census authority/loss: result=%+v err=%v", res, err)
 			}
 			wantCalls, wantCloses, wantRows := 1, 1, 1
-			if tc.empty {
+			switch {
+			case tc.empty:
 				wantCalls, wantCloses, wantRows = 0, 0, 0
-			} else if tc.openErr != nil {
+			case tc.openErr != nil:
 				wantCloses, wantRows = 0, 0
-			} else if tc.recordErr != nil || tc.badKey {
+			case tc.recordErr != nil || tc.badKey:
 				wantRows = 0
 			}
 			if calls != wantCalls || f.closes != wantCloses || rows != wantRows {

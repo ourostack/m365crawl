@@ -260,8 +260,9 @@ func (c *loopSyncCmd) Run(rt *runtime) error {
 		InvalidRecords: report.InvalidRecords, DiscoveryRemaining: report.DiscoveryRemaining,
 		DiscoveryRemainingRecords: report.DiscoveryRemainingRecords, LoopCoverage: rt.loopCoverageOf(report.Sources, report.Diagnostics)}
 	if report.DiscoveryRemaining {
-		result.Notice = fmt.Sprintf("this run registered %d new Loop sources, the most one run takes; %s still unregistered: run m365crawl loop sync again",
-			store.LoopDiscoveryBatch, plural(report.DiscoveryRemainingRecords, "archived record is", "archived records are"))
+		result.Notice = fmt.Sprintf("this run registered %d new Loop sources, the most one run takes; %s still unregistered: run %s again",
+			store.LoopDiscoveryBatch, plural(report.DiscoveryRemainingRecords, "archived record is", "archived records are"),
+			rt.recoveryCommand(false, "", "loop", "sync"))
 	}
 	if err != nil {
 		// A run that failed after writing still reports what it committed, then fails.

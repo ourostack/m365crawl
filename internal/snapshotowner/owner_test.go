@@ -34,7 +34,7 @@ func TestSnapshotOwnerConservativeLiveness(t *testing.T) {
 			t.Fatal(err)
 		}
 		path := filepath.Join(dir, ".m365crawl-owner.json")
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // G304: exact marker in this test's newly allocated private t.TempDir
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestSnapshotOwnerConservativeLiveness(t *testing.T) {
 		if err := Register(dir); err == nil {
 			t.Error("registration overwrote an existing owner marker")
 		}
-		after, err := os.ReadFile(path)
+		after, err := os.ReadFile(path) //nolint:gosec // G304: same owned marker, checking exclusive registration preserved its bytes
 		if err != nil || string(after) != string(b) {
 			t.Errorf("failed exclusive registration changed ownership evidence: %v", err)
 		}

@@ -26,7 +26,7 @@ func observationUTF16(s string, length bool) []byte {
 		b = binary.AppendUvarint(b, uint64(len(units)))
 	}
 	for _, u := range units {
-		b = append(b, byte(u>>8), byte(u))
+		b = binary.BigEndian.AppendUint16(b, u)
 	}
 	return b
 }
@@ -282,7 +282,7 @@ func TestSyncIncompleteObservationReplaysReadableCalendarChange(t *testing.T) {
 				}
 				if len(b) > 7 {
 					logs[path] = b
-					if err := os.WriteFile(path, b[:7], 0o600); err != nil {
+					if err := os.WriteFile(path, b[:7], 0o600); err != nil { //nolint:gosec // G703: Glob result only from this test's newly created private LevelDB directory
 						t.Fatal(err)
 					}
 				}

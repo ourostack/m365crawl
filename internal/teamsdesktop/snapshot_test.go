@@ -157,9 +157,10 @@ func TestSnapshotOwnershipSweepGuards(t *testing.T) {
 				return os.RemoveAll(p)
 			}
 			wantCount, wantCalls := 0, 0
-			if name == "positive-qualified" {
+			switch name {
+			case "positive-qualified":
 				wantCount, wantCalls = 1, 1
-			} else if name == "remove-error" {
+			case "remove-error":
 				wantCalls = 1
 			}
 			if got := SweepStaleSnapshots(tmp, time.Hour); got != wantCount || removes != wantCalls {

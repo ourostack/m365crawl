@@ -385,11 +385,15 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 		return SourceReport{}, false, err
 	}
 	if r.o.Account == nil {
+		pending, err := r.st.CalendarReplayPending(ctx, src.Key())
+		if err != nil {
+			return SourceReport{}, false, errs.DBError(err)
+		}
 		last, err := r.st.LastFingerprint(ctx, src.Key())
 		if err != nil {
 			return SourceReport{}, false, errs.DBError(err)
 		}
-		if last == fp && !r.o.FullRead { // a forced full read reads a source whose fingerprint has not changed too
+		if last == fp && !r.o.FullRead && !pending { // pending positives cannot be skipped by an unchanged source
 			// Nothing was read, but what the calendar could not use before it still cannot: a sync
 			// that reports nothing missing while data is missing is wrong.
 			losses, err := r.st.CalendarLosses(ctx, src.Key(), nil)
@@ -492,7 +496,8 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if w.memo.err != nil {
 		return nil, nil, 0, errs.DBError(w.memo.err)
 	}
-	cal, err := sess.DeriveCalendar(ctx, source, begun, calendarZone(), w.present)
+	cal, err := sess.DeriveCalendarObservation(ctx, source, begun, calendarZone(), w.present,
+		w.censusComplete && lost(generic) == 0, r.o.Account != nil)
 	if err != nil {
 		return nil, nil, 0, asCoded(err)
 	}
@@ -518,6 +523,9 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 		status = StatusOmissions
 		fp = ""
 	}
+	if cal.ReplayPending {
+		fp = ""
+	}
 	if len(omissions) == 0 {
 		omissions = nil
 	}
@@ -537,18 +545,19 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 // result does not depend on record order and a repeated sync changes nothing. Account rows are
 // applied before the first record of that account.
 type writer struct {
-	ctx      context.Context
-	sess     *store.Session
-	seenAcct map[[2]string]bool
-	convs    []teamsdesktop.Conversation
-	msgs     []teamsdesktop.Message
-	acts     []teamsdesktop.Activity
-	recs     []teamsdesktop.GenericRecord
-	recBytes int
-	people   map[[2]string]teamsdesktop.Person
-	present  []string // the databases the generic read found: the accounts whose cache was read
-	counts   runCounts
-	changes  []Change // held until the source commits
+	ctx            context.Context
+	sess           *store.Session
+	seenAcct       map[[2]string]bool
+	convs          []teamsdesktop.Conversation
+	msgs           []teamsdesktop.Message
+	acts           []teamsdesktop.Activity
+	recs           []teamsdesktop.GenericRecord
+	recBytes       int
+	people         map[[2]string]teamsdesktop.Person
+	present        []string // the databases the generic read found: the accounts whose cache was read
+	censusComplete bool
+	counts         runCounts
+	changes        []Change // held until the source commits
 	// transcripts is what deriving the transcript parts of this source's accounts counted.
 	transcripts map[string]store.TranscriptCounts
 
@@ -709,6 +718,7 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 	if err := w.flushRecords(source, at); err != nil {
 		return nil, 0, err
 	}
+	w.censusComplete = res.CensusComplete
 	if res.CensusComplete {
 		w.present = res.Present
 		if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {

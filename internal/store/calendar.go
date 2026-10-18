@@ -70,6 +70,7 @@ func (c *CalendarCounts) Add(b CalendarCounts) {
 
 // CalendarResult is a derivation's counts and the omissions it counted by code.
 type CalendarResult struct {
+	ReplayPending bool
 	OutlookReadID int64
 	Counts        CalendarCounts
 	Omissions     map[string]int
@@ -94,11 +95,12 @@ var (
 
 // calendarMode says which rows a derivation maps and how it writes them.
 type calendarMode struct {
-	source  string // only this records source; empty means every source
-	since   string // only rows updated at or after this time (store text); empty means every row
-	replace bool   // blank the derived rows first, so nothing of an older copy survives
-	zone    *time.Location
-	at      time.Time
+	replayAll bool   // a pending full-source replay may not silently skip retained groups
+	source    string // only this records source; empty means every source
+	since     string // only rows updated at or after this time (store text); empty means every row
+	replace   bool   // blank the derived rows first, so nothing of an older copy survives
+	zone      *time.Location
+	at        time.Time
 	// read is the accounts whose Teams cache this derivation read, as {tenant, user}. Only they get
 	// a fresh window and fresh covered days; nil means every account (a rebuild from the records
 	// reads no cache, and stamps nothing it did not see).
@@ -555,6 +557,9 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 			continue // an account with no calendar database and nothing to apply gets no row
 		}
 		if m.read != nil && !m.read[[2]string{g.acct.TenantID, g.acct.UserID}] {
+			if m.replayAll {
+				return res, errors.New("calendar replay account was not qualified by the current observation")
+			}
 			continue // its cache was not read: nothing here says it is fresher than it was
 		}
 		counts, refused, err := g.apply(ctx, tx, m)

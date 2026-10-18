@@ -679,7 +679,7 @@ func TestRecoveryLoopBatchContinuationReplaysSelectedArchive(t *testing.T) {
 }
 
 func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
-	for _, state := range []string{"missing", "never-successful"} {
+	for _, state := range []string{"missing", "never-successful", "missing-account"} {
 		for _, tc := range []struct {
 			name, format string
 			flags        []string
@@ -716,6 +716,9 @@ func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
 					if o.DBPath != a.db || o.Root != a.root || o.OutlookEnabled || o.OutlookRoot != "" {
 						t.Errorf("actual_remedy_lost_acquisition_context: %+v", o)
 					}
+					if state == "missing-account" && (o.Account == nil || o.Account.TenantID+"/"+o.Account.UserID != trAccount) {
+						t.Errorf("actual remedy broadened explicit account: %+v", o.Account)
+					}
 					st, err := store.Open(ctx, o.DBPath)
 					if err != nil {
 						return syncer.Report{}, nil, err
@@ -726,6 +729,9 @@ func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
 					return syncer.Report{Status: syncer.StatusOK}, nil, nil
 				}
 				args := append([]string{"--max-age", "0", "--outlook-root", "none"}, tc.flags...)
+				if state == "missing-account" {
+					args = append(args, "--account", trAccount)
+				}
 				args = append(args, "people")
 				code, out, stderr := a.run(args...)
 				if code != 0 || calls != 0 {
@@ -743,7 +749,7 @@ func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
 					hint, _ = doc["hint"].(string)
 					note, _ = doc["note"].(string)
 				}
-				if state == "missing" {
+				if state != "never-successful" {
 					if _, err := os.Stat(a.db); !errors.Is(err, os.ErrNotExist) {
 						t.Fatalf("initial missing-archive read created A: %v", err)
 					}
@@ -758,6 +764,9 @@ func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
 						t.Fatalf("actual in-band remedy replay failed: %d %s", code, stderr)
 					}
 					recoveryContext(t, words, a.db, tc.format)
+					if state == "missing-account" && recoveryValue(words, "--account") != trAccount {
+						t.Errorf("actual hint/note lost explicit account: %q", words)
+					}
 					if tc.format != "text" {
 						recoveryDocument(t, replayed, tc.format, "sync")
 					}

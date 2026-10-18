@@ -52,7 +52,7 @@ func (rt *runtime) noteEmpty(st *store.Store, res result) error {
 func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	q := rt.query
 	if st == nil {
-		return "no archive yet: run m365crawl sync", nil
+		return "no archive yet: run " + rt.recoverySyncCommand(), nil
 	}
 	if note, err := rt.teamsAccountNote(st); note != "" || err != nil {
 		return note, err
@@ -66,7 +66,7 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 	case newest.IsZero() && !teamsReadHere():
 		return "Teams is read on macOS and Windows only, so this archive holds no Teams data on this operating system", nil
 	case newest.IsZero():
-		return "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty", nil
+		return "the archive holds no Teams messages yet: run " + rt.recoverySyncCommand() + ", and m365crawl doctor if it stays empty", nil
 	}
 	if rt.link != nil {
 		held, err := hasConversationOf(st, rt.ctx, rt.account, rt.link.conversation)

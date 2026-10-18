@@ -30,9 +30,10 @@ func TestSnapshotOwnerRegistrationRefusesUnqualifiedRoots(t *testing.T) {
 				return false, nil
 			}
 			dir, other := t.TempDir(), t.TempDir()
-			if name == "relative" {
+			switch name {
+			case "relative":
 				dir = "relative-owner-root"
-			} else if name == "root-open-error" {
+			case "root-open-error":
 				dir = filepath.Join(dir, "absent")
 			}
 			path := filepath.Join(dir, markerName)
@@ -102,7 +103,7 @@ func TestSnapshotOwnerRegistrationRefusesUnqualifiedRoots(t *testing.T) {
 				if !errors.Is(err, want) || markerFile == nil {
 					t.Fatalf("registration lost real descriptor failure: %v", err)
 				}
-				if _, err := markerFile.Stat(); !errors.Is(err, os.ErrClosed) {
+				if _, err := markerFile.Stat(); err == nil || markerFile.Fd() != ^uintptr(0) {
 					t.Fatalf("registration leaked its marker descriptor: %v", err)
 				}
 				if name == "encode-error" && Reclaimable(dir) {

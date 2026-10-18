@@ -638,8 +638,8 @@ func TestSweepsStaleSnapshots(t *testing.T) {
 	old := time.Now().Add(-48 * time.Hour)
 	_ = os.Chtimes(stale, old, old)
 	run(t, Options{Root: fixtureRoot, DBPath: newDB(t)})
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("stale snapshot kept: %v", err)
+	if info, err := os.Stat(stale); err != nil || !info.IsDir() {
+		t.Fatalf("an aged legacy root has no positive dead-owner evidence and must remain: %v", err)
 	}
 }
 

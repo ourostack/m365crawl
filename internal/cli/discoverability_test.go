@@ -485,9 +485,7 @@ func TestLoopRetryOnlyWhereItHelps(t *testing.T) {
 		t.Fatalf("retry_needed: %v", needed)
 	}
 	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "sources")
-	if strings.Count(text, "m365crawl loop sync --source-id") != 1+2 { // one table cell and two fix lines
-		t.Fatalf("text shows a retry on a healthy source:\n%s", text)
-	}
+	assertCurrentLoopRetryTable(t, text)
 	for _, cmd := range [][]string{{"loop"}, {"loop", "sync"}} {
 		help := strings.Join(strings.Fields(helpOf(t, cmd...)), " ")
 		for _, want := range []string{"retry_needed", "cannot recover", "missing_blobs"} {
