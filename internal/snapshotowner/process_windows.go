@@ -17,7 +17,23 @@ var (
 	ownerOpenProcess = windows.OpenProcess
 	ownerExitCode    = windows.GetExitCodeProcess
 	ownerCloseHandle = windows.CloseHandle
+	ownerSetSecurity = windows.SetNamedSecurityInfo
+	ownerTokenUser   = func() (*windows.Tokenuser, error) {
+		return windows.GetCurrentProcessToken().GetTokenUser()
+	}
 )
+
+// Called only for the marker just created exclusively within the verified root.
+func platformOwnMarker(f *os.File) error {
+	user, err := ownerTokenUser()
+	if err != nil {
+		return err
+	}
+	err = ownerSetSecurity(f.Name(), windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION, user.User.Sid, nil, nil, nil)
+	runtime.KeepAlive(user)
+	return err
+}
 
 func platformProcessDead(pid int) (bool, error) {
 	if pid <= 0 || pid > maxOwnerPID {

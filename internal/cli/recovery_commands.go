@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/openclaw/crawlkit/output"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -43,6 +44,15 @@ func (rt *runtime) recoveryCommand(acquire bool, account string, args ...string)
 		}
 	}
 	return recoveryPlatformCommand(db, flags, args)
+}
+
+func (rt *runtime) transcriptFetchRecoveryCommand(account, eventID string) string {
+	if rt.account != nil {
+		account = rt.account.TenantID + "/" + rt.account.UserID
+	} else if strings.HasPrefix(account, outlookAccountPrefix) {
+		account = ""
+	}
+	return rt.recoveryCommand(false, account, "transcripts", "fetch", eventID)
 }
 
 func (rt *runtime) recoverySyncCommand(st *store.Store) string {

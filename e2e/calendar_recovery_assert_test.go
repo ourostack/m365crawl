@@ -3,9 +3,24 @@
 package e2e
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
+
+func assertScopedSyncHint(t *testing.T, e *env, hint any) {
+	t.Helper()
+	text, ok := hint.(string)
+	if !ok || !strings.HasPrefix(text, "run ") {
+		t.Fatalf("missing executable sync hint: %v", hint)
+	}
+	got := calendarRecoveryWords(t, strings.TrimPrefix(text, "run "))
+	want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", "json",
+		"--teams-root", e.root, "--outlook-root", "none", "sync"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("sync hint changed literal archive/root/format/operation context:\ngot  %q\nwant %q", got, want)
+	}
+}
 
 func assertCalendarLinkFixes(t *testing.T, fixes []any, archive, teams, outlook string) {
 	t.Helper()

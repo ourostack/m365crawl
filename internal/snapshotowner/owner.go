@@ -30,6 +30,7 @@ var (
 	ownerReadFile     = readMarker
 	ownerProtected    = platformProtected
 	ownerOpenMarker   = platformOpenMarker
+	ownerOwnMarker    = platformOwnMarker
 	ownerEncodeMarker = func(f *os.File, m marker) error {
 		return json.NewEncoder(f).Encode(m)
 	}
@@ -67,7 +68,10 @@ func Register(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("create snapshot owner marker: %w", err)
 	}
-	writeErr := ownerEncodeMarker(f, marker{Version: 1, PID: pid})
+	writeErr := ownerOwnMarker(f)
+	if writeErr == nil {
+		writeErr = ownerEncodeMarker(f, marker{Version: 1, PID: pid})
+	}
 	if err := errors.Join(writeErr, f.Close()); err != nil {
 		return fmt.Errorf("write snapshot owner marker: %w", err)
 	}

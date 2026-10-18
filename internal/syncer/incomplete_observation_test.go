@@ -172,7 +172,7 @@ func observationSource(t *testing.T, journalDatabase bool) (string, string, stri
 	}
 	saved := map[string][]byte{}
 	for _, path := range logs {
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // G304: generated journal selected by a local glob in this test's private copied source
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +279,7 @@ func TestSyncIncompleteObservationReplaysReadableCalendarChange(t *testing.T) {
 			}
 			logs := map[string][]byte{}
 			for _, path := range paths {
-				b, err := os.ReadFile(path)
+				b, err := os.ReadFile(path) //nolint:gosec // G304: generated journal selected by a local glob in this test's private copied source
 				if err != nil {
 					t.Fatal(err)
 				}

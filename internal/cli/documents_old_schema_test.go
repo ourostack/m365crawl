@@ -59,7 +59,7 @@ delete from schema_migrations where version=11`)
 		t.Fatal("old optional archive-only read acquired a source")
 	}
 	e.exec(`insert into schema_migrations(version) values(999)`)
-	newerBefore, err := os.ReadFile(e.db)
+	newerBefore, err := os.ReadFile(e.db) //nolint:gosec // G304: closed synthetic archive created under newEnv's private temp root
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ delete from schema_migrations where version=11`)
 			t.Fatalf("future archive became successful empty output: %s", stderr)
 		}
 	}
-	newerAfter, err := os.ReadFile(e.db)
+	newerAfter, err := os.ReadFile(e.db) //nolint:gosec // G304: same owned synthetic archive, proving future-schema refusal is readonly
 	if err != nil || !bytes.Equal(newerBefore, newerAfter) || acquisitions != 0 {
 		t.Fatal("future archive refusal acquired, repaired or wrote the closed archive")
 	}

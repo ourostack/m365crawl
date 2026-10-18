@@ -28,7 +28,7 @@ func TestSnapshotOwnershipMarkerLifetime(t *testing.T) {
 	check := func(dir string) {
 		t.Helper()
 		path := filepath.Join(dir, ".m365crawl-owner.json")
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // G304: fixed marker in this test's exclusively owned snapshot root
 		if err != nil {
 			t.Errorf("snapshot lacks registered ownership before source copy: %v", err)
 			return

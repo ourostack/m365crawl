@@ -720,9 +720,10 @@ func TestE2EWhoami(t *testing.T) {
 		t.Fatalf("JSON mode keeps stderr empty (the hint is in the result): %q", res.stderr)
 	}
 	who := mustJSON(t, res.stdout)
-	if who["needs_sync"] != true || who["hint"] != "run m365crawl sync" {
+	if who["needs_sync"] != true {
 		t.Fatalf("whoami before a sync lacks the in-band hint: %v", who)
 	}
+	assertScopedSyncHint(t, e, who["hint"])
 	if accts, _ := who["accounts"].([]any); len(accts) != 0 {
 		t.Fatalf("accounts before a sync = %v", who["accounts"])
 	}
@@ -797,9 +798,10 @@ func TestE2EMaxAge(t *testing.T) {
 		res := e.cmd("messages", "--max-age", "0")
 		mustExit(t, res, 0)
 		whole := mustJSON(t, res.stdout)
-		if whole["needs_sync"] != true || whole["hint"] != "run m365crawl sync" || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) {
+		if whole["needs_sync"] != true || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) {
 			t.Fatalf("never synced with --max-age 0 = %v", whole)
 		}
+		assertScopedSyncHint(t, e, whole["hint"])
 		if _, err := os.Stat(e.db); err == nil {
 			t.Fatal("--max-age 0 must not create the archive")
 		}
@@ -1390,9 +1392,10 @@ func TestE2EArchiveFromAnOlderVersion(t *testing.T) {
 				}
 				migrated := archiveCount(t, e.db, `select count(*) from pragma_table_info('sync_runs') where name='accounts_json'`) == 1
 				if mode == "max-age-0" {
-					if migrated || whole["needs_sync"] != true || whole["hint"] != "run m365crawl sync" {
+					if migrated || whole["needs_sync"] != true || whole["archive_age_seconds"] != nil {
 						t.Fatalf("--max-age 0 must not sync and must say needs_sync: migrated %v, %s", migrated, res.stdout)
 					}
+					assertScopedSyncHint(t, e, whole["hint"])
 					return
 				}
 				if !migrated || whole["needs_sync"] != nil || whole["archive_age_seconds"] == nil {

@@ -40,7 +40,7 @@ func recoveryArchives(t *testing.T) (a, b *env) {
 	if goruntime.GOOS == "windows" {
 		name = "selected archive evidence.db"
 	}
-	a.db = filepath.Join(t.TempDir(), name)
+	a.db = filepath.Join(t.TempDir(), "selected", name)
 	defaultDB, err := defaultArchivePath()
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func recoveryDocument(t *testing.T, out, format, label string) map[string]any {
 
 func recoveryUnchanged(t *testing.T, path string, before []byte) {
 	t.Helper()
-	after, err := os.ReadFile(path)
+	after, err := os.ReadFile(path) //nolint:gosec // G304: callers pass their own explicitly created synthetic archive or evidence file
 	if err != nil || !bytes.Equal(before, after) {
 		t.Errorf("follow-up changed unrelated default archive %s: %v", path, err)
 	}
@@ -135,7 +135,7 @@ func recoveryUnchanged(t *testing.T, path string, before []byte) {
 
 func recoveryBytes(t *testing.T, path string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: callers pass their own explicitly created synthetic archive or evidence file
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestRecoveryCommandPolicyBoundaries(t *testing.T) {
 		t.Errorf("shell-expanding locator was not withheld: %q", got)
 	}
 	locator := "owned archive's cache $(not-a-command).db"
-	words = attendeeCommandWords(t, "m365crawl --file "+fileRetryArgument("darwin", locator))
+	words = attendeeCommandWordsFor(t, "m365crawl --file "+fileRetryArgument("darwin", locator), "darwin")
 	if !slices.Equal(words, []string{"m365crawl", "--file", locator}) {
 		t.Errorf("POSIX literal argument changed: %q", words)
 	}

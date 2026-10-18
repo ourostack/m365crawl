@@ -23,7 +23,7 @@ func TestSnapshotOwnershipMarkerLifetime(t *testing.T) {
 	check := func(dir string) {
 		t.Helper()
 		path := filepath.Join(dir, ".m365crawl-owner.json")
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // G304: fixed marker in this test's exclusively owned snapshot root
 		if err != nil {
 			t.Errorf("snapshot lacks registered ownership before source copy: %v", err)
 			return
@@ -167,7 +167,7 @@ func TestSnapshotOwnershipSweepGuards(t *testing.T) {
 				t.Fatalf("guard %s: removed=%d calls=%d, want %d/%d", name, got, removes, wantCount, wantCalls)
 			}
 			if name != "positive-qualified" {
-				if b, err := os.ReadFile(payload); err != nil || string(b) != "retained" {
+				if b, err := os.ReadFile(payload); err != nil || string(b) != "retained" { //nolint:gosec // G304: payload created in this test's private temp root
 					t.Fatalf("guard %s lost owned payload: %q %v", name, b, err)
 				}
 			} else if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {

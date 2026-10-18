@@ -10,12 +10,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var snapshotSetSecurity = windows.SetNamedSecurityInfo
+
 func makeSnapshotRoot() (string, error) {
 	dir, err := os.MkdirTemp("", snapshotPrefix)
 	if err != nil {
 		return "", err
 	}
-	if err := securePath(dir, true); err != nil {
+	if err := securePath(dir, true, true); err != nil {
 		_ = os.RemoveAll(dir)
 		return "", err
 	}
@@ -26,7 +28,7 @@ func makeSnapshotDir(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil { //nolint:gosec // Windows ACLs enforce the privacy guarantee here
 		return err
 	}
-	return securePath(path, true)
+	return securePath(path, true, false)
 }
 
 func openSnapshotFile(path string) (*os.File, error) {
@@ -34,23 +36,30 @@ func openSnapshotFile(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := securePath(path, false); err != nil {
+	if err := securePath(path, false, true); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return f, nil
 }
 
-func securePath(path string, isDir bool) error {
+func securePath(path string, isDir, created bool) error {
 	acl, err := privateACL(isDir)
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(
+	information := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION)
+	var owner *windows.SID
+	if created {
+		// privateACL has already initialized and checked these cached SIDs.
+		owner = privateSIDState.user
+		information |= windows.OWNER_SECURITY_INFORMATION
+	}
+	return snapshotSetSecurity(
 		path,
 		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
+		information,
+		owner,
 		nil,
 		acl,
 		nil,

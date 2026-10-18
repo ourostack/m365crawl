@@ -358,7 +358,7 @@ func TestSyncOmissions(t *testing.T) {
 		t.Fatalf("fixture blob roots: %v", blobDir)
 	}
 	path := filepath.Join(blobDir[0], rel)
-	original, err := os.ReadFile(path)
+	original, err := os.ReadFile(path) //nolint:gosec // G304: exact blob in fixtureCopy's private synthetic source tree
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestSyncOmissions(t *testing.T) {
 	if err := os.Rename(withheld, path); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := os.ReadFile(path)
+	restored, err := os.ReadFile(path) //nolint:gosec // G304: same owned blob, proving restoration preserved every byte
 	if err != nil || !bytes.Equal(original, restored) {
 		t.Fatalf("restoration did not retain the exact synthetic blob bytes: %v", err)
 	}

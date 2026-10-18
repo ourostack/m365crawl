@@ -11,6 +11,8 @@ import (
 
 var ownerKill = syscall.Kill
 
+func platformOwnMarker(_ *os.File) error { return nil }
+
 func platformProcessDead(pid int) (bool, error) {
 	if pid <= 0 || pid > maxOwnerPID {
 		return false, fs.ErrInvalid

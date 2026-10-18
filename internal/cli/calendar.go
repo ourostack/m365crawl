@@ -787,14 +787,8 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
 		}
 		if unfetched > 0 {
-			account := ev.AccountID
-			if rt.account != nil {
-				account = rt.account.TenantID + "/" + rt.account.UserID
-			} else if strings.HasPrefix(account, outlookAccountPrefix) {
-				account = ""
-			}
 			res.(*eventResult).addNotice(fmt.Sprintf("%d of %d transcript parts are not fetched; run %s", unfetched, fetchable,
-				rt.recoveryCommand(false, account, "transcripts", "fetch", ev.EventID)))
+				rt.transcriptFetchRecoveryCommand(ev.AccountID, ev.EventID)))
 		}
 		rt.noteOutlookOff(st, res, slices.Contains(ev.Sources, string(calendar.SourceOutlook)))
 		return res, nil
