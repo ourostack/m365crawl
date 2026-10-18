@@ -148,18 +148,81 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Reserve exact synthetic native test environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP ("m365crawl-owner-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")
+          $item = Get-Item -LiteralPath $scratch
+          if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid owned scratch root' }
+          foreach ($name in @('home', 'home/AppData', 'home/AppData/Local', 'home/AppData/Roaming', 'cache', 'go-cache', 'go-mod', 'go-work')) {
+            New-Item -ItemType Directory -Path (Join-Path $scratch $name) -ErrorAction Stop | Out-Null
+          }
+          $runtime = [ordered]@{
+            HOME = (Join-Path $scratch 'home')
+            USERPROFILE = (Join-Path $scratch 'home')
+            LOCALAPPDATA = (Join-Path $scratch 'home/AppData/Local')
+            APPDATA = (Join-Path $scratch 'home/AppData/Roaming')
+            XDG_CACHE_HOME = (Join-Path $scratch 'cache')
+            TMPDIR = $scratch
+            TMP = $scratch
+            TEMP = $scratch
+            GOTMPDIR = $scratch
+            GOCACHE = (Join-Path $scratch 'go-cache')
+            GOMODCACHE = (Join-Path $scratch 'go-mod')
+            GOPATH = (Join-Path $scratch 'go-work')
+            GOWORK = 'off'
+            GOENV = 'off'
+            GOFLAGS = ''
+            GOTOOLCHAIN = 'local'
+            GOPROXY = 'https://proxy.golang.org'
+            GOSUMDB = 'sum.golang.org'
+            LANG = 'C'
+            LC_ALL = 'C'
+            TZ = 'UTC'
+            M365CRAWL_REAL_CACHE = '0'
+            M365CRAWL_DB = (Join-Path $scratch 'absent/archive.db')
+            M365CRAWL_TEAMS_ROOT = (Join-Path $scratch 'absent/teams')
+            M365CRAWL_OUTLOOK_ROOT = 'none'
+          }
+          foreach ($key in $runtime.Keys) { "$key=$($runtime[$key])" >> $env:GITHUB_ENV }
       - name: Execute native owner tests with coverage
         id: native-tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $keep = @('PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'SystemDrive', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'XDG_CACHE_HOME', 'TMPDIR', 'TMP', 'TEMP', 'GOTMPDIR', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOWORK', 'GOENV', 'GOFLAGS', 'GOTOOLCHAIN', 'GOPROXY', 'GOSUMDB', 'LANG', 'LC_ALL', 'TZ', 'M365CRAWL_REAL_CACHE', 'M365CRAWL_DB', 'M365CRAWL_TEAMS_ROOT', 'M365CRAWL_OUTLOOK_ROOT')
+          foreach ($key in @([Environment]::GetEnvironmentVariables('Process').Keys)) {
+            if ($keep -notcontains $key -and $key -ne 'PSModulePath') { [Environment]::SetEnvironmentVariable([string]$key, $null, 'Process') }
+          }
+          $sdkJSON = @(& go env -json GOVERSION GOOS GOARCH GOHOSTOS GOHOSTARCH)
+          if ($LASTEXITCODE -ne 0) { throw 'Native SDK identity query failed' }
+          $sdk = ($sdkJSON -join "`n") | ConvertFrom-Json
+          if ($sdk.GOVERSION -cne 'go1.27.2' -or $sdk.GOOS -cne 'windows' -or $sdk.GOHOSTOS -cne 'windows' -or $sdk.GOARCH -cne 'amd64' -or $sdk.GOHOSTARCH -cne 'amd64') { throw 'Expected actual native Windows amd64 Go 1.27.2 before tests' }
           go test -count=1 -timeout 15m -parallel 1 '-coverprofile=owner-windows.out' ./internal/snapshotowner
           if ($LASTEXITCODE -ne 0) { throw 'Native owner tests failed' }
       - name: Execute exact native Windows recovery regressions
         id: native-cli-tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $keep = @('PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'SystemDrive', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'XDG_CACHE_HOME', 'TMPDIR', 'TMP', 'TEMP', 'GOTMPDIR', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOWORK', 'GOENV', 'GOFLAGS', 'GOTOOLCHAIN', 'GOPROXY', 'GOSUMDB', 'LANG', 'LC_ALL', 'TZ', 'M365CRAWL_REAL_CACHE', 'M365CRAWL_DB', 'M365CRAWL_TEAMS_ROOT', 'M365CRAWL_OUTLOOK_ROOT')
+          foreach ($key in @([Environment]::GetEnvironmentVariables('Process').Keys)) {
+            if ($keep -notcontains $key -and $key -ne 'PSModulePath') { [Environment]::SetEnvironmentVariable([string]$key, $null, 'Process') }
+          }
           go test -count=1 -timeout 5m -parallel 1 -v ./internal/cli '-run=^(TestRecoveryWindowsPrefixGlobalsRefuseExpansion|TestRecoveryWindowsLiteralLinkPolicy)$'
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows recovery regressions failed' }
+      - name: Execute exact native fresh snapshot creator regression
+        id: native-creator-tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keep = @('PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'SystemDrive', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'XDG_CACHE_HOME', 'TMPDIR', 'TMP', 'TEMP', 'GOTMPDIR', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOWORK', 'GOENV', 'GOFLAGS', 'GOTOOLCHAIN', 'GOPROXY', 'GOSUMDB', 'LANG', 'LC_ALL', 'TZ', 'M365CRAWL_REAL_CACHE', 'M365CRAWL_DB', 'M365CRAWL_TEAMS_ROOT', 'M365CRAWL_OUTLOOK_ROOT')
+          foreach ($key in @([Environment]::GetEnvironmentVariables('Process').Keys)) {
+            if ($keep -notcontains $key -and $key -ne 'PSModulePath') { [Environment]::SetEnvironmentVariable([string]$key, $null, 'Process') }
+          }
+          go test -count=1 -timeout 5m -parallel 1 -v ./internal/teamsdesktop '-run=^TestSnapshotFreshWindowsOwnership$'
+          if ($LASTEXITCODE -ne 0) { throw 'Native fresh snapshot creator regression failed' }
       - name: Emit native SDK profile observations for mandatory independent validation
         if: always()
         shell: pwsh
@@ -168,6 +231,10 @@ jobs:
           TEST_OUTCOME: ${{ steps.native-tests.outcome }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $keep = @('PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'SystemDrive', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'XDG_CACHE_HOME', 'TMPDIR', 'TMP', 'TEMP', 'GOTMPDIR', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOWORK', 'GOENV', 'GOFLAGS', 'GOTOOLCHAIN', 'GOPROXY', 'GOSUMDB', 'LANG', 'LC_ALL', 'TZ', 'M365CRAWL_REAL_CACHE', 'M365CRAWL_DB', 'M365CRAWL_TEAMS_ROOT', 'M365CRAWL_OUTLOOK_ROOT', 'SOURCE_SHA', 'TEST_OUTCOME', 'GITHUB_WORKSPACE')
+          foreach ($key in @([Environment]::GetEnvironmentVariables('Process').Keys)) {
+            if ($keep -notcontains $key -and $key -ne 'PSModulePath') { [Environment]::SetEnvironmentVariable([string]$key, $null, 'Process') }
+          }
           $profile = Join-Path $env:GITHUB_WORKSPACE 'owner-windows.out'
           $rows = @(Get-Content -LiteralPath $profile)
           if ($rows.Count -lt 2 -or $rows[0] -cnotmatch '^mode: (set|count|atomic)$') { throw 'Missing or invalid profile' }
