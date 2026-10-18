@@ -143,7 +143,12 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 			return nil, nil
 		}
 		c := errs.Usage("--outlook-account is not applied while --max-age is 0, which turns the implicit sync off")
-		c.Fix = "Run `m365crawl sync " + rt.linkFlags() + "` to apply it."
+		args := []string{"sync"}
+		if rt.outlookProfile != "" {
+			args = append(args, "--outlook-profile", rt.outlookProfile)
+		}
+		args = append(args, "--outlook-account", rt.outlookLink)
+		c.Fix = "Run `" + rt.recoveryCommand(true, "", args...) + "` to apply it."
 		return nil, c
 	}
 	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge && !pending {
@@ -487,15 +492,6 @@ func (rt *runtime) checkLink() error {
 	}
 	rt.outlookLink, rt.outlookProfile = a.TenantID+"/"+a.UserID, profile
 	return nil
-}
-
-// linkFlags is the --outlook-account (and --outlook-profile) of this run, as one would type them.
-func (rt *runtime) linkFlags() string {
-	out := "--outlook-account " + rt.outlookLink
-	if rt.outlookProfile != "" {
-		out = "--outlook-profile " + shellWord(rt.outlookProfile) + " " + out
-	}
-	return out
 }
 
 // linkOptions adds the explicit Outlook link to the options of a sync that applies it.

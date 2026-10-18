@@ -148,15 +148,15 @@ func TestLoopTextAndCoverageShapes(t *testing.T) {
 	}
 	failed := store.LoopSource{Registration: store.LoopRegistration{ID: 4}, LastSnapshotID: 9,
 		Health: store.KnowledgeSource{Status: "failed", Reason: "loop_cache_input_changed"}}
-	coverage := loopCoverageOf([]store.LoopSource{failed}, []string{"synthetic diagnostic"})
+	coverage := (&runtime{}).loopCoverageOf([]store.LoopSource{failed}, []string{"synthetic diagnostic"})
 	if coverage.State != "registered" || !strings.Contains(coverage.items[0].Effect, "last good snapshot stays the latest cached snapshot") ||
-		!strings.Contains(coverage.items[0].Fix, "m365crawl loop sync --source-id 4") || coverage.Diagnostics[0] != "synthetic diagnostic" {
+		!strings.Contains(coverage.items[0].Fix, "loop sync --source-id 4") || coverage.Diagnostics[0] != "synthetic diagnostic" {
 		t.Fatalf("failed coverage: %+v", coverage)
 	}
 	var out bytes.Buffer
 	rt := &runtime{stdout: &out}
 	rt.renderLoopCoverage(nil)
-	rt.renderLoopCoverage(loopCoverageOf(nil, nil))
+	rt.renderLoopCoverage(rt.loopCoverageOf(nil, nil))
 	if out.Len() != 0 {
 		t.Fatalf("empty coverage rendered: %s", out.String())
 	}

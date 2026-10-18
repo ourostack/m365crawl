@@ -47,7 +47,7 @@ type loopSearchSource struct {
 }
 
 // compact is the coverage shared search carries: the same totals, short source rows and no tuple.
-func (c *loopCoverage) compact() *loopCoverage {
+func (c *loopCoverage) compact(rt *runtime) *loopCoverage {
 	out := *c
 	sources := make([]loopSearchSource, len(c.items))
 	for i, item := range c.items {
@@ -56,7 +56,7 @@ func (c *loopCoverage) compact() *loopCoverage {
 			state = "metadata_only"
 		}
 		sources[i] = loopSearchSource{SourceID: item.SourceID, State: state, SnapshotMatch: item.SnapshotMatch, RawPresent: item.RawPresent,
-			Reason: firstOf(item.Reason, item.RawReason), Inspect: "m365crawl loop sources --source-id " + strconv.FormatInt(item.SourceID, 10)}
+			Reason: firstOf(item.Reason, item.RawReason), Inspect: rt.recoveryCommand(false, "", "loop", "sources", "--source-id", strconv.FormatInt(item.SourceID, 10))}
 	}
 	out.Sources = sources
 	return &out
@@ -99,20 +99,20 @@ type loopSourceItem struct {
 // loopFailureFix is the remedy of each fixed Loop failure reason, as docs/commands.md lists them.
 // {retry} is the source's own retry command, named once where the remedy needs it.
 var loopFailureFix = map[string]string{
-	"loop_cache_identity_unqualified": "the archived record's identity or owner fields are now outside the reader's bounds or not UTF-8, so they are not read or shown; after m365crawl sync archives a readable record, run {retry}",
-	"loop_cache_record_missing":       "the archived record is gone, so nothing can be projected; after Teams caches it again and m365crawl sync archives it, run {retry}",
-	"loop_cache_value_missing":        "the archived record holds no value (Teams cached the key without a readable value); run m365crawl sync, then {retry}",
+	"loop_cache_identity_unqualified": "the archived record's identity or owner fields are now outside the reader's bounds or not UTF-8, so they are not read or shown; after {sync} archives a readable record, run {retry}",
+	"loop_cache_record_missing":       "the archived record is gone, so nothing can be projected; after Teams caches it again and {sync} archives it, run {retry}",
+	"loop_cache_value_missing":        "the archived record holds no value (Teams cached the key without a readable value); run {sync}, then {retry}",
 	"loop_cache_value_too_large":      "the archived value is larger than 8 MiB, so it was not loaded; open an issue at " + issuesURL + " if Loop wrote it",
-	"loop_cache_value_unqualified":    "the archived value or its clocks are not in the text form the reader accepts; run m365crawl sync, then {retry}",
+	"loop_cache_value_unqualified":    "the archived value or its clocks are not in the text form the reader accepts; run {sync}, then {retry}",
 	"loop_cache_snapshot_unsupported": "the cached value is not a Loop snapshot shape this version reads; upgrade m365crawl, then run {retry}",
 	"loop_cache_snapshot_too_large":   "the snapshot exceeds the reader's blob, channel, segment or nesting limits; open an issue at " + issuesURL + " if Loop wrote it",
 	"loop_cache_reader_failed":        "the value could not be read or parsed; run {retry}, and open an issue at " + issuesURL + " if it repeats",
 	"loop_cache_input_changed":        "the archived record changed while it was projected; run {retry}",
 	"loop_cache_cancelled":            "the projection was interrupted; run {retry}",
-	"stale_attempt":                   "another projection of the same source finished first; run m365crawl loop sources to see the current state",
+	"stale_attempt":                   "another projection of the same source finished first; run {sources} to see the current state",
 }
 
-func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCoverage {
+func (rt *runtime) loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCoverage {
 	out := &loopCoverage{Scope: "loop_cache_channels", State: "not_registered", items: []loopSourceItem{}}
 	if len(diagnostics) > 0 {
 		out.Diagnostics = diagnostics
@@ -120,7 +120,7 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 	for _, source := range sources {
 		out.State = "registered"
 		health := source.Health
-		retry := "m365crawl loop sync --source-id " + strconv.FormatInt(source.Registration.ID, 10)
+		retry := rt.recoveryCommand(false, "", "loop", "sync", "--source-id", strconv.FormatInt(source.Registration.ID, 10))
 		item := loopSourceItem{SourceID: source.Registration.ID, Kind: store.LoopKind,
 			Tuple: loopTupleItem{Source: source.Registration.Tuple.Source, Database: source.Registration.Tuple.Database,
 				Store: source.Registration.Tuple.Store, KeyJSON: source.Registration.Tuple.KeyJSON},
@@ -138,14 +138,16 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 		out.Totals.Registered++
 		failed := health.Status == "failed" || health.Status == "cancelled"
 		if fix, known := loopFailureFix[health.Reason]; known && failed {
-			item.Fix = strings.ReplaceAll(fix, "{retry}", retry)
+			item.Fix = strings.NewReplacer("{retry}", retry,
+				"{sync}", rt.recoveryCommand(true, "", "sync"),
+				"{sources}", rt.recoveryCommand(false, "", "loop", "sources")).Replace(fix)
 			item.Effect = "nothing has been projected from this source yet, so it adds no channel"
 			if source.LastSnapshotID > 0 {
 				item.Effect = "the last good snapshot stays the latest cached snapshot, so its channels are still listed"
 			}
 		} else if health.Coverage == "metadata_only" {
 			item.Effect = "the latest snapshot has no channel this version reads, so it adds no channel; earlier snapshots stay listed with retained=true"
-			item.Fix = "nothing to fix, and a retry now changes nothing: the snapshot was read and holds no channel text; after Teams caches more of the component and m365crawl sync archives it, run " + retry
+			item.Fix = "nothing to fix, and a retry now changes nothing: the snapshot was read and holds no channel text; after Teams caches more of the component and " + rt.recoveryCommand(true, "", "sync") + " archives it, run " + retry
 		}
 		switch {
 		case failed:
@@ -172,7 +174,7 @@ func loopCoverageOf(sources []store.LoopSource, diagnostics []string) *loopCover
 
 // loopSnapshotCoverage is the coverage read with the rows, carrying the refresh's error and diagnostics.
 func loopSnapshotCoverage(rt *runtime, sources []store.LoopSource) *loopCoverage {
-	coverage := loopCoverageOf(sources, nil)
+	coverage := rt.loopCoverageOf(sources, nil)
 	if rt.loopCoverage != nil {
 		coverage.RefreshError, coverage.Diagnostics = rt.loopCoverage.RefreshError, rt.loopCoverage.Diagnostics
 	}

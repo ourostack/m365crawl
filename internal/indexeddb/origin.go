@@ -149,6 +149,12 @@ func (o *Origin) Stats() leveldb.Stats { return o.stats }
 // that was rewritten since its last compaction, never understate it. dbs is what
 // Origin.Databases returns for the directory. The directory is only read.
 func Census(leveldbDir string) (held map[int64]int64, dbs []Database, err error) {
+	held, dbs, _, err = CensusWithStats(leveldbDir)
+	return held, dbs, err
+}
+
+// CensusWithStats also reports observation loss, including a torn journal that hid database names.
+func CensusWithStats(leveldbDir string) (held map[int64]int64, dbs []Database, stats leveldb.Stats, err error) {
 	held = map[int64]int64{}
 	db, err := leveldb.LoadWith(leveldbDir, leveldb.LoadOptions{
 		Keep: isMetadataKey,
@@ -173,15 +179,16 @@ func Census(leveldbDir string) (held map[int64]int64, dbs []Database, err error)
 		},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, stats, err
 	}
-	o := &Origin{kv: db, stats: db.Stats()}
+	stats = db.Stats()
+	o := &Origin{kv: db, stats: stats}
 	defer func() { _ = o.Close() }()
 	dbs, err = o.Databases()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, stats, err
 	}
-	return held, dbs, nil
+	return held, dbs, stats, nil
 }
 
 // isMetadataKey keeps the global metadata and each database's own metadata (object store

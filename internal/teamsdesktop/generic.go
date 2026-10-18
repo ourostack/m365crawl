@@ -46,7 +46,11 @@ type GenericResult struct {
 	// Present lists every database in scope that has something to read: every non-typed,
 	// non-denied database, and every typed one that has a store its mapper does not consume.
 	Present []string
-	// Complete says, per database, that every store was read with no fatal error and no bad_key.
+	// CensusComplete says the observation can authorize absence of an entire database.
+	// A torn census or batch withholds that authority, even if no database was visible.
+	CensusComplete bool
+	// Complete says, per database, that every store was read with no fatal error, bad_key or
+	// truncated observation; only a complete database can authorize missing-key removal.
 	Complete map[string]bool
 	// Redacted counts the credential-looking fragments Scrub removed from values.
 	Redacted int
@@ -84,7 +88,7 @@ type genericOrigin interface {
 // Seams: the census of the snapshot and the opening of one batch's origin, which keeps the
 // object stores keep reports (by database id and object store id, so no second metadata pass).
 var (
-	censusFn  = indexeddb.Census
+	censusFn  = indexeddb.CensusWithStats
 	openBatch = func(snapDir string, keep func(dbID, storeID int64) bool) (genericOrigin, error) {
 		return indexeddb.OpenWith(filepath.Join(snapDir, "leveldb"), filepath.Join(snapDir, "blob"),
 			indexeddb.OpenOptions{KeepStore: keep})
@@ -116,9 +120,13 @@ func ReadGeneric(ctx context.Context, snapDir string, account *Account, budget i
 		Omissions: map[string]int{},
 		Complete:  map[string]bool{},
 	}
-	held, dbs, err := censusFn(filepath.Join(snapDir, "leveldb"))
+	held, dbs, stats, err := censusFn(filepath.Join(snapDir, "leveldb"))
 	if err != nil {
 		return res, ctxOr(ctx, classify(err))
+	}
+	res.CensusComplete = stats.TruncatedLogTails == 0
+	if stats.TruncatedLogTails > 0 {
+		res.Omissions[omitTruncatedLogTail] = stats.TruncatedLogTails
 	}
 	var todo []genericDB
 	for _, db := range dbs {
@@ -203,6 +211,12 @@ func readBatch(ctx context.Context, snapDir string, batch []genericDB, res *Gene
 		return nil
 	}
 	defer func() { _ = o.Close() }()
+	if n := o.Stats().TruncatedLogTails; n > 0 {
+		res.CensusComplete = false
+		if n > res.Omissions[omitTruncatedLogTail] {
+			res.Omissions[omitTruncatedLogTail] = n
+		}
+	}
 	for _, g := range batch {
 		complete, seen, err := readGenericDatabase(ctx, o, g, res, opts, fn)
 		if err != nil {
@@ -220,15 +234,13 @@ func readBatch(ctx context.Context, snapDir string, batch []genericDB, res *Gene
 			}
 			continue
 		}
+		complete = complete && res.CensusComplete
 		res.Complete[g.db.Name] = complete
 		if opts.OnDatabase != nil {
 			if err := opts.OnDatabase(g.db.Name, complete, seen); err != nil {
 				return err
 			}
 		}
-	}
-	if n := o.Stats().TruncatedLogTails; n > res.Omissions[omitTruncatedLogTail] {
-		res.Omissions[omitTruncatedLogTail] = n
 	}
 	return nil
 }

@@ -203,6 +203,10 @@ func TestLoopSourceFailuresKeepPeersAndLastGood(t *testing.T) {
 	a := newLoopArchive(t)
 	record := a.insert(t, "https://synthetic.invalid", "source", syntheticLoop(t, 1, 1, "lastgood words"))
 	explicitLoop(t, a.path, 0)
+	lastGood := loopSnapshotRows(t, a.path, "lastgood")
+	if len(lastGood) != 1 {
+		t.Fatal("last-good Loop control was not admitted")
+	}
 	read := loopRead
 	t.Cleanup(func() { loopRead = read })
 	for name, fault := range map[string]func(context.Context, []byte) (loopcache.Result, error){
@@ -216,6 +220,10 @@ func TestLoopSourceFailuresKeepPeersAndLastGood(t *testing.T) {
 		report := explicitLoop(t, a.path, 0)
 		if report.Failed != 1 || report.Sources[0].Health.Reason != "loop_cache_reader_failed" || report.Sources[0].SnapshotMatch != "differs" {
 			t.Fatalf("%s reader failure: %+v", name, report)
+		}
+		rows := loopSnapshotRows(t, a.path, "lastgood")
+		if len(rows) != 1 || rows[0].ID != lastGood[0].ID || rows[0].SnapshotID != lastGood[0].SnapshotID {
+			t.Fatal("failed Loop read replaced admitted channel/snapshot identity")
 		}
 	}
 	// Input changed after acquisition: a fixed failed attempt, no implicit retry.
@@ -256,6 +264,10 @@ func TestLoopSourceFailuresKeepPeersAndLastGood(t *testing.T) {
 	report = explicitLoop(t, a.path, 0)
 	if report.Failed != 0 || len(report.Diagnostics) != 1 || !strings.HasPrefix(report.Diagnostics[0], "stale_attempt:") {
 		t.Fatalf("superseded failure: %+v", report)
+	}
+	rows := loopSnapshotRows(t, a.path, "lastgood")
+	if len(rows) != 1 || rows[0].ID != lastGood[0].ID || rows[0].SnapshotID != lastGood[0].SnapshotID {
+		t.Fatal("superseded Loop publication/failure replaced last-good identity")
 	}
 }
 

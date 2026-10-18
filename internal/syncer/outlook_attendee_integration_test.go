@@ -67,6 +67,11 @@ func TestAttendeeOneCopyLifecycle(t *testing.T) {
 	if copies != 1 || cleanups != 1 || !peopleRead || !nativeRead {
 		t.Fatalf("lifecycle: copies=%d cleanup=%d people=%v native=%v", copies, cleanups, peopleRead, nativeRead)
 	}
+	for _, path := range []string{private, filepath.Dir(private)} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatal("shared optional-lane cleanup left its owned payload or snapshot root")
+		}
+	}
 	if got := sourceKeyed(t, rep, "outlook|Main|attendees"); got.Status == "failed" {
 		t.Fatalf("native capture failed: %#v", got)
 	}

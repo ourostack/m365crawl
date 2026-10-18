@@ -669,7 +669,7 @@ func TestUsageSyncFlagsDiscoveryAndRemedies(t *testing.T) {
 }
 
 func TestUsageCoverageNoticesAndRetryQuoting(t *testing.T) {
-	coverage := documentsCoverage([]store.KnowledgeSource{
+	coverage := (&runtime{}).documentsCoverage([]store.KnowledgeSource{
 		{ID: 1, AdmittedID: 1, Kind: store.UsageDocumentKind, Status: "partial", Losses: map[string]int{"onedrive_usage_document_unmapped": 2,
 			"onedrive_usage_recent_unmapped": 1, "onedrive_usage_document_orphan": 3, "onedrive_usage_collaborator_unmapped": 4}},
 		{ID: 2, AdmittedID: 2, Kind: store.UsageDocumentKind, Status: "complete", Reason: syncer.UsageListedNothing},
@@ -688,17 +688,17 @@ func TestUsageCoverageNoticesAndRetryQuoting(t *testing.T) {
 			t.Fatalf("notice %d = %q, want %s", i, coverage.Notices[i], prefix)
 		}
 	}
-	if fix := coverage.Sources[2].Fix; !strings.Contains(fix, `m365crawl docs sync --onedrive-usage-file "C:\synthetic\copy one.db"`) || !strings.Contains(fix, "private copy") {
+	if fix := coverage.Sources[2].Fix; !strings.Contains(fix, `docs sync --onedrive-usage-file "C:\synthetic\copy one.db"`) || !strings.Contains(fix, "private copy") {
 		t.Fatalf("unknown usage reason or Windows path retry: %s", fix)
 	}
-	if fix := coverage.Sources[3].Fix; !strings.Contains(fix, `m365crawl docs sync --onedrive-usage-file '/synthetic/it'\''s.db'`) {
+	if fix := coverage.Sources[3].Fix; !strings.Contains(fix, `docs sync --onedrive-usage-file '/synthetic/it'\''s.db'`) {
 		t.Fatalf("quoted retry: %s", fix)
 	}
-	if source := coverage.Sources[4]; !strings.Contains(source.Fix, "m365crawl docs sync --source-id 5") || strings.Contains(source.Fix, "--onedrive-usage-file") ||
+	if source := coverage.Sources[4]; !strings.Contains(source.Fix, "docs sync --source-id 5") || strings.Contains(source.Fix, "--onedrive-usage-file") ||
 		!strings.Contains(source.Fix, "OneDrive") || !strings.Contains(source.Effect, "last good capture") {
 		t.Fatalf("admitted usage failure route: %+v", source)
 	}
-	if fix := coverage.Sources[5].Fix; strings.Contains(fix, "$(calc)") || !strings.Contains(fix, "m365crawl docs sync --onedrive-usage-file FILE") || !strings.Contains(fix, "locator") {
+	if fix := coverage.Sources[5].Fix; strings.Contains(fix, "$(calc)") || !strings.Contains(fix, "docs sync --onedrive-usage-file FILE") || !strings.Contains(fix, "locator") {
 		t.Fatalf("windows retry interpolated an unsafe name: %s", fix)
 	}
 	for _, reason := range documentFailureReasons {
@@ -769,7 +769,7 @@ func TestUsageCLISuppliedFileEndToEnd(t *testing.T) {
 	if goruntime.GOOS != "darwin" && goruntime.GOOS != "windows" {
 		fix, _ := sources[0]["fix"].(string)
 		if doc["failed"] != float64(1) || sources[0]["source_id"] != nil || sources[0]["reason"] != "onedrive_usage_input_unqualified" ||
-			!strings.Contains(fix, "m365crawl docs sync --onedrive-usage-file "+quoteFor("")(file)) {
+			!strings.Contains(fix, "docs sync --onedrive-usage-file "+quoteFor("")(file)) {
 			t.Fatalf("unqualified platform refusal: %s", stdout)
 		}
 		return

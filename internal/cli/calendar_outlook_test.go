@@ -134,8 +134,11 @@ func TestCalendarOutlookOnlyEvents(t *testing.T) {
 	}
 	// The envelope names the exact command to link the profile. Two Teams accounts are in the
 	// archive, so the Teams account is a placeholder.
-	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || got[0] != "m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>" {
+	if got := asStrings(m["unlinked_fix"]); len(got) != 1 {
 		t.Fatalf("unlinked_fix %v", got)
+	} else if words := attendeeCommandWords(t, got[0]); recoveryValue(words, "--outlook-profile") != "Main" ||
+		recoveryValue(words, "--outlook-account") != "<tenantId>/<userId>" || recoveryValue(words, "--format") != "json" {
+		t.Fatalf("unlinked fix changed its profile, placeholder or format: %q", words)
 	}
 
 	// The Teams account filter omits them, and with them the unlinked notice.
@@ -181,6 +184,13 @@ func TestCalendarItemIDResolves(t *testing.T) {
 
 func TestCalendarOutlookGoldens(t *testing.T) {
 	e, run := syncedWithOutlook(t, "Main")
+	root := outlookRootOf(t, run)
+	if root == "" {
+		t.Fatal("the golden must normalize only its actual owned Outlook fixture root")
+	}
+	scrub := func(out string) string {
+		return e.scrub(strings.ReplaceAll(out, root, "<outlook-root>"))
+	}
 	m := agendaVia(t, run, "--from", "2031-03-05", "--days", "1")
 	item := itemBySubject(t, m, "Fixture all-day event")
 	if item["detail_level"] != "basic" || sourcesOf(item) != "outlook" {
@@ -207,13 +217,13 @@ func TestCalendarOutlookGoldens(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", name, code, errOut)
 			}
-			checkGolden(t, name+"."+suffix, e.scrub(out))
+			checkGolden(t, name+"."+suffix, scrub(out))
 		}
 		code, out, errOut := run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-21", "--days", "2")
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		checkGolden(t, "calendar_outlook_unlinked."+suffix, e.scrub(out))
+		checkGolden(t, "calendar_outlook_unlinked."+suffix, scrub(out))
 	}
 }
 
@@ -235,17 +245,21 @@ func TestOutlookOnlyNote(t *testing.T) {
 }
 
 func TestLinkFixes(t *testing.T) {
-	if linkFixes(nil, nil) != nil {
+	rt := &runtime{dbPath: "/synthetic/archive.db"}
+	if rt.linkFixes(nil, nil) != nil {
 		t.Fatal("no unlinked account, no fix")
 	}
 	// With one Teams account in scope the hint names it; with two it keeps the placeholder.
 	one := []calendar.AccountCoverage{{AccountID: teamsAccount}, {AccountID: "outlook/Main"}}
-	if got := linkFixes([]string{"outlook/Main"}, one); got[0] != "m365crawl sync --outlook-profile Main --outlook-account "+teamsAccount {
+	if got := rt.linkFixes([]string{"outlook/Main"}, one); recoveryValue(attendeeCommandWords(t, got[0]), "--outlook-account") != teamsAccount {
 		t.Fatal(got)
 	}
 	two := append(slices.Clone(one), calendar.AccountCoverage{AccountID: tenantA + "/other"})
-	if got := linkFixes([]string{"outlook/My Mail"}, two); got[0] != "m365crawl sync --outlook-profile 'My Mail' --outlook-account <tenantId>/<userId>" {
+	if got := rt.linkFixes([]string{"outlook/My Mail"}, two); len(got) != 1 {
 		t.Fatal(got)
+	} else if words := attendeeCommandWords(t, got[0]); recoveryValue(words, "--outlook-profile") != "My Mail" ||
+		recoveryValue(words, "--outlook-account") != "<tenantId>/<userId>" {
+		t.Fatal(words)
 	}
 	if got := shellWord("Main"); got != "Main" {
 		t.Fatal(got)
@@ -457,8 +471,11 @@ func TestTwoProfilesLinkOnlyOne(t *testing.T) {
 	if got := asStrings(m["unlinked_accounts"]); len(got) != 1 || got[0] != "outlook/Second" {
 		t.Fatalf("unlinked_accounts %v", got)
 	}
-	if got := asStrings(m["unlinked_fix"]); len(got) != 1 || !strings.HasPrefix(got[0], "m365crawl sync --outlook-profile Second --outlook-account ") {
+	if got := asStrings(m["unlinked_fix"]); len(got) != 1 {
 		t.Fatalf("unlinked_fix %v", got)
+	} else if words := attendeeCommandWords(t, got[0]); recoveryValue(words, "--outlook-profile") != "Second" ||
+		recoveryValue(words, "--outlook-account") == "" {
+		t.Fatalf("unlinked fix lost profile/principal: %q", words)
 	}
 	var second []string
 	for _, it := range items(t, m) {
@@ -631,7 +648,7 @@ func TestOutlookLinkWithMaxAgeZero(t *testing.T) {
 	_, run := syncedWithOutlook(t, "Main")
 	code, _, stderr := run("--max-age", "0", "--outlook-profile", "Main", "--outlook-account", teamsAccount, "calendar", "--days", "1")
 	body := usageBody(t, stderr)
-	if code != 2 || !strings.Contains(body["fix"].(string), "m365crawl sync --outlook-profile Main --outlook-account "+teamsAccount) {
+	if code != 2 || !strings.Contains(body["fix"].(string), "sync --outlook-profile Main --outlook-account "+teamsAccount) {
 		t.Fatalf("%d %v", code, body)
 	}
 	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {

@@ -170,14 +170,28 @@ func TestPartialSyncDoesNotRefreshAndReadsRetry(t *testing.T) {
 	calls := stubSync(t, func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
 		return partialReport(), nil, partialErr()
 	})
-	for i := 0; i < 2; i++ {
-		code, stdout, _ := e.run("people", "--json")
-		m := decode(t, stdout)
-		if code != 0 || m["archive_age_seconds"] != nil || m["sync_error"] == nil {
-			t.Fatalf("read %d: exit %d, %v", i, code, m)
+	for _, format := range []string{"json", "log"} {
+		for i := 0; i < 2; i++ {
+			code, stdout, _ := e.run("people", "--format", format)
+			if format == "log" {
+				if !strings.HasPrefix(stdout, "people=") {
+					t.Fatal("degraded people log lost its operation label")
+				}
+				stdout = strings.TrimPrefix(stdout, "people=")
+			}
+			m := decode(t, stdout)
+			age, hasAge := m["archive_age_seconds"]
+			failure, _ := m["sync_error"].(map[string]any)
+			if code != 0 || !hasAge || age != nil || failure["code"] != errs.CodePartialSync ||
+				m["needs_sync"] != true || len(items(t, m)) != 0 {
+				t.Fatalf("%s read %d invented freshness or lost partial failure: exit %d, %v", format, i, code, m)
+			}
+			if format == "log" && strings.Contains(strings.TrimSpace(stdout), "\n") {
+				t.Fatal("log degraded read is not one compact JSON document")
+			}
 		}
 	}
-	if calls.Load() != 2 {
+	if calls.Load() != 4 {
 		t.Fatalf("each read must retry the implicit sync, got %d attempts", calls.Load())
 	}
 }

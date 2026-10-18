@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"io"
 	"reflect"
 	"strconv"
@@ -291,7 +292,11 @@ func owaHTMLMatches(value any, expected string) bool {
 	if !ok {
 		return false
 	}
-	r, err := gzip.NewReader(bytes.NewReader([]byte(data)))
+	raw, err := hex.DecodeString(data)
+	if err != nil {
+		return false
+	}
+	r, err := gzip.NewReader(bytes.NewReader(raw))
 	if err != nil {
 		return false
 	}

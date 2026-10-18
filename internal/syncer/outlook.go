@@ -326,7 +326,7 @@ func (r *runner) outlook(ctx context.Context, p outlookdesktop.Profile, rep *Rep
 	nativeCalendarErr = calErr
 	afterCalendar()
 	if ctx.Err() != nil {
-		return sr, decoded, nil, calErr
+		return sr, decoded, nil, ctx.Err()
 	}
 	if !mailOn {
 		return sr, decoded, r.mailRowOf(false, SourceReport{}, key), calErr

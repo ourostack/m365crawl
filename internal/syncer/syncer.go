@@ -216,15 +216,19 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		if err != nil {
 			// Cancelling removes the snapshot a source is still reading, so its failure can look like
 			// a damaged cache: the cancellation is the real reason.
-			if stopped = ctx.Err(); stopped != nil {
+			if stopped = ctx.Err(); stopped == nil {
+				coded := codedOf(err)
+				failures = append(failures, sourceFailure{key, err, coded})
+				rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
+				_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
+				r.progress("%s: failed (%s)", key, coded.Code)
 				return
 			}
-			coded := codedOf(err)
-			failures = append(failures, sourceFailure{key, err, coded})
-			rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
-			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
-			r.progress("%s: failed (%s)", key, coded.Code)
-			return
+			// The calendar can commit before its following stage observes cancellation.
+			if sr.Source == "" || sr.Source != key || sr.Counts == nil || sr.Error != nil ||
+				(sr.Status != StatusOK && sr.Status != StatusOmissions) {
+				return
+			}
 		}
 		committed++
 		decoded = decoded || didDecode
@@ -262,6 +266,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 			settle(o.key, o.report, o.decoded, o.err)
 		}
 	}
+	if stopped == nil {
+		stopped = ctx.Err()
+	}
 	var linkErr error
 	if stopped == nil && r.o.OutlookLink != "" && r.outlookOn() {
 		linkErr = r.linkOutlook(ctx)
@@ -274,6 +281,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		for _, c := range r.transcripts {
 			rep.Transcripts.Add(c)
 		}
+	}
+	if stopped == nil {
+		stopped = ctx.Err()
 	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {
@@ -506,6 +516,7 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	status := StatusOK
 	if lost(omissions) > 0 {
 		status = StatusOmissions
+		fp = ""
 	}
 	if len(omissions) == 0 {
 		omissions = nil
@@ -698,9 +709,13 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 	if err := w.flushRecords(source, at); err != nil {
 		return nil, 0, err
 	}
-	w.present = res.Present
-	if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
-		return nil, 0, asCoded(err)
+	if res.CensusComplete {
+		w.present = res.Present
+		if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
+			return nil, 0, asCoded(err)
+		}
+	} else {
+		w.present = nil
 	}
 	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
 		return nil, 0, asCoded(err)

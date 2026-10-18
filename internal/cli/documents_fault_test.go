@@ -26,20 +26,39 @@ func TestDocumentsCLIUnqualifiedInputGetsSourceRemedyNotArchiveRepair(t *testing
 
 func TestDocumentsCLIRefreshFailureServesCurrentLastGoodCoverage(t *testing.T) {
 	e := newEnv(t)
-	seedDocumentsCLI(t, e)
+	id := seedDocumentsCLI(t, e)
 	run := runDocumentsSync
 	t.Cleanup(func() { runDocumentsSync = run })
 	runDocumentsSync = func(context.Context, syncer.DocumentOptions) (syncer.DocumentReport, error) {
 		return syncer.DocumentReport{}, os.ErrPermission
 	}
 
-	code, stdout, stderr := e.run("--max-age", "1h", "docs", "list", "--limit", "1")
-	if code != 0 || len(items(t, decode(t, stdout))) != 1 {
-		t.Fatalf("refresh failure erased last-good row: %s", stderr)
-	}
-	coverage := decode(t, stdout)["source_coverage"].(map[string]any)
-	if coverage["refresh_error"] == nil || coverage["state"] != "registered" {
-		t.Fatal("current last-good coverage hid independent refresh failure")
+	for _, format := range []string{"json", "log"} {
+		code, stdout, stderr := e.run("--format", format, "--max-age", "1h", "docs", "list", "--limit", "1")
+		if format == "log" {
+			if !strings.HasPrefix(stdout, "docs_list=") {
+				t.Fatal("degraded document log lost its operation label")
+			}
+			stdout = strings.TrimPrefix(stdout, "docs_list=")
+		}
+		if code != 0 || len(items(t, decode(t, stdout))) != 1 {
+			t.Fatalf("refresh failure erased last-good row: %s", stderr)
+		}
+		doc := decode(t, stdout)
+		row := items(t, doc)[0]
+		if row["id"] != id || row["title"] != "Quarterly shared plan" {
+			t.Fatal("degraded read replaced admitted document identity or content")
+		}
+		if age, present := doc["archive_age_seconds"]; !present || age != nil {
+			t.Fatal("independent document freshness invented a Teams sync age")
+		}
+		coverage := doc["source_coverage"].(map[string]any)
+		if coverage["refresh_error"] == nil || coverage["state"] != "registered" {
+			t.Fatal("current last-good coverage hid independent refresh failure")
+		}
+		if format == "log" && strings.Contains(strings.TrimSpace(stdout), "\n") {
+			t.Fatal("degraded document log is not one compact JSON document")
+		}
 	}
 }
 

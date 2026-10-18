@@ -112,6 +112,8 @@ func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
 
 	old := newDB(t)
 	run(t, Options{Root: root, DBPath: old})
+	const identities = `select json_array(tenant_id,user_id,conversation_id,id,rowid) from messages order by tenant_id,user_id,conversation_id,id`
+	beforeIDs := strings.Join(runRows(t, old, identities), "\n")
 	ageToAlpha1(t, old)
 	if snapshot(t, old) == want {
 		t.Fatal("the aged archive should differ from a fresh one")
@@ -130,6 +132,13 @@ func TestAlpha1ArchiveMigratesToWhatAFreshSyncMakes(t *testing.T) {
 	}
 	if got := snapshot(t, old); got != want {
 		t.Errorf("migrated archive differs from a fresh sync:\n%s\n---\n%s", got, want)
+	}
+	if got := strings.Join(runRows(t, old, identities), "\n"); got != beforeIDs {
+		t.Fatal("directional derivation replaced supported message row identities")
+	}
+	if recordsQuery(t, old, `select count(*) from messages m left join message_fts f on f.rowid=m.rowid
+where f.rowid is null or f.message_key<>m.tenant_id||'|'||m.user_id||'|'||m.conversation_id||'|'||m.id or f.content<>m.content_text`) != 0 {
+		t.Fatal("directional derivation broke message/FTS rowid or content correspondence")
 	}
 
 	// Once migrated, a cache touch reports only real changes: here none.
@@ -175,12 +184,19 @@ func TestNewerArchiveIsNeverWritten(t *testing.T) {
 	if err := os.Chtimes(logFile(t, root), later, later); err != nil {
 		t.Fatal(err)
 	}
+	discover := discoverSources
+	discoveries := 0
+	discoverSources = func(string) ([]teamsdesktop.Source, []string, error) {
+		discoveries++
+		return nil, nil, errors.New("future derivation must not discover sources")
+	}
+	t.Cleanup(func() { discoverSources = discover })
 	_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != errs.CodeArchiveNewer || coded.Exit != errs.ExitEnvironment || !strings.Contains(coded.Message, "99") {
 		t.Fatalf("err = %v", err)
 	}
-	if snapshot(t, db) != before || runCount(t, d) != runs {
+	if snapshot(t, db) != before || runCount(t, d) != runs || discoveries != 0 {
 		t.Error("a refused sync wrote to the archive")
 	}
 }

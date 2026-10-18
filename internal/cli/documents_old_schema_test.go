@@ -2,14 +2,30 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 func TestDocumentsCLIOlderArchiveReadDoesNotMigrateOrInventFreshness(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
+	oldSync := runDocumentsSync
+	acquisitions := 0
+	runDocumentsSync = func(ctx context.Context, options syncer.DocumentOptions) (syncer.DocumentReport, error) {
+		if options.Explicit || options.Discover || options.MaxAge != 0 ||
+			options.Root != "" || options.RegistryFile != "" || options.UsageFile != "" {
+			acquisitions++
+			return syncer.DocumentReport{}, context.Canceled
+		}
+		// This facade also performs read-only registration lookup; keep that guard real.
+		return oldSync(ctx, options)
+	}
+	t.Cleanup(func() { runDocumentsSync = oldSync })
 	e.exec(`drop table document_capture_members;
 drop table document_capture_metadata;
 drop table document_observations;
@@ -38,5 +54,23 @@ delete from schema_migrations where version=11`)
 	current, err := os.Stat(e.db)
 	if err != nil || !bytes.Equal(before, after) || !current.ModTime().Equal(info.ModTime()) {
 		t.Fatal("old optional archive was migrated/written by max-age0 read")
+	}
+	if acquisitions != 0 {
+		t.Fatal("old optional archive-only read acquired a source")
+	}
+	e.exec(`insert into schema_migrations(version) values(999)`)
+	newerBefore, err := os.ReadFile(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"docs", "list"}, {"docs", "sources"}, {"search", "Quarterly", "--source", "documents"}} {
+		code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		if code != errs.ExitEnvironment || errorOf(t, stderr)["code"] != errs.CodeArchiveNewer {
+			t.Fatalf("future archive became successful empty output: %s", stderr)
+		}
+	}
+	newerAfter, err := os.ReadFile(e.db)
+	if err != nil || !bytes.Equal(newerBefore, newerAfter) || acquisitions != 0 {
+		t.Fatal("future archive refusal acquired, repaired or wrote the closed archive")
 	}
 }

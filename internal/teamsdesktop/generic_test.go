@@ -1,6 +1,7 @@
 package teamsdesktop
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,80 @@ import (
 	"github.com/ourostack/m365crawl/internal/leveldb"
 	"github.com/ourostack/m365crawl/internal/v8"
 )
+
+func TestIncompleteObservationDecoderInvalidatesReadMemory(t *testing.T) {
+	src := fixtureSource(t)
+	snap := fixtureSnapshot(t)
+	current := decoderVersion
+	t.Cleanup(func() { decoderVersion = current })
+	type key struct{ database, store, json string }
+	type memo struct {
+		digest   []byte
+		redacted int
+	}
+	collect := func(into map[key]memo) func(GenericRecord) error {
+		return func(r GenericRecord) error {
+			if r.Digest != nil {
+				into[key{r.Database, r.Store, string(r.KeyJSON)}] = memo{
+					digest: append([]byte(nil), r.Digest...), redacted: r.ValueRedacted,
+				}
+			}
+			return nil
+		}
+	}
+	decoderVersion = 4
+	legacyFingerprint, err := FingerprintOf(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[key]memo{}
+	_, err = ReadGeneric(context.Background(), snap, nil, 1<<20, GenericOptions{
+		Sig:   MemoSignature(1),
+		Known: func(string, string, string, []byte) (int, bool) { return 0, false },
+	}, collect(legacy))
+	if err != nil || len(legacy) == 0 {
+		t.Fatalf("legacy read-memory setup: digests=%d err=%v", len(legacy), err)
+	}
+	decoderVersion = current
+	upgradedFingerprint, err := FingerprintOf(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgradedFingerprint == legacyFingerprint {
+		t.Error("an unchanged source would still take the pre-hardening fingerprint shortcut")
+	}
+	matches := 0
+	known := func(cache map[key]memo) func(string, string, string, []byte) (int, bool) {
+		return func(db, store, json string, digest []byte) (int, bool) {
+			m, ok := cache[key{db, store, json}]
+			if ok && bytes.Equal(m.digest, digest) {
+				matches++
+				return m.redacted, true
+			}
+			return 0, false
+		}
+	}
+	refreshed := map[key]memo{}
+	_, err = ReadGeneric(context.Background(), snap, nil, 1<<20,
+		GenericOptions{Sig: MemoSignature(1), Known: known(legacy)}, collect(refreshed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matches != 0 || len(refreshed) < len(legacy) {
+		t.Errorf("legacy read memory bypassed the upgraded observation: matched=%d refreshed=%d legacy=%d",
+			matches, len(refreshed), len(legacy))
+	}
+	matches = 0
+	_, err = ReadGeneric(context.Background(), snap, nil, 1<<20,
+		GenericOptions{Sig: MemoSignature(1), Known: known(refreshed)}, func(GenericRecord) error { return nil })
+	if err != nil || matches == 0 {
+		t.Errorf("the current decoder cannot reuse its own clean read memory: matches=%d err=%v", matches, err)
+	}
+	stableFingerprint, err := FingerprintOf(src)
+	if err != nil || stableFingerprint != upgradedFingerprint {
+		t.Fatalf("version exercise changed source identity: fingerprint=%q err=%v", stableFingerprint, err)
+	}
+}
 
 func TestDeniedNames(t *testing.T) {
 	for _, c := range []struct {
@@ -180,20 +255,21 @@ func TestReadGenericKeysCanonical(t *testing.T) {
 
 // fakeGeneric scripts a snapshot for ReadGeneric: the census and the origin of each batch.
 type fakeGeneric struct {
-	dbs        []indexeddb.Database
-	held       map[int64]int64
-	records    map[int64][]indexeddb.Record
-	decode     func(raw []byte) (any, error)
-	recErr     error
-	stats      leveldb.Stats
-	openErr    error
-	censusEr   error
-	opens      [][]string
-	prev       weak.Pointer[fakeGenericOrigin]
-	released   []bool
-	closes     int // origins closed
-	payloadErr error
-	unwraps    int // envelope unwraps: a Decode or a Payload call each unwraps the value once
+	dbs         []indexeddb.Database
+	held        map[int64]int64
+	records     map[int64][]indexeddb.Record
+	decode      func(raw []byte) (any, error)
+	recErr      error
+	stats       leveldb.Stats
+	censusStats leveldb.Stats
+	openErr     error
+	censusEr    error
+	opens       [][]string
+	prev        weak.Pointer[fakeGenericOrigin]
+	released    []bool
+	closes      int // origins closed
+	payloadErr  error
+	unwraps     int // envelope unwraps: a Decode or a Payload call each unwraps the value once
 }
 
 type fakeGenericOrigin struct {
@@ -231,11 +307,11 @@ func (f *fakeGeneric) install(t *testing.T) {
 	}
 	oc, oo := censusFn, openBatch
 	t.Cleanup(func() { censusFn, openBatch = oc, oo })
-	censusFn = func(string) (map[int64]int64, []indexeddb.Database, error) {
+	censusFn = func(string) (map[int64]int64, []indexeddb.Database, leveldb.Stats, error) {
 		if f.censusEr != nil {
-			return nil, nil, f.censusEr
+			return nil, nil, f.censusStats, f.censusEr
 		}
-		return f.held, f.dbs, nil
+		return f.held, f.dbs, f.censusStats, nil
 	}
 	openBatch = func(_ string, keep func(int64, int64) bool) (genericOrigin, error) {
 		if f.openErr != nil {
@@ -501,6 +577,112 @@ func TestReadGenericTruncatedTail(t *testing.T) {
 	g, err := f.run(t, nil, 15)
 	if err != nil || g.res.Omissions[omitTruncatedLogTail] != 1 {
 		t.Fatalf("err=%v omissions=%v", err, g.res.Omissions)
+	}
+}
+
+// A readable prefix is useful data, but a torn journal cannot authorize absence.
+func TestGenericTruncatedObservationWithholdsAbsence(t *testing.T) {
+	for _, tails := range []int{0, 1} {
+		t.Run(fmt.Sprintf("truncated=%d", tails), func(t *testing.T) {
+			f := &fakeGeneric{
+				dbs:   []indexeddb.Database{gdb(1, "a-manager", "s"), gdb(2, "b-manager", "s")},
+				held:  map[int64]int64{1: 10, 2: 10},
+				stats: leveldb.Stats{TruncatedLogTails: tails},
+				records: map[int64][]indexeddb.Record{
+					1: {strRec("readable-key", "readable-value")},
+				},
+			}
+			f.install(t)
+			callbacks := map[string]bool{}
+			var records []GenericRecord
+			res, err := ReadGeneric(context.Background(), "/snap", nil, 15,
+				GenericOptions{OnDatabase: func(db string, complete bool, _ map[string]map[string]struct{}) error {
+					callbacks[db] = complete
+					return nil
+				}}, func(record GenericRecord) error {
+					records = append(records, record)
+					return nil
+				})
+			if err != nil || len(records) != 1 || string(records[0].ValueJSON) != `"readable-value"` {
+				t.Fatalf("readable prefix was discarded: records=%+v err=%v", records, err)
+			}
+			if len(callbacks) != 2 || res.Omissions[omitTruncatedLogTail] != tails || res.CensusComplete != (tails == 0) {
+				t.Fatalf("incomplete observation lost its database/loss evidence: callbacks=%v result=%+v", callbacks, res)
+			}
+			for _, db := range f.dbs {
+				if callbacks[db.Name] != (tails == 0) || res.Complete[db.Name] != (tails == 0) {
+					t.Errorf("database %s granted absence from truncated=%d: callback=%t result=%t",
+						db.Name, tails, callbacks[db.Name], res.Complete[db.Name])
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name                          string
+		tails                         int
+		censusErr, openErr, recordErr error
+		empty                         bool
+		badKey                        bool
+	}{
+		{name: "complete-empty", empty: true},
+		{name: "truncated-empty", tails: 1, empty: true},
+		{name: "census-loss-with-readable-prefix", tails: 1},
+		{name: "census-error", censusErr: errors.New("scripted census error")},
+		{name: "ordinary-open-error", openErr: errors.New("scripted open error")},
+		{name: "ordinary-record-error", recordErr: errors.New("scripted record error")},
+		{name: "ordinary-bad-key", badKey: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeGeneric{
+				censusStats: leveldb.Stats{TruncatedLogTails: tc.tails},
+				censusEr:    tc.censusErr, openErr: tc.openErr, recErr: tc.recordErr,
+				dbs:     []indexeddb.Database{gdb(1, "a-manager", "s")},
+				held:    map[int64]int64{1: 10},
+				records: map[int64][]indexeddb.Record{1: {strRec("k", "v")}},
+			}
+			if tc.empty {
+				f.dbs = nil
+			}
+			if tc.badKey {
+				f.records[1] = []indexeddb.Record{{Err: &indexeddb.OmissionError{Omission: indexeddb.Omission{Code: indexeddb.CodeBadKey, Detail: "scripted bad key"}}}}
+			}
+			f.install(t)
+			calls, rows := 0, 0
+			res, err := ReadGeneric(context.Background(), "/snap", nil, 15,
+				GenericOptions{OnDatabase: func(_ string, complete bool, _ map[string]map[string]struct{}) error {
+					calls++
+					if complete != (tc.tails == 0 && tc.openErr == nil && tc.recordErr == nil && !tc.badKey) {
+						t.Errorf("wrong key-absence authority: complete=%t", complete)
+					}
+					return nil
+				}}, func(GenericRecord) error { rows++; return nil })
+			if tc.censusErr != nil {
+				if err == nil || calls != 0 || f.closes != 0 || res.CensusComplete {
+					t.Fatalf("census error granted authority or opened an origin: result=%+v calls=%d closes=%d err=%v", res, calls, f.closes, err)
+				}
+				return
+			}
+			if err != nil || res.CensusComplete != (tc.tails == 0) || res.Omissions[omitTruncatedLogTail] != tc.tails {
+				t.Fatalf("wrong census authority/loss: result=%+v err=%v", res, err)
+			}
+			wantCalls, wantCloses, wantRows := 1, 1, 1
+			if tc.empty {
+				wantCalls, wantCloses, wantRows = 0, 0, 0
+			} else if tc.openErr != nil {
+				wantCloses, wantRows = 0, 0
+			} else if tc.recordErr != nil || tc.badKey {
+				wantRows = 0
+			}
+			if calls != wantCalls || f.closes != wantCloses || rows != wantRows {
+				t.Errorf("prefix/close lifecycle: calls=%d closes=%d rows=%d; want %d/%d/%d", calls, f.closes, rows, wantCalls, wantCloses, wantRows)
+			}
+			if (tc.openErr != nil || tc.recordErr != nil) && res.Omissions[omitDatabaseUnreadable] != 1 {
+				t.Errorf("ordinary unreadable evidence lost: %+v", res)
+			}
+			if tc.badKey && res.Omissions[indexeddb.CodeBadKey] != 1 {
+				t.Errorf("ordinary bad-key evidence lost: %+v", res)
+			}
+		})
 	}
 }
 

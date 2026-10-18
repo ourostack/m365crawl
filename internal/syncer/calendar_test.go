@@ -144,7 +144,7 @@ func (f *fakeCache) install(t *testing.T) {
 	old := readGenericFn
 	t.Cleanup(func() { readGenericFn = old })
 	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, emit func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
-		res := teamsdesktop.GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}}
+		res := teamsdesktop.GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}, CensusComplete: true}
 		names := make([]string, 0, len(f.dbs))
 		for n := range f.dbs {
 			names = append(names, n)
@@ -430,13 +430,18 @@ func TestUnchangedSyncStillReportsCalendarLosses(t *testing.T) {
 	if first.Status != StatusOmissions || first.Omissions["calendar_unmapped"] != 1 {
 		t.Fatalf("first: %s %v", first.Status, first.Omissions)
 	}
+	const rowsSQL = `select json_array(rowid,database,store,key_json,value_json,removed_at) from records order by database,store,key_json`
+	before := observationState(t, db, rowsSQL)
 	again, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
-	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 || again.Sources[0].Status != StatusOmissions || again.Sources[0].Counts != nil {
+	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 || again.Sources[0].Status != StatusOmissions ||
+		again.Sources[0].Counts == nil || again.Sources[0].Counts.Records.Seen != 2 || again.Sources[0].Counts.Records.Unchanged != 2 {
 		t.Fatalf("an unchanged sync: %s %v %+v", again.Status, again.Omissions, again.Sources)
 	}
-	// The run is recorded as a success with its omission, so the fingerprint still skips the read.
-	if n := recordsQuery(t, db, `select count(*) from sync_runs where status='ok_with_omissions' and fingerprint<>''`); n < 2 {
-		t.Fatalf("%d runs recorded with omissions", n)
+	if n := recordsQuery(t, db, `select count(*) from sync_runs where source=? and status='ok_with_omissions' and fingerprint<>''`, sourceKey); n != 0 {
+		t.Fatalf("%d incomplete source runs retained reusable fingerprints", n)
+	}
+	if got := observationState(t, db, rowsSQL); got != before {
+		t.Fatalf("recounting unresolved calendar loss changed rows/values/tombstones\nbefore %s\nafter %s", before, got)
 	}
 	// Once the record is fixed the loss is gone.
 	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", nil), fakeEvent("broken", "2026-09-11T09:00:00Z", nil)}

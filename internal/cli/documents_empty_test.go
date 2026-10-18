@@ -16,12 +16,12 @@ func TestDocumentsCoverageExplainsResponseThatListedNoDocuments(t *testing.T) {
 		{ID: 1, Kind: "office_recent", Status: "complete", Coverage: "observations", Reason: officedocuments.NoDocumentsListed},
 		{ID: 2, Kind: "office_shared", Status: "complete", Coverage: "observations"},
 	}
-	coverage := documentsCoverage(sources)
+	coverage := (&runtime{}).documentsCoverage(sources)
 	if len(coverage.Notices) != 1 || !strings.Contains(coverage.Notices[0], officedocuments.NoDocumentsListed) ||
 		!strings.Contains(coverage.Notices[0], "not whether the account has documents") {
 		t.Fatalf("empty response notice = %#v", coverage.Notices)
 	}
-	if len(documentsCoverage(sources[1:]).Notices) != 0 {
+	if len((&runtime{}).documentsCoverage(sources[1:]).Notices) != 0 {
 		t.Fatal("notice emitted without an empty response source")
 	}
 	encoded, err := json.Marshal(coverage)
@@ -42,7 +42,7 @@ func TestDocumentsCoverageExplainsResponseThatListedNoDocuments(t *testing.T) {
 
 // A dialog list or supplied file is not an Office service response, so its notice claims only what the file held.
 func TestDocumentsCoverageExplainsFileThatListedNoDocumentsNeutrally(t *testing.T) {
-	coverage := documentsCoverage([]store.KnowledgeSource{
+	coverage := (&runtime{}).documentsCoverage([]store.KnowledgeSource{
 		{ID: 1, Kind: "office_dialog", Status: "complete", Coverage: "observations", Reason: officedocuments.FileListedNoDocuments},
 		{ID: 2, Kind: "office_recent", Status: "complete", Coverage: "observations", Reason: officedocuments.NoDocumentsListed},
 	})
@@ -62,7 +62,7 @@ func TestDocumentRemediesNamePlainDocsSync(t *testing.T) {
 			t.Errorf("%s remedy names --source-id, which a never-admitted source cannot use: %s", reason, fix)
 		}
 	}
-	never := documentsCoverage([]store.KnowledgeSource{{LocatorID: 3, Kind: "office_recent", Status: "failed", Reason: "office_json_cancelled"}})
+	never := (&runtime{}).documentsCoverage([]store.KnowledgeSource{{LocatorID: 3, Kind: "office_recent", Status: "failed", Reason: "office_json_cancelled"}})
 	if !strings.Contains(never.Sources[0].Fix, "m365crawl docs sync") {
 		t.Fatalf("never-admitted fix = %q", never.Sources[0].Fix)
 	}

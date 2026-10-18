@@ -230,7 +230,9 @@ func TestLoopSearchCoverageIsCompact(t *testing.T) {
 			for key := range source {
 				keys = append(keys, key)
 			}
-			if len(source) != 6 || source["inspect"] != fmt.Sprintf("m365crawl loop sources --source-id %d", int64(source["source_id"].(float64))) ||
+			words := attendeeCommandWords(t, source["inspect"].(string))
+			if len(source) != 6 || recoveryValue(words, "--source-id") != fmt.Sprint(int64(source["source_id"].(float64))) ||
+				recoveryValue(words, "--db") != e.db || recoveryValue(words, "--format") != "json" ||
 				source["state"] == nil || source["snapshot_match"] == nil || source["raw_present"] == nil || source["reason"] == nil {
 				t.Fatalf("%v compact source has keys %v: %v", args, keys, source)
 			}
@@ -252,7 +254,7 @@ func TestLoopCoverageWording(t *testing.T) {
 		t.Fatalf("nothing registered: %v", doc["loop_coverage"])
 	}
 	for reason, fix := range loopFailureFix {
-		rendered := loopCoverageOf([]store.LoopSource{{Registration: store.LoopRegistration{ID: 3},
+		rendered := (&runtime{}).loopCoverageOf([]store.LoopSource{{Registration: store.LoopRegistration{ID: 3},
 			Health: store.KnowledgeSource{Status: "failed", Reason: reason}}}, nil).items[0].Fix
 		if strings.Count(rendered, "retry") > 1 || strings.Contains(rendered, "{retry}") || fix == "" {
 			t.Fatalf("%s fix repeats itself: %q", reason, rendered)

@@ -442,16 +442,13 @@ func TestSweepStaleSnapshotsSkipsFreshAndForeign(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if n := SweepStaleSnapshots(tmp, 24*time.Hour); n != 1 {
-		t.Fatalf("swept %d, want 1", n)
+	if n := SweepStaleSnapshots(tmp, 24*time.Hour); n != 0 {
+		t.Fatalf("swept %d unknown roots, want 0", n)
 	}
-	for _, p := range []string{fresh, other, file} {
+	for _, p := range []string{stale, fresh, other, file} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("%s was removed", p)
 		}
-	}
-	if _, err := os.Stat(stale); err == nil {
-		t.Error("stale snapshot kept")
 	}
 	if n := SweepStaleSnapshots(filepath.Join(tmp, "absent"), time.Hour); n != 0 {
 		t.Errorf("absent dir swept %d", n)

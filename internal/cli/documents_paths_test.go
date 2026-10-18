@@ -87,7 +87,7 @@ func TestDocumentsOptionalCoverageMergeKeepsFailuresAndSources(t *testing.T) {
 		t.Fatal("unknown optional coverage fabricated")
 	}
 	notes := notesCoverage(nil)
-	docs := documentsCoverage(nil)
+	docs := (&runtime{}).documentsCoverage(nil)
 	if mergedOptionalCoverage(notes, nil) != notes || mergedOptionalCoverage(nil, docs) != docs {
 		t.Fatal("single participating source scope replaced")
 	}

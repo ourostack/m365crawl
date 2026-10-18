@@ -7,7 +7,7 @@ import (
 
 func TestDocumentsMixedRefreshErrorsPreserveEachSourceCode(t *testing.T) {
 	notes := notesCoverage(nil)
-	docs := documentsCoverage(nil)
+	docs := (&runtime{}).documentsCoverage(nil)
 	notes.RefreshError = &syncError{Code: "note_snapshot_failed", Message: "notes refused"}
 	docs.RefreshError = &syncError{Code: "office_json_input_unqualified", Message: "documents refused"}
 	raw, err := json.Marshal(mergedOptionalCoverage(notes, docs))
