@@ -146,3 +146,48 @@ func TestSnapshotOwnerConservativeLiveness(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotOwnerReadMarkerNonRegularFailure(t *testing.T) {
+	open := ownerOpenMarker
+	t.Cleanup(func() { ownerOpenMarker = open })
+	dir := t.TempDir()
+	path := filepath.Join(dir, markerName)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(path, "unchanged")
+	const payload = "owned non-regular marker fixture"
+	if err := os.WriteFile(child, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path) //nolint:gosec // G304: exact directory just created as the marker in this test's private t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if info, err := f.Stat(); err != nil || !info.IsDir() {
+		t.Fatalf("non-regular owned fixture not qualified: %v", err)
+	}
+	ownerOpenMarker = func(p string) (*os.File, error) {
+		if p != path {
+			t.Fatalf("reader escaped the exact owned marker: %q", p)
+		}
+		return f, nil
+	}
+	b, err := readMarker(path)
+	var ioErr *fs.PathError
+	if b != nil || err == nil || errors.As(err, &ioErr) {
+		t.Fatalf("non-regular marker needs policy refusal, not an attempted I/O failure: bytes=%q err=%v", b, err)
+	}
+	if n, err := f.Write([]byte("x")); n != 0 || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("non-regular marker refusal did not close its file: wrote=%d err=%v", n, err)
+	}
+	after, err := os.ReadFile(child) //nolint:gosec // G304: exact child written in the owned non-regular marker directory above
+	if err != nil || string(after) != payload {
+		t.Fatalf("non-regular refusal changed owned fixture contents: %q %v", after, err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "unchanged" {
+		t.Fatalf("non-regular refusal changed its owned directory: %v %v", entries, err)
+	}
+}

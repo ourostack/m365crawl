@@ -5,6 +5,10 @@ package snapshotowner
 import (
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 	"unsafe"
 
@@ -224,10 +228,216 @@ func TestSnapshotOwnerWindowsPrivateACL(t *testing.T) {
 			}
 		})
 	}
+	t.Run("missing-final-ace-after-complete-grants", func(t *testing.T) {
+		data := valid()
+		binary.LittleEndian.PutUint16(data[4:6], 5)
+		before := string(data)
+		if ownerPrivateACL(data, user, system, true) {
+			t.Fatal("complete grant prefix hid a missing declared final ACE")
+		}
+		if string(data) != before {
+			t.Fatal("refusing a truncated ACL changed its bytes")
+		}
+	})
+	t.Run("checked-allocation", func(t *testing.T) {
+		t.Run("allocation-too-short", func(t *testing.T) {
+			short := new(uint16)
+			*short = 0xa5a5
+			var pinner runtime.Pinner
+			pinner.Pin(short)
+			defer pinner.Unpin()
+			base := unsafe.Pointer(short)
+			if ownerACLInAllocation(base, uint64(unsafe.Sizeof(*short)), uintptr(base), user, system, true) || *short != 0xa5a5 {
+				t.Fatal("short owned allocation was admitted or mutated")
+			}
+			runtime.KeepAlive(short)
+		})
+		for _, tc := range []struct {
+			name                              string
+			prefix                            int
+			acl                               []byte
+			shortHeader, overrunHeader        bool
+			beforeBase, insufficientRemaining bool
+			want                              bool
+		}{
+			{name: "valid-base-grants", acl: valid(), want: true},
+			{name: "valid-prefix-grants", prefix: 16, acl: valid(), want: true},
+			{name: "missing-system-effective", prefix: 16, acl: encode(u, ui, si)},
+			{name: "short-ACL-header", prefix: 16, acl: valid(), shortHeader: true},
+			{name: "overrun-ACL-header", prefix: 16, acl: valid(), overrunHeader: true},
+			{name: "candidate-before-base", prefix: 16, acl: valid(), beforeBase: true},
+			{name: "candidate-last-two-bytes", prefix: 16, acl: valid(), insufficientRemaining: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				wordSize := int(unsafe.Sizeof(uintptr(0)))
+				words := make([]uintptr, (tc.prefix+len(tc.acl)+8+wordSize-1)/wordSize)
+				var pinner runtime.Pinner
+				pinner.Pin(&words[0])
+				defer pinner.Unpin()
+				base := unsafe.Pointer(&words[0])
+				data := unsafe.Slice((*byte)(base), len(words)*wordSize)
+				for i := 0; i < tc.prefix; i++ {
+					data[i] = 0xa5
+				}
+				copy(data[tc.prefix:], tc.acl)
+				if tc.shortHeader {
+					binary.LittleEndian.PutUint16(data[tc.prefix+2:tc.prefix+4], 4)
+				}
+				if tc.overrunHeader {
+					length := len(data) - tc.prefix + 4
+					if length > 0xffff {
+						t.Fatal("synthetic ACL length exceeds its header")
+					}
+					binary.LittleEndian.PutUint16(data[tc.prefix+2:tc.prefix+4], uint16(length))
+				}
+				address := uintptr(base) + uintptr(tc.prefix)
+				if tc.beforeBase {
+					address = uintptr(base) - 4
+				}
+				if tc.insufficientRemaining {
+					address = uintptr(base) + uintptr(len(data)-2)
+				}
+				before := string(data)
+				if got := ownerACLInAllocation(base, uint64(len(data)), address, user, system, true); got != tc.want {
+					t.Fatalf("checked allocation admitted=%t, want %t", got, tc.want)
+				}
+				if string(data) != before {
+					t.Fatal("checked allocation parser changed owned bytes")
+				}
+				runtime.KeepAlive(words)
+			})
+		}
+	})
 	if !ownerPrivateACL(encode(s), system, system, true) {
 		t.Fatal("current user=SYSTEM must not require a second distinct principal")
 	}
 	if ownerPrivateACL(valid(), nil, system, true) || ownerPrivateACL(valid(), user, nil, true) {
 		t.Fatal("unknown intended principal admitted")
+	}
+}
+
+func TestSnapshotOwnerWindowsProtectionFailures(t *testing.T) {
+	get, token, systemSID := ownerGetSecurity, ownerTokenUser, ownerWellKnownSID
+	t.Cleanup(func() {
+		ownerGetSecurity, ownerTokenUser, ownerWellKnownSID = get, token, systemSID
+	})
+	const userText = "S-1-5-21-1-2-3-1001"
+	user, err := windows.StringToSid(userText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor := func(sddl string) *windows.SECURITY_DESCRIPTOR {
+		t.Helper()
+		sd, err := windows.SecurityDescriptorFromString(sddl)
+		if err != nil || sd == nil || !sd.IsValid() {
+			t.Fatalf("invalid synthetic descriptor fixture: %v", err)
+		}
+		return sd
+	}
+	acl := "(A;;GA;;;" + userText + ")(A;;GA;;;SY)"
+	valid := descriptor("O:" + userText + "D:P" + acl)
+	noOwner := descriptor("D:P" + acl)
+	systemOwner := descriptor("O:SYD:P" + acl)
+	unprotected := descriptor("O:" + userText + "D:" + acl)
+	noDACL := descriptor("O:" + userText)
+	if err := noDACL.SetControl(windows.SE_DACL_PROTECTED, windows.SE_DACL_PROTECTED); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _, err := noOwner.Owner(); err != nil || owner != nil {
+		t.Fatalf("owner-absent fixture not qualified: %v", err)
+	}
+	if _, _, err := noDACL.DACL(); !errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) {
+		t.Fatalf("DACL-absent fixture not qualified: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unchanged")
+	const payload = "owned protection-query fixture"
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault := errors.New("synthetic native metadata uncertainty")
+	for _, tc := range []struct {
+		name                          string
+		sd                            *windows.SECURITY_DESCRIPTOR
+		queryErr, tokenErr, systemErr error
+		file, want                    bool
+	}{
+		{name: "private-current-owner", sd: valid, want: true},
+		{name: "query-error", queryErr: fault},
+		{name: "descriptor-absent"},
+		{name: "owner-absent", sd: noOwner},
+		{name: "token-error", sd: valid, tokenErr: fault},
+		{name: "owner-not-current-user", sd: systemOwner},
+		{name: "system-SID-error", sd: valid, systemErr: fault},
+		{name: "unprotected-directory", sd: unprotected},
+		{name: "DACL-absent", sd: noDACL},
+		{name: "unprotected-file", sd: unprotected, file: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantPath, info := dir, dirInfo
+			if tc.file {
+				wantPath, info = path, fileInfo
+			}
+			calls := 0
+			ownerGetSecurity = func(p string, kind windows.SE_OBJECT_TYPE, flags windows.SECURITY_INFORMATION) (*windows.SECURITY_DESCRIPTOR, error) {
+				calls++
+				if p != wantPath || kind != windows.SE_FILE_OBJECT ||
+					flags != windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION {
+					t.Fatalf("unsafe native metadata query: %q %d %d", p, kind, flags)
+				}
+				return tc.sd, tc.queryErr
+			}
+			ownerTokenUser = func() (*windows.Tokenuser, error) {
+				if tc.tokenErr != nil {
+					return nil, tc.tokenErr
+				}
+				return &windows.Tokenuser{User: windows.SIDAndAttributes{Sid: user}}, nil
+			}
+			ownerWellKnownSID = func(kind windows.WELL_KNOWN_SID_TYPE) (*windows.SID, error) {
+				if kind != windows.WinLocalSystemSid {
+					t.Fatalf("queried an unrelated well-known principal: %d", kind)
+				}
+				if tc.systemErr != nil {
+					return nil, tc.systemErr
+				}
+				return systemSID(kind)
+			}
+			if got := platformProtected(wantPath, info); got != tc.want || calls != 1 {
+				t.Fatalf("protection=%t want=%t metadata calls=%d", got, tc.want, calls)
+			}
+		})
+	}
+	after, err := os.ReadFile(path) //nolint:gosec // G304: exact owned file written above, proving metadata refusals preserved its bytes
+	if err != nil || string(after) != payload {
+		t.Fatalf("protection query changed file contents: %q %v", after, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "unchanged" {
+		t.Fatalf("protection query changed the owned directory: %v %v", entries, err)
+	}
+}
+
+func TestSnapshotOwnerWindowsOpenMarkerEmbeddedNUL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, markerName) + "\x00suffix"
+	f, err := platformOpenMarker(path)
+	if f != nil {
+		_ = f.Close()
+		t.Fatal("embedded NUL unexpectedly opened a marker")
+	}
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("lost embedded-NUL conversion cause: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("invalid marker path mutated its owned directory: %v %v", entries, err)
 	}
 }

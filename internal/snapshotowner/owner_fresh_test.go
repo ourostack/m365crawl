@@ -28,8 +28,8 @@ func TestSnapshotOwnerFreshMarkerFailureClosesFile(t *testing.T) {
 	if captured == nil {
 		t.Fatal("did not reach the exclusive fresh-marker boundary")
 	}
-	if _, err := captured.Stat(); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("failed fresh marker remained open: %v", err)
+	if n, err := captured.Write([]byte("x")); n != 0 || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("failed fresh marker close oracle: wrote %d bytes, err=%v", n, err)
 	}
 	info, err := os.Stat(filepath.Join(dir, markerName))
 	if err != nil || info.Size() != 0 {
