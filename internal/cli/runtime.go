@@ -274,7 +274,7 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 			age = &s
 		}
 	}
-	syncHint := "run " + rt.recoverySyncCommand()
+	syncHint := "run " + rt.recoverySyncCommand(st)
 	if age == nil && rt.format == output.Text {
 		rt.hint(syncHint) // JSON mode carries the same hint in the result (needs_sync, hint)
 	}

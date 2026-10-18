@@ -243,9 +243,10 @@ func TestImplicitSyncNoTeamsEmptyArchive(t *testing.T) {
 	if m["count"].(float64) != 0 || m["sync_error"].(map[string]any)["code"] != "teams_not_installed" {
 		t.Fatalf("result = %v", m)
 	}
-	if strings.Contains(stderr, "hint:") || m["hint"] != "run m365crawl sync" {
+	if strings.Contains(stderr, "hint:") {
 		t.Fatalf("hint %q stderr %q", m["hint"], stderr)
 	}
+	assertRecoveryEnvCommand(t, e, m["hint"], "run ", "", "json", "sync")
 }
 
 func syncRunCount(t *testing.T, e *env) int {
@@ -496,9 +497,11 @@ func TestStatusEmptyArchive(t *testing.T) {
 	if code != 0 || strings.Contains(stderr, "hint:") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
-	if m := decode(t, stdout); m["archive_exists"] != false || m["hint"] != "run m365crawl sync" {
+	m := decode(t, stdout)
+	if m["archive_exists"] != false {
 		t.Fatalf("status = %v", m)
 	}
+	assertRecoveryEnvCommand(t, e, m["hint"], "run ", "", "json", "sync")
 }
 
 func TestConversationsAndPeople(t *testing.T) {
@@ -708,9 +711,10 @@ func TestNeedsSyncSignalInBand(t *testing.T) {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
 		m := decode(t, stdout)
-		if m["needs_sync"] != true || m["hint"] != "run m365crawl sync" {
+		if m["needs_sync"] != true {
 			t.Errorf("%v: needs_sync/hint missing: %s", args, stdout)
 		}
+		assertRecoveryEnvCommand(t, e, m["hint"], "run ", "", "json", "sync")
 		if stderr != "" {
 			t.Errorf("%v: JSON mode keeps stderr empty, the hint is in the result: %q", args, stderr)
 		}

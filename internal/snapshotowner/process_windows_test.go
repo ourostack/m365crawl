@@ -3,8 +3,10 @@
 package snapshotowner
 
 import (
+	"encoding/binary"
 	"errors"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -108,4 +110,124 @@ func firstError(errs ...error) error {
 		}
 	}
 	return nil
+}
+
+func TestSnapshotOwnerWindowsPrivateACL(t *testing.T) {
+	user, err := windows.StringToSid("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type entry struct {
+		sid   *windows.SID
+		mask  uint32
+		flags byte
+	}
+	encode := func(entries ...entry) []byte {
+		t.Helper()
+		if len(entries) > 0xffff {
+			t.Fatal("synthetic ACL entry count exceeds the native header")
+		}
+		data := make([]byte, 8)
+		data[0] = 2
+		binary.LittleEndian.PutUint16(data[4:6], uint16(len(entries)))
+		for _, e := range entries {
+			sid := unsafe.Slice((*byte)(unsafe.Pointer(e.sid)), e.sid.Len())
+			ace := make([]byte, 8+len(sid))
+			if len(ace) > 0xffff {
+				t.Fatal("synthetic ACE exceeds the native header")
+			}
+			ace[0], ace[1] = windows.ACCESS_ALLOWED_ACE_TYPE, e.flags
+			binary.LittleEndian.PutUint16(ace[2:4], uint16(len(ace)))
+			binary.LittleEndian.PutUint32(ace[4:8], e.mask)
+			copy(ace[8:], sid)
+			data = append(data, ace...)
+		}
+		if len(data) > 0xffff {
+			t.Fatal("synthetic ACL exceeds the native header")
+		}
+		binary.LittleEndian.PutUint16(data[2:4], uint16(len(data)))
+		return data
+	}
+	const (
+		full    = 0x1f01ff
+		inherit = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+		only    = inherit | windows.INHERIT_ONLY_ACE
+	)
+	u, s := entry{user, full, 0}, entry{system, full, 0}
+	ui, si := entry{user, windows.GENERIC_ALL, only}, entry{system, windows.GENERIC_ALL, only}
+	valid := func() []byte { return encode(u, ui, s, si) }
+	for _, tc := range []struct {
+		name      string
+		data      []byte
+		directory bool
+		want      bool
+	}{
+		{"effective-and-inherit-only-four", valid(), true, true},
+		{"principal-order-is-not-identity", encode(si, s, ui, u), true, true},
+		{"generic-two", encode(entry{user, windows.GENERIC_ALL, inherit}, entry{system, windows.GENERIC_ALL, inherit}), true, true},
+		{"effective-two", encode(u, s), true, true},
+		{"file-effective-two", encode(u, s), false, true},
+		{"file-inherited-effective", encode(entry{user, full, windows.INHERITED_ACE}, entry{system, full, windows.INHERITED_ACE}), false, true},
+		{"foreign-effective", encode(u, s, entry{foreign, full, 0}), true, false},
+		{"foreign-inherit-only", encode(u, s, entry{foreign, windows.GENERIC_ALL, only}), true, false},
+		{"missing-user-effective", encode(ui, s, si), true, false},
+		{"missing-system-effective", encode(u, ui, si), true, false},
+		{"only-inherit-is-not-effective", encode(ui, si), true, false},
+		{"inherit-only-on-file", valid(), false, false},
+		{"zero-access", encode(entry{user, 0, 0}, s), true, false},
+		{"partial-access", encode(entry{user, windows.GENERIC_READ, 0}, s), true, false},
+		{"unknown-access-bits", encode(entry{user, full | 0x02000000, 0}, s), true, false},
+		{"empty-acl", encode(), true, false},
+		{"nil-acl", nil, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ownerPrivateACL(tc.data, user, system, tc.directory); got != tc.want {
+				t.Fatalf("private ACL=%t, want %t", got, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{"unsupported-acl-revision", func(b []byte) { b[0] = 1 }},
+		{"reserved-acl-byte", func(b []byte) { b[1] = 1 }},
+		{"reserved-acl-word", func(b []byte) { b[6] = 1 }},
+		{"acl-size-overrun", func(b []byte) { binary.LittleEndian.PutUint16(b[2:4], binary.LittleEndian.Uint16(b[2:4])+4) }},
+		{"acl-count-overrun", func(b []byte) { binary.LittleEndian.PutUint16(b[4:6], 0xffff) }},
+		{"unaccounted-ace", func(b []byte) { binary.LittleEndian.PutUint16(b[4:6], 2) }},
+		{"denied-ace", func(b []byte) { b[8] = windows.ACCESS_DENIED_ACE_TYPE }},
+		{"object-ace-unsupported", func(b []byte) { b[8] = 5 }},
+		{"unknown-flags", func(b []byte) { b[9] = 0x40 }},
+		{"no-propagate-unsupported", func(b []byte) { b[9] = inherit | windows.NO_PROPAGATE_INHERIT_ACE }},
+		{"inherit-only-without-inheritance", func(b []byte) { b[9] = windows.INHERIT_ONLY_ACE }},
+		{"short-ace", func(b []byte) { binary.LittleEndian.PutUint16(b[10:12], 8) }},
+		{"unaligned-ace", func(b []byte) { binary.LittleEndian.PutUint16(b[10:12], 17) }},
+		{"ace-overrun", func(b []byte) { binary.LittleEndian.PutUint16(b[10:12], 0xfffc) }},
+		{"unsupported-sid-revision", func(b []byte) { b[16] = 2 }},
+		{"sid-subauthority-overrun", func(b []byte) { b[17] = 15 }},
+		{"sid-trailing-data", func(b []byte) { b[17]-- }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := valid()
+			tc.mutate(data)
+			if ownerPrivateACL(data, user, system, true) {
+				t.Fatal("malformed/unsupported ACL admitted")
+			}
+		})
+	}
+	if !ownerPrivateACL(encode(s), system, system, true) {
+		t.Fatal("current user=SYSTEM must not require a second distinct principal")
+	}
+	if ownerPrivateACL(valid(), nil, system, true) || ownerPrivateACL(valid(), user, nil, true) {
+		t.Fatal("unknown intended principal admitted")
+	}
 }

@@ -98,10 +98,13 @@ func TestSnapshotOwnerConservativeLiveness(t *testing.T) {
 				return !tc.unprotected && (!tc.markerUnprotected || p != path)
 			}
 			ownerReadFile = func(p string) ([]byte, error) {
+				if p != path {
+					t.Fatalf("owner reader escaped the exact owned marker: %q", p)
+				}
 				if tc.readDenied {
 					return nil, fs.ErrPermission
 				}
-				return os.ReadFile(p)
+				return os.ReadFile(p) //nolint:gosec // G304: p is checked against the exact marker written above in this subtest's private t.TempDir
 			}
 			stats := 0
 			ownerLstat = func(p string) (fs.FileInfo, error) {

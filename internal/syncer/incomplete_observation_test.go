@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 
 	"github.com/ourostack/m365crawl/internal/indexeddb"
+	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
 	gl "github.com/syndtr/goleveldb/leveldb"
@@ -441,5 +444,90 @@ func TestSyncIncompleteObservationRetainsArchiveAndCalendar(t *testing.T) {
 				t.Errorf("owned snapshots leaked: %v", leaked)
 			}
 		})
+	}
+}
+
+// OOS-1 is a hypothesis: archive-only backfill must not turn unread cache days into verified ones.
+func TestSyncFirstIncompleteCalendarBackfillWithholdsAuthority(t *testing.T) {
+	tmp := isolateTmp(t)
+	utcDays(t)
+	root, _, keeper, logs := observationSource(t, false)
+	archive := newDB(t)
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("qualification: first observation must start without an archive: %v", err)
+	}
+	restore := func() {
+		t.Helper()
+		for path, b := range logs {
+			if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // G703: exact saved journal in this test's new private LevelDB source
+				t.Errorf("restore owned journal: %v", err)
+			}
+		}
+	}
+	t.Cleanup(restore)
+	var dir string
+	for path, b := range logs {
+		dir = filepath.Dir(path)
+		if err := os.WriteFile(path, b[:7], 0o600); err != nil { //nolint:gosec // G703: saved payload journal only in this test's new private LevelDB source
+			t.Fatal(err)
+		}
+	}
+	o, err := indexeddb.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, closeErr := o.Stats(), o.Close()
+	if closeErr != nil || stats.TruncatedLogTails == 0 {
+		t.Fatalf("qualification: actual torn journal not established: stats=%+v close=%v", stats, closeErr)
+	}
+	originalEnsure := ensureCalendar
+	backfills := 0
+	ensureCalendar = func(ctx context.Context, st *store.Store, at time.Time) (*store.CalendarResult, error) {
+		backfills++
+		return originalEnsure(ctx, st, at)
+	}
+	t.Cleanup(func() { ensureCalendar = originalEnsure })
+	const sourceClocks = `select json_array(source,account_id,window_start,window_end,synced_at,cache_fresh_at) from calendar_sources order by source,account_id`
+	const dayClocks = `select json_array(source,account_id,day,first_verified_at,last_verified_at) from calendar_covered_days order by source,account_id,day`
+	opts := Options{Root: root, DBPath: archive}
+	for attempt := 0; attempt < 3; attempt++ {
+		calls := backfills
+		report, _ := run(t, opts)
+		if backfills != calls+1 || report.Omissions["truncated_log_tail"] == 0 || report.Status == StatusOK {
+			t.Fatalf("qualification: actual normal Run/backfill and incomplete input required: calls=%d report=%+v", backfills-calls, report)
+		}
+		if n := recordsQuery(t, archive, `select count(*) from records where database=? and value_json is not null and removed_at is null`, keeper); n != 1 {
+			t.Fatalf("qualification: readable calendar raw was not archived: %d", n)
+		}
+		t.Logf("damaged attempt=%d projected=%d sources=%s days=%s", attempt,
+			recordsQuery(t, archive, `select count(*) from calendar_source_events where removed_at is null`),
+			observationState(t, archive, sourceClocks), observationState(t, archive, dayClocks))
+		// Positive projection and a raw-derived cache timestamp alone are not a covering read.
+		if n := recordsQuery(t, archive, `select count(*) from calendar_sources where source='teams' and synced_at<>''`); n != 0 {
+			t.Errorf("OOS1 unqualified first/repeated observation acquired a source sync clock through backfill: attempt=%d sources=%s",
+				attempt, observationState(t, archive, sourceClocks))
+		}
+		if n := recordsQuery(t, archive, `select count(*) from calendar_covered_days where source='teams' and (first_verified_at<>'' or last_verified_at<>'')`); n != 0 {
+			t.Errorf("OOS1 archive-only backfill granted verified coverage after damaged observation: attempt=%d days=%s",
+				attempt, observationState(t, archive, dayClocks))
+		}
+		if n := recordsQuery(t, archive, `select count(*) from records where removed_at is not null`); n != 0 {
+			t.Errorf("incomplete first/repeated observation invented raw absence: %d", n)
+		}
+	}
+	restore()
+	restored, _ := run(t, opts)
+	if restored.Omissions["truncated_log_tail"] != 0 || restored.Status != StatusOK {
+		t.Fatalf("qualification: ordinary restored complete recovery did not succeed: %+v", restored)
+	}
+	if n := recordsQuery(t, archive, `select count(*) from calendar_source_events where removed_at is null`); n != 2 {
+		t.Fatalf("qualification: complete recovery did not project both real fixture events: %d", n)
+	}
+	if recordsQuery(t, archive, `select count(*) from calendar_sources where source='teams' and synced_at<>''`) == 0 ||
+		recordsQuery(t, archive, `select count(*) from calendar_covered_days where source='teams' and first_verified_at<>'' and last_verified_at<>''`) == 0 {
+		t.Fatal("qualification: complete source must establish positive source/day authority")
+	}
+	if leaked := snapshotDirs(t, tmp); len(leaked) != 0 {
+		t.Errorf("owned snapshots leaked: %v", leaked)
 	}
 }

@@ -689,12 +689,23 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 	w := calendar.Window{Source: calendar.SourceTeams, AccountID: account, SyncedAt: m.at}
 	if m.read == nil {
 		// A rebuild reads no cache: it verifies no day again and does not say the account synced now.
+		var pending bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, calendarReplayKey(g.source)).Scan(&pending); err != nil {
+			return counts, nil, err
+		}
 		var prev string
 		if err := tx.QueryRowContext(ctx, `select synced_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return counts, nil, err
 		}
 		if t := parseTime(sql.NullString{String: prev, Valid: prev != ""}); !t.IsZero() {
 			w.SyncedAt = t
+		}
+		if pending {
+			// Retained positives are still useful, but an incomplete source cannot acquire its
+			// first verified day or source clock through an archive-only rebuild.
+			w.SyncedAt = parseTime(sql.NullString{String: prev, Valid: prev != ""})
+			days = nil
+			lo, hi = first.String, last.String
 		}
 		fresh := days[:0:0]
 		for _, d := range days {

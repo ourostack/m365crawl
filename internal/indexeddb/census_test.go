@@ -52,7 +52,7 @@ func TestCensusTornJournalRetainsOnlyObservedPrefix(t *testing.T) {
 			}
 			saved := map[string][]byte{}
 			for _, path := range logs {
-				b, err := os.ReadFile(path)
+				b, err := os.ReadFile(path) //nolint:gosec // G304: journal generated above in this test's private t.TempDir, selected by its local *.log glob
 				if err != nil {
 					t.Fatal(err)
 				}

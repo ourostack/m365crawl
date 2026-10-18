@@ -211,9 +211,16 @@ func TestNoPlainHintLineInJSONMode(t *testing.T) {
 		t.Fatalf("the hint stays in the JSON: %v", m)
 	}
 	_, _, stderr = e.run("people", "--format", "text")
-	if !strings.Contains(stderr, "hint: run m365crawl sync") {
-		t.Fatalf("text mode keeps the hint line: %q", stderr)
+	var hint string
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(line, "hint: ") {
+			if hint != "" {
+				t.Fatalf("text mode repeated its hint: %q", stderr)
+			}
+			hint = strings.TrimPrefix(line, "hint: ")
+		}
 	}
+	assertRecoveryEnvCommand(t, e, hint, "run ", "", "text", "sync")
 }
 
 // --- argument validation comes before the implicit sync ---

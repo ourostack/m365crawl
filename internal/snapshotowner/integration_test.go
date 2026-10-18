@@ -75,7 +75,7 @@ func TestSnapshotOwnerPositiveDeadSweepIntegration(t *testing.T) {
 				if !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("positively dead payload survived: %v", err)
 				}
-			} else if b, err := os.ReadFile(payload); err != nil || string(b) != "synthetic snapshot payload" {
+			} else if b, err := os.ReadFile(payload); err != nil || string(b) != "synthetic snapshot payload" { //nolint:gosec // G304: exact synthetic payload written above inside this test's private snapshot root
 				t.Fatalf("uncertain/live payload was changed: %q %v", b, err)
 			}
 			wantQueries := 1

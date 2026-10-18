@@ -2,10 +2,9 @@ package cli
 
 import (
 	"path/filepath"
-	goruntime "runtime"
-	"strings"
 
 	"github.com/openclaw/crawlkit/output"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // recoveryCommand carries only context accepted by the destination, never item projection flags.
@@ -43,34 +42,30 @@ func (rt *runtime) recoveryCommand(acquire bool, account string, args ...string)
 			flags = append(flags, root.flag, root.path)
 		}
 	}
-	if goruntime.GOOS == "windows" {
-		for _, word := range append([]string{db}, flags...) {
-			if strings.Trim(word, windowsQuotable) != "" {
-				return "no executable recovery command: selected context requires literal arguments on Windows"
-			}
-		}
-		// Link values are concrete acquisition context, not item selectors or help placeholders.
-		for i, word := range args {
-			if (word == "--outlook-account" || word == "--outlook-profile") && i+1 < len(args) {
-				if strings.Trim(args[i+1], windowsQuotable) != "" && args[i+1] != "<tenantId>/<userId>" {
-					return "no executable recovery command: selected link requires literal arguments on Windows"
-				}
-			}
-		}
-	}
-	return archiveScopedCommand(db, append(flags, args...)...)
+	return recoveryPlatformCommand(db, flags, args)
 }
 
-func (rt *runtime) recoverySyncCommand() string {
+func (rt *runtime) recoverySyncCommand(st *store.Store) string {
+	if rt.mailAccount() != "" {
+		return "no executable recovery command: an Outlook read account is not a Teams sync filter; acquire the selected archive and Outlook root separately without --account"
+	}
 	account := ""
 	if rt.account != nil {
 		account = rt.account.TenantID + "/" + rt.account.UserID
 	}
 	args := []string{"sync"}
-	if rt.outlookOn && rt.outlookLink != "" {
+	link := rt.outlookOn && rt.outlookLink != ""
+	if account != "" && link {
+		if st == nil || rt.linkPending(st) {
+			return "no executable recovery command: cannot combine a Teams account filter with an unconfirmed Outlook link; apply the link separately"
+		}
+		// An already-applied link needs no new operation, and sync rejects it with --account.
+		link = false
+	}
+	if link {
 		args = append(args, "--outlook-account", rt.outlookLink)
 	}
-	if rt.outlookOn && rt.outlookProfile != "" {
+	if rt.outlookOn && rt.outlookProfile != "" && account == "" {
 		args = append(args, "--outlook-profile", rt.outlookProfile)
 	}
 	return rt.recoveryCommand(true, account, args...)

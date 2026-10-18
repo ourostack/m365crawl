@@ -20,6 +20,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/onedriveusage"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func recoveryArchives(t *testing.T) (a, b *env) {
@@ -92,6 +93,23 @@ func recoveryContext(t *testing.T, words []string, db, format string) {
 	}
 	if slices.Contains(words, "--fields") {
 		t.Errorf("follow-up copied route-specific item projection: %q", words)
+	}
+}
+
+func assertRecoveryEnvCommand(t *testing.T, e *env, value any, prefix, suffix, format string, args ...string) {
+	t.Helper()
+	text, ok := value.(string)
+	if !ok || !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, suffix) {
+		t.Fatalf("recovery instruction lost its message framing: %v; want %q...%q", value, prefix, suffix)
+	}
+	words := recoveryWords(t, strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix))
+	want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", format}
+	if args[0] == "sync" {
+		want = append(want, "--teams-root", e.root, "--outlook-root", "none")
+	}
+	want = append(want, args...)
+	if !slices.Equal(words, want) {
+		t.Fatalf("recovery argv=%q, want exactly %q", words, want)
 	}
 }
 
@@ -799,4 +817,182 @@ func recoveryPartFetched(t *testing.T, path, account string) bool {
 		t.Fatal(err)
 	}
 	return n == 1
+}
+
+func TestRecoveryCalendarRemediesKeepDestinationValidAccountScope(t *testing.T) {
+	for _, scope := range []string{"outlook-read", "applied-link"} {
+		for _, tc := range []struct {
+			name, format string
+			flags        []string
+		}{
+			{"json", "json", []string{"--format", "json"}},
+			{"log", "log", []string{"--format", "log"}},
+			{"text", "text", []string{"--format", "text"}},
+			{"json-wins", "json", []string{"--json", "--format", "text"}},
+		} {
+			t.Run(scope+"/"+tc.name, func(t *testing.T) {
+				ctx := context.Background()
+				a, b := recoveryArchives(t)
+				outlook := outlookProfiles(t, "Main")
+				db := loopRecords(t, b)
+				insertLoopCLI(t, db, "default-only", loopCLIValue(t, 1, [2]string{"default", "Unrelated default text"}))
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+				beforeB := recoveryBytes(t, b.db)
+				account := "outlook/Main"
+				var beforeA []byte
+				if scope == "applied-link" {
+					account = trAccount
+					db = loopRecords(t, a)
+					w := calendar.Window{Source: calendar.SourceTeams, AccountID: trAccount,
+						Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+						End:   time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), SyncedAt: trFetchedAt, CacheFreshAt: trFetchedAt}
+					if _, err := calendar.ApplySnapshot(ctx, db, w, []calendar.Event{trEvent()}, trFetchedAt); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Close(); err != nil {
+						t.Fatal(err)
+					}
+					st, err := store.Open(ctx, a.db)
+					if err != nil {
+						t.Fatal(err)
+					}
+					sess, err := st.Begin(ctx)
+					if err != nil {
+						_ = st.Close()
+						t.Fatal(err)
+					}
+					if err := sess.ApplyAccount(ctx, teamsdesktop.Account{TenantID: tenantA, UserID: userA, Locale: "en-us"}); err != nil {
+						sess.Rollback()
+						_ = st.Close()
+						t.Fatal(err)
+					}
+					if err := sess.Commit(); err != nil {
+						_ = st.Close()
+						t.Fatal(err)
+					}
+					if err := st.SetOutlookLink(ctx, "outlook/Main", trAccount, trFetchedAt); err != nil {
+						_ = st.Close()
+						t.Fatalf("qualification: real calendar link could not be applied: %v", err)
+					}
+					linked, linkErr := st.OutlookLinkInEffect(ctx, "outlook/Main", trAccount)
+					last, ageErr := st.LastSuccessFor(ctx, trAccount)
+					closeErr := st.Close()
+					if linkErr != nil || ageErr != nil || closeErr != nil || !linked || !last.IsZero() {
+						t.Fatalf("qualification: need applied link and no covering success: linked=%t last=%v errors=%v/%v/%v",
+							linked, last, linkErr, ageErr, closeErr)
+					}
+					beforeA = recoveryBytes(t, a.db)
+				}
+				oldSync := runSync
+				t.Cleanup(func() { runSync = oldSync })
+				calls := 0
+				runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+					calls++
+					if o.DBPath != a.db || o.Root != a.root || !o.OutlookEnabled || o.OutlookRoot != outlook {
+						t.Errorf("actual calendar remedy lost selected acquisition context: %+v", o)
+					}
+					if scope == "outlook-read" {
+						// runner.outlookOn requires Account=nil, not a read-only outlook/Main selector.
+						if o.Account != nil {
+							t.Errorf("N1 actual calendar remedy suppresses intended Outlook source: Account=%+v", o.Account)
+						}
+					} else if o.Account == nil || o.Account.TenantID+"/"+o.Account.UserID != trAccount ||
+						o.OutlookLink != "" || o.OutlookLinkProfile != "" {
+						t.Errorf("N1 applied-link remedy broadened Teams scope or repeated a forbidden link operation: %+v", o)
+					}
+					st, err := store.Open(ctx, o.DBPath)
+					if err != nil {
+						return syncer.Report{}, nil, err
+					}
+					return syncer.Report{Status: syncer.StatusOK}, nil, st.Close()
+				}
+				args := append([]string{"--max-age", "0", "--outlook-root", outlook, "--account", account}, tc.flags...)
+				if scope == "applied-link" {
+					args = append(args, "--outlook-profile", "Main", "--outlook-account", trAccount)
+				}
+				args = append(args, "calendar", "--from", "2026-11-03", "--days", "1")
+				code, out, stderr := a.run(args...)
+				if code != 0 || calls != 0 {
+					t.Fatalf("qualification: supported initial calendar read failed/acquired: exit=%d calls=%d stderr=%s", code, calls, stderr)
+				}
+				var hint, note string
+				if tc.format == "text" {
+					hint, note = stderr, out
+				} else {
+					doc := recoveryDocument(t, out, tc.format, "calendar")
+					age, present := doc["archive_age_seconds"]
+					if !present || age != nil || doc["needs_sync"] != true || doc["sync_error"] != nil {
+						t.Fatalf("qualification: calendar read needs unknown age without acquisition error: %v", doc)
+					}
+					hint, _ = doc["hint"].(string)
+					note, _ = doc["note"].(string)
+				}
+				if scope == "outlook-read" {
+					if _, err := os.Stat(a.db); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("initial readonly calendar read created A: %v", err)
+					}
+				} else {
+					recoveryUnchanged(t, a.db, beforeA)
+				}
+				recoveryUnchanged(t, b.db, beforeB)
+				if hint == "" {
+					t.Fatal("qualification: actual unknown-age calendar hint is absent")
+				}
+				remedies := []string{hint}
+				if strings.Contains(note, "m365crawl ") || strings.Contains(note, "no executable recovery command:") {
+					remedies = append(remedies, note)
+				}
+				if scope == "outlook-read" && len(remedies) != 2 {
+					t.Fatalf("qualification: missing-archive calendar must emit both actual hint and note: hint=%q note=%q", hint, note)
+				}
+				for _, remedy := range remedies {
+					beforeCalls := calls
+					if strings.Contains(remedy, "no executable recovery command:") {
+						if strings.Contains(remedy, "m365crawl ") {
+							t.Errorf("non-executable guidance also offered an executable command: %q", remedy)
+						}
+						continue
+					}
+					words := recoveryInstruction(t, remedy)
+					recoveryContext(t, words, a.db, tc.format)
+					for flag, want := range map[string]string{"--teams-root": a.root, "--outlook-root": outlook} {
+						if recoveryValue(words, flag) != want {
+							t.Errorf("actual calendar remedy lost %s: %q", flag, words)
+						}
+					}
+					if scope == "outlook-read" {
+						if recoveryValue(words, "--account") != "" {
+							t.Errorf("N1 Outlook read selector became an invalid Teams acquisition filter: %q", words)
+						}
+					} else if recoveryValue(words, "--account") != trAccount ||
+						recoveryValue(words, "--outlook-account") != "" || recoveryValue(words, "--outlook-profile") != "" {
+						t.Errorf("N1 actual applied-link instruction is not destination-valid for the selected Teams account: %q", words)
+					}
+					code, replayed, replayErr := recoveryInvoke(words[1:])
+					if code != 0 {
+						t.Errorf("N1 actual emitted calendar remedy refused before valid acquisition: exit=%d stderr=%s", code, replayErr)
+					} else if tc.format != "text" {
+						recoveryDocument(t, replayed, tc.format, "sync")
+					}
+					if calls != beforeCalls+1 {
+						t.Errorf("actual executable calendar remedy did not reach recording acquisition boundary: before=%d after=%d", beforeCalls, calls)
+					}
+					recoveryUnchanged(t, b.db, beforeB)
+				}
+				if scope == "applied-link" {
+					st, err := store.OpenReadOnly(ctx, a.db)
+					if err != nil {
+						t.Fatal(err)
+					}
+					linked, err := st.OutlookLinkInEffect(ctx, "outlook/Main", trAccount)
+					closeErr := st.Close()
+					if err != nil || closeErr != nil || !linked {
+						t.Errorf("actual remedies lost the already-applied link: linked=%t errors=%v/%v", linked, err, closeErr)
+					}
+				}
+			})
+		}
+	}
 }
