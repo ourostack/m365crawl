@@ -15,6 +15,7 @@ on:
           - make-check
           - assemble
           - windows-owner-coverage
+          - native-build
       version:
         description: Assembly version, unused for make-check
         required: false
@@ -65,6 +66,107 @@ jobs:
         run: brew install shellcheck
       - name: Run unchanged complete local gate
         run: make check
+
+  native-build:
+    if: inputs.operation == 'native-build'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GOENV: "off"
+      GOTOOLCHAIN: local
+      GOFLAGS: "-mod=readonly"
+      GOOS: darwin
+      GOARCH: arm64
+      CGO_ENABLED: "0"
+    steps:
+      - name: Validate exact source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Compile canonical Darwin ARM64 identities
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1)"
+          printf 'verified-source=%s\n' "$SOURCE_SHA"
+          mkdir identity-output
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags "-s -w -X github.com/ourostack/m365crawl/internal/cli.version=dev-v1-hardening -X github.com/ourostack/m365crawl/internal/cli.commit=$SOURCE_SHA -X github.com/ourostack/m365crawl/internal/cli.date=$BUILD_DATE" -o identity-output/m365crawl-candidate ./cmd/m365crawl
+          go test -c -tags acceptance -o identity-output/acceptance.test ./acceptance
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          def output(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          root = pathlib.Path("identity-output")
+          names = ["acceptance.test", "m365crawl-candidate"]
+          assert sorted(p.name for p in root.iterdir()) == names
+          assert output("git", "status", "--porcelain=v1") == "?? identity-output/"
+          subprocess.run(["git", "diff", "--exit-code"], check=True)
+          sdk = pathlib.Path(output("go", "env", "GOROOT"))
+          sdk_sources = [
+              "testing/testing.go",
+              "testing/internal/testdeps/deps.go",
+              "runtime/proc.go",
+              "os/exec/exec.go",
+              "cmd/go/internal/test/test.go",
+          ]
+          manifest = {
+              "schema_version": 1,
+              "source_sha": output("git", "rev-parse", "HEAD"),
+              "source_tree": output("git", "rev-parse", "HEAD^{tree}"),
+              "go_version": output("go", "version"),
+              "go_mod_sha256": hashlib.sha256(pathlib.Path("go.mod").read_bytes()).hexdigest(),
+              "go_sum_sha256": hashlib.sha256(pathlib.Path("go.sum").read_bytes()).hexdigest(),
+              "sdk_go_sha256": hashlib.sha256((sdk / "bin/go").read_bytes()).hexdigest(),
+              "sdk_source_sha256": {
+                  name: hashlib.sha256((sdk / "src" / name).read_bytes()).hexdigest()
+                  for name in sdk_sources
+              },
+              "build_environment": {
+                  name: os.environ[name]
+                  for name in ["GOOS", "GOARCH", "CGO_ENABLED", "GOENV", "GOWORK", "GOTOOLCHAIN", "GOFLAGS"]
+              },
+              "files": [
+                  {
+                      "name": name,
+                      "bytes": (root / name).stat().st_size,
+                      "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest(),
+                  }
+                  for name in names
+              ],
+              "qualification": "Actual canonical Go build and test-c output only; not executed native acceptance, installed binaries or signed release artifacts.",
+          }
+          assert manifest["source_sha"] == os.environ["SOURCE_SHA"]
+          (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print("native-build-source=" + manifest["source_sha"])
+          for row in manifest["files"]:
+              print("native-build-file=" + json.dumps(row, sort_keys=True))
+          PY
+      - name: Retain exact provisional build identities
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: v1-native-${{ inputs.source_sha }}
+          path: identity-output/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   assemble:
     if: inputs.operation == 'assemble'
