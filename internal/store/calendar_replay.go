@@ -16,7 +16,7 @@ func (s *Store) CalendarReplayPending(ctx context.Context, source string) (bool,
 	return pending, err
 }
 
-// DeriveCalendarObservation defers incomplete positives without granting absence or freshness.
+// DeriveCalendarObservation retains incomplete positives without granting absence or freshness.
 // A complete unfiltered replay must apply every retained group before discharging the obligation.
 func (x *Session) DeriveCalendarObservation(ctx context.Context, source string, at time.Time, zone *time.Location, present []string, complete, filtered bool) (CalendarResult, error) {
 	key := calendarReplayKey(source)
@@ -43,6 +43,16 @@ func (x *Session) DeriveCalendarObservation(ctx context.Context, source string, 
 		}
 	}
 	mode := calendarMode{source: source, since: at.UTC().Format(timeLayout), at: at, zone: zone, read: read}
+	if !complete {
+		empty, err := calendarLost(ctx, x.tx)
+		if err != nil {
+			return CalendarResult{}, err
+		}
+		if empty {
+			// Bootstrap retained positives, not authority, from this source's whole archive.
+			mode.since, mode.read = "", nil
+		}
+	}
 	if pending && complete {
 		mode.since = ""
 		mode.replayAll = !filtered

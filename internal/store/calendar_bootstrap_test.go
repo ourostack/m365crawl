@@ -95,3 +95,66 @@ func TestCalendarPendingBackfillCannotMintFirstCacheFreshness(t *testing.T) {
 		t.Errorf("archive-only backfill discharged pending replay: %t %v", pending, err)
 	}
 }
+
+func TestCalendarIncompleteBootstrapKeepsSourceScopeAndOlderPositives(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	putRecords(t, s, t0, calEv(acctA, "bootstrap-old", "2026-09-10T09:00:00Z", nil))
+	putFrom(t, s, calSource2, t0, calEv(acctB, "bootstrap-peer", "2026-09-11T09:00:00Z", nil))
+	x, err := s.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Rollback()
+	if _, err := x.UpsertRecords(calSource, []teamsdesktop.GenericRecord{
+		calEv(acctA, "bootstrap-new", "2026-09-12T09:00:00Z", nil),
+	}, t1); err != nil {
+		t.Fatal(err)
+	}
+	result, err := x.DeriveCalendarObservation(ctx, calSource, t1, time.UTC, nil, false, false)
+	if err != nil || result.failure != nil || !result.ReplayPending {
+		t.Fatalf("cold source-scoped bootstrap: %+v %v", result, err)
+	}
+	if err := x.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for query, want := range map[string]string{
+		`select count(*) from calendar_source_events where source_id in ('bootstrap-old','bootstrap-new') and removed_at is null`: "2",
+		`select count(*) from calendar_source_events where source_id='bootstrap-peer'`:                                            "0",
+		`select count(*) from calendar_sources where source='teams'`:                                                              "1",
+		`select count(*) from calendar_sources where synced_at<>'' or cache_fresh_at<>''`:                                         "0",
+		`select count(*) from calendar_covered_days`:                                                                              "0",
+	} {
+		if got := scalar(t, s, query); got != want {
+			t.Errorf("source-scoped retained bootstrap: %s = %q, want %q", query, got, want)
+		}
+	}
+	if pending, err := s.CalendarReplayPending(ctx, calSource2); err != nil || pending {
+		t.Errorf("bootstrap invented a peer-source replay obligation: %t %v", pending, err)
+	}
+}
+
+func TestCalendarIncompleteBootstrapFaultsRollBack(t *testing.T) {
+	sweepCalendar(t, func(t *testing.T, s *Store) {
+		putRecords(t, s, t0, calEv(acctA, "bootstrap-retained", "2026-09-10T09:00:00Z", nil))
+	}, func(ctx context.Context, s *Store) error {
+		x, err := s.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer x.Rollback()
+		if _, err := x.UpsertRecords(calSource, []teamsdesktop.GenericRecord{
+			calEv(acctA, "bootstrap-written", "2026-09-11T09:00:00Z", nil),
+		}, t1); err != nil {
+			return err
+		}
+		result, err := x.DeriveCalendarObservation(ctx, calSource, t1, time.UTC, nil, false, false)
+		if err != nil {
+			return err
+		}
+		if result.failure != nil {
+			return result.failure
+		}
+		return x.Commit()
+	})
+}

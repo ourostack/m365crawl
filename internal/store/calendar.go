@@ -687,14 +687,14 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 		}
 	}
 	w := calendar.Window{Source: calendar.SourceTeams, AccountID: account, SyncedAt: m.at}
+	var pending bool
 	if m.read == nil {
 		// A rebuild reads no cache: it verifies no day again and does not say the account synced now.
-		var pending bool
 		if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, calendarReplayKey(g.source)).Scan(&pending); err != nil {
 			return counts, nil, err
 		}
-		var prev string
-		if err := tx.QueryRowContext(ctx, `select synced_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		var prev, prevFresh string
+		if err := tx.QueryRowContext(ctx, `select synced_at,cache_fresh_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev, &prevFresh); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return counts, nil, err
 		}
 		if t := parseTime(sql.NullString{String: prev, Valid: prev != ""}); !t.IsZero() {
@@ -704,6 +704,7 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 			// Retained positives are still useful, but an incomplete source cannot acquire its
 			// first verified day or source clock through an archive-only rebuild.
 			w.SyncedAt = parseTime(sql.NullString{String: prev, Valid: prev != ""})
+			w.CacheFreshAt = parseTime(sql.NullString{String: prevFresh, Valid: prevFresh != ""})
 			days = nil
 			lo, hi = first.String, last.String
 		}
@@ -724,11 +725,13 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 		end, _ := time.ParseInLocation(time.DateOnly, hi, m.zone)
 		w.Start, w.End = start, end.AddDate(0, 0, 1)
 	}
-	fresh, err := g.freshAt(ctx, tx, account, m.at)
-	if err != nil {
-		return counts, nil, err
+	if !pending {
+		fresh, err := g.freshAt(ctx, tx, account, m.at)
+		if err != nil {
+			return counts, nil, err
+		}
+		w.CacheFreshAt = fresh
 	}
-	w.CacheFreshAt = fresh
 	// The core marks the ids it is given as gone before it captures the batch's events, and an event
 	// of the batch is live whatever the list says. A removed record that is mapped here (a
 	// backfill maps every row) must end up gone, so the gone ids are applied after the events.
