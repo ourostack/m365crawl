@@ -447,7 +447,7 @@ func TestSyncIncompleteObservationRetainsArchiveAndCalendar(t *testing.T) {
 	}
 }
 
-// OOS-1 is a hypothesis: archive-only backfill must not turn unread cache days into verified ones.
+// Incomplete first reads expose retained positives without borrowing backfill authority.
 func TestSyncFirstIncompleteCalendarBackfillWithholdsAuthority(t *testing.T) {
 	tmp := isolateTmp(t)
 	utcDays(t)
@@ -502,17 +502,28 @@ func TestSyncFirstIncompleteCalendarBackfillWithholdsAuthority(t *testing.T) {
 		t.Logf("damaged attempt=%d projected=%d sources=%s days=%s", attempt,
 			recordsQuery(t, archive, `select count(*) from calendar_source_events where removed_at is null`),
 			observationState(t, archive, sourceClocks), observationState(t, archive, dayClocks))
-		// Positive projection and a raw-derived cache timestamp alone are not a covering read.
-		if n := recordsQuery(t, archive, `select count(*) from calendar_sources where source='teams' and synced_at<>''`); n != 0 {
-			t.Errorf("OOS1 unqualified first/repeated observation acquired a source sync clock through backfill: attempt=%d sources=%s",
+		if n := recordsQuery(t, archive, `select count(*) from calendar_source_events where removed_at is null`); n != 1 {
+			t.Errorf("first/repeated incomplete sync stranded retained positive events: attempt=%d got=%d want=1", attempt, n)
+		}
+		if n := recordsQuery(t, archive, `select count(*) from meta where key like 'calendar_replay/%'`); n != 1 {
+			t.Errorf("positive bootstrap lost its durable replay obligation: attempt=%d got=%d", attempt, n)
+		}
+		if fingerprint := queryStr(t, archive, `select fingerprint from sync_runs where source<>'' order by id desc limit 1`); fingerprint != "" {
+			t.Errorf("incomplete positive bootstrap minted a reusable fingerprint: attempt=%d fingerprint=%q", attempt, fingerprint)
+		}
+		if n := recordsQuery(t, archive, `select count(*) from calendar_sources where source='teams' and (synced_at<>'' or cache_fresh_at<>'' or coalesce(window_start,'')<>'' or coalesce(window_end,'')<>'')`); n != 0 {
+			t.Errorf("unqualified first/repeated observation acquired freshness/window authority through backfill: attempt=%d sources=%s",
 				attempt, observationState(t, archive, sourceClocks))
 		}
-		if n := recordsQuery(t, archive, `select count(*) from calendar_covered_days where source='teams' and (first_verified_at<>'' or last_verified_at<>'')`); n != 0 {
-			t.Errorf("OOS1 archive-only backfill granted verified coverage after damaged observation: attempt=%d days=%s",
+		if n := recordsQuery(t, archive, `select count(*) from calendar_covered_days where source='teams'`); n != 0 {
+			t.Errorf("archive-only backfill granted covered days after damaged observation: attempt=%d days=%s",
 				attempt, observationState(t, archive, dayClocks))
 		}
 		if n := recordsQuery(t, archive, `select count(*) from records where removed_at is not null`); n != 0 {
 			t.Errorf("incomplete first/repeated observation invented raw absence: %d", n)
+		}
+		if n := recordsQuery(t, archive, `select count(*) from calendar_source_events where removed_at is not null`); n != 0 {
+			t.Errorf("incomplete first/repeated observation invented event absence: %d", n)
 		}
 	}
 	restore()

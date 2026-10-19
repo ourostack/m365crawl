@@ -233,14 +233,14 @@ func TestCalendarReplayBackfillPreservesQualifiedAuthority(t *testing.T) {
 	if _, err := s.EnsureCalendar(ctx, time.UTC, t0); err != nil {
 		t.Fatal(err)
 	}
-	const sources = `select group_concat(json_array(source,account_id,window_start,window_end,synced_at),'|') from
+	const sources = `select group_concat(json_array(source,account_id,window_start,window_end,synced_at,cache_fresh_at),'|') from
 			(select * from calendar_sources order by source,account_id)`
 	const days = `select group_concat(json_array(source,account_id,day,first_verified_at,last_verified_at),'|') from
 			(select * from calendar_covered_days order by source,account_id,day)`
 	const raw = `select group_concat(json_array(rowid,source,tenant_id,user_id,database,store,key_json,value_json,content_hash,first_seen_at,updated_at,removed_at,hex(raw_digest),value_redacted),'|') from
 			(select rowid,* from records order by rowid)`
 	oldSources, oldDays := scalar(t, s, sources), scalar(t, s, days)
-	if scalar(t, s, `select count(*) from calendar_sources where synced_at<>''`) != "1" ||
+	if scalar(t, s, `select count(*) from calendar_sources where synced_at<>'' and cache_fresh_at<>''`) != "1" ||
 		scalar(t, s, `select count(*) from calendar_covered_days where first_verified_at<>'' and last_verified_at<>''`) != "1" {
 		t.Fatal("qualification: need real previously qualified nonzero source/day authority")
 	}
