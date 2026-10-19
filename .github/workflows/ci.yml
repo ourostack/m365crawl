@@ -78,6 +78,7 @@ jobs:
       GOOS: darwin
       GOARCH: arm64
       CGO_ENABLED: "0"
+      SOURCE_LAYOUT: /Users/microsoft/code/teamscrawl-v1-hardening-20261017
     steps:
       - name: Validate exact source identity
         env:
@@ -93,17 +94,39 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Prepare actual source-file layout binding
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test ! -e "$SOURCE_LAYOUT"
+          test ! -L "$SOURCE_LAYOUT"
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          parent = pathlib.Path(os.environ["SOURCE_LAYOUT"]).parent
+          assert parent.resolve() == parent, "source-layout ancestors must not be links"
+          PY
+          PARENT="$(dirname "$SOURCE_LAYOUT")"
+          if ! test -d "$PARENT"; then
+            sudo -n mkdir -p "$PARENT"
+            sudo -n chown "$(id -u):$(id -g)" "$PARENT"
+          fi
+          test -O "$PARENT"
+          git worktree add --detach "$SOURCE_LAYOUT" "$SOURCE_SHA"
       - name: Compile canonical Darwin ARM64 identities
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
+          cd "$SOURCE_LAYOUT"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           printf 'verified-source=%s\n' "$SOURCE_SHA"
-          mkdir identity-output
+          export IDENTITY_OUTPUT="${RUNNER_TEMP}/v1-native-${SOURCE_SHA}"
+          mkdir "$IDENTITY_OUTPUT"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          go build -trimpath -ldflags "-s -w -X github.com/ourostack/m365crawl/internal/cli.version=dev-v1-hardening -X github.com/ourostack/m365crawl/internal/cli.commit=$SOURCE_SHA -X github.com/ourostack/m365crawl/internal/cli.date=$BUILD_DATE" -o identity-output/m365crawl-candidate ./cmd/m365crawl
-          go test -c -tags acceptance -o identity-output/acceptance.test ./acceptance
+          go build -trimpath -ldflags "-s -w -X github.com/ourostack/m365crawl/internal/cli.version=dev-v1-hardening -X github.com/ourostack/m365crawl/internal/cli.commit=$SOURCE_SHA -X github.com/ourostack/m365crawl/internal/cli.date=$BUILD_DATE" -o "$IDENTITY_OUTPUT/m365crawl-candidate" ./cmd/m365crawl
+          go test -c -tags acceptance -o "$IDENTITY_OUTPUT/acceptance.test" ./acceptance
           python3 - <<'PY'
           import hashlib
           import json
@@ -114,10 +137,10 @@ jobs:
           def output(*args):
               return subprocess.check_output(args, text=True).strip()
 
-          root = pathlib.Path("identity-output")
+          root = pathlib.Path(os.environ["IDENTITY_OUTPUT"])
           names = ["acceptance.test", "m365crawl-candidate"]
           assert sorted(p.name for p in root.iterdir()) == names
-          assert output("git", "status", "--porcelain=v1") == "?? identity-output/"
+          assert output("git", "status", "--porcelain=v1") == ""
           subprocess.run(["git", "diff", "--exit-code"], check=True)
           sdk = pathlib.Path(output("go", "env", "GOROOT"))
           sdk_sources = [
@@ -131,6 +154,7 @@ jobs:
               "schema_version": 1,
               "source_sha": output("git", "rev-parse", "HEAD"),
               "source_tree": output("git", "rev-parse", "HEAD^{tree}"),
+              "source_layout": output("git", "rev-parse", "--show-toplevel"),
               "go_version": output("go", "version"),
               "go_mod_sha256": hashlib.sha256(pathlib.Path("go.mod").read_bytes()).hexdigest(),
               "go_sum_sha256": hashlib.sha256(pathlib.Path("go.sum").read_bytes()).hexdigest(),
@@ -154,6 +178,7 @@ jobs:
               "qualification": "Actual canonical Go build and test-c output only; not executed native acceptance, installed binaries or signed release artifacts.",
           }
           assert manifest["source_sha"] == os.environ["SOURCE_SHA"]
+          assert manifest["source_layout"] == os.environ["SOURCE_LAYOUT"]
           (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
           print("native-build-source=" + manifest["source_sha"])
           for row in manifest["files"]:
@@ -163,7 +188,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: v1-native-${{ inputs.source_sha }}
-          path: identity-output/
+          path: ${{ runner.temp }}/v1-native-${{ inputs.source_sha }}/
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
