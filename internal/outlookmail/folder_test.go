@@ -1,6 +1,7 @@
 package outlookmail
 
 import (
+	"math"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/hxstore/hxbuild"
@@ -32,17 +33,25 @@ func TestMapFolderKinds(t *testing.T) {
 // The measured 0x4d8 layout moves the name/type words and string base by eight,
 // but keeps the common key, parent, lead and stamp words.
 func extendedFolder(s hxbuild.MailFolderSpec) *hxbuild.Object {
+	lead := s.Lead
+	if lead < 0 || lead > math.MaxInt32-1240 {
+		panic("extended folder fixture lead is out of range")
+	}
+	nameLength := len(hxbuild.UTF16Z(s.Name))
+	if nameLength > math.MaxInt32 {
+		panic("extended folder fixture name is too long")
+	}
 	o := hxbuild.NewObject(ClassFolder, 0x4d8, 1240)
 	o.PutU32(20, s.Key)
 	o.PutU32(40, s.Key)
 	o.PutU32(32, s.Parent)
-	o.PutU32(104, uint32(s.Lead))
+	o.PutU32(104, uint32(lead))
 	o.PutU64(112, s.Stamp)
 	o.PutU32(1168, s.Type)
-	o.Append(make([]byte, s.Lead))
+	o.Append(make([]byte, lead))
 	if s.Name != "" {
-		o.PutStringWord(1096, 1240+s.Lead, s.Name)
-		o.PutU32(1100, uint32(len(hxbuild.UTF16Z(s.Name)))|1<<31)
+		o.PutStringWord(1096, 1240+lead, s.Name)
+		o.PutU32(1100, uint32(nameLength)|1<<31)
 	}
 	return o
 }
