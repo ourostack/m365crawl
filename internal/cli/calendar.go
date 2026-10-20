@@ -399,6 +399,10 @@ func (rt *runtime) linkFixes(unlinked []string, known []calendar.AccountCoverage
 	}
 	out := make([]string, len(unlinked))
 	for i, u := range unlinked {
+		if !rt.outlookOn {
+			out[i] = "no executable recovery command: enable the intended Outlook source with --outlook-root DIR before linking the selected archive"
+			continue
+		}
 		out[i] = rt.recoveryCommand(true, "", "sync", "--outlook-profile", strings.TrimPrefix(u, outlookAccountPrefix), "--outlook-account", teams)
 	}
 	return out

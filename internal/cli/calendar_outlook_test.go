@@ -245,7 +245,7 @@ func TestOutlookOnlyNote(t *testing.T) {
 }
 
 func TestLinkFixes(t *testing.T) {
-	rt := &runtime{dbPath: "/synthetic/archive.db"}
+	rt := &runtime{dbPath: "/synthetic/archive.db", outlookOn: true, outlookRoot: "/synthetic/Outlook"}
 	if rt.linkFixes(nil, nil) != nil {
 		t.Fatal("no unlinked account, no fix")
 	}

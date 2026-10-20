@@ -35,22 +35,16 @@ func (x *Session) DeriveCalendarObservation(ctx context.Context, source string, 
 		pending = true
 	}
 	read := map[[2]string]bool{}
-	if complete {
-		for _, name := range present {
-			if _, a, ok := teamsdesktop.ParseDatabaseName(name); ok {
-				read[[2]string{a.TenantID, a.UserID}] = true
-			}
+	for _, name := range present {
+		if _, a, ok := teamsdesktop.ParseDatabaseName(name); ok {
+			read[[2]string{a.TenantID, a.UserID}] = true
 		}
 	}
 	mode := calendarMode{source: source, since: at.UTC().Format(timeLayout), at: at, zone: zone, read: read}
 	if !complete {
-		empty, err := calendarLost(ctx, x.tx)
-		if err != nil {
-			return CalendarResult{}, err
-		}
-		if empty {
-			// Bootstrap retained positives, not authority, from this source's whole archive.
-			mode.since, mode.read = "", nil
+		mode.since, mode.bootstrap = "", true
+		if !filtered {
+			mode.read = nil
 		}
 	}
 	if pending && complete {
