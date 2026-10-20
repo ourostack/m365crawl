@@ -260,6 +260,9 @@ func TestRealMailRead(t *testing.T) {
 	perClass := map[uint16]int{}
 	for p, k := range res.Stats.Pairs {
 		perClass[p.Class] += k
+		if p.Class == outlookmail.ClassFolder {
+			t.Logf("folder layout tag 0x%x: %d objects, %d resynced", p.Tag, k, res.Stats.PairsResynced[p])
+		}
 	}
 	resynced := map[uint16]int{}
 	for p, k := range res.Stats.PairsResynced {

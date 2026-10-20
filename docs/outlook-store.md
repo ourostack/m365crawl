@@ -257,9 +257,10 @@ Mail objects sit in the same blocks as the calendar. The reader is `internal/out
 | 0xca | 0x74e (1870) | body record: inline HTML or the path of a body file | 2,564, same key as the detail |
 | 0x16a | 0x318 (792) | attachment record | 4,269 |
 | 0x4d | 0x4d0 (1232) | folder | 171 (128 named, 43 unnamed) |
+| 0x4d | 0x4d8 (1240) | extended folder layout, measured separately | not tabulated here |
 | 0x55 | 0x15e (350) | one recipient | 71,335 (63,702 resolve to a detail object) |
 
-Common words: +20 object key (repeated at +40), +32 parent key, +104 string area lead (the string area base is the fixed region plus this word), +112 u64 change stamp. A class's tag is its fixed size; a mail object with another tag turns mail off for the sync (see the guard in `outlookmail.Collect`).
+Common words: +20 object key (repeated at +40), +32 parent key, +104 string area lead (the string area base is the fixed region plus this word), +112 u64 change stamp. A class's tag is its fixed size. Unknown header, detail or body tags refuse the mail read; an unknown folder, attachment or recipient tag is a counted partial-layout loss (see the guard in `outlookmail.Collect`). Both explicitly measured folder tags above are supported; other tags are not inferred from their size.
 
 ### Strings
 
@@ -311,9 +312,11 @@ The record has the same key as the detail object. The body is in one of two form
 
 There is no content type in the store; the reader derives it from the extension with a fixed table. Names that are a bare GUID with no extension (2,467 of 4,269) are embedded items and count as inline: they do not make a message "have attachments". A separate class 0xf7 repeats the path and adds nothing.
 
-### Folder (class 0x4d, string base 1232 + lead)
+### Folder (class 0x4d)
 
 Name +1088/+1092, parent +32, well-known type +1160: 0x61 Inbox, 0x63 Archive, 0x64 Drafts, 0x65 Sent Items, 0x67 Deleted Items (likely: the values agreed with the English names in every named folder; no other language was available). 0x7a is the generic folder type, not a Junk Email marker: in a later count of one mailbox's 23 named 0x7a folders, 16 were user-created subfolders, 6 were other system folders and 1 was Junk Email; To Me has this type too. No field that tells Junk Email apart is established. Three account roots hold folder sets in the copy; the measured mail is under one. To Me is a folder of its own that holds separate header copies of the same messages (1,109 latest copies). The reader picks the account's folder set as the root (the first parent that is not itself a folder) whose folders hold the most header copies, and lists only those folders. Of the folders of type 0x7a, the ones that hold a header copy whose message also has a copy in an inbox folder are To Me (`to_me`) and the rest are `other`. A To Me folder whose messages have no inbox copy is `other` as well.
+
+The legacy tag `0x4d0` uses string base **1232 + lead**. The extended tag `0x4d8` was measured on October 19, 2026 with Outlook `16.115.26101121`: its string base is **1240 + lead**, name words are **+1096/+1100**, and well-known type is **+1168**. The reader retains the established common key, parent, lead and stamp offsets. A counts-only comparison against a private canonical snapshot distinguished the extended offsets from the legacy candidates: the extended name/base combination validated every folder string and the shifted type agreed with the established system-folder names; the legacy offsets did not. Both layouts can coexist and use the same copy-version, account-root and resync-priority rules. Mail mapper version 3 forces a new read of unchanged stores so archives made with the older mapper can regain folder names and links; no schema migration or removal of archived messages is needed.
 
 Objects of every mail class that were reached after unknown bytes (the walk's `Resynced` flag) are real objects: one that maps cleanly is kept and competes under the version rule like any other copy, and only one that does not map is skipped (a header that does not map leaves the read untrusted for marking messages gone). On one private copy 662 of 1,454 folder objects were reached that way, and skipping them dropped the messages of those folders. A message whose header names a folder object the store holds no copy of is kept all the same, with its folder key, no folder name and the kind `unknown`; more than 5% of the messages in that state is the loss `outlook_mail_folder_missing`.
 

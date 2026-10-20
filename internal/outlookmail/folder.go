@@ -2,7 +2,7 @@ package outlookmail
 
 import "github.com/ourostack/m365crawl/internal/hxstore"
 
-// Folder fixed region (class 0x4d).
+// Legacy folder fixed-region offsets (class 0x4d); the extended layout adds eight.
 const (
 	fdName = 1088
 	fdType = 1160
@@ -38,14 +38,18 @@ var folderKinds = map[uint32]string{
 // kind other. The type values are likely, not established, outside the English folder names they
 // were measured on.
 func MapFolder(o hxstore.Object) (Folder, error) {
-	f, err := newFields(o, TagFolder)
+	fixed, shift := TagFolder, 0
+	if o.Tag == TagFolderExtended {
+		fixed, shift = TagFolderExtended, 8
+	}
+	f, err := newFields(o, fixed)
 	if err != nil {
 		return Folder{}, err
 	}
-	fd := Folder{Key: word(o, offKey), Parent: word(o, offLink), Name: f.text(fdName), Kind: "other"}
+	fd := Folder{Key: word(o, offKey), Parent: word(o, offLink), Name: f.text(fdName + shift), Kind: "other"}
 	fd.BadStrings = f.bad
-	fd.Generic = word(o, fdType) == typeGeneric
-	if k, ok := folderKinds[word(o, fdType)]; ok {
+	fd.Generic = word(o, fdType+shift) == typeGeneric
+	if k, ok := folderKinds[word(o, fdType+shift)]; ok {
 		fd.Kind = k
 	}
 	return fd, nil
