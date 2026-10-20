@@ -75,6 +75,7 @@ func TestSyncNotesRegistersAndRootlessRefreshesExplicitLocator(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatal("registered explicit source was not refreshed")
 	}
+	lastGood, admittedID := rows[0], report.Sources[0].AdmittedID
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +83,11 @@ func TestSyncNotesRegistersAndRootlessRefreshesExplicitLocator(t *testing.T) {
 	if err != nil || report.Failed != 1 || report.Sources[0].Status != "unavailable" {
 		t.Fatalf("disappeared registered source concealed: %#v/%v", report, err)
 	}
+	if report.Sources[0].AdmittedID != admittedID {
+		t.Fatal("unavailable optional source replaced its last admitted capture")
+	}
 	rows, _, err = st.Notes(ctx, store.NoteFilter{Query: "repairedword"})
-	if err != nil || len(rows) != 1 {
+	if err != nil || len(rows) != 1 || rows[0].ID != lastGood.ID || rows[0].CaptureID != lastGood.CaptureID || rows[0].Text != lastGood.Text {
 		t.Fatal("missing registered source erased last-good")
 	}
 }

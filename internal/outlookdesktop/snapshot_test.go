@@ -3,6 +3,7 @@ package outlookdesktop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -18,6 +19,80 @@ import (
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
+
+func TestSnapshotOwnershipMarkerLifetime(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	store := fakeProfile(t, t.TempDir(), "Main Profile", 5000)
+	var checked string
+	check := func(dir string) {
+		t.Helper()
+		path := filepath.Join(dir, ".m365crawl-owner.json")
+		b, err := os.ReadFile(path) //nolint:gosec // G304: fixed marker in this test's exclusively owned snapshot root
+		if err != nil {
+			t.Errorf("snapshot lacks registered ownership before source copy: %v", err)
+			return
+		}
+		var marker struct{ Version, PID int }
+		if err := json.Unmarshal(b, &marker); err != nil || marker.Version != 1 || marker.PID <= 0 {
+			t.Errorf("invalid Outlook snapshot ownership metadata: %s err=%v", b, err)
+		}
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("Outlook ownership marker is not regular: %v", err)
+		}
+	}
+	swap(t, &onAttempt, func(int) {
+		paths, err := filepath.Glob(filepath.Join(tmp, snapshotPrefix+"*"))
+		if err != nil || len(paths) != 1 {
+			t.Errorf("cannot identify owned Outlook registration root: %v err=%v", paths, err)
+			return
+		}
+		checked = paths[0]
+		check(checked)
+	})
+	info, cleanup, err := Snapshot(context.Background(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if checked != filepath.Dir(info.Path) {
+		t.Errorf("ownership must bind the copy before reading its source: checked=%q info=%+v", checked, info)
+	}
+	check(checked)
+	cleanup()
+	cleanup()
+	assertClean(t, tmp)
+}
+
+func TestSnapshotOwnershipRegistrationFailureCleanup(t *testing.T) {
+	quiet(t)
+	tmp := tempHome(t)
+	var allocated string
+	fault := errors.New("synthetic registration failure")
+	swap(t, &registerSnapshotOwner, func(dir string) error {
+		allocated = dir
+		if err := os.WriteFile(filepath.Join(dir, ".m365crawl-owner.json"), []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return fault
+	})
+	swap(t, &statSource, func(string) (fs.FileInfo, error) {
+		t.Fatal("registration failure reached source stat")
+		return nil, fault
+	})
+	swap(t, &openFile, func(string, int, fs.FileMode) (*os.File, error) {
+		t.Fatal("registration failure reached source open")
+		return nil, fault
+	})
+	swap(t, &onAttempt, func(int) { t.Fatal("registration failure reached copy attempt") })
+	info, cleanup, err := Snapshot(context.Background(), filepath.Join(t.TempDir(), "absent", StoreFileName))
+	if !errors.Is(err, fault) || info.Path != "" || allocated == "" || cleanup == nil {
+		t.Fatalf("registration failure: info=%+v allocated=%q cleanup-nil=%t err=%v", info, allocated, cleanup == nil, err)
+	}
+	cleanup()
+	cleanup()
+	assertClean(t, tmp)
+}
 
 // swap replaces a package variable for one test.
 func swap[T any](t *testing.T, p *T, v T) {
@@ -59,8 +134,8 @@ func TestSnapshotCopiesOnlyTheStore(t *testing.T) {
 	if err != nil || !bytes.Equal(got, syntheticStore(5000)) {
 		t.Fatalf("copy differs from source: %v", err)
 	}
-	if names := entries(t, filepath.Dir(info.Path)); len(names) != 1 {
-		t.Fatalf("snapshot directory holds %v, want only the store", names)
+	if names := entries(t, filepath.Dir(info.Path)); !reflect.DeepEqual(names, []string{".m365crawl-owner.json", StoreFileName}) {
+		t.Fatalf("snapshot directory holds %v, want only the store and local ownership metadata", names)
 	}
 	if len(entries(t, tmp)) != 1 {
 		t.Fatalf("temp holds %v", entries(t, tmp))
@@ -581,14 +656,15 @@ func TestSnapshotErrorsNeverCarryContent(t *testing.T) {
 	}
 }
 
-func TestTeamsSweepRemovesOutlookSnapshots(t *testing.T) {
+func TestTeamsSweepRetainsLiveOutlookSnapshots(t *testing.T) {
 	quiet(t)
 	tmp := tempHome(t)
 	store := fakeProfile(t, t.TempDir(), "Main Profile", 100)
-	info, _, err := Snapshot(context.Background(), store) // cleanup deliberately not called: a killed process
+	info, cleanup, err := Snapshot(context.Background(), store)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(cleanup)
 	if got := teamsdesktop.SweepStaleSnapshots(tmp, time.Hour); got != 0 {
 		t.Fatalf("a fresh snapshot was swept (%d)", got)
 	}
@@ -596,9 +672,13 @@ func TestTeamsSweepRemovesOutlookSnapshots(t *testing.T) {
 	if err := os.Chtimes(filepath.Dir(info.Path), old, old); err != nil {
 		t.Fatal(err)
 	}
-	if got := teamsdesktop.SweepStaleSnapshots(tmp, time.Hour); got != 1 {
-		t.Fatalf("swept %d, want 1", got)
+	if got := teamsdesktop.SweepStaleSnapshots(tmp, time.Hour); got != 0 {
+		t.Fatalf("swept %d live-owned roots, want 0", got)
 	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Fatalf("live Outlook payload was lost: %v", err)
+	}
+	cleanup()
 	assertClean(t, tmp)
 }
 

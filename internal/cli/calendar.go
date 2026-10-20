@@ -335,7 +335,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}
-		list.UnlinkedFix = linkFixes(agenda.Unlinked, agenda.Accounts)
+		list.UnlinkedFix = rt.linkFixes(agenda.Unlinked, agenda.Accounts)
 		list.setCoverage(agenda.UncoveredDays, agenda.Accounts, agenda.AsOf)
 		rt.noteOutlookOff(st, list, hasOutlook)
 		noteTeamsCacheAge(list, from)
@@ -383,7 +383,7 @@ const outlookAccountPrefix = "outlook/"
 
 // linkFixes is, for each unlinked Outlook account, the command that links it. The Teams account is
 // named when the agenda knows exactly one; with several it is a placeholder, and whoami lists them.
-func linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
+func (rt *runtime) linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
 	if len(unlinked) == 0 {
 		return nil
 	}
@@ -399,7 +399,11 @@ func linkFixes(unlinked []string, known []calendar.AccountCoverage) []string {
 	}
 	out := make([]string, len(unlinked))
 	for i, u := range unlinked {
-		out[i] = "m365crawl sync --outlook-profile " + shellWord(strings.TrimPrefix(u, outlookAccountPrefix)) + " --outlook-account " + teams
+		if !rt.outlookOn {
+			out[i] = "no executable recovery command: enable the intended Outlook source with --outlook-root DIR before linking the selected archive"
+			continue
+		}
+		out[i] = rt.recoveryCommand(true, "", "sync", "--outlook-profile", strings.TrimPrefix(u, outlookAccountPrefix), "--outlook-account", teams)
 	}
 	return out
 }
@@ -787,7 +791,8 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
 		}
 		if unfetched > 0 {
-			res.(*eventResult).addNotice(fmt.Sprintf("%d of %d transcript parts are not fetched; run m365crawl transcripts fetch %s", unfetched, fetchable, shellWord(ev.EventID)))
+			res.(*eventResult).addNotice(fmt.Sprintf("%d of %d transcript parts are not fetched; run %s", unfetched, fetchable,
+				rt.transcriptFetchRecoveryCommand(ev.AccountID, ev.EventID)))
 		}
 		rt.noteOutlookOff(st, res, slices.Contains(ev.Sources, string(calendar.SourceOutlook)))
 		return res, nil

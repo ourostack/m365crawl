@@ -66,14 +66,11 @@ func TestEmptyTeamsListsSayWhy(t *testing.T) {
 	pinReadsHere(t)
 	e := newEnv(t)
 	for _, args := range [][]string{{"messages"}, {"search", "x", "--source", "chats"}, {"conversations"}, {"teams"}, {"people"}, {"activity"}, {"stores"}, {"unread"}, {"thread", "c", "r"}, {"calendar"}, {"calendar", "actions"}, {"calendar", "sources"}} {
-		if got := noteOf(t, e, args...); got != "no archive yet: run m365crawl sync" {
-			t.Errorf("no archive, %v: note %q", args, got)
-		}
+		got := noteOf(t, e, args...)
+		assertRecoveryEnvCommand(t, e, got, "no archive yet: run ", "", "json", "sync")
 	}
 	e.emptyArchive()
-	if got := noteOf(t, e, "messages"); got != "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty" {
-		t.Errorf("empty archive: %q", got)
-	}
+	assertRecoveryEnvCommand(t, e, noteOf(t, e, "messages"), "the archive holds no Teams messages yet: run ", ", and m365crawl doctor if it stays empty", "json", "sync")
 	for _, args := range [][]string{{"calendar"}, {"calendar", "actions"}, {"calendar", "sources"}} {
 		if got := noteOf(t, e, args...); got == "" || !contains([]string{
 			"the archive holds no calendar yet: run m365crawl sync, and m365crawl calendar sources if it stays empty",
@@ -220,7 +217,7 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 // An empty search names only the sources it read: a mail-only search never blames Teams.
 func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
 	pinReadsHere(t)
-	noTeams := "the archive holds no Teams messages yet: run m365crawl sync, and m365crawl doctor if it stays empty"
+	noTeams := "the archive holds no Teams messages yet: run {selected-sync}, and m365crawl doctor if it stays empty"
 	outlookOff := "mail is not read in this run: the Outlook source is off (--outlook-root none, or --teams-root without --outlook-root)"
 	e := newEnv(t)
 	e.emptyArchive()
@@ -232,7 +229,10 @@ func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
 		{[]string{"search", "x", "--source", "chats"}, noTeams},
 		{[]string{"search", "x"}, outlookOff + "; " + noTeams},
 	} {
-		if got := noteOf(t, e, c.args...); got != c.want {
+		got := noteOf(t, e, c.args...)
+		if prefix, suffix, ok := strings.Cut(c.want, "{selected-sync}"); ok {
+			assertRecoveryEnvCommand(t, e, got, prefix, suffix, "json", "sync")
+		} else if got != c.want {
 			t.Errorf("empty archive, %v: note %q, want %q", c.args, got, c.want)
 		}
 	}
@@ -247,7 +247,9 @@ func TestSearchEmptyNoteNamesTheSourcesRead(t *testing.T) {
 		{[]string{"search", "zzzqqq"}, "Teams chats: " + noTeams + "; no mail matched the search words and filters"},
 	} {
 		got := noteOf(t, e, c.args...)
-		if got != c.want {
+		if prefix, suffix, ok := strings.Cut(c.want, "{selected-sync}"); ok {
+			assertRecoveryEnvCommand(t, e, got, prefix, suffix, "json", "sync")
+		} else if got != c.want {
 			t.Errorf("mail only, %v: note %q, want %q", c.args, got, c.want)
 		}
 		if c.args[len(c.args)-1] == "mail" && strings.Contains(got, "Teams") {
@@ -304,9 +306,7 @@ func TestSearchEmptyNoteOnOtherPlatforms(t *testing.T) {
 	teamsReadHere = func() bool { return true }
 	e = newEnv(t)
 	got := noteOf(t, e, "search", "x")
-	if !strings.Contains(got, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only") || !strings.Contains(got, "no archive yet: run m365crawl sync") {
-		t.Errorf("windows, no archive: note %q", got)
-	}
+	assertRecoveryEnvCommand(t, e, got, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only; no archive yet: run ", "", "json", "sync")
 	e.emptyArchive()
 	code, _, errOut := e.run("--json", "--max-age", "0", "search", "x", "--source", "mail")
 	if body := errorOf(t, errOut); code != 3 || body["code"] != "mail_unsupported_platform" {

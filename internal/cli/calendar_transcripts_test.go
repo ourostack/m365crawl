@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -75,15 +76,25 @@ func TestCalendarEventTranscripts(t *testing.T) {
 			t.Errorf("call %d keys %v", i, got[i])
 		}
 	}
-	notice := "1 of 4 transcript parts are not fetched; run m365crawl transcripts fetch " + trEventID()
-	if !strings.Contains(strings.Join(noticesOf(m), "\n"), notice) {
-		t.Fatalf("notices %v, want %q", m["notices"], notice)
+	prefix := "1 of 4 transcript parts are not fetched; run "
+	var command string
+	for _, notice := range noticesOf(m) {
+		if strings.HasPrefix(notice, prefix) {
+			command = strings.TrimPrefix(notice, prefix)
+		}
+	}
+	words := attendeeCommandWords(t, command)
+	recoveryContext(t, words, e.db, "json")
+	if recoveryValue(words, "--account") != trAccount || !slices.Contains(words, trEventID()) {
+		t.Fatalf("transcript notice lost account/event: %q", words)
 	}
 	// The text output has the calls and the notice.
 	code, out, errOut := e.tr("--format", "text", "calendar", "event", trEventID())
-	if code != 0 || !strings.Contains(out, "transcript call") || !strings.Contains(out, "call-5") || !strings.Contains(out, "2 of 3") || !strings.Contains(out, notice) {
+	if code != 0 || !strings.Contains(out, "transcript call") || !strings.Contains(out, "call-5") || !strings.Contains(out, "2 of 3") || !strings.Contains(out, prefix) {
 		t.Fatalf("text: exit %d\n%s%s", code, out, errOut)
 	}
+	_, tail, _ := strings.Cut(out, prefix)
+	recoveryContext(t, attendeeCommandWords(t, strings.SplitN(tail, "\n", 2)[0]), e.db, "text")
 }
 
 func TestCalendarEventTranscriptsAllFetched(t *testing.T) {

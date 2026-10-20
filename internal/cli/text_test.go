@@ -54,6 +54,16 @@ func checkGolden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("read golden (run with -update): %v", err)
 	}
+	if goruntime.GOOS == "windows" {
+		switch name {
+		case "calendar_outlook.plain", "calendar_outlook.color", "calendar_outlook_unlinked.plain", "calendar_outlook_unlinked.color":
+			const placeholder = "--outlook-account '<tenantId>/<userId>'"
+			if bytes.Count(want, []byte(placeholder)) != 1 {
+				t.Fatal("Outlook golden must contain exactly one literal link placeholder")
+			}
+			want = bytes.Replace(want, []byte(placeholder), []byte(`--outlook-account "<tenantId>/<userId>"`), 1)
+		}
+	}
 	if string(want) != got {
 		t.Errorf("%s mismatch\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
 	}

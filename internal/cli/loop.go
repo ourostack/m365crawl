@@ -137,7 +137,7 @@ func (rt *runtime) refreshLoop(sourceID int64) (*loopCoverage, error) {
 	// Every caller reads the sources again with its rows, so a run with nothing due reads none.
 	report, refreshErr := runLoopSync(rt.ctx, syncer.LoopOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge, Probe: true})
 	if refreshErr == nil {
-		return loopCoverageOf(report.Sources, report.Diagnostics), nil
+		return rt.loopCoverageOf(report.Sources, report.Diagnostics), nil
 	}
 	if rt.ctx.Err() != nil || errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
 		return nil, refreshErr
@@ -146,7 +146,7 @@ func (rt *runtime) refreshLoop(sourceID int64) (*loopCoverage, error) {
 	if err != nil {
 		return nil, errors.Join(refreshErr, err)
 	}
-	coverage := loopCoverageOf(retained.Sources, nil)
+	coverage := rt.loopCoverageOf(retained.Sources, nil)
 	coded := errs.DBError(refreshErr)
 	errors.As(loopError(refreshErr), &coded)
 	coverage.RefreshError = &syncError{Code: coded.Code, Message: coded.Message}
@@ -258,10 +258,11 @@ func (c *loopSyncCmd) Run(rt *runtime) error {
 	report, err := runLoopSync(rt.ctx, syncer.LoopOptions{DBPath: rt.dbPath, SourceID: c.SourceID, Explicit: true, Discover: c.SourceID == 0})
 	result := loopSyncResult{Projected: report.Projected, Unchanged: report.Unchanged, Skipped: report.Skipped, Failed: report.Failed,
 		InvalidRecords: report.InvalidRecords, DiscoveryRemaining: report.DiscoveryRemaining,
-		DiscoveryRemainingRecords: report.DiscoveryRemainingRecords, LoopCoverage: loopCoverageOf(report.Sources, report.Diagnostics)}
+		DiscoveryRemainingRecords: report.DiscoveryRemainingRecords, LoopCoverage: rt.loopCoverageOf(report.Sources, report.Diagnostics)}
 	if report.DiscoveryRemaining {
-		result.Notice = fmt.Sprintf("this run registered %d new Loop sources, the most one run takes; %s still unregistered: run m365crawl loop sync again",
-			store.LoopDiscoveryBatch, plural(report.DiscoveryRemainingRecords, "archived record is", "archived records are"))
+		result.Notice = fmt.Sprintf("this run registered %d new Loop sources, the most one run takes; %s still unregistered: run %s again",
+			store.LoopDiscoveryBatch, plural(report.DiscoveryRemainingRecords, "archived record is", "archived records are"),
+			rt.recoveryCommand(false, "", "loop", "sync"))
 	}
 	if err != nil {
 		// A run that failed after writing still reports what it committed, then fails.
@@ -390,7 +391,7 @@ func (c *loopSourcesCmd) Run(rt *runtime) error {
 	if err != nil {
 		return loopError(err)
 	}
-	coverage := loopCoverageOf(report.Sources, nil)
+	coverage := rt.loopCoverageOf(report.Sources, nil)
 	result := newList(shape(rt, coverage.items), false)
 	result.LoopCoverage, result.sourceOnly = coverage, true
 	result.ArchiveAgeSeconds = rt.loopArchiveAge()

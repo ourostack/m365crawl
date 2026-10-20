@@ -131,7 +131,12 @@ func TestLoopHelpAndFailedSourceFollowup(t *testing.T) {
 	}
 	for _, source := range sources {
 		id := source["source_id"].(float64)
-		retry := fmt.Sprintf("m365crawl loop sync --source-id %d", int64(id))
+		retry := source["retry"].(string)
+		words := attendeeCommandWords(t, retry)
+		if recoveryValue(words, "--source-id") != fmt.Sprint(int64(id)) ||
+			recoveryValue(words, "--db") != e.db || recoveryValue(words, "--format") != "json" {
+			t.Fatalf("failed source retry escaped its context: %q", words)
+		}
 		switch source["tuple"].(map[string]any)["key_json"] {
 		case "failed":
 			if source["status"] != "failed" || source["reason"] != "loop_cache_value_missing" || source["retry"] != retry ||

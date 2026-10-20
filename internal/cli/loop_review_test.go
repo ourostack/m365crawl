@@ -99,14 +99,23 @@ func TestLoopSyncReportsRemainingDiscovery(t *testing.T) {
 	doc := decode(t, runOK(t, e, "loop", "sync"))
 	if doc["failed"] != float64(store.LoopDiscoveryBatch) || doc["discovery_remaining"] != true ||
 		doc["discovery_remaining_records"] != float64(store.LoopDiscoveryBatch+2) ||
-		doc["invalid_records"] != float64(1) || !strings.Contains(doc["notice"].(string), "run m365crawl loop sync again") {
+		doc["invalid_records"] != float64(1) {
 		t.Fatalf("first batch: %v", doc)
 	}
-	if second := runOK(t, e, "--format", "text", "loop", "sync"); !strings.Contains(second, "notice: this run registered 128 new Loop sources, the most one run takes; 2 archived records are still unregistered: run m365crawl loop sync again") {
-		t.Fatalf("second batch:\n%s", second)
+	assertRecoveryEnvCommand(t, e, doc["notice"], "this run registered 128 new Loop sources, the most one run takes; 130 archived records are still unregistered: run ", " again", "json", "loop", "sync")
+	second := runOK(t, e, "--format", "text", "loop", "sync")
+	var notice string
+	for _, line := range strings.Split(second, "\n") {
+		if strings.HasPrefix(line, "notice: ") {
+			if notice != "" {
+				t.Fatalf("repeated second-batch notice:\n%s", second)
+			}
+			notice = line
+		}
 	}
+	assertRecoveryEnvCommand(t, e, notice, "notice: this run registered 128 new Loop sources, the most one run takes; 2 archived records are still unregistered: run ", " again", "text", "loop", "sync")
 	text := runOK(t, e, "--format", "text", "loop", "sync")
-	if strings.Contains(text, "run m365crawl loop sync again") || !strings.Contains(text, "loop diagnostic: loop_cache_identity_unqualified: records rowid") {
+	if strings.Contains(text, "notice: ") || !strings.Contains(text, "loop diagnostic: loop_cache_identity_unqualified: records rowid") {
 		t.Fatalf("drained run:\n%s", text)
 	}
 	done := decode(t, runOK(t, e, "loop", "sync"))
@@ -230,7 +239,9 @@ func TestLoopSearchCoverageIsCompact(t *testing.T) {
 			for key := range source {
 				keys = append(keys, key)
 			}
-			if len(source) != 6 || source["inspect"] != fmt.Sprintf("m365crawl loop sources --source-id %d", int64(source["source_id"].(float64))) ||
+			words := attendeeCommandWords(t, source["inspect"].(string))
+			if len(source) != 6 || recoveryValue(words, "--source-id") != fmt.Sprint(int64(source["source_id"].(float64))) ||
+				recoveryValue(words, "--db") != e.db || recoveryValue(words, "--format") != "json" ||
 				source["state"] == nil || source["snapshot_match"] == nil || source["raw_present"] == nil || source["reason"] == nil {
 				t.Fatalf("%v compact source has keys %v: %v", args, keys, source)
 			}
@@ -252,7 +263,7 @@ func TestLoopCoverageWording(t *testing.T) {
 		t.Fatalf("nothing registered: %v", doc["loop_coverage"])
 	}
 	for reason, fix := range loopFailureFix {
-		rendered := loopCoverageOf([]store.LoopSource{{Registration: store.LoopRegistration{ID: 3},
+		rendered := (&runtime{}).loopCoverageOf([]store.LoopSource{{Registration: store.LoopRegistration{ID: 3},
 			Health: store.KnowledgeSource{Status: "failed", Reason: reason}}}, nil).items[0].Fix
 		if strings.Count(rendered, "retry") > 1 || strings.Contains(rendered, "{retry}") || fix == "" {
 			t.Fatalf("%s fix repeats itself: %q", reason, rendered)

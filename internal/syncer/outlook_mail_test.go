@@ -377,23 +377,58 @@ func TestSyncMailReadAfterASyncStoppedBetweenCalendarAndMail(t *testing.T) {
 	db := newDB(t)
 	root := mailRoot(t)
 	run(t, outlookOpts(db, root))
-	appendBlock(t, root,
-		hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: 13, Stamp: 1, DetailKey: 23, FolderKey: 101, Received: mailDay, Subject: "Fixture three", SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
-		hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: 23, Stamp: 1, MessageID: "<three@example.invalid>", Class: "IPM.Note", Sent: mailDay}))
-	touch(t, root, time.Minute)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	afterCalendar = cancel
-	t.Cleanup(func() { afterCalendar = func() {} })
-	_, _, _ = Run(ctx, outlookOpts(db, root))
-	afterCalendar = func() {}
-	if n := count(t, db, `select count(*) from mail_messages`); n != 2 {
-		t.Fatalf("%d messages after the stopped sync", n)
-	}
-
-	r, _ := run(t, outlookOpts(db, root))
-	if mail := sourceKeyed(t, r, "outlook|Main|mail"); mail.Status == StatusUnchanged || mail.Counts.Mail.Added != 1 {
-		t.Fatalf("the mail was not read after the stopped sync: %+v", r.Sources)
+	old := afterCalendar
+	t.Cleanup(func() { afterCalendar = old })
+	for cycle, message := range []string{"three", "four"} {
+		before := readStatus(t, db)
+		if before.LastSuccessAt.IsZero() {
+			t.Fatal("setup has no covering success before interruption")
+		}
+		key, detail := uint32(13+cycle), uint32(23+cycle)
+		appendBlock(t, root,
+			hxbuild.NewMailHeader(hxbuild.MailHeaderSpec{Key: key, Stamp: 1, DetailKey: detail, FolderKey: 101, Received: mailDay, Subject: "Fixture " + message, SenderName: "Fixture Sender", SenderAddr: "sender@example.invalid", Unread: 1, Importance: 1}),
+			hxbuild.NewMailDetail(hxbuild.MailDetailSpec{Key: detail, Stamp: 1, MessageID: "<" + message + "@example.invalid>", Class: "IPM.Note", Sent: mailDay}))
+		touch(t, root, time.Minute)
+		ctx, cancel := context.WithCancel(context.Background())
+		calls := 0
+		afterCalendar = func() {
+			calls++
+			cancel()
+		}
+		rep, _, err := Run(ctx, outlookOpts(db, root))
+		cancel()
+		afterCalendar = old
+		if calls != 1 {
+			t.Fatalf("cycle%d never reached its single calendar-commit cancellation seam: %d", cycle, calls)
+		}
+		if !errors.Is(err, context.Canceled) || rep.Status != StatusPartial {
+			t.Errorf("cycle%d committed calendar interruption was reported as success: status=%s err=%v", cycle, rep.Status, err)
+		}
+		cal := sourceKeyed(t, rep, "outlook|Main")
+		if (cal.Status != StatusOK && cal.Status != StatusOmissions) || cal.Counts == nil || cal.Error != nil {
+			t.Errorf("cycle%d lost the committed calendar source: %+v", cycle, cal)
+		}
+		after := readStatus(t, db)
+		if !after.LastSuccessAt.Equal(before.LastSuccessAt) || after.LastRun == nil || after.LastRun.Status != StatusPartial {
+			t.Errorf("cycle%d interruption advanced covering success: before=%v after=%+v", cycle, before.LastSuccessAt, after)
+		}
+		if n := count(t, db, `select count(*) from mail_messages`); n != 2+cycle {
+			t.Errorf("cycle%d mail committed after cancellation: %d", cycle, n)
+		}
+		if n := count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Main'`); n != 0 {
+			t.Errorf("cycle%d interrupted mail retained its read marker: %d", cycle, n)
+		}
+		r, _ := run(t, outlookOpts(db, root))
+		mail := sourceKeyed(t, r, "outlook|Main|mail")
+		if mail.Status == StatusUnchanged || mail.Counts == nil || mail.Counts.Mail == nil || mail.Counts.Mail.Added != 1 {
+			t.Errorf("cycle%d retry did not add exactly its missing message: %+v", cycle, mail)
+		}
+		if n := count(t, db, `select count(*) from mail_messages`); n != 3+cycle {
+			t.Errorf("cycle%d retry row count: %d", cycle, n)
+		}
+		if n := count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Main'`); n != 1 {
+			t.Errorf("cycle%d retry failed to commit its mail read marker: %d", cycle, n)
+		}
 	}
 }
 

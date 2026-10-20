@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -654,9 +655,11 @@ func TestMemoFailuresFailTheSource(t *testing.T) {
 					w.memo.loadRecords = func(string, string) (map[[2]string]store.RecordMemo, error) { return nil, boom }
 				}
 			}
-			before := ""
+			before, fingerprints := "", ""
+			const reusable = `select json_array(source,fingerprint,status) from sync_runs where source<>'' and status in ('ok','ok_with_omissions','unchanged') order by id`
 			if name != "put typed" {
 				before = dumpArchive(t, db)
+				fingerprints = observationState(t, db, reusable)
 			}
 			_, _, err := Run(context.Background(), Options{Root: root, DBPath: db})
 			codedErr(t, err, errs.CodeDBError)
@@ -667,6 +670,9 @@ func TestMemoFailuresFailTheSource(t *testing.T) {
 				requireNothingKept(t, db)
 			} else if after := dumpArchive(t, db); after != before {
 				t.Fatal("a failed source changed the archive")
+			}
+			if name != "put typed" && observationState(t, db, reusable) != fingerprints {
+				t.Fatal("failed source changed reusable successful fingerprint authority")
 			}
 		})
 	}
@@ -687,6 +693,10 @@ func TestMemoRollsBackWithTheSource(t *testing.T) {
 	}
 	if typed, digests := memoRows(t, db); typed != 0 || digests != 0 {
 		t.Fatalf("a rolled-back source left memory: %d typed, %d record digests", typed, digests)
+	}
+	requireNothingKept(t, db)
+	if recordsQuery(t, db, `select count(*) from sync_runs where source<>'' and status in ('ok','ok_with_omissions','unchanged')`) != 0 {
+		t.Fatal("rolled-back source left reusable successful attempt authority")
 	}
 	// And a store failure while remembering rolls everything back too.
 	beforeFlush = func(string, int) error { return nil }
@@ -782,7 +792,34 @@ func TestMemoIsPrunedWhenRecordsLeaveTheCache(t *testing.T) {
 	applyState(t, root, full, blobs, cacheState{"all", 1, nil})
 	run(t, Options{Root: root, DBPath: db})
 	allTyped, allDigests := memoRows(t, db)
+	beforeTorn := dumpArchive(t, db)
 	applyState(t, root, full, blobs, cacheState{"cut", 0.4, nil})
+	touchLog(t, root)
+	sources, _, err := teamsdesktop.Discover(root)
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("owned fixture discovery: %v %v", sources, err)
+	}
+	_, _, stats, err := indexeddb.CensusWithStats(sources[0].LevelDBDir)
+	if err != nil || stats.TruncatedLogTails == 0 {
+		t.Fatalf("the fractional control must be positively incomplete: stats=%+v err=%v", stats, err)
+	}
+	torn, _ := run(t, Options{Root: root, DBPath: db})
+	if torn.Omissions["truncated_log_tail"] == 0 || dumpArchive(t, db) != beforeTorn {
+		t.Fatal("a torn prefix lost its diagnostic or changed content/rowids/FTS/removal state")
+	}
+	if _, digests := memoRows(t, db); digests != allDigests {
+		t.Fatalf("an incomplete census pruned generic read memory: %d want %d", digests, allDigests)
+	}
+	applyState(t, root, full, blobs, cacheState{"all before qualified cut", 1, nil})
+	batches := readLogBatches(t, logFile(t, root))
+	if len(batches) < 2 {
+		t.Fatal("fixture needs independently committed journal batches")
+	}
+	writeLogBatches(t, logFile(t, root), batches[:len(batches)/2])
+	_, dbs, stats, err := indexeddb.CensusWithStats(sources[0].LevelDBDir)
+	if err != nil || stats.TruncatedLogTails != 0 || len(dbs) == 0 {
+		t.Fatalf("absence control must be a complete nonempty journal generation: dbs=%d stats=%+v err=%v", len(dbs), stats, err)
+	}
 	touchLog(t, root)
 	run(t, Options{Root: root, DBPath: db})
 	run(t, Options{Root: root, DBPath: fresh})

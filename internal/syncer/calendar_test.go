@@ -144,7 +144,7 @@ func (f *fakeCache) install(t *testing.T) {
 	old := readGenericFn
 	t.Cleanup(func() { readGenericFn = old })
 	readGenericFn = func(_ context.Context, _ string, _ *teamsdesktop.Account, _ int64, opts teamsdesktop.GenericOptions, emit func(teamsdesktop.GenericRecord) error) (teamsdesktop.GenericResult, error) {
-		res := teamsdesktop.GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}}
+		res := teamsdesktop.GenericResult{Omissions: map[string]int{}, Complete: map[string]bool{}, CensusComplete: true}
 		names := make([]string, 0, len(f.dbs))
 		for n := range f.dbs {
 			names = append(names, n)
@@ -314,6 +314,10 @@ func TestSyncCalendarWriteFailureIsACountedLossNotAFailedSource(t *testing.T) {
 	cache.install(t)
 	run(t, Options{Root: fixtureRoot, DBPath: db})
 	raw := openRaw(t, db)
+	reusable := queryStr(t, db, `select fingerprint from sync_runs where source<>'' order by id desc limit 1`)
+	if reusable == "" {
+		t.Fatal("qualification: initial source had no reusable fingerprint")
+	}
 	if _, err := raw.Exec(`create trigger refuse before update on calendar_source_events begin select raise(abort, 'calendar refused'); end`); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +336,11 @@ func TestSyncCalendarWriteFailureIsACountedLossNotAFailedSource(t *testing.T) {
 	if _, err := raw.Exec(`drop trigger refuse`); err != nil {
 		t.Fatal(err)
 	}
-	rep, _, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
+	// Even an otherwise reusable fingerprint must not bypass the committed replay obligation.
+	if _, err := raw.Exec(`update sync_runs set fingerprint=? where source<>''`, reusable); err != nil {
+		t.Fatal(err)
+	}
+	rep, _, err = Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	if err != nil || rep.Omissions["calendar_derivation_failed"] != 0 {
 		t.Fatalf("omissions %v err %v", rep.Omissions, err)
 	}
@@ -430,13 +438,18 @@ func TestUnchangedSyncStillReportsCalendarLosses(t *testing.T) {
 	if first.Status != StatusOmissions || first.Omissions["calendar_unmapped"] != 1 {
 		t.Fatalf("first: %s %v", first.Status, first.Omissions)
 	}
+	const rowsSQL = `select json_array(rowid,database,store,key_json,value_json,removed_at) from records order by database,store,key_json`
+	before := observationState(t, db, rowsSQL)
 	again, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
-	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 || again.Sources[0].Status != StatusOmissions || again.Sources[0].Counts != nil {
+	if again.Status != StatusOmissions || again.Omissions["calendar_unmapped"] != 1 || again.Sources[0].Status != StatusOmissions ||
+		again.Sources[0].Counts == nil || again.Sources[0].Counts.Records.Seen != 2 || again.Sources[0].Counts.Records.Unchanged != 2 {
 		t.Fatalf("an unchanged sync: %s %v %+v", again.Status, again.Omissions, again.Sources)
 	}
-	// The run is recorded as a success with its omission, so the fingerprint still skips the read.
-	if n := recordsQuery(t, db, `select count(*) from sync_runs where status='ok_with_omissions' and fingerprint<>''`); n < 2 {
-		t.Fatalf("%d runs recorded with omissions", n)
+	if n := recordsQuery(t, db, `select count(*) from sync_runs where source=? and status='ok_with_omissions' and fingerprint<>''`, sourceKey); n != 0 {
+		t.Fatalf("%d incomplete source runs retained reusable fingerprints", n)
+	}
+	if got := observationState(t, db, rowsSQL); got != before {
+		t.Fatalf("recounting unresolved calendar loss changed rows/values/tombstones\nbefore %s\nafter %s", before, got)
 	}
 	// Once the record is fixed the loss is gone.
 	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", nil), fakeEvent("broken", "2026-09-11T09:00:00Z", nil)}
@@ -529,8 +542,8 @@ func TestUnchangedSyncFailsWhenTheLossesCannotBeRead(t *testing.T) {
 	}
 }
 
-// A derivation that fails and cannot even forget its stamp fails the source.
-func TestSourceFailsWhenAFailedDerivationCannotForgetItsStamp(t *testing.T) {
+// A derivation failure that cannot retain its replay obligation fails the source.
+func TestSourceFailsWhenAFailedDerivationCannotRetainReplayObligation(t *testing.T) {
 	isolateTmp(t)
 	utcDays(t)
 	db := newDB(t)
@@ -540,7 +553,7 @@ func TestSourceFailsWhenAFailedDerivationCannotForgetItsStamp(t *testing.T) {
 	raw := openRaw(t, db)
 	for _, q := range []string{
 		`create trigger refuse before update on calendar_source_events begin select raise(abort, 'calendar refused'); end`,
-		`create trigger keep before delete on meta begin select raise(abort, 'stamp kept'); end`,
+		`create trigger keep before insert on meta when new.key like 'calendar_replay/%' begin select raise(abort, 'replay refused'); end`,
 	} {
 		if _, err := raw.Exec(q); err != nil {
 			t.Fatal(err)
@@ -548,7 +561,16 @@ func TestSourceFailsWhenAFailedDerivationCannotForgetItsStamp(t *testing.T) {
 	}
 	cache.dbs[fakeCalendarDB] = []teamsdesktop.GenericRecord{fakeEvent("e1", "2026-09-10T09:00:00Z", map[string]any{"subject": "Renamed", "lastModifiedTime": map[string]any{"$date": "2026-08-02T00:00:00Z"}})}
 	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db, FullRead: true})
-	if err == nil || !strings.Contains(err.Error(), "stamp kept") {
+	if err == nil || !strings.Contains(err.Error(), "replay refused") {
 		t.Fatalf("err = %v", err)
+	}
+	if got := queryStr(t, db, `select subject from calendar_source_events`); got != "Subject e1" {
+		t.Fatalf("failed source changed qualified projection: %q", got)
+	}
+	if n := recordsQuery(t, db, `select count(*) from records where store='calendar' and value_json like '%Renamed%'`); n != 0 {
+		t.Fatal("source committed raw positives without a durable replay obligation")
+	}
+	if n := recordsQuery(t, db, `select count(*) from meta where key='calendar_derivation'`); n != 1 {
+		t.Fatal("source discarded its qualified global derivation stamp")
 	}
 }

@@ -20,7 +20,7 @@ func InstallFakeGeneric(t *testing.T, dbs func() map[string][]FakeRecord) {
 	oc, oo := censusFn, openBatch
 	t.Cleanup(func() { censusFn, openBatch = oc, oo })
 	current := map[int64][]indexeddb.Record{}
-	censusFn = func(string) (map[int64]int64, []indexeddb.Database, error) {
+	censusFn = func(string) (map[int64]int64, []indexeddb.Database, leveldb.Stats, error) {
 		scripted := dbs()
 		names := make([]string, 0, len(scripted))
 		for n := range scripted {
@@ -38,7 +38,7 @@ func InstallFakeGeneric(t *testing.T, dbs func() map[string][]FakeRecord) {
 				current[id] = append(current[id], indexeddb.Record{Key: r.Key, Raw: []byte(r.Value)})
 			}
 		}
-		return held, out, nil
+		return held, out, leveldb.Stats{}, nil
 	}
 	openBatch = func(string, func(int64, int64) bool) (genericOrigin, error) { return scriptedOrigin(current), nil }
 }

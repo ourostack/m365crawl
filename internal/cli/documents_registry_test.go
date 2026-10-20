@@ -86,7 +86,7 @@ func TestRegistryUnadmittedRetryRoute(t *testing.T) {
 		!strings.HasPrefix(sources[0]["reason"].(string), "office_registry_") {
 		t.Fatalf("first failed registry capture: %s", stdout)
 	}
-	retry := "m365crawl docs sync --registry-file " + registryFileArg(sources[0]["platform"].(string), file)
+	retry := "docs sync --registry-file " + registryFileArg(sources[0]["platform"].(string), file)
 	fix, _ := sources[0]["fix"].(string)
 	if !strings.Contains(fix, retry) || strings.Contains(stdout, "--source-id 0") || strings.Contains(stdout, "--source-id null") {
 		t.Fatalf("unadmitted registry source has no usable explicit retry route: %q", fix)
@@ -119,7 +119,7 @@ func TestRegistryUnadmittedRetryRoute(t *testing.T) {
 		if id, ok := source["source_id"].(float64); ok {
 			admitted = true
 			fix, _ := source["fix"].(string)
-			if !strings.Contains(fix, "m365crawl docs sync --source-id "+strconv.FormatInt(int64(id), 10)) ||
+			if !strings.Contains(fix, "docs sync --source-id "+strconv.FormatInt(int64(id), 10)) ||
 				strings.Contains(fix, "--registry-file") || !strings.Contains(source["effect"].(string), "last good capture") {
 				t.Fatalf("admitted registry failure route: %v", source)
 			}
@@ -378,7 +378,7 @@ func TestRegistryReadOnlyRepeatLeavesArchiveBytes(t *testing.T) {
 }
 
 func TestRegistryCoverageNoticesAndRetryQuoting(t *testing.T) {
-	coverage := documentsCoverage([]store.KnowledgeSource{
+	coverage := (&runtime{}).documentsCoverage([]store.KnowledgeSource{
 		{ID: 1, AdmittedID: 1, Kind: store.RegistryDocumentKind, Status: "partial", Losses: map[string]int{"office_registry_document_unmapped": 2}},
 		{ID: 2, AdmittedID: 2, Kind: store.RegistryDocumentKind, Status: "complete", Reason: syncer.RegistryListedNoDocuments},
 		{Kind: store.RegistryDocumentKind, Platform: "windows", Status: "failed", Reason: "office_registry_future_reason", Locator: `C:\synthetic\copy one.reg`},
@@ -401,7 +401,7 @@ func TestRegistryCoverageNoticesAndRetryQuoting(t *testing.T) {
 // makes safe in both cmd and PowerShell is not interpolated at all.
 func TestRegistryRetryCommandNeverRunsFileNameText(t *testing.T) {
 	fix := func(platform, locator string) string {
-		return documentsCoverage([]store.KnowledgeSource{{Kind: store.RegistryDocumentKind, Platform: platform,
+		return (&runtime{}).documentsCoverage([]store.KnowledgeSource{{Kind: store.RegistryDocumentKind, Platform: platform,
 			Status: "failed", Reason: "office_registry_source_busy", Locator: locator}}).Sources[0].Fix
 	}
 	for locator, want := range map[string]string{
@@ -412,7 +412,7 @@ func TestRegistryRetryCommandNeverRunsFileNameText(t *testing.T) {
 		`/synthetic/semi;colon&amp|pipe>x.reg`: `--registry-file '/synthetic/semi;colon&amp|pipe>x.reg'`,
 	} {
 		for _, platform := range []string{"darwin", "linux", "synthetic", ""} {
-			if got := fix(platform, locator); !strings.HasSuffix(got, "m365crawl docs sync "+want) {
+			if got := fix(platform, locator); !strings.HasSuffix(got, "docs sync "+want) {
 				t.Fatalf("%s retry for %q = %q", platform, locator, got)
 			}
 		}
@@ -422,14 +422,14 @@ func TestRegistryRetryCommandNeverRunsFileNameText(t *testing.T) {
 		`C:\synthetic\copy one (2).reg`:   `--registry-file "C:\synthetic\copy one (2).reg"`,
 		`C:\synthetic\a,b.reg`:            `--registry-file "C:\synthetic\a,b.reg"`, // a bare comma is PowerShell's array operator
 	} {
-		if got := fix("windows", locator); !strings.HasSuffix(got, "m365crawl docs sync "+want) {
+		if got := fix("windows", locator); !strings.HasSuffix(got, "docs sync "+want) {
 			t.Fatalf("windows retry for %q = %q", locator, got)
 		}
 	}
 	for _, locator := range []string{`C:\synthetic\we$(calc).reg`, "C:\\synthetic\\back`tick.reg", `C:\synthetic\100%TEMP%.reg`,
 		`C:\synthetic\it's.reg`, `C:\synthetic\a&b.reg`, `C:\synthetic\car^et!.reg`} {
 		got := fix("windows", locator)
-		if strings.Contains(got, locator) || !strings.Contains(got, "m365crawl docs sync --registry-file FILE") || !strings.Contains(got, "locator") {
+		if strings.Contains(got, locator) || !strings.Contains(got, "docs sync --registry-file FILE") || !strings.Contains(got, "locator") {
 			t.Fatalf("windows retry interpolated an unsafe name %q: %q", locator, got)
 		}
 	}

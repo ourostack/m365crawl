@@ -800,7 +800,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	}
 	if p.loop {
 		res.Sources.Loop = sourceOf(searchLoop)
-		res.LoopCoverage = rt.loopCoverage.compact()
+		res.LoopCoverage = rt.loopCoverage.compact(rt)
 	}
 	if p.content {
 		res.Sources.Content = sourceOf(searchContent)

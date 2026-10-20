@@ -342,9 +342,7 @@ func TestRetryNeededOnlyWhereARetryCanHelp(t *testing.T) {
 		}
 	}
 	text := textRun(t, e, "loop", "sources")
-	if strings.Count(text, "m365crawl loop sync --source-id") != 1+2 { // one table cell and two fix lines
-		t.Fatalf("text shows a retry where it cannot help:\n%s", text)
-	}
+	assertCurrentLoopRetryTable(t, text)
 	for _, cmd := range [][]string{{"loop"}, {"loop", "sync"}} {
 		if help := helpOf(t, cmd...); !strings.Contains(help, "retry_needed is true on a failed or cancelled source") || !strings.Contains(help, "metadata-only source is false") {
 			t.Fatalf("%v --help does not say when retry_needed is true", cmd)

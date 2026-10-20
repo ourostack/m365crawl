@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/snapshotowner"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 const (
@@ -36,15 +38,16 @@ var (
 	createFile = func(path string) (io.WriteCloser, error) {
 		return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // path is inside our private snapshot directory
 	}
-	statSource   = os.Stat
-	sameFile     = os.SameFile
-	statOpen     = func(f *os.File) (fs.FileInfo, error) { return f.Stat() }
-	wait         = sleepCtx
-	settle       = 250 * time.Millisecond
-	retryWaits   = [SnapshotAttempts - 1]time.Duration{time.Second, 2 * time.Second}
-	onAttempt    = func(int) {}
-	afterCopy    = func(int) {}
-	copyBufBytes = 1 << 20
+	statSource            = os.Stat
+	sameFile              = os.SameFile
+	statOpen              = func(f *os.File) (fs.FileInfo, error) { return f.Stat() }
+	wait                  = sleepCtx
+	settle                = 250 * time.Millisecond
+	retryWaits            = [SnapshotAttempts - 1]time.Duration{time.Second, 2 * time.Second}
+	onAttempt             = func(int) {}
+	afterCopy             = func(int) {}
+	copyBufBytes          = 1 << 20
+	registerSnapshotOwner = snapshotowner.Register
 )
 
 // sleepCtx waits d, or returns the context's error as soon as ctx is cancelled.
@@ -118,7 +121,7 @@ type Info struct {
 // cancelled, and on every error path before Snapshot returns.
 func Snapshot(ctx context.Context, storePath string) (info Info, cleanup func(), err error) {
 	noop := func() {}
-	dir, err := os.MkdirTemp("", snapshotPrefix)
+	dir, err := teamsdesktop.NewPrivateSnapshotRoot()
 	if err != nil {
 		return Info{}, noop, errs.Internal(err)
 	}
@@ -131,6 +134,9 @@ func Snapshot(ctx context.Context, storePath string) (info Info, cleanup func(),
 			remove()
 		}
 	}()
+	if err := registerSnapshotOwner(dir); err != nil {
+		return Info{}, noop, errs.Internal(err)
+	}
 	dst := filepath.Join(dir, StoreFileName)
 
 	var last string

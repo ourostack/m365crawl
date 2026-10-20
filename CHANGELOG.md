@@ -4,6 +4,19 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-20
+
+### Fixed
+
+- Incomplete Teams IndexedDB observations retain readable data without treating hidden keys or database names as removals, marking retained calendar events gone, or advancing calendar verification. Truncation stays visible, including an empty partial census; unchanged-cache fingerprints and read memory are invalidated for the corrected decoder.
+- A first incomplete calendar read now exposes retained events and normal exact-address Outlook links immediately, while replay remains pending. Archive-only recovery preserves existing sync and cache-fresh clocks and grants no new verified days or coverage window.
+- Cancellation after a committed Outlook calendar keeps that committed result while reporting interruption instead of refreshing covering success. Unread mail remains eligible for the next ordinary sync.
+- An unchanged Teams cache with unresolved report-significant omissions is read again so diagnostics cannot silently disappear. Restored content clears the loss after a real read; clean denylist/redaction-only observations retain their unchanged shortcut.
+- Read the measured extended Outlook for Mac mail-folder layout as well as the original layout, restoring folder names, kinds and message links. Existing archives re-read unchanged stores under the new mail mapper; unknown layouts still report an explicit partial-read loss.
+- The portable OWA acceptance body oracle decodes SQL's hexadecimal BLOB representation before its bounded gzip comparison. Strict null, type, malformed hex/gzip, body and FTS corruption checks remain; production storage and native collector qualification are unchanged.
+- Loop retries and compact inspections, Office registry/OneDrive usage retries, Outlook link fixes and event transcript follow-ups retain the selected archive and output format. Source/link recovery also retains applicable roots, profile/principal and account context without copying incompatible item flags.
+- Teams and Outlook snapshot roots record protected ownership before source copying. Stale sweeping requires both age and positive owner-death evidence and rechecks root identity; active, reused-PID, uncertain, unprotected and legacy roots are retained so another archive's lazy reader keeps its backing files. Registration failure cleans the new root and fails capture. Windows process-open failures never imply death, so unprovable abandoned roots remain.
+
 ## [1.0.0] - 2026-10-17
 
 ### Fixed

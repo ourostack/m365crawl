@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -353,18 +354,81 @@ func TestSyncOmissions(t *testing.T) {
 	rel := omittingBlob(t)
 	root := fixtureCopy(t)
 	blobDir, _ := filepath.Glob(filepath.Join(root, "*", "IndexedDB", "*.blob"))
-	if err := os.Remove(filepath.Join(blobDir[0], rel)); err != nil {
+	if len(blobDir) != 1 {
+		t.Fatalf("fixture blob roots: %v", blobDir)
+	}
+	path := filepath.Join(blobDir[0], rel)
+	original, err := os.ReadFile(path) //nolint:gosec // G304: exact blob in fixtureCopy's private synthetic source tree
+	if err != nil {
 		t.Fatal(err)
 	}
-	r, _ := run(t, Options{Root: root, DBPath: newDB(t)})
-	if r.Status != "ok_with_omissions" || r.Omissions["blob_missing"] != 1 {
-		t.Fatalf("status %q omissions %v", r.Status, r.Omissions)
+	withheld := path + ".withheld-for-recovery"
+	if err := os.Rename(path, withheld); err != nil {
+		t.Fatal(err)
 	}
-	if r.Sources[0].Status != "ok_with_omissions" || r.Sources[0].Omissions["blob_missing"] != 1 {
-		t.Fatalf("source report: %+v", r.Sources[0])
+	db := newDB(t)
+	for observation := 0; observation < 3; observation++ {
+		r, _ := run(t, Options{Root: root, DBPath: db, FullRead: observation == 2})
+		if r.Status != StatusOmissions || r.Omissions["blob_missing"] != 1 {
+			t.Errorf("observation%d lost the still-unresolved top-level omission: status=%q omissions=%v", observation, r.Status, r.Omissions)
+		}
+		source := sourceKeyed(t, r, sourceKey)
+		if source.Status != StatusOmissions || source.Omissions["blob_missing"] != 1 {
+			t.Errorf("observation%d lost the source omission: %+v", observation, source)
+		}
+		if n := recordsQuery(t, db, `select coalesce(json_extract(omissions_json,'$.blob_missing'),0) from sync_runs where source=? order by id desc limit 1`, sourceKey); n != 1 {
+			t.Errorf("observation%d persisted source run lost the omission: %d", observation, n)
+		}
+		if status := readStatus(t, db); status.LastRun == nil || status.LastRun.Status != StatusOmissions {
+			t.Errorf("observation%d covering attempt claims clean success: %+v", observation, status.LastRun)
+		}
+	}
+	if err := os.Rename(withheld, path); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(path) //nolint:gosec // G304: same owned blob, proving restoration preserved every byte
+	if err != nil || !bytes.Equal(original, restored) {
+		t.Fatalf("restoration did not retain the exact synthetic blob bytes: %v", err)
+	}
+	recovered, _ := run(t, Options{Root: root, DBPath: db})
+	if recovered.Omissions["blob_missing"] != 0 || sourceKeyed(t, recovered, sourceKey).Status == StatusUnchanged {
+		t.Errorf("restored content must actually be read before clearing the omission: %+v", recovered)
+	}
+	clean, _ := run(t, Options{Root: root, DBPath: db})
+	if clean.Status != StatusUnchanged || sourceKeyed(t, clean, sourceKey).Status != StatusUnchanged {
+		t.Errorf("a clean restored source cannot use its unchanged shortcut: %+v", clean)
 	}
 	if left := snapshotDirs(t, tmp); len(left) != 0 {
 		t.Fatalf("snapshot left behind: %v", left)
+	}
+}
+
+func TestSyncDenialOnlyRetainsUnchangedShortcut(t *testing.T) {
+	isolateTmp(t)
+	db := newDB(t)
+	first, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if first.Status != StatusOK || first.Omissions["denied_database"] == 0 || first.Omissions["denied_store"] == 0 {
+		t.Fatalf("control requires actual non-loss denial observations: %+v", first)
+	}
+	for name := range first.Omissions {
+		switch name {
+		case "denied_database", "denied_store", "calendar_unknown_time_zone", "calendar_all_day_unaligned":
+		default:
+			t.Fatalf("control has a report-significant loss: %s", name)
+		}
+	}
+	again, _ := run(t, Options{Root: fixtureRoot, DBPath: db})
+	if again.Status != StatusUnchanged || sourceKeyed(t, again, sourceKey).Status != StatusUnchanged {
+		t.Errorf("working denylist disabled the clean unchanged shortcut: %+v", again)
+	}
+	filtered := newDB(t)
+	run(t, Options{Root: fixtureRoot, DBPath: filtered, Account: &acctA})
+	if n := recordsQuery(t, filtered, `select count(*) from messages where user_id=?`, acctB.UserID); n != 0 {
+		t.Fatalf("filtered control already read the other account: %d", n)
+	}
+	all, _ := run(t, Options{Root: fixtureRoot, DBPath: filtered})
+	if all.Status == StatusUnchanged || recordsQuery(t, filtered, `select count(*) from messages where user_id=?`, acctB.UserID) == 0 {
+		t.Errorf("a filtered-source fingerprint suppressed the later unfiltered read: %+v", all)
 	}
 }
 
@@ -375,6 +439,14 @@ func TestSyncLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
+	discover := discoverSources
+	discoveries := 0
+	discoverSources = func(string) ([]teamsdesktop.Source, []string, error) {
+		discoveries++
+		return nil, nil, errors.New("locked archive must not discover sources")
+	}
+	t.Cleanup(func() { discoverSources = discover })
+	start := time.Now()
 	r, ch, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
 	var coded *errs.Coded
 	if !errors.As(err, &coded) || coded.Code != errs.CodeLocked || coded.Exit != errs.ExitLocked {
@@ -382,6 +454,12 @@ func TestSyncLocked(t *testing.T) {
 	}
 	if r.Status != "" || ch != nil {
 		t.Fatalf("a failed run returns no report: %+v", r)
+	}
+	if time.Since(start) >= time.Second || discoveries != 0 {
+		t.Fatal("busy archive waited or reached source discovery")
+	}
+	if _, err := os.Stat(db); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("busy missing archive was created before lock refusal")
 	}
 }
 
@@ -560,8 +638,8 @@ func TestSweepsStaleSnapshots(t *testing.T) {
 	old := time.Now().Add(-48 * time.Hour)
 	_ = os.Chtimes(stale, old, old)
 	run(t, Options{Root: fixtureRoot, DBPath: newDB(t)})
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("stale snapshot kept: %v", err)
+	if info, err := os.Stat(stale); err != nil || !info.IsDir() {
+		t.Fatalf("an aged legacy root has no positive dead-owner evidence and must remain: %v", err)
 	}
 }
 
@@ -1024,10 +1102,11 @@ func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
 			return teamsdesktop.GenericResult{}, err
 		}
 		return teamsdesktop.GenericResult{
-			Omissions: map[string]int{"database_unreadable": 1},
-			Present:   []string{calendar},
-			Complete:  map[string]bool{calendar: false},
-			Redacted:  3,
+			CensusComplete: true,
+			Omissions:      map[string]int{"database_unreadable": 1},
+			Present:        []string{calendar},
+			Complete:       map[string]bool{calendar: false},
+			Redacted:       3,
 		}, nil
 	}
 	db2 := newDB(t)

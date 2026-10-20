@@ -154,7 +154,6 @@ var seams = map[string]bool{"removeFile": true, "openFile": true}
 // allowed lists "<file>:<top-level declaration>:<name>" uses that are the temp-directory
 // helper, the single read-only open of the original, or a write to our own copy.
 var allowed = map[string]bool{
-	"snapshot.go:Snapshot:MkdirTemp":    true, // the private snapshot directory
 	"snapshot.go:Snapshot:RemoveAll":    true, // removing that directory
 	"snapshot.go:removeFile:Remove":     true, // removing the stale copy inside it
 	"snapshot.go:copyOnce:removeFile":   true, // the seam, called on dst: the path inside our snapshot directory

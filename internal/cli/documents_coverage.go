@@ -3,7 +3,7 @@ package cli
 import "github.com/ourostack/m365crawl/internal/store"
 
 func documentSnapshotCoverage(rt *runtime, sources []store.KnowledgeSource) *noteCoverage {
-	coverage := documentsCoverage(sources)
+	coverage := rt.documentsCoverage(sources)
 	if rt.documentCoverage != nil {
 		coverage.RefreshError = rt.documentCoverage.RefreshError
 	}

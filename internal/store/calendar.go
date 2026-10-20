@@ -70,6 +70,7 @@ func (c *CalendarCounts) Add(b CalendarCounts) {
 
 // CalendarResult is a derivation's counts and the omissions it counted by code.
 type CalendarResult struct {
+	ReplayPending bool
 	OutlookReadID int64
 	Counts        CalendarCounts
 	Omissions     map[string]int
@@ -94,11 +95,13 @@ var (
 
 // calendarMode says which rows a derivation maps and how it writes them.
 type calendarMode struct {
-	source  string // only this records source; empty means every source
-	since   string // only rows updated at or after this time (store text); empty means every row
-	replace bool   // blank the derived rows first, so nothing of an older copy survives
-	zone    *time.Location
-	at      time.Time
+	replayAll bool   // a pending full-source replay may not silently skip retained groups
+	bootstrap bool   // project unqualified accounts without granting observation authority
+	source    string // only this records source; empty means every source
+	since     string // only rows updated at or after this time (store text); empty means every row
+	replace   bool   // blank the derived rows first, so nothing of an older copy survives
+	zone      *time.Location
+	at        time.Time
 	// read is the accounts whose Teams cache this derivation read, as {tenant, user}. Only they get
 	// a fresh window and fresh covered days; nil means every account (a rebuild from the records
 	// reads no cache, and stamps nothing it did not see).
@@ -113,6 +116,7 @@ type calGroup struct {
 	source      string
 	acct        teamsdesktop.Account
 	hasCalendar bool
+	liveRecords bool
 	days        map[string]struct{} // days the cache holds now
 	retaken     map[string]struct{} // days of removed records, taken again after a zone change
 	gone        []string
@@ -413,13 +417,17 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 
 	// Every claimed database: it makes its account a group, and says whether the account has a
 	// calendar database at all.
-	if err := eachRow(ctx, tx, `select distinct source, database from records where store in `+names+srcSQL, append(nameArgs, srcArgs...), func(r *sql.Rows) error {
+	if err := eachRow(ctx, tx, `select source, database, max(removed_at is null) from records where store in `+names+srcSQL+` group by source, database`, append(nameArgs, srcArgs...), func(r *sql.Rows) error {
 		var source, database string
-		if err := r.Scan(&source, &database); err != nil {
+		var present bool
+		if err := r.Scan(&source, &database, &present); err != nil {
 			return err
 		}
-		if g, manager, ok := group(source, database); ok && manager == "calendar" {
-			g.hasCalendar = true
+		if g, manager, ok := group(source, database); ok {
+			g.liveRecords = g.liveRecords || present
+			if manager == "calendar" {
+				g.hasCalendar = true
+			}
 		}
 		return nil
 	}); err != nil {
@@ -554,10 +562,36 @@ func deriveCalendar(ctx context.Context, tx *sql.Tx, m calendarMode) (CalendarRe
 		if !g.hasCalendar && len(g.events)+len(g.recaps)+len(g.items)+len(g.gone) == 0 {
 			continue // an account with no calendar database and nothing to apply gets no row
 		}
-		if m.read != nil && !m.read[[2]string{g.acct.TenantID, g.acct.UserID}] {
-			continue // its cache was not read: nothing here says it is fresher than it was
+		groupMode := m
+		if m.bootstrap {
+			if m.read != nil && !m.read[[2]string{g.acct.TenantID, g.acct.UserID}] {
+				continue
+			}
+			var qualified bool
+			account := teamscal.AccountID(g.acct)
+			if err := tx.QueryRowContext(ctx, `select
+				exists(select 1 from calendar_sources where source='teams' and account_id=? and
+					(synced_at<>'' or cache_fresh_at<>'' or coalesce(window_start,'')<>'' or coalesce(window_end,'')<>''))
+				or exists(select 1 from calendar_covered_days where source='teams' and account_id=?)`, account, account).Scan(&qualified); err != nil {
+				return res, err
+			}
+			if qualified {
+				continue
+			}
+			groupMode.read = nil
+		} else if m.read != nil && !m.read[[2]string{g.acct.TenantID, g.acct.UserID}] {
+			if m.replayAll {
+				if g.liveRecords {
+					return res, errors.New("calendar replay account was not qualified by the current observation")
+				}
+				// A complete census retired its databases; replay retained positives without
+				// granting that departed account new source clocks or verified coverage.
+				groupMode.read = nil
+			} else {
+				continue // its cache was not read: nothing here says it is fresher than it was
+			}
 		}
-		counts, refused, err := g.apply(ctx, tx, m)
+		counts, refused, err := g.apply(ctx, tx, groupMode)
 		if err != nil {
 			return res, err
 		}
@@ -682,14 +716,26 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 		}
 	}
 	w := calendar.Window{Source: calendar.SourceTeams, AccountID: account, SyncedAt: m.at}
+	var pending bool
 	if m.read == nil {
 		// A rebuild reads no cache: it verifies no day again and does not say the account synced now.
-		var prev string
-		if err := tx.QueryRowContext(ctx, `select synced_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, calendarReplayKey(g.source)).Scan(&pending); err != nil {
+			return counts, nil, err
+		}
+		var prev, prevFresh string
+		if err := tx.QueryRowContext(ctx, `select synced_at,cache_fresh_at from calendar_sources where source=? and account_id=?`, string(calendar.SourceTeams), account).Scan(&prev, &prevFresh); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return counts, nil, err
 		}
 		if t := parseTime(sql.NullString{String: prev, Valid: prev != ""}); !t.IsZero() {
 			w.SyncedAt = t
+		}
+		if pending {
+			// Retained positives are still useful, but an incomplete source cannot acquire its
+			// first verified day or source clock through an archive-only rebuild.
+			w.SyncedAt = parseTime(sql.NullString{String: prev, Valid: prev != ""})
+			w.CacheFreshAt = parseTime(sql.NullString{String: prevFresh, Valid: prevFresh != ""})
+			days = nil
+			lo, hi = first.String, last.String
 		}
 		fresh := days[:0:0]
 		for _, d := range days {
@@ -708,11 +754,13 @@ func (g *calGroup) apply(ctx context.Context, tx *sql.Tx, m calendarMode) (Calen
 		end, _ := time.ParseInLocation(time.DateOnly, hi, m.zone)
 		w.Start, w.End = start, end.AddDate(0, 0, 1)
 	}
-	fresh, err := g.freshAt(ctx, tx, account, m.at)
-	if err != nil {
-		return counts, nil, err
+	if !pending {
+		fresh, err := g.freshAt(ctx, tx, account, m.at)
+		if err != nil {
+			return counts, nil, err
+		}
+		w.CacheFreshAt = fresh
 	}
-	w.CacheFreshAt = fresh
 	// The core marks the ids it is given as gone before it captures the batch's events, and an event
 	// of the batch is live whatever the list says. A removed record that is mapped here (a
 	// backfill maps every row) must end up gone, so the gone ids are applied after the events.

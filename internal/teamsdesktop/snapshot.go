@@ -15,6 +15,7 @@ import (
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/leveldb"
+	"github.com/ourostack/m365crawl/internal/snapshotowner"
 )
 
 const (
@@ -24,8 +25,12 @@ const (
 
 // Test seams: called at the start of each attempt and after the copy, before validation.
 var (
-	onSnapshotAttempt = func(int) {}
-	afterCopy         = func(int) {}
+	onSnapshotAttempt      = func(int) {}
+	afterCopy              = func(int) {}
+	registerSnapshotOwner  = snapshotowner.Register
+	reclaimSnapshot        = snapshotowner.Reclaimable
+	sweepSnapshotLstat     = os.Lstat
+	sweepSnapshotRemoveAll = os.RemoveAll
 )
 
 // Snapshot copies the source into a private temp directory: <snapDir>/leveldb and
@@ -47,6 +52,10 @@ func Snapshot(ctx context.Context, s Source) (snapDir string, cleanup func(), er
 	}
 	var once sync.Once
 	remove := func() { once.Do(func() { _ = os.RemoveAll(dir) }) }
+	if err := registerSnapshotOwner(dir); err != nil {
+		remove()
+		return "", noop, errs.Internal(err)
+	}
 
 	var last error
 	for attempt := 1; attempt <= snapshotAttempts; attempt++ {
@@ -278,7 +287,8 @@ func mapFSError(path string, err error) error {
 }
 
 // SweepStaleSnapshots removes m365crawl-snapshot-* directories in tmp that were last modified
-// more than olderThan ago (left by a killed process) and returns how many it removed.
+// more than olderThan ago, only with protected evidence of a positively dead owner.
+// Live, unknown and legacy roots are retained. It returns successful removals.
 func SweepStaleSnapshots(tmp string, olderThan time.Duration) int {
 	ents, err := os.ReadDir(tmp)
 	if err != nil {
@@ -294,7 +304,16 @@ func SweepStaleSnapshots(tmp string, olderThan time.Duration) int {
 		if err != nil || !info.ModTime().Before(cutoff) {
 			continue
 		}
-		if os.RemoveAll(filepath.Join(tmp, e.Name())) == nil {
+		dir := filepath.Join(tmp, e.Name())
+		if !reclaimSnapshot(dir) {
+			continue
+		}
+		last, err := sweepSnapshotLstat(dir)
+		if err != nil || !last.IsDir() || last.Mode()&fs.ModeSymlink != 0 ||
+			!os.SameFile(info, last) || !last.ModTime().Before(cutoff) {
+			continue
+		}
+		if sweepSnapshotRemoveAll(dir) == nil {
 			n++
 		}
 	}

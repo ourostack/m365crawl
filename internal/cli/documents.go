@@ -178,7 +178,7 @@ func documentDetailKeys() []string {
 
 var runDocumentsSync = syncer.SyncDocuments
 
-func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
+func (rt *runtime) documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 	out := notesCoverage(sources)
 	out.Scope = "office_document_metadata"
 	seen := map[string]bool{}
@@ -200,9 +200,9 @@ func documentsCoverage(sources []store.KnowledgeSource) *noteCoverage {
 		fix := firstOf(documentFailureFix[source.Reason], documentFailureFix[fallback])
 		if flag != "" {
 			// A locator with no admitted capture has no source ID to name, so its retry route is the file.
-			retry := fileRetry(flag, source.Platform, source.Locator)
+			retry := rt.recoveryCommand(false, "", "docs", "sync") + " " + flag + " " + fileRetryArgument(source.Platform, source.Locator)
 			if source.ID > 0 {
-				retry = "m365crawl docs sync --source-id " + strconv.FormatInt(source.ID, 10)
+				retry = rt.recoveryCommand(false, "", "docs", "sync", "--source-id", strconv.FormatInt(source.ID, 10))
 			}
 			fix += ". Retry this source with " + retry
 		}
@@ -226,28 +226,27 @@ const windowsQuotable = argSafeWindows + ` ,()~#[]{}`
 
 const argSafeWindows = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@+=-" + `\`
 
-// fileRetry is the command that retries a single-file source with no source ID, through the flag
-// that supplies its file. A fix is text an agent may paste into a shell, so the file name is
+// fileRetryArgument quotes the single-file selector of a source with no admitted ID.
+// A fix is text an agent may paste into a shell, so the file name is
 // quoted for the platform the source was registered on. A Windows name that no single quoting
 // keeps literal in both cmd.exe and PowerShell is not interpolated: the fix names the locator
 // field instead.
-func fileRetry(flag, platform, locator string) string {
-	command := "m365crawl docs sync " + flag + " "
+func fileRetryArgument(platform, locator string) string {
 	if platform != "windows" {
-		return command + quoteFor("")(locator)
+		return quoteFor("")(locator)
 	}
 	if locator != "" && strings.Trim(locator, argSafeWindows) == "" {
-		return command + locator
+		return locator
 	}
 	if strings.Trim(locator, windowsQuotable) == "" {
-		return command + `"` + locator + `"`
+		return `"` + locator + `"`
 	}
-	return command + "FILE, where FILE is this source's locator passed as one literal argument (its name holds characters a shell would expand, so it is not repeated here)"
+	return "FILE, where FILE is this source's locator passed as one literal argument (its name holds characters a shell would expand, so it is not repeated here)"
 }
 
-// registryFileArg is the --registry-file argument fileRetry prints for a quotable path.
+// registryFileArg is the --registry-file argument for a quotable path.
 func registryFileArg(platform, locator string) string {
-	return strings.TrimPrefix(fileRetry("--registry-file", platform, locator), "m365crawl docs sync --registry-file ")
+	return fileRetryArgument(platform, locator)
 }
 
 // documentFailureReasons are the reasons a document source capture fails or is cancelled, as
@@ -423,7 +422,7 @@ func (rt *runtime) documentFlags() error {
 func (rt *runtime) refreshDocuments(sourceID int64) (*noteCoverage, error) {
 	report, refreshErr := runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
 	if refreshErr == nil {
-		return documentsCoverage(report.Sources), nil
+		return rt.documentsCoverage(report.Sources), nil
 	}
 	if rt.ctx.Err() != nil || errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
 		return nil, refreshErr
@@ -446,7 +445,7 @@ func (rt *runtime) refreshDocuments(sourceID int64) (*noteCoverage, error) {
 	if sourceID > 0 && len(selected) == 0 {
 		return nil, refreshErr
 	}
-	coverage := documentsCoverage(selected)
+	coverage := rt.documentsCoverage(selected)
 	coded := errs.DBError(refreshErr)
 	errors.As(documentError(refreshErr), &coded)
 	coverage.RefreshError = &syncError{Code: coded.Code, Message: coded.Message}
@@ -479,7 +478,7 @@ func (rt *runtime) documentsRead(label string, sourceID int64, fn func(*store.St
 		return documentError(err)
 	}
 	if result.SourceCoverage == nil {
-		result.SourceCoverage = documentsCoverage(nil)
+		result.SourceCoverage = rt.documentsCoverage(nil)
 	}
 	result.SourceCoverage.RefreshError = coverage.RefreshError
 	result.sourceOnly = true
@@ -547,7 +546,7 @@ func (c *documentsSyncCmd) Run(rt *runtime) error {
 		return err
 	}
 	return rt.write("docs sync", notesSyncResult{Captured: report.Captured, Unchanged: report.Unchanged,
-		Skipped: report.Skipped, Failed: report.Failed, SourceCoverage: documentsCoverage(report.Sources),
+		Skipped: report.Skipped, Failed: report.Failed, SourceCoverage: rt.documentsCoverage(report.Sources),
 		Discovery: documentDiscoveryItems(report.Discovery)})
 }
 
@@ -675,7 +674,7 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 			undated = undated && items[i].ModifiedAt == nil
 		}
 		result := newList(shape(rt, items), snapshot.Truncated)
-		result.SourceCoverage = documentsCoverage(snapshot.Sources)
+		result.SourceCoverage = rt.documentsCoverage(snapshot.Sources)
 		if notice := undatedNotice(snapshot.Undated); notice != "" {
 			result.addNotice(notice)
 		}
@@ -758,7 +757,7 @@ func (c *documentsShowCmd) Run(rt *runtime) error {
 			References: current.References, ReferencesTotal: current.ReferencesTotal, ReferencesTruncated: current.ReferencesTruncated,
 			UsageRelations: usageRelationsOf(current)}
 		result := newList(shape(rt, []documentDetailItem{item}), false)
-		result.SourceCoverage = documentsCoverage([]store.KnowledgeSource{current.Source})
+		result.SourceCoverage = rt.documentsCoverage([]store.KnowledgeSource{current.Source})
 		return result, nil
 	})
 }
@@ -781,7 +780,7 @@ func (c *documentsSourcesCmd) Run(rt *runtime) error {
 	if err != nil {
 		return documentError(err)
 	}
-	coverage := documentsCoverage(report.Sources)
+	coverage := rt.documentsCoverage(report.Sources)
 	result := newList(shape(rt, coverage.Sources), false)
 	result.SourceCoverage, result.sourceOnly = coverage, true
 	if result.Count == 0 {

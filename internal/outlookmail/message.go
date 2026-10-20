@@ -18,23 +18,25 @@ import (
 )
 
 // MapperVersion is raised whenever a mapping change alters derived mail data, so the archive can
-// re-read the store. Version 2 stopped labelling folders of the generic type 0x7a as junk.
-const MapperVersion = 2
+// re-read the store. Version 2 stopped labelling folders of the generic type 0x7a as junk;
+// version 3 reads the measured extended folder layout.
+const MapperVersion = 3
 
 // Class and tag of each mapped object. The tag is the size of the fixed region.
 const (
-	ClassHeader     = 0x4f
-	TagHeader       = 0x430
-	ClassDetail     = 0xc9
-	TagDetail       = 0x60f
-	ClassBody       = 0xca
-	TagBody         = 0x74e
-	ClassAttachment = 0x16a
-	TagAttachment   = 0x318
-	ClassFolder     = 0x4d
-	TagFolder       = 0x4d0
-	ClassRecipient  = 0x55
-	TagRecipient    = 0x15e
+	ClassHeader       = 0x4f
+	TagHeader         = 0x430
+	ClassDetail       = 0xc9
+	TagDetail         = 0x60f
+	ClassBody         = 0xca
+	TagBody           = 0x74e
+	ClassAttachment   = 0x16a
+	TagAttachment     = 0x318
+	ClassFolder       = 0x4d
+	TagFolder         = 0x4d0
+	TagFolderExtended = 0x4d8
+	ClassRecipient    = 0x55
+	TagRecipient      = 0x15e
 )
 
 // Offsets shared by every class.

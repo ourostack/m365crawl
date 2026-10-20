@@ -216,15 +216,19 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		if err != nil {
 			// Cancelling removes the snapshot a source is still reading, so its failure can look like
 			// a damaged cache: the cancellation is the real reason.
-			if stopped = ctx.Err(); stopped != nil {
+			if stopped = ctx.Err(); stopped == nil {
+				coded := codedOf(err)
+				failures = append(failures, sourceFailure{key, err, coded})
+				rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
+				_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
+				r.progress("%s: failed (%s)", key, coded.Code)
 				return
 			}
-			coded := codedOf(err)
-			failures = append(failures, sourceFailure{key, err, coded})
-			rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
-			_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
-			r.progress("%s: failed (%s)", key, coded.Code)
-			return
+			// The calendar can commit before its following stage observes cancellation.
+			if sr.Source == "" || sr.Source != key || sr.Counts == nil || sr.Error != nil ||
+				(sr.Status != StatusOK && sr.Status != StatusOmissions) {
+				return
+			}
 		}
 		committed++
 		decoded = decoded || didDecode
@@ -262,6 +266,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 			settle(o.key, o.report, o.decoded, o.err)
 		}
 	}
+	if stopped == nil {
+		stopped = ctx.Err()
+	}
 	var linkErr error
 	if stopped == nil && r.o.OutlookLink != "" && r.outlookOn() {
 		linkErr = r.linkOutlook(ctx)
@@ -274,6 +281,9 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		for _, c := range r.transcripts {
 			rep.Transcripts.Add(c)
 		}
+	}
+	if stopped == nil {
+		stopped = ctx.Err()
 	}
 	rep.FinishedAt = time.Now().UTC()
 	switch {
@@ -375,11 +385,15 @@ func (r *runner) source(ctx context.Context, src teamsdesktop.Source, rep *Repor
 		return SourceReport{}, false, err
 	}
 	if r.o.Account == nil {
+		pending, err := r.st.CalendarReplayPending(ctx, src.Key())
+		if err != nil {
+			return SourceReport{}, false, errs.DBError(err)
+		}
 		last, err := r.st.LastFingerprint(ctx, src.Key())
 		if err != nil {
 			return SourceReport{}, false, errs.DBError(err)
 		}
-		if last == fp && !r.o.FullRead { // a forced full read reads a source whose fingerprint has not changed too
+		if last == fp && !r.o.FullRead && !pending { // pending positives cannot be skipped by an unchanged source
 			// Nothing was read, but what the calendar could not use before it still cannot: a sync
 			// that reports nothing missing while data is missing is wrong.
 			losses, err := r.st.CalendarLosses(ctx, src.Key(), nil)
@@ -482,7 +496,8 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if w.memo.err != nil {
 		return nil, nil, 0, errs.DBError(w.memo.err)
 	}
-	cal, err := sess.DeriveCalendar(ctx, source, begun, calendarZone(), w.present)
+	cal, err := sess.DeriveCalendarObservation(ctx, source, begun, calendarZone(), w.present,
+		w.censusComplete && lost(generic) == 0, r.o.Account != nil)
 	if err != nil {
 		return nil, nil, 0, asCoded(err)
 	}
@@ -506,6 +521,10 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	status := StatusOK
 	if lost(omissions) > 0 {
 		status = StatusOmissions
+		fp = ""
+	}
+	if cal.ReplayPending {
+		fp = ""
 	}
 	if len(omissions) == 0 {
 		omissions = nil
@@ -526,18 +545,19 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 // result does not depend on record order and a repeated sync changes nothing. Account rows are
 // applied before the first record of that account.
 type writer struct {
-	ctx      context.Context
-	sess     *store.Session
-	seenAcct map[[2]string]bool
-	convs    []teamsdesktop.Conversation
-	msgs     []teamsdesktop.Message
-	acts     []teamsdesktop.Activity
-	recs     []teamsdesktop.GenericRecord
-	recBytes int
-	people   map[[2]string]teamsdesktop.Person
-	present  []string // the databases the generic read found: the accounts whose cache was read
-	counts   runCounts
-	changes  []Change // held until the source commits
+	ctx            context.Context
+	sess           *store.Session
+	seenAcct       map[[2]string]bool
+	convs          []teamsdesktop.Conversation
+	msgs           []teamsdesktop.Message
+	acts           []teamsdesktop.Activity
+	recs           []teamsdesktop.GenericRecord
+	recBytes       int
+	people         map[[2]string]teamsdesktop.Person
+	present        []string // the databases the generic read found: the accounts whose cache was read
+	censusComplete bool
+	counts         runCounts
+	changes        []Change // held until the source commits
 	// transcripts is what deriving the transcript parts of this source's accounts counted.
 	transcripts map[string]store.TranscriptCounts
 
@@ -698,9 +718,14 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 	if err := w.flushRecords(source, at); err != nil {
 		return nil, 0, err
 	}
-	w.present = res.Present
-	if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
-		return nil, 0, asCoded(err)
+	w.censusComplete = res.CensusComplete
+	if res.CensusComplete {
+		w.present = res.Present
+		if _, err := w.sess.MarkDatabasesRemoved(source, res.Present, account, at); err != nil {
+			return nil, 0, asCoded(err)
+		}
+	} else {
+		w.present = nil
 	}
 	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
 		return nil, 0, asCoded(err)

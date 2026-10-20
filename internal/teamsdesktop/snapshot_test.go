@@ -2,6 +2,9 @@ package teamsdesktop
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +16,166 @@ import (
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/leveldb"
 )
+
+func TestSnapshotOwnershipMarkerLifetime(t *testing.T) {
+	privateTempDir(t)
+	var checked string
+	check := func(dir string) {
+		t.Helper()
+		path := filepath.Join(dir, ".m365crawl-owner.json")
+		b, err := os.ReadFile(path) //nolint:gosec // G304: fixed marker in this test's exclusively owned snapshot root
+		if err != nil {
+			t.Errorf("snapshot lacks registered ownership before source copy: %v", err)
+			return
+		}
+		var marker struct{ Version, PID int }
+		if err := json.Unmarshal(b, &marker); err != nil || marker.Version != 1 || marker.PID <= 0 {
+			t.Errorf("invalid snapshot ownership metadata: %s err=%v", b, err)
+		}
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("ownership marker is not a regular private file: %v", err)
+		}
+	}
+	old := onSnapshotAttempt
+	onSnapshotAttempt = func(int) {
+		paths, err := filepath.Glob(filepath.Join(os.TempDir(), snapshotPrefix+"*"))
+		if err != nil || len(paths) != 1 {
+			t.Errorf("cannot identify the owned registration root: %v err=%v", paths, err)
+			return
+		}
+		checked = paths[0]
+		check(checked)
+	}
+	t.Cleanup(func() { onSnapshotAttempt = old })
+	snap, cleanup, err := Snapshot(context.Background(), fixtureSource(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if checked != snap {
+		t.Errorf("registration must precede the copy of exactly this snapshot: checked=%q snapshot=%q", checked, snap)
+	}
+	check(snap)
+	cleanup()
+	cleanup()
+	if _, err := os.Stat(snap); !os.IsNotExist(err) {
+		t.Errorf("owned snapshot/marker survived its idempotent cleanup: %v", err)
+	}
+}
+
+func TestSnapshotOwnershipRegistrationFailureCleanup(t *testing.T) {
+	privateTempDir(t)
+	oldRegister, oldAttempt := registerSnapshotOwner, onSnapshotAttempt
+	t.Cleanup(func() { registerSnapshotOwner, onSnapshotAttempt = oldRegister, oldAttempt })
+	var allocated string
+	fault := errors.New("synthetic registration failure")
+	registerSnapshotOwner = func(dir string) error {
+		allocated = dir
+		if err := os.WriteFile(filepath.Join(dir, ".m365crawl-owner.json"), []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return fault
+	}
+	onSnapshotAttempt = func(int) { t.Fatal("registration failure reached source copy") }
+	// This deliberately nonexistent source must never be opened.
+	snap, cleanup, err := Snapshot(context.Background(), Source{LevelDBDir: filepath.Join(t.TempDir(), "absent")})
+	if !errors.Is(err, fault) || snap != "" || allocated == "" || cleanup == nil {
+		t.Fatalf("registration failure: snapshot=%q allocated=%q cleanup-nil=%t err=%v", snap, allocated, cleanup == nil, err)
+	}
+	cleanup()
+	cleanup()
+	if _, err := os.Lstat(allocated); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("failed registration leaked its private root/partial marker: %v", err)
+	}
+}
+
+type sweepSymlinkInfo struct{ fs.FileInfo }
+
+func (s sweepSymlinkInfo) Mode() fs.FileMode { return s.FileInfo.Mode() | fs.ModeSymlink }
+
+func TestSnapshotOwnershipSweepGuards(t *testing.T) {
+	for _, name := range []string{"unknown", "stat-error", "replaced", "symlink", "not-directory", "freshened", "remove-error", "positive-qualified"} {
+		t.Run(name, func(t *testing.T) {
+			tmp := t.TempDir()
+			dir := filepath.Join(tmp, snapshotPrefix+"guard")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			payload := filepath.Join(dir, "owned")
+			if err := os.WriteFile(payload, []byte("retained"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			oldTime := time.Now().Add(-48 * time.Hour)
+			if err := os.Chtimes(dir, oldTime, oldTime); err != nil {
+				t.Fatal(err)
+			}
+			other := t.TempDir()
+			file := filepath.Join(other, "regular")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			oldReclaim, oldStat, oldRemove := reclaimSnapshot, sweepSnapshotLstat, sweepSnapshotRemoveAll
+			t.Cleanup(func() {
+				reclaimSnapshot, sweepSnapshotLstat, sweepSnapshotRemoveAll = oldReclaim, oldStat, oldRemove
+			})
+			reclaimSnapshot = func(p string) bool {
+				if p != dir {
+					t.Fatalf("unexpected ownership path %s", p)
+				}
+				if name == "freshened" {
+					now := time.Now()
+					if err := os.Chtimes(dir, now, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return name != "unknown"
+			}
+			sweepSnapshotLstat = func(p string) (fs.FileInfo, error) {
+				switch name {
+				case "stat-error":
+					return nil, fs.ErrPermission
+				case "replaced":
+					return os.Lstat(other)
+				case "not-directory":
+					return os.Lstat(file)
+				case "symlink":
+					info, err := os.Lstat(p)
+					return sweepSymlinkInfo{info}, err
+				default:
+					return os.Lstat(p)
+				}
+			}
+			removes := 0
+			sweepSnapshotRemoveAll = func(p string) error {
+				removes++
+				if p != dir {
+					t.Fatalf("unexpected deletion path %s", p)
+				}
+				if name == "remove-error" {
+					return fs.ErrPermission
+				}
+				return os.RemoveAll(p)
+			}
+			wantCount, wantCalls := 0, 0
+			switch name {
+			case "positive-qualified":
+				wantCount, wantCalls = 1, 1
+			case "remove-error":
+				wantCalls = 1
+			}
+			if got := SweepStaleSnapshots(tmp, time.Hour); got != wantCount || removes != wantCalls {
+				t.Fatalf("guard %s: removed=%d calls=%d, want %d/%d", name, got, removes, wantCount, wantCalls)
+			}
+			if name != "positive-qualified" {
+				if b, err := os.ReadFile(payload); err != nil || string(b) != "retained" { //nolint:gosec // G304: payload created in this test's private temp root
+					t.Fatalf("guard %s lost owned payload: %q %v", name, b, err)
+				}
+			} else if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("positive removal did not remove its exact owned root: %v", err)
+			}
+		})
+	}
+}
 
 func TestSnapshotFixtureOpens(t *testing.T) {
 	snap, cleanup, err := Snapshot(context.Background(), fixtureSource(t))
@@ -223,13 +386,10 @@ func TestSweepStaleSnapshots(t *testing.T) {
 	for _, d := range []string{old, other} {
 		_ = os.Chtimes(d, ago, ago)
 	}
-	if n := SweepStaleSnapshots(tmp, 24*time.Hour); n != 1 {
-		t.Fatalf("swept %d, want 1", n)
+	if n := SweepStaleSnapshots(tmp, 24*time.Hour); n != 0 {
+		t.Fatalf("swept %d unknown roots, want 0", n)
 	}
-	if _, err := os.Stat(old); !os.IsNotExist(err) {
-		t.Error("old snapshot kept")
-	}
-	for _, d := range []string{fresh, other} {
+	for _, d := range []string{old, fresh, other} {
 		if _, err := os.Stat(d); err != nil {
 			t.Errorf("%s removed", d)
 		}

@@ -3,6 +3,8 @@ package indexeddb
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -11,6 +13,127 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
+
+func TestCensusTornJournalRetainsOnlyObservedPrefix(t *testing.T) {
+	for _, journalDatabase := range []bool{false, true} {
+		t.Run(fmt.Sprintf("journal-database=%t", journalDatabase), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "origin.leveldb")
+			db, err := gl.OpenFile(dir, &opt.Options{Compression: opt.NoCompression})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			put := func(k, v []byte) {
+				t.Helper()
+				if err := db.Put(k, v, &opt.WriteOptions{Sync: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			put(dbNameKey("https://x", "prefix"), []byte{1})
+			put(storeNameKey(1, 1), u16("rows"))
+			put(append(idPrefix(1, 1, indexData, 1), idbString("prefix-key")...), []byte("stable-prefix"))
+			put(storeNameKey(2, 1), u16("rows"))
+			if !journalDatabase {
+				put(dbNameKey("https://x", "journal"), []byte{2})
+			}
+			if err := db.CompactRange(util.Range{}); err != nil {
+				t.Fatal(err)
+			}
+			if journalDatabase {
+				put(dbNameKey("https://x", "journal"), []byte{2})
+			}
+			put(append(idPrefix(2, 1, indexData, 1), idbString("journal-key")...), []byte("journal-value"))
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := filepath.Glob(filepath.Join(dir, "*.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := map[string][]byte{}
+			for _, path := range logs {
+				b, err := os.ReadFile(path) //nolint:gosec // G304: journal generated above in this test's private t.TempDir, selected by its local *.log glob
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(b) > 7 {
+					saved[path] = b
+				}
+			}
+			if len(saved) == 0 {
+				t.Fatal("fixture setup produced no journal payload")
+			}
+			var healthyHeld int64
+			for cycle := 0; cycle < 2; cycle++ {
+				for _, damaged := range []bool{false, true, false} {
+					for path, b := range saved {
+						if damaged {
+							b = b[:7] // A complete physical header with an absent payload.
+						}
+						if err := os.WriteFile(path, b, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					o, err := Open(dir, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					stats := o.Stats()
+					if err := o.Close(); err != nil {
+						t.Fatal(err)
+					}
+					held, dbs, err := Census(dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					withHeld, withDBs, withStats, err := CensusWithStats(dir)
+					if err != nil || !reflect.DeepEqual(withHeld, held) || !reflect.DeepEqual(withDBs, dbs) ||
+						withStats.TruncatedLogTails != stats.TruncatedLogTails {
+						t.Fatalf("stats census changed compatibility output or lost journal evidence: held=%v dbs=%+v stats=%+v err=%v",
+							withHeld, withDBs, withStats, err)
+					}
+					wantDBs := 2
+					if damaged && journalDatabase {
+						wantDBs = 1
+					}
+					if healthyHeld == 0 && !damaged {
+						healthyHeld = held[2]
+					}
+					if len(dbs) != wantDBs || held[1] == 0 || healthyHeld == 0 ||
+						(damaged && held[2] >= healthyHeld) || (!damaged && held[2] != healthyHeld) {
+						t.Errorf("cycle=%d damaged=%t: census held=%v dbs=%+v", cycle, damaged, held, dbs)
+					}
+					if (stats.TruncatedLogTails > 0) != damaged {
+						t.Errorf("fixture did not discriminate torn journal: damaged=%t stats=%+v", damaged, stats)
+					}
+				}
+			}
+		})
+	}
+	t.Run("census-errors", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "origin.leveldb")
+		if _, _, _, err := CensusWithStats(dir); err == nil {
+			t.Fatal("missing origin was mistaken for a complete empty census")
+		}
+		db, err := gl.OpenFile(dir, &opt.Options{Compression: opt.NoCompression})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		if err := db.Put([]byte{0, 0, 0, 0, 201, 0x80}, []byte{1}, &opt.WriteOptions{Sync: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, stats, err := CensusWithStats(dir); err == nil || stats.Keys == 0 {
+			t.Fatalf("metadata error lost its loaded observation stats: stats=%+v err=%v", stats, err)
+		}
+		if _, _, err := Census(dir); err == nil {
+			t.Fatal("compatibility wrapper swallowed metadata error")
+		}
+	})
+}
 
 func heapNow() uint64 {
 	var m runtime.MemStats

@@ -85,6 +85,43 @@ func lossOf(r Result, code string) int {
 	return 0
 }
 
+func TestCollectExtendedFolderLayout(t *testing.T) {
+	objs := folderObjs()
+	objs[0] = extendedFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: rootKey, Name: "Fixture Extended Inbox", Type: 0x61, Stamp: 4, Lead: 3})
+	objs = append(objs,
+		extendedFolder(hxbuild.MailFolderSpec{Key: fOtherBox, Parent: otherRoot, Name: "Fixture Other Account", Type: 0x61}),
+		hdr(11, 21, fInbox, 1, "Fixture own message", 2), det(21, "<own@example.invalid>"),
+		hdr(12, 22, fOtherBox, 1, "Fixture other message", 2), det(22, "<other@example.invalid>"))
+	r := collect(t, storeOf(t, framed(objs...)), Options{})
+	if len(r.Losses) != 0 || r.Doubtful || r.Notes.OtherTagSkipped != 0 || r.Notes.MissingFolder != 0 || r.Notes.OtherRoot != 1 {
+		t.Fatalf("extended layout was not trusted/account-scoped: %+v %+v", r.Notes, r.Losses)
+	}
+	if len(r.Messages) != 1 || r.Messages[0].DetailKey != 21 || r.Messages[0].Folder.Key != fInbox || r.Messages[0].Folder.Name != "Fixture Extended Inbox" || r.Messages[0].Folder.Kind != "inbox" || len(r.Folders) != 5 {
+		t.Fatalf("extended folder link: %+v %+v", r.Messages, r.Folders)
+	}
+}
+
+func TestCollectExtendedFolderVersionAndResync(t *testing.T) {
+	objs := append(folderObjs(),
+		extendedFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: rootKey, Name: "Fixture Latest Inbox", Type: 0x61, Stamp: 5}),
+		hdr(11, 21, fInbox, 1, "Fixture message", 2), det(21, "<own@example.invalid>"))
+	stray := extendedFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: otherRoot, Name: "Fixture Resynced Copy", Type: 0x61, Stamp: 500})
+	payload := append(framed(objs...), append([]byte{1, 2, 3}, stray.Encode()...)...)
+	r := collect(t, storeOf(t, payload), Options{})
+	if len(r.Losses) != 0 || r.Doubtful || r.Notes.ResyncedKept != 1 || len(r.Messages) != 1 || r.Messages[0].Folder.Name != "Fixture Latest Inbox" {
+		t.Fatalf("extended clean/version priority: %+v %+v %+v", r.Notes, r.Losses, r.Messages)
+	}
+}
+
+func TestCollectUnknownExtendedFolderTagRemainsALoss(t *testing.T) {
+	o := extendedFolder(hxbuild.MailFolderSpec{Key: fInbox, Parent: rootKey, Name: "Fixture Unknown Layout", Type: 0x61})
+	o.PutU16(2, 0x4d9)
+	r := collect(t, storeOf(t, framed(o, hdr(11, 21, fInbox, 1, "Fixture message", 2), det(21, "<own@example.invalid>"))), Options{})
+	if r.Notes.OtherTagSkipped != 1 || lossOf(r, CodeMailLayoutPartial) != 1 || lossOf(r, CodeMailFolderMissing) != 1 || len(r.Folders) != 0 || len(r.Messages) != 1 || r.Messages[0].Folder.Kind != KindUnknown {
+		t.Fatalf("unknown extended layout was guessed: %+v %+v %+v", r.Notes, r.Losses, r.Messages)
+	}
+}
+
 func TestCollectJoinsCopiesOfOneMessage(t *testing.T) {
 	objs := append(folderObjs(),
 		hdr(11, 21, fToMe, 1, "Fixture subject", 2), hdr(12, 21, fInbox, 9, "Fixture subject", 2), hdr(13, 21, fSent, 5, "Fixture subject", 2),

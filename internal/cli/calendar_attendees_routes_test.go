@@ -7,9 +7,12 @@ import (
 	"testing"
 )
 
-var attendeeCommandPlatform = goruntime.GOOS
-
 func attendeeCommandWords(t *testing.T, command string) []string {
+	t.Helper()
+	return attendeeCommandWordsFor(t, command, goruntime.GOOS)
+}
+
+func attendeeCommandWordsFor(t *testing.T, command, platform string) []string {
 	t.Helper()
 	var out []string
 	var word strings.Builder
@@ -23,7 +26,7 @@ func attendeeCommandWords(t *testing.T, command string) []string {
 			started = true
 			continue
 		}
-		if quote == 0 && c == '\\' && attendeeCommandPlatform != "windows" {
+		if quote == 0 && c == '\\' && platform != "windows" {
 			escaped = true
 			started = true
 			continue
@@ -39,7 +42,7 @@ func attendeeCommandWords(t *testing.T, command string) []string {
 		}
 		switch c {
 		case '\'':
-			if attendeeCommandPlatform == "windows" {
+			if platform == "windows" {
 				word.WriteRune(c)
 			} else {
 				quote = c
