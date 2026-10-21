@@ -255,9 +255,12 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 	}
 	if !found || len(rep.Sources) != 2 || src.Source != "outlook|"+c.profile.Name+"|mail" ||
 		cal.Source == "" || cal.Error != nil || len(cal.Omissions) != 0 || len(src.Omissions) != 0 {
-		if found && len(src.Omissions) != 0 {
+		switch {
+		case c.failure != nil && c.failure.calendar:
+			c.failure.calendarSourceFailure(rep, c.profile.Name, step)
+		case found && len(src.Omissions) != 0:
 			c.failure.sourceOmissions(src.Omissions)
-		} else {
+		default:
 			c.failure.record(protocol.StageImport, "sync_source_refused")
 		}
 		t.Fatal("sync_source_refused")

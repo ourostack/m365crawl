@@ -70,6 +70,9 @@ func FixedCalendarQualificationFailureReason(stage, reason string) string {
 }
 
 func CalendarQualificationFailureFields(stage string, fields []string) bool {
+	if stage == StageImport {
+		return calendarImportFailureFields(fields)
+	}
 	if DiagnosticStage(stage) {
 		return DiagnosticFields(fields)
 	}
@@ -122,7 +125,7 @@ func DecodeCalendarQualificationFailure(data []byte) (CalendarQualificationFailu
 		!CalendarQualificationFailureStage(value.Stage) ||
 		value.Reason != "unproved" && FixedCalendarQualificationFailureReason(value.Stage, value.Reason) != value.Reason ||
 		!CalendarQualificationFailureFields(value.Stage, value.Fields) ||
-		!DiagnosticOmissions(value.Stage, value.Reason, value.Omissions) {
+		!calendarQualificationOmissions(value.Stage, value.Reason, value.Omissions) {
 		return CalendarQualificationFailure{}, calendarQualificationRefused()
 	}
 	return value, nil

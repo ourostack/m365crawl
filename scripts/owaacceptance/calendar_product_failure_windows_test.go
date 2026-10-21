@@ -34,7 +34,7 @@ func TestCalendarProductSupervisorReportsBoundFailureOnlyAfterRelease(t *testing
 	if err != nil {
 		t.Fatal("synthetic_executable_missing")
 	}
-	for _, mode := range []string{"diagnostic", "forged-diagnostic", "sql-diagnostic", "mail-diagnostic"} {
+	for _, mode := range []string{"diagnostic", "forged-diagnostic", "sql-diagnostic", "mail-diagnostic", "calendar-source-diagnostic"} {
 		t.Run(mode, func(t *testing.T) {
 			receipt := filepath.Join(t.TempDir(), "receipt")
 			_, runErr := runCalendarQualified(exe, testDigest(t, exe), calendarProductSource(t, mode), t.TempDir(), receipt, 10*time.Second)
@@ -56,6 +56,9 @@ func TestCalendarProductSupervisorReportsBoundFailureOnlyAfterRelease(t *testing
 			}
 			if mode == "mail-diagnostic" && packet != `owa_calendar_qualification status=unqualified stage=import_repeat_compare reason=sync_source_refused fields=["mail_coverage"] omissions={"outlook_owa_reader_blob_missing":2,"outlook_owa_source_changed":1}` {
 				t.Fatal("fixed_sorted_mail_loss_diagnostic_lost")
+			}
+			if mode == "calendar-source-diagnostic" && packet != `owa_calendar_qualification status=unqualified stage=import_repeat_compare reason=sync_source_refused fields=["pass_full_read","calendar_omissions"] omissions={"calendar_refused":2,"outlook_event_unmapped":7}` {
+				t.Fatal("fixed_calendar_pass_cause_and_loss_packet_lost")
 			}
 		})
 	}

@@ -34,7 +34,7 @@ func TestRealOWACalendarProductQualification(t *testing.T) {
 		t.Fatal("synthetic_product_marker_required")
 	}
 	switch string(mode) {
-	case "diagnostic", "forged-diagnostic", "sql-diagnostic", "mail-diagnostic":
+	case "diagnostic", "forged-diagnostic", "sql-diagnostic", "mail-diagnostic", "calendar-source-diagnostic":
 		failure := protocol.CalendarQualificationFailure{
 			Version: protocol.Version, Kind: protocol.CalendarQualificationFailureKind, Owner: owner,
 			Stage: protocol.StageCalendarOracle, Reason: "calendar_oracle_regional_zone_unsupported",
@@ -46,6 +46,9 @@ func TestRealOWACalendarProductQualification(t *testing.T) {
 		case "mail-diagnostic":
 			failure.Stage, failure.Reason, failure.Fields = protocol.StageImport, "sync_source_refused", []string{"mail_coverage"}
 			failure.Omissions = map[string]int64{"outlook_owa_reader_blob_missing": 2, "outlook_owa_source_changed": 1}
+		case "calendar-source-diagnostic":
+			failure.Stage, failure.Reason, failure.Fields = protocol.StageImport, "sync_source_refused", []string{"pass_full_read", "calendar_omissions"}
+			failure.Omissions = map[string]int64{"calendar_refused": 2, "outlook_event_unmapped": 7}
 		}
 		if string(mode) != "forged-diagnostic" {
 			if protocol.EmitCalendarQualificationFailure(owner, failure) != nil {
