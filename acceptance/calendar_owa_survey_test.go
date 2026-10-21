@@ -14,20 +14,10 @@ import (
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
+	"github.com/ourostack/m365crawl/scripts/owaacceptance/protocol"
 )
 
-var owaCalendarSurveyFields = []string{
-	"records", "decoded", "decode_failed", "objects", "non_objects",
-	"uid_valid", "uid_missing", "uid_invalid", "uid_duplicate", "uid_conflict",
-	"start_valid", "end_valid", "modified_valid", "reversed_intervals", "utc_midnight_intervals",
-	"all_day_true", "all_day_false", "all_day_unknown", "all_day_invalid", "all_day_unaligned",
-	"body_html", "body_text", "body_unknown", "body_truncated", "body_invalid",
-	"attendees_complete", "attendees_partial", "attendees_unknown", "attendees_invalid",
-	"attendee_rows", "attendee_required", "attendee_optional", "attendee_resource",
-	"time_zone_present", "item_type_present", "organizer_present", "response_present",
-	"start_unknown", "start_invalid", "end_unknown", "end_invalid", "modified_unknown", "modified_invalid",
-	"time_zone_invalid", "item_type_invalid", "organizer_invalid", "response_invalid",
-}
+var owaCalendarSurveyFields = protocol.CalendarObservationFields()
 
 type owaCalendarSurvey struct {
 	Counts   map[string]int64
