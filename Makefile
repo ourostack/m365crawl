@@ -107,6 +107,7 @@ script-lint:
 	scripts/report-failure.sh --selftest
 	scripts/release-flags.sh --selftest
 	bash scripts/release-notes.sh --selftest
+	bash scripts/rehearsal-publish-window.sh --selftest
 	scripts/automerge-eligible.sh --selftest
 	scripts/retry.sh --selftest
 	scripts/check-release-wiring.sh --selftest
