@@ -210,10 +210,12 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 		committed int
 		decoded   bool
 		stopped   error // cancellation: the sources after it are not tried
+		retained  bool
 	)
 	// settle books one source's outcome, whichever kind of source it is.
 	settle := func(key string, sr SourceReport, didDecode bool, err error) {
 		if err != nil {
+			retained = retained || errors.Is(err, ErrOWASnapshotRetained)
 			// Cancelling removes the snapshot a source is still reading, so its failure can look like
 			// a damaged cache: the cancellation is the real reason.
 			if stopped = ctx.Err(); stopped == nil {
@@ -222,6 +224,14 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 				rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
 				_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
 				r.progress("%s: failed (%s)", key, coded.Code)
+				return
+			}
+			if errors.Is(err, ErrOWASnapshotRetained) {
+				coded := errs.Interrupted()
+				coded.Message += "; " + ErrOWASnapshotRetained.Error()
+				rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed,
+					Error: &SourceError{Code: coded.Code, Message: coded.Message, Fix: coded.Fix}})
+				r.progress("%s: %s", key, ErrOWASnapshotRetained.Error())
 				return
 			}
 			// The calendar can commit before its following stage observes cancellation.
@@ -300,17 +310,23 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 	default:
 		rep.Status = StatusOK
 	}
+	var resultErr error
 	switch {
 	case stopped != nil:
-		return rep, changes, stopped
+		resultErr = stopped
 	case linkErr != nil:
-		return rep, changes, linkErr // the operator's mistake comes first; the sources are committed
+		resultErr = linkErr // the operator's mistake comes first; the sources are committed
 	case len(failures) == 0:
-		return rep, changes, nil
+		resultErr = nil
 	case committed == 0:
-		return rep, changes, failures[0].err
+		resultErr = failures[0].err
+	default:
+		resultErr = errs.PartialSync(describe(failures))
 	}
-	return rep, changes, errs.PartialSync(describe(failures))
+	if retained && !errors.Is(resultErr, ErrOWASnapshotRetained) {
+		resultErr = errors.Join(resultErr, ErrOWASnapshotRetained)
+	}
+	return rep, changes, resultErr
 }
 
 // sourceFailure is a source that failed and why.

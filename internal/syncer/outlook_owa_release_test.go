@@ -15,14 +15,14 @@ import (
 )
 
 func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
-	for _, mode := range []string{"success", "open-error", "open-unproved", "open-unproved-deadline", "panic-open", "close-error", "layout-close-error", "panic-close", "cancel-collect", "cancel-collect-close"} {
+	for _, mode := range []string{"success", "open-error", "open-unproved", "open-unproved-deadline", "panic-open", "close-error", "layout-close-error", "layout-close-panic", "panic-close", "cancel-collect", "cancel-collect-close"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateTmp(t)
 			root, db := owaRoot(t, "mail"), newDB(t)
 			opts := outlookOpts(db, root)
 			run(t, opts)
 			opts.FullRead = true
-			if mode == "layout-close-error" {
+			if mode == "layout-close-error" || mode == "layout-close-panic" {
 				opts.OutlookRoot = owaRoot(t, "empty")
 			}
 			st, err := store.Open(context.Background(), db)
@@ -75,7 +75,7 @@ func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
 				switch mode {
 				case "close-error", "layout-close-error", "cancel-collect-close":
 					return errors.New("private closing cause")
-				case "panic-close":
+				case "panic-close", "layout-close-panic":
 					panic("private closing panic")
 				}
 				return nil
@@ -111,7 +111,7 @@ func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
 			if mode == "open-unproved-deadline" && !errors.Is(out[0].err, context.DeadlineExceeded) {
 				t.Fatal("reader-close failure replaced its deadline")
 			}
-			if mode == "layout-close-error" && codedOf(out[0].err).Code != outlookmail.CodeMailLayoutUnsupported {
+			if (mode == "layout-close-error" || mode == "layout-close-panic") && codedOf(out[0].err).Code != outlookmail.CodeMailLayoutUnsupported {
 				t.Fatal("reader-close failure replaced the primary layout refusal")
 			}
 			if count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 {
@@ -128,5 +128,50 @@ func TestOWAMailCanceledBeforeCollectorOwnsNoReader(t *testing.T) {
 	_, err := collectOWAMail(ctx, "unused", "outlook/Default", false, &released)
 	if !errors.Is(err, context.Canceled) || !released {
 		t.Fatal("an unstarted collector acquired ownership or lost cancellation")
+	}
+}
+
+func TestOWAMailCanceledRunReportsRetainedSnapshot(t *testing.T) {
+	isolateTmp(t)
+	root, db := owaRoot(t, "mail"), newDB(t)
+	opts := outlookOpts(db, root)
+	run(t, opts)
+	opts.FullRead = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	open, closeOrigin, copySource := outlookOWAOpen, outlookOWAClose, outlookOWAPrivateSnapshot
+	t.Cleanup(func() { outlookOWAOpen, outlookOWAClose, outlookOWAPrivateSnapshot = open, closeOrigin, copySource })
+	var release func()
+	closed := false
+	outlookOWAPrivateSnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
+		var snap string
+		var err error
+		snap, release, err = copySource(ctx, source)
+		return snap, release, err
+	}
+	t.Cleanup(func() {
+		if closed && release != nil {
+			release()
+		}
+	})
+	outlookOWAOpen = func(ctx context.Context, dir, blob string) (*indexeddb.Origin, error) {
+		o, err := open(ctx, dir, blob)
+		cancel()
+		return o, err
+	}
+	outlookOWAClose = func(o *indexeddb.Origin) error {
+		if err := closeOrigin(o); err != nil {
+			return err
+		}
+		closed = true
+		return errors.New("private close cause")
+	}
+	rep, _, err := Run(ctx, opts)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "retained") {
+		t.Fatal("public canceled Run discarded the retained-snapshot notice")
+	}
+	source := sourceKeyed(t, rep, "outlook|Default|mail")
+	if source.Error == nil || !strings.Contains(source.Error.Message, "retained") {
+		t.Fatal("public canceled report discarded its retained source outcome")
 	}
 }

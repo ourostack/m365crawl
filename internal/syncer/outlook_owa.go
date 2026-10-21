@@ -98,7 +98,8 @@ func (r *runner) rememberOWAFailure(ctx context.Context, profile string, err err
 	}
 }
 
-var errOWASnapshotRetained = errors.New("outlookowa: snapshot retained because reader release was not proved")
+// ErrOWASnapshotRetained reports a private snapshot whose reader release was not proved.
+var ErrOWASnapshotRetained = errors.New("reader release was not proved and its snapshot was retained")
 
 func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (SourceReport, bool, error) {
 	begun := outlookNow()
@@ -179,7 +180,7 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 	})
 	if err != nil {
 		if !released {
-			err = errors.Join(err, errOWASnapshotRetained)
+			err = errors.Join(err, ErrOWASnapshotRetained)
 		}
 		return SourceReport{}, false, err
 	}
@@ -268,7 +269,11 @@ func collectOWAMail(ctx context.Context, snap, account string, expect bool, rele
 		return res, err
 	}
 	defer func() {
-		if closeErr := outlookOWAClose(o); closeErr != nil {
+		if closeErr := contained(func() error { return outlookOWAClose(o) }); closeErr != nil {
+			var coded *errs.Coded
+			if err == nil && errors.As(closeErr, &coded) && coded.Code == errs.CodeInternal {
+				err = errs.Internal(errors.New("outlook mail reader release failed"))
+			}
 			err = errors.Join(err, outlookowa.ErrReaderClose)
 		} else {
 			*released = true
@@ -280,7 +285,7 @@ func collectOWAMail(ctx context.Context, snap, account string, expect bool, rele
 // Only fixed diagnostics cross the source boundary; Windows access failures are not macOS FDA.
 func owaSourceError(err error) (result error) {
 	defer func() {
-		if errors.Is(err, errOWASnapshotRetained) {
+		if errors.Is(err, ErrOWASnapshotRetained) {
 			result = owaRetainedError(result)
 		}
 	}()
@@ -317,8 +322,8 @@ func owaRetainedError(err error) error {
 	var coded *errs.Coded
 	if errors.As(err, &coded) {
 		public := *coded
-		public.Message += "; reader release was not proved and its snapshot was retained"
-		return &public
+		public.Message += "; " + ErrOWASnapshotRetained.Error()
+		return errors.Join(&public, ErrOWASnapshotRetained)
 	}
 	return err
 }
