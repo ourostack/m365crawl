@@ -71,7 +71,14 @@ func (oracle *owaWindowsZoneOracle) local(ctx context.Context, name string, inst
 	}
 	zone, found := oracle.zones[name]
 	if !found {
-		return time.Time{}, errors.New("calendar_oracle_zone_unknown")
+		identity, err := oracle.identity(ctx, name)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if identity.Canonical != identity.Representative {
+			return time.Time{}, errors.New("calendar_oracle_regional_zone_unsupported")
+		}
+		zone = oracle.zones[identity.Windows]
 	}
 	utc := instant.UTC()
 	if utc.Year() < 1601 || utc.Year() > 9999 {

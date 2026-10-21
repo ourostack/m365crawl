@@ -50,7 +50,7 @@ func TestOWACalendarWindowsZoneOracleRefusesUnprovedInputs(t *testing.T) {
 		t.Fatal("windows_zone_oracle_setup_refused")
 	}
 	at := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
-	for _, zone := range []string{"", "Local", "Synthetic Unknown Zone", "America/Los_Angeles"} {
+	for _, zone := range []string{"", "Local", "Synthetic Unknown Zone", "america/los_angeles"} {
 		if _, err := oracle.local(t.Context(), zone, at); err == nil || err.Error() != "calendar_oracle_zone_unknown" {
 			t.Fatal("unknown_zone_became_host_or_utc_fallback")
 		}
