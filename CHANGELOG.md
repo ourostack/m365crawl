@@ -4,6 +4,19 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-21
+
+### Fixed
+
+- Require Go 1.27.3 or newer so builds include its `crypto/x509` security fixes.
+- Preserve supplied release notes and signing disclosures in published releases,
+  and refuse promotion when the published body does not match. The stable release
+  badge and installation/agent guidance now explicitly identify the stable 1.x
+  contract without broadening native source coverage.
+- Wait for the owned file-event pump and its watcher-close call before returning
+  from watch shutdown, rather than letting that cleanup continue after return.
+- Retain a Windows Outlook mail snapshot when an aborted open or failed reader close cannot prove that its lazy table reader was released. Preserve the original failure or cancellation and report the retained snapshot without exposing cached content; healthy and proved-canceled reads still remove their snapshot. Calendar support and mailbox attribution are unchanged.
+
 ## [1.0.1] - 2026-10-20
 
 ### Fixed
