@@ -62,6 +62,7 @@ func (q *qualifiedRun) finishCalendarQualification(exit int, result error) error
 		return errors.Join(result, closeErr, errors.New("calendar_qualification_closeout_refused"))
 	}
 	q.closeoutVerified = true
+	q.calendarFailureReleased = record.Outcome == "test_failed" && record.NativeCloseVerified && record.ConsumersReleased && record.RootState == "absent"
 	if !record.Qualified {
 		return errors.Join(result, closeErr, errors.New("calendar_qualification_unproved"))
 	}
@@ -75,6 +76,9 @@ func runCalendarQualified(binary, digest, source, parent, receipt string, timeou
 	}
 	exit, result := w.run(binary, []string{"-test.run=^" + protocol.CalendarQualificationTest + "$", "-test.timeout=4m"}, qualifiedEnv(os.Environ(), q), timeout)
 	if err := q.finish(exit, result); err != nil {
+		if exit != 0 && result == nil && q.closeoutVerified && q.calendarFailureReleased && q.calendarFailure.Stage != "" {
+			return protocol.CalendarQualification{}, &calendarProductFailureError{failure: q.calendarFailure, cause: err}
+		}
 		return protocol.CalendarQualification{}, err
 	}
 	return q.calendarQualification, nil

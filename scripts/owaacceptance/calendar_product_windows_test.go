@@ -34,6 +34,31 @@ func TestRealOWACalendarProductQualification(t *testing.T) {
 		t.Fatal("synthetic_product_marker_required")
 	}
 	switch string(mode) {
+	case "diagnostic", "forged-diagnostic", "sql-diagnostic", "mail-diagnostic":
+		failure := protocol.CalendarQualificationFailure{
+			Version: protocol.Version, Kind: protocol.CalendarQualificationFailureKind, Owner: owner,
+			Stage: protocol.StageCalendarOracle, Reason: "calendar_oracle_regional_zone_unsupported",
+			Fields: []string{}, Omissions: map[string]int64{},
+		}
+		switch string(mode) {
+		case "sql-diagnostic":
+			failure.Stage, failure.Reason, failure.Fields = protocol.StageCalendarSQL, "archive_mismatch", []string{"is_private"}
+		case "mail-diagnostic":
+			failure.Stage, failure.Reason, failure.Fields = protocol.StageImport, "sync_source_refused", []string{"mail_coverage"}
+			failure.Omissions = map[string]int64{"outlook_owa_reader_blob_missing": 2, "outlook_owa_source_changed": 1}
+		}
+		if string(mode) != "forged-diagnostic" {
+			if protocol.EmitCalendarQualificationFailure(owner, failure) != nil {
+				t.Fatal("synthetic_product_failure_emission_refused")
+			}
+		} else {
+			failure.Owner.Child.Created++
+			wire, err := protocol.Encode(failure)
+			if err != nil || protocol.WriteProtectedNew(filepath.Join(filepath.Dir(os.Getenv(protocol.OwnerEnv)), protocol.CalendarQualificationFailureName), wire) != nil {
+				t.Fatal("synthetic_foreign_failure_setup_failed")
+			}
+		}
+		t.Fatal("synthetic-private-child-error-discarded")
 	case "missing":
 		return
 	case "failed":

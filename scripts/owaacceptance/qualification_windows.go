@@ -25,6 +25,8 @@ type qualifiedRun struct {
 	witness                   protocol.Qualification
 	observation               protocol.CalendarObservation
 	calendarQualification     protocol.CalendarQualification
+	calendarFailure           protocol.CalendarQualificationFailure
+	calendarFailureReleased   bool
 	consumersReleased         bool
 	cleanupVerified           bool
 	nativeCloseVerified       bool

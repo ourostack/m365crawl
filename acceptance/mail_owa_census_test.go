@@ -34,6 +34,11 @@ type owaRawCensus struct {
 	bodies   map[string]any
 }
 
+var (
+	owaCensusOpen  = indexeddb.OpenWith
+	owaCensusClose = (*indexeddb.Origin).Close
+)
+
 // This path never calls the importer, its field accessors, Collect or Normalize. Metadata is selected independently; only the three case-exact content stores can expose values.
 func owaCensus(level, blob string) (c owaRawCensus, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), owaWorkTimeout)
@@ -42,6 +47,18 @@ func owaCensus(level, blob string) (c owaRawCensus, err error) {
 }
 
 func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, err error) {
+	return owaCensusLeaseContext(ctx, level, blob, nil)
+}
+
+func owaCensusLeaseContext(ctx context.Context, level, blob string, released *bool) (c owaRawCensus, err error) {
+	if released != nil {
+		*released = true
+		defer func() {
+			if err != nil {
+				c = owaRawCensus{}
+			}
+		}()
+	}
 	c = owaRawCensus{folders: map[string]owaRawFolder{}, messages: map[string]owaRawMessage{}, bodies: map[string]any{}}
 	if err := owaCheckSource(ctx, teamsdesktop.Source{LevelDBDir: level, BlobDir: blob}); err != nil {
 		return c, err
@@ -54,17 +71,24 @@ func owaCensusContext(ctx context.Context, level, blob string) (c owaRawCensus, 
 	if err != nil {
 		return c, err
 	}
-	o, err := indexeddb.OpenWith(level, blob, indexeddb.OpenOptions{KeepStore: func(d, s int64) bool {
+	if released != nil {
+		*released = false
+	}
+	o, err := owaCensusOpen(level, blob, indexeddb.OpenOptions{KeepStore: func(d, s int64) bool {
 		return d == db.ID && (s == stores["folders"] || s == stores["messages"] || s == stores["messageBodies"])
 	}})
-	if err != nil {
+	if o != nil {
+		defer func() {
+			if closeErr := owaCensusCloseReader(o); closeErr != nil {
+				err = errors.New("census_close_refused")
+			} else if released != nil {
+				*released = true
+			}
+		}()
+	}
+	if err != nil || o == nil {
 		return c, errors.New("census_open_refused")
 	}
-	defer func() {
-		if closeErr := o.Close(); closeErr != nil {
-			err = errors.New("census_close_refused")
-		}
-	}()
 	if o.Stats().TruncatedLogTails != 0 {
 		return c, errors.New("census_decoder_refused")
 	}

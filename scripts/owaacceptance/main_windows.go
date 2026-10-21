@@ -152,6 +152,9 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 		if w.qualification != nil && w.qualification.owner.Test == protocol.TestName && result == nil && exit != 0 {
 			w.qualification.readDiagnostic()
 		}
+		if w.qualification != nil && w.qualification.owner.Test == protocol.CalendarQualificationTest && result == nil && exit != 0 {
+			w.qualification.readCalendarFailure()
+		}
 		if err := w.cleanup(); err != nil {
 			result = errors.Join(result, err)
 		} else if w.qualification != nil {
@@ -765,7 +768,7 @@ func main() {
 	if *qualification {
 		witness, err := runCalendarQualified(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "owa_calendar_qualification status=unqualified reason=unproved")
+			fmt.Fprintln(os.Stderr, calendarFailurePacket(err))
 			os.Exit(1)
 		}
 		counts, err := json.Marshal(witness.Counts)
