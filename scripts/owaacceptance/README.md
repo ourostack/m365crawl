@@ -1,8 +1,12 @@
 # Windows OWA acceptance process owner
 
-## Calendar-capable branch: observation only
+## Calendar-capable branch: explicit separate scopes
 
-This branch's executable front door requires `-calendar-observation`. It selects only `TestRealOWACalendarFieldObservation`; an old mail-only invocation is refused before launch. Build the acceptance artifact from `./acceptance`, not the supervisor package's synthetic test helper.
+This branch's executable front door requires exactly one of `-calendar-observation` and `-calendar-qualification`. Missing or simultaneous modes and old mail-only invocations are refused before launch. Build the acceptance artifact from `./acceptance`, not the supervisor package's synthetic control-marker test helper.
+
+### Field observation
+
+`-calendar-observation` selects only `TestRealOWACalendarFieldObservation`.
 
 ```powershell
 & <owned-supervisor.exe> -calendar-observation -test-binary <reviewed-owned-acceptance.test.exe> -test-sha256 <reviewed-lowercase-sha256> -outlook-root <explicit-source-EBWebView> -scratch-parent <existing-private-validation-parent> -receipt-dir <explicit-new-private-receipt-directory>
@@ -14,11 +18,29 @@ The existing suspended-start/job/ACL/path/placement/native-process/handle/consum
 
 The actual legacy mail-only acceptance entrypoint explicitly refuses on this calendar-capable branch even under otherwise-valid old ownership. Its stable-mail implementation remains in the separately qualified stable source; the legacy library lifecycle regression APIs below do not authorize a calendar read.
 
-**No real source invocation is authorized by this implementation or copied-synthetic evidence.** The outer owner still needs fresh independent bounded enabling review, pinned reviewed artifacts, a fresh protected receipt and exact process/native-root readback before one counts-only observation. Product/mapping/native qualification and a release/install remain separate work.
+### Cached calendar SQL qualification
+
+`-calendar-qualification` selects only `TestRealOWACalendarProductQualification`, with its own ownership decoder, witness, failure record and terminal closeout.
+
+```powershell
+& <owned-supervisor.exe> -calendar-qualification -test-binary <reviewed-owned-acceptance.test.exe> -test-sha256 <reviewed-lowercase-sha256> -outlook-root <explicit-source-EBWebView> -scratch-parent <existing-private-validation-parent> -receipt-dir <explicit-new-private-receipt-directory>
+```
+
+The guarded test refuses before discovery unless the exact qualified ownership/process/artifact context matches. It admits exactly one discovered profile with no skipped profiles and one stable private snapshot. Calendar expectations come from an independent event-only raw reader, Windows/ICU temporal evidence, and independent field/body/privacy projections; mail control uses its existing independently selected three content stores. Both reader releases must be proved. Failed acquisition, decode, projection or close never yields usable partial expectations or permission to remove a copied snapshot under an unproved reader.
+
+The ordinary sync runs against that private copy, not the live source or ordinary archive: initial, unchanged, then full-read. Every pass checks independent mail/account/relationship state and the fixed 48-column calendar SQL projection. Expected unique event volume comes from raw source evidence; persisted volume comes from actual SQL. The fresh qualification archive must contain only the single expected Outlook calendar account: extra accounts or other calendar sources refuse even if the expected account matches. First-seen, semantic field clocks, detail-as-of and removal history must remain stable. Empty-source, unsupported-oracle, loss/omission, mismatch or unknown coverage is not qualification.
+
+`calendar-qualification.json` has the distinct product-SQL kind and outcome `qualified`, complete coherent raw counters, positive expected/persisted unique volumes, exactly three passes, the corresponding compared-cell count, zero mismatches, mail-control success and reader release. `calendar-qualification-closeout.json` confirms it only after matched witness, adopted exit-zero child, verified whole-generation/native release and exact root absence. These records cannot become mail qualification or field observation. Successful stdout contains only fixed labels, artifact hash and bounded counts.
+
+On failure, the test's final cleanup can emit create-new protected `calendar-qualification-failure.json`, with a distinct failure kind, exact adopted owner and fixed stage/reason/field vocabulary. Calendar-specific stages are `calendar_oracle`, `calendar_sql` and `calendar_history`; common stages retain their existing meanings. Only allowlisted complete error codes may classify oracle refusals, including bounded joined-error selection; arbitrary/private error text is never forwarded. Native mail omission counts remain restricted to their existing fixed codes. Child output stays discarded. Only a nonzero test exit with fully proved consumer/native release, root absence and validated closeout may yield the bound fixed-code public failure packet. Timeout, malformed/foreign diagnostics or unproved lifecycle remain unqualified with an unproved cause.
+
+These checks establish cached-source parity only, not server/mailbox completeness, principal attribution, several-populated-mailbox support, a native admission or release/install. Unproved timezone spelling/alias/regional clocks, HTML and privacy forms still refuse. Original mail and field-observation wire schemas/outcomes and the existing process/ACL/path/Job/disposal barriers are unchanged.
+
+**No real source invocation is authorized by this implementation or copied-synthetic evidence.** Either mode still requires fresh independent bounded enabling review, pinned reviewed artifacts, a fresh protected receipt and exact outer process/native-root readback. A consumed field-observation admission cannot authorize a product-qualification attempt or retry.
 
 ## Legacy stable-mail lifecycle reference
 
-The remaining mail witness/diagnostic details document the stable-mail protocol and its retained regression APIs, not this branch's executable observation mode. Do not reuse its old invocation to access a live source from the calendar-capable branch.
+The remaining mail witness/diagnostic details document the stable-mail protocol and its retained regression APIs, not either calendar executable mode. Do not reuse its old invocation to access a live source from the calendar-capable branch.
 
 This Windows-only supervisor runs the existing precompiled Go acceptance test, not another importer. The test refuses before discovery unless this supervisor's protected ownership, live process identities, native workspace identity, reviewed binary digest and exact test selection all match. An environment flag or a zero-exit executable cannot qualify. **Host execution still requires the parent's independent enabling review and explicit approval; the copied-synthetic proofs are not real-cache acceptance or release approval.**
 
