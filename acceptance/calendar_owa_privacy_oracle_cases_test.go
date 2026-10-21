@@ -41,7 +41,7 @@ func TestOWACalendarIndependentScalarPrivacyLiterals(t *testing.T) {
 }
 
 func TestOWACalendarIndependentScalarPrivacyRefusals(t *testing.T) {
-	for _, source := range []string{`{"password":"SYNTHETIC"}`, `[["password","SYNTHETIC"]]`,
+	for _, source := range []string{`{"password":`, `[["password","SYNTHETIC"]`,
 		"https://example.invalid/?x=1&amp;sig=SYNTHETIC", "Bearer\fSYNTHETIC", string([]byte{0xff})} {
 		if _, _, err := owaOraclePrivacyText(t.Context(), source); err == nil {
 			t.Fatal("unproved_privacy_form_became_expected_data")

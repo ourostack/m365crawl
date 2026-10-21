@@ -17,6 +17,10 @@ var (
 )
 
 func owaOraclePrivacyText(ctx context.Context, source string) (string, int, error) {
+	return owaOraclePrivacyDepth(ctx, source, 0)
+}
+
+func owaOraclePrivacyDepth(ctx context.Context, source string, depth int) (string, int, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
@@ -26,9 +30,21 @@ func owaOraclePrivacyText(ctx context.Context, source string) (string, int, erro
 	trimmed, lower := strings.TrimSpace(source), strings.ToLower(source)
 	array := strings.TrimSpace(strings.TrimPrefix(trimmed, "["))
 	structuredArray := strings.HasPrefix(trimmed, "[") && (array == "" || strings.ContainsRune(`"{[tfnu-0123456789]`, rune(array[0])))
-	if strings.HasPrefix(trimmed, "{") || structuredArray ||
-		strings.Contains(lower, "&amp;sig=") || strings.Contains(lower, `\u0026sig=`) {
+	if strings.Contains(lower, "&amp;sig=") || strings.Contains(lower, `\u0026sig=`) {
 		return "", 0, errors.New("calendar_oracle_structured_privacy_unproved")
+	}
+	if strings.HasPrefix(trimmed, "{") || structuredArray {
+		return owaOracleStructuredPrivacy(ctx, source, depth)
+	}
+	return owaOracleScalarPrivacyRules(ctx, source)
+}
+
+func owaOracleScalarPrivacyRules(ctx context.Context, source string) (string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+	if len(source) > owaMaxPayloadBytes {
+		return "", 0, errors.New("calendar_oracle_text_budget_or_encoding_refused")
 	}
 	if len(source) > 6 && strings.EqualFold(source[:6], "Bearer") {
 		next, _ := utf8.DecodeRuneInString(source[6:])
