@@ -137,6 +137,9 @@ func TestOpenCalendarCancellationAndDataFailuresReleaseOrigin(t *testing.T) {
 			if where == "close-failed" && !strings.Contains(err.Error(), "outlook_owa_calendar_close_failed") {
 				t.Fatal("failed close was hidden by cancellation")
 			}
+			if where == "close-failed" && !errors.Is(err, ErrReaderClose) {
+				t.Fatal("failed open did not expose its unproved reader release")
+			}
 		})
 	}
 }

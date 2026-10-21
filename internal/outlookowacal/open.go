@@ -7,6 +7,9 @@ import (
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 )
 
+// ErrReaderClose means an aborted open could not prove that its reader was released.
+var ErrReaderClose = errors.New("outlook_owa_calendar_close_failed")
+
 var (
 	calendarCensus   = indexeddb.CensusWithStats
 	calendarOpenWith = indexeddb.OpenWith
@@ -40,7 +43,7 @@ func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, e
 	}
 	if err := ctx.Err(); err != nil {
 		if closeErr := calendarClose(o); closeErr != nil {
-			return nil, errors.Join(err, errors.New("outlook_owa_calendar_close_failed"))
+			return nil, errors.Join(err, ErrReaderClose)
 		}
 		return nil, err
 	}

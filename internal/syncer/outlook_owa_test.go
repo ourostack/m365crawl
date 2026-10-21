@@ -698,6 +698,7 @@ func TestSyncOWALazyOriginClosesBeforeCleanupIncludingCloseFailure(t *testing.T)
 			t.Cleanup(func() { outlookOWAOpen, outlookOWAClose, outlookOWASnapshot = oldOpen, oldClose, oldCopy })
 			var origin *indexeddb.Origin
 			var dbID, storeID int64
+			var delayedCleanup func()
 			outlookOWAOpen = func(ctx context.Context, dir, blob string) (*indexeddb.Origin, error) {
 				result, err := oldOpen(ctx, dir, blob)
 				if err == nil {
@@ -725,7 +726,7 @@ func TestSyncOWALazyOriginClosesBeforeCleanupIncludingCloseFailure(t *testing.T)
 			}
 			outlookOWASnapshot = func(ctx context.Context, source teamsdesktop.Source) (string, func(), error) {
 				dir, cleanup, err := oldCopy(ctx, source)
-				return dir, func() {
+				delayedCleanup = func() {
 					if origin == nil {
 						t.Error("snapshot cleanup preceded origin opening")
 					} else if err := origin.Records(dbID, storeID, func(indexeddb.Record) error { return nil }); !errors.Is(err, leveldb.ErrClosed) {
@@ -735,7 +736,8 @@ func TestSyncOWALazyOriginClosesBeforeCleanupIncludingCloseFailure(t *testing.T)
 					if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 						t.Errorf("closed snapshot cleanup failed: %v", err)
 					}
-				}, err
+				}
+				return dir, delayedCleanup, err
 			}
 			r, _, err := Run(context.Background(), o)
 			m := sourceKeyed(t, r, "outlook|Default|mail")
@@ -749,8 +751,18 @@ func TestSyncOWALazyOriginClosesBeforeCleanupIncludingCloseFailure(t *testing.T)
 			} else if err != nil || m.Status != StatusOK {
 				t.Fatalf("real table read failed: %+v %v", m, err)
 			}
-			if count(t, db, `select count(*) from mail_messages`) != 5 || len(snapshotDirs(t, tmp)) != 0 {
-				t.Fatal("close path damaged archive or leaked private snapshot")
+			if count(t, db, `select count(*) from mail_messages`) != 5 {
+				t.Fatal("close path damaged the archived mail")
+			}
+			if failClose {
+				if len(snapshotDirs(t, tmp)) != 1 || delayedCleanup == nil || !strings.Contains(m.Error.Message, "snapshot was retained") {
+					t.Fatal("unproved close did not retain and report its owned snapshot")
+				}
+				// This fixture's real Close succeeded before its injected error, so release is now independently proved.
+				delayedCleanup()
+			}
+			if len(snapshotDirs(t, tmp)) != 0 {
+				t.Fatal("proved reader release left its synthetic snapshot behind")
 			}
 			outlookOWAOpen, outlookOWAClose, outlookOWASnapshot = oldOpen, oldClose, oldCopy
 			o.FullRead = false

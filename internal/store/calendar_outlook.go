@@ -43,6 +43,8 @@ type OutlookBatch struct {
 	// found none. They are kept to link the profile to the Teams account that has one of them (see
 	// AutoLinkOutlook), and they are not part of any output.
 	Addresses []string
+	// PreserveIdentity keeps existing sign-in metadata when this reader did not establish it; Addresses must be nil.
+	PreserveIdentity bool
 	// InferGone says the read can be trusted to be complete (no damaged block, so no event can
 	// have been missed): an event the archive holds live that this read no longer holds is then
 	// remembered, and marked gone when the next trusted read also misses it (see confirmedGone). Without it nothing is inferred and an unseen event stays.
@@ -102,6 +104,9 @@ func OutlookStamp(mapper int, zone *time.Location) string {
 // become unknown. A changed time zone also forgets the covered days, which were taken in the old
 // zone, and takes them again. Events the batch does not hold are left as they are.
 func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(CalendarResult) Run) (res CalendarResult, err error) {
+	if b.PreserveIdentity && b.Addresses != nil {
+		return res, errors.New("outlook: unknown identity cannot carry addresses")
+	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		if err := auditAttendeeNamespace(ctx, tx); err != nil {
 			return err
@@ -124,8 +129,10 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookReadKey+b.Account, string(raw)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
-			return err
+		if !b.PreserveIdentity {
+			if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
+				return err
+			}
 		}
 		record := run(res)
 		res.OutlookReadID, aerr = insertOutlookRead(ctx, tx, b, record.Fingerprint)
