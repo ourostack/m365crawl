@@ -138,13 +138,7 @@ jobs:
           TAG: ${{ needs.decide.outputs.tag }}
         run: |
           notes="${RUNNER_TEMP}/release-notes.md"
-          if [ -f "docs/releases/${TAG}.md" ]; then
-            cp "docs/releases/${TAG}.md" "$notes"
-          else
-            : > "$notes"
-          fi
-          printf '\nThe darwin binaries are Developer ID signed and notarized by Apple.\n' >> "$notes"
-          printf 'The Windows binaries are unsigned.\n' >> "$notes"
+          bash scripts/release-notes.sh generate > "$notes"
           echo "args=release --clean --release-notes=${notes}" >> "$GITHUB_OUTPUT"
       - name: Release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -272,7 +266,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.decide.outputs.tag }}
           REPO: ${{ github.repository }}
-        run: scripts/release-flags.sh settle
+        run: |
+          bash scripts/release-notes.sh verify
+          scripts/release-flags.sh settle
 
   # Pushes the cask to ourostack/homebrew-tap with a deploy key that can write to that
   # one repository, and only after the published darwin and Windows artifacts verify. A stable release

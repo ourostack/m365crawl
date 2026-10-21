@@ -106,6 +106,7 @@ script-lint:
 	scripts/check-tap-key.sh --selftest
 	scripts/report-failure.sh --selftest
 	scripts/release-flags.sh --selftest
+	bash scripts/release-notes.sh --selftest
 	scripts/automerge-eligible.sh --selftest
 	scripts/retry.sh --selftest
 	scripts/check-release-wiring.sh --selftest
