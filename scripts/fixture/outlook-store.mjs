@@ -40,6 +40,24 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
         { ItemId: id('Message/Null=='), Body: null },
         { ItemId: id('Message/Undefined=='), Body: undefined, NormalizedBody: { Value: '<p>Synthetic cached truncated HTML</p>' }, IsTruncated: true },
       ];
+      const events = [
+        {
+          UID: 'AA11', Start: '2031-03-05T09:30:00Z', End: '2031-03-05T10:00:00Z',
+          LastModifiedTime: '2031-03-04T12:00:00Z', Subject: 'Synthetic OWA calendar',
+          IsAllDayEvent: false, IsCancelled: false, IsOnlineMeeting: true, IsOrganizer: false, HasAttachments: false,
+          Body: { BodyType: 'HTML', Value: '<p>Synthetic &amp; cached calendar</p>', IsTruncated: false },
+          Preview: 'Synthetic calendar preview', FreeBusyType: 'Busy',
+          RequiredAttendees: [{ Mailbox: mailbox('Synthetic required', 'required@example.invalid'), ResponseType: 'Accept' }],
+          OptionalAttendees: [{ Mailbox: mailbox('Synthetic optional', 'optional@example.invalid'), ResponseType: 'Tentative' }],
+          Resources: [{ Mailbox: mailbox('Synthetic room', 'room@example.invalid'), ResponseType: 'NoResponseReceived' }],
+        },
+        {
+          UID: 'BB22', Start: '2031-03-06T00:00:00Z', End: '2031-03-07T00:00:00Z',
+          LastModifiedTime: '2031-03-04T12:00:00Z', Subject: 'Synthetic UTC-aligned all-day event',
+          IsAllDayEvent: true, IsCancelled: false,
+          RequiredAttendees: [], OptionalAttendees: [], Resources: [],
+        },
+      ];
       async function writeDB(name, withBodies = true) {
         const db = await new Promise((resolve, reject) => {
           const req = indexedDB.open(name, 1);
@@ -56,7 +74,14 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
           if (withBodies && variant !== 'empty') bodies.forEach((b, i) => tx.objectStore('messageBodies').put(b, `body-${i}`));
           // Host objects would produce an omission if the mail collector ever decoded these stores.
           tx.objectStore('credentials').put(new DOMException('Synthetic auth decoy only', 'SyntheticDecoy'), 'auth-decoy');
-          tx.objectStore('events').put(new DOMException('Synthetic event decoy only'), 'event-decoy');
+          if (variant.startsWith('calendar')) {
+            if (variant !== 'calendar-empty') {
+              events.forEach((event, i) => tx.objectStore('events').put(event, `event-${i}`));
+              if (variant === 'calendar-damaged') tx.objectStore('events').put(new DOMException('Synthetic damaged event'), 'event-decoy');
+            }
+          } else {
+            tx.objectStore('events').put(new DOMException('Synthetic event decoy only'), 'event-decoy');
+          }
           tx.objectStore('calendar').put({ subject: 'Synthetic excluded calendar' }, 'calendar-decoy');
           tx.objectStore('attachmentPayloads').put(new Uint8Array([19, 23, 29]), 'payload-decoy');
           tx.oncomplete = resolve;
