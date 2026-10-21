@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -78,7 +81,7 @@ func TestDraftsPowerShellArgvHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("DRAFT_ARGV:%s\n", data)
+	fmt.Printf("DRAFT_ARGV:%s\n", base64.StdEncoding.EncodeToString(data))
 }
 
 func draftPowerShellWords(t *testing.T, command string) []string {
@@ -103,11 +106,13 @@ $PSNativeCommandArgumentPassing = 'Legacy'
 function m365crawl { & $env:M365CRAWL_DRAFT_TEST_EXE '-test.run=^TestDraftsPowerShellArgvHelper$' '--' @args; if ($LASTEXITCODE -ne 0) { throw 'native argv helper failed' } }
 ` + command + `
 if ($PSNativeCommandArgumentPassing -ne 'Legacy') { exit 73 }`
-	cmd := exec.Command("pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-")
-	if goruntime.GOOS == "windows" {
-		cmd = exec.Command("pwsh.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-")
+	// Encode both wire directions so the host console cannot reinterpret Unicode before the argv assertion.
+	var encoded []byte
+	for _, unit := range utf16.Encode([]rune(script)) {
+		encoded = binary.LittleEndian.AppendUint16(encoded, unit)
 	}
-	cmd.Stdin = strings.NewReader(script + "\n")
+	// #nosec G204 -- Real native argv is the assertion; only the fixed pwsh engine and owned synthetic commands are executed.
+	cmd := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", base64.StdEncoding.EncodeToString(encoded))
 	cmd.Env = append(os.Environ(), "M365CRAWL_DRAFT_ARGV_HELPER=1", "M365CRAWL_DRAFT_TEST_EXE="+exe, "REVIEW_ARCHIVE=expanded-wrong-archive", "DRAFT_PATH=expanded-wrong-archive", "TERM=dumb")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -115,8 +120,12 @@ if ($PSNativeCommandArgumentPassing -ne 'Legacy') { exit 73 }`
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		if _, data, ok := strings.Cut(line, "DRAFT_ARGV:"); ok {
+			payload, err := base64.StdEncoding.DecodeString(strings.TrimSpace(data))
+			if err != nil {
+				t.Fatal(err)
+			}
 			var args []string
-			if err := json.NewDecoder(strings.NewReader(data)).Decode(&args); err != nil {
+			if err := json.Unmarshal(payload, &args); err != nil {
 				t.Fatal(err)
 			}
 			return append([]string{"m365crawl"}, args...)
