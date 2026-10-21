@@ -34,6 +34,8 @@ Merge a notes file named `docs/releases/vX.Y.Z-rc.N.md` (for example `v0.3.0-rc.
 
 The cask for a rehearsal is the one goreleaser renders for the rc tag. It is attached to the rc release like a stable one: its version is the rc version and its URLs point at the rc assets. goreleaser renders it even though `skip_upload: true` (which only skips its own push to the tap); this was checked with a local snapshot build of a prerelease version, and the attach step fails with a clear message if the file is ever missing. That is the simplest honest cask, because it is exactly what the pipeline would publish, and `scripts/publish-cask.sh` checks it names the tag's version.
 
+After verification and `settle` pass, an initial rehearsal waits 60 seconds before its tap push (`scripts/rehearsal-publish-window.sh`). This bounded observation window lets a controlled failure exercise finish its safety checks before the push starts; it does not inject a failure itself. Stable publication and publish-only recovery do not wait, and no verification gate is skipped.
+
 ### Rehearsing a pipeline change
 
 After a change to the release workflow or its scripts, rehearse before the next stable release. Do these steps in order; every rehearsal version must be above the latest stable release.
@@ -139,6 +141,7 @@ Pull-request CI runs on every pull request (the required checks include `test`, 
 - `scripts/publish-cask.sh --selftest`: the first publish pushes one commit, a repeat changes nothing, a cask for another version is refused, an older stable cask never replaces a later one on `main`, a prerelease is refused on `main`, a rehearsal pushes only to its branch, the tap is restored to the previous cask with a new commit, a tap file with no version line not blocking the publish (the selftest cask is shaped like the one goreleaser renders), a missing input is named.
 - `scripts/release-flags.sh --selftest`: demote, restore of a demoted stable release (never latest while a higher stable exists, also with 400 releases listed), and the rehearsal flag checks.
 - `bash scripts/release-notes.sh --selftest`: exact generated notes and signing disclosures, refusal of missing/empty notes, and published-body checks that reject blank bodies, the wrong version, omitted signing disclosures and GitHub read failures.
+- `bash scripts/rehearsal-publish-window.sh --selftest`: one bounded wait for an initial rehearsal, no wait for stable publication or publish-only recovery, and refusal of missing or invalid mode values.
 - `scripts/changelog-assemble.sh --selftest`: fragments merged by subsection in the fixed order and by file name, continuation lines kept, the used fragments deleted and `changes/README.md` kept, a prerelease version, and refusals that change nothing: no fragments, an unknown heading, a bullet outside a subsection, a subsection without bullets, any other line, an existing version section, entries under `[Unreleased]`, and a bad version or date. It also runs `--check` on the repository itself.
 - `scripts/retry.sh --selftest`, `scripts/automerge-eligible.sh --selftest`, `scripts/check-tap-key.sh --selftest` and `scripts/report-failure.sh --selftest`.
 - `scripts/sign-notarize.sh --selftest`: every signing gate.
