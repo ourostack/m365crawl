@@ -114,20 +114,25 @@ func calendarObservationCounts(counts map[string]int64) bool {
 }
 
 func MatchCalendarObservation(owner Ownership, observation CalendarObservation) error {
+	_, err := calendarObservationData(owner, observation)
+	return err
+}
+
+func calendarObservationData(owner Ownership, observation CalendarObservation) ([]byte, error) {
 	if validateOwnershipTest(owner, CalendarObservationTest) != nil || !owner.Adopted {
-		return calendarObservationRefused()
+		return nil, calendarObservationRefused()
 	}
 	data, err := Encode(observation)
 	if err != nil {
-		return calendarObservationRefused()
+		return nil, calendarObservationRefused()
 	}
 	if _, err := DecodeCalendarObservation(data); err != nil {
-		return calendarObservationRefused()
+		return nil, calendarObservationRefused()
 	}
 	if owner.Nonce != observation.Nonce || owner.Test != observation.Test ||
 		owner.BinaryHash != observation.BinaryHash || owner.BinaryNative != observation.BinaryNative ||
 		owner.RootNative != observation.RootNative || owner.Supervisor != observation.Supervisor || owner.Child != observation.Child {
-		return calendarObservationRefused()
+		return nil, calendarObservationRefused()
 	}
-	return nil
+	return data, nil
 }

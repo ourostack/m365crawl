@@ -22,7 +22,11 @@ type BinaryPin struct {
 const MaxBinaryBytes = 128 << 20
 
 func SelectedTest() error {
-	if len(os.Args) != 3 || os.Args[1] != "-test.run=^"+TestName+"$" || os.Args[2] != "-test.timeout=4m" {
+	return selectedTestName(TestName)
+}
+
+func selectedTestName(test string) error {
+	if len(os.Args) != 3 || os.Args[1] != "-test.run=^"+test+"$" || os.Args[2] != "-test.timeout=4m" {
 		return refused()
 	}
 	return nil
@@ -237,6 +241,14 @@ func ProcessIdentity(pid uint32) (Process, error) {
 	return Process{PID: pid, Created: uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)}, nil
 }
 
+func guardProcessIdentity(pid int) (Process, error) {
+	if pid <= 0 || int64(pid) > 0xffffffff {
+		return Process{}, refused()
+	}
+	// #nosec G115 -- Positive uint32 PID range is checked immediately above.
+	return ProcessIdentity(uint32(pid))
+}
+
 func ReadProtected(path string) ([]byte, error) {
 	if CheckPrivate(filepath.Dir(path), true) != nil || CheckPrivate(path, false) != nil {
 		return nil, refused()
@@ -310,7 +322,11 @@ func WriteProtectedNew(path string, data []byte) error {
 }
 
 func CurrentGuard() (Ownership, error) {
-	if SelectedTest() != nil {
+	return currentGuardFor(TestName, DecodeOwnership)
+}
+
+func currentGuardFor(test string, decode func([]byte) (Ownership, error)) (Ownership, error) {
+	if selectedTestName(test) != nil {
 		return Ownership{}, refused()
 	}
 	path := os.Getenv(OwnerEnv)
@@ -321,16 +337,16 @@ func CurrentGuard() (Ownership, error) {
 	if err != nil {
 		return Ownership{}, err
 	}
-	owner, err := DecodeOwnership(data)
-	if err != nil || !owner.Adopted {
+	owner, err := decode(data)
+	if err != nil || !owner.Adopted || owner.Test != test {
 		return Ownership{}, refused()
 	}
 	initialData, err := ReadProtected(filepath.Join(filepath.Dir(path), OwnerName))
 	if err != nil {
 		return Ownership{}, refused()
 	}
-	initial, err := DecodeOwnership(initialData)
-	if err != nil || initial.Adopted {
+	initial, err := decode(initialData)
+	if err != nil || initial.Adopted || initial.Test != test {
 		return Ownership{}, refused()
 	}
 	wantInitial := owner
@@ -346,17 +362,11 @@ func CurrentGuard() (Ownership, error) {
 	if err != nil || root != owner.RootNative {
 		return Ownership{}, refused()
 	}
-	pid, ppid := os.Getpid(), os.Getppid()
-	if pid <= 0 || int64(pid) > 0xffffffff || ppid <= 0 || int64(ppid) > 0xffffffff {
+	child, err := guardProcessIdentity(os.Getpid())
+	if err != nil || child != owner.Child {
 		return Ownership{}, refused()
 	}
-	// #nosec G115 -- Both native PIDs are positive and within uint32 range immediately above.
-	childPID, parentPID := uint32(pid), uint32(ppid)
-	child, err := ProcessIdentity(childPID)
-	if err != nil || child != owner.Child || parentPID != owner.Supervisor.PID {
-		return Ownership{}, refused()
-	}
-	parent, err := ProcessIdentity(owner.Supervisor.PID)
+	parent, err := guardProcessIdentity(os.Getppid())
 	if err != nil || parent != owner.Supervisor {
 		return Ownership{}, refused()
 	}
