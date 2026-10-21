@@ -534,7 +534,9 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 	}
 	out := make(chan struct{}, 1)
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer func() { _ = fw.Close() }()
 		pumpEvents(ctx, stop, fw.Events, fw.Errors, out)
 	}()
@@ -545,6 +547,7 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 			close(stop)
 		default:
 		}
+		<-done
 	}, nil
 }
 

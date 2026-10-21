@@ -993,7 +993,7 @@ How it runs:
 
 1. It syncs once at start. By default that first sync is a silent baseline: its changes are not printed, so only later changes appear. `--emit-initial` prints them too.
 2. It watches the Teams `.leveldb` and `.blob` directories with file-system events (kqueue on macOS). Events are debounced: a sync starts after the cache has been quiet for 2 seconds and at most 10 seconds after the first event of a burst, but never sooner than `--min-interval` (default 60 seconds, env `M365CRAWL_WATCH_MIN_INTERVAL`, `0` disables the pause) after the previous sync ended. Teams on a busy account writes its cache continuously, and a sync is a full read, so without the pause `watch` would sync back to back and keep a CPU core busy. Events that arrive during a sync or during the pause coalesce into one sync when the pause ends, and no sync runs if the cache did not change; the first sync at start is immediate, a stop signal during the pause exits at once, and a sync that fails because the archive is locked is retried after the short lock backoff, not after the pause. A negative `--min-interval` is a `usage` error. Consequently the archive can lag Teams by up to `--min-interval` plus the time a sync takes. A poll every `--every` (default 60 seconds) is the safety net when events are missed; it syncs only when the source fingerprint changed (a sync that runs with `M365CRAWL_FULL_READ=1` set is a full read of every record). If file events are unavailable, `watch` warns on stderr and polls.
-3. It runs until SIGINT or SIGTERM, then exits 0.
+3. It runs until SIGINT or SIGTERM, then exits 0. Shutdown joins its owned file-event pump and watcher-close call before returning.
 
 Line kinds:
 
