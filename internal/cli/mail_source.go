@@ -8,6 +8,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookdesktop"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 var (
@@ -99,7 +100,18 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 		}
 		return c
 	}
-	details := []string{"OWA cached mail only; calendar is unsupported on OWA in this release"}
+	details := []string{"OWA cached calendar and mail; independent read state"}
+	calendars := map[string]*store.OutlookSource{}
+	calendarUnreadable := false
+	if st != nil && len(s.native) > 0 {
+		res, err := readCalendarSources(st, rt.ctx, store.CalendarSourcesFilter{Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
+		calendarUnreadable = err != nil
+		for _, row := range res.Rows {
+			if row.Source == "outlook" {
+				calendars[row.AccountID] = row.Outlook
+			}
+		}
+	}
 	for range s.refused {
 		details = append(details, "a cached profile cannot be examined (outlook_profile_unreadable)")
 		c.Warn, c.Fix = true, "Check that each Outlook cache profile is readable and has one supported origin."
@@ -119,6 +131,18 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 				detail = "profile " + p.Name + ": cached paths readable; mail read " + oneUnit(rt.now().Sub(state.ReadAt)) + " ago"
 			}
 		}
+		calendarDetail := "calendar not read yet"
+		switch o := calendars["outlook/"+p.Name]; {
+		case calendarUnreadable:
+			calendarDetail = "cannot read the archived calendar state"
+			c.Warn, c.Fix = true, "Run `m365crawl sync`."
+		case o != nil && o.Failure != nil:
+			calendarDetail = "the last calendar read failed (" + o.Failure.Code + ")"
+			c.Warn, c.Fix = true, "Run `m365crawl sync` and read its coded error."
+		case o != nil && !o.LastReadAt.IsZero():
+			calendarDetail = "calendar read " + oneUnit(rt.now().Sub(o.LastReadAt)) + " ago, " + o.Status
+		}
+		detail += "; " + calendarDetail
 		details = append(details, detail)
 	}
 	c.Detail = strings.Join(details, "; ")

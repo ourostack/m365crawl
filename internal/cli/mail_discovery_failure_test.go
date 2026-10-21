@@ -82,7 +82,7 @@ func TestOutlookRootRepairSupportsBothSourceShapes(t *testing.T) {
 		t.Fatalf("repair excludes supported Windows source: exit %d %v", code, er)
 	}
 	root := createdOWARoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), filepath.Join(root, "Default"))
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("supported EBWebView repair did not work: %d %s", code, stderr)
 	}
