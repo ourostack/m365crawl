@@ -21,6 +21,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/browser"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/render"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // version, commit and date are set at build time with
@@ -348,6 +349,15 @@ func unknownCommand(rest string, args []string, kctx *kong.Context) (msg, sugges
 	return fmt.Sprintf("%s, did you mean %q?", msg, suggestion), suggestion
 }
 
+func withSnapshotRetention(err error, coded *errs.Coded) *errs.Coded {
+	if errors.Is(err, syncer.ErrOWASnapshotRetained) && !strings.Contains(coded.Message, syncer.ErrOWASnapshotRetained.Error()) {
+		public := *coded
+		public.Message += "; " + syncer.ErrOWASnapshotRetained.Error()
+		return &public
+	}
+	return coded
+}
+
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
 	var coded *errs.Coded
@@ -370,6 +380,7 @@ func (rt *runtime) fail(err error) int {
 			coded = errs.Internal(err)
 		}
 	}
+	coded = withSnapshotRetention(err, coded)
 	if coded.Code == errs.CodeUsage && strings.HasPrefix(coded.Fix, "Run the command with --help") {
 		// The generic fix becomes command-specific: name the command whose help to read.
 		if rt.cmd != "" {

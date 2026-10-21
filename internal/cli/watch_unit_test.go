@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -55,6 +56,34 @@ func TestFileEventsCloseIsIdempotent(t *testing.T) {
 	}
 	closeEvents()
 	closeEvents() // a second call must not panic on the closed stop channel
+}
+
+func TestFileEventsCloseWaitsForWatcherShutdown(t *testing.T) {
+	procs := goruntime.GOMAXPROCS(1)
+	defer goruntime.GOMAXPROCS(procs)
+	fw, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = fw.Close()
+		for range fw.Events {
+		}
+		for range fw.Errors {
+		}
+	}()
+	old := newFSWatcher
+	newFSWatcher = func() (*fsnotify.Watcher, error) { return fw, nil }
+	t.Cleanup(func() { newFSWatcher = old })
+
+	_, closeEvents, err := fileEvents(context.Background(), []string{t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeEvents()
+	if len(fw.WatchList()) != 0 {
+		t.Error("close returned before the owned filesystem watcher shut down")
+	}
 }
 
 func TestFileEventsReportsWatcherCreationFailure(t *testing.T) {

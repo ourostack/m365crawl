@@ -98,6 +98,9 @@ func (r *runner) rememberOWAFailure(ctx context.Context, profile string, err err
 	}
 }
 
+// ErrOWASnapshotRetained reports a private snapshot whose reader release was not proved.
+var ErrOWASnapshotRetained = errors.New("reader release was not proved and its snapshot was retained")
+
 func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (SourceReport, bool, error) {
 	begun := outlookNow()
 	key, account := mailKey(outlookKey(p.Name)), outlookAccount(p.Name)
@@ -148,7 +151,12 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 		return SourceReport{}, false, errs.DBError(err)
 	}
 	snap, cleanup, err := outlookOWAPrivateSnapshot(ctx, p.Source)
-	defer cleanup()
+	released := true
+	defer func() {
+		if released {
+			cleanup()
+		}
+	}()
 	if err != nil {
 		return SourceReport{}, false, err
 	}
@@ -164,8 +172,16 @@ func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (Sour
 	if err != nil {
 		return SourceReport{}, false, errs.DBError(err)
 	}
-	res, err := collectOWAMail(ctx, snap, account, expect)
+	var res outlookowa.Result
+	err = contained(func() error {
+		var err error
+		res, err = collectOWAMail(ctx, snap, account, expect, &released)
+		return err
+	})
 	if err != nil {
+		if !released {
+			err = errors.Join(err, ErrOWASnapshotRetained)
+		}
 		return SourceReport{}, false, err
 	}
 	omissions := map[string]int{}
@@ -241,22 +257,38 @@ func ownedOWASnapshot(ctx context.Context, source teamsdesktop.Source) (string, 
 	}, nil
 }
 
-// The Origin closes before this returns, so the caller can then remove the private snapshot.
-func collectOWAMail(ctx context.Context, snap, account string, expect bool) (res outlookowa.Result, err error) {
+// released is true only when no reader was acquired or its Close succeeded.
+func collectOWAMail(ctx context.Context, snap, account string, expect bool, released *bool) (res outlookowa.Result, err error) {
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
+	*released = false
 	o, err := outlookOWAOpen(ctx, filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
 	if err != nil {
+		*released = !errors.Is(err, outlookowa.ErrReaderClose)
 		return res, err
 	}
 	defer func() {
-		if closeErr := outlookOWAClose(o); closeErr != nil && err == nil {
-			err = errors.New("outlookowa: close_failed")
+		if closeErr := contained(func() error { return outlookOWAClose(o) }); closeErr != nil {
+			var coded *errs.Coded
+			if err == nil && errors.As(closeErr, &coded) && coded.Code == errs.CodeInternal {
+				err = errs.Internal(errors.New("outlook mail reader release failed"))
+			}
+			err = errors.Join(err, outlookowa.ErrReaderClose)
+		} else {
+			*released = true
 		}
 	}()
 	return outlookowa.Collect(ctx, o, account, expect)
 }
 
 // Only fixed diagnostics cross the source boundary; Windows access failures are not macOS FDA.
-func owaSourceError(err error) error {
+func owaSourceError(err error) (result error) {
+	defer func() {
+		if errors.Is(err, ErrOWASnapshotRetained) {
+			result = owaRetainedError(result)
+		}
+	}()
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
@@ -284,6 +316,16 @@ func owaSourceError(err error) error {
 	}
 	return &errs.Coded{Code: CodeOutlookProfileUnreadable, Exit: errs.ExitEnvironment, Message: "the Outlook mail profile could not be read",
 		Fix: "Check that the Outlook profile is readable, then run again."}
+}
+
+func owaRetainedError(err error) error {
+	var coded *errs.Coded
+	if errors.As(err, &coded) {
+		public := *coded
+		public.Message += "; " + ErrOWASnapshotRetained.Error()
+		return errors.Join(&public, ErrOWASnapshotRetained)
+	}
+	return err
 }
 
 var (
