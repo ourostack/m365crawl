@@ -38,14 +38,19 @@ func (r *runner) outlookOWAProfile(ctx context.Context, p outlookowa.Profile) []
 	}
 	if cal.err != nil {
 		cal.err = owaCalendarSourceError(cal.err)
-		if ctx.Err() == nil {
-			c := codedOf(cal.err)
-			if err := r.st.SetOutlookFailure(ctx, outlookAccount(p.Name), &store.OutlookFailure{Code: c.Code, Message: c.Message, Fix: c.Fix, Exit: c.Exit}); err != nil {
-				r.progress("%s: could not record the calendar failure", cal.key)
-			}
-		}
+		r.rememberOWACalendarFailure(ctx, p.Name, cal.err)
 	}
 	return []outlookOutcome{cal, mail}
+}
+
+func (r *runner) rememberOWACalendarFailure(ctx context.Context, profile string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	c := codedOf(err)
+	if err := r.st.SetOutlookFailure(ctx, outlookAccount(profile), &store.OutlookFailure{Code: c.Code, Message: c.Message, Fix: c.Fix, Exit: c.Exit}); err != nil {
+		r.progress("%s: could not record the calendar failure", outlookKey(profile))
+	}
 }
 
 func collectOWACalendar(ctx context.Context, snap, account string, expect bool, closed *bool) (res outlookowacal.Result, err error) {

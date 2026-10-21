@@ -45,7 +45,7 @@ func (r *runner) outlookOWARoute(root string) (bool, error) {
 	return len(profiles)+len(skipped) > 0, nil
 }
 
-func (r *runner) outlookOWASources(ctx context.Context, _ *Report) []outlookOutcome {
+func (r *runner) outlookOWASources(ctx context.Context, rep *Report) []outlookOutcome {
 	root := r.o.OutlookRoot
 	if root == "" {
 		var err error
@@ -63,9 +63,11 @@ func (r *runner) outlookOWASources(ctx context.Context, _ *Report) []outlookOutc
 	}
 	var out []outlookOutcome
 	for _, sp := range skipped {
+		cal := outlookOutcome{key: outlookKey(sp.Name), err: owaCalendarSourceError(sp.Err)}
+		r.rememberOWACalendarFailure(ctx, sp.Name, cal.err)
 		o := outlookOutcome{key: mailKey(outlookKey(sp.Name)), err: owaSourceError(sp.Err)}
 		r.rememberOWAFailure(ctx, sp.Name, o.err)
-		out = append(out, o)
+		out = append(out, cal, o)
 	}
 	if len(profiles)+len(skipped) == 0 && !r.o.OutlookImplicit {
 		return []outlookOutcome{{key: "outlook", err: &errs.Coded{Code: CodeNoOutlookProfiles, Exit: errs.ExitEnvironment,
@@ -73,19 +75,16 @@ func (r *runner) outlookOWASources(ctx context.Context, _ *Report) []outlookOutc
 	}
 	for _, p := range profiles {
 		if ctx.Err() != nil {
-			out = append(out, outlookOutcome{key: mailKey(outlookKey(p.Name)), err: ctx.Err()})
+			out = append(out, outlookOutcome{key: outlookKey(p.Name), err: ctx.Err()},
+				outlookOutcome{key: mailKey(outlookKey(p.Name)), err: ctx.Err()})
 			break
 		}
-		o := outlookOutcome{key: mailKey(outlookKey(p.Name))}
-		err := contained(func() (err error) {
-			o.report, o.decoded, err = r.outlookOWAMail(ctx, p)
-			return err
-		})
-		if err != nil {
-			o.err = owaSourceError(err)
-			r.rememberOWAFailure(ctx, p.Name, o.err)
+		for _, o := range r.outlookOWAProfile(ctx, p) {
+			if o.key == outlookKey(p.Name) && o.report.Counts != nil {
+				rep.Calendar.Add(o.report.Counts.Calendar)
+			}
+			out = append(out, o)
 		}
-		out = append(out, o)
 	}
 	return out
 }

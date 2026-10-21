@@ -100,7 +100,11 @@ func TestOWASourcesOptionalAbsenceAndExplicitFailures(t *testing.T) {
 func owaRoot(t *testing.T, variant string) string {
 	t.Helper()
 	root := createdOutlookRoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", variant), filepath.Join(root, "Default"))
+	fixtures := "outlook-owa-fixture"
+	if strings.HasPrefix(variant, "calendar") {
+		fixtures = "outlook-owa-calendar-fixture"
+	}
+	copyTree(t, filepath.Join("..", "..", "testdata", fixtures, variant), filepath.Join(root, "Default"))
 	return root
 }
 
@@ -116,7 +120,7 @@ func owaProfile(root string) outlookowa.Profile {
 func TestOWACreatedFixtureRootIsCanonical(t *testing.T) {
 	check := func(t *testing.T) {
 		t.Helper()
-		root := owaRoot(t, "mail")
+		root := owaRoot(t, "calendar")
 		canonical, err := filepath.EvalSymlinks(root)
 		if err != nil || root != canonical {
 			t.Fatal("created_owa_fixture_not_canonical")
@@ -143,18 +147,18 @@ func TestOWACreatedFixtureRootIsCanonical(t *testing.T) {
 	}
 }
 
-func TestSyncOWAMailOnlyAndUnchanged(t *testing.T) {
+func TestSyncOWAMailAndCalendarRemainIndependentAndUnchanged(t *testing.T) {
 	tmp := isolateTmp(t)
-	db, root := newDB(t), owaRoot(t, "mail")
+	db, root := newDB(t), owaRoot(t, "calendar")
 	o := outlookOpts(db, root)
 	o.Root = t.TempDir()
 	r, _ := run(t, o)
 	m := sourceKeyed(t, r, "outlook|Default|mail")
-	if len(r.Sources) != 1 || m.Status != StatusOK || m.Counts == nil || m.Counts.Mail == nil || m.Counts.Mail.Added != 5 || len(m.Accounts) != 1 || m.Accounts[0] != "outlook/Default" {
-		t.Fatalf("mail-only read: %+v", r.Sources)
+	if len(r.Sources) != 2 || m.Status != StatusOK || m.Counts == nil || m.Counts.Mail == nil || m.Counts.Mail.Added != 5 || len(m.Accounts) != 1 || m.Accounts[0] != "outlook/Default" {
+		t.Fatalf("independent public mail read: %+v", r.Sources)
 	}
-	if count(t, db, `select count(*) from calendar_source_events where source='outlook'`) != 0 || count(t, db, `select count(*) from meta where key like 'outlook_identity:%' or key like 'outlook_read:%'`) != 0 {
-		t.Fatal("OWA invented calendar/identity markers")
+	if count(t, db, `select count(*) from calendar_source_events where source='outlook'`) != 2 || count(t, db, `select count(*) from meta where key like 'outlook_identity:%'`) != 0 {
+		t.Fatal("OWA lost its calendar or invented identity markers")
 	}
 	if count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from mail_recipients where role='bcc'`) != 1 {
 		t.Fatal("native mail not committed")
@@ -189,11 +193,11 @@ func TestSyncOWAWindowsDefaultIsHermetic(t *testing.T) {
 	local := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)
 	root := filepath.Join(local, "Microsoft", "Olk", "EBWebView")
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), filepath.Join(root, "Default"))
 	o := implicitOpts(newDB(t), "")
 	o.Root = t.TempDir()
 	r, _ := run(t, o)
-	if len(r.Sources) != 1 || sourceKeyed(t, r, "outlook|Default|mail").Counts.Mail.Added != 5 {
+	if len(r.Sources) != 2 || sourceKeyed(t, r, "outlook|Default|mail").Counts.Mail.Added != 5 {
 		t.Fatalf("implicit no-Teams routing: %+v", r.Sources)
 	}
 	t.Setenv("LOCALAPPDATA", t.TempDir())
@@ -209,7 +213,7 @@ func TestSyncOWAWindowsDefaultIsHermetic(t *testing.T) {
 
 func TestSyncOWAOffAndAccountFilter(t *testing.T) {
 	isolateTmp(t)
-	root := owaRoot(t, "mail")
+	root := owaRoot(t, "calendar")
 	for _, filtered := range []bool{false, true} {
 		o := outlookOpts(newDB(t), root)
 		if filtered {
@@ -233,7 +237,7 @@ func TestSyncOWAFailureAndInterval(t *testing.T) {
 	isolateTmp(t)
 	for _, failure := range []string{"copy", "map", "commit"} {
 		t.Run(failure, func(t *testing.T) {
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			o := outlookOpts(db, root)
 			run(t, o)
 			o.FullRead, o.OutlookMinReadInterval = true, 0
@@ -277,7 +281,7 @@ func TestSyncOWAFailureAndInterval(t *testing.T) {
 			outlookOWASnapshot = oldCopy
 			switch failure {
 			case "map":
-				copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), owaProfile(root).Dir)
+				copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), owaProfile(root).Dir)
 			case "commit":
 				if _, err := openRaw(t, db).Exec(`drop trigger owa_fail`); err != nil {
 					t.Fatal(err)
@@ -300,7 +304,7 @@ func TestSyncOWAFailureAndInterval(t *testing.T) {
 
 func TestSyncOWACancellationClosesAndCleansCopy(t *testing.T) {
 	tmp := isolateTmp(t)
-	db, root := newDB(t), owaRoot(t, "mail")
+	db, root := newDB(t), owaRoot(t, "calendar")
 	ctx, cancel := context.WithCancel(context.Background())
 	old := outlookOWASnapshot
 	outlookOWASnapshot = func(ctx context.Context, s teamsdesktop.Source) (string, func(), error) {
@@ -319,7 +323,7 @@ func TestSyncOWACancellationClosesAndCleansCopy(t *testing.T) {
 
 func TestSyncOWAChangedCopyImportsWithoutAbsenceOrSkip(t *testing.T) {
 	tmp := isolateTmp(t)
-	db, root := newDB(t), owaRoot(t, "mail")
+	db, root := newDB(t), owaRoot(t, "calendar")
 	p := owaProfile(root)
 	ctx := context.Background()
 	origin, err := outlookowa.Open(ctx, p.Source.LevelDBDir, p.Source.BlobDir)
@@ -407,7 +411,7 @@ func TestSyncOWAChangedCopyImportsWithoutAbsenceOrSkip(t *testing.T) {
 
 func TestSyncOWAImplicitAndIndependentProfiles(t *testing.T) {
 	isolateTmp(t)
-	root := owaRoot(t, "mail")
+	root := owaRoot(t, "calendar")
 	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "multiple"), filepath.Join(root, "Refused"))
 	o := implicitOpts(newDB(t), root)
 	r, _ := run(t, o)
@@ -448,7 +452,7 @@ func TestSyncOWADatabaseFailuresCannotVouchForRead(t *testing.T) {
 		{"skip-marker", `create trigger owa_fail before insert on meta when new.key='outlook_skipped:Default' begin select raise(abort,'synthetic'); end`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			o := outlookOpts(db, root)
 			now := time.Date(2031, 1, 1, 0, 0, 0, 0, time.UTC)
 			old := outlookNow
@@ -487,7 +491,7 @@ func TestSyncOWAPanicIsFixedInternalFailure(t *testing.T) {
 		panic("synthetic-private-do-not-export")
 	}
 	t.Cleanup(func() { outlookOWASnapshot = old })
-	o := outlookOpts(newDB(t), owaRoot(t, "mail"))
+	o := outlookOpts(newDB(t), owaRoot(t, "calendar"))
 	r, _, err := Run(context.Background(), o)
 	m := sourceKeyed(t, r, "outlook|Default|mail")
 	if err == nil || m.Error.Code != errs.CodeInternal || strings.Contains(m.Error.Message, "private") {
@@ -497,7 +501,7 @@ func TestSyncOWAPanicIsFixedInternalFailure(t *testing.T) {
 
 func TestSyncOWACancelledReceiptCannotLeaveReadMarker(t *testing.T) {
 	isolateTmp(t)
-	o := outlookOpts(newDB(t), owaRoot(t, "mail"))
+	o := outlookOpts(newDB(t), owaRoot(t, "calendar"))
 	o.Root = t.TempDir()
 	run(t, o)
 	o.FullRead = true
@@ -546,7 +550,7 @@ func TestSyncExplicitHxStoreKeepsItsOwnSourceSafety(t *testing.T) {
 
 func TestSyncOWALossesSurviveUnchangedRead(t *testing.T) {
 	isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	p := owaProfile(root)
 	if err := os.Remove(filepath.Join(p.Source.BlobDir, "1", "00", "2")); err != nil {
 		t.Fatal(err)
@@ -569,7 +573,7 @@ func TestSyncOWALossesSurviveUnchangedRead(t *testing.T) {
 
 func TestSyncOWASourceDisappearingAfterCopyIsRetryable(t *testing.T) {
 	tmp := isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	o := outlookOpts(db, root)
 	old := outlookOWASnapshot
 	outlookOWASnapshot = func(ctx context.Context, s teamsdesktop.Source) (string, func(), error) {
@@ -627,7 +631,7 @@ func TestDefaultOutlookRootDispatchesUnsupportedProviderAndErrors(t *testing.T) 
 
 func tableOWARoot(t *testing.T) string {
 	t.Helper()
-	root := owaRoot(t, "mail")
+	root := owaRoot(t, "calendar")
 	p := owaProfile(root)
 	src, err := leveldb.Load(p.Source.LevelDBDir)
 	if err != nil {
@@ -782,7 +786,7 @@ func TestSyncOWAFirstFingerprintAndMailHoldsFaultsRetry(t *testing.T) {
 	for _, where := range []string{"first-fingerprint", "mail-holds"} {
 		t.Run(where, func(t *testing.T) {
 			tmp := isolateTmp(t)
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			o := outlookOpts(db, root)
 			run(t, o)
 			o.FullRead = true
@@ -847,7 +851,7 @@ func TestSyncOWAFirstFingerprintAndMailHoldsFaultsRetry(t *testing.T) {
 
 func TestSyncOWACancellationBeforeSubsequentProfileDoesNotReadIt(t *testing.T) {
 	tmp := isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	copyTree(t, filepath.Join(root, "Default"), filepath.Join(root, "Second"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -865,7 +869,8 @@ func TestSyncOWACancellationBeforeSubsequentProfileDoesNotReadIt(t *testing.T) {
 	t.Cleanup(func() { outlookOWASnapshot = old })
 	r := runner{o: outlookOpts(db, root), st: st}
 	out := r.outlookOWASources(ctx, &Report{})
-	if len(out) != 2 || !errors.Is(out[0].err, context.Canceled) || !errors.Is(out[1].err, context.Canceled) || out[1].key != "outlook|Second|mail" {
+	if len(out) != 4 || !errors.Is(out[0].err, context.Canceled) || !errors.Is(out[1].err, context.Canceled) ||
+		!errors.Is(out[2].err, context.Canceled) || !errors.Is(out[3].err, context.Canceled) || out[3].key != "outlook|Second|mail" {
 		t.Fatalf("cancellation did not stop the subsequent source: %+v", out)
 	}
 	if count(t, db, `select count(*) from meta where key='outlook_last_attempt:Second' or key like 'outlook_mail_read:%'`) != 0 || count(t, db, `select count(*) from mail_messages`) != 0 || len(snapshotDirs(t, tmp)) != 0 {
@@ -898,7 +903,7 @@ func TestOWADefaultResolutionErrorAndEmptyRootAreExplicit(t *testing.T) {
 
 func TestSyncOWAFormatProbeRefusalIsNotAnEmptySuccess(t *testing.T) {
 	isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	o := outlookOpts(db, root)
 	run(t, o)
 	old := outlookOWADiscover
@@ -1001,7 +1006,7 @@ func TestSyncOWAActiveLazyCancellationKeepsSnapshotUntilClose(t *testing.T) {
 
 func TestSyncOWAReadableProfileSurvivesLegacyClassificationFailure(t *testing.T) {
 	isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	denied := filepath.Join(root, "Denied")
 	if err := os.MkdirAll(filepath.Join(denied, "IndexedDB"), 0o700); err != nil {
 		t.Fatal(err)
@@ -1040,7 +1045,7 @@ func TestSyncOWAReadableProfileSurvivesLegacyClassificationFailure(t *testing.T)
 
 func TestOwnedOWASnapshotForwardsCopyDeadlineAndReleasesContext(t *testing.T) {
 	isolateTmp(t)
-	p := owaProfile(owaRoot(t, "mail"))
+	p := owaProfile(owaRoot(t, "calendar"))
 	type valueKey struct{}
 	parent := context.WithValue(context.Background(), valueKey{}, "synthetic scope")
 	ctx, cancel := context.WithTimeout(parent, 20*time.Millisecond)
@@ -1129,7 +1134,7 @@ func TestOWAFormatRoutingDistinguishesPositiveLegacyAndRootErrors(t *testing.T) 
 	for _, kind := range []string{"hx", "classic", "legacy-error-owa-empty", "both-root-errors"} {
 		t.Run(kind, func(t *testing.T) {
 			isolateTmp(t)
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			hx, owa := outlookDiscover, outlookOWADiscover
 			t.Cleanup(func() { outlookDiscover, outlookOWADiscover = hx, owa })
 			o := outlookOpts(db, root)
@@ -1198,7 +1203,7 @@ func TestSyncOWAReadableFormatOverridesEachNegativeLegacyProbe(t *testing.T) {
 	for _, kind := range []string{"skipped-only", "error-only"} {
 		t.Run(kind, func(t *testing.T) {
 			isolateTmp(t)
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			old := outlookDiscover
 			t.Cleanup(func() { outlookDiscover = old })
 			outlookDiscover = func(path string) ([]outlookdesktop.Profile, []string, []outlookdesktop.SkippedProfile, error) {
@@ -1210,7 +1215,7 @@ func TestSyncOWAReadableFormatOverridesEachNegativeLegacyProbe(t *testing.T) {
 			o := outlookOpts(db, root)
 			o.Root = t.TempDir()
 			r, _ := run(t, o)
-			if len(r.Sources) != 1 || sourceKeyed(t, r, "outlook|Default|mail").Counts.Mail.Added != 5 {
+			if len(r.Sources) != 2 || sourceKeyed(t, r, "outlook|Default|mail").Counts.Mail.Added != 5 {
 				t.Fatalf("negative legacy probe overrode positive OWA evidence: %+v", r.Sources)
 			}
 		})

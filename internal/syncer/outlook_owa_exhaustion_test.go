@@ -13,7 +13,7 @@ import (
 
 func TestSyncOWAExhaustionPreservesCodeRollbackAndRetry(t *testing.T) {
 	isolateTmp(t)
-	db, root := newDB(t), owaRoot(t, "mail")
+	db, root := newDB(t), owaRoot(t, "calendar")
 	st, err := store.Open(context.Background(), db)
 	if err != nil {
 		t.Fatal("synthetic_archive_open_failed")
