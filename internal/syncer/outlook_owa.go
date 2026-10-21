@@ -20,8 +20,6 @@ import (
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
-var errOWASnapshotRetained = errors.New("outlook reader release was not proved; snapshot retained")
-
 func defaultOutlookRoot() (string, error) {
 	root, err := outlookOWADefaultRoot()
 	if errors.Is(err, outlookdesktop.ErrNotSupported) {
@@ -101,6 +99,9 @@ func (r *runner) rememberOWAFailure(ctx context.Context, profile string, err err
 		r.progress("%s: could not record the mail failure", mailKey(outlookKey(profile)))
 	}
 }
+
+// ErrOWASnapshotRetained reports a private snapshot whose reader release was not proved.
+var ErrOWASnapshotRetained = errors.New("reader release was not proved and its snapshot was retained")
 
 func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (SourceReport, bool, error) {
 	mail, _ := r.readOWAProfile(ctx, p, false)
@@ -225,10 +226,10 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 			return
 		}
 		if !mailClosed {
-			mail.err = errors.Join(mail.err, errOWASnapshotRetained)
+			mail.err = errors.Join(mail.err, ErrOWASnapshotRetained)
 		}
 		if !calendarClosed {
-			cal.err = errors.Join(cal.err, errOWASnapshotRetained)
+			cal.err = errors.Join(cal.err, ErrOWASnapshotRetained)
 		}
 		r.progress("%s: snapshot retained because reader release was not proved", outlookKey(p.Name))
 	}()
@@ -351,22 +352,26 @@ func ownedOWASnapshot(ctx context.Context, source teamsdesktop.Source) (string, 
 	}, nil
 }
 
-// closed is true only when no reader was acquired or its Close succeeded.
-func collectOWAMail(ctx context.Context, snap, account string, expect bool, closed *bool) (res outlookowa.Result, err error) {
+// released is true only when no reader was acquired or its Close succeeded.
+func collectOWAMail(ctx context.Context, snap, account string, expect bool, released *bool) (res outlookowa.Result, err error) {
 	if err := ctx.Err(); err != nil {
 		return res, err
 	}
-	*closed = false
+	*released = false
 	o, err := outlookOWAOpen(ctx, filepath.Join(snap, "leveldb"), filepath.Join(snap, "blob"))
 	if err != nil {
-		*closed = !errors.Is(err, outlookowa.ErrReaderClose)
+		*released = !errors.Is(err, outlookowa.ErrReaderClose)
 		return res, err
 	}
 	defer func() {
-		if closeErr := outlookOWAClose(o); closeErr != nil {
+		if closeErr := contained(func() error { return outlookOWAClose(o) }); closeErr != nil {
+			var coded *errs.Coded
+			if err == nil && errors.As(closeErr, &coded) && coded.Code == errs.CodeInternal {
+				err = errs.Internal(errors.New("outlook mail reader release failed"))
+			}
 			err = errors.Join(err, outlookowa.ErrReaderClose)
 		} else {
-			*closed = true
+			*released = true
 		}
 	}()
 	return outlookowa.Collect(ctx, o, account, expect)
@@ -375,7 +380,7 @@ func collectOWAMail(ctx context.Context, snap, account string, expect bool, clos
 // Only fixed diagnostics cross the source boundary; Windows access failures are not macOS FDA.
 func owaSourceError(err error) (result error) {
 	defer func() {
-		if errors.Is(err, errOWASnapshotRetained) {
+		if errors.Is(err, ErrOWASnapshotRetained) {
 			result = owaRetainedError(result)
 		}
 	}()
@@ -413,8 +418,8 @@ func owaRetainedError(err error) error {
 	var coded *errs.Coded
 	if errors.As(err, &coded) {
 		public := *coded
-		public.Message += "; reader release was not proved and its snapshot was retained"
-		return &public
+		public.Message += "; " + ErrOWASnapshotRetained.Error()
+		return errors.Join(&public, ErrOWASnapshotRetained)
 	}
 	return err
 }

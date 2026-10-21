@@ -38,10 +38,22 @@ func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, e
 		return nil, sourceFailure("records_unreadable", err)
 	}
 	if err := ctx.Err(); err != nil {
-		if closeErr := mailClose(o); closeErr != nil {
+		if closeErr := closeCanceledReader(o); closeErr != nil {
 			return nil, errors.Join(err, ErrReaderClose)
 		}
 		return nil, err
 	}
 	return o, nil
+}
+
+func closeCanceledReader(o *indexeddb.Origin) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = ErrReaderClose
+		}
+	}()
+	if mailClose(o) != nil {
+		return ErrReaderClose
+	}
+	return nil
 }

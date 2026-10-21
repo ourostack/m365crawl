@@ -170,12 +170,16 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		rt.synced.Status = syncer.StatusFailed
 	}
 	if rt.ctx.Err() != nil {
+		if errors.Is(err, syncer.ErrOWASnapshotRetained) {
+			return nil, errors.Join(rt.ctx.Err(), syncer.ErrOWASnapshotRetained)
+		}
 		return nil, rt.ctx.Err()
 	}
 	var coded *errs.Coded
 	if !errors.As(err, &coded) {
 		coded = errs.Internal(err)
 	}
+	coded = withSnapshotRetention(err, coded)
 	if coded.Exit == errs.ExitUsage {
 		return nil, coded // the link the operator asked for was refused: that is theirs to fix, not a warning
 	}

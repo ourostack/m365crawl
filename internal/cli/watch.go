@@ -262,6 +262,9 @@ func (w *watcher) sync() (done bool, err error) {
 	}
 	// The sync covers every account so --account only filters what is emitted, never the archive.
 	rep, changes, err := runSync(w.rt.ctx, w.rt.syncOptions(syncer.Options{Root: w.rt.root, DBPath: w.rt.dbPath}))
+	if w.rt.ctx.Err() != nil && errors.Is(err, syncer.ErrOWASnapshotRetained) {
+		w.rt.printWarning(withSnapshotRetention(err, errs.Interrupted()))
+	}
 	var coded *errs.Coded
 	partial := errors.As(err, &coded) && coded.Code == errs.CodePartialSync && w.rt.ctx.Err() == nil
 	// Sources committed but the run could not be recorded: their changes are in the archive too.
@@ -531,7 +534,9 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 	}
 	out := make(chan struct{}, 1)
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer func() { _ = fw.Close() }()
 		pumpEvents(ctx, stop, fw.Events, fw.Errors, out)
 	}()
@@ -542,6 +547,7 @@ func fileEvents(ctx context.Context, dirs []string) (<-chan struct{}, func(), er
 			close(stop)
 		default:
 		}
+		<-done
 	}, nil
 }
 

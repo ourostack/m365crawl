@@ -118,7 +118,7 @@ func (r *runner) commitOWACalendarSnapshot(ctx context.Context, snap, account, k
 
 func owaCalendarSourceError(err error) (result error) {
 	defer func() {
-		if errors.Is(err, errOWASnapshotRetained) {
+		if errors.Is(err, ErrOWASnapshotRetained) {
 			result = owaRetainedError(result)
 		}
 	}()
