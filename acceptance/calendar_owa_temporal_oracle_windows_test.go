@@ -22,6 +22,7 @@ type owaTemporalExpected struct {
 	StartDate, EndDate    string
 	Invalid, UnknownZones int
 	Unaligned             int
+	Redacted              int
 }
 
 func owaOracleInstant(value any) (time.Time, bool) {
@@ -50,24 +51,29 @@ func (out *owaTemporalExpected) flag(value any) int8 {
 	return -1
 }
 
-func (out *owaTemporalExpected) zone(ctx context.Context, oracle *owaWindowsZoneOracle, value any) (*owaNativeZoneIdentity, error) {
+func (out *owaTemporalExpected) zone(ctx context.Context, oracle *owaWindowsZoneOracle, value any) (*owaNativeZoneIdentity, string, error) {
 	text, ok := value.(string)
 	if !ok || !utf8.ValidString(text) {
 		out.Invalid++
-		return nil, nil
+		return nil, "", nil
 	}
-	identity, err := oracle.identity(ctx, text)
+	clean, count, err := owaOraclePrivacyText(ctx, text)
+	if err != nil {
+		return nil, "", err
+	}
+	out.Redacted += count
+	identity, err := oracle.identity(ctx, clean)
 	if err != nil {
 		if err.Error() == "calendar_oracle_zone_unknown" || err.Error() == "calendar_oracle_zone_unmapped" {
 			out.UnknownZones++
-			return nil, nil
+			return nil, clean, nil
 		}
-		return nil, err
+		return nil, clean, err
 	}
 	if identity.Alias {
-		return nil, errors.New("calendar_oracle_alias_policy_unproved")
+		return nil, clean, errors.New("calendar_oracle_alias_policy_unproved")
 	}
-	return &identity, nil
+	return &identity, clean, nil
 }
 
 func owaProjectTemporal(ctx context.Context, oracle *owaWindowsZoneOracle, value any) (owaTemporalExpected, error) {
@@ -101,20 +107,20 @@ func owaProjectTemporal(ctx context.Context, oracle *owaWindowsZoneOracle, value
 	}
 	if raw := fields["StartTimeZoneId"]; owaSurveyPresent(raw) {
 		if text, ok := raw.(string); ok && utf8.ValidString(text) {
-			out.Zone, out.ZoneDeclared = text, true
+			out.ZoneDeclared = true
 		}
-		identity, err := out.zone(ctx, oracle, raw)
+		identity, label, err := out.zone(ctx, oracle, raw)
 		if err != nil {
 			return out, err
 		}
-		out.ZoneIdentity = identity
+		out.ZoneIdentity, out.Zone = identity, label
 	}
 	if out.AllDay != 1 {
 		return out, nil
 	}
 	proved := out.ZoneIdentity != nil
 	if raw := fields["EndTimeZoneId"]; proved && owaSurveyPresent(raw) {
-		identity, err := out.zone(ctx, oracle, raw)
+		identity, _, err := out.zone(ctx, oracle, raw)
 		if err != nil {
 			return out, err
 		}
