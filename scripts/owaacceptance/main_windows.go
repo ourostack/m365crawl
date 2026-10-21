@@ -149,7 +149,7 @@ func (w *workspace) run(binary string, args, env []string, timeout time.Duration
 		if w.qualification != nil && result == nil && exit == 0 {
 			result = w.qualification.verifyWitness()
 		}
-		if w.qualification != nil && result == nil && exit != 0 {
+		if w.qualification != nil && w.qualification.owner.Test == protocol.TestName && result == nil && exit != 0 {
 			w.qualification.readDiagnostic()
 		}
 		if err := w.cleanup(); err != nil {
@@ -756,19 +756,20 @@ func main() {
 	parent := flags.String("scratch-parent", "", "Existing private validation directory outside Git")
 	digest := flags.String("test-sha256", "", "Expected reviewed test executable SHA256")
 	receipt := flags.String("receipt-dir", "", "Explicit protected durable receipt directory outside Git")
-	if flags.Parse(os.Args[1:]) != nil || !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flags.NArg() != 0 {
+	observation := flags.Bool("calendar-observation", false, "Explicit counts-only calendar field observation, not qualification")
+	if flags.Parse(os.Args[1:]) != nil || !*observation || !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flags.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "owa_acceptance status=refused reason=arguments")
 		os.Exit(2)
 	}
-	witness, err := runQualified(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
+	witness, err := runCalendarObserved(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, failurePacket(err))
+		fmt.Fprintln(os.Stderr, "owa_calendar_observation status=unobserved reason=unproved")
 		os.Exit(1)
 	}
 	counts, err := json.Marshal(witness.Counts)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "owa_acceptance status=failed reason=safe_counts")
+		fmt.Fprintln(os.Stderr, "owa_calendar_observation status=unobserved reason=safe_counts")
 		os.Exit(1)
 	}
-	fmt.Printf("owa_acceptance status=qualified cleanup=verified version=%d test=%s binary_sha256=%s observed=%d unstable=%d counts=%s\n", protocol.Version, protocol.TestName, witness.BinaryHash, witness.Observed, witness.Unstable, counts)
+	fmt.Printf("owa_calendar_observation status=observed cleanup=verified version=%d test=%s binary_sha256=%s observed=%d unstable=%d counts=%s\n", protocol.Version, protocol.CalendarObservationTest, witness.BinaryHash, witness.Observed, witness.Unstable, counts)
 }

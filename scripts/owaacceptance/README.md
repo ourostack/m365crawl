@@ -1,5 +1,25 @@
 # Windows OWA acceptance process owner
 
+## Calendar-capable branch: observation only
+
+This branch's executable front door requires `-calendar-observation`. It selects only `TestRealOWACalendarFieldObservation`; an old mail-only invocation is refused before launch. Build the acceptance artifact from `./acceptance`, not the supervisor package's synthetic test helper.
+
+```powershell
+& <owned-supervisor.exe> -calendar-observation -test-binary <reviewed-owned-acceptance.test.exe> -test-sha256 <reviewed-lowercase-sha256> -outlook-root <explicit-source-EBWebView> -scratch-parent <existing-private-validation-parent> -receipt-dir <explicit-new-private-receipt-directory>
+```
+
+The observation is restricted to one discovered profile, one stable private snapshot and event values only. It does not sync/import, compare SQL, verify a principal or qualify the product. `calendar-observation.json` has the closed field-shape kind, outcome `observed`, 47 bounded coherent counters and explicit value-reader release proof. The separate `calendar-observation-closeout.json` confirms an observation only after matched evidence, exit zero, verified whole-generation/native release and actual identity-bound disposal. Neither record can be decoded as mail qualification, and successful stdout says `status=observed`, never `qualified`.
+
+The existing suspended-start/job/ACL/path/placement/native-process/handle/consumer/resource/disposal barriers below are shared unchanged. If a reader's release is unproved, both per-test and TestMain cleanup retain that copied payload until the supervisor proves owning-generation release. Missing/invalid observations, nonzero exit, timeout, unknown consumers or failed cleanup remain unconfirmed with fixed failure output; raw child logs remain discarded. Generic failed closeout facts do not establish a guessed source failure cause.
+
+The actual legacy mail-only acceptance entrypoint explicitly refuses on this calendar-capable branch even under otherwise-valid old ownership. Its stable-mail implementation remains in the separately qualified stable source; the legacy library lifecycle regression APIs below do not authorize a calendar read.
+
+**No real source invocation is authorized by this implementation or copied-synthetic evidence.** The outer owner still needs fresh independent bounded enabling review, pinned reviewed artifacts, a fresh protected receipt and exact process/native-root readback before one counts-only observation. Product/mapping/native qualification and a release/install remain separate work.
+
+## Legacy stable-mail lifecycle reference
+
+The remaining mail witness/diagnostic details document the stable-mail protocol and its retained regression APIs, not this branch's executable observation mode. Do not reuse its old invocation to access a live source from the calendar-capable branch.
+
 This Windows-only supervisor runs the existing precompiled Go acceptance test, not another importer. The test refuses before discovery unless this supervisor's protected ownership, live process identities, native workspace identity, reviewed binary digest and exact test selection all match. An environment flag or a zero-exit executable cannot qualify. **Host execution still requires the parent's independent enabling review and explicit approval; the copied-synthetic proofs are not real-cache acceptance or release approval.**
 
 Build with `GOWORK=off go build -o <owned-supervisor.exe> ./scripts/owaacceptance` and `GOWORK=off go test -c -tags acceptance -o <owned-acceptance.test.exe> ./acceptance`. Use absolute binary paths. Never build a real-data capture into Git or run the entire real acceptance suite when qualifying only OWA mail.
