@@ -17,7 +17,7 @@ import (
 
 // Notes contains counts only, never values from a source event.
 type Notes struct {
-	Unmapped, UnknownZone, AllDayUnaligned, Redacted int
+	Unmapped, UnknownZone, AllDayUnaligned, Redacted, PartialAttendees int
 }
 
 // MapEvent leaves unobserved fields unknown and returns only fixed errors.
@@ -46,6 +46,8 @@ func MapEvent(account string, value any) (calendar.Event, Notes, error) {
 		SourceID: uid, GlobalID: uid, ICalUID: uid, SeriesKey: uid,
 		Start: start, End: end, LastModified: &modified,
 		AllDay: r.flag(o, "IsAllDayEvent"), Cancelled: r.flag(o, "IsCancelled"),
+		IsOnlineMeeting: r.flag(o, "IsOnlineMeeting"), IsOrganizer: r.flag(o, "IsOrganizer"),
+		HasAttachments: r.flag(o, "HasAttachments"),
 	}
 	if series, _, ok := calendar.SplitOccurrenceID(uid); ok {
 		e.SeriesKey = strings.ToLower(series)
@@ -98,23 +100,8 @@ func MapEvent(account string, value any) (calendar.Event, Notes, error) {
 			r.notes.Unmapped++
 		}
 	}
-	if response, ok := r.text(o, "ResponseType"); ok {
-		switch response {
-		case "Accept":
-			e.Response = "accepted"
-		case "Tentative":
-			e.Response = "tentative"
-		case "Decline":
-			e.Response = "declined"
-		case "NoResponseReceived":
-			e.Response = "none"
-		case "Organizer":
-			e.Response = "organizer"
-		default:
-			r.notes.Unmapped++
-		}
-		known[calendar.FieldResponse] = e.Response != ""
-	}
+	e.Response, known[calendar.FieldResponse] = r.response(o)
+	r.details(o, &e, known)
 	if e.AllDay.Is(true) {
 		if start.Equal(start.Truncate(24*time.Hour)) && end.Equal(end.Truncate(24*time.Hour)) && end.After(start) {
 			e.StartDate, e.EndDate = start.Format(time.DateOnly), end.Format(time.DateOnly)

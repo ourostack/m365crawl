@@ -16,8 +16,8 @@ import (
 
 // CollectNotes contains counts of events and observation loss.
 type CollectNotes struct {
-	Records, Events, DecodeFailures, UnmappedEvents, DuplicateConflicts int
-	UnmappedFields, UnknownZone, AllDayUnaligned, Redacted              int
+	Records, Events, DecodeFailures, UnmappedEvents, DuplicateConflicts      int
+	UnmappedFields, UnknownZone, AllDayUnaligned, Redacted, PartialAttendees int
 }
 
 // Result distinguishes observed identities from confidently mapped events.
@@ -95,7 +95,8 @@ func collect(ctx context.Context, origin reader, account string, expectEvents bo
 		result.Notes.UnknownZone += notes.UnknownZone
 		result.Notes.AllDayUnaligned += notes.AllDayUnaligned
 		result.Notes.Redacted += notes.Redacted
-		if losses := notes.Unmapped + notes.UnknownZone + notes.AllDayUnaligned; losses > 0 {
+		result.Notes.PartialAttendees += notes.PartialAttendees
+		if losses := notes.Unmapped + notes.UnknownZone + notes.AllDayUnaligned + notes.PartialAttendees; losses > 0 {
 			result.loss(outlookcal.CodeEventUnmapped, losses)
 		}
 		id := event.SourceID
