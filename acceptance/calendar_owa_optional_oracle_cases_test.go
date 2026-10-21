@@ -88,6 +88,7 @@ func TestOWACalendarOptionalOracleSyntheticDifferential(t *testing.T) {
 		if err != nil {
 			t.Fatal("optional_golden_refused")
 		}
+
 		fields, _ := owaSurveyObject(value)
 		raw := owaObject("UID", "AA11", "Start", "2026-10-20T00:00:00Z", "End", "2026-10-21T00:00:00Z", "LastModifiedTime", "2026-10-19T00:00:00Z")
 		for key, field := range fields {
@@ -128,6 +129,35 @@ func TestOWACalendarOptionalOracleSyntheticDifferential(t *testing.T) {
 			}
 		} else if actual.AttendeesJSON != "" {
 			t.Fatal("unknown_attendees_became_empty_removal")
+		}
+	}
+}
+
+func TestOWACalendarOptionalOracleAllEnumLiterals(t *testing.T) {
+	for _, tc := range []struct{ source, raw, target, literal string }{
+		{"ResponseType", "Accept", "response", "accepted"},
+		{"ResponseType", "Tentative", "response", "tentative"},
+		{"ResponseType", "Decline", "response", "declined"},
+		{"ResponseType", "NoResponseReceived", "response", "none"},
+		{"ResponseType", "Organizer", "response", "organizer"},
+		{"FreeBusyType", "Free", "show_as", "free"},
+		{"FreeBusyType", "Tentative", "show_as", "tentative"},
+		{"FreeBusyType", "Busy", "show_as", "busy"},
+		{"CalendarItemType", "Single", "event_type", "single"},
+		{"CalendarItemType", "Occurrence", "event_type", "occurrence"},
+		{"CalendarItemType", "Exception", "event_type", "exception"},
+		{"CalendarItemType", "RecurringMaster", "event_type", "master"},
+	} {
+		value := owaObject("UID", "AA11", "Start", "2026-10-20T00:00:00Z", "End", "2026-10-21T00:00:00Z",
+			"LastModifiedTime", "2026-10-19T00:00:00Z", tc.source, tc.raw)
+		expected, err := owaProjectOptional(t.Context(), value)
+		if err != nil || !expected.Fields[tc.target].Known || expected.Fields[tc.target].Value != tc.literal || expected.Invalid != 0 {
+			t.Fatal("optional_enum_literal_projection_mismatch")
+		}
+		actual, notes, err := outlookowacal.MapEvent("outlook/Synthetic", value)
+		values := map[string]string{"response": actual.Response, "show_as": actual.ShowAs, "event_type": string(actual.EventType)}
+		if err != nil || notes.Unmapped != 0 || values[tc.target] != tc.literal {
+			t.Fatal("optional_enum_literal_differential_mismatch")
 		}
 	}
 }
