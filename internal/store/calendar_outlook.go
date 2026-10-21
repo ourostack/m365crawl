@@ -367,9 +367,16 @@ func dropSupersededKeys(ctx context.Context, tx *sql.Tx, account string, events 
 // keeping their keys and first sighting, so the batch is captured over nothing. An event the
 // core will refuse is not blanked: nothing is written for it, so blanking would erase its row.
 func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calendar.Event) error {
-	sets, err := blankSets(ctx, tx, blankTables[0].table, blankTables[0].keep)
+	keep := append([]string{"unknown_fields"}, blankTables[0].keep...)
+	sets, err := blankSets(ctx, tx, blankTables[0].table, keep)
 	if err != nil {
 		return err
+	}
+	// Empty SQL defaults are not evidence that a previously derived field was known.
+	sets = append(sets, "unknown_fields=?")
+	var unknown []string
+	for _, field := range calendar.AllUnknownFields() {
+		unknown = append(unknown, string(field))
 	}
 	stmt, err := tx.PrepareContext(ctx, `update calendar_source_events set `+strings.Join(sets, ", ")+` where source=? and account_id=? and source_id=?`) //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
 	if err != nil {
@@ -380,7 +387,7 @@ func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calen
 		if calendar.ValidateEvent(e) != nil {
 			continue // the core refuses it and writes nothing: its stored copy keeps its content
 		}
-		if _, err := stmt.ExecContext(ctx, string(calendar.SourceOutlook), account, e.SourceID); err != nil {
+		if _, err := stmt.ExecContext(ctx, strings.Join(unknown, ","), string(calendar.SourceOutlook), account, e.SourceID); err != nil {
 			return err
 		}
 	}

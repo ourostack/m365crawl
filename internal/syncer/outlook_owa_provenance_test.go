@@ -20,6 +20,10 @@ func TestOWACalendarPrePrivacyReadRequalifiesCalendarOnly(t *testing.T) {
 	testOWACalendarPriorMapperRequalifies(t, 3)
 }
 
+func TestOWACalendarPreKnowledgeResetReadRequalifiesCalendarOnly(t *testing.T) {
+	testOWACalendarPriorMapperRequalifies(t, 4)
+}
+
 func testOWACalendarPriorMapperRequalifies(t *testing.T, priorVersion int) {
 	t.Helper()
 	r, profile, clock := owaCalendarRunner(t, newDB(t))

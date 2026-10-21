@@ -73,6 +73,11 @@ func validField(f Field) bool {
 	return false
 }
 
+// AllUnknownFields returns a sorted copy of the complete non-flag vocabulary.
+func AllUnknownFields() []Field {
+	return NormalizeUnknown(unknownVocabulary)
+}
+
 // NormalizeUnknown returns fields sorted without duplicates; nil for none.
 func NormalizeUnknown(fields []Field) []Field {
 	if len(fields) == 0 {
