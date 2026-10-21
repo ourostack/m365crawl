@@ -32,6 +32,10 @@ var (
 // This observes raw field shapes, not mapper correctness, service completeness or a verified principal.
 // The caller must retain its private snapshot if Released is false, even when another error is primary.
 func owaSurveyCalendar(ctx context.Context, level, blob string) (out owaCalendarSurvey, result error) {
+	return owaReadCalendarRaw(ctx, level, blob, nil)
+}
+
+func owaReadCalendarRaw(ctx context.Context, level, blob string, visit func(any, []byte) error) (out owaCalendarSurvey, result error) {
 	out = owaCalendarSurvey{Counts: map[string]int64{}, Released: true}
 	for _, field := range owaCalendarSurveyFields {
 		out.Counts[field] = 0
@@ -119,7 +123,13 @@ func owaSurveyCalendar(ctx context.Context, level, blob string) (out owaCalendar
 			return nil
 		}
 		out.Counts["decoded"]++
-		return owaSurveyShape(ctx, out.Counts, seen, value, payload)
+		if err := owaSurveyShape(ctx, out.Counts, seen, value, payload); err != nil {
+			return err
+		}
+		if visit != nil {
+			return visit(value, payload)
+		}
+		return nil
 	})
 	if ctx.Err() != nil {
 		return out, errors.New("calendar_survey_context_refused")
