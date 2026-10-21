@@ -75,6 +75,8 @@ type OutlookLayout struct {
 
 // OutlookRead is the last good read's census of one profile's store: numbers only.
 type OutlookRead struct {
+	// OWA identifies an IndexedDB census; HxStore block health and deletion inference do not apply.
+	OWA bool `json:"owa,omitempty"`
 	// At is when the read happened; `calendar sources` shows it as census_as_of.
 	At             time.Time       `json:"at,omitzero"`
 	UnknownLayouts []OutlookLayout `json:"unknown_layouts,omitempty"`
@@ -404,6 +406,7 @@ type OutlookFailure struct {
 	Message string `json:"message"`
 	Fix     string `json:"fix"`
 	Exit    int    `json:"exit"`
+	OWA     bool   `json:"owa,omitempty"`
 }
 
 // SetOutlookFailure remembers why the account's last read failed; nil forgets it.

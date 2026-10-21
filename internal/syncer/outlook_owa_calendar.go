@@ -15,7 +15,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
-const outlookOWACalendarMapperVersion = 1
+const outlookOWACalendarMapperVersion = 2
 
 var (
 	outlookOWACalendarOpen    = outlookowacal.Open
@@ -48,7 +48,7 @@ func (r *runner) rememberOWACalendarFailure(ctx context.Context, profile string,
 		return
 	}
 	c := codedOf(err)
-	if err := r.st.SetOutlookFailure(ctx, outlookAccount(profile), &store.OutlookFailure{Code: c.Code, Message: c.Message, Fix: c.Fix, Exit: c.Exit}); err != nil {
+	if err := r.st.SetOutlookFailure(ctx, outlookAccount(profile), &store.OutlookFailure{Code: c.Code, Message: c.Message, Fix: c.Fix, Exit: c.Exit, OWA: true}); err != nil {
 		r.progress("%s: could not record the calendar failure", outlookKey(profile))
 	}
 }
@@ -90,7 +90,7 @@ func (r *runner) commitOWACalendarSnapshot(ctx context.Context, snap, account, k
 		omissions["outlook_owa_source_changed"]++
 		fp = ""
 	}
-	read := store.OutlookRead{UnmappedValues: map[string]int{}}
+	read := store.OutlookRead{OWA: true, UnmappedValues: map[string]int{}}
 	for key, count := range map[string]int{
 		"owa_event": res.Notes.UnmappedEvents, "owa_value": res.Notes.UnmappedFields,
 		"owa_zone": res.Notes.UnknownZone, "owa_all_day": res.Notes.AllDayUnaligned,

@@ -170,7 +170,9 @@ func TestMailOWACommands(t *testing.T) {
 		c := raw.(map[string]any)
 		if c["name"] == "outlook_store" {
 			found = true
-			if c["warn"] == true || !strings.Contains(c["detail"].(string), "calendar is unsupported on OWA") {
+			detail := c["detail"].(string)
+			if c["warn"] == true || !strings.Contains(detail, "calendar read ") || !strings.Contains(detail, "mail read ") ||
+				strings.Contains(detail, "calendar is unsupported") {
 				t.Fatalf("doctor = %v", c)
 			}
 		}

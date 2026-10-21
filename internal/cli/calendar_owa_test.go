@@ -65,6 +65,12 @@ func TestCalendarOWADoctorIndependentHealth(t *testing.T) {
 			if tc.failed != (row["error"] != nil) {
 				t.Fatalf("calendar failure hidden in source output = %v", row)
 			}
+			if row["deletions"] != "not_inferred" {
+				t.Fatalf("OWA source claims unsupported deletion inference = %v", row)
+			}
+			if _, has := row["blocks_invalid_ratio"]; has {
+				t.Fatalf("OWA source invents HxStore block health = %v", row)
+			}
 			agenda := mailJSON(t, e, "--max-age", "0", "calendar", "--from", "2031-03-01", "--to", "2031-04-01")
 			if num(t, agenda, "count") != wantEvents {
 				t.Fatalf("cached calendar query count = %v", agenda)
@@ -104,8 +110,18 @@ func TestCalendarOWADoctorIntervalAndUnchanged(t *testing.T) {
 	}
 	unchanged := sourceRows(t, e)["outlook/Default"]
 	if unchanged["status"] != "ok" || unchanged["last_read_at"] != first["last_read_at"] ||
-		unchanged["census_as_of"] != first["census_as_of"] || num(t, unchanged, "events_live") != 2 {
+		unchanged["census_as_of"] != first["census_as_of"] || num(t, unchanged, "events_live") != 2 ||
+		unchanged["deletions"] != "not_inferred" {
 		t.Fatalf("unchanged check manufactured a calendar read = %v", unchanged)
+	}
+	e.exec(`insert into meta(key,value) values('outlook_failure:outlook/Default','{"code":"outlook_layout_unsupported","message":"fixed failure","owa":true}')`)
+	failed := sourceRows(t, e)["outlook/Default"]
+	if failed["deletions"] != "not_inferred" || failed["error"] == nil ||
+		failed["census_as_of"] != first["census_as_of"] || num(t, failed, "events_live") != 2 {
+		t.Fatalf("failure changed last good OWA census or policy = %v", failed)
+	}
+	if _, has := failed["blocks_invalid_ratio"]; has {
+		t.Fatalf("failed OWA source invents block health = %v", failed)
 	}
 }
 
