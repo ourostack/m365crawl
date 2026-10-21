@@ -183,6 +183,7 @@ func TestMapEventPreservesOccurrenceAndAllDayUncertainty(t *testing.T) {
 	}
 	replace(o, "Start", "2026-10-20T00:00:00Z")
 	replace(o, "End", "2026-10-22T00:00:00Z")
+	replace(o, "StartTimeZoneId", "UTC")
 	e, notes, err = MapEvent("outlook/Synthetic", o)
 	if err != nil || !e.AllDay.Is(true) || e.StartDate != "2026-10-20" || e.EndDate != "2026-10-22" || notes != (Notes{}) {
 		t.Fatal("aligned explicit all-day span was lost")

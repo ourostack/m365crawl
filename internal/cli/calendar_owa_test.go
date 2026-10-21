@@ -26,7 +26,7 @@ func TestCalendarOWADoctorIndependentHealth(t *testing.T) {
 		t.Run(tc.variant, func(t *testing.T) {
 			e := textEnv(t)
 			root := createdOWARoot(t)
-			fixture := "outlook-owa-calendar-fixture"
+			fixture := "outlook-owa-calendar-local-fixture"
 			if tc.variant == "mail" {
 				fixture = "outlook-owa-fixture"
 			}
@@ -91,7 +91,7 @@ func TestCalendarOWADoctorIndependentHealth(t *testing.T) {
 func TestCalendarOWADoctorIntervalAndUnchanged(t *testing.T) {
 	e := textEnv(t)
 	root := createdOWARoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), filepath.Join(root, "Default"))
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("sync exit %d: %s", code, stderr)
 	}
@@ -129,7 +129,7 @@ func TestCalendarOWADoctorUnreadAndStateFailure(t *testing.T) {
 	e := textEnv(t)
 	e.emptyArchive()
 	root := createdOWARoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), filepath.Join(root, "Default"))
 	st, err := store.OpenReadOnly(context.Background(), e.db)
 	if err != nil {
 		t.Fatal(err)

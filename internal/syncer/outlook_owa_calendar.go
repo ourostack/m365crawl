@@ -15,7 +15,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
-const outlookOWACalendarMapperVersion = 2
+const outlookOWACalendarMapperVersion = 3
 
 var (
 	outlookOWACalendarOpen    = outlookowacal.Open

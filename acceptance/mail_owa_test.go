@@ -21,7 +21,7 @@ func owaFixtureProfile(variant, name string) outlookowa.Profile {
 	noBlobs := variant == "empty" || variant == "missing-store"
 	switch variant {
 	case "mail":
-		fixture, variant = "outlook-owa-calendar-fixture", "calendar"
+		fixture, variant = "outlook-owa-calendar-local-fixture", "calendar"
 	case "empty":
 		fixture, variant = "outlook-owa-calendar-empty-mail-fixture", "calendar-empty-mail"
 	case "mail-decoy":

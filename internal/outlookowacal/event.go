@@ -78,10 +78,12 @@ func MapEvent(account string, value any) (calendar.Event, Notes, error) {
 			r.notes.Unmapped++
 		}
 	}
+	var location *time.Location
 	if zone, ok := r.text(o, "StartTimeZoneId"); ok {
 		e.TimeZone, known[calendar.FieldTimeZone] = zone, true
-		if iana, _, found := outlookcal.ZoneIANA(zone); found {
+		if iana, loc, found := outlookcal.ZoneIANA(zone); found {
 			e.TimeZoneIANA, known[calendar.FieldTimeZoneIANA] = iana, true
+			location = loc
 		} else {
 			r.notes.UnknownZone++
 		}
@@ -103,8 +105,8 @@ func MapEvent(account string, value any) (calendar.Event, Notes, error) {
 	e.Response, known[calendar.FieldResponse] = r.response(o)
 	r.details(o, &e, known)
 	if e.AllDay.Is(true) {
-		if start.Equal(start.Truncate(24*time.Hour)) && end.Equal(end.Truncate(24*time.Hour)) && end.After(start) {
-			e.StartDate, e.EndDate = start.Format(time.DateOnly), end.Format(time.DateOnly)
+		if first, last, ok := r.allDayDates(o, start, end, e.TimeZoneIANA, location); ok {
+			e.StartDate, e.EndDate = first, last
 		} else {
 			e.AllDay = calendar.TriUnknown
 			r.notes.AllDayUnaligned++
@@ -126,6 +128,38 @@ func MapEvent(account string, value any) (calendar.Event, Notes, error) {
 }
 
 type eventReader struct{ notes Notes }
+
+func (r *eventReader) allDayDates(o *v8.Object, start, end time.Time, iana string, location *time.Location) (string, string, bool) {
+	if location == nil {
+		return "", "", false
+	}
+	if _, present := valueOf(o, "EndTimeZoneId"); present {
+		zone, ok := r.text(o, "EndTimeZoneId")
+		if !ok {
+			return "", "", false
+		}
+		endIANA, _, found := outlookcal.ZoneIANA(zone)
+		if !found {
+			r.notes.UnknownZone++
+			return "", "", false
+		}
+		if endIANA != iana {
+			return "", "", false
+		}
+	}
+	first, last := start.In(location), end.In(location)
+	for _, instant := range []time.Time{first, last} {
+		if instant.Year() < 1 || instant.Year() > 9999 ||
+			instant.Hour() != 0 || instant.Minute() != 0 || instant.Second() != 0 || instant.Nanosecond() != 0 {
+			return "", "", false
+		}
+	}
+	firstDate, lastDate := first.Format(time.DateOnly), last.Format(time.DateOnly)
+	if lastDate <= firstDate {
+		return "", "", false
+	}
+	return firstDate, lastDate, true
+}
 
 func validObject(value any) (*v8.Object, bool) {
 	o, ok := value.(*v8.Object)

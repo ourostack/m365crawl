@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export const origin = 'https_outlook.office.com_0.indexeddb';
 
-export async function buildOutlookProfile(chromium, profileDir, variant = 'mail') {
+export async function buildOutlookProfile(chromium, profileDir, variant = 'mail', calendarLocalDates = false) {
   const ctx = await chromium.launchPersistentContext(profileDir, { channel: 'msedge', headless: true });
   let version = '';
   try {
@@ -15,7 +15,7 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
     });
     const page = await ctx.newPage();
     await page.goto('https://outlook.office.com/fixture');
-    await page.evaluate(async variant => {
+    await page.evaluate(async ({ variant, calendarLocalDates }) => {
       const emptyMail = variant === 'empty' || variant === 'calendar-empty-mail';
       const id = Id => ({ Id });
       const mailbox = (Name, EmailAddress) => ({ Name, EmailAddress });
@@ -59,6 +59,13 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
           RequiredAttendees: [], OptionalAttendees: [], Resources: [],
         },
       ];
+      if (calendarLocalDates) {
+        Object.assign(events[1], {
+          Start: '2031-03-06T08:00:00Z', End: '2031-03-07T08:00:00Z',
+          StartTimeZoneId: 'Pacific Standard Time', EndTimeZoneId: 'America/Los_Angeles',
+          Subject: 'Synthetic local-date all-day event',
+        });
+      }
       async function writeDB(name, withBodies = true) {
         const db = await new Promise((resolve, reject) => {
           const req = indexedDB.open(name, 1);
@@ -93,7 +100,7 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
       }
       await writeDB(variant === 'unknown' ? 'not-owa-synthetic' : 'owa-offline-data-synthetic', variant !== 'missing-store');
       if (variant === 'multiple') await writeDB('owa-offline-data-second-synthetic');
-    }, variant);
+    }, { variant, calendarLocalDates });
   } finally {
     await ctx.close();
   }

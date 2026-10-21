@@ -102,7 +102,7 @@ func owaRoot(t *testing.T, variant string) string {
 	root := createdOutlookRoot(t)
 	fixtures := "outlook-owa-fixture"
 	if strings.HasPrefix(variant, "calendar") {
-		fixtures = "outlook-owa-calendar-fixture"
+		fixtures = "outlook-owa-calendar-local-fixture"
 	}
 	copyTree(t, filepath.Join("..", "..", "testdata", fixtures, variant), filepath.Join(root, "Default"))
 	return root
@@ -193,7 +193,7 @@ func TestSyncOWAWindowsDefaultIsHermetic(t *testing.T) {
 	local := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)
 	root := filepath.Join(local, "Microsoft", "Olk", "EBWebView")
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), filepath.Join(root, "Default"))
 	o := implicitOpts(newDB(t), "")
 	o.Root = t.TempDir()
 	r, _ := run(t, o)
@@ -281,7 +281,7 @@ func TestSyncOWAFailureAndInterval(t *testing.T) {
 			outlookOWASnapshot = oldCopy
 			switch failure {
 			case "map":
-				copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar"), owaProfile(root).Dir)
+				copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), owaProfile(root).Dir)
 			case "commit":
 				if _, err := openRaw(t, db).Exec(`drop trigger owa_fail`); err != nil {
 					t.Fatal(err)

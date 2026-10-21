@@ -50,7 +50,7 @@ func copyOWAFixture(t *testing.T, variant string) string {
 	}
 	fixtures := "outlook-owa-fixture"
 	if strings.HasPrefix(variant, "calendar") {
-		fixtures = "outlook-owa-calendar-fixture"
+		fixtures = "outlook-owa-calendar-local-fixture"
 	}
 	src := filepath.Join("..", "testdata", fixtures, variant)
 	dst := filepath.Join(root, "Default")

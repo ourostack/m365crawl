@@ -13,9 +13,9 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookowa"
 )
 
-func chromiumCalendar(t *testing.T, variant string) *indexeddb.Origin {
+func chromiumCalendar(t *testing.T, fixture, variant string) *indexeddb.Origin {
 	t.Helper()
-	base := filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", variant, "IndexedDB")
+	base := filepath.Join("..", "..", "testdata", fixture, variant, "IndexedDB")
 	o, err := Open(context.Background(), filepath.Join(base, "https_outlook.office.com_0.indexeddb.leveldb"), filepath.Join(base, "https_outlook.office.com_0.indexeddb.blob"))
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func chromiumCalendar(t *testing.T, variant string) *indexeddb.Origin {
 }
 
 func TestChromiumCalendarFixtureDetailsAndAllowlist(t *testing.T) {
-	o := chromiumCalendar(t, "calendar")
+	o := chromiumCalendar(t, "outlook-owa-calendar-local-fixture", "calendar")
 	res, err := Collect(context.Background(), o, "outlook/Synthetic", false)
 	if err != nil || res.Doubtful || len(res.Losses) != 0 || res.Notes != (CollectNotes{Records: 2, Events: 2}) || len(res.Events) != 2 {
 		t.Fatalf("browser-written event census: %+v %v", res.Notes, err)
@@ -42,7 +42,7 @@ func TestChromiumCalendarFixtureDetailsAndAllowlist(t *testing.T) {
 	}
 	wantAttendees := `[{"name":"Synthetic required","address":"required@example.invalid","type":"required","response":"accepted"},{"name":"Synthetic optional","address":"optional@example.invalid","type":"optional","response":"tentative"},{"name":"Synthetic room","address":"room@example.invalid","type":"resource","response":"none"}]`
 	if a.AttendeesJSON != wantAttendees || !b.AllDay.Is(true) || b.StartDate != "2031-03-06" || b.EndDate != "2031-03-07" || b.AttendeesJSON != "[]" {
-		t.Fatal("browser-written roles or explicitly UTC-aligned all-day details were lost")
+		t.Fatal("browser-written roles or explicitly local-midnight all-day details were lost")
 	}
 	for _, event := range res.Events {
 		if err := calendar.ValidateEvent(event); err != nil {
@@ -67,7 +67,7 @@ func TestChromiumCalendarFixtureDetailsAndAllowlist(t *testing.T) {
 }
 
 func TestChromiumCalendarEmptyFixtureCannotErasePreviouslyObservedEvents(t *testing.T) {
-	o := chromiumCalendar(t, "calendar-empty")
+	o := chromiumCalendar(t, "outlook-owa-calendar-local-fixture", "calendar-empty")
 	res, err := Collect(context.Background(), o, "outlook/Synthetic", false)
 	if err != nil || len(res.Events) != 0 || res.Doubtful || res.Notes.Records != 0 {
 		t.Fatal("a newly observed empty event store was not representable")
@@ -80,7 +80,7 @@ func TestChromiumCalendarEmptyFixtureCannotErasePreviouslyObservedEvents(t *test
 }
 
 func TestChromiumCalendarDamagedFixtureKeepsGoodEventsAndLoss(t *testing.T) {
-	res, err := Collect(context.Background(), chromiumCalendar(t, "calendar-damaged"), "outlook/Synthetic", false)
+	res, err := Collect(context.Background(), chromiumCalendar(t, "outlook-owa-calendar-local-fixture", "calendar-damaged"), "outlook/Synthetic", false)
 	if err != nil || !res.Doubtful || len(res.Events) != 2 || len(res.SeenIDs) != 2 || res.Notes.Records != 3 ||
 		res.Notes.DecodeFailures+res.Notes.UnmappedEvents != 1 || len(res.Losses) != 1 ||
 		res.Losses[0].Code != outlookcal.CodeEventUnmapped || res.Losses[0].Count != 1 {
@@ -89,7 +89,7 @@ func TestChromiumCalendarDamagedFixtureKeepsGoodEventsAndLoss(t *testing.T) {
 }
 
 func TestChromiumCalendarFixtureRetainsIndependentMail(t *testing.T) {
-	base := filepath.Join("..", "..", "testdata", "outlook-owa-calendar-fixture", "calendar", "IndexedDB")
+	base := filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar", "IndexedDB")
 	o, err := outlookowa.Open(context.Background(), filepath.Join(base, "https_outlook.office.com_0.indexeddb.leveldb"), filepath.Join(base, "https_outlook.office.com_0.indexeddb.blob"))
 	if err != nil {
 		t.Fatal(err)
