@@ -24,6 +24,7 @@ type qualifiedRun struct {
 	pins                      []windows.Handle
 	witness                   protocol.Qualification
 	observation               protocol.CalendarObservation
+	calendarQualification     protocol.CalendarQualification
 	consumersReleased         bool
 	cleanupVerified           bool
 	nativeCloseVerified       bool
@@ -70,7 +71,7 @@ func newQualifiedRun(binary, digest, source, parent, receipt string) (*workspace
 }
 
 func newBoundRun(binary, digest, source, parent, receipt, test string) (*workspace, *qualifiedRun, error) {
-	if test != protocol.TestName && test != protocol.CalendarObservationTest {
+	if test != protocol.TestName && test != protocol.CalendarObservationTest && test != protocol.CalendarQualificationTest {
 		return nil, nil, errors.New("qualification_scope_refused")
 	}
 	if protocol.SafeAbsolute(source, true, true) != nil || !filepath.IsAbs(receipt) || filepath.Clean(receipt) != receipt || protocol.SafeAbsolute(filepath.Dir(receipt), true, true) != nil {
@@ -151,6 +152,9 @@ func (q *qualifiedRun) beforeResume(pid uint32) error {
 }
 
 func (q *qualifiedRun) verifyWitness() error {
+	if q.owner.Test == protocol.CalendarQualificationTest {
+		return q.verifyCalendarQualification()
+	}
 	if q.owner.Test == protocol.CalendarObservationTest {
 		return q.verifyObservation()
 	}
@@ -180,6 +184,9 @@ func qualifiedEnv(env []string, q *qualifiedRun) []string {
 }
 
 func (q *qualifiedRun) finish(exit int, result error) error {
+	if q.owner.Test == protocol.CalendarQualificationTest {
+		return q.finishCalendarQualification(exit, result)
+	}
 	if q.owner.Test == protocol.CalendarObservationTest {
 		return q.finishObservation(exit, result)
 	}

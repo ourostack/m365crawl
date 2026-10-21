@@ -757,9 +757,25 @@ func main() {
 	digest := flags.String("test-sha256", "", "Expected reviewed test executable SHA256")
 	receipt := flags.String("receipt-dir", "", "Explicit protected durable receipt directory outside Git")
 	observation := flags.Bool("calendar-observation", false, "Explicit counts-only calendar field observation, not qualification")
-	if flags.Parse(os.Args[1:]) != nil || !*observation || !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flags.NArg() != 0 {
+	qualification := flags.Bool("calendar-qualification", false, "Explicit guarded cached-calendar SQL qualification")
+	if flags.Parse(os.Args[1:]) != nil || *observation == *qualification || !filepath.IsAbs(*binary) || !filepath.IsAbs(*source) || !filepath.IsAbs(*parent) || !filepath.IsAbs(*receipt) || flags.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "owa_acceptance status=refused reason=arguments")
 		os.Exit(2)
+	}
+	if *qualification {
+		witness, err := runCalendarQualified(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "owa_calendar_qualification status=unqualified reason=unproved")
+			os.Exit(1)
+		}
+		counts, err := json.Marshal(witness.Counts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "owa_calendar_qualification status=unqualified reason=safe_counts")
+			os.Exit(1)
+		}
+		fmt.Printf("owa_calendar_qualification status=qualified cleanup=verified version=%d test=%s binary_sha256=%s expected_events=%d persisted_events=%d passes=%d compared_values=%d counts=%s\n",
+			protocol.Version, protocol.CalendarQualificationTest, witness.BinaryHash, witness.ExpectedEvents, witness.PersistedEvents, witness.Passes, witness.ComparedValues, counts)
+		return
 	}
 	witness, err := runCalendarObserved(*binary, *digest, *source, *parent, *receipt, 5*time.Minute)
 	if err != nil {
