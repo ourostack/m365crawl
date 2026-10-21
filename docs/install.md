@@ -21,7 +21,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 tar -xzf m365crawl_<version>_darwin_arm64.tar.gz
 ```
 
-To build from source, install Go 1.27 or newer:
+To build from source, install Go 1.27.3 or newer:
 
 ```sh
 go install github.com/ourostack/m365crawl/cmd/m365crawl@latest

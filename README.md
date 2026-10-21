@@ -37,7 +37,7 @@ Published macOS binaries are always Developer ID signed and notarized by Apple. 
 
 Windows: download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`. No extra permission step is needed.
 
-[`docs/install.md`](docs/install.md) covers the macOS tarballs, building from source (Go 1.27 or newer), verifying a download, upgrading and removing m365crawl. crawlkit's `crawlctl discover --app m365crawl` finds it.
+[`docs/install.md`](docs/install.md) covers the macOS tarballs, building from source (Go 1.27.3 or newer), verifying a download, upgrading and removing m365crawl. crawlkit's `crawlctl discover --app m365crawl` finds it.
 
 ## Quick start
 
