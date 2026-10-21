@@ -232,7 +232,14 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 		t.Fatal("sync_refused")
 	}
 	src, found := mailSource(rep)
-	if !found || len(rep.Sources) != 1 || len(src.Omissions) != 0 {
+	var cal syncer.SourceReport
+	for _, row := range rep.Sources {
+		if row.Source == "outlook|"+c.profile.Name {
+			cal = row
+		}
+	}
+	if !found || len(rep.Sources) != 2 || src.Source != "outlook|"+c.profile.Name+"|mail" ||
+		cal.Source == "" || cal.Error != nil || len(cal.Omissions) != 0 || len(src.Omissions) != 0 {
 		if found && len(src.Omissions) != 0 {
 			c.failure.sourceOmissions(src.Omissions)
 		} else {
@@ -244,7 +251,7 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 	if step == 1 {
 		wantStatus = syncer.StatusUnchanged
 	}
-	if src.Status != wantStatus {
+	if src.Status != wantStatus || cal.Status != wantStatus {
 		c.failure.record(protocol.StageImport, "sync_status_mismatch")
 		t.Fatal("sync_status_mismatch")
 	}

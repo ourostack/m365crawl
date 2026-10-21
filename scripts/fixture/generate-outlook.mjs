@@ -9,10 +9,11 @@ import { buildOutlookProfile, origin } from './outlook-store.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
-if (args.length > 1 || (args.length === 1 && args[0] !== '--calendar')) throw new Error('usage: generate-outlook.mjs [--calendar]');
-const calendarOnly = args[0] === '--calendar';
-const scenarios = calendarOnly ? ['calendar', 'calendar-empty', 'calendar-damaged'] : ['mail', 'unknown', 'multiple', 'missing-store', 'empty'];
-const out = path.join(root, 'testdata', calendarOnly ? 'outlook-owa-calendar-fixture' : 'outlook-owa-fixture');
+if (args.length > 1 || (args.length === 1 && !['--calendar', '--calendar-empty-mail'].includes(args[0]))) throw new Error('usage: generate-outlook.mjs [--calendar|--calendar-empty-mail]');
+const emptyMail = args[0] === '--calendar-empty-mail';
+const calendarOnly = args[0] === '--calendar' || emptyMail;
+const scenarios = emptyMail ? ['calendar-empty-mail'] : calendarOnly ? ['calendar', 'calendar-empty', 'calendar-damaged'] : ['mail', 'unknown', 'multiple', 'missing-store', 'empty'];
+const out = path.join(root, 'testdata', emptyMail ? 'outlook-owa-calendar-empty-mail-fixture' : calendarOnly ? 'outlook-owa-calendar-fixture' : 'outlook-owa-fixture');
 if (existsSync(out)) throw new Error('fixture output already exists; refusing to replace it');
 const tmp = await mkdtemp(path.join(os.tmpdir(), 'm365crawl-task4-owa-'));
 const disposition = { temporary_profile_root: tmp, profiles: [], removed: false };

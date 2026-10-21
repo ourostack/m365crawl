@@ -11,27 +11,37 @@ import (
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/outlookowa"
+	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
 )
 
 func owaFixtureProfile(variant, name string) outlookowa.Profile {
-	dir := filepath.Join("..", "testdata", "outlook-owa-fixture", variant)
+	fixture := "outlook-owa-fixture"
+	noBlobs := variant == "empty" || variant == "missing-store"
+	switch variant {
+	case "mail":
+		fixture, variant = "outlook-owa-calendar-fixture", "calendar"
+	case "empty":
+		fixture, variant = "outlook-owa-calendar-empty-mail-fixture", "calendar-empty-mail"
+	case "mail-decoy":
+		variant = "mail"
+	}
+	dir := filepath.Join("..", "testdata", fixture, variant)
 	idb := filepath.Join(dir, "IndexedDB")
 	p := outlookowa.Profile{Name: name, Dir: dir, Source: teamsdesktop.Source{
 		Profile: name, Origin: "https_outlook.office.com_0",
 		LevelDBDir: filepath.Join(idb, "https_outlook.office.com_0.indexeddb.leveldb"),
 		BlobDir:    filepath.Join(idb, "https_outlook.office.com_0.indexeddb.blob"),
 	}}
-	if variant == "empty" || variant == "missing-store" {
+	if noBlobs {
 		p.Source.BlobDir = ""
 	}
 	return p
 }
 
-// This literal census comes from hand-checking the unchanged Chromium fixture, not Collect.
+// Both independently written profiles must match the hand-checked mail census, not Collect.
 func TestOWAMailLiteralCensus(t *testing.T) {
-	c := owaObserve(t, owaFixtureProfile("mail", "SyntheticA"))
 	want := map[string]int{
 		"messages": 5, "folders": 7, "folder_ids": 8, "body_records": 4,
 		"body_joined": 4, "body_missing": 1, "body_orphan": 0, "body_inline": 3, "body_none": 2,
@@ -39,8 +49,13 @@ func TestOWAMailLiteralCensus(t *testing.T) {
 		"attachments": 1, "size_zero": 1, "inline": 1, "has_attachments": 1,
 		"conversation_present": 1, "conversation_groups": 1,
 	}
-	if !reflect.DeepEqual(c.census.counts(), want) {
-		t.Fatal("literal_census_mismatch")
+	for _, variant := range []string{"mail", "mail-decoy"} {
+		t.Run(variant, func(t *testing.T) {
+			c := owaObserve(t, owaFixtureProfile(variant, "SyntheticA"))
+			if !reflect.DeepEqual(c.census.counts(), want) {
+				t.Fatal("literal_census_mismatch")
+			}
+		})
 	}
 }
 
@@ -60,6 +75,9 @@ func TestOWAMailAcceptanceHarness(t *testing.T) {
 	}
 	if n := owaScalar(t, st, `select count(*) from mail_source_ids`); n != 28 {
 		t.Fatalf("account_isolation assigned_keys=%d", n)
+	}
+	if n := owaScalar(t, st, `select count(*) from calendar_source_events where source='outlook'`); n != 4 {
+		t.Fatalf("independent_calendar_rows count=%d", n)
 	}
 	// Independent literals prove derivation, not just agreement between archive and FTS.
 	for _, q := range []string{
@@ -128,7 +146,32 @@ func TestOWAMailEmptyAndOptionalCoverage(t *testing.T) {
 	if len(c.census.messages) != 0 || len(c.census.folders) != 7 {
 		t.Fatal("empty_census_mismatch")
 	}
-	owaExercise(t, filepath.Join(owaScratch(t), "empty.db"), c)
+	db := filepath.Join(owaScratch(t), "empty.db")
+	owaExercise(t, db, c)
+	st := owaArchive(t, db)
+	defer owaCloseArchive(t, st)
+	if owaScalar(t, st, `select count(*) from calendar_source_events where source='outlook'`) != 0 {
+		t.Fatal("empty_calendar_fixture_not_empty")
+	}
+}
+
+func TestOWAMailOriginalCalendarDecoyRemainsPartial(t *testing.T) {
+	c := owaObserve(t, owaFixtureProfile("mail-decoy", "Synthetic"))
+	db := filepath.Join(owaScratch(t), "decoy.db")
+	rep, _, err := syncer.Run(c.ctx, syncer.Options{Root: filepath.Join(c.root, "no-teams"), DBPath: db, OutlookRoot: c.root, OutlookEnabled: true, OutlookMinReadInterval: -1})
+	mail, found := mailSource(rep)
+	if err == nil || !found || len(rep.Sources) != 2 || mail.Status != syncer.StatusOK {
+		t.Fatal("original_decoy_did_not_preserve_independent_mail")
+	}
+	cal := rep.Sources[0]
+	if cal.Source != "outlook|Synthetic" || cal.Status != syncer.StatusFailed || cal.Error == nil || cal.Error.Code != "outlook_layout_unsupported" {
+		t.Fatal("original_calendar_decoy_refusal_lost")
+	}
+	st := owaArchive(t, db)
+	defer owaCloseArchive(t, st)
+	if fields := owaCompare(st, c.account, c.census); len(fields) != 0 {
+		t.Fatalf("decoy_changed_committed_mail fields=%v", fields)
+	}
 }
 
 func TestOWAMailDiagnosticsAreFieldNames(t *testing.T) {

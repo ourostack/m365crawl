@@ -19,6 +19,7 @@ import (
 func TestOWACompleteImportDiagnosticPaths(t *testing.T) {
 	for mode, reason := range map[string]string{
 		"sync": "sync_refused", "source_missing": "sync_source_refused", "source_multiple": "sync_source_refused",
+		"calendar_source": "sync_source_refused", "calendar_error": "sync_source_refused", "calendar_omissions": "sync_source_refused", "calendar_status": "sync_status_mismatch",
 		"omissions": "sync_source_refused", "product_omissions": "sync_source_refused", "unknown_omissions": "unproved", "status": "sync_status_mismatch", "counts": "sync_counts_mismatch",
 		"archive_open": "archive_open_failed", "state": "archive_state_refused", "state_budget": "archive_state_budget",
 		"query_budget": "query_projection_budget", "repeat": "repeat_archive_unstable", "mismatch": "archive_mismatch",
@@ -126,25 +127,39 @@ func TestOWACompleteImportDiagnosticProbe(t *testing.T) {
 	}
 	// Use a real normal synthetic report, changing only controlled test-owned report fields for each existing guard.
 	rep, _, err := syncer.Run(c.ctx, syncer.Options{Root: filepath.Join(c.root, "no-teams"), DBPath: path, OutlookRoot: c.root, OutlookEnabled: true, OutlookMinReadInterval: -1})
-	if err != nil || len(rep.Sources) != 1 || rep.Sources[0].Counts == nil || rep.Sources[0].Counts.Mail == nil {
+	mailIndex := -1
+	for i, row := range rep.Sources {
+		if row.Source == "outlook|"+c.profile.Name+"|mail" {
+			mailIndex = i
+		}
+	}
+	if err != nil || len(rep.Sources) != 2 || mailIndex < 0 || rep.Sources[mailIndex].Counts == nil || rep.Sources[mailIndex].Counts.Mail == nil {
 		t.Fatal("synthetic_import_setup_failed")
 	}
 	switch mode {
-	case "source_missing", "source_multiple", "omissions", "unknown_omissions", "status", "counts":
+	case "source_missing", "source_multiple", "omissions", "unknown_omissions", "status", "counts", "calendar_source", "calendar_error", "calendar_omissions", "calendar_status":
 		switch mode {
 		case "source_missing":
 			rep.Sources = nil
 		case "source_multiple":
-			rep.Sources = append(rep.Sources, rep.Sources[0])
+			rep.Sources = append(rep.Sources, rep.Sources[mailIndex])
 		case "omissions":
-			rep.Sources[0].Omissions = map[string]int{"outlook_owa_detail_conflict": 2}
-			rep.Sources[0].Status = syncer.StatusOmissions
+			rep.Sources[mailIndex].Omissions = map[string]int{"outlook_owa_detail_conflict": 2}
+			rep.Sources[mailIndex].Status = syncer.StatusOmissions
 		case "unknown_omissions":
-			rep.Sources[0].Omissions = map[string]int{"private-unknown-never-output": 1}
+			rep.Sources[mailIndex].Omissions = map[string]int{"private-unknown-never-output": 1}
 		case "status":
-			rep.Sources[0].Status = syncer.StatusUnchanged
+			rep.Sources[mailIndex].Status = syncer.StatusUnchanged
 		case "counts":
-			rep.Sources[0].Counts.Mail.Added++
+			rep.Sources[mailIndex].Counts.Mail.Added++
+		case "calendar_source":
+			rep.Sources[1-mailIndex].Source = "unexpected-synthetic-calendar"
+		case "calendar_error":
+			rep.Sources[1-mailIndex].Error = &syncer.SourceError{Code: "outlook_layout_unsupported"}
+		case "calendar_omissions":
+			rep.Sources[1-mailIndex].Omissions = map[string]int{"outlook_event_unmapped": 1}
+		case "calendar_status":
+			rep.Sources[1-mailIndex].Status = syncer.StatusUnchanged
 		}
 		owaSyncChecks(t, rep, nil, c, 0)
 	case "archive_open":

@@ -16,6 +16,7 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
     const page = await ctx.newPage();
     await page.goto('https://outlook.office.com/fixture');
     await page.evaluate(async variant => {
+      const emptyMail = variant === 'empty' || variant === 'calendar-empty-mail';
       const id = Id => ({ Id });
       const mailbox = (Name, EmailAddress) => ({ Name, EmailAddress });
       const folders = ['inbox', 'archive', 'drafts', 'sent', 'deleted', 'junk', 'custom'].map((type, i) => ({ id: `Folder/${i}==`, parentFolderId: 'Root/Case==', displayName: `Synthetic ${type}`, distinguishedFolderType: type }));
@@ -70,12 +71,12 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
         await new Promise((resolve, reject) => {
           const tx = db.transaction([...db.objectStoreNames], 'readwrite');
           folders.forEach((f, i) => tx.objectStore('folders').put(f, `folder-${i}`));
-          if (variant !== 'empty') messages.forEach((m, i) => tx.objectStore('messages').put(m, `message-${i}`));
-          if (withBodies && variant !== 'empty') bodies.forEach((b, i) => tx.objectStore('messageBodies').put(b, `body-${i}`));
+          if (!emptyMail) messages.forEach((m, i) => tx.objectStore('messages').put(m, `message-${i}`));
+          if (withBodies && !emptyMail) bodies.forEach((b, i) => tx.objectStore('messageBodies').put(b, `body-${i}`));
           // Host objects would produce an omission if the mail collector ever decoded these stores.
           tx.objectStore('credentials').put(new DOMException('Synthetic auth decoy only', 'SyntheticDecoy'), 'auth-decoy');
           if (variant.startsWith('calendar')) {
-            if (variant !== 'calendar-empty') {
+            if (variant !== 'calendar-empty' && variant !== 'calendar-empty-mail') {
               events.forEach((event, i) => tx.objectStore('events').put(event, `event-${i}`));
               if (variant === 'calendar-damaged') tx.objectStore('events').put(new DOMException('Synthetic damaged event'), 'event-decoy');
             }
