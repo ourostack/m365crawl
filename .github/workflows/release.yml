@@ -116,6 +116,14 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: scripts/sign-notarize.sh --check-secrets
+      - name: Pick release notes
+        id: notes
+        env:
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: |
+          notes="${RUNNER_TEMP}/release-notes.md"
+          bash scripts/release-notes.sh generate > "$notes"
+          echo "args=release --clean --release-notes=${notes}" >> "$GITHUB_OUTPUT"
       - name: Create the tag at the released commit
         env:
           TAG: ${{ needs.decide.outputs.tag }}
@@ -132,14 +140,6 @@ jobs:
             echo "::error::the tag ${TAG} already points at ${existing}, not ${SHA}"
             exit 1
           fi
-      - name: Pick release notes
-        id: notes
-        env:
-          TAG: ${{ needs.decide.outputs.tag }}
-        run: |
-          notes="${RUNNER_TEMP}/release-notes.md"
-          bash scripts/release-notes.sh generate > "$notes"
-          echo "args=release --clean --release-notes=${notes}" >> "$GITHUB_OUTPUT"
       - name: Release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
