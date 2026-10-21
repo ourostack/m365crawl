@@ -42,10 +42,22 @@ func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, e
 		return nil, errors.New("outlook_owa_calendar_records_unreadable")
 	}
 	if err := ctx.Err(); err != nil {
-		if closeErr := calendarClose(o); closeErr != nil {
+		if closeErr := closeCanceledReader(o); closeErr != nil {
 			return nil, errors.Join(err, ErrReaderClose)
 		}
 		return nil, err
 	}
 	return o, nil
+}
+
+func closeCanceledReader(o *indexeddb.Origin) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = ErrReaderClose
+		}
+	}()
+	if calendarClose(o) != nil {
+		return ErrReaderClose
+	}
+	return nil
 }

@@ -86,7 +86,7 @@ func TestOpenCalendarRefusesMetadataAndLayoutsBeforeValues(t *testing.T) {
 }
 
 func TestOpenCalendarCancellationAndDataFailuresReleaseOrigin(t *testing.T) {
-	for _, where := range []string{"entry", "after-census", "open-failed", "after-open", "close-failed"} {
+	for _, where := range []string{"entry", "after-census", "open-failed", "after-open", "close-failed", "close-panic"} {
 		t.Run(where, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -117,6 +117,9 @@ func TestOpenCalendarCancellationAndDataFailuresReleaseOrigin(t *testing.T) {
 				calendarClose = func(o *indexeddb.Origin) error {
 					closed = true
 					err := closeOrigin(o)
+					if where == "close-panic" && err == nil {
+						panic("private-close-panic")
+					}
 					if where == "close-failed" && err == nil {
 						return errors.New("private-close-failure")
 					}
@@ -131,13 +134,13 @@ func TestOpenCalendarCancellationAndDataFailuresReleaseOrigin(t *testing.T) {
 			if where != "open-failed" && !errors.Is(err, context.Canceled) {
 				t.Fatal("open cancellation was lost")
 			}
-			if (where == "after-open" || where == "close-failed") && !closed {
+			if (where == "after-open" || where == "close-failed" || where == "close-panic") && !closed {
 				t.Fatal("canceled origin was not closed")
 			}
 			if where == "close-failed" && !strings.Contains(err.Error(), "outlook_owa_calendar_close_failed") {
 				t.Fatal("failed close was hidden by cancellation")
 			}
-			if where == "close-failed" && !errors.Is(err, ErrReaderClose) {
+			if (where == "close-failed" || where == "close-panic") && !errors.Is(err, ErrReaderClose) {
 				t.Fatal("failed open did not expose its unproved reader release")
 			}
 		})

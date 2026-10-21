@@ -59,7 +59,11 @@ func collectOWACalendar(ctx context.Context, snap, account string, expect bool, 
 		return res, err
 	}
 	defer func() {
-		if closeErr := outlookOWACalendarClose(o); closeErr != nil {
+		if closeErr := contained(func() error { return outlookOWACalendarClose(o) }); closeErr != nil {
+			var coded *errs.Coded
+			if err == nil && errors.As(closeErr, &coded) && coded.Code == errs.CodeInternal {
+				err = errs.Internal(errors.New("outlook calendar reader release failed"))
+			}
 			err = errors.Join(err, outlookowacal.ErrReaderClose)
 		} else {
 			*closed = true
