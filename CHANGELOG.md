@@ -8,6 +8,8 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ### Fixed
 
+- Initial release rehearsals leave a bounded observation window before the tap push so controlled failure tests need not race runner startup. Stable publication and publish-only recovery are unchanged.
+- Partition the complete macOS release race-test suite using the existing CI test-name sharder, preserving every check, race option and timeout budget while requiring every partition to pass before publishing.
 - Require Go 1.27.3 or newer so builds include its `crypto/x509` security fixes.
 - Preserve supplied release notes and signing disclosures in published releases,
   and refuse promotion when the published body does not match. The stable release
