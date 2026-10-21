@@ -290,6 +290,11 @@ jobs:
           # The scripts of a publish-only resume come from the commit this run started on (main), not from the
           # tag's older commit; the release assets always come from the release itself.
           ref: ${{ needs.decide.outputs.publish_only == 'true' && github.sha || needs.decide.outputs.sha }}
+      - name: Open the initial rehearsal observation window
+        env:
+          REHEARSAL: ${{ needs.decide.outputs.rehearsal }}
+          PUBLISH_ONLY: ${{ needs.decide.outputs.publish_only }}
+        run: bash scripts/rehearsal-publish-window.sh
       - name: Push the cask to the tap
         env:
           TAG: ${{ needs.decide.outputs.tag }}
