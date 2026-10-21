@@ -2,6 +2,7 @@
 package outlookowacal
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -198,8 +199,11 @@ func (r *eventReader) text(o *v8.Object, key string) (string, bool) {
 		return "", false
 	}
 	if teamsdesktop.MayRedact(s) {
-		data, _ := json.Marshal(s) // A valid string always encodes as JSON.
-		clean, count := teamsdesktop.Scrub(data)
+		var data bytes.Buffer
+		encoder := json.NewEncoder(&data)
+		encoder.SetEscapeHTML(false)
+		_ = encoder.Encode(s) // A valid string always encodes to a bytes.Buffer.
+		clean, count := teamsdesktop.Scrub(data.Bytes())
 		r.notes.Redacted += count
 		_ = json.Unmarshal(clean, &s) // Scrubbing a JSON string preserves its type.
 	}

@@ -72,8 +72,9 @@ func TestOWACalendarOptionalOracleUncertainty(t *testing.T) {
 	if err != nil || !out.AttendeesKnown || out.Attendees == nil || len(out.Attendees) != 0 {
 		t.Fatal("complete_empty_attendee_evidence_lost")
 	}
-	if _, err := owaProjectOptional(t.Context(), owaObject("Subject", "Bearer SYNTHETIC-UNPROVED")); err == nil {
-		t.Fatal("unproved_redaction_was_used_as_expected_text")
+	clean, err := owaProjectOptional(t.Context(), owaObject("Subject", "Bearer SYNTHETIC"))
+	if err != nil || clean.Fields["subject"].Value != "[redacted]" || clean.Redacted != 1 {
+		t.Fatal("independent_known_redaction_was_lost")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -95,7 +96,7 @@ func TestOWACalendarOptionalOracleSyntheticDifferential(t *testing.T) {
 			raw.Keys, raw.Values = append(raw.Keys, key), append(raw.Values, field)
 		}
 		actual, notes, err := outlookowacal.MapEvent("outlook/Synthetic", raw)
-		if err != nil || notes.Unmapped != expected.Invalid || notes.PartialAttendees != expected.PartialAttendees {
+		if err != nil || notes.Unmapped != expected.Invalid || notes.PartialAttendees != expected.PartialAttendees || notes.Redacted != expected.Redacted {
 			t.Fatal("optional_uncertainty_differential_mismatch")
 		}
 		if actual.DialInConferenceID != expected.DialConference.Value || actual.DialInTollNumber != expected.DialNumber.Value ||

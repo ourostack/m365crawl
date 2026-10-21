@@ -27,6 +27,7 @@ type owaOptionalExpected struct {
 	Attendees                  []owaExpectedAttendee
 	AttendeesKnown             bool
 	Invalid, PartialAttendees  int
+	Redacted                   int
 	err                        error
 }
 
@@ -47,14 +48,13 @@ func (out *owaOptionalExpected) text(ctx context.Context, value any) owaExpected
 		out.err = errors.New("calendar_oracle_text_budget_refused")
 		return owaExpectedText{}
 	}
-	lower := strings.ToLower(text)
-	trimmed := strings.TrimSpace(text)
-	if strings.Contains(lower, "bearer") || strings.Contains(lower, "eyj") || strings.Contains(lower, "sig=") ||
-		strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-		out.err = errors.New("calendar_oracle_redaction_unproved")
+	clean, count, err := owaOraclePrivacyText(ctx, text)
+	if err != nil {
+		out.err = err
 		return owaExpectedText{}
 	}
-	return owaExpectedText{Value: text, Known: true}
+	out.Redacted += count
+	return owaExpectedText{Value: clean, Known: true}
 }
 
 func (out *owaOptionalExpected) enum(ctx context.Context, value any, vocabulary map[string]string) owaExpectedText {
