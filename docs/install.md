@@ -2,6 +2,8 @@
 
 Install m365crawl with Homebrew on macOS or from the zip on Windows, run `m365crawl doctor`, then `m365crawl sync`. This page covers each step, plus verifying a download, upgrading and removing m365crawl.
 
+The default channel is the **stable 1.x release**, not an alpha or a release candidate. Homebrew serves stable releases; for a manual download, use [the latest stable release](https://github.com/ourostack/m365crawl/releases/latest). Prereleases are publisher rehearsals, not the recommended installation. The [1.x compatibility contract](../SPEC.md#10-versioning-and-compatibility) preserves supported public behavior; it does not promise that older binaries can open newer archives or qualify unsupported native sources.
+
 ## macOS
 
 ### 1. Install
@@ -19,7 +21,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 tar -xzf m365crawl_<version>_darwin_arm64.tar.gz
 ```
 
-To build from source, install Go 1.27 or newer:
+To build from source, install Go 1.27.3 or newer:
 
 ```sh
 go install github.com/ourostack/m365crawl/cmd/m365crawl@latest

@@ -59,7 +59,8 @@ checksum:
   algorithm: sha256
 
 changelog:
-  disable: true
+  # Disabling this also discards the workflow's explicit --release-notes file.
+  disable: false
 
 release:
   # Tags with a hyphen (v0.1.0-rc.2) are GitHub prereleases and never become "latest".
