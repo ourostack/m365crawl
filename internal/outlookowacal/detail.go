@@ -153,6 +153,8 @@ func (r *eventReader) response(o *v8.Object) (string, bool) {
 		return "", false
 	}
 	switch s {
+	case "Unknown":
+		return "", false
 	case "Accept":
 		return "accepted", true
 	case "Tentative":

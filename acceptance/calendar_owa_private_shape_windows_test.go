@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ourostack/m365crawl/internal/outlookcal"
 )
 
 type owaPrivateShape struct {
@@ -29,7 +31,11 @@ func owaPrivateShapes(value any) []owaPrivateShape {
 			return "", false
 		}
 		if !utf8.ValidString(s) {
-			add(path, "string", "invalid_utf8")
+			category := "invalid_utf8"
+			if owaPrivateSurrogatesOnly(s) {
+				category = "unpaired_utf16_code_unit"
+			}
+			add(path, "string", category)
 			return "", false
 		}
 		return s, true
@@ -66,6 +72,22 @@ func owaPrivateShapes(value any) []owaPrivateShape {
 		}
 		for _, key := range []string{"IsAllDayEvent", "IsCancelled", "IsOnlineMeeting", "IsOrganizer", "HasAttachments"} {
 			flag(fields, key, key)
+		}
+		for _, key := range []string{"StartTimeZoneId", "EndTimeZoneId"} {
+			if zone, ok := fields[key].(string); ok && utf8.ValidString(zone) {
+				if _, _, found := outlookcal.ZoneIANA(zone); !found {
+					category := "unresolved_timezone"
+					switch {
+					case zone == "":
+						category = "empty_timezone"
+					case strings.TrimSpace(zone) == "":
+						category = "whitespace_timezone"
+					case strings.HasPrefix(zone, "tzone://Microsoft/Custom"):
+						category = "custom_timezone_definition_absent"
+					}
+					add(key, "string", category)
+				}
+			}
 		}
 		enum(fields, "ResponseType", "ResponseType", "Accept", "Tentative", "Decline", "NoResponseReceived", "Organizer")
 		enum(fields, "FreeBusyType", "FreeBusyType", "Free", "Tentative", "Busy")
@@ -156,6 +178,22 @@ func owaPrivateShapes(value any) []owaPrivateShape {
 		return a.Category < b.Category
 	})
 	return out
+}
+
+func owaPrivateSurrogatesOnly(value string) bool {
+	found := false
+	for len(value) > 0 {
+		_, size := utf8.DecodeRuneInString(value)
+		if size != 1 || value[0] < utf8.RuneSelf {
+			value = value[size:]
+			continue
+		}
+		if len(value) < 3 || value[0] != 0xed || value[1] < 0xa0 || value[1] > 0xbf || value[2] < 0x80 || value[2] > 0xbf {
+			return false
+		}
+		found, value = true, value[3:]
+	}
+	return found
 }
 
 func owaPrivateType(value any) string {

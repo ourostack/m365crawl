@@ -74,6 +74,13 @@ func owaOracleResponseVocabulary() map[string]string {
 	return map[string]string{"Accept": "accepted", "Tentative": "tentative", "Decline": "declined", "NoResponseReceived": "none", "Organizer": "organizer"}
 }
 
+func (out *owaOptionalExpected) response(ctx context.Context, value any) owaExpectedText {
+	if raw, ok := value.(string); ok && raw == "Unknown" && ctx.Err() == nil {
+		return owaExpectedText{}
+	}
+	return out.enum(ctx, value, owaOracleResponseVocabulary())
+}
+
 func owaProjectOptional(ctx context.Context, value any) (owaOptionalExpected, error) {
 	out := owaOptionalExpected{Fields: map[string]owaExpectedText{}}
 	if err := ctx.Err(); err != nil {
@@ -103,7 +110,7 @@ func owaProjectOptional(ctx context.Context, value any) (owaOptionalExpected, er
 			}
 		}
 	}
-	out.Fields["response"] = out.enum(ctx, fields["ResponseType"], owaOracleResponseVocabulary())
+	out.Fields["response"] = out.response(ctx, fields["ResponseType"])
 	out.Fields["show_as"] = out.enum(ctx, fields["FreeBusyType"], map[string]string{"Free": "free", "Tentative": "tentative", "Busy": "busy"})
 	out.Fields["event_type"] = out.enum(ctx, fields["CalendarItemType"], map[string]string{
 		"Single": "single", "Occurrence": "occurrence", "Exception": "exception", "RecurringMaster": "master",
@@ -152,7 +159,6 @@ func (out *owaOptionalExpected) attendees(ctx context.Context, fields map[string
 		return
 	}
 	rows := []owaExpectedAttendee{}
-	responses := owaOracleResponseVocabulary()
 	for i, list := range lists {
 		for _, raw := range list {
 			if ctx.Err() != nil {
@@ -178,7 +184,7 @@ func (out *owaOptionalExpected) attendees(ctx context.Context, fields map[string
 				out.Invalid++
 				return
 			}
-			response := out.enum(ctx, row["ResponseType"], responses)
+			response := out.response(ctx, row["ResponseType"])
 			rows = append(rows, owaExpectedAttendee{Name: name.Value, Address: address.Value, Type: groups[i].role, Response: response.Value})
 		}
 	}
