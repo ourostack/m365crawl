@@ -62,10 +62,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/release-decide.sh
 
-  # A release reruns the macOS check gate on the released commit before publishing; the Windows
-  # test, e2e and coverage gates are enforced in pull-request CI, and the published Windows
-  # artifacts are verified below before the cask is pushed.
-  verify:
+  # Rerun every macOS check on the released commit. Keep the race suite's existing 15-minute
+  # package budget, but partition its test names as CI does instead of exhausting that budget
+  # cumulatively in one process. Windows source gates remain in CI; native artifacts verify below.
+  verify-checks:
     needs: decide
     if: ${{ needs.decide.outputs.release == 'true' && needs.decide.outputs.publish_only != 'true' }}
     runs-on: macos-latest
@@ -86,8 +86,47 @@ jobs:
           node-version: "22"
       - name: Install shellcheck
         run: brew install shellcheck
-      - name: Run every check
-        run: make check
+      - name: Run the non-race checks
+        run: make tidy-check fmt-check vet lint coverage e2e
+
+  verify-race:
+    needs: decide
+    if: ${{ needs.decide.outputs.release == 'true' && needs.decide.outputs.publish_only != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.sha }}
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Run every test in this race shard
+        run: make test-shard SHARD=${{ matrix.shard }} SHARDS=4
+
+  verify:
+    if: ${{ always() && needs.decide.outputs.release == 'true' && needs.decide.outputs.publish_only != 'true' }}
+    needs: [decide, verify-checks, verify-race]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release verification job
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          jq -e 'length == 3 and all(. == "success")' <<<"$RESULTS" >/dev/null
 
   release:
     needs: [decide, verify]
