@@ -62,6 +62,7 @@ func TestRealOWACalendarProductQualification(t *testing.T) {
 		Supervisor: owner.Supervisor, Child: owner.Child, Outcome: "qualified", Observed: 1,
 	}
 	owaCalendarProductCleanup(t, owner, state, &witness)
+	privateDiagnostic := owaPrivateDiagnostic(t, owner)
 	profiles, skipped, err := outlookowa.Discover(owner.Source)
 	if err != nil || len(skipped) != 0 || len(profiles) != 1 {
 		state.record(protocol.StageDiscovery, "profile_discovery_refused")
@@ -72,6 +73,7 @@ func TestRealOWACalendarProductQualification(t *testing.T) {
 		state.record(protocol.StageStability, "unstable_source_observation")
 		t.Fatal("calendar_product_snapshot_unstable")
 	}
+	privateDiagnostic.read(t, captured, state)
 	state.stage = protocol.StageCalendarOracle
 	*captured.readersReleased = false
 	expected, err := owaReadExpectedCalendar(captured.ctx, captured.profile.Source.LevelDBDir, captured.profile.Source.BlobDir)
