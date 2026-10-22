@@ -68,7 +68,18 @@ func owaCalendarExpectedSQL(account string, event owaEventExpected) (map[string]
 			values["time_zone_iana"] = core.Zone
 		case !identity.Alias && core.Zone == identity.Windows && identity.Canonical != "" &&
 			identity.Canonical == identity.Representative && strings.Contains(identity.Representative, "/"):
-			values["time_zone_iana"] = identity.Representative
+			// IANA backward links define these preferred spellings independently
+			// of both the product's resolver and the archive being compared.
+			preferred := identity.Representative
+			switch preferred {
+			case "Asia/Calcutta":
+				preferred = "Asia/Kolkata"
+			case "Europe/Kiev":
+				preferred = "Europe/Kyiv"
+			case "America/Buenos_Aires":
+				preferred = "America/Argentina/Buenos_Aires"
+			}
+			values["time_zone_iana"] = preferred
 		default:
 			return nil, errors.New("calendar_oracle_persisted_zone_spelling_unproved")
 		}
