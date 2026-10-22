@@ -16,6 +16,9 @@ func TestOWACalendarPersistedPreferredZoneSpellingLiterals(t *testing.T) {
 	for _, tc := range []struct{ source, expected string }{
 		{"UTC", "UTC"}, {"Etc/UTC", "Etc/UTC"}, {"Pacific Standard Time", "America/Los_Angeles"},
 		{"America/Los_Angeles", "America/Los_Angeles"},
+		{"Tokyo Standard Time", "Asia/Tokyo"}, {"Asia/Tokyo", "Asia/Tokyo"},
+		{"Eastern Standard Time", "America/New_York"}, {"America/New_York", "America/New_York"},
+		{"GMT Standard Time", "Europe/London"}, {"Europe/Paris", "Europe/Paris"},
 	} {
 		value := owaTemporalLiteral()
 		owaTemporalSet(value, "StartTimeZoneId", tc.source)

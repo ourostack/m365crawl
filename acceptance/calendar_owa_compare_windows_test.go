@@ -58,12 +58,17 @@ func owaCalendarExpectedSQL(account string, event owaEventExpected) (map[string]
 	values["all_day"], values["start_date"], values["end_date"] = owaCalendarSQLFlag(core.AllDay), core.StartDate, core.EndDate
 	values["time_zone"] = core.Zone
 	if identity := core.ZoneIdentity; identity != nil {
-		// Only these exact preferred spellings have independent literal differential evidence.
+		// Derive spellings from independent native identities, never the product resolver.
 		switch {
 		case identity.Canonical == "America/Los_Angeles" && (core.Zone == "Pacific Standard Time" || core.Zone == "America/Los_Angeles"):
 			values["time_zone_iana"] = "America/Los_Angeles"
 		case identity.Canonical == "Etc/UTC" && (core.Zone == "UTC" || core.Zone == "Etc/UTC"):
 			values["time_zone_iana"] = core.Zone
+		case !identity.Alias && identity.Windows != "" && identity.Canonical == core.Zone && strings.Contains(core.Zone, "/"):
+			values["time_zone_iana"] = core.Zone
+		case !identity.Alias && core.Zone == identity.Windows && identity.Canonical != "" &&
+			identity.Canonical == identity.Representative && strings.Contains(identity.Representative, "/"):
+			values["time_zone_iana"] = identity.Representative
 		default:
 			return nil, errors.New("calendar_oracle_persisted_zone_spelling_unproved")
 		}
