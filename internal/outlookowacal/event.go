@@ -194,6 +194,9 @@ func (r *eventReader) text(o *v8.Object, key string) (string, bool) {
 		return "", false
 	}
 	s, ok := value.(string)
+	if ok && key == "Preview" && !utf8.ValidString(s) {
+		s, ok = previewUnicode(s)
+	}
 	if !ok || !utf8.ValidString(s) {
 		r.notes.Unmapped++
 		return "", false

@@ -93,7 +93,11 @@ func owaProjectOptional(ctx context.Context, value any) (owaOptionalExpected, er
 	for target, source := range map[string]string{
 		"subject": "Subject", "location": "Location", "body_preview": "Preview", "join_url": "OnlineMeetingJoinUrl",
 	} {
-		out.Fields[target] = out.text(ctx, fields[source])
+		value := fields[source]
+		if source == "Preview" {
+			value = owaOraclePreviewText(value)
+		}
+		out.Fields[target] = out.text(ctx, value)
 	}
 	out.Fields["organizer"], out.Fields["organizer_address"] = owaExpectedText{}, owaExpectedText{}
 	if raw := fields["Organizer"]; owaSurveyPresent(raw) {

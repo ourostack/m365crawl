@@ -82,8 +82,10 @@ func owaPrivateShapes(value any) []owaPrivateShape {
 						category = "empty_timezone"
 					case strings.TrimSpace(zone) == "":
 						category = "whitespace_timezone"
-					case strings.HasPrefix(zone, "tzone://Microsoft/Custom"):
+					case strings.HasPrefix(zone, "tzone://Microsoft/Custom") || zone == "Customized Time Zone" || zone == "Custom":
 						category = "custom_timezone_definition_absent"
+					case zone == "Unknown" || zone == "Unspecified" || zone == "None" || zone == "Local":
+						category = "explicit_unknown_timezone"
 					}
 					add(key, "string", category)
 				}
