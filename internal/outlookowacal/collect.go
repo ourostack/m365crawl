@@ -14,7 +14,7 @@ import (
 	"github.com/ourostack/m365crawl/internal/outlookcal"
 )
 
-// CollectNotes contains counts of events and observation loss.
+// CollectNotes contains counts of events, retained uncertainty and observation loss.
 type CollectNotes struct {
 	Records, Events, DecodeFailures, UnmappedEvents, DuplicateConflicts      int
 	UnmappedFields, UnknownZone, AllDayUnaligned, Redacted, PartialAttendees int
@@ -96,7 +96,9 @@ func collect(ctx context.Context, origin reader, account string, expectEvents bo
 		result.Notes.AllDayUnaligned += notes.AllDayUnaligned
 		result.Notes.Redacted += notes.Redacted
 		result.Notes.PartialAttendees += notes.PartialAttendees
-		if losses := notes.Unmapped + notes.UnknownZone + notes.AllDayUnaligned + notes.PartialAttendees; losses > 0 {
+		// The source zone label and unknown IANA field are retained, as in the
+		// shared Outlook mapper. Unproved local all-day dates remain a loss.
+		if losses := notes.Unmapped + notes.AllDayUnaligned + notes.PartialAttendees; losses > 0 {
 			result.loss(outlookcal.CodeEventUnmapped, losses)
 		}
 		id := event.SourceID

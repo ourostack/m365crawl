@@ -174,7 +174,7 @@ func TestCollectCalendarLossesKeepGoodEventsAndPreventAbsence(t *testing.T) {
 	}, "A", true)
 	if err != nil || !got.Doubtful || len(got.Events) != 1 || got.Notes.UnmappedEvents != 1 || got.Notes.UnmappedFields != 1 ||
 		got.Notes.UnknownZone != 1 || got.Notes.AllDayUnaligned != 1 || got.Notes.Redacted == 0 || got.Notes.PartialAttendees != 1 ||
-		lossCount(got, outlookcal.CodeEventUnmapped) != 5 || lossCount(got, "outlook_owa_reader_truncated_log_tail") != 1 {
+		lossCount(got, outlookcal.CodeEventUnmapped) != 4 || lossCount(got, "outlook_owa_reader_truncated_log_tail") != 1 {
 		t.Fatalf("losses=%+v err=%v", got, err)
 	}
 	for _, input := range []*calendarReader{
