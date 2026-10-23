@@ -4,6 +4,19 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-23
+
+### Added
+
+- Read cached new Outlook OWA calendar events on Windows through the supported calendar queries, source counts and doctor paths, alongside existing cached mail.
+- Windows OWA doctor reports independent cached calendar and mail read health, including calendar failures without treating committed mail as unread. Calendar queries and source counts retain an unlinked profile when sign-in identity is unverified.
+
+### Fixed
+
+- Retain explicit unknown attendee responses, render decoded unpaired UTF-16 Preview units at the text boundary, and preserve unresolved timezone labels with their known UTC intervals without counting retained uncertainty alone as an omitted event. Malformed fields, unsupported values, partial attendees and unproved all-day dates still report loss.
+- Update installation, privacy and embedded agent guidance to describe the supported Windows OWA calendar without broadening separate native people/attendee or multi-mailbox support.
+- OWA calendar sources report that deletions are not inferred and omit inapplicable HxStore block-health ratios. Last-good census provenance survives later failures; older development receipts requalify calendar without rereading unchanged mail.
+
 ## [1.0.2] - 2026-10-21
 
 ### Fixed

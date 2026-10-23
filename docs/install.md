@@ -70,7 +70,7 @@ m365crawl.exe sync
 m365crawl.exe
 ```
 
-Windows needs no extra permission step. On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's cached mail under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. The `mail` commands, `search --source mail`, overview, status and doctor work with that cache. OWA calendar is not read in this release; see [the Windows mail source differences](outlook-store.md#windows-owa-cached-mail) for cache limits and unavailable fields.
+Windows needs no extra permission step. On Windows, m365crawl reads Teams chats, the Teams calendar and new Outlook's cached mail and calendar under `%LOCALAPPDATA%\Microsoft\Olk\EBWebView`. Calendar queries, the `mail` commands, `search --source mail`, overview, status and doctor work with that cache. Calendar and mail read health are independent; source uncertainty and multi-mailbox limits remain explicit. See [the Windows OWA source differences](outlook-store.md#windows-owa-cached-mail) for cache limits and unavailable fields.
 
 ## Where m365crawl keeps its data
 
