@@ -1,0 +1,19 @@
+{
+  "browser": "msedge",
+  "browser_versions": [
+    "155.0.4283.62",
+    "155.0.4283.62",
+    "155.0.4283.62"
+  ],
+  "generated_at": "2026-10-21T12:20:18.709Z",
+  "origin": "https://outlook.office.com",
+  "intercepted": true,
+  "synthetic_only": true,
+  "calendar_local_dates": true,
+  "truncated_body": "IsTruncated=true retains available cached HTML inline; not server completeness",
+  "scenarios": [
+    "calendar",
+    "calendar-empty",
+    "calendar-damaged"
+  ]
+}

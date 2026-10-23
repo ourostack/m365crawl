@@ -119,7 +119,7 @@ func TestMailOWAThreadCancellationNeverReturnsPartialSuccess(t *testing.T) {
 func TestMailOWANativeStatusText(t *testing.T) {
 	e := textEnv(t)
 	root := createdOWARoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), filepath.Join(root, "Default"))
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("sync = %d: %s", code, stderr)
 	}

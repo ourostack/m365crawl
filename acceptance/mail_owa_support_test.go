@@ -26,14 +26,23 @@ import (
 )
 
 type owaObservation struct {
-	failure       *owaFailureState
-	ctx           context.Context
-	root, account string
-	ownedSnapshot string
-	profile       outlookowa.Profile
-	census        owaRawCensus
-	stable        bool
-	digest        [32]byte
+	failure         *owaFailureState
+	ctx             context.Context
+	root, account   string
+	ownedSnapshot   string
+	profile         outlookowa.Profile
+	census          owaRawCensus
+	stable          bool
+	digest          [32]byte
+	readersReleased *bool
+}
+
+func owaReleaseGatedCleanup(released *bool, cleanup func()) func() {
+	return func() {
+		if released != nil && *released {
+			cleanup()
+		}
+	}
 }
 
 func owaStable(before, after string) bool { return before != "" && before == after }
@@ -58,9 +67,15 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 		state.record(protocol.StageCapture, "snapshot_refused")
 		t.Fatal("snapshot_refused")
 	}
+	readersReleased := new(bool)
+	*readersReleased = true
+	guardedCleanup := owaReleaseGatedCleanup(readersReleased, cleanup)
 	release := func() {
+		if !*readersReleased {
+			return // The supervisor owns disposal after whole-generation reader release.
+		}
 		state.cleanup(t, func() {
-			cleanup()
+			guardedCleanup()
 			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 				state.record(protocol.StageCleanup, "snapshot_cleanup_failed")
 				t.Error("snapshot_cleanup_failed")
@@ -68,7 +83,7 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 		})
 	}
 	calMu.Lock()
-	calCleanups = append(calCleanups, cleanup)
+	calCleanups = append(calCleanups, guardedCleanup)
 	calMu.Unlock()
 	t.Cleanup(release)
 	after, afterFresh, err := outlookowa.Fingerprint(p)
@@ -97,7 +112,7 @@ func owaCapture(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) 
 	}
 	p.Dir = profileDir
 	p.Source.LevelDBDir, p.Source.BlobDir = level, blob
-	return owaObservation{failure: state, ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source, state)}
+	return owaObservation{failure: state, ctx: ctx, root: root, ownedSnapshot: dir, account: "outlook/" + p.Name, profile: p, stable: owaStable(before, after) && fresh.Equal(afterFresh), digest: owaPayloadDigestContext(t, ctx, p.Source, state), readersReleased: readersReleased}
 }
 
 func owaObserve(t *testing.T, p outlookowa.Profile, states ...*owaFailureState) owaObservation {
@@ -232,10 +247,20 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 		t.Fatal("sync_refused")
 	}
 	src, found := mailSource(rep)
-	if !found || len(rep.Sources) != 1 || len(src.Omissions) != 0 {
-		if found && len(src.Omissions) != 0 {
+	var cal syncer.SourceReport
+	for _, row := range rep.Sources {
+		if row.Source == "outlook|"+c.profile.Name {
+			cal = row
+		}
+	}
+	if !found || len(rep.Sources) != 2 || src.Source != "outlook|"+c.profile.Name+"|mail" ||
+		cal.Source == "" || cal.Error != nil || len(cal.Omissions) != 0 || len(src.Omissions) != 0 {
+		switch {
+		case c.failure != nil && c.failure.calendar:
+			c.failure.calendarSourceFailure(rep, c.profile.Name, step)
+		case found && len(src.Omissions) != 0:
 			c.failure.sourceOmissions(src.Omissions)
-		} else {
+		default:
 			c.failure.record(protocol.StageImport, "sync_source_refused")
 		}
 		t.Fatal("sync_source_refused")
@@ -244,7 +269,7 @@ func owaSyncChecks(t *testing.T, rep syncer.Report, err error, c owaObservation,
 	if step == 1 {
 		wantStatus = syncer.StatusUnchanged
 	}
-	if src.Status != wantStatus {
+	if src.Status != wantStatus || cal.Status != wantStatus {
 		c.failure.record(protocol.StageImport, "sync_status_mismatch")
 		t.Fatal("sync_status_mismatch")
 	}

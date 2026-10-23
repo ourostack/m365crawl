@@ -23,6 +23,10 @@ type qualifiedRun struct {
 	binary                    *protocol.BinaryPin
 	pins                      []windows.Handle
 	witness                   protocol.Qualification
+	observation               protocol.CalendarObservation
+	calendarQualification     protocol.CalendarQualification
+	calendarFailure           protocol.CalendarQualificationFailure
+	calendarFailureReleased   bool
 	consumersReleased         bool
 	cleanupVerified           bool
 	nativeCloseVerified       bool
@@ -65,6 +69,13 @@ func (q *qualifiedRun) pinAncestors(path string) error {
 }
 
 func newQualifiedRun(binary, digest, source, parent, receipt string) (*workspace, *qualifiedRun, error) {
+	return newBoundRun(binary, digest, source, parent, receipt, protocol.TestName)
+}
+
+func newBoundRun(binary, digest, source, parent, receipt, test string) (*workspace, *qualifiedRun, error) {
+	if test != protocol.TestName && test != protocol.CalendarObservationTest && test != protocol.CalendarQualificationTest {
+		return nil, nil, errors.New("qualification_scope_refused")
+	}
 	if protocol.SafeAbsolute(source, true, true) != nil || !filepath.IsAbs(receipt) || filepath.Clean(receipt) != receipt || protocol.SafeAbsolute(filepath.Dir(receipt), true, true) != nil {
 		return nil, nil, errors.New("qualification_arguments_refused")
 	}
@@ -119,7 +130,7 @@ func newQualifiedRun(binary, digest, source, parent, receipt string) (*workspace
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return abortWorkspace("qualification_nonce_failed")
 	}
-	q.owner = protocol.Ownership{Version: protocol.Version, Nonce: hex.EncodeToString(nonce[:]), Test: protocol.TestName, BinaryHash: pin.Hash, BinaryNative: pin.Native, Root: w.dir, RootNative: w.id, Source: source, Supervisor: supervisor}
+	q.owner = protocol.Ownership{Version: protocol.Version, Nonce: hex.EncodeToString(nonce[:]), Test: test, BinaryHash: pin.Hash, BinaryNative: pin.Native, Root: w.dir, RootNative: w.id, Source: source, Supervisor: supervisor}
 	data, err := protocol.Encode(q.owner)
 	if err != nil || protocol.WriteProtectedNew(filepath.Join(receipt, protocol.OwnerName), data) != nil {
 		return abortWorkspace("qualification_prelaunch_record_failed")
@@ -143,6 +154,12 @@ func (q *qualifiedRun) beforeResume(pid uint32) error {
 }
 
 func (q *qualifiedRun) verifyWitness() error {
+	if q.owner.Test == protocol.CalendarQualificationTest {
+		return q.verifyCalendarQualification()
+	}
+	if q.owner.Test == protocol.CalendarObservationTest {
+		return q.verifyObservation()
+	}
 	data, err := protocol.ReadProtected(filepath.Join(q.receipt, protocol.WitnessName))
 	if err != nil {
 		return errors.New("qualification_witness_missing")
@@ -169,6 +186,12 @@ func qualifiedEnv(env []string, q *qualifiedRun) []string {
 }
 
 func (q *qualifiedRun) finish(exit int, result error) error {
+	if q.owner.Test == protocol.CalendarQualificationTest {
+		return q.finishCalendarQualification(exit, result)
+	}
+	if q.owner.Test == protocol.CalendarObservationTest {
+		return q.finishObservation(exit, result)
+	}
 	closeErr := errors.Join(q.binary.Close(), q.closePins())
 	record := protocol.Closeout{Version: protocol.Version, Owner: q.owner, Outcome: "refused", Reason: "qualification_refused", Exit: exit, ConsumersReleased: q.consumersReleased, NativeCloseVerified: q.nativeCloseVerified && closeErr == nil && q.cleanupVerified, RootState: "retained_unverified"}
 	// #nosec G703 -- Exact generated workspace root from protected ownership; read-only post-barrier absence check, never caller-directed deletion.

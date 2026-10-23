@@ -48,7 +48,11 @@ func copyOWAFixture(t *testing.T, variant string) string {
 	if err != nil {
 		t.Fatal("created_fixture_root_canonicalization_failed")
 	}
-	src := filepath.Join("..", "testdata", "outlook-owa-fixture", variant)
+	fixtures := "outlook-owa-fixture"
+	if strings.HasPrefix(variant, "calendar") {
+		fixtures = "outlook-owa-calendar-local-fixture"
+	}
+	src := filepath.Join("..", "testdata", fixtures, variant)
 	dst := filepath.Join(root, "Default")
 	err = filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -76,7 +80,7 @@ func copyOWAFixture(t *testing.T, variant string) string {
 
 func TestMailOWACommands(t *testing.T) {
 	e := newEnv(t)
-	root := copyOWAFixture(t, "mail")
+	root := copyOWAFixture(t, "calendar")
 	run := func(args ...string) result {
 		return e.cmd(append([]string{"--outlook-root", root, "--max-age", "0"}, args...)...)
 	}
@@ -90,13 +94,23 @@ func TestMailOWACommands(t *testing.T) {
 		s := raw.(map[string]any)
 		if strings.HasPrefix(s["source"].(string), "outlook|") {
 			native++
-			if s["source"] != "outlook|Default|mail" {
-				t.Fatalf("OWA must emit mail only: %v", s)
+			if s["source"] != "outlook|Default|mail" && s["source"] != "outlook|Default" {
+				t.Fatalf("unexpected native profile source: %v", s)
+			}
+			if s["source"] == "outlook|Default" {
+				counts := s["counts"].(map[string]any)["calendar"].(map[string]any)["events"].(map[string]any)
+				if counts["seen"] != float64(2) {
+					t.Fatal("public calendar did not import its real browser fixture")
+				}
 			}
 		}
 	}
-	if native != 1 {
+	if native != 2 {
 		t.Fatalf("native source count = %d", native)
+	}
+	calendar := sync["calendar"].(map[string]any)["events"].(map[string]any)
+	if calendar["seen"] != float64(30) {
+		t.Fatal("public calendar aggregate did not add its two events exactly once")
 	}
 	its, _ := list(t, run("mail", "list"))
 	if len(its) != 5 {
@@ -156,7 +170,9 @@ func TestMailOWACommands(t *testing.T) {
 		c := raw.(map[string]any)
 		if c["name"] == "outlook_store" {
 			found = true
-			if c["warn"] == true || !strings.Contains(c["detail"].(string), "calendar is unsupported on OWA") {
+			detail := c["detail"].(string)
+			if c["warn"] == true || !strings.Contains(detail, "calendar read ") || !strings.Contains(detail, "mail read ") ||
+				strings.Contains(detail, "calendar is unsupported") {
 				t.Fatalf("doctor = %v", c)
 			}
 		}

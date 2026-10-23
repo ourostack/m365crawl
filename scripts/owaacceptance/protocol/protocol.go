@@ -180,7 +180,10 @@ func hash(value string) bool {
 }
 func process(p Process) bool { return p.PID > 0 && p.Created > 0 }
 func ValidateOwnership(o Ownership) error {
-	if o.Version != Version || o.Test != TestName || !hash(o.Nonce) || !hash(o.BinaryHash) || o.BinaryNative == [3]uint32{} || o.RootNative == [3]uint32{} || o.Root == "" || o.Source == "" || !process(o.Supervisor) {
+	return validateOwnershipTest(o, TestName)
+}
+func validateOwnershipTest(o Ownership, test string) error {
+	if o.Version != Version || o.Test != test || !hash(o.Nonce) || !hash(o.BinaryHash) || o.BinaryNative == [3]uint32{} || o.RootNative == [3]uint32{} || o.Root == "" || o.Source == "" || !process(o.Supervisor) {
 		return refused()
 	}
 	if o.Adopted {

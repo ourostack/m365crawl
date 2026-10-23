@@ -73,7 +73,8 @@ type OutlookSource struct {
 	NextReadAfter  time.Time // zero when the next sync may read
 	IntervalSecond int
 	UnknownLayouts []OutlookLayout
-	BlocksRatio    *float64 // nil until a read has succeeded
+	BlocksRatio    *float64 // nil without a successful HxStore block census
+	Deletions      string   // inferred for HxStore; not_inferred for OWA
 	UnmappedValues map[string]int
 	Failure        *OutlookFailure
 }
@@ -315,7 +316,7 @@ func (s *Store) sourceOutlook(ctx context.Context, f CalendarSourcesFilter, set 
 // outlookOf builds the Outlook part of a row from the profile's remembered state: the last attempt,
 // the failure that ended it, whether the last sync skipped the read, and the last good read's census.
 func outlookOf(r *CalendarSource, m map[string]string, f CalendarSourcesFilter) *OutlookSource {
-	o := &OutlookSource{LastReadAt: r.SyncedAt, IntervalSecond: int(f.ReadInterval / time.Second), Status: SourceOK}
+	o := &OutlookSource{LastReadAt: r.SyncedAt, IntervalSecond: int(f.ReadInterval / time.Second), Status: SourceOK, Deletions: "inferred"}
 	if t, err := time.Parse(timeLayout, m[strings.TrimSuffix(outlookAttemptKey, ":")]); err == nil {
 		o.LastAttemptAt = t
 		if next := t.Add(f.ReadInterval); f.Now.Before(next) {
@@ -328,6 +329,9 @@ func outlookOf(r *CalendarSource, m map[string]string, f CalendarSourcesFilter) 
 			o.Failure = &OutlookFailure{Code: "unreadable", Message: "the recorded failure cannot be read"}
 		}
 		o.Status = statusOfFailure(o.Failure.Code)
+		if o.Failure.OWA {
+			o.Deletions = "not_inferred"
+		}
 	} else if m[strings.TrimSuffix(outlookSkippedKey, ":")] != "" && !o.NextReadAfter.IsZero() {
 		o.Status = SourceSkippedInterval
 	}
@@ -338,11 +342,15 @@ func outlookOf(r *CalendarSource, m map[string]string, f CalendarSourcesFilter) 
 	var read OutlookRead
 	if json.Unmarshal([]byte(m[strings.TrimSuffix(outlookReadKey, ":")]), &read) == nil {
 		o.UnknownLayouts, o.UnmappedValues, o.CensusAsOf = read.UnknownLayouts, read.UnmappedValues, read.At
-		ratio := 0.0
-		if read.BlocksFound > 0 {
-			ratio = float64(read.BlocksInvalid) / float64(read.BlocksFound)
+		if read.OWA {
+			o.Deletions = "not_inferred"
+		} else {
+			ratio := 0.0
+			if read.BlocksFound > 0 {
+				ratio = float64(read.BlocksInvalid) / float64(read.BlocksFound)
+			}
+			o.BlocksRatio = &ratio
 		}
-		o.BlocksRatio = &ratio
 	}
 	return o
 }

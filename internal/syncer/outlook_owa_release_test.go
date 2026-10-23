@@ -18,7 +18,7 @@ func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
 	for _, mode := range []string{"success", "open-error", "open-unproved", "open-unproved-deadline", "panic-open", "close-error", "layout-close-error", "layout-close-panic", "panic-close", "cancel-collect", "cancel-collect-close"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateTmp(t)
-			root, db := owaRoot(t, "mail"), newDB(t)
+			root, db := owaRoot(t, "calendar"), newDB(t)
 			opts := outlookOpts(db, root)
 			run(t, opts)
 			opts.FullRead = true
@@ -82,9 +82,10 @@ func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
 			}
 			r := runner{o: opts, st: st}
 			out := r.outlookOWASources(ctx, &Report{})
-			if len(out) != 1 {
-				t.Fatal("mail-only patch changed the public source set")
+			if len(out) != 2 {
+				t.Fatal("calendar integration lost a public profile lane")
 			}
+			mail := out[1]
 			wantCleanup := mode == "success" || mode == "open-error" || mode == "cancel-collect"
 			if cleaned != 0 && !wantCleanup || cleaned != 1 && wantCleanup {
 				t.Fatal("snapshot disposal preceded reader-release proof")
@@ -93,25 +94,25 @@ func TestOWAMailSnapshotDisposalRequiresReaderRelease(t *testing.T) {
 				if _, err := os.Stat(snap); err != nil {
 					t.Fatal("unproved reader's snapshot is not retained")
 				}
-				if out[0].err == nil || !strings.Contains(out[0].err.Error(), "retained") {
+				if mail.err == nil || !strings.Contains(mail.err.Error(), "retained") {
 					t.Fatal("snapshot retention was not reported")
 				}
 			}
 			if mode == "success" {
-				if out[0].err != nil || !out[0].decoded {
+				if mail.err != nil || !mail.decoded {
 					t.Fatal("healthy mail read regressed")
 				}
-			} else if out[0].err == nil || strings.Contains(out[0].err.Error(), "private") ||
+			} else if mail.err == nil || strings.Contains(mail.err.Error(), "private") ||
 				count(t, db, `select count(*) from meta where key='outlook_mail_read:outlook/Default'`) != 0 {
 				t.Fatal("failed reader was successful, exposed its cause, or vouched for freshness")
 			}
-			if (mode == "open-unproved" || mode == "cancel-collect" || mode == "cancel-collect-close") && !errors.Is(out[0].err, context.Canceled) {
+			if (mode == "open-unproved" || mode == "cancel-collect" || mode == "cancel-collect-close") && !errors.Is(mail.err, context.Canceled) {
 				t.Fatal("reader-close failure replaced cancellation")
 			}
-			if mode == "open-unproved-deadline" && !errors.Is(out[0].err, context.DeadlineExceeded) {
+			if mode == "open-unproved-deadline" && !errors.Is(mail.err, context.DeadlineExceeded) {
 				t.Fatal("reader-close failure replaced its deadline")
 			}
-			if (mode == "layout-close-error" || mode == "layout-close-panic") && codedOf(out[0].err).Code != outlookmail.CodeMailLayoutUnsupported {
+			if (mode == "layout-close-error" || mode == "layout-close-panic") && codedOf(mail.err).Code != outlookmail.CodeMailLayoutUnsupported {
 				t.Fatal("reader-close failure replaced the primary layout refusal")
 			}
 			if count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 {
@@ -133,7 +134,7 @@ func TestOWAMailCanceledBeforeCollectorOwnsNoReader(t *testing.T) {
 
 func TestOWAMailCanceledRunReportsRetainedSnapshot(t *testing.T) {
 	isolateTmp(t)
-	root, db := owaRoot(t, "mail"), newDB(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
 	opts := outlookOpts(db, root)
 	run(t, opts)
 	opts.FullRead = true

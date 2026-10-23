@@ -43,6 +43,8 @@ type OutlookBatch struct {
 	// found none. They are kept to link the profile to the Teams account that has one of them (see
 	// AutoLinkOutlook), and they are not part of any output.
 	Addresses []string
+	// PreserveIdentity keeps existing sign-in metadata when this reader did not establish it; Addresses must be nil.
+	PreserveIdentity bool
 	// InferGone says the read can be trusted to be complete (no damaged block, so no event can
 	// have been missed): an event the archive holds live that this read no longer holds is then
 	// remembered, and marked gone when the next trusted read also misses it (see confirmedGone). Without it nothing is inferred and an unseen event stays.
@@ -73,6 +75,8 @@ type OutlookLayout struct {
 
 // OutlookRead is the last good read's census of one profile's store: numbers only.
 type OutlookRead struct {
+	// OWA identifies an IndexedDB census; HxStore block health and deletion inference do not apply.
+	OWA bool `json:"owa,omitempty"`
 	// At is when the read happened; `calendar sources` shows it as census_as_of.
 	At             time.Time       `json:"at,omitzero"`
 	UnknownLayouts []OutlookLayout `json:"unknown_layouts,omitempty"`
@@ -102,6 +106,9 @@ func OutlookStamp(mapper int, zone *time.Location) string {
 // become unknown. A changed time zone also forgets the covered days, which were taken in the old
 // zone, and takes them again. Events the batch does not hold are left as they are.
 func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(CalendarResult) Run) (res CalendarResult, err error) {
+	if b.PreserveIdentity && b.Addresses != nil {
+		return res, errors.New("outlook: unknown identity cannot carry addresses")
+	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		if err := auditAttendeeNamespace(ctx, tx); err != nil {
 			return err
@@ -124,8 +131,10 @@ func (s *Store) CommitOutlook(ctx context.Context, b OutlookBatch, run func(Cale
 		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookReadKey+b.Account, string(raw)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
-			return err
+		if !b.PreserveIdentity {
+			if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, outlookIdentityKey+b.Account, joinAddresses(b.Addresses)); err != nil {
+				return err
+			}
 		}
 		record := run(res)
 		res.OutlookReadID, aerr = insertOutlookRead(ctx, tx, b, record.Fingerprint)
@@ -358,9 +367,16 @@ func dropSupersededKeys(ctx context.Context, tx *sql.Tx, account string, events 
 // keeping their keys and first sighting, so the batch is captured over nothing. An event the
 // core will refuse is not blanked: nothing is written for it, so blanking would erase its row.
 func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calendar.Event) error {
-	sets, err := blankSets(ctx, tx, blankTables[0].table, blankTables[0].keep)
+	keep := append([]string{"unknown_fields"}, blankTables[0].keep...)
+	sets, err := blankSets(ctx, tx, blankTables[0].table, keep)
 	if err != nil {
 		return err
+	}
+	// Empty SQL defaults are not evidence that a previously derived field was known.
+	sets = append(sets, "unknown_fields=?")
+	var unknown []string
+	for _, field := range calendar.AllUnknownFields() {
+		unknown = append(unknown, string(field))
 	}
 	stmt, err := tx.PrepareContext(ctx, `update calendar_source_events set `+strings.Join(sets, ", ")+` where source=? and account_id=? and source_id=?`) //nolint:gosec // G202: names come from pragma_table_info of a package-owned table
 	if err != nil {
@@ -371,7 +387,7 @@ func blankEvents(ctx context.Context, tx *sql.Tx, account string, events []calen
 		if calendar.ValidateEvent(e) != nil {
 			continue // the core refuses it and writes nothing: its stored copy keeps its content
 		}
-		if _, err := stmt.ExecContext(ctx, string(calendar.SourceOutlook), account, e.SourceID); err != nil {
+		if _, err := stmt.ExecContext(ctx, strings.Join(unknown, ","), string(calendar.SourceOutlook), account, e.SourceID); err != nil {
 			return err
 		}
 	}
@@ -397,6 +413,7 @@ type OutlookFailure struct {
 	Message string `json:"message"`
 	Fix     string `json:"fix"`
 	Exit    int    `json:"exit"`
+	OWA     bool   `json:"owa,omitempty"`
 }
 
 // SetOutlookFailure remembers why the account's last read failed; nil forgets it.

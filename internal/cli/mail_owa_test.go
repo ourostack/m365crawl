@@ -183,7 +183,7 @@ func TestMailLegacyNullableFields(t *testing.T) {
 func TestMailOWASourceCLI(t *testing.T) {
 	e := textEnv(t)
 	root := createdOWARoot(t)
-	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-calendar-local-fixture", "calendar"), filepath.Join(root, "Default"))
 	code, out, stderr := e.run("--outlook-root", root, "sync")
 	if code != 0 {
 		t.Fatalf("sync exit %d: %s", code, stderr)

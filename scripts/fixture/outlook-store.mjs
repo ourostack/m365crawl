@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export const origin = 'https_outlook.office.com_0.indexeddb';
 
-export async function buildOutlookProfile(chromium, profileDir, variant = 'mail') {
+export async function buildOutlookProfile(chromium, profileDir, variant = 'mail', calendarLocalDates = false) {
   const ctx = await chromium.launchPersistentContext(profileDir, { channel: 'msedge', headless: true });
   let version = '';
   try {
@@ -15,7 +15,8 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
     });
     const page = await ctx.newPage();
     await page.goto('https://outlook.office.com/fixture');
-    await page.evaluate(async variant => {
+    await page.evaluate(async ({ variant, calendarLocalDates }) => {
+      const emptyMail = variant === 'empty' || variant === 'calendar-empty-mail';
       const id = Id => ({ Id });
       const mailbox = (Name, EmailAddress) => ({ Name, EmailAddress });
       const folders = ['inbox', 'archive', 'drafts', 'sent', 'deleted', 'junk', 'custom'].map((type, i) => ({ id: `Folder/${i}==`, parentFolderId: 'Root/Case==', displayName: `Synthetic ${type}`, distinguishedFolderType: type }));
@@ -40,6 +41,31 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
         { ItemId: id('Message/Null=='), Body: null },
         { ItemId: id('Message/Undefined=='), Body: undefined, NormalizedBody: { Value: '<p>Synthetic cached truncated HTML</p>' }, IsTruncated: true },
       ];
+      const events = [
+        {
+          UID: 'AA11', Start: '2031-03-05T09:30:00Z', End: '2031-03-05T10:00:00Z',
+          LastModifiedTime: '2031-03-04T12:00:00Z', Subject: 'Synthetic OWA calendar',
+          IsAllDayEvent: false, IsCancelled: false, IsOnlineMeeting: true, IsOrganizer: false, HasAttachments: false,
+          Body: { BodyType: 'HTML', Value: '<p>Synthetic &amp; cached calendar</p>', IsTruncated: false },
+          Preview: 'Synthetic calendar preview', FreeBusyType: 'Busy',
+          RequiredAttendees: [{ Mailbox: mailbox('Synthetic required', 'required@example.invalid'), ResponseType: 'Accept' }],
+          OptionalAttendees: [{ Mailbox: mailbox('Synthetic optional', 'optional@example.invalid'), ResponseType: 'Tentative' }],
+          Resources: [{ Mailbox: mailbox('Synthetic room', 'room@example.invalid'), ResponseType: 'NoResponseReceived' }],
+        },
+        {
+          UID: 'BB22', Start: '2031-03-06T00:00:00Z', End: '2031-03-07T00:00:00Z',
+          LastModifiedTime: '2031-03-04T12:00:00Z', Subject: 'Synthetic UTC-aligned all-day event',
+          IsAllDayEvent: true, IsCancelled: false,
+          RequiredAttendees: [], OptionalAttendees: [], Resources: [],
+        },
+      ];
+      if (calendarLocalDates) {
+        Object.assign(events[1], {
+          Start: '2031-03-06T08:00:00Z', End: '2031-03-07T08:00:00Z',
+          StartTimeZoneId: 'Pacific Standard Time', EndTimeZoneId: 'America/Los_Angeles',
+          Subject: 'Synthetic local-date all-day event',
+        });
+      }
       async function writeDB(name, withBodies = true) {
         const db = await new Promise((resolve, reject) => {
           const req = indexedDB.open(name, 1);
@@ -52,11 +78,18 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
         await new Promise((resolve, reject) => {
           const tx = db.transaction([...db.objectStoreNames], 'readwrite');
           folders.forEach((f, i) => tx.objectStore('folders').put(f, `folder-${i}`));
-          if (variant !== 'empty') messages.forEach((m, i) => tx.objectStore('messages').put(m, `message-${i}`));
-          if (withBodies && variant !== 'empty') bodies.forEach((b, i) => tx.objectStore('messageBodies').put(b, `body-${i}`));
+          if (!emptyMail) messages.forEach((m, i) => tx.objectStore('messages').put(m, `message-${i}`));
+          if (withBodies && !emptyMail) bodies.forEach((b, i) => tx.objectStore('messageBodies').put(b, `body-${i}`));
           // Host objects would produce an omission if the mail collector ever decoded these stores.
           tx.objectStore('credentials').put(new DOMException('Synthetic auth decoy only', 'SyntheticDecoy'), 'auth-decoy');
-          tx.objectStore('events').put(new DOMException('Synthetic event decoy only'), 'event-decoy');
+          if (variant.startsWith('calendar')) {
+            if (variant !== 'calendar-empty' && variant !== 'calendar-empty-mail') {
+              events.forEach((event, i) => tx.objectStore('events').put(event, `event-${i}`));
+              if (variant === 'calendar-damaged') tx.objectStore('events').put(new DOMException('Synthetic damaged event'), 'event-decoy');
+            }
+          } else {
+            tx.objectStore('events').put(new DOMException('Synthetic event decoy only'), 'event-decoy');
+          }
           tx.objectStore('calendar').put({ subject: 'Synthetic excluded calendar' }, 'calendar-decoy');
           tx.objectStore('attachmentPayloads').put(new Uint8Array([19, 23, 29]), 'payload-decoy');
           tx.oncomplete = resolve;
@@ -67,7 +100,7 @@ export async function buildOutlookProfile(chromium, profileDir, variant = 'mail'
       }
       await writeDB(variant === 'unknown' ? 'not-owa-synthetic' : 'owa-offline-data-synthetic', variant !== 'missing-store');
       if (variant === 'multiple') await writeDB('owa-offline-data-second-synthetic');
-    }, variant);
+    }, { variant, calendarLocalDates });
   } finally {
     await ctx.close();
   }

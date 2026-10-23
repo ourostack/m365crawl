@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -326,7 +327,11 @@ func TestOWAMailReviewA3UnexpectedCoverageAndAbsence(t *testing.T) {
 }
 
 func TestOWAMailReviewRealPermitRefusal(t *testing.T) {
-	if err := owaRealAcceptancePermit(); err == nil || err.Error() != "qualification_protocol_refused" {
+	want := "qualification_protocol_refused"
+	if runtime.GOOS == "windows" {
+		want = "mail_only_calendar_scope_refused"
+	}
+	if err := owaRealAcceptancePermit(); err == nil || err.Error() != want {
 		t.Fatal("unreviewed_real_acceptance_permitted")
 	}
 }

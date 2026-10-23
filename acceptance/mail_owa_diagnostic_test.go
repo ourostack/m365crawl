@@ -23,6 +23,7 @@ type owaFailureState struct {
 	fields    []string
 	omissions map[string]int64
 	completed bool
+	calendar  bool
 }
 
 func owaRecordCensusReason(s *owaFailureState, err error) {
@@ -56,6 +57,9 @@ func (s *owaFailureState) recordFields(stage, reason string, fields []string) {
 	if s != nil && s.failure == "" {
 		s.failure = stage
 		s.reason = protocol.FixedDiagnosticReason(stage, reason)
+		if s.calendar {
+			s.reason = protocol.FixedCalendarQualificationFailureReason(stage, reason)
+		}
 		s.fields = append([]string{}, fields...)
 		s.omissions = map[string]int64{}
 	}
