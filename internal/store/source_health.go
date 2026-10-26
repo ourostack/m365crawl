@@ -23,6 +23,9 @@ type SourceHealth struct {
 
 // SourceFamily recognizes only the three sync-backed source families, not independent observations.
 func SourceFamily(key string) (family, account string) {
+	if key == "outlook_mail" {
+		return "outlook_mail", ""
+	}
 	if rest, ok := strings.CutPrefix(key, "outlook|"); ok {
 		if profile, mail := strings.CutSuffix(rest, "|mail"); mail {
 			return "outlook_mail", "outlook/" + profile

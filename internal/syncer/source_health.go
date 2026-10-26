@@ -31,6 +31,11 @@ func (r *runner) recordSourceHealth(ctx context.Context, rep *Report, runErr err
 		}
 		record("teams", status, codedOf(runErr).Code, "", nil)
 	} else {
+		reported := map[string]bool{}
+		for _, sr := range rep.Sources {
+			reported[sr.Source] = true
+		}
+		var barriers []SourceReport
 		for _, sr := range rep.Sources {
 			family, _ := store.SourceFamily(sr.Source)
 			if family == "" {
@@ -39,6 +44,22 @@ func (r *runner) recordSourceHealth(ctx context.Context, rep *Report, runErr err
 			code := ""
 			if sr.Error != nil {
 				code = sr.Error.Code
+			}
+			shared := sr.Source == "outlook" || code == "no_full_disk_access" || code == CodeOutlookProfileUnreadable ||
+				code == "outlook_store_version" || code == "outlook_store_unrecognized" ||
+				code == "snapshot_inconsistent" || code == "unsupported_block_compression"
+			// A shared discovery barrier prevented both reads; do not replace an independent mail outcome.
+			if shared && family == "outlook_calendar" && code != "" && code != CodeNoOutlookProfiles &&
+				(sr.Status == StatusFailed || sr.Status == StatusUnavailable) {
+				key := mailKey(sr.Source)
+				if sr.Source == "outlook" {
+					key = "outlook_mail"
+				}
+				if !reported[key] {
+					barriers = append(barriers, SourceReport{Source: key, Status: sr.Status, Error: sr.Error})
+					record(key, sr.Status, code, "", nil)
+					reported[key] = true
+				}
 			}
 			switch sr.Status {
 			case StatusFailed, StatusUnavailable, StatusSkippedInterval:
@@ -57,6 +78,7 @@ func (r *runner) recordSourceHealth(ctx context.Context, rep *Report, runErr err
 					record(sr.Source, sr.Status, "", fp, sr.Accounts)
 				}
 			}
+			rep.Sources = append(rep.Sources, barriers...)
 		}
 		// Cancellation leaves later sources untried; absence from the report then proves nothing.
 		prior, err := r.st.SourceHealth(ctx)

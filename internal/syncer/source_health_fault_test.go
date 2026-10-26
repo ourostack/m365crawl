@@ -77,7 +77,7 @@ func TestSourceHealthMissingProfileDiscoveryFailureDoesNotRetire(t *testing.T) {
 		t.Fatal(err)
 	}
 	health, err := st.SourceHealth(ctx)
-	if err != nil || len(health) != 2 {
+	if err != nil || len(health) != 3 {
 		t.Fatalf("failed discovery erased known profile: %+v %v", health, err)
 	}
 }

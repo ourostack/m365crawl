@@ -56,6 +56,7 @@ func TestSourceHealthRejectsCorruptOutcomeAndFailure(t *testing.T) {
 func TestSourceHealthFamilyExcludesIndependentObservations(t *testing.T) {
 	for _, tc := range []struct{ key, family, account string }{
 		{"", "", ""}, {"outlook", "outlook_calendar", ""},
+		{"outlook_mail", "outlook_mail", ""},
 		{"outlook|Main", "outlook_calendar", "outlook/Main"},
 		{"outlook|Main|mail", "outlook_mail", "outlook/Main"},
 		{"outlook|Main|people", "", ""}, {"outlook|Main|attendees", "", ""},
