@@ -8,8 +8,8 @@
 #   POLL_TIMEOUT_MINUTES how long to wait for the tap (default 10)
 #
 # The publish-homebrew job has already pushed the cask to the tap, so the wait only
-# covers the time GitHub takes to serve the new commit. The script polls `brew info`
-# until the tap serves this version, then installs the cask and runs the same gates
+# covers the time GitHub takes to serve the new commit. The script reads the literal
+# version without loading cask Ruby, then installs the cask and runs the same gates
 # as verify-release on the installed binary.
 set -euo pipefail
 
@@ -26,11 +26,14 @@ version="${TAG#v}"
 cask="ourostack/tap/m365crawl"
 
 brew tap ourostack/tap
+tap_repo="$(brew --repository ourostack/tap)"
 deadline=$((SECONDS + ${POLL_TIMEOUT_MINUTES:-10} * 60))
 served=""
 while :; do
   brew update --quiet || true
-  served="$(brew info --cask --json=v2 "$cask" | python3 -c 'import json,sys; print(json.load(sys.stdin)["casks"][0]["version"])')"
+  # Loading metadata before the explicit install would fail Homebrew's tap-trust check.
+  served="$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "$tap_repo/Casks/m365crawl.rb")"
+  [[ "$served" != *$'\n'* ]] || fail "the tap cask has ambiguous version declarations"
   [[ "$served" == "$version" ]] && break
   [[ $SECONDS -lt $deadline ]] || fail "the tap still serves '$served' after ${POLL_TIMEOUT_MINUTES:-10} minutes; expected '$version'"
   echo "tap serves '$served', waiting for '$version'"
