@@ -6,3 +6,7 @@
 - Every mail read and mail-participating search carries a retained mail-read
   failure as a stale-data notice, even offline, with no matching items or with
   selected fields. A successful mail read clears the notice.
+- Unknown Outlook account layouts preserve previously established calendar
+  identity and automatic links rather than clearing them as confirmed empty.
+- Offline mail search remains compatible with older readable archives without
+  retained failure storage.

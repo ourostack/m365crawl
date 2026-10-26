@@ -1,12 +1,32 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/store"
 )
+
+func TestOfflineMailSearchWithoutLegacyMetaRemainsReadOnly(t *testing.T) {
+	e := newEnv(t)
+	e.emptyArchive()
+	e.exec("drop table meta")
+	before, err := os.ReadFile(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := mailJSON(t, e, "search", "fixture", "--source", "mail")
+	if doc["count"] != float64(0) || doc["notices"] != nil || doc["needs_sync"] != true {
+		t.Fatalf("old archive result: %v", doc)
+	}
+	after, err := os.ReadFile(e.db)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("offline read changed the old archive")
+	}
+}
 
 func TestArchivedMailFailureSurvivesOfflineReads(t *testing.T) {
 	e := mailEnv(t)

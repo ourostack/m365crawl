@@ -34,7 +34,7 @@ func TestMailFailuresPropagatesReadErrors(t *testing.T) {
 	for _, setup := range []string{
 		`insert into meta(key,value) values('outlook_mail_failure:outlook/A','invalid')`,
 		`drop table meta; create table meta(key text,value text); insert into meta values('outlook_mail_failure:outlook/A',null)`,
-		`drop table meta`,
+		`drop table meta; create table meta(x)`,
 	} {
 		s := newStore(t)
 		if _, err := s.db.Exec(setup); err != nil {
@@ -43,5 +43,10 @@ func TestMailFailuresPropagatesReadErrors(t *testing.T) {
 		if _, err := s.MailFailures(context.Background(), ""); err == nil {
 			t.Fatalf("failed state read became an empty success: %s", setup)
 		}
+	}
+	s := newStore(t)
+	_ = s.Close()
+	if _, err := s.MailFailures(context.Background(), ""); err == nil {
+		t.Fatal("closed database became an empty success")
 	}
 }

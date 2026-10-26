@@ -14,10 +14,11 @@ func extendedBody(s hxbuild.MailBodySpec) *hxbuild.Object {
 	raw = append(raw, 0x12, 0x34, 0x56, 0x78)
 	raw = append(raw, old[0x74e:]...)
 	binary.LittleEndian.PutUint16(raw[2:], 0x752)
-	binary.LittleEndian.PutUint32(raw[4:], uint32(len(raw)))
 	o := hxbuild.NewObject(0xca, 0x752, len(raw))
 	for i, b := range raw {
-		o.PutU8(i, b)
+		if i < 4 || i >= 8 {
+			o.PutU8(i, b)
+		}
 	}
 	return o
 }

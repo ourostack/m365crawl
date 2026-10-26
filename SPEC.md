@@ -781,6 +781,13 @@ the fixed region and both variable-area bases grow four bytes. Other tags
 are not inferred from size or a similar tag. Both mapper fingerprints advance
 so an unchanged source is reconsidered after upgrading.
 
+An unsupported account layout leaves sign-in identity unknown, not confirmed
+empty: calendar acquisition preserves previously established identity and
+automatic links without deriving new identity from those records. A profile
+with no previously established identity stays unknown. A qualified account
+read that genuinely finds no address still clears previous identity evidence.
+The unknown account pair remains in `calendar sources` diagnostics.
+
 Every mail read and search that participates in mail retains archived mail-read
 failures in the result's existing `notices`, including with `--max-age 0`,
 zero matching items, disabled local source discovery and `--fields`. Notices
@@ -790,6 +797,8 @@ notices; chats-only searches do not acquire them. Reading stored failure state
 can fail explicitly; it never becomes an empty-success diagnosis. A successful
 mail read clears its stored failure and notice. Exit codes and the existing
 source error fields of sync reports are unchanged.
+An older readable archive without the `meta` table has no retained failure
+storage; its offline search remains empty or readable without migration.
 
 ### Windows OWA mail source and additive output contract
 

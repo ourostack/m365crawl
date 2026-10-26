@@ -15,10 +15,11 @@ func extendedEvent(s hxbuild.EventSpec) *hxbuild.Object {
 	raw = append(raw, 0x12, 0x34, 0x56, 0x78)
 	raw = append(raw, old[708:]...)
 	binary.LittleEndian.PutUint16(raw[2:], 0x459)
-	binary.LittleEndian.PutUint32(raw[4:], uint32(len(raw)))
 	o := hxbuild.NewObject(0x6b, 0x459, len(raw))
 	for i, b := range raw {
-		o.PutU8(i, b)
+		if i < 4 || i >= 8 {
+			o.PutU8(i, b)
+		}
 	}
 	return o
 }
@@ -48,9 +49,20 @@ func TestCollectMixedEventLayoutsSelectsLatestCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(r.Events) != 1 || r.Events[0].Subject != "Fixture latest" || len(r.UnknownLayouts) != 0 ||
 		r.Notes.SupersededCopies != 1 || r.AttendeeSelections == nil || len(r.AttendeeSelections.Rows) != 1 ||
 		r.AttendeeSelections.Rows[0].DetailKey != 501 || r.AttendeeSelections.Rows[0].StampRaw != 2 {
 		t.Fatalf("mixed-layout selection lost identity or detail binding: %+v", r)
+	}
+}
+
+func TestUnknownAccountLayoutDoesNotPublishPartialIdentity(t *testing.T) {
+	r := collect(t, storeOf(t, framed(extendedEvent(baseSpec(1)),
+		hxbuild.NewAccount(hxbuild.AccountSpec{Address: "fixture@example.invalid"}),
+		hxbuild.NewObject(0x49, 0x1a12, 6674))), Options{})
+	if !r.IdentityUnknown || r.AccountAddresses != nil || len(r.Events) != 1 ||
+		len(r.UnknownLayouts) != 1 || r.UnknownLayouts[0].Class != 0x49 || r.UnknownLayouts[0].Tag != 0x1a12 {
+		t.Fatalf("unknown layout published a confirmed identity: %+v", r)
 	}
 }

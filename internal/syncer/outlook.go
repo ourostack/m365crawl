@@ -362,7 +362,7 @@ func (r *runner) outlookCalendarEvidence(ctx context.Context, info outlookdeskto
 	// would not map could hide a live event, and then every unseen event stays.
 	var omissions map[string]int
 	status := StatusOK
-	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Origin: origin, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0, Addresses: res.AccountAddresses},
+	cal, err := r.st.CommitOutlook(ctx, store.OutlookBatch{Account: account, Origin: origin, Events: res.Events, FreshAt: info.ModTime, At: begun, Zone: zone, Stamp: store.OutlookStamp(outlookMapperVersion, zone), Read: outlookRead(res), InferGone: len(res.Losses) == 0, Addresses: res.AccountAddresses, PreserveIdentity: res.IdentityUnknown},
 		func(cal store.CalendarResult) store.Run {
 			if omissions = outlookOmissions(res, cal); lost(omissions) > 0 {
 				status = StatusOmissions

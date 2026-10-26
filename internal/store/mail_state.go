@@ -31,6 +31,13 @@ type MailFailure struct {
 
 // MailFailures reads retained read failures, including accounts with no mail rows.
 func (s *Store) MailFailures(ctx context.Context, account string) ([]MailFailure, error) {
+	var hasMeta bool
+	if err := s.db.QueryRowContext(ctx, `select exists(select 1 from sqlite_master where name='meta')`).Scan(&hasMeta); err != nil {
+		return nil, err
+	}
+	if !hasMeta {
+		return nil, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `select key, value from meta where key like ? escape '\' and (?='' or key=?) order by key`,
 		escapeLike(mailFailureKey)+"%", account, mailFailureKey+account)
 	if err != nil {

@@ -103,6 +103,7 @@ type Result struct {
 	// and sorted: the addresses its account objects carry. They link the profile to the Teams account
 	// that has one of them.
 	AccountAddresses   []string
+	IdentityUnknown    bool // unsupported account layouts; addresses stay nil, not confirmed empty
 	Notes              Notes
 	Losses             []Loss
 	UnknownLayouts     []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
@@ -163,6 +164,8 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 				res.Notes.AccountObjects++
 				addresses[a] = true
 			}
+		case o.Class == classAccount:
+			res.IdentityUnknown = true
 		case o.Class == classDetail && o.Tag == tagDetail:
 			if o.Resynced {
 				res.Notes.ResyncedSkipped++
@@ -186,8 +189,10 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 		return res, g
 	}
 	res.Notes.AccountAddresses = len(addresses)
-	for a := range addresses {
-		res.AccountAddresses = append(res.AccountAddresses, a)
+	if !res.IdentityUnknown {
+		for a := range addresses {
+			res.AccountAddresses = append(res.AccountAddresses, a)
+		}
 	}
 	sort.Strings(res.AccountAddresses)
 	res.Notes.DetailCopiesDiffer = len(differing)

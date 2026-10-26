@@ -109,7 +109,9 @@ with zero unmapped events and zero missing or unreadable detail objects.
 This is one cache's evidence, not server completeness.
 
 The same copy retained an unknown account pair `0x49/0x1a12`; it was not
-used as automatic-link identity. The mail collector retained 7,755
+used as automatic-link identity. Unknown account layouts preserve existing
+established identity and links instead of clearing them as confirmed empty;
+a profile with no established identity remains unknown. The mail collector retained 7,755
 `outlook_mail_layout_partial` omissions for attachment pair `0x16a/0x31e`.
 These observations do not qualify either layout, and their existing unknown
 or partial reporting is unchanged by event/body support.
