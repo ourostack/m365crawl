@@ -52,6 +52,8 @@ type runtime struct {
 	noteCoverage     *noteCoverage
 	documentCoverage *noteCoverage
 	loopCoverage     *loopCoverage
+	healthSources    []string // resolved search families, independent of returned hits
+	healthAccount    string   // mail ID account or calendar event principal
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
@@ -297,6 +299,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	res.setSynced(rt.synced)
 	if age == nil {
 		res.setNeedsSync(syncHint)
+	}
+	if err := rt.noteSourceHealth(st, label, res, age == nil); err != nil {
+		return asCoded(err)
 	}
 	return rt.write(label, res)
 }

@@ -272,6 +272,12 @@ func (c *searchCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	if p.chats {
+		rt.healthSources = append(rt.healthSources, "teams")
+	}
+	if p.mail {
+		rt.healthSources = append(rt.healthSources, "outlook_mail")
+	}
 	if c.Source == searchNotes && strings.TrimSpace(c.Query) == "" && c.Since == "" && c.Until == "" {
 		return errs.Usage("notes search requires words or --since/--until; use notes list for an unfiltered list")
 	}

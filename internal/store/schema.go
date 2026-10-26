@@ -38,7 +38,8 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 18 adds immutable bounded Engage Home access-session observations.
 // Version 19 adds successful Outlook calendar decode/origin identities, immutable
 // native attendee evidence and independently audited link-mutation frontiers.
-const SchemaVersion = 19
+// Version 20 retains per-source error codes in the existing sync outcome history.
+const SchemaVersion = 20
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
