@@ -51,6 +51,15 @@ Each darwin binary is notarized with `notarytool submit --wait`, bounded by `NOT
 
 ## Resuming a publish
 
+The Homebrew verification waiter reads the generated cask's single literal version
+without evaluating its Ruby. On Homebrew 6 and later, `brew info` would load the
+untrusted cask before the intended install. The existing fully qualified
+`brew install --cask ourostack/tap/m365crawl` then applies Homebrew's documented
+[item-scoped installation trust](https://docs.brew.sh/Tap-Trust#installing-from-a-tap),
+not whole-tap trust or a trust override. Stale, missing or ambiguous version
+metadata cannot reach installation, and the actual installed version and signature
+remain mandatory checks.
+
 `decide` reads the tap itself (`ourostack/homebrew-tap` is public; it first checks that the tap repository itself is readable and refuses when it is not, so a private or renamed tap never looks like a missing cask, then reads `Casks/m365crawl.rb` through the API with the workflow token) rather than keeping a marker: the tap is the fact that matters, it survives any re-run, and a marker could say "published" while the tap says otherwise. A version is finished when its release exists and the cask on the tap's `main` (stable) or `rehearsal` branch (rehearsal) is for that version or a later one, and a stable release is not demoted to a prerelease. Otherwise the run resumes at the tag's commit with `publish_only=true`:
 
 - `verify` (`make check`) and `release` (the build, signing, notarization and the tag) are skipped. Nothing is rebuilt or signed again, and the assets already on the release are reused.

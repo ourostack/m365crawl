@@ -112,6 +112,7 @@ script-lint:
 	scripts/retry.sh --selftest
 	scripts/check-release-wiring.sh --selftest
 	bash scripts/check-release-wiring_test.sh
+	bash scripts/verify-homebrew_test.sh
 	scripts/test-shard.sh --selftest
 
 tidy-check:
