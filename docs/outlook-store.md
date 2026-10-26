@@ -95,7 +95,26 @@ Pinned pairs: class 0x6b with tag 0x455 (1109 bytes, the event) and class 0x6c w
 - **A string can be absent.** The length word at the offset word + 4 (bit 31 masked) is zero exactly when the string is absent, and then the offset word is 0 too, with no text stored for it. Offset 0 is the first string of the string area, so reading an absent string by its offset word returns that first string: the subject as first written (the area only grows, so a rename leaves the old subject at offset 0 and appends the new one). A reader must test the length word before it reads. Measured on the copy taken 2026-10-07 after the first rename (6,823 id-carrying event objects, all copies counted): the length word is zero in 230 objects for the body preview (+700), 730 for the location (+836), 14 for the bare subject (+876) and none for the organizer name, organizer address and subject; in every one of those the offset word is 0, and in no object is a zero length word paired with a non-zero offset. Every non-zero length word is the string's byte length including the terminator (the terminator sits at the stated end in 6,593 of 6,593 previews, 6,093 of 6,093 locations, 6,809 of 6,809 bare subjects, and all organizer names, addresses and subjects). A present string can also have offset 0 (the subject in 5,786 objects, the preview in 1,006), so the offset word cannot say "absent"; only the length word can. Known cause of an earlier error in this page: the location and preview rows below were first matched against Teams on objects where both had text, and the "Outlook holds text where Teams has none" counts included absent strings read as the subject.
 - Times are 8-byte .NET ticks (100 ns since 0001-01-01), UTC.
 
-## Event object (class 0x6b, tag 0x455)
+## Event object (class 0x6b, tags 0x455 and 0x459)
+
+The tables below use the original `0x455` (1109-byte fixed region) offsets.
+An October 26, 2026 counts-only check of the updated Mac store established a
+second event layout, `0x459` (1113 bytes): mapped fields through +700 retain
+their offsets, while the mapped fields from the old +772 onward move forward
+four bytes. Both variable-area bases use 1113 instead of 1109. The location
+and meaning of the added bytes within the unmapped gap are not established.
+The reader selects offsets by these exact tags, not by a guessed general
+shift. A fresh private-copy production read mapped 3,677 distinct events,
+with zero unmapped events and zero missing or unreadable detail objects.
+This is one cache's evidence, not server completeness.
+
+The same copy retained an unknown account pair `0x49/0x1a12`; it was not
+used as automatic-link identity. Unknown account layouts preserve existing
+established identity and links instead of clearing them as confirmed empty;
+a profile with no established identity remains unknown. The mail collector retained 7,755
+`outlook_mail_layout_partial` omissions for attachment pair `0x16a/0x31e`.
+These observations do not qualify either layout, and their existing unknown
+or partial reporting is unchanged by event/body support.
 
 The store holds 8,589 objects of this class: singles, masters, occurrences and exceptions together. 7,860 carry an id and 729 are id-less stubs (718 of them 1,554 bytes long, belonging to 5 series keys, with no strings and no detail link). There are 3,366 distinct ids.
 
@@ -256,7 +275,7 @@ Mail objects sit in the same blocks as the calendar. The reader is `internal/out
 | --- | --- | --- | --- |
 | 0x4f | 0x430 (1072) | message header (what a list reads) | 2,241 (3,988 copies) |
 | 0xc9 | 0x60f (1551) | message detail: Message-ID, class, In-Reply-To, sent time | 2,564 |
-| 0xca | 0x74e (1870) | body record: inline HTML or the path of a body file | 2,564, same key as the detail |
+| 0xca | 0x74e (1870), 0x752 (1874) | body record: inline HTML or the path of a body file | same key as the detail; original sample: 2,564 |
 | 0x16a | 0x318 (792) | attachment record | 4,269 |
 | 0x4d | 0x4d0 (1232) | folder | 171 (128 named, 43 unnamed) |
 | 0x4d | 0x4d8 (1240) | extended folder layout, measured separately | not tabulated here |

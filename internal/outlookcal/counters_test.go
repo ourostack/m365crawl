@@ -324,7 +324,7 @@ func mappedDigest(t *testing.T) string {
 var pinnedMapping = struct {
 	version int
 	digest  string
-}{version: 5, digest: "4cde27fbe10284c972da1b2192e75808d2c88c1f8b0d293fc27fcacbb98518f2"}
+}{version: 6, digest: "4cde27fbe10284c972da1b2192e75808d2c88c1f8b0d293fc27fcacbb98518f2"}
 
 func TestMapperVersionIsPinnedToTheMappedOutput(t *testing.T) {
 	got := mappedDigest(t)

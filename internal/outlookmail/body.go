@@ -36,7 +36,6 @@ const (
 	// A body record's word table sits in the fixed region [0, TagBody); a string target is
 	// counted from TagBody plus the lead word.
 	bodyFilesPrefix = "~/Files/"
-	bodyScanEnd     = TagBody
 )
 
 // Body is what a class 0xca object holds: inline HTML, or the path of the file that holds it.
@@ -70,12 +69,16 @@ func (c *candidate) offer(flagged bool, pos, n int) {
 // pair with bit 31 set in its length word wins, then the longest, then the first. The offsets of
 // the pair differ between variants of the record, so none is pinned.
 func MapBody(o hxstore.Object) Body {
-	f, err := newFields(o, TagBody)
+	fixed := TagBody
+	if o.Tag == TagBodyExtended {
+		fixed = TagBodyExtended
+	}
+	f, err := newFields(o, fixed)
 	if err != nil {
 		return Body{State: BodyNone}
 	}
 	var html, path candidate
-	for off := 0; off+8 <= bodyScanEnd; off += 4 {
+	for off := 0; off+8 <= fixed; off += 4 {
 		w, l := word(o, off), word(o, off+4)
 		n, flagged := int(l&lengthMask), l&^lengthMask != 0
 		if n == 0 {

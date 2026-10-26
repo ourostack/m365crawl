@@ -103,6 +103,7 @@ type Result struct {
 	// and sorted: the addresses its account objects carry. They link the profile to the Teams account
 	// that has one of them.
 	AccountAddresses   []string
+	IdentityUnknown    bool // unsupported account layouts; addresses stay nil, not confirmed empty
 	Notes              Notes
 	Losses             []Loss
 	UnknownLayouts     []PairCount // pairs of a mapped class (event, detail) whose tag KnownLayouts does not list
@@ -145,7 +146,7 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 			selections.observe(o)
 		}
 		switch {
-		case o.Class == classEvent && o.Tag != tagEvent:
+		case o.Class == classEvent && !knownEventTag(o.Tag):
 			badTags[o.Tag]++
 		case o.Class == classEvent:
 			switch {
@@ -163,6 +164,8 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 				res.Notes.AccountObjects++
 				addresses[a] = true
 			}
+		case o.Class == classAccount:
+			res.IdentityUnknown = true
 		case o.Class == classDetail && o.Tag == tagDetail:
 			if o.Resynced {
 				res.Notes.ResyncedSkipped++
@@ -186,8 +189,10 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 		return res, g
 	}
 	res.Notes.AccountAddresses = len(addresses)
-	for a := range addresses {
-		res.AccountAddresses = append(res.AccountAddresses, a)
+	if !res.IdentityUnknown {
+		for a := range addresses {
+			res.AccountAddresses = append(res.AccountAddresses, a)
+		}
 	}
 	sort.Strings(res.AccountAddresses)
 	res.Notes.DetailCopiesDiffer = len(differing)
@@ -213,9 +218,9 @@ var progress = func(int) {}
 
 // keepEvent records o if it is the first copy of its id or beats the copy held.
 func keepEvent(winners map[string]winner, o hxstore.Object, rule VersionRule, n *Notes) {
-	off, _ := o.U32(evID)
-	size, _ := o.U32(evID + 4)
-	id, ok := o.Bytes(evFixed+int(off), int(size))
+	off, _ := o.U32(eventOffset(o, evID))
+	size, _ := o.U32(eventOffset(o, evID+4))
+	id, ok := o.Bytes(int(o.Tag)+int(off), int(size))
 	if !ok {
 		id = nil // an id outside the object: the copy still competes, and fails to map
 	}

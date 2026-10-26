@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,41 @@ type MailState struct {
 	Read    bool      // a sync read the account's mail and no later read failed
 	ReadAt  time.Time // when, zero when Read is false
 	Failure *OutlookFailure
+}
+
+type MailFailure struct {
+	Account string
+	OutlookFailure
+}
+
+// MailFailures reads retained read failures, including accounts with no mail rows.
+func (s *Store) MailFailures(ctx context.Context, account string) ([]MailFailure, error) {
+	var hasMeta bool
+	if err := s.db.QueryRowContext(ctx, `select exists(select 1 from sqlite_master where name='meta')`).Scan(&hasMeta); err != nil {
+		return nil, err
+	}
+	if !hasMeta {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `select key, value from meta where key like ? escape '\' and (?='' or key=?) order by key`,
+		escapeLike(mailFailureKey)+"%", account, mailFailureKey+account)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []MailFailure
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		f := MailFailure{Account: strings.TrimPrefix(key, mailFailureKey)}
+		if err := json.Unmarshal([]byte(value), &f.OutlookFailure); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // MailState reads the marker and the last failure of the account's mail.

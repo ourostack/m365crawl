@@ -350,7 +350,16 @@ func (c *searchCmd) Run(rt *runtime) error {
 			}
 			rt.loopCoverage = coverage
 		}
-		return c.search(rt, p, f, st)
+		res, err := c.search(rt, p, f, st)
+		if err != nil {
+			return nil, err
+		}
+		if p.mail {
+			if err := rt.noteMailFailures(st, res, mailAccountOf(rt.g.Account)); err != nil {
+				return nil, err
+			}
+		}
+		return res, nil
 	})
 }
 
