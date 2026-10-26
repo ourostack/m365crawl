@@ -50,3 +50,17 @@ func TestMailFailuresPropagatesReadErrors(t *testing.T) {
 		t.Fatal("closed database became an empty success")
 	}
 }
+
+func TestMailFailuresWithoutLegacyMetaIsEmpty(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.db.Exec("drop table meta"); err != nil {
+		t.Fatal(err)
+	}
+	failures, err := s.MailFailures(context.Background(), "")
+	if err != nil || len(failures) != 0 {
+		t.Fatalf("legacy archive gained an error: %+v %v", failures, err)
+	}
+	if rowCount(t, s, "select count(*) from sqlite_master where name='meta'") != 0 {
+		t.Fatal("read created failure storage")
+	}
+}

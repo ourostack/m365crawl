@@ -65,3 +65,16 @@ func TestArchivedMailFailureSurvivesOfflineReads(t *testing.T) {
 		t.Fatalf("text read hid failure: %d %s %s", code, out, errOut)
 	}
 }
+
+func TestMalformedMailFailureStopsSuccessfulReadEnvelopes(t *testing.T) {
+	e := mailEnv(t)
+	e.exec(`insert into meta(key,value) values('outlook_mail_failure:outlook/Main','not-json')`)
+	for _, args := range [][]string{
+		{"mail", "list"}, {"search", "fixture", "--source", "mail"},
+	} {
+		code, out, errOut := e.mail(append([]string{"--json"}, args...)...)
+		if code != 1 || out != "" || errorOf(t, errOut)["code"] != "db_error" {
+			t.Fatalf("%v hid a corrupt stored failure: exit=%d out=%q err=%q", args, code, out, errOut)
+		}
+	}
+}
