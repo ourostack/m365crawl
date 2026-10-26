@@ -109,7 +109,7 @@ func collect(ctx context.Context, s *hxstore.Store, cap limits) (Result, error) 
 			if o.Class == 0x6b {
 				tag = 0x455
 			}
-			if o.Tag != tag {
+			if o.Tag != tag && !(o.Class == 0x6b && o.Tag == 0x459) {
 				return &Error{Code: "outlook_attendees_layout_unsupported"}
 			}
 			if o.Resynced {

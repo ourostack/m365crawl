@@ -145,7 +145,7 @@ func collectSelections(ctx context.Context, s *hxstore.Store, account string, op
 			selections.observe(o)
 		}
 		switch {
-		case o.Class == classEvent && o.Tag != tagEvent:
+		case o.Class == classEvent && !knownEventTag(o.Tag):
 			badTags[o.Tag]++
 		case o.Class == classEvent:
 			switch {
@@ -213,9 +213,9 @@ var progress = func(int) {}
 
 // keepEvent records o if it is the first copy of its id or beats the copy held.
 func keepEvent(winners map[string]winner, o hxstore.Object, rule VersionRule, n *Notes) {
-	off, _ := o.U32(evID)
-	size, _ := o.U32(evID + 4)
-	id, ok := o.Bytes(evFixed+int(off), int(size))
+	off, _ := o.U32(eventOffset(o, evID))
+	size, _ := o.U32(eventOffset(o, evID+4))
+	id, ok := o.Bytes(int(o.Tag)+int(off), int(size))
 	if !ok {
 		id = nil // an id outside the object: the copy still competes, and fails to map
 	}

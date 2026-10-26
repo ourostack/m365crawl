@@ -10,11 +10,14 @@
 // the object's envelope.
 package outlookcal
 
-import "github.com/ourostack/m365crawl/internal/calendar"
+import (
+	"github.com/ourostack/m365crawl/internal/calendar"
+	"github.com/ourostack/m365crawl/internal/hxstore"
+)
 
 // MapperVersion is raised whenever a mapping change alters derived calendar data, so
 // the archive can re-read the store.
-const MapperVersion = 5
+const MapperVersion = 6
 
 // Layout names an object layout the reader knows: the class, the envelope tag (the
 // size of the fixed region) and what the object is.
@@ -27,19 +30,21 @@ type Layout struct {
 // The pinned layouts. A class 0x6b object with any other tag turns the source off
 // (see Collect).
 var (
-	EventLayout  = Layout{Class: classEvent, Tag: tagEvent, Name: "event"}
-	DetailLayout = Layout{Class: classDetail, Tag: tagDetail, Name: "detail"}
+	EventLayout         = Layout{Class: classEvent, Tag: tagEvent, Name: "event"}
+	ExtendedEventLayout = Layout{Class: classEvent, Tag: tagEventExtended, Name: "event"}
+	DetailLayout        = Layout{Class: classDetail, Tag: tagDetail, Name: "detail"}
 )
 
 // KnownLayouts lists every (class, tag) the reader reads. Entries are added only with a
 // row in the layout document and an acceptance pass.
-var KnownLayouts = []Layout{EventLayout, DetailLayout, AccountLayout}
+var KnownLayouts = []Layout{EventLayout, ExtendedEventLayout, DetailLayout, AccountLayout}
 
 const (
-	classEvent  = 0x6b
-	tagEvent    = 0x455
-	classDetail = 0x6c
-	tagDetail   = 0x348
+	classEvent       = 0x6b
+	tagEvent         = 0x455
+	tagEventExtended = 0x459
+	classDetail      = 0x6c
+	tagDetail        = 0x348
 
 	// Event fixed region (docs/outlook-store.md).
 	evFixed       = 1109 // the fixed size, equal to the tag
@@ -78,6 +83,19 @@ const (
 
 	lengthFlag = 1 << 31
 )
+
+func knownEventTag(tag uint16) bool {
+	return tag == tagEvent || tag == tagEventExtended
+}
+
+// The extended layout keeps fields through +700, shifts the established fields
+// from +772 onward by four bytes, and grows the fixed region by four bytes.
+func eventOffset(o hxstore.Object, off int) int {
+	if o.Tag == tagEventExtended && off >= evExtraB {
+		return off + 4
+	}
+	return off
+}
 
 // UnlocatedFields lists the event fields the layout document does not pin. The mapper
 // leaves each unknown on every event; TestUnlocatedFieldsStayUnknown asserts it.

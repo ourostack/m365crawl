@@ -590,6 +590,7 @@ func mailState(m store.MailRow) string {
 	case !*m.IsRead:
 		s = append(s, "unread")
 	}
+
 	if m.Flag == "flagged" {
 		s = append(s, "flagged")
 	}
@@ -603,6 +604,30 @@ func mailState(m store.MailRow) string {
 		s = append(s, "evicted")
 	}
 	return strings.Join(s, ",")
+}
+
+func (rt *runtime) readMail(label, account string, fn func(*store.Store) (result, error)) error {
+	return rt.read(label, func(st *store.Store) (result, error) {
+		res, err := fn(st)
+		if err != nil {
+			return nil, err
+		}
+		return res, rt.noteMailFailures(st, res, account)
+	})
+}
+
+func (rt *runtime) noteMailFailures(st *store.Store, res result, account string) error {
+	if st == nil {
+		return nil
+	}
+	failures, err := st.MailFailures(rt.ctx, account)
+	if err != nil {
+		return err
+	}
+	for _, f := range failures {
+		res.addNotice("Outlook mail for " + f.Account + " may be stale: " + f.Code + ": " + f.Message + ". " + f.Fix)
+	}
+	return nil
 }
 
 // ---- mail list ----
@@ -641,7 +666,7 @@ func (c *mailListCmd) Run(rt *runtime) error {
 	if dateOnly.MatchString(c.Until) {
 		until = until.In(time.Local).AddDate(0, 0, 1) // a date alone names the whole day
 	}
-	return rt.read("mail list", func(st *store.Store) (result, error) {
+	return rt.readMail("mail list", rt.g.Account, func(st *store.Store) (result, error) {
 		if st == nil {
 			res := rt.newMailList(nil, false, mailScope{})
 			res.Note = rt.emptyNote(nil, mailScope{}, false, since)
@@ -751,7 +776,7 @@ func (c *mailShowCmd) Run(rt *runtime) error {
 	if err := rt.checkIDAccount(account); err != nil {
 		return err
 	}
-	return rt.read("mail show", func(st *store.Store) (result, error) {
+	return rt.readMail("mail show", account, func(st *store.Store) (result, error) {
 		if st == nil {
 			return nil, mailNotFound(c.ID)
 		}
@@ -902,7 +927,7 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 	if err := rt.checkIDAccount(account); err != nil {
 		return err
 	}
-	return rt.read("mail thread", func(st *store.Store) (result, error) {
+	return rt.readMail("mail thread", account, func(st *store.Store) (result, error) {
 		if st == nil {
 			return nil, mailNotFound(c.ID)
 		}
@@ -965,7 +990,7 @@ func (c *mailFoldersCmd) Run(rt *runtime) error {
 	if err := checkCommandFields(rt, "mail folders", ""); err != nil {
 		return err
 	}
-	return rt.read("mail folders", func(st *store.Store) (result, error) {
+	return rt.readMail("mail folders", rt.g.Account, func(st *store.Store) (result, error) {
 		var sc mailScope
 		if st != nil {
 			var err error
@@ -1027,7 +1052,7 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 	if err := checkMailLimit(c.Limit); err != nil {
 		return err
 	}
-	return rt.read("mail unread", func(st *store.Store) (result, error) {
+	return rt.readMail("mail unread", rt.g.Account, func(st *store.Store) (result, error) {
 		if st == nil {
 			res := &mailUnreadResult{Folders: []mailUnreadFolder{}, mailListResult: *rt.newMailList(nil, false, mailScope{})}
 			res.Note = rt.emptyNote(nil, mailScope{}, false, time.Time{})

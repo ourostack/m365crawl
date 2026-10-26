@@ -83,12 +83,12 @@ type MapNotes struct {
 // other field is unknown (UnlocatedFields).
 func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calendar.Event, MapNotes, error) {
 	var notes MapNotes
-	if ev.Class != classEvent || ev.Tag != tagEvent || ev.Len() < evFixed {
+	if ev.Class != classEvent || !knownEventTag(ev.Tag) || ev.Len() < int(ev.Tag) {
 		return calendar.Event{}, notes, &UnmappedError{Reason: "not a known event layout"}
 	}
 	r := reader{o: ev, notes: &notes}
 	area, _ := ev.U32(evAreaOne)
-	base := evFixed + int(area)
+	base := int(ev.Tag) + int(area)
 	if base > ev.Len() {
 		return calendar.Event{}, notes, &UnmappedError{Reason: "string area outside the object"}
 	}
@@ -130,7 +130,7 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 
 	var okAll = true
 	text := func(wordOff int) string {
-		s, present, ok := ev.PresentString(wordOff, base)
+		s, present, ok := ev.PresentString(eventOffset(ev, wordOff), base)
 		if !present {
 			return "" // absent: the length word is zero (see hxstore.Object.PresentString)
 		}
@@ -144,8 +144,8 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 		return calendar.Event{}, notes, &UnmappedError{Reason: "a string is out of range"}
 	}
 
-	if bare, ok := ev.StringUnaligned(evSubjectBare, base); ok && e.Cancelled.Is(true) {
-		raw, _ := ev.StringUnaligned(evSubject, base) // read above, so in range
+	if bare, ok := ev.StringUnaligned(eventOffset(ev, evSubjectBare), base); ok && e.Cancelled.Is(true) {
+		raw, _ := ev.StringUnaligned(eventOffset(ev, evSubject), base) // read above, so in range
 		notes.CancelledSubjectsDiffer, notes.CancelledSubjectsMatch = bare != raw, bare == raw
 	}
 
@@ -161,7 +161,7 @@ func MapEvent(account string, ev hxstore.Object, detail *hxstore.Object) (calend
 	}
 
 	// The zone name sits in area one, the other string base.
-	zone, zoneOK := ev.StringUnaligned(evZoneName, evFixed)
+	zone, zoneOK := ev.StringUnaligned(eventOffset(ev, evZoneName), int(ev.Tag))
 	if !zoneOK || zone == "" {
 		unknown = append(unknown, calendar.FieldTimeZone, calendar.FieldTimeZoneIANA)
 	} else {
@@ -263,22 +263,22 @@ func idText(raw []byte) (string, bool) {
 // word at +824 counts bytes, terminator included. ok is false when the id is empty or outside the object; an
 // id-less stub has length zero and is reported by IDLength instead.
 func eventID(o hxstore.Object) ([]byte, bool) {
-	off, _ := o.U32(evID)
-	n, _ := o.U32(evID + 4)
+	off, _ := o.U32(eventOffset(o, evID))
+	n, _ := o.U32(eventOffset(o, evID+4))
 	if n == 0 {
 		return nil, false
 	}
-	return o.Bytes(evFixed+int(off), int(n))
+	return o.Bytes(int(o.Tag)+int(off), int(n))
 }
 
 // HasID reports whether an event object carries an id (id-less stubs have none).
 func HasID(o hxstore.Object) bool {
-	n, ok := o.U32(evID + 4)
+	n, ok := o.U32(eventOffset(o, evID+4))
 	return ok && n != 0
 }
 
 func flagBit(o hxstore.Object, off int, mask byte) calendar.Tri {
-	b, ok := o.U8(off)
+	b, ok := o.U8(eventOffset(o, off))
 	if !ok {
 		return calendar.TriUnknown
 	}
@@ -286,7 +286,7 @@ func flagBit(o hxstore.Object, off int, mask byte) calendar.Tri {
 }
 
 func eventType(o hxstore.Object) (string, bool) {
-	v, _ := o.U32(evType)
+	v, _ := o.U32(eventOffset(o, evType))
 	switch v {
 	case 0:
 		return calendar.EventSingle, false
@@ -301,7 +301,7 @@ func eventType(o hxstore.Object) (string, bool) {
 }
 
 func showAs(o hxstore.Object) (string, bool) {
-	v, _ := o.U32(evShowAs)
+	v, _ := o.U32(eventOffset(o, evShowAs))
 	switch v {
 	case 0:
 		return "free", false
@@ -314,7 +314,7 @@ func showAs(o hxstore.Object) (string, bool) {
 }
 
 func response(o hxstore.Object) (string, bool) {
-	v, _ := o.U32(evResponse)
+	v, _ := o.U32(eventOffset(o, evResponse))
 	switch v {
 	case 0:
 		return "accepted", false
@@ -405,7 +405,7 @@ func attendees(o hxstore.Object, base int, r *reader) (list string, count int, c
 // each further string that starts there and is the target of the +980 or +772 word. A
 // maximum over all the string words was tried and overshot on real data, so it is not used.
 func listStart(o hxstore.Object, base int) (int, bool) {
-	w, _ := o.U32(evSubjectBare)
+	w, _ := o.U32(eventOffset(o, evSubjectBare))
 	pos, ok := stringEnd(o, base+int(w))
 	if !ok {
 		return 0, false
@@ -413,7 +413,7 @@ func listStart(o hxstore.Object, base int) (int, bool) {
 	for {
 		skipped := false
 		for _, extra := range []int{evExtraA, evExtraB} {
-			off, _ := o.U32(extra)
+			off, _ := o.U32(eventOffset(o, extra))
 			if base+int(off) != pos {
 				continue
 			}
