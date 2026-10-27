@@ -3,6 +3,7 @@ package teamsdesktop
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -39,14 +40,47 @@ func scrub(valueJSON []byte, depth int) ([]byte, int) {
 	if mayContain(out, []string{"eyJ"}) {
 		out = rules.JWT.ReplaceAllFunc(out, func([]byte) []byte { n++; return []byte(redacted) })
 	}
-	if mayContain(out, []string{"sig="}) {
-		out = rules.Sig.ReplaceAllFunc(out, func(m []byte) []byte {
+	out, queryRedactions := scrubQueries(out)
+	n += queryRedactions
+	return out, n
+}
+
+func scrubQueries(in []byte) ([]byte, int) {
+	if !mayContain(in, []string{"sig=", "tempauth="}) {
+		return in, 0
+	}
+	n := 0
+	for _, rule := range []*regexp.Regexp{rules.Sig, rules.Tempauth} {
+		in = rule.ReplaceAllFunc(in, func(m []byte) []byte {
+			i := rule.FindSubmatchIndex(m)[3]
+			if bytes.Equal(m[i:], []byte(redacted)) {
+				return m
+			}
 			n++
-			i := rules.Sig.FindSubmatchIndex(m)[3]
 			return append(append([]byte(nil), m[:i]...), redacted...)
 		})
 	}
-	return out, n
+	return in, n
+}
+
+// JSON escapes can hide URL delimiters or credential parameter names from a byte-pattern scan.
+func scrubEscapedQuery(lit []byte) ([]byte, int) {
+	if !bytes.ContainsRune(lit, '\\') {
+		return lit, 0
+	}
+	var text string
+	if json.Unmarshal(lit, &text) != nil {
+		return lit, 0
+	}
+	out, n := scrubQueries([]byte(text))
+	if n == 0 {
+		return lit, 0
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(string(out))
+	return bytes.TrimRight(buf.Bytes(), "\n"), n
 }
 
 // redactKeyed walks the JSON text once, tracking string literals. It replaces the value that
@@ -83,6 +117,10 @@ func redactKeyed(in []byte, depth int) ([]byte, int) {
 		lit := in[start:i]
 		if !secretKeyLiteral(lit) {
 			if inner, k := scrubStringified(lit, depth); k > 0 {
+				lit = inner
+				n += k
+			}
+			if inner, k := scrubEscapedQuery(lit); k > 0 {
 				lit = inner
 				n += k
 			}
