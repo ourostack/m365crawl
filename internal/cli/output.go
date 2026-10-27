@@ -16,11 +16,13 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // meta is embedded last in every read result so its keys come after the command's own.
 type meta struct {
-	ArchiveAgeSeconds *int64 `json:"archive_age_seconds"`
+	SourceHealth      *[]store.SourceHealth `json:"source_health,omitempty"`
+	ArchiveAgeSeconds *int64                `json:"archive_age_seconds"`
 	// Synced is present only when this read ran the implicit sync first (--max-age): how long the
 	// sync took and how it ended. Absent when the archive was fresh enough to read as it was.
 	Synced    *syncedInfo `json:"synced,omitempty"`
@@ -56,7 +58,15 @@ func (m *meta) addNotice(s string) { m.Notices = append(m.Notices, s) }
 
 func (m *meta) setNeedsSync(hint string) { m.NeedsSync, m.Hint = true, hint }
 
+func (m *meta) setSourceHealth(health []store.SourceHealth) {
+	if m.NeedsSync && len(health) == 0 {
+		return
+	}
+	m.SourceHealth = &health
+}
+
 type result interface {
+	setSourceHealth([]store.SourceHealth)
 	setMeta(*int64, *syncError)
 	setSynced(*syncedInfo)
 	setNeedsSync(hint string)

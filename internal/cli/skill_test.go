@@ -11,6 +11,8 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
 // The embedded guide is the repository's SKILL.md, printed raw in every output mode.
@@ -98,7 +100,7 @@ func shellWords(s string) []string {
 // skillKeys are the JSON keys and error codes the guide may name.
 func skillKeys() []string {
 	keys := []string{errs.CodeMailUnsupportedPlatform, errs.CodeSigninRequired}
-	for _, typ := range []reflect.Type{reflect.TypeFor[draftsResult](), reflect.TypeFor[draftItem](), reflect.TypeFor[listResult](), reflect.TypeFor[meta](), reflect.TypeFor[messageItem](), reflect.TypeFor[mailListItem](),
+	for _, typ := range []reflect.Type{reflect.TypeFor[store.SourceHealth](), reflect.TypeFor[syncer.Report](), reflect.TypeFor[draftsResult](), reflect.TypeFor[draftItem](), reflect.TypeFor[listResult](), reflect.TypeFor[meta](), reflect.TypeFor[messageItem](), reflect.TypeFor[mailListItem](),
 		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource](),
 		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage](),
 		reflect.TypeFor[noteCoverage](), reflect.TypeFor[noteItem](), reflect.TypeFor[noteSourceItem](),

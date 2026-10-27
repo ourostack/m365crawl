@@ -769,6 +769,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		ev := eventOf(d, rt.archiveRef())
+		rt.healthAccount = d.Principal
 		related, err := st.EventMail(rt.ctx, d.Event, store.EventMailLimit)
 		if err != nil {
 			return nil, err

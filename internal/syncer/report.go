@@ -59,6 +59,7 @@ type Report struct {
 	ApplicationBackfill *store.ApplicationBackfillReport `json:"application_backfill,omitempty"`
 	StartedAt           time.Time                        `json:"started_at"`
 	FinishedAt          time.Time                        `json:"finished_at"`
+	FailedSourceHealth  []store.SourceHealth             `json:"failed_source_health"`
 }
 
 // SourceReport is one Teams origin's outcome.

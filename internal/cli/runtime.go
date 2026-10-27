@@ -52,6 +52,9 @@ type runtime struct {
 	noteCoverage     *noteCoverage
 	documentCoverage *noteCoverage
 	loopCoverage     *loopCoverage
+	healthSources    []string // resolved search families, independent of returned hits
+	healthAccount    string   // mail ID account or calendar event principal
+	healthUnknown    bool     // this implicit refresh could not persist or derive its source health
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
@@ -169,16 +172,14 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	if rt.synced.Status == "" {
 		rt.synced.Status = syncer.StatusFailed
 	}
-	if rt.ctx.Err() != nil {
-		if errors.Is(err, syncer.ErrOWASnapshotRetained) {
-			return nil, errors.Join(rt.ctx.Err(), syncer.ErrOWASnapshotRetained)
-		}
-		return nil, rt.ctx.Err()
+	if rt.ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return nil, errors.Join(rt.ctx.Err(), err)
 	}
 	var coded *errs.Coded
 	if !errors.As(err, &coded) {
 		coded = errs.Internal(err)
 	}
+	rt.healthUnknown = coded.Code == errs.CodeDBError && rep.FailedSourceHealth == nil
 	coded = withSnapshotRetention(err, coded)
 	if coded.Exit == errs.ExitUsage {
 		return nil, coded // the link the operator asked for was refused: that is theirs to fix, not a warning
@@ -297,6 +298,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	res.setSynced(rt.synced)
 	if age == nil {
 		res.setNeedsSync(syncHint)
+	}
+	if err := rt.noteSourceHealth(st, label, res, age == nil); err != nil {
+		return asCoded(err)
 	}
 	return rt.write(label, res)
 }

@@ -1,10 +1,8 @@
 package store
 
-// mailSchemaDDL is the mail archive (schema version 8). Times are UTC text in timeLayout, like the
-// rest of the archive. A message is identified by (account, detail_key); the unique key lets a
-// re-keyed row (see CommitMail) keep its rowid, which mail_fts, mail_recipients and mail_attachments
-// all use. subject_norm compares without regard to ASCII case, so the thread fallback and its
-// index need no lower().
+// mailSchemaDDL is the mail archive. Schema20 adds internal modified_at clocks to messages and folders; message clocks include child writes and marks, independently of state_seen_at.
+//
+// Times are UTC text in timeLayout, like the rest of the archive. A message is identified by (account, detail_key); the unique key lets a re-keyed row (see CommitMail) keep its rowid, which mail_fts, mail_recipients and mail_attachments all use. subject_norm compares without regard to ASCII case, so the thread fallback and its index need no lower().
 //
 // body_state is what the read found: inline, file (read), pending (a body file not read yet),
 // missing, unreadable or none. mail_absent holds the first trusted read that missed a message; a
@@ -16,6 +14,7 @@ create table if not exists mail_folders(
   parent_key integer not null default 0,
   name text not null default '',
   kind text not null default 'other',
+  modified_at text,
   primary key(account, folder_key)
 );
 create table if not exists mail_messages(
@@ -46,6 +45,7 @@ create table if not exists mail_messages(
   body_text_version integer not null default 0,
   first_seen_at text not null,
   state_seen_at text not null,
+  modified_at text,
   gone_at text,
   evicted_at text,
   unique(account, detail_key)

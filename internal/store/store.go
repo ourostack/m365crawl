@@ -136,7 +136,7 @@ var chmodFile = os.Chmod
 // fills it. Version 14 adds the document variant, registry_json and opened_at columns. Version 15
 // adds the document usage_json and native_key columns.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest int
+	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts, mailModified, folderModified int
 	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
@@ -154,11 +154,28 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('document_capture_metadata') where name='variant'),
   (select count(*) from pragma_table_info('document_observations') where name='usage_json'),
   (select count(*) from pragma_table_info('document_observations') where name='native_key'),
-  (select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
-		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture); err != nil {
+  (select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture'),
+  (select count(*) from pragma_table_info('sync_runs') where name='error_code'),
+  (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
+  (select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
+  (select count(*) from pragma_table_info('mail_folders') where name='modified_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified); err != nil {
 		return err
 	}
 	var stmts []string
+	if errorCode == 0 {
+		stmts = append(stmts, `alter table sync_runs add column error_code text not null default ''`)
+	}
+	if sourceAccounts == 0 {
+		stmts = append(stmts, `alter table sync_runs add column source_accounts_json text`)
+	}
+	if mailModified == 0 {
+		stmts = append(stmts, `alter table mail_messages add column modified_at text`,
+			`update mail_messages set modified_at=max(first_seen_at,state_seen_at,coalesce(gone_at,first_seen_at),coalesce(evicted_at,first_seen_at))`)
+	}
+	if folderModified == 0 {
+		stmts = append(stmts, `alter table mail_folders add column modified_at text`)
+	}
 	if messageDigest == 0 {
 		stmts = append(stmts, `alter table messages add column raw_digest blob`)
 	}
@@ -380,11 +397,14 @@ type Run struct {
 	StartedAt, FinishedAt time.Time
 	Source, Fingerprint   string
 	Status                string // ok, ok_with_omissions, unchanged, partial, failed
+	ErrorCode             string // per-source failure/refusal, empty on successful reads
 	Counts                any    // marshaled as counts_json
 	Omissions             map[string]int
 	// Accounts marks a run-level row (Source ""): the accounts the whole run covered, as
 	// "<tenantId>/<userId>", or "*" for every account. Per-source rows leave it nil.
 	Accounts []string
+	// SourceAccounts is source-local identity evidence, never a run-level freshness marker.
+	SourceAccounts []string
 }
 
 const successStatuses = `('ok','ok_with_omissions','unchanged')`
@@ -410,8 +430,8 @@ func recordRun(ctx context.Context, db execer, r Run) error {
 		b, _ := json.Marshal(r.Accounts)
 		accounts = string(b)
 	}
-	_, err := db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json, accounts_json) values(?,?,?,?,?,?,?,?)`,
-		fmtTime(r.StartedAt), fmtTime(r.FinishedAt), r.Source, r.Fingerprint, r.Status, counts, omissions, accounts)
+	_, err := db.ExecContext(ctx, `insert into sync_runs(started_at, finished_at, source, fingerprint, status, counts_json, omissions_json, accounts_json, error_code, source_accounts_json) values(?,?,?,?,?,?,?,?,?,?)`,
+		fmtTime(r.StartedAt), fmtTime(r.FinishedAt), r.Source, r.Fingerprint, r.Status, counts, omissions, accounts, r.ErrorCode, jsonOrNil(r.SourceAccounts))
 	return err
 }
 

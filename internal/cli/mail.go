@@ -607,6 +607,7 @@ func mailState(m store.MailRow) string {
 }
 
 func (rt *runtime) readMail(label, account string, fn func(*store.Store) (result, error)) error {
+	rt.healthAccount = account
 	return rt.read(label, func(st *store.Store) (result, error) {
 		res, err := fn(st)
 		if err != nil {

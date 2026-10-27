@@ -125,6 +125,10 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		return Report{}, nil, errs.DBError(err)
 	}
 	rep, changes, err = r.run(ctx, started)
+	if healthErr := r.recordSourceHealth(context.WithoutCancel(ctx), &rep, err); healthErr != nil {
+		rep.FailedSourceHealth = nil // The persistence boundary did not establish checked health.
+		return rep, changes, errs.DBError(errors.Join(err, healthErr, record(StatusFailed)))
+	}
 	if rep.Status == "" { // failed before any source ran
 		_ = record(StatusFailed)
 		return rep, changes, err
@@ -222,7 +226,6 @@ func (r *runner) run(ctx context.Context, started time.Time) (Report, []Change, 
 				coded := codedOf(err)
 				failures = append(failures, sourceFailure{key, err, coded})
 				rep.Sources = append(rep.Sources, SourceReport{Source: key, Status: StatusFailed, Error: &SourceError{Code: coded.Code, Message: bodyMessage(coded), Fix: coded.Fix}})
-				_ = r.st.RecordRun(context.WithoutCancel(ctx), store.Run{StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(), Source: key, Status: StatusFailed})
 				r.progress("%s: failed (%s)", key, coded.Code)
 				return
 			}
@@ -545,7 +548,7 @@ func (r *runner) apply(ctx context.Context, source, snap string, begun time.Time
 	if len(omissions) == 0 {
 		omissions = nil
 	}
-	if err := sess.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: source, Fingerprint: fp, Status: status, Counts: w.counts, Omissions: omissions}); err != nil {
+	if err := sess.RecordRun(ctx, store.Run{StartedAt: begun, FinishedAt: time.Now().UTC(), Source: source, Fingerprint: fp, Status: status, Counts: w.counts, Omissions: omissions, SourceAccounts: w.accounts()}); err != nil {
 		return nil, nil, 0, errs.DBError(err)
 	}
 	if err := sess.Commit(); err != nil {
