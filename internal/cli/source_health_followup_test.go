@@ -14,7 +14,7 @@ import (
 
 func TestReReviewB7ImplicitPersistenceFailureDoesNotClaimCheckedEmpty(t *testing.T) {
 	e := newEnv(t)
-	e.sync()
+	e.sourceHealthArchive()
 	old := runSync
 	runSync = func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
 		return syncer.Report{
@@ -65,7 +65,7 @@ func TestSourceHealthImplicitUnknownKeepsRecordedFailureAndNormalWarning(t *test
 	for _, known := range []bool{false, true} {
 		t.Run(map[bool]string{false: "established empty", true: "unestablished with recorded failure"}[known], func(t *testing.T) {
 			e := newEnv(t)
-			e.sync()
+			e.sourceHealthArchive()
 			if known {
 				e.exec(`insert into sync_runs(started_at,source,status,error_code) values('2026-09-01','synthetic|teams','failed','store_missing')`)
 			}
@@ -104,7 +104,7 @@ func TestSourceHealthCancellationDiagnosticAtImplicitAndTextBoundaries(t *testin
 				t.Run(format+map[bool]string{false: "/sync", true: "/implicit"}[implicit]+map[bool]string{false: "/wrapped-only", true: "/cancel-context"}[cancelContext], func(t *testing.T) {
 					e := newEnv(t)
 					if implicit {
-						e.sync()
+						e.sourceHealthArchive()
 					}
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
