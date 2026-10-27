@@ -42,7 +42,10 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 21 adds the optional Scout session history (scout_schema.go): registered app folders,
 // their scans, per-file listing state and immutable observations with messages and their FTS
 // index. The tables are additive and stay empty until `scout sync` reads a folder.
-const SchemaVersion = 21
+// Version 22 adds the optional WorkIQ source state (workiq_schema.go): opt-in settings, source
+// identities, progress, pages, censuses, gaps and receipts. It is additive and stays empty until
+// `workiq enable` and an explicit WorkIQ command.
+const SchemaVersion = 22
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -217,4 +220,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-var schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL + engageContentSchemaDDL + attendeeSchemaDDL() + scoutSchemaDDL
+var schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL + engageContentSchemaDDL + attendeeSchemaDDL() + scoutSchemaDDL + workiqSchemaDDL
