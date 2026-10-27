@@ -23,7 +23,7 @@ func TestSourceHealthNeedsSyncDoesNotClaimHealthy(t *testing.T) {
 
 func TestSourceHealthReflectsImplicitRefresh(t *testing.T) {
 	e := newEnv(t)
-	e.sync()
+	e.sourceHealthArchive()
 	old := runSync
 	calls := 0
 	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {

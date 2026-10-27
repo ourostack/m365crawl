@@ -9,6 +9,27 @@ import (
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
+// sourceHealthArchive starts these post-sync tests with real completed-run freshness, without capturing a cache they never inspect.
+func (e *env) sourceHealthArchive() {
+	e.t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, e.db)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			e.t.Fatal(err)
+		}
+	}()
+	if err := st.RecordRun(ctx, store.Run{StartedAt: mailT0, FinishedAt: mailT0, Status: "ok", Accounts: []string{"*"}}); err != nil {
+		e.t.Fatal(err)
+	}
+	if last, err := st.LastSuccess(ctx); err != nil || !last.Equal(mailT0) {
+		e.t.Fatalf("post-sync fixture has no complete-success marker: %v %v", last, err)
+	}
+}
+
 func TestSourceHealthCommandScopeAndProjection(t *testing.T) {
 	e := mailEnv(t)
 	t.Setenv("HOME", t.TempDir())
@@ -94,7 +115,7 @@ func TestSourceHealthEmptyAndDisabled(t *testing.T) {
 	if doc := mailJSON(t, e, "messages"); doc["source_health"] != nil {
 		t.Fatal("never-synced result claimed a health check")
 	}
-	e.sync()
+	e.sourceHealthArchive()
 	if doc := mailJSON(t, e, "messages"); len(doc["source_health"].([]any)) != 0 {
 		t.Fatal("healthy source did not give []")
 	}
