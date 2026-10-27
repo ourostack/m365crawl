@@ -102,7 +102,7 @@ func mayContain[T ~string | ~[]byte](s T, needles []string) bool {
 // redactNeedles are the lower-case texts one of which any redaction needs. "eyJ" is kept in its
 // own case by foldHas.
 func redactNeedles() []string {
-	out := []string{"eyJ", "bearer", "sig="}
+	out := []string{"eyJ", "bearer", "sig=", "tempauth="}
 	for k := range rules.SecretKeys {
 		out = append(out, k)
 	}
