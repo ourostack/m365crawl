@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -71,6 +72,7 @@ func SourceFailureState(status, code string, succeeded bool) string {
 type sourceAttempt struct {
 	status, code     string
 	lastOK           time.Time
+	accountObserved  bool
 	goodFingerprints map[string]bool
 	byAccount        map[string]*sourceAttempt
 }
@@ -80,6 +82,10 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 		a.byAccount = map[string]*sourceAttempt{}
 	}
 	if len(accounts) > 0 {
+		if prior := a.byAccount[""]; prior != nil {
+			// Identity resolution must retain successful aggregate history, not its unknown failure.
+			a.lastOK, a.goodFingerprints = prior.lastOK, prior.goodFingerprints
+		}
 		delete(a.byAccount, "") // a known identity supersedes the pre-identity attempt
 	} else {
 		for account := range a.byAccount {
@@ -92,7 +98,10 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 	for _, account := range accounts {
 		state := a.byAccount[account]
 		if state == nil {
-			state = &sourceAttempt{goodFingerprints: map[string]bool{}}
+			state = &sourceAttempt{lastOK: a.lastOK, goodFingerprints: map[string]bool{}}
+			for fp := range a.goodFingerprints {
+				state.goodFingerprints[fp] = true
+			}
 			a.byAccount[account] = state
 		}
 		if status == "skipped_interval" || status == "unchanged" && (fp == "" || !state.goodFingerprints[fp]) {
@@ -101,6 +110,9 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 		state.status, state.code = status, code
 		if status == "ok" || status == "ok_with_omissions" || status == "unchanged" {
 			state.lastOK = at
+			if status != "unchanged" && account != "" {
+				state.accountObserved = true
+			}
 			if fp != "" {
 				state.goodFingerprints[fp] = true
 			}
@@ -111,34 +123,47 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 // SourceHealth derives health from sync outcomes; retained legacy refusals supply missing error information.
 func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 	attempts := map[string]*sourceAttempt{}
-	var columns int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from pragma_table_info('sync_runs') where name='error_code'`).Scan(&columns); err != nil {
+	var codes, accounts, schema int
+	var hasRecords bool
+	if err := s.db.QueryRowContext(ctx, `select
+		(select count(*) from pragma_table_info('sync_runs') where name='error_code'),
+		(select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
+		exists(select 1 from sqlite_master where name='records'),
+		coalesce((select max(version) from schema_migrations),1)`).Scan(&codes, &accounts, &hasRecords, &schema); err != nil {
 		return nil, err
 	}
-	if columns > 0 {
-		err := s.each(ctx, `select source,status,error_code,fingerprint,finished_at,source_accounts_json from sync_runs where source<>'' order by id`, func(rs *sql.Rows) error {
-			var key, status, code, fp string
-			var at, accounts sql.NullString
-			if err := rs.Scan(&key, &status, &code, &fp, &at, &accounts); err != nil {
+	if schema >= 3 && !hasRecords {
+		return nil, errors.New("archive is missing records")
+	}
+	codeColumn, accountColumn := "''", "null"
+	if codes > 0 {
+		codeColumn = "error_code"
+	}
+	if accounts > 0 {
+		accountColumn = "source_accounts_json"
+	}
+	err := s.each(ctx, `select source,status,`+codeColumn+`,fingerprint,finished_at,`+accountColumn+` from sync_runs where source<>'' order by id`, func(rs *sql.Rows) error {
+		var key, status, code, fp string
+		var at, accounts sql.NullString
+		if err := rs.Scan(&key, &status, &code, &fp, &at, &accounts); err != nil {
+			return err
+		}
+		a := attempts[key]
+		if a == nil {
+			a = &sourceAttempt{}
+			attempts[key] = a
+		}
+		var scope []string
+		if accounts.Valid {
+			if err := json.Unmarshal([]byte(accounts.String), &scope); err != nil {
 				return err
 			}
-			a := attempts[key]
-			if a == nil {
-				a = &sourceAttempt{}
-				attempts[key] = a
-			}
-			var scope []string
-			if accounts.Valid {
-				if err := json.Unmarshal([]byte(accounts.String), &scope); err != nil {
-					return err
-				}
-			}
-			a.apply(status, code, fp, parseTime(at), scope)
-			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
+		a.apply(status, code, fp, parseTime(at), scope)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if err := s.legacySourceAttempts(ctx, attempts); err != nil {
 		return nil, err
@@ -171,15 +196,20 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 			}
 			if family == "teams" && scopeAccount == "" {
 				accounts = nil
-				if err := s.each(ctx, `select distinct tenant_id||'/'||user_id from records where source=? and tenant_id<>'' and user_id<>''
-					union select tenant_id||'/'||user_id from accounts where ?='teams' order by 1`, func(rs *sql.Rows) error {
+				query := `select tenant_id||'/'||user_id from accounts where ?='teams'`
+				args := []any{key}
+				if hasRecords {
+					query += ` union select distinct tenant_id||'/'||user_id from records where source=? and tenant_id<>'' and user_id<>''`
+					args = append(args, key)
+				}
+				if err := s.each(ctx, query+` order by 1`, func(rs *sql.Rows) error {
 					var account string
 					if err := rs.Scan(&account); err != nil {
 						return err
 					}
 					accounts = append(accounts, account)
 					return nil
-				}, key, key); err != nil {
+				}, args...); err != nil {
 					return nil, err
 				}
 				if len(accounts) == 0 {
@@ -191,7 +221,7 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 				if account != "" {
 					h.AccountID = &account
 				}
-				if family == "teams" && scopeAccount != "" && a.lastOK.IsZero() {
+				if family == "teams" && scopeAccount != "" && !a.accountObserved {
 					var known bool
 					if err := s.db.QueryRowContext(ctx, `select exists(select 1 from accounts where tenant_id||'/'||user_id=?)`, account).Scan(&known); err != nil {
 						return nil, err
@@ -273,22 +303,62 @@ func (s *Store) sourceNewestItem(ctx context.Context, family, account string) (*
 		return nil, nil
 	}
 
+	var calendarTable, mailTable, recordsTable bool
+	var mailModified, folderModified, schema int
+	if err := s.db.QueryRowContext(ctx, `select
+		exists(select 1 from sqlite_master where name='calendar_source_events'),
+		exists(select 1 from sqlite_master where name='mail_messages'),
+		exists(select 1 from sqlite_master where name='records'),
+		(select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
+		(select count(*) from pragma_table_info('mail_folders') where name='modified_at'),
+		coalesce((select max(version) from schema_migrations),1)`).Scan(&calendarTable, &mailTable, &recordsTable, &mailModified, &folderModified, &schema); err != nil {
+		return nil, err
+	}
+	if family == "outlook_mail" && schema >= 6 && !mailTable ||
+		family == "outlook_calendar" && schema >= 5 && !calendarTable ||
+		family == "teams" && (schema >= 3 && !recordsTable || schema >= 5 && !calendarTable) {
+		return nil, errors.New("archive is missing a source timestamp table")
+	}
 	var newest sql.NullString
-	var err error
+	var query string
+	args := []any{account}
 	switch family {
 	case "outlook_mail":
-		err = s.db.QueryRowContext(ctx, `select max(state_seen_at) from mail_messages where account=?`, account).Scan(&newest)
+		if !mailTable {
+			return nil, nil
+		}
+		clock := `max(first_seen_at,state_seen_at,coalesce(gone_at,first_seen_at),coalesce(evicted_at,first_seen_at))`
+		if mailModified > 0 {
+			clock = `max(coalesce(modified_at,first_seen_at),` + clock + `)`
+		}
+		query = `select max(at) from (select ` + clock + ` at from mail_messages where account=?`
+		if folderModified > 0 {
+			query += ` union all select modified_at from mail_folders where account=?`
+			args = append(args, account)
+		}
+		query += `)`
 	case "outlook_calendar":
-		err = s.db.QueryRowContext(ctx, `select max(max(seen_at,coalesce(removed_at,seen_at))) from calendar_source_events where account_id=?`, account).Scan(&newest)
+		if !calendarTable {
+			return nil, nil
+		}
+		query = `select max(max(seen_at,coalesce(removed_at,seen_at))) from calendar_source_events where account_id=?`
 	default:
-		err = s.db.QueryRowContext(ctx, `select max(at) from (
+		query = `select max(at) from (
 			select updated_at at from messages where tenant_id||'/'||user_id=?
 			union all select updated_at from conversations where tenant_id||'/'||user_id=?
-			union all select updated_at from activity where tenant_id||'/'||user_id=?
-			union all select max(updated_at,coalesce(removed_at,updated_at)) from records where tenant_id||'/'||user_id=?
-			union all select max(seen_at,coalesce(removed_at,seen_at)) from calendar_source_events where account_id=?
-		)`, account, account, account, account, account).Scan(&newest)
+			union all select updated_at from activity where tenant_id||'/'||user_id=?`
+		args = append(args, account, account)
+		if recordsTable {
+			query += ` union all select max(updated_at,coalesce(removed_at,updated_at)) from records where tenant_id||'/'||user_id=?`
+			args = append(args, account)
+		}
+		if calendarTable {
+			query += ` union all select max(seen_at,coalesce(removed_at,seen_at)) from calendar_source_events where account_id=?`
+			args = append(args, account)
+		}
+		query += `)`
 	}
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&newest)
 	return healthTime(parseTime(newest)), err
 }
 

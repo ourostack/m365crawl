@@ -136,7 +136,7 @@ var chmodFile = os.Chmod
 // fills it. Version 14 adds the document variant, registry_json and opened_at columns. Version 15
 // adds the document usage_json and native_key columns.
 func (s *Store) migrate(ctx context.Context) error {
-	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts int
+	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts, mailModified, folderModified int
 	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
@@ -156,8 +156,10 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('document_observations') where name='native_key'),
   (select count(*) from pragma_table_info('document_capture_metadata') where name='members_capture'),
   (select count(*) from pragma_table_info('sync_runs') where name='error_code'),
-  (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
-		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts); err != nil {
+  (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
+  (select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
+  (select count(*) from pragma_table_info('mail_folders') where name='modified_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified); err != nil {
 		return err
 	}
 	var stmts []string
@@ -166,6 +168,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if sourceAccounts == 0 {
 		stmts = append(stmts, `alter table sync_runs add column source_accounts_json text`)
+	}
+	if mailModified == 0 {
+		stmts = append(stmts, `alter table mail_messages add column modified_at text`,
+			`update mail_messages set modified_at=max(first_seen_at,state_seen_at,coalesce(gone_at,first_seen_at),coalesce(evicted_at,first_seen_at))`)
+	}
+	if folderModified == 0 {
+		stmts = append(stmts, `alter table mail_folders add column modified_at text`)
 	}
 	if messageDigest == 0 {
 		stmts = append(stmts, `alter table messages add column raw_digest blob`)

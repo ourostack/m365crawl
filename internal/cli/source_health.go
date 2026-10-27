@@ -58,6 +58,8 @@ func (rt *runtime) sourceHealthInScope(st *store.Store, label string, h store.So
 	switch {
 	case label == "sql":
 		return true, nil // SQL has no automatic account predicate.
+	case label == "calendar event" && h.Source == "outlook_mail":
+		return true, nil // EventMail searches every mailbox, independently of the event's principal.
 	case h.AccountID == nil:
 		return true, nil // No observed account can prove this source irrelevant.
 	case strings.HasPrefix(label, "mail "):

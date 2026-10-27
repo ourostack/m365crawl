@@ -266,9 +266,9 @@ func upsertMailFolders(ctx context.Context, tx *sql.Tx, b MailBatch) error {
 		if x, had := held[f.Key]; had && x == (row{f.Parent, f.Name, f.Kind}) {
 			continue // the folder is stored as it is: an unchanged read writes nothing
 		}
-		if _, err := tx.ExecContext(ctx, `insert into mail_folders(account, folder_key, parent_key, name, kind) values(?,?,?,?,?)
-on conflict(account, folder_key) do update set parent_key=excluded.parent_key, name=excluded.name, kind=excluded.kind`,
-			b.Account, f.Key, f.Parent, f.Name, f.Kind); err != nil {
+		if _, err := tx.ExecContext(ctx, `insert into mail_folders(account, folder_key, parent_key, name, kind, modified_at) values(?,?,?,?,?,?)
+on conflict(account, folder_key) do update set parent_key=excluded.parent_key, name=excluded.name, kind=excluded.kind, modified_at=excluded.modified_at`,
+			b.Account, f.Key, f.Parent, f.Name, f.Kind, fmtTime(b.ReadAt)); err != nil {
 			return err
 		}
 	}
@@ -384,10 +384,10 @@ func readFlag(m outlookmail.Message) any {
 func insertMail(ctx context.Context, tx *sql.Tx, account string, m outlookmail.Message, d mailDerived, at string) error {
 	d.body(m)
 	r, err := tx.ExecContext(ctx, `insert into mail_messages(account, detail_key, internet_message_id, conversation_id, folder_key, to_me, subject, subject_norm, sender_name, sender_address, preview,
-  in_reply_to, received_at, sent_at, class, importance, ical_uid, is_read, read_state, flag, has_attachments, body_state, body_html_gz, body_text, body_text_version, first_seen_at, state_seen_at)
-values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  in_reply_to, received_at, sent_at, class, importance, ical_uid, is_read, read_state, flag, has_attachments, body_state, body_html_gz, body_text, body_text_version, first_seen_at, state_seen_at, modified_at)
+values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		account, m.DetailKey, m.MessageID, m.ConversationID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
-		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion, at, at)
+		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion, at, at, at)
 	if err != nil {
 		return err
 	}
@@ -406,10 +406,10 @@ func replaceMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmai
 	d.body(m)
 	if _, err := tx.ExecContext(ctx, `update mail_messages set internet_message_id=?, conversation_id=?, folder_key=?, to_me=?, subject=?, subject_norm=?, sender_name=?, sender_address=?, preview=?,
   in_reply_to=?, received_at=?, sent_at=?, class=?, importance=?, ical_uid=?, is_read=?, read_state=?, flag=?, has_attachments=?, body_state=?, body_html_gz=?, body_text=?, body_text_version=?,
-  state_seen_at=?, gone_at=null, evicted_at=null where rowid=?`,
+  state_seen_at=?, modified_at=?, gone_at=null, evicted_at=null where rowid=?`,
 		m.MessageID, m.ConversationID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
 		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion,
-		at, ex.rowid); err != nil {
+		at, at, ex.rowid); err != nil {
 		return err
 	}
 	for _, q := range []string{`delete from mail_recipients where message_rowid=?`, `delete from mail_attachments where message_rowid=?`} {
@@ -530,6 +530,9 @@ func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail
 	}
 	if err := insertNewAttachments(ctx, tx, ex, m, &changed); err != nil {
 		return false, err
+	}
+	if changed {
+		set("modified_at", at)
 	}
 	if len(sets) == 0 {
 		return changed, nil
@@ -682,7 +685,7 @@ func judgeMissing(ctx context.Context, tx *sql.Tx, b MailBatch, at string, byKey
 		if col == "" {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `update mail_messages set `+col+`=? where rowid=?`, at, ex.rowid); err != nil { //nolint:gosec // G202: col is one of two column names
+		if _, err := tx.ExecContext(ctx, `update mail_messages set `+col+`=?, modified_at=? where rowid=?`, at, at, ex.rowid); err != nil { //nolint:gosec // G202: col is one of two column names
 			return res, err
 		}
 		if col == "gone_at" {

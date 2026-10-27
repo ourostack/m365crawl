@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/outlookmail"
@@ -296,7 +297,7 @@ const (
 	mailTextKey         = "mail_text_version"
 	mailRederiveBatch   = 100
 	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>? order by rowid limit ?`
-	updateMailRederived = `update mail_messages set subject_norm=?, body_text=?, body_text_version=? where rowid=?`
+	updateMailRederived = `update mail_messages set subject_norm=?, body_text=?, body_text_version=?, modified_at=? where rowid=?`
 )
 
 // rederiveMail recomputes subject_norm, body_text and the full-text entry of every mail message
@@ -350,7 +351,7 @@ func rederiveMail(ctx context.Context, tx *sql.Tx) (int, error) {
 			if html, ok := inflateMailHTML(x.gz); ok {
 				text = outlookmail.HTMLText(html)
 			}
-			if _, err := tx.ExecContext(ctx, updateMailRederived, norm, text, MailTextVersion, x.rowid); err != nil {
+			if _, err := tx.ExecContext(ctx, updateMailRederived, norm, text, MailTextVersion, fmtTime(time.Now()), x.rowid); err != nil {
 				return 0, err
 			}
 			if text != x.text {

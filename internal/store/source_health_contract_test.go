@@ -82,7 +82,7 @@ func TestSourceHealthReadFailuresSurface(t *testing.T) {
 	sweepReadFaults(t, seedSourceHealthEvidence, func(ctx context.Context, s *Store) error {
 		_, err := s.SourceHealth(ctx)
 		return err
-	}, 6, 8)
+	}, 7, 10)
 }
 
 func TestSourceHealthPrincipalUsesActiveLink(t *testing.T) {
@@ -105,7 +105,7 @@ func TestSourceHealthKnownDiscoveryReadFailuresSurface(t *testing.T) {
 	}, func(ctx context.Context, s *Store) error {
 		_, err := s.SourceHealth(ctx)
 		return err
-	}, 6, 7)
+	}, 6, 8)
 }
 
 func TestSourceHealthScopedUnknownReadFailuresSurface(t *testing.T) {
@@ -118,5 +118,5 @@ func TestSourceHealthScopedUnknownReadFailuresSurface(t *testing.T) {
 	}, func(ctx context.Context, s *Store) error {
 		_, err := s.SourceHealth(ctx)
 		return err
-	}, 5)
+	}, 6)
 }

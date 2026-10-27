@@ -26,7 +26,8 @@ func TestSourceHealthCalendarPrincipalAndUnknownAccountScope(t *testing.T) {
 	}{
 		{"calendar", "", "", &main, "outlook_calendar", true},
 		{"calendar event", teams, "", &main, "outlook_calendar", true},
-		{"calendar event", teams, "", &other, "outlook_mail", false},
+		{"calendar event", teams, "", &other, "outlook_mail", true},
+		{"calendar event", teams, "", &other, "outlook_calendar", false},
 		{"calendar event", teams, "", nil, "teams", true},
 		{"calendar event", teams, "", nil, "outlook_calendar", true},
 		{"mail show", main, "", nil, "outlook_mail", true},

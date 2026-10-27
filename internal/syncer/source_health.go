@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,8 +79,8 @@ func (r *runner) recordSourceHealth(ctx context.Context, rep *Report, runErr err
 					record(sr.Source, sr.Status, "", fp, sr.Accounts)
 				}
 			}
-			rep.Sources = append(rep.Sources, barriers...)
 		}
+		rep.Sources = append(rep.Sources, barriers...)
 		// Cancellation leaves later sources untried; absence from the report then proves nothing.
 		prior, err := r.st.SourceHealth(ctx)
 		if err != nil {
@@ -100,15 +101,24 @@ func (r *runner) recordSourceHealth(ctx context.Context, rep *Report, runErr err
 	var err error
 	rep.FailedSourceHealth, err = r.st.SourceHealth(ctx)
 	if err == nil && rep.Status != "" {
-		current := map[string]bool{}
+		current := map[string][]string{}
 		for _, sr := range rep.Sources {
-			current[sr.Source] = true
+			scope := sr.Accounts
+			if family, _ := store.SourceFamily(sr.Source); family == "teams" && r.o.Account != nil {
+				scope = r.o.AccountScope()
+			}
+			current[sr.Source] = scope
 		}
 		active := []store.SourceHealth{}
 		for _, h := range rep.FailedSourceHealth {
-			if current[h.SourceKey] {
-				active = append(active, h)
+			scope, present := current[h.SourceKey]
+			if !present {
+				continue
 			}
+			if h.Source == "teams" && h.AccountID != nil && len(scope) > 0 && !slices.Contains(scope, *h.AccountID) {
+				continue
+			}
+			active = append(active, h)
 		}
 		rep.FailedSourceHealth = active
 	}

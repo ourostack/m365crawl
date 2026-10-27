@@ -125,9 +125,9 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		return Report{}, nil, errs.DBError(err)
 	}
 	rep, changes, err = r.run(ctx, started)
-	if healthErr := r.recordSourceHealth(context.WithoutCancel(ctx), &rep, err); healthErr != nil && err == nil {
-		_ = record(StatusFailed)
-		return rep, changes, errs.DBError(healthErr)
+	if healthErr := r.recordSourceHealth(context.WithoutCancel(ctx), &rep, err); healthErr != nil {
+		rep.FailedSourceHealth = nil // The persistence boundary did not establish checked health.
+		return rep, changes, errs.DBError(errors.Join(err, healthErr, record(StatusFailed)))
 	}
 	if rep.Status == "" { // failed before any source ran
 		_ = record(StatusFailed)
