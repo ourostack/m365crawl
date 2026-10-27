@@ -411,7 +411,19 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 		return MailRow{}, err
 	}
 	if len(rows) == 0 {
-		return MailRow{}, ErrMailNotFound
+		rowid, err := s.mailPublicAlias(ctx, account, detailKey)
+		if err != nil {
+			return MailRow{}, err
+		}
+		if rowid != 0 {
+			rows, err = s.mailRows(ctx, true, ` from mail_messages m`+mailJoin+` where m.account=? and m.rowid=?`, []any{account, rowid})
+			if err != nil {
+				return MailRow{}, err
+			}
+		}
+		if len(rows) == 0 {
+			return MailRow{}, ErrMailNotFound
+		}
 	}
 	return rows[0], nil
 }

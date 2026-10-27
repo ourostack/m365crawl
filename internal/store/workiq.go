@@ -40,11 +40,11 @@ func (s *Store) hasWorkIQ(ctx context.Context) (bool, error) {
 	}
 	var tables int
 	if err := s.db.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table' and name in
-('workiq_accounts','workiq_attempts','workiq_frontiers','workiq_pages','workiq_rows','workiq_aliases',
+('workiq_accounts','workiq_attempts','workiq_frontiers','workiq_pages','workiq_rows','workiq_aliases','workiq_source_keys',
 'workiq_folders','workiq_censuses','workiq_census_members','workiq_gaps','workiq_mail_receipts')`).Scan(&tables); err != nil {
 		return false, err
 	}
-	if tables != 11 {
+	if tables != 12 {
 		return false, errors.New("WorkIQ archive state is incomplete")
 	}
 	return true, nil
