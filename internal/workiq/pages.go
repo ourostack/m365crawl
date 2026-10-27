@@ -55,6 +55,9 @@ type toolResult struct {
 
 var scrubServer = teamsdesktop.Scrub
 
+// DecodePage admits an entire envelope at storage boundaries as well as over stdio.
+func DecodePage(ctx context.Context, raw []byte) (Page, error) { return decodePage(ctx, raw) }
+
 func decodePage(ctx context.Context, raw []byte) (Page, error) {
 	budget := strictjson.Budget{Context: ctx, MaxDepth: 64, MaxMembers: 131072}
 	if len(raw) > maxFrame {

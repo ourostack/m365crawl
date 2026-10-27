@@ -57,7 +57,7 @@ func TestWorkIQPageFailureShapes(t *testing.T) {
 
 func TestWorkIQPageSafeOpaqueDelta(t *testing.T) {
 	raw := []byte(`{"structuredContent":{"results":[{"statusCode":200,"error":null,"data":{"value":[],"@odata.deltaLink":"/me/mailFolders/f/messages/delta()?$deltatoken=a%2Fb%2Bz&x=2&x=1"}}]}}`)
-	page, err := decodePage(context.Background(), raw)
+	page, err := DecodePage(context.Background(), raw)
 	if err != nil || page.DeltaCursor != "/me/mailFolders/f/messages/delta()?$deltatoken=a%2Fb%2Bz&x=2&x=1" || !json.Valid(page.JSON) {
 		t.Fatalf("opaque safe delta: %+v %v", page, err)
 	}
