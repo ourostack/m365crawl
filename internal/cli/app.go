@@ -364,6 +364,10 @@ func (rt *runtime) fail(err error) int {
 	if errors.Is(err, context.Canceled) {
 		// SIGINT or SIGTERM cancelled the context, possibly under a wrapping coded error.
 		coded = errs.Interrupted()
+		var cause *errs.Coded
+		if errors.As(err, &cause) && cause.Code == errs.CodeDBError {
+			coded.Message += "; " + strings.ReplaceAll(bodyOf(cause).Message, "\n", "; ")
+		}
 	} else if !errors.As(err, &coded) {
 		var pe *kong.ParseError
 		switch {

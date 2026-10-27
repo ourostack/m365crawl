@@ -44,7 +44,7 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 			res.addNotice(sourceHealthNotice(h))
 		}
 	}
-	if len(health) > 0 || !needsSync {
+	if len(health) > 0 || !needsSync && !rt.healthUnknown {
 		res.setSourceHealth(health)
 	}
 	return nil

@@ -135,6 +135,22 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 	if schema >= 3 && !hasRecords {
 		return nil, errors.New("archive is missing records")
 	}
+	// Legacy outcomes have no account scope; resolve every proven association before replaying scoped recoveries.
+	associations := map[string][]string{}
+	query := `select 'teams',tenant_id||'/'||user_id from accounts`
+	if hasRecords {
+		query += ` union select distinct source,tenant_id||'/'||user_id from records where tenant_id<>'' and user_id<>''`
+	}
+	if err := s.each(ctx, query+` order by 1,2`, func(rs *sql.Rows) error {
+		var source, account string
+		if err := rs.Scan(&source, &account); err != nil {
+			return err
+		}
+		associations[source] = append(associations[source], account)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	codeColumn, accountColumn := "''", "null"
 	if codes > 0 {
 		codeColumn = "error_code"
@@ -151,6 +167,12 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 		a := attempts[key]
 		if a == nil {
 			a = &sourceAttempt{}
+			if family, _ := SourceFamily(key); family == "teams" && len(associations[key]) > 0 {
+				a.byAccount = map[string]*sourceAttempt{}
+				for _, account := range associations[key] {
+					a.byAccount[account] = &sourceAttempt{accountObserved: true, goodFingerprints: map[string]bool{}}
+				}
+			}
 			attempts[key] = a
 		}
 		var scope []string
@@ -193,28 +215,6 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 			accounts := []string{sourceAccount}
 			if family == "teams" {
 				accounts = []string{scopeAccount}
-			}
-			if family == "teams" && scopeAccount == "" {
-				accounts = nil
-				query := `select tenant_id||'/'||user_id from accounts where ?='teams'`
-				args := []any{key}
-				if hasRecords {
-					query += ` union select distinct tenant_id||'/'||user_id from records where source=? and tenant_id<>'' and user_id<>''`
-					args = append(args, key)
-				}
-				if err := s.each(ctx, query+` order by 1`, func(rs *sql.Rows) error {
-					var account string
-					if err := rs.Scan(&account); err != nil {
-						return err
-					}
-					accounts = append(accounts, account)
-					return nil
-				}, args...); err != nil {
-					return nil, err
-				}
-				if len(accounts) == 0 {
-					accounts = []string{""}
-				}
 			}
 			for _, account := range accounts {
 				h := SourceHealth{SourceKey: key, Source: family, State: state, LastErrorCode: a.code, LastOKAt: healthTime(a.lastOK)}

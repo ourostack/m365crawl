@@ -82,7 +82,7 @@ func TestSourceHealthReadFailuresSurface(t *testing.T) {
 	sweepReadFaults(t, seedSourceHealthEvidence, func(ctx context.Context, s *Store) error {
 		_, err := s.SourceHealth(ctx)
 		return err
-	}, 7, 10)
+	}, 8, 10)
 }
 
 func TestSourceHealthPrincipalUsesActiveLink(t *testing.T) {
