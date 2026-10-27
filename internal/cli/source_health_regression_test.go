@@ -24,10 +24,10 @@ func TestReview248CalendarEventHealthCoversMailItActuallyReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg := mailMsg(700, fInbox, "<review@example.test>", "", detail.Event.Subject, 1, true)
-	msg.ICalUID = detail.Event.ICalUID
+	msg := mailMsg(700, fInbox, "<review@example.test>", "", detail.Subject, 1, true)
+	msg.ICalUID = detail.ICalUID
 	if msg.ICalUID == "" {
-		msg.Subject, msg.Received = detail.Event.Subject, detail.Event.Start
+		msg.Subject, msg.Received = detail.Subject, detail.Start
 	}
 	msg.Account = "outlook/Other"
 	_, err = st.CommitMail(ctx, store.MailBatch{
