@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 )
@@ -19,11 +20,18 @@ func mailSourceKey(ctx context.Context, tx *sql.Tx, account, kind, sourceID stri
 	}
 	var query string
 	var args []any
+	registry := "mail_source_ids"
+	if rest, server := strings.CutPrefix(kind, "workiq:"); server {
+		registry, kind = "workiq_source_keys", rest
+	}
 	switch kind {
 	case "message":
 		query = `select detail_key as k from mail_messages where account=?
-union all select detail_key from mail_absent where account=?`
-		args = []any{account, account}
+union all select detail_key from mail_absent where account=?
+union all select case when alias=cast(cast(alias as integer) as text)
+and cast(alias as integer) between 0 and 4294967295 then cast(alias as integer) else -1 end
+from workiq_aliases where kind='mail' and account_id=? and namespace='public'`
+		args = []any{account, account, account}
 	case "folder":
 		query = `select folder_key as k from mail_folders where account=?
 union all select parent_key from mail_folders where account=?
@@ -38,7 +46,7 @@ union all select folder_key from mail_coverage where account=?`
 	}
 	var stored int64
 	err := tx.QueryRowContext(ctx, `select case when typeof(key)='integer' and key between 1 and 4294967295 then key else 0 end
-from mail_source_ids where account=? and kind=? and source_id=?`, account, kind, sourceID).Scan(&stored)
+from `+registry+` where account=? and kind=? and source_id=?`, account, kind, sourceID).Scan(&stored) //nolint:gosec // registry is one of two fixed table names
 	switch {
 	case err == nil:
 		if stored == 0 {
@@ -48,8 +56,9 @@ from mail_source_ids where account=? and kind=? and source_id=?`, account, kind,
 	case !errors.Is(err, sql.ErrNoRows):
 		return 0, err
 	}
-	query += ` union all select key from mail_source_ids where account=? and kind=?`
-	args = append(args, account, kind)
+	query += ` union all select key from mail_source_ids where account=? and kind=?
+union all select key from workiq_source_keys where account=? and kind=?`
+	args = append(args, account, kind, account, kind)
 	var high, invalid int64
 	if err := tx.QueryRowContext(ctx, `select
 coalesce(max(case when typeof(k)='integer' and k between 0 and 4294967295 then k else 0 end),0),
@@ -82,7 +91,7 @@ from (`+query+`)`, args...).Scan(&high, &invalid); err != nil {
 		}
 	}
 	next := high + 1
-	if _, err := tx.ExecContext(ctx, `insert into mail_source_ids(account,kind,source_id,key) values(?,?,?,?)`, account, kind, sourceID, next); err != nil {
+	if _, err := tx.ExecContext(ctx, `insert into `+registry+`(account,kind,source_id,key) values(?,?,?,?)`, account, kind, sourceID, next); err != nil { //nolint:gosec // registry is one of two fixed table names
 		return 0, err
 	}
 	return uint32(next), nil //nolint:gosec // high is validated before incrementing

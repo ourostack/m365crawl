@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
+	"github.com/ourostack/m365crawl/internal/outlookmail"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 func TestWorkIQSettingsAndScope(t *testing.T) {
@@ -30,12 +32,24 @@ func TestWorkIQSettingsAndScope(t *testing.T) {
 
 func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := writableArchivePath(t)
 	legacyDDL := strings.Replace(schemaDDL, workiqSchemaDDL, "", 1)
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: legacyDDL, SchemaVersion: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacy := &Store{cs: cs, db: cs.DB()}
+	// Integrated schema20 also runs the directional column migration after its DDL.
+	must0(legacy.migrate(ctx))
+	must0(legacy.ApplyAccount(ctx, acctA))
+	_ = must(legacy.ApplyConversations(ctx, []teamsdesktop.Conversation{conv(acctA, "c1", "Chat", "Preserved")}))
+	_ = must(legacy.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c1", "m1", "preserved message", base)}))
+	message := mailMsg(21, fInbox, "<preserved@test.invalid>", "Preserved mail", 0)
+	message.Attachments = []outlookmail.Attachment{{Key: 3, Name: "fixture.txt", Size: 10, ContentType: "text/plain"}}
+	mustCommitMail(t, legacy, mailBatch(mailT0, message))
+	mailBefore := must(legacy.MailGet(ctx, mailAcct, 21))
+	messageRowid := rowCount(t, legacy, `select rowid from messages`)
+	must0(legacy.RecordRun(ctx, Run{Source: "outlook|profile-1|mail", Status: "failed", ErrorCode: "outlook_profile_unreadable", StartedAt: base, FinishedAt: base, SourceAccounts: []string{mailAcct}}))
 	_, err = cs.DB().ExecContext(ctx, `insert into meta(key,value) values('historical-clock','2026-09-01T12:00:00.000Z')`)
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +58,10 @@ func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	old := must(OpenReadOnly(ctx, path))
 	if enabled, err := old.WorkIQEnabled(ctx); err != nil || enabled {
 		t.Fatalf("old read-only source state: %v %v", enabled, err)
+	}
+	if rowCount(t, old, `select max(version) from schema_migrations`) != 20 ||
+		rowCount(t, old, `select count(*) from sqlite_master where name like 'workiq_%'`) != 0 {
+		t.Fatal("old read-only access migrated source state")
 	}
 	must0(old.Close())
 	s := must(Open(ctx, path))
@@ -55,5 +73,15 @@ func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	must0(s.db.QueryRowContext(ctx, `select value from meta where key='historical-clock'`).Scan(&oldClock))
 	if oldClock != "2026-09-01T12:00:00.000Z" || rowCount(t, s, `select count(*) from workiq_attempts`) != 0 {
 		t.Fatal("migration fabricated source observations")
+	}
+	mailAfter := must(s.MailGet(ctx, mailAcct, 21))
+	if !reflect.DeepEqual(mailBefore, mailAfter) || rowCount(t, s, `select rowid from messages`) != messageRowid ||
+		rowCount(t, s, `select count(*) from message_fts where rowid=? and message_fts match 'preserved'`, messageRowid) != 1 ||
+		rowCount(t, s, `select count(*) from mail_fts where rowid=? and mail_fts match 'preserved'`, mailBefore.Rowid) != 1 {
+		t.Fatal("migration changed canonical IDs, rowids, child rows, original clocks or FTS")
+	}
+	health := must(s.SourceHealth(ctx))
+	if len(health) != 1 || health[0].LastErrorCode != "outlook_profile_unreadable" || health[0].LastOKAt != nil {
+		t.Fatal("migration erased a local failure or invented a covering success")
 	}
 }
