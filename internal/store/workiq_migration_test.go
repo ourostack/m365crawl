@@ -85,3 +85,25 @@ func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 		t.Fatal("migration erased a local failure or invented a covering success")
 	}
 }
+
+func TestWorkIQCurrentSchemaMissingTablesRefusedBeforeRepair(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "writable", true: "read-only"}[readOnly], func(t *testing.T) {
+			s := newStore(t)
+			ctx := context.Background()
+			path := s.cs.Path()
+			_, err := s.db.ExecContext(ctx, `alter table workiq_aliases rename to retained_broken_workiq_aliases`)
+			must0(err)
+			must0(s.Close())
+			open := Open
+			if readOnly {
+				open = OpenReadOnly
+			}
+			reopened, err := open(ctx, path)
+			if err == nil {
+				must0(reopened.Close())
+				t.Fatal("current incomplete source state was accepted or recreated as checked-empty metadata")
+			}
+		})
+	}
+}

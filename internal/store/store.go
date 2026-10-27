@@ -96,7 +96,8 @@ insert into meta(key,value) select '` + vacuumKey + `',
 
 // checkSchemaNotNewer fails with the coded archive_newer error when the archive at path records a
 // schema version above SchemaVersion. crawlkit refuses such an archive too, but with a plain error.
-// A missing file, or one without a version, passes.
+// A missing file, or one without a version, passes. Current WorkIQ identity state must exist
+// before writable DDL can recreate a missing table and erase evidence of corruption.
 func checkSchemaNotNewer(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
@@ -109,6 +110,10 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 	}
 	if found > SchemaVersion {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
+	}
+	if found >= 21 {
+		_, err := (&Store{db: db}).hasWorkIQ(ctx)
+		return err
 	}
 	return nil
 }
