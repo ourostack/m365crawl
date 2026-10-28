@@ -327,6 +327,9 @@ body_state=?,body_html_gz=?,body_text=?,body_text_version=?,state_seen_at=?,modi
 	if err := bindWorkIQMailAlias(ctx, tx, account, "public", strconv.FormatUint(uint64(key), 10), rowid); err != nil {
 		return err
 	}
+	if err := fillWorkIQMailChildren(ctx, tx, rowid, m, fmtTime(observed)); err != nil {
+		return err
+	}
 	var liveVersion, deleteMark, deleteVersion, liveSeen sql.NullString
 	var retainedRowID int64
 	err = tx.QueryRowContext(ctx, `select item_rowid,server_version,server_deleted_at,server_deleted_version,server_seen_at from workiq_rows

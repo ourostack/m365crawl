@@ -132,6 +132,10 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 	var res MailResult
 	var aliases []workIQMailCacheAlias
 	var err error
+	b, err = prepareWorkIQNativeMailMetadata(ctx, tx, b)
+	if err != nil {
+		return res, err
+	}
 	b, aliases, err = prepareWorkIQCacheMail(ctx, tx, b)
 	if err != nil {
 		return res, err

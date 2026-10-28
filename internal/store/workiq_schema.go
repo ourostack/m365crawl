@@ -67,9 +67,10 @@ create table if not exists workiq_aliases(
 create table if not exists workiq_source_keys(
  account text not null,
  kind text not null check(kind in ('message','folder','attachment')),
+ namespace text not null default 'graph' check(namespace in ('graph','native')),
  source_id text not null,
  key integer not null check(typeof(key)='integer' and key between 1 and 4294967295),
- primary key(account,kind,source_id), unique(account,kind,key)
+ primary key(account,kind,namespace,source_id), unique(account,kind,key)
 );
 create table if not exists workiq_folders(
  account_id text not null, graph_id text not null, folder_key integer not null,
