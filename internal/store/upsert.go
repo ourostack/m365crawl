@@ -337,10 +337,22 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 		now, derivedAt := nowText(), time.Now().UTC()
 		apps := newAppPublisher(tx)
 		defer apps.close()
+		haveWorkIQ, err := workIQHasRows(ctx, tx, "message")
+		if err != nil {
+			return err
+		}
 		for _, m := range ms {
 			n.Seen++
 			if m.TenantID == "" || m.UserID == "" || m.ConversationID == "" || m.ID == "" {
 				return errors.New("message needs tenant, user, conversation and id")
+			}
+			source := workIQCacheMessageResult{Message: m, PublishApps: true}
+			if haveWorkIQ {
+				source, err = applyWorkIQCacheMessage(ctx, tx, m, derivedAt)
+				if err != nil {
+					return err
+				}
+				m = source.Message
 			}
 			sent, edited, deleted := fmtTime(m.SentAt), fmtTime(m.EditedAt), fmtTime(m.DeletedAt)
 			if sent == nil {
@@ -359,7 +371,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			var old string
 			var oldDeleted sql.NullString
 			err := sel.QueryRowContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID).Scan(&rowid, &version, &old, &oldDeleted)
-			if err == nil && deleted == nil && oldDeleted.Valid && m.Version <= version {
+			if err == nil && !source.Bound && deleted == nil && oldDeleted.Valid && m.Version <= version {
 				deleted = oldDeleted.String // a known tombstone is sticky
 			}
 			hash := hashOf(m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, m.MentionsMe, reactions, files, links, m.Subject, m.Importance, m.Pinned, m.Link, raw)
@@ -377,7 +389,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				changes = append(changes, Change{Change: ChangeNew, Key: key})
 			case err != nil:
 				return err
-			case m.Version < version, old == hash:
+			case !source.Bound && m.Version < version, old == hash && !source.Changed:
 				n.Unchanged++
 				rows = append(rows, RowState{rowid, old, false})
 				continue
@@ -400,8 +412,10 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			}
 			// Only an accepted insert or update publishes evidence: an older or unchanged copy above
 			// never moves the current or last good pointer.
-			if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
-				return err
+			if source.PublishApps {
+				if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
+					return err
+				}
 			}
 			rows = append(rows, RowState{rowid, hash, true})
 		}

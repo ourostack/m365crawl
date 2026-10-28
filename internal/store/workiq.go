@@ -30,6 +30,18 @@ type WorkIQSummary struct {
 	Gaps              map[string]int
 }
 
+const workIQCacheMessageFilter = `not exists(select 1 from workiq_rows w
+where w.kind='message' and w.account_id=messages.tenant_id||'/'||messages.user_id
+and w.item_rowid=messages.rowid and w.winner='workiq_server')`
+
+const workIQCacheConversationFilter = `not exists(select 1 from workiq_rows w
+where w.kind='conversation' and w.account_id=conversations.tenant_id||'/'||conversations.user_id
+and w.item_rowid=conversations.rowid and w.winner='workiq_server')`
+
+const workIQCacheMailFilter = `not exists(select 1 from workiq_rows w
+where w.kind='mail' and w.account_id=mail_messages.account
+and w.item_rowid=mail_messages.rowid and w.winner='workiq_server')`
+
 func (s *Store) hasWorkIQ(ctx context.Context) (bool, error) {
 	var version int
 	if err := s.db.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
