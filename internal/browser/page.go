@@ -87,8 +87,15 @@ func (b *Browser) Page(ctx context.Context) (*Page, error) {
 
 // Navigate loads url in the tab and waits for the document to finish loading.
 func (p *Page) Navigate(ctx context.Context, url string) error {
+	before, err := p.navigationFrame(ctx)
+	if err != nil {
+		return err
+	}
 	var res struct {
-		ErrorText string `json:"errorText"`
+		FrameID    string          `json:"frameId"`
+		LoaderID   json.RawMessage `json:"loaderId"`
+		ErrorText  string          `json:"errorText"`
+		IsDownload bool            `json:"isDownload"`
 	}
 	if err := p.c.call(ctx, p.session, "Page.navigate", map[string]any{"url": url}, &res); err != nil {
 		return err
@@ -96,19 +103,79 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 	if res.ErrorText != "" {
 		return fmt.Errorf("navigation failed: %s", res.ErrorText)
 	}
-	for {
-		var state string
-		err := p.Eval(ctx, "document.readyState", &state)
-		if err == nil && state == "complete" {
-			return nil
+	if res.IsDownload {
+		return errors.New("browser navigation produced a download")
+	}
+	if res.FrameID == "" || res.FrameID != before.ID {
+		return errors.New("browser navigation frame identity changed or missing")
+	}
+	// CDP omits loaderId for same-document navigation only. In that case the
+	// positively read committed loader remains the requested document.
+	loader := before.LoaderID
+	sameDocument := len(res.LoaderID) == 0
+	if !sameDocument {
+		loader = ""
+		if json.Unmarshal(res.LoaderID, &loader) != nil || loader == "" {
+			return errors.New("browser navigation loader identity invalid")
 		}
-		if err != nil && !isDestroyed(err) {
+	}
+	committed := sameDocument
+	for {
+		frame, err := p.navigationFrame(ctx)
+		if err != nil {
 			return err
+		}
+		if frame.ID != res.FrameID {
+			return errors.New("browser navigation was superseded")
+		}
+		if frame.LoaderID != loader {
+			if committed || frame.LoaderID != before.LoaderID {
+				return errors.New("browser navigation was superseded")
+			}
+		} else {
+			committed = true
+			var state string
+			err := p.Eval(ctx, "document.readyState", &state)
+			if err != nil && !isDestroyed(err) {
+				return err
+			}
+			if err == nil && state == "complete" {
+				after, err := p.navigationFrame(ctx)
+				if err != nil {
+					return err
+				}
+				if after.ID != res.FrameID || after.LoaderID != loader {
+					return errors.New("browser navigation was superseded")
+				}
+				return ctx.Err()
+			}
 		}
 		if err := sleep(ctx, loadPollWait); err != nil {
 			return err
 		}
 	}
+}
+
+type navigationFrame struct {
+	ID       string `json:"id"`
+	LoaderID string `json:"loaderId"`
+	ParentID string `json:"parentId"`
+}
+
+func (p *Page) navigationFrame(ctx context.Context) (navigationFrame, error) {
+	var res struct {
+		FrameTree struct {
+			Frame navigationFrame `json:"frame"`
+		} `json:"frameTree"`
+	}
+	if err := p.c.call(ctx, p.session, "Page.getFrameTree", nil, &res); err != nil {
+		return navigationFrame{}, err
+	}
+	frame := res.FrameTree.Frame
+	if frame.ID == "" || frame.LoaderID == "" || frame.ParentID != "" {
+		return navigationFrame{}, errors.New("browser navigation top-document identity missing or invalid")
+	}
+	return frame, nil
 }
 
 // Host returns location.host of the tab, retrying while a navigation destroys the page's

@@ -505,6 +505,10 @@ In scope for v0.2.0:
 
 Out of scope: sending, reacting, marking read or any other write to Teams; using Teams tokens; classic Teams; Linux hosts (CI runs on Linux, but there is no Teams desktop cache to read there); downloading attachments or media (files and links are stored as metadata; transcript text is in scope); a terminal UI.
 
+### Owned browser navigation
+
+The owned browser transport MUST bind navigation readiness to the acknowledged top frame and committed document loader, not a completed previous document. It reads the current root binding before the one navigation, waits for the returned loader to commit, and verifies that binding again after complete readiness. CDP's documented same-document acknowledgment omits loaderId and preserves the positively read prior loader; explicit null/empty/malformed identity, downloads, failed or superseded navigation MUST NOT become success. Existing caller deadlines/cancellation and destroyed-context handling remain authoritative. This internal read-only synchronization adds no exposed browser capability or source URL/route admission, and MUST NOT weaken final generation/host/target/account/privacy checks. A synthetic contract regression does not qualify a live service outcome.
+
 ### Recovery command context
 
 Concrete Loop source retry/compact-inspection commands, Office registry/OneDrive usage single-file retries, Outlook link fixes and calendar-event transcript-fetch follow-ups MUST retain the selected absolute archive and effective output format (`text`, `json` or `log`, including `--json` precedence). The route spellings below, such as `m365crawl docs sync --registry-file FILE`, name the operation: executable follow-ups include the archive/format globals, for example `m365crawl --db ARCHIVE --max-age 0 --format json docs sync --registry-file FILE`.
