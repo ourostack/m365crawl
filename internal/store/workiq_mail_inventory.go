@@ -175,144 +175,152 @@ func (s *Store) SealWorkIQMailInventory(ctx context.Context, attempt int64, at t
 		return errors.New("invalid WorkIQ mail inventory scope or completion clock")
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		scope := WorkIQScope{Family: "mail", Account: binding.Fact.ID}
-		if err := tx.QueryRowContext(ctx, `select qualification from workiq_attempts where id=?`, attempt).Scan(&scope.Qualification); err != nil {
-			return err
-		}
-		root, err := loadWorkIQProgress(ctx, tx, scope, "/me/mailFolders?includeHiddenFolders=true")
-		if err != nil {
-			return err
-		}
-		if root.ID == 0 {
-			return errors.New("mail inventory has no complete hidden-folder root traversal")
-		}
-		if err := preparedWorkIQFrontier(ctx, tx, attempt, root); err != nil {
-			return err
-		}
-		type entry struct {
-			id, parent string
-			root       bool
-			children   sql.NullInt64
-		}
-		var folders []entry
-		byID := map[string]entry{}
-		if err := eachRow(ctx, tx, `select graph_id,parent_graph_id,root_listed,child_count from workiq_folders
-where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func(row *sql.Rows) error {
-			var f entry
-			if err := row.Scan(&f.id, &f.parent, &f.root, &f.children); err != nil {
-				return err
-			}
-			folders = append(folders, f)
-			byID[f.id] = f
-			return nil
-		}); err != nil {
-			return err
-		}
-		childCounts := map[string]int64{}
-		for _, f := range folders {
-			if !f.root {
-				childCounts[f.parent]++
-			}
-		}
-		settled := map[string]bool{}
-		for _, f := range folders {
-			if f.children.Valid && f.children.Int64 != childCounts[f.id] {
-				return errors.New("mail inventory changed during child-folder enumeration")
-			}
-			path := map[string]bool{}
-			for id := f.id; !settled[id]; {
-				current, listed := byID[id]
-				if !listed {
-					return errors.New("mail inventory contains an unlisted folder parent")
-				}
-				if path[id] {
-					return errors.New("mail inventory contains a folder cycle")
-				}
-				path[id] = true
-				if current.root {
-					if _, parentListed := byID[current.parent]; parentListed {
-						return errors.New("mail inventory root is also a listed child folder")
-					}
-					break
-				}
-				id = current.parent
-			}
-			for id := range path {
-				settled[id] = true
-			}
-		}
-		full := true
-		for _, f := range folders {
-			base := "/me/mailFolders/" + url.PathEscape(f.id)
-			if !f.children.Valid || f.children.Int64 > 0 {
-				child, err := loadWorkIQProgress(ctx, tx, scope, base+"/childFolders?includeHiddenFolders=true")
-				if err != nil {
-					return err
-				}
-				if child.ID == 0 {
-					return errors.New("mail inventory is missing a child-folder traversal")
-				}
-				if err := preparedWorkIQFrontier(ctx, tx, attempt, child); err != nil {
-					return err
-				}
-			}
-			progress, err := loadWorkIQProgress(ctx, tx, scope, base+"/messages/delta()")
-			if err != nil {
-				return err
-			}
-			if progress.ID == 0 {
-				return errors.New("mail inventory is missing a folder message baseline")
-			}
-			if err := preparedWorkIQFrontier(ctx, tx, attempt, progress); err != nil {
-				return err
-			}
-			var terminal string
-			if err := tx.QueryRowContext(ctx, `select delta_cursor from workiq_pages where frontier_id=? and expected_revision=? and state='staged'`,
-				progress.ID, progress.Revision-1).Scan(&terminal); err != nil {
-				return err
-			}
-			if terminal == "" {
-				return errors.New("mail folder traversal has no terminal delta link")
-			}
-			full = full && progress.Baseline
-		}
-		var ready bool
-		if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, workIQMailIndexPrefix+scope.Account).Scan(&ready); err != nil {
-			return err
-		}
-		if !ready {
-			return errors.New("native mail candidate index is not prepared")
-		}
-		var unproven bool
-		if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_census_members cm join workiq_censuses c on c.id=cm.census_id
-where c.attempt_id=? and cm.retained=0 and (cm.page_id is null or not exists(select 1 from workiq_pages p where p.id=cm.page_id and p.prepared_attempt_id=? and p.prepared_complete=1 and p.state='staged')))`,
-			attempt, attempt).Scan(&unproven); err != nil {
-			return err
-		}
-		if unproven {
-			return errors.New("mail census contains data without prepared page proof")
-		}
-		var id int64
-		err = tx.QueryRowContext(ctx, `select id from workiq_censuses where attempt_id=? and account_id=?`, attempt, scope.Account).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
-			r, err := tx.ExecContext(ctx, `insert into workiq_censuses(attempt_id,account_id) values(?,?)`, attempt, scope.Account)
-			if err != nil {
-				return err
-			}
-			id, err = r.LastInsertId()
-			if err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-		proof, dataAt, err := workIQMailEnumerationProof(ctx, tx, attempt, scope, len(folders))
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `update workiq_censuses set inventory_ready=1,full_enumeration=?,carry_complete=?,complete=?,completed_at=?,
-enumeration_key=?,source_data_at=? where id=?`,
-			b2i(full), b2i(full), b2i(full), workIQTimeValue(&at), proof, workIQTimeValue(dataAt), id)
-		return err
+		return workIQMailInventoryTransaction(ctx, tx, attempt, binding.Fact.ID, at, nil)
 	})
+}
+
+func workIQMailInventoryTransaction(ctx context.Context, tx *sql.Tx, attempt int64, account string, at time.Time, inspect *WorkIQMailInventoryProof) error {
+	scope := WorkIQScope{Family: "mail", Account: account}
+	if err := tx.QueryRowContext(ctx, `select qualification from workiq_attempts where id=?`, attempt).Scan(&scope.Qualification); err != nil {
+		return err
+	}
+	root, err := loadWorkIQProgress(ctx, tx, scope, "/me/mailFolders?includeHiddenFolders=true")
+	if err != nil {
+		return err
+	}
+	if root.ID == 0 {
+		return errors.New("mail inventory has no complete hidden-folder root traversal")
+	}
+	if err := preparedWorkIQFrontier(ctx, tx, attempt, root); err != nil {
+		return err
+	}
+	type entry struct {
+		id, parent string
+		root       bool
+		children   sql.NullInt64
+	}
+	var folders []entry
+	byID := map[string]entry{}
+	if err := eachRow(ctx, tx, `select graph_id,parent_graph_id,root_listed,child_count from workiq_folders
+where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func(row *sql.Rows) error {
+		var f entry
+		if err := row.Scan(&f.id, &f.parent, &f.root, &f.children); err != nil {
+			return err
+		}
+		folders = append(folders, f)
+		byID[f.id] = f
+		return nil
+	}); err != nil {
+		return err
+	}
+	childCounts := map[string]int64{}
+	for _, f := range folders {
+		if !f.root {
+			childCounts[f.parent]++
+		}
+	}
+	settled := map[string]bool{}
+	for _, f := range folders {
+		if f.children.Valid && f.children.Int64 != childCounts[f.id] {
+			return errors.New("mail inventory changed during child-folder enumeration")
+		}
+		path := map[string]bool{}
+		for id := f.id; !settled[id]; {
+			current, listed := byID[id]
+			if !listed {
+				return errors.New("mail inventory contains an unlisted folder parent")
+			}
+			if path[id] {
+				return errors.New("mail inventory contains a folder cycle")
+			}
+			path[id] = true
+			if current.root {
+				if _, parentListed := byID[current.parent]; parentListed {
+					return errors.New("mail inventory root is also a listed child folder")
+				}
+				break
+			}
+			id = current.parent
+		}
+		for id := range path {
+			settled[id] = true
+		}
+	}
+	full := true
+	for _, f := range folders {
+		base := "/me/mailFolders/" + url.PathEscape(f.id)
+		if !f.children.Valid || f.children.Int64 > 0 {
+			child, err := loadWorkIQProgress(ctx, tx, scope, base+"/childFolders?includeHiddenFolders=true")
+			if err != nil {
+				return err
+			}
+			if child.ID == 0 {
+				return errors.New("mail inventory is missing a child-folder traversal")
+			}
+			if err := preparedWorkIQFrontier(ctx, tx, attempt, child); err != nil {
+				return err
+			}
+		}
+		progress, err := loadWorkIQProgress(ctx, tx, scope, base+"/messages/delta()")
+		if err != nil {
+			return err
+		}
+		if progress.ID == 0 {
+			return errors.New("mail inventory is missing a folder message baseline")
+		}
+		if err := preparedWorkIQFrontier(ctx, tx, attempt, progress); err != nil {
+			return err
+		}
+		var terminal string
+		if err := tx.QueryRowContext(ctx, `select delta_cursor from workiq_pages where frontier_id=? and expected_revision=? and state='staged'`,
+			progress.ID, progress.Revision-1).Scan(&terminal); err != nil {
+			return err
+		}
+		if terminal == "" {
+			return errors.New("mail folder traversal has no terminal delta link")
+		}
+		full = full && progress.Baseline
+	}
+	var ready bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, workIQMailIndexPrefix+scope.Account).Scan(&ready); err != nil {
+		return err
+	}
+	if !ready {
+		return errors.New("native mail candidate index is not prepared")
+	}
+	var unproven bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_census_members cm join workiq_censuses c on c.id=cm.census_id
+where c.attempt_id=? and cm.retained=0 and (cm.page_id is null or not exists(select 1 from workiq_pages p where p.id=cm.page_id and p.prepared_attempt_id=? and p.prepared_complete=1 and p.state='staged')))`,
+		attempt, attempt).Scan(&unproven); err != nil {
+		return err
+	}
+	if unproven {
+		return errors.New("mail census contains data without prepared page proof")
+	}
+	proof, dataAt, err := workIQMailEnumerationProof(ctx, tx, attempt, scope, len(folders))
+	if err != nil {
+		return err
+	}
+	if inspect != nil {
+		*inspect = WorkIQMailInventoryProof{attempt: attempt, scope: scope, full: full, folders: len(folders), enumeration: proof, dataAt: *dataAt}
+		return nil
+	}
+	var id int64
+	err = tx.QueryRowContext(ctx, `select id from workiq_censuses where attempt_id=? and account_id=?`, attempt, scope.Account).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		r, err := tx.ExecContext(ctx, `insert into workiq_censuses(attempt_id,account_id) values(?,?)`, attempt, scope.Account)
+		if err != nil {
+			return err
+		}
+		id, err = r.LastInsertId()
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `update workiq_censuses set inventory_ready=1,full_enumeration=?,carry_complete=?,complete=?,completed_at=?,
+enumeration_key=?,source_data_at=? where id=?`,
+		b2i(full), b2i(full), b2i(full), workIQTimeValue(&at), proof, workIQTimeValue(dataAt), id)
+	return err
 }

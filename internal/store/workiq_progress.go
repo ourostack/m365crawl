@@ -109,7 +109,13 @@ on conflict(family,account_id,resource,scope,qualification) where retired=0 do n
 			next = page.DeltaCursor
 		}
 		_, err := tx.ExecContext(ctx, `update workiq_frontiers set pending_cursor=?,revision=revision+1 where id=? and revision=?`, next, frontier, revision)
-		return err
+		if err != nil {
+			return err
+		}
+		if family == "mail" {
+			return bumpWorkIQMailInventory(ctx, tx, account)
+		}
+		return nil
 	})
 }
 

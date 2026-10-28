@@ -6,7 +6,8 @@ create table if not exists workiq_accounts(
  family text not null check(family in ('mail','chats')), account_id text not null,
  user_id text not null, tenant_id text not null default '', address text not null,
  binding text not null check(binding in ('stored_identity','explicit_bootstrap')),
- bound_at text not null, primary key(family,account_id)
+ bound_at text not null, inventory_revision integer not null default 0,
+ primary key(family,account_id)
 );
 create table if not exists workiq_attempts(
  id integer primary key autoincrement,
