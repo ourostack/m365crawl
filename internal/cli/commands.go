@@ -32,6 +32,7 @@ type file struct {
 }
 
 type messageItem struct {
+	Provenance              string    `json:"provenance"`
 	TenantID                string    `json:"tenant_id"`
 	UserID                  string    `json:"user_id"`
 	ConversationID          string    `json:"conversation_id"`
@@ -76,6 +77,7 @@ type messageItem struct {
 }
 
 type conversationItem struct {
+	Provenance    string    `json:"provenance"`
 	TenantID      string    `json:"tenant_id"`
 	UserID        string    `json:"user_id"`
 	ID            string    `json:"id"`
@@ -151,7 +153,8 @@ func messageItems(rows []store.MessageRow, maxText int, html map[store.MessageKe
 	for i, r := range rows {
 		text, cut := truncateRunes(r.ContentText, maxText)
 		it := messageItem{
-			TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ConversationDisplayName: r.ConversationDisplayName,
+			Provenance: r.Provenance,
+			TenantID:   r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ConversationDisplayName: r.ConversationDisplayName,
 			ID: r.ID, ReplyChainID: r.ReplyChainID, ParentMessageID: r.ParentMessageID, SenderID: r.SenderID, SenderName: r.SenderName,
 			SentAt: r.SentAt, EditedAt: r.EditedAt, DeletedAt: r.DeletedAt, MessageType: r.MessageType, Text: text, TextTruncated: cut,
 			HTML:       html[store.MessageKey{TenantID: r.TenantID, UserID: r.UserID, ConversationID: r.ConversationID, ID: r.ID}],
@@ -592,7 +595,8 @@ func (c *conversationsCmd) Run(rt *runtime) error {
 		items := make([]conversationItem, len(rows))
 		for i, r := range rows {
 			items[i] = conversationItem{TenantID: r.TenantID, UserID: r.UserID, ID: r.ID, Kind: r.Kind, Title: r.Title, DisplayName: r.DisplayName,
-				TeamID: r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite,
+				Provenance: r.Provenance,
+				TeamID:     r.TeamID, MemberCount: len(r.Members), LastMessageAt: r.LastMessageAt, ReadHorizonAt: r.ReadHorizonAt, Favorite: r.Favorite,
 				CalendarSeriesKey: r.CalendarSeriesKey, CalendarEventCount: r.CalendarEventCount}
 		}
 		return newList(shape(rt, items), trunc).withTotal(total), nil

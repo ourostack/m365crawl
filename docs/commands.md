@@ -835,7 +835,7 @@ Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 
 m365crawl watch --every 30s --fields id,type,text --max-text 200
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `type`, `subtype`, `is_read`, `at`, `message_id`, `app_id`, `message_sent_at`, `actor_id`, `actor_name`, `actor_inferred`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `type`, `subtype`, `is_read`, `at`, `message_id`, `app_id`, `message_sent_at`, `actor_id`, `actor_name`, `actor_inferred`.
 
 ## search
 
@@ -888,7 +888,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `dated_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `kind`, `registration_id`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `state`, `partial`, `losses`, `paragraphs`, `cells`, `occurrences_total`, `preview_truncated`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `full_text_sql`, `references`, `references_total`, `references_truncated`, `descriptive_fields_truncated`, `scope`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
+`--fields` keys: `source`, `provenance`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `dated_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `kind`, `registration_id`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `state`, `partial`, `losses`, `paragraphs`, `cells`, `occurrences_total`, `preview_truncated`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `full_text_sql`, `references`, `references_total`, `references_truncated`, `descriptive_fields_truncated`, `scope`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
 
 ## people
 
@@ -1008,7 +1008,7 @@ m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text
 m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
 
 ## unread
 
@@ -1036,7 +1036,7 @@ m365crawl unread --limit 5
 m365crawl unread --by-conversation --since 7d
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
 
 ## thread
 
@@ -1062,7 +1062,7 @@ m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
 m365crawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
 
 ## conversations
 
@@ -1087,7 +1087,7 @@ m365crawl conversations --kind Space
 m365crawl conversations --query planning
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `id`, `kind`, `title`, `display_name`, `team_id`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`, `calendar_series_key`, `calendar_event_count`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `id`, `kind`, `title`, `display_name`, `team_id`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`, `calendar_series_key`, `calendar_event_count`.
 
 ## teams
 
@@ -1220,7 +1220,7 @@ m365crawl mail list --from pat --since 7d --fields id,subject,from_name,received
 m365crawl mail list --has-attachments --limit 20
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail show
 
@@ -1236,7 +1236,7 @@ Keys are those of `mail list`, with `recipients` (every recipient, each `{name, 
 m365crawl mail show outlook/Main:12345 --max-text 2000
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail thread
 
@@ -1248,7 +1248,7 @@ m365crawl mail thread <id>
 
 Items have the shape of `mail list`, oldest first by `dated_at`. A copy of a message that a newer folder set holds too is left out, unless it is the message asked for. `grouping` first tries `conversation` (at least two messages sharing an exact nonempty account-scoped `conversation_id`), otherwise `reply_chain` (In-Reply-To and Message-ID links followed in both directions), otherwise `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When no other message joins it, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail folders
 
@@ -1272,7 +1272,7 @@ m365crawl mail unread [--folder NAME|KIND] [--limit N]
 
 `folders` holds one `{account, folder, kind, unread, cached, current}` per folder that holds messages; `current` is `false` for a folder of an older folder set, whose unread state stopped at its last read. `unread_total` is the sum of the folders' `unread`, every folder included. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ## calendar
 

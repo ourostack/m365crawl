@@ -69,6 +69,7 @@ type searchChatItem struct {
 // searchMailItem is a mail message in a search result: the item of mail list, plus the source.
 type searchMailItem struct {
 	Source              string     `json:"source"`
+	Provenance          string     `json:"provenance"`
 	ID                  string     `json:"id"`
 	Account             string     `json:"account"`
 	Folder              *string    `json:"folder"`
@@ -93,6 +94,7 @@ type searchMailItem struct {
 	ICalUID             *string    `json:"ical_uid"`
 	GoneAt              *time.Time `json:"gone_at"`
 	EvictedAt           *time.Time `json:"evicted_at"`
+	DeletedAt           *time.Time `json:"deleted_at"`
 	OlderCopy           bool       `json:"older_copy"`
 	CopyOf              *string    `json:"copy_of"`
 	ReceivedAtDisagrees bool       `json:"received_at_disagrees"`
@@ -261,6 +263,7 @@ func searchTime(t time.Time) *time.Time {
 
 func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 	it := searchMailItem{
+		Provenance: r.Provenance, DeletedAt: searchTime(r.DeletedAt),
 		Source: searchMail, ID: r.ID(), Account: r.Account, Folder: searchNZ(r.Folder), FolderKind: searchNZ(r.FolderKind), ToMe: r.ToMe,
 		Subject: searchNZ(r.Subject), FromName: searchNZ(r.SenderName), FromAddress: searchNZ(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo), ConversationID: searchNZ(r.ConversationID),
