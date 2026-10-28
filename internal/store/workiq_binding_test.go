@@ -149,6 +149,11 @@ func TestWorkIQUnverifiedAttemptCannotFabricateSuccess(t *testing.T) {
 		t.Fatal("an unverified identity fabricated a successful source outcome")
 	}
 	must0(s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "failed", ErrorCode: "workiq_signin_required", FinishedAt: base}))
+	before := dump(t, s)
+	if err := s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "failed", ErrorCode: "workiq_signin_required", FinishedAt: base}); err == nil ||
+		dump(t, s) != before {
+		t.Fatal("a repeated failed completion rewrote an immutable attempt outcome")
+	}
 }
 
 func TestWorkIQCorruptAttemptVerificationIsNotRetentionAuthority(t *testing.T) {
