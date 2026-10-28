@@ -30,12 +30,29 @@ func (s *Store) CommitWorkIQMessages(ctx context.Context, batch WorkIQMessageBat
 	if err != nil {
 		return WorkIQMessageResult{}, err
 	}
-	chat, err := workiq.DecodeChat(ctx, batch.Chat)
+	result, qualified, err := prepareWorkIQMessageBatch(ctx, binding, batch)
 	if err != nil {
 		return WorkIQMessageResult{}, err
 	}
+	if len(qualified) == 0 {
+		return result, nil
+	}
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		return commitWorkIQMessageRecords(ctx, tx, binding.Fact.ID, qualified, batch.ObservedAt, &result)
+	})
+	if err != nil {
+		return WorkIQMessageResult{}, err
+	}
+	return result, nil
+}
+
+func prepareWorkIQMessageBatch(ctx context.Context, binding workiq.AccountBinding, batch WorkIQMessageBatch) (WorkIQMessageResult, []workiq.ChatMessage, error) {
+	chat, err := workiq.DecodeChat(ctx, batch.Chat)
+	if err != nil {
+		return WorkIQMessageResult{}, nil, err
+	}
 	if binding.Fact.Family != "chats" || binding.Fact.TenantID != chat.TenantID || chat.TenantID == "" || batch.ObservedAt.IsZero() {
-		return WorkIQMessageResult{}, errors.New("WorkIQ messages do not match the verified archive tenant")
+		return WorkIQMessageResult{}, nil, errors.New("WorkIQ messages do not match the verified archive tenant")
 	}
 	result := WorkIQMessageResult{Gaps: map[string]int{}}
 	seen := map[string]bool{}
@@ -44,14 +61,14 @@ func (s *Store) CommitWorkIQMessages(ctx context.Context, batch WorkIQMessageBat
 	for _, raw := range batch.Messages {
 		size += len(raw)
 		if size > 16<<20 {
-			return WorkIQMessageResult{}, errors.New("WorkIQ message batch exceeds the page bound")
+			return WorkIQMessageResult{}, nil, errors.New("WorkIQ message batch exceeds the page bound")
 		}
 		header, err := workiq.DecodeMessageHeader(ctx, raw)
 		if err != nil {
-			return WorkIQMessageResult{}, err
+			return WorkIQMessageResult{}, nil, err
 		}
 		if seen[header.ID] {
-			return WorkIQMessageResult{}, errors.New("WorkIQ page repeats a message identity")
+			return WorkIQMessageResult{}, nil, errors.New("WorkIQ page repeats a message identity")
 		}
 		seen[header.ID] = true
 		result.Counts.Seen++
@@ -72,45 +89,40 @@ func (s *Store) CommitWorkIQMessages(ctx context.Context, batch WorkIQMessageBat
 		}
 		message, err := workiq.DecodeChatMessage(ctx, binding.Fact, chat, raw)
 		if err != nil {
-			return WorkIQMessageResult{}, err
+			return WorkIQMessageResult{}, nil, err
 		}
 		qualified = append(qualified, message)
 	}
-	if len(qualified) == 0 {
-		return result, nil
-	}
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		records := make([]workIQServerMessageRecord, 0, len(qualified))
-		native := make([]teamsdesktop.Message, 0, len(qualified))
-		reduced := map[string]workIQCacheMessageResult{}
-		for _, message := range qualified {
-			record, canonical, firstBinding, unverified, err := reduceWorkIQServerMessage(ctx, tx, binding.Fact.ID, message, batch.ObservedAt)
-			if err != nil {
-				return err
-			}
-			if unverified {
-				result.Gaps["workiq_version_unverified"]++
-			}
-			records, native = append(records, record), append(native, canonical)
-			reduced[canonical.ID] = workIQCacheMessageResult{Message: canonical, Bound: true, Changed: firstBinding}
-		}
-		counts, _, rows, err := applyMessageSources(ctx, tx, native, reduced)
+	return result, qualified, nil
+}
+
+func commitWorkIQMessageRecords(ctx context.Context, tx *sql.Tx, account string, qualified []workiq.ChatMessage, observed time.Time, result *WorkIQMessageResult) error {
+	records := make([]workIQServerMessageRecord, 0, len(qualified))
+	native := make([]teamsdesktop.Message, 0, len(qualified))
+	reduced := map[string]workIQCacheMessageResult{}
+	for _, message := range qualified {
+		record, canonical, firstBinding, unverified, err := reduceWorkIQServerMessage(ctx, tx, account, message, observed)
 		if err != nil {
 			return err
 		}
-		for i, record := range records {
-			if err := record.persist(ctx, tx, binding.Fact.ID, rows[i].Rowid, batch.ObservedAt); err != nil {
-				return err
-			}
+		if unverified {
+			result.Gaps["workiq_version_unverified"]++
 		}
-		result.Counts.Inserted, result.Counts.Updated = counts.Inserted, counts.Updated
-		result.Counts.Unchanged += counts.Unchanged
-		return nil
-	})
-	if err != nil {
-		return WorkIQMessageResult{}, err
+		records, native = append(records, record), append(native, canonical)
+		reduced[canonical.ID] = workIQCacheMessageResult{Message: canonical, Bound: true, Changed: firstBinding}
 	}
-	return result, nil
+	counts, _, rows, err := applyMessageSources(ctx, tx, native, reduced)
+	if err != nil {
+		return err
+	}
+	for i, record := range records {
+		if err := record.persist(ctx, tx, account, rows[i].Rowid, observed); err != nil {
+			return err
+		}
+	}
+	result.Counts.Inserted, result.Counts.Updated = counts.Inserted, counts.Updated
+	result.Counts.Unchanged += counts.Unchanged
+	return nil
 }
 
 type workIQServerMessageRecord struct {

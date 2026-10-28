@@ -44,6 +44,7 @@ func (r *workIQMailRun) prepare(ctx context.Context, resource string) error {
 		}
 		for _, id := range ids {
 			r.pages++
+			r.report.Counts["pages"] = r.pages
 			if r.pages > 10000 {
 				r.report.Gaps["workiq_page_limit"]++
 				return workIQFailure("workiq_page_limit")
@@ -91,6 +92,9 @@ func (r *workIQMailRun) fetchResource(ctx context.Context, resource string) erro
 		}
 		page, err := r.session.fetch(ctx, path)
 		if err != nil {
+			if page.StatusCode == 410 && p.ID != 0 && path != resource {
+				return &workIQExpired{resource: resource, revision: p.Revision}
+			}
 			return err
 		}
 		if err := workIQWrite(ctx, r.options.DBPath, func(writeCtx context.Context, s *store.Store) error {
@@ -137,7 +141,7 @@ func (r *workIQMailRun) folders(ctx context.Context, parent string) ([]workiq.Fo
 
 func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *workIQSession, attempt int64, account string, report *WorkIQAccountReport) error {
 	r := workIQMailRun{options: options, session: session, attempt: attempt, account: account, report: report,
-		prepared: map[string]int64{}, visited: map[string]bool{}}
+		prepared: map[string]int64{}, visited: map[string]bool{}, pages: options.pageWork}
 	var after int64
 	for {
 		done := false

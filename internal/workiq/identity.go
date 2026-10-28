@@ -133,6 +133,19 @@ func selectedAddress(user User) (string, error) {
 	return "", failure("workiq_account_invalid")
 }
 
+// DiscoveryBinding pins only the already selected user. It is not an archived
+// content owner; every chat still needs SelectChatAccount with its actual tenant.
+func (user User) DiscoveryBinding() (AccountBinding, error) {
+	if user.ID == "" {
+		return AccountBinding{}, failure("workiq_protocol")
+	}
+	address, err := selectedAddress(user)
+	if err != nil {
+		return AccountBinding{}, err
+	}
+	return AccountBinding{UserID: user.ID, Address: address}, nil
+}
+
 func (binding AccountBinding) Verify(user User) error {
 	if binding.UserID == "" || user.ID != binding.UserID || binding.Address == "" || !validAccount(binding.Address) ||
 		!strings.EqualFold(binding.Address, strings.TrimSpace(user.Mail)) && !strings.EqualFold(binding.Address, strings.TrimSpace(user.UPN)) {

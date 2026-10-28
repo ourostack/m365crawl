@@ -14,7 +14,7 @@ create table if not exists workiq_attempts(
  family text not null check(family in ('mail','chats')), account_id text not null,
  started_at text not null, finished_at text,
  status text not null default 'open' check(status in ('open','ok','ok_with_omissions','partial','failed')),
- window_start text, qualification text not null default 'workiq-v1',
+ window_start text, window_end text, qualification text not null default 'workiq-v1',
  bound_user_id text not null default '', bound_address text not null default '',
  bound_mail text not null default '', bound_upn text not null default '', verified_at text,
  error_code text not null default '', counts_json text not null default '{}',

@@ -47,7 +47,7 @@ func scopeTime(at time.Time) string {
 	if at.IsZero() {
 		return ""
 	}
-	return at.UTC().Format(timeLayout)
+	return at.UTC().Format(time.RFC3339Nano)
 }
 
 func preparedWorkIQFrontier(ctx context.Context, tx *sql.Tx, attempt int64, progress WorkIQProgress) error {

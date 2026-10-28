@@ -11,6 +11,7 @@ import (
 type WorkIQScope struct {
 	Family, Account, Qualification string
 	WindowStart                    time.Time
+	WindowEnd                      time.Time
 }
 
 type WorkIQPageBatch struct {
