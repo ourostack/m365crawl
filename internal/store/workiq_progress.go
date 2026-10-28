@@ -48,6 +48,9 @@ func (s *Store) BeginWorkIQAttempt(ctx context.Context, scope WorkIQScope, at ti
 }
 
 func (s *Store) StageWorkIQPage(ctx context.Context, batch WorkIQPageBatch) error {
+	if _, err := s.validateWorkIQAttemptOwner(ctx, batch.AttemptID); err != nil {
+		return err
+	}
 	page, err := workiq.DecodePage(ctx, batch.Page.JSON)
 	if err != nil {
 		return err
@@ -116,6 +119,11 @@ func (s *Store) CompleteWorkIQAttempt(ctx context.Context, attempt int64, summar
 	}
 	if summary.FinishedAt.IsZero() {
 		return errors.New("WorkIQ attempt has no completion time")
+	}
+	if summary.Status == "ok" || summary.Status == "ok_with_omissions" {
+		if _, err := s.validateWorkIQAttemptOwner(ctx, attempt); err != nil {
+			return err
+		}
 	}
 	// These closed map[string]int types contain no values JSON can fail to encode.
 	counts, _ := json.Marshal(summary.Counts)

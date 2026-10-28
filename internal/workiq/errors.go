@@ -12,9 +12,10 @@ func failure(code string) *errs.Coded {
 	exit := errs.ExitRuntime
 	switch code {
 	case "workiq_hermetic_required", "workiq_not_installed", "workiq_binary_unsafe",
-		"workiq_disabled", "workiq_signin_required", "workiq_eula_required", "workiq_consent_required":
+		"workiq_disabled", "workiq_signin_required", "workiq_eula_required", "workiq_consent_required",
+		"workiq_identity_mismatch", "workiq_mail_account_missing", "workiq_multiple_mailboxes":
 		exit = errs.ExitEnvironment
-	case "workiq_account_invalid":
+	case "workiq_account_invalid", "workiq_account_required":
 		exit = errs.ExitUsage
 	}
 	return &errs.Coded{Code: code, Exit: exit,

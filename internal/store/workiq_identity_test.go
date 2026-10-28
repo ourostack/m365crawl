@@ -225,3 +225,28 @@ func TestWorkIQStableIDCorruptAliasesAreNotCheckedEmpty(t *testing.T) {
 		t.Fatal("corrupt public key reservation allowed a new identity")
 	}
 }
+
+func TestWorkIQAccountFactsDoNotReadDeniedArchivedProfiles(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	must0(s.ApplyAccount(ctx, acctA))
+	_, err := s.db.ExecContext(ctx, `insert into records(source,tenant_id,user_id,database,store,key_json,value_json,content_hash,first_seen_at,updated_at)
+values('fixture',?,?,'Teams:auth:identity','profiles',?,'{"mail":"denied-decoy@example.invalid"}','fixture','','')`,
+		acctA.TenantID, acctA.UserID, `"8:orgid:`+acctA.UserID+`"`)
+	must0(err)
+	facts := must(s.WorkIQAccounts(ctx))
+	if len(facts) != 1 || len(facts[0].Addresses) != 0 {
+		t.Fatal("new source binding consumed a denied archived profile value")
+	}
+}
+
+func TestWorkIQAccountFactsIncludeNamedAggregateFailureScope(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	must0(s.RecordRun(ctx, Run{Source: "outlook_mail", Status: "failed", StartedAt: base, FinishedAt: base,
+		SourceAccounts: []string{"outlook/RecordedInAggregate"}}))
+	facts := must(s.WorkIQAccounts(ctx))
+	if len(facts) != 1 || facts[0].ID != "outlook/RecordedInAggregate" || facts[0].IdentityPresent {
+		t.Fatal("named failed-attempt scope disappeared because its source key was aggregate")
+	}
+}

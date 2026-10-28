@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
@@ -50,7 +51,7 @@ union select account_id from calendar_account_links where source='outlook'`, fun
 	if err != nil {
 		return nil, err
 	}
-	err = s.each(ctx, `select source,source_accounts_json from sync_runs where source like 'outlook|%'`, func(rs *sql.Rows) error {
+	err = s.each(ctx, `select source,source_accounts_json from sync_runs where source like 'outlook|%' or source in ('outlook','outlook_mail')`, func(rs *sql.Rows) error {
 		var source string
 		var raw sql.NullString
 		if err := rs.Scan(&source, &raw); err != nil {
@@ -109,16 +110,34 @@ or key like 'outlook\_mail\_failure:%' escape '\' or key like 'outlook\_failure:
 	if err != nil {
 		return nil, err
 	}
-	err = s.each(ctx, `select tenant_id||'/'||user_id,value_json from records
+	type profileRef struct{ id, source, database, store, key string }
+	var profiles []profileRef
+	err = s.each(ctx, `select tenant_id||'/'||user_id,source,database,store,key_json from records
 where store='profiles' and removed_at is null and key_json='"8:orgid:'||user_id||'"'`, func(rs *sql.Rows) error {
-		var id string
-		var raw sql.NullString
-		if err := rs.Scan(&id, &raw); err != nil {
+		var ref profileRef
+		if err := rs.Scan(&ref.id, &ref.source, &ref.database, &ref.store, &ref.key); err != nil {
 			return err
 		}
-		if fact := facts[id]; fact != nil && fact.Family == "chats" && raw.Valid {
+		if fact := facts[ref.id]; fact != nil && fact.Family == "chats" &&
+			!teamsdesktop.Denied(ref.database) && !teamsdesktop.Denied(ref.store) {
+			profiles = append(profiles, ref)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range profiles {
+		var raw string
+		if err := s.db.QueryRowContext(ctx, `select coalesce(value_json,'') from records
+where source=? and database=? and store=? and key_json=? and removed_at is null`,
+			ref.source, ref.database, ref.store, ref.key).Scan(&raw); err != nil {
+			return nil, err
+		}
+		if raw != "" {
+			fact := facts[ref.id]
 			var profile struct{ Mail, UserPrincipalName, Email string }
-			if json.Unmarshal([]byte(raw.String), &profile) == nil {
+			if json.Unmarshal([]byte(raw), &profile) == nil {
 				for _, address := range strings.Split(joinAddresses([]string{profile.Mail, profile.UserPrincipalName, profile.Email}), "\n") {
 					if address != "" {
 						fact.Addresses = append(fact.Addresses, address)
@@ -126,10 +145,6 @@ where store='profiles' and removed_at is null and key_json='"8:orgid:'||user_id|
 				}
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	var result []workiq.AccountFact
 	for _, fact := range facts {
