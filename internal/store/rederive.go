@@ -301,7 +301,7 @@ func readConversations(ctx context.Context, tx *sql.Tx, after int64) ([]storedCo
 const (
 	mailTextKey         = "mail_text_version"
 	mailRederiveBatch   = 100
-	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>? and ` + workIQCacheMailFilter + ` order by rowid limit ?`
+	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>?`
 	updateMailRederived = `update mail_messages set subject_norm=?, body_text=?, body_text_version=?, modified_at=? where rowid=?`
 )
 
@@ -328,6 +328,15 @@ func rederiveMail(ctx context.Context, tx *sql.Tx) (int, error) {
 	if from == MailTextVersion {
 		return 0, nil
 	}
+	query := selectMailRederive
+	have, err := workIQHasRows(ctx, tx, "mail")
+	if err != nil {
+		return 0, err
+	}
+	if have {
+		query += " and " + workIQCacheMailFilter
+	}
+	query += " order by rowid limit ?"
 	changed, last := 0, int64(0)
 	for {
 		type row struct {
@@ -336,7 +345,7 @@ func rederiveMail(ctx context.Context, tx *sql.Tx) (int, error) {
 			gz                              []byte
 		}
 		var batch []row
-		err := eachRow(ctx, tx, selectMailRederive, []any{MailTextVersion, last, mailRederiveBatch}, func(r *sql.Rows) error {
+		err := eachRow(ctx, tx, query, []any{MailTextVersion, last, mailRederiveBatch}, func(r *sql.Rows) error {
 			var x row
 			if err := r.Scan(&x.rowid, &x.subject, &x.norm, &x.name, &x.addr, &x.text, &x.gz); err != nil {
 				return err
