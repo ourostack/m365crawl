@@ -223,6 +223,10 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		effective.Body = mapped.Body
 		winner = "workiq_server"
 	}
+	if len(mapped.Attachments) > 0 || mapped.HasAttachments != nil && *mapped.HasAttachments {
+		yes := true
+		effective.HasAttachments = &yes
+	}
 	effective.MessageID = originalHeader
 	if !fresh.IsZero() {
 		copyVersion, err := workIQNativeMailCopyVersion(fresh)
