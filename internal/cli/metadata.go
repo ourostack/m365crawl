@@ -81,7 +81,7 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "loop sync",
 			Title: command + " (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)"}
 	}
-	for _, command := range []string{"content capture", "content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content fetch engage-home", "content signin"} {
+	for _, command := range []string{"content capture", "content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content fetch engage-home", "content fetch engage-thread", "content signin"} {
 		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
 		switch command {
 		case "content capture":
@@ -90,7 +90,7 @@ func manifest() control.Manifest {
 			argv = append(argv, "<words>")
 		case "content show":
 			argv = append(argv, "<cloud-local-text-or-engage-observation-id>")
-		case "content fetch page", "content fetch stream", "content signin":
+		case "content fetch page", "content fetch stream", "content fetch engage-thread", "content signin":
 			argv = append(argv, "<supported-url>")
 		}
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "content capture" || strings.HasPrefix(command, "content fetch") || command == "content signin",

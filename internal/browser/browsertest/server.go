@@ -138,7 +138,19 @@ func (s *Server) setDefaults() {
 	}
 	s.handlers["Target.createTarget"] = func(Request) (any, *Error) { return map[string]any{"targetId": "T2"}, nil }
 	s.handlers["Target.attachToTarget"] = func(Request) (any, *Error) { return map[string]any{"sessionId": "S1"}, nil }
-	s.handlers["Page.navigate"] = func(Request) (any, *Error) { return map[string]any{"frameId": "F1"}, nil }
+	var navigationMu sync.Mutex
+	loader := 0
+	s.handlers["Page.getFrameTree"] = func(Request) (any, *Error) {
+		navigationMu.Lock()
+		defer navigationMu.Unlock()
+		return map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F1", "loaderId": fmt.Sprintf("L%d", loader)}}}, nil
+	}
+	s.handlers["Page.navigate"] = func(Request) (any, *Error) {
+		navigationMu.Lock()
+		defer navigationMu.Unlock()
+		loader++
+		return map[string]any{"frameId": "F1", "loaderId": fmt.Sprintf("L%d", loader)}, nil
+	}
 	s.handlers["Runtime.evaluate"] = func(Request) (any, *Error) {
 		return map[string]any{"result": map[string]any{"type": "string", "value": "complete"}}, nil
 	}

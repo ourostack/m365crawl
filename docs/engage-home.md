@@ -114,6 +114,4 @@ Windows release assets are intentionally unsigned. Protect the private archive
 and browser profile like the mailbox; never publish native payloads in reports,
 fixtures or issues. See [privacy](privacy.md) and [release process](releasing.md).
 
-Need targeted threads, replies, another service or another workflow? Work with
-your agent to open a **prompt request** with the desired job and nonprivate
-evidence. Do not infer support from a related service or improvise a token client.
+For one exact Engage thread or Teams Engage deep link, use [`content fetch engage-thread URL`](commands.md#content-fetch-engage-thread) to retain observed starter/replies, authors/times, safe links and generic attachment metadata with explicit partial/loss reporting. Home's own no-selector/starter-only contract above is unchanged. For another service or workflow, work with your agent to open a **prompt request**; do not infer support or improvise a token client.
