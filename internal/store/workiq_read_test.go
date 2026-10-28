@@ -113,6 +113,10 @@ func TestWorkIQReadOldArchiveRemainsNativeWithoutMigration(t *testing.T) {
 	must0(err)
 	requireWorkIQReadOrigin(t, conversations[0], "desktop_cache")
 	requireWorkIQReadOrigin(t, must(old.MailGet(ctx, mailAcct, 100)), "desktop_cache")
+	coverage := must(old.MailCoverage(ctx))
+	if len(coverage) != 1 || coverage[0].Count != 1 || coverage[0].CountBasis != "" || coverage[0].CacheCount != nil {
+		t.Fatal("old native-only read acquired source count semantics")
+	}
 	if rowCount(t, old, `select max(version) from schema_migrations`) != 20 ||
 		rowCount(t, old, `select count(*) from sqlite_master where name like 'workiq_%'`) != 0 {
 		t.Fatal("public provenance migrated an old read-only archive")
