@@ -321,7 +321,7 @@ func TestWorkIQMailEnumerationProofRejectsUnknownOriginalClock(t *testing.T) {
 		t.Fatal("corrupt original clock became an inventory completion")
 	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		_, _, err := workIQMailEnumerationProof(ctx, tx, attempt, WorkIQScope{Family: "mail", Account: mailAcct, Qualification: "different"}, 0)
+		_, _, err := workIQMailEnumerationProof(ctx, tx, attempt, WorkIQScope{Family: "mail", Account: mailAcct, Qualification: "different"}, 0, false)
 		return err
 	})
 	if err == nil || dump(t, s) != before {

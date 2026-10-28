@@ -175,11 +175,15 @@ func (s *Store) SealWorkIQMailInventory(ctx context.Context, attempt int64, at t
 		return errors.New("invalid WorkIQ mail inventory scope or completion clock")
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		return workIQMailInventoryTransaction(ctx, tx, attempt, binding.Fact.ID, at, nil)
+		return workIQMailInventoryTransaction(ctx, tx, attempt, binding.Fact.ID, at, nil, false)
 	})
 }
 
-func workIQMailInventoryTransaction(ctx context.Context, tx *sql.Tx, attempt int64, account string, at time.Time, inspect *WorkIQMailInventoryProof) error {
+func workIQMailInventoryTransaction(ctx context.Context, tx *sql.Tx, attempt int64, account string, at time.Time, inspect *WorkIQMailInventoryProof, admitted bool) error {
+	state := "staged"
+	if admitted {
+		state = "admitted"
+	}
 	scope := WorkIQScope{Family: "mail", Account: account}
 	if err := tx.QueryRowContext(ctx, `select qualification from workiq_attempts where id=?`, attempt).Scan(&scope.Qualification); err != nil {
 		return err
@@ -191,7 +195,7 @@ func workIQMailInventoryTransaction(ctx context.Context, tx *sql.Tx, attempt int
 	if root.ID == 0 {
 		return errors.New("mail inventory has no complete hidden-folder root traversal")
 	}
-	if err := preparedWorkIQFrontier(ctx, tx, attempt, root); err != nil {
+	if err := workIQInventoryFrontier(ctx, tx, attempt, root, admitted); err != nil {
 		return err
 	}
 	type entry struct {
@@ -257,7 +261,7 @@ where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func
 			if child.ID == 0 {
 				return errors.New("mail inventory is missing a child-folder traversal")
 			}
-			if err := preparedWorkIQFrontier(ctx, tx, attempt, child); err != nil {
+			if err := workIQInventoryFrontier(ctx, tx, attempt, child, admitted); err != nil {
 				return err
 			}
 		}
@@ -268,12 +272,12 @@ where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func
 		if progress.ID == 0 {
 			return errors.New("mail inventory is missing a folder message baseline")
 		}
-		if err := preparedWorkIQFrontier(ctx, tx, attempt, progress); err != nil {
+		if err := workIQInventoryFrontier(ctx, tx, attempt, progress, admitted); err != nil {
 			return err
 		}
 		var terminal string
-		if err := tx.QueryRowContext(ctx, `select delta_cursor from workiq_pages where frontier_id=? and expected_revision=? and state='staged'`,
-			progress.ID, progress.Revision-1).Scan(&terminal); err != nil {
+		if err := tx.QueryRowContext(ctx, `select delta_cursor from workiq_pages where frontier_id=? and expected_revision=? and state=?`,
+			progress.ID, progress.Revision-1, state).Scan(&terminal); err != nil {
 			return err
 		}
 		if terminal == "" {
@@ -290,14 +294,14 @@ where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func
 	}
 	var unproven bool
 	if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_census_members cm join workiq_censuses c on c.id=cm.census_id
-where c.attempt_id=? and cm.retained=0 and (cm.page_id is null or not exists(select 1 from workiq_pages p where p.id=cm.page_id and p.prepared_attempt_id=? and p.prepared_complete=1 and p.state='staged')))`,
-		attempt, attempt).Scan(&unproven); err != nil {
+where c.attempt_id=? and ((?=1 and cm.admitted=0) or (cm.retained=0 and (cm.page_id is null or not exists(select 1 from workiq_pages p where p.id=cm.page_id and p.prepared_attempt_id=? and p.prepared_complete=1 and p.state=?)))))`,
+		attempt, admitted, attempt, state).Scan(&unproven); err != nil {
 		return err
 	}
 	if unproven {
 		return errors.New("mail census contains data without prepared page proof")
 	}
-	proof, dataAt, err := workIQMailEnumerationProof(ctx, tx, attempt, scope, len(folders))
+	proof, dataAt, err := workIQMailEnumerationProof(ctx, tx, attempt, scope, len(folders), admitted)
 	if err != nil {
 		return err
 	}

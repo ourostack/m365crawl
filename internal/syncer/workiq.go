@@ -174,6 +174,16 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 			}
 		}
 	}
+	var mailProof *store.WorkIQMailCompletionProof
+	if err == nil && len(account.Gaps) == 0 && !pending {
+		err = workIQRead(ctx, options.DBPath, func(s *store.Store) error {
+			proof, err := s.InspectWorkIQMailCompletion(ctx, attempt)
+			if err == nil {
+				mailProof = &proof
+			}
+			return err
+		})
+	}
 	account.Status = "ok"
 	code := ""
 	if err != nil {
@@ -201,6 +211,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0 && !pending,
 				Folders: account.Counts["folders"], Counts: account.Counts, Gaps: account.Gaps,
+				MailProof: mailProof,
 			})
 		})
 		cancel()

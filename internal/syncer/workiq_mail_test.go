@@ -3,6 +3,7 @@ package syncer
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -208,6 +209,39 @@ func TestWorkIQClosedClientConfirmationCanReduceItsShortWriteBatch(t *testing.T)
 	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "mail", Account: account})
 	if err != nil || !injected || len(report.Accounts) != 1 || report.Accounts[0].Status != "ok" || report.Counts["mail_added"] != 1 {
 		t.Fatal("bounded post-cleanup confirmation did not safely shrink and complete", err)
+	}
+}
+
+func TestWorkIQMailAcquisitionPersistsActualSealedDataReceipt(t *testing.T) {
+	path, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	started := time.Now()
+	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: path, Source: "mail", Account: account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var count int
+	if err := db.QueryRow(`select count(*) from workiq_mail_receipts`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("actual complete mailbox acquisition did not persist its data receipt", err)
+	}
+	var owner, completed, original string
+	var folders int
+	if err := db.QueryRow(`select account_id,completed_at,source_data_at,folders from workiq_mail_receipts`).Scan(&owner, &completed, &original, &folders); err != nil {
+		t.Fatal(err)
+	}
+	completedAt, err := time.Parse(time.RFC3339Nano, completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceAt, err := time.Parse(time.RFC3339Nano, original)
+	if err != nil || owner != account || folders != report.Counts["folders"] ||
+		sourceAt.Before(started) || sourceAt.After(completedAt) || completedAt.After(time.Now()) {
+		t.Fatal("receipt lost exact original observation, owner, inventory or completion evidence", err)
 	}
 }
 
