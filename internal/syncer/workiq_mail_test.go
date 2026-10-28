@@ -51,6 +51,166 @@ func workIQAcquisitionArchive(t *testing.T) (string, string) {
 	return db, account
 }
 
+func TestWorkIQRemovedDeltaSchedulesTwoActualGapFreeAccountCensuses(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	ctx := context.Background()
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(ctx, options); err != nil {
+		t.Fatal("initial synthetic server item was not archived", err)
+	}
+	t.Setenv("WORKIQ_ACQUISITION_MODE", "removed")
+	report, err := RunWorkIQ(ctx, options)
+	if err != nil {
+		t.Fatal("removed delta could not perform its bounded account census checks", err)
+	}
+	s, err := store.OpenReadOnly(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	rows, err := s.MailList(ctx, store.MailFilter{IncludeGone: true})
+	if err != nil || len(rows) != 1 || rows[0].GoneAt.IsZero() || !rows[0].DeletedAt.IsZero() ||
+		report.Counts["census_rechecks"] != 2 {
+		t.Fatal("removed delta did not schedule actual distinct full censuses, or was mistaken for explicit deletion", err)
+	}
+}
+
+func TestWorkIQFailedCensusClientCleanupCannotPublishSecondMiss(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	ctx := context.Background()
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(ctx, options); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKIQ_ACQUISITION_MODE", "removed")
+	old := workIQClose
+	t.Cleanup(func() { workIQClose = old })
+	closed := 0
+	workIQClose = func(client *workiq.Client) error {
+		closed++
+		err := old(client)
+		if closed == 6 { // delta, first full, second full: bootstrap/final each
+			return fmt.Errorf("synthetic closing failure: %w", err)
+		}
+		return err
+	}
+	_, err := RunWorkIQ(ctx, options)
+	if err == nil || closed != 6 {
+		t.Fatal("fixture did not fail actual second-census cleanup", err)
+	}
+	s, err := store.OpenReadOnly(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	rows, err := s.MailList(ctx, store.MailFilter{IncludeGone: true})
+	if err != nil || len(rows) != 1 || !rows[0].GoneAt.IsZero() {
+		t.Fatal("failed cleanup became the second trusted absence observation", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	workIQClose = old
+	report, err := RunWorkIQ(ctx, options)
+	if err != nil || report.Counts["census_rechecks"] != 1 {
+		t.Fatal("a later explicit command lost the durable census request or its actual recheck count", err)
+	}
+	read, err := store.OpenReadOnly(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = read.Close() }()
+	rows, err = read.MailList(ctx, store.MailFilter{IncludeGone: true})
+	if err != nil || len(rows) != 1 || rows[0].GoneAt.IsZero() {
+		t.Fatal("resumed actual census did not complete the second trusted absence", err)
+	}
+}
+
+func TestWorkIQMovedDeltaRechecksEveryFolderWithoutChangingPublicIdentity(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	ctx := context.Background()
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(ctx, options); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.OpenReadOnly(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.MailList(ctx, store.MailFilter{})
+	if err != nil || len(before) != 1 {
+		t.Fatal("initial synthetic item was not retained", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKIQ_ACQUISITION_MODE", "removed-move")
+	report, err := RunWorkIQ(ctx, options)
+	if err != nil || report.Counts["census_rechecks"] != 2 {
+		t.Fatal("cross-folder move did not complete actual census checks", err)
+	}
+	s, err = store.OpenReadOnly(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	after, err := s.MailList(ctx, store.MailFilter{IncludeGone: true})
+	if err != nil || len(after) != 1 || after[0].DetailKey != before[0].DetailKey ||
+		after[0].FolderKind != "sent" || !after[0].GoneAt.IsZero() || !after[0].DeletedAt.IsZero() {
+		t.Fatal("actual move duplicated, rekeyed or marked the canonical item gone/deleted", err)
+	}
+}
+
+func TestWorkIQCensusRechecksRetainEarlierCommandWriteCounts(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	ctx := context.Background()
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(ctx, options); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKIQ_ACQUISITION_MODE", "removed-new")
+	report, err := RunWorkIQ(ctx, options)
+	s, readErr := store.OpenReadOnly(ctx, db)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	defer func() { _ = s.Close() }()
+	rows, readErr := s.MailList(ctx, store.MailFilter{IncludeGone: true})
+	if readErr != nil || len(rows) != 2 {
+		t.Fatal("actual delta's new canonical item was not retained beside the absent item", readErr)
+	}
+	if err != nil || report.Counts["census_rechecks"] != 2 || report.Counts["mail_added"] != 1 {
+		t.Fatal("automatic census checks lost the earlier delta's actual new canonical item count", err)
+	}
+}
+
+func TestWorkIQClosedClientConfirmationCanReduceItsShortWriteBatch(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	oldClose, oldWrite := workIQClose, workIQWrite
+	t.Cleanup(func() { workIQClose, workIQWrite = oldClose, oldWrite })
+	closed, injected := 0, false
+	workIQClose = func(client *workiq.Client) error {
+		closed++
+		return oldClose(client)
+	}
+	workIQWrite = func(ctx context.Context, path string, operation func(context.Context, *store.Store) error) error {
+		if closed == 2 && !injected {
+			injected = true
+			return context.DeadlineExceeded
+		}
+		return oldWrite(ctx, path, operation)
+	}
+	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "mail", Account: account})
+	if err != nil || !injected || len(report.Accounts) != 1 || report.Accounts[0].Status != "ok" || report.Counts["mail_added"] != 1 {
+		t.Fatal("bounded post-cleanup confirmation did not safely shrink and complete", err)
+	}
+}
+
 func workIQAcquisitionStub(t *testing.T) string {
 	t.Helper()
 	exe := os.Getenv("M365CRAWL_TEST_ACQUISITION_STUB")

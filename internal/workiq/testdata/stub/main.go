@@ -20,9 +20,15 @@ func folder(kind string) map[string]any {
 	total := 0
 	if kind == "inbox" {
 		total = 1
+		if strings.HasPrefix(os.Getenv("WORKIQ_ACQUISITION_MODE"), "removed") {
+			total = 0
+		}
 		if n, err := strconv.Atoi(os.Getenv("WORKIQ_ACQUISITION_MESSAGE_COUNT")); err == nil && n > 0 && n <= 10000 {
 			total = n
 		}
+	}
+	if kind == "sentitems" && (os.Getenv("WORKIQ_ACQUISITION_MODE") == "removed-move" || os.Getenv("WORKIQ_ACQUISITION_MODE") == "removed-new") {
+		total = 1
 	}
 	children := 0
 	if kind == "inbox" {
@@ -154,6 +160,26 @@ func fetch(path string) (any, int) {
 		}
 		base := "/me/mailFolders/folder-" + kind + "/messages/delta()"
 		if path == base || path == base+"?$deltatoken=stable%2bstate" {
+			if kind == "sentitems" && (os.Getenv("WORKIQ_ACQUISITION_MODE") == "removed-move" || os.Getenv("WORKIQ_ACQUISITION_MODE") == "removed-new") {
+				id, header := "graph-moved", "<one@example.invalid>"
+				if os.Getenv("WORKIQ_ACQUISITION_MODE") == "removed-new" {
+					id, header = "graph-new-item", "<second@example.invalid>"
+				}
+				return map[string]any{"value": []any{map[string]any{
+					"id": id, "parentFolderId": "folder-sentitems", "internetMessageId": header,
+					"subject": "Synthetic server mail", "sentDateTime": "2026-09-10T07:59:00Z",
+					"receivedDateTime": "2026-09-10T08:00:00Z", "lastModifiedDateTime": "2026-09-10T08:02:00Z",
+					"from": map[string]any{"emailAddress": map[string]any{"name": "Synthetic sender", "address": "sender@example.invalid"}},
+					"body": map[string]any{"contentType": "html", "content": "<p>retained synthetic server body</p>"},
+				}}, "@odata.deltaLink": base + "?$deltatoken=stable%2bstate"}, 200
+			}
+			if kind == "inbox" && strings.HasPrefix(os.Getenv("WORKIQ_ACQUISITION_MODE"), "removed") {
+				values := []any{}
+				if strings.Contains(path, "$deltatoken=") {
+					values = append(values, map[string]any{"id": "graph-one", "@removed": map[string]any{"reason": "deleted"}})
+				}
+				return map[string]any{"value": values, "@odata.deltaLink": base + "?$deltatoken=stable%2bstate"}, 200
+			}
 			if kind == "inbox" {
 				if strings.Contains(path, "$deltatoken=") {
 					if name := os.Getenv("WORKIQ_ACQUISITION_EXPIRE_ONCE"); name != "" {

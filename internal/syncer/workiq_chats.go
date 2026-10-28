@@ -140,6 +140,15 @@ func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 	if !enabled {
 		return report, workIQFailure("workiq_disabled")
 	}
+	if options.Account != "" {
+		known := false
+		for _, fact := range facts {
+			known = known || fact.Family == "chats" && fact.ID == options.Account
+		}
+		if !known {
+			return report, workIQFailure("workiq_chat_account_unmatched")
+		}
+	}
 	chats, err := discoverWorkIQChats(ctx, options, facts, &report)
 	if err != nil {
 		return report, err

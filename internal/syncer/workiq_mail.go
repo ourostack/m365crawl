@@ -171,7 +171,6 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 	for _, folder := range queue {
 		seen[folder.ID] = true
 	}
-	full := true
 	for i := 0; i < len(queue); i++ {
 		folder := queue[i]
 		if folder.ChildCount == nil || *folder.ChildCount > 0 {
@@ -188,11 +187,6 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 			}
 		}
 		resource := "/me/mailFolders/" + url.PathEscape(folder.ID) + "/messages/delta()"
-		p, err := r.progress(ctx, resource)
-		if err != nil {
-			return err
-		}
-		full = full && p.AdmittedRevision == 0
 		if err := r.fetchResource(ctx, resource); err != nil {
 			return err
 		}
@@ -266,20 +260,6 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 			return s.AdmitWorkIQFrontier(writeCtx, attempt, resource, p.Revision)
 		}); err != nil {
 			return err
-		}
-	}
-	if full && len(report.Gaps) == 0 {
-		for {
-			done := false
-			if err := workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) (err error) {
-				done, err = s.ConfirmWorkIQMailCensusBatch(writeCtx, attempt, 128)
-				return err
-			}); err != nil {
-				return err
-			}
-			if done {
-				break
-			}
 		}
 	}
 	report.Counts["pages"] = r.pages

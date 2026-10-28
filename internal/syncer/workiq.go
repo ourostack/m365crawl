@@ -19,6 +19,7 @@ type WorkIQOptions struct {
 	restart                 *workIQExpired
 	restarted               map[string]bool
 	pageWork                int
+	censusPasses            int
 }
 
 type WorkIQAccountReport struct {
@@ -125,11 +126,54 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 		return nil
 	})
 	account := WorkIQAccountReport{Family: "mail", Account: binding.Fact.ID, Counts: map[string]int{}, Gaps: map[string]int{}}
+	pending, fullRecheck := false, false
+	if err == nil {
+		err = workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
+			pending, err = s.WorkIQMailRecheckPending(ctx, attempt)
+			return err
+		})
+		if err == nil && pending {
+			fullRecheck = true
+			options.censusPasses++
+			err = resetWorkIQMailCensus(ctx, options, attempt)
+			if err == nil {
+				account.Counts["census_rechecks"] = 1
+			}
+		}
+	}
 	if err == nil {
 		err = acquireWorkIQMail(ctx, options, session, attempt, binding.Fact.ID, &account)
 	}
-	cleanupErr := session.close() // cleanup must precede any positive outcome
+	cleanupErr := session.close() // close before absence confirmation or positive outcome
 	err = errors.Join(err, cleanupErr)
+	if err == nil && len(account.Gaps) == 0 {
+		done, limit := false, 128
+		for !done {
+			err = workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) (err error) {
+				done, err = s.ConfirmWorkIQMailCensusIfFull(writeCtx, attempt, limit)
+				return err
+			})
+			if err != nil {
+				if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && limit > 1 {
+					limit /= 2
+					continue
+				}
+				break
+			}
+		}
+	}
+	if err == nil && len(account.Gaps) == 0 {
+		err = workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
+			pending, err = s.WorkIQMailRecheckPending(ctx, attempt)
+			return err
+		})
+		if pending {
+			account.Counts["census_pending"] = 1
+			if !fullRecheck {
+				account.Gaps["workiq_mail_census_pending"]++
+			}
+		}
+	}
 	account.Status = "ok"
 	code := ""
 	if err != nil {
@@ -155,7 +199,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		persistErr = workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
-				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0,
+				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0 && !pending,
 				Folders: account.Counts["folders"], Counts: account.Counts, Gaps: account.Gaps,
 			})
 		})
@@ -176,6 +220,9 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	var expired *workIQExpired
 	if errors.As(err, &expired) && cleanupErr == nil && persistErr == nil {
 		return retryWorkIQBaseline(ctx, options, report, expired)
+	}
+	if err == nil && pending && (len(account.Gaps) == 0 || len(account.Gaps) == 1 && account.Gaps["workiq_mail_census_pending"] == 1) {
+		return retryWorkIQMailCensus(ctx, options, report)
 	}
 	return report, err
 }
