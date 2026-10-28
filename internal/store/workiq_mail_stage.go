@@ -49,10 +49,16 @@ func (s *Store) StageWorkIQMailFolder(ctx context.Context, attempt int64, folder
 		if kind == "" {
 			kind = "other"
 		}
-		if _, err := tx.ExecContext(ctx, `insert into workiq_folders(account_id,graph_id,folder_key,parent_graph_id,well_known,inventory_attempt,total_items)
-values(?,?,?,?,?,?,?) on conflict(account_id,graph_id) do update set parent_graph_id=excluded.parent_graph_id,
-well_known=excluded.well_known,inventory_attempt=excluded.inventory_attempt,total_items=excluded.total_items`,
-			binding.Fact.ID, cleaned.ID, key, cleaned.ParentID, kind, attempt, cleaned.TotalCount); err != nil {
+		if _, err := tx.ExecContext(ctx, `insert into workiq_folders(account_id,graph_id,folder_key,parent_graph_id,well_known,inventory_attempt,total_items,child_count)
+values(?,?,?,?,?,?,?,?) on conflict(account_id,graph_id) do update set parent_graph_id=excluded.parent_graph_id,
+well_known=case when excluded.well_known='other' then workiq_folders.well_known else excluded.well_known end,
+root_listed=case when workiq_folders.inventory_attempt=excluded.inventory_attempt then workiq_folders.root_listed else 0 end,
+inventory_attempt=excluded.inventory_attempt,total_items=excluded.total_items,child_count=excluded.child_count`,
+			binding.Fact.ID, cleaned.ID, key, cleaned.ParentID, kind, attempt, cleaned.TotalCount, cleaned.ChildCount); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `select well_known from workiq_folders where account_id=? and graph_id=?`,
+			binding.Fact.ID, cleaned.ID).Scan(&kind); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `insert into mail_folders(account,folder_key,parent_key,name,kind,modified_at) values(?,?,?,?,?,?)

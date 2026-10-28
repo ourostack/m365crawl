@@ -205,7 +205,12 @@ func (r *faultResult) LastInsertId() (int64, error) {
 	}
 	return r.inner.LastInsertId()
 }
-func (r *faultResult) RowsAffected() (int64, error) { return r.inner.RowsAffected() }
+func (r *faultResult) RowsAffected() (int64, error) {
+	if r.inj.hit("rowsaffected") {
+		return 0, errInjected
+	}
+	return r.inner.RowsAffected()
+}
 
 type faultRows struct {
 	inner driver.Rows
