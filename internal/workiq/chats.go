@@ -34,6 +34,31 @@ type ChatMessage struct {
 	Removed    bool
 }
 
+type MessageHeader struct {
+	ID, MessageType, ReplyToID string
+	CreatedAt                  *time.Time
+	Removed                    bool
+}
+
+func DecodeMessageHeader(ctx context.Context, raw json.RawMessage) (MessageHeader, error) {
+	var wire struct {
+		ID, MessageType, ReplyToID, CreatedDateTime string
+		Removed                                     json.RawMessage `json:"@removed"`
+	}
+	if _, err := decodeEntity(ctx, raw, &wire); err != nil {
+		return MessageHeader{}, err
+	}
+	if wire.ID == "" || len(wire.ID) > maxPath {
+		return MessageHeader{}, failure("workiq_protocol")
+	}
+	created, err := graphTime(wire.CreatedDateTime)
+	if err != nil {
+		return MessageHeader{}, err
+	}
+	return MessageHeader{ID: wire.ID, MessageType: wire.MessageType, ReplyToID: wire.ReplyToID, CreatedAt: created,
+		Removed: len(wire.Removed) > 0 && string(wire.Removed) != "null"}, nil
+}
+
 func DecodeChat(ctx context.Context, raw json.RawMessage) (Chat, error) {
 	var wire struct{ ID, TenantID, ChatType, Topic string }
 	safe, err := decodeEntity(ctx, raw, &wire)

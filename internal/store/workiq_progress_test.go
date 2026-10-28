@@ -14,6 +14,7 @@ func TestWorkIQPageProgressIsAtomicAndCompareAndSwap(t *testing.T) {
 	must0(s.SetWorkIQEnabled(ctx, true))
 	scope := WorkIQScope{Family: "chats", Account: acctA.TenantID + "/" + acctA.UserID}
 	attempt := must(s.BeginWorkIQAttempt(ctx, scope, base))
+	verifyWorkIQTestAttempt(t, s, attempt)
 	page := must(workiq.DecodePage(ctx, []byte(`{"structuredContent":{"results":[{"statusCode":200,"error":null,"data":{"value":[],"@odata.nextLink":"/chats/c/messages?$skiptoken=A%2fb"}}]}}`)))
 	batch := WorkIQPageBatch{AttemptID: attempt, Resource: "/chats/c/messages", Page: page, ObservedAt: base}
 	must0(s.StageWorkIQPage(ctx, batch))
@@ -76,6 +77,7 @@ func TestWorkIQPageCannotLeaveItsFamilyOrResource(t *testing.T) {
 				account = "outlook/Main"
 			}
 			attempt := must(s.BeginWorkIQAttempt(ctx, WorkIQScope{Family: tc.family, Account: account}, base))
+			verifyWorkIQTestAttempt(t, s, attempt)
 			body := `{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[]}}]}}`
 			if tc.next != "" {
 				body = `{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[],"@odata.nextLink":"` + tc.next + `"}}]}}`
@@ -124,6 +126,7 @@ func TestWorkIQStorageFaults(t *testing.T) {
 		prepared := func(t *testing.T, s *Store) {
 			setup(t, s)
 			id = must(s.BeginWorkIQAttempt(context.Background(), WorkIQScope{Family: "mail", Account: mailAcct}, base))
+			verifyWorkIQTestAttempt(t, s, id)
 		}
 		page := must(workiq.DecodePage(context.Background(), []byte(`{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[]}}]}}`)))
 		sweepFaults(t, prepared, func(ctx context.Context, s *Store) error {
@@ -135,6 +138,7 @@ func TestWorkIQStorageFaults(t *testing.T) {
 		prepared := func(t *testing.T, s *Store) {
 			setup(t, s)
 			id = must(s.BeginWorkIQAttempt(context.Background(), WorkIQScope{Family: "mail", Account: mailAcct}, base))
+			verifyWorkIQTestAttempt(t, s, id)
 		}
 		sweepFaults(t, prepared, func(ctx context.Context, s *Store) error {
 			return s.CompleteWorkIQAttempt(ctx, id, WorkIQSummary{Status: "ok_with_omissions", FinishedAt: base, Gaps: map[string]int{"workiq_clock_unknown": 1}})
@@ -155,6 +159,7 @@ func TestWorkIQProgressRejectsInvalidStateWithoutMutation(t *testing.T) {
 		t.Fatal("unknown archive account was created")
 	}
 	attempt := must(s.BeginWorkIQAttempt(ctx, scope, base))
+	verifyWorkIQTestAttempt(t, s, attempt)
 	valid := must(workiq.DecodePage(ctx, []byte(`{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[]}}]}}`)))
 	for _, batch := range []WorkIQPageBatch{
 		{AttemptID: attempt, Resource: "/me/chats", Page: valid},
