@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -163,7 +164,7 @@ func TestNavigateRejectsSupersededDocument(t *testing.T) {
 
 func TestNavigateBindingQueryErrorsAndCancellation(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3} {
-		t.Run(string(rune('0'+failAt)), func(t *testing.T) {
+		t.Run(strconv.Itoa(failAt), func(t *testing.T) {
 			s := browsertest.NewServer(t)
 			p := testPage(t, s)
 			var calls atomic.Int32
