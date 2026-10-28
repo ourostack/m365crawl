@@ -112,6 +112,7 @@ type mailPersonOut struct {
 
 // mailListItem is one message in a list.
 type mailListItem struct {
+	Provenance        string     `json:"provenance"`
 	ID                string     `json:"id"`
 	Account           string     `json:"account"`
 	Folder            *string    `json:"folder"`
@@ -135,11 +136,13 @@ type mailListItem struct {
 	ICalUID           *string    `json:"ical_uid"`
 	GoneAt            *time.Time `json:"gone_at"`
 	EvictedAt         *time.Time `json:"evicted_at"`
+	DeletedAt         *time.Time `json:"deleted_at"`
 	TextTruncated     bool       `json:"text_truncated,omitempty"`
 }
 
 // mailShowItem is one message in full.
 type mailShowItem struct {
+	Provenance        string              `json:"provenance"`
 	ID                string              `json:"id"`
 	Account           string              `json:"account"`
 	Folder            *string             `json:"folder"`
@@ -166,6 +169,7 @@ type mailShowItem struct {
 	ICalUID           *string             `json:"ical_uid"`
 	GoneAt            *time.Time          `json:"gone_at"`
 	EvictedAt         *time.Time          `json:"evicted_at"`
+	DeletedAt         *time.Time          `json:"deleted_at"`
 	TextTruncated     bool                `json:"text_truncated,omitempty"`
 }
 
@@ -230,6 +234,7 @@ func recipientLabel(r store.MailRecipient) string {
 
 func listItemOf(r store.MailRow, max int) mailListItem {
 	it := mailListItem{
+		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
@@ -253,6 +258,7 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 
 func showItemOf(r store.MailRow, max int) mailShowItem {
 	it := mailShowItem{
+		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),

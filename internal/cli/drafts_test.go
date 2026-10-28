@@ -542,7 +542,10 @@ func draftRollbackFixture(t *testing.T) *env {
 	if _, err = db.Exec(`attach database ? as seed`, seed); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"schema_migrations", "records", "conversations", "sync_runs"} {
+	for _, table := range []string{"schema_migrations", "records", "conversations", "sync_runs", "meta",
+		"workiq_accounts", "workiq_attempts", "workiq_frontiers", "workiq_pages",
+		"workiq_rows", "workiq_aliases", "workiq_source_keys", "workiq_folders",
+		"workiq_censuses", "workiq_census_members", "workiq_gaps", "workiq_mail_receipts"} {
 		if _, err = db.Exec("create table main." + table + " as select * from seed." + table); err != nil {
 			t.Fatal(err)
 		}
