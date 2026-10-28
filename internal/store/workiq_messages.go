@@ -150,7 +150,7 @@ where m.tenant_id=? and m.user_id=? and m.conversation_id=? and m.id=?`,
 		changed = changed || !cacheJSON.Valid || cacheJSON.String != encoded
 		cache, hasCache, cacheJSON = safeIncoming, true, sql.NullString{String: encoded, Valid: true}
 	}
-	if changed {
+	if changed && !observed.IsZero() {
 		state.Cache.SeenAt = &observed
 	}
 	state.Cache.Seen, state.Cache.Version, state.Cache.Text = true, cache.Version, cache.ContentText

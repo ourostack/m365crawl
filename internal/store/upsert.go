@@ -317,6 +317,12 @@ func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Mess
 }
 
 func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (Counts, []Change, []RowState, error) {
+	return applyMessageSources(ctx, tx, ms, nil)
+}
+
+// reduced is nonnil only after verified, code-qualified server reduction for one conversation.
+// Those projections must not be interpreted again as native cache arrivals.
+func applyMessageSources(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message, reduced map[string]workIQCacheMessageResult) (Counts, []Change, []RowState, error) {
 	var n Counts
 	var changes []Change
 	rows := make([]RowState, 0, len(ms))
@@ -359,7 +365,9 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				return errors.New("message needs tenant, user, conversation and id")
 			}
 			source := workIQCacheMessageResult{Message: m, PublishApps: true}
-			if haveWorkIQ {
+			if reduced != nil {
+				source = reduced[m.ID]
+			} else if haveWorkIQ {
 				source, err = applyWorkIQCacheMessage(ctx, tx, m, derivedAt)
 				if err != nil {
 					return err
