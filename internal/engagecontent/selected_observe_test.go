@@ -32,7 +32,7 @@ func (d *selectedDriver) Eval(ctx context.Context, expr string, out any) error {
 		if d.fail == "generation" {
 			generation = "other-generation"
 		}
-		b, _ := json.Marshal(map[string]any{"Allowed": !d.wrongPage, "Generation": generation})
+		b, _ := json.Marshal(map[string]any{"Top": true, "Allowed": !d.wrongPage, "URL": "https://engage.cloud.microsoft/main/threads/" + selectedTestID(), "Ready": "complete", "Generation": generation})
 		return json.Unmarshal(b, out)
 	}
 	return d.fakeDriver.Eval(ctx, expr, out)

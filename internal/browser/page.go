@@ -130,7 +130,7 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 		}
 		if frame.LoaderID != loader {
 			if committed || frame.LoaderID != before.LoaderID {
-				return errors.New("browser navigation was superseded")
+				return p.navigationSuperseded(ctx, res.FrameID, committed && !sameDocument)
 			}
 		} else {
 			committed = true
@@ -145,7 +145,7 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 					return err
 				}
 				if after.ID != res.FrameID || after.LoaderID != loader {
-					return errors.New("browser navigation was superseded")
+					return p.navigationSuperseded(ctx, res.FrameID, after.ID == res.FrameID && !sameDocument)
 				}
 				return ctx.Err()
 			}

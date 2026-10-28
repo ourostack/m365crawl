@@ -12,7 +12,7 @@ import (
 //go:embed selected.js
 var selectedJS string
 
-const selectedStateExpr = `({Allowed:location.protocol==="https:"&&location.hostname==="engage.cloud.microsoft"&&(!location.port||location.port==="443"),Generation:window.__m365crawlEngageCapture?.Generation||""})`
+const selectedStateExpr = `({Top:window===top,Allowed:location.protocol==="https:"&&location.hostname==="engage.cloud.microsoft"&&(!location.port||location.port==="443"),URL:location.href,Ready:document.readyState,Generation:window.__m365crawlEngageCapture?.Generation||""})`
 
 func selectedScript(target ThreadTarget) string {
 	encoded, _ := json.Marshal(target)
@@ -60,15 +60,9 @@ func ObserveThread(ctx context.Context, page Driver, target ThreadTarget) (resul
 	}()
 	landing, closeLanding := context.WithTimeout(work, 30*time.Second)
 	defer closeLanding()
-	if page.Navigate(landing, target.URL) != nil {
-		return Result{}, &ReadError{Code: "navigation_failed"}
-	}
-	var before struct {
-		Allowed    bool
-		Generation string
-	}
-	if page.Eval(landing, selectedStateExpr, &before) != nil || !before.Allowed || before.Generation == "" || len(before.Generation) > 128 {
-		return Result{}, &ReadError{Code: "unavailable"}
+	generation, e := selectedLanding(landing, page, target)
+	if e != nil {
+		return Result{}, e
 	}
 	closeLanding()
 	if err := waitCollection(work); err != nil {
@@ -83,7 +77,7 @@ func ObserveThread(ctx context.Context, page Driver, target ThreadTarget) (resul
 		return Result{}, &ReadError{Code: "capture_failed"}
 	}
 	stopped = true
-	if raw.Generation != before.Generation {
+	if raw.Generation != generation {
 		return Result{}, &ReadError{Code: "document_changed"}
 	}
 	return decodeSelected(work, target, raw)

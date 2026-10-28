@@ -19,6 +19,13 @@ type selectedURLFixturePage struct {
 }
 
 func (p *selectedURLFixturePage) Eval(ctx context.Context, expr string, out any) error {
+	if strings.Contains(expr, "URL:location.href") {
+		data, err := json.Marshal(map[string]any{"Top": true, "Allowed": true, "URL": p.result.Selection.URL, "Ready": "complete", "Generation": "synthetic-generation"})
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(data, out)
+	}
 	if !strings.Contains(expr, ".stop()") {
 		return p.engageFixturePage.Eval(ctx, expr, out)
 	}

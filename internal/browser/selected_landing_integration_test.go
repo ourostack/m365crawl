@@ -65,10 +65,10 @@ func TestSelectedLandingAfterCommittedReplacement(t *testing.T) {
 		case strings.Contains(params.Expression, ".stop()"):
 			value = map[string]any{
 				"State": "observations", "Generation": "final-generation",
-				"Account": map[string]any{"Host": "engage.cloud.microsoft", "UserID": "viewer", "NetworkID": "network"},
+				"Account":         map[string]any{"Host": "engage.cloud.microsoft", "UserID": "viewer", "NetworkID": "network"},
 				"AccountEvidence": []any{map[string]any{"Host": "engage.cloud.microsoft", "UserID": "viewer", "NetworkID": "network"}},
 				"Threads": []any{map[string]any{
-					"ID": id, "NetworkID": "network", "StarterID": "starter", "Blocks": []string{"useful starter"},
+					"ID": id, "NetworkID": "network", "GroupID": "group", "StarterID": "starter", "Blocks": []string{"useful starter"},
 					"Selected": map[string]any{"messages": []any{
 						map[string]any{"id": "starter", "thread_id": id, "blocks": []string{"useful starter"}, "body_state": "observed"},
 						map[string]any{"id": "reply", "thread_id": id, "parent_id": "starter", "blocks": []string{"useful reply"}, "body_state": "observed"},
