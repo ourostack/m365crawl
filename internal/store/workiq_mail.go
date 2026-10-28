@@ -364,8 +364,8 @@ server_version=excluded.server_version,server_deleted_at=excluded.server_deleted
 			return err
 		}
 	}
-	if err := retainWorkIQMailCacheMarks(ctx, tx, account); err != nil {
+	if err := retainWorkIQMailCacheMarks(ctx, tx, account, rowid); err != nil {
 		return err
 	}
-	return reduceWorkIQMailMarks(ctx, tx, account)
+	return reduceWorkIQMailMarks(ctx, tx, account, rowid)
 }

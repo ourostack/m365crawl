@@ -3,23 +3,37 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
-func retainWorkIQMailCacheMarks(ctx context.Context, tx *sql.Tx, account string) error {
+func workIQMailMarkSelection(account string, ids []int64) (string, []any) {
+	scope := " where kind='mail' and account_id=?"
+	args := []any{account}
+	if len(ids) > 0 {
+		scope += " and item_rowid in (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	return scope, args
+}
+
+func retainWorkIQMailCacheMarks(ctx context.Context, tx *sql.Tx, account string, ids ...int64) error {
 	have, err := workIQHasRows(ctx, tx, "mail")
 	if err != nil || !have {
 		return err
 	}
+	scope, args := workIQMailMarkSelection(account, ids)
 	_, err = tx.ExecContext(ctx, `update workiq_rows set
 cache_first_miss_at=coalesce(cache_first_miss_at,(select a.first_missed_at from mail_absent a join mail_messages m on m.account=a.account and m.detail_key=a.detail_key where m.account=workiq_rows.account_id and m.rowid=workiq_rows.item_rowid)),
 cache_gone_at=coalesce(cache_gone_at,(select m.gone_at from mail_messages m where m.account=workiq_rows.account_id and m.rowid=workiq_rows.item_rowid)),
 cache_evicted_at=coalesce(cache_evicted_at,(select m.evicted_at from mail_messages m where m.account=workiq_rows.account_id and m.rowid=workiq_rows.item_rowid))
-where kind='mail' and account_id=? and cache_seen=1`, account)
+`+scope+` and cache_seen=1`, args...)
 	return err
 }
 
-func reduceWorkIQMailMarks(ctx context.Context, tx *sql.Tx, account string) error {
+func reduceWorkIQMailMarks(ctx context.Context, tx *sql.Tx, account string, ids ...int64) error {
 	have, err := workIQHasRows(ctx, tx, "mail")
 	if err != nil || !have {
 		return err
@@ -29,8 +43,9 @@ func reduceWorkIQMailMarks(ctx context.Context, tx *sql.Tx, account string) erro
 		gone, evicted, deleted *time.Time
 	}
 	var updates []mark
+	scope, args := workIQMailMarkSelection(account, ids)
 	err = eachRow(ctx, tx, `select item_rowid,cache_seen,server_seen,cache_first_miss_at,cache_gone_at,cache_evicted_at,server_seen_at,server_gone_at,
-cache_deleted_at,server_deleted_at,server_version,server_deleted_version from workiq_rows where kind='mail' and account_id=?`, []any{account}, func(row *sql.Rows) error {
+cache_deleted_at,server_deleted_at,server_version,server_deleted_version from workiq_rows`+scope, args, func(row *sql.Rows) error {
 		var id int64
 		var in WorkIQReduceInput
 		var first, gone, evicted, seen, serverGone, cacheDeleted, serverDeleted, liveVersion, deleteVersion sql.NullString
