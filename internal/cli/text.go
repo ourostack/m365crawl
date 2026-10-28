@@ -102,6 +102,20 @@ func (rt *runtime) renderText(label string, v any) error {
 			for _, item := range r.Items {
 				if engage, ok := item.(EngageContentItem); ok {
 					_, _ = fmt.Fprintf(w, "original session %d losses (not per-thread): %v; first %d of %d blocks; preview_truncated=%t text_truncated=%t\nfull record in this archive: %s\n", engage.SessionID, engage.SessionLosses, len(engage.Blocks), engage.BlocksTotal, engage.PreviewTruncated, engage.TextTruncated, engage.FullTextCommand)
+					if engage.Selected != nil {
+						for _, message := range engage.Selected.Messages {
+							_, _ = fmt.Fprintf(w, "message %s; author %s; created %s; updated %s; body %s\n", message.ID, searchVal(message.Author.Name), noteStamp(message.CreatedAt), noteStamp(message.UpdatedAt), message.BodyState)
+							for _, block := range message.Blocks {
+								_, _ = fmt.Fprintln(w, block)
+							}
+							for _, link := range message.Links {
+								_, _ = fmt.Fprintf(w, "link: %s\n", link.URL)
+							}
+							for _, attachment := range message.Attachments {
+								_, _ = fmt.Fprintf(w, "attachment metadata: %s; native_type %s; URL %s (not downloaded)\n", searchVal(attachment.Title), searchVal(attachment.NativeType), searchVal(attachment.URL))
+							}
+						}
+					}
 				}
 			}
 		}

@@ -12,6 +12,9 @@ const MaxResultJSONBytes = 64 << 20
 // ValidateResult checks final, owned evidence without repairing or mutating it.
 // Transport-only account fragments are deliberately not reconstructed here.
 func ValidateResult(ctx context.Context, r Result) error {
+	if r.Selection != nil {
+		return validateSelected(ctx, r)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -51,6 +54,9 @@ func ValidateResult(ctx context.Context, r Result) error {
 	}
 	blocks, unknownClocks := 0, 0
 	for i, thread := range r.Threads {
+		if thread.Selected != nil {
+			return malformed
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

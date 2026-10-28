@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	EngageKind          = "engage_home"
-	EngageQualification = "engage-native-home-v1/mapper-v1"
-	EngageHomeURL       = "https://engage.cloud.microsoft/"
+	EngageKind                = "engage_home"
+	EngageQualification       = "engage-native-home-v1/mapper-v1"
+	EngageHomeURL             = "https://engage.cloud.microsoft/"
+	EngageThreadKind          = "engage_thread"
+	EngageThreadQualification = "engage-native-selected-v1/mapper-v1"
 )
 
 type EngageCapture struct {
@@ -44,6 +46,7 @@ type EngageRegistration struct {
 	Target, Outcome, Reason, AccountState string
 	AttemptedAt, FinishedAt               *time.Time
 	LastSuccessfulInstanceID              *int64
+	Kind                                  string
 }
 type EngageSource struct {
 	ID, RegistrationID, AdmittedAttemptID, CurrentSessionID int64
@@ -91,9 +94,15 @@ func engageBoundary(account engagecontent.SourceAccount) string {
 	return engageJSON([]string{account.Host, account.NetworkID, account.UserID})
 }
 func engageDigest(sourceID int64, encoded string) string {
-	return hashOf(engageJSON([]string{strconv.FormatInt(sourceID, 10), EngageQualification, encoded}))
+	return engageDigestFor(sourceID, EngageQualification, encoded)
+}
+func engageDigestFor(sourceID int64, qualification, encoded string) string {
+	return hashOf(engageJSON([]string{strconv.FormatInt(sourceID, 10), qualification, encoded}))
 }
 func engageCoverage(r engagecontent.Result) string {
+	if r.Selection != nil {
+		return "native_selected_thread_observations"
+	}
 	if r.State == "metadata_only" {
 		return "metadata_only"
 	}
@@ -126,14 +135,33 @@ func engageIndex(session EngageSession, thread engagecontent.ThreadObservation) 
 		Ordinal                                 int
 		ThreadID, NetworkID, GroupID, StarterID string
 		SenderID                                *string
-	}{session.Result.Account, session.ID, session.RepresentationDigest, thread.Ordinal, thread.ID, thread.NetworkID, thread.GroupID, thread.StarterID, thread.SenderID})
-	return title, strings.Join(thread.Blocks, "\n"), meta
+		Selected                                *engagecontent.SelectedThread `json:",omitempty"`
+	}{session.Result.Account, session.ID, session.RepresentationDigest, thread.Ordinal, thread.ID, thread.NetworkID, thread.GroupID, thread.StarterID, thread.SenderID, thread.Selected})
+	body := strings.Join(thread.Blocks, "\n")
+	if thread.Selected != nil {
+		parts := []string{}
+		for _, message := range thread.Selected.Messages {
+			parts = append(parts, strings.Join(message.Blocks, "\n"))
+		}
+		body = strings.Join(parts, "\n")
+	}
+	return title, body, meta
 }
 
 func (s *Store) BeginEngageAttempt(ctx context.Context, input KnowledgeInput) (KnowledgeAttempt, error) {
 	if input.Kind != EngageKind || input.Platform != "browser" || input.Locator != EngageHomeURL || input.AcquisitionSignature != "" {
 		return KnowledgeAttempt{}, errors.New("engage: invalid registration")
 	}
+	return s.beginEngage(ctx, input)
+}
+func (s *Store) BeginEngageThreadAttempt(ctx context.Context, input KnowledgeInput) (KnowledgeAttempt, error) {
+	target, err := engagecontent.ParseThreadURL(input.Locator)
+	if err != nil || target.URL != input.Locator || input.Kind != EngageThreadKind || input.Platform != "browser" || input.AcquisitionSignature != "" {
+		return KnowledgeAttempt{}, errors.New("engage: invalid thread registration")
+	}
+	return s.beginEngage(ctx, input)
+}
+func (s *Store) beginEngage(ctx context.Context, input KnowledgeInput) (KnowledgeAttempt, error) {
 	return s.beginKnowledgeAttempt(ctx, input, func(tx *sql.Tx, id int64) error {
 		var target string
 		var priorAttempts int
@@ -141,14 +169,14 @@ func (s *Store) BeginEngageAttempt(ctx context.Context, input KnowledgeInput) (K
 			return err
 		}
 		if priorAttempts == 0 {
-			if _, err := tx.ExecContext(ctx, `insert into engage_locator_metadata(locator_id,target_url) values(?,?)`, id, EngageHomeURL); err != nil {
+			if _, err := tx.ExecContext(ctx, `insert into engage_locator_metadata(locator_id,target_url) values(?,?)`, id, input.Locator); err != nil {
 				return err
 			}
 		}
 		if err := tx.QueryRowContext(ctx, `select target_url from engage_locator_metadata where locator_id=?`, id).Scan(&target); err != nil {
 			return err
 		}
-		if target != EngageHomeURL {
+		if target != input.Locator {
 			return errEngageIntegrity
 		}
 		_, err := readEngage(ctx, tx, EngageFilter{}, 0, false, id)
@@ -164,24 +192,28 @@ func (s *Store) CommitEngageCapture(ctx context.Context, a KnowledgeAttempt, c E
 		return err
 	}
 	encoded := engageJSON(c.Result)
-	outcome := KnowledgeOutcome{Status: "partial", Qualification: EngageQualification, At: c.AdmittedAt}
-	return s.finishKnowledge(ctx, a, outcome, EngageKind, func(ctx context.Context, tx *sql.Tx, a KnowledgeAttempt, _ KnowledgeOutcome) (int64, string, map[string]int, error) {
+	kind, qualification, target := EngageKind, EngageQualification, EngageHomeURL
+	if c.Result.Selection != nil {
+		kind, qualification, target = EngageThreadKind, EngageThreadQualification, c.Result.Selection.URL
+	}
+	outcome := KnowledgeOutcome{Status: "partial", Qualification: qualification, At: c.AdmittedAt}
+	return s.finishKnowledge(ctx, a, outcome, kind, func(ctx context.Context, tx *sql.Tx, a KnowledgeAttempt, _ KnowledgeOutcome) (int64, string, map[string]int, error) {
 		// Reuse is not a repair path. Audit the complete prior namespace first.
 		if _, err := readEngage(ctx, tx, EngageFilter{}, 0, false, 0); err != nil {
 			return 0, "", nil, err
 		}
 		boundary := engageBoundary(c.Result.Account)
-		if _, err := tx.ExecContext(ctx, `insert into knowledge_sources(locator_id,boundary,qualification) values(?,?,?) on conflict(locator_id,boundary,qualification) do nothing`, a.LocatorID, boundary, EngageQualification); err != nil {
+		if _, err := tx.ExecContext(ctx, `insert into knowledge_sources(locator_id,boundary,qualification) select ?,?,? from knowledge_locators where id=? and locator=? on conflict(locator_id,boundary,qualification) do nothing`, a.LocatorID, boundary, qualification, a.LocatorID, target); err != nil {
 			return 0, "", nil, err
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `select id from knowledge_sources where locator_id=? and boundary=? and qualification=?`, a.LocatorID, boundary, EngageQualification).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `select s.id from knowledge_sources s join knowledge_locators l on l.id=s.locator_id where s.locator_id=? and s.boundary=? and s.qualification=? and l.locator=?`, a.LocatorID, boundary, qualification, target).Scan(&id); err != nil {
 			return 0, "", nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `insert into engage_source_metadata(source_id,account_json) values(?,?) on conflict(source_id) do nothing`, id, engageJSON(c.Result.Account)); err != nil {
 			return 0, "", nil, err
 		}
-		digest := engageDigest(id, encoded)
+		digest := engageDigestFor(id, qualification, encoded)
 		// finishKnowledge's outcome is value-captured before admission. Bind its
 		// content digest here in the same transaction, and retain it below.
 		if _, err := tx.ExecContext(ctx, `update knowledge_attempts set content_digest=? where id=?`, digest, a.ID); err != nil {
@@ -191,7 +223,7 @@ func (s *Store) CommitEngageCapture(ctx context.Context, a KnowledgeAttempt, c E
 		err := tx.QueryRowContext(ctx, `select rowid from engage_sessions where source_id=? and representation_digest=?`, id, digest).Scan(&sessionID)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			res, err := tx.ExecContext(ctx, `insert into engage_sessions(source_id,capture_id,representation_digest,qualification,result_json,acquired_at,captured_at) values(?,?,?,?,?,?,?)`, id, a.ID, digest, EngageQualification, encoded, knowledgeTime(c.AcquiredAt), knowledgeTime(c.AdmittedAt))
+			res, err := tx.ExecContext(ctx, `insert into engage_sessions(source_id,capture_id,representation_digest,qualification,result_json,acquired_at,captured_at) values(?,?,?,?,?,?,?)`, id, a.ID, digest, qualification, encoded, knowledgeTime(c.AcquiredAt), knowledgeTime(c.AdmittedAt))
 			if err != nil {
 				return 0, "", nil, err
 			}
@@ -252,4 +284,10 @@ func (s *Store) RecordEngageFailure(ctx context.Context, a KnowledgeAttempt, f E
 		return errors.New("engage: invalid failure")
 	}
 	return s.finishKnowledge(ctx, a, KnowledgeOutcome{Status: f.Status, Reason: f.Reason, At: f.At}, EngageKind, nil)
+}
+func (s *Store) RecordEngageThreadFailure(ctx context.Context, a KnowledgeAttempt, f EngageFailure) error {
+	if !validEngageFailure(f.Status, f.Reason) {
+		return errors.New("engage: invalid thread failure")
+	}
+	return s.finishKnowledge(ctx, a, KnowledgeOutcome{Status: f.Status, Reason: f.Reason, At: f.At}, EngageThreadKind, nil)
 }

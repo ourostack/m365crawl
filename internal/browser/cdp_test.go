@@ -351,7 +351,7 @@ func TestNavigate(t *testing.T) {
 	if err := p.Navigate(ctx, "x"); err == nil {
 		t.Fatal("a protocol error fails Navigate")
 	}
-	s.Handle("Page.navigate", func(browsertest.Request) (any, *browsertest.Error) { return map[string]any{}, nil })
+	s.Handle("Page.navigate", func(browsertest.Request) (any, *browsertest.Error) { return map[string]any{"frameId": "F1"}, nil })
 
 	n := 0
 	s.Handle("Runtime.evaluate", func(browsertest.Request) (any, *browsertest.Error) {

@@ -15,7 +15,7 @@ import (
 
 type contentGroup struct {
 	Capture contentCaptureCmd `cmd:"" help:"Explicitly capture one guarded already-resident Office file or selected original native file reference."`
-	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire a supported page, selected Stream transcript or bounded Engage Home session through the tool-owned headless browser."`
+	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire a supported page, selected Stream transcript or bounded Engage session through the tool-owned headless browser."`
 	Signin  contentSigninCmd  `cmd:"" help:"Explicit user-agreed visible window for the tool-owned profile."`
 	List    contentListCmd    `cmd:"" help:"List immutable retained observations offline, known native text-modified newest first."`
 	Search  contentSearchCmd  `cmd:"" help:"Search supported retained text/title/native metadata offline."`
@@ -23,17 +23,20 @@ type contentGroup struct {
 	Sources contentSourcesCmd `cmd:"" help:"Read registered source coverage offline, including failed and metadata-only zero-hit participants."`
 }
 type contentFetchGroup struct {
-	EngageHome contentFetchEngageHomeCmd `cmd:"" help:"Explicitly capture bounded native Engage Home-session thread-starter observations (always partial; no URL or account selector)."`
-	Page       contentFetchPageCmd       `cmd:"" help:"Explicitly acquire a supported rich-text page projection (always partial)."`
-	Stream     contentFetchStreamCmd     `cmd:"" help:"Explicitly acquire one verified selected transcript, or verified metadata without a selected body."`
+	EngageThread contentFetchEngageThreadCmd `cmd:"" help:"Capture one exact Engage thread link, with starter/replies and partial native metadata."`
+	EngageHome   contentFetchEngageHomeCmd   `cmd:"" help:"Explicitly capture bounded native Engage Home-session thread-starter observations (always partial; no URL or account selector)."`
+	Page         contentFetchPageCmd         `cmd:"" help:"Explicitly acquire a supported rich-text page projection (always partial)."`
+	Stream       contentFetchStreamCmd       `cmd:"" help:"Explicitly acquire one verified selected transcript, or verified metadata without a selected body."`
 }
 
 const contentHelp = "Explicit fetch only: `content fetch page URL` or `content fetch stream URL [--transcript-id ID]`. Supported HTTPS tenant.sharepoint.com or tenant.sharepoint-df.com /sites/NAME or /teams/NAME targets: /SitePages/NAME.aspx, or /_layouts/15/stream.aspx?id=ENCODED_NATIVE_FILE_PATH. No sharing-ticket replay, library crawl or automatic retry.\n" +
 	"Reads and search are archive-only, regardless of --max-age. Pages are supported rich-text projections, always partial, never rendered layouts. Stream complete means only one verified selected native transcript; no_transcript and metadata_only have no selected body. Last-good body keeps its original file/account/selection and clocks; retained is not current content.\n" +
 	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Generated retries/fixes/next commands name this same absolute --db archive; run them as printed. A retry preserves the original request, not an automatic format correction. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
-func (contentGroup) Help() string      { return engageHelp + localContentHelp + contentHelp }
-func (contentFetchGroup) Help() string { return engageHelp + contentHelp }
+func (contentGroup) Help() string {
+	return engageSelectedHelp + engageHelp + localContentHelp + contentHelp
+}
+func (contentFetchGroup) Help() string { return engageSelectedHelp + engageHelp + contentHelp }
 func splitContentSite(path string) string {
 	parts := strings.Split(path, "/")
 	return "/" + parts[1] + "/" + parts[2]

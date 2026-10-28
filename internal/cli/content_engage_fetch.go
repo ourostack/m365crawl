@@ -83,6 +83,9 @@ func earlyEngagePage(page transcripts.PageDriver) (engagecontent.Driver, error) 
 }
 
 func captureEngage(ctx context.Context, options browser.LaunchOptions) (result engagecontent.Result, err error) {
+	return captureEngageWith(ctx, options, observeEngageHome)
+}
+func captureEngageWith(ctx context.Context, options browser.LaunchOptions, observe func(context.Context, engagecontent.Driver) (engagecontent.Result, error)) (result engagecontent.Result, err error) {
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -114,7 +117,7 @@ func captureEngage(ctx context.Context, options browser.LaunchOptions) (result e
 	if err != nil {
 		return result, err
 	}
-	result, err = observeEngageHome(ctx, driver)
+	result, err = observe(ctx, driver)
 	if err == nil {
 		err = engagecontent.ValidateResult(ctx, result)
 	}
@@ -166,17 +169,40 @@ func engageFailure(err error) (string, string) {
 }
 
 func (rt *runtime) fetchEngage(options browser.LaunchOptions) (EngageFetchReport, error) {
+	return rt.fetchEngageKind(options, nil)
+}
+func (rt *runtime) fetchEngageKind(options browser.LaunchOptions, target *engagecontent.ThreadTarget) (EngageFetchReport, error) {
 	report := EngageFetchReport{ObservationIDs: []string{}, SessionLosses: []engagecontent.Loss{}, Scope: engageScope, AccountState: "unknown", Partial: true}
+	args := []string{"fetch", "engage-home"}
+	if target != nil {
+		report.Scope = engageThreadScope
+		args = []string{"fetch", "engage-thread", target.URL}
+	}
 	var attempt store.KnowledgeAttempt
 	if err := rt.cloudWrite(rt.ctx, func(st *store.Store) error {
 		var err error
-		attempt, err = st.BeginEngageAttempt(rt.ctx, store.KnowledgeInput{Kind: store.EngageKind, Platform: "browser", Locator: store.EngageHomeURL, At: transcriptsNow()})
+		if target != nil {
+			attempt, err = st.BeginEngageThreadAttempt(rt.ctx, store.KnowledgeInput{Kind: store.EngageThreadKind, Platform: "browser", Locator: target.URL, At: transcriptsNow()})
+		} else {
+			attempt, err = st.BeginEngageAttempt(rt.ctx, store.KnowledgeInput{Kind: store.EngageKind, Platform: "browser", Locator: store.EngageHomeURL, At: transcriptsNow()})
+		}
 		return err
 	}); err != nil {
 		return report, err
 	}
 	report.RegistrationID = attempt.LocatorID
-	result, err := captureEngage(rt.ctx, options)
+	var result engagecontent.Result
+	var err error
+	if target != nil {
+		result, err = captureEngageWith(rt.ctx, options, func(ctx context.Context, driver engagecontent.Driver) (engagecontent.Result, error) {
+			return observeEngageThread(ctx, driver, *target)
+		})
+		if err == nil && (result.Selection == nil || *result.Selection != *target) {
+			result, err = engagecontent.Result{}, &engagecontent.ReadError{Code: "identity_drift"}
+		}
+	} else {
+		result, err = captureEngage(rt.ctx, options)
+	}
 	acquired := transcriptsNow()
 	if rt.ctx.Err() != nil {
 		result, err = engagecontent.Result{}, rt.ctx.Err()
@@ -187,12 +213,15 @@ func (rt *runtime) fetchEngage(options browser.LaunchOptions) (EngageFetchReport
 		diagnostic, cancel := context.WithTimeout(context.WithoutCancel(rt.ctx), 10*time.Second)
 		defer cancel()
 		recordErr := rt.cloudWrite(diagnostic, func(st *store.Store) error {
+			if target != nil {
+				return st.RecordEngageThreadFailure(diagnostic, attempt, store.EngageFailure{Status: status, Reason: reason, At: transcriptsNow()})
+			}
 			return st.RecordEngageFailure(diagnostic, attempt, store.EngageFailure{Status: status, Reason: reason, At: transcriptsNow()})
 		})
 		if recordErr != nil {
 			return report, errors.Join(err, recordErr)
 		}
-		fix := "Retry explicitly with `" + rt.contentCommand("fetch", "engage-home") + "`. Authentication remains unknown; historical instances are unchanged."
+		fix := "Retry explicitly with `" + rt.contentCommand(args...) + "`. Authentication remains unknown; historical instances are unchanged."
 		if reason == "engage_unavailable" || reason == "engage_identity_unverified" {
 			fix += " If the user agrees, optional `" + rt.contentCommand("signin", store.EngageHomeURL, "--user-agreed") + "` can verify a native session; sign-in is not asserted necessary."
 		}

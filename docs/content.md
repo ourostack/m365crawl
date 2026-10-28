@@ -6,7 +6,7 @@ There are three kinds of explicit content:
 
 - [Resident Office text](#resident-office-text): one Word, Excel or PowerPoint file already on this computer.
 - [SharePoint pages and Stream transcripts](#sharepoint-pages-and-stream-transcripts): one supported page or Stream URL, through the tool-owned browser.
-- [Engage Home sessions](engage-home.md): bounded native thread starters from Engage's fixed Home workflow.
+- Engage: [bounded Home starters](engage-home.md) through `content fetch engage-home`, or [one selected thread](commands.md#content-fetch-engage-thread) through `content fetch engage-thread URL`, including observed starter/replies, native authors/times, safe links and generic attachment metadata. Both remain explicitly partial.
 
 Every flag and result field is in [commands.md](commands.md#content-explicit-acquisition-offline-reads). [privacy.md](privacy.md) says what each one reads and stores.
 
