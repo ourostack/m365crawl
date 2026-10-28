@@ -33,7 +33,13 @@ func hasEngageSchema(ctx context.Context, r knowledgeReader) (bool, error) {
 func engageSummary(s EngageSession) EngageSessionSummary {
 	n := 0
 	for _, t := range s.Result.Threads {
-		n += len(t.Blocks)
+		if t.Selected != nil {
+			for _, message := range t.Selected.Messages {
+				n += len(message.Blocks)
+			}
+		} else {
+			n += len(t.Blocks)
+		}
 	}
 	return EngageSessionSummary{s.ID, s.SourceID, s.CaptureID, s.RepresentationDigest, s.Qualification, s.Result.State, len(s.Result.Threads), n, s.Result.Losses, s.AcquiredAt, s.CapturedAt}
 }
@@ -50,15 +56,15 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 	// Missing or orphan namespace rows cannot disappear through inner joins.
 	var bad int
 	err = r.QueryRowContext(ctx, `select
- (select count(*) from knowledge_locators l left join engage_locator_metadata m on m.locator_id=l.id where l.kind='engage_home' and m.locator_id is null)+
- (select count(*) from knowledge_locators l where l.kind='engage_home' and l.latest_attempt is null and l.id<>?)+
- (select count(*) from knowledge_locators l where l.kind='engage_home' and
+ (select count(*) from knowledge_locators l left join engage_locator_metadata m on m.locator_id=l.id where l.kind in ('engage_home','engage_thread') and m.locator_id is null)+
+ (select count(*) from knowledge_locators l where l.kind in ('engage_home','engage_thread') and l.latest_attempt is null and l.id<>?)+
+ (select count(*) from knowledge_locators l where l.kind in ('engage_home','engage_thread') and
  (l.latest_attempt is not (select max(a.id) from knowledge_attempts a where a.locator_id=l.id) or
  l.last_admitted is not (select max(a.id) from knowledge_attempts a where a.locator_id=l.id and a.source_id is not null)))+
- (select count(*) from engage_locator_metadata m left join knowledge_locators l on l.id=m.locator_id where l.id is null or l.kind<>'engage_home' or l.platform<>'browser' or l.locator<>'https://engage.cloud.microsoft/' or m.target_url<>l.locator)+
- (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id left join engage_source_metadata m on m.source_id=s.id left join engage_source_state st on st.source_id=s.id where l.kind='engage_home' and (m.source_id is null or st.source_id is null))+
- (select count(*) from engage_source_metadata m left join knowledge_sources s on s.id=m.source_id left join knowledge_locators l on l.id=s.locator_id where s.id is null or l.id is null or l.kind<>'engage_home')+
- (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id where l.kind='engage_home' and
+ (select count(*) from engage_locator_metadata m left join knowledge_locators l on l.id=m.locator_id where l.id is null or l.kind not in ('engage_home','engage_thread') or l.platform<>'browser' or (l.kind='engage_home' and l.locator<>'https://engage.cloud.microsoft/') or m.target_url<>l.locator)+
+ (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id left join engage_source_metadata m on m.source_id=s.id left join engage_source_state st on st.source_id=s.id where l.kind in ('engage_home','engage_thread') and (m.source_id is null or st.source_id is null))+
+ (select count(*) from engage_source_metadata m left join knowledge_sources s on s.id=m.source_id left join knowledge_locators l on l.id=s.locator_id where s.id is null or l.id is null or l.kind not in ('engage_home','engage_thread'))+
+ (select count(*) from knowledge_sources s join knowledge_locators l on l.id=s.locator_id where l.kind in ('engage_home','engage_thread') and
  not exists(select 1 from knowledge_attempts a where a.id=s.admitted_attempt and a.source_id=s.id and a.locator_id=s.locator_id))+
  (select count(*) from engage_source_state st left join engage_source_metadata m on m.source_id=st.source_id where m.source_id is null)+
  (select count(*) from engage_sessions e left join engage_source_metadata m on m.source_id=e.source_id where m.source_id is null)+
@@ -71,10 +77,10 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 	if bad != 0 {
 		return out, errEngageIntegrity
 	}
-	regs, err := r.QueryContext(ctx, `select l.id,l.latest_attempt,l.last_admitted,
+	regs, err := r.QueryContext(ctx, `select l.id,l.kind,l.locator,l.latest_attempt,l.last_admitted,
  a.started_at,a.finished_at,coalesce(a.outcome,'pending'),a.reason,g.source_id
  from knowledge_locators l join knowledge_attempts a on a.id=l.latest_attempt
- left join knowledge_attempts g on g.id=l.last_admitted where l.kind='engage_home' order by l.id`)
+ left join knowledge_attempts g on g.id=l.last_admitted where l.kind in ('engage_home','engage_thread') order by l.id`)
 	if err != nil {
 		return out, err
 	}
@@ -82,7 +88,7 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 		var reg EngageRegistration
 		var admitted, goodSource sql.NullInt64
 		var started, finished sql.NullString
-		if err := regs.Scan(&reg.ID, &reg.LatestAttemptID, &admitted, &started, &finished, &reg.Outcome, &reg.Reason, &goodSource); err != nil {
+		if err := regs.Scan(&reg.ID, &reg.Kind, &reg.Target, &reg.LatestAttemptID, &admitted, &started, &finished, &reg.Outcome, &reg.Reason, &goodSource); err != nil {
 			_ = regs.Close()
 			return out, err
 		}
@@ -92,7 +98,14 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 			return out, err
 		}
 		reg.AttemptedAt, reg.FinishedAt = times[0], times[1]
-		reg.Target, reg.AccountState = EngageHomeURL, "unknown"
+		if reg.Kind == EngageThreadKind {
+			target, err := engagecontent.ParseThreadURL(reg.Target)
+			if err != nil || target.URL != reg.Target {
+				_ = regs.Close()
+				return out, errEngageIntegrity
+			}
+		}
+		reg.AccountState = "unknown"
 		if admitted.Valid && admitted.Int64 == reg.LatestAttemptID {
 			reg.AccountState = "verified_at_last_success"
 		}
@@ -110,7 +123,7 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 	// against their exact canonical session below, including intermediate reuse.
 	attempts, err := r.QueryContext(ctx, `select a.id,a.source_id,a.started_at,a.finished_at,coalesce(a.outcome,''),coalesce(a.coverage,''),a.reason,coalesce(a.losses_json,'{}'),a.acquisition_signature,a.content_digest,
  exists(select 1 from engage_capture_members m where m.capture_id=a.id)
- from knowledge_attempts a join knowledge_locators l on l.id=a.locator_id where l.kind='engage_home' order by a.id`)
+ from knowledge_attempts a join knowledge_locators l on l.id=a.locator_id where l.kind in ('engage_home','engage_thread') order by a.id`)
 	if err != nil {
 		return out, err
 	}
@@ -185,7 +198,16 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 			_ = srcRows.Close()
 			return out, err
 		}
-		if json.Unmarshal([]byte(account), &src.Account) != nil || account != engageJSON(src.Account) || boundary != engageBoundary(src.Account) || qual != EngageQualification || complete.Valid || observed.Valid || src.AdmittedAttemptID != maxAttempt || src.CurrentSessionID != current || good != expectedGood {
+		expectedQualification := ""
+		for _, reg := range out.Registrations {
+			if reg.ID == src.RegistrationID {
+				expectedQualification = EngageQualification
+				if reg.Kind == EngageThreadKind {
+					expectedQualification = EngageThreadQualification
+				}
+			}
+		}
+		if json.Unmarshal([]byte(account), &src.Account) != nil || account != engageJSON(src.Account) || boundary != engageBoundary(src.Account) || qual != expectedQualification || complete.Valid || observed.Valid || src.AdmittedAttemptID != maxAttempt || src.CurrentSessionID != current || good != expectedGood {
 			_ = srcRows.Close()
 			return out, errEngageIntegrity
 		}
@@ -224,7 +246,7 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 			_ = sessions.Close()
 			return out, err
 		}
-		if json.Unmarshal([]byte(encoded), &session.Result) != nil || encoded != engageJSON(session.Result) || session.RepresentationDigest != engageDigest(session.SourceID, encoded) || session.Qualification != EngageQualification {
+		if json.Unmarshal([]byte(encoded), &session.Result) != nil || encoded != engageJSON(session.Result) || session.RepresentationDigest != engageDigestFor(session.SourceID, session.Qualification, encoded) {
 			_ = sessions.Close()
 			return out, errEngageIntegrity
 		}
@@ -254,6 +276,20 @@ func readEngage(ctx context.Context, r knowledgeReader, f EngageFilter, detailID
 			return out, errEngageIntegrity
 		}
 		src := &out.Sources[idx]
+		qualification, target := EngageQualification, EngageHomeURL
+		if session.Result.Selection != nil {
+			qualification, target = EngageThreadQualification, session.Result.Selection.URL
+		}
+		bound := false
+		for _, reg := range out.Registrations {
+			if reg.ID == src.RegistrationID && reg.Target == target {
+				bound = true
+			}
+		}
+		if !bound || src.Qualification != qualification || session.Qualification != qualification {
+			_ = sessions.Close()
+			return out, errEngageIntegrity
+		}
 		if src.CurrentSessionID == session.ID {
 			src.CurrentSession = engageSummary(session)
 			src.Coverage = engageCoverage(session.Result)

@@ -22,45 +22,46 @@ type engageDisplayLoss struct {
 	Count int    `json:"count"`
 }
 type EngageContentItem struct {
-	ID                   string              `json:"id"`
-	Kind                 string              `json:"kind"`
-	SourceID             int64               `json:"source_id"`
-	RegistrationID       int64               `json:"registration_id"`
-	SessionID            int64               `json:"session_id"`
-	CaptureID            int64               `json:"capture_id"`
-	RepresentationDigest string              `json:"representation_digest"`
-	Qualification        string              `json:"qualification"`
-	SourceAccount        engageAccount       `json:"source_account"`
-	Ordinal              int                 `json:"ordinal"`
-	NativeThreadID       string              `json:"native_thread_id"`
-	NativeNetworkID      string              `json:"native_network_id"`
-	NativeGroupID        string              `json:"native_group_id"`
-	NativeStarterID      string              `json:"native_starter_id"`
-	NativeSenderID       *string             `json:"native_sender_id"`
-	Title                *string             `json:"title"`
-	Language             *string             `json:"language"`
-	Version              *int64              `json:"version"`
-	IsDeleted            *bool               `json:"is_deleted"`
-	IsDraft              *bool               `json:"is_draft"`
-	CreatedRaw           *string             `json:"created_raw"`
-	UpdatedRaw           *string             `json:"updated_raw"`
-	StarterCreatedRaw    *string             `json:"starter_created_raw"`
-	StarterUpdatedRaw    *string             `json:"starter_updated_raw"`
-	CreatedAt            *time.Time          `json:"created_at"`
-	UpdatedAt            *time.Time          `json:"updated_at"`
-	StarterCreatedAt     *time.Time          `json:"starter_created_at"`
-	StarterUpdatedAt     *time.Time          `json:"starter_updated_at"`
-	Blocks               []string            `json:"blocks"`
-	BlocksTotal          int                 `json:"blocks_total"`
-	PreviewTruncated     bool                `json:"preview_truncated"`
-	TextTruncated        bool                `json:"text_truncated"`
-	Retained             bool                `json:"retained"`
-	SessionLosses        []engageDisplayLoss `json:"session_losses"`
-	SessionScope         string              `json:"session_scope"`
-	AcquiredAt           time.Time           `json:"acquired_at"`
-	CapturedAt           time.Time           `json:"captured_at"`
-	FullTextSQL          string              `json:"full_text_sql"`
-	FullTextCommand      string              `json:"full_text_command"`
+	ID                   string                        `json:"id"`
+	Kind                 string                        `json:"kind"`
+	SourceID             int64                         `json:"source_id"`
+	RegistrationID       int64                         `json:"registration_id"`
+	SessionID            int64                         `json:"session_id"`
+	CaptureID            int64                         `json:"capture_id"`
+	RepresentationDigest string                        `json:"representation_digest"`
+	Qualification        string                        `json:"qualification"`
+	SourceAccount        engageAccount                 `json:"source_account"`
+	Ordinal              int                           `json:"ordinal"`
+	NativeThreadID       string                        `json:"native_thread_id"`
+	NativeNetworkID      string                        `json:"native_network_id"`
+	NativeGroupID        string                        `json:"native_group_id"`
+	NativeStarterID      string                        `json:"native_starter_id"`
+	NativeSenderID       *string                       `json:"native_sender_id"`
+	Title                *string                       `json:"title"`
+	Language             *string                       `json:"language"`
+	Version              *int64                        `json:"version"`
+	IsDeleted            *bool                         `json:"is_deleted"`
+	IsDraft              *bool                         `json:"is_draft"`
+	CreatedRaw           *string                       `json:"created_raw"`
+	UpdatedRaw           *string                       `json:"updated_raw"`
+	StarterCreatedRaw    *string                       `json:"starter_created_raw"`
+	StarterUpdatedRaw    *string                       `json:"starter_updated_raw"`
+	CreatedAt            *time.Time                    `json:"created_at"`
+	UpdatedAt            *time.Time                    `json:"updated_at"`
+	StarterCreatedAt     *time.Time                    `json:"starter_created_at"`
+	StarterUpdatedAt     *time.Time                    `json:"starter_updated_at"`
+	Blocks               []string                      `json:"blocks"`
+	BlocksTotal          int                           `json:"blocks_total"`
+	PreviewTruncated     bool                          `json:"preview_truncated"`
+	TextTruncated        bool                          `json:"text_truncated"`
+	Retained             bool                          `json:"retained"`
+	SessionLosses        []engageDisplayLoss           `json:"session_losses"`
+	SessionScope         string                        `json:"session_scope"`
+	AcquiredAt           time.Time                     `json:"acquired_at"`
+	CapturedAt           time.Time                     `json:"captured_at"`
+	FullTextSQL          string                        `json:"full_text_sql"`
+	FullTextCommand      string                        `json:"full_text_command"`
+	Selected             *engagecontent.SelectedThread `json:"selected,omitempty"`
 }
 type engageSessionSummary struct {
 	ID                   int64               `json:"session_id"`
@@ -149,7 +150,15 @@ func engageCopy[T any](p *T) *T {
 // shapeEngage owns all preview memory. Raw/native evidence is never clipped.
 func shapeEngage(row store.EngageObservationRow, maxText int) EngageContentItem {
 	t := row.Thread
-	item := EngageContentItem{ID: fmt.Sprintf("engage-observation:%d", row.ID), Kind: store.EngageKind,
+	kind, scope := store.EngageKind, engageScope
+	if t.Selected != nil {
+		kind, scope = store.EngageThreadKind, engageThreadScope
+		t.Blocks = nil
+		for _, message := range t.Selected.Messages {
+			t.Blocks = append(t.Blocks, message.Blocks...)
+		}
+	}
+	item := EngageContentItem{ID: fmt.Sprintf("engage-observation:%d", row.ID), Kind: kind,
 		SourceID: row.SourceID, SessionID: row.SessionID, CaptureID: row.CaptureID,
 		RepresentationDigest: row.RepresentationDigest, Qualification: row.Qualification, SourceAccount: engageAccountOf(row.Account),
 		Ordinal: t.Ordinal, NativeThreadID: t.ID, NativeNetworkID: t.NetworkID, NativeGroupID: t.GroupID, NativeStarterID: t.StarterID,
@@ -158,8 +167,35 @@ func shapeEngage(row store.EngageObservationRow, maxText int) EngageContentItem 
 		CreatedRaw: engageCopy(t.CreatedRaw), UpdatedRaw: engageCopy(t.UpdatedRaw), StarterCreatedRaw: engageCopy(t.StarterCreatedRaw), StarterUpdatedRaw: engageCopy(t.StarterUpdatedRaw),
 		CreatedAt: engageCopy(t.CreatedAt), UpdatedAt: engageCopy(t.UpdatedAt), StarterCreatedAt: engageCopy(t.StarterCreatedAt), StarterUpdatedAt: engageCopy(t.StarterUpdatedAt),
 		Blocks: append([]string{}, t.Blocks[:min(100, len(t.Blocks))]...), BlocksTotal: len(t.Blocks), PreviewTruncated: len(t.Blocks) > 100,
-		Retained: row.Retained, SessionLosses: engageDisplayLosses(row.SessionLosses), SessionScope: engageScope, AcquiredAt: row.AcquiredAt, CapturedAt: row.CapturedAt,
+		Retained: row.Retained, SessionLosses: engageDisplayLosses(row.SessionLosses), SessionScope: scope, AcquiredAt: row.AcquiredAt, CapturedAt: row.CapturedAt,
 		FullTextSQL: fmt.Sprintf("SELECT o.*,s.* FROM engage_occurrences o JOIN engage_sessions s ON s.rowid=o.session_id WHERE o.rowid=%d", row.ID)}
+	if t.Selected != nil {
+		encoded, _ := json.Marshal(t.Selected)
+		var selected engagecontent.SelectedThread
+		_ = json.Unmarshal(encoded, &selected)
+		for i := range selected.Messages {
+			m := &selected.Messages[i]
+			m.Blocks = append([]string{}, m.Blocks[:min(100, len(m.Blocks))]...)
+			for j, value := range m.Blocks {
+				var cut bool
+				m.Blocks[j], cut = truncateRunes(value, maxText)
+				item.TextTruncated = item.TextTruncated || cut
+			}
+			if m.Author.Name != nil {
+				value, cut := truncateRunes(*m.Author.Name, maxText)
+				m.Author.Name = &value
+				item.TextTruncated = item.TextTruncated || cut
+			}
+			for j := range m.Attachments {
+				if m.Attachments[j].Title != nil {
+					value, cut := truncateRunes(*m.Attachments[j].Title, maxText)
+					m.Attachments[j].Title = &value
+					item.TextTruncated = item.TextTruncated || cut
+				}
+			}
+		}
+		item.Selected = &selected
+	}
 	if item.Title != nil {
 		value, cut := truncateRunes(*item.Title, maxText)
 		item.Title = &value
@@ -178,12 +214,22 @@ func (rt *runtime) engageCoverageOf(snap store.EngageSnapshot) *EngageContentCov
 		out.Scope = "not_registered"
 	}
 	for _, r := range snap.Registrations {
-		out.Registrations = append(out.Registrations, engageRegistrationItem{"engage_registration", r.ID, r.LatestAttemptID, r.Target, r.Outcome, r.Reason, r.AccountState, engageCopy(r.AttemptedAt), engageCopy(r.FinishedAt), engageCopy(r.LastSuccessfulInstanceID), rt.contentCommand("fetch", "engage-home")})
+		kind, retry := "engage_registration", rt.contentCommand("fetch", "engage-home")
+		if r.Kind == store.EngageThreadKind {
+			kind, retry = "engage_thread_registration", rt.contentCommand("fetch", "engage-thread", r.Target)
+			out.Scope = "native_engage_access_sessions"
+		}
+		out.Registrations = append(out.Registrations, engageRegistrationItem{kind, r.ID, r.LatestAttemptID, r.Target, r.Outcome, r.Reason, r.AccountState, engageCopy(r.AttemptedAt), engageCopy(r.FinishedAt), engageCopy(r.LastSuccessfulInstanceID), retry})
 	}
 	for _, s := range snap.Sources {
 		c := s.CurrentSession
 		summary := engageSessionSummary{c.ID, c.SourceID, c.CaptureID, c.RepresentationDigest, c.Qualification, c.State, c.ThreadsTotal, c.BlocksTotal, engageDisplayLosses(c.Losses), c.AcquiredAt, c.CapturedAt}
-		out.Instances = append(out.Instances, engageSourceItem{store.EngageKind, s.ID, s.RegistrationID, s.AdmittedAttemptID, s.CurrentSessionID, engageAccountOf(s.Account), s.Qualification, s.Coverage, engageCopy(s.LastGoodSessionID), engageCopy(s.AdmittedAt), summary, s.IsLastSuccessfulInstance})
+		kind := store.EngageKind
+		if s.Qualification == store.EngageThreadQualification {
+			kind = store.EngageThreadKind
+			out.Scope = "native_engage_access_sessions"
+		}
+		out.Instances = append(out.Instances, engageSourceItem{kind, s.ID, s.RegistrationID, s.AdmittedAttemptID, s.CurrentSessionID, engageAccountOf(s.Account), s.Qualification, s.Coverage, engageCopy(s.LastGoodSessionID), engageCopy(s.AdmittedAt), summary, s.IsLastSuccessfulInstance})
 	}
 	return out
 }

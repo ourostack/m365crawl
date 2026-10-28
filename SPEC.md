@@ -234,6 +234,22 @@ original request, never a guessed parent directory or source ID0.
 
 ## Engage Home-session archive (schema 18)
 
+### Selected Engage threads
+
+`content fetch engage-thread URL [--browser EXE] [--timeout 10m]` explicitly acquires one selected thread through the same exclusively leased tool-owned headless browser and separately agreed root sign-in. It accepts only HTTPS Engage `/main/threads/<opaque Thread>` or the exact Teams Engage entity deep link, with bounded strict context/subEntityId/Thread JSON/base64 decoding. Userinfo, nondefault ports, arbitrary hosts/paths, duplicate/unknown nested fields, tickets and malformed/oversized targets MUST be refused before browser acquisition.
+
+The selected observer MUST preserve Home's existing typename predicate and behavior. It separately projects the observed untyped `data.thread`, requires the exact requested native thread/group when supplied, positive consistent viewer/network and a successful same-generation final capture. A native same-host route transition is not sufficient without final native target/account proof. The existing45/30/10/3-second observer/landing/collection/cleanup and native byte/work/cardinality limits remain unchanged. Caller Close/cancellation barriers precede publication; any discarded capture is registration-level account-unknown.
+
+Selected results are always partial, with qualification `native_selected_thread_observations`, independent `engage_thread` registration and `engage-native-selected-v1/mapper-v1` source qualification. Existing Engage immutable tables/IDs/membership/audits/FTS hold omitted selected-only model extensions without a migration. Home JSON/digests and old retained occurrences remain unchanged. Older binaries do not understand new selected representations; no downgrade or old-binary read promise is added.
+
+Each selected occurrence carries `selected.messages` in native observation order: starter first, then observed reply edges, preserving native IDs, direct thread/parent relationships, author id/name/network/opaque native_type, original and parsed clocks, body_state and ordered blocks. Unknown optional metadata is null with counted losses. Missing reply bodies are `unmapped`, not observed empty bodies. `selected.replies` preserves edges_observed/edges_known, nullable total_count and native has_next_page/has_previous_page flags; these do not certify all server replies or an atomic snapshot. Unsupported references/entity variants remain counted losses. Search indexes starter and replies plus retained native metadata; ordering/date filters still use native starter-updated time, not acquisition or latest reply time.
+
+Attachment metadata is limited to observed bounded native id/title/opaque native_type and optional safe URL. Title MUST NOT be called filename; no MIME, size, file/image class, download or extraction right is inferred. Every retained string uses existing scrubbing. Data URLs in body blocks, LINK entities and attachment metadata MUST pass strict per-value HTTP(S)/host/userinfo and credential/signed/preauthenticated rejection, including sig/tempauth/downloadUrl and encoded/nested credential cases. Unsafe values are omitted/redacted whole, never rewritten into usable links by stripping a credential. Links/attachments are never followed. Unknown description/preview/variant semantics stay unknown with loss.
+
+Content show/list/search expose selected data under `selected`, omitted for Home. Top-level blocks preview the first100 aggregate message blocks; selected message blocks preview up to100 each. `--max-text` clips display copies only. Existing same-archive full_text_sql/full_text_command retrieve complete original canonical evidence. All immutable/source/FTS audits apply before filtering, including zero hits; reads never acquire, refresh, migrate or sign in. Synthetic tests and portable reads do not qualify live Windows acquisition or every future entity/attachment variant.
+
+### Home compatibility
+
 The concrete `engage_home` content family MUST follow the
 [Engage evidence/clock/lifecycle contract](docs/engage-home.md).
 `content fetch engage-home` has no target arguments and captures only the fixed

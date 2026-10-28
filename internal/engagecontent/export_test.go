@@ -8,6 +8,8 @@ var InitScriptForTest = initScript
 var HomeStateForTest = homeStateExpr
 var HomeClickForTest = homeClickExpr
 var DecodeForTest = decode
+var SelectedScriptForTest = selectedScript
+var DecodeSelectedForTest = decodeSelected
 
 type ScriptResultForTest = scriptResult
 

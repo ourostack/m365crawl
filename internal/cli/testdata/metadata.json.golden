@@ -92,6 +92,19 @@
       "json": true,
       "mutates": true
     },
+    "content fetch engage-thread": {
+      "title": "content fetch engage-thread (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "content",
+        "fetch",
+        "engage-thread",
+        "\u003csupported-url\u003e"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "content fetch page": {
       "title": "content fetch page (capture/fetch explicit only; reads offline; Windows cloud acquisition not yet qualified)",
       "argv": [

@@ -22,6 +22,7 @@ type Result struct {
 	Account              SourceAccount
 	Threads              []ThreadObservation
 	Losses               []Loss
+	Selection            *ThreadTarget `json:",omitempty"`
 }
 
 type ThreadObservation struct {
@@ -35,6 +36,7 @@ type ThreadObservation struct {
 	Version                              *int64
 	IsDeleted, IsDraft                   *bool
 	Blocks                               []string
+	Selected                             *SelectedThread `json:",omitempty"`
 }
 
 type scriptResult struct {
@@ -54,4 +56,5 @@ type scriptThread struct {
 	SenderID, Language, Title            json.RawMessage
 	Version, IsDeleted, IsDraft          json.RawMessage
 	Blocks                               []string
+	Selected                             json.RawMessage
 }
