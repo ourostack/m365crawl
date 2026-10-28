@@ -118,11 +118,23 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 		}
 		defer func() { _ = upd.Close() }()
 		now := nowText()
+		observed := time.Now().UTC()
+		haveWorkIQ, err := workIQHasRows(ctx, tx, "conversation")
+		if err != nil {
+			return err
+		}
 		var touched []teamsdesktop.Conversation
 		for _, c := range cs {
 			n.Seen++
 			if c.TenantID == "" || c.UserID == "" || c.ID == "" {
 				return errors.New("conversation needs tenant, user and id")
+			}
+			sourceChanged := false
+			if haveWorkIQ {
+				c, sourceChanged, err = applyWorkIQCacheConversation(ctx, tx, c, observed)
+				if err != nil {
+					return err
+				}
 			}
 			members, last, horizon := jsonOrNil(c.Members), fmtTime(c.LastMessageAt), fmtTime(c.ReadHorizonAt)
 			raw := rawOrNil(c.Raw)
@@ -154,7 +166,7 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 				n.Inserted++
 			case err != nil:
 				return err
-			case old == hash:
+			case old == hash && !sourceChanged:
 				n.Unchanged++
 				rows = append(rows, RowState{rowid, old, false})
 				continue
