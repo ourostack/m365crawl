@@ -79,6 +79,10 @@ on conflict(family,account_id) do update set address=excluded.address,binding=ex
 // validateWorkIQAttemptOwner re-reads archive identity after network I/O and before retention.
 // The caller holds its short writer role; no external call is made under that role.
 func (s *Store) validateWorkIQAttemptOwner(ctx context.Context, attempt int64) (workiq.AccountBinding, error) {
+	return s.validateWorkIQOwner(ctx, attempt, true)
+}
+
+func (s *Store) validateWorkIQOwner(ctx context.Context, attempt int64, retention bool) (workiq.AccountBinding, error) {
 	enabled, err := s.WorkIQEnabled(ctx)
 	if err != nil {
 		return workiq.AccountBinding{}, err
@@ -86,14 +90,17 @@ func (s *Store) validateWorkIQAttemptOwner(ctx context.Context, attempt int64) (
 	if !enabled {
 		return workiq.AccountBinding{}, errors.New("WorkIQ source is disabled")
 	}
-	var family, account, status, userID, address, mail, upn string
+	var family, account, status, userID, address, mail, upn, kind string
 	var verified sql.NullString
-	if err := s.db.QueryRowContext(ctx, `select family,account_id,status,bound_user_id,bound_address,bound_mail,bound_upn,verified_at
-from workiq_attempts where id=?`, attempt).Scan(&family, &account, &status, &userID, &address, &mail, &upn, &verified); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select family,account_id,status,bound_user_id,bound_address,bound_mail,bound_upn,verified_at,kind
+from workiq_attempts where id=?`, attempt).Scan(&family, &account, &status, &userID, &address, &mail, &upn, &verified, &kind); err != nil {
 		return workiq.AccountBinding{}, err
 	}
 	if status != "open" || userID == "" || !verified.Valid {
 		return workiq.AccountBinding{}, errors.New("WorkIQ data attempt has not been identity verified")
+	}
+	if kind != "sync" && kind != "coverage" && kind != "status" || retention && kind != "sync" {
+		return workiq.AccountBinding{}, errors.New("WorkIQ outcome kind does not permit data retention")
 	}
 	clock, err := workIQStoredTime(verified)
 	if err != nil {

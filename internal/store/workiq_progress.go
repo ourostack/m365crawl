@@ -13,11 +13,15 @@ import (
 )
 
 func (s *Store) BeginWorkIQAttempt(ctx context.Context, scope WorkIQScope, at time.Time) (int64, error) {
+	if scope.Kind == "" {
+		scope.Kind = "sync"
+	}
 	enabled, err := s.WorkIQEnabled(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if !enabled || at.IsZero() || scope.Family != "mail" && scope.Family != "chats" {
+	if !enabled || at.IsZero() || scope.Family != "mail" && scope.Family != "chats" ||
+		scope.Kind != "sync" && scope.Kind != "coverage" && scope.Kind != "status" {
 		return 0, errors.New("WorkIQ attempt requires opt-in and a known source scope")
 	}
 	facts, err := s.WorkIQAccounts(ctx)
@@ -49,8 +53,8 @@ func (s *Store) BeginWorkIQAttempt(ctx context.Context, scope WorkIQScope, at ti
 	}
 	var id int64
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,window_start,window_end,qualification) values(?,?,?,?,?,?)`,
-			scope.Family, scope.Account, fmtTime(at), windowStart, windowEnd, scope.Qualification)
+		result, err := tx.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,window_start,window_end,qualification,kind) values(?,?,?,?,?,?,?)`,
+			scope.Family, scope.Account, workIQTimeValue(&at), windowStart, windowEnd, scope.Qualification, scope.Kind)
 		if err != nil {
 			return err
 		}
@@ -142,7 +146,7 @@ func (s *Store) CompleteWorkIQAttempt(ctx context.Context, attempt int64, summar
 		return errors.New("WorkIQ attempt has no completion time")
 	}
 	if summary.Status == "ok" || summary.Status == "ok_with_omissions" {
-		if _, err := s.validateWorkIQAttemptOwner(ctx, attempt); err != nil {
+		if _, err := s.validateWorkIQOwner(ctx, attempt, false); err != nil {
 			return err
 		}
 	}
@@ -150,9 +154,9 @@ func (s *Store) CompleteWorkIQAttempt(ctx context.Context, attempt int64, summar
 	counts, _ := json.Marshal(summary.Counts)
 	gaps, _ := json.Marshal(summary.Gaps)
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		var family, account, started, status string
-		if err := tx.QueryRowContext(ctx, `select family,account_id,started_at,status from workiq_attempts where id=?`, attempt).
-			Scan(&family, &account, &started, &status); err != nil {
+		var family, account, started, status, kind string
+		if err := tx.QueryRowContext(ctx, `select family,account_id,started_at,status,kind from workiq_attempts where id=?`, attempt).
+			Scan(&family, &account, &started, &status, &kind); err != nil {
 			return err
 		}
 		if status != "open" {
@@ -170,13 +174,25 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `update workiq_attempts set finished_at=?,status=?,error_code=?,counts_json=?,gap_count=?,all_folders=? where id=?`,
-			fmtTime(summary.FinishedAt), summary.Status, summary.ErrorCode, string(counts), gapCount, b2i(summary.AllFolders), attempt); err != nil {
+			workIQTimeValue(&summary.FinishedAt), summary.Status, summary.ErrorCode, string(counts), gapCount, b2i(summary.MailProof != nil), attempt); err != nil {
 			return err
 		}
-		key, _ := json.Marshal([]string{family, account})
+		scope := []string{family, account}
+		if kind != "sync" {
+			scope = append(scope, kind)
+		}
+		key, _ := json.Marshal(scope)
 		accounts, _ := json.Marshal([]string{account})
-		_, err := tx.ExecContext(ctx, `insert into sync_runs(started_at,finished_at,source,status,counts_json,omissions_json,error_code,source_accounts_json) values(?,?,?,?,?,?,?,?)`,
-			started, fmtTime(summary.FinishedAt), "workiq:"+string(key), summary.Status, string(counts), string(gaps), summary.ErrorCode, string(accounts))
+		result, err := tx.ExecContext(ctx, `insert into sync_runs(started_at,finished_at,source,status,counts_json,omissions_json,error_code,source_accounts_json) values(?,?,?,?,?,?,?,?)`,
+			started, workIQTimeValue(&summary.FinishedAt), "workiq:"+string(key), summary.Status, string(counts), string(gaps), summary.ErrorCode, string(accounts))
+		if err != nil {
+			return err
+		}
+		run, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = s.recordWorkIQMailReceipt(ctx, tx, attempt, family, account, kind, summary, run)
 		return err
 	})
 }

@@ -49,7 +49,7 @@ func (s *Store) InspectWorkIQMailInventory(ctx context.Context, attempt int64) (
 	}
 	defer func() { _ = tx.Rollback() }()
 	var proof WorkIQMailInventoryProof
-	if err := workIQMailInventoryTransaction(ctx, tx, attempt, binding.Fact.ID, time.Time{}, &proof); err != nil {
+	if err := workIQMailInventoryTransaction(ctx, tx, attempt, binding.Fact.ID, time.Time{}, &proof, false); err != nil {
 		return WorkIQMailInventoryProof{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `select inventory_revision from workiq_accounts where family='mail' and account_id=?`, binding.Fact.ID).Scan(&proof.revision); err != nil {

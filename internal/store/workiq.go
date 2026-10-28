@@ -10,6 +10,7 @@ import (
 
 type WorkIQScope struct {
 	Family, Account, Qualification string
+	Kind                           string
 	WindowStart                    time.Time
 	WindowEnd                      time.Time
 }
@@ -29,6 +30,7 @@ type WorkIQSummary struct {
 	Folders           int
 	Counts            map[string]int
 	Gaps              map[string]int
+	MailProof         *WorkIQMailCompletionProof
 }
 
 const workIQCacheMessageFilter = `not exists(select 1 from workiq_rows w

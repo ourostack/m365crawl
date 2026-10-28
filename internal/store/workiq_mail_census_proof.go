@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func workIQMailEnumerationProof(ctx context.Context, tx *sql.Tx, attempt int64, scope WorkIQScope, folders int) (string, *time.Time, error) {
+func workIQMailEnumerationProof(ctx context.Context, tx *sql.Tx, attempt int64, scope WorkIQScope, folders int, admitted bool) (string, *time.Time, error) {
 	h := sha256.New()
 	// hash.Hash writes cannot fail. Only private receipt IDs, not payloads or
 	// opaque cursor bytes, enter this logical enumeration identity.
@@ -20,10 +20,12 @@ func workIQMailEnumerationProof(ctx context.Context, tx *sql.Tx, attempt int64, 
 	err := eachRow(ctx, tx, `select p.id,p.observed_at,f.resource,p.expected_revision=f.revision-1
 from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id
 where f.family='mail' and f.account_id=? and f.qualification=? and f.scope='' and f.retired=0
-and p.prepared_attempt_id=? and p.prepared_complete=1 and p.state='staged'
-and p.expected_revision>=f.admitted_revision and p.expected_revision<f.revision
+and p.prepared_attempt_id=? and p.prepared_complete=1
+and ((?=0 and p.state='staged' and p.expected_revision>=f.admitted_revision)
+or (?=1 and p.state='admitted' and f.admitted_revision=f.revision))
+and p.expected_revision<f.revision
 and (f.resource='/me/mailFolders?includeHiddenFolders=true' or f.resource like '%/messages/delta()')
-order by p.id`, []any{scope.Account, scope.Qualification, attempt}, func(row *sql.Rows) error {
+order by p.id`, []any{scope.Account, scope.Qualification, attempt, admitted, admitted}, func(row *sql.Rows) error {
 		var id int64
 		var observed, resource string
 		var terminal bool

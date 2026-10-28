@@ -13,6 +13,7 @@ create table if not exists workiq_attempts(
  id integer primary key autoincrement,
  family text not null check(family in ('mail','chats')), account_id text not null,
  started_at text not null, finished_at text,
+ kind text not null default 'sync' check(kind in ('sync','coverage','status')),
  status text not null default 'open' check(status in ('open','ok','ok_with_omissions','partial','failed')),
  window_start text, window_end text, qualification text not null default 'workiq-v1',
  bound_user_id text not null default '', bound_address text not null default '',
@@ -107,7 +108,9 @@ create table if not exists workiq_gaps(
 );
 create table if not exists workiq_mail_receipts(
  id integer primary key autoincrement, attempt_id integer not null unique references workiq_attempts(id),
- account_id text not null, completed_at text not null, folders integer not null check(folders>=0)
+ sync_run_id integer not null unique references sync_runs(id),
+ account_id text not null, completed_at text not null, source_data_at text not null,
+ folders integer not null check(folders>=0), enumeration_key text not null
 );
 create view if not exists item_sources as
 select 'message' as kind,m.tenant_id||'/'||m.user_id as account_id,m.rowid as item_rowid,
