@@ -459,3 +459,72 @@ func TestWorkIQGlobalAccountSelectsOnlyItsArchivedFamily(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkIQUnknownChatSelectorRefusesWithoutInventedAccountWork(t *testing.T) {
+	db, _ := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	seedWorkIQChatOwner(t, db)
+	t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "chats", Account: "unarchived/user"})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != "workiq_chat_account_unmatched" || len(report.Accounts) != 0 {
+		t.Fatal("unknown explicit account became a positive empty sync instead of a named refusal", err)
+	}
+}
+
+func TestWorkIQMailRecheckHelpersStopOnReadWriteCancelAndBudgetBoundaries(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	report := WorkIQReport{Counts: map[string]int{}, Gaps: map[string]int{}}
+	if _, err := retryWorkIQMailCensus(ctx, WorkIQOptions{}, report); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled census restarted")
+	}
+	if _, err := retryWorkIQMailCensus(context.Background(), WorkIQOptions{censusPasses: 2}, report); err == nil {
+		t.Fatal("census restart exceeded its command budget")
+	}
+	for _, role := range []string{"read", "write"} {
+		t.Run(role, func(t *testing.T) {
+			db, account := workIQAcquisitionArchive(t)
+			workIQAcquisitionStub(t)
+			ctx := context.Background()
+			if _, err := RunWorkIQ(ctx, WorkIQOptions{DBPath: db, Source: "mail", Account: account}); err != nil {
+				t.Fatal(err)
+			}
+			s, err := store.Open(ctx, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			facts, err := s.WorkIQAccounts(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := workiq.User{ID: "synthetic-user", Mail: "test.user@example.invalid"}
+			binding, err := workiq.SelectMailAccount(user, facts, account)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			attempt, err := s.BeginWorkIQAttempt(ctx, store.WorkIQScope{Family: "mail", Account: account}, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.VerifyWorkIQAttempt(ctx, attempt, binding, user, now); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			oldRead, oldWrite := workIQRead, workIQWrite
+			t.Cleanup(func() { workIQRead, workIQWrite = oldRead, oldWrite })
+			broken := errors.New("synthetic census boundary failure")
+			if role == "read" {
+				workIQRead = func(context.Context, string, func(*store.Store) error) error { return broken }
+			} else {
+				workIQWrite = func(context.Context, string, func(context.Context, *store.Store) error) error { return broken }
+			}
+			if err := resetWorkIQMailCensus(ctx, WorkIQOptions{DBPath: db}, attempt); !errors.Is(err, broken) {
+				t.Fatal("failed actual baseline reset was called successful", err)
+			}
+		})
+	}
+}
