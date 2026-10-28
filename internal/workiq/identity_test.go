@@ -10,6 +10,19 @@ import (
 	"github.com/ourostack/m365crawl/internal/errs"
 )
 
+func TestWorkIQDiscoveryPinIsNotAnArchivedContentOwner(t *testing.T) {
+	for _, user := range []User{{}, {ID: "selected-user"}} {
+		if _, err := user.DiscoveryBinding(); err == nil {
+			t.Fatal("discovery pinned missing identity or unsafe address")
+		}
+	}
+	user := User{ID: "selected-user", Mail: "owner@example.invalid"}
+	binding, err := user.DiscoveryBinding()
+	if err != nil || binding.Fact.ID != "" || binding.Fact.TenantID != "" || binding.Verify(user) != nil {
+		t.Fatal("discovery invented an archive owner or could not pin the actual user", err)
+	}
+}
+
 func TestWorkIQMailAccountBindingHonorsStoredIdentityAndExplicitBootstrap(t *testing.T) {
 	me := User{ID: "user", Mail: "Owner@Example.Invalid", UPN: "upn@example.invalid"}
 	facts := []AccountFact{

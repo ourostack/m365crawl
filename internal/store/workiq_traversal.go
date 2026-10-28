@@ -46,12 +46,16 @@ where frontier_id=? and expected_revision=? and state='staged'`, p.ID, p.Revisio
 }
 
 func (s *Store) WorkIQPendingMailPages(ctx context.Context, attempt int64, resource string, after int64, limit int) ([]int64, error) {
+	return s.workIQPendingPages(ctx, attempt, resource, after, limit, "mail")
+}
+
+func (s *Store) workIQPendingPages(ctx context.Context, attempt int64, resource string, after int64, limit int, family string) ([]int64, error) {
 	binding, err := s.validateWorkIQAttemptOwner(ctx, attempt)
 	if err != nil {
 		return nil, err
 	}
-	if binding.Fact.Family != "mail" || after < 0 || limit < 1 || limit > 128 {
-		return nil, errors.New("invalid bounded mail page traversal")
+	if binding.Fact.Family != family || after < 0 || limit < 1 || limit > 128 {
+		return nil, errors.New("invalid bounded source page traversal")
 	}
 	if _, err := workiq.RelativePath(resource, ""); err != nil {
 		return nil, err
@@ -72,6 +76,10 @@ where f.resource=? and f.retired=0 and p.state='staged' and p.id>? order by p.id
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Store) WorkIQPendingChatPages(ctx context.Context, attempt int64, resource string, after int64, limit int) ([]int64, error) {
+	return s.workIQPendingPages(ctx, attempt, resource, after, limit, "chats")
 }
 
 // An optional parent selects one completed sibling list: "" selects the root

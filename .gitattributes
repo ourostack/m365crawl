@@ -6,3 +6,5 @@
 *.js text eol=lf
 **/testdata/** -text binary
 **/*.golden text diff merge eol=lf
+# The synthetic MCP executable's authored source is not a binary cache fixture.
+internal/workiq/testdata/stub/*.go text diff merge eol=lf

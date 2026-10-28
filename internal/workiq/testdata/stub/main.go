@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,12 +38,86 @@ func fetch(path string) (any, int) {
 			return nil, 403
 		case "missing-id":
 			return map[string]any{"mail": "test.user@example.invalid"}, 200
+		case "invalid-address":
+			return map[string]any{"id": "synthetic-user", "mail": "not an address"}, 200
 		case "pinned-mismatch":
 			if len(os.Args) == 4 {
 				return map[string]any{"id": "other-user", "mail": "test.user@example.invalid"}, 200
 			}
 		}
 		return map[string]any{"id": "synthetic-user", "mail": "test.user@example.invalid", "userPrincipalName": "test.user@example.invalid"}, 200
+	}
+	if os.Getenv("WORKIQ_ACQUISITION_CHATS") != "" {
+		mode := os.Getenv("WORKIQ_ACQUISITION_CHATS")
+		if strings.HasPrefix(path, "/me/chats") && mode == "page-limit" {
+			return map[string]any{"value": []any{}, "@odata.nextLink": "/me/chats?$skiptoken=loop"}, 200
+		}
+		if strings.HasPrefix(path, "/me/chats") && (mode == "count-limit" || mode == "byte-limit") {
+			u, err := url.ParseRequestURI(path)
+			if err != nil {
+				os.Exit(89)
+			}
+			page, _ := strconv.Atoi(u.Query().Get("$skiptoken"))
+			count, topic := 25001, ""
+			if mode == "byte-limit" {
+				count, topic = 128, strings.Repeat("x", 65536)
+			}
+			var values []any
+			for i := 0; i < count; i++ {
+				values = append(values, map[string]any{"id": fmt.Sprintf("bounded-%d-%d", page, i), "tenantId": "unarchived", "chatType": "group", "topic": topic})
+			}
+			return map[string]any{"value": values, "@odata.nextLink": fmt.Sprintf("/me/chats?$skiptoken=%d", page+1)}, 200
+		}
+		switch path {
+		case "/me/chats":
+			if mode == "discovery-fail" {
+				return nil, 400
+			}
+			if os.Getenv("WORKIQ_ACQUISITION_CHATS") == "empty" {
+				return map[string]any{"value": []any{}}, 200
+			}
+			if os.Getenv("WORKIQ_ACQUISITION_CHATS") == "malformed" {
+				return map[string]any{"value": "not-a-collection"}, 200
+			}
+			return map[string]any{"value": []any{map[string]any{"id": "server-only", "tenantId": "synthetic-tenant", "chatType": "group"}},
+				"@odata.nextLink": "/me/chats?$skiptoken=second"}, 200
+		case "/me/chats?$skiptoken=second":
+			id, tenant := "chat", "synthetic-tenant"
+			switch os.Getenv("WORKIQ_ACQUISITION_CHATS") {
+			case "duplicate":
+				id = "server-only"
+			case "unmatched":
+				tenant = "unarchived-tenant"
+			case "missing-tenant":
+				tenant = ""
+			case "bad-entity":
+				id = ""
+			}
+			values := []any{map[string]any{"id": id, "tenantId": tenant, "chatType": "group"}}
+			if mode == "tie" {
+				values = append(values, map[string]any{"id": "another-empty", "tenantId": tenant, "chatType": "group"})
+			}
+			return map[string]any{"value": values}, 200
+		case "/chats/chat/messages":
+			return map[string]any{"value": []any{map[string]any{"id": "old-first", "createdDateTime": "2025-01-01T00:00:00Z"}},
+				"@odata.nextLink": "/chats/chat/messages?$skiptoken=second"}, 200
+		case "/chats/chat/messages?$skiptoken=second":
+			if os.Getenv("WORKIQ_ACQUISITION_CHATS") == "fail-second" {
+				return nil, 400
+			}
+			out := map[string]any{"value": []any{
+				map[string]any{"id": "current-one", "createdDateTime": "2026-09-10T00:00:00Z"},
+				map[string]any{"id": "current-two", "createdDateTime": "2026-09-11T00:00:00Z"},
+			}}
+			if mode == "delta" {
+				out["@odata.deltaLink"] = "/chats/chat/messages?$deltatoken=end"
+			}
+			return out, 200
+		case "/chats/server-only/messages":
+			return map[string]any{"value": []any{}}, 200
+		case "/chats/another-empty/messages", "/chats/chat/messages?$deltatoken=end":
+			return map[string]any{"value": []any{}}, 200
+		}
 	}
 	if path == "/me/mailFolders/folder-inbox/childFolders?includeHiddenFolders=true" {
 		if os.Getenv("WORKIQ_ACQUISITION_MODE") == "child-fail" {
@@ -80,6 +155,18 @@ func fetch(path string) (any, int) {
 		base := "/me/mailFolders/folder-" + kind + "/messages/delta()"
 		if path == base || path == base+"?$deltatoken=stable%2bstate" {
 			if kind == "inbox" {
+				if strings.Contains(path, "$deltatoken=") {
+					if name := os.Getenv("WORKIQ_ACQUISITION_EXPIRE_ONCE"); name != "" {
+						f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+						if err == nil {
+							_ = f.Close()
+							return nil, 410
+						}
+						if !os.IsExist(err) {
+							os.Exit(87)
+						}
+					}
+				}
 				switch os.Getenv("WORKIQ_ACQUISITION_MODE") {
 				case "permanent":
 					return nil, 400

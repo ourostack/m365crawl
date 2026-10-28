@@ -34,10 +34,23 @@ func (s *Store) BeginWorkIQAttempt(ctx context.Context, scope WorkIQScope, at ti
 	if scope.Qualification == "" {
 		scope.Qualification = "workiq-v1"
 	}
+	var windowStart, windowEnd any
+	if !scope.WindowStart.IsZero() {
+		windowStart = workIQTimeValue(&scope.WindowStart)
+		if scope.Family == "chats" && scope.WindowEnd.IsZero() {
+			scope.WindowEnd = at
+		}
+	}
+	if !scope.WindowEnd.IsZero() {
+		if scope.WindowStart.IsZero() || scope.WindowEnd.Before(scope.WindowStart) || scope.WindowEnd.After(at) {
+			return 0, errors.New("invalid fixed WorkIQ window")
+		}
+		windowEnd = workIQTimeValue(&scope.WindowEnd)
+	}
 	var id int64
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,window_start,qualification) values(?,?,?,?,?)`,
-			scope.Family, scope.Account, fmtTime(at), fmtTime(scope.WindowStart), scope.Qualification)
+		result, err := tx.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,window_start,window_end,qualification) values(?,?,?,?,?,?)`,
+			scope.Family, scope.Account, fmtTime(at), windowStart, windowEnd, scope.Qualification)
 		if err != nil {
 			return err
 		}
