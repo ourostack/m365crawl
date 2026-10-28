@@ -950,6 +950,14 @@ m365crawl people --query @example.com
 
 Run one read-only SQL query against the archive.
 
+Source-aware schemas also expose the read-only `item_sources` view:
+`kind` (`message`, `conversation`, `mail`), `account_id`, `item_rowid`,
+`graph_id`, `server_json`, `cache_seen_at`, `server_seen_at`, and `provenance`.
+Join its kind and item rowid to the corresponding canonical table's rowid.
+Provenance records independent sightings, not the winning body; native-only
+rows have null server evidence. Older read-only schemas have no such view and
+ordinary read commands report `desktop_cache` without migrating them.
+
 ```
 m365crawl sql <query> [flags]
 ```
@@ -1171,6 +1179,16 @@ m365crawl records --database Teams:pinned-manager --store pins --since 7d
 ## mail
 
 The `mail` commands read new Outlook cached mail from the archive: HxStore on Mac and OWA IndexedDB on Windows; explicit supported OWA copies work portably. The archive holds only cached mail plus what earlier syncs kept. Every result says when mail was last synced and how far back the cache reaches; lists also give `cache_fresh_at`, when Outlook last wrote its cache. Mail Outlook received after that is not in the archive. When a sync finds Outlook has not written its cache for over an hour (Outlook closed, asleep or not syncing), `source_health` carries a `stale` entry (`outlook_cache_stale`) and a notice: open Outlook, let it sync, then run `m365crawl sync`.
+
+Message items retain `provenance` (`desktop_cache`, `workiq_server`, `both`)
+independently of the winning body or acquisition enablement. `deleted_at` is
+effective explicit deletion, not inferred cache absence. For an account with
+retained server mail, `coverage[].count` counts canonical rows of all origins,
+excluding inferred gone/evicted rows. `count_basis: "canonical_archive"`
+distinguishes this from a native census; `cache_count` retains that census's
+original count when known. Range and read clocks remain native cache evidence:
+a server-only folder has null native range/read clocks. These are not server
+folder totals or a whole-account freshness claim.
 
 - **Ids.** A message id is `<account>:<detail_key>`, split on the last colon, as `mail list` prints it (for example `outlook/Main:12345`). `--account` takes the mail account as it appears in the ids (`outlook/<profile>`), not a Teams account.
 - **List results** are `{"items": [...], "count", "truncated", "synced_at", "coverage": [{"account", "folder", "kind", "oldest_at", "newest_at", "count", "current"}], "note"}`, and a bounded `mail list` can add `folder_copies` (see "Folder copies"). `note` explains an empty result (no archive yet, Outlook source off, no Outlook profile, mail not read yet, filters matched nothing, or the cache covers only since a date, measured on the current folder copies; when an older copy reaches further back, the note says how far). For unread results it says how many messages the cache holds in each folder, for example "the local cache holds 17 messages in Inbox; Outlook may show more", or "no unread mail in the cache; Outlook may show more". Text output of every `mail` list ends with `synced <time> · cache covers since <date>`.

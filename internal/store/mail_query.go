@@ -123,6 +123,8 @@ type CoverageRow struct {
 	Count              int
 	ReadAt             time.Time
 	Current            bool
+	CountBasis         string
+	CacheCount         *int
 }
 
 // MailParticipant is one distinct person in a thread.
@@ -691,24 +693,8 @@ func mailKindRank(kind string) int {
 	return 5
 }
 
-// MailCoverage lists, per folder, how far back the cache reached at the last read.
+// MailCoverage preserves native ranges/read clocks. Source-containing accounts
+// count canonical rows, retaining the native census count separately.
 func (s *Store) MailCoverage(ctx context.Context) ([]CoverageRow, error) {
-	out := []CoverageRow{}
-	sets, err := loadMailSets(ctx, s.db)
-	if err != nil {
-		return nil, err
-	}
-	err = mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), c.oldest_at, c.newest_at, c.count, c.read_at
-from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key order by c.account, c.folder_key`, nil, func(r *sql.Rows) error {
-		var c CoverageRow
-		var oldest, newest, read sql.NullString
-		if err := r.Scan(&c.Account, &c.FolderKey, &c.Folder, &c.Kind, &oldest, &newest, &c.Count, &read); err != nil {
-			return err
-		}
-		c.OldestAt, c.NewestAt, c.ReadAt = parseTime(oldest), parseTime(newest), parseTime(read)
-		c.Current = sets.isCurrent(c.Account, c.FolderKey)
-		out = append(out, c)
-		return nil
-	})
-	return out, err
+	return s.workIQMailCoverage(ctx)
 }

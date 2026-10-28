@@ -49,6 +49,7 @@ type mailGroup struct {
 }
 
 const mailCommon = `Mail comes from new Outlook's local cache: HxStore on Mac, OWA IndexedDB on Windows. It holds only cached mail, not server totals. Explicit copied supported sources also work on Linux. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers and when Outlook last wrote it (cache_fresh_at): mail Outlook received after that is not in the archive, and source_health reports a cache Outlook stopped writing (state stale).
+Items also retain their acquisition provenance: desktop_cache, workiq_server or both. This is not a content winner or a freshness claim. deleted_at is an effective explicit deletion mark, not inferred cache absence. For an account with retained server mail, coverage[].count counts canonical rows of all provenances, excluding inferred gone/evicted rows. count_basis is canonical_archive and cache_count retains the last native census count when known. The coverage range and synced_at still describe native cache reads; a server-only folder has null native range/read clocks. These counts are not server totals.
 --account takes the mail account as printed in the ids, outlook/<profile>.
 A field the archive does not hold is null: subject, sender, in_reply_to, ical_uid and internet_message_id when Outlook stored none, is_read when the read state is not known, sent_at when the store has no send time, address on a recipient with no address, gone_at and evicted_at while the message is present.
 Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is the store's own number. Windows preserves To/Cc/Bcc order with role to/cc/bcc and kind_raw=0; ReplyTo is not inferred. conversation_id is null when absent; threads use a shared conversation identity before reply_chain and subject fallback.
@@ -209,13 +210,15 @@ type mailUnreadFolder struct {
 }
 
 type mailCoverageOut struct {
-	Account  string     `json:"account"`
-	Folder   string     `json:"folder"`
-	Kind     string     `json:"kind"`
-	OldestAt *time.Time `json:"oldest_at"`
-	NewestAt *time.Time `json:"newest_at"`
-	Count    int        `json:"count"`
-	Current  bool       `json:"current"`
+	Account    string     `json:"account"`
+	Folder     string     `json:"folder"`
+	Kind       string     `json:"kind"`
+	OldestAt   *time.Time `json:"oldest_at"`
+	NewestAt   *time.Time `json:"newest_at"`
+	Count      int        `json:"count"`
+	CountBasis string     `json:"count_basis,omitempty"`
+	CacheCount *int       `json:"cache_count,omitempty"`
+	Current    bool       `json:"current"`
 }
 
 func nz(s string) *string {
@@ -439,7 +442,8 @@ func (rt *runtime) mailScope(st *store.Store, folder string) (mailScope, error) 
 func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 	out := make([]mailCoverageOut, len(rows))
 	for i, c := range rows {
-		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count, Current: c.Current}
+		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count,
+			CountBasis: c.CountBasis, CacheCount: c.CacheCount, Current: c.Current}
 	}
 	return out
 }

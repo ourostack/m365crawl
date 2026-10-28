@@ -109,4 +109,16 @@ create table if not exists workiq_mail_receipts(
  id integer primary key autoincrement, attempt_id integer not null unique references workiq_attempts(id),
  account_id text not null, completed_at text not null, folders integer not null check(folders>=0)
 );
+create view if not exists item_sources as
+select 'message' as kind,m.tenant_id||'/'||m.user_id as account_id,m.rowid as item_rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + ` as provenance
+from messages m left join workiq_rows w on w.kind='message' and w.account_id=m.tenant_id||'/'||m.user_id and w.item_rowid=m.rowid
+union all
+select 'conversation',c.tenant_id||'/'||c.user_id,c.rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + `
+from conversations c left join workiq_rows w on w.kind='conversation' and w.account_id=c.tenant_id||'/'||c.user_id and w.item_rowid=c.rowid
+union all
+select 'mail',m.account,m.rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + `
+from mail_messages m left join workiq_rows w on w.kind='mail' and w.account_id=m.account and w.item_rowid=m.rowid;
 `

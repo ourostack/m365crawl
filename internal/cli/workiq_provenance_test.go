@@ -77,3 +77,34 @@ func TestWorkIQNestedAndSharedMailKeepEffectiveSourceFields(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkIQPublicCoverageAndSQLKeepNativeClockMeaning(t *testing.T) {
+	e := mailEnv(t)
+	before := mailJSON(t, e, "mail", "list")
+	e.exec(`insert into workiq_rows(kind,account_id,item_rowid,graph_id,server_json,cache_first,cache_seen,winner,modified_at)
+select 'mail',account,rowid,cast(detail_key as text),'{}',1,1,'desktop_cache','2026-09-10T08:00:00Z' from mail_messages`)
+	after := mailJSON(t, e, "--fields", "provenance", "mail", "list")
+	if after["synced_at"] != before["synced_at"] {
+		t.Fatal("source counts replaced the native read clock")
+	}
+	total, cached := float64(0), float64(0)
+	for _, value := range after["coverage"].([]any) {
+		row := value.(map[string]any)
+		if row["count_basis"] != "canonical_archive" || row["cache_count"] == nil {
+			t.Fatal("public coverage hid the canonical/native distinction")
+		}
+		total += row["count"].(float64)
+		cached += row["cache_count"].(float64)
+	}
+	if total != 6 || cached != 6 {
+		t.Fatal("public coverage lost canonical or original native counts")
+	}
+	code, out, stderr := e.mail("sql", "select distinct kind,provenance from item_sources order by kind,provenance")
+	if code != 0 {
+		t.Fatal("public SQL source view failed", stderr)
+	}
+	rows := decode(t, out)["rows"].([]any)
+	if len(rows) != 1 || rows[0].([]any)[0] != "mail" || rows[0].([]any)[1] != "both" {
+		t.Fatal("public SQL did not retain the canonical independent-source origin")
+	}
+}
