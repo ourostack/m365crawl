@@ -4,6 +4,17 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-28
+
+### Added
+
+- `content fetch engage-thread URL` captures an exact Engage thread or Teams Engage deep link: observed starter/replies, native authors/times, safe links and generic attachment metadata, with explicit partial/loss reporting, immutable archive evidence and offline content show/search. Unsafe signed or credential-bearing URLs are omitted/redacted; attachments are not downloaded or classified into file/image types.
+- Selected-thread capture can attempt a fresh exact-target landing after a positively committed same-frame document replacement, without weakening generic navigation or final native identity/generation checks. Landing, collection and transport limits remain unchanged.
+
+### Fixed
+
+- Tool-owned browser navigation waits for the requested document's committed loader and complete readiness instead of accepting a completed previous document. Same-document navigation retains its bound loader; missing identity, downloads and superseding documents fail closed without changing acquisition deadlines or Engage evidence checks.
+
 ## [1.2.0] - 2026-10-27
 
 ### Added
