@@ -74,12 +74,15 @@ create table if not exists workiq_folders(
 create table if not exists workiq_censuses(
  id integer primary key autoincrement, attempt_id integer not null references workiq_attempts(id),
  account_id text not null, completed_at text, complete integer not null default 0,
+ full_enumeration integer not null default 0,
  unique(attempt_id,account_id)
 );
 create table if not exists workiq_census_members(
  census_id integer not null references workiq_censuses(id), normalized_id text not null,
  graph_id text not null, folder_id text not null,
  sender text not null, sent_at text, subject_norm text not null,
+ data_json text not null default '{}', observed_at text, removed integer not null default 0,
+ admitted integer not null default 0,
  primary key(census_id,graph_id)
 );
 create table if not exists workiq_gaps(

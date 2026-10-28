@@ -48,6 +48,7 @@ create table if not exists mail_messages(
   modified_at text,
   gone_at text,
   evicted_at text,
+  deleted_at text,
   unique(account, detail_key)
 );
 create index if not exists mail_messages_received on mail_messages(received_at desc);
