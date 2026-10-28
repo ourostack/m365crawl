@@ -80,7 +80,7 @@ func ParseThreadURL(raw string) (ThreadTarget, error) {
 }
 
 var selectedDecimal = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
-var selectedURLs = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*://|//|javascript:|data:)[^\s<>"']+`)
+var selectedURLs = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*://|//|javascript:|data:)[^\s<>"]+`)
 
 func selectedStrings(raw string, keys ...string) (map[string]string, error) {
 	bad := &ReadError{Code: "invalid_target"}
