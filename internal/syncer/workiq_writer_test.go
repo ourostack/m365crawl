@@ -69,4 +69,13 @@ func TestSyncWaitsForOwnedShortWriterBeforeDiscovery(t *testing.T) {
 			t.Fatalf("ordinary synthetic sync failed after reserved writer acquired: %v", err)
 		}
 	}
+
+}
+
+func TestSyncSourceProjectionMetadataFailureDoesNotReachNativeDiscovery(t *testing.T) {
+	db := archiveWith(t, `insert into meta(key,value) values('workiq_mail_projection_version','not-a-version')`)
+	report, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	if err == nil || len(report.Sources) != 0 {
+		t.Fatal("corrupt source maintenance metadata became checked-empty success or native-source outcome")
+	}
 }

@@ -103,6 +103,12 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		_ = record(StatusFailed)
 		return Report{}, nil, migrationError(err)
 	}
+	// Server projection upgrades are distinct from native mail text versions:
+	// neither may reinterpret the other source or invent a new sighting.
+	if _, err := st.EnsureWorkIQMailProjection(ctx); err != nil {
+		_ = record(StatusFailed)
+		return Report{}, nil, migrationError(err)
+	}
 	// Application evidence is backfilled from the raw JSON the archive already holds: on its own
 	// marker, whether or not the rederivation above had work, and before any cache is read, so an
 	// absent, unchanged or failing capture never delays it. A settled archive does nothing.

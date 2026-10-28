@@ -105,7 +105,7 @@ where a.kind='mail_native_presence' and a.account_id=? and a.namespace=?`, []any
 			if err := tx.QueryRowContext(ctx, `select detail_key from mail_messages where account=? and rowid=?`, b.Account, rowid).Scan(&m.DetailKey); err != nil {
 				return b, nil, err
 			}
-			m, err = applyWorkIQCacheMail(ctx, tx, b.Account, rowid, m, b.ReadAt)
+			m, err = applyWorkIQCacheMail(ctx, tx, b.Account, rowid, m, b.ReadAt, b.FreshAt)
 			if err != nil {
 				return b, nil, err
 			}
@@ -184,7 +184,7 @@ or exists(select 1 from workiq_aliases where kind='mail' and account_id=? and na
 	return nil
 }
 
-func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed time.Time) (outlookmail.Message, error) {
+func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed, fresh time.Time) (outlookmail.Message, error) {
 	var raw, originalHeader, oldWinner, retainedGraphID string
 	var oldCache sql.NullString
 	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner,w.graph_id from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
@@ -199,8 +199,8 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 	if json.Unmarshal([]byte(raw), &server) != nil || server.ID != retainedGraphID {
 		return m, errors.New("invalid retained server mail projection")
 	}
+	var previous outlookmail.Message
 	if oldCache.Valid {
-		var previous outlookmail.Message
 		if json.Unmarshal([]byte(oldCache.String), &previous) != nil || previous.Account != account || previous.DetailKey != m.DetailKey {
 			return m, errors.New("invalid retained native mail projection")
 		}
@@ -210,23 +210,12 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		return m, err
 	}
 	cache := m
-	// Body bytes are decoded before JSON/base64 encoding, then the whole typed
-	// projection is scrubbed. The cache's own header remains separately retained.
-	var body string
-	encodedBody, _ := json.Marshal(string(cache.Body.HTML))
-	safeBody, _ := scrubWorkIQProjection(encodedBody)
-	if json.Unmarshal(safeBody, &body) != nil {
-		return m, errors.New("invalid scrubbed cache mail body")
+	if len(cache.Body.HTML) == 0 && len(previous.Body.HTML) > 0 {
+		cache.Body = previous.Body
 	}
-	cache.Body.HTML = []byte(body)
-	encoded, err := json.Marshal(cache)
+	cleaned, safe, err := cleanWorkIQNativeMail(cache)
 	if err != nil {
-		return m, errors.New("invalid native mail projection")
-	}
-	safe, _ := scrubWorkIQProjection(encoded)
-	var cleaned outlookmail.Message
-	if json.Unmarshal(safe, &cleaned) != nil || cleaned.Account != account || cleaned.DetailKey != m.DetailKey {
-		return m, errors.New("native mail identity could not be retained")
+		return m, err
 	}
 	winner := "desktop_cache"
 	effective := cleaned
@@ -235,21 +224,32 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		winner = "workiq_server"
 	}
 	effective.MessageID = originalHeader
+	if !fresh.IsZero() {
+		copyVersion, err := workIQNativeMailCopyVersion(fresh)
+		if err != nil {
+			return m, err
+		}
+		if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_seen_at=?,cache_version=?,
+cache_first_miss_at=null,cache_gone_at=null,cache_evicted_at=null where kind='mail' and account_id=? and item_rowid=?
+and (cache_version is null or cache_version<?)`, workIQTimeValue(&observed), copyVersion, account, rowid, copyVersion); err != nil {
+			return m, err
+		}
+	}
 	if oldCache.Valid && oldCache.String == string(safe) && oldWinner == winner {
 		return effective, nil
 	}
 	d := deriveMail(effective)
 	d.body(effective)
-	if _, err := tx.ExecContext(ctx, `update mail_messages set body_state=?,body_html_gz=?,body_text=?,body_text_version=?,modified_at=? where rowid=?`,
-		d.state, d.gz, d.text, MailTextVersion, fmtTime(observed), rowid); err != nil {
+	if _, err := tx.ExecContext(ctx, `update mail_messages set body_state=?,body_html_gz=?,body_text=?,body_text_version=?,modified_at=? where rowid=?
+and (body_state<>? or body_html_gz is not ? or body_text<>? or body_text_version<>?)`,
+		d.state, d.gz, d.text, MailTextVersion, fmtTime(observed), rowid, d.state, d.gz, d.text, MailTextVersion); err != nil {
 		return m, err
 	}
 	if err := reindexMail(ctx, tx, rowid, effective, d.text); err != nil {
 		return m, err
 	}
-	if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_projection=?,cache_seen_at=?,winner=?,
-cache_first_miss_at=null,cache_gone_at=null,cache_evicted_at=null where kind='mail' and account_id=? and item_rowid=?`,
-		string(safe), workIQTimeValue(&observed), winner, account, rowid); err != nil {
+	if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_projection=?,winner=? where kind='mail' and account_id=? and item_rowid=?`,
+		string(safe), winner, account, rowid); err != nil {
 		return m, err
 	}
 	return effective, nil

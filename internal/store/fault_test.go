@@ -233,6 +233,11 @@ func (r *faultRows) Next(dest []driver.Value) error {
 	if err := r.inner.Next(dest); err != nil {
 		return err
 	}
+	for i, column := range r.inner.Columns() {
+		if column == "winner" && r.inj.hit("mail-winner-corrupt") {
+			dest[i] = "not-a-source"
+		}
+	}
 	if r.inj.hit("scan") {
 		for i := range dest {
 			dest[i] = nil
