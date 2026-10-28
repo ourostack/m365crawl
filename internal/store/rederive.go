@@ -32,8 +32,8 @@ const (
 	derivationKey  = "derivation_version"
 	rederiveBatch  = 500
 	alpha1Version  = 1 // an archive with no meta.derivation_version
-	selectMessages = `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from messages where rowid>? order by rowid limit ?`
-	selectConvs    = `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from conversations where rowid>? order by rowid limit ?`
+	selectMessages = `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from messages where rowid>? and ` + workIQCacheMessageFilter + ` order by rowid limit ?`
+	selectConvs    = `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from conversations where rowid>? and ` + workIQCacheConversationFilter + ` order by rowid limit ?`
 )
 
 // Rederive brings an archive written by an older build up to DerivationVersion: it recomputes the
@@ -296,7 +296,7 @@ func readConversations(ctx context.Context, tx *sql.Tx, after int64) ([]storedCo
 const (
 	mailTextKey         = "mail_text_version"
 	mailRederiveBatch   = 100
-	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>? order by rowid limit ?`
+	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>? and ` + workIQCacheMailFilter + ` order by rowid limit ?`
 	updateMailRederived = `update mail_messages set subject_norm=?, body_text=?, body_text_version=?, modified_at=? where rowid=?`
 )
 
