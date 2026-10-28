@@ -86,8 +86,10 @@ func (s *Store) StageWorkIQPage(ctx context.Context, batch WorkIQPageBatch) erro
 				}
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `insert into workiq_frontiers(family,account_id,resource,scope,qualification) values(?,?,?,?,?)
-on conflict(family,account_id,resource,scope,qualification) do nothing`, family, account, resource, scope, qualification); err != nil {
+		if _, err := tx.ExecContext(ctx, `insert into workiq_frontiers(family,account_id,resource,scope,qualification,generation)
+select ?,?,?,?,?,coalesce(max(generation),-1)+1 from workiq_frontiers where family=? and account_id=? and resource=? and scope=? and qualification=?
+on conflict(family,account_id,resource,scope,qualification) where retired=0 do nothing`,
+			family, account, resource, scope, qualification, family, account, resource, scope, qualification); err != nil {
 			return err
 		}
 		var frontier, revision int64
@@ -99,7 +101,7 @@ on conflict(family,account_id,resource,scope,qualification) do nothing`, family,
 			return errors.New("WorkIQ cursor changed before publication")
 		}
 		if _, err := tx.ExecContext(ctx, `insert into workiq_pages(attempt_id,frontier_id,expected_revision,data_json,next_cursor,delta_cursor,observed_at) values(?,?,?,?,?,?,?)`,
-			batch.AttemptID, frontier, revision, string(page.JSON), page.NextCursor, page.DeltaCursor, fmtTime(batch.ObservedAt)); err != nil {
+			batch.AttemptID, frontier, revision, string(page.JSON), page.NextCursor, page.DeltaCursor, workIQTimeValue(&batch.ObservedAt)); err != nil {
 			return err
 		}
 		next := page.NextCursor

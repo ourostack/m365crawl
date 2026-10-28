@@ -26,14 +26,19 @@ create table if not exists workiq_frontiers(
  family text not null, account_id text not null, resource text not null,
  scope text not null default '', qualification text not null,
  cursor text not null default '', pending_cursor text not null default '', revision integer not null default 0,
+ admitted_revision integer not null default 0,
  baseline integer not null default 1, retired integer not null default 0,
- unique(family,account_id,resource,scope,qualification)
+ generation integer not null default 0,
+ unique(family,account_id,resource,scope,qualification,generation)
 );
+create unique index if not exists workiq_frontiers_active on workiq_frontiers(family,account_id,resource,scope,qualification) where retired=0;
 create table if not exists workiq_pages(
  id integer primary key autoincrement, attempt_id integer not null references workiq_attempts(id),
  frontier_id integer not null references workiq_frontiers(id), expected_revision integer not null,
  data_json text not null, next_cursor text not null default '', delta_cursor text not null default '',
  observed_at text not null,
+ prepared_attempt_id integer not null default 0, prepared_offset integer not null default 0,
+ prepared_complete integer not null default 0,
  state text not null default 'staged' check(state in ('staged','admitted','retired')),
  unique(attempt_id,frontier_id,expected_revision)
 );
@@ -69,12 +74,15 @@ create table if not exists workiq_folders(
  account_id text not null, graph_id text not null, folder_key integer not null,
  parent_graph_id text not null default '', well_known text not null default 'other',
  inventory_attempt integer not null, total_items integer, resource_path text not null default '',
+ child_count integer, root_listed integer not null default 0,
  primary key(account_id,graph_id)
 );
 create table if not exists workiq_censuses(
  id integer primary key autoincrement, attempt_id integer not null references workiq_attempts(id),
  account_id text not null, completed_at text, complete integer not null default 0,
  full_enumeration integer not null default 0,
+ inventory_ready integer not null default 0, carry_complete integer not null default 0,
+ carried_through integer not null default 0,
  unique(attempt_id,account_id)
 );
 create table if not exists workiq_census_members(
@@ -83,6 +91,7 @@ create table if not exists workiq_census_members(
  sender text not null, sent_at text, subject_norm text not null,
  data_json text not null default '{}', observed_at text, removed integer not null default 0,
  admitted integer not null default 0,
+ page_id integer, retained integer not null default 0,
  primary key(census_id,graph_id)
 );
 create table if not exists workiq_gaps(
