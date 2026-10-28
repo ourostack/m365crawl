@@ -89,7 +89,10 @@ func (s *Store) CommitMail(ctx context.Context, b MailBatch) (res MailResult, er
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var cerr error
 		res, cerr = commitMail(ctx, tx, b)
-		return cerr
+		if cerr != nil {
+			return cerr
+		}
+		return retainWorkIQNativeMailFresh(ctx, tx, b.Account, b.FreshAt)
 	})
 	if err != nil {
 		return MailResult{}, err

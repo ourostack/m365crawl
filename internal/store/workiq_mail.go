@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"html"
 	"strconv"
 	"time"
 
@@ -154,15 +153,7 @@ func workIQMailProjection(ctx context.Context, tx *sql.Tx, account string, serve
 		}
 	}
 	m.Flag, m.Importance, m.HasAttachments, m.Class = server.Flag, server.Importance, server.HasAttachments, "IPM.Note"
-	m.Body.State = outlookmail.BodyNone
-	if server.BodyPresent {
-		m.Body.State = outlookmail.BodyInline
-		if server.BodyType == "html" {
-			m.Body.HTML = []byte(server.Body)
-		} else if server.BodyType == "text" {
-			m.Body.HTML = []byte("<p>" + html.EscapeString(server.Body) + "</p>")
-		}
-	}
+	m.Body = workIQServerMailBody(server)
 	for _, group := range []struct {
 		role      string
 		addresses []workiq.MailAddress
@@ -193,6 +184,8 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 	var oldProjection string
 	var oldWinner string
 	var cachedProjection sql.NullString
+	var initialCacheSeen *time.Time
+	var initialCacheVersion any
 	if bound {
 		if err := tx.QueryRowContext(ctx, `select cache_first,cache_seen,server_projection,winner,cache_projection from workiq_rows where kind='mail' and account_id=? and item_rowid=?`,
 			account, rowid).Scan(&cacheFirst, &cacheSeen, &oldProjection, &oldWinner, &cachedProjection); err != nil {
@@ -271,6 +264,21 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 			return err
 		}
 		m.DetailKey = canonical
+		if cacheSeen && !cachedProjection.Valid {
+			snapshot, seen, err := snapshotWorkIQNativeMail(ctx, tx, account, rowid)
+			if err != nil {
+				return err
+			}
+			cachedProjection = sql.NullString{String: string(snapshot), Valid: true}
+			initialCacheSeen = seen
+			fresh, err := loadWorkIQNativeMailFresh(ctx, tx, account)
+			if err != nil {
+				return err
+			}
+			if fresh != nil {
+				initialCacheVersion = fresh.UnixNano()
+			}
+		}
 		cacheHasBody := cacheSeen && currentText != "" && oldWinner != "workiq_server"
 		if cacheSeen && cachedProjection.Valid {
 			var cached outlookmail.Message
@@ -349,12 +357,14 @@ where kind='mail' and account_id=? and item_rowid=?`, account, rowid).Scan(&reta
 	}
 	projected, _ := json.Marshal(server)
 	_, err = tx.ExecContext(ctx, `insert into workiq_rows(kind,account_id,item_rowid,graph_id,server_json,server_projection,cache_first,cache_seen,server_seen_at,winner,modified_at,
-server_version,server_deleted_at,server_deleted_version)
-values('mail',?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(kind,account_id,item_rowid) do update set graph_id=excluded.graph_id,
+server_version,server_deleted_at,server_deleted_version,cache_projection,cache_seen_at,cache_version)
+values('mail',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(kind,account_id,item_rowid) do update set graph_id=excluded.graph_id,
 server_json=excluded.server_json,server_projection=excluded.server_projection,server_seen_at=excluded.server_seen_at,winner=excluded.winner,modified_at=excluded.modified_at,
-server_version=excluded.server_version,server_deleted_at=excluded.server_deleted_at,server_deleted_version=excluded.server_deleted_version`,
+server_version=excluded.server_version,server_deleted_at=excluded.server_deleted_at,server_deleted_version=excluded.server_deleted_version,
+cache_projection=coalesce(workiq_rows.cache_projection,excluded.cache_projection),cache_seen_at=coalesce(workiq_rows.cache_seen_at,excluded.cache_seen_at),
+cache_version=coalesce(workiq_rows.cache_version,excluded.cache_version)`,
 		account, rowid, server.ID, string(server.Raw), string(projected), b2i(cacheFirst), b2i(cacheSeen), nullAny(liveSeen), winner, workIQTimeValue(&observed),
-		nullAny(liveVersion), nullAny(deleteMark), nullAny(deleteVersion))
+		nullAny(liveVersion), nullAny(deleteMark), nullAny(deleteVersion), nullAny(cachedProjection), workIQTimeValue(initialCacheSeen), initialCacheVersion)
 	if err != nil {
 		return err
 	}
@@ -365,6 +375,10 @@ server_version=excluded.server_version,server_deleted_at=excluded.server_deleted
 		}
 	}
 	if err := retainWorkIQMailCacheMarks(ctx, tx, account, rowid); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do nothing`,
+		workIQMailProjectionKey, strconv.Itoa(WorkIQMailProjectionVersion)); err != nil {
 		return err
 	}
 	return reduceWorkIQMailMarks(ctx, tx, account, rowid)

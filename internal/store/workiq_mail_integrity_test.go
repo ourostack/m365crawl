@@ -83,7 +83,7 @@ func TestWorkIQMailRetainedNativeCodecAndEmptyBodyRemainSourceAware(t *testing.T
 			}
 			before := dump(t, s)
 			err := s.inTx(ctx, func(tx *sql.Tx) error {
-				_, err := applyWorkIQCacheMail(ctx, tx, mailAcct, 1, incoming, mailT0)
+				_, err := applyWorkIQCacheMail(ctx, tx, mailAcct, 1, incoming, mailT0, mailT0)
 				return err
 			})
 			if err == nil || dump(t, s) != before {
@@ -99,7 +99,7 @@ func TestWorkIQMailRetainedNativeCodecAndEmptyBodyRemainSourceAware(t *testing.T
 		before := dump(t, archive)
 		if direct {
 			err = archive.inTx(ctx, func(tx *sql.Tx) error {
-				_, err := applyWorkIQCacheMail(ctx, tx, mailAcct, 1, empty, mailT0)
+				_, err := applyWorkIQCacheMail(ctx, tx, mailAcct, 1, empty, mailT0, mailT0)
 				return err
 			})
 		} else {
