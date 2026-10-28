@@ -35,7 +35,7 @@ func bindWorkIQMailAlias(ctx context.Context, tx *sql.Tx, account, namespace, al
 			return errors.New("invalid numeric mail source alias")
 		}
 		alias = strconv.FormatUint(key, 10)
-	case "graph", "native_owa":
+	case "graph", "native_owa", "native_instance":
 	default:
 		return errors.New("invalid mail source alias namespace")
 	}

@@ -159,7 +159,7 @@ var chmodFile = os.Chmod
 // adds the document usage_json and native_key columns.
 func (s *Store) migrate(ctx context.Context) error {
 	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts, mailModified, folderModified int
-	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture int
+	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture, mailDeleted int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -180,11 +180,15 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('sync_runs') where name='error_code'),
   (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
   (select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
-  (select count(*) from pragma_table_info('mail_folders') where name='modified_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
-		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified); err != nil {
+  (select count(*) from pragma_table_info('mail_folders') where name='modified_at'),
+  (select count(*) from pragma_table_info('mail_messages') where name='deleted_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified, &mailDeleted); err != nil {
 		return err
 	}
 	var stmts []string
+	if mailDeleted == 0 {
+		stmts = append(stmts, `alter table mail_messages add column deleted_at text`)
+	}
 	if errorCode == 0 {
 		stmts = append(stmts, `alter table sync_runs add column error_code text not null default ''`)
 	}

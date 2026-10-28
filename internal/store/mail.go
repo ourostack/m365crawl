@@ -83,6 +83,9 @@ type MailResult struct {
 // A read that misses more than MailGoneWithholdMin messages and more than MailGoneWithholdPercent
 // percent of the live ones marks nothing.
 func (s *Store) CommitMail(ctx context.Context, b MailBatch) (res MailResult, err error) {
+	if err := s.validateWorkIQMailCacheOwner(ctx, b.Account); err != nil {
+		return MailResult{}, err
+	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var cerr error
 		res, cerr = commitMail(ctx, tx, b)
@@ -105,6 +108,7 @@ type mailExisting struct {
 	received                               sql.NullString
 	atts                                   map[uint32]bool // attachment key to downloaded
 	seen                                   bool
+	serverBound, cacheSeen                 bool
 }
 
 type rekeyKey struct{ msgID, kind string }
@@ -123,6 +127,12 @@ func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error
 
 func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error) {
 	var res MailResult
+	var aliases []workIQMailCacheAlias
+	var err error
+	b, aliases, err = prepareWorkIQCacheMail(ctx, tx, b)
+	if err != nil {
+		return res, err
+	}
 	at := b.ReadAt.UTC().Format(timeLayout)
 	if err := upsertMailFolders(ctx, tx, b); err != nil {
 		return res, err
@@ -157,10 +167,14 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 	live := 0
 	for _, k := range sortedMailKeys(byKey) {
 		ex := byKey[k]
+		if !ex.cacheSeen {
+			ex.seen = true
+			continue
+		}
 		if !ex.gone && !ex.evicted {
 			live++
 		}
-		if !inBatch[k] && ex.msgID != "" {
+		if !inBatch[k] && ex.msgID != "" && !ex.serverBound {
 			rk := rekeyKey{ex.msgID, ex.kind}
 			if b.RekeyAcrossFolders {
 				rk.kind = ""
@@ -225,13 +239,23 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 	if err != nil {
 		return res, err
 	}
+	if err := finishWorkIQCacheMailAliases(ctx, tx, b.Account, aliases); err != nil {
+		return res, err
+	}
 	if err := writeMailCoverage(ctx, tx, b, at, other); err != nil {
 		return res, err
 	}
 	if !b.Trusted {
 		return res, nil
 	}
-	return judgeMissing(ctx, tx, b, at, byKey, absent, live, other, res)
+	res, err = judgeMissing(ctx, tx, b, at, byKey, absent, live, other, res)
+	if err != nil {
+		return res, err
+	}
+	if err := retainWorkIQMailCacheMarks(ctx, tx, b.Account); err != nil {
+		return res, err
+	}
+	return res, reduceWorkIQMailMarks(ctx, tx, b.Account)
 }
 
 // mailRootChanged records the account root of this read in meta and reports whether it differs
@@ -294,13 +318,23 @@ on conflict(account, folder_key) do update set parent_key=excluded.parent_key, n
 func loadMailExisting(ctx context.Context, tx *sql.Tx, account string) (map[uint32]*mailExisting, error) {
 	byKey := map[uint32]*mailExisting{}
 	byRow := map[int64]*mailExisting{}
-	err := eachRow(ctx, tx, `select m.rowid, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.kind,'unknown'), m.to_me, m.is_read, m.read_state, m.flag, m.importance,
+	sourceColumns := "0,1"
+	have, err := workIQHasRows(ctx, tx, "mail")
+	if err != nil {
+		return nil, err
+	}
+	if have {
+		sourceColumns = `exists(select 1 from workiq_rows w where w.kind='mail' and w.account_id=m.account and w.item_rowid=m.rowid),
+coalesce((select w.cache_seen from workiq_rows w where w.kind='mail' and w.account_id=m.account and w.item_rowid=m.rowid),1)`
+	}
+	err = eachRow(ctx, tx, `select m.rowid, m.detail_key, m.internet_message_id, m.folder_key, coalesce(f.kind,'unknown'), m.to_me, m.is_read, m.read_state, m.flag, m.importance,
   m.has_attachments, m.body_state, m.gone_at is not null, m.evicted_at is not null, m.received_at,
-  exists(select 1 from mail_recipients r where r.message_rowid=m.rowid), m.conversation_id, m.ical_uid
+  exists(select 1 from mail_recipients r where r.message_rowid=m.rowid), m.conversation_id, m.ical_uid,
+  `+sourceColumns+`
 from mail_messages m left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key where m.account=? order by m.rowid`, []any{account}, func(r *sql.Rows) error {
 		ex := &mailExisting{atts: map[uint32]bool{}}
 		if err := r.Scan(&ex.rowid, &ex.detailKey, &ex.msgID, &ex.folderKey, &ex.kind, &ex.toMe, &ex.isRead, &ex.readState, &ex.flag, &ex.imp,
-			&ex.hasAtt, &ex.body, &ex.gone, &ex.evicted, &ex.received, &ex.hasRecips, &ex.conversationID, &ex.icalUID); err != nil {
+			&ex.hasAtt, &ex.body, &ex.gone, &ex.evicted, &ex.received, &ex.hasRecips, &ex.conversationID, &ex.icalUID, &ex.serverBound, &ex.cacheSeen); err != nil {
 			return err
 		}
 		byKey[ex.detailKey], byRow[ex.rowid] = ex, ex
@@ -414,6 +448,9 @@ values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	if err := insertMailChildren(ctx, tx, id, m, nil, true); err != nil {
 		return err
 	}
+	if err := maybeIndexWorkIQMail(ctx, tx, account, id, m.MessageID); err != nil {
+		return err
+	}
 	return indexMail(ctx, tx, id, m, d.text)
 }
 
@@ -434,6 +471,9 @@ func replaceMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmai
 		}
 	}
 	if err := insertMailChildren(ctx, tx, ex.rowid, m, nil, true); err != nil {
+		return err
+	}
+	if err := maybeIndexWorkIQMail(ctx, tx, m.Account, ex.rowid, m.MessageID); err != nil {
 		return err
 	}
 	return reindexMail(ctx, tx, ex.rowid, m, d.text)
@@ -554,6 +594,9 @@ func updateMail(ctx context.Context, tx *sql.Tx, ex *mailExisting, m outlookmail
 		return changed, nil
 	}
 	if _, err := tx.ExecContext(ctx, `update mail_messages set `+strings.Join(sets, ", ")+` where rowid=?`, append(args, ex.rowid)...); err != nil { //nolint:gosec // G202: sets are fixed column fragments
+		return false, err
+	}
+	if err := maybeIndexWorkIQMail(ctx, tx, m.Account, ex.rowid, m.MessageID); err != nil {
 		return false, err
 	}
 	if fill && d.gz != nil {
