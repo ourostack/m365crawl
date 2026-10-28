@@ -83,6 +83,9 @@ create table if not exists workiq_censuses(
  full_enumeration integer not null default 0,
  inventory_ready integer not null default 0, carry_complete integer not null default 0,
  carried_through integer not null default 0,
+ identity_checked_through integer not null default 0, identity_check_complete integer not null default 0,
+ confirmed_through integer not null default 0, confirmation_complete integer not null default 0,
+ enumeration_key text not null default '', source_data_at text,
  unique(attempt_id,account_id)
 );
 create table if not exists workiq_census_members(

@@ -21,8 +21,9 @@ func (s *Store) ConfirmWorkIQMailCensus(ctx context.Context, attempt int64) erro
 		var census int64
 		var complete, full bool
 		var finished sql.NullString
-		if err := tx.QueryRowContext(ctx, `select id,complete,full_enumeration,completed_at from workiq_censuses where attempt_id=? and account_id=?`,
-			attempt, binding.Fact.ID).Scan(&census, &complete, &full, &finished); err != nil {
+		var proof string
+		if err := tx.QueryRowContext(ctx, `select id,complete,full_enumeration,completed_at,enumeration_key from workiq_censuses where attempt_id=? and account_id=?`,
+			attempt, binding.Fact.ID).Scan(&census, &complete, &full, &finished, &proof); err != nil {
 			return err
 		}
 		at, err := workIQStoredTime(finished)
@@ -97,12 +98,17 @@ from workiq_rows where kind='mail' and account_id=?`, []any{binding.Fact.ID}, fu
 				return errors.New("WorkIQ census ordering is inconsistent")
 			}
 			var previous bool
+			var priorProof string
 			if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_censuses c where c.id=? and c.account_id=? and c.complete=1 and c.full_enumeration=1
-and not exists(select 1 from workiq_gaps g where g.attempt_id=c.attempt_id and g.resolved=0))`, i.first.Int64, binding.Fact.ID).Scan(&previous); err != nil {
+and not exists(select 1 from workiq_gaps g where g.attempt_id=c.attempt_id and g.resolved=0)),
+coalesce((select enumeration_key from workiq_censuses where id=?),'')`, i.first.Int64, binding.Fact.ID, i.first.Int64).Scan(&previous, &priorProof); err != nil {
 				return err
 			}
 			if !previous {
 				return errors.New("previous WorkIQ absence census is not a gap-free full enumeration")
+			}
+			if proof != "" && priorProof == proof {
+				continue
 			}
 			if _, err := tx.ExecContext(ctx, `update workiq_rows set server_gone_at=? where kind='mail' and account_id=? and item_rowid=?`,
 				workIQTimeValue(at), binding.Fact.ID, i.id); err != nil {

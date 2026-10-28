@@ -306,8 +306,13 @@ where c.attempt_id=? and cm.retained=0 and (cm.page_id is null or not exists(sel
 		} else if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `update workiq_censuses set inventory_ready=1,full_enumeration=?,carry_complete=?,complete=?,completed_at=? where id=?`,
-			b2i(full), b2i(full), b2i(full), workIQTimeValue(&at), id)
+		proof, dataAt, err := workIQMailEnumerationProof(ctx, tx, attempt, scope, len(folders))
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `update workiq_censuses set inventory_ready=1,full_enumeration=?,carry_complete=?,complete=?,completed_at=?,
+enumeration_key=?,source_data_at=? where id=?`,
+			b2i(full), b2i(full), b2i(full), workIQTimeValue(&at), proof, workIQTimeValue(dataAt), id)
 		return err
 	})
 }
