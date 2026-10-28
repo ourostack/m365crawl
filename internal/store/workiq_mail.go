@@ -199,7 +199,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 			return err
 		}
 		var previous workiq.MailMessage
-		if json.Unmarshal([]byte(oldProjection), &previous) != nil {
+		if json.Unmarshal([]byte(oldProjection), &previous) != nil || previous.ID != server.ID {
 			return errors.New("invalid retained server mail projection")
 		}
 		if server.ModifiedAt != nil && previous.ModifiedAt != nil && server.ModifiedAt.Before(*previous.ModifiedAt) {
@@ -274,7 +274,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 		cacheHasBody := cacheSeen && currentText != "" && oldWinner != "workiq_server"
 		if cacheSeen && cachedProjection.Valid {
 			var cached outlookmail.Message
-			if json.Unmarshal([]byte(cachedProjection.String), &cached) != nil {
+			if json.Unmarshal([]byte(cachedProjection.String), &cached) != nil || cached.Account != account || cached.DetailKey != canonical {
 				return errors.New("invalid retained native mail projection")
 			}
 			cacheHasBody = len(cached.Body.HTML) > 0
@@ -320,8 +320,9 @@ body_state=?,body_html_gz=?,body_text=?,body_text_version=?,state_seen_at=?,modi
 		return err
 	}
 	var liveVersion, deleteMark, deleteVersion, liveSeen sql.NullString
-	err = tx.QueryRowContext(ctx, `select server_version,server_deleted_at,server_deleted_version,server_seen_at from workiq_rows
-where kind='mail' and account_id=? and item_rowid=?`, account, rowid).Scan(&liveVersion, &deleteMark, &deleteVersion, &liveSeen)
+	var retainedRowID int64
+	err = tx.QueryRowContext(ctx, `select item_rowid,server_version,server_deleted_at,server_deleted_version,server_seen_at from workiq_rows
+where kind='mail' and account_id=? and item_rowid=?`, account, rowid).Scan(&retainedRowID, &liveVersion, &deleteMark, &deleteVersion, &liveSeen)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

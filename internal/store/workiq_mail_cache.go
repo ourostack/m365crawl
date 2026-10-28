@@ -185,10 +185,10 @@ or exists(select 1 from workiq_aliases where kind='mail' and account_id=? and na
 }
 
 func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed time.Time) (outlookmail.Message, error) {
-	var raw, originalHeader, oldWinner string
+	var raw, originalHeader, oldWinner, retainedGraphID string
 	var oldCache sql.NullString
-	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
-where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan(&raw, &originalHeader, &oldCache, &oldWinner)
+	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner,w.graph_id from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
+where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan(&raw, &originalHeader, &oldCache, &oldWinner, &retainedGraphID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, nil
 	}
@@ -196,8 +196,14 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		return m, err
 	}
 	var server workiq.MailMessage
-	if json.Unmarshal([]byte(raw), &server) != nil {
+	if json.Unmarshal([]byte(raw), &server) != nil || server.ID != retainedGraphID {
 		return m, errors.New("invalid retained server mail projection")
+	}
+	if oldCache.Valid {
+		var previous outlookmail.Message
+		if json.Unmarshal([]byte(oldCache.String), &previous) != nil || previous.Account != account || previous.DetailKey != m.DetailKey {
+			return m, errors.New("invalid retained native mail projection")
+		}
 	}
 	mapped, err := workIQMailProjection(ctx, tx, account, server)
 	if err != nil {
