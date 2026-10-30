@@ -646,7 +646,7 @@ func TestMailHelpIsTheContract(t *testing.T) {
 		t.Errorf("mail help must describe independent cached calendar support and its limits:\n%s", out)
 	}
 	_, out, _ = e.run("--format", "text", "mail", "list", "--help")
-	if flat := strings.Join(strings.Fields(out), " "); !strings.Contains(flat, "a date alone (YYYY-MM-DD) includes that whole day") {
+	if flat := strings.Join(strings.Fields(out), " "); !strings.Contains(flat, "a date alone includes that whole local day, a time is exclusive") {
 		t.Errorf("--until help:\n%s", out)
 	}
 }

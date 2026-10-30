@@ -271,7 +271,7 @@ an ordinary resident supported file; never use a weaker reader or hydrate it.
 ### content list
 
 Offline `content list [--source-id N] [--modified-since DATE] [--modified-until DATE] [--limit 50]`.
-Native date bounds exclude unknown clocks. Source ID selects a native instance;
+Native date bounds exclude unknown clocks; `--modified-until` follows [Time windows](#time-windows). Source ID selects a native instance;
 registration ID belongs only to explicit retries. No max-age capture or migration.
 
 `--fields` keys: `id`, `source_id`, `registration_id`, `capture_id`, `kind`, `title`, `text`, `text_truncated`, `descriptive_fields_truncated`, `state`, `scope`, `retained`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `modified_at`, `captured_at`, `losses`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `preview_truncated`, `full_text_sql`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `partial`, `paragraphs`, `cells`, `occurrences_total`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `references`, `references_total`, `references_truncated`, `session_id`, `qualification`, `source_account`, `ordinal`, `native_thread_id`, `native_network_id`, `native_group_id`, `native_starter_id`, `native_sender_id`, `language`, `version`, `is_deleted`, `is_draft`, `created_raw`, `updated_raw`, `starter_created_raw`, `starter_updated_raw`, `created_at`, `updated_at`, `starter_created_at`, `starter_updated_at`, `blocks`, `blocks_total`, `session_losses`, `session_scope`, `acquired_at`, `full_text_command`, `selected`.
@@ -339,6 +339,19 @@ Output is JSON when stdout is not a terminal and text on a terminal. In JSON mod
 - **Text times** of day from the archive are local time followed by the zone's name, for example `2026-10-12 09:30 PDT` or a transcript part's `10:02 PST` (a zone without an abbreviation prints its offset name, such as `+03`). Date-only values carry no zone, and `watch` prefixes its own lines with this machine's clock. JSON times are UTC, so a text day can differ from the JSON day.
 - **Log format.** `--format log` prints each result as one `label={json}` line, where the label is the command path with `_` for spaces, for example `docs_list={...}`, and the JSON is the same document `--format json` prints, compact. The global `--help` says so too. `skill` and `metadata` print their document in every format.
 - **Errors** go to stderr as `{"error": {"code", "message", "fix"}}`, and `fix` is an instruction you can follow. Exit codes: 0 success, 1 runtime failure, 2 usage, 3 environment not ready, 4 another run holds the lock. [SPEC.md](../SPEC.md) section 6 lists every error code.
+
+## Time windows
+
+Every read that takes a lower and an upper time bound reads the half-open window from the lower bound up to, but not including, the upper bound, so adjacent windows never count an item twice. This holds for `--since`/`--until` on `messages`, `search` (every source), `mail list`, `transcripts`, `notes list`/`search` and `docs list`/`search`, and for `--modified-since`/`--modified-until` on `content list`/`search`.
+
+| Bound | `YYYY-MM-DD` | RFC3339 time | Relative age (`7d`) |
+| --- | --- | --- | --- |
+| `--since` | Local midnight at the start of that day (included). | That instant (included). | That long before now (included). |
+| `--until` | Local midnight at the end of that day (excluded), so the whole day is included. | That instant (excluded). | That long before now (excluded). |
+| `calendar --from` | Local midnight at the start of that day (included). | That instant (included). | Signed offsets such as `-1d` or `+3d`. |
+| `calendar --to` | Local midnight at the start of that day (excluded), so that day is not included. | That instant (excluded). | Signed offsets such as `+3d`. |
+
+So `--since 2026-10-27 --until 2026-10-27` reads all of 27 October, the same day as `calendar --from 2026-10-27 --days 1` or `calendar --from 2026-10-27 --to 2026-10-28`. A day is local: 23 or 25 hours long when daylight saving time starts or ends. A window whose `--until` ends at or before its `--since` can match nothing: the read still succeeds, and `notices` says the window is empty. `calendar` refuses such a range instead (`--to must be after --from`).
 
 ## Overview
 
@@ -598,7 +611,7 @@ Explicit local capture and registration, independent of Teams/Outlook. Result: `
 m365crawl notes list [--source ID] [--query TEXT] [--since TIME] [--until TIME] [--limit N]
 ```
 
-Newest native modified time first, undated notes last, stable archive rowid for ties. Default limit 50. Date windows exclude unknown native times; `--until` is exclusive. Items expose stable `note:ID`, source/capture IDs, native GOID/GUID/GOSID and parents, title/text, nullable modified/captured/source-observed times. Text joins indexed rich text and OCR in native index-row order, not original page layout.
+Newest native modified time first, undated notes last, stable archive rowid for ties. Default limit 50. Date windows exclude unknown native times; `--until` is exclusive, and a date alone as `--until` includes that whole local day. Items expose stable `note:ID`, source/capture IDs, native GOID/GUID/GOSID and parents, title/text, nullable modified/captured/source-observed times. Text joins indexed rich text and OCR in native index-row order, not original page layout.
 
 `--fields` keys: `id`, `source_id`, `capture_id`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `title`, `text`, `modified_at`, `captured_at`, `source_observed_at`, `text_truncated`.
 
@@ -765,7 +778,7 @@ m365crawl search [<query>] [flags]
 | `--source=chats\|mail\|transcripts\|notes\|documents\|loop\|all` | every source | Choose messages, fetched transcripts, indexed notes, document metadata, cached Loop channels or all participating sources (default). |
 | `--from=STRING` | chats, mail, transcripts | Sender or transcript speaker; unresolved notes/documents are excluded from `all` and reject this filter when explicitly selected. |
 | `--since=STRING` | every source | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). For transcripts, the time of each entry. |
-| `--until=STRING` | every source | Bound source-native time (same formats as `--since`). Document modification timestamps are exclusive upper bounds; a date-only document bound includes its whole local day. Unknown knowledge times do not match bounded windows. |
+| `--until=STRING` | every source | Bound source-native time (same formats as `--since`); a date alone includes that whole local day, a time is exclusive, for every source alike (see [Time windows](#time-windows)). Unknown knowledge times do not match bounded windows. |
 | `--limit=50` | every source | Maximum items in the merged list; `truncated` says whether any source had more. |
 | `--folder=NAME\|KIND` | mail | Only mail in this folder, by name or kind (`inbox`, `sent`, …). |
 | `-c, --conversation=STRING` | chats | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
@@ -892,7 +905,7 @@ m365crawl messages [flags]
 | `-c, --conversation=STRING` | Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link). |
 | `--from=STRING` | Sender: a person id, or a case-insensitive part of the name. |
 | `--since=STRING` | Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). |
-| `--until=STRING` | Only messages at or before this time (same formats as `--since`). |
+| `--until=STRING` | Only messages before this time (same formats as `--since`); a date alone includes that whole local day, a time is exclusive. |
 | `--team=STRING` | Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error. |
 | `--limit=50` | Maximum items to return; `truncated` says whether more exist. |
 | `--include-system` | Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default. |
@@ -1106,7 +1119,7 @@ m365crawl mail list [flags]
 | `--folder=NAME\|KIND` | Only this folder, by name (checked first, ignoring case) or kind: `inbox`, `sent`, `drafts`, `archive`, `deleted`, `to_me`, `other`. An unknown folder is the `unknown_folder` error, which lists the folders; for `junk` it says junk folders are not detected by kind and to pass the junk folder's name instead. |
 | `--from=TEXT` | Only messages whose sender name or address contains this text, ignoring case. |
 | `--since=DATE` | Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as `7d`). |
-| `--until=DATE` | Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive. |
+| `--until=DATE` | Only messages received before this time; a date alone includes that whole local day, a time is exclusive. |
 | `--unread` | Only unread messages. |
 | `--flagged` | Only flagged messages. |
 | `--has-attachments` | Only messages with attachments. |
@@ -1192,7 +1205,7 @@ Flags of the agenda:
 | Flag | Meaning |
 | --- | --- |
 | `--from=WHEN` | Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today. An unsigned duration such as 7d is a usage error. Write a negative offset with an equals sign, `--from=-7d`: `--from -7d` is a usage error. |
-| `--to=WHEN` | End of the range, exclusive; same forms as `--from`. Default: the start of the next day. Not with `--days`. |
+| `--to=WHEN` | End of the range, exclusive; same forms as `--from`. A date alone is the start of that day, so `--to D` leaves day D out (unlike `--until D` elsewhere; see [Time windows](#time-windows)). Default: the start of the next day. Not with `--days`. |
 | `--days=INT` | Range length in days from `--from` (instead of `--to`). |
 | `--query=STRING` | Only events whose subject, organizer or location contains this text, ignoring case. |
 | `--include-cancelled` | Also list cancelled events. |
@@ -1444,7 +1457,7 @@ Without `<meeting>` every recorded meeting is listed, newest first, with its par
 | Flag | Meaning |
 | --- | --- |
 | `--since=DATE` | Only meetings that started at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d). |
-| `--until=DATE` | Only meetings that started before this time; a date alone (YYYY-MM-DD) includes that whole day. |
+| `--until=DATE` | Only meetings that started before this time; a date alone includes that whole local day, a time is exclusive. |
 | `--state=STATE` | Only meetings in this state: fetched, partial, not_fetched or unfetchable. |
 | `--limit=N` | Maximum meetings to return (at most 1000); `truncated` says whether more exist. |
 

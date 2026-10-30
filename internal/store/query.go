@@ -314,7 +314,7 @@ func (s *Store) messageWhere(ctx context.Context, w *where, f Filter) error {
 		w.add(`m.sent_at>=?`, fmtTime(f.Since))
 	}
 	if !f.Until.IsZero() {
-		w.add(`m.sent_at<=?`, fmtTime(f.Until))
+		w.add(`m.sent_at<?`, fmtTime(f.Until))
 	}
 	if f.MentionsMe {
 		w.add(mentionsMeExpr)

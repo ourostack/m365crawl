@@ -74,7 +74,7 @@ func (rt *runtime) contentError(err error) error {
 type contentListCmd struct {
 	SourceID      int64  `help:"Only this admitted native instance ID (not registration retry ID)."`
 	ModifiedSince string `help:"Native file-modified (Engage starter-updated) lower bound; unknown clocks excluded, explicit year-one is present."`
-	ModifiedUntil string `help:"Native file-modified (Engage starter-updated) upper bound; unknown clocks excluded."`
+	ModifiedUntil string `help:"Native file-modified (Engage starter-updated) upper bound; a date alone includes that whole local day, a time is exclusive; unknown clocks excluded."`
 	Limit         int    `default:"50" help:"Maximum returned observations; inspect truncated."`
 }
 type contentSearchCmd struct {
@@ -115,11 +115,7 @@ func (c *contentListCmd) run(rt *runtime, label, query string) error {
 	if c.SourceID < 0 {
 		return errs.Usage("--source-id must be positive")
 	}
-	since, err := rt.when("--modified-since", c.ModifiedSince)
-	if err != nil {
-		return err
-	}
-	until, err := rt.when("--modified-until", c.ModifiedUntil)
+	since, until, err := rt.window("--modified-since", c.ModifiedSince, "--modified-until", c.ModifiedUntil)
 	if err != nil {
 		return err
 	}

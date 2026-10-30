@@ -464,7 +464,7 @@ func (s *Store) LocalTextSnapshot(ctx context.Context, f LocalTextFilter) (Local
 		at := row.Snapshot.Evidence.ModifiedAt
 		return (f.SourceID > 0 && row.SourceID != f.SourceID) || (f.Query != "" && !matches[row.ID]) ||
 			(!f.ModifiedSince.IsZero() && (at == nil || at.Before(f.ModifiedSince))) ||
-			(!f.ModifiedUntil.IsZero() && (at == nil || at.After(f.ModifiedUntil)))
+			(!f.ModifiedUntil.IsZero() && (at == nil || !at.Before(f.ModifiedUntil)))
 	})
 	labels := map[int64]string{}
 	for _, src := range out.Sources {

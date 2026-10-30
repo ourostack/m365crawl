@@ -266,7 +266,7 @@ type calendarGroup struct {
 
 type calendarCmd struct {
 	From             string `help:"Start of the range: today, yesterday, tomorrow, YYYY-MM-DD (midnight in this machine's zone), RFC3339, or a signed offset from now (+3d, -1d, +2w, +90m). Default: today." placeholder:"WHEN"`
-	To               string `help:"End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days." placeholder:"WHEN"`
+	To               string `help:"End of the range, exclusive; same forms as --from. A date alone is the start of that day, so --to D leaves day D out (unlike --until D elsewhere). Default: the start of the next day. Not with --days." placeholder:"WHEN"`
 	Days             int    `help:"Range length in days from --from (instead of --to)."`
 	Query            string `help:"Only events whose subject, organizer or location contains this text, ignoring case."`
 	IncludeCancelled bool   `name:"include-cancelled" help:"Also list cancelled events."`
@@ -1130,7 +1130,7 @@ type actionItem struct {
 
 type calendarActionsCmd struct {
 	From  string `help:"Start of the range, applied to the event's start: today, yesterday, tomorrow, YYYY-MM-DD, RFC3339, or a signed offset (+3d, -1d). Default: today." placeholder:"WHEN"`
-	To    string `help:"End of the range, exclusive; same forms as --from. Default: the start of the next day. Not with --days." placeholder:"WHEN"`
+	To    string `help:"End of the range, exclusive; same forms as --from. A date alone is the start of that day, so --to D leaves day D out (unlike --until D elsewhere). Default: the start of the next day. Not with --days." placeholder:"WHEN"`
 	Days  int    `help:"Range length in days from --from (instead of --to)."`
 	Owner string `help:"Only items whose owner's name contains this text, ignoring case."`
 	Mine  bool   `help:"Only items owned by you: the owner equals your own display name (as whoami shows), ignoring case, or is your first name alone when nobody else in the meeting has it. Items whose first name another person shares are left out and counted in mine_ambiguous_omitted."`

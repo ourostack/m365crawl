@@ -204,7 +204,7 @@ type msgFlags struct {
 	Conversation  string `short:"c" help:"Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link)."`
 	From          string `help:"Sender: a person id, or a case-insensitive part of the name."`
 	Since         string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
-	Until         string `help:"Only messages at or before this time (same formats as --since)."`
+	Until         string `help:"Only messages before this time (same formats as --since); a date alone includes that whole local day, a time is exclusive."`
 	Team          string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
@@ -220,11 +220,7 @@ func (rt *runtime) filter(f msgFlags) (store.Filter, error) {
 		return store.Filter{}, err
 	}
 	rt.team = f.Team
-	since, err := rt.when("--since", f.Since)
-	if err != nil {
-		return store.Filter{}, err
-	}
-	until, err := rt.when("--until", f.Until)
+	since, until, err := rt.window("--since", f.Since, "--until", f.Until)
 	if err != nil {
 		return store.Filter{}, err
 	}

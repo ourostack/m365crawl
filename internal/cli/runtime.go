@@ -49,6 +49,7 @@ type runtime struct {
 	synced           *syncedInfo // the implicit sync this read ran, if any
 	query            listQuery   // what the running list command asked for, to explain an empty result
 	link             *convLink   // the Teams link the running read's conversation came from, if any
+	windowNotice     string      // set by window when the running read's time window is empty
 	noteCoverage     *noteCoverage
 	documentCoverage *noteCoverage
 	loopCoverage     *loopCoverage
