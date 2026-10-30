@@ -81,6 +81,13 @@ func TestStaleOutlookCacheShowsOnMailReadsPastIt(t *testing.T) {
 	if len(health) != 1 || health[0].(map[string]any)["state"] != "failing" {
 		t.Fatalf("failing and stale = %v", health)
 	}
+	// An unchanged check of a copy no successful read qualified does not clear the failure, and
+	// the failing source is not also reported stale.
+	e.exec(`insert into sync_runs(started_at, finished_at, source, status, error_code, fingerprint) values('2026-09-10T11:10:00.000Z','2026-09-10T11:10:00.000Z','outlook|Main|mail','unchanged','','unqualified')`)
+	health, _ = mailJSON(t, e, "mail", "list")["source_health"].([]any)
+	if len(health) != 1 || health[0].(map[string]any)["state"] != "failing" {
+		t.Fatalf("unqualified unchanged = %v", health)
+	}
 }
 
 func TestStaleOutlookCacheReadErrorStopsTheRead(t *testing.T) {
