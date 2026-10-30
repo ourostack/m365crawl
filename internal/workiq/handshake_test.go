@@ -52,7 +52,11 @@ func TestWorkIQSilentHandshakeIsASignInRequirement(t *testing.T) {
 }
 
 func TestWorkIQLogsOnStdoutAreAClearProtocolError(t *testing.T) {
-	shortHandshake(t)
+	// The log line arrives at once and ends the handshake, so the deadline only needs to outlast a
+	// slow start of the stub child (race builds under load), never the stub's minute-long sleep.
+	old := handshakeTimeout
+	handshakeTimeout = 10 * time.Second
+	t.Cleanup(func() { handshakeTimeout = old })
 	useStub(t, "log-noise")
 	_, err := Open(context.Background(), Invocation{}, "")
 	requireCode(t, err, "workiq_protocol")
