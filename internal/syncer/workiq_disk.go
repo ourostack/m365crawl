@@ -120,7 +120,7 @@ func workIQDiskFailure(d store.WorkIQMailDisk, need, free int64) error {
 // WorkIQMailDiskCost says what the rest of an account's whole-account mail sync needs.
 func WorkIQMailDiskCost(d store.WorkIQMailDisk, need, free int64) string {
 	return fmt.Sprintf("about %d more items in about %d pages (roughly %s at about %d pages a minute) need about %s free on the archive's disk, including admitting every fetched item, and %s is free.",
-		d.Remaining(), d.Pages(), workIQDuration(d.Minutes()), store.WorkIQMailPagesPerMinute, workIQSize(need), workIQSize(free))
+		d.Remaining(), d.Pages(), workIQDuration(d.Minutes()), store.WorkIQMailPagesPerMinute, WorkIQSize(need), WorkIQSize(free))
 }
 
 // WorkIQMailDiskPerItem is the free space whole-account mail sync needs per mailbox item before any
@@ -129,7 +129,8 @@ func WorkIQMailDiskPerItem() string {
 	return fmt.Sprintf("%d KB", ((store.WorkIQAcquireBytesPerItem+store.WorkIQAdmitBytesPerItem)*5/4/1024+9)/10*10)
 }
 
-func workIQSize(n int64) string {
+// WorkIQSize is a byte count in decimal gigabytes, as the disk estimate states it.
+func WorkIQSize(n int64) string {
 	return fmt.Sprintf("%.1f GB", float64(n)/1e9)
 }
 
@@ -138,4 +139,12 @@ func workIQDuration(minutes int64) string {
 		return fmt.Sprintf("%d minutes", minutes)
 	}
 	return fmt.Sprintf("%d hours", (minutes+59)/60)
+}
+
+// workIQDiagnostic is the redacted WorkIQ child diagnostic a run's error carries, if any.
+func workIQDiagnostic(err error) *workiq.Diagnostic {
+	if d, ok := workiq.DiagnosticOf(err); ok {
+		return &d
+	}
+	return nil
 }

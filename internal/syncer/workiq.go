@@ -30,6 +30,8 @@ type WorkIQAccountReport struct {
 	Status  string         `json:"status"`
 	Counts  map[string]int `json:"counts"`
 	Gaps    map[string]int `json:"gaps"`
+	// Diagnostic is the redacted trace a failed WorkIQ child left: exit status and output tails.
+	Diagnostic *workiq.Diagnostic `json:"diagnostic,omitempty"`
 }
 
 type WorkIQReport struct {
@@ -273,6 +275,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	}
 	account.Status = "ok"
 	code := ""
+	account.Diagnostic = workIQDiagnostic(err)
 	if err != nil {
 		account.Status, code = "failed", workIQOutcomeCode(err)
 		var expired *workIQExpired
@@ -294,7 +297,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0 && !pending,
 				Folders: account.Counts["folders"], Counts: account.Counts, Gaps: account.Gaps,
-				MailProof: mailProof,
+				MailProof: mailProof, Diagnostic: account.Diagnostic,
 			})
 		})
 		cancel()

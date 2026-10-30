@@ -37,6 +37,8 @@ type Client struct {
 	frames  chan frame
 	drained chan struct{}
 	heard   atomic.Bool // the child wrote at least one byte to stdout
+	ready   atomic.Bool // the handshake finished: a later child exit is a lost session
+	junk    []byte      // the first non-JSON stdout line, for the diagnostic; set before its frame
 }
 
 // listener records that stdout produced any byte, even an incomplete line.
@@ -110,6 +112,7 @@ func Open(ctx context.Context, inv Invocation, account string) (*Client, error) 
 		_ = c.Close()
 		return nil, err
 	}
+	c.ready.Store(true)
 	return c, nil
 }
 
@@ -124,6 +127,7 @@ func (c *Client) read(ctx context.Context) {
 		var msg wireMessage
 		_, parseErr := budget.Parse(raw)
 		if parseErr != nil || json.Unmarshal(raw, &msg) != nil || msg.RPC != "2.0" {
+			c.junk = append([]byte(nil), raw[:min(len(raw), 4*diagnosticStdout)]...)
 			c.deliver(frame{err: failure("workiq_protocol")})
 			return
 		}
@@ -180,6 +184,11 @@ func (c *Client) write(ctx context.Context, v any) error {
 	go func() { done <- json.NewEncoder(c.p.input).Encode(v) }()
 	select {
 	case err := <-done:
+		if err != nil && c.ready.Load() {
+			// The child stopped reading: reap it, then report what it left behind.
+			_ = c.p.close()
+			return c.diagnose(c.lost(c.p.errors.diagnostic()))
+		}
 		if err != nil {
 			return failure("workiq_failed")
 		}
@@ -211,10 +220,10 @@ func (c *Client) call(ctx context.Context, limit time.Duration, method string, p
 		if f.err != nil {
 			var coded *errs.Coded
 			if errors.As(f.err, &coded) {
-				return nil, coded
+				return nil, c.diagnose(coded)
 			}
 			_ = c.p.close() // wait for stderr draining before classifying a child that exited
-			return nil, c.p.errors.diagnostic()
+			return nil, c.diagnose(c.lost(c.p.errors.diagnostic()))
 		}
 		msg := f.msg
 		if string(msg.ID) != strconv.FormatUint(id, 10) {

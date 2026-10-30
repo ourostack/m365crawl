@@ -188,6 +188,8 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 	for _, folder := range queue {
 		seen[folder.ID] = true
 	}
+	// List the whole tree, hidden and child folders included, before any message page, so the
+	// first disk check sees every folder's items.
 	for i := 0; i < len(queue); i++ {
 		folder := queue[i]
 		if folder.ChildCount == nil || *folder.ChildCount > 0 {
@@ -203,9 +205,10 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 				return err
 			}
 		}
-		resource := "/me/mailFolders/" + url.PathEscape(folder.ID) + "/messages/delta"
-		r.queue = queue
-		if err := r.fetchResource(ctx, resource); err != nil {
+	}
+	r.queue = queue
+	for _, folder := range queue {
+		if err := r.fetchResource(ctx, store.WorkIQMailMessagesResource(folder.ID)); err != nil {
 			return err
 		}
 	}

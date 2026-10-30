@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
 // SourceHealth discloses a failed source without claiming that the archive is current.
@@ -25,6 +27,8 @@ type SourceHealth struct {
 	WorkIQFamily   string     `json:"-"`
 	WorkIQEnabled  bool       `json:"-"`
 	CoveredThrough *time.Time `json:"covered_through,omitempty"`
+	// LastDiagnostic is the redacted trace the WorkIQ child left on the failure it reports.
+	LastDiagnostic *workiq.Diagnostic `json:"last_diagnostic,omitempty"`
 	attemptedAt    time.Time
 }
 

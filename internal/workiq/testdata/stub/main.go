@@ -44,6 +44,16 @@ func folder(kind string) map[string]any {
 	return out
 }
 
+// createOnce creates name and says whether this call created it.
+func createOnce(name string) bool {
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // G304: test-chosen marker path.
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
 func fetch(path string) (any, int) {
 	if os.Getenv("WORKIQ_PROBE_CASE") == "folder-limit" && strings.HasPrefix(path, "/me/mailFolders?") {
 		u, _ := url.ParseRequestURI(path)
@@ -195,7 +205,9 @@ func fetch(path string) (any, int) {
 		if os.Getenv("WORKIQ_PROBE_CASE") == "wrong-child-parent" {
 			return map[string]any{"value": []any{map[string]any{"id": id, "parentFolderId": "foreign", "childFolderCount": 0}}}, 200
 		}
-		return map[string]any{"value": []any{map[string]any{"id": id, "parentFolderId": "folder-inbox", "childFolderCount": 0, "totalItemCount": 0}}}, 200
+		// Live: the Inbox's child folders held most of a large mailbox's items.
+		total, _ := strconv.Atoi(os.Getenv("WORKIQ_ACQUISITION_CHILD_TOTAL"))
+		return map[string]any{"value": []any{map[string]any{"id": id, "parentFolderId": "folder-inbox", "childFolderCount": 0, "totalItemCount": total}}}, 200
 	}
 	if path == "/me/mailFolders/a-child/messages/delta" || path == "/me/mailFolders/a-child/messages/delta?$deltatoken=end" {
 		return map[string]any{"value": []any{}, "@odata.deltaLink": "/me/mailFolders('a-child')/messages/delta?$deltatoken=end"}, 200
@@ -274,6 +286,13 @@ func fetch(path string) (any, int) {
 						if !os.IsExist(err) {
 							os.Exit(87)
 						}
+					}
+				}
+				// Live: WorkIQ ended mid-run once, after 840 pages, with nothing m365crawl kept.
+				if die := os.Getenv("WORKIQ_ACQUISITION_DIE_ONCE"); die != "" || os.Getenv("WORKIQ_ACQUISITION_DIE_ALWAYS") != "" {
+					if die == "" || createOnce(die) {
+						_, _ = fmt.Fprintln(os.Stderr, "fatal: synthetic transport loss for user@example.invalid")
+						os.Exit(3)
 					}
 				}
 				switch os.Getenv("WORKIQ_ACQUISITION_MODE") {

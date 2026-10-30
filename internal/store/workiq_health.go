@@ -3,9 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
 var workIQHealthNow = time.Now
@@ -128,9 +132,13 @@ func (s *Store) withWorkIQHealth(ctx context.Context, native []SourceHealth, out
 			continue
 		}
 		account, doctor := outcome.account, "workiq"
+		diagnostic, err := s.workIQAttemptDiagnostic(ctx, outcome.id)
+		if err != nil {
+			return nil, err
+		}
 		native = append(native, SourceHealth{SourceKey: outcome.key, Source: "workiq", WorkIQFamily: outcome.family,
 			AccountID: &account, DoctorCheck: &doctor, State: state, LastErrorCode: outcome.code,
-			LastOKAt: healthTime(selected.lastOK)})
+			LastOKAt: healthTime(selected.lastOK), LastDiagnostic: diagnostic})
 	}
 	return native, nil
 }
@@ -165,4 +173,25 @@ and a.gap_count=0 and r.enumeration_key<>''`, outcome.id, outcome.account).Scan(
 		return nil, nil
 	}
 	return done, nil
+}
+
+func workIQDiagnosticKey(attempt int64) string {
+	return "workiq_diagnostic:" + strconv.FormatInt(attempt, 10)
+}
+
+// workIQAttemptDiagnostic is the redacted WorkIQ child diagnostic an attempt kept, if any.
+func (s *Store) workIQAttemptDiagnostic(ctx context.Context, attempt int64) (*workiq.Diagnostic, error) {
+	var raw string
+	var d workiq.Diagnostic
+	err := s.db.QueryRowContext(ctx, `select value from meta where key=?`, workIQDiagnosticKey(attempt)).Scan(&raw)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err == nil:
+		err = json.Unmarshal([]byte(raw), &d)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
 }

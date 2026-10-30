@@ -56,7 +56,7 @@ func TestWorkIQTransportFailureBranches(t *testing.T) {
 	requireCode(t, err, "workiq_cursor_invalid")
 	_ = client.p.input.Close()
 	_, err = client.Fetch(context.Background(), "/me")
-	requireCode(t, err, "workiq_failed")
+	requireCode(t, err, "workiq_session_lost")
 }
 
 func TestWorkIQMalformedFramesAndReplyIOFailure(t *testing.T) {

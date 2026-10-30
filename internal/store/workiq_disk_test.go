@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,9 +58,10 @@ func TestWorkIQMailDiskFactsCountKnownInventoryAndUnadmittedPages(t *testing.T) 
 		`insert into workiq_frontiers(id,family,account_id,resource,qualification,retired,generation) values(5,'mail','` + mailAcct + `','/me/mailFolders/a/messages/delta','q',1,1)`,
 		// Folder "e e" was fetched and admitted: its next pages carry only changes.
 		`insert into workiq_frontiers(id,family,account_id,resource,qualification,baseline) values(6,'mail','` + mailAcct + `','/me/mailFolders/e%20e/messages/delta','q',0)`,
+		// Staged pages keep WorkIQ's whole tool result; the Graph page is its one result's data.
 		`insert into workiq_pages(attempt_id,frontier_id,expected_revision,data_json,observed_at,state) values
-(?,1,0,'{"value":[1,2,3]}','',	'staged'),(?,1,1,'{"value":[1,2,3,4,5,6,7,8,9,10]}','','staged'),(?,2,0,'{"value":[1]}','','admitted'),
-(?,3,0,'{"value":[1,2]}','','staged'),(?,4,0,'{"value":[1,2]}','','staged'),(?,5,0,'{"value":[1,2]}','','staged'),(?,6,0,'{"value":[1,2]}','','staged')`,
+(?,1,0,'` + workIQEnvelope(3) + `','','staged'),(?,1,1,'` + workIQEnvelope(10) + `','','staged'),(?,2,0,'` + workIQEnvelope(1) + `','','admitted'),
+(?,3,0,'` + workIQEnvelope(2) + `','','staged'),(?,4,0,'` + workIQEnvelope(2) + `','','staged'),(?,5,0,'` + workIQEnvelope(2) + `','','staged'),(?,6,0,'` + workIQEnvelope(2) + `','','staged')`,
 	} {
 		args := []any{}
 		for range strings.Count(statement, "?") {
@@ -68,15 +70,24 @@ func TestWorkIQMailDiskFactsCountKnownInventoryAndUnadmittedPages(t *testing.T) 
 		must(s.db.ExecContext(ctx, statement, args...))
 	}
 	d, settled := must2Disk(s.WorkIQMailDiskFacts(ctx, mailAcct))
-	pages := int64(len(`{"value":[1,2,3]}`) + len(`{"value":[1,2,3,4,5,6,7,8,9,10]}`) + len(`{"value":[1,2]}`))
+	pages := int64(len(workIQEnvelope(3)) + len(workIQEnvelope(10)) + len(workIQEnvelope(2)))
 	if d.InventoryItems != 1000 || d.FetchedItems != 13 || d.StagedItems != 15 || d.StagedBytes != pages ||
-		d.LargestPage != int64(len(`{"value":[1,2,3,4,5,6,7,8,9,10]}`)) || len(settled) != 1 || !settled["/me/mailFolders/e%20e/messages/delta"] {
+		d.LargestPage != int64(len(workIQEnvelope(10))) || len(settled) != 1 || !settled["/me/mailFolders/e%20e/messages/delta"] {
 		t.Fatalf("disk facts counted the wrong inventory or pages: %+v %v", d, settled)
 	}
 	must0(s.Close())
 	if _, _, err := s.WorkIQMailDiskFacts(ctx, mailAcct); err == nil {
 		t.Fatal("a closed archive answered")
 	}
+}
+
+// workIQEnvelope is a staged WorkIQ fetch result holding a Graph page of n items.
+func workIQEnvelope(n int) string {
+	values := make([]string, n)
+	for i := range values {
+		values[i] = fmt.Sprint(i)
+	}
+	return `{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[` + strings.Join(values, ",") + `]}}]}}`
 }
 
 func must2Disk(d WorkIQMailDisk, settled map[string]bool, err error) (WorkIQMailDisk, map[string]bool) {

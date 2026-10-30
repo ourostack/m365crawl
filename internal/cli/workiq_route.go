@@ -87,8 +87,9 @@ func (rt *runtime) repeatStep() startStep {
 }
 
 // mailRoute routes one Outlook account to a WorkIQ mail sync and then the same read, unless a
-// complete WorkIQ mail sync already retains the account's server mail (ok is false then).
-func (rt *runtime) mailRoute(st *store.Store, account, reason, why string) (r workIQRoute, ok bool, err error) {
+// complete WorkIQ mail sync already retains the account's server mail (ok is false then). situation
+// says why the read needs server mail; the route adds what to do about it.
+func (rt *runtime) mailRoute(st *store.Store, account, reason, situation string) (r workIQRoute, ok bool, err error) {
 	done, err := workIQMailComplete(st, rt.ctx, account)
 	if err != nil || done {
 		return r, false, err
@@ -101,7 +102,6 @@ func (rt *runtime) mailRoute(st *store.Store, account, reason, why string) (r wo
 	if err != nil {
 		return r, false, err
 	}
-	r = rt.newWorkIQRoute(setup, "mail", account, reason, why, time.Time{})
 	// The cost comes from the last run's saved estimate and the free space now; the read never
 	// lists folders itself. Without both, the sync's own disk check decides.
 	cost := "its size is unknown until WorkIQ lists the folders, and it stops before fetching messages the archive's disk cannot hold (it needs about " +
@@ -110,11 +110,17 @@ func (rt *runtime) mailRoute(st *store.Store, account, reason, why string) (r wo
 		need := disk.Need()
 		cost = syncer.WorkIQMailDiskCost(disk, need, free)
 		if free < need {
-			r.Fix += " Whole-account WorkIQ mail sync is refused on this archive: " + cost +
-				" Free space or move the archive to run it. Fetching only a date range is tracked in ourostack/m365crawl#262."
+			steps := "check WorkIQ"
+			if !setup.enabled {
+				steps += " and turn it on"
+			}
+			r = rt.newWorkIQRoute(setup, "mail", account, reason, situation+" Whole-account WorkIQ mail sync, which would fetch it, is refused on this archive: "+
+				cost+" Free at least "+syncer.WorkIQSize(need-free)+" on the archive's disk or move the archive, and this read's route will offer the sync step again. "+
+				"Fetching only a date range is tracked in ourostack/m365crawl#262. Until then the steps below only "+steps+".", time.Time{})
 			return r, true, nil
 		}
 	}
+	r = rt.newWorkIQRoute(setup, "mail", account, reason, situation+" WorkIQ can fetch the account's server mail into this archive: run these steps, then repeat the read.", time.Time{})
 	r.Next = append(r.Next, startStep{Command: rt.recoveryCommand(false, account, "workiq", "sync", "--source", "mail"),
 		Does: "fetch every mail folder of this account from the server into the archive: " + cost +
 			" Run it again only while its result says resumable: true, otherwise follow the error's fix"}, rt.repeatStep())
@@ -147,7 +153,7 @@ func (rt *runtime) sinceRoutes(st *store.Store, coverage []store.CoverageRow, si
 			starts = append(starts, f.Folder+" from "+f.CacheCoversSince.In(displayZone).Format("2006-01-02"))
 		}
 		r, ok, err := rt.mailRoute(st, account, routeRangeBeforeCache, "This read starts before the cached mail of "+account+" in "+
-			strings.Join(starts, ", ")+". WorkIQ can fetch the older mail from the server into this archive: run these steps, then repeat the read.")
+			strings.Join(starts, ", ")+".")
 		if err != nil {
 			return nil, err
 		}

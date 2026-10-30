@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/errs"
 )
 
 const (
@@ -36,9 +38,13 @@ const (
 	versionOnly
 )
 
+// diagnosticBuffer keeps the head of stderr for classification, its tail for diagnostics, and
+// the child's exit status once it was reaped.
 type diagnosticBuffer struct {
-	mu sync.Mutex
-	b  []byte
+	mu   sync.Mutex
+	b    []byte
+	tail []byte
+	exit string
 }
 
 func (b *diagnosticBuffer) Write(p []byte) (int, error) {
@@ -47,7 +53,29 @@ func (b *diagnosticBuffer) Write(p []byte) (int, error) {
 	if left := maxStderr - len(b.b); left > 0 {
 		b.b = append(b.b, p[:min(left, len(p))]...)
 	}
+	b.tail = append(b.tail, p[max(0, len(p)-2*diagnosticStderr):]...)
+	b.tail = b.tail[max(0, len(b.tail)-2*diagnosticStderr):]
 	return len(p), nil
+}
+
+func (b *diagnosticBuffer) tailBytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.tail...)
+}
+
+func (b *diagnosticBuffer) setExit(state *os.ProcessState) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if state != nil {
+		b.exit = state.String()
+	}
+}
+
+func (b *diagnosticBuffer) exitStatus() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.exit
 }
 
 // empty says the child wrote nothing to stderr.
@@ -57,7 +85,7 @@ func (b *diagnosticBuffer) empty() bool {
 	return len(b.b) == 0
 }
 
-func (b *diagnosticBuffer) diagnostic() error {
+func (b *diagnosticBuffer) diagnostic() *errs.Coded {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return classify(b.b)
@@ -185,6 +213,7 @@ func (p *process) close() error {
 		defer timer.Stop()
 		select {
 		case err := <-exited:
+			p.errors.setExit(p.cmd.ProcessState)
 			if err != nil {
 				p.err = p.errors.diagnostic()
 			}
@@ -192,7 +221,9 @@ func (p *process) close() error {
 			if p.group != nil {
 				p.err = p.group.end()
 			}
-			if err := <-exited; err != nil && p.err == nil {
+			err := <-exited
+			p.errors.setExit(p.cmd.ProcessState)
+			if err != nil && p.err == nil {
 				p.err = p.errors.diagnostic()
 			}
 		}

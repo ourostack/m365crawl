@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -143,5 +144,54 @@ func TestWorkIQMailIncrementalSyncAfterACompleteSyncIsNotRefused(t *testing.T) {
 	report, err := RunWorkIQ(context.Background(), options)
 	if err != nil || report.Counts["disk_inventory_items"] != 0 || report.Counts["disk_needed_bytes"] > int(free) {
 		t.Fatal("a catch-up after a complete sync was charged for the whole mailbox", err, report.Counts)
+	}
+}
+
+// A run that continues an earlier one counts the items that run already fetched, so it neither
+// overstates the remaining fetch nor forgets their admission.
+func TestWorkIQMailResumedRunCountsItemsFetchedEarlier(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	t.Setenv("WORKIQ_ACQUISITION_MAIL_PAGES", "many")
+	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
+	old := workIQMailPageLimit
+	t.Cleanup(func() { workIQMailPageLimit = old })
+	workIQMailPageLimit = 15
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(context.Background(), options); !workIQPageLimitCode(err) {
+		t.Fatal("the first run did not stop at its page budget", err)
+	}
+	fetched := count(t, db, `select count(*) from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id
+where f.resource='/me/mailFolders/folder-inbox/messages/delta'`)
+	if fetched == 0 || fetched >= 6 {
+		t.Fatal("fixture did not stop inside the Inbox", fetched)
+	}
+	setWorkIQFreeBytes(t, func(string) (int64, error) { return 0, nil })
+	report, err := RunWorkIQ(context.Background(), options)
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != "workiq_disk_space" || report.Counts["disk_fetched_items"] != fetched ||
+		report.Counts["disk_staged_items"] != fetched || !strings.Contains(coded.Fix, fmt.Sprintf("about %d more items", 6-fetched)) {
+		t.Fatalf("the resumed run miscounted earlier pages: %v %+v", err, report.Counts)
+	}
+}
+
+// The whole folder tree, child folders included, is listed before any message page, so the first
+// check sees the full inventory. Live, the Inbox's child folders raised it from 28,570 items to
+// 366,180 only after 843 pages.
+func TestWorkIQMailSyncListsEveryFolderBeforeTheFirstMessagePage(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
+	t.Setenv("WORKIQ_ACQUISITION_CHILD_TOTAL", "5000")
+	free := store.WorkIQMailDisk{InventoryItems: 6}.Need() + 10<<20
+	if free >= (store.WorkIQMailDisk{InventoryItems: 5006}).Need() {
+		t.Fatal("fixture does not separate the top-level folders from the whole tree")
+	}
+	setWorkIQFreeBytes(t, func(string) (int64, error) { return free, nil })
+	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "mail", Account: account})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != "workiq_disk_space" || report.Counts["disk_inventory_items"] != 5006 ||
+		stagedWorkIQMessagePages(t, db) != 0 {
+		t.Fatalf("message pages were fetched before the child folders were counted: %v %d %+v", err, stagedWorkIQMessagePages(t, db), report.Counts)
 	}
 }

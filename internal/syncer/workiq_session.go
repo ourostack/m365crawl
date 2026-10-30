@@ -301,11 +301,22 @@ func (s *workIQSession) fetch(ctx context.Context, path string) (workiq.Page, er
 		if err == nil {
 			return page, nil
 		}
-		if closeErr := s.close(); closeErr != nil {
+		// A child that ended after the session began is reopened and the same page retried like a
+		// server error; its exit was already reported, so only a cleanup failure stops the run.
+		var coded *errs.Coded
+		lost := errors.As(err, &coded) && coded.Code == "workiq_session_lost"
+		if closeErr := s.close(); closeErr != nil && (!lost || errors.As(closeErr, &coded) && coded.Code == "workiq_cleanup_failed") {
 			return workiq.Page{}, errors.Join(err, closeErr)
 		}
+		status := page.StatusCode
+		if lost {
+			status = 503
+		}
 		now := workIQNow()
-		wait, retryable, policyErr := workIQRetryDelay(page.StatusCode, page.RetryAfter, retry, now, deadline.Sub(now))
+		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
+		if policyErr != nil && lost {
+			return workiq.Page{}, errors.Join(policyErr, err) // keep the child's diagnostic
+		}
 		if policyErr != nil {
 			return workiq.Page{}, policyErr
 		}

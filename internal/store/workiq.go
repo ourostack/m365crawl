@@ -31,6 +31,7 @@ type WorkIQSummary struct {
 	Counts            map[string]int
 	Gaps              map[string]int
 	MailProof         *WorkIQMailCompletionProof
+	Diagnostic        *workiq.Diagnostic // the failed WorkIQ child's redacted diagnostic, kept for health
 }
 
 const workIQCacheMessageFilter = `not exists(select 1 from workiq_rows w

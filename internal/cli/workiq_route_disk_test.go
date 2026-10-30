@@ -64,9 +64,15 @@ func TestOlderMailRouteStatesWholeAccountSyncCost(t *testing.T) {
 	r := read()
 	fix, _ := r["fix"].(string)
 	cmds := routeCommands(t, r)
-	if !strings.Contains(fix, "Whole-account WorkIQ mail sync is refused on this archive") || !strings.Contains(fix, "ourostack/m365crawl#262") ||
+	if !strings.Contains(fix, "is refused on this archive") || !strings.Contains(fix, "ourostack/m365crawl#262") ||
 		!strings.Contains(fix, "350498 more items") || len(cmds) != 2 || strings.Contains(strings.Join(cmds, " "), "workiq sync") {
 		t.Fatalf("a sync that cannot fit was still offered: %q %q", fix, cmds)
+	}
+	// The guidance matches what is left: free the shortfall or wait for range backfill; the remaining
+	// steps only check and enable WorkIQ, and repeating the read cannot change the result yet.
+	if strings.Contains(fix, "run these steps, then repeat the read") || !strings.Contains(fix, "Free at least 108.8 GB") ||
+		!strings.Contains(fix, "the steps below only check WorkIQ and turn it on") {
+		t.Fatalf("refused guidance does not match its steps: %q", fix)
 	}
 
 	setRouteDisk(t, func(*store.Store, context.Context, string) (store.WorkIQMailDisk, bool, error) {

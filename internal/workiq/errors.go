@@ -22,6 +22,8 @@ func failure(code string) *errs.Coded {
 	switch code {
 	case "workiq_signin_required":
 		fix = "WorkIQ has no signed-in account and may have opened its own sign-in window. A person must sign in once through WorkIQ (for example `workiq auth login`), then retry; m365crawl never signs in."
+	case "workiq_session_lost":
+		fix = "The WorkIQ process ended or closed its connection after the session began; the run's position is kept. Run the same workiq command again; the result's diagnostic shows the process's exit status."
 	case "workiq_protocol":
 		fix = "WorkIQ's output was not the MCP JSON this version reads. A WorkIQ log level that writes logs to stdout corrupts that stream, so remove any such WorkIQ setting and retry; m365crawl never passes log flags."
 	}
@@ -29,7 +31,7 @@ func failure(code string) *errs.Coded {
 }
 
 // Child text is classified only after scrubbing and is never part of a returned diagnostic.
-func classify(raw []byte) error {
+func classify(raw []byte) *errs.Coded {
 	encoded, _ := json.Marshal(string(raw))
 	safe, _ := teamsdesktop.Scrub(encoded)
 	text := strings.ToLower(string(safe))

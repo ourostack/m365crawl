@@ -154,6 +154,10 @@ func serveStub() int {
 			return code
 		}
 		switch mode {
+		case "die": // live: WorkIQ ended mid-run with nothing m365crawl could explain
+			_, _ = fmt.Fprintln(os.Stderr, `fatal: lost connection for test.user@example.invalid at https://graph.invalid/x?sig=abc`)
+			_, _ = fmt.Fprintln(os.Stderr, `subject "Quarterly private plan" token eyJhbGciOiJIUzI1NiJ9.privatepayloadprivatepayload`)
+			return 2
 		case "eof":
 			_, _ = fmt.Fprintln(os.Stderr, "accept-eula private-download")
 			return 1

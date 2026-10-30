@@ -98,8 +98,9 @@ and resource like '%/messages/delta'`, []any{account}, func(r *sql.Rows) error {
 		})
 	}
 	if err == nil {
-		err = s.db.QueryRowContext(ctx, `select coalesce(sum(json_array_length(p.data_json,'$.value')),0),
-coalesce(sum(case when f.baseline=1 then json_array_length(p.data_json,'$.value') else 0 end),0),
+		// A staged page keeps WorkIQ's whole tool result; the Graph page is its one result's data.
+		err = s.db.QueryRowContext(ctx, `select coalesce(sum(json_array_length(p.data_json,'$.structuredContent.results[0].data.value')),0),
+coalesce(sum(case when f.baseline=1 then json_array_length(p.data_json,'$.structuredContent.results[0].data.value') else 0 end),0),
 coalesce(sum(length(cast(p.data_json as blob))),0), coalesce(max(length(cast(p.data_json as blob))),0)
 from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id
 where f.family='mail' and f.account_id=? and f.retired=0 and f.resource like '%/messages/delta' and p.state='staged'`,

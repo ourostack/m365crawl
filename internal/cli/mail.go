@@ -1023,8 +1023,7 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 			res.Note = "no other message shares its subject and a participant"
 		}
 		if !truncated && threadReachesBack(rows) {
-			r, ok, err := rt.mailRoute(st, account, routeParentNotArchived, "A reply in this thread answers a message this archive does not hold. "+
-				"WorkIQ can fetch the account's server mail into this archive: run these steps, then repeat the read.")
+			r, ok, err := rt.mailRoute(st, account, routeParentNotArchived, "A reply in this thread answers a message this archive does not hold.")
 			if err != nil {
 				return nil, err
 			}
