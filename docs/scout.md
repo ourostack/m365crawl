@@ -9,9 +9,10 @@ This source is off until you run `m365crawl scout sync`. Ordinary `sync`, `watch
 Scout sessions are private AI conversation history: everything the agent saw and did, including tool output that can quote your mail, chats and files. m365crawl handles them like your private chats:
 
 - They are read from your own computer and stay in the local archive. Nothing is uploaded and no network is used.
-- Token-shaped values are replaced with `[redacted]` before anything is stored: JWTs anywhere in the text, strings that start with `Bearer`, values of keys such as `access_token` or `password`, and `sig=` URL parameters. Other secrets that appeared in tool output are kept as written, so protect the archive like the conversations themselves.
+- Secrets are replaced with `[redacted]` before anything is stored. The rules m365crawl uses for Teams records cover JWTs, strings that start with `Bearer`, values of keys such as `access_token` or `password`, and `sig=` URL parameters. Scout adds rules for tool output: `Bearer` tokens anywhere in the text; GitHub, OpenAI-style `sk-`, Slack, AWS and npm tokens; private key blocks; `Password=`, `AccountKey=` and similar connection-string values; `access_token`, `code` and similar URL parameters; values assigned to names such as `GITHUB_TOKEN`, `CLIENT_SECRET` or `API_KEY`; and `Cookie` headers. Secrets of other shapes are kept as written, so protect the archive like the conversations themselves.
+- When these rules or the session reader change, the next `scout sync` scrubs every archived session again, including sessions Scout has since deleted, and reports how many in `rescrubbed`.
 - Session text is never written to logs or error messages.
-- Only `scout list`, `scout search` and `scout show` print it, and only when you ask.
+- `scout list`, `scout search` and `scout show` print it only when you ask. `m365crawl sql` can read the tables directly: `scout_messages` holds message text, and `scout_observations.raw_json` holds each session's scrubbed JSON, including reasoning text that `scout show` does not display.
 
 ## Read your sessions
 

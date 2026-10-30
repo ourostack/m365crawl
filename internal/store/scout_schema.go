@@ -3,8 +3,12 @@ package store
 // scoutSchemaDDL holds the optional Scout session history (schema 21). A source is one app folder
 // that `scout sync` read. A file row is one session file name inside one device folder of it; its
 // state is what the last listing saw, and gone_at marks a file a complete listing no longer had
-// (the archive keeps everything it read). An observation is one immutable read of a file's
-// distinct bytes under one parser version; its messages and their FTS rows belong to it alone.
+// (the archive keeps everything it read). An observation is one read of a file's distinct bytes;
+// its messages and their FTS rows belong to it alone. stamp (scoutsessions.Stamp) names the parser
+// and scrub rules it was stored under: the one exception to immutability is RescrubScout, which
+// scrubs and maps an observation again in place when the stamp changes, as the Teams credential
+// purge does. read_stamp is the stamp of a file's last successful read; a file is skipped without
+// being opened only when its size, modification time and read_stamp all match.
 // scout_messages has an explicit integer primary key, so the FTS rowid link survives VACUUM.
 const scoutSchemaDDL = `
 create table if not exists scout_sources(
@@ -43,6 +47,7 @@ create table if not exists scout_files(
  gone_at text,
  read_size integer,
  read_modified_ns integer,
+ read_stamp text,
  latest_observation integer,
  unique(source_id,device_id,file_name)
 );
@@ -50,7 +55,7 @@ create table if not exists scout_observations(
  id integer primary key,
  file_id integer not null,
  digest text not null,
- parser_version integer not null,
+ stamp text not null,
  size integer not null,
  file_modified_at text not null,
  captured_at text not null,
@@ -72,7 +77,7 @@ create table if not exists scout_observations(
  redactions integer not null,
  losses_json text not null,
  raw_json text not null,
- unique(file_id,digest,parser_version)
+ unique(file_id,digest)
 );
 create table if not exists scout_messages(
  id integer primary key,

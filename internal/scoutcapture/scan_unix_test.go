@@ -315,3 +315,25 @@ func TestEvalSymlinksFailure(t *testing.T) {
 		t.Fatalf("%v", found)
 	}
 }
+
+func TestCheckConfirmsTheLayoutWithoutReading(t *testing.T) {
+	root := appFolder(t)
+	got, err := Check(context.Background(), root)
+	if err != nil || got != root {
+		t.Fatalf("%q %v", got, err)
+	}
+	for _, dir := range []string{"relative", filepath.Join(root, "sessions")} {
+		if _, err := Check(context.Background(), dir); err == nil || err.Error() != "scout_root_invalid" {
+			t.Fatalf("%s: %v", dir, err)
+		}
+	}
+	swap(t, &fstatfs, func(int, *unix.Statfs_t) error { return unix.EIO })
+	if _, err := Check(context.Background(), root); err == nil || err.Error() != "scout_root_unqualified" {
+		t.Fatalf("unqualified: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Check(ctx, root); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled: %v", err)
+	}
+}

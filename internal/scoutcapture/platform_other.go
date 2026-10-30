@@ -10,6 +10,9 @@ func Scan(context.Context, Options, func(File) error) (Result, error) {
 	return Result{}, ErrPlatformUnqualified
 }
 
+// Check is refused for the same reason as Scan.
+func Check(context.Context, string) (string, error) { return "", ErrPlatformUnqualified }
+
 // Supported is false: acquisition is refused here.
 func Supported() bool { return false }
 

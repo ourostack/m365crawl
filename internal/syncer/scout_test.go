@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/scoutcapture"
+	"github.com/ourostack/m365crawl/internal/scoutsessions"
 	"github.com/ourostack/m365crawl/internal/store"
 )
 
@@ -43,6 +45,16 @@ func scoutFolder(t *testing.T) string {
 func fakeScan(t *testing.T, files []scoutcapture.File, err error, seen *scoutcapture.Options) {
 	t.Helper()
 	scoutSwap(t, &scoutSupported, func() bool { return true })
+	// A portable stand-in for the guarded layout check, which scoutcapture tests itself.
+	scoutSwap(t, &scoutCheck, func(_ context.Context, root string) (string, error) {
+		if !filepath.IsAbs(root) {
+			return "", &scoutcapture.Error{Code: "scout_root_invalid"}
+		}
+		if info, err := os.Stat(filepath.Join(root, "sessions", "devices")); err != nil || !info.IsDir() {
+			return "", &scoutcapture.Error{Code: "scout_root_invalid"}
+		}
+		return root, nil
+	})
 	scoutSwap(t, &scoutScan, func(ctx context.Context, opts scoutcapture.Options, consume func(scoutcapture.File) error) (scoutcapture.Result, error) {
 		if seen != nil {
 			*seen = opts
@@ -125,7 +137,7 @@ func TestSyncScoutCancellationIsRecorded(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
 	root := scoutFolder(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	scoutSwap(t, &scoutSupported, func() bool { return true })
+	fakeScan(t, nil, nil, nil)
 	scoutSwap(t, &scoutScan, func(ctx context.Context, opts scoutcapture.Options, consume func(scoutcapture.File) error) (scoutcapture.Result, error) {
 		cancel()
 		return scoutcapture.Result{}, consume(read("a.json", scoutSession))
@@ -144,11 +156,13 @@ func TestSyncScoutCancellationIsRecorded(t *testing.T) {
 		t.Fatalf("%+v %v", sources, err)
 	}
 	// A run that cannot even begin returns the archive's error.
-	scoutSwap(t, &scoutOpen, func(_ context.Context, path string) (*store.Store, error) {
-		return store.Open(context.Background(), path)
+	ctx, cancel = context.WithCancel(context.Background())
+	scoutSwap(t, &scoutCheck, func(_ context.Context, root string) (string, error) {
+		cancel()
+		return root, nil
 	})
-	if _, err := SyncScout(ctx, ScoutOptions{DBPath: db, Roots: []string{root}}); err == nil {
-		t.Fatal("cancelled begin succeeded")
+	if _, err := SyncScout(ctx, ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled begin: %v", err)
 	}
 }
 
@@ -219,5 +233,81 @@ func TestSyncScoutReadsARealFolder(t *testing.T) {
 	report, err = SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}})
 	if err != nil || report.Folders[0].Unchanged != 1 {
 		t.Fatalf("%+v %v", report, err)
+	}
+}
+
+func TestSyncScoutRescrubsArchivedAndGoneSessionsWhenRulesChange(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	root := scoutFolder(t)
+	fakeScan(t, []scoutcapture.File{read("a.json", scoutSession)}, nil, nil)
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	// The session leaves OneDrive, so the archive alone holds it.
+	fakeScan(t, nil, nil, nil)
+	if report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil || report.Folders[0].Gone != 1 || report.Rescrubbed != 0 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	// A rule added later: "world" becomes a secret.
+	scoutSwap(t, &scoutStamp, func() string { return "later-rules" })
+	scoutSwap(t, &scoutScrub, func(raw []byte) ([]byte, int) {
+		out, n := scoutsessions.Scrub(raw)
+		return []byte(strings.ReplaceAll(string(out), "world", "[redacted]")), n + strings.Count(string(out), "world")
+	})
+	report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}})
+	if err != nil || report.Rescrubbed != 1 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	st, err := store.OpenReadOnly(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if hits, _, err := st.ScoutSearch(context.Background(), "world", store.ScoutFilter{}); err != nil || len(hits) != 0 {
+		t.Fatalf("the gone session kept the secret: %v %v", hits, err)
+	}
+	if hits, _, _ := st.ScoutSearch(context.Background(), "synthetic", store.ScoutFilter{}); len(hits) != 1 || hits[0].Message.Text != "hello synthetic [redacted]" {
+		t.Fatalf("%+v", hits)
+	}
+}
+
+func TestSyncScoutRestoresTheSameBytesUnderANewStamp(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	root := scoutFolder(t)
+	fakeScan(t, []scoutcapture.File{read("a.json", scoutSession)}, nil, nil)
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	// The stamp changes between the archive pass and the folder read, so the read meets bytes the
+	// archive holds under another stamp and stores them again in place from the source.
+	stamps := []string{"old", "new"}
+	scoutSwap(t, &scoutStamp, func() string {
+		stamp := stamps[0]
+		if len(stamps) > 1 {
+			stamps = stamps[1:]
+		}
+		return stamp
+	})
+	report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}})
+	if err != nil || report.Rescrubbed != 1 || report.Folders[0].Rescrubbed != 1 || report.Folders[0].Unchanged != 0 {
+		t.Fatalf("%+v %v", report, err)
+	}
+}
+
+func TestSyncScoutStopsOnCheckAndRescrubErrors(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	root := scoutFolder(t)
+	fakeScan(t, []scoutcapture.File{read("a.json", scoutSession)}, nil, nil)
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	scoutSwap(t, &scoutCheck, func(context.Context, string) (string, error) { return "", context.Canceled })
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("check: %v", err)
+	}
+	scoutSwap(t, &scoutStamp, func() string { return "broken-rules" })
+	scoutSwap(t, &scoutScrub, func([]byte) ([]byte, int) { return []byte("not json"), 0 })
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, store.ErrScoutRescrub) {
+		t.Fatalf("rescrub: %v", err)
 	}
 }

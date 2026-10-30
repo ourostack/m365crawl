@@ -508,7 +508,7 @@ Inspect source IDs, kind, admitted/attempted state, coverage, reason and losses.
 
 ## Scout session history
 
-Opt-in: m365crawl reads the session files Microsoft Scout keeps in your local OneDrive folder only when you run `scout sync`, and `sync`, `watch` and shared `search` never read them. The guide is [scout.md](scout.md). These are private AI conversation history, handled like private chats: local only, never logged, and token-shaped values (the Teams scrub rules: JWTs, `Bearer` strings, credential-named keys, `sig=` parameters) stored as `[redacted]`; other secrets in tool output are kept as written.
+Opt-in: m365crawl reads the session files Microsoft Scout keeps in your local OneDrive folder only when you run `scout sync`, and `sync`, `watch` and shared `search` never read them. The guide is [scout.md](scout.md). These are private AI conversation history, handled like private chats: local only and never logged. Secrets are stored as `[redacted]` under the Teams scrub rules and the Scout rules for tool output (listed in [scout.md](scout.md#privacy) and SPEC); when those rules or the parser change, the next `scout sync` scrubs and maps every archived session again in place, gone ones included (`rescrubbed`).
 
 - **No download.** Only files already on this computer are read. A cloud-only OneDrive file is counted as `cloud_only` and never opened; on macOS every read runs with downloads of cloud-only files turned off. Acquisition runs on macOS (APFS) and on Linux with `--root` (local filesystems only); Windows is refused with `scout_platform_unqualified` until verified.
 - **IDs.** `source_id` is one app folder. `scout-session:N` is one session file and stays the same across versions; `observation_id` is one immutable version (distinct bytes, with their SHA-256 `digest`); `scout-message:N` is one message of one observation.
@@ -522,9 +522,9 @@ Opt-in: m365crawl reads the session files Microsoft Scout keeps in your local On
 m365crawl scout sync [--root DIR]...
 ```
 
-Without `--root`, reads every folder under `~/Library/CloudStorage/OneDrive-*/Apps/` that holds `sessions/devices` (macOS). `--root` names an app folder; repeat it for several. A file is opened only when it is resident and its size or modification time changed since its last read.
+Without `--root`, reads every folder under `~/Library/CloudStorage/OneDrive-*/Apps/` that holds `sessions/devices` (macOS). `--root` names an app folder; repeat it for several. A file is opened only when it is resident and its size, modification time or rules stamp changed since its last read. Resolving the folder, the layout check and every read run with downloads of cloud-only files turned off.
 
-- **Result.** `discovered`, `folders` (each with `source_id`, `locator_tail`, `outcome`, `reason`, `fix`, `devices`, `unreadable_devices`, `listed`, `admitted`, `unchanged`, `cloud_only`, `unsafe`, `too_large`, `failed`, `gone`, `redacted`), the totals `admitted`, `unchanged`, `cloud_only`, `failed` and `gone`, `notices` and `scout_coverage`.
+- **Result.** `discovered`, `folders` (each with `source_id`, `locator_tail`, `outcome`, `reason`, `fix`, `devices`, `unreadable_devices`, `listed`, `admitted`, `unchanged`, `rescrubbed`, `cloud_only`, `unsafe`, `too_large`, `failed`, `gone`, `redacted`), the totals `admitted`, `unchanged`, `rescrubbed` (archived versions scrubbed and mapped again under new rules, gone ones included), `cloud_only`, `failed` and `gone`, `notices` and `scout_coverage`.
 - **Outcome.** `complete` (every listed session is archived as it is now), `partial` (a file or device folder was skipped), `failed` (the folder could not be scanned; `reason` and `fix` say why) or `cancelled`.
 - **Exit.** 0 when at least one folder was scanned. When none could be, the result is printed and the first folder's reason is the error: `scout_root_invalid` (exit 2), or another reason below (exit 3). `scout_folder_not_found` (exit 3) means discovery found no folder; `scout_platform_unqualified` (exit 3) means acquisition is not verified here.
 

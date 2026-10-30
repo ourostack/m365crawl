@@ -28,9 +28,10 @@ type ScoutFileKey struct{ Device, Name string }
 // ScoutKnown is the size and modification time of a file's last successful read.
 type ScoutKnown struct{ Size, ModNanos int64 }
 
-// ScoutRun is one `scout sync` of one app folder.
+// ScoutRun is one `scout sync` of one app folder under one stamp (scoutsessions.Stamp).
 type ScoutRun struct {
 	SourceID, RunID int64
+	Stamp           string
 	Known           map[ScoutFileKey]ScoutKnown
 }
 
@@ -61,8 +62,10 @@ type ScoutRunEnd struct {
 var ErrScoutSessionNotFound = errors.New("scout session not found")
 
 // BeginScoutRun registers the app folder on first use, records a pending run and returns the
-// archive's last successful read of each of its files.
-func (s *Store) BeginScoutRun(ctx context.Context, platform, root string, at time.Time) (run ScoutRun, err error) {
+// archive's last successful read of each of its files made under stamp; a file read under another
+// stamp is read again.
+func (s *Store) BeginScoutRun(ctx context.Context, platform, root, stamp string, at time.Time) (run ScoutRun, err error) {
+	run.Stamp = stamp
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return run, err
@@ -87,7 +90,7 @@ func (s *Store) BeginScoutRun(ctx context.Context, platform, root string, at tim
 		return run, err
 	}
 	rows, err := tx.QueryContext(ctx, `select device_id,file_name,read_size,read_modified_ns from scout_files
-where source_id=? and read_size is not null`, run.SourceID)
+where source_id=? and read_size is not null and read_stamp=?`, run.SourceID, stamp)
 	if err != nil {
 		return run, err
 	}
@@ -108,9 +111,10 @@ where source_id=? and read_size is not null`, run.SourceID)
 }
 
 // CommitScoutFile records one listed file in its own transaction. It returns admitted for a new
-// observation, unchanged when the archive already holds these bytes (or the file was not opened
-// because its size and time match the last read), or the file's state otherwise. An observation
-// is never changed: bytes seen before, even several versions ago, reuse that observation.
+// observation, unchanged when the archive already holds these bytes under the run's stamp (or the
+// file was not opened because its size, time and stamp match the last read), rescrubbed when it
+// holds them under another stamp and stored them again in place from this read, or the file's
+// state otherwise. Bytes seen before, even several versions ago, reuse that observation.
 func (s *Store) CommitScoutFile(ctx context.Context, run ScoutRun, in ScoutFileInput, at time.Time) (outcome string, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -144,21 +148,26 @@ on conflict(source_id,device_id,file_name) do update set state=excluded.state, r
 		outcome = "unchanged"
 	case state == ScoutArchived:
 		var observation int64
-		err = tx.QueryRowContext(ctx, `select id from scout_observations where file_id=? and digest=? and parser_version=?`,
-			fileID, in.Digest, scoutsessions.ParserVersion).Scan(&observation)
+		var stamp string
+		err = tx.QueryRowContext(ctx, `select id,stamp from scout_observations where file_id=? and digest=?`, fileID, in.Digest).Scan(&observation, &stamp)
 		switch {
-		case err == nil:
+		case err == nil && stamp == run.Stamp:
 			outcome = "unchanged"
+		case err == nil:
+			outcome = "rescrubbed"
+			if err = rewriteScoutObservation(ctx, tx, observation, run.Stamp, in.Raw, in.Redactions, in.Session); err != nil {
+				return "", err
+			}
 		case errors.Is(err, sql.ErrNoRows):
 			outcome = "admitted"
-			if observation, err = insertScoutObservation(ctx, tx, fileID, run.RunID, in, at); err != nil {
+			if observation, err = insertScoutObservation(ctx, tx, fileID, run, in, at); err != nil {
 				return "", err
 			}
 		default:
 			return "", err
 		}
-		if _, err = tx.ExecContext(ctx, `update scout_files set latest_observation=?, read_size=?, read_modified_ns=? where id=?`,
-			observation, in.Size, in.Modified.UnixNano(), fileID); err != nil {
+		if _, err = tx.ExecContext(ctx, `update scout_files set latest_observation=?, read_size=?, read_modified_ns=?, read_stamp=? where id=?`,
+			observation, in.Size, in.Modified.UnixNano(), run.Stamp, fileID); err != nil {
 			return "", err
 		}
 	}
@@ -172,9 +181,8 @@ func scoutOptionalTime(at *time.Time) any {
 	return knowledgeTime(*at)
 }
 
-func insertScoutObservation(ctx context.Context, tx *sql.Tx, fileID, runID int64, in ScoutFileInput, at time.Time) (int64, error) {
-	session := in.Session
-	var first, last *time.Time
+// scoutSpan is the earliest and latest known message time.
+func scoutSpan(session *scoutsessions.Session) (first, last *time.Time) {
 	for _, m := range session.Messages {
 		if m.At == nil {
 			continue
@@ -186,14 +194,14 @@ func insertScoutObservation(ctx context.Context, tx *sql.Tx, fileID, runID int64
 			last = m.At
 		}
 	}
-	losses, _ := json.Marshal(session.Losses) // a map of strings to ints always encodes
-	result, err := tx.ExecContext(ctx, `insert into scout_observations(file_id,digest,parser_version,size,file_modified_at,captured_at,run_id,
+	return first, last
+}
+
+func insertScoutObservation(ctx context.Context, tx *sql.Tx, fileID int64, run ScoutRun, in ScoutFileInput, at time.Time) (int64, error) {
+	result, err := tx.ExecContext(ctx, `insert into scout_observations(file_id,digest,stamp,size,file_modified_at,captured_at,run_id,
 native_id,name,model,origin,kind,device_claim,automation,created_raw,created_at,updated_raw,updated_at,message_count,first_message_at,
-last_message_at,redactions,losses_json,raw_json) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		fileID, in.Digest, scoutsessions.ParserVersion, in.Size, knowledgeTime(in.Modified), knowledgeTime(at), runID,
-		session.NativeID, session.Name, session.Model, session.Origin, session.Kind, session.DeviceID, session.Automation,
-		session.CreatedAtRaw, scoutOptionalTime(session.CreatedAt), session.UpdatedAtRaw, scoutOptionalTime(session.UpdatedAt),
-		len(session.Messages), scoutOptionalTime(first), scoutOptionalTime(last), in.Redactions, string(losses), string(in.Raw))
+last_message_at,redactions,losses_json,raw_json) values(?,?,?,?,?,?,?,'','','','','','',0,'',null,'',null,0,null,null,0,'{}','')`,
+		fileID, in.Digest, run.Stamp, in.Size, knowledgeTime(in.Modified), knowledgeTime(at), run.RunID)
 	if err != nil {
 		return 0, err
 	}
@@ -201,23 +209,131 @@ last_message_at,redactions,losses_json,raw_json) values(?,?,?,?,?,?,?,?,?,?,?,?,
 	if err != nil {
 		return 0, err
 	}
+	return observation, rewriteScoutObservation(ctx, tx, observation, run.Stamp, in.Raw, in.Redactions, in.Session)
+}
+
+// rewriteScoutObservation stores a session's scrubbed JSON, mapped fields and messages on an
+// observation, keeping its digest, size, clocks and run. Messages keep their IDs by ordinal; a
+// message the new mapping no longer has is removed with its FTS row. This is the in-place
+// exception to immutability that a stamp change allows.
+func rewriteScoutObservation(ctx context.Context, tx *sql.Tx, observation int64, stamp string, raw []byte, redactions int, session *scoutsessions.Session) error {
+	first, last := scoutSpan(session)
+	losses, _ := json.Marshal(session.Losses) // a map of strings to ints always encodes
+	if _, err := tx.ExecContext(ctx, `update scout_observations set stamp=?,native_id=?,name=?,model=?,origin=?,kind=?,device_claim=?,automation=?,
+created_raw=?,created_at=?,updated_raw=?,updated_at=?,message_count=?,first_message_at=?,last_message_at=?,redactions=?,losses_json=?,raw_json=?
+where id=?`, stamp, session.NativeID, session.Name, session.Model, session.Origin, session.Kind, session.DeviceID, session.Automation,
+		session.CreatedAtRaw, scoutOptionalTime(session.CreatedAt), session.UpdatedAtRaw, scoutOptionalTime(session.UpdatedAt),
+		len(session.Messages), scoutOptionalTime(first), scoutOptionalTime(last), redactions, string(losses), string(raw), observation); err != nil {
+		return err
+	}
+	existing := map[int]int64{}
+	rows, err := tx.QueryContext(ctx, `select ordinal,id from scout_messages where observation_id=?`, observation)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var ordinal int
+		var id int64
+		if err := rows.Scan(&ordinal, &id); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		existing[ordinal] = id
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
 	for _, m := range session.Messages {
 		sum := sha256.Sum256([]byte(m.Role + "\x00" + m.NativeID + "\x00" + m.TimestampRaw + "\x00" + m.Text))
-		result, err := tx.ExecContext(ctx, `insert into scout_messages(observation_id,ordinal,native_id,role,at_raw,at,text,tool_calls,file_names,
-reasoning,digest) values(?,?,?,?,?,?,?,?,?,?,?)`, observation, m.Ordinal, m.NativeID, m.Role, m.TimestampRaw, scoutOptionalTime(m.At), m.Text,
-			m.ToolCalls, m.FileNames, m.Reasoning, hex.EncodeToString(sum[:]))
-		if err != nil {
-			return 0, err
+		values := []any{m.NativeID, m.Role, m.TimestampRaw, scoutOptionalTime(m.At), m.Text, m.ToolCalls, m.FileNames, m.Reasoning, hex.EncodeToString(sum[:])}
+		id, ok := existing[m.Ordinal]
+		delete(existing, m.Ordinal)
+		if ok {
+			if _, err := tx.ExecContext(ctx, `update scout_messages set native_id=?,role=?,at_raw=?,at=?,text=?,tool_calls=?,file_names=?,reasoning=?,digest=?
+where id=?`, append(values, id)...); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `update scout_fts set name=?,text=? where rowid=?`, session.Name, m.Text, id); err != nil {
+				return err
+			}
+			continue
 		}
-		id, err := result.LastInsertId()
+		result, err := tx.ExecContext(ctx, `insert into scout_messages(native_id,role,at_raw,at,text,tool_calls,file_names,reasoning,digest,
+observation_id,ordinal) values(?,?,?,?,?,?,?,?,?,?,?)`, append(values, observation, m.Ordinal)...)
 		if err != nil {
-			return 0, err
+			return err
+		}
+		if id, err = result.LastInsertId(); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `insert into scout_fts(rowid,name,text) values(?,?,?)`, id, session.Name, m.Text); err != nil {
+			return err
+		}
+	}
+	gone := make([]int64, 0, len(existing))
+	for _, id := range existing {
+		gone = append(gone, id)
+	}
+	slices.Sort(gone)
+	for _, id := range gone {
+		if _, err := tx.ExecContext(ctx, `delete from scout_messages where id=?`, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `delete from scout_fts where rowid=?`, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ErrScoutRescrub is a stored session that no longer maps after scrubbing; nothing of it changes.
+var ErrScoutRescrub = errors.New("scout: a stored session no longer maps after scrubbing")
+
+// RescrubScout scrubs and maps again, in place and in one transaction, every observation stored
+// under a stamp other than stamp, gone files included, and returns how many it rewrote. It starts
+// from the observation's stored (already scrubbed) JSON, so a rule added later reaches sessions the
+// folder no longer has; the observation's redactions add the new ones.
+func (s *Store) RescrubScout(ctx context.Context, stamp string, scrub func([]byte) ([]byte, int)) (rewritten int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	rows, err := tx.QueryContext(ctx, `select id,raw_json,redactions from scout_observations where stamp<>? order by id`, stamp)
+	if err != nil {
+		return 0, err
+	}
+	type stored struct {
+		id         int64
+		raw        string
+		redactions int
+	}
+	var stale []stored
+	for rows.Next() {
+		var o stored
+		if err = rows.Scan(&o.id, &o.raw, &o.redactions); err != nil {
+			return 0, errors.Join(err, rows.Close())
+		}
+		stale = append(stale, o)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	for _, o := range stale {
+		clean, n := scrub([]byte(o.raw))
+		session, parseErr := scoutsessions.Parse(clean)
+		if parseErr != nil {
+			err = ErrScoutRescrub
+			return 0, err
+		}
+		if err = rewriteScoutObservation(ctx, tx, o.id, stamp, clean, o.redactions+n, &session); err != nil {
 			return 0, err
 		}
 	}
-	return observation, nil
+	return len(stale), tx.Commit()
 }
 
 // FinishScoutRun records the run's outcome and marks gone every file of a completely listed

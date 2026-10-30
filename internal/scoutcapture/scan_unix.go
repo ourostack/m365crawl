@@ -30,20 +30,39 @@ const dirFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLO
 // Supported is true: acquisition is qualified on this platform.
 func Supported() bool { return true }
 
+// Check resolves root and confirms that it is an app folder with sessions/devices on a qualified
+// local filesystem, under the same no-download guard as Scan, and returns the resolved path. It
+// lists and reads nothing, so a mistyped folder can be refused before it is registered.
+func Check(ctx context.Context, root string) (string, error) {
+	var resolved string
+	err := withGuard(ctx, func() error {
+		layout, err := openLayout(root)
+		if err != nil {
+			return err
+		}
+		resolved = layout.root
+		layout.close()
+		return nil
+	})
+	return resolved, err
+}
+
 // Scan lists every device folder of the app folder at opts.Root and hands each session file to
-// consume, in device then file name order. It returns an *Error when the folder cannot be scanned
-// at all, consume's error, or the context's error; a device folder or file that cannot be read is
-// reported in the result and the scan goes on.
+// consume, in device then file name order. Resolving the root, every listing and every read run
+// inside the no-download guard. It returns an *Error when the folder cannot be scanned at all,
+// consume's error, or the context's error; a device folder or file that cannot be read is reported
+// in the result and the scan goes on.
 func Scan(ctx context.Context, opts Options, consume func(File) error) (Result, error) {
-	if !filepath.IsAbs(opts.Root) || filepath.Clean(opts.Root) != opts.Root {
-		return Result{}, &Error{Code: "scout_root_invalid"}
-	}
-	root, err := evalSymlinks(opts.Root)
-	if err != nil {
-		return Result{}, &Error{Code: "scout_root_invalid"}
-	}
-	res := Result{Root: root}
-	err = withGuard(ctx, func() error { return scan(ctx, opts, consume, &res) })
+	var res Result
+	err := withGuard(ctx, func() error {
+		layout, err := openLayout(opts.Root)
+		if err != nil {
+			return err
+		}
+		defer layout.close()
+		res.Root = layout.root
+		return scan(ctx, opts, consume, layout.devices, &res)
+	})
 	return res, err
 }
 
@@ -55,25 +74,52 @@ func openDir(parent int, name string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), name), nil //nolint:gosec // G115: a descriptor the kernel returned
 }
 
-func scan(ctx context.Context, opts Options, consume func(File) error, res *Result) error {
-	root, err := openDir(unix.AT_FDCWD, res.Root)
+// scoutLayout holds the open app folder, its sessions folder and its devices folder.
+type scoutLayout struct {
+	root    string
+	files   []*os.File
+	devices *os.File
+}
+
+func (l *scoutLayout) close() {
+	for _, f := range l.files {
+		_ = f.Close()
+	}
+}
+
+// openLayout resolves root and opens root, root/sessions and root/sessions/devices without
+// following links below root. The caller runs it inside the guard.
+func openLayout(root string) (_ *scoutLayout, err error) {
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return nil, &Error{Code: "scout_root_invalid"}
+	}
+	resolved, err := evalSymlinks(root)
 	if err != nil {
-		return &Error{Code: "scout_root_invalid"}
+		return nil, &Error{Code: "scout_root_invalid"}
 	}
-	defer func() { _ = root.Close() }()
-	if !qualifiedFS(int(root.Fd())) { //nolint:gosec // G115: a descriptor
-		return &Error{Code: "scout_root_unqualified"}
+	layout := &scoutLayout{root: resolved}
+	defer func() {
+		if err != nil {
+			layout.close()
+		}
+	}()
+	parent := unix.AT_FDCWD
+	for i, name := range []string{resolved, "sessions", "devices"} {
+		dir, err := openDir(parent, name)
+		if err != nil {
+			return nil, &Error{Code: "scout_root_invalid"}
+		}
+		layout.files = append(layout.files, dir)
+		parent = int(dir.Fd()) //nolint:gosec // G115: a descriptor
+		if i == 0 && !qualifiedFS(parent) {
+			return nil, &Error{Code: "scout_root_unqualified"}
+		}
 	}
-	sessions, err := openDir(int(root.Fd()), "sessions") //nolint:gosec // G115: a descriptor
-	if err != nil {
-		return &Error{Code: "scout_root_invalid"}
-	}
-	defer func() { _ = sessions.Close() }()
-	devices, err := openDir(int(sessions.Fd()), "devices") //nolint:gosec // G115: a descriptor
-	if err != nil {
-		return &Error{Code: "scout_root_invalid"}
-	}
-	defer func() { _ = devices.Close() }()
+	layout.devices = layout.files[2]
+	return layout, nil
+}
+
+func scan(ctx context.Context, opts Options, consume func(File) error, devices *os.File, res *Result) error {
 	names, err := readNames(devices)
 	if err != nil {
 		return &Error{Code: "scout_devices_unreadable"}

@@ -25,7 +25,7 @@ type scoutGroup struct {
 // scoutAboutHelp says what the source is, that it is opt-in and private, and how to read it.
 const scoutAboutHelp = "Microsoft Scout keeps a JSON copy of each session (one conversation, or one automation run) in your own OneDrive, one folder per device. m365crawl reads those files only when you run `scout sync`: it is off until then, and `sync`, `watch` and `search` never read them. " +
 	"Afterwards `scout list`, `scout search WORDS` and `scout show scout-session:N` read the archive offline, and `scout sources` shows what each scan read and skipped.\n" +
-	"These files are private AI conversation history: everything the agent saw and did, including tool output that can quote mail, chats and files. m365crawl handles them like your private chats: they stay in the local archive, are never uploaded, and are never written to logs. Token-shaped values (JWTs anywhere in the text, strings that start with Bearer, values of keys such as access_token or password, sig= URL parameters) are replaced with [redacted] before they are stored; other secrets that appeared in tool output are kept as written.\n" +
+	"These files are private AI conversation history: everything the agent saw and did, including tool output that can quote mail, chats and files. m365crawl handles them like your private chats: they stay in the local archive, are never uploaded, and are never written to logs. Before anything is stored, secrets are replaced with [redacted]: the Teams rules (JWTs, strings that start with Bearer, credential-named keys, sig= parameters) and Scout rules for tool output (Bearer tokens anywhere, GitHub, OpenAI-style sk-, Slack, AWS and npm tokens, private key blocks, connection-string keys and passwords, token-like URL parameters, NAME_TOKEN/SECRET/PASSWORD/API_KEY assignments, Cookie headers). When those rules or the parser change, the next scout sync scrubs and maps every archived session again, gone ones included. Secrets of other shapes are kept as written.\n" +
 	"The session file format is not a documented interface and can change between Scout releases, so the source is best-effort (scout_coverage.format is \"unofficial\"). A file that cannot be read is counted, never guessed.\n"
 
 // scoutResidencyHelp says why a session can be missing and what fixes it.
@@ -313,6 +313,7 @@ type scoutFolderItem struct {
 	Listed            int    `json:"listed"`
 	Admitted          int    `json:"admitted"`
 	Unchanged         int    `json:"unchanged"`
+	Rescrubbed        int    `json:"rescrubbed"`
 	CloudOnly         int    `json:"cloud_only"`
 	Unsafe            int    `json:"unsafe"`
 	TooLarge          int    `json:"too_large"`
@@ -326,6 +327,7 @@ type scoutSyncResult struct {
 	Folders       []scoutFolderItem `json:"folders"`
 	Admitted      int               `json:"admitted"`
 	Unchanged     int               `json:"unchanged"`
+	Rescrubbed    int               `json:"rescrubbed"`
 	CloudOnly     int               `json:"cloud_only"`
 	Failed        int               `json:"failed"`
 	Gone          int               `json:"gone"`
@@ -358,19 +360,24 @@ func (c *scoutSyncCmd) Run(rt *runtime) error {
 			Fix: "Pass the Scout app folder with --root DIR."}
 	}
 	report, runErr := runScoutSync(rt.ctx, syncer.ScoutOptions{DBPath: rt.dbPath, Roots: c.Root, Home: home})
-	result := scoutSyncResult{Discovered: report.Discovered, Folders: []scoutFolderItem{}}
+	result := scoutSyncResult{Discovered: report.Discovered, Rescrubbed: report.Rescrubbed, Folders: []scoutFolderItem{}}
 	scanned := false
 	for _, f := range report.Folders {
 		item := scoutFolderItem{SourceID: f.SourceID, LocatorTail: locatorTail(f.Root), Outcome: f.Outcome, Reason: f.Reason, Fix: scoutFix(f.Reason, f.CloudOnly),
 			Devices: f.Devices, UnreadableDevices: f.UnreadableDevices, Listed: f.Listed, Admitted: f.Admitted, Unchanged: f.Unchanged,
-			CloudOnly: f.CloudOnly, Unsafe: f.Unsafe, TooLarge: f.TooLarge, Failed: f.Failed, Gone: f.Gone, Redacted: f.Redacted}
+			Rescrubbed: f.Rescrubbed, CloudOnly: f.CloudOnly, Unsafe: f.Unsafe, TooLarge: f.TooLarge, Failed: f.Failed, Gone: f.Gone, Redacted: f.Redacted}
 		result.Folders = append(result.Folders, item)
 		result.Admitted += f.Admitted
 		result.Unchanged += f.Unchanged
+		result.Rescrubbed += f.Rescrubbed
 		result.CloudOnly += f.CloudOnly
 		result.Failed += f.Failed + f.Unsafe + f.TooLarge
 		result.Gone += f.Gone
 		scanned = scanned || f.Outcome != "failed"
+	}
+	if result.Rescrubbed > 0 {
+		result.Notices = append(result.Notices, plural(result.Rescrubbed, "archived session version was", "archived session versions were")+
+			" stored under older scrub or parser rules and were scrubbed and mapped again in place, gone sessions included")
 	}
 	if result.CloudOnly > 0 {
 		result.Notices = append(result.Notices, plural(result.CloudOnly, "session file is", "session files are")+

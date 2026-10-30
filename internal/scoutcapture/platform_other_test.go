@@ -11,6 +11,9 @@ func TestAcquisitionIsRefusedUntilVerified(t *testing.T) {
 	if _, err := Scan(context.Background(), Options{Root: t.TempDir()}, func(File) error { return nil }); err == nil || err.Error() != "scout_platform_unqualified" {
 		t.Fatalf("scan: %v", err)
 	}
+	if _, err := Check(context.Background(), t.TempDir()); err == nil || err.Error() != "scout_platform_unqualified" {
+		t.Fatalf("check: %v", err)
+	}
 	if Supported() {
 		t.Fatal("supported")
 	}

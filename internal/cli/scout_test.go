@@ -53,7 +53,7 @@ func seedScout(t *testing.T, e *env) {
 	}
 	defer func() { _ = st.Close() }()
 	at := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
-	run, err := st.BeginScoutRun(ctx, "darwin", "/Users/someone/OneDrive/Apps/Synthetic Scout", at)
+	run, err := st.BeginScoutRun(ctx, "darwin", "/Users/someone/OneDrive/Apps/Synthetic Scout", scoutsessions.Stamp(), at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func seedScout(t *testing.T, e *env) {
 	if _, err := st.FinishScoutRun(ctx, run, end, at); err != nil {
 		t.Fatal(err)
 	}
-	run, err = st.BeginScoutRun(ctx, "darwin", "/Users/someone/OneDrive/Apps/Synthetic Scout", at.Add(time.Hour))
+	run, err = st.BeginScoutRun(ctx, "darwin", "/Users/someone/OneDrive/Apps/Synthetic Scout", scoutsessions.Stamp(), at.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestScoutReadsWithoutASource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := st.BeginScoutRun(ctx, "linux", "/synthetic/Scout", time.Now())
+	run, err := st.BeginScoutRun(ctx, "linux", "/synthetic/Scout", scoutsessions.Stamp(), time.Now())
 	if err == nil {
 		_, err = st.FinishScoutRun(ctx, run, store.ScoutRunEnd{Outcome: "complete"}, time.Now())
 	}
@@ -271,10 +271,11 @@ func TestScoutSyncReports(t *testing.T) {
 	seedScout(t, e)
 	folder := syncer.ScoutFolderReport{SourceID: 1, Root: "/Users/someone/OneDrive/Apps/Synthetic Scout", Outcome: "partial", Devices: 2, Listed: 5,
 		Admitted: 1, Unchanged: 2, CloudOnly: 1, Unsafe: 1, Gone: 1, Redacted: 1}
-	seen := stubScoutSync(t, syncer.ScoutReport{Discovered: true, Folders: []syncer.ScoutFolderReport{folder}}, nil)
+	folder.Rescrubbed = 1
+	seen := stubScoutSync(t, syncer.ScoutReport{Discovered: true, Rescrubbed: 2, Folders: []syncer.ScoutFolderReport{folder}}, nil)
 	code, out, stderr := e.run("--json", "scout", "sync")
 	m := decode(t, out)
-	if code != 0 || m["discovered"] != true || m["admitted"] != float64(1) || m["failed"] != float64(1) || len(m["notices"].([]any)) != 2 || seen.Home == "" || seen.DBPath != e.db {
+	if code != 0 || m["discovered"] != true || m["admitted"] != float64(1) || m["failed"] != float64(1) || m["rescrubbed"] != float64(3) || len(m["notices"].([]any)) != 3 || seen.Home == "" || seen.DBPath != e.db {
 		t.Fatalf("sync: %d %v %s", code, m, stderr)
 	}
 	if f := m["folders"].([]any)[0].(map[string]any); f["locator_tail"] != "Apps/Synthetic Scout" || !strings.Contains(f["fix"].(string), "Always keep") {

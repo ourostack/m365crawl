@@ -14,7 +14,9 @@ import (
 )
 
 // ParserVersion numbers how Parse maps a file. Raise it when a change alters what Parse returns
-// for the same bytes, so the next sync stores a new observation instead of keeping the old one.
+// for the same bytes. It is part of Stamp: the next scout sync then maps every archived
+// observation again in place from its stored JSON, gone files included, and opens again every
+// resident file whose last read had another stamp.
 const ParserVersion = 1
 
 // MaxFileBytes is the largest session file read. Larger files are skipped, never truncated.

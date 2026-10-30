@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,12 @@ const (
 )
 
 var scoutBase = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+// Two stamps stand for the parser and scrub rules before and after a change.
+const (
+	scoutStampA = "stamp-a"
+	scoutStampB = "stamp-b"
+)
 
 // scoutBody is a synthetic session file; every id, name and text is invented.
 func scoutBody(id, name string, automation bool, messages ...string) string {
@@ -52,7 +60,7 @@ func scoutRead(t testing.TB, device, name, body string, modified time.Time) Scou
 
 func mustBeginScout(t testing.TB, s *Store, root string, at time.Time) ScoutRun {
 	t.Helper()
-	run, err := s.BeginScoutRun(context.Background(), "darwin", root, at)
+	run, err := s.BeginScoutRun(context.Background(), "darwin", root, scoutStampA, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +142,7 @@ func TestScoutCommitOutcomesAndImmutableObservations(t *testing.T) {
 	if again.SourceID != 1 || again.RunID != 2 || again.Known[ScoutFileKey{scoutDevA, "a-1.json"}] != (ScoutKnown{v1.Size, scoutBase.UnixNano()}) || len(again.Known) != 1 {
 		t.Fatalf("known: %+v", again)
 	}
-	other, err := s.BeginScoutRun(ctx, "linux", "/synthetic/Apps/Scout", scoutBase)
+	other, err := s.BeginScoutRun(ctx, "linux", "/synthetic/Apps/Scout", scoutStampA, scoutBase)
 	if err != nil || other.SourceID != 2 {
 		t.Fatalf("platform is part of the source: %+v %v", other, err)
 	}
@@ -343,14 +351,14 @@ func TestScoutReadsRefuseCorruptRows(t *testing.T) {
 
 func TestScoutWriteFaultsLeaveArchiveUnchanged(t *testing.T) {
 	sweepFaults(t, nil, func(ctx context.Context, s *Store) error {
-		_, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/new", scoutBase)
+		_, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/new", scoutStampA, scoutBase)
 		return err
 	})
 	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
-		_, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/Apps/Scout", scoutBase)
+		_, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/Apps/Scout", scoutStampA, scoutBase)
 		return err
 	})
-	run := ScoutRun{SourceID: 1, RunID: 2}
+	run := ScoutRun{SourceID: 1, RunID: 2, Stamp: scoutStampA}
 	body := scoutRead(t, scoutDevA, "a-1.json", scoutBody("a-1", "Quarterly plan", false, "a new turn", "and its answer"), scoutBase.Add(3*time.Hour))
 	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
 		_, err := s.CommitScoutFile(ctx, run, body, scoutBase.Add(3*time.Hour))
@@ -359,6 +367,11 @@ func TestScoutWriteFaultsLeaveArchiveUnchanged(t *testing.T) {
 	same := scoutRead(t, scoutDevB, "b-1.json", scoutBody("b-1", "Inbox triage", true, "triage the inbox", "two urgent threads"), scoutBase)
 	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
 		_, err := s.CommitScoutFile(ctx, run, same, scoutBase.Add(3*time.Hour))
+		return err
+	})
+	restamped := ScoutRun{SourceID: 1, RunID: 2, Stamp: scoutStampB}
+	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
+		_, err := s.CommitScoutFile(ctx, restamped, same, scoutBase.Add(3*time.Hour))
 		return err
 	})
 	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
@@ -385,4 +398,140 @@ func TestScoutReadFaultsRemainTerminal(t *testing.T) {
 			sweepFaults(t, setupScoutArchive, op)
 		})
 	}
+}
+
+// redactWord is a scrub rule "added later": it replaces one word in the stored JSON, and with
+// drop it also removes a session's last message, as a changed mapping might.
+func redactWord(word string, drop bool) func([]byte) ([]byte, int) {
+	pattern := regexp.MustCompile(`(?i)` + word)
+	return func(raw []byte) ([]byte, int) {
+		session, _ := scoutsessions.Parse(raw)
+		n := len(pattern.FindAllIndex(raw, -1))
+		out := pattern.ReplaceAllString(string(raw), "[redacted]")
+		if drop && len(session.Messages) > 1 {
+			cut := strings.LastIndex(out, `,{"id":"m`)
+			out = out[:cut] + "]}"
+		}
+		return []byte(out), n
+	}
+}
+
+func TestScoutStampChangeRereadsFilesAndRescrubsInPlace(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	// A run under a new stamp knows no last read, so every resident file is opened again.
+	run, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/Apps/Scout", scoutStampB, scoutBase.Add(2*time.Hour))
+	if err != nil || len(run.Known) != 0 {
+		t.Fatalf("%+v %v", run, err)
+	}
+	// The same bytes read under the new stamp are stored again on the same observation.
+	body := scoutBody("b-1", "Inbox triage", true, "triage the inbox", "two urgent threads")
+	in := scoutRead(t, scoutDevB, "b-1.json", body, scoutBase)
+	in.Raw = []byte(strings.ReplaceAll(body, "urgent", "[redacted]"))
+	clean, err := scoutsessions.Parse(in.Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Session, in.Redactions = &clean, 1
+	if got := mustCommitScout(t, s, run, in, scoutBase.Add(2*time.Hour)); got != "rescrubbed" {
+		t.Fatalf("outcome %s", got)
+	}
+	if hits, _, _ := s.ScoutSearch(ctx, "urgent", ScoutFilter{}); len(hits) != 0 {
+		t.Fatalf("old text still searchable: %+v", hits)
+	}
+	if got := mustCommitScout(t, s, run, in, scoutBase.Add(2*time.Hour)); got != "unchanged" {
+		t.Fatalf("second commit %s", got)
+	}
+	again := mustBeginScout(t, s, "/synthetic/Apps/Scout", scoutBase)
+	if _, ok := again.Known[ScoutFileKey{scoutDevA, "a-1.json"}]; !ok || len(again.Known) != 1 {
+		t.Fatalf("known under the old stamp: %+v", again.Known)
+	}
+}
+
+func scoutMessageIDs(t *testing.T, s *Store, observation int) []int64 {
+	t.Helper()
+	rows, err := s.db.QueryContext(context.Background(), `select id from scout_messages where observation_id=? order by ordinal`, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func TestScoutRuleAddedLaterReachesArchivedAndGoneSessions(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	// a-1 leaves OneDrive: its sessions are gone but archived.
+	run := mustBeginScout(t, s, "/synthetic/Apps/Scout", scoutBase.Add(2*time.Hour))
+	if n := mustFinishScout(t, s, run, ScoutRunEnd{Outcome: "complete", DevicesListed: true, SeenDevices: []string{scoutDevB}, ListedDevices: []string{scoutDevB}}, scoutBase.Add(2*time.Hour)); n != 4 {
+		t.Fatalf("gone %d", n)
+	}
+	before := scoutMessageIDs(t, s, 3)
+	if hits, _, err := s.ScoutSearch(ctx, "budget", ScoutFilter{}); err != nil || len(hits) != 1 || len(before) != 3 {
+		t.Fatalf("%+v %v %v", hits, before, err)
+	}
+	n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true))
+	if err != nil || n != 3 {
+		t.Fatalf("rescrubbed %d %v", n, err)
+	}
+	if hits, _, _ := s.ScoutSearch(ctx, "quarterly", ScoutFilter{}); len(hits) != 0 {
+		t.Fatalf("redacted word still searchable: %d", len(hits))
+	}
+	var raw string
+	var redactions, messages, stale int
+	if err := s.db.QueryRowContext(ctx, `select raw_json,redactions,message_count,(select count(*) from scout_observations where stamp<>?) from scout_observations where id=3`, scoutStampB).
+		Scan(&raw, &redactions, &messages, &stale); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "quarterly") || redactions != 2 || messages != 2 || stale != 0 {
+		t.Fatalf("raw %s redactions %d messages %d stale %d", raw, redactions, messages, stale)
+	}
+	// The kept messages keep their IDs; the dropped one left the FTS index too.
+	if after := scoutMessageIDs(t, s, 3); len(after) != 2 || after[0] != before[0] || after[1] != before[1] {
+		t.Fatalf("ids moved: %v to %v", before, after)
+	}
+	if hits, _, _ := s.ScoutSearch(ctx, "budget", ScoutFilter{}); len(hits) != 0 {
+		t.Fatalf("dropped message still searchable")
+	}
+	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true)); err != nil || n != 0 {
+		t.Fatalf("second pass %d %v", n, err)
+	}
+	// A mapping that grows a session adds messages under new IDs.
+	grow := func(raw []byte) ([]byte, int) {
+		return []byte(strings.Replace(string(raw), `]}`, `,{"id":"extra","role":"user","content":"an added synthetic turn"}]}`, 1)), 0
+	}
+	if n, err := s.RescrubScout(ctx, "stamp-c", grow); err != nil || n != 3 {
+		t.Fatalf("grow %d %v", n, err)
+	}
+	// One file's two versions share the added turn, so search returns it once per file.
+	if hits, _, _ := s.ScoutSearch(ctx, "added", ScoutFilter{}); len(hits) != 2 {
+		t.Fatalf("added turns: %d", len(hits))
+	}
+	if _, err := s.RescrubScout(ctx, "stamp-d", func([]byte) ([]byte, int) { return []byte("not json"), 0 }); !errors.Is(err, ErrScoutRescrub) {
+		t.Fatal(err)
+	}
+}
+
+func TestScoutRescrubFaultsLeaveArchiveUnchanged(t *testing.T) {
+	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
+		_, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true))
+		return err
+	})
+	grow := func(raw []byte) ([]byte, int) {
+		return []byte(strings.Replace(string(raw), `]}`, `,{"id":"extra","role":"user","content":"added"}]}`, 1)), 0
+	}
+	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
+		_, err := s.RescrubScout(ctx, scoutStampB, grow)
+		return err
+	})
 }

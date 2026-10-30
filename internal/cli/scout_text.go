@@ -86,7 +86,7 @@ func (rt *runtime) renderScoutCoverage(c *scoutCoverage) {
 }
 
 func (rt *runtime) renderScoutSync(r scoutSyncResult) {
-	_, _ = fmt.Fprintf(rt.stdout, "scout: %d admitted, %d unchanged, %d cloud-only (not read), %d failed, %d gone\n", r.Admitted, r.Unchanged, r.CloudOnly, r.Failed, r.Gone)
+	_, _ = fmt.Fprintf(rt.stdout, "scout: %d admitted, %d unchanged, %d rescrubbed, %d cloud-only (not read), %d failed, %d gone\n", r.Admitted, r.Unchanged, r.Rescrubbed, r.CloudOnly, r.Failed, r.Gone)
 	rows := [][]string{}
 	for _, f := range r.Folders {
 		rows = append(rows, []string{strconv.FormatInt(f.SourceID, 10), f.LocatorTail, f.Outcome, strconv.Itoa(f.Listed), strconv.Itoa(f.Admitted),

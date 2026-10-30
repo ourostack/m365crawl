@@ -5,15 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/scoutcapture"
 	"github.com/ourostack/m365crawl/internal/scoutsessions"
 	"github.com/ourostack/m365crawl/internal/store"
-	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // ScoutOptions select the app folders `scout sync` reads: Roots when given, otherwise the folders
@@ -29,17 +26,19 @@ type ScoutOptions struct {
 // could not be scanned; Reason says why) or cancelled. SourceID is zero for a folder refused before
 // it was registered.
 type ScoutFolderReport struct {
-	SourceID                                                                         int64
-	Root                                                                             string
-	Outcome, Reason                                                                  string
-	Devices, UnreadableDevices                                                       int
-	Listed, Admitted, Unchanged, CloudOnly, Unsafe, TooLarge, Failed, Gone, Redacted int
+	SourceID                                                                                     int64
+	Root                                                                                         string
+	Outcome, Reason                                                                              string
+	Devices, UnreadableDevices                                                                   int
+	Listed, Admitted, Unchanged, Rescrubbed, CloudOnly, Unsafe, TooLarge, Failed, Gone, Redacted int
 }
 
 // ScoutReport lists every folder in the order read. Discovered says the folders were found
-// rather than named.
+// rather than named. Rescrubbed counts archived observations, gone ones included, that were
+// stored under an older parser or scrub stamp and were scrubbed and mapped again in place.
 type ScoutReport struct {
 	Discovered bool
+	Rescrubbed int
 	Folders    []ScoutFolderReport
 }
 
@@ -48,6 +47,9 @@ var ErrScoutFolderNotFound = &scoutcapture.Error{Code: "scout_folder_not_found"}
 
 var (
 	scoutScan      = scoutcapture.Scan
+	scoutCheck     = scoutcapture.Check
+	scoutStamp     = scoutsessions.Stamp
+	scoutScrub     = scoutsessions.Scrub
 	scoutDiscover  = scoutcapture.Discover
 	scoutSupported = scoutcapture.Supported
 	scoutOpen      = store.Open
@@ -56,9 +58,10 @@ var (
 	scoutNow       = time.Now
 )
 
-// SyncScout reads the selected app folders into the archive. Each resident session file is read
-// once, digested, scrubbed of credential-looking values and parsed; cloud-only files are counted
-// and never opened. A folder that cannot be scanned is reported as failed and the others are still
+// SyncScout reads the selected app folders into the archive. First it scrubs and maps again every
+// archived observation stored under another stamp (scoutsessions.Stamp), gone files included.
+// Then each resident session file whose size, time or stamp changed is read once, digested,
+// scrubbed (scoutsessions.Scrub) and parsed; cloud-only files are counted and never opened. A folder that cannot be scanned is reported as failed and the others are still
 // read. The error is the archive's, the context's or discovery's; a run that fails after writing
 // still returns what it committed.
 func SyncScout(ctx context.Context, opts ScoutOptions) (ScoutReport, error) {
@@ -86,6 +89,9 @@ func SyncScout(ctx context.Context, opts ScoutOptions) (ScoutReport, error) {
 	if err != nil {
 		return report, err
 	}
+	if report.Rescrubbed, err = st.RescrubScout(ctx, scoutStamp(), scoutScrub); err != nil {
+		return report, errors.Join(err, st.Close())
+	}
 	for _, root := range roots {
 		folder, err := syncScoutFolder(ctx, st, root)
 		report.Folders = append(report.Folders, folder)
@@ -96,29 +102,21 @@ func SyncScout(ctx context.Context, opts ScoutOptions) (ScoutReport, error) {
 	return report, st.Close()
 }
 
-// scoutLayout resolves root and checks that it holds sessions/devices, so a mistyped folder is
-// refused before it is registered.
-func scoutLayout(root string) (string, bool) {
-	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return "", false
-	}
-	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", false
-	}
-	info, err := os.Lstat(filepath.Join(resolved, "sessions", "devices"))
-	return resolved, err == nil && info.IsDir()
-}
-
 func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFolderReport, error) {
 	out := ScoutFolderReport{Root: root, Outcome: "failed"}
-	resolved, ok := scoutLayout(root)
-	if !ok {
-		out.Reason = "scout_root_invalid"
+	// The layout is checked, inside the no-download guard, before the folder is registered, so
+	// a mistyped folder never becomes a source.
+	resolved, err := scoutCheck(ctx, root)
+	var coded *scoutcapture.Error
+	if errors.As(err, &coded) {
+		out.Reason = coded.Code
 		return out, nil
 	}
+	if err != nil {
+		return out, err
+	}
 	out.Root = resolved
-	run, err := st.BeginScoutRun(ctx, scoutPlatform, resolved, scoutNow())
+	run, err := st.BeginScoutRun(ctx, scoutPlatform, resolved, scoutStamp(), scoutNow())
 	if err != nil {
 		return out, err
 	}
@@ -132,7 +130,7 @@ func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFo
 		if f.State == scoutcapture.StateRead {
 			sum := sha256.Sum256(f.Data)
 			in.Digest = hex.EncodeToString(sum[:])
-			clean, redacted := teamsdesktop.Scrub(f.Data)
+			clean, redacted := scoutScrub(f.Data)
 			if session, err := scoutsessions.Parse(clean); err == nil {
 				in.Session, in.Raw, in.Redactions = &session, clean, redacted
 				out.Redacted += redacted
@@ -148,6 +146,8 @@ func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFo
 			out.Admitted++
 		case "unchanged":
 			out.Unchanged++
+		case "rescrubbed":
+			out.Rescrubbed++
 		case store.ScoutCloudOnly:
 			out.CloudOnly++
 		case store.ScoutUnsafe:
@@ -159,7 +159,7 @@ func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFo
 		}
 		return nil
 	})
-	end := store.ScoutRunEnd{DevicesListed: scanErr == nil, Listed: out.Listed, Admitted: out.Admitted, Unchanged: out.Unchanged,
+	end := store.ScoutRunEnd{DevicesListed: scanErr == nil, Listed: out.Listed, Admitted: out.Admitted, Unchanged: out.Unchanged + out.Rescrubbed,
 		CloudOnly: out.CloudOnly, Failed: out.Failed + out.Unsafe + out.TooLarge}
 	for _, device := range result.Devices {
 		end.SeenDevices = append(end.SeenDevices, device.ID)
@@ -168,7 +168,6 @@ func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFo
 		}
 	}
 	out.Devices, out.UnreadableDevices = len(end.SeenDevices), len(end.SeenDevices)-len(end.ListedDevices)
-	var coded *scoutcapture.Error
 	var fatal error
 	switch {
 	case scanErr == nil && end.Failed+end.CloudOnly+out.UnreadableDevices == 0:

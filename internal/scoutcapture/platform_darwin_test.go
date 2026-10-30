@@ -197,3 +197,25 @@ func TestLoadPolicyFailures(t *testing.T) {
 		t.Fatal("symbol failure ignored")
 	}
 }
+
+// Resolving links of the root is filesystem access too, so it runs with downloads off.
+func TestRootResolutionRunsInsideTheGuard(t *testing.T) {
+	root := appFolder(t)
+	policyOnce.Do(loadPolicy)
+	guarded := 0
+	swap(t, &evalSymlinks, func(path string) (string, error) {
+		if policyGet(policyType, policyThread) == materializeOff {
+			guarded++
+		}
+		return filepath.EvalSymlinks(path)
+	})
+	if _, err := Check(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := collect(t, Options{Root: root, MaxBytes: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if guarded != 2 {
+		t.Fatalf("%d of 2 resolutions ran with downloads off", guarded)
+	}
+}
