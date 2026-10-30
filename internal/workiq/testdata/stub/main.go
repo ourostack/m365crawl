@@ -291,7 +291,7 @@ func fetch(path string) (any, int) {
 				// Live: WorkIQ ended mid-run once, after 840 pages, with nothing m365crawl kept.
 				if die := os.Getenv("WORKIQ_ACQUISITION_DIE_ONCE"); die != "" || os.Getenv("WORKIQ_ACQUISITION_DIE_ALWAYS") != "" {
 					if die == "" || createOnce(die) {
-						_, _ = fmt.Fprintln(os.Stderr, "fatal: synthetic transport loss for user@example.invalid")
+						_, _ = fmt.Fprintln(os.Stderr, `fatal: transport connection lost for user@example.invalid subject="Private plan"`)
 						os.Exit(3)
 					}
 				}

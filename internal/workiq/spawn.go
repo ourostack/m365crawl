@@ -44,6 +44,7 @@ type diagnosticBuffer struct {
 	mu   sync.Mutex
 	b    []byte
 	tail []byte
+	cut  bool // the tail lost its start
 	exit string
 }
 
@@ -53,15 +54,17 @@ func (b *diagnosticBuffer) Write(p []byte) (int, error) {
 	if left := maxStderr - len(b.b); left > 0 {
 		b.b = append(b.b, p[:min(left, len(p))]...)
 	}
-	b.tail = append(b.tail, p[max(0, len(p)-2*diagnosticStderr):]...)
-	b.tail = b.tail[max(0, len(b.tail)-2*diagnosticStderr):]
+	b.tail = append(b.tail, p...)
+	if drop := len(b.tail) - 2*diagnosticStderr; drop > 0 {
+		b.tail, b.cut = b.tail[drop:], true
+	}
 	return len(p), nil
 }
 
-func (b *diagnosticBuffer) tailBytes() []byte {
+func (b *diagnosticBuffer) tailBytes() ([]byte, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return append([]byte(nil), b.tail...)
+	return append([]byte(nil), b.tail...), b.cut
 }
 
 func (b *diagnosticBuffer) setExit(state *os.ProcessState) {

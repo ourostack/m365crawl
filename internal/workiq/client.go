@@ -38,7 +38,8 @@ type Client struct {
 	drained chan struct{}
 	heard   atomic.Bool // the child wrote at least one byte to stdout
 	ready   atomic.Bool // the handshake finished: a later child exit is a lost session
-	junk    []byte      // the first non-JSON stdout line, for the diagnostic; set before its frame
+	junk    []byte      // the start of the first non-JSON stdout line, for the diagnostic; set before its frame
+	junkCut bool        // that line was longer than junk
 }
 
 // listener records that stdout produced any byte, even an incomplete line.
@@ -127,7 +128,7 @@ func (c *Client) read(ctx context.Context) {
 		var msg wireMessage
 		_, parseErr := budget.Parse(raw)
 		if parseErr != nil || json.Unmarshal(raw, &msg) != nil || msg.RPC != "2.0" {
-			c.junk = append([]byte(nil), raw[:min(len(raw), 4*diagnosticStdout)]...)
+			c.junk, c.junkCut = append([]byte(nil), raw[:min(len(raw), 4*diagnosticStdout)]...), len(raw) > 4*diagnosticStdout
 			c.deliver(frame{err: failure("workiq_protocol")})
 			return
 		}

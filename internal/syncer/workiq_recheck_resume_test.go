@@ -199,3 +199,43 @@ func TestWorkIQMailRecheckContinuesAfterEveryResumableStopAndFailedStart(t *test
 		})
 	}
 }
+
+// A recheck run that admitted its cursors and then could not save the census confirmation is not
+// resumable: the next run sees admitted cursors and must restart the rebuild, so "run again" would
+// not continue it. A busy archive before admission, or outside a recheck, stays resumable.
+func TestWorkIQRecheckStoppedAfterAdmissionIsNotResumable(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	old := workIQConfirmCensus
+	t.Cleanup(func() { workIQConfirmCensus = old })
+	workIQConfirmCensus = func(context.Context, string, int64, int) (bool, error) {
+		return false, workIQFailure("workiq_archive_busy")
+	}
+	t.Setenv("WORKIQ_ACQUISITION_REMOVE_ONE", "1")
+	sawRecheck, sawPlain := false, false
+	for run := 0; run < 4 && !sawRecheck; run++ {
+		report, err := RunWorkIQ(context.Background(), options)
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != "workiq_archive_busy" {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		if report.Counts["census_rechecks"] > 0 {
+			sawRecheck = true
+			if report.Resumable {
+				t.Fatal("a recheck stopped after admitting its cursors invited a rerun that would restart it")
+			}
+		} else {
+			sawPlain = true
+			if !report.Resumable {
+				t.Fatal("a busy archive outside a recheck lost its resumable stop")
+			}
+		}
+	}
+	if !sawRecheck || !sawPlain {
+		t.Fatal("the fixture did not reach both a plain and a recheck run", sawRecheck, sawPlain)
+	}
+}

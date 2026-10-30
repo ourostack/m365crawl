@@ -147,6 +147,15 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 	return report, resultErr
 }
 
+// workIQConfirmCensus confirms a finished mail census in bounded batches; a test seam.
+var workIQConfirmCensus = func(ctx context.Context, path string, attempt int64, limit int) (done bool, err error) {
+	err = workIQWrite(ctx, path, func(writeCtx context.Context, s *store.Store) (err error) {
+		done, err = s.ConfirmWorkIQMailCensusIfFull(writeCtx, attempt, limit)
+		return err
+	})
+	return done, err
+}
+
 // workIQResumableCodes are the mail and chat sync stops that keep their position, so the same command run
 // again continues from it.
 var workIQResumableCodes = map[string]bool{"workiq_page_limit": true, "workiq_archive_busy": true, "workiq_retry_later": true}
@@ -230,18 +239,19 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 			}
 		}
 	}
+	// admitted says this run's traversal finished and admitted its cursors; after that a recheck
+	// can no longer be continued, only restarted.
+	admitted := false
 	if err == nil {
 		err = acquireWorkIQMail(ctx, options, session, attempt, binding.Fact.ID, &account)
+		admitted = err == nil
 	}
 	cleanupErr := session.close() // close before absence confirmation or positive outcome
 	err = errors.Join(err, cleanupErr)
 	if err == nil && len(account.Gaps) == 0 {
 		done, limit := false, 128
 		for !done {
-			err = workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) (err error) {
-				done, err = s.ConfirmWorkIQMailCensusIfFull(writeCtx, attempt, limit)
-				return err
-			})
+			done, err = workIQConfirmCensus(ctx, options.DBPath, attempt, limit)
 			if err != nil {
 				if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && limit > 1 {
 					limit /= 2
@@ -314,9 +324,10 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	for name, n := range account.Gaps {
 		report.Gaps[name] += n
 	}
-	// Only a stop that kept its position is resumable; an owed recheck continues after a page-budget
-	// stop rather than resetting, so the next run never discards this run's progress.
-	report.Resumable = workIQResumableCodes[code] && account.Gaps[code] > 0 && cleanupErr == nil && persistErr == nil
+	// Only a stop that kept its position is resumable; an owed recheck continues across such stops
+	// rather than resetting. A recheck that already admitted its cursors cannot be continued, so a
+	// later stop in it (a busy archive while confirming its census) is not resumable.
+	report.Resumable = workIQResumableCodes[code] && account.Gaps[code] > 0 && cleanupErr == nil && persistErr == nil && (!fullRecheck || !admitted)
 	var expired *workIQExpired
 	if errors.As(err, &expired) && cleanupErr == nil && persistErr == nil {
 		return retryWorkIQBaseline(ctx, options, report, expired)

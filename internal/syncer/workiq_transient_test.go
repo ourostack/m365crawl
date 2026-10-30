@@ -65,7 +65,7 @@ func TestWorkIQSessionLostEveryTimeIsRetryLaterWithADiagnostic(t *testing.T) {
 		t.Fatalf("repeated lost sessions: %v %+v", err, report)
 	}
 	d := report.Accounts[0].Diagnostic
-	if d == nil || d.Exit != "exit status 3" || !strings.Contains(d.Stderr, "fatal: synthetic transport loss") || strings.Contains(d.Stderr, "example.invalid") {
+	if d == nil || d.Exit != "exit status 3" || d.Stderr != "fatal: transport connection lost for [redacted]" {
 		t.Fatalf("diagnostic = %+v", d)
 	}
 	if count(t, db, `select count(*) from meta where key like 'workiq_diagnostic:%' and json_extract(value,'$.exit')='exit status 3'`) != 1 {
