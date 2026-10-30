@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -125,4 +126,36 @@ func (s *Store) OWAMailSourceCount(ctx context.Context, account string) (int, er
 	var n int
 	err := s.db.QueryRowContext(ctx, `select count(*) from mail_source_ids where account=?`, account).Scan(&n)
 	return n, err
+}
+
+// OWAProfileMailState combines the mail state of every mailbox account the profile held at its
+// last attributed read: the first failure, read only when every mailbox was read (at the oldest
+// read), and how many mailboxes there are.
+func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailState, int, error) {
+	accounts, err := s.OWAMailboxes(ctx, scope)
+	if err != nil {
+		return MailState{}, 0, err
+	}
+	if len(accounts) == 0 {
+		accounts = []string{scope}
+	}
+	out := MailState{Read: true}
+	for _, a := range accounts {
+		st, err := s.MailState(ctx, a)
+		if err != nil {
+			return MailState{}, 0, err
+		}
+		if st.Failure != nil && out.Failure == nil {
+			out.Failure = st.Failure
+		}
+		if !st.Read {
+			out.Read = false
+		} else if out.ReadAt.IsZero() || st.ReadAt.Before(out.ReadAt) {
+			out.ReadAt = st.ReadAt
+		}
+	}
+	if !out.Read || out.Failure != nil {
+		out.Read, out.ReadAt = false, time.Time{}
+	}
+	return out, len(accounts), nil
 }

@@ -89,3 +89,35 @@ func TestOWAMailboxSetAndSourceOverlap(t *testing.T) {
 		t.Fatalf("overlap crossed accounts = %d, %v", n, err)
 	}
 }
+
+func TestOWAProfileMailStateCombinesMailboxes(t *testing.T) {
+	s, ctx := newStore(t), context.Background()
+	second := mailAcct + "/mailbox-b"
+	if st, n, err := s.OWAProfileMailState(ctx, mailAcct); err != nil || n != 1 || st.Read {
+		t.Fatalf("unread single = %+v %d %v", st, n, err)
+	}
+	if err := s.SetMailRead(ctx, mailAcct, mailT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); !st.Read || n != 1 || !st.ReadAt.Equal(mailT0.Add(time.Hour)) {
+		t.Fatalf("read single = %+v", st)
+	}
+	if err := s.SetOWAMailboxes(ctx, mailAcct, []string{mailAcct, second}); err != nil {
+		t.Fatal(err)
+	}
+	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); st.Read || n != 2 {
+		t.Fatalf("one unread mailbox reported read: %+v", st)
+	}
+	if err := s.SetMailRead(ctx, second, mailT0); err != nil {
+		t.Fatal(err)
+	}
+	if st, _, _ := s.OWAProfileMailState(ctx, mailAcct); !st.Read || !st.ReadAt.Equal(mailT0) {
+		t.Fatalf("oldest read = %+v", st)
+	}
+	if err := s.SetMailFailure(ctx, second, OutlookFailure{Code: "outlook_mail_layout_unsupported"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _, _ := s.OWAProfileMailState(ctx, mailAcct); st.Read || st.Failure == nil || st.Failure.Code != "outlook_mail_layout_unsupported" {
+		t.Fatalf("failed mailbox hidden: %+v", st)
+	}
+}

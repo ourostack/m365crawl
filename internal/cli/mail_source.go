@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 
@@ -119,7 +120,7 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 	for _, p := range s.native {
 		detail := "profile " + p.Name + ": cached paths readable; mail not read yet"
 		if st != nil {
-			state, err := st.MailState(rt.ctx, "outlook/"+p.Name)
+			state, mailboxes, err := st.OWAProfileMailState(rt.ctx, "outlook/"+p.Name)
 			switch {
 			case err != nil:
 				detail = "profile " + p.Name + ": cannot read the archived mail state"
@@ -133,6 +134,9 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 					detail += "; " + owaStaleDetail(stale, err)
 					c.Warn, c.Fix = true, owaStaleFix(err)
 				}
+			}
+			if err == nil && mailboxes > 1 {
+				detail += fmt.Sprintf(" (%d mailboxes)", mailboxes)
 			}
 		}
 		calendarDetail := "calendar not read yet"
