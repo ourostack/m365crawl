@@ -33,7 +33,7 @@ func (calendarAttendeesGroup) Help() string {
 		"Only sync acquires input. Default explicit discovery is Mac HxStore; --root accepts a supported copied <root>/<profile>/HxStore.hxd input. Windows/OWA native acquisition is not qualified. Shared ordinary Outlook capture refreshes registered lanes only, respecting its copy interval.\n" +
 		"list, show and sources never refresh, discover, register, copy or migrate, even with --max-age 1ns. --history includes retained associated copies without making them current. Absence is not evidence that a person or meeting does not exist.\n" +
 		attendeeAccountContext + "\n" + attendeeLocalInspection + "\n" + attendeeSourcesContext + "\n" +
-		"native_attendee_evidence survives fields, zero hits and preview limits. Native physical rows are not multiplied by event bindings. Own-snapshot ambiguity is computed before parent/100-row projection. Full-record/capture routes retain the selected absolute archive and --max-age 0. Current source capture and own_captures recovery are distinct: own routes are deduplicated from at most100 rows plus100 bindings and survive --fields."
+		"native_attendee_evidence survives fields, zero hits and preview limits. Native physical rows are not multiplied by event bindings. Own-snapshot ambiguity is computed before parent/100-row projection. Full-record/capture routes retain the selected absolute archive and --no-sync. Current source capture and own_captures recovery are distinct: own routes are deduplicated from at most100 rows plus100 bindings and survive --fields."
 }
 
 type attendeeSyncCmd struct {

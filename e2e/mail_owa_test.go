@@ -82,7 +82,7 @@ func TestMailOWACommands(t *testing.T) {
 	e := newEnv(t)
 	root := copyOWAFixture(t, "calendar")
 	run := func(args ...string) result {
-		return e.cmd(append([]string{"--outlook-root", root, "--max-age", "0"}, args...)...)
+		return e.cmd(append([]string{"--outlook-root", root, "--no-sync"}, args...)...)
 	}
 	sync := ok(t, run("sync"))
 	if strings.Contains(run("status").stdout, "credential") {
@@ -191,7 +191,7 @@ func TestMailOWACodedLayoutRefusal(t *testing.T) {
 			if !strings.Contains(res.stdout+res.stderr, `"code":"outlook_mail_layout_unsupported"`) {
 				t.Fatalf("missing coded refusal: %s %s", res.stdout, res.stderr)
 			}
-			its, _ := list(t, e.cmd("--max-age", "0", "mail", "list"))
+			its, _ := list(t, e.cmd("--no-sync", "mail", "list"))
 			if len(its) != 0 {
 				t.Fatal("refusal archived mail")
 			}

@@ -23,10 +23,11 @@ import (
 type meta struct {
 	SourceHealth      *[]store.SourceHealth `json:"source_health,omitempty"`
 	ArchiveAgeSeconds *int64                `json:"archive_age_seconds"`
-	// ImplicitSync is present when this read's implicit sync found another m365crawl run holding
-	// the archive lock: waited_for_other_sync (that run synced while this read waited, so the
-	// result is fresh) or other_sync_in_progress (the wait ran out; the result is the archive as
-	// it was, and a notice says so).
+	// ImplicitSync says what the implicit sync did before this read answered: ran, skipped_fresh
+	// (younger than --max-age), disabled (--no-sync or a zero max age), waited_for_other_sync
+	// (another m365crawl run synced while this read waited, so the result is fresh) or
+	// other_sync_in_progress (the wait ran out; the result is the archive as it was, and a notice
+	// says so). Omitted on reads that never sync first by design.
 	ImplicitSync string `json:"implicit_sync,omitempty"`
 	// Synced is present only when this read ran the implicit sync first (--max-age): how long the
 	// sync took and how it ended. Absent when the archive was fresh enough to read as it was.
@@ -436,11 +437,11 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 	return now.Add(-d).UTC(), nil
 }
 
-// parseMaxAge reads --max-age; 0 disables the implicit sync.
+// parseMaxAge reads --max-age; 0 turns the implicit sync off, like --no-sync.
 func parseMaxAge(s string) (time.Duration, error) {
 	d, err := parseDuration(s)
 	if err != nil {
-		return 0, fmt.Errorf("--max-age %q: use a duration such as 15m, 2h, 1d, or 0 to disable", s)
+		return 0, fmt.Errorf("--max-age %q: use a duration such as 15m, 2h or 1d (--no-sync reads the archive as it is)", s)
 	}
 	return d, nil
 }

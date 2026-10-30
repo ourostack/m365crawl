@@ -25,7 +25,7 @@ m365crawl search "launch checklist"
 m365crawl notes show note:ID
 ```
 
-Ordinary note reads refresh registered sources only. New indexes need another explicit `notes sync`; `--max-age 0` performs no capture. Account, author, chat-only and mail-only filters exclude unresolved notes from combined search with a notice. Use `--source notes` for an independent notes-only search that does not require Teams or Outlook.
+Ordinary note reads refresh registered sources only. New indexes need another explicit `notes sync`; `--no-sync` performs no capture. Account, author, chat-only and mail-only filters exclude unresolved notes from combined search with a notice. Use `--source notes` for an independent notes-only search that does not require Teams or Outlook.
 
 <p align="center"><img src="indexed-notes.png" alt="Actual synthetic m365crawl output: focused indexed-note search, then a note with text, OCR, native hierarchy, flags and source coverage" width="1000"></p>
 
@@ -62,7 +62,7 @@ bindings survive preview100, fields and zero hits. Physical observation IDs are
 unique per result; multiple parent bindings are separate relationships, not
 additional people. Exact full-record SQL extracts one complete indexed native
 object; full-capture SQL reads its immutable snapshot. Follow emitted routes
-with their selected absolute archive and `--max-age 0`.
+with their selected absolute archive and `--no-sync`.
 Use independent `own_captures` routes to recover the full historical snapshot,
 including bindings beyond the100-entry preview. These deduplicated routes survive
 fields and are bounded by at most100 rows plus100 bindings; current source health

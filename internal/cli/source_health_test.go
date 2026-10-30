@@ -92,7 +92,7 @@ func TestSourceHealthCommandScopeAndProjection(t *testing.T) {
 			}
 			code, out, stderr := e.mail(append(flags, tc.args...)...)
 			if tc.args[0] == "drafts" {
-				code, out, stderr = e.runDefault(append([]string{"--json", "--max-age", "0"}, tc.args...)...)
+				code, out, stderr = e.runDefault(append([]string{"--json", "--no-sync"}, tc.args...)...)
 			}
 			if code != 0 || stderr != "" {
 				t.Fatalf("exit=%d stderr=%q", code, stderr)

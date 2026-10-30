@@ -54,7 +54,7 @@ func TestNotesCLIIndependentOfflineListShowAndCoverage(t *testing.T) {
 		{"notes", "show", id},
 		{"notes", "sources"},
 	} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0", "--outlook-root", "/irrelevant/bad"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync", "--outlook-root", "/irrelevant/bad"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v exit%d: %s", args, code, stderr)
 		}
@@ -66,7 +66,7 @@ func TestNotesCLIIndependentOfflineListShowAndCoverage(t *testing.T) {
 			t.Fatal("notes-only path ran legacy freshness")
 		}
 	}
-	code, stdout, stderr := e.run("--max-age", "0", "--fields", "id,title", "--max-text", "5", "notes", "list")
+	code, stdout, stderr := e.run("--no-sync", "--fields", "id,title", "--max-text", "5", "notes", "list")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -74,7 +74,7 @@ func TestNotesCLIIndependentOfflineListShowAndCoverage(t *testing.T) {
 	if len(items(t, doc)[0]) != 2 || doc["source_coverage"] == nil {
 		t.Fatal("field shaping hid source coverage")
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "--format", "text", "notes", "list")
+	code, stdout, stderr = e.run("--no-sync", "--format", "text", "notes", "list")
 	if code != 0 || !strings.Contains(stdout, id) || !strings.Contains(stdout, "indexed") {
 		t.Fatalf("text notes: %d/%s/%s", code, stdout, stderr)
 	}
@@ -83,7 +83,7 @@ func TestNotesCLIIndependentOfflineListShowAndCoverage(t *testing.T) {
 func TestNotesSearchOnlyBypassesLegacyAndMixedParticipationMatrix(t *testing.T) {
 	e := newEnv(t)
 	id := seedNotesCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "--outlook-root", "/irrelevant/bad", "search", "Quarterly", "--source", "notes")
+	code, stdout, stderr := e.run("--no-sync", "--outlook-root", "/irrelevant/bad", "search", "Quarterly", "--source", "notes")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -97,13 +97,13 @@ func TestNotesSearchOnlyBypassesLegacyAndMixedParticipationMatrix(t *testing.T) 
 		{"--conversation", "thread"}, {"--folder", "Inbox"}, {"--mentions-me"},
 		{"--direct-mentions"}, {"--include-system"}, {"--include-deleted"}, {"--html"},
 	} {
-		args := append([]string{"--max-age", "0", "search", "Quarterly", "--source", "notes"}, flag...)
+		args := append([]string{"--no-sync", "search", "Quarterly", "--source", "notes"}, flag...)
 		if code, _, stderr := e.run(args...); code != 2 {
 			t.Fatalf("explicit notes accepted %v: %d/%s", flag, code, stderr)
 		}
 	}
 	for _, flag := range [][]string{{"--account", "tenant/user"}, {"--from", "someone"}, {"--mentions-me"}, {"--folder", "Inbox"}} {
-		args := append([]string{"--max-age", "0", "search", "Quarterly"}, flag...)
+		args := append([]string{"--no-sync", "search", "Quarterly"}, flag...)
 		code, stdout, stderr := e.run(args...)
 		if code != 0 {
 			t.Fatalf("all-source narrowing %v: %d/%s", flag, code, stderr)
@@ -122,12 +122,12 @@ func TestNotesSearchOnlyBypassesLegacyAndMixedParticipationMatrix(t *testing.T) 
 
 func TestNotesCLIErrorsEmptyNoMatchesAndHelp(t *testing.T) {
 	e := newEnv(t)
-	code, stdout, stderr := e.run("--max-age", "0", "notes", "list")
+	code, stdout, stderr := e.run("--no-sync", "notes", "list")
 	if code != 0 || decode(t, stdout)["note"] == nil {
 		t.Fatalf("never-captured state: %d/%s/%s", code, stdout, stderr)
 	}
 	seedNotesCLI(t, e)
-	code, stdout, stderr = e.run("--max-age", "0", "notes", "search", "nomatchword")
+	code, stdout, stderr = e.run("--no-sync", "notes", "search", "nomatchword")
 	if code != 0 || decode(t, stdout)["source_coverage"] == nil || len(items(t, decode(t, stdout))) != 0 {
 		t.Fatalf("no-hit coverage: %d/%s/%s", code, stdout, stderr)
 	}
@@ -136,7 +136,7 @@ func TestNotesCLIErrorsEmptyNoMatchesAndHelp(t *testing.T) {
 		{"notes", "list", "--source", "-1"}, {"notes", "list", "--limit", "0"},
 		{"--account", "tenant/user", "notes", "list"},
 	} {
-		if code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code == 0 {
+		if code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...); code == 0 {
 			t.Fatalf("invalid note request accepted %v: %s", args, stderr)
 		}
 	}
@@ -151,7 +151,7 @@ func TestNotesCLIErrorsEmptyNoMatchesAndHelp(t *testing.T) {
 func TestNotesSearchParticipationNeverClaimsChatOnlyTotal(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "search", "Fixture", "--limit", "1")
+	code, stdout, stderr := e.run("--no-sync", "search", "Fixture", "--limit", "1")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -164,7 +164,7 @@ func TestNotesSearchParticipationNeverClaimsChatOnlyTotal(t *testing.T) {
 func TestNotesShowTextIncludesNativeDetailsNotLegacyFreshness(t *testing.T) {
 	e := newEnv(t)
 	id := seedNotesCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "--format", "text", "notes", "show", id)
+	code, stdout, stderr := e.run("--no-sync", "--format", "text", "notes", "show", id)
 	if code != 0 {
 		t.Fatal(stderr)
 	}

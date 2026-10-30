@@ -223,7 +223,7 @@ func TestSearchTranscriptsTextOutput(t *testing.T) {
 			suffix = "color"
 			t.Setenv("CLICOLOR_FORCE", "1")
 		}
-		code, out, errOut := e.run("--format", "text", "--max-age", "0", "search", "hello", "--until", "2023-11-14T23:00:00Z")
+		code, out, errOut := e.run("--format", "text", "--no-sync", "search", "hello", "--until", "2023-11-14T23:00:00Z")
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
@@ -235,7 +235,7 @@ func TestSearchTranscriptsFailuresAreReported(t *testing.T) {
 	for _, broken := range []string{"drop table transcript_fts", "alter table transcript_entries rename column text to said"} {
 		e := searchTranscriptEnv(t)
 		e.exec(broken)
-		code, _, errOut := e.run("--max-age", "0", "--json", "search", "hello", "--source", "transcripts")
+		code, _, errOut := e.run("--no-sync", "--json", "search", "hello", "--source", "transcripts")
 		if code == 0 || errorOf(t, errOut)["code"] == nil {
 			t.Fatalf("%s: a broken transcript table must fail the search: %d %s", broken, code, errOut)
 		}

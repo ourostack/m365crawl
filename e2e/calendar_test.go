@@ -13,7 +13,7 @@ import (
 // machine that never synced gets.
 func TestE2ECalendar(t *testing.T) {
 	e := newEnv(t)
-	before := mustJSON(t, e.cmd("calendar", "--max-age", "0").stdout)
+	before := mustJSON(t, e.cmd("calendar", "--no-sync").stdout)
 	if before["needs_sync"] != true || before["coverage_gap"] != true {
 		t.Fatalf("before a sync: %v", before)
 	}
@@ -32,7 +32,7 @@ func TestE2ECalendar(t *testing.T) {
 	if ev["event_id"] != id || ev["subject"] != first["subject"] {
 		t.Fatalf("event: %v", ev)
 	}
-	res := e.cmd("calendar", "event", "ev_nothing", "--max-age", "0")
+	res := e.cmd("calendar", "event", "ev_nothing", "--no-sync")
 	mustExit(t, res, 2)
 }
 
@@ -41,7 +41,7 @@ func TestE2ECalendar(t *testing.T) {
 // adds the Outlook row, and `doctor` reports the Outlook source without failing.
 func TestE2ECalendarSources(t *testing.T) {
 	e := newEnv(t)
-	before := mustJSON(t, e.cmd("calendar", "sources", "--max-age", "0").stdout)
+	before := mustJSON(t, e.cmd("calendar", "sources", "--no-sync").stdout)
 	if before["needs_sync"] != true {
 		t.Fatalf("before a sync: %v", before)
 	}
@@ -72,7 +72,7 @@ func TestE2ECalendarSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExit(t, e.cmd("--outlook-root", root, "sync"), 0)
-	all := ok(t, e.cmd("--outlook-root", root, "calendar", "sources", "--max-age", "0"))
+	all := ok(t, e.cmd("--outlook-root", root, "calendar", "sources", "--no-sync"))
 	var outlook map[string]any
 	for _, it := range all["items"].([]any) {
 		if m := it.(map[string]any); m["source"] == "outlook" {
@@ -127,7 +127,7 @@ func TestE2ECalendarOutlook(t *testing.T) {
 	e := newEnv(t)
 	root := outlookRoot(t)
 	cal := func(extra ...string) map[string]any {
-		return ok(t, e.cmd(append([]string{"calendar", "--outlook-root", root, "--max-age", "0", "--limit", "200"}, extra...)...))
+		return ok(t, e.cmd(append([]string{"calendar", "--outlook-root", root, "--no-sync", "--limit", "200"}, extra...)...))
 	}
 	mustExit(t, e.cmd("sync", "--outlook-root", root), 0)
 
@@ -165,7 +165,7 @@ func TestE2ECalendarOutlook(t *testing.T) {
 	if far["coverage_gap"] != true || len(far["uncovered_days"].([]any)) != 2 {
 		t.Fatalf("%v", far)
 	}
-	res := e.cmd("calendar", "--outlook-root", root, "--max-age", "0", "--format", "text", "--from", "2040-01-01", "--days", "2")
+	res := e.cmd("calendar", "--outlook-root", root, "--no-sync", "--format", "text", "--from", "2040-01-01", "--days", "2")
 	mustExit(t, res, 0)
 	if !strings.Contains(res.stdout, "no cached data covers 2 day(s) of this range: 2040-01-01, 2040-01-02") {
 		t.Fatalf("text: %s", res.stdout)

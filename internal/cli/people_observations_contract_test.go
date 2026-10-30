@@ -46,25 +46,25 @@ func TestPeopleObservationsHelpValidationAndFilteredScope(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"--max-age", "0", "people", "show", "mail:fixture@example.invalid"},
-		{"--max-age", "0", "people", "show", "person-observation:999"},
-		{"--max-age", "0", "people", "show", "person-observation:1", "--fields", "wrong"},
-		{"--max-age", "0", "people", "sources", "--fields", "wrong"},
+		{"--no-sync", "people", "show", "mail:fixture@example.invalid"},
+		{"--no-sync", "people", "show", "person-observation:999"},
+		{"--no-sync", "people", "show", "person-observation:1", "--fields", "wrong"},
+		{"--no-sync", "people", "sources", "--fields", "wrong"},
 		{"people", "--limit", "0"},
 	} {
 		if code, _, _ := e.run(args...); code != 2 {
 			t.Fatalf("validation: %v exit%d", args, code)
 		}
 	}
-	code, out, _ := e.run("--max-age", "0", "people", "--limit", "1", "--fields", "id,identity_state")
+	code, out, _ := e.run("--no-sync", "people", "--limit", "1", "--fields", "id,identity_state")
 	if code != 0 || !strings.Contains(out, `"truncated":true`) {
 		t.Fatalf("merged truncation: %s", out)
 	}
-	code, out, _ = e.run("--max-age", "0", "people", "show", "person-observation:1")
+	code, out, _ = e.run("--no-sync", "people", "show", "person-observation:1")
 	if code != 0 || !strings.Contains(out, `"conflicts":[{`) {
 		t.Fatalf("detail conflicts: %s", out)
 	}
-	if code, _, _ := e.run("--max-age", "0", "people", "--query", "person-observation:1"); code != 0 {
+	if code, _, _ := e.run("--no-sync", "people", "--query", "person-observation:1"); code != 0 {
 		t.Fatal("exact stable ID query failed")
 	}
 }

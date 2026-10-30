@@ -70,5 +70,6 @@
       "entries": []
     }
   ],
-  "archive_age_seconds": 0
+  "archive_age_seconds": 0,
+  "implicit_sync": "disabled"
 }

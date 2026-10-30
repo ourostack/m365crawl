@@ -55,7 +55,7 @@ func TestEngageClockOverflowCLIAndSQL(t *testing.T) {
 		if item["starter_updated_at"] == nil {
 			t.Fatal("known clock collapsed to null")
 		}
-		if code, full, stderr := e.run("--max-age", "0", "sql", item["full_text_sql"].(string)); code != 0 || !strings.Contains(full, item["starter_updated_raw"].(string)) {
+		if code, full, stderr := e.run("--no-sync", "sql", item["full_text_sql"].(string)); code != 0 || !strings.Contains(full, item["starter_updated_raw"].(string)) {
 			t.Fatalf("%s %s", full, stderr)
 		}
 	}

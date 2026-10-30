@@ -80,7 +80,7 @@ func TestEngageOfflineAndZeroHitCoverage(t *testing.T) {
 		t.Fatal(stderr)
 	}
 	item := decode(t, out)["items"].([]any)[0].(map[string]any)
-	if code, full, stderr := e.run("--max-age", "0", "sql", item["full_text_sql"].(string)); code != 0 || !strings.Contains(full, "lastblockword") {
+	if code, full, stderr := e.run("--no-sync", "sql", item["full_text_sql"].(string)); code != 0 || !strings.Contains(full, "lastblockword") {
 		t.Fatalf("full SQL %s %s", full, stderr)
 	}
 	after, err := os.ReadFile(e.db)

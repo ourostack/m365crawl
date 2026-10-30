@@ -124,7 +124,7 @@ func TestLoopHelpAndFailedSourceFollowup(t *testing.T) {
 	if doc["failed"] != float64(1) || doc["projected"] != float64(1) {
 		t.Fatalf("loop sync counts: %v", doc)
 	}
-	doc = decode(t, runOK(t, e, "--max-age", "0", "loop", "sources"))
+	doc = decode(t, runOK(t, e, "--no-sync", "loop", "sources"))
 	sources := items(t, doc)
 	if len(sources) != 2 {
 		t.Fatalf("sources: %v", sources)
@@ -149,16 +149,16 @@ func TestLoopHelpAndFailedSourceFollowup(t *testing.T) {
 			}
 		}
 	}
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "sources")
+	text := runOK(t, e, "--no-sync", "--format", "text", "loop", "sources")
 	if !strings.Contains(text, "loop sync --source-id") || !strings.Contains(text, "loop_cache_value_missing") {
 		t.Fatalf("text sources lack the retry route:\n%s", text)
 	}
-	list := decode(t, runOK(t, e, "--max-age", "0", "loop", "list"))
+	list := decode(t, runOK(t, e, "--no-sync", "loop", "list"))
 	if len(items(t, list)) != 0 || !strings.Contains(list["note"].(string), "loop sources") || len(loopCoverageSources(t, list)) != 2 {
 		t.Fatalf("registered sources without channels: %v", list)
 	}
 	empty := newEnv(t)
-	none := decode(t, runOK(t, empty, "--max-age", "0", "loop", "list"))
+	none := decode(t, runOK(t, empty, "--no-sync", "loop", "list"))
 	if !strings.Contains(none["note"].(string), "loop sync") || len(loopCoverageSources(t, none)) != 0 {
 		t.Fatalf("no registration note: %v", none)
 	}
@@ -192,7 +192,7 @@ func TestLoopArchiveOnlyRawMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := archiveDigest(t, e.db)
-	list := decode(t, runOK(t, e, "--max-age", "0", "loop", "list"))
+	list := decode(t, runOK(t, e, "--no-sync", "loop", "list"))
 	rows := items(t, list)
 	if len(rows) != 1 || rows[0]["matches_retained_value"] != false || rows[0]["retained"] != false ||
 		rows[0]["raw_updated_at"] != "2026-10-12T05:00:00Z" || rows[0]["text"] != "xray retained words" || rows[0]["modified_at"] != nil ||
@@ -202,13 +202,13 @@ func TestLoopArchiveOnlyRawMatch(t *testing.T) {
 	if source := loopCoverageSources(t, list)[0]; source["snapshot_match"] != "differs" || source["raw_present"] != true {
 		t.Fatalf("archive-only coverage: %v", source)
 	}
-	show := decode(t, runOK(t, e, "--max-age", "0", "loop", "show", rows[0]["id"].(string)))
+	show := decode(t, runOK(t, e, "--no-sync", "loop", "show", rows[0]["id"].(string)))
 	detail := items(t, show)
 	if len(detail) != 1 || detail[0]["id"] != rows[0]["id"] || detail[0]["matches_retained_value"] != false ||
 		detail[0]["raw_updated_at"] != "2026-10-12T05:00:00Z" || loopCoverageSources(t, show)[0]["snapshot_match"] != "differs" {
 		t.Fatalf("archive-only detail: %v", show)
 	}
-	zero := decode(t, runOK(t, e, "--max-age", "0", "loop", "search", "nothingmatchesthis"))
+	zero := decode(t, runOK(t, e, "--no-sync", "loop", "search", "nothingmatchesthis"))
 	if len(items(t, zero)) != 0 || loopCoverageSources(t, zero)[0]["snapshot_match"] != "differs" ||
 		loopCoverageSources(t, zero)[0]["raw_updated_at"] != "2026-10-12T05:00:00Z" {
 		t.Fatalf("zero-hit coverage: %v", zero)
@@ -218,7 +218,7 @@ func TestLoopArchiveOnlyRawMatch(t *testing.T) {
 	}
 	// An age-permitted read then projects Y; X stays inspectable by its stable ID as retained.
 	runOK(t, e, "loop", "sync")
-	retained := items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "show", rows[0]["id"].(string))))
+	retained := items(t, decode(t, runOK(t, e, "--no-sync", "loop", "show", rows[0]["id"].(string))))
 	if retained[0]["retained"] != true || retained[0]["text"] != "xray retained words" {
 		t.Fatalf("retained X: %v", retained)
 	}
@@ -250,11 +250,11 @@ func TestLoopExactSequenceTransport(t *testing.T) {
 			}
 		}
 	}
-	check("plain", exactDecode(t, runOK(t, e, "--max-age", "0", "loop", "list"))["items"].([]any))
-	check("fields", exactDecode(t, runOK(t, e, "--max-age", "0", "--fields", "sequence,text", "loop", "search", "sequence"))["items"].([]any))
-	check("shared", exactDecode(t, runOK(t, e, "--max-age", "0", "search", "sequence", "--source", "loop"))["items"].([]any))
-	check("shared fields", exactDecode(t, runOK(t, e, "--max-age", "0", "--fields", "source,path,sequence,snapshot_sequence", "search", "sequence", "--source", "loop"))["items"].([]any))
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "--fields", "path,sequence", "loop", "list")
+	check("plain", exactDecode(t, runOK(t, e, "--no-sync", "loop", "list"))["items"].([]any))
+	check("fields", exactDecode(t, runOK(t, e, "--no-sync", "--fields", "sequence,text", "loop", "search", "sequence"))["items"].([]any))
+	check("shared", exactDecode(t, runOK(t, e, "--no-sync", "search", "sequence", "--source", "loop"))["items"].([]any))
+	check("shared fields", exactDecode(t, runOK(t, e, "--no-sync", "--fields", "source,path,sequence,snapshot_sequence", "search", "sequence", "--source", "loop"))["items"].([]any))
+	text := runOK(t, e, "--no-sync", "--format", "text", "--fields", "path,sequence", "loop", "list")
 	if !strings.Contains(text, "9007199254740993") || !strings.Contains(text, "9223372036854775807") {
 		t.Fatalf("text projection lost exact sequences:\n%s", text)
 	}

@@ -28,7 +28,7 @@ func TestDraftsWindowsEmitterLiteral(t *testing.T) {
 	id := "teams-draft:" + strings.Repeat("a", 64)
 	revision := strings.Repeat("b", 64)
 	got := draftInspectionCommand("windows", `C:\review\%REVIEW_ARCHIVE%\cached.db`, "tenant/user", id, revision, true)
-	for _, text := range []string{"& {", "$PSNativeCommandArgumentPassing = 'Standard'", `--db 'C:\review\%REVIEW_ARCHIVE%\cached.db'`, "--account 'tenant/user'", "--max-age 0 --max-text 0", "--include-removed"} {
+	for _, text := range []string{"& {", "$PSNativeCommandArgumentPassing = 'Standard'", `--db 'C:\review\%REVIEW_ARCHIVE%\cached.db'`, "--account 'tenant/user'", "--no-sync --max-text 0", "--include-removed"} {
 		if !strings.Contains(got, text) {
 			t.Fatalf("Windows emitter is not declared literal PowerShell: missing %q in %s", text, got)
 		}
@@ -152,7 +152,7 @@ func TestDraftsPowerShellArgumentRoundTrip(t *testing.T) {
 		account := "tenant/user's $HOME ` %DRAFT_PATH% !DRAFT_PATH! ‘‚‛’ \"quoted\""
 		command := draftInspectionCommand("windows", db, account, id, revision, true)
 		got := draftPowerShellWords(t, command)
-		want := []string{"m365crawl", "--db", db, "--max-age", "0", "--max-text", "0", "--account", account, "drafts", "show", id, "--body-revision", revision, "--include-removed"}
+		want := []string{"m365crawl", "--db", db, "--no-sync", "--max-text", "0", "--account", account, "drafts", "show", id, "--body-revision", revision, "--include-removed"}
 		if !slices.Equal(got, want) {
 			t.Fatalf("actual %s shell/native argv changed selected context:\ngot %#v\nwant %#v", goruntime.GOOS, got, want)
 		}
@@ -431,7 +431,7 @@ func TestDraftsGuardedFollowupReplay(t *testing.T) {
 	b := draftOne(t, e)
 	cmd := b["full_inspection"].(string)
 	words := draftFollowupWords(t, cmd)
-	if !strings.Contains(cmd, "--max-age 0") || !strings.Contains(cmd, "--max-text 0") || !strings.Contains(cmd, "--body-revision") {
+	if !strings.Contains(cmd, "--no-sync") || !strings.Contains(cmd, "--max-text 0") || !strings.Contains(cmd, "--body-revision") {
 		t.Fatal(cmd)
 	}
 	var out, err bytes.Buffer
@@ -483,7 +483,7 @@ func TestDraftsHelpAndGuide(t *testing.T) {
 func TestDraftsNotSharedMessages(t *testing.T) {
 	e := draftCLI(t)
 	_ = draftOne(t, e)
-	for _, args := range [][]string{{"--max-age", "0", "messages"}, {"--max-age", "0", "search", "synthetic draft"}} {
+	for _, args := range [][]string{{"--no-sync", "messages"}, {"--no-sync", "search", "synthetic draft"}} {
 		code, out, err := draftRun(e, args...)
 		if code != 0 {
 			t.Fatal(err)

@@ -127,7 +127,7 @@ func TestOutlookAccountNoteFailures(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := brokenMeta(t)
-			code, _, errOut := e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
+			code, _, errOut := e.run(append([]string{"--json", "--no-sync"}, args...)...)
 			if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
 				t.Fatalf("exit %d, stderr %q", code, errOut)
 			}
@@ -141,7 +141,7 @@ func TestOutlookAccountNoteFailures(t *testing.T) {
 		calendarSourcesOf = func(*store.Store, context.Context, store.CalendarSourcesFilter) (store.CalendarSources, error) {
 			return store.CalendarSources{}, errors.New("broken")
 		}
-		code, _, errOut := e.run("--json", "--max-age", "0", "--account", "outlook/Main", "messages")
+		code, _, errOut := e.run("--json", "--no-sync", "--account", "outlook/Main", "messages")
 		if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
 			t.Fatalf("exit %d, stderr %q", code, errOut)
 		}

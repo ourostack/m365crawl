@@ -27,7 +27,7 @@ func TestAttendeeUnknownOriginArchivedRequestFix(t *testing.T) {
 			t.Fatal("no ordinary and exact native retry routes", fix)
 		}
 		words := attendeeCommandWords(t, routes[1])
-		for flag, want := range map[string]string{"--db": e.db, "--max-age": "0", "--outlook-root": "/synthetic/saved 'root"} {
+		for flag, want := range map[string]string{"--db": e.db, "--outlook-root": "/synthetic/saved 'root"} {
 			found := false
 			for i := 0; i+1 < len(words); i++ {
 				found = found || words[i] == flag && words[i+1] == want
@@ -55,7 +55,7 @@ func TestAttendeeUnknownOriginFixRequiresOrdinaryBootstrap(t *testing.T) {
 	}
 	fix, _ := errorOf(t, stderr)["fix"].(string)
 	if !strings.Contains(fix, "sync --outlook-root") || !strings.Contains(fix, "/synthetic/original root") ||
-		!strings.Contains(fix, e.db) || !strings.Contains(fix, "--max-age 0") || strings.Contains(fix, "--full-read") {
+		!strings.Contains(fix, e.db) || strings.Contains(fix, "--no-sync") || strings.Contains(fix, "--max-age") || strings.Contains(fix, "--full-read") {
 		t.Fatal("unknown-origin remedy must use selected archive and ordinary eligible bootstrap, not repeat standalone takeover", fix)
 	}
 }

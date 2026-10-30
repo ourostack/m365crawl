@@ -187,7 +187,8 @@ func (c *transcriptsFetchCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
-	rt.maxAge = 0 // a fetch reads the parts the archive holds; it never syncs first
+	// A fetch reads the parts the archive holds; it never syncs first.
+	rt.maxAge, rt.syncNever, rt.syncOff = 0, true, "transcripts fetch never syncs first"
 	return rt.read("transcripts fetch", func(st *store.Store) (result, error) {
 		res := &transcriptFetchResult{Source: sourceArchive, Calls: []fetchCallItem{}}
 		if st == nil {

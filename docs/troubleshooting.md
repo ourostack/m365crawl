@@ -54,7 +54,7 @@ Start with `m365crawl doctor`. It checks every prerequisite, and each failed che
 
 **An Outlook profile's meetings are not merged with Teams.** The profile is not linked to your Teams account. The agenda's `unlinked_fix` prints the command that links it, for example `m365crawl sync --outlook-profile Main --outlook-account <tenantId>/<userId>`. `m365crawl whoami` lists the Teams accounts.
 
-**The answer is stale.** `archive_age_seconds` says how old the archive is. Pass `--max-age 15m` to sync first when it is older, or run `m365crawl watch` in the background.
+**The answer is stale.** `archive_age_seconds` says how old the archive is. Pass `--max-age 15m` to sync first when it is older, or run `m365crawl watch` in the background. `implicit_sync` says whether this read synced first: `disabled` means `--no-sync` or `--max-age 0` turned the sync off (`--max-age 0` does not mean fresh), so run `m365crawl sync` or drop that flag.
 
 ## Reporting a problem
 

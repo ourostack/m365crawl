@@ -67,7 +67,7 @@ func appEnv(t *testing.T) *env {
 
 func jsonRun(t *testing.T, e *env, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "--json"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "--json"}, args...)...)
 	if code != 0 {
 		t.Fatalf("%v: exit %d: %s", args, code, errOut)
 	}
@@ -122,7 +122,7 @@ func TestApplicationMessageRoutes(t *testing.T) {
 				t.Fatalf("%s app_observation: %v", name, app)
 			}
 			if !strings.HasPrefix(served["observation_id"].(string), "message-app-observation:") ||
-				!strings.Contains(served["full_inspection"].(string), "--max-age 0 sql \"select projection_json from message_app_observations where rowid=") {
+				!strings.Contains(served["full_inspection"].(string), "--no-sync sql \"select projection_json from message_app_observations where rowid=") {
 				t.Fatalf("follow-up: %v", served)
 			}
 			if first == nil {
@@ -152,7 +152,7 @@ func TestApplicationMessageRoutes(t *testing.T) {
 		t.Fatalf("search hits: %v %v", m["count"], m["sources"])
 	}
 	// Text output names the claim, the citations, the refusal and the archive-only follow-up.
-	code, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
+	code, out, _ := e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
 	for _, want := range []string{"[app: Synthetic Helper] ", "message app-1 (thread: 19:app-evidence@thread.v2 app-1)", `app "Synthetic Helper", app id "app-synthetic", claimed by the message itself`,
 		`native reply-to id "native-reply-1" (not a verified thread root)`, "citations: 2 read from the message, 2 shown; 1 more could not be read",
 		`[0] id 9223372036854775807 "First source"`, "full record (the stored projection as a JSON string to decode again; not the raw message): m365crawl --db ",
@@ -187,17 +187,17 @@ func TestApplicationNotDerivedAndFailedText(t *testing.T) {
 		retained["served"].(map[string]any)["app_name"] != "Synthetic Helper" || coverageOf(t, m)["retained"] != float64(1) {
 		t.Fatalf("retained: %v", retained)
 	}
-	_, out, _ := e.run("--max-age", "0", "--format", "text", "search", "evidence", "--source", "chats")
+	_, out, _ := e.run("--no-sync", "--format", "text", "search", "evidence", "--source", "chats")
 	if !strings.Contains(out, "served is the last good observation of this message, from mapper version 2") || !strings.Contains(out, "[app id: only-id]") ||
 		!strings.Contains(out, `app id "only-id", claimed by the message itself`) || !strings.Contains(out, "1 retained") {
 		t.Fatalf("search text:\n%s", out)
 	}
-	_, out, _ = e.run("--max-age", "0", "--format", "text", "search", "zzzznomatch", "--source", "chats")
+	_, out, _ = e.run("--no-sync", "--format", "text", "search", "zzzznomatch", "--source", "chats")
 	if !strings.Contains(out, "app evidence: unknown (no Teams message returned)") {
 		t.Fatalf("empty search text:\n%s", out)
 	}
-	_, out, _ = e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
-	if !strings.Contains(out, "application evidence failed (teams_app_raw_invalid)") || !strings.Contains(out, "1 not derived") || !strings.Contains(out, "not derived yet: run m365crawl sync; reads with --max-age 0 never derive it") {
+	_, out, _ = e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
+	if !strings.Contains(out, "application evidence failed (teams_app_raw_invalid)") || !strings.Contains(out, "1 not derived") || !strings.Contains(out, "not derived yet: run m365crawl sync; reads with --no-sync never derive it") {
 		t.Fatalf("text:\n%s", out)
 	}
 }
@@ -306,7 +306,7 @@ func TestCalendarAppEvidenceBounds(t *testing.T) {
 	if f := eventDoc(t, e, id, append(acct, "--fields", "subject")...); f["application_evidence_coverage"] == nil || f["chat"] != nil {
 		t.Fatalf("--fields subject dropped coverage or kept chat: %v", keysOf(f))
 	}
-	_, out, _ := e.run("--max-age", "0", "--format", "text", "--account", tenantA+"/"+userA, "calendar", "event", id)
+	_, out, _ := e.run("--no-sync", "--format", "text", "--account", tenantA+"/"+userA, "calendar", "event", id)
 	if !strings.Contains(out, "app evidence of 10 returned Teams messages (mapper v2): 1 mapped, 9 absent") || !strings.Contains(out, "application evidence mapped") {
 		t.Fatalf("calendar text:\n%s", out)
 	}
@@ -379,7 +379,7 @@ func TestApplicationFullInspectionKeepsArchive(t *testing.T) {
 	quoteArg = quoteFor("linux")
 	got7 := fullInspection(7, "/tmp/a b/it's.db")
 	quoteArg = old
-	if got, want := got7, `m365crawl --db '/tmp/a b/it'\''s.db' --max-age 0 sql "select projection_json from message_app_observations where rowid=7" --limit 1`; got != want {
+	if got, want := got7, `m365crawl --db '/tmp/a b/it'\''s.db' --no-sync sql "select projection_json from message_app_observations where rowid=7" --limit 1`; got != want {
 		t.Fatalf("template:\n got %s\nwant %s", got, want)
 	}
 	e := appEnv(t)
@@ -449,7 +449,7 @@ func TestSQLRendersBlobsAsHex(t *testing.T) {
 		t.Fatalf("json raw_digest = %v, want %s", row[0], want)
 	}
 	for _, format := range []string{"text", "log"} {
-		if _, out, _ := e.run("--max-age", "0", "--format", format, "sql", q); !strings.Contains(out, want) {
+		if _, out, _ := e.run("--no-sync", "--format", format, "sql", q); !strings.Contains(out, want) {
 			t.Fatalf("%s output lacks %s:\n%s", format, want, out)
 		}
 	}

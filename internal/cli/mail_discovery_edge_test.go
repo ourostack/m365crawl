@@ -40,7 +40,7 @@ func TestMailFailedRootResolutionBeforeArchiveIsNotAbsence(t *testing.T) {
 	t.Cleanup(func() { outlookDefaultRoot = old })
 	outlookDefaultRoot = func() (string, error) { return "", os.ErrNotExist }
 	for _, args := range [][]string{{}, {"mail", "list"}, {"search", "missing", "--source", "mail"}} {
-		code, out, stderr := e.runDefault(append([]string{"--max-age", "0"}, args...)...)
+		code, out, stderr := e.runDefault(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("optional read-only unavailable exit %d: %s", code, stderr)
 		}

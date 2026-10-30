@@ -73,7 +73,7 @@ func TestDocumentsCLIShowArchiveRemovedBetweenLookupAndRefreshFailsWithoutPanic(
 		}
 		return syncer.DocumentReport{}, nil
 	}
-	code, _, stderr := e.run("--max-age", "0", "docs", "show", id)
+	code, _, stderr := e.run("--no-sync", "docs", "show", id)
 	if code != 2 || !strings.Contains(stderr, "document_observation_unknown") {
 		t.Fatalf("lost archive became successful detail: %s", stderr)
 	}

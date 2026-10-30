@@ -175,7 +175,7 @@ func TestAttendeeRealSourceIDRecoveryCommandsExecute(t *testing.T) {
 		t.Fatal("real runner-to-CLI source-ID handoff lost saved ordinary-bootstrap command", fix)
 	}
 	ordinary, original := attendeeCommandWords(t, parts[1]), attendeeCommandWords(t, parts[3])
-	for flag, want := range map[string]string{"--db": e.db, "--max-age": "0", "--teams-root": e.root, "--outlook-root": root} {
+	for flag, want := range map[string]string{"--db": e.db, "--teams-root": e.root, "--outlook-root": root} {
 		found := false
 		for i := 0; i+1 < len(ordinary); i++ {
 			found = found || ordinary[i] == flag && ordinary[i+1] == want
@@ -183,6 +183,9 @@ func TestAttendeeRealSourceIDRecoveryCommandsExecute(t *testing.T) {
 		if !found {
 			t.Fatal("emitted real recovery escaped selected roots/archive", flag, ordinary)
 		}
+	}
+	if strings.Contains(parts[1], "--no-sync") || strings.Contains(parts[1], "--max-age") {
+		t.Fatal("an explicit sync route carries a read freshness flag", parts[1])
 	}
 	if !strings.Contains(parts[3], "--source-id "+strconv.FormatInt(id, 10)) || strings.Contains(parts[3], "--root") {
 		t.Fatal("original retry selectors were combined or rewritten", original)

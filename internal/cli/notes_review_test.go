@@ -17,7 +17,7 @@ func TestNotesReviewedEmbeddedFieldsAreSelectable(t *testing.T) {
 		{"notes", "show", id, "--fields", "id,title,text,capture_id"},
 		{"search", "Quarterly", "--source", "notes", "--fields", "source,id,source_id,capture_id,modified_at"},
 	} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("embedded provenance field rejected: %d/%s", code, stderr)
 		}
@@ -49,7 +49,7 @@ func TestNotesReviewedProjectedTextHandlesDifferentTruncationKeys(t *testing.T) 
 	if err != nil || closeErr != nil {
 		t.Fatal(err, closeErr)
 	}
-	code, stdout, stderr := e.run("--format", "text", "--max-age", "0", "--max-text", "12",
+	code, stdout, stderr := e.run("--format", "text", "--no-sync", "--max-text", "12",
 		"--fields", "source,id,title,text", "search", "Quarterly", "--source", "notes")
 	if code != 0 || !strings.Contains(stdout, "Quarterly short") || !strings.Contains(stdout, "text_truncated") {
 		t.Fatalf("heterogeneous projected text failed: %d/%s/%s", code, stdout, stderr)

@@ -186,7 +186,7 @@ func TestImplicitSyncUncodedFailureBecomesAnInternalWarning(t *testing.T) {
 func TestReadCommandsReportAnUnreadableArchiveAsDBError(t *testing.T) {
 	e := newEnv(t)
 	e.garbageArchive()
-	for _, args := range [][]string{{"search", "x"}, {"--max-age", "0", "search", "x"}} {
+	for _, args := range [][]string{{"search", "x"}, {"--no-sync", "search", "x"}} {
 		code, _, stderr := e.run(args...)
 		if code != errs.ExitRuntime || errorOf(t, stderr)["code"] != errs.CodeDBError {
 			t.Errorf("%v: exit %d, stderr %s", args, code, stderr)
@@ -198,7 +198,7 @@ func TestReadCommandsReportABrokenSyncLogAsDBError(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	e.exec("drop table sync_runs")
-	for _, args := range [][]string{{"search", "Fixture"}, {"--max-age", "0", "search", "Fixture"}} {
+	for _, args := range [][]string{{"search", "Fixture"}, {"--no-sync", "search", "Fixture"}} {
 		code, _, stderr := e.run(args...)
 		if code != errs.ExitRuntime || errorOf(t, stderr)["code"] != errs.CodeDBError {
 			t.Errorf("%v: exit %d, stderr %s", args, code, stderr)

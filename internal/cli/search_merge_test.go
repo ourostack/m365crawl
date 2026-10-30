@@ -175,7 +175,7 @@ func searchMailEnv(t *testing.T) *env {
 
 func searchJSON(t *testing.T, e *env, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "--json", "search"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "--json", "search"}, args...)...)
 	if code != 0 {
 		t.Fatalf("search %v: exit %d: %s", args, code, errOut)
 	}
@@ -184,7 +184,7 @@ func searchJSON(t *testing.T, e *env, args ...string) map[string]any {
 
 func searchFails(t *testing.T, e *env, code int, args ...string) map[string]any {
 	t.Helper()
-	got, out, errOut := e.run(append([]string{"--max-age", "0", "--json", "search"}, args...)...)
+	got, out, errOut := e.run(append([]string{"--no-sync", "--json", "search"}, args...)...)
 	if got != code {
 		t.Fatalf("search %v: exit %d, want %d: %s %s", args, got, code, out, errOut)
 	}
@@ -338,7 +338,7 @@ func TestSearchSourceChoosesWhatIsSearched(t *testing.T) {
 	if m["items"].([]any)[0].(map[string]any)["source"] != "chats" {
 		t.Fatal("chat items carry source too")
 	}
-	if code, _, _ := e.run("--max-age", "0", "search", "Hello", "--source", "everything"); code != 2 {
+	if code, _, _ := e.run("--no-sync", "search", "Hello", "--source", "everything"); code != 2 {
 		t.Fatalf("bad --source: exit %d", code)
 	}
 }
@@ -477,12 +477,12 @@ func TestSearchOnUnsupportedPlatformReturnsChatsWithANote(t *testing.T) {
 func TestSearchQuerySyntaxErrorsAreOneUsageError(t *testing.T) {
 	e := searchMailEnv(t)
 	for _, q := range []string{`"`, "*"} {
-		code, out, errOut := e.run("--max-age", "0", "--json", "search", q)
+		code, out, errOut := e.run("--no-sync", "--json", "search", q)
 		if code != 2 || out != "" || strings.Count(errOut, `"error"`) != 1 {
 			t.Fatalf("query %q: exit %d, out %q, err %q", q, code, out, errOut)
 		}
 		fix := errorOf(t, errOut)["fix"]
-		code, _, errOut = e.run("--max-age", "0", "--json", "search", q, "--source", "mail")
+		code, _, errOut = e.run("--no-sync", "--json", "search", q, "--source", "mail")
 		if code != 2 || errorOf(t, errOut)["fix"] != fix {
 			t.Fatalf("mail fix differs for %q: %s", q, errOut)
 		}
@@ -496,7 +496,7 @@ func TestSearchQuerySyntaxErrorsAreOneUsageError(t *testing.T) {
 
 func TestSearchFieldsValidateAgainstBothSources(t *testing.T) {
 	e := searchMailEnv(t)
-	code, out, errOut := e.run("--max-age", "0", "--json", "--fields", "source,id,subject,sent_at,received_at,folder", "search", "Hello", "--limit", "3")
+	code, out, errOut := e.run("--no-sync", "--json", "--fields", "source,id,subject,sent_at,received_at,folder", "search", "Hello", "--limit", "3")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -507,7 +507,7 @@ func TestSearchFieldsValidateAgainstBothSources(t *testing.T) {
 	if its[1]["source"] != "chats" || its[1]["sent_at"] == nil || its[1]["folder"] != nil {
 		t.Fatalf("chat item: %v", its[1])
 	}
-	code, _, errOut = e.run("--max-age", "0", "--json", "--fields", "source,nope", "search", "Hello")
+	code, _, errOut = e.run("--no-sync", "--json", "--fields", "source,nope", "search", "Hello")
 	er := errorOf(t, errOut)
 	msg, _ := er["message"].(string)
 	if code != 2 || !strings.Contains(msg, `unknown --fields key "nope"`) || !strings.Contains(msg, "source") || !strings.Contains(msg, "folder") || !strings.Contains(msg, "conversation_id") {
@@ -572,7 +572,7 @@ func TestSearchTextOutputs(t *testing.T) {
 				suffix = "color"
 				t.Setenv("CLICOLOR_FORCE", "1")
 			}
-			code, out, errOut := e.run(append([]string{"--format", "text", "--max-age", "0"}, c.args...)...)
+			code, out, errOut := e.run(append([]string{"--format", "text", "--no-sync"}, c.args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", c.name, code, errOut)
 			}
@@ -587,7 +587,7 @@ func TestSearchTextOutputs(t *testing.T) {
 func TestSearchMailFailuresAreReported(t *testing.T) {
 	e := searchMailEnv(t)
 	e.exec("drop table mail_fts")
-	code, _, errOut := e.run("--max-age", "0", "--json", "search", "Hello", "--source", "mail")
+	code, _, errOut := e.run("--no-sync", "--json", "search", "Hello", "--source", "mail")
 	if code == 0 || errorOf(t, errOut)["code"] == nil {
 		t.Fatalf("a broken mail index must fail the search: %d %s", code, errOut)
 	}
@@ -614,7 +614,7 @@ func TestSearchMailRowsWithoutOptionalFields(t *testing.T) {
 
 func TestSearchMaxTextCutsMailPreviews(t *testing.T) {
 	e := searchMailEnv(t)
-	code, out, errOut := e.run("--max-age", "0", "--json", "--max-text", "5", "search", "Hello", "--source", "mail", "--limit", "1")
+	code, out, errOut := e.run("--no-sync", "--json", "--max-text", "5", "search", "Hello", "--source", "mail", "--limit", "1")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -627,12 +627,12 @@ func TestSearchMaxTextCutsMailPreviews(t *testing.T) {
 func TestSearchReportsArchiveFailuresFromEitherSource(t *testing.T) {
 	e := searchMailEnv(t)
 	e.exec("alter table messages drop column content_html")
-	code, _, errOut := e.run("--max-age", "0", "--json", "search", "Hello", "--source", "chats", "--html")
+	code, _, errOut := e.run("--no-sync", "--json", "search", "Hello", "--source", "chats", "--html")
 	if code == 0 || errorOf(t, errOut)["code"] == nil {
 		t.Fatalf("a broken chat body column must fail the search: %d %s", code, errOut)
 	}
 	e.exec("drop table mail_folders")
-	code, _, errOut = e.run("--max-age", "0", "--json", "search", "Hello")
+	code, _, errOut = e.run("--no-sync", "--json", "search", "Hello")
 	if code == 0 || errorOf(t, errOut)["code"] == nil {
 		t.Fatalf("a broken mail table must fail the search: %d %s", code, errOut)
 	}

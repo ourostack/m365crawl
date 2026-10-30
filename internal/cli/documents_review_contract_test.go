@@ -23,7 +23,7 @@ func TestDocumentUntilDateIncludesWholeDay(t *testing.T) {
 				until string
 				count int
 			}{{"2026-10-11", 1}, {"2026-10-10", 0}, {"2026-10-11T01:00:00Z", 0}, {"2026-10-11T01:00:01Z", 1}} {
-				args := append([]string{"--max-age", "0"}, command...)
+				args := append([]string{"--no-sync"}, command...)
 				code, out, stderr := e.run(append(args, "--until", bound.until)...)
 				if code != 0 || len(items(t, decode(t, out))) != bound.count {
 					t.Errorf("--until %s: want %d rows; exit %d %s %s", bound.until, bound.count, code, out, stderr)
@@ -73,7 +73,7 @@ func TestDocumentPublicRowsAndCoverageShareCurrentSnapshot(t *testing.T) {
 				}
 				return report, nil
 			}
-			code, out, stderr := e.run(append([]string{"--max-age", "0"}, command...)...)
+			code, out, stderr := e.run(append([]string{"--no-sync"}, command...)...)
 			if code != 0 {
 				t.Fatalf("current snapshot: %d %s %s", code, out, stderr)
 			}

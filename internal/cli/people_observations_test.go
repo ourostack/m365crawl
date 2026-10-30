@@ -33,7 +33,7 @@ func TestPeopleObservationsConnectedListShowAndCoverage(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	code, out, _ := e.run("--max-age", "0", "people", "--query", "fixture")
+	code, out, _ := e.run("--no-sync", "people", "--query", "fixture")
 	if code != 0 {
 		t.Fatalf("list exit %d: %s", code, out)
 	}
@@ -47,7 +47,7 @@ func TestPeopleObservationsConnectedListShowAndCoverage(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list.Items) != 1 || list.Items[0].IdentityState != "unresolved" || len(list.Coverage) == 0 {
 		t.Fatalf("connected observation list: %s", out)
 	}
-	code, out, _ = e.run("--max-age", "0", "people", "show", list.Items[0].ID)
+	code, out, _ = e.run("--no-sync", "people", "show", list.Items[0].ID)
 	if code != 0 {
 		t.Fatalf("show exit %d: %s", code, out)
 	}
@@ -60,11 +60,11 @@ func TestPeopleObservationsConnectedListShowAndCoverage(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &detail); err != nil || len(detail.Items) != 1 || detail.Items[0].ID != list.Items[0].ID || len(detail.Items[0].Copies) != 1 {
 		t.Fatalf("detail identity: %s", out)
 	}
-	code, out, stderr := e.run("--max-age", "0", "people", "--query", "no-match", "--fields", "id")
+	code, out, stderr := e.run("--no-sync", "people", "--query", "no-match", "--fields", "id")
 	if code != 0 || !containsJSONKey(out, "source_coverage") {
 		t.Fatalf("zero-hit coverage: %d %s %s", code, out, stderr)
 	}
-	code, out, _ = e.run("--max-age", "0", "people", "sources")
+	code, out, _ = e.run("--no-sync", "people", "sources")
 	if code != 0 || !containsJSONKey(out, "source_coverage") {
 		t.Fatalf("source coverage: %d %s", code, out)
 	}

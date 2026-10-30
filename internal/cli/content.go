@@ -55,12 +55,35 @@ func (rt *runtime) archiveCommand(args ...string) string {
 	return archiveScopedCommand(rt.archiveRef(), args...)
 }
 
+// archiveScopedCommand is an executable command on the selected archive. A read pins --no-sync, so
+// a follow-up reads the same archive state instead of syncing partway through related reads; an
+// explicit acquisition (sync, fetch, capture, signin) carries no freshness flag, because none
+// applies to it and "--no-sync sync" would read as a contradiction.
 func archiveScopedCommand(db string, args ...string) string {
-	words := []string{"m365crawl", "--db", quoteArg(db), "--max-age", "0"}
+	words := []string{"m365crawl", "--db", quoteArg(db)}
+	if !acquisitionCommand(args) {
+		words = append(words, "--no-sync")
+	}
 	for _, arg := range args {
 		words = append(words, quoteArg(arg))
 	}
 	return strings.Join(words, " ")
+}
+
+// acquisitionCommand says whether args (global flags, each with a value, then the command path)
+// name an explicit acquisition rather than a read.
+func acquisitionCommand(args []string) bool {
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "--") {
+		i += 2
+	}
+	for n := 0; i < len(args) && n < 3 && !strings.HasPrefix(args[i], "--"); i, n = i+1, n+1 {
+		switch args[i] {
+		case "sync", "fetch", "capture", "signin":
+			return true
+		}
+	}
+	return false
 }
 
 func (rt *runtime) contentError(err error) error {

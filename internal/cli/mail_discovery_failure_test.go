@@ -30,7 +30,7 @@ func TestMailDiscoveryFailuresRemainUnknownAcrossReadSurfaces(t *testing.T) {
 				outlookDefaultRoot = func() (string, error) { return "", errors.New("synthetic-private-suffix") }
 			}
 			for _, args := range [][]string{{"status"}, {}, {"search", "missing", "--source", "mail"}, {"mail", "list"}, {"mail", "folders"}, {"mail", "unread"}} {
-				code, out, stderr := e.runDefault(append([]string{"--json", "--max-age", "0"}, args...)...)
+				code, out, stderr := e.runDefault(append([]string{"--json", "--no-sync"}, args...)...)
 				if code != 0 {
 					t.Fatalf("read-only optional source failed whole command %v: %d %s", args, code, stderr)
 				}
@@ -63,7 +63,7 @@ func TestMailMissingLocalAppDataIsNotNoProfile(t *testing.T) {
 	e := textEnv(t)
 	e.emptyArchive()
 	t.Setenv("LOCALAPPDATA", "")
-	code, out, stderr := e.runDefault("--max-age", "0", "status")
+	code, out, stderr := e.runDefault("--no-sync", "status")
 	if code != 0 {
 		t.Fatalf("status exit %d: %s", code, stderr)
 	}

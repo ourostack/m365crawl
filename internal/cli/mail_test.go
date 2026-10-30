@@ -141,7 +141,7 @@ func mailEnv(t *testing.T) *env {
 }
 
 func (e *env) mail(args ...string) (int, string, string) {
-	return e.run(append([]string{"--max-age", "0"}, args...)...)
+	return e.run(append([]string{"--no-sync"}, args...)...)
 }
 
 func mailJSON(t *testing.T, e *env, args ...string) map[string]any {
@@ -514,7 +514,9 @@ func TestMailEmptyNotes(t *testing.T) {
 		t.Fatalf("not read: %q", n)
 	}
 	// This run's own sync already covered the mail source: do not send the agent round again.
-	if n := note(e, "--outlook-root", root, "--max-age", "1ns", "mail", "list"); strings.Contains(n, "run m365crawl sync") || !strings.Contains(n, "although this run synced") {
+	// (--no-sync, which note's reads pin, wins over any --max-age, so this read leaves it out.)
+	_, out, _ := e.run("--outlook-root", root, "--max-age", "1ns", "mail", "list")
+	if n, _ := decode(t, out)["note"].(string); strings.Contains(n, "run m365crawl sync") || !strings.Contains(n, "although this run synced") {
 		t.Fatalf("after an implicit sync: %q", n)
 	}
 	// The read marker says the source was read and found nothing.
@@ -583,7 +585,7 @@ func TestMailTextGoldens(t *testing.T) {
 				suffix = "color"
 				t.Setenv("CLICOLOR_FORCE", "1")
 			}
-			code, out, errOut := e.run(append([]string{"--format", "text", "--max-age", "0"}, c.args...)...)
+			code, out, errOut := e.run(append([]string{"--format", "text", "--no-sync"}, c.args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", c.name, code, errOut)
 			}
@@ -607,7 +609,7 @@ func TestMailTextGoldens(t *testing.T) {
 
 func TestMailTextTruncatedShow(t *testing.T) {
 	e := mailEnv(t)
-	_, out, _ := e.run("--format", "text", "--max-age", "0", "--max-text", "4", "mail", "show", "outlook/Main:101")
+	_, out, _ := e.run("--format", "text", "--no-sync", "--max-text", "4", "mail", "show", "outlook/Main:101")
 	if !strings.Contains(out, "cut by --max-text") {
 		t.Fatalf("out = %s", out)
 	}
@@ -656,17 +658,17 @@ func TestMailStateAndInlineText(t *testing.T) {
 	e.exec(`update mail_messages set gone_at='2026-09-09T00:00:00.000Z' where detail_key=103`)
 	e.exec(`update mail_messages set evicted_at='2026-09-09T00:00:00.000Z' where detail_key=105`)
 	e.exec(`update mail_messages set is_read=0 where detail_key=102`)
-	_, out, _ := e.run("--format", "text", "--max-age", "0", "mail", "list", "--include-gone", "--include-evicted")
+	_, out, _ := e.run("--format", "text", "--no-sync", "mail", "list", "--include-gone", "--include-evicted")
 	if !strings.Contains(out, "gone") || !strings.Contains(out, "evicted") {
 		t.Fatalf("list = %s", out)
 	}
 	for _, id := range []string{"103", "105"} {
-		_, out, _ = e.run("--format", "text", "--max-age", "0", "mail", "show", "outlook/Main:"+id)
+		_, out, _ = e.run("--format", "text", "--no-sync", "mail", "show", "outlook/Main:"+id)
 		if !strings.Contains(out, "gone") && !strings.Contains(out, "evicted") {
 			t.Fatalf("show %s = %s", id, out)
 		}
 	}
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "mail", "show", "outlook/Main:102")
+	_, out, _ = e.run("--format", "text", "--no-sync", "mail", "show", "outlook/Main:102")
 	if !strings.Contains(out, "image/png (inline)") {
 		t.Fatalf("show = %s", out)
 	}

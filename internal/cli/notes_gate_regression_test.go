@@ -45,7 +45,7 @@ func TestNotesSharedSearchProjectionAndRefreshErrorsAreExplicit(t *testing.T) {
 	e := newEnv(t)
 	seedNotesCLI(t, e)
 	e.exec(`alter table note_entities rename column title to broken`)
-	if code, _, stderr := e.run("--max-age", "0", "search", "Quarterly", "--source", "notes"); code == 0 {
+	if code, _, stderr := e.run("--no-sync", "search", "Quarterly", "--source", "notes"); code == 0 {
 		t.Fatal(stderr)
 	}
 	e.garbageArchive()
@@ -63,11 +63,11 @@ func TestNotesSharedSearchNoHitsAndTextSourceFollowUp(t *testing.T) {
 		{"--format", "text", "search", "Quarterly", "--source", "notes"},
 		{"--format", "text", "notes", "sources"},
 	} {
-		if code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code != 0 {
+		if code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...); code != 0 {
 			t.Fatal(stderr)
 		}
 		empty := newEnv(t)
-		if code, stdout, stderr := empty.run("--format", "text", "--max-age", "0", "notes", "list"); code != 0 || !bytes.Contains([]byte(stdout), []byte("no notes captured")) {
+		if code, stdout, stderr := empty.run("--format", "text", "--no-sync", "notes", "list"); code != 0 || !bytes.Contains([]byte(stdout), []byte("no notes captured")) {
 			t.Fatalf("unknown source text: %d/%s/%s", code, stdout, stderr)
 		}
 	}

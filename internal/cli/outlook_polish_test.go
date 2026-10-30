@@ -34,7 +34,7 @@ func TestOutlookRootMissingIsOneCodedError(t *testing.T) {
 		{filepath.Join(file, "below"), "cannot be read"},
 	} {
 		for _, cmd := range [][]string{{"sync"}, {"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions"}, {"conversations"}} {
-			code, out, errOut := e.run(append([]string{"--max-age", "0", "--outlook-root", c.root}, cmd...)...)
+			code, out, errOut := e.run(append([]string{"--no-sync", "--outlook-root", c.root}, cmd...)...)
 			body := usageBody(t, errOut)
 			if code != 3 || out != "" || body["code"] != "outlook_root_missing" || !strings.Contains(body["message"].(string), c.want) || !strings.Contains(body["message"].(string), "--outlook-root") || body["fix"] == "" {
 				t.Fatalf("%v with %s: exit %d out %q err %s", cmd, c.root, code, out, errOut)
@@ -86,7 +86,7 @@ func (e *env) runDefault(args ...string) (code int, stdout, stderr string) {
 // outlookRowCount is the number of Outlook events the archive holds.
 func (e *env) outlookRowCount(args ...string) int {
 	e.t.Helper()
-	_, out, errOut := e.runDefault(append(args, "--max-age", "0", "sql", "select count(*) from calendar_source_events where source='outlook'")...)
+	_, out, errOut := e.runDefault(append(args, "--no-sync", "sql", "select count(*) from calendar_source_events where source='outlook'")...)
 	var doc struct{ Rows [][]int }
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc.Rows) != 1 {
 		e.t.Fatalf("sql: %v %s %s", err, out, errOut)
@@ -109,7 +109,7 @@ func TestDefaultOutlookNeverStopsASync(t *testing.T) {
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, errOut := e.runDefault("--max-age", "0", "sync"); code != 0 {
+	if code, _, errOut := e.runDefault("--no-sync", "sync"); code != 0 {
 		t.Fatalf("empty: exit %d %s", code, errOut)
 	}
 	// Named, a directory that is not there is the error it always was.
@@ -158,7 +158,7 @@ func TestOutlookOffNotice(t *testing.T) {
 	}
 	off := func(args ...string) map[string]any {
 		t.Helper()
-		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, out, errOut := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: %d %s", args, code, errOut)
 		}
@@ -188,11 +188,11 @@ func TestOutlookOffNotice(t *testing.T) {
 	if len(outlookNotices(teams)) != 0 {
 		t.Fatalf("a Teams-only result: %v", teams["notices"])
 	}
-	if code, out, _ := run("--max-age", "0", "calendar", "event", outlookOnly["event_id"].(string)); code != 0 || len(asStrings(decode(t, out)["notices"])) != 1 {
+	if code, out, _ := run("--no-sync", "calendar", "event", outlookOnly["event_id"].(string)); code != 0 || len(asStrings(decode(t, out)["notices"])) != 1 {
 		t.Fatalf("source on: %d %s", code, out)
 	}
 	// The text output prints it as one dim line.
-	code, out, errOut := e.run("--format", "text", "--max-age", "0", "calendar", "--limit", "200", "--from", from, "--to", to)
+	code, out, errOut := e.run("--format", "text", "--no-sync", "calendar", "--limit", "200", "--from", from, "--to", to)
 	if code != 0 || strings.Count(out, "notice: the Outlook source is off") != 1 {
 		t.Fatalf("text: %d %s %s", code, out, errOut)
 	}
@@ -222,7 +222,7 @@ func TestOutlookOffNoticeOnActions(t *testing.T) {
 	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
 		t.Fatal(errOut)
 	}
-	args := []string{"--max-age", "0", "calendar", "actions", "--from", "2023-11-20", "--to", "2023-11-26", "--account", teamsAccount}
+	args := []string{"--no-sync", "calendar", "actions", "--from", "2023-11-20", "--to", "2023-11-26", "--account", teamsAccount}
 	code, out, errOut := e.run(args...)
 	m := decode(t, out)
 	if code != 0 || m["count"].(float64) == 0 || len(asStrings(m["notices"])) != 1 {
@@ -300,7 +300,7 @@ func TestOutlookOffNoticeWithoutReadTimes(t *testing.T) {
 	old := outlookReadTimes
 	t.Cleanup(func() { outlookReadTimes = old })
 	outlookReadTimes = func(*store.Store, context.Context) (map[string]time.Time, error) { return nil, errors.New("no meta") }
-	code, out, errOut := e.run("--max-age", "0", "calendar", "--limit", "200", "--from", "2023-11-20", "--to", "2023-11-26")
+	code, out, errOut := e.run("--no-sync", "calendar", "--limit", "200", "--from", "2023-11-20", "--to", "2023-11-26")
 	got := outlookNotices(decode(t, out))
 	if code != 0 || len(got) != 1 || strings.Contains(got[0], "last read") {
 		t.Fatalf("%d %v %s", code, got, errOut)
@@ -313,29 +313,29 @@ func TestBadOutlookRootDoesNotStopWhoamiStatusVersion(t *testing.T) {
 	e.sync()
 	t.Setenv("M365CRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))
 	for _, cmd := range []string{"whoami", "status", "--version"} {
-		code, out, errOut := e.run("--max-age", "0", cmd)
+		code, out, errOut := e.run("--no-sync", cmd)
 		if code != 0 || out == "" {
 			t.Fatalf("%s: exit %d %s", cmd, code, errOut)
 		}
 	}
-	_, out, _ := e.run("--max-age", "0", "status")
+	_, out, _ := e.run("--no-sync", "status")
 	o, _ := decode(t, out)["outlook"].(map[string]any)
 	if o["code"] != "outlook_root_missing" || o["message"] == "" || o["fix"] == "" {
 		t.Fatalf("status outlook: %s", out)
 	}
 	// Text shows it, with and without an archive.
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "status")
+	_, out, _ = e.run("--format", "text", "--no-sync", "status")
 	if !strings.Contains(out, "outlook_root_missing") {
 		t.Fatalf("text: %s", out)
 	}
 	fresh := &env{t: t, root: e.root, db: filepath.Join(t.TempDir(), "none.db")}
-	_, out, _ = fresh.run("--format", "text", "--max-age", "0", "status")
+	_, out, _ = fresh.run("--format", "text", "--no-sync", "status")
 	if !strings.Contains(out, "outlook_root_missing") {
 		t.Fatalf("text, no archive: %s", out)
 	}
 	// Without the problem the field is absent, and sync still fails hard.
 	t.Setenv("M365CRAWL_OUTLOOK_ROOT", "")
-	if _, out, _ = e.run("--max-age", "0", "status"); decode(t, out)["outlook"] != nil {
+	if _, out, _ = e.run("--no-sync", "status"); decode(t, out)["outlook"] != nil {
 		t.Fatalf("clean: %s", out)
 	}
 	t.Setenv("M365CRAWL_OUTLOOK_ROOT", filepath.Join(t.TempDir(), "gone"))

@@ -11,7 +11,7 @@ import (
 func TestAttendeeNameProjectionRetainsClipMarker(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 1, false)
-	code, out, stderr := e.run("--max-age", "0", "--fields", "name", "--max-text", "5", "calendar", "attendees", "list", ref)
+	code, out, stderr := e.run("--no-sync", "--fields", "name", "--max-text", "5", "calendar", "attendees", "list", ref)
 	if code != 0 {
 		t.Fatal(code, out, stderr)
 	}

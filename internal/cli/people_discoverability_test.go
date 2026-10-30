@@ -22,7 +22,7 @@ func TestPeopleDefaultListHelpExposesWorkingOptions(t *testing.T) {
 		}
 	}
 	peopleFixture(t, e)
-	code, out, stderr = e.run("--max-age", "0", "people", "--query", "fixture", "--limit", "1", "--fields", "id,identity_state")
+	code, out, stderr = e.run("--no-sync", "people", "--query", "fixture", "--limit", "1", "--fields", "id,identity_state")
 	if code != 0 || !strings.Contains(out, `"identity_state":"unresolved"`) || !strings.Contains(out, `"truncated":true`) {
 		t.Fatalf("advertised options: %d %s %s", code, out, stderr)
 	}
@@ -36,7 +36,7 @@ func TestPeopleZeroHitExplainsCoverageWithoutChangingArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, format := range []string{"json", "text"} {
-		code, out, stderr := e.run("--format", format, "--max-age", "0", "people", "--query", "absent", "--fields", "id")
+		code, out, stderr := e.run("--format", format, "--no-sync", "people", "--query", "absent", "--fields", "id")
 		if code != 0 || !strings.Contains(out, "matched") || !strings.Contains(out, "coverage") {
 			t.Fatalf("empty %s explanation: %d %s %s", format, code, out, stderr)
 		}
@@ -73,7 +73,7 @@ func TestOverviewRoutesRegisteredPeopleWithoutSyncOrInventedCounts(t *testing.T)
 			if len(res.Sources) != len(overviewKinds) || res.Sources[6].Source != "people" || res.Sources[6].Observations == nil {
 				t.Fatalf("people row missing from the overview: %s", out)
 			}
-			found := strings.Contains(res.Sources[6].Note, "m365crawl --max-age 0 people sources")
+			found := strings.Contains(res.Sources[6].Note, "m365crawl --no-sync people sources")
 			if !found {
 				t.Fatal("overview lacks executable people coverage route")
 			}
@@ -112,7 +112,7 @@ func TestPeopleEmptyCoverageAcrossSourceStates(t *testing.T) {
 			case "partial", "failed":
 				peopleArchiveSQL(t, e.db, "update knowledge_attempts set outcome='"+kind+"',reason='synthetic_fixture_loss'")
 			}
-			args := []string{"--max-age", "0", "people", "--fields", "id"}
+			args := []string{"--no-sync", "people", "--fields", "id"}
 			if kind != "empty" {
 				args = append(args, "--query", "absent")
 			}
@@ -143,7 +143,7 @@ func TestOverviewPeopleRegistrationFaultIsNotEmptySuccess(t *testing.T) {
 	e := newEnv(t)
 	peopleFixture(t, e)
 	peopleArchiveSQL(t, e.db, "update knowledge_attempts set started_at='invalid'")
-	if code, out, stderr := e.run("--max-age", "0"); code == 0 || !strings.Contains(stderr, "db_error") {
+	if code, out, stderr := e.run("--no-sync"); code == 0 || !strings.Contains(stderr, "db_error") {
 		t.Fatalf("source-read fault hidden: %d %s %s", code, out, stderr)
 	}
 }
@@ -166,7 +166,7 @@ func TestOverviewPeopleRouteIsRegistrationScoped(t *testing.T) {
 					peopleArchiveSQL(t, e.db, "update knowledge_locators set latest_attempt=null,last_admitted=null")
 				}
 			}
-			args := []string{"--max-age", "0"}
+			args := []string{"--no-sync"}
 			if state == "account" {
 				args = append(args, "--account", "tenant/user")
 			}

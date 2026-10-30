@@ -43,7 +43,7 @@ func TestApplicationCoverageCountsPostedByApp(t *testing.T) {
 	if none := coverageOf(t, jsonRun(t, e, "search", "zzzznomatch", "--source", "chats")); none["posted_by_app"] != float64(0) {
 		t.Fatalf("zero hits: %v", none)
 	}
-	_, text, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
+	_, text, _ := e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
 	if !strings.Contains(text, "1 mapped, 1 partial, 1 absent\nposted by an app (names an app): 1 of 3\n") {
 		t.Fatalf("text coverage line:\n%s", text)
 	}
@@ -64,7 +64,7 @@ func TestGlobalHelpExplainsLogFormat(t *testing.T) {
 			t.Fatalf("--help does not explain --format log (%q):\n%s", want, help)
 		}
 	}
-	_, out, _ := appEnv(t).run("--max-age", "0", "--format", "log", "docs", "list")
+	_, out, _ := appEnv(t).run("--no-sync", "--format", "log", "docs", "list")
 	if !strings.HasPrefix(out, "docs_list={") || strings.Count(out, "\n") != 1 {
 		t.Fatalf("log output is not the one line the help describes:\n%s", out)
 	}
@@ -185,7 +185,7 @@ func TestApplicationLossesAreExplainedPerMessage(t *testing.T) {
 		!strings.Contains(app["meaning"].(string), "teams_bot_citation_unmapped: "+want) {
 		t.Fatalf("loss not explained: %v / %v", losses, app["meaning"])
 	}
-	_, text, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
+	_, text, _ := e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
 	if !strings.Contains(text, "not read: teams_bot_citation_unmapped x1 ("+want+")") {
 		t.Fatalf("text does not explain the loss:\n%s", text)
 	}
@@ -245,7 +245,7 @@ func TestServedCitationsAreTheStoredProjection(t *testing.T) {
 			t.Fatalf("messages --help lacks %q", want)
 		}
 	}
-	_, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
+	_, out, _ := e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
 	if !strings.Contains(out, "full record (the stored projection as a JSON string to decode again; not the raw message): m365crawl --db ") {
 		t.Fatalf("text does not say what the full record is:\n%s", out)
 	}
@@ -254,7 +254,7 @@ func TestServedCitationsAreTheStoredProjection(t *testing.T) {
 func TestApplicationTextIsPlainAndKeepsTheMarker(t *testing.T) {
 	e := appEnv(t)
 	t.Setenv("COLUMNS", "60")
-	_, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--conversation", appChat)
+	_, out, _ := e.run("--no-sync", "--format", "text", "messages", "--conversation", appChat)
 	for _, want := range []string{"[app: Synthetic Helper] ", "citations: 2 read from the message, 2 shown; 1 more could not be read"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("text lacks %q:\n%s", want, out)
@@ -322,11 +322,11 @@ func loopRowsEnv(t *testing.T) *env {
 
 func TestLoopRowsSayLatestCachedSnapshot(t *testing.T) {
 	e := loopRowsEnv(t)
-	row := items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "list")))[0]
+	row := items(t, decode(t, runOK(t, e, "--no-sync", "loop", "list")))[0]
 	if row["latest_cached_snapshot"] != true || row["retained"] != false || row["text_state"] != "partial_snapshot" {
 		t.Fatalf("row: %v", row)
 	}
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list")
+	text := runOK(t, e, "--no-sync", "--format", "text", "loop", "list")
 	for _, want := range []string{"text_state", "partial_snapshot", "latest cached snapshot"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text loop list lacks %q:\n%s", want, text)
@@ -336,28 +336,28 @@ func TestLoopRowsSayLatestCachedSnapshot(t *testing.T) {
 	if strings.Contains(strings.Replace(text, loopRowsHint, "", 1), "current") {
 		t.Fatalf("text loop list still says current:\n%s", text)
 	}
-	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Hello", "--source", "loop"); !strings.Contains(search, "partial_snapshot") {
+	if search := runOK(t, e, "--no-sync", "--format", "text", "search", "Hello", "--source", "loop"); !strings.Contains(search, "partial_snapshot") {
 		t.Fatalf("text search does not mark the Loop row partial_snapshot:\n%s", search)
 	}
 	id := row["id"].(string)
-	if show := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id); !strings.Contains(show, "latest cached snapshot of this source; archived record matches this snapshot: yes; archived record still in the app's cache: yes") {
+	if show := runOK(t, e, "--no-sync", "--format", "text", "loop", "show", id); !strings.Contains(show, "latest cached snapshot of this source; archived record matches this snapshot: yes; archived record still in the app's cache: yes") {
 		t.Fatalf("text loop show:\n%s", show)
 	}
 	e.exec(`update records set removed_at='2026-10-12T06:00:00.000Z' where key_json='hello'`)
-	gone := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list")
+	gone := runOK(t, e, "--no-sync", "--format", "text", "loop", "list")
 	if !strings.Contains(gone, "archived record gone from the app's cache") {
 		t.Fatalf("a removed record is not named plainly:\n%s", gone)
 	}
-	if show := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id); !strings.Contains(show, "archived record gone from the app's cache") {
+	if show := runOK(t, e, "--no-sync", "--format", "text", "loop", "show", id); !strings.Contains(show, "archived record gone from the app's cache") {
 		t.Fatalf("text loop show of a removed record:\n%s", show)
 	}
 	e.exec(`update records set removed_at=null, value_json='` + loopCLIValue(t, 9, [2]string{"greeting", "Hello again"}) + `', content_hash='next', updated_at='2026-10-12T07:00:00.000Z' where key_json='hello'`)
 	runOK(t, e, "loop", "sync")
-	older := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list")
+	older := runOK(t, e, "--no-sync", "--format", "text", "loop", "list")
 	if !strings.Contains(older, "older cached snapshot, archived record differs") {
 		t.Fatalf("an older snapshot is not named plainly:\n%s", older)
 	}
-	if show := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id); !strings.Contains(show, "older cached snapshot (a newer snapshot of this source exists)") {
+	if show := runOK(t, e, "--no-sync", "--format", "text", "loop", "show", id); !strings.Contains(show, "older cached snapshot (a newer snapshot of this source exists)") {
 		t.Fatalf("text loop show of an older snapshot:\n%s", show)
 	}
 	help := helpOf(t, "loop")
@@ -372,12 +372,12 @@ func TestLoopRowsSayLatestCachedSnapshot(t *testing.T) {
 // hits are told apart from no Loop hits.
 func TestSearchReportsMatchedPerSource(t *testing.T) {
 	e := loopRowsEnv(t)
-	clipped := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--limit", "1"))
+	clipped := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--limit", "1"))
 	loop := searchSourceCount(t, clipped, "loop")
 	if loop["count"] != float64(0) || loop["returned"] != float64(0) || loop["matched"] != float64(1) || loop["truncated"] != true || loop["matched_at_least"] != nil {
 		t.Fatalf("crowded-out Loop hit: %v", loop)
 	}
-	full := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--limit", "500"))
+	full := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--limit", "500"))
 	chatsAll := searchSourceCount(t, full, "chats")
 	chats := searchSourceCount(t, clipped, "chats")
 	if chats["returned"] != float64(1) || chats["matched"] != chatsAll["returned"] || chatsAll["matched"] != chatsAll["returned"] || chatsAll["returned"].(float64) < 2 {
@@ -386,18 +386,18 @@ func TestSearchReportsMatchedPerSource(t *testing.T) {
 	if all := searchSourceCount(t, full, "loop"); all["returned"] != float64(1) || all["matched"] != float64(1) || all["truncated"] != false {
 		t.Fatalf("returned Loop hit: %v", all)
 	}
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Hello", "--limit", "1")
+	text := runOK(t, e, "--no-sync", "--format", "text", "search", "Hello", "--limit", "1")
 	if !strings.Contains(text, "1 Loop hit not shown; use --source loop") || !strings.Contains(text, "1 chat hit not shown; use --source chats") {
 		t.Fatalf("text search has no crowded-out hint:\n%s", text)
 	}
-	none := decode(t, runOK(t, e, "--max-age", "0", "search", "Meeting", "--limit", "1"))
+	none := decode(t, runOK(t, e, "--no-sync", "search", "Meeting", "--limit", "1"))
 	if zero := searchSourceCount(t, none, "loop"); zero["matched"] != float64(0) || zero["returned"] != float64(0) || zero["truncated"] != false {
 		t.Fatalf("no Loop hit: %v", zero)
 	}
-	if quiet := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Meeting", "--limit", "1"); strings.Contains(quiet, "Loop hit") {
+	if quiet := runOK(t, e, "--no-sync", "--format", "text", "search", "Meeting", "--limit", "1"); strings.Contains(quiet, "Loop hit") {
 		t.Fatalf("a hint for Loop hits that do not exist:\n%s", quiet)
 	}
-	only := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--source", "loop"))
+	only := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--source", "loop"))
 	if own := searchSourceCount(t, only, "loop"); own["matched"] != float64(1) || own["returned"] != float64(1) {
 		t.Fatalf("--source loop: %v", own)
 	}
@@ -472,7 +472,7 @@ func TestSearchIsDescribedByEverySourceItSearches(t *testing.T) {
 
 func TestLoopRetryOnlyWhereItHelps(t *testing.T) {
 	e := loopRowsEnv(t)
-	doc := decode(t, runOK(t, e, "--max-age", "0", "loop", "sources"))
+	doc := decode(t, runOK(t, e, "--no-sync", "loop", "sources"))
 	needed := map[string]bool{}
 	for _, source := range items(t, doc) {
 		key := source["tuple"].(map[string]any)["key_json"].(string)
@@ -484,7 +484,7 @@ func TestLoopRetryOnlyWhereItHelps(t *testing.T) {
 	if needed["hello"] || !needed["failed"] || needed["metadata"] {
 		t.Fatalf("retry_needed: %v", needed)
 	}
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "sources")
+	text := runOK(t, e, "--no-sync", "--format", "text", "loop", "sources")
 	assertCurrentLoopRetryTable(t, text)
 	for _, cmd := range [][]string{{"loop"}, {"loop", "sync"}} {
 		help := strings.Join(strings.Fields(helpOf(t, cmd...)), " ")
@@ -498,24 +498,24 @@ func TestLoopRetryOnlyWhereItHelps(t *testing.T) {
 
 func TestLoopCommandsReportArchiveAge(t *testing.T) {
 	e := loopRowsEnv(t)
-	id := items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "list")))[0]["id"].(string)
+	id := items(t, decode(t, runOK(t, e, "--no-sync", "loop", "list")))[0]["id"].(string)
 	for _, args := range [][]string{{"loop", "list"}, {"loop", "search", "Hello"}, {"loop", "show", id}, {"loop", "sources"}, {"search", "Hello", "--source", "loop"}} {
-		doc := decode(t, runOK(t, e, append([]string{"--max-age", "0"}, args...)...))
+		doc := decode(t, runOK(t, e, append([]string{"--no-sync"}, args...)...))
 		if age, ok := doc["archive_age_seconds"].(float64); !ok || age < 0 {
 			t.Fatalf("%v archive_age_seconds = %v", args, doc["archive_age_seconds"])
 		}
 	}
-	if text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list"); !strings.Contains(text, "archive age: ") || strings.Contains(text, "never synced") {
+	if text := runOK(t, e, "--no-sync", "--format", "text", "loop", "list"); !strings.Contains(text, "archive age: ") || strings.Contains(text, "never synced") {
 		t.Fatalf("text loop list has no archive age:\n%s", text)
 	}
 	never := newEnv(t)
 	insertLoopCLI(t, loopRecords(t, never), "hello", loopCLIValue(t, 5, [2]string{"greeting", "Hello"}))
 	runOK(t, never, "loop", "sync")
-	doc := decode(t, runOK(t, never, "--max-age", "0", "loop", "list"))
+	doc := decode(t, runOK(t, never, "--no-sync", "loop", "list"))
 	if _, has := doc["archive_age_seconds"]; !has || doc["archive_age_seconds"] != nil {
 		t.Fatalf("an archive that never synced has an age: %v", doc["archive_age_seconds"])
 	}
-	if text := runOK(t, never, "--max-age", "0", "--format", "text", "loop", "list"); !strings.Contains(text, "archive age: never synced") {
+	if text := runOK(t, never, "--no-sync", "--format", "text", "loop", "list"); !strings.Contains(text, "archive age: never synced") {
 		t.Fatalf("text loop list of a never-synced archive:\n%s", text)
 	}
 	if help := helpOf(t, "loop"); !strings.Contains(help, "archive_age_seconds") {

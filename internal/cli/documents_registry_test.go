@@ -91,8 +91,8 @@ func TestRegistryUnadmittedRetryRoute(t *testing.T) {
 	if !strings.Contains(fix, retry) || strings.Contains(stdout, "--source-id 0") || strings.Contains(stdout, "--source-id null") {
 		t.Fatalf("unadmitted registry source has no usable explicit retry route: %q", fix)
 	}
-	for _, args := range [][]string{{"docs", "sources"}, {"--max-age", "0", "docs", "list"}, {"--format", "text", "docs", "sources"},
-		{"--max-age", "0", "search", "anything", "--source", "documents"}} {
+	for _, args := range [][]string{{"docs", "sources"}, {"--no-sync", "docs", "list"}, {"--format", "text", "docs", "sources"},
+		{"--no-sync", "search", "anything", "--source", "documents"}} {
 		code, stdout, stderr := e.run(args...)
 		if code != 0 || !strings.Contains(stdout, "--registry-file") || strings.Contains(stdout, "--source-id 0") {
 			t.Fatalf("%v lost the retry route: %d %s %s", args, code, stdout, stderr)
@@ -113,7 +113,7 @@ func TestRegistryUnadmittedRetryRoute(t *testing.T) {
 	if closeErr := st.Close(); err != nil || closeErr != nil {
 		t.Fatal(err, closeErr)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "docs", "sources")
+	_, stdout, _ = e.run("--no-sync", "docs", "sources")
 	admitted := false
 	for _, source := range coverageSources(t, decode(t, stdout)) {
 		if id, ok := source["source_id"].(float64); ok {
@@ -191,7 +191,7 @@ func TestRegistryZeroHitCoverageAfterGlobalLimit(t *testing.T) {
 	seedRegistryCLI(t, e, "/fictional/MicrosoftRegistrationDB_failed.reg")
 	check := func(args []string, wantItems int, wantTruncated bool) map[string]any {
 		t.Helper()
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: %s", args, stderr)
 		}
@@ -230,7 +230,7 @@ func TestRegistryZeroHitCoverageAfterGlobalLimit(t *testing.T) {
 	check([]string{"docs", "list", "--since", "2026-10-01"}, 1, false)
 	check([]string{"docs", "list", "--since", "2026-09-14", "--until", "2026-09-16"}, 0, false)
 	check([]string{"--fields", "id", "docs", "list", "--surface", "shared"}, 1, false)
-	code, stdout, _ := e.run("--max-age", "0", "docs", "list", "--application", "REGISTRY")
+	code, stdout, _ := e.run("--no-sync", "docs", "list", "--application", "REGISTRY")
 	rows := items(t, decode(t, stdout))
 	if code != 0 || len(rows) != 1 || rows[0]["variant"] != store.RegistryDocumentKind || rows[0]["modified_at"] != nil {
 		t.Fatalf("--application registry: %s", stdout)
@@ -252,7 +252,7 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 	invalid.FriendlyPath, invalid.URL, invalid.Size, invalid.Pinned = referenced, "file://"+filepath.ToSlash(referenced), nil, nil
 	seedRegistryCLI(t, e, "/fictional/MicrosoftRegistrationDB_clocks.reg", valid, invalid)
 	seedDocumentsCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "docs", "list", "--application", "registry")
+	code, stdout, stderr := e.run("--no-sync", "docs", "list", "--application", "registry")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -283,7 +283,7 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 		t.Fatalf("an unparsed opened time must stay raw with a visible null, never a fabricated date: %v", bad)
 	}
 	// A JSON row keeps its exact legacy keys.
-	_, stdout, _ = e.run("--max-age", "0", "docs", "list", "--surface", "shared")
+	_, stdout, _ = e.run("--no-sync", "docs", "list", "--surface", "shared")
 	legacy := items(t, decode(t, stdout))[0]
 	for _, key := range []string{"variant", "registry_native", "opened_at"} {
 		if _, present := legacy[key]; present {
@@ -294,7 +294,7 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 		t.Fatal("Office JSON row lost its native claims")
 	}
 	// Descriptive strings obey --max-text; identifiers and raw clocks stay exact.
-	_, stdout, _ = e.run("--max-age", "0", "--max-text", "5", "docs", "list", "--application", "registry", "--limit", "1")
+	_, stdout, _ = e.run("--no-sync", "--max-text", "5", "docs", "list", "--application", "registry", "--limit", "1")
 	clipped := items(t, decode(t, stdout))[0]
 	clippedNative := clipped["registry_native"].(map[string]any)
 	if clipped["text_truncated"] != true || len([]rune(clipped["title"].(string))) > 5 || clipped["title"] != clippedNative["Title"] ||
@@ -304,7 +304,7 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 	id := bad["id"].(string)
 	show := func(format string) string {
 		t.Helper()
-		code, stdout, stderr := e.run("--max-age", "0", "--format", format, "docs", "show", id)
+		code, stdout, stderr := e.run("--no-sync", "--format", format, "docs", "show", id)
 		if code != 0 {
 			t.Fatal(stderr)
 		}
@@ -323,7 +323,7 @@ func TestRegistryCLIClocksAndNoReferencedIO(t *testing.T) {
 	if text := show("text"); strings.Contains(text, "surface :") || strings.Contains(text, "registry/;") {
 		t.Fatalf("registry detail rendered an invented surface: %s", text)
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "--format", "text", "docs", "show", good["id"].(string))
+	code, stdout, stderr = e.run("--no-sync", "--format", "text", "docs", "show", good["id"].(string))
 	if code != 0 || !strings.Contains(stdout, "opened_at: 2026-10-09T12:34:56.5Z") {
 		t.Fatalf("parsed opened time missing from text detail: %s %s", stdout, stderr)
 	}
@@ -365,7 +365,7 @@ func TestRegistryReadOnlyRepeatLeavesArchiveBytes(t *testing.T) {
 	before := archive()
 	for _, args := range [][]string{{"docs", "list"}, {"docs", "search", "Repeat"}, {"docs", "show", "document-observation:1"},
 		{"docs", "sources"}, {"search", "Repeat", "--source", "documents"}, {"--format", "text", "docs", "list"}} {
-		args = append([]string{"--max-age", "0"}, args...)
+		args = append([]string{"--no-sync"}, args...)
 		code, first, stderr := e.run(args...)
 		_, second, _ := e.run(args...)
 		if code != 0 || first != second {
@@ -469,7 +469,7 @@ func TestRegistryFileUsageErrorsRegisterNothing(t *testing.T) {
 			t.Fatalf("%s: exit %d %s", name, code, stderr)
 		}
 	}
-	code, stdout, stderr := e.run("--max-age", "0", "docs", "sources")
+	code, stdout, stderr := e.run("--no-sync", "docs", "sources")
 	if code != 0 || len(items(t, decode(t, stdout))) != 1 {
 		t.Fatalf("a usage error registered a source: %s %s", stdout, stderr)
 	}
@@ -483,7 +483,7 @@ func TestRegistryFileUsageErrorsRegisterNothing(t *testing.T) {
 	runDocumentsSync = run
 	// The archive still answers and still takes writes: none of its locks were disturbed.
 	seedRegistryCLI(t, e, "/fictional/MicrosoftRegistrationDB_after.reg", registryCLIObservation(12, "After", ""))
-	if code, stdout, _ := e.run("--max-age", "0", "docs", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 2 {
+	if code, stdout, _ := e.run("--no-sync", "docs", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 2 {
 		t.Fatalf("archive unusable after refused registry files: %s", stdout)
 	}
 }
@@ -522,7 +522,7 @@ func TestRegistryTextListShowsOpenedNotModified(t *testing.T) {
 	seedDocumentsCLI(t, e)
 	seedRegistryCLI(t, e, "/fictional/MicrosoftRegistrationDB_text.reg",
 		registryCLIObservation(12, "Opened known", "2026-10-09T12:34:56Z"), registryCLIObservation(13, "Opened unknown", "not a clock"))
-	code, stdout, stderr := e.run("--max-age", "0", "--format", "text", "docs", "list")
+	code, stdout, stderr := e.run("--no-sync", "--format", "text", "docs", "list")
 	if code != 0 {
 		t.Fatal(stderr)
 	}

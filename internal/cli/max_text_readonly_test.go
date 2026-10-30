@@ -148,8 +148,8 @@ func TestMaxTextOfflineReadsPreservePOSIX0400AndFullEvidence(t *testing.T) {
 		}
 	}
 	words := requireContentFollowupArchive(t, e, command)
-	if !slices.Contains(words, "--max-age") || words[slices.Index(words, "--max-age")+1] != "0" {
-		t.Fatal("emitted full command is not selected archive/max-age0")
+	if !slices.Contains(words, "--no-sync") || slices.Contains(words, "--max-age") {
+		t.Fatal("emitted full command is not selected archive/--no-sync")
 	}
 	code, out, stderr := replayContentFollowup(t, e, command)
 	check("exact emitted selected-DB max-age0 SQL")

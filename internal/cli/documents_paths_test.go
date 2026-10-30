@@ -48,7 +48,7 @@ func TestDocumentsCLIReadFailuresAndMissingSelections(t *testing.T) {
 	for _, args := range [][]string{
 		{"docs", "list", "--source-id", "999"}, {"docs", "sources", "--source-id", "999"},
 	} {
-		code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 2 || !strings.Contains(stderr, "document_source_unknown") {
 			t.Fatal("nonexistent source became successful empty selection")
 		}
@@ -111,14 +111,14 @@ func TestDocumentsOptionalCoverageMergeKeepsFailuresAndSources(t *testing.T) {
 func TestDocumentsCLIMissingArchiveAndNoSourceRemainIndependent(t *testing.T) {
 	e := newEnv(t)
 	missing := filepath.Join(t.TempDir(), "missing.db")
-	code, stdout, stderr := e.run("--db", missing, "--max-age", "0", "docs", "sources")
+	code, stdout, stderr := e.run("--db", missing, "--no-sync", "docs", "sources")
 	if code != 0 || !strings.Contains(stdout, "docs sync") {
 		t.Fatalf("absent document sources lost next action: %s", stderr)
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatal("read-only sources created an archive")
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "docs", "search", "words")
+	code, stdout, stderr = e.run("--no-sync", "docs", "search", "words")
 	if code != 0 || !strings.Contains(stdout, "docs sync") {
 		t.Fatalf("unregistered search required legacy apps: %s", stderr)
 	}

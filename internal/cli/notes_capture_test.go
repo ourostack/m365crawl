@@ -44,7 +44,7 @@ func TestNotesCLIExplicitSyncIsAConnectedOfflineWorkflow(t *testing.T) {
 			t.Fatalf("explicit capture: %d/%s/%s", code, stdout, stderr)
 		}
 	}
-	code, stdout, stderr := e.run("--max-age", "0", "notes", "search", "searchableword")
+	code, stdout, stderr := e.run("--no-sync", "notes", "search", "searchableword")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -52,11 +52,11 @@ func TestNotesCLIExplicitSyncIsAConnectedOfflineWorkflow(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatal("capture was not connected to search")
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "notes", "show", rows[0]["id"].(string))
+	code, stdout, stderr = e.run("--no-sync", "notes", "show", rows[0]["id"].(string))
 	if code != 0 || len(items(t, decode(t, stdout))[0]["flags"].([]any)) != 1 {
 		t.Fatalf("captured native flags missing: %d/%s/%s", code, stdout, stderr)
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "search", "searchableword", "--source", "notes", "--fields", "source,id", "--max-text", "5")
+	code, stdout, stderr = e.run("--no-sync", "search", "searchableword", "--source", "notes", "--fields", "source,id", "--max-text", "5")
 	if code != 0 || decode(t, stdout)["source_coverage"] == nil {
 		t.Fatalf("shared focused recall: %d/%s/%s", code, stdout, stderr)
 	}
@@ -78,7 +78,7 @@ func TestNotesCLIValidationIsBeforeCapture(t *testing.T) {
 		{"notes", "list", "--source=-1"},
 		{"search", "--source", "notes"},
 	} {
-		if code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code == 0 {
+		if code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...); code == 0 {
 			t.Fatalf("invalid capture/read accepted %v: %s", args, stderr)
 		}
 	}

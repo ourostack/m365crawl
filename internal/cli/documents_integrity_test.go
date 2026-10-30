@@ -18,7 +18,7 @@ func TestDocumentsCLIArchiveAndProjectionFailuresRemainErrors(t *testing.T) {
 		e := newEnv(t)
 		seedDocumentsCLI(t, e)
 		e.exec(`alter table document_observations rename column title to broken`)
-		code, _, stderr := e.run(append([]string{"--max-age", "0"}, command...)...)
+		code, _, stderr := e.run(append([]string{"--no-sync"}, command...)...)
 		if code == 0 || !strings.Contains(stderr, "db_error") {
 			t.Fatalf("broken document projection became empty success: %v %s", command, stderr)
 		}
@@ -50,7 +50,7 @@ func TestDocumentsCLIReadOnlyArchiveBytesAndTimesStayUnchanged(t *testing.T) {
 	}
 	for _, command := range [][]string{{"docs", "list"}, {"docs", "search", "Quarterly"},
 		{"docs", "show", "document-observation:1"}, {"docs", "sources"}, {"search", "Quarterly", "--source", "documents"}} {
-		if code, _, stderr := e.run(append([]string{"--max-age", "0"}, command...)...); code != 0 {
+		if code, _, stderr := e.run(append([]string{"--no-sync"}, command...)...); code != 0 {
 			t.Fatal(stderr)
 		}
 	}
@@ -73,7 +73,7 @@ func TestDocumentsCLISelectionDuringRefreshCannotHideCorruption(t *testing.T) {
 		e.exec(`alter table document_observations rename column title to broken`)
 		return syncer.DocumentReport{}, nil
 	}
-	if code, _, stderr := e.run("--max-age", "0", "docs", "show", id); code == 0 || !strings.Contains(stderr, "db_error") {
+	if code, _, stderr := e.run("--no-sync", "docs", "show", id); code == 0 || !strings.Contains(stderr, "db_error") {
 		t.Fatal("detail hid corruption introduced between lookup and selected refresh")
 	}
 }

@@ -54,7 +54,7 @@ func TestDocsListOrderByOpened(t *testing.T) {
 		t.Fatalf("opened order over every row = %q", got)
 	}
 	for _, args := range [][]string{{"docs", "list", "--order-by", "captured_at"}, {"docs", "search", "plan", "--order-by", "opened_at"}} {
-		if code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code != 2 || stdout != "" || !strings.Contains(stderr, "order-by") {
+		if code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...); code != 2 || stdout != "" || !strings.Contains(stderr, "order-by") {
 			t.Fatalf("%v: exit %d %s", args, code, stderr)
 		}
 	}

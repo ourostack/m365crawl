@@ -153,7 +153,7 @@ func TestAttendeeCLIExplicitAndOffline(t *testing.T) {
 func TestAttendeeCLIProjectionAndFullRecord(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 1, false)
-	code, out, stderr := e.run("--max-age", "0", "--max-text", "5", "calendar", "attendees", "list", ref)
+	code, out, stderr := e.run("--no-sync", "--max-text", "5", "calendar", "attendees", "list", ref)
 	if code != 0 {
 		t.Fatal(code, out, stderr)
 	}
@@ -166,7 +166,7 @@ func TestAttendeeCLIProjectionAndFullRecord(t *testing.T) {
 	if !ok || !strings.Contains(query, "json_extract(s.result_json,'$.attendees['||o.ordinal||']')") {
 		t.Fatal("full record repeated blob or lost indexed native object", row)
 	}
-	if command := row["full_record_command"].(string); !strings.Contains(command, "--db") || !strings.Contains(command, e.db) || !strings.Contains(command, "--max-age 0") || strings.Contains(command, " content ") {
+	if command := row["full_record_command"].(string); !strings.Contains(command, "--db") || !strings.Contains(command, e.db) || !strings.Contains(command, "--no-sync") || strings.Contains(command, " content ") {
 		t.Fatal("full record escaped selected archive", command)
 	}
 	s, err := store.OpenReadOnly(context.Background(), e.db)
@@ -190,7 +190,7 @@ func TestAttendeeCLIProjectionAndFullRecord(t *testing.T) {
 	if !found {
 		t.Fatal("native object missing")
 	}
-	code, out, _ = e.run("--max-age", "0", "--fields", "id", "calendar", "attendees", "list", ref, "--source-id", "999")
+	code, out, _ = e.run("--no-sync", "--fields", "id", "calendar", "attendees", "list", ref, "--source-id", "999")
 	if code != 0 || !containsJSONKey(out, "native_attendee_evidence") || len(items(t, decode(t, out))) != 0 {
 		t.Fatal("zero/source/fields projection lost independent evidence", out)
 	}
@@ -199,7 +199,7 @@ func TestAttendeeCLIProjectionAndFullRecord(t *testing.T) {
 func TestAttendeeCalendarSummaryScope(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 1, false)
-	code, out, stderr := e.run("--max-age", "0", "--fields", "attendees", "calendar", "event", ref)
+	code, out, stderr := e.run("--no-sync", "--fields", "attendees", "calendar", "event", ref)
 	if code != 0 || !containsJSONKey(out, "native_attendee_evidence") {
 		t.Fatal("event fields hid independent native scope", code, out, stderr)
 	}
@@ -217,7 +217,7 @@ func TestAttendeeAmbiguityAcrossListShowFormats(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 101, true)
 	for _, command := range [][]string{{"calendar", "attendees", "list", ref}, {"calendar", "attendees", "show", "attendee-observation:1"}} {
-		code, out, stderr := e.run(append([]string{"--max-age", "0"}, command...)...)
+		code, out, stderr := e.run(append([]string{"--no-sync"}, command...)...)
 		if code != 0 {
 			t.Fatal(code, out, stderr)
 		}
@@ -225,7 +225,7 @@ func TestAttendeeAmbiguityAcrossListShowFormats(t *testing.T) {
 		if len(rows) == 0 || rows[0]["ambiguous"] != true {
 			t.Fatal("own complete snapshot ambiguity disappeared", out)
 		}
-		code, out, stderr = e.run(append([]string{"--max-age", "0", "--format", "text"}, command...)...)
+		code, out, stderr = e.run(append([]string{"--no-sync", "--format", "text"}, command...)...)
 		if code != 0 || !strings.Contains(out, "ambiguous") {
 			t.Fatal("text lost source-local ambiguity", code, out, stderr)
 		}

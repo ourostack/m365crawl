@@ -68,10 +68,10 @@ func TestPeopleObservationsRefreshFailsWithoutReadableArchive(t *testing.T) {
 
 func TestPeopleObservationsEmptyAndReadFailurePaths(t *testing.T) {
 	e := newEnv(t)
-	if code, _, _ := e.run("--max-age", "0", "people", "sources"); code != 0 {
+	if code, _, _ := e.run("--no-sync", "people", "sources"); code != 0 {
 		t.Fatal("empty sources refused")
 	}
-	if code, _, _ := e.run("--max-age", "0", "people", "show", "person-observation:1"); code != 2 {
+	if code, _, _ := e.run("--no-sync", "people", "show", "person-observation:1"); code != 2 {
 		t.Fatal("missing detail did not report usage")
 	}
 	peopleFixture(t, e)

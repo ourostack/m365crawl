@@ -123,7 +123,7 @@ func TestMailOWANativeStatusText(t *testing.T) {
 	if code, _, stderr := e.run("--outlook-root", root, "sync"); code != 0 {
 		t.Fatalf("sync = %d: %s", code, stderr)
 	}
-	code, out, stderr := e.run("--format", "text", "--max-age", "0", "--outlook-root", root, "status")
+	code, out, stderr := e.run("--format", "text", "--no-sync", "--outlook-root", root, "status")
 	if code != 0 || !strings.Contains(out, "5 messages, 1 unread, 7 folders") {
 		t.Fatalf("native status text = %d: %s %s", code, out, stderr)
 	}

@@ -52,7 +52,8 @@ type Globals struct {
 	OutlookProfile string `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
 	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
 	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
-	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 disables the implicit sync." placeholder:"DURATION"`
+	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 does not mean fresh: it turns the implicit sync off, like --no-sync." placeholder:"DURATION"`
+	NoSync         bool   `name:"no-sync" help:"Read commands read the archive as it is and never sync first, whatever --max-age says (also: M365CRAWL_NO_SYNC=1). The result says implicit_sync: disabled, and adds a notice when the archive is older than 15m. Explicit sync, fetch and capture commands are unaffected."`
 	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A list command's --help ends with the keys it accepts. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
 	MaxText        int    `name:"max-text" help:"Supported commands: cap each applicable text/preview field at N Unicode code points, including any … marker, and set truncation flags. 0 keeps all text." placeholder:"N"`
 }

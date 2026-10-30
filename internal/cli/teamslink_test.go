@@ -143,7 +143,7 @@ func linkTo(conv string) string {
 // conversationsOf runs a read and returns the conversation ids of its items and its note.
 func conversationsOf(t *testing.T, e *env, args ...string) (map[string]bool, string) {
 	t.Helper()
-	code, stdout, stderr := e.run(append([]string{"--json", "--max-age", "0", "--account", tenantA + "/" + userA}, args...)...)
+	code, stdout, stderr := e.run(append([]string{"--json", "--no-sync", "--account", tenantA + "/" + userA}, args...)...)
 	if code != 0 {
 		t.Fatalf("%v: exit %d: %s", args, code, stderr)
 	}
@@ -217,7 +217,7 @@ func TestConversationLinkNotArchived(t *testing.T) {
 		t.Fatalf("note %q", n)
 	}
 	// Without --account the note does not name one.
-	_, stdout, _ := e.run("--json", "--max-age", "0", "messages", "-c", missing)
+	_, stdout, _ := e.run("--json", "--no-sync", "messages", "-c", missing)
 	if note := decode(t, stdout)["note"]; note != uncachedNote("19:missing@thread.v2", false) {
 		t.Fatalf("no --account: note %q", note)
 	}
@@ -236,7 +236,7 @@ func TestConversationLinkCheckFailure(t *testing.T) {
 	hasConversationOf = func(*store.Store, context.Context, *teamsdesktop.Account, string) (bool, error) {
 		return false, errors.New("broken")
 	}
-	code, _, stderr := e.run("--json", "--max-age", "0", "messages", "-c", "https://teams.microsoft.com/l/chat/19%3Amissing%40thread.v2/0")
+	code, _, stderr := e.run("--json", "--no-sync", "messages", "-c", "https://teams.microsoft.com/l/chat/19%3Amissing%40thread.v2/0")
 	if code == 0 || errorOf(t, stderr)["code"] != "db_error" {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -250,7 +250,7 @@ func TestConversationFlagRejectsBadLinks(t *testing.T) {
 		{"https://teams.microsoft.com/l/message/19%3Aabc", linkFix},
 	} {
 		for _, cmd := range []string{"messages", "unread", "search"} {
-			code, _, stderr := e.run("--json", "--max-age", "0", cmd, "-c", c.link)
+			code, _, stderr := e.run("--json", "--no-sync", cmd, "-c", c.link)
 			er := errorOf(t, stderr)
 			if code != 2 || er["code"] != "usage" || er["fix"] != c.fix || !strings.HasPrefix(er["message"].(string), "--conversation: ") {
 				t.Errorf("%s -c %s: exit %d %v", cmd, c.link, code, er)
@@ -263,7 +263,7 @@ func TestThreadTakesLinks(t *testing.T) {
 	e := linkEnv(t)
 	// A channel reply's link reads the whole thread, by its root.
 	link := "https://teams.microsoft.com/l/message/" + linkTo(fixtureChannel) + "/1700000046000?tenantId=" + tenantA + "&parentMessageId=1700000045000"
-	_, stdout, errOut := e.run("--json", "--max-age", "0", "--account", tenantA+"/"+userA, "thread", link)
+	_, stdout, errOut := e.run("--json", "--no-sync", "--account", tenantA+"/"+userA, "thread", link)
 	its := items(t, decode(t, stdout))
 	if len(its) == 0 || its[0]["id"] != "1700000045000" {
 		t.Fatalf("thread <reply link>: %v %s", its, errOut)
@@ -273,20 +273,20 @@ func TestThreadTakesLinks(t *testing.T) {
 		"https://teams.cloud.microsoft/l/message/" + fixtureChannel + "/1700000045000",
 		"https://teams.live.com/l/message/" + linkTo(fixtureChannel) + "/1700000045000?context=%7B%7D",
 	} {
-		_, out, _ := e.run("--json", "--max-age", "0", "--account", tenantA+"/"+userA, "thread", l)
+		_, out, _ := e.run("--json", "--no-sync", "--account", tenantA+"/"+userA, "thread", l)
 		if got := items(t, decode(t, out)); len(got) != len(its) {
 			t.Errorf("thread %s: %d items, want %d", l, len(got), len(its))
 		}
 	}
 	// A link pasted with brackets, spaces, an upper-case scheme or a full stop reads the same thread.
 	for _, l := range []string{" <" + link + "> ", strings.Replace(link, "https", "HTTPS", 1) + "."} {
-		_, out, _ := e.run("--json", "--max-age", "0", "--account", tenantA+"/"+userA, "thread", l)
+		_, out, _ := e.run("--json", "--no-sync", "--account", tenantA+"/"+userA, "thread", l)
 		if got := items(t, decode(t, out)); len(got) != len(its) {
 			t.Errorf("thread %q: %d items, want %d", l, len(got), len(its))
 		}
 	}
 	// A root after a link is a usage error.
-	code, _, stderr := e.run("--json", "--max-age", "0", "thread", link, "1700000045000")
+	code, _, stderr := e.run("--json", "--no-sync", "thread", link, "1700000045000")
 	if er := errorOf(t, stderr); code != 2 || er["code"] != "usage" || !strings.Contains(er["message"].(string), "not both") || !strings.Contains(er["fix"].(string), "without the root") {
 		t.Fatalf("thread <link> <root>: exit %d %v", code, er)
 	}
@@ -296,7 +296,7 @@ func TestThreadTakesLinks(t *testing.T) {
 		"https://teams.microsoft.com/l/chat/" + linkTo(fixtureChat) + "/conversations",
 		"https://teams.microsoft.com/l/meetup-join/" + linkTo(fixtureMeeting) + "/0",
 	} {
-		code, _, stderr := e.run("--json", "--max-age", "0", "thread", l)
+		code, _, stderr := e.run("--json", "--no-sync", "thread", l)
 		er := errorOf(t, stderr)
 		fix, _ := er["fix"].(string)
 		if code != 2 || er["code"] != "usage" || !strings.Contains(fix, "m365crawl messages --conversation '"+l+"'") || !strings.Contains(fix, "message link") {
@@ -304,7 +304,7 @@ func TestThreadTakesLinks(t *testing.T) {
 		}
 	}
 	// A link that names people keeps its own fix.
-	code, _, stderr = e.run("--json", "--max-age", "0", "thread", "https://teams.microsoft.com/l/chat/0/0?users=a@example.com")
+	code, _, stderr = e.run("--json", "--no-sync", "thread", "https://teams.microsoft.com/l/chat/0/0?users=a@example.com")
 	if er := errorOf(t, stderr); code != 2 || er["fix"] != peopleLinkFix {
 		t.Fatalf("thread <people link>: exit %d %v", code, er)
 	}

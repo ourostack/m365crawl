@@ -45,19 +45,19 @@ func TestNotesReadProjectionFailuresAreNotEmptySuccess(t *testing.T) {
 
 func TestNotesShowMissingAndDamagedArchiveIsExplicitError(t *testing.T) {
 	e := newEnv(t)
-	if code, _, stderr := e.run("--max-age", "0", "notes", "show", "note:1"); code == 0 {
+	if code, _, stderr := e.run("--no-sync", "notes", "show", "note:1"); code == 0 {
 		t.Fatal(stderr)
 	}
 	id := seedNotesCLI(t, e)
 	e.exec(`alter table note_elements rename column text to broken`)
-	if code, _, stderr := e.run("--max-age", "0", "notes", "show", id); code == 0 {
+	if code, _, stderr := e.run("--no-sync", "notes", "show", id); code == 0 {
 		t.Fatal(stderr)
 	}
 }
 
 func TestNotesSourcesWithoutArchiveAndExplicitEmptyDirectory(t *testing.T) {
 	e := newEnv(t)
-	if code, stdout, stderr := e.run("--max-age", "0", "notes", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 0 {
+	if code, stdout, stderr := e.run("--no-sync", "notes", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 0 {
 		t.Fatalf("no registered sources: %d/%s/%s", code, stdout, stderr)
 	}
 	code, stdout, stderr := e.run("notes", "sync", "--root", t.TempDir())

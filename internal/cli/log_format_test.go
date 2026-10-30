@@ -69,7 +69,7 @@ func TestEveryCommandRunsUnderLogFormat(t *testing.T) {
 		if skip[path] != "" {
 			continue
 		}
-		args := append([]string{"--format", "log", "--max-age", "0"}, strings.Fields(path)...)
+		args := append([]string{"--format", "log", "--no-sync"}, strings.Fields(path)...)
 		for _, a := range n.Positional {
 			if a.Required {
 				args = append(args, "placeholder")

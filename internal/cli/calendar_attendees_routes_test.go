@@ -74,7 +74,7 @@ func attendeeCommandWordsFor(t *testing.T, command, platform string) []string {
 func TestAttendeeEmittedRoutesExecuteSelectedArchive(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 1, true)
-	code, out, stderr := e.run("--max-age", "0", "--max-text", "1", "calendar", "attendees", "list", ref)
+	code, out, stderr := e.run("--no-sync", "--max-text", "1", "calendar", "attendees", "list", ref)
 	if code != 0 {
 		t.Fatal(code, out, stderr)
 	}
@@ -102,12 +102,12 @@ func TestAttendeePositiveArchiveIDsAndPreview(t *testing.T) {
 	e := newEnv(t)
 	ref := attendeeCLIArchive(t, e, 101, false)
 	for _, id := range []string{"11", "attendee-observation:0", "attendee-observation:-1", "attendee-observation:+1", "attendee-observation:01", "attendee-observation:9223372036854775808", "https://example.invalid/person"} {
-		if code, _, _ := e.run("--max-age", "0", "calendar", "attendees", "show", id); code == 0 {
+		if code, _, _ := e.run("--no-sync", "calendar", "attendees", "show", id); code == 0 {
 			t.Fatal("noncanonical archive ID accepted", id)
 		}
 	}
 	for _, limit := range []string{"100", "101"} {
-		code, out, stderr := e.run("--max-age", "0", "calendar", "attendees", "list", ref, "--limit", limit)
+		code, out, stderr := e.run("--no-sync", "calendar", "attendees", "list", ref, "--limit", limit)
 		if code != 0 {
 			t.Fatal(code, out, stderr)
 		}

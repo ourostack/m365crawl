@@ -15,7 +15,7 @@ func assertScopedSyncHint(t *testing.T, e *env, hint any) {
 		t.Fatalf("missing executable sync hint: %v", hint)
 	}
 	got := calendarRecoveryWords(t, strings.TrimPrefix(text, "run "))
-	want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", "json",
+	want := []string{"m365crawl", "--db", e.db, "--no-sync", "--format", "json",
 		"--teams-root", e.root, "--outlook-root", "none", "sync"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("sync hint changed literal archive/root/format/operation context:\ngot  %q\nwant %q", got, want)

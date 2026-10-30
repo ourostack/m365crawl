@@ -297,7 +297,7 @@ func (rt *runtime) showEngage(value string) error {
 func engageSourceLabel(id int64) string { return strconv.FormatInt(id, 10) }
 
 func (rt *runtime) engageFullSQLCommand(query string) string {
-	return "m365crawl --db " + quoteArg(rt.archiveRef()) + " --max-age 0 sql " + quoteArg(query)
+	return "m365crawl --db " + quoteArg(rt.archiveRef()) + " --no-sync sql " + quoteArg(query)
 }
 
 func (rt *runtime) renderEngageCoverage(c *EngageContentCoverage) {

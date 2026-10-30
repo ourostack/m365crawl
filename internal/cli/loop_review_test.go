@@ -188,8 +188,8 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 		`"blobs":{},"trees":{"channels"`, `"blobs":{"orphan":"absent"},"trees":{"channels"`, 1)
 	insertLoopCLI(t, db, "page", partial)
 	runOK(t, e, "loop", "sync")
-	id := items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "list")))[0]["id"].(string)
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id)
+	id := items(t, decode(t, runOK(t, e, "--no-sync", "loop", "list")))[0]["id"].(string)
+	text := runOK(t, e, "--no-sync", "--format", "text", "loop", "show", id)
 	zone := time.Date(2026, 10, 12, 1, 0, 0, 0, time.UTC).In(displayZone).Format("2006-01-02 15:04 MST")
 	for _, want := range []string{id + "  channels/native", "text state: partial_snapshot", "not a full or current Loop page",
 		"sequence 7 (snapshot 7, latest 7)", "pending operations 0 (snapshot 0)", "markers 0", "missing blobs 1", "partial: yes",
@@ -200,7 +200,7 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 			t.Fatalf("text loop show lacks %q:\n%s", want, text)
 		}
 	}
-	if search := runOK(t, e, "--max-age", "0", "--format", "text", "search", "evidence"); !strings.Contains(search, "partial_snapshot") || !strings.Contains(search, "  evidence words") || strings.Contains(search, "[partial_snapshot]") {
+	if search := runOK(t, e, "--no-sync", "--format", "text", "search", "evidence"); !strings.Contains(search, "partial_snapshot") || !strings.Contains(search, "  evidence words") || strings.Contains(search, "[partial_snapshot]") {
 		t.Fatalf("shared search does not mark the Loop row as a partial snapshot:\n%s", search)
 	}
 	if _, err := db.Exec(`update records set value_json=?,content_hash='next',updated_at='2026-10-12T05:00:00.000Z' where key_json='page'`,
@@ -208,16 +208,16 @@ func TestLoopShowTextCarriesSnapshotEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOK(t, e, "loop", "sync")
-	old := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "show", id)
+	old := runOK(t, e, "--no-sync", "--format", "text", "loop", "show", id)
 	for _, want := range []string{"older cached snapshot (a newer snapshot of this source exists); archived record matches this snapshot: no; archived record still in the app's cache: yes", "\nevidence words\n"} {
 		if !strings.Contains(old, want) {
 			t.Fatalf("retained text loop show lacks %q:\n%s", want, old)
 		}
 	}
-	if list := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list"); strings.Contains(list, "text state:") {
+	if list := runOK(t, e, "--no-sync", "--format", "text", "loop", "list"); strings.Contains(list, "text state:") {
 		t.Fatalf("loop list text is not compact:\n%s", list)
 	}
-	if fields := runOK(t, e, "--max-age", "0", "--format", "text", "--fields", "id,text", "loop", "show", id); strings.Contains(fields, "text state:") {
+	if fields := runOK(t, e, "--no-sync", "--format", "text", "--fields", "id,text", "loop", "show", id); strings.Contains(fields, "text state:") {
 		t.Fatalf("--fields did not bound the detail:\n%s", fields)
 	}
 }
@@ -227,7 +227,7 @@ func TestLoopSearchCoverageIsCompact(t *testing.T) {
 	e := newEnv(t)
 	seedLoopSearch(t, e)
 	for _, args := range [][]string{{"search", "Hello"}, {"search", "Hello", "--source", "loop"}, {"--fields", "source", "search", "Hello", "--limit", "1"}} {
-		doc := decode(t, runOK(t, e, append([]string{"--max-age", "0"}, args...)...))
+		doc := decode(t, runOK(t, e, append([]string{"--no-sync"}, args...)...))
 		coverage := doc["loop_coverage"].(map[string]any)
 		totals, _ := coverage["totals"].(map[string]any)
 		if totals == nil || totals["registered"] != float64(3) || totals["failed"] != float64(1) || totals["metadata_only"] != float64(1) ||
@@ -246,12 +246,12 @@ func TestLoopSearchCoverageIsCompact(t *testing.T) {
 				t.Fatalf("%v compact source has keys %v: %v", args, keys, source)
 			}
 		}
-		if strings.Contains(runOK(t, e, append([]string{"--max-age", "0"}, args...)...), "key_json") {
+		if strings.Contains(runOK(t, e, append([]string{"--no-sync"}, args...)...), "key_json") {
 			t.Fatalf("%v search coverage carries the tuple", args)
 		}
 	}
 	// loop commands keep the full detail.
-	list := decode(t, runOK(t, e, "--max-age", "0", "loop", "list"))
+	list := decode(t, runOK(t, e, "--no-sync", "loop", "list"))
 	if source := loopCoverageSources(t, list)[0]; source["tuple"] == nil || source["retry"] == nil {
 		t.Fatalf("loop list lost full coverage: %v", source)
 	}
@@ -259,7 +259,7 @@ func TestLoopSearchCoverageIsCompact(t *testing.T) {
 
 func TestLoopCoverageWording(t *testing.T) {
 	empty := newEnv(t)
-	if doc := decode(t, runOK(t, empty, "--max-age", "0", "loop", "list")); doc["loop_coverage"].(map[string]any)["state"] != "not_registered" {
+	if doc := decode(t, runOK(t, empty, "--no-sync", "loop", "list")); doc["loop_coverage"].(map[string]any)["state"] != "not_registered" {
 		t.Fatalf("nothing registered: %v", doc["loop_coverage"])
 	}
 	for reason, fix := range loopFailureFix {
@@ -281,7 +281,7 @@ func TestLoopInvalidOwnerNeverPrinted(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"loop", "sources"}, {"loop", "list"}, {"search", "owned"}, {"--format", "text", "loop", "sources"}} {
-		out := runOK(t, e, append([]string{"--max-age", "0"}, args...)...)
+		out := runOK(t, e, append([]string{"--no-sync"}, args...)...)
 		if strings.Contains(out, "SECRE") || !strings.Contains(out, "loop_cache_identity_unqualified") {
 			t.Fatalf("%v: invalid owner printed or reason missing:\n%s", args, out)
 		}

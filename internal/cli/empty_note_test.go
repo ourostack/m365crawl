@@ -49,7 +49,7 @@ func pinReadsHere(t *testing.T) {
 // noteOf runs a read command in JSON and returns its note.
 func noteOf(t *testing.T, e *env, args ...string) string {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--json", "--no-sync"}, args...)...)
 	if code != 0 {
 		t.Fatalf("%v: exit %d: %s", args, code, errOut)
 	}
@@ -123,11 +123,11 @@ func TestEmptyTeamsListsSayWhy(t *testing.T) {
 func TestEmptyNoteOnlyOnEmptyLists(t *testing.T) {
 	e := newEnv(t)
 	teamsArchive(t, e)
-	code, out, _ := e.run("--json", "--max-age", "0", "messages")
+	code, out, _ := e.run("--json", "--no-sync", "messages")
 	if m := decode(t, out); code != 0 || m["count"] != float64(1) || m["note"] != nil {
 		t.Fatalf("a full list has no note: %d %v", code, m)
 	}
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "messages", "--from", "nobody")
+	_, out, _ = e.run("--format", "text", "--no-sync", "messages", "--from", "nobody")
 	if !contains(splitLines(out), "note: nothing matched the filters") {
 		t.Fatalf("text output lacks the note:\n%s", out)
 	}
@@ -139,7 +139,7 @@ func TestEmptyNoteReportsAnArchiveFailure(t *testing.T) {
 	teamsArchive(t, e)
 	e.exec("drop table messages")
 	e.exec("create table messages (x)")
-	code, _, errOut := e.run("--json", "--max-age", "0", "stores")
+	code, _, errOut := e.run("--json", "--no-sync", "stores")
 	if code == 0 {
 		t.Fatalf("exit 0, stderr %q", errOut)
 	}
@@ -170,7 +170,7 @@ func TestCalendarEmptyNoteReportsAFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { calendarSourcesOf = old })
 	for _, args := range [][]string{{"calendar"}, {"calendar", "actions"}} {
-		code, _, errOut := e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
+		code, _, errOut := e.run(append([]string{"--json", "--no-sync"}, args...)...)
 		if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
 			t.Fatalf("%v: exit %d, stderr %q", args, code, errOut)
 		}
@@ -183,19 +183,19 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 	e := newEnv(t)
 	teamsArchive(t, e)
 	for _, args := range [][]string{{"messages"}, {"search", "hello"}} {
-		_, out, _ := e.run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+		_, out, _ := e.run(append([]string{"--format", "text", "--no-sync"}, args...)...)
 		if !strings.Contains(out, "thread") || !strings.Contains(out, "19:chat 1") {
 			t.Fatalf("%v: no thread target:\n%s", args, out)
 		}
 	}
-	code, out, _ := e.run("--json", "--max-age", "0", "thread", "19:chat", "1")
+	code, out, _ := e.run("--json", "--no-sync", "thread", "19:chat", "1")
 	if m := decode(t, out); code != 0 || m["count"] != float64(1) {
 		t.Fatalf("thread: %d %v", code, m)
 	}
 	// For mail, the thread column holds the id that mail thread takes.
 	e = newEnv(t)
 	seedMail(t, e, seedMessages())
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "search", "Quarterly", "--source", "mail")
+	_, out, _ = e.run("--format", "text", "--no-sync", "search", "Quarterly", "--source", "mail")
 	var id string
 	for _, w := range strings.Fields(out) {
 		if strings.HasPrefix(w, "outlook/") {
@@ -203,7 +203,7 @@ func TestTextThreadColumnRunsThread(t *testing.T) {
 			break
 		}
 	}
-	if code, out, errOut := e.run("--json", "--max-age", "0", "mail", "thread", id); code != 0 || decode(t, out)["count"] == float64(0) {
+	if code, out, errOut := e.run("--json", "--no-sync", "mail", "thread", id); code != 0 || decode(t, out)["count"] == float64(0) {
 		t.Fatalf("mail thread %q: %d %s %s", id, code, out, errOut)
 	}
 	if got := threadTarget("19:c", "", "5"); got != "19:c 5" {
@@ -273,7 +273,7 @@ func TestSearchEmptyNoteReportsAFailure(t *testing.T) {
 	messageWindowOf = func(*store.Store, context.Context, *teamsdesktop.Account) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, errors.New("broken")
 	}
-	code, _, errOut := e.run("--json", "--max-age", "0", "search", "zzzqqq", "--source", "chats")
+	code, _, errOut := e.run("--json", "--no-sync", "search", "zzzqqq", "--source", "chats")
 	if code == 0 {
 		t.Fatalf("exit 0, stderr %q", errOut)
 	}
@@ -308,7 +308,7 @@ func TestSearchEmptyNoteOnOtherPlatforms(t *testing.T) {
 	got := noteOf(t, e, "search", "x")
 	assertRecoveryEnvCommand(t, e, got, "mail is not supported on this operating system; searched Teams chats and meeting transcripts only; no archive yet: run ", "", "json", "sync")
 	e.emptyArchive()
-	code, _, errOut := e.run("--json", "--max-age", "0", "search", "x", "--source", "mail")
+	code, _, errOut := e.run("--json", "--no-sync", "search", "x", "--source", "mail")
 	if body := errorOf(t, errOut); code != 3 || body["code"] != "mail_unsupported_platform" {
 		t.Errorf("windows, --source mail: exit %d, %v", code, body)
 	}

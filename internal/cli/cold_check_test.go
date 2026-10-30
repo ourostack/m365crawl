@@ -11,11 +11,11 @@ func TestMatchedAtLeastIsExplainedAsAFloor(t *testing.T) {
 	e := loopHitsEnv(t)
 	seedTwoDocuments(t, e)
 	line := "documents stopped reading at --limit, so its match count (matched_at_least in JSON) is a floor, not a total; raise --limit to read further"
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Quarterly", "--source", "documents", "--limit", "1")
+	text := runOK(t, e, "--no-sync", "--format", "text", "search", "Quarterly", "--source", "documents", "--limit", "1")
 	if strings.Count(text, line) != 1 {
 		t.Fatalf("text does not explain the floor once:\n%s", text)
 	}
-	if all := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Quarterly", "--source", "documents"); strings.Contains(all, "a floor") {
+	if all := runOK(t, e, "--no-sync", "--format", "text", "search", "Quarterly", "--source", "documents"); strings.Contains(all, "a floor") {
 		t.Fatalf("an exact count is called a floor:\n%s", all)
 	}
 	two := &searchSources{Mail: newSourceCount(1, 50, true, true, true), Notes: newSourceCount(5, 5, true, true, true),
@@ -35,13 +35,13 @@ func TestMatchedAtLeastIsExplainedAsAFloor(t *testing.T) {
 func TestLoopListTextSaysRowsArePartialSnapshots(t *testing.T) {
 	e := loopRowsEnv(t)
 	line := "partial snapshots of cached text, not full or current pages"
-	if text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list"); strings.Count(text, line) != 1 {
+	if text := runOK(t, e, "--no-sync", "--format", "text", "loop", "list"); strings.Count(text, line) != 1 {
 		t.Fatalf("loop list text does not carry the line once:\n%s", text)
 	}
-	if text := runOK(t, e, "--max-age", "0", "--format", "text", "loop", "list", "--query", "nothingmatchesthis"); strings.Contains(text, line) {
+	if text := runOK(t, e, "--no-sync", "--format", "text", "loop", "list", "--query", "nothingmatchesthis"); strings.Contains(text, line) {
 		t.Fatalf("an empty loop list carries the line:\n%s", text)
 	}
-	if doc := decode(t, runOK(t, e, "--max-age", "0", "loop", "list")); strings.Contains(runOK(t, e, "--max-age", "0", "loop", "list"), line) || len(items(t, doc)) == 0 {
+	if doc := decode(t, runOK(t, e, "--no-sync", "loop", "list")); strings.Contains(runOK(t, e, "--no-sync", "loop", "list"), line) || len(items(t, doc)) == 0 {
 		t.Fatal("the line is text-only and the fixture returns rows")
 	}
 }

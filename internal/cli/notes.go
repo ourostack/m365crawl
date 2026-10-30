@@ -24,7 +24,7 @@ type notesGroup struct {
 
 func (notesGroup) Help() string {
 	return "Notes are local OneNote indexed-cache observations, not full document layout or service completeness. Native notebook IDs qualify a cache boundary, not account ownership. Partial captures retain prior page text, OCR and flags. Missing pages are retained, not treated as deletions.\n" +
-		"Run `notes sync` to register available Mac indexes or `notes sync --root DIR` for explicit rollback-mode SQLite index copies on Mac, Windows or Linux. Sources are never modified; WAL, active journals and unsafe files are refused. Ordinary reads refresh only registered participating locators; --max-age 0 disables capture. No browser, network, hydration or app launch.\n" +
+		"Run `notes sync` to register available Mac indexes or `notes sync --root DIR` for explicit rollback-mode SQLite index copies on Mac, Windows or Linux. Sources are never modified; WAL, active journals and unsafe files are refused. Ordinary reads refresh only registered participating locators; --no-sync disables capture. No browser, network, hydration or app launch.\n" +
 		"Use `notes sources` for coverage and `notes show note:ID` to read a search hit. Dates are native modified times; unknown dates do not match bounded windows. Source IDs are archive-local, and --account is not supported."
 }
 

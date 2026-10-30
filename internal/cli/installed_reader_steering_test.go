@@ -82,26 +82,26 @@ func TestInstalledSteeringUnlinkedProfileAndRequestIsolation(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"attendee-observation:1", "attendee-observation:999"} {
-		code, _, stderr := e.run("--max-age", "0", "--account", "outlook/Main", "calendar", "attendees", "show", id)
+		code, _, stderr := e.run("--no-sync", "--account", "outlook/Main", "calendar", "attendees", "show", id)
 		if code != 2 || errorOf(t, stderr)["code"] != "outlook_attendee_unknown" {
 			t.Fatal("scoped unknown changed its code/exit", code, stderr)
 		}
 		requireOwnerSteering(t, errorOf(t, stderr)["fix"].(string))
 	}
-	if code, out, stderr := e.run("--max-age", "0", "--fields", "id", "calendar", "attendees", "show", "attendee-observation:1"); code != 0 || len(items(t, decode(t, out))) != 1 {
+	if code, out, stderr := e.run("--no-sync", "--fields", "id", "calendar", "attendees", "show", "attendee-observation:1"); code != 0 || len(items(t, decode(t, out))) != 1 {
 		t.Fatal("deliberate same-archive/source-local inspection stopped working", code, out, stderr)
 	}
 	for _, args := range [][]string{
 		{"--account", "outlook/Main", "--format", "text", "--fields", "id", "calendar", "attendees", "list", ref, "--limit", "1"},
 		{"--account", "outlook/Main", "--fields", "id", "calendar", "attendees", "list", ref, "--source-id", "999", "--limit", "1"},
 	} {
-		code, out, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, out, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatal(code, stderr)
 		}
 		requireOwnerSteering(t, out)
 	}
-	if code, _, _ := e.run("--max-age", "0", "calendar", "attendees", "list", ref, "--limit", "0"); code != 2 {
+	if code, _, _ := e.run("--no-sync", "calendar", "attendees", "list", ref, "--limit", "0"); code != 2 {
 		t.Fatal("minimum preview was relaxed")
 	}
 	after, err := os.ReadFile(e.db)
@@ -115,7 +115,7 @@ func TestInstalledSteeringSourcesRemainArchiveWide(t *testing.T) {
 	attendeeCLIArchive(t, e, 2, false)
 	var unscoped []map[string]any
 	for _, account := range []string{"", "outlook/Main", "foreign/principal"} {
-		args := []string{"--max-age", "0", "--fields", "source_id,account,scope_state", "calendar", "attendees", "sources"}
+		args := []string{"--no-sync", "--fields", "source_id,account,scope_state", "calendar", "attendees", "sources"}
 		if account != "" {
 			args = append(args, "--account", account)
 		}
@@ -157,12 +157,12 @@ func TestInstalledSteeringOwnerControlsAndUnknownParity(t *testing.T) {
 	owner := tenantA + "/" + userA
 	ref := attendeeCLIArchiveWithOwner(t, e, 1, false, owner)
 	show := func(account, id string) (int, string, string) {
-		return e.run("--max-age", "0", "--account", account, "calendar", "attendees", "show", id)
+		return e.run("--no-sync", "--account", account, "calendar", "attendees", "show", id)
 	}
 	if code, out, stderr := show(owner, "attendee-observation:1"); code != 0 || len(items(t, decode(t, out))) != 1 {
 		t.Fatal("compatible captured/current linked owner rejected", code, out, stderr)
 	}
-	code, out, stderr := e.run("--max-age", "0", "--account", owner, "calendar", "attendees", "list", ref, "--history", "--source-id", "1", "--limit", "1")
+	code, out, stderr := e.run("--no-sync", "--account", owner, "calendar", "attendees", "list", ref, "--history", "--source-id", "1", "--limit", "1")
 	if code != 0 || len(items(t, decode(t, out))) != 1 {
 		t.Fatal("linked-owner event positive changed", code, out, stderr)
 	}
@@ -196,7 +196,7 @@ func TestInstalledSteeringOwnerControlsAndUnknownParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, history := range []bool{false, true} {
-		args := []string{"--max-age", "0", "--account", owner, "calendar", "attendees", "list", ref, "--source-id", "1", "--limit", "1"}
+		args := []string{"--no-sync", "--account", owner, "calendar", "attendees", "list", ref, "--source-id", "1", "--limit", "1"}
 		if history {
 			args = append(args, "--history")
 		}
@@ -224,7 +224,7 @@ func TestInstalledSteeringUnknownParityAndCorruptionPrecedence(t *testing.T) {
 	for _, account := range []string{"outlook/Main", "foreign/principal"} {
 		for _, id := range []string{"attendee-observation:1", "attendee-observation:999"} {
 			opens = 0
-			code, out, stderr := e.run("--max-age", "0", "--account", account, "calendar", "attendees", "show", id)
+			code, out, stderr := e.run("--no-sync", "--account", account, "calendar", "attendees", "show", id)
 			got := errorOf(t, stderr)
 			if code != 2 || out != "" || got["code"] != "outlook_attendee_unknown" || opens != 1 {
 				t.Fatal("scoped unknown retried or projected hidden evidence", code, out, stderr, opens)
@@ -238,7 +238,7 @@ func TestInstalledSteeringUnknownParityAndCorruptionPrecedence(t *testing.T) {
 	}
 	e.exec(`update outlook_attendee_snapshots set result_json='{}'`)
 	for _, account := range []string{"", "outlook/Main"} {
-		args := []string{"--max-age", "0", "calendar", "attendees", "show", "attendee-observation:1"}
+		args := []string{"--no-sync", "calendar", "attendees", "show", "attendee-observation:1"}
 		if account != "" {
 			args = append(args, "--account", account)
 		}
@@ -249,7 +249,7 @@ func TestInstalledSteeringUnknownParityAndCorruptionPrecedence(t *testing.T) {
 
 	e.exec(`drop table outlook_link_state`)
 	for _, id := range []string{"attendee-observation:1", "attendee-observation:999"} {
-		if code, _, stderr := e.run("--max-age", "0", "--account", "outlook/Main", "calendar", "attendees", "show", id); code != 3 || errorOf(t, stderr)["code"] != "outlook_attendee_archive_corrupt" {
+		if code, _, stderr := e.run("--no-sync", "--account", "outlook/Main", "calendar", "attendees", "show", id); code != 3 || errorOf(t, stderr)["code"] != "outlook_attendee_archive_corrupt" {
 			t.Fatal("namespace corruption lost precedence to account/absence", code, stderr)
 		}
 	}

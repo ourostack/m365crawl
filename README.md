@@ -57,7 +57,7 @@ Then hand it to your agent. `m365crawl skill` prints a compact, version-matched 
 
 > Find the discussion about the launch checklist, then open the relevant thread. Keep the first pass short and expand only the matches.
 
-For an offline-only read, use `--max-age 0`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. An explicit transcript fetch is a separate action, never a side effect of search. To try every command on synthetic data first, follow the [usage guide](docs/guide.md#try-it-on-synthetic-data).
+For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. (`--max-age 0` still turns the sync off, but it does not mean fresh; `--no-sync` says what it does.) An explicit transcript fetch is a separate action, never a side effect of search. To try every command on synthetic data first, follow the [usage guide](docs/guide.md#try-it-on-synthetic-data).
 
 ## What your agent can do with it
 
