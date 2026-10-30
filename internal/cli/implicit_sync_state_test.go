@@ -111,7 +111,7 @@ func TestNeverSyncedNoSyncReadKeepsNeedsSyncWithoutExtraNotice(t *testing.T) {
 
 func TestEmittedArchiveCommandsUseNoSyncOnlyForReads(t *testing.T) {
 	read := archiveScopedCommand("/a.db", "--max-text", "0", "sql", "select 1")
-	if read != "m365crawl --db /a.db --no-sync --max-text 0 sql 'select 1'" {
+	if read != "m365crawl --db /a.db --no-sync --max-text 0 sql "+quoteArg("select 1") {
 		t.Fatalf("read command = %q", read)
 	}
 	for _, args := range [][]string{

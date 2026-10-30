@@ -15,7 +15,7 @@ func TestRecoveryWindowsPrefixGlobalsRefuseExpansion(t *testing.T) {
 		dbPath: `C:\archives\family folder\selected.db`, format: output.JSON,
 		root: `C:\teams\cache`, outlookRoot: `C:\outlook\cache`, outlookOn: true,
 	}
-	const safe = `m365crawl --db "C:\archives\family folder\selected.db" --no-sync --format json --account outlook/Main --teams-root C:\teams\cache --outlook-root C:\outlook\cache sync`
+	const safe = `m365crawl --db "C:\archives\family folder\selected.db" --format json --account outlook/Main --teams-root C:\teams\cache --outlook-root C:\outlook\cache sync`
 	if got := base.recoveryCommand(true, "outlook/Main", "sync"); got != safe {
 		t.Fatalf("qualification: ordinary Windows globals lost literal context: %q", got)
 	}
