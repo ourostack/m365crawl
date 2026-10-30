@@ -17,6 +17,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
 | Document metadata | [`docs sync`](#docs-sync), [`docs list`](#docs-list), [`docs search`](#docs-search), [`docs show`](#docs-show), [`docs sources`](#docs-sources) |
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
+| Scout session history (opt-in) | [`scout sync`](#scout-sync), [`scout list`](#scout-list), [`scout search`](#scout-search), [`scout show`](#scout-show), [`scout sources`](#scout-sources) |
 | Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
 | Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
@@ -504,6 +505,79 @@ Inspect source IDs, kind, admitted/attempted state, coverage, reason and losses.
 | `stale_attempt` | Another capture of the same source finished first. Run `docs sources`. | Never captures, discovers or creates an archive. An unknown positive source is an error rather than an empty success. Source account/subject ownership remains unresolved, so account/link/profile filters are rejected by the docs group.
 
 `--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
+
+## Scout session history
+
+Opt-in: m365crawl reads the session files Microsoft Scout keeps in your local OneDrive folder only when you run `scout sync`, and `sync`, `watch` and shared `search` never read them. The guide is [scout.md](scout.md). These are private AI conversation history, handled like private chats: local only, never logged, and token-shaped values (the Teams scrub rules: JWTs, `Bearer` strings, credential-named keys, `sig=` parameters) stored as `[redacted]`; other secrets in tool output are kept as written.
+
+- **No download.** Only files already on this computer are read. A cloud-only OneDrive file is counted as `cloud_only` and never opened; on macOS every read runs with downloads of cloud-only files turned off. Acquisition runs on macOS (APFS) and on Linux with `--root` (local filesystems only); Windows is refused with `scout_platform_unqualified` until verified.
+- **IDs.** `source_id` is one app folder. `scout-session:N` is one session file and stays the same across versions; `observation_id` is one immutable version (distinct bytes, with their SHA-256 `digest`); `scout-message:N` is one message of one observation.
+- **Archive.** A version once read is never changed. Bytes seen before reuse their observation. A file that leaves OneDrive is marked `file_state` `gone` and keeps its archived versions.
+- **Coverage.** Every Scout result carries `scout_coverage` outside `--fields`, `--limit` and zero hits: `state` (`not_registered` or `registered`), `format` (`unofficial`: the file format is not a documented interface), `totals` (`present_files`, `archived_files`, `cloud_only_files`, `failed_files`, `gone_files`, `sessions`), `sources` (as `scout sources` prints them) and a `note` when cloud-only files mean sessions can be missing. `archive_age_seconds` is the age of the newest finished `scout sync` scan.
+- **Reads.** `scout list`, `scout search`, `scout show` and `scout sources` read only the archive on every `--max-age` and never create one. They refuse `--account`, `--outlook-account` and `--outlook-profile`.
+
+### scout sync
+
+```sh
+m365crawl scout sync [--root DIR]...
+```
+
+Without `--root`, reads every folder under `~/Library/CloudStorage/OneDrive-*/Apps/` that holds `sessions/devices` (macOS). `--root` names an app folder; repeat it for several. A file is opened only when it is resident and its size or modification time changed since its last read.
+
+- **Result.** `discovered`, `folders` (each with `source_id`, `locator_tail`, `outcome`, `reason`, `fix`, `devices`, `unreadable_devices`, `listed`, `admitted`, `unchanged`, `cloud_only`, `unsafe`, `too_large`, `failed`, `gone`, `redacted`), the totals `admitted`, `unchanged`, `cloud_only`, `failed` and `gone`, `notices` and `scout_coverage`.
+- **Outcome.** `complete` (every listed session is archived as it is now), `partial` (a file or device folder was skipped), `failed` (the folder could not be scanned; `reason` and `fix` say why) or `cancelled`.
+- **Exit.** 0 when at least one folder was scanned. When none could be, the result is printed and the first folder's reason is the error: `scout_root_invalid` (exit 2), or another reason below (exit 3). `scout_folder_not_found` (exit 3) means discovery found no folder; `scout_platform_unqualified` (exit 3) means acquisition is not verified here.
+
+| Reason | Meaning and remedy |
+|---|---|
+| `scout_root_invalid` | The folder is not a Scout app folder: pass the folder inside your OneDrive's `Apps` folder that holds `sessions/devices`. |
+| `scout_root_unqualified` | The folder is not on a local disk (APFS on macOS, a local filesystem on Linux); network and FUSE filesystems can download when read. |
+| `scout_devices_unreadable` | `sessions/devices` could not be listed, possibly because OneDrive keeps it only in the cloud: set the app folder to "Always keep on this device" and sync again. |
+| `scout_guard_unavailable` | macOS could not turn off downloads of cloud-only files for the read, so nothing was read. |
+| `scout_guard_restore_failed` | The read finished, but the download policy could not be restored on one thread. Sync again. |
+| `scout_capture_failed` | The scan stopped unexpectedly. Sync again. |
+
+Per-file reasons are counted, not raised: `scout_file_cloud_only`, `scout_file_unsafe` (a link or not a regular file), `scout_file_too_large` (over 32 MiB), `scout_file_unreadable`, `scout_file_changed_during_read` and `scout_session_unparsable` (not a JSON object). They are in `scout_files.reason` (`m365crawl sql`).
+
+### scout list
+
+```sh
+m365crawl scout list [--source-id ID] [--device ID] [--origin all|automation|interactive] [--since DATE] [--until DATE] [--limit N]
+```
+
+One row per session file, with the newest version the archive read. Activity is the last message time, else the session's updated time, else the file's modification time; rows are newest activity first, then newest ID. `--since` keeps sessions whose activity reaches it, `--until` those that began before it; a date alone as `--until` includes that whole local day, and a time is exclusive. `origin` is the file's own source label, null for a conversation you started; `automation` is true when the file names an automation. `file_state` is `archived`, `cloud_only` (archived earlier, cloud-only now), `failed`, `unsafe`, `too_large` or `gone`. `losses` counts what the reader could not map. Limit defaults to 50; 0 returns all. `--max-text` clips `name`.
+
+`--fields` keys: `id`, `source_id`, `observation_id`, `observations`, `latest_observation`, `session_id`, `name`, `name_truncated`, `device_id`, `origin`, `automation`, `model`, `created_at`, `updated_at`, `first_message_at`, `last_message_at`, `message_count`, `file_state`, `file_reason`, `gone_at`, `file_modified_at`, `captured_at`, `digest`, `redactions`, `losses`.
+
+### scout search
+
+```sh
+m365crawl scout search WORDS [--source-id ID] [--device ID] [--origin ...] [--since DATE] [--until DATE] [--limit N]
+```
+
+One row per matching message (`scout-message:N`) with its `session` (`scout-session:N`). The session name is searched with every message. A message kept unchanged by several versions of a session is returned once, from the newest. Messages with a known time come first, newest first; `--since` and `--until` compare the message time and leave out messages without one. `--max-text` clips `text` and `session_name`.
+
+`--fields` keys: `id`, `session`, `observation_id`, `ordinal`, `session_name`, `device_id`, `automation`, `role`, `at`, `text`, `text_truncated`, `tool_calls`, `file_names`, `reasoning`.
+
+### scout show
+
+```sh
+m365crawl scout show scout-session:ID [--observation ID] [--offset N] [--limit N]
+```
+
+One item: the session as in `scout list`, with `messages` in file order from `--offset` (default limit 100; 0 returns all), `messages_offset` and `messages_truncated`. `--observation` shows an older version of the same session. Each message has `id`, `ordinal`, `role`, `at`, `text`, `tool_calls`, `file_names` and `reasoning` (whether it carries reasoning text, which is not shown). An unknown ID, or an observation of another session, is `scout_session_unknown` (exit 2).
+
+`--fields` keys: `id`, `source_id`, `observation_id`, `observations`, `latest_observation`, `session_id`, `name`, `name_truncated`, `device_id`, `origin`, `automation`, `model`, `created_at`, `updated_at`, `first_message_at`, `last_message_at`, `message_count`, `file_state`, `file_reason`, `gone_at`, `file_modified_at`, `captured_at`, `digest`, `redactions`, `losses`, `messages_offset`, `messages_truncated`, `messages`.
+
+### scout sources
+
+```sh
+m365crawl scout sources
+```
+
+One row per app folder `scout sync` has read: `platform`, `locator_tail` (the folder's last two path elements), `registered_at`, `last_scan_at`, `last_outcome`, `last_reason`, `fix`, `devices`, `unreadable_devices` and its files by state at the last scan. `present_files` excludes gone files; `sessions` counts the files the archive holds a version of, gone ones included.
+
+`--fields` keys: `source_id`, `platform`, `locator_tail`, `registered_at`, `last_scan_at`, `last_outcome`, `last_reason`, `fix`, `devices`, `unreadable_devices`, `present_files`, `archived_files`, `cloud_only_files`, `failed_files`, `gone_files`, `sessions`.
 
 ## Cached Loop channels
 

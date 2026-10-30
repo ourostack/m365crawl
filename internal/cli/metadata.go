@@ -81,6 +81,17 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "loop sync",
 			Title: command + " (cached partial channel snapshots from the archive; show needs loop-channel:ID; nothing fetched)"}
 	}
+	for _, command := range []string{"scout sync", "scout list", "scout search", "scout show", "scout sources"} {
+		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
+		switch command {
+		case "scout search":
+			argv = append(argv, "<words>")
+		case "scout show":
+			argv = append(argv, "<scout-session-id>")
+		}
+		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "scout sync",
+			Title: command + " (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)"}
+	}
 	for _, command := range []string{"content capture", "content list", "content search", "content show", "content sources", "content fetch page", "content fetch stream", "content fetch engage-home", "content fetch engage-thread", "content signin"} {
 		argv := append([]string{"m365crawl", "--json"}, strings.Fields(command)...)
 		switch command {
@@ -107,8 +118,8 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "calendar attendees sync",
 			Title: command + " (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "native_calendar_attendee_evidence", "transcripts", "notes", "documents", "loop", "content"}
-	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "outlook_attendee_evidence", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text"}}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "native_calendar_attendee_evidence", "transcripts", "notes", "documents", "loop", "content", "scout"}
+	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "outlook_attendee_evidence", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text", "scout_session_history"}}
 	return m
 }
 

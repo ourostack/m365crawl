@@ -76,6 +76,7 @@ For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh 
 | Inspect the document claim, not a guessed file | `m365crawl docs show document-observation:ID` · `m365crawl docs sources` |
 | Find text from a Loop component Teams cached | `m365crawl loop sync` once, then `m365crawl loop search "words"` or shared `search` |
 | Inspect one cached Loop channel and its snapshot version | `m365crawl loop show loop-channel:ID` · `m365crawl loop sources` |
+| What did my Scout agent do today? | Opt in with `m365crawl scout sync`, then `m365crawl scout list --since 24h`, `scout search "words"` and `scout show scout-session:ID`; [private, never downloads cloud-only files](docs/scout.md) |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
 | Review a retained own Teams compose body | `m365crawl drafts list`, then its guarded `full_inspection` in the declared `full_inspection_shell` (Windows: PowerShell7.3+, not CMD), or `drafts show teams-draft:HASH`; [cached projection, not current-unsent/editor truth](docs/commands.md#drafts) |
 
@@ -89,6 +90,7 @@ For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh 
 | Calendar, recaps and action items | `sync`, from Teams and the new Outlook for Mac | [Usage guide: Calendar](docs/guide.md#calendar) |
 | Native meeting attendee evidence | Explicit Mac HxStore discovery or supported copied profiles; registered lanes reuse an ordinary Outlook copy. Offline archive reads are portable, not native Windows/OWA qualification. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
 | OneNote indexed notes, Office document metadata, cached Loop channels, native people observations | Their own explicit `notes`, `docs`, `loop` and `people sync` | [Notes, documents, people and Loop](docs/local-sources.md) |
+| Microsoft Scout session history (opt-in) | Explicit `scout sync`, from session files already in your local OneDrive folder on macOS (Linux: `--root`); never downloads a cloud-only file. Windows acquisition is not yet verified. | [Scout session history](docs/scout.md) |
 | Meeting transcript text | Explicit `transcripts fetch`, through the tool-owned browser | [Commands: transcripts](docs/commands.md#transcripts) |
 | Resident Office text, SharePoint pages, Stream transcripts, Engage Home sessions and selected threads | Explicit `content capture` or `content fetch` only. Acquisition is not yet qualified on native Windows and is not supported on Linux; offline archive reads are portable. | [Explicit content capture](docs/content.md) · [Engage Home](docs/engage-home.md) · [Selected thread](docs/commands.md#content-fetch-engage-thread) |
 
@@ -116,6 +118,7 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 - Attachments are recorded as metadata; their bytes are not copied into the archive.
 - Mac Outlook's local store does not separate To from Cc; Windows preserves To/Cc/Bcc roles and cached conversation identities. Importance is read but not yet verified against Outlook's own display.
 - The calendar holds only the days Teams cached plus what Outlook's store holds, and attendees, body and rooms only for meetings someone opened.
+- Private Microsoft 365 Copilot chat history is not included: Microsoft's export of Copilot interactions needs an organization-wide permission an administrator must approve, so no route reads it for one signed-in user. Scout session history is read only from files already on this computer.
 - Contact stores, call history and pinned-message lists have no typed commands yet; they are mirrored as raw records, readable with `stores` and `records`.
 - The apps can change their storage layout. When they do, `sync` fails with a named error or reports counted omissions instead of guessing.
 
@@ -124,6 +127,7 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 - [`docs/guide.md`](docs/guide.md): a synthetic-data walkthrough, then Teams, mail, the calendar and the output contract for agents.
 - [`docs/commands.md`](docs/commands.md): every command and flag.
 - [`docs/local-sources.md`](docs/local-sources.md): OneNote notes, document metadata, people observations and cached Loop channels.
+- [`docs/scout.md`](docs/scout.md): opt-in Microsoft Scout session history from your OneDrive folder.
 - [`docs/content.md`](docs/content.md) and [`docs/engage-home.md`](docs/engage-home.md): explicit Office, SharePoint, Stream and Engage capture.
 - [`docs/install.md`](docs/install.md): install, upgrade, verify and remove.
 - [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks and how to grant it.

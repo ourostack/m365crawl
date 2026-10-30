@@ -9,7 +9,8 @@ func requireDeferredWorkflowMeaning(t *testing.T, text string) {
 	t.Helper()
 	text = strings.Join(strings.Fields(text), " ")
 	for _, sentence := range []string{
-		"Private Copilot history and Planner/Microsoft To Do assigned-task ingestion are not included and remain uncommitted/deferred.",
+		"Private Copilot chat history is not included: Microsoft offers no route for one signed-in user to read it, only an organization-wide export that an administrator must approve.",
+		"Planner/Microsoft To Do assigned-task ingestion is not included and remains uncommitted/deferred.",
 		"Shared-chat bot/citation claims and recap action items are not substitutes for those workflows.",
 	} {
 		if !strings.Contains(text, sentence) {
