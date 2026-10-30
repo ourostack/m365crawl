@@ -170,3 +170,13 @@ func TestActionEffects(t *testing.T) {
 		t.Error("an unknown action has an effect class")
 	}
 }
+
+func TestActionFieldsAreKnown(t *testing.T) {
+	for name, a := range actions {
+		for _, f := range slices.Concat(a.required, a.optional) {
+			if !slices.Contains(fieldOrder, f) {
+				t.Errorf("%s lists unknown field %q", name, f)
+			}
+		}
+	}
+}

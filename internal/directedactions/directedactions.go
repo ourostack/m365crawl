@@ -70,8 +70,9 @@ type State struct {
 }
 
 type TargetState struct {
-	Recipients []string `json:"recipients"`
-	Version    string   `json:"version"`
+	Conversation string   `json:"conversation,omitempty"` // for a message: the conversation it belongs to
+	Recipients   []string `json:"recipients"`
+	Version      string   `json:"version"`
 }
 
 type Earlier struct {
@@ -104,6 +105,7 @@ const (
 	CodeIdentityMismatch    Code = "identity_mismatch"
 	CodeIntentKeyReused     Code = "intent_key_reused"
 	CodeUnknownTarget       Code = "unknown_target"
+	CodeTargetMismatch      Code = "target_mismatch"
 	CodeRecipientsChanged   Code = "recipients_changed"
 	CodeStaleVersion        Code = "stale_version"
 	CodeOutcomeUnknown      Code = "outcome_unknown"
@@ -115,24 +117,47 @@ func Codes() []Code {
 		CodeUnsupportedContract, CodeUnknownAction, CodeMissingAgent, CodeMissingReason,
 		CodePersonOnly, CodeWritesOff, CodeIntentKeyNotAllowed, CodeInvalidRequest,
 		CodeIdentityRequired, CodeIdentityMismatch, CodeIntentKeyReused, CodeUnknownTarget,
-		CodeRecipientsChanged, CodeStaleVersion, CodeOutcomeUnknown,
+		CodeTargetMismatch, CodeRecipientsChanged, CodeStaleVersion, CodeOutcomeUnknown,
 	}
 }
+
+const (
+	fConversation = "target.conversation"
+	fMessage      = "target.message"
+	fRecipients   = "target.recipients"
+	fText         = "content.text"
+	fSubject      = "content.subject"
+	fReaction     = "content.reaction"
+	fVersion      = "expected_version"
+)
+
+// fieldOrder is the order in which missing and unexpected fields are reported.
+var fieldOrder = []string{fConversation, fMessage, fRecipients, fText, fSubject, fReaction, fVersion}
+
+type lookup int
+
+const (
+	lookupNone lookup = iota
+	lookupConversation
+	lookupMessage
+)
 
 type action struct {
 	effect   Effect // empty for the person's writes switch
 	send     bool
 	required []string
+	optional []string
+	lookup   lookup // the target that holds the audience and version
 }
 
 var actions = map[string]action{
-	"send_teams_message": {VisibleToOthers, true, []string{"target.conversation", "target.recipients", "content.text"}},
-	"send_mail":          {VisibleToOthers, true, []string{"target.recipients", "content.subject", "content.text"}},
-	"reply_mail":         {VisibleToOthers, true, []string{"target.message", "target.recipients", "content.text"}},
-	"add_reaction":       {VisibleToOthers, false, []string{"target.conversation", "target.message", "target.recipients", "content.reaction"}},
-	"remove_reaction":    {VisibleToOthers, false, []string{"target.conversation", "target.message", "target.recipients", "content.reaction"}},
-	"save_mail_draft":    {OnlyYou, false, []string{"content.text"}},
-	"discard_mail_draft": {OnlyYou, false, []string{"target.message"}},
+	"send_teams_message": {VisibleToOthers, true, []string{fConversation, fRecipients, fText}, []string{fVersion}, lookupConversation},
+	"send_mail":          {VisibleToOthers, true, []string{fRecipients, fSubject, fText}, nil, lookupNone},
+	"reply_mail":         {VisibleToOthers, true, []string{fMessage, fRecipients, fText}, []string{fVersion}, lookupMessage},
+	"add_reaction":       {VisibleToOthers, false, []string{fConversation, fMessage, fRecipients, fReaction}, []string{fVersion}, lookupMessage},
+	"remove_reaction":    {VisibleToOthers, false, []string{fConversation, fMessage, fRecipients, fReaction}, []string{fVersion}, lookupMessage},
+	"save_mail_draft":    {OnlyYou, false, []string{fText}, []string{fMessage, fRecipients, fSubject, fVersion}, lookupMessage},
+	"discard_mail_draft": {OnlyYou, false, []string{fMessage}, []string{fVersion}, lookupMessage},
 	"turn_writes_on":     {},
 	"turn_writes_off":    {},
 }
@@ -170,46 +195,99 @@ func invalid(field string) Result {
 
 func blank(s string) bool { return strings.TrimSpace(s) == "" }
 
-func present(r Request, field string) bool {
+// account is how identities and recipients compare everywhere: without surrounding white space
+// and ignoring letter case.
+func account(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+func accounts(list []string) []string {
+	out := make([]string, len(list))
+	for i, s := range list {
+		out[i] = account(s)
+	}
+	return out
+}
+
+// normalize applies the contract's comparison rules once, so every check and every comparison
+// with an earlier request sees the same values.
+func normalize(r Request) Request {
+	r.Identity = account(r.Identity)
+	r.Target.Conversation = strings.TrimSpace(r.Target.Conversation)
+	r.Target.Message = strings.TrimSpace(r.Target.Message)
+	r.Target.Recipients = accounts(r.Target.Recipients)
+	r.Content.Text = strings.TrimSpace(r.Content.Text)
+	r.Content.Subject = strings.TrimSpace(r.Content.Subject)
+	r.Content.Reaction = strings.TrimSpace(r.Content.Reaction)
+	r.ExpectedVersion = strings.TrimSpace(r.ExpectedVersion)
+	r.IntentKey = strings.TrimSpace(r.IntentKey)
+	return r
+}
+
+func given(r Request, field string) bool {
 	switch field {
-	case "target.conversation":
-		return !blank(r.Target.Conversation)
-	case "target.message":
-		return !blank(r.Target.Message)
-	case "target.recipients":
-		return len(r.Target.Recipients) > 0 && !slices.ContainsFunc(r.Target.Recipients, blank)
-	case "content.text":
-		return !blank(r.Content.Text)
-	case "content.subject":
-		return !blank(r.Content.Subject)
-	default: // content.reaction
-		return !blank(r.Content.Reaction)
+	case fConversation:
+		return r.Target.Conversation != ""
+	case fMessage:
+		return r.Target.Message != ""
+	case fRecipients:
+		return len(r.Target.Recipients) > 0
+	case fText:
+		return r.Content.Text != ""
+	case fSubject:
+		return r.Content.Subject != ""
+	case fReaction:
+		return r.Content.Reaction != ""
+	default: // expected_version
+		return r.ExpectedVersion != ""
 	}
 }
 
-func targetKey(t Target) string {
-	if t.Conversation != "" {
-		return t.Conversation
+func (a action) key(r Request) string {
+	switch a.lookup {
+	case lookupConversation:
+		return r.Target.Conversation
+	case lookupMessage:
+		return r.Target.Message
+	default:
+		return ""
 	}
-	return t.Message
+}
+
+// checkFields reports the first missing required field, then the first field the action does not
+// use, so an unused field can never make a request look different from an earlier one.
+func (a action) checkFields(r Request) (string, bool) {
+	for _, f := range a.required {
+		if !given(r, f) {
+			return f, false
+		}
+	}
+	for _, f := range fieldOrder {
+		if given(r, f) && !slices.Contains(a.required, f) && !slices.Contains(a.optional, f) {
+			return f, false
+		}
+	}
+	if slices.Contains(r.Target.Recipients, "") {
+		return fRecipients, false
+	}
+	if given(r, fVersion) && a.key(r) == "" {
+		return fVersion, false
+	}
+	return "", true
 }
 
 func sameAudience(a, b []string) bool {
-	norm := func(list []string) []string {
-		out := make([]string, len(list))
-		for i, s := range list {
-			out[i] = strings.ToLower(strings.TrimSpace(s))
-		}
+	set := func(list []string) []string {
+		out := slices.Clone(list)
 		slices.Sort(out)
 		return slices.Compact(out)
 	}
-	return slices.Equal(norm(a), norm(b))
+	return slices.Equal(set(a), set(b))
 }
 
-// sameRequest compares what an action does, not who asked or why, so a retry may reword its reason.
+// sameRequest compares two normalized requests by what the action does, not who asked or why,
+// so a retry may reword its reason.
 func sameRequest(a, b Request) bool {
 	return a.Action == b.Action &&
-		strings.EqualFold(a.Identity, b.Identity) &&
+		a.Identity == b.Identity &&
 		a.Target.Conversation == b.Target.Conversation &&
 		a.Target.Message == b.Target.Message &&
 		sameAudience(a.Target.Recipients, b.Target.Recipients) &&
@@ -238,26 +316,26 @@ func Decide(state State, req Request) Result {
 	if state.Writes != "on" {
 		return refuse(CodeWritesOff)
 	}
+	req = normalize(req)
 	if req.IntentKey != "" && !a.send {
 		return refuse(CodeIntentKeyNotAllowed)
 	}
-	for _, field := range a.required {
-		if !present(req, field) {
-			return invalid(field)
-		}
+	if field, ok := a.checkFields(req); !ok {
+		return invalid(field)
 	}
-	key := targetKey(req.Target)
-	if req.ExpectedVersion != "" && key == "" {
-		return invalid("expected_version")
-	}
-	if a.effect == VisibleToOthers && blank(req.Identity) {
+	if a.effect == VisibleToOthers && req.Identity == "" {
 		return refuse(CodeIdentityRequired)
 	}
-	if !blank(req.Identity) && !strings.EqualFold(strings.TrimSpace(req.Identity), strings.TrimSpace(state.SignedIn)) {
+	if req.Identity != "" && req.Identity != account(state.SignedIn) {
 		return refuse(CodeIdentityMismatch)
 	}
+	earlier := make([]Earlier, len(state.Earlier))
+	for i, e := range state.Earlier {
+		e.Request = normalize(e.Request)
+		earlier[i] = e
+	}
 	if req.IntentKey != "" {
-		for _, e := range state.Earlier {
+		for _, e := range earlier {
 			if e.Request.IntentKey != req.IntentKey || e.Outcome == Failed {
 				continue
 			}
@@ -271,19 +349,27 @@ func Decide(state State, req Request) Result {
 			return r
 		}
 	}
-	if key != "" {
+	if c := req.Target.Conversation; c != "" {
+		if _, ok := state.Targets[c]; !ok {
+			return refuse(CodeUnknownTarget)
+		}
+	}
+	if key := a.key(req); key != "" {
 		current, ok := state.Targets[key]
 		if !ok {
 			return refuse(CodeUnknownTarget)
 		}
-		if a.effect == VisibleToOthers && !sameAudience(req.Target.Recipients, current.Recipients) {
+		if a.lookup == lookupMessage && req.Target.Conversation != "" && current.Conversation != req.Target.Conversation {
+			return refuse(CodeTargetMismatch)
+		}
+		if a.effect == VisibleToOthers && !sameAudience(req.Target.Recipients, accounts(current.Recipients)) {
 			return refuse(CodeRecipientsChanged)
 		}
 		if req.ExpectedVersion != "" && req.ExpectedVersion != current.Version {
 			return refuse(CodeStaleVersion)
 		}
 	}
-	for _, e := range state.Earlier {
+	for _, e := range earlier {
 		if e.Outcome == Unknown && sameRequest(e.Request, req) {
 			return refuse(CodeOutcomeUnknown)
 		}

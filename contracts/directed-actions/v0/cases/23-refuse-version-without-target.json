@@ -18,27 +18,48 @@
           "lee@example.test"
         ],
         "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
       }
     },
     "earlier": []
   },
   "request": {
     "contract": "directed-actions/v0",
-    "action": "send_mail",
+    "action": "save_mail_draft",
     "agent": "synthetic-helper",
-    "reason": "Pat asked me to send Kim the agenda.",
-    "identity": "pat@example.test",
-    "target": {
-      "recipients": [
-        "kim@example.test"
-      ]
-    },
+    "reason": "Pat asked me to draft a reply for later.",
     "content": {
-      "subject": "Agenda",
-      "text": "Here is the agenda for Thursday."
+      "text": "Draft reply."
     },
-    "intent_key": "synthetic-intent-4",
-    "expected_version": "v1"
+    "expected_version": "d1"
   },
   "expect": {
     "decision": "refuse",
