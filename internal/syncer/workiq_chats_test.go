@@ -138,7 +138,7 @@ func TestWorkIQChatFailureKeepsItsCursorAndDoesNotBlockTheNextSelectedChat(t *te
 }
 
 func TestWorkIQChatDiscoveryRejectsMalformedPagesAndDisclosesUnmatchedTenants(t *testing.T) {
-	for _, mode := range []string{"malformed", "bad-entity", "duplicate", "unmatched", "missing-tenant", "empty"} {
+	for _, mode := range []string{"malformed", "bad-entity", "unmatched", "missing-tenant", "empty"} {
 		t.Run(mode, func(t *testing.T) {
 			db, _ := workIQAcquisitionArchive(t)
 			workIQAcquisitionStub(t)
@@ -146,9 +146,11 @@ func TestWorkIQChatDiscoveryRejectsMalformedPagesAndDisclosesUnmatchedTenants(t 
 			t.Setenv("WORKIQ_ACQUISITION_CHATS", mode)
 			report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "chats"})
 			switch mode {
-			case "malformed", "bad-entity", "duplicate":
-				if err == nil || len(report.Accounts) != 0 {
-					t.Fatal("malformed discovery became selected content work")
+			case "malformed", "bad-entity":
+				// The failure is recorded against the only chat account, with no content work.
+				if err == nil || len(report.Accounts) != 1 || report.Accounts[0].Status != "failed" || report.Counts["chats_completed"] != 0 ||
+					count(t, db, `select count(*) from workiq_attempts where status='open'`) != 0 {
+					t.Fatal("malformed discovery became selected content work or left no closed attempt", err, report.Accounts)
 				}
 			case "unmatched", "missing-tenant":
 				if err != nil || report.Gaps["workiq_chat_account_unmatched"] != 1 || report.Counts["chats_completed"] != 1 {
@@ -282,8 +284,13 @@ func TestWorkIQChatDiscoveryActualBoundsAndRefusals(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || len(report.Accounts) != 0 {
-				t.Fatal("discovery refusal/cap produced positive content work")
+			// The refusal is recorded against the only chat account, never as content work. A disabled
+			// source records nothing, and WorkIQ's own unusable address belongs to no account.
+			unowned := mode == "disabled" || mode == "invalid-address"
+			if err == nil || report.Counts["chats_completed"] != 0 || count(t, db, `select count(*) from workiq_attempts where status='open'`) != 0 ||
+				!unowned && (len(report.Accounts) != 1 || report.Accounts[0].Status != "failed") ||
+				unowned && len(report.Accounts) != 0 {
+				t.Fatal("discovery refusal/cap produced positive content work or no closed attempt", report.Accounts)
 			}
 			if mode == "count-limit" && report.Counts["chats_discovered"] != 100000 {
 				t.Fatal("actual discovered-ID bound was not exercised")

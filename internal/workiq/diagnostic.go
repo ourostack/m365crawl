@@ -12,13 +12,17 @@ import (
 )
 
 // Diagnostic is what m365crawl may report about a WorkIQ child that failed: its exit status, the
-// allowlisted end of its stderr and the allowlisted start of a non-JSON stdout line. Only common
+// allowlisted end of its stderr, the allowlisted start of a non-JSON stdout line, and a failed
+// server or tool result's descriptor. Only common
 // log and transport words, error class names, HTTP status numbers and hashed request IDs survive,
 // so it carries no message content or secret, only the shape of what went wrong.
 type Diagnostic struct {
 	Exit   string `json:"exit,omitempty"`
 	Stderr string `json:"stderr_tail,omitempty"`
 	Stdout string `json:"stdout,omitempty"`
+	// Server describes a failed server or tool result: its HTTP status, a Graph error code that is a
+	// plain identifier, and the allowlisted shape of its text.
+	Server string `json:"server,omitempty"`
 }
 
 const (

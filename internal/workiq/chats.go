@@ -23,6 +23,7 @@ func IDQualified(MessageClass) bool { return false }
 
 type Chat struct {
 	ID, TenantID, Type, Topic string
+	Updated                   time.Time // lastUpdatedDateTime; zero when absent or unreadable
 	Raw                       json.RawMessage
 }
 
@@ -63,7 +64,7 @@ func DecodeMessageHeader(ctx context.Context, raw json.RawMessage) (MessageHeade
 }
 
 func DecodeChat(ctx context.Context, raw json.RawMessage) (Chat, error) {
-	var wire struct{ ID, TenantID, ChatType, Topic string }
+	var wire struct{ ID, TenantID, ChatType, Topic, LastUpdatedDateTime string }
 	safe, err := decodeEntity(ctx, raw, &wire)
 	if err != nil {
 		return Chat{}, err
@@ -71,7 +72,8 @@ func DecodeChat(ctx context.Context, raw json.RawMessage) (Chat, error) {
 	if wire.ID == "" || len(wire.ID) > maxPath {
 		return Chat{}, failure("workiq_protocol")
 	}
-	return Chat{ID: wire.ID, TenantID: wire.TenantID, Type: wire.ChatType, Topic: wire.Topic, Raw: safe}, nil
+	updated, _ := time.Parse(time.RFC3339Nano, wire.LastUpdatedDateTime) // ordering only; unknown stays zero
+	return Chat{ID: wire.ID, TenantID: wire.TenantID, Type: wire.ChatType, Topic: wire.Topic, Updated: updated, Raw: safe}, nil
 }
 
 func DecodeChatMessage(ctx context.Context, account AccountFact, chat Chat, raw json.RawMessage) (ChatMessage, error) {

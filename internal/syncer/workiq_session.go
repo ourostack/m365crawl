@@ -153,14 +153,6 @@ func workIQOutcomeCode(err error) string {
 	return errs.CodeDBError
 }
 
-func workIQUser(ctx context.Context, client *workiq.Client) (workiq.User, error) {
-	page, err := client.Fetch(ctx, "/me")
-	if err != nil {
-		return workiq.User{}, err
-	}
-	return workiq.DecodeUser(ctx, page.Data)
-}
-
 func workIQBootstrap(ctx context.Context, options WorkIQOptions) (workiq.User, error) {
 	address := ""
 	expectedUser := ""
@@ -195,21 +187,18 @@ func workIQBootstrap(ctx context.Context, options WorkIQOptions) (workiq.User, e
 			return workiq.User{}, workIQFailure(code)
 		}
 	}
-	client, err := workIQOpen(ctx, options.Invocation, address)
+	client, user, err := workIQOpenUser(ctx, options.Invocation, address)
 	if err != nil {
 		return workiq.User{}, err
 	}
-	user, err := workIQUser(ctx, client)
-	if err == nil {
-		if address != "" {
-			owner := expectedUser
-			if owner == "" {
-				owner = user.ID
-			}
-			err = (workiq.AccountBinding{UserID: owner, Address: address}).Verify(user)
-		} else if expectedUser != "" && user.ID != expectedUser {
-			err = workIQFailure("workiq_identity_mismatch")
+	if address != "" {
+		owner := expectedUser
+		if owner == "" {
+			owner = user.ID
 		}
+		err = (workiq.AccountBinding{UserID: owner, Address: address}).Verify(user)
+	} else if expectedUser != "" && user.ID != expectedUser {
+		err = workIQFailure("workiq_identity_mismatch")
 	}
 	closeErr := workIQClose(client)
 	if err != nil || closeErr != nil {
@@ -219,18 +208,61 @@ func workIQBootstrap(ctx context.Context, options WorkIQOptions) (workiq.User, e
 }
 
 func workIQPinned(ctx context.Context, options WorkIQOptions, binding workiq.AccountBinding) (*workiq.Client, workiq.User, error) {
-	client, err := workIQOpen(ctx, options.Invocation, binding.Address)
+	client, user, err := workIQOpenUser(ctx, options.Invocation, binding.Address)
 	if err != nil {
 		return nil, workiq.User{}, err
 	}
-	user, err := workIQUser(ctx, client)
-	if err == nil {
-		err = binding.Verify(user)
-	}
-	if err != nil {
+	if err := binding.Verify(user); err != nil {
 		return nil, workiq.User{}, errors.Join(err, workIQClose(client))
 	}
 	return client, user, nil
+}
+
+// workIQTransient says a failure is one to retry on a new session: the child ended after the
+// session began, or a failure with no status that WorkIQ did not explain.
+func workIQTransient(err error, status int) bool {
+	code := workIQOutcomeCode(err)
+	return code == "workiq_session_lost" || code == "workiq_failed" && status == 0
+}
+
+// workIQOpenUser opens a session and reads its signed-in user. A session lost during that identity
+// check, or a throttled or failed /me, is reopened under the same retry budget as a page.
+func workIQOpenUser(ctx context.Context, inv workiq.Invocation, address string) (*workiq.Client, workiq.User, error) {
+	deadline := workIQNow().Add(10 * time.Minute)
+	for retry := 0; ; retry++ {
+		client, err := workIQOpen(ctx, inv, address)
+		if err != nil {
+			return nil, workiq.User{}, err
+		}
+		page, err := client.Fetch(ctx, "/me")
+		if err == nil {
+			var user workiq.User
+			if user, err = workiq.DecodeUser(ctx, page.Data); err == nil {
+				return client, user, nil
+			}
+		}
+		closeErr := workIQClose(client)
+		transient := workIQTransient(err, page.StatusCode)
+		var coded *errs.Coded
+		if closeErr != nil && (!transient || errors.As(closeErr, &coded) && coded.Code == "workiq_cleanup_failed") {
+			return nil, workiq.User{}, errors.Join(err, closeErr)
+		}
+		status := page.StatusCode
+		if transient {
+			status = 503
+		}
+		now := workIQNow()
+		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
+		if policyErr != nil {
+			return nil, workiq.User{}, errors.Join(policyErr, err)
+		}
+		if !retryable {
+			return nil, workiq.User{}, err
+		}
+		if err := workIQWait(ctx, wait); err != nil {
+			return nil, workiq.User{}, err
+		}
+	}
 }
 
 type workIQSession struct {
@@ -301,24 +333,22 @@ func (s *workIQSession) fetch(ctx context.Context, path string) (workiq.Page, er
 		if err == nil {
 			return page, nil
 		}
-		// A child that ended after the session began is reopened and the same page retried like a
-		// server error; its exit was already reported, so only a cleanup failure stops the run.
+		// A child that ended after the session began, or a failure with no status that WorkIQ did not
+		// explain, is reopened and the same page retried like a server error; only a cleanup failure
+		// stops the run at once.
+		transient := workIQTransient(err, page.StatusCode)
 		var coded *errs.Coded
-		lost := errors.As(err, &coded) && coded.Code == "workiq_session_lost"
-		if closeErr := s.close(); closeErr != nil && (!lost || errors.As(closeErr, &coded) && coded.Code == "workiq_cleanup_failed") {
+		if closeErr := s.close(); closeErr != nil && (!transient || errors.As(closeErr, &coded) && coded.Code == "workiq_cleanup_failed") {
 			return workiq.Page{}, errors.Join(err, closeErr)
 		}
 		status := page.StatusCode
-		if lost {
+		if transient {
 			status = 503
 		}
 		now := workIQNow()
 		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
-		if policyErr != nil && lost {
-			return workiq.Page{}, errors.Join(policyErr, err) // keep the child's diagnostic
-		}
 		if policyErr != nil {
-			return workiq.Page{}, policyErr
+			return workiq.Page{}, errors.Join(policyErr, err) // keep the failure's diagnostic
 		}
 		if !retryable {
 			return page, err

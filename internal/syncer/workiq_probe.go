@@ -58,7 +58,7 @@ func runWorkIQProbe(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 		default:
 			next = measureWorkIQChats(ctx, options, facts, &report)
 		}
-		err = errors.Join(err, next)
+		err = errors.Join(err, recordWorkIQFailure(ctx, options, &report, family, next))
 		if ctx.Err() != nil {
 			break
 		}
@@ -90,6 +90,7 @@ func beginWorkIQProbe(ctx context.Context, options WorkIQOptions, enabled bool, 
 func finishWorkIQProbe(ctx context.Context, options WorkIQOptions, report *WorkIQReport, account WorkIQAccountReport, attempt int64, cause error) error {
 	account.Status = "ok"
 	code := ""
+	account.Diagnostic = workIQDiagnostic(cause)
 	if cause != nil {
 		account.Status, code = "failed", workIQOutcomeCode(cause)
 		account.Gaps["workiq_probe_failed"]++
@@ -100,7 +101,7 @@ func finishWorkIQProbe(ctx context.Context, options WorkIQOptions, report *WorkI
 		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workIQPersistBudget)
 		err := workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{Status: account.Status,
-				ErrorCode: code, FinishedAt: workIQNow(), Counts: account.Counts, Gaps: account.Gaps})
+				ErrorCode: code, FinishedAt: workIQNow(), Counts: account.Counts, Gaps: account.Gaps, Diagnostic: account.Diagnostic})
 		})
 		cancel()
 		if err != nil {

@@ -176,7 +176,7 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code
 		_, err := tx.ExecContext(ctx, `update workiq_attempts set finished_at=?,status=?,error_code=?,counts_json=?,gap_count=?,all_folders=? where id=?`,
 			workIQTimeValue(&summary.FinishedAt), summary.Status, summary.ErrorCode, string(counts), gapCount, b2i(summary.MailProof != nil), attempt)
 		if err == nil && summary.Diagnostic != nil {
-			raw, _ := json.Marshal(summary.Diagnostic) // three strings always encode
+			raw, _ := json.Marshal(summary.Diagnostic) // plain strings always encode
 			_, err = tx.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do update set value=excluded.value`,
 				workIQDiagnosticKey(attempt), string(raw))
 		}

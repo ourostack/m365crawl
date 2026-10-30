@@ -18,6 +18,7 @@ func recordWorkIQStartupFailure(ctx context.Context, options WorkIQOptions, enab
 	}
 	account.Status = "failed"
 	account.Gaps["workiq_startup_failed"]++
+	account.Diagnostic = workIQDiagnostic(cause)
 	if !enabled {
 		return account, cause
 	}
@@ -37,7 +38,7 @@ func recordWorkIQStartupFailure(ctx context.Context, options WorkIQOptions, enab
 			return err
 		}
 		return s.CompleteWorkIQAttempt(writeCtx, id, store.WorkIQSummary{
-			Status: "failed", ErrorCode: code, FinishedAt: workIQNow(), Gaps: account.Gaps,
+			Status: "failed", ErrorCode: code, FinishedAt: workIQNow(), Gaps: account.Gaps, Diagnostic: account.Diagnostic,
 		})
 	})
 	if err != nil {
@@ -56,6 +57,8 @@ func failedWorkIQStartupReport(ctx context.Context, options WorkIQOptions, repor
 			for code, n := range account.Gaps {
 				report.Gaps[code] += n
 			}
+			// Nothing was fetched yet, so a resumable stop (a lost or throttled identity check) can rerun.
+			report.Resumable = workIQResumableCodes[workIQOutcomeCode(cause)] && account.Gaps["workiq_persistence_failed"] == 0
 			return report, err
 		}
 	}

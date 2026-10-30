@@ -117,3 +117,29 @@ func TestWorkIQDiagnosticBoundsAreLineAligned(t *testing.T) {
 		t.Fatal("empty or wholly partial output produced a diagnostic")
 	}
 }
+
+// A server or tool failure keeps a safe descriptor: its HTTP status, a Graph error code that is a
+// plain identifier, and the allowlisted shape of its text, never the text itself.
+func TestWorkIQServerFailureKeepsASafeDescriptor(t *testing.T) {
+	for _, tc := range []struct{ raw, code, server string }{
+		{`{"isError":true,"content":[{"type":"text","text":"Unhandled server failure for subject Quarterly plan"}]}`,
+			"workiq_failed", "tool error: Unhandled server failure for [redacted]"},
+		{`{"structuredContent":{"results":[{"statusCode":404,"error":{"code":"itemNotFound","message":"The chat Quarterly plan was not found"}}]}}`,
+			"workiq_failed", "status 404; code itemNotFound; The [redacted] was not found"},
+		{`{"structuredContent":{"results":[{"statusCode":500,"error":{"code":"generalException; drop","message":"x"}}]}}`,
+			"workiq_failed", "status 500; [redacted]"},
+		{`{"structuredContent":{"results":[{"statusCode":403,"error":"Access denied for GET path /me/chats/private"}]}}`,
+			"workiq_policy_denied", "status 403"},
+	} {
+		_, err := decodePage(context.Background(), []byte(tc.raw))
+		requireCode(t, err, tc.code)
+		if d, ok := DiagnosticOf(err); !ok || d.Server != tc.server {
+			t.Fatalf("%s: descriptor %+v %v", tc.raw, d, ok)
+		}
+	}
+	_, err := decodePage(context.Background(), []byte(`{"isError":"yes"}`))
+	requireCode(t, err, "workiq_failed")
+	if _, ok := DiagnosticOf(err); ok {
+		t.Fatal("a result that is not a tool result gained a server descriptor")
+	}
+}

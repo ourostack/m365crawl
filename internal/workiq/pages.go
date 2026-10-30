@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/strictjson"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
@@ -66,7 +68,10 @@ func RelativePath(raw, scope string) (string, error) {
 }
 
 type toolResult struct {
-	IsError    bool `json:"isError"`
+	IsError bool `json:"isError"`
+	Content []struct {
+		Text string `json:"text"`
+	} `json:"content"`
 	Structured struct {
 		Results []struct {
 			Data       json.RawMessage `json:"data"`
@@ -95,12 +100,45 @@ func retryAfter(raw json.RawMessage) string {
 
 // resultError classifies a failed result. WorkIQ's own path refusal is plain text that echoes the
 // requested path, so it maps to a fixed code before any other reading of the text.
-func resultError(raw json.RawMessage) error {
+func resultError(raw json.RawMessage) *errs.Coded {
 	var text string
 	if json.Unmarshal(raw, &text) == nil && strings.HasPrefix(text, "Access denied for GET path") {
 		return failure("workiq_policy_denied")
 	}
 	return classify(raw)
+}
+
+var graphErrorCode = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}$`)
+
+// serverDescriptor says what a failed result was without its text: the HTTP status, a Graph error
+// code that is a plain identifier, and the allowlisted shape of its message. A path refusal echoes
+// the path, so it keeps only the status.
+func serverDescriptor(status int, raw json.RawMessage, code string) string {
+	var parts []string
+	add := func(part string) {
+		if part != "" && (len(parts) == 0 || parts[len(parts)-1] != part) {
+			parts = append(parts, part)
+		}
+	}
+	if status > 0 {
+		add("status " + strconv.Itoa(status))
+	}
+	if code == "workiq_policy_denied" {
+		return strings.Join(parts, "; ")
+	}
+	var text string
+	var object struct{ Code, Message string }
+	if json.Unmarshal(raw, &text) != nil && json.Unmarshal(raw, &object) == nil {
+		switch {
+		case graphErrorCode.MatchString(object.Code):
+			add("code " + object.Code)
+		case object.Code != "":
+			add("[redacted]")
+		}
+		text = object.Message
+	}
+	add(redactDiagnosticLine(text))
+	return strings.Join(parts, "; ")
 }
 
 var scrubServer = teamsdesktop.Scrub
@@ -117,8 +155,19 @@ func decodePage(ctx context.Context, raw []byte) (Page, error) {
 		return Page{}, failure("workiq_protocol")
 	}
 	var before toolResult
-	if json.Unmarshal(raw, &before) != nil || before.IsError && !before.failed() {
+	if json.Unmarshal(raw, &before) != nil {
 		return Page{}, classify(raw)
+	}
+	if before.IsError && !before.failed() {
+		var text []string
+		for _, content := range before.Content {
+			text = append(text, content.Text)
+		}
+		server := "tool error"
+		if shape := redactDiagnosticLine(strings.Join(text, " ")); shape != "" {
+			server += ": " + shape
+		}
+		return Page{}, &diagnosed{err: classify(raw), d: Diagnostic{Server: server}}
 	}
 	if len(before.Structured.Results) != 1 {
 		return Page{}, failure("workiq_protocol")
@@ -133,7 +182,9 @@ func decodePage(ctx context.Context, raw []byte) (Page, error) {
 		return Page{}, failure("workiq_protocol")
 	}
 	if a.Status >= 400 || len(a.Error) > 0 && string(a.Error) != "null" {
-		return Page{StatusCode: a.Status, RetryAfter: retryAfter(a.RetryAfter)}, resultError(a.Error)
+		failed := resultError(a.Error)
+		return Page{StatusCode: a.Status, RetryAfter: retryAfter(a.RetryAfter)},
+			&diagnosed{err: failed, d: Diagnostic{Server: serverDescriptor(a.Status, a.Error, failed.Code)}}
 	}
 	var oldLinks, links struct {
 		Next  string `json:"@odata.nextLink"`

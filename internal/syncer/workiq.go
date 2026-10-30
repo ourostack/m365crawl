@@ -113,11 +113,8 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 	if options.Kind != "sync" {
 		return runWorkIQProbe(ctx, options)
 	}
-	if options.Source == "chats" {
-		return runWorkIQChats(ctx, options)
-	}
-	if options.Source == "mail" {
-		return runWorkIQMail(ctx, options)
+	if options.Source == "chats" || options.Source == "mail" {
+		return runWorkIQFamily(ctx, options)
 	}
 	var resultErr, mailErr, chatsErr error
 	mailResumable, chatsResumable := false, false
@@ -126,11 +123,10 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		part.Source = family
 		var next WorkIQReport
 		var err error
+		next, err = runWorkIQFamily(ctx, part)
 		if family == "mail" {
-			next, err = runWorkIQMail(ctx, part)
 			mailErr, mailResumable = err, next.Resumable
 		} else {
-			next, err = runWorkIQChats(ctx, part)
 			chatsErr, chatsResumable = err, next.Resumable
 		}
 		report.Accounts = append(report.Accounts, next.Accounts...)
@@ -145,6 +141,68 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 	}
 	report.Resumable = resultErr != nil && (mailErr == nil || mailResumable) && (chatsErr == nil || chatsResumable)
 	return report, resultErr
+}
+
+// runWorkIQFamily syncs one source family and makes sure a failure leaves a recorded result.
+func runWorkIQFamily(ctx context.Context, options WorkIQOptions) (WorkIQReport, error) {
+	run := runWorkIQChats
+	if options.Source == "mail" {
+		run = runWorkIQMail
+	}
+	report, err := run(ctx, options)
+	return report, recordWorkIQFailure(ctx, options, &report, options.Source, err)
+}
+
+// recordWorkIQFailure makes sure a failed run of an enabled source family leaves a result entry
+// and a closed attempt with its diagnostic, even when it failed before reaching an account (for
+// example during chat discovery or the identity check). The attempt belongs to the selected
+// account, or to the family's only archived account; a scope another live run owns is left alone.
+func recordWorkIQFailure(ctx context.Context, options WorkIQOptions, report *WorkIQReport, family string, err error) error {
+	if err == nil || !report.Enabled || workIQNotAnAccountFailure(err) {
+		return err
+	}
+	for _, account := range report.Accounts {
+		if account.Family == family {
+			return err
+		}
+	}
+	var facts []workiq.AccountFact
+	if readErr := workIQRead(ctx, options.DBPath, func(s *store.Store) (readErr error) {
+		facts, readErr = s.WorkIQAccounts(ctx)
+		return readErr
+	}); readErr != nil {
+		return errors.Join(err, readErr)
+	}
+	selected, matches := "", 0
+	for _, fact := range facts {
+		if fact.Family == family && (options.Account == "" || fact.ID == options.Account) {
+			selected, matches = fact.ID, matches+1
+		}
+	}
+	if matches != 1 {
+		return err
+	}
+	account, recordErr := recordWorkIQStartupFailure(ctx, options, true, WorkIQAccountReport{Family: family, Account: selected}, err)
+	report.Accounts = append(report.Accounts, account)
+	for code, n := range account.Gaps {
+		report.Gaps[code] += n
+	}
+	report.Resumable = report.Resumable || workIQResumableCodes[workIQOutcomeCode(err)] && account.Gaps["workiq_persistence_failed"] == 0
+	return recordErr
+}
+
+// workIQNotAnAccountFailure says a failure belongs to no account's attempt: the run could not
+// choose its account, or another live run owns the scope.
+func workIQNotAnAccountFailure(err error) bool {
+	var coded *errs.Coded
+	if !errors.As(err, &coded) {
+		return false
+	}
+	switch coded.Code {
+	case errs.CodeLocked, "workiq_mail_account_missing", "workiq_chat_account_unmatched":
+		return true
+	}
+	return coded.Exit == errs.ExitUsage
 }
 
 // workIQConfirmCensus confirms a finished mail census in bounded batches; a test seam.

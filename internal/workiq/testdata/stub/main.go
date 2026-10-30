@@ -44,6 +44,34 @@ func folder(kind string) map[string]any {
 	return out
 }
 
+// failFrom counts fetches across every child process in a shared file and, from the Nth on, answers
+// with a server failure: an MCP tool error without results, or a Graph 404 with a private message.
+func failFrom() map[string]any {
+	from, err := strconv.Atoi(os.Getenv("WORKIQ_ACQUISITION_FAIL_FROM"))
+	if err != nil || from < 1 {
+		return nil
+	}
+	counter := os.Getenv("WORKIQ_ACQUISITION_FAIL_COUNTER")
+	f, err := os.OpenFile(counter, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: test-chosen counter path.
+	if err != nil {
+		os.Exit(90)
+	}
+	_, _ = f.Write([]byte{'.'})
+	_ = f.Close()
+	info, err := os.Stat(counter)
+	if err != nil {
+		os.Exit(91)
+	}
+	if info.Size() < int64(from) {
+		return nil
+	}
+	if os.Getenv("WORKIQ_ACQUISITION_FAIL_SHAPE") == "graph-404" {
+		return map[string]any{"structuredContent": map[string]any{"results": []any{map[string]any{"statusCode": 404,
+			"error": map[string]any{"code": "itemNotFound", "message": "The chat Quarterly plan was not found"}}}}}
+	}
+	return map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "Unhandled server failure for subject Quarterly plan"}}}
+}
+
 // createOnce creates name and says whether this call created it.
 func createOnce(name string) bool {
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // G304: test-chosen marker path.
@@ -74,6 +102,12 @@ func fetch(path string) (any, int) {
 				"createdDateTime": "2026-09-10T00:00:00Z"})
 		}
 		return map[string]any{"value": values, "@odata.nextLink": fmt.Sprintf("/chats/chat/messages?$skiptoken=%d", page+1)}, 200
+	}
+	if path == "/me" && len(os.Args) == 4 { // live: WorkIQ lost during the pinned identity check
+		if die := os.Getenv("WORKIQ_ACQUISITION_ME_DIE"); die != "" && (die == "always" || createOnce(die)) {
+			_, _ = fmt.Fprintln(os.Stderr, "fatal: connection lost for user@example.invalid")
+			os.Exit(3)
+		}
 	}
 	if path == "/me" {
 		switch os.Getenv("WORKIQ_ACQUISITION_ME") {
@@ -140,8 +174,14 @@ func fetch(path string) (any, int) {
 			if os.Getenv("WORKIQ_ACQUISITION_CHATS") == "malformed" {
 				return map[string]any{"value": "not-a-collection"}, 200
 			}
-			return map[string]any{"value": []any{map[string]any{"id": "server-only", "tenantId": "synthetic-tenant", "chatType": "group"}},
-				"@odata.nextLink": "/me/chats?$skiptoken=second"}, 200
+			first := map[string]any{"id": "server-only", "tenantId": "synthetic-tenant", "chatType": "group"}
+			switch mode { // live: Graph repeats chats on later pages, unchanged or moved by new activity
+			case "repeat-newer":
+				first["lastUpdatedDateTime"] = "2026-09-10T00:00:00Z"
+			case "repeat-older":
+				first["lastUpdatedDateTime"] = "2026-09-11T00:00:00Z"
+			}
+			return map[string]any{"value": []any{first}, "@odata.nextLink": "/me/chats?$skiptoken=second"}, 200
 		case "/me/chats?$skiptoken=second":
 			id, tenant := "chat", "synthetic-tenant"
 			switch os.Getenv("WORKIQ_ACQUISITION_CHATS") {
@@ -155,6 +195,14 @@ func fetch(path string) (any, int) {
 				id = ""
 			}
 			values := []any{map[string]any{"id": id, "tenantId": tenant, "chatType": "group"}}
+			switch mode {
+			case "repeat-newer":
+				values = append([]any{map[string]any{"id": "server-only", "tenantId": "synthetic-tenant", "chatType": "group", "lastUpdatedDateTime": "2026-09-11T00:00:00Z"}}, values...)
+			case "repeat-older":
+				values = append([]any{map[string]any{"id": "server-only", "tenantId": "synthetic-tenant", "chatType": "group", "lastUpdatedDateTime": "2026-09-10T00:00:00Z"}}, values...)
+			case "repeat-conflict":
+				values = append([]any{map[string]any{"id": "server-only", "tenantId": "other-tenant", "chatType": "group"}}, values...)
+			}
 			if mode == "tie" {
 				values = append(values, map[string]any{"id": "another-empty", "tenantId": tenant, "chatType": "group"})
 			}
@@ -441,6 +489,10 @@ func main() {
 				_ = f.Close()
 			}
 			if result := refusal(path); result != nil {
+				reply["result"] = result
+				break
+			}
+			if result := failFrom(); result != nil {
 				reply["result"] = result
 				break
 			}

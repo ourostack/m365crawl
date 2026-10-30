@@ -35,7 +35,15 @@ func discoverWorkIQChats(ctx context.Context, options WorkIQOptions, facts []wor
 	}
 	session := &workIQSession{options: options, binding: discovery, client: client}
 	var out []workIQSelectedChat
-	seen := map[string]bool{}
+	// Graph's listing repeats chats on later pages, unchanged or moved by new activity: keep one
+	// entry per chat, the newest copy, and never fail the run for it.
+	type seenChat struct {
+		index   int // into out; -1 when the chat was not selected
+		tenant  string
+		updated time.Time
+	}
+	seen := map[string]*seenChat{}
+	dropped := map[string]bool{}
 	path, pages, bytes := "/me/chats", 0, 0
 	for path != "" && err == nil {
 		pages++
@@ -66,10 +74,25 @@ func discoverWorkIQChats(ctx context.Context, options WorkIQOptions, facts []wor
 					if err != nil {
 						return err
 					}
-					if seen[chat.ID] {
-						return workIQFailure("workiq_protocol")
+					if prior := seen[chat.ID]; prior != nil {
+						report.Counts["chats_repeated"]++
+						switch {
+						case prior.tenant != chat.TenantID:
+							// One chat cannot belong to two tenants: leave it out rather than guess.
+							if !dropped[chat.ID] {
+								dropped[chat.ID] = true
+								report.Gaps["workiq_chat_identity_conflict"]++
+							}
+						case chat.Updated.After(prior.updated):
+							prior.updated = chat.Updated
+							if prior.index >= 0 {
+								out[prior.index].chat = chat
+							}
+						}
+						continue
 					}
-					seen[chat.ID] = true
+					entry := &seenChat{index: -1, tenant: chat.TenantID, updated: chat.Updated}
+					seen[chat.ID] = entry
 					report.Counts["chats_discovered"]++
 					binding, err := workiq.SelectChatAccount(user, chat, facts, options.Account)
 					if err != nil {
@@ -80,6 +103,7 @@ func discoverWorkIQChats(ctx context.Context, options WorkIQOptions, facts []wor
 					if err != nil {
 						return err
 					}
+					entry.index = len(out)
 					out = append(out, workIQSelectedChat{chat: chat, binding: binding, last: last})
 				}
 				return nil
@@ -96,11 +120,18 @@ func discoverWorkIQChats(ctx context.Context, options WorkIQOptions, facts []wor
 	if err != nil {
 		return nil, err
 	}
+	kept := out[:0]
+	for _, selected := range out {
+		if !dropped[selected.chat.ID] {
+			kept = append(kept, selected)
+		}
+	}
+	out = kept
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].last.Equal(out[j].last) {
 			return out[i].last.After(out[j].last)
 		}
-		// Discovery rejects duplicate resource IDs, including conflicting tenants.
+		// Discovery keeps one entry per chat ID, so IDs break ties.
 		return out[i].chat.ID < out[j].chat.ID
 	})
 	report.Counts["chats_eligible"] = len(out)
