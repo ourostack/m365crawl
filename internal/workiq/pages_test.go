@@ -8,8 +8,8 @@ import (
 )
 
 func TestWorkIQCursorScope(t *testing.T) {
-	const scope = "/me/mailFolders/f/messages/delta()"
-	const relative = "/me/mailFolders/f/messages/delta()?$deltatoken=a%2Fb%2Bz&x=2&x=1"
+	const scope = "/me/mailFolders/f/messages/delta"
+	const relative = "/me/mailFolders/f/messages/delta?$deltatoken=a%2Fb%2Bz&x=2&x=1"
 	got, err := RelativePath("https://graph.microsoft.com/v1.0"+relative, scope)
 	if err != nil || got != relative {
 		t.Fatalf("opaque bytes changed: %q %v", got, err)
@@ -22,7 +22,7 @@ func TestWorkIQCursorScope(t *testing.T) {
 		_, err := RelativePath(path, "")
 		requireCode(t, err, "workiq_cursor_invalid")
 	}
-	_, err = RelativePath("/me/mailFolders/other/messages/delta()", scope)
+	_, err = RelativePath("/me/mailFolders/other/messages/delta", scope)
 	requireCode(t, err, "workiq_cursor_invalid")
 }
 
@@ -56,9 +56,9 @@ func TestWorkIQPageFailureShapes(t *testing.T) {
 }
 
 func TestWorkIQPageSafeOpaqueDelta(t *testing.T) {
-	raw := []byte(`{"structuredContent":{"results":[{"statusCode":200,"error":null,"data":{"value":[],"@odata.deltaLink":"/me/mailFolders/f/messages/delta()?$deltatoken=a%2Fb%2Bz&x=2&x=1"}}]}}`)
+	raw := []byte(`{"structuredContent":{"results":[{"statusCode":200,"error":null,"data":{"value":[],"@odata.deltaLink":"/me/mailFolders/f/messages/delta?$deltatoken=a%2Fb%2Bz&x=2&x=1"}}]}}`)
 	page, err := DecodePage(context.Background(), raw)
-	if err != nil || page.DeltaCursor != "/me/mailFolders/f/messages/delta()?$deltatoken=a%2Fb%2Bz&x=2&x=1" || !json.Valid(page.JSON) {
+	if err != nil || page.DeltaCursor != "/me/mailFolders/f/messages/delta?$deltatoken=a%2Fb%2Bz&x=2&x=1" || !json.Valid(page.JSON) {
 		t.Fatalf("opaque safe delta: %+v %v", page, err)
 	}
 	old := scrubServer

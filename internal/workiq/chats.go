@@ -38,12 +38,15 @@ type MessageHeader struct {
 	ID, MessageType, ReplyToID string
 	CreatedAt                  *time.Time
 	Removed                    bool
+	// Version is the exact server created and modified clocks, so a repeated ID can be told apart
+	// from Graph repeating an unchanged message on the next page.
+	Version string
 }
 
 func DecodeMessageHeader(ctx context.Context, raw json.RawMessage) (MessageHeader, error) {
 	var wire struct {
-		ID, MessageType, ReplyToID, CreatedDateTime string
-		Removed                                     json.RawMessage `json:"@removed"`
+		ID, MessageType, ReplyToID, CreatedDateTime, LastModifiedDateTime string
+		Removed                                                           json.RawMessage `json:"@removed"`
 	}
 	if _, err := decodeEntity(ctx, raw, &wire); err != nil {
 		return MessageHeader{}, err
@@ -56,7 +59,7 @@ func DecodeMessageHeader(ctx context.Context, raw json.RawMessage) (MessageHeade
 		return MessageHeader{}, err
 	}
 	return MessageHeader{ID: wire.ID, MessageType: wire.MessageType, ReplyToID: wire.ReplyToID, CreatedAt: created,
-		Removed: len(wire.Removed) > 0 && string(wire.Removed) != "null"}, nil
+		Removed: len(wire.Removed) > 0 && string(wire.Removed) != "null", Version: wire.CreatedDateTime + "\x00" + wire.LastModifiedDateTime}, nil
 }
 
 func DecodeChat(ctx context.Context, raw json.RawMessage) (Chat, error) {

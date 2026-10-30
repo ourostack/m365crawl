@@ -3,6 +3,7 @@ package workiq
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -27,6 +28,30 @@ type AccountBinding struct {
 	UserID    string      `json:"-"`
 	Address   string      `json:"-"`
 	Bootstrap bool        `json:"-"`
+}
+
+// PinAddress chooses only archived identity evidence, never the default CLI user.
+func (fact AccountFact) PinAddress() (string, error) {
+	if fact.MultipleMailboxes {
+		return "", failure("workiq_multiple_mailboxes")
+	}
+	addresses := make([]string, 0, len(fact.Addresses))
+	for _, address := range fact.Addresses {
+		addresses = append(addresses, strings.ToLower(strings.TrimSpace(address)))
+	}
+	sort.Strings(addresses)
+	for _, address := range addresses {
+		if address != "" && validAccount(address) {
+			return address, nil
+		}
+	}
+	if len(addresses) > 0 {
+		return "", failure("workiq_account_invalid")
+	}
+	if fact.Family == "mail" && fact.IdentityPresent {
+		return "", failure("workiq_identity_mismatch")
+	}
+	return "", nil
 }
 
 func DecodeUser(ctx context.Context, raw json.RawMessage) (User, error) {

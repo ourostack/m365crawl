@@ -18,9 +18,14 @@ func failure(code string) *errs.Coded {
 	case "workiq_account_invalid", "workiq_account_required":
 		exit = errs.ExitUsage
 	}
-	return &errs.Coded{Code: code, Exit: exit,
-		Message: "the optional WorkIQ source could not complete (" + code + ")",
-		Fix:     "Inspect the WorkIQ setup separately, then retry the explicit command; no sign-in or agreement was performed."}
+	fix := "Inspect the WorkIQ setup separately, then retry the explicit command; no sign-in or agreement was performed."
+	switch code {
+	case "workiq_signin_required":
+		fix = "WorkIQ has no signed-in account and may have opened its own sign-in window. A person must sign in once through WorkIQ (for example `workiq auth login`), then retry; m365crawl never signs in."
+	case "workiq_protocol":
+		fix = "WorkIQ's output was not the MCP JSON this version reads. A WorkIQ log level that writes logs to stdout corrupts that stream, so remove any such WorkIQ setting and retry; m365crawl never passes log flags."
+	}
+	return &errs.Coded{Code: code, Exit: exit, Message: "the optional WorkIQ source could not complete (" + code + ")", Fix: fix}
 }
 
 // Child text is classified only after scrubbing and is never part of a returned diagnostic.

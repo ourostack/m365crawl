@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,18 @@ func serveStub() int {
 		case "version-unknown":
 			_, _ = fmt.Fprintln(os.Stdout, "private-download")
 			return 0
+		case "version-real": // WorkIQ 1.0.1's actual `workiq version` output
+			_, _ = fmt.Fprint(os.Stdout, "1.0.1.47154\n")
+			return 0
+		case "version-build": // the same release's `--version` form
+			_, _ = fmt.Fprint(os.Stdout, "1.0.1.47154+d19fa9922df3c408ed063b3a4520771990d5317c\n")
+			return 0
+		case "version-five":
+			_, _ = fmt.Fprint(os.Stdout, "1.0.1.47154.9\n")
+			return 0
+		case "version-bad-build":
+			_, _ = fmt.Fprint(os.Stdout, "1.0.1+private download\n")
+			return 0
 		}
 		_, _ = fmt.Fprintln(os.Stdout, "1.0.1")
 		return 0
@@ -47,6 +60,24 @@ func serveStub() int {
 	mode := os.Getenv("WORKIQ_TEST_MODE")
 	if mode == "stderr" {
 		_, _ = fmt.Fprint(os.Stderr, strings.Repeat("x", 131072))
+	}
+	if name := os.Getenv("WORKIQ_TEST_PID"); name != "" {
+		if os.WriteFile(name, []byte(strconv.Itoa(os.Getpid())), 0o600) != nil { //nolint:gosec // G703: child-only path created by its parent test.
+			return 89
+		}
+	}
+	switch mode {
+	case "signed-out": // live WorkIQ with no cached account: silent, starts its own sign-in, ignores stdin EOF
+		time.Sleep(time.Minute)
+		return 0
+	case "signed-out-stderr":
+		_, _ = fmt.Fprintln(os.Stderr, "[MCP Proxy] Registered 10 remote tools")
+		time.Sleep(time.Minute)
+		return 0
+	case "log-noise": // a WorkIQ log level that writes logs to stdout
+		_, _ = fmt.Fprintln(os.Stdout, "info: WorkIQ.Program[0] Starting MCP server")
+		time.Sleep(time.Minute)
+		return 0
 	}
 	dec, enc := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
 	var req struct {
@@ -75,6 +106,10 @@ func serveStub() int {
 	if dec.Decode(&req) != nil || req.Method != "notifications/initialized" {
 		return 83
 	}
+	if mode == "blocked-write" {
+		time.Sleep(time.Minute)
+		return 0
+	}
 	if mode == "idle" {
 		_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": "idle-ping", "method": "ping"})
 		var reply struct {
@@ -84,7 +119,7 @@ func serveStub() int {
 		if dec.Decode(&reply) != nil || reply.ID != "idle-ping" || string(reply.Result) != "{}" {
 			return 87
 		}
-		if os.WriteFile(os.Getenv("WORKIQ_TEST_ACK"), []byte("ack"), 0o600) != nil {
+		if os.WriteFile(os.Getenv("WORKIQ_TEST_ACK"), []byte("ack"), 0o600) != nil { //nolint:gosec // G703: child-only acknowledgment path created by its parent test.
 			return 88
 		}
 	}
@@ -225,7 +260,7 @@ func TestWorkIQMCPTransport(t *testing.T) {
 }
 
 func TestWorkIQCursorAndProtocolFailures(t *testing.T) {
-	for mode, code := range map[string]string{
+	for mode, code := range map[string]string{ //nolint:gosec // G101: synthetic helper mode names and fixed public error codes, not credentials.
 		"secret-cursor": "workiq_cursor_redacted", "wrong-id": "workiq_protocol",
 		"bad-json": "workiq_protocol", "old": "workiq_protocol",
 	} {
@@ -276,7 +311,7 @@ func TestWorkIQAnswersPingWhileIdle(t *testing.T) {
 	defer func() { _ = client.Close() }()
 	deadline := time.Now().Add(time.Second)
 	for {
-		if raw, err := os.ReadFile(ack); err == nil && string(raw) == "ack" {
+		if raw, err := os.ReadFile(ack); err == nil && string(raw) == "ack" { //nolint:gosec // G304: parent-owned synthetic child acknowledgment.
 			return
 		}
 		if time.Now().After(deadline) {

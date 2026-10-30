@@ -66,7 +66,7 @@ func TestWorkIQMalformedFramesAndReplyIOFailure(t *testing.T) {
 	} {
 		p := &process{input: brokenInput{}, output: io.NopCloser(strings.NewReader(raw + "\n")), stop: make(chan struct{})}
 		c := &Client{p: p, frames: make(chan frame, 1), drained: make(chan struct{})}
-		go c.read()
+		go c.read(context.Background())
 		f := <-c.frames
 		if f.err == nil {
 			t.Fatal("malformed frame or failed response IO became success")
@@ -77,6 +77,6 @@ func TestWorkIQMalformedFramesAndReplyIOFailure(t *testing.T) {
 	p := &process{input: discardInput{}, stop: make(chan struct{})}
 	close(p.stop)
 	c := &Client{p: p, frames: make(chan frame)}
-	_, err := c.call(context.Background(), "initialize", nil)
+	_, err := c.call(context.Background(), requestTimeout, "initialize", nil)
 	requireCode(t, err, "workiq_failed")
 }

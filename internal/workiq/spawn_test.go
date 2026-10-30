@@ -53,11 +53,11 @@ func TestWorkIQBinaryLookupNeverBypassesTestGuard(t *testing.T) {
 	}
 	path := filepath.Join(os.Getenv("PATH"), name)
 	// Copy only this synthetic helper binary; no existing WorkIQ installation is opened.
-	raw, err := os.ReadFile(exe)
+	raw, err := os.ReadFile(exe) //nolint:gosec // G304: the current synthetic test executable, never an app installation.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, raw, 0o700); err != nil {
+	if err := os.WriteFile(path, raw, 0o700); err != nil { //nolint:gosec // G306: an executable inside the test's private PATH directory.
 		t.Fatal(err)
 	}
 	if got, err := chooseBinary(Invocation{}, false); err != nil || got != path {
@@ -94,9 +94,10 @@ func TestWorkIQPipeAndAdoptionFailuresAreSanitized(t *testing.T) {
 			}
 			_, err := Open(context.Background(), Invocation{}, "")
 			code := "workiq_failed"
-			if stage == "command" {
+			switch stage {
+			case "command":
 				code = "workiq_binary_unsafe"
-			} else if stage == "adopt" {
+			case "adopt":
 				code = "workiq_cleanup_failed"
 			}
 			requireCode(t, err, code)
@@ -108,6 +109,7 @@ func TestWorkIQVersionFailuresDoNotPrintChildOutput(t *testing.T) {
 	for mode, code := range map[string]string{
 		"version-noisy": "workiq_protocol", "version-eula": "workiq_eula_required",
 		"version-unknown": "workiq_failed", "hang": "workiq_timeout",
+		"version-five": "workiq_failed", "version-bad-build": "workiq_failed",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			useStub(t, mode)

@@ -23,7 +23,10 @@ var (
 	buildCommand   = commandFor
 	adoptChild     = adoptProcess
 	requestTimeout = callTimeout
-	readVersion    = io.ReadAll
+	// A signed-in WorkIQ 1.0.1 answered initialize within 1.6-3.5 s; one with no cached account
+	// stays silent while it opens its own interactive sign-in.
+	handshakeTimeout = 30 * time.Second
+	readVersion      = io.ReadAll
 )
 
 type mode uint8
@@ -45,6 +48,13 @@ func (b *diagnosticBuffer) Write(p []byte) (int, error) {
 		b.b = append(b.b, p[:min(left, len(p))]...)
 	}
 	return len(p), nil
+}
+
+// empty says the child wrote nothing to stderr.
+func (b *diagnosticBuffer) empty() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.b) == 0
 }
 
 func (b *diagnosticBuffer) diagnostic() error {
@@ -76,7 +86,8 @@ func validAccount(s string) bool {
 		return false
 	}
 	for _, c := range local {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || strings.ContainsRune("._+-", c)) {
+		allowed := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || strings.ContainsRune("._+-", c)
+		if !allowed {
 			return false
 		}
 	}
@@ -88,7 +99,8 @@ func validAccount(s string) bool {
 			return false
 		}
 		for _, c := range label {
-			if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			allowed := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-'
+			if !allowed {
 				return false
 			}
 		}
@@ -124,12 +136,15 @@ func startWorkIQ(ctx context.Context, inv Invocation, operation mode, account st
 		return nil, failure("workiq_timeout")
 	}
 	args := []string{"mcp"}
-	if operation == versionOnly {
+	switch operation {
+	case versionOnly:
 		args = []string{"version"}
-	} else if operation != readMCP {
+	case readMCP:
+		if account != "" {
+			args = append(args, "--account", account)
+		}
+	default:
 		return nil, failure("workiq_protocol")
-	} else if account != "" {
-		args = append(args, "--account", account)
 	}
 	cmd, err := buildCommand(binary, args)
 	if err != nil {
@@ -218,7 +233,7 @@ func Version(ctx context.Context, inv Invocation) (string, error) {
 		if closeErr != nil {
 			return "", closeErr
 		}
-		if match := regexp.MustCompile(`(?m)^(?:WorkIQ(?: CLI)? )?v?([0-9]+\.[0-9]+\.[0-9]+)\r?$`).FindSubmatch(r.raw); len(match) > 0 {
+		if match := regexp.MustCompile(`(?m)^(?:WorkIQ(?: CLI)? )?v?([0-9]+\.[0-9]+\.[0-9]+)(?:\.[0-9]+)?(?:\+[0-9A-Za-z.-]+)?\r?$`).FindSubmatch(r.raw); len(match) > 0 {
 			return string(match[1]), nil
 		}
 		return "", classify(r.raw)
