@@ -649,7 +649,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	documentTruncated, undated := false, ""
 	if p.indexedDocuments && st != nil {
 		snapshot, err := st.DocumentSnapshot(rt.ctx, store.DocumentFilter{Query: c.Query,
-			ModifiedSince: f.Since, ModifiedUntil: documentUpperBound(f.Until, c.Until), Limit: f.Limit})
+			ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
 			return nil, err
 		}

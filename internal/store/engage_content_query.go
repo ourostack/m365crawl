@@ -410,7 +410,7 @@ func readEngageOccurrences(ctx context.Context, r knowledgeReader, s EngageSessi
 		if f.ModifiedSince != nil && (at == nil || at.Before(*f.ModifiedSince)) {
 			continue
 		}
-		if f.ModifiedUntil != nil && (at == nil || at.After(*f.ModifiedUntil)) {
+		if f.ModifiedUntil != nil && (at == nil || !at.Before(*f.ModifiedUntil)) {
 			continue
 		}
 		if f.Query != "" {

@@ -301,7 +301,7 @@ func (s *Store) cloudSnapshot(ctx context.Context, filter CloudFilter, id int64)
 		args = append(args, knowledgeTime(filter.ModifiedSince))
 	}
 	if !filter.ModifiedUntil.IsZero() {
-		where += " and o.file_modified_at<=?"
+		where += " and o.file_modified_at<?"
 		args = append(args, knowledgeTime(filter.ModifiedUntil))
 	}
 	limit := ""

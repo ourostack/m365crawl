@@ -178,6 +178,7 @@ func isTTY(w io.Writer) bool {
 
 // write prints one result to stdout in the chosen format.
 func (rt *runtime) write(label string, v any) error {
+	rt.noteWindow(v)
 	if rt.format == output.Text {
 		return rt.renderText(label, v)
 	}

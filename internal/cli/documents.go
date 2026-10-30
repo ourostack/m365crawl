@@ -554,7 +554,7 @@ type documentsListCmd struct {
 	SourceID    int64  `name:"source-id" help:"Only this registered document source ID; docs sources lists IDs."`
 	Query       string `help:"Words in document title, native URLs/IDs or source sharing/person metadata."`
 	Since       string `help:"Native modification time at or after this date/time; unknown dates excluded. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
-	Until       string `help:"Native modification time before this time; a date includes its whole day. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
+	Until       string `help:"Native modification time before this time; a date alone includes that whole local day, a time is exclusive. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
 	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, registry for Office registry rows, or onedrive for OneDrive usage rows. Narrows rows, not source_coverage." placeholder:"APP"`
 	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry and OneDrive usage rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`
@@ -640,15 +640,10 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 	if c.Limit < 0 {
 		return errs.Usage("--limit must be nonnegative; 0 returns all document observations")
 	}
-	since, err := rt.when("--since", c.Since)
+	since, until, err := rt.window("--since", c.Since, "--until", c.Until)
 	if err != nil {
 		return err
 	}
-	until, err := rt.when("--until", c.Until)
-	if err != nil {
-		return err
-	}
-	until = documentUpperBound(until, c.Until)
 	application, err := documentApplication(c.Application)
 	if err != nil {
 		return err
@@ -685,18 +680,11 @@ func (c *documentsListCmd) Run(rt *runtime) error {
 	})
 }
 
-func documentUpperBound(until time.Time, raw string) time.Time {
-	if dateOnly.MatchString(raw) {
-		return until.In(time.Local).AddDate(0, 0, 1)
-	}
-	return until
-}
-
 type documentsSearchCmd struct {
 	Query       string `arg:"" optional:"" help:"Words in archived document metadata; required unless a date, --application or --surface filter is supplied."`
 	SourceID    int64  `name:"source-id" help:"Only this registered document source ID."`
 	Since       string `help:"Native modification time at or after this date/time. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
-	Until       string `help:"Native modification time before this time; unknown dates excluded. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
+	Until       string `help:"Native modification time before this time; a date alone includes that whole local day, a time is exclusive; unknown dates excluded. Never matches a registry row or a collaborator row: neither states a modification time. Recent rows match only when their file-modification clock has a parsed explicit offset; missing, unparsed or zone-less clocks are excluded. The result counts the rows left out."`
 	Limit       int    `default:"50" help:"Maximum observations; 0 returns all. Check truncated."`
 	Application string `help:"Only this source label: Word, Excel or PowerPoint (any case) for Office JSON rows, supplied for files given with docs sync --root, registry for Office registry rows, or onedrive for OneDrive usage rows. Narrows rows, not source_coverage." placeholder:"APP"`
 	Surface     string `help:"Only this Office JSON surface: recent, shared, recommended or dialog; docs --help defines each. Registry and OneDrive usage rows have no surface and never match. Narrows rows, not source_coverage." placeholder:"SURFACE"`

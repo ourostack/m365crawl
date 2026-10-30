@@ -637,7 +637,7 @@ type mailListCmd struct {
 	Folder         string `help:"Only this folder, by name (checked first) or kind: inbox, sent, drafts, archive, deleted, to_me, other." placeholder:"NAME|KIND"`
 	From           string `help:"Only messages whose sender name or address contains this text, ignoring case." placeholder:"TEXT"`
 	Since          string `help:"Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d)." placeholder:"DATE"`
-	Until          string `help:"Only messages received before this time; a date alone (YYYY-MM-DD) includes that whole day, a time is exclusive." placeholder:"DATE"`
+	Until          string `help:"Only messages received before this time; a date alone includes that whole local day, a time is exclusive." placeholder:"DATE"`
 	Unread         bool   `help:"Only unread messages."`
 	Flagged        bool   `help:"Only flagged messages."`
 	HasAttachments bool   `name:"has-attachments" help:"Only messages with attachments."`
@@ -656,16 +656,9 @@ func (c *mailListCmd) Run(rt *runtime) error {
 	if err := checkMailLimit(c.Limit); err != nil {
 		return err
 	}
-	since, err := rt.when("--since", c.Since)
+	since, until, err := rt.window("--since", c.Since, "--until", c.Until)
 	if err != nil {
 		return err
-	}
-	until, err := rt.when("--until", c.Until)
-	if err != nil {
-		return err
-	}
-	if dateOnly.MatchString(c.Until) {
-		until = until.In(time.Local).AddDate(0, 0, 1) // a date alone names the whole day
 	}
 	return rt.readMail("mail list", rt.g.Account, func(st *store.Store) (result, error) {
 		if st == nil {

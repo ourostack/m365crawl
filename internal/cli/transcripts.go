@@ -32,7 +32,7 @@ const transcriptsSeeGroup = "What a meeting reference, a part and each state are
 
 // Help is the long help of the list.
 func (transcriptsCmd) Help() string {
-	return transcriptsSeeGroup + "\nWithout <meeting> every recorded meeting is listed, newest first, with its part counts. With <meeting> each call of it is listed with its parts. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d and compare the meeting's start; a date alone as --until includes that whole day."
+	return transcriptsSeeGroup + "\nWithout <meeting> every recorded meeting is listed, newest first, with its part counts. With <meeting> each call of it is listed with its parts. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d and compare the meeting's start; a date alone as --until includes that whole local day, a time is exclusive."
 }
 
 // Help is the long help of transcripts show.
@@ -138,7 +138,7 @@ func (rt *runtime) newTranscriptList(calls []store.TranscriptCall, truncated, wi
 type transcriptsCmd struct {
 	Meeting string `arg:"" optional:"" help:"Only this meeting, with its parts: an event id or key, a meeting chat link or thread id, or a call id."`
 	Since   string `help:"Only meetings that started at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d)." placeholder:"DATE"`
-	Until   string `help:"Only meetings that started before this time; a date alone (YYYY-MM-DD) includes that whole day." placeholder:"DATE"`
+	Until   string `help:"Only meetings that started before this time; a date alone includes that whole local day, a time is exclusive." placeholder:"DATE"`
 	State   string `help:"Only meetings in this state: fetched (every part that can be fetched is in the archive), partial, not_fetched or unfetchable (no part can be fetched)." placeholder:"STATE"`
 	Limit   int    `default:"50" help:"Maximum meetings to return (at most 1000); truncated says whether more exist." placeholder:"N"`
 }
@@ -183,16 +183,9 @@ func (c *transcriptsCmd) Run(rt *runtime) error {
 		u.Fix = "Pick one of the states in the message."
 		return u
 	}
-	since, err := rt.when("--since", c.Since)
+	since, until, err := rt.window("--since", c.Since, "--until", c.Until)
 	if err != nil {
 		return err
-	}
-	until, err := rt.when("--until", c.Until)
-	if err != nil {
-		return err
-	}
-	if dateOnly.MatchString(c.Until) {
-		until = until.In(time.Local).AddDate(0, 0, 1) // a date alone names the whole day
 	}
 	ref, err := meetingRef(c.Meeting)
 	if err != nil {

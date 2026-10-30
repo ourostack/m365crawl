@@ -278,7 +278,7 @@ type notesListCmd struct {
 	Source int64  `help:"Only this archive-local source ID; notes sources lists available IDs."`
 	Query  string `help:"Words to find in title, indexed text or OCR."`
 	Since  string `help:"Native modified time at or after this date/time/relative age."`
-	Until  string `help:"Native modified time before this time; unknown timestamps are excluded."`
+	Until  string `help:"Native modified time before this time; a date alone includes that whole local day, a time is exclusive; unknown timestamps are excluded."`
 	Limit  int    `default:"50" help:"Maximum notes to return; check truncated."`
 	label  string // the result label: notes search runs this command under its own name
 }
@@ -290,11 +290,7 @@ func (c *notesListCmd) Run(rt *runtime) error {
 	if err := checkLimit(c.Limit); err != nil {
 		return err
 	}
-	since, err := rt.when("--since", c.Since)
-	if err != nil {
-		return err
-	}
-	until, err := rt.when("--until", c.Until)
+	since, until, err := rt.window("--since", c.Since, "--until", c.Until)
 	if err != nil {
 		return err
 	}
@@ -318,7 +314,7 @@ type notesSearchCmd struct {
 	Query  string `arg:"" help:"Words to find in indexed note titles, text or OCR."`
 	Source int64  `help:"Only this archive source ID."`
 	Since  string `help:"Only notes with native modified times at or after this time."`
-	Until  string `help:"Only notes with native modified times before this time."`
+	Until  string `help:"Only notes with native modified times before this time; a date alone includes that whole local day, a time is exclusive."`
 	Limit  int    `default:"50" help:"Maximum hits; check truncated."`
 }
 

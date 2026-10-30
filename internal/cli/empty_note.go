@@ -75,7 +75,7 @@ func (rt *runtime) emptyListNote(st *store.Store) (string, error) {
 		}
 	}
 	switch {
-	case !q.since.IsZero() && q.since.After(newest), !q.until.IsZero() && q.until.Before(oldest):
+	case !q.since.IsZero() && q.since.After(newest), !q.until.IsZero() && !q.until.After(oldest):
 		return "nothing matched: the time range is outside the archived Teams messages, which run from " + day(oldest) + " to " + day(newest), nil
 	case q.filtered:
 		return "nothing matched the filters", nil
