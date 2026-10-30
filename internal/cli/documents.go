@@ -493,6 +493,7 @@ func (rt *runtime) documentsRead(label string, sourceID int64, fn func(*store.St
 			result.Note = "no document metadata matched; source_coverage describes retained or unavailable inputs"
 		}
 	}
+	rt.noteRegisteredSyncOff(result, "document")
 	return rt.write(label, result)
 }
 

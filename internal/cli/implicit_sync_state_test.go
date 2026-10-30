@@ -189,3 +189,123 @@ func TestOutlookLinkRefusedWithNoSync(t *testing.T) {
 		t.Fatalf("%d %v", code, body)
 	}
 }
+
+// Where the sync was turned off decides what the notice tells the agent to undo, and an explicit
+// flag always beats the environment.
+func TestSyncOffSourcesAndPrecedence(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	e.ageArchive("-3 hours")
+	read := func(env map[string]string, args ...string) map[string]any {
+		t.Helper()
+		for k, v := range env {
+			t.Setenv(k, v)
+		}
+		code, stdout, stderr := e.run(append(args, "--json", "conversations", "--limit", "1")...)
+		for k := range env {
+			t.Setenv(k, "")
+		}
+		if code != 0 {
+			t.Fatalf("%v %v: exit %d: %s", env, args, code, stderr)
+		}
+		return decode(t, stdout)
+	}
+	noSyncEnv := map[string]string{"M365CRAWL_NO_SYNC": "1"}
+	maxAgeEnv := map[string]string{"M365CRAWL_MAX_AGE": "0"}
+	for _, tc := range []struct {
+		name          string
+		env           map[string]string
+		args          []string
+		want, names   string
+		drop, notDrop string
+	}{
+		{"env no-sync", noSyncEnv, nil, "disabled", "(M365CRAWL_NO_SYNC)", "unset M365CRAWL_NO_SYNC", "drop --no-sync"},
+		{"env max-age 0", maxAgeEnv, nil, "disabled", "M365CRAWL_MAX_AGE=0 turns", "unset M365CRAWL_MAX_AGE", "drop --max-age 0"},
+		{"flag no-sync over env max-age", maxAgeEnv, []string{"--no-sync"}, "disabled", "(--no-sync)", "drop --no-sync", "M365CRAWL"},
+		{"flag max-age 0 over env no-sync", noSyncEnv, []string{"--max-age", "0"}, "disabled", "--max-age 0 turns", "drop --max-age 0", "M365CRAWL"},
+		{"explicit max-age beats env no-sync", noSyncEnv, []string{"--max-age", "1ns"}, "ran", "", "", ""},
+		{"--no-sync=false beats env no-sync", noSyncEnv, []string{"--no-sync=false", "--max-age", "1ns"}, "ran", "", "", ""},
+		{"--no-sync=false alone beats env no-sync", noSyncEnv, []string{"--no-sync=false"}, "skipped_fresh", "", "", ""},
+	} {
+		m := read(tc.env, tc.args...)
+		if m["implicit_sync"] != tc.want {
+			t.Errorf("%s: implicit_sync = %v", tc.name, m["implicit_sync"])
+			continue
+		}
+		notices := noticesOf(m)
+		if tc.names == "" {
+			if len(notices) != 0 {
+				t.Errorf("%s: notices %q", tc.name, notices)
+			}
+			continue
+		}
+		if len(notices) != 1 || !strings.Contains(notices[0], tc.names) || !strings.Contains(notices[0], tc.drop) || strings.Contains(notices[0], tc.notDrop) {
+			t.Errorf("%s: notices %q", tc.name, notices)
+		}
+	}
+	// The text hint names the real cause too.
+	e.ageArchive("-3 hours")
+	t.Setenv("M365CRAWL_NO_SYNC", "1")
+	_, _, stderr := e.run("--format", "text", "conversations", "--limit", "1")
+	if !strings.Contains(stderr, "unset M365CRAWL_NO_SYNC") || strings.Contains(stderr, "drop --no-sync") {
+		t.Fatalf("env text hint %q", stderr)
+	}
+	t.Setenv("M365CRAWL_NO_SYNC", "")
+	t.Setenv("M365CRAWL_MAX_AGE", "0")
+	_, _, stderr = e.run("--format", "text", "conversations", "--limit", "1")
+	if !strings.Contains(stderr, "M365CRAWL_MAX_AGE=0 turns syncing off") {
+		t.Fatalf("max-age env text hint %q", stderr)
+	}
+}
+
+func TestOutlookLinkRefusalNamesTheEnvironment(t *testing.T) {
+	_, run := syncedWithOutlook(t, "Main")
+	t.Setenv("M365CRAWL_NO_SYNC", "true")
+	code, _, stderr := run("--outlook-profile", "Main", "--outlook-account", teamsAccount, "calendar", "--days", "1")
+	if body := usageBody(t, stderr); code != 2 || !strings.Contains(body["message"].(string), "(M365CRAWL_NO_SYNC)") {
+		t.Fatalf("%d %v", code, body)
+	}
+}
+
+// Registered-source reads skip their own refresh under --no-sync or --max-age 0; their coverage
+// objects cannot tell "skipped" from "not due", so the result says so (#264 review).
+func TestRegisteredSourceReadsSayTheyDidNotRefresh(t *testing.T) {
+	e := newEnv(t)
+	peopleFixture(t, e)
+	for _, args := range [][]string{
+		{"notes", "list"}, {"notes", "sources"}, {"search", "words", "--source", "notes"},
+		{"docs", "list"}, {"search", "words", "--source", "documents"},
+		{"loop", "list"}, {"search", "words", "--source", "loop"},
+		{"people"}, {"people", "sources"},
+	} {
+		for _, off := range [][]string{{"--no-sync"}, {"--max-age", "0"}} {
+			code, stdout, stderr := e.run(append(append([]string{"--json"}, off...), args...)...)
+			if code != 0 {
+				t.Fatalf("%v %v: exit %d: %s", off, args, code, stderr)
+			}
+			m := decode(t, stdout)
+			notices := noticesOf(m)
+			if m["implicit_sync"] != "disabled" || len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "did not refresh its registered") ||
+				!strings.Contains(notices[len(notices)-1], strings.Join(off, " ")) || stderr != "" {
+				t.Errorf("%v %v: implicit_sync %v notices %q stderr %q", off, args, m["implicit_sync"], notices, stderr)
+			}
+		}
+		code, stdout, _ := e.run(append([]string{"--json"}, args...)...)
+		if m := decode(t, stdout); code != 0 || m["implicit_sync"] != nil {
+			t.Errorf("%v: an ordinary refresh adds no implicit_sync: %v", args, m["implicit_sync"])
+		}
+	}
+	_, _, stderr := e.run("--format", "text", "--no-sync", "notes", "list")
+	if !strings.HasPrefix(stderr, "hint: this read did not refresh its registered") {
+		t.Fatalf("text hint %q", stderr)
+	}
+}
+
+func TestCoverageRouteIsAnAcquisition(t *testing.T) {
+	if got := archiveScopedCommand("/a.db", "workiq", "coverage", "--source", "chats"); strings.Contains(got, "--no-sync") {
+		t.Fatalf("coverage route %q", got)
+	}
+	if got := archiveScopedCommand("/a.db", "--format", "json", "status"); !strings.Contains(got, " --no-sync ") {
+		t.Fatalf("status read %q", got)
+	}
+}

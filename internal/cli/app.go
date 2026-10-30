@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -43,19 +44,41 @@ var panicHook func()
 
 // Globals are the flags every command accepts.
 type Globals struct {
-	Format         string `help:"Output format: text, json or log. log prints each result as one label={json} line: the command name with spaces as underscores (docs_list={...}), then the same JSON document as json, compact. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
-	JSON           bool   `name:"json" help:"Alias for --format json."`
-	DB             string `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
-	TeamsRoot      string `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
-	OutlookRoot    string `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"New Outlook cache root: Mac profiles for mail/calendar, Windows Olk EBWebView for OWA mail only. Explicit supported OWA copies work portably. Default: Outlook's own directory ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
-	OutlookAccount string `name:"outlook-account" env:"M365CRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
-	OutlookProfile string `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
-	Account        string `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
-	NoColor        bool   `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
-	MaxAge         string `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 does not mean fresh: it turns the implicit sync off, like --no-sync." placeholder:"DURATION"`
-	NoSync         bool   `name:"no-sync" help:"Read commands read the archive as it is and never sync first, whatever --max-age says (also: M365CRAWL_NO_SYNC=1). The result says implicit_sync: disabled, and adds a notice when the archive is older than 15m. Explicit sync, fetch and capture commands are unaffected."`
-	Fields         string `help:"List commands only: keep only these top-level keys of each item, comma separated. A list command's --help ends with the keys it accepts. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
-	MaxText        int    `name:"max-text" help:"Supported commands: cap each applicable text/preview field at N Unicode code points, including any … marker, and set truncation flags. 0 keeps all text." placeholder:"N"`
+	Format         string  `help:"Output format: text, json or log. log prints each result as one label={json} line: the command name with spaces as underscores (docs_list={...}), then the same JSON document as json, compact. Default: text on a terminal, json otherwise." placeholder:"text|json|log"`
+	JSON           bool    `name:"json" help:"Alias for --format json."`
+	DB             string  `name:"db" env:"M365CRAWL_DB" help:"Archive database path (default ~/.m365crawl/m365crawl.db)." placeholder:"PATH"`
+	TeamsRoot      string  `name:"teams-root" env:"M365CRAWL_TEAMS_ROOT" help:"Teams EBWebView directory (default: the new Teams container)." placeholder:"DIR"`
+	OutlookRoot    string  `name:"outlook-root" env:"M365CRAWL_OUTLOOK_ROOT" help:"New Outlook cache root: Mac profiles for mail/calendar, Windows Olk EBWebView for OWA mail only. Explicit supported OWA copies work portably. Default: Outlook's own directory ('none' turns Outlook off; with --teams-root set Outlook is off unless this names a directory)." placeholder:"DIR"`
+	OutlookAccount string  `name:"outlook-account" env:"M365CRAWL_OUTLOOK_ACCOUNT" help:"Link the Outlook profile to this Teams account (<tenantId>/<userId>) so their events merge; 'none' ends the link and keeps it ended. A profile whose own address is a Teams account's own address is linked to it automatically; this flag always wins over that. The link is kept, so the flag is needed only to change it. Needs the Outlook source on." placeholder:"TENANT/USER|none"`
+	OutlookProfile string  `name:"outlook-profile" env:"M365CRAWL_OUTLOOK_PROFILE" help:"The Outlook profile --outlook-account applies to: required when more than one profile is under the Outlook root." placeholder:"NAME"`
+	Account        string  `help:"Only this account. Teams account <tenantId>/<userId>; for mail commands outlook/<profile>. Default: every account." placeholder:"TENANT/USER"`
+	NoColor        bool    `name:"no-color" help:"Disable colored output (also: NO_COLOR). CLICOLOR_FORCE=1 forces color."`
+	MaxAge         string  `name:"max-age" env:"M365CRAWL_MAX_AGE" default:"15m" help:"Read commands sync first when the last successful sync is older than this (for example 15m, 2h, 1d). 0 does not mean fresh: it turns the implicit sync off, like --no-sync." placeholder:"DURATION"`
+	NoSync         envBool `name:"no-sync" env:"M365CRAWL_NO_SYNC" help:"Read commands read the archive as it is and never sync first; an explicit --max-age wins over the environment variable. The result says implicit_sync: disabled, and adds a notice when the archive is older than 15m. Explicit sync, fetch and capture commands are unaffected."`
+	Fields         string  `help:"List commands only: keep only these top-level keys of each item, comma separated. A list command's --help ends with the keys it accepts. A nested key comes with its parent: calendar event's chat.recent_messages with --fields chat." placeholder:"a,b,c"`
+	MaxText        int     `name:"max-text" help:"Supported commands: cap each applicable text/preview field at N Unicode code points, including any … marker, and set truncation flags. 0 keeps all text." placeholder:"N"`
+}
+
+// envBool is a boolean flag whose environment variable may be set but empty, which reads as unset
+// instead of failing every command.
+type envBool bool
+
+func (b *envBool) Decode(ctx *kong.DecodeContext) error {
+	if ctx.Scan.Peek().Type != kong.FlagValueToken {
+		*b = true // a bare --no-sync
+		return nil
+	}
+	value := strings.TrimSpace(fmt.Sprint(ctx.Scan.Pop().Value))
+	if value == "" {
+		*b = false
+		return nil
+	}
+	v, err := strconv.ParseBool(value)
+	if err != nil {
+		return fmt.Errorf("use 1 or true to read the archive as it is, 0 or false to allow the implicit sync; got %q", value)
+	}
+	*b = envBool(v)
+	return nil
 }
 
 type cliApp struct {
@@ -252,6 +275,7 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 	}
 	rt.cmd = commandName(kctx)
 	kctx.Bind(explicitDraftFlags(kctx))
+	rt.explicitMaxAge, rt.explicitNoSync = explicitFreshnessFlags(kctx)
 	if err := rt.setup(); err != nil {
 		return rt.fail(err)
 	}
@@ -266,6 +290,18 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) (code 
 		return rt.fail(err)
 	}
 	return exitOK
+}
+
+// explicitFreshnessFlags says whether --max-age and --no-sync were given on the command line, where
+// they win over M365CRAWL_MAX_AGE and M365CRAWL_NO_SYNC.
+func explicitFreshnessFlags(kctx *kong.Context) (maxAge, noSync bool) {
+	for _, p := range kctx.Path {
+		if p.Flag != nil && !p.Resolved {
+			maxAge = maxAge || p.Flag.Name == "max-age"
+			noSync = noSync || p.Flag.Name == "no-sync"
+		}
+	}
+	return maxAge, noSync
 }
 
 // commandName is the command path without its argument placeholders: "search <query>" -> "search".

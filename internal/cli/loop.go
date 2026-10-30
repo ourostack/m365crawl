@@ -195,6 +195,7 @@ func (rt *runtime) loopRead(label string, sourceID int64, fn func(*store.Store) 
 	if result.Count == 0 && result.Note == "" {
 		result.Note = loopEmptyNote(result.LoopCoverage)
 	}
+	rt.noteRegisteredSyncOff(result, "Loop")
 	return rt.write(label, result)
 }
 

@@ -161,6 +161,7 @@ func (c *peopleCmd) runConnectedPeople(rt *runtime, coverage *noteCoverage) erro
 		return asCoded(err)
 	}
 	res.sourceOnly = true
+	rt.noteRegisteredSyncOff(res, "native people")
 	return rt.write("people", res)
 }
 
@@ -275,6 +276,7 @@ func (rt *runtime) peopleRead(label string, fn func(*store.Store) (*listResult, 
 		return asCoded(readErr)
 	}
 	res.SourceCoverage, res.sourceOnly = coverage, true
+	rt.noteRegisteredSyncOff(res, "native people")
 	return rt.write(label, res)
 }
 

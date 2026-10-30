@@ -35,6 +35,8 @@ type runtime struct {
 	cmd              string // the running command, for command-specific fixes
 	maxAge           time.Duration
 	syncOff          string // what turned the implicit sync off for this read, such as "--no-sync" or "--max-age 0"
+	explicitMaxAge   bool   // --max-age was given on the command line
+	explicitNoSync   bool   // --no-sync was given on the command line, maybe as --no-sync=false
 	syncNever        bool   // the command never syncs first by design, so its result reports no implicit_sync
 	fields           []string
 	dbPath           string
@@ -90,16 +92,17 @@ func (rt *runtime) setup() error {
 	} else if rt.maxAge, err = parseMaxAge(maxAge); err != nil {
 		return errs.Usage(err.Error())
 	} else if rt.maxAge == 0 {
-		rt.syncOff = "--max-age 0"
-	}
-	noSync := g.NoSync
-	if v := strings.TrimSpace(os.Getenv("M365CRAWL_NO_SYNC")); v != "" && !noSync {
-		if noSync, err = strconv.ParseBool(v); err != nil {
-			return errs.Usage("M365CRAWL_NO_SYNC=" + strconv.Quote(v) + ": use 1 to read the archive as it is, or 0")
+		rt.syncOff = syncOffMaxAgeEnv
+		if rt.explicitMaxAge {
+			rt.syncOff = syncOffMaxAge
 		}
 	}
-	if noSync {
-		rt.maxAge, rt.syncOff = 0, "--no-sync"
+	// The flag (even --no-sync=false) beats M365CRAWL_NO_SYNC, and so does an explicit --max-age.
+	if bool(g.NoSync) && (rt.explicitNoSync || !rt.explicitMaxAge) {
+		rt.maxAge, rt.syncOff = 0, syncOffNoSyncEnv
+		if rt.explicitNoSync {
+			rt.syncOff = syncOffNoSync
+		}
 	}
 	rt.fields = splitFields(g.Fields)
 	if g.MaxText < 0 {
@@ -391,13 +394,36 @@ const (
 	implicitSyncDisabled     = "disabled"      // --no-sync or --max-age 0: the archive was read as it is
 )
 
+// What can turn the implicit sync off. The notice names the one in effect, so an agent is told to
+// undo what it (or its environment) actually set.
+const (
+	syncOffNoSync    = "--no-sync"
+	syncOffNoSyncEnv = "M365CRAWL_NO_SYNC"
+	syncOffMaxAge    = "--max-age 0"
+	syncOffMaxAgeEnv = "M365CRAWL_MAX_AGE=0"
+)
+
+// syncOffUndo is how to turn the implicit sync back on, and whether the cause is a zero max age,
+// which agents read as "nothing cached is fresh enough".
+func (rt *runtime) syncOffUndo() (undo string, zeroAge bool) {
+	switch rt.syncOff {
+	case syncOffMaxAge:
+		return "drop --max-age 0", true
+	case syncOffMaxAgeEnv:
+		return "unset M365CRAWL_MAX_AGE or pass a positive --max-age", true
+	case syncOffNoSyncEnv:
+		return "unset M365CRAWL_NO_SYNC or pass --no-sync=false", false
+	}
+	return "drop --no-sync", false
+}
+
 // noteSyncOff cautions a read that skipped its implicit sync, so an empty or short answer from an
 // old archive cannot pass as fresh. --no-sync says so once the archive is older than the default
-// max age; --max-age 0 always does, because agents read it as "nothing cached is fresh enough".
+// max age; a zero max age always does, because agents read it as "nothing cached is fresh enough".
 // syncHint is "run <the sync command>".
 func (rt *runtime) noteSyncOff(res result, age time.Duration, syncHint string) {
-	viaMaxAge := rt.syncOff == "--max-age 0"
-	if !viaMaxAge && age <= defaultMaxAge {
+	undo, zeroAge := rt.syncOffUndo()
+	if !zeroAge && age <= defaultMaxAge {
 		return
 	}
 	run := strings.TrimPrefix(syncHint, "run ")
@@ -405,20 +431,39 @@ func (rt *runtime) noteSyncOff(res result, age time.Duration, syncHint string) {
 		run = "m365crawl sync"
 	}
 	old := "the archive is " + compactDuration(roundAge(age)) + " old"
-	if viaMaxAge {
-		res.addNotice("This read did not sync: --max-age 0 turns the implicit sync off, it does not mean fresh, and " + old +
-			", so newer items may be missing. For fresh data run `" + run + "` first or drop --max-age 0; pass --no-sync to read the archive as it is.")
+	if zeroAge {
+		res.addNotice("This read did not sync: " + rt.syncOff + " turns the implicit sync off, it does not mean fresh, and " + old +
+			", so newer items may be missing. For fresh data run `" + run + "` first or " + undo + "; pass --no-sync to read the archive as it is.")
 	} else {
-		res.addNotice("This read did not sync (--no-sync) and " + old + ", so newer items may be missing. For fresh data run `" + run + "` first or drop --no-sync.")
+		res.addNotice("This read did not sync (" + rt.syncOff + ") and " + old + ", so newer items may be missing. For fresh data run `" + run + "` first or " + undo + ".")
 	}
 	if rt.format != output.Text {
 		return // JSON and log results carry the notice; their stderr stays for warnings
 	}
-	hint := "this read did not sync; " + old + ". Run `" + run + "` first for fresh data"
-	if viaMaxAge {
-		hint += " (--max-age 0 turns syncing off; --no-sync reads as is)"
+	hint := "this read did not sync; " + old + ". Run `" + run + "` first for fresh data, or " + undo
+	if zeroAge {
+		hint += " (" + rt.syncOff + " turns syncing off; --no-sync reads as is)"
 	}
 	rt.hint(hint)
+}
+
+// noteRegisteredSyncOff marks a registered-source read (notes, documents, Loop, native people)
+// whose refresh --no-sync or a zero max age skipped. Its coverage object cannot tell skipped from
+// not due, so the result says implicit_sync: disabled and adds a notice whatever the age.
+func (rt *runtime) noteRegisteredSyncOff(res result, what string) {
+	if rt.syncOff == "" {
+		return
+	}
+	res.setSynced(implicitSyncDisabled, nil)
+	undo, zeroAge := rt.syncOffUndo()
+	notice := "This read did not refresh its registered " + what + " sources (" + rt.syncOff + "), so newer items may be missing. For fresh data " + undo + "."
+	if zeroAge {
+		notice = "This read did not refresh its registered " + what + " sources: " + rt.syncOff + " turns the refresh off, it does not mean fresh, so newer items may be missing. For fresh data " + undo + "; pass --no-sync to read the archive as it is."
+	}
+	res.addNotice(notice)
+	if rt.format == output.Text {
+		rt.hint("this read did not refresh its registered " + what + " sources (" + rt.syncOff + "); for fresh data " + undo)
+	}
 }
 
 // roundAge drops the parts of an archive age a person does not need: seconds once it is a minute.

@@ -79,7 +79,7 @@ func acquisitionCommand(args []string) bool {
 	}
 	for n := 0; i < len(args) && n < 3 && !strings.HasPrefix(args[i], "--"); i, n = i+1, n+1 {
 		switch args[i] {
-		case "sync", "fetch", "capture", "signin":
+		case "sync", "fetch", "capture", "signin", "coverage":
 			return true
 		}
 	}
