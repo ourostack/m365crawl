@@ -30,9 +30,11 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 	if err != nil {
 		return err
 	}
-	stale, err := outlookCacheHealth(st, rt.ctx)
-	if err != nil {
-		return err
+	var stale []store.SourceHealth
+	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
+		if stale, err = outlookCacheHealth(st, rt.ctx); err != nil {
+			return err
+		}
 	}
 	for _, h := range stale {
 		failing := slices.ContainsFunc(all, func(f store.SourceHealth) bool { return f.SourceKey == h.SourceKey })
