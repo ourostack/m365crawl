@@ -767,6 +767,29 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	res := newList(shape(rt, out), truncated)
 	if p.chats && st != nil {
 		res.ApplicationEvidenceCoverage = applicationCoverageOf(envs)
+		if res.WorkIQRoutes, err = rt.chatRoutes(st, f.Since); err != nil {
+			return nil, err
+		}
+	}
+	if searchMailNow && !f.Since.IsZero() {
+		coverage, err := mailCoverageOf(st, rt.ctx)
+		if err != nil {
+			return nil, err
+		}
+		var own []store.CoverageRow
+		for _, c := range coverage {
+			if account := mailAccountOf(rt.g.Account); account == "" || c.Account == account {
+				own = append(own, c)
+			}
+		}
+		if c.Folder != "" {
+			own = matchCoverage(own, c.Folder)
+		}
+		routes, err := rt.sinceRoutes(st, own, f.Since)
+		if err != nil {
+			return nil, err
+		}
+		res.WorkIQRoutes = append(res.WorkIQRoutes, routes...)
 	}
 	if p.noteExclusion != "" {
 		res.addNotice(p.noteExclusion)

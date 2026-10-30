@@ -108,6 +108,7 @@ func (rt *runtime) doctorChecks() []check {
 	// teams_origin
 	cs = append(cs, teamsOriginDoctorCheck(sources, other, derr, code, coded))
 	cs = append(cs, rt.archiveChecks()...)
+	cs = append(cs, rt.workIQDoctorChecks()...)
 	return append(cs, transcriptsBrowserCheck(), rt.transcriptsProfileCheck())
 }
 

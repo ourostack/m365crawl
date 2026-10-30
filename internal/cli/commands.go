@@ -259,6 +259,7 @@ func (searchCmd) Help() string {
 		"Cached Loop channels (source loop) are partial snapshot text already in the archive, not full or current pages. They have no native date, so they follow every dated hit in path order and carry modified_at null; `loop show loop-channel:ID` expands one. Date, account, author, chat-only, mail-only and profile filters are refused with --source loop and leave Loop out of --source all with a notice. loop_coverage reports each registered Loop source's snapshot_match and failures outside --fields, clipping and zero hits.\n" +
 		"note also says when mail is left out and why: it is not in the archive yet, the Outlook source is off, there is no Outlook profile, or mail is not yet read on this platform. --account takes a Teams account (TENANT/USER), which narrows chats and searches all mail, or a mail account (outlook/PROFILE), which narrows mail and skips chats.\n" +
 		"Gone and evicted mail is never searched; --include-deleted is for Teams chats only.\n" +
+		"When --since reaches before an Outlook account's cached mail or the oldest archived Teams message, workiq_routes lists the explicit WorkIQ commands to run next: mail sync, or counts-only chat coverage. The search never starts WorkIQ.\n" +
 		"Text output has a thread column that names each item's whole thread: for a chat message the two arguments of `m365crawl thread <conversation_id> <root_id>`, the root being its reply_chain_id, else its id; for mail the id for `m365crawl mail thread <id>`; for a transcript the call id for `m365crawl transcripts show <call_id>`.\n" +
 		"Chat hits carry app_observation and the result carries application_evidence_coverage for the chat hits that survive the merged --limit.\n" + applicationEvidenceHelp + appSummaryHelp
 }
@@ -397,7 +398,15 @@ func (c *messagesCmd) Run(rt *runtime) error {
 		if err != nil {
 			return nil, err
 		}
-		return excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML))(c.Unread && !c.IncludeChannels)
+		routes, err := rt.chatRoutes(st, f.Since)
+		if err != nil {
+			return nil, err
+		}
+		res, err := excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML))(c.Unread && !c.IncludeChannels)
+		if l, ok := res.(*listResult); ok {
+			l.WorkIQRoutes = routes
+		}
+		return res, err
 	})
 }
 

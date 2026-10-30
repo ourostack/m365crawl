@@ -40,6 +40,9 @@ type meta struct {
 	// Notices are short plain sentences about the result that an agent should know before it
 	// trusts it, such as archived Outlook events that this run did not refresh. Omitted when empty.
 	Notices []string `json:"notices,omitempty"`
+	// WorkIQRoutes name the explicit WorkIQ commands that reach history older than the apps
+	// cached, when a read asks for it. Omitted when empty; a read never starts WorkIQ itself.
+	WorkIQRoutes []workIQRoute `json:"workiq_routes,omitempty"`
 	// Note says why a list is empty or short, in one plain sentence: an additive key of every list.
 	Note string `json:"note,omitempty"`
 }

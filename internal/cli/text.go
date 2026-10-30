@@ -39,6 +39,12 @@ func metaLines(w io.Writer, m meta, color bool) {
 	for _, n := range m.Notices {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
 	}
+	for _, r := range m.WorkIQRoutes {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("route: "+r.Fix, color))
+		for _, step := range r.Next {
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("  next: "+step.Command, color))
+		}
+	}
 	ageLine(w, m, color)
 	if m.SyncError != nil {
 		_, _ = fmt.Fprintf(w, "sync error: %s: %s\n", m.SyncError.Code, m.SyncError.Message)
@@ -61,6 +67,9 @@ var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, 
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
+	if r, ok := v.(interface{ renderWorkIQ(*runtime) error }); ok {
+		return r.renderWorkIQ(rt)
+	}
 	if r, ok := v.(interface{ renderDrafts(*runtime) error }); ok {
 		return r.renderDrafts(rt)
 	}

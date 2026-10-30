@@ -59,6 +59,22 @@ Then hand it to your agent. `m365crawl skill` prints a compact, version-matched 
 
 For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. (`--max-age 0` still turns the sync off, but it does not mean fresh; `--no-sync` says what it does.) An explicit transcript fetch is a separate action, never a side effect of search. To try every command on synthetic data first, follow the [usage guide](docs/guide.md#try-it-on-synthetic-data).
 
+## Optional WorkIQ source
+
+The [optional-source contract](SPEC.md#planned-optional-workiq-source) adds explicit server reads through your separately installed and signed-in [WorkIQ CLI](https://github.com/microsoft/work-iq). It is disabled by default; ordinary reads, plain `sync` and `watch` never launch it. When a mail read asks for a range older than the Outlook cache, its JSON `workiq_routes` lists the commands below, so an agent can enable WorkIQ and sync on its own. Only installing WorkIQ, signing in and accepting its EULA need a person, once; m365crawl never does them.
+
+```sh
+m365crawl workiq enable
+m365crawl --account outlook/Main workiq sync --source mail
+m365crawl workiq coverage --source chats --since 365d --max-chats 200
+m365crawl workiq status
+m365crawl workiq disable
+```
+
+Replace `outlook/Main` with an existing profile from your archive. Stored address mismatches and several content mailboxes per profile are refused, without an override. Mail sync traverses all visible folders and needs room for the whole mailbox (about 35 GB per 100,000 items), refusing with `workiq_disk_space` when the archive's disk is too small; fetching only a date range is tracked in ourostack/m365crawl#262. Coverage prints folder totals, not a time-windowed mailbox count. Chat selection uses archived activity, and unqualified message-ID classes are counted with gaps rather than inserted as duplicate messages. Synthetic tests do not establish native WorkIQ/Windows or service qualification. See [command output and limits](docs/commands.md#workiq).
+
+Archived messages, conversations and mail name their `provenance`: `desktop_cache`, `workiq_server` or `both`. Disabling WorkIQ preserves those rows and their stable IDs. Server success does not claim that a failing Outlook reader recovered. The new download-URL/temporary-authentication scrub rules also apply to desktop records, causing one full reread under the new signature.
+
 ## What your agent can do with it
 
 | Ask | Command |
