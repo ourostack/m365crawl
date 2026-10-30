@@ -17,13 +17,13 @@ func TestMailThreadPropagatesCancellationAfterSuccessfulConversationQuery(t *tes
 	original := mailThreadConversationGroup
 	t.Cleanup(func() { mailThreadConversationGroup = original })
 	calls := 0
-	mailThreadConversationGroup = func(actual *Store, queryCtx context.Context, seed MailRow) ([]int64, bool, error) {
+	mailThreadConversationGroup = func(actual *Store, queryCtx context.Context, seed MailRow, notCopy string) ([]int64, bool, error) {
 		calls++
 		if actual != s || queryCtx != ctx || seed.Account != mailAcct || seed.DetailKey != 101 ||
 			seed.ConversationID != "SyntheticConversation" || seed.Rowid <= 0 {
 			t.Fatal("successful_thread_seed_missing")
 		}
-		ids, linked, err := original(actual, queryCtx, seed)
+		ids, linked, err := original(actual, queryCtx, seed, notCopy)
 		if err != nil || len(ids) != 2 || !linked {
 			t.Fatal("real_conversation_query_preflight_failed")
 		}
@@ -33,7 +33,7 @@ func TestMailThreadPropagatesCancellationAfterSuccessfulConversationQuery(t *tes
 		default:
 			t.Fatal("conversation_query_context_not_cancelled")
 		}
-		ids, linked, err = original(actual, queryCtx, seed)
+		ids, linked, err = original(actual, queryCtx, seed, notCopy)
 		if !errors.Is(err, context.Canceled) || ids != nil || linked {
 			t.Fatal("real_conversation_query_cancellation_not_propagated")
 		}
@@ -59,7 +59,7 @@ func TestMailThreadPropagatesConversationQueryFailureAfterSeed(t *testing.T) {
 	original := mailThreadConversationGroup
 	t.Cleanup(func() { mailThreadConversationGroup = original })
 	called := false
-	mailThreadConversationGroup = func(actual *Store, ctx context.Context, seed MailRow) ([]int64, bool, error) {
+	mailThreadConversationGroup = func(actual *Store, ctx context.Context, seed MailRow, notCopy string) ([]int64, bool, error) {
 		called = true
 		if actual != s || seed.ConversationID != "SyntheticConversation" || seed.Account != mailAcct || seed.Rowid <= 0 {
 			t.Fatal("successful_thread_seed_missing")
@@ -68,7 +68,7 @@ func TestMailThreadPropagatesConversationQueryFailureAfterSeed(t *testing.T) {
 		if _, err := actual.db.ExecContext(ctx, `drop table mail_messages`); err != nil {
 			t.Fatal("synthetic_group_query_fault_failed")
 		}
-		return original(actual, ctx, seed)
+		return original(actual, ctx, seed, notCopy)
 	}
 	rows, grouping, truncated, err := s.MailThread(context.Background(), mailAcct, 101)
 	if !called || err == nil || rows != nil || grouping != "" || truncated {

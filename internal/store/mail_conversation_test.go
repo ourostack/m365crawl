@@ -136,7 +136,7 @@ func TestMailConversationGroupReportsQueryFailure(t *testing.T) {
 	if _, err := s.db.Exec(`drop table mail_messages`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.conversationGroup(context.Background(), MailRow{Account: mailAcct, ConversationID: "synthetic", Rowid: 1}); err == nil {
+	if _, _, err := s.conversationGroup(context.Background(), MailRow{Account: mailAcct, ConversationID: "synthetic", Rowid: 1}, ""); err == nil {
 		t.Fatal("conversation query failure was hidden")
 	}
 }

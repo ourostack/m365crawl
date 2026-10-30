@@ -18,6 +18,7 @@ type mailFolderCopyOut struct {
 	InCurrentCopy         int        `json:"in_current_copy"`
 	OnlyInOlderCopies     int        `json:"only_in_older_copies"`
 	LackingInCurrentRange int        `json:"lacking_in_current_range"`
+	OlderCopiesMarked     int        `json:"older_copies_marked"`
 	CurrentOldestAt       *time.Time `json:"current_oldest_at"`
 }
 
@@ -38,14 +39,22 @@ func (rt *runtime) checkFolderCopies(st *store.Store, res *mailListResult, sc ma
 	}
 	for _, c := range checks {
 		res.FolderCopies = append(res.FolderCopies, mailFolderCopyOut{Account: c.Account, Kind: c.Kind, Copies: c.Copies, State: c.State, Messages: c.Messages,
-			InCurrentCopy: c.InCurrentCopy, OnlyInOlderCopies: c.OnlyInOlderCopies, LackingInCurrentRange: c.LackingInCurrentRange, CurrentOldestAt: tp(c.CurrentOldestAt)})
+			InCurrentCopy: c.InCurrentCopy, OnlyInOlderCopies: c.OnlyInOlderCopies, LackingInCurrentRange: c.LackingInCurrentRange,
+			OlderCopiesMarked: c.OlderCopiesMarked, CurrentOldestAt: tp(c.CurrentOldestAt)})
+		var notice string
 		switch c.State {
 		case "partial":
-			res.addNotice(fmt.Sprintf("%s mail of %s is partial in this range: an older copy of the folder, from a folder set Outlook replaced, holds %d of %s that the current cache does not hold, although its range covers their dates",
-				c.Kind, c.Account, c.LackingInCurrentRange, plural(c.Messages, "message", "messages")))
+			notice = fmt.Sprintf("%s mail of %s is partial in this range: an older copy of the folder, from a folder set Outlook replaced, holds %d of %s that the current cache does not hold, although its range covers their dates",
+				c.Kind, c.Account, c.LackingInCurrentRange, plural(c.Messages, "message", "messages"))
 		case "older_copy_only":
-			res.addNotice(fmt.Sprintf("%s mail of %s in this range comes only from an older copy of the folder, from a folder set Outlook replaced and no sync reads any more: the current cache does not reach these dates", c.Kind, c.Account))
+			notice = fmt.Sprintf("%s mail of %s in this range comes only from an older copy of the folder, from a folder set Outlook replaced and no sync reads any more: the current cache does not reach these dates", c.Kind, c.Account)
+		default:
+			continue
 		}
+		if c.OlderCopiesMarked > 0 {
+			notice += fmt.Sprintf("; a sync marked %s of them gone or evicted when that set left the store, so mail list shows them only with --include-gone --include-evicted", plural(c.OlderCopiesMarked, "message", "messages"))
+		}
+		res.addNotice(notice)
 	}
 	return nil
 }

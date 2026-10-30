@@ -411,29 +411,33 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 	if err != nil {
 		return nil, "", false, err
 	}
-	ids, linked, err := mailThreadConversationGroup(s, ctx, seed)
+	// Each grouping leaves out a copy that a newer folder set also holds (the seed is in any case
+	// first), so copies never take the place of a message under the cap.
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, "", false, err
+	}
+	notCopy := ""
+	if cond := copies.notCopy(`m.rowid`); cond != "" {
+		notCopy = ` and ` + cond
+	}
+	ids, linked, err := mailThreadConversationGroup(s, ctx, seed, notCopy)
 	if err != nil {
 		return nil, "", false, err
 	}
 	grouping = "conversation"
 	if !linked {
 		grouping = "reply_chain"
-		if ids, linked, err = s.replyChain(ctx, seed); err != nil {
+		if ids, linked, err = s.replyChain(ctx, seed, notCopy); err != nil {
 			return nil, "", false, err
 		}
 		if !linked {
 			grouping = "subject"
-			if ids, err = s.subjectGroup(ctx, seed); err != nil {
+			if ids, err = s.subjectGroup(ctx, seed, notCopy); err != nil {
 				return nil, "", false, err
 			}
 		}
 	}
-	// A copy that a newer folder set also holds is left out, unless it is the seed.
-	copies, err := loadMailCopies(ctx, s.db)
-	if err != nil {
-		return nil, "", false, err
-	}
-	ids = slices.DeleteFunc(ids, func(id int64) bool { return id != seed.Rowid && copies.newer[id] != "" })
 	// Each grouping gathers one message past the cap, so exactly the cap is not truncated.
 	if truncated = len(ids) > mailThreadCap; truncated {
 		ids = ids[:mailThreadCap] // the seed is first, so it stays
@@ -444,12 +448,14 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 
 var mailThreadConversationGroup = (*Store).conversationGroup
 
-func (s *Store) conversationGroup(ctx context.Context, seed MailRow) ([]int64, bool, error) {
+// conversationGroup and the other groupings take notCopy, a condition (with its leading "and")
+// that leaves copies out, or "".
+func (s *Store) conversationGroup(ctx context.Context, seed MailRow, notCopy string) ([]int64, bool, error) {
 	ids := []int64{seed.Rowid}
 	if seed.ConversationID == "" {
 		return ids, false, nil
 	}
-	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and m.conversation_id=? and m.rowid<>? order by m.received_at desc, m.rowid desc limit ?`,
+	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and m.conversation_id=? and m.rowid<>?`+notCopy+` order by m.received_at desc, m.rowid desc limit ?`,
 		[]any{seed.Account, seed.ConversationID, seed.Rowid, mailThreadCap})
 	if err != nil {
 		return nil, false, err
@@ -471,7 +477,7 @@ func joinIDs(ids []int64) string {
 // replyChain follows In-Reply-To links, both ways and transitively, from the seed. Every row that
 // shares a Message-ID with a row in the chain is in it. linked says the chain holds a Message-ID
 // other than the seed's: a chain with only the seed is no link.
-func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, linked bool, err error) {
+func (s *Store) replyChain(ctx context.Context, seed MailRow, notCopy string) (ids []int64, linked bool, err error) {
 	have := map[int64]bool{seed.Rowid: true}
 	ids = []int64{seed.Rowid}
 	ownIDs := map[string]bool{}
@@ -481,7 +487,7 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 			ownIDs[cur.InternetMessageID] = true
 		}
 		var near []MailRow
-		near, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and ((m.internet_message_id<>'' and (m.internet_message_id=? or m.internet_message_id=?)) or (?<>'' and m.in_reply_to=?)) order by m.rowid`,
+		near, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.account=? and ((m.internet_message_id<>'' and (m.internet_message_id=? or m.internet_message_id=?)) or (?<>'' and m.in_reply_to=?))`+notCopy+` order by m.rowid`,
 			[]any{cur.Account, cur.InternetMessageID, cur.InReplyTo, cur.InternetMessageID, cur.InternetMessageID})
 		if err != nil {
 			return nil, false, err
@@ -505,7 +511,7 @@ func (s *Store) replyChain(ctx context.Context, seed MailRow) (ids []int64, link
 // subject that share an address (sender or recipient, ignoring case) with it, at most
 // mailThreadCap+1 in all. The address check runs in the query, before the limit, so a match is
 // never lost behind newer same-subject mail between other people.
-func (s *Store) subjectGroup(ctx context.Context, seed MailRow) ([]int64, error) {
+func (s *Store) subjectGroup(ctx context.Context, seed MailRow, notCopy string) ([]int64, error) {
 	ids := []int64{seed.Rowid}
 	mine := slices.Sorted(maps.Keys(addressSet(seed)))
 	if seed.SubjectNorm == "" || len(mine) == 0 {
@@ -515,7 +521,7 @@ func (s *Store) subjectGroup(ctx context.Context, seed MailRow) ([]int64, error)
 	w := where{}
 	w.add(`m.account=? and m.subject_norm=? and m.rowid<>?`, seed.Account, seed.SubjectNorm, seed.Rowid)
 	w.add(`(lower(m.sender_address) in `+in+` or exists(select 1 from mail_recipients r where r.message_rowid=m.rowid and lower(r.address) in `+in+`))`, append(args, args...)...)
-	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, mailThreadCap)) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	same, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+notCopy+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, mailThreadCap)) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
 		return nil, err
 	}

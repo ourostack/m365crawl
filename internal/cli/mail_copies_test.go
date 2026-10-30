@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -218,5 +219,33 @@ func TestMailListCopyCheckFailureSurfaces(t *testing.T) {
 	t.Cleanup(func() { mailCopyChecks = old })
 	if code, _, _ := e.mail(append([]string{"--json", "mail", "list", "--folder", "sent"}, dayFlags(3)...)...); code == 0 {
 		t.Fatal("a failed copy check must fail the list")
+	}
+}
+
+// A message only an older copy holds counts in folder_copies even after a sync marked it gone,
+// and the notice names the flags that make mail list show it, so the two agree.
+func TestMailListPartialNoticeNamesTheFlagsForMarkedOlderCopies(t *testing.T) {
+	e := copyEnv(t)
+	db, err := sql.Open("sqlite", e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`update mail_messages set gone_at='2026-09-10T12:00:00.000Z' where detail_key=1002`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	m := mailJSON(t, e, append([]string{"mail", "list", "--folder", "sent"}, dayFlags(3)...)...)
+	c := m["folder_copies"].([]any)[0].(map[string]any)
+	notices, _ := m["notices"].([]any)
+	if got := strings.Join(ids(items(t, m)), " "); got != "outlook/Main:2001" || c["state"] != "partial" || c["older_copies_marked"] != float64(1) ||
+		len(notices) != 1 || !strings.Contains(notices[0].(string), "--include-gone --include-evicted") {
+		t.Fatalf("%s %v %v", got, c, notices)
+	}
+	m = mailJSON(t, e, append([]string{"mail", "list", "--folder", "sent", "--include-gone", "--include-evicted"}, dayFlags(3)...)...)
+	c = m["folder_copies"].([]any)[0].(map[string]any)
+	notices, _ = m["notices"].([]any)
+	if got := strings.Join(ids(items(t, m)), " "); got != "outlook/Main:2001 outlook/Main:1002" || c["older_copies_marked"] != float64(0) ||
+		len(notices) != 1 || strings.Contains(notices[0].(string), "--include-gone") {
+		t.Fatalf("with the flags: %s %v %v", got, c, notices)
 	}
 }

@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/calendar"
 	"github.com/ourostack/m365crawl/internal/outlookmail"
 )
 
@@ -199,11 +201,12 @@ func TestMailOlderCopyOnlyMessageStaysListed(t *testing.T) {
 	}
 }
 
-// Copies are matched only across folder sets, only in the same folder role and only by a nonempty
-// Message-ID: two folders of one set holding the same Message-ID (a message sent to oneself, a
-// copy in a user folder) stay two rows, a message an older set holds in Inbox and the current set
-// in Deleted Items is not merged by guess, and To Me and Inbox are one role.
-func TestMailCopiesMatchOnlyTheSameRoleAcrossSets(t *testing.T) {
+// An older row is a copy of a newer row of another set with its Message-ID and folder role
+// first (so mail sent to oneself still pairs Sent with Sent), then of any current-set row with
+// its Message-ID, whatever the folder: the current set says where the message is now, so a message
+// moved after the rebuild is not listed from its old folder. Rows of one set never merge, and a
+// row without a Message-ID is never a copy.
+func TestMailCopiesPairByRoleThenByCurrentMessageID(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	noID := setMsg(1005, aSent, "", 6)
@@ -214,6 +217,8 @@ func TestMailCopiesMatchOnlyTheSameRoleAcrossSets(t *testing.T) {
 			setMsg(1002, aToMe, "<tome@t>", 4),
 			noID,
 			setMsg(1006, aProject(), "<user@t>", 7),
+			setMsg(1007, aSent, "<self@t>", 5),
+			setMsg(1008, aInbox, "<only-a@t>", 8),
 		},
 		[]outlookmail.Message{
 			setMsg(2001, bDeleted, "<moved@t>", 3),
@@ -224,12 +229,20 @@ func TestMailCopiesMatchOnlyTheSameRoleAcrossSets(t *testing.T) {
 			setMsg(2006, bPr, "<user@t>", 7),
 		})
 	got := listKeys(t, s, MailFilter{})
-	if !sameKeys(got, 2001, 1001, 2002, 2004, 2003, 2005, 1005, 2006, 1006) {
+	if !sameKeys(got, 2001, 2002, 2004, 2003, 2005, 1005, 2006, 1008) {
 		t.Fatalf("listed %v", got)
 	}
-	tome, err := s.MailGet(ctx, mailAcct, 1002)
-	if err != nil || tome.CopyOf != mailAcct+":2002" {
-		t.Fatalf("To Me copy %+v %v", tome, err)
+	if got := listKeys(t, s, MailFilter{Folder: "inbox"}); !sameKeys(got, 2002, 2004, 1008) {
+		t.Fatalf("a message moved out of Inbox after the rebuild is not listed from the older Inbox: %v", got)
+	}
+	for dk, want := range map[uint32]string{1001: "2001", 1002: "2002", 1006: "2006", 1007: "2003", 1005: "", 1008: ""} {
+		r, err := s.MailGet(ctx, mailAcct, dk)
+		if want != "" {
+			want = mailAcct + ":" + want
+		}
+		if err != nil || r.CopyOf != want || !r.OlderCopy {
+			t.Fatalf("%d: copy_of %q, want %q (%v)", dk, r.CopyOf, want, err)
+		}
 	}
 }
 
@@ -397,7 +410,7 @@ func TestMailCopyCheckFollowsGoneAndEvicted(t *testing.T) {
 	if m, err := s.MailGet(ctx, mailAcct, 1001); err != nil || m.GoneAt.IsZero() {
 		t.Fatalf("the older copy's message is marked gone by two trusted reads: %+v %v", m, err)
 	}
-	if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 3 || c.LackingInCurrentRange != 1 || c.State != "partial" {
+	if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 3 || c.LackingInCurrentRange != 1 || c.State != "partial" || c.OlderCopiesMarked != 1 {
 		t.Fatalf("an older copy's gone message still counts: %+v", c)
 	}
 	for col, mark := range map[string]string{
@@ -489,6 +502,12 @@ func TestMailCopyReadsSurfaceFailures(t *testing.T) {
 		if _, _, _, err := s.MailThread(ctx, mailAcct, 2001); err != nil {
 			return err
 		}
+		if _, err := s.MailStatusOf(ctx, mailAcct); err != nil {
+			return err
+		}
+		if _, err := s.EventMail(ctx, calendar.Event{ICalUID: "none"}, 0); err != nil {
+			return err
+		}
 		_, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}, {Account: mailAcct, Kind: "inbox"}, {Account: mailAcct, Kind: "archive"}}, MailCopyRange{Since: day(30), Until: day(0)})
 		return err
 	})
@@ -574,5 +593,87 @@ func TestMailThreadLeavesCopiesOut(t *testing.T) {
 	}
 	if got := keys(1001); !sameKeys(got, 2003, 1001, 2001) {
 		t.Fatalf("from the older copy: %v", got)
+	}
+}
+
+// A message the current set holds anywhere is not missing from it: deleted after the rebuild (its
+// current row gone) or moved to another folder. Drafts, Deleted Items and Archive are not checked:
+// their coverage is only the oldest item they hold.
+func TestMailCopyCheckCountsWhatTheCurrentSetHoldsAnywhere(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seedTwoSets(t, s,
+		[]outlookmail.Message{setMsg(1001, aInbox, "<deleted-later@t>", 3), setMsg(1002, aInbox, "<moved@t>", 3), setMsg(1003, aDeleted, "<trash@t>", 3)},
+		[]outlookmail.Message{setMsg(2001, bInbox, "<deleted-later@t>", 3), setMsg(2002, bDeleted, "<moved@t>", 3), setMsg(2010, bInbox, "<anchor@t>", 10)})
+	if _, err := s.db.Exec(`update mail_messages set gone_at=? where detail_key=2001`, fmtTime(hr(9))); err != nil {
+		t.Fatal(err)
+	}
+	if c := checkOf(t, s, "inbox", day(3).Add(-time.Hour), day(3).Add(time.Hour)); c.State != "consistent" || c.Messages != 0 || c.LackingInCurrentRange != 0 {
+		t.Fatalf("%+v", c)
+	}
+	checks, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "inbox"}}, MailCopyRange{Since: day(3).Add(-time.Hour), Until: day(3).Add(time.Hour), IncludeGone: true})
+	if err != nil || checks[0].Messages != 1 || checks[0].InCurrentCopy != 1 || checks[0].State != "consistent" {
+		t.Fatalf("%+v %v", checks, err)
+	}
+	checks, err = s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "deleted"}, {Account: mailAcct, Kind: "drafts"}, {Account: mailAcct, Kind: "archive"}}, MailCopyRange{Since: day(7)})
+	if err != nil || len(checks) != 0 {
+		t.Fatalf("only Inbox and Sent Items are checked: %+v %v", checks, err)
+	}
+	// Sent Items has no older copy once the older set's Sent Items is another kind of folder.
+	if _, err := s.db.Exec(`update mail_folders set kind='other' where folder_key=?`, aSent); err != nil {
+		t.Fatal(err)
+	}
+	if checks, err = s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}}, MailCopyRange{}); err != nil || len(checks) != 0 {
+		t.Fatalf("%+v %v", checks, err)
+	}
+}
+
+// A thread gathers its messages with copies already left out, so copies never take the place of a
+// message under the cap and truncated stays true to what was left out.
+func TestMailThreadCapCountsNoCopies(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	n := mailThreadCap - 40
+	var a, b []outlookmail.Message
+	for i := range n {
+		for _, x := range []struct {
+			dk     uint32
+			folder uint32
+			out    *[]outlookmail.Message
+		}{{uint32(1000 + i), aSent, &a}, {uint32(5000 + i), bSent, &b}} {
+			m := setMsg(x.dk, x.folder, fmt.Sprintf("<t-%d@t>", i), 3)
+			m.Subject, m.Received = "Plan", mailT0.Add(-time.Duration(i)*time.Minute)
+			*x.out = append(*x.out, m)
+		}
+	}
+	seedTwoSets(t, s, a, b)
+	rows, grouping, truncated, err := s.MailThread(ctx, mailAcct, 5000)
+	if err != nil || grouping != "subject" || truncated || len(rows) != n {
+		t.Fatalf("%s truncated=%v rows=%d (want %d) %v", grouping, truncated, len(rows), n, err)
+	}
+	for _, r := range rows {
+		if r.OlderCopy {
+			t.Fatalf("a copy in the thread: %+v", r)
+		}
+	}
+}
+
+// The status mail block and an event's related mail count and list a message once.
+func TestMailStatusAndEventMailLeaveCopiesOut(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	invite := func(dk, folder uint32) outlookmail.Message {
+		m := setMsg(dk, folder, "<invite@t>", 3)
+		m.ICalUID = "ABC"
+		return m
+	}
+	seedTwoSets(t, s, []outlookmail.Message{invite(1001, aInbox), setMsg(1002, aInbox, "<only-a@t>", 4)}, []outlookmail.Message{invite(2001, bInbox)})
+	st, err := s.MailStatusOf(ctx, mailAcct)
+	if err != nil || st.Messages != 2 || st.Unread != 2 {
+		t.Fatalf("%+v %v", st, err)
+	}
+	related, err := s.EventMail(ctx, calendar.Event{ICalUID: "abc"}, 0)
+	if err != nil || len(related) != 1 || related[0].DetailKey != 2001 {
+		t.Fatalf("%+v %v", related, err)
 	}
 }

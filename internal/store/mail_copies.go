@@ -25,12 +25,14 @@ import (
 // folder of the account is an older copy. When no recorded root is known, or no archived folder
 // hangs from it, every folder counts as current and nothing is called a copy.
 //
-// A row in an older set is a copy of another row when both have the same nonempty Message-ID
-// (compared with normalizeMailMessageID), sit in folders of the same role (mailCopyRole) and in
-// different sets, and the other row ranks higher: a row of the current set first, then the row
-// seen most recently, then the row archived last. Rows of one set are never merged with each
-// other, so a message in Sent Items and Inbox of one set (sent to oneself) stays two rows. No row
-// is deleted or re-keyed: the copy keeps its id and its own gone and evicted marks.
+// A row in an older set is a copy of another row with the same nonempty Message-ID (compared with
+// normalizeMailMessageID) in a different set, chosen in this order: a current-set row in a folder
+// of the same role (mailCopyRole), so mail sent to oneself still pairs Sent with Sent; any
+// current-set row, whatever its folder, because the current set says where the message is now
+// (moved, or deleted after the rebuild); a row of another older set in the same role that ranks
+// higher (seen more recently, then archived later). Rows of one set never merge, so a message in
+// Sent Items and Inbox of one set stays two rows. Current-set rows count whatever their gone and
+// evicted marks. No row is deleted or re-keyed: the copy keeps its id and its own marks.
 
 // mailFolderID is one archived folder.
 type mailFolderID struct {
@@ -195,7 +197,7 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 	}
 	sort.Strings(accounts)
 	for _, account := range accounts {
-		groups := map[string][]copyRow{}
+		byID := map[string][]copyCand{}
 		err := mailEach(ctx, q, `select rowid, detail_key, internet_message_id, folder_key, state_seen_at from mail_messages where account=? and internet_message_id<>''`, []any{account}, func(r *sql.Rows) error {
 			var row copyRow
 			var key, folder uint32
@@ -204,20 +206,21 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 				return err
 			}
 			id := mailFolderID{account, folder}
-			role, norm := mailCopyRole(sets.kind[id]), normalizeMailMessageID(msgID)
-			if role == "" || norm == "" {
-				return nil
+			kind, known := sets.kind[id]
+			norm := normalizeMailMessageID(msgID)
+			if !known || norm == "" {
+				return nil // a folder the store does not hold sits in no known set
 			}
 			row.id, row.set, row.current = fmt.Sprintf("%s:%d", account, key), sets.set[id], sets.current[id]
-			groups[role+"\x00"+norm] = append(groups[role+"\x00"+norm], row)
+			byID[norm] = append(byID[norm], copyCand{mailCopyRole(kind), row})
 			return nil
 		})
 		if err != nil {
 			return c, err
 		}
-		for _, g := range groups {
+		for _, g := range byID {
 			sort.Slice(g, func(i, j int) bool {
-				a, b := g[i], g[j]
+				a, b := g[i].row, g[j].row
 				if a.current != b.current {
 					return a.current
 				}
@@ -227,19 +230,44 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 				return a.rowid > b.rowid
 			})
 			for i, r := range g {
-				if r.current {
+				if r.row.current {
 					continue
 				}
-				for _, n := range g[:i] {
-					if n.set != r.set {
-						c.newer[r.rowid] = n.id
-						break
-					}
+				if n, ok := newerCopy(g[:i], r.role, r.row.set); ok {
+					c.newer[r.row.rowid] = n
 				}
 			}
 		}
 	}
 	return c, nil
+}
+
+// copyCand is one row of a Message-ID with the role of its folder ("" when it has none).
+type copyCand struct {
+	role string
+	row  copyRow
+}
+
+// newerCopy picks, from the rows of one Message-ID that rank above an older row (best first;
+// current-set rows always rank first), the row that the older row, of role and set, is a copy
+// of (see the rule above).
+func newerCopy(g []copyCand, role string, set uint32) (string, bool) {
+	var anyCurrent, olderSameRole string
+	for _, n := range g {
+		switch {
+		case n.row.set == set:
+		case n.row.current && role != "" && n.role == role:
+			return n.row.id, true
+		case n.row.current && anyCurrent == "":
+			anyCurrent = n.row.id
+		case !n.row.current && role != "" && n.role == role && olderSameRole == "":
+			olderSameRole = n.row.id
+		}
+	}
+	if anyCurrent != "" {
+		return anyCurrent, true
+	}
+	return olderSameRole, olderSameRole != ""
 }
 
 // copyIDs is the rowids of every copy, ascending, for a "not in" clause.
@@ -272,16 +300,19 @@ func (c mailCopies) mark(rows []MailRow) {
 type MailCopyScope struct{ Account, Kind string }
 
 // MailCopyRange is the received-time range [Since, Until) a check covers (a zero end is open) and
-// whether gone and evicted messages of the current folder set count, as in MailFilter. Messages of
-// an older set count whatever their marks: once Outlook replaces a set, a trusted read finds its
-// messages missing and marks them, which says nothing about whether the current set holds them.
+// whether gone and evicted messages of the current folder set count, as in MailFilter. Messages
+// only an older set holds count whatever their marks: once Outlook replaces a set, a trusted read
+// finds its messages missing and marks them, which says nothing about whether the current set
+// holds them. OlderCopiesMarked says how many of them the list hides behind those marks.
 type MailCopyRange struct {
 	Since, Until                time.Time
 	IncludeGone, IncludeEvicted bool
 }
 
-// MailCopyCheck compares, for one account and folder role over a range, the messages the current
-// folder set holds with the ones only older sets hold, each message counted once.
+// MailCopyCheck compares, for one account and folder role (inbox or sent) over a range, the
+// messages the current folder set holds with the ones only older sets hold, each message counted
+// once, the way mail list counts them: a copy counts through the row that stands for it, so a
+// message the current set holds in any folder, or held and since marked gone, is never missing.
 //
 // State is partial when an older copy holds a message dated inside the current copy's range (from
 // CurrentOldestAt on) that the current copy lacks: the current cache is missing messages there.
@@ -297,14 +328,22 @@ type MailCopyCheck struct {
 	InCurrentCopy         int
 	OnlyInOlderCopies     int
 	LackingInCurrentRange int
-	CurrentOldestAt       time.Time
-	State                 string
+	// OlderCopiesMarked is how many of OnlyInOlderCopies a sync marked gone or evicted (after the
+	// set left the store) and the list therefore hides unless the range includes them.
+	OlderCopiesMarked int
+	CurrentOldestAt   time.Time
+	State             string
 }
 
-// MailCopyChecks checks each distinct account and role in scopes that has an older folder copy,
-// in the order of scopes. A kind with no role, or an account without older copies, gives nothing.
+// checkedRole is true for the roles a copy check runs for: Inbox (with To Me) and Sent Items, whose
+// coverage is a range the cache holds. The coverage of Drafts, Deleted Items and Archive is only
+// the oldest item they hold, and an empty folder has none, so it says nothing about a day.
+func checkedRole(role string) bool { return role == "inbox" || role == "sent" }
+
+// MailCopyChecks checks each distinct account and checked role in scopes that has an older folder
+// copy, in the order of scopes. Another kind, or an account without older copies, gives nothing.
 func (s *Store) MailCopyChecks(ctx context.Context, scopes []MailCopyScope, rng MailCopyRange) ([]MailCopyCheck, error) {
-	sets, err := loadMailSets(ctx, s.db)
+	copies, err := loadMailCopies(ctx, s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -312,11 +351,11 @@ func (s *Store) MailCopyChecks(ctx context.Context, scopes []MailCopyScope, rng 
 	done := map[MailCopyScope]bool{}
 	for _, sc := range scopes {
 		k := MailCopyScope{sc.Account, mailCopyRole(sc.Kind)}
-		if k.Kind == "" || done[k] || !sets.hasOlder(k.Account, k.Kind) {
+		if !checkedRole(k.Kind) || done[k] || !copies.sets.hasOlder(k.Account, k.Kind) {
 			continue
 		}
 		done[k] = true
-		c, err := s.mailCopyCheck(ctx, sets, k, rng)
+		c, err := s.mailCopyCheck(ctx, copies, k, rng)
 		if err != nil {
 			return nil, err
 		}
@@ -338,8 +377,9 @@ func (m mailSets) hasOlder(account, role string) bool {
 	return false
 }
 
-func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScope, rng MailCopyRange) (MailCopyCheck, error) {
+func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopyScope, rng MailCopyRange) (MailCopyCheck, error) {
 	c := MailCopyCheck{Account: k.Account, Kind: k.Kind}
+	sets := copies.sets
 	inRole := func(key uint32) (bool, bool) {
 		id := mailFolderID{k.Account, key}
 		return mailCopyRole(sets.kind[id]) == k.Kind, sets.current[id]
@@ -378,7 +418,7 @@ func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScop
 	if !rng.Until.IsZero() {
 		w.add(`received_at<?`, rng.Until.UTC().Format(timeLayout))
 	}
-	type message struct{ current, lacking bool }
+	type message struct{ current, lacking, shown bool }
 	msgs := map[string]*message{}
 	err = mailEach(ctx, s.db, `select rowid, internet_message_id, folder_key, received_at, gone_at is not null, evicted_at is not null from mail_messages`+w.sql(), w.args, func(r *sql.Rows) error {
 		var rowid int64
@@ -390,9 +430,10 @@ func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScop
 			return err
 		}
 		role, current := inRole(key)
-		// The list's gone and evicted switches apply to the current copy. An older copy's marks
-		// follow its set leaving the store, so its messages count whatever their marks.
-		if !role || current && (gone && !rng.IncludeGone || evicted && !rng.IncludeEvicted) {
+		hidden := gone && !rng.IncludeGone || evicted && !rng.IncludeEvicted
+		// A copy counts through the row that stands for it. The list's gone and evicted switches
+		// apply to the current set; an older set's marks follow it leaving the store.
+		if !role || copies.newer[rowid] != "" || current && hidden {
 			return nil
 		}
 		id := normalizeMailMessageID(msgID)
@@ -405,6 +446,7 @@ func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScop
 			msgs[id] = m
 		}
 		m.current = m.current || current
+		m.shown = m.shown || !hidden
 		at := parseTime(received)
 		m.lacking = m.lacking || !current && !c.CurrentOldestAt.IsZero() && !at.IsZero() && !at.Before(c.CurrentOldestAt)
 		return nil
@@ -422,6 +464,9 @@ func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScop
 			c.LackingInCurrentRange++
 		default:
 			c.OnlyInOlderCopies++
+		}
+		if !m.current && !m.shown {
+			c.OlderCopiesMarked++
 		}
 	}
 	beforeCurrent := c.CurrentOldestAt.IsZero() || !rng.Until.IsZero() && !rng.Until.After(c.CurrentOldestAt)

@@ -39,9 +39,18 @@ func (s *Store) EventMail(ctx context.Context, ev calendar.Event, limit int) ([]
 	if ok, err := s.hasMail(ctx); err != nil || !ok {
 		return out, err
 	}
+	// A copy that a newer folder set also holds is listed once, through it.
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	notCopy := ""
+	if cond := copies.notCopy(`m.rowid`); cond != "" {
+		notCopy = ` and ` + cond
+	}
 	uid := strings.ToLower(ev.ICalUID)
 	if uid != "" {
-		rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.ical_uid=? and m.gone_at is null order by m.received_at desc, m.rowid desc limit ?`, []any{uid, limit})
+		rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.ical_uid=? and m.gone_at is null`+notCopy+` order by m.received_at desc, m.rowid desc limit ?`, []any{uid, limit})
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +75,7 @@ func (s *Store) EventMail(ctx context.Context, ev calendar.Event, limit int) ([]
 		args := stringArgs(people)
 		w.add(`(lower(m.sender_address) in `+in+` or exists(select 1 from mail_recipients r where r.message_rowid=m.rowid and lower(r.address) in `+in+`))`, append(args, args...)...)
 	}
-	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit-len(out))) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+notCopy+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit-len(out))) //nolint:gosec // G202: fragments are package constants; values are placeholders
 	if err != nil {
 		return nil, err
 	}
