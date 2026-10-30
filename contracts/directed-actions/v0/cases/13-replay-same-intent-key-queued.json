@@ -1,0 +1,107 @@
+{
+  "name": "13-replay-same-intent-key-queued",
+  "description": "A concurrent retry while the first request is still queued returns that request.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "kind": "mail_message",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
+      }
+    },
+    "earlier": [
+      {
+        "request_id": "req-1",
+        "outcome": "queued",
+        "request": {
+          "contract": "directed-actions/v0",
+          "action": "send_teams_message",
+          "agent": "synthetic-helper",
+          "reason": "Pat asked me to tell Sam the review is done.",
+          "identity": "pat@example.test",
+          "target": {
+            "conversation": "19:synthetic-chat-1@thread.v2",
+            "recipients": [
+              "pat@example.test",
+              "sam@example.test"
+            ]
+          },
+          "content": {
+            "text": "The review is done."
+          },
+          "intent_key": "synthetic-intent-1"
+        }
+      }
+    ]
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_teams_message",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to tell Sam the review is done.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "text": "The review is done."
+    },
+    "intent_key": "synthetic-intent-1"
+  },
+  "expect": {
+    "decision": "replay",
+    "replay_of": "req-1",
+    "earlier_outcome": "queued",
+    "exit_class": "done"
+  }
+}

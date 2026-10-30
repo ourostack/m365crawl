@@ -1,0 +1,103 @@
+{
+  "name": "16-accept-intent-key-after-failed",
+  "description": "After a failed outcome nothing happened, so the same key may send again.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "kind": "mail_message",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
+      }
+    },
+    "earlier": [
+      {
+        "request_id": "req-1",
+        "outcome": "failed",
+        "request": {
+          "contract": "directed-actions/v0",
+          "action": "send_mail",
+          "agent": "synthetic-helper",
+          "reason": "Pat asked me to send Kim the agenda.",
+          "identity": "pat@example.test",
+          "target": {
+            "recipients": [
+              "kim@example.test"
+            ]
+          },
+          "content": {
+            "subject": "Agenda",
+            "text": "Here is the agenda for Thursday."
+          },
+          "intent_key": "synthetic-intent-mail-1"
+        }
+      }
+    ]
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_mail",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to send Kim the agenda.",
+    "identity": "pat@example.test",
+    "target": {
+      "recipients": [
+        "kim@example.test"
+      ]
+    },
+    "content": {
+      "subject": "Agenda",
+      "text": "Here is the agenda for Thursday."
+    },
+    "intent_key": "synthetic-intent-mail-1"
+  },
+  "expect": {
+    "decision": "accept",
+    "effect": "visible_to_others"
+  }
+}

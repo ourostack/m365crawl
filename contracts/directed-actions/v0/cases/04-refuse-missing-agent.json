@@ -1,0 +1,82 @@
+{
+  "name": "04-refuse-missing-agent",
+  "description": "A request that does not name its agent is refused.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "kind": "mail_message",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_teams_message",
+    "agent": "  ",
+    "reason": "Pat asked me to tell Sam the review is done.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "text": "The review is done."
+    }
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "missing_agent",
+    "exit_class": "request_problem"
+  }
+}

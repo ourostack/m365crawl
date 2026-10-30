@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ourostack/m365crawl/contracts/directed-actions/v0/envelope.schema.json",
+  "title": "Directed action request, v0",
+  "description": "What an agent sends to ask a tool to act for a person. contract.md defines the rules; this schema gives the shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "action", "agent", "reason"],
+  "properties": {
+    "contract": {
+      "description": "The contract version the request follows.",
+      "const": "directed-actions/v0"
+    },
+    "action": {
+      "description": "What to do. contract.md lists each action's effect class and required fields.",
+      "type": "string",
+      "enum": [
+        "send_teams_message",
+        "send_mail",
+        "reply_mail",
+        "add_reaction",
+        "remove_reaction",
+        "save_mail_draft",
+        "discard_mail_draft",
+        "turn_writes_on",
+        "turn_writes_off"
+      ]
+    },
+    "agent": {
+      "description": "The name of the agent that is acting.",
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "description": "Why the agent is acting.",
+      "type": "string",
+      "minLength": 1
+    },
+    "identity": {
+      "description": "The account that acts. Required for actions other people can see.",
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "description": "What the action applies to, and who will see it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation": {
+          "description": "The id of a Teams chat or channel conversation.",
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "description": "The id of a message: the one replied to, reacted to, or a mail draft.",
+          "type": "string",
+          "minLength": 1
+        },
+        "recipients": {
+          "description": "Everyone the agent expects to see the result.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        }
+      }
+    },
+    "content": {
+      "description": "What the action carries.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "description": "Plain message text.", "type": "string", "minLength": 1 },
+        "subject": { "description": "A mail subject.", "type": "string", "minLength": 1 },
+        "reaction": { "description": "A reaction name.", "type": "string", "minLength": 1 }
+      }
+    },
+    "expected_version": {
+      "description": "The target's version the agent read. The request is refused if the target has changed since.",
+      "type": "string",
+      "minLength": 1
+    },
+    "intent_key": {
+      "description": "A key the agent chooses for one send. A retry with the same key returns the earlier request instead of sending twice. Allowed only on send actions.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
