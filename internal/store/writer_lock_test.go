@@ -21,7 +21,7 @@ func writerLocked(err error) bool {
 
 func TestWriterRoleReservesNormalSyncAndPreventsServerStarvation(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	global := must(AcquireLock(path))
 	defer global()
 	intent := must(AcquireLock(path + ".short-writer"))
@@ -73,7 +73,7 @@ func TestWriterRoleReservesNormalSyncAndPreventsServerStarvation(t *testing.T) {
 
 func TestWriterRoleOldSideFilesDoNotGrantWaitOrBlockServer(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	stale := must(AcquireLock(path + ".short-writer"))
 	stale()
 	stale = must(AcquireLock(path + ".sync-pending"))
@@ -105,7 +105,7 @@ func TestWriterRoleOldSideFilesDoNotGrantWaitOrBlockServer(t *testing.T) {
 
 func TestWriterRoleDeadlineCancellationAndInvalidModeReleaseConsumers(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	global := must(AcquireLock(path))
 	defer global()
 	intent := must(AcquireLock(path + ".short-writer"))
@@ -146,7 +146,7 @@ func TestWriterRoleAcquisitionErrorsNeverRetainAConsumer(t *testing.T) {
 			for fail := 1; fail <= 6; fail++ {
 				t.Run(fmt.Sprint(fail), func(t *testing.T) {
 					ctx := context.Background()
-					path := filepath.Join(t.TempDir(), "archive.db")
+					path := filepath.Join(t.TempDir(), "data", "archive.db")
 					oldLock, oldWait := writerLock, writerWait
 					t.Cleanup(func() { writerLock, writerWait = oldLock, oldWait })
 					mode := WriterOrdinarySync
@@ -212,7 +212,7 @@ func TestWriterRoleCancellationDuringAndAfterWait(t *testing.T) {
 		t.Run(fmt.Sprint(during), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := filepath.Join(t.TempDir(), "data", "archive.db")
 			global := must(AcquireLock(path))
 			defer global()
 			intent := must(AcquireLock(path + ".short-writer"))
@@ -239,7 +239,7 @@ func TestWriterRoleCancellationDuringAndAfterWait(t *testing.T) {
 }
 
 func TestWriterShortOperationBoundsContextRollsBackAndCloses(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	oldLock := writerLock
 	t.Cleanup(func() { writerLock = oldLock })
 	lockTime := time.Duration(0)
@@ -300,8 +300,9 @@ func TestWriterShortOperationBoundsContextRollsBackAndCloses(t *testing.T) {
 func TestWriterShortOperationOpenAndLockErrorsDoNotRunCallback(t *testing.T) {
 	for _, badArchive := range []bool{false, true} {
 		t.Run(fmt.Sprint(badArchive), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "archive.db")
+			path := filepath.Join(t.TempDir(), "data", "archive.db")
 			if badArchive {
+				must(AcquireLock(path))() // prepares the private archive folder as each platform requires
 				must0(os.WriteFile(path, []byte("synthetic corrupt archive"), 0o600))
 			} else {
 				release := must(AcquireLock(path))

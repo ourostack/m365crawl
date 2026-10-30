@@ -9,7 +9,7 @@ import (
 )
 
 func TestWorkIQWriterOperationBudgetIsSeparateFromAcquisition(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	for _, tc := range []struct {
 		budget, want time.Duration
 	}{{0, WorkIQWriteBudget}, {45 * time.Second, 45 * time.Second}} {
@@ -24,7 +24,7 @@ func TestWorkIQWriterOperationBudgetIsSeparateFromAcquisition(t *testing.T) {
 }
 
 func TestWorkIQWriterDoesNotReportACompletedWriteAsADeadline(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "archive.db")
+	path := filepath.Join(t.TempDir(), "data", "archive.db")
 	err := WithWorkIQWriterFor(context.Background(), path, 20*time.Millisecond, func(ctx context.Context, s *Store) error {
 		<-ctx.Done() // the operation finished its work; only the clock ran out afterwards
 		return nil
