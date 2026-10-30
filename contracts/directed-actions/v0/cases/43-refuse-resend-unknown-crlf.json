@@ -1,0 +1,105 @@
+{
+  "name": "43-refuse-resend-unknown-crlf",
+  "description": "Windows line endings do not make a resend of an unknown request look new.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "kind": "mail_message",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
+      }
+    },
+    "earlier": [
+      {
+        "request_id": "req-1",
+        "outcome": "unknown",
+        "request": {
+          "contract": "directed-actions/v0",
+          "action": "send_teams_message",
+          "agent": "synthetic-helper",
+          "reason": "Pat asked me to tell Sam the review is done.",
+          "identity": "pat@example.test",
+          "target": {
+            "conversation": "19:synthetic-chat-1@thread.v2",
+            "recipients": [
+              "pat@example.test",
+              "sam@example.test"
+            ]
+          },
+          "content": {
+            "text": "Line one.\nLine two."
+          }
+        }
+      }
+    ]
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_teams_message",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to tell Sam the review is done.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "text": "Line one.\r\nLine two."
+    }
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "outcome_unknown",
+    "exit_class": "person_needed",
+    "tell_person": true
+  }
+}

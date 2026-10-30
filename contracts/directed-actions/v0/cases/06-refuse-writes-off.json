@@ -6,6 +6,7 @@
     "signed_in": "pat@example.test",
     "targets": {
       "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
         "recipients": [
           "pat@example.test",
           "sam@example.test"
@@ -13,6 +14,7 @@
         "version": "v7"
       },
       "synthetic-mail-message-1": {
+        "kind": "mail_message",
         "recipients": [
           "pat@example.test",
           "lee@example.test"
@@ -20,6 +22,7 @@
         "version": "v2"
       },
       "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
         "recipients": [
           "pat@example.test",
           "lee@example.test"
@@ -27,6 +30,7 @@
         "version": "v3"
       },
       "synthetic-chat-message-9": {
+        "kind": "chat_message",
         "conversation": "19:synthetic-chat-1@thread.v2",
         "recipients": [
           "pat@example.test",
@@ -35,6 +39,7 @@
         "version": "m4"
       },
       "synthetic-chat-message-12": {
+        "kind": "chat_message",
         "conversation": "19:synthetic-chat-2@thread.v2",
         "recipients": [
           "pat@example.test",
@@ -43,6 +48,7 @@
         "version": "m1"
       },
       "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
         "recipients": [
           "pat@example.test"
         ],

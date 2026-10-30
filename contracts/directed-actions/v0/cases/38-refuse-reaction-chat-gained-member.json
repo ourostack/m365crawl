@@ -1,0 +1,84 @@
+{
+  "name": "38-refuse-reaction-chat-gained-member",
+  "description": "A reaction is seen by the chat's current members, so a member added since the message was read changes its audience.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test",
+          "kim@example.test"
+        ],
+        "version": "v8"
+      },
+      "synthetic-mail-message-1": {
+        "kind": "mail_message",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      },
+      "19:synthetic-chat-2@thread.v2": {
+        "kind": "conversation",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v3"
+      },
+      "synthetic-chat-message-9": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-1@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "m4"
+      },
+      "synthetic-chat-message-12": {
+        "kind": "chat_message",
+        "conversation": "19:synthetic-chat-2@thread.v2",
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "m1"
+      },
+      "synthetic-mail-draft-1": {
+        "kind": "mail_draft",
+        "recipients": [
+          "pat@example.test"
+        ],
+        "version": "d1"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "add_reaction",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to acknowledge Sam's message.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "message": "synthetic-chat-message-9",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "reaction": "like"
+    }
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "recipients_changed",
+    "exit_class": "request_problem"
+  }
+}

@@ -178,5 +178,9 @@ func TestActionFieldsAreKnown(t *testing.T) {
 				t.Errorf("%s lists unknown field %q", name, f)
 			}
 		}
+		usesMessage := slices.Contains(a.required, fMessage) || slices.Contains(a.optional, fMessage)
+		if usesMessage != (a.messageKind != "") {
+			t.Errorf("%s: takes target.message %v, message kind %q", name, usesMessage, a.messageKind)
+		}
 	}
 }

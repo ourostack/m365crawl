@@ -69,7 +69,18 @@ type State struct {
 	Earlier  []Earlier              `json:"earlier"`
 }
 
+// Kind says what a known target is, so an action can only apply to the kind it is meant for.
+type Kind string
+
+const (
+	KindConversation Kind = "conversation"
+	KindChatMessage  Kind = "chat_message"
+	KindMailMessage  Kind = "mail_message"
+	KindMailDraft    Kind = "mail_draft"
+)
+
 type TargetState struct {
+	Kind         Kind     `json:"kind"`
 	Conversation string   `json:"conversation,omitempty"` // for a message: the conversation it belongs to
 	Recipients   []string `json:"recipients"`
 	Version      string   `json:"version"`
@@ -143,23 +154,54 @@ const (
 )
 
 type action struct {
-	effect   Effect // empty for the person's writes switch
-	send     bool
-	required []string
-	optional []string
-	lookup   lookup // the target that holds the audience and version
+	effect      Effect // empty for the person's writes switch
+	send        bool
+	required    []string
+	optional    []string
+	messageKind Kind   // the kind target.message must name
+	audience    lookup // the target whose current audience must match target.recipients
+	version     lookup // the target expected_version is compared with
 }
 
 var actions = map[string]action{
-	"send_teams_message": {VisibleToOthers, true, []string{fConversation, fRecipients, fText}, []string{fVersion}, lookupConversation},
-	"send_mail":          {VisibleToOthers, true, []string{fRecipients, fSubject, fText}, nil, lookupNone},
-	"reply_mail":         {VisibleToOthers, true, []string{fMessage, fRecipients, fText}, []string{fVersion}, lookupMessage},
-	"add_reaction":       {VisibleToOthers, false, []string{fConversation, fMessage, fRecipients, fReaction}, []string{fVersion}, lookupMessage},
-	"remove_reaction":    {VisibleToOthers, false, []string{fConversation, fMessage, fRecipients, fReaction}, []string{fVersion}, lookupMessage},
-	"save_mail_draft":    {OnlyYou, false, []string{fText}, []string{fMessage, fRecipients, fSubject, fVersion}, lookupMessage},
-	"discard_mail_draft": {OnlyYou, false, []string{fMessage}, []string{fVersion}, lookupMessage},
-	"turn_writes_on":     {},
-	"turn_writes_off":    {},
+	"send_teams_message": {
+		effect: VisibleToOthers, send: true,
+		required: []string{fConversation, fRecipients, fText}, optional: []string{fVersion},
+		audience: lookupConversation, version: lookupConversation,
+	},
+	"send_mail": {
+		effect: VisibleToOthers, send: true,
+		required: []string{fRecipients, fSubject, fText},
+	},
+	"reply_mail": {
+		effect: VisibleToOthers, send: true,
+		required: []string{fMessage, fRecipients, fText}, optional: []string{fVersion},
+		messageKind: KindMailMessage, audience: lookupMessage, version: lookupMessage,
+	},
+	// Everyone now in the chat sees a reaction, so its audience is the conversation's, while
+	// its version is the message's.
+	"add_reaction": {
+		effect:   VisibleToOthers,
+		required: []string{fConversation, fMessage, fRecipients, fReaction}, optional: []string{fVersion},
+		messageKind: KindChatMessage, audience: lookupConversation, version: lookupMessage,
+	},
+	"remove_reaction": {
+		effect:   VisibleToOthers,
+		required: []string{fConversation, fMessage, fRecipients, fReaction}, optional: []string{fVersion},
+		messageKind: KindChatMessage, audience: lookupConversation, version: lookupMessage,
+	},
+	"save_mail_draft": {
+		effect:   OnlyYou,
+		required: []string{fText}, optional: []string{fMessage, fRecipients, fSubject, fVersion},
+		messageKind: KindMailDraft, version: lookupMessage,
+	},
+	"discard_mail_draft": {
+		effect:   OnlyYou,
+		required: []string{fMessage}, optional: []string{fVersion},
+		messageKind: KindMailDraft, version: lookupMessage,
+	},
+	"turn_writes_on":  {},
+	"turn_writes_off": {},
 }
 
 // Actions lists every action name the contract defines, sorted.
@@ -207,6 +249,13 @@ func accounts(list []string) []string {
 	return out
 }
 
+// content is compared in the form that is sent: line endings as LF, without surrounding white space.
+func content(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.TrimSpace(s)
+}
+
 // normalize applies the contract's comparison rules once, so every check and every comparison
 // with an earlier request sees the same values.
 func normalize(r Request) Request {
@@ -214,9 +263,9 @@ func normalize(r Request) Request {
 	r.Target.Conversation = strings.TrimSpace(r.Target.Conversation)
 	r.Target.Message = strings.TrimSpace(r.Target.Message)
 	r.Target.Recipients = accounts(r.Target.Recipients)
-	r.Content.Text = strings.TrimSpace(r.Content.Text)
-	r.Content.Subject = strings.TrimSpace(r.Content.Subject)
-	r.Content.Reaction = strings.TrimSpace(r.Content.Reaction)
+	r.Content.Text = content(r.Content.Text)
+	r.Content.Subject = content(r.Content.Subject)
+	r.Content.Reaction = content(r.Content.Reaction)
 	r.ExpectedVersion = strings.TrimSpace(r.ExpectedVersion)
 	r.IntentKey = strings.TrimSpace(r.IntentKey)
 	return r
@@ -241,15 +290,12 @@ func given(r Request, field string) bool {
 	}
 }
 
-func (a action) key(r Request) string {
-	switch a.lookup {
-	case lookupConversation:
+// key is only asked for an action whose expected_version is allowed, so l is never lookupNone.
+func key(r Request, l lookup) string {
+	if l == lookupConversation {
 		return r.Target.Conversation
-	case lookupMessage:
-		return r.Target.Message
-	default:
-		return ""
 	}
+	return r.Target.Message
 }
 
 // checkFields reports the first missing required field, then the first field the action does not
@@ -268,7 +314,7 @@ func (a action) checkFields(r Request) (string, bool) {
 	if slices.Contains(r.Target.Recipients, "") {
 		return fRecipients, false
 	}
-	if given(r, fVersion) && a.key(r) == "" {
+	if given(r, fVersion) && key(r, a.version) == "" {
 		return fVersion, false
 	}
 	return "", true
@@ -326,12 +372,20 @@ func Decide(state State, req Request) Result {
 	if a.effect == VisibleToOthers && req.Identity == "" {
 		return refuse(CodeIdentityRequired)
 	}
-	if req.Identity != "" && req.Identity != account(state.SignedIn) {
+	signedIn := account(state.SignedIn)
+	if req.Identity != "" && req.Identity != signedIn {
 		return refuse(CodeIdentityMismatch)
+	}
+	// A request without an identity acts as the signed-in account, so it compares as one.
+	if req.Identity == "" {
+		req.Identity = signedIn
 	}
 	earlier := make([]Earlier, len(state.Earlier))
 	for i, e := range state.Earlier {
 		e.Request = normalize(e.Request)
+		if e.Request.Identity == "" {
+			e.Request.Identity = signedIn
+		}
 		earlier[i] = e
 	}
 	if req.IntentKey != "" {
@@ -349,25 +403,38 @@ func Decide(state State, req Request) Result {
 			return r
 		}
 	}
+	var conv, msg TargetState
 	if c := req.Target.Conversation; c != "" {
-		if _, ok := state.Targets[c]; !ok {
-			return refuse(CodeUnknownTarget)
-		}
-	}
-	if key := a.key(req); key != "" {
-		current, ok := state.Targets[key]
+		t, ok := state.Targets[c]
 		if !ok {
 			return refuse(CodeUnknownTarget)
 		}
-		if a.lookup == lookupMessage && req.Target.Conversation != "" && current.Conversation != req.Target.Conversation {
+		if t.Kind != KindConversation {
 			return refuse(CodeTargetMismatch)
 		}
-		if a.effect == VisibleToOthers && !sameAudience(req.Target.Recipients, accounts(current.Recipients)) {
-			return refuse(CodeRecipientsChanged)
+		conv = t
+	}
+	if m := req.Target.Message; m != "" {
+		t, ok := state.Targets[m]
+		if !ok {
+			return refuse(CodeUnknownTarget)
 		}
-		if req.ExpectedVersion != "" && req.ExpectedVersion != current.Version {
-			return refuse(CodeStaleVersion)
+		if t.Kind != a.messageKind || (req.Target.Conversation != "" && t.Conversation != req.Target.Conversation) {
+			return refuse(CodeTargetMismatch)
 		}
+		msg = t
+	}
+	pick := func(l lookup) TargetState {
+		if l == lookupConversation {
+			return conv
+		}
+		return msg
+	}
+	if a.audience != lookupNone && !sameAudience(req.Target.Recipients, accounts(pick(a.audience).Recipients)) {
+		return refuse(CodeRecipientsChanged)
+	}
+	if req.ExpectedVersion != "" && req.ExpectedVersion != pick(a.version).Version {
+		return refuse(CodeStaleVersion)
 	}
 	for _, e := range earlier {
 		if e.Outcome == Unknown && sameRequest(e.Request, req) {

@@ -25,17 +25,19 @@ Every action has one effect class:
 
 ## Actions
 
-| Action | Effect | Send | Required fields | Optional fields | Audience and version from |
-| --- | --- | --- | --- | --- | --- |
-| `send_teams_message` | `visible_to_others` | yes | `target.conversation`, `target.recipients`, `content.text` | `expected_version` | the conversation |
-| `send_mail` | `visible_to_others` | yes | `target.recipients`, `content.subject`, `content.text` | none | none; a new mail has no earlier audience |
-| `reply_mail` | `visible_to_others` | yes | `target.message`, `target.recipients`, `content.text` | `expected_version` | the message replied to |
-| `add_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | the message, which must belong to the conversation |
-| `remove_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | the message, which must belong to the conversation |
-| `save_mail_draft` | `only_you` | no | `content.text` | `target.message` (an existing draft), `target.recipients`, `content.subject`, `expected_version` | the draft, when one is named |
-| `discard_mail_draft` | `only_you` | no | `target.message` | `expected_version` | the draft |
-| `turn_writes_on` | the person's switch | no | none; always refused | none | none |
-| `turn_writes_off` | the person's switch | no | none; always refused | none | none |
+| Action | Effect | Send | Required fields | Optional fields | `target.message` kind | Audience from | Version from |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `send_teams_message` | `visible_to_others` | yes | `target.conversation`, `target.recipients`, `content.text` | `expected_version` | not allowed | conversation | conversation |
+| `send_mail` | `visible_to_others` | yes | `target.recipients`, `content.subject`, `content.text` | none | not allowed | none; a new mail has no earlier audience | none |
+| `reply_mail` | `visible_to_others` | yes | `target.message`, `target.recipients`, `content.text` | `expected_version` | `mail_message` | message | message |
+| `add_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | `chat_message` in that conversation | conversation | message |
+| `remove_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | `chat_message` in that conversation | conversation | message |
+| `save_mail_draft` | `only_you` | no | `content.text` | `target.message` (a draft to update), `target.recipients`, `content.subject`, `expected_version` | `mail_draft` | none | message |
+| `discard_mail_draft` | `only_you` | no | `target.message` | `expected_version` | `mail_draft` | none | message |
+| `turn_writes_on` | the person's switch | no | none; always refused | none | not allowed | none | none |
+| `turn_writes_off` | the person's switch | no | none; always refused | none | not allowed | none | none |
+
+A reaction is seen by everyone in the chat now, not only by the people the message first reached, so its audience comes from the conversation while its version comes from the message.
 
 `identity` is allowed on every action, and `intent_key` only on sends. Any other target or content field, or `expected_version` where the table does not list it, is refused. An unused field must never make a request look different from an earlier one.
 
@@ -44,13 +46,13 @@ Every action has one effect class:
 ## The request
 
 - `agent` names the agent that is acting, and `reason` says why. Both are required on every action and are recorded with it.
-- `identity` is the account that acts. It is required for `visible_to_others` actions and optional for `only_you` actions. When present it must equal the signed-in account.
-- `target.conversation` and `target.message` name what the action applies to. The tool must already know every target the request names. The table says which one holds the audience and version. A reaction names both, and the message must belong to that conversation.
-- `target.recipients` lists everyone the agent expects to see the result. For a `visible_to_others` action, it must equal the audience of the target the table names, compared as a set. A new mail has no earlier audience, so its recipients are taken as given. A blank recipient is refused.
+- `identity` is the account that acts. It is required for `visible_to_others` actions and optional for `only_you` actions. When present it must equal the signed-in account. When absent, the request acts as the signed-in account and is compared as if it had named it.
+- `target.conversation` and `target.message` name what the action applies to. The tool must already know every target the request names, and each known target has a kind: `conversation`, `chat_message`, `mail_message` or `mail_draft`. `target.conversation` must name a `conversation`, and `target.message` must name the kind the table gives. A reaction's message must also belong to the named conversation.
+- `target.recipients` lists everyone the agent expects to see the result. For a `visible_to_others` action, it must equal the current audience of the target the table names, compared as a set. A new mail has no earlier audience, so its recipients are taken as given. A blank recipient is refused.
 - `expected_version`, when present, is the version the agent read of the target the table names. It must equal that target's current version.
 - `intent_key` is allowed only on send actions.
 
-Every value is compared after removing white space at its start and end. Identities and recipients also ignore letter case, everywhere they are compared: against the signed-in account, against a target's audience, and against earlier requests.
+Every value is compared after removing white space at its start and end. Content is compared in the form that is sent, with every CRLF and lone CR turned into LF. Identities and recipients also ignore letter case, everywhere they are compared: against the signed-in account, against a target's audience, and against earlier requests.
 
 Two requests are the same request when their action, identity, conversation, message, recipients and content are equal under these rules. `agent` and `reason` do not count, so a retry may word its reason differently.
 
@@ -67,11 +69,13 @@ The tool checks a request in this order and stops at the first refusal:
 7. The fields must fit the action: `invalid_request`, with `field` naming the problem. The tool reports the first missing required field in the table's order, then the first field the action does not use, then a blank recipient, then an `expected_version` with no target to compare against. Fields are taken in this order: `target.conversation`, `target.message`, `target.recipients`, `content.text`, `content.subject`, `content.reaction`, `expected_version`.
 8. A `visible_to_others` action needs `identity`: `identity_required`. A given identity must match: `identity_mismatch`.
 9. If an earlier request with the same intent key is `queued`, `sent` or `unknown`, the same request gets a replay of that earlier request and nothing is sent. A different request with that key is refused: `intent_key_reused`. After a `failed` outcome nothing happened, so the key is free again.
-10. Every named target must be known: `unknown_target`. A reaction's message must belong to the named conversation: `target_mismatch`.
+10. Every named target must be known: `unknown_target`. Each must be the kind the action needs, and a reaction's message must belong to the named conversation: `target_mismatch`.
 11. The recipients must match the target's audience: `recipients_changed`.
 12. The expected version must match: `stale_version`.
 13. If the same request was made earlier and its outcome is `unknown`, the request is refused until the person settles the earlier one: `outcome_unknown`. A new intent key does not get around this.
 14. Otherwise the request is accepted and the tool acts.
+
+The decision uses what the tool already knows. Before an action that cannot be undone, the tool checks again at the source: before discarding a draft, it fetches the message again and confirms it is still a draft, and refuses if it is not.
 
 ## The answer
 
@@ -114,7 +118,7 @@ The m365crawl exit numbers are a proposal. They are settled when the write comma
 Each file in `cases/` holds one case:
 
 - `name` and `description` say what it checks.
-- `state` is what the tool knows: `writes` (`on` or `off`), `signed_in` (the signed-in account), `targets` (each known conversation or message, keyed by its id, with its `recipients`, its `version` and, for a message in a conversation, that `conversation`), and `earlier` (accepted requests, each with `request_id`, `outcome` and the original `request`).
+- `state` is what the tool knows: `writes` (`on` or `off`), `signed_in` (the signed-in account), `targets` (each known conversation or message, keyed by its id, with its `kind`, `recipients`, `version` and, for a chat message, its `conversation`), and `earlier` (accepted requests, each with `request_id`, `outcome` and the original `request`).
 - `request` is the agent's request.
 - `expect` is the answer. Fields that do not apply are left out, and `tell_person` is left out when it is `false`.
 
