@@ -104,7 +104,7 @@ func TestWorkIQMailSyncMeasuresArchiveGrowthPerItem(t *testing.T) {
 		return calls * 400 << 20 // 400 MiB between the first check and the staged page
 	}
 	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "mail", Account: account})
-	if err != nil || report.Counts["disk_acquire_bytes_per_item"] != 2<<20 || report.Counts["disk_staged_items"] != 200 {
+	if err != nil || report.Counts["disk_acquire_bytes_per_item"] != 2<<20 || report.Counts["disk_staged_items"] != 200 || report.Counts["disk_fetched_items"] != 200 {
 		t.Fatal("measured growth was not kept as the per-item figure", err, report.Counts)
 	}
 	if got := old(db); got <= 0 {
@@ -113,7 +113,7 @@ func TestWorkIQMailSyncMeasuresArchiveGrowthPerItem(t *testing.T) {
 }
 
 func TestWorkIQMailDiskCostText(t *testing.T) {
-	d := store.WorkIQMailDisk{InventoryItems: 366000, StagedItems: 15502}
+	d := store.WorkIQMailDisk{InventoryItems: 366000, FetchedItems: 15502, StagedItems: 15502}
 	text := WorkIQMailDiskCost(d, d.Need(), 15e9)
 	if !strings.Contains(text, "about 350498 more items in about 35050 pages (roughly 19 hours at about 31 pages a minute)") ||
 		!strings.Contains(text, "and 15.0 GB is free") || WorkIQMailDiskPerItem() != "340 KB" {
@@ -121,5 +121,27 @@ func TestWorkIQMailDiskCostText(t *testing.T) {
 	}
 	if small := WorkIQMailDiskCost(store.WorkIQMailDisk{InventoryItems: 60}, 0, 0); !strings.Contains(small, "roughly 1 minutes") {
 		t.Fatal("short cost text:", small)
+	}
+}
+
+// After a complete sync every folder's cursor is admitted, so a catch-up fetches only changes and
+// needs only the page and transaction reserve, not room for the whole mailbox again.
+func TestWorkIQMailIncrementalSyncAfterACompleteSyncIsNotRefused(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "200")
+	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	if _, err := RunWorkIQ(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	whole := store.WorkIQMailDisk{InventoryItems: 200}.Need()
+	free := store.WorkIQMailDisk{}.Need() + 10<<20
+	if free >= whole {
+		t.Fatal("fixture does not separate a catch-up from a whole-mailbox fetch")
+	}
+	setWorkIQFreeBytes(t, func(string) (int64, error) { return free, nil })
+	report, err := RunWorkIQ(context.Background(), options)
+	if err != nil || report.Counts["disk_inventory_items"] != 0 || report.Counts["disk_needed_bytes"] > int(free) {
+		t.Fatal("a catch-up after a complete sync was charged for the whole mailbox", err, report.Counts)
 	}
 }

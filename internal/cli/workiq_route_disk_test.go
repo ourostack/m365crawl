@@ -31,7 +31,7 @@ func routeStepDoes(t *testing.T, route map[string]any, command string) string {
 // without promising anything beyond the follow-up issue.
 func TestOlderMailRouteStatesWholeAccountSyncCost(t *testing.T) {
 	e := routeEnv(t)
-	huge := store.WorkIQMailDisk{InventoryItems: 366000, StagedItems: 15502, StagedBytes: 877 << 20, LargestPage: 10 << 20}
+	huge := store.WorkIQMailDisk{InventoryItems: 366000, FetchedItems: 15502, StagedItems: 15502, StagedBytes: 877 << 20, LargestPage: 10 << 20}
 	read := func() map[string]any {
 		t.Helper()
 		routes := routesOf(t, mailJSON(t, e, "mail", "list", "--since", "2026-01-01"))

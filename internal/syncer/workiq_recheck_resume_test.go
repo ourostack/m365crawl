@@ -5,8 +5,10 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
@@ -125,5 +127,75 @@ func TestWorkIQExpiredRestartFailureReportsItsStoredCode(t *testing.T) {
 	}
 	if !errors.Is(err, broken) || report.Resumable || stored == "workiq_delta_expired" || workIQOutcomeCode(err) != stored {
 		t.Fatalf("restart failure printed %q but stored %q: %v", workIQOutcomeCode(err), stored, err)
+	}
+}
+
+// An owed recheck's rebuild continues after any stop that left its cursors on their first pass: a
+// transient failure, a busy archive or a failed start between runs, not only a page-budget stop.
+func TestWorkIQMailRecheckContinuesAfterEveryResumableStopAndFailedStart(t *testing.T) {
+	for _, stop := range []string{"workiq_retry_later", "workiq_archive_busy", "failed-start"} {
+		t.Run(stop, func(t *testing.T) {
+			db, account := workIQAcquisitionArchive(t)
+			workIQAcquisitionStub(t)
+			t.Setenv("WORKIQ_ACQUISITION_MAIL_PAGES", "many")
+			t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
+			options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+			if _, err := RunWorkIQ(context.Background(), options); err != nil {
+				t.Fatal(err)
+			}
+			oldLimit, oldWait, oldWriter := workIQMailPageLimit, workIQWait, withWorkIQWriter
+			t.Cleanup(func() { workIQMailPageLimit, workIQWait, withWorkIQWriter = oldLimit, oldWait, oldWriter })
+			workIQMailPageLimit = 18
+			workIQWait = func(context.Context, time.Duration) error { return nil }
+			t.Setenv("WORKIQ_ACQUISITION_REMOVE_ONE", "1")
+			if _, err := RunWorkIQ(context.Background(), options); !workIQPageLimitCode(err) {
+				t.Fatal("the recheck did not start and stop at the page budget", err)
+			}
+			retired := count(t, db, `select count(*) from workiq_frontiers where retired=1`)
+			switch stop {
+			case "workiq_retry_later":
+				t.Setenv("WORKIQ_ACQUISITION_MODE", "transient-always")
+			case "workiq_archive_busy":
+				withWorkIQWriter = func(ctx context.Context, path string, budget time.Duration, op func(context.Context, *store.Store) error) error {
+					if _, page := ctx.Value(workIQPageBytesKey{}).(int); page {
+						return context.DeadlineExceeded
+					}
+					return oldWriter(ctx, path, budget, op)
+				}
+			default:
+				t.Setenv("WORKIQ_ACQUISITION_ME", "fail")
+			}
+			report, err := RunWorkIQ(context.Background(), options)
+			var coded *errs.Coded
+			if stop != "failed-start" && (!errors.As(err, &coded) || coded.Code != stop || !report.Resumable) {
+				t.Fatalf("the interrupting run did not stop resumably with %s: %v %+v", stop, err, report)
+			}
+			if stop == "failed-start" && (err == nil || report.Resumable) {
+				t.Fatal("the failed start succeeded or claimed to be resumable", err)
+			}
+			t.Setenv("WORKIQ_ACQUISITION_MODE", "")
+			t.Setenv("WORKIQ_ACQUISITION_ME", "")
+			withWorkIQWriter = oldWriter
+			for run := 0; ; run++ {
+				if run > 6 {
+					t.Fatal("the owed recheck never finished")
+				}
+				report, err = RunWorkIQ(context.Background(), options)
+				if err == nil {
+					break
+				}
+				if !workIQPageLimitCode(err) || !report.Resumable {
+					t.Fatalf("run %d: %v %+v", run, err, report)
+				}
+			}
+			// Two owed checks retire the account's cursors exactly twice; restarting the interrupted
+			// rebuild would have retired them a third time.
+			if got := count(t, db, `select count(*) from workiq_frontiers where retired=1`); got != 2*retired {
+				t.Fatalf("after %s the rebuild was restarted instead of continued: %d retired cursors, want %d", stop, got, 2*retired)
+			}
+			if count(t, db, `select count(*) from mail_messages`) != 6 {
+				t.Fatal("the continued recheck lost mail")
+			}
+		})
 	}
 }

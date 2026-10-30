@@ -33,14 +33,16 @@ const workIQMeasureAfter = 100
 // updated from every page the run stages.
 type workIQMailDiskRun struct {
 	store.WorkIQMailDisk
+	settled     map[string]bool // message resources whose cursor is admitted: they fetch only changes
 	baseBytes   int64
 	stagedItems int64
 }
 
-func workIQInventoryItems(folders []workiq.Folder) int64 {
+// workIQInventoryItems is the items of the folders listed so far whose cursor is not yet admitted.
+func workIQInventoryItems(folders []workiq.Folder, settled map[string]bool) int64 {
 	var n int64
 	for _, folder := range folders {
-		if folder.TotalCount != nil {
+		if folder.TotalCount != nil && !settled[store.WorkIQMailMessagesResource(folder.ID)] {
 			n += *folder.TotalCount
 		}
 	}
@@ -53,16 +55,17 @@ func workIQInventoryItems(folders []workiq.Folder) int64 {
 func (r *workIQMailRun) checkDisk(ctx context.Context) error {
 	if r.disk == nil {
 		var facts store.WorkIQMailDisk
+		var settled map[string]bool
 		if err := workIQRead(ctx, r.options.DBPath, func(s *store.Store) (err error) {
-			facts, err = s.WorkIQMailDiskFacts(ctx, r.account)
+			facts, settled, err = s.WorkIQMailDiskFacts(ctx, r.account)
 			return err
 		}); err != nil {
 			return err
 		}
-		r.disk = &workIQMailDiskRun{WorkIQMailDisk: facts, baseBytes: workIQArchiveBytes(r.options.DBPath)}
+		r.disk = &workIQMailDiskRun{WorkIQMailDisk: facts, settled: settled, baseBytes: workIQArchiveBytes(r.options.DBPath)}
 	}
 	// The folders listed so far this run, or the inventory an earlier run kept, whichever is larger.
-	r.disk.InventoryItems = max(r.disk.InventoryItems, r.inventory)
+	r.disk.InventoryItems = max(r.disk.InventoryItems, workIQInventoryItems(r.queue, r.disk.settled))
 	free, err := workIQFreeBytes(r.options.DBPath)
 	if err != nil {
 		return err
@@ -77,13 +80,16 @@ func (r *workIQMailRun) checkDisk(ctx context.Context) error {
 
 // noteStaged moves a staged page's items from future to staged admission and keeps the highest
 // archive growth per item the run has measured.
-func (r *workIQMailRun) noteStaged(page workiq.Page) {
+func (r *workIQMailRun) noteStaged(resource string, page workiq.Page) {
 	var collection struct {
 		Value []json.RawMessage `json:"value"`
 	}
 	_ = json.Unmarshal(page.Data, &collection) // staging already validated the page
 	items := int64(len(collection.Value))
 	r.disk.StagedItems += items
+	if !r.disk.settled[resource] {
+		r.disk.FetchedItems += items
+	}
 	r.disk.StagedBytes += int64(len(page.JSON))
 	r.disk.LargestPage = max(r.disk.LargestPage, int64(len(page.JSON)))
 	r.disk.stagedItems += items

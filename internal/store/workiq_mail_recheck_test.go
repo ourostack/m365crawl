@@ -128,7 +128,7 @@ func TestWorkIQMailConditionalConfirmationNeverPromotesAnIncrementalInventory(t 
 	}
 }
 
-func TestWorkIQMailRecheckContinuesOnlyThePageLimitedRebuildOfItsOwnCheck(t *testing.T) {
+func TestWorkIQMailRecheckContinuesItsRebuildUntilACursorIsAdmitted(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	first := seedWorkIQMailAttempt(t, s)
@@ -152,15 +152,24 @@ func TestWorkIQMailRecheckContinuesOnlyThePageLimitedRebuildOfItsOwnCheck(t *tes
 	if !must(s.WorkIQMailRecheckContinues(ctx, second)) {
 		t.Fatal("a run after a page-budget stop restarted the same owed check")
 	}
-	must0(s.CompleteWorkIQAttempt(ctx, second, WorkIQSummary{Status: "failed", ErrorCode: "workiq_failed", FinishedAt: mailT0}))
-	third := next(t)
-	if must(s.WorkIQMailRecheckContinues(ctx, third)) {
-		t.Fatal("a rebuild that stopped for another reason was continued instead of restarted")
+	// Whatever stopped the run (a transient failure, a busy archive, a failed start), the rebuild's
+	// cursors are still on their first pass, so the next run continues it.
+	for _, code := range []string{"workiq_retry_later", "workiq_archive_busy", "workiq_signin_required", "workiq_failed"} {
+		must0(s.CompleteWorkIQAttempt(ctx, second, WorkIQSummary{Status: "failed", ErrorCode: code, FinishedAt: mailT0}))
+		second = next(t)
+		if !must(s.WorkIQMailRecheckContinues(ctx, second)) {
+			t.Fatal("a rebuild still on its first pass was restarted after", code)
+		}
 	}
-	must0(s.MarkWorkIQMailRecheckRestarted(ctx, third))
-	must0(s.CompleteWorkIQAttempt(ctx, third, WorkIQSummary{Status: "failed", ErrorCode: "workiq_page_limit", FinishedAt: mailT0}))
+	// Once any of its cursors is admitted, the rebuild's traversal is over; continuing would only
+	// fetch changes and never complete the full check, so the next run restarts it.
+	must(s.db.ExecContext(ctx, `update workiq_frontiers set baseline=0 where retired=0 and family='mail'`))
+	if must(s.WorkIQMailRecheckContinues(ctx, second)) {
+		t.Fatal("a rebuild whose cursors were admitted was continued instead of restarted")
+	}
+	must(s.db.ExecContext(ctx, `update workiq_frontiers set baseline=1 where retired=0 and family='mail'`))
 	must(s.db.ExecContext(ctx, `update meta set value='0:0' where key like 'workiq_mail_recheck:%'`))
-	if must(s.WorkIQMailRecheckContinues(ctx, next(t))) {
+	if must(s.WorkIQMailRecheckContinues(ctx, second)) {
 		t.Fatal("a restart recorded for another check continued this one")
 	}
 }

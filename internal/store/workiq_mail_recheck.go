@@ -85,20 +85,24 @@ and not exists(select 1 from workiq_gaps g where g.attempt_id=a.id and g.resolve
 	return "workiq_mail_recheck:" + string(scope), fmt.Sprintf("%d:%d", trigger, completed), completed < 2, nil
 }
 
-// WorkIQMailRecheckContinues says the owed recheck already retired the account's cursors and the
-// previous mail sync stopped at its page budget with its position kept, so this run continues that
-// rebuild instead of retiring its progress. Any other earlier outcome restarts the check.
+// WorkIQMailRecheckContinues says the owed recheck already retired the account's cursors and its
+// rebuild is still on its first pass, so this run continues that rebuild instead of retiring its
+// progress, whatever stopped the previous run (a page budget, a transient failure, a busy archive,
+// a failed start). Once any of the account's current cursors is admitted the rebuild's traversal is
+// over and only a restart can make the full check, so the check restarts. A finished complete check
+// changes the epoch, so the next owed check restarts too.
 func (s *Store) WorkIQMailRecheckContinues(ctx context.Context, attempt int64) (bool, error) {
 	key, epoch, pending, err := s.workIQMailRecheck(ctx, attempt)
 	if err != nil || !pending {
 		return false, err
 	}
-	var recorded, previous string
+	var recorded string
+	var admitted bool
 	err = s.db.QueryRowContext(ctx, `select coalesce((select value from meta where key=?),''),
-coalesce((select p.error_code from workiq_attempts p join workiq_attempts a on a.id=?
-where p.family='mail' and p.account_id=a.account_id and p.kind='sync' and p.qualification=a.qualification
-and p.id<a.id and p.status<>'open' order by p.id desc limit 1),'')`, key, attempt).Scan(&recorded, &previous)
-	return recorded == epoch && previous == "workiq_page_limit", err
+exists(select 1 from workiq_frontiers f join workiq_attempts a on a.id=?
+where f.family='mail' and f.account_id=a.account_id and f.qualification=a.qualification and f.retired=0 and f.baseline=0)`,
+		key, attempt).Scan(&recorded, &admitted)
+	return recorded == epoch && !admitted, err
 }
 
 // MarkWorkIQMailRecheckRestarted records that the owed recheck retired the account's cursors.

@@ -16,17 +16,17 @@ import (
 var workIQMailPageLimit = 10000
 
 type workIQMailRun struct {
-	options   WorkIQOptions
-	session   *workIQSession
-	attempt   int64
-	account   string
-	report    *WorkIQAccountReport
-	prepared  map[string]int64
-	visited   map[string]bool
-	jobs      []string
-	pages     int
-	disk      *workIQMailDiskRun
-	inventory int64
+	options  WorkIQOptions
+	session  *workIQSession
+	attempt  int64
+	account  string
+	report   *WorkIQAccountReport
+	prepared map[string]int64
+	visited  map[string]bool
+	jobs     []string
+	pages    int
+	disk     *workIQMailDiskRun
+	queue    []workiq.Folder
 }
 
 func (r *workIQMailRun) progress(ctx context.Context, resource string) (store.WorkIQTraversalProgress, error) {
@@ -119,7 +119,7 @@ func (r *workIQMailRun) fetchResource(ctx context.Context, resource string) erro
 			return err
 		}
 		if messages {
-			r.noteStaged(page)
+			r.noteStaged(resource, page)
 		}
 		if err := r.prepare(ctx, resource); err != nil {
 			return err
@@ -204,7 +204,7 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 			}
 		}
 		resource := "/me/mailFolders/" + url.PathEscape(folder.ID) + "/messages/delta"
-		r.inventory = workIQInventoryItems(queue)
+		r.queue = queue
 		if err := r.fetchResource(ctx, resource); err != nil {
 			return err
 		}
