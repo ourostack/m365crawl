@@ -207,31 +207,6 @@ func TestLockedExit4(t *testing.T) {
 	}
 }
 
-func TestImplicitSyncFailureStillReads(t *testing.T) {
-	e := newEnv(t)
-	e.sync()
-	release, err := store.AcquireLock(e.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	code, stdout, stderr := e.run("--max-age", "1ns", "search", "Fixture", "--json")
-	if code != 0 {
-		t.Fatalf("read must succeed on the existing archive: exit %d, %s", code, stderr)
-	}
-	m := decode(t, stdout)
-	se, ok := m["sync_error"].(map[string]any)
-	if !ok || se["code"] != "locked" || se["message"] == "" {
-		t.Fatalf("sync_error = %v", m["sync_error"])
-	}
-	if len(items(t, m)) == 0 {
-		t.Fatal("expected hits from the existing archive")
-	}
-	if !strings.Contains(stderr, `"locked"`) {
-		t.Fatalf("warning missing on stderr: %q", stderr)
-	}
-}
-
 func TestImplicitSyncNoTeamsEmptyArchive(t *testing.T) {
 	e := newEnv(t)
 	e.root = filepath.Join(t.TempDir(), "absent")

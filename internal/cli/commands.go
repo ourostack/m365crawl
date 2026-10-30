@@ -826,6 +826,11 @@ func (r *whoamiResult) setSynced(si *syncedInfo) {
 	r.Archive.setSynced(si)
 }
 
+func (r *whoamiResult) setImplicitSync(state string) {
+	r.meta.setImplicitSync(state)
+	r.Archive.setImplicitSync(state)
+}
+
 func (r *whoamiResult) setNeedsSync(hint string) {
 	r.meta.setNeedsSync(hint)
 	r.Archive.setNeedsSync(hint)
