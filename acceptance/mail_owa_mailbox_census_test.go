@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -364,6 +366,7 @@ func (dc *owaDBCensus) observe(store string, value any) {
 }
 
 type owaSyncRun struct {
+	RunError    string         `json:"run_error,omitempty"`
 	MailSources int            `json:"mail_sources"`
 	Statuses    map[string]int `json:"statuses"`
 	Errors      map[string]int `json:"errors"`
@@ -373,6 +376,7 @@ type owaSyncRun struct {
 
 type owaSyncCensus struct {
 	Runs               []owaSyncRun `json:"runs"`
+	ArchiveError       string       `json:"archive_error,omitempty"`
 	Accounts           int          `json:"mail_accounts"`
 	MessagesPerAccount []int        `json:"messages_per_account"`
 	Bindings           int          `json:"mailbox_bindings"`
@@ -388,8 +392,16 @@ func owaCensusSync(t *testing.T, root string) *owaSyncCensus {
 	db := filepath.Join(dir, "census.db")
 	out := &owaSyncCensus{}
 	for i := 0; i < 2; i++ {
-		rep, _, _ := syncer.Run(context.Background(), syncer.Options{Root: filepath.Join(dir, "no-teams"), DBPath: db, OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1, FullRead: i == 1})
+		rep, _, runErr := syncer.Run(context.Background(), syncer.Options{Root: filepath.Join(dir, "no-teams"), DBPath: db, OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1, FullRead: i == 1})
 		run := owaSyncRun{Statuses: map[string]int{}, Errors: map[string]int{}}
+		if runErr != nil {
+			// Only the fixed code crosses the report boundary, never the message.
+			run.RunError = "uncoded"
+			var coded *errs.Coded
+			if errors.As(runErr, &coded) {
+				run.RunError = coded.Code
+			}
+		}
 		for _, s := range rep.Sources {
 			if !strings.HasPrefix(s.Source, "outlook|") || !strings.HasSuffix(s.Source, "|mail") {
 				continue
@@ -414,7 +426,11 @@ func owaCensusSync(t *testing.T, root string) *owaSyncCensus {
 	}
 	st, err := store.OpenReadOnly(context.Background(), db)
 	if err != nil {
-		t.Fatalf("archive open refused")
+		out.ArchiveError = "open_refused"
+		if errors.Is(err, store.ErrNoArchive) {
+			out.ArchiveError = "not_created"
+		}
+		return out
 	}
 	defer func() { _ = st.Close() }()
 	scalar := func(q string) int {
