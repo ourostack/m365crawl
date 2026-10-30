@@ -180,6 +180,10 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code
 			_, err = tx.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do update set value=excluded.value`,
 				workIQDiagnosticKey(attempt), string(raw))
 		}
+		if err == nil && summary.StopAt != "" {
+			_, err = tx.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do update set value=excluded.value`,
+				workIQStopKey(attempt), summary.StopAt)
+		}
 		if err != nil {
 			return err
 		}

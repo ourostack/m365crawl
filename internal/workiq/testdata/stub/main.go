@@ -44,9 +44,19 @@ func folder(kind string) map[string]any {
 	return out
 }
 
-// failFrom counts fetches across every child process in a shared file and, from the Nth on, answers
-// with a server failure: an MCP tool error without results, or a Graph 404 with a private message.
-func failFrom() map[string]any {
+// failFrom answers with a server failure: an MCP tool error without results, or a Graph 404 in
+// WorkIQ's nested error shape with a private message. It fails every fetch whose path contains
+// WORKIQ_ACQUISITION_FAIL_PATH, and, counting fetches across every child process in a shared file,
+// every fetch from the Nth on.
+func failFrom(path string) map[string]any {
+	failure := map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "Unhandled server failure for subject Quarterly plan"}}}
+	if os.Getenv("WORKIQ_ACQUISITION_FAIL_SHAPE") == "graph-404" {
+		failure = map[string]any{"isError": true, "structuredContent": map[string]any{"results": []any{map[string]any{"data": nil, "statusCode": 404,
+			"error": map[string]any{"error": map[string]any{"code": "itemNotFound", "message": "The chat Quarterly plan was not found"}}}}}}
+	}
+	if pinned := os.Getenv("WORKIQ_ACQUISITION_FAIL_PATH"); pinned != "" && strings.Contains(path, pinned) {
+		return failure
+	}
 	from, err := strconv.Atoi(os.Getenv("WORKIQ_ACQUISITION_FAIL_FROM"))
 	if err != nil || from < 1 {
 		return nil
@@ -65,11 +75,7 @@ func failFrom() map[string]any {
 	if info.Size() < int64(from) {
 		return nil
 	}
-	if os.Getenv("WORKIQ_ACQUISITION_FAIL_SHAPE") == "graph-404" {
-		return map[string]any{"structuredContent": map[string]any{"results": []any{map[string]any{"statusCode": 404,
-			"error": map[string]any{"code": "itemNotFound", "message": "The chat Quarterly plan was not found"}}}}}
-	}
-	return map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "Unhandled server failure for subject Quarterly plan"}}}
+	return failure
 }
 
 // createOnce creates name and says whether this call created it.
@@ -492,7 +498,7 @@ func main() {
 				reply["result"] = result
 				break
 			}
-			if result := failFrom(); result != nil {
+			if result := failFrom(path); result != nil {
 				reply["result"] = result
 				break
 			}

@@ -89,10 +89,13 @@ var (
 	diagnosticSpace   = regexp.MustCompile(`\s+`)
 )
 
+// diagnosticStatusLabel names the words after which a three-digit number is an HTTP status. Any
+// other number, such as a count or part of a phone number, is redacted.
+var diagnosticStatusLabel = map[string]bool{"status": true, "http": true, "code": true, "statuscode": true}
+
 func diagnosticSafeWord(word string) string {
 	switch {
-	case diagnosticVocabulary[strings.ToLower(strings.TrimRight(word, ".-"))], diagnosticStatus.MatchString(word),
-		diagnosticClass.FindString(word) == word:
+	case diagnosticVocabulary[strings.ToLower(strings.TrimRight(word, ".-"))], diagnosticClass.FindString(word) == word:
 		return word
 	case diagnosticGUID.MatchString(word):
 		sum := sha256.Sum256([]byte(strings.ToLower(word)))
@@ -109,8 +112,20 @@ func redactDiagnosticLine(line string) string {
 		}
 		return ' ' // quotes, brackets, controls and other symbols only separate words
 	}, line)
-	line = diagnosticWord.ReplaceAllStringFunc(line, diagnosticSafeWord)
-	line = diagnosticRedacts.ReplaceAllString(line, "[redacted]")
+	var out strings.Builder
+	last, previous := 0, ""
+	for _, span := range diagnosticWord.FindAllStringIndex(line, -1) {
+		word, gap := line[span[0]:span[1]], line[last:span[0]]
+		out.WriteString(gap)
+		if diagnosticStatus.MatchString(word) && diagnosticStatusLabel[strings.ToLower(previous)] && strings.Trim(gap, " :=") == "" {
+			out.WriteString(word)
+		} else {
+			out.WriteString(diagnosticSafeWord(word))
+		}
+		last, previous = span[1], word
+	}
+	out.WriteString(line[last:])
+	line = diagnosticRedacts.ReplaceAllString(out.String(), "[redacted]")
 	return strings.TrimSpace(diagnosticSpace.ReplaceAllString(line, " "))
 }
 
@@ -163,8 +178,13 @@ func diagnosticHead(raw []byte, cut bool, limit int) string {
 	if cut {
 		text = text[:max(0, strings.LastIndexByte(text, ' '))]
 	}
+	return diagnosticBound(text, limit)
+}
+
+// diagnosticBound cuts already redacted text to at most limit bytes, never inside a word.
+func diagnosticBound(text string, limit int) string {
 	if len(text) > limit {
-		text = text[:max(0, strings.LastIndexByte(text[:limit+1], ' '))] // never end inside a word
+		text = text[:max(0, strings.LastIndexByte(text[:limit+1], ' '))]
 	}
 	return strings.TrimSpace(text)
 }

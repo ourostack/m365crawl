@@ -187,7 +187,7 @@ func recordWorkIQFailure(ctx context.Context, options WorkIQOptions, report *Wor
 	for code, n := range account.Gaps {
 		report.Gaps[code] += n
 	}
-	report.Resumable = report.Resumable || workIQResumableCodes[workIQOutcomeCode(err)] && account.Gaps["workiq_persistence_failed"] == 0
+	report.Resumable = report.Resumable || workIQResumableCodes[workIQOutcomeCode(recordErr)] && account.Gaps["workiq_persistence_failed"] == 0
 	return recordErr
 }
 
@@ -343,6 +343,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	}
 	account.Status = "ok"
 	code := ""
+	err = workIQStuck(ctx, options, "mail", account.Account, err)
 	account.Diagnostic = workIQDiagnostic(err)
 	if err != nil {
 		account.Status, code = "failed", workIQOutcomeCode(err)
@@ -365,7 +366,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0 && !pending,
 				Folders: account.Counts["folders"], Counts: account.Counts, Gaps: account.Gaps,
-				MailProof: mailProof, Diagnostic: account.Diagnostic,
+				MailProof: mailProof, Diagnostic: account.Diagnostic, StopAt: workIQStopAt(err),
 			})
 		})
 		cancel()

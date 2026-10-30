@@ -111,8 +111,9 @@ func resultError(raw json.RawMessage) *errs.Coded {
 var graphErrorCode = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}$`)
 
 // serverDescriptor says what a failed result was without its text: the HTTP status, a Graph error
-// code that is a plain identifier, and the allowlisted shape of its message. A path refusal echoes
-// the path, so it keeps only the status.
+// code that is a plain identifier, and the allowlisted shape of its message, within the stdout
+// bound. WorkIQ nests Graph's own error object under "error"; that inner object wins. A path
+// refusal echoes the path, so it keeps only the status.
 func serverDescriptor(status int, raw json.RawMessage, code string) string {
 	var parts []string
 	add := func(part string) {
@@ -127,8 +128,15 @@ func serverDescriptor(status int, raw json.RawMessage, code string) string {
 		return strings.Join(parts, "; ")
 	}
 	var text string
-	var object struct{ Code, Message string }
+	var object struct {
+		Code, Message string
+		Error         json.RawMessage
+	}
 	if json.Unmarshal(raw, &text) != nil && json.Unmarshal(raw, &object) == nil {
+		var inner struct{ Code, Message string }
+		if json.Unmarshal(object.Error, &inner) == nil && (inner.Code != "" || inner.Message != "") {
+			object.Code, object.Message = inner.Code, inner.Message
+		}
 		switch {
 		case graphErrorCode.MatchString(object.Code):
 			add("code " + object.Code)
@@ -138,7 +146,26 @@ func serverDescriptor(status int, raw json.RawMessage, code string) string {
 		text = object.Message
 	}
 	add(redactDiagnosticLine(text))
-	return strings.Join(parts, "; ")
+	return diagnosticBound(strings.Join(parts, "; "), diagnosticStdout)
+}
+
+// rpcDescriptor says what a JSON-RPC error was: its numeric code and the allowlisted shape of its
+// message, within the stdout bound.
+func rpcDescriptor(raw json.RawMessage) string {
+	parts := []string{"rpc error"}
+	var rpc struct {
+		Code    json.Number
+		Message string
+	}
+	if json.Unmarshal(raw, &rpc) == nil {
+		if code, err := rpc.Code.Int64(); err == nil {
+			parts = append(parts, "code "+strconv.FormatInt(code, 10))
+		}
+		if shape := redactDiagnosticLine(rpc.Message); shape != "" {
+			parts = append(parts, shape)
+		}
+	}
+	return diagnosticBound(strings.Join(parts, "; "), diagnosticStdout)
 }
 
 var scrubServer = teamsdesktop.Scrub
@@ -167,7 +194,7 @@ func decodePage(ctx context.Context, raw []byte) (Page, error) {
 		if shape := redactDiagnosticLine(strings.Join(text, " ")); shape != "" {
 			server += ": " + shape
 		}
-		return Page{}, &diagnosed{err: classify(raw), d: Diagnostic{Server: server}}
+		return Page{}, &diagnosed{err: classify(raw), d: Diagnostic{Server: diagnosticBound(server, diagnosticStdout)}}
 	}
 	if len(before.Structured.Results) != 1 {
 		return Page{}, failure("workiq_protocol")

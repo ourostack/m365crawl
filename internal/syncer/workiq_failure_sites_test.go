@@ -155,6 +155,17 @@ func TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult(t *testing.T) {
 					count(t, db, `select count(*) from meta where key like 'workiq_diagnostic:%'`) == 0 {
 					t.Fatalf("failure from fetch %d of %d left no result, closed attempt or diagnostic: %v %+v", from, fetches, err, report.Accounts)
 				}
+				if tc.name == "chats-coverage" {
+					continue
+				}
+				// Every later fetch keeps failing, so reruns stop at the identity check: by the third
+				// run the same stop repeats and the result no longer invites another rerun.
+				for range 2 {
+					report, err = RunWorkIQ(context.Background(), tc.options(db, account))
+				}
+				if workIQCode(err) != "workiq_stuck" || report.Resumable {
+					t.Fatalf("a failure repeating from fetch %d of %d still invited a rerun: %v resumable %v", from, fetches, err, report.Resumable)
+				}
 			}
 		})
 	}
@@ -201,5 +212,68 @@ func TestWorkIQFailureRecordingNeedsOneArchivedAccount(t *testing.T) {
 	if err := recordWorkIQFailure(ctx, WorkIQOptions{DBPath: db, Source: "mail"}, &report, "mail", cause); !errors.Is(err, broken) ||
 		!errors.Is(err, cause) || len(report.Accounts) != 0 {
 		t.Fatal("an unreadable account list lost the cause or the read failure", err, report.Accounts)
+	}
+}
+
+// Live: an unexplained failure tied to one page ended every run as resumable workiq_retry_later, so
+// an agent following the result reran forever. When a run stops at the same unchanged position for
+// the same reason as the run before it, the result is workiq_stuck: not resumable, with the
+// diagnostic. A stop after a run that got further is an ordinary resumable stop again.
+func TestWorkIQRepeatedUnexplainedStopAtOnePositionIsStuck(t *testing.T) {
+	noWorkIQWait(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, path string
+		options    func(db, account string) WorkIQOptions
+	}{
+		{"mail", "folder-inbox/messages", func(db, account string) WorkIQOptions {
+			return WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+		}},
+		{"chats", "/chats/chat/messages", func(db, _ string) WorkIQOptions { return WorkIQOptions{DBPath: db, Source: "chats", MaxChats: 1} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, account := workIQAcquisitionArchive(t)
+			workIQAcquisitionStub(t)
+			seedWorkIQChatOwner(t, db)
+			t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+			t.Setenv("WORKIQ_ACQUISITION_FAIL_PATH", tc.path)
+			options := tc.options(db, account)
+			if report, err := RunWorkIQ(ctx, options); workIQCode(err) != "workiq_retry_later" || !report.Resumable {
+				t.Fatalf("the first stop was not resumable: %v %v", err, report.Resumable)
+			}
+			for run := 2; run <= 3; run++ {
+				report, err := RunWorkIQ(ctx, options)
+				if workIQCode(err) != "workiq_stuck" || report.Resumable || len(report.Accounts) == 0 || report.Accounts[0].Diagnostic == nil ||
+					report.Accounts[0].Diagnostic.Server != "tool error: Unhandled server failure for [redacted]" {
+					t.Fatalf("run %d repeated the stop without reporting it stuck: %v resumable %v %+v", run, err, report.Resumable, report.Accounts)
+				}
+			}
+			if count(t, db, `select count(*) from workiq_attempts where error_code='workiq_stuck' and finished_at is not null`) != 2 {
+				t.Fatal("the stuck runs did not close their attempts with workiq_stuck")
+			}
+			t.Setenv("WORKIQ_ACQUISITION_FAIL_PATH", "")
+			if _, err := RunWorkIQ(ctx, options); err != nil {
+				t.Fatal("the run did not finish once the failure cleared", err)
+			}
+			t.Setenv("WORKIQ_ACQUISITION_FAIL_PATH", tc.path)
+			if report, err := RunWorkIQ(ctx, options); workIQCode(err) != "workiq_retry_later" || !report.Resumable {
+				t.Fatalf("a stop after a run that finished was called stuck: %v %v", err, report.Resumable)
+			}
+		})
+	}
+}
+
+// When the archive cannot say where the previous run stopped, a stop stays the ordinary resumable
+// one rather than being guessed stuck.
+func TestWorkIQStuckNeedsTheArchiveToSay(t *testing.T) {
+	cause := &workIQStop{error: workIQFailure("workiq_retry_later"), at: "same place"}
+	original := workIQRead
+	t.Cleanup(func() { workIQRead = original })
+	workIQRead = func(context.Context, string, func(*store.Store) error) error {
+		return errors.New("synthetic read failure")
+	}
+	err := workIQStuck(context.Background(), WorkIQOptions{DBPath: "unread", Kind: "sync"}, "mail", "outlook/Main", cause)
+	if !errors.Is(err, cause) || workIQCode(err) != "workiq_retry_later" {
+		t.Fatal("an unreadable archive turned a resumable stop into another outcome", err)
 	}
 }

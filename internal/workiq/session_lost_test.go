@@ -2,6 +2,7 @@ package workiq
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -130,6 +131,13 @@ func TestWorkIQServerFailureKeepsASafeDescriptor(t *testing.T) {
 			"workiq_failed", "status 500; [redacted]"},
 		{`{"structuredContent":{"results":[{"statusCode":403,"error":"Access denied for GET path /me/chats/private"}]}}`,
 			"workiq_policy_denied", "status 403"},
+		// WorkIQ 1.0.1 nests Graph's own error object under "error"; the inner code and message win.
+		{`{"isError":true,"structuredContent":{"results":[{"data":null,"statusCode":429,"retryAfterSeconds":12,"error":{"error":{"code":"TooManyRequests","message":"Too many requests. Please try again later.","innerError":{"date":"2026-10-29T23:33:00"}}}}]}}`,
+			"workiq_failed", "status 429; code TooManyRequests; [redacted] requests. [redacted]"},
+		{`{"isError":true,"structuredContent":{"results":[{"data":null,"statusCode":404,"error":{"code":"outerCode","error":{"code":"itemNotFound","message":"The chat Quarterly plan was not found"}}}]}}`,
+			"workiq_failed", "status 404; code itemNotFound; The [redacted] was not found"},
+		{`{"isError":true,"structuredContent":{"results":[{"data":null,"statusCode":503,"error":{"error":{"code":"serviceNotAvailable"}}}]}}`,
+			"workiq_failed", "status 503; code serviceNotAvailable"},
 	} {
 		_, err := decodePage(context.Background(), []byte(tc.raw))
 		requireCode(t, err, tc.code)
@@ -141,5 +149,52 @@ func TestWorkIQServerFailureKeepsASafeDescriptor(t *testing.T) {
 	requireCode(t, err, "workiq_failed")
 	if _, ok := DiagnosticOf(err); ok {
 		t.Fatal("a result that is not a tool result gained a server descriptor")
+	}
+}
+
+// A three-digit number survives only right after its label (status, http, code), so counts, phone
+// numbers and other figures in echoed text do not.
+func TestWorkIQDiagnosticKeepsStatusNumbersOnlyAfterTheirLabel(t *testing.T) {
+	for line, want := range map[string]string{
+		"status 503":                         "status 503",
+		"HTTP 429 throttled":                 "HTTP 429 throttled",
+		"error code: 404":                    "error code: 404",
+		"status=500":                         "status=500",
+		"total 1,234,567 items":              "[redacted]",
+		"call (425) 555-0100 for help":       "call ([redacted] for [redacted]",
+		"error 503 after status 200, 300 ms": "error [redacted] after status 200, [redacted]",
+	} {
+		if got := redactDiagnosticLine(line); got != want {
+			t.Fatalf("%q: got %q, want %q", line, got, want)
+		}
+	}
+}
+
+// The server descriptor is bounded like stdout, however long the echoed body.
+func TestWorkIQServerDescriptorIsBounded(t *testing.T) {
+	body := strings.Repeat("error ", 2000)
+	for _, raw := range []string{
+		`{"isError":true,"content":[{"type":"text","text":"` + body + `"}]}`,
+		`{"isError":true,"structuredContent":{"results":[{"data":null,"statusCode":500,"error":{"error":{"code":"generalException","message":"` + body + `"}}}]}}`,
+	} {
+		_, err := decodePage(context.Background(), []byte(raw))
+		d, ok := DiagnosticOf(err)
+		if !ok || d.Server == "" || len(d.Server) > diagnosticStdout || strings.HasSuffix(d.Server, "erro") {
+			t.Fatalf("descriptor of %d bytes: %q", len(d.Server), d.Server)
+		}
+	}
+}
+
+// A JSON-RPC error keeps its numeric code and the allowlisted shape of its message only.
+func TestWorkIQRPCErrorDescriptor(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"code":-32603,"message":"Internal error for subject Quarterly plan"}`: "rpc error; code -32603; Internal error for [redacted]",
+		`{"code":"abc","message":"x"}`:                                          "rpc error",
+		`{"message":"timeout"}`:                                                 "rpc error; timeout",
+		`"plain text"`:                                                          "rpc error",
+	} {
+		if got := rpcDescriptor(json.RawMessage(raw)); got != want {
+			t.Fatalf("%s: got %q, want %q", raw, got, want)
+		}
 	}
 }

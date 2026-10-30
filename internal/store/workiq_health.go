@@ -179,6 +179,22 @@ func workIQDiagnosticKey(attempt int64) string {
 	return "workiq_diagnostic:" + strconv.FormatInt(attempt, 10)
 }
 
+func workIQStopKey(attempt int64) string {
+	return "workiq_stop:" + strconv.FormatInt(attempt, 10)
+}
+
+// LastWorkIQStop is where and why the latest settled attempt of one scope (family, account, kind)
+// was stopped by an unexplained failure, or "" when it was not, or when the scope has none.
+func (s *Store) LastWorkIQStop(ctx context.Context, family, account, kind string) (string, error) {
+	var stop sql.NullString
+	err := s.db.QueryRowContext(ctx, `select m.value from workiq_attempts a left join meta m on m.key='workiq_stop:'||a.id
+where a.family=? and a.account_id=? and a.kind=? and a.status<>'open' order by a.id desc limit 1`, family, account, kind).Scan(&stop)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return stop.String, err
+}
+
 // workIQAttemptDiagnostic is the redacted WorkIQ child diagnostic an attempt kept, if any.
 func (s *Store) workIQAttemptDiagnostic(ctx context.Context, attempt int64) (*workiq.Diagnostic, error) {
 	var raw string

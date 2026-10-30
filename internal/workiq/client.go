@@ -231,7 +231,7 @@ func (c *Client) call(ctx context.Context, limit time.Duration, method string, p
 			return nil, failure("workiq_protocol")
 		}
 		if len(msg.Error) > 0 && string(msg.Error) != "null" {
-			return nil, classify(msg.Error)
+			return nil, &diagnosed{err: classify(msg.Error), d: Diagnostic{Server: rpcDescriptor(msg.Error)}}
 		}
 		if len(msg.Result) == 0 {
 			return nil, failure("workiq_protocol")

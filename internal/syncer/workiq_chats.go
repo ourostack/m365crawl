@@ -279,7 +279,7 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 			}
 		}
 	}
-	err = errors.Join(err, session.close())
+	err = workIQStuck(ctx, options, "chats", binding.Fact.ID, errors.Join(err, session.close()))
 	report.Status = "ok"
 	report.Diagnostic = workIQDiagnostic(err)
 	code := ""
@@ -298,7 +298,7 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 		persistErr := workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: report.Status, ErrorCode: code, FinishedAt: workIQNow(), Counts: report.Counts, Gaps: report.Gaps,
-				Diagnostic: report.Diagnostic,
+				Diagnostic: report.Diagnostic, StopAt: workIQStopAt(err),
 			})
 		})
 		cancel()

@@ -31,6 +31,9 @@ func TestWorkIQTransportFailureBranches(t *testing.T) {
 			}
 			_, err = client.Fetch(context.Background(), "/me")
 			requireCode(t, err, code)
+			if d, _ := DiagnosticOf(err); mode == "rpc-error" && d.Server != "rpc error; code -32000; [redacted]" {
+				t.Fatalf("JSON-RPC error descriptor %+v", d)
+			}
 			_ = client.Close()
 		})
 	}

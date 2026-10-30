@@ -48,6 +48,8 @@ func workIQFailure(code string) error {
 		fix = "WorkIQ kept failing temporarily (throttling or a server error) and nothing past the last saved page advanced. Wait a minute, then run the same workiq command again."
 	case "workiq_archive_busy":
 		fix = "The archive was too busy to save a page in time; nothing past the last saved page advanced. Run the same workiq command again, ideally when the computer is less busy."
+	case "workiq_stuck":
+		fix = "WorkIQ failed the same way at the same position as the previous run, so running the same command again will not help. Stop and report this failure with its diagnostic; the run's position is kept."
 	}
 	return &errs.Coded{Code: code, Exit: exit,
 		Message: "the explicit WorkIQ source could not complete (" + code + ")", Fix: fix}
@@ -218,6 +220,60 @@ func workIQPinned(ctx context.Context, options WorkIQOptions, binding workiq.Acc
 	return client, user, nil
 }
 
+// workIQStop marks a run stopped by an unexplained failure that outlasted its retries with where
+// (a hash of the request path) and why it stopped, so the next run can tell it stopped at the same
+// place again.
+type workIQStop struct {
+	error
+	at string
+}
+
+func (e *workIQStop) Unwrap() error { return e.error }
+
+// workIQStopped keeps the failure's diagnostic with the retry policy's stop, and marks where an
+// unexplained (transient) failure stopped. A throttle or server error the server explained is not
+// marked: waiting can clear it.
+func workIQStopped(transient bool, path string, policyErr, cause error) error {
+	err := errors.Join(policyErr, cause)
+	if !transient {
+		return err
+	}
+	sum := sha256.Sum256([]byte(path))
+	reason := workIQOutcomeCode(cause)
+	if d, ok := workiq.DiagnosticOf(cause); ok {
+		reason += " " + d.Server
+	}
+	return &workIQStop{error: err, at: hex.EncodeToString(sum[:8]) + " " + reason}
+}
+
+// workIQStopAt is where and why an error's unexplained failure stopped the run, or "".
+func workIQStopAt(err error) string {
+	var stop *workIQStop
+	if errors.As(err, &stop) {
+		return stop.at
+	}
+	return ""
+}
+
+// workIQStuck reports a sync stop as workiq_stuck when the scope's previous sync stopped at the same
+// position for the same reason: running again would only repeat it. When the archive cannot say,
+// the stop stays the ordinary resumable one.
+func workIQStuck(ctx context.Context, options WorkIQOptions, family, account string, cause error) error {
+	at := workIQStopAt(cause)
+	if at == "" || options.Kind != "sync" {
+		return cause
+	}
+	var last string
+	ctx = context.WithoutCancel(ctx)
+	if err := workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
+		last, err = s.LastWorkIQStop(ctx, family, account, "sync")
+		return err
+	}); err != nil || last != at {
+		return cause
+	}
+	return errors.Join(workIQFailure("workiq_stuck"), cause)
+}
+
 // workIQTransient says a failure is one to retry on a new session: the child ended after the
 // session began, or a failure with no status that WorkIQ did not explain.
 func workIQTransient(err error, status int) bool {
@@ -234,7 +290,8 @@ func workIQOpenUser(ctx context.Context, inv workiq.Invocation, address string) 
 		if err != nil {
 			return nil, workiq.User{}, err
 		}
-		page, err := client.Fetch(ctx, "/me")
+		const path = "/me"
+		page, err := client.Fetch(ctx, path)
 		if err == nil {
 			var user workiq.User
 			if user, err = workiq.DecodeUser(ctx, page.Data); err == nil {
@@ -254,7 +311,7 @@ func workIQOpenUser(ctx context.Context, inv workiq.Invocation, address string) 
 		now := workIQNow()
 		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
 		if policyErr != nil {
-			return nil, workiq.User{}, errors.Join(policyErr, err)
+			return nil, workiq.User{}, workIQStopped(transient, path, policyErr, err)
 		}
 		if !retryable {
 			return nil, workiq.User{}, err
@@ -348,7 +405,7 @@ func (s *workIQSession) fetch(ctx context.Context, path string) (workiq.Page, er
 		now := workIQNow()
 		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
 		if policyErr != nil {
-			return workiq.Page{}, errors.Join(policyErr, err) // keep the failure's diagnostic
+			return workiq.Page{}, workIQStopped(transient, path, policyErr, err)
 		}
 		if !retryable {
 			return page, err

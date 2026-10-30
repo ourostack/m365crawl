@@ -32,6 +32,9 @@ type WorkIQSummary struct {
 	Gaps              map[string]int
 	MailProof         *WorkIQMailCompletionProof
 	Diagnostic        *workiq.Diagnostic // the failed WorkIQ child's redacted diagnostic, kept for health
+	// StopAt says where (a hash of the request) and why an unexplained failure stopped a sync, so the
+	// next run of the scope can tell whether it stopped at the same place again.
+	StopAt string
 }
 
 const workIQCacheMessageFilter = `not exists(select 1 from workiq_rows w
