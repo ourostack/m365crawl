@@ -16,6 +16,8 @@ import (
 
 	"github.com/ourostack/m365crawl/internal/indexeddb"
 	"github.com/ourostack/m365crawl/internal/outlookowa"
+	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/v8"
 )
@@ -87,9 +89,13 @@ func TestOWAMailboxIdentityCensus(t *testing.T) {
 		Profiles    int                 `json:"profiles"`
 		Skipped     int                 `json:"skipped_profiles"`
 		Detail      []*owaProfileCensus `json:"detail"`
+		Sync        *owaSyncCensus      `json:"sync,omitempty"`
 	}{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Profiles: len(profiles), Skipped: len(skipped)}
 	for i, p := range profiles {
 		report.Detail = append(report.Detail, owaCensusProfile(i, p.Source))
+	}
+	if os.Getenv(owaMailboxCensusEnv+"_SYNC") == "1" {
+		report.Sync = owaCensusSync(t, root)
 	}
 	data, _ := json.MarshalIndent(report, "", " ")
 	if path := os.Getenv(owaMailboxCensusEnv + "_PATH"); path != "" {
@@ -355,4 +361,82 @@ func (dc *owaDBCensus) observe(store string, value any) {
 			}
 		}
 	}
+}
+
+type owaSyncRun struct {
+	MailSources int            `json:"mail_sources"`
+	Statuses    map[string]int `json:"statuses"`
+	Errors      map[string]int `json:"errors"`
+	Added       int            `json:"added"`
+	Updated     int            `json:"updated"`
+}
+
+type owaSyncCensus struct {
+	Runs               []owaSyncRun `json:"runs"`
+	Accounts           int          `json:"mail_accounts"`
+	MessagesPerAccount []int        `json:"messages_per_account"`
+	Bindings           int          `json:"mailbox_bindings"`
+	CrossAccountIDs    int          `json:"native_ids_in_several_accounts"`
+	Absent             int          `json:"absent"`
+	ReadMarkers        int          `json:"read_markers"`
+}
+
+// owaCensusSync runs the product's sync twice into a private scratch archive and reports counts only.
+func owaCensusSync(t *testing.T, root string) *owaSyncCensus {
+	t.Helper()
+	dir := t.TempDir()
+	db := filepath.Join(dir, "census.db")
+	out := &owaSyncCensus{}
+	for i := 0; i < 2; i++ {
+		rep, _, _ := syncer.Run(context.Background(), syncer.Options{Root: filepath.Join(dir, "no-teams"), DBPath: db, OutlookEnabled: true, OutlookRoot: root, OutlookMinReadInterval: -1, FullRead: i == 1})
+		run := owaSyncRun{Statuses: map[string]int{}, Errors: map[string]int{}}
+		for _, s := range rep.Sources {
+			if !strings.HasPrefix(s.Source, "outlook|") || !strings.HasSuffix(s.Source, "|mail") {
+				continue
+			}
+			run.MailSources++
+			run.Statuses[s.Status]++
+			if s.Error != nil {
+				detail := ""
+				if s.Error.Code == "outlook_mail_layout_unsupported" {
+					if _, d, ok := strings.Cut(s.Error.Message, "supported: "); ok {
+						detail = ":" + strings.Fields(d + " ")[0]
+					}
+				}
+				run.Errors[s.Error.Code+detail]++
+			}
+			if s.Counts != nil && s.Counts.Mail != nil {
+				run.Added += s.Counts.Mail.Added
+				run.Updated += s.Counts.Mail.Updated
+			}
+		}
+		out.Runs = append(out.Runs, run)
+	}
+	st, err := store.OpenReadOnly(context.Background(), db)
+	if err != nil {
+		t.Fatalf("archive open refused")
+	}
+	defer func() { _ = st.Close() }()
+	scalar := func(q string) int {
+		rows, err := owaQuery(st, q)
+		if err != nil || len(rows) != 1 || len(rows[0]) != 1 {
+			t.Fatalf("archive count refused")
+		}
+		n, _ := rows[0][0].(int64)
+		return int(n)
+	}
+	rows, err := owaQuery(st, `select count(*) from mail_messages group by account order by 1`)
+	if err != nil {
+		t.Fatalf("archive count refused")
+	}
+	for _, r := range rows {
+		n, _ := r[0].(int64)
+		out.MessagesPerAccount = append(out.MessagesPerAccount, int(n))
+	}
+	out.Accounts = len(out.MessagesPerAccount)
+	out.Bindings = scalar(`select count(*) from meta where key like 'outlook_mailbox_identity:%'`)
+	out.CrossAccountIDs = scalar(`select count(*) from (select kind, source_id from mail_source_ids group by kind, source_id having count(distinct account) > 1)`)
+	out.Absent = scalar(`select count(*) from mail_absent`)
+	out.ReadMarkers = scalar(`select count(*) from meta where key like 'outlook_mail_read:%'`)
+	return out
 }
