@@ -54,6 +54,7 @@ A field the archive does not hold is null: subject, sender, in_reply_to, ical_ui
 Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is the store's own number. Windows preserves To/Cc/Bcc order with role to/cc/bcc and kind_raw=0; ReplyTo is not inferred. conversation_id is null when absent; threads use a shared conversation identity before reply_chain and subject fallback.
 Windows: to_me is false, in_reply_to is null, attachments are metadata only (downloaded=false; missing size=0). Unknown HasAttachments stays unavailable in decoding and is not inferred from attachment metadata. Cached HTML can be truncated at source. Only one content mailbox per profile is supported; unsupported layouts are coded refusals. Cached OWA calendar events are read independently from mail; ` + "`calendar sources`" + ` reports their read state. Calendar absence does not establish deletion, and an unverified sign-in identity never creates an automatic link.
 Mac importance is likely right (low, normal, high) but is read from one store field that is not fully confirmed.
+Folder copies: Outlook for Mac can rebuild an account in its store with a new set of folders and new ids for the same messages; the archive keeps the older sets. A message that a newer set also holds (same Message-ID, same kind of folder) is listed and counted once, from the newer copy; mail list --include-copies also lists the older copies, with copy_of naming the newer one. older_copy is true for a message from an older set, and current is false for an older set's folder in coverage, mail folders and mail unread: no sync reads it any more, so its range stopped at its last read.
 An id is account:detail_key, as printed by mail list.`
 
 // Help is the long help of the mail group, shared by every mail command.
@@ -65,7 +66,7 @@ const mailSeeGroup = "What every mail command shares (null fields, ids, --accoun
 
 // Help is the long help of mail list.
 func (mailListCmd) Help() string {
-	return mailSeeGroup + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d; a date alone as --until includes that whole day, a time is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more."
+	return mailSeeGroup + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d; a date alone as --until includes that whole day, a time is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more. With --since or --until, folder_copies compares, for each selected folder kind that has older copies, the current copy with the older ones over that range, counting each message once: state partial means an older copy holds messages dated inside the current cache's range that the current cache lacks, older_copy_only means only an older copy reaches the range, and consistent means neither."
 }
 
 // Help is the long help of mail show.
@@ -80,7 +81,7 @@ func (mailThreadCmd) Help() string {
 
 // Help is the long help of mail folders.
 func (mailFoldersCmd) Help() string {
-	return mailSeeGroup + "\nmessages and unread count what the archive holds in the folder, leaving out messages that are gone or evicted. oldest_at is the oldest message the cache held at the last read."
+	return mailSeeGroup + "\nmessages and unread count what the archive holds in the folder, leaving out messages that are gone or evicted. oldest_at is the oldest message the cache held at the last read. current is false for a folder of an older folder set; its counts leave out messages a newer copy holds."
 }
 
 // Help is the long help of mail unread.
@@ -135,6 +136,8 @@ type mailListItem struct {
 	ICalUID           *string    `json:"ical_uid"`
 	GoneAt            *time.Time `json:"gone_at"`
 	EvictedAt         *time.Time `json:"evicted_at"`
+	OlderCopy         bool       `json:"older_copy"`
+	CopyOf            *string    `json:"copy_of"`
 	TextTruncated     bool       `json:"text_truncated,omitempty"`
 }
 
@@ -166,6 +169,8 @@ type mailShowItem struct {
 	ICalUID           *string             `json:"ical_uid"`
 	GoneAt            *time.Time          `json:"gone_at"`
 	EvictedAt         *time.Time          `json:"evicted_at"`
+	OlderCopy         bool                `json:"older_copy"`
+	CopyOf            *string             `json:"copy_of"`
 	TextTruncated     bool                `json:"text_truncated,omitempty"`
 }
 
@@ -179,6 +184,7 @@ type mailFolderItem struct {
 	OldestAt *time.Time `json:"oldest_at"`
 	NewestAt *time.Time `json:"newest_at"`
 	ReadAt   *time.Time `json:"read_at"`
+	Current  bool       `json:"current"`
 }
 
 // mailUnreadFolder is one folder's line of mail unread.
@@ -188,6 +194,7 @@ type mailUnreadFolder struct {
 	Kind    string `json:"kind"`
 	Unread  int    `json:"unread"`
 	Cached  int    `json:"cached"`
+	Current bool   `json:"current"`
 }
 
 type mailCoverageOut struct {
@@ -197,6 +204,7 @@ type mailCoverageOut struct {
 	OldestAt *time.Time `json:"oldest_at"`
 	NewestAt *time.Time `json:"newest_at"`
 	Count    int        `json:"count"`
+	Current  bool       `json:"current"`
 }
 
 func nz(s string) *string {
@@ -235,7 +243,7 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
 		ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt), IsRead: r.IsRead, Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID),
-		GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt),
+		GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf),
 	}
 	for i, rc := range r.Recipients {
 		if i == 3 {
@@ -259,6 +267,7 @@ func showItemOf(r store.MailRow, max int) mailShowItem {
 		IsRead: r.IsRead, ReadState: nz(r.ReadState), Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, Attachments: []mailAttachmentOut{}, BodyState: nz(r.BodyState),
 		InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID), GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt),
+		OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf),
 	}
 	for _, rc := range r.Recipients {
 		it.Recipients = append(it.Recipients, mailRecipientOut{Name: nz(rc.Name), Address: nz(rc.Address), Role: nz(rc.Role), KindRaw: rc.KindRaw})
@@ -292,14 +301,28 @@ type mailScope struct {
 	marked   bool                  // a sync has read the mail of the account filter (the outlook_mail_read marker)
 }
 
+// since is how far back the current cache reaches: the oldest message of the selected folders of
+// the current folder sets, or of every selected folder when none of them is current.
 func (sc mailScope) since() time.Time {
-	var out time.Time
+	current, older := sc.reach()
+	if current.IsZero() {
+		return older
+	}
+	return current
+}
+
+// reach is the oldest message of the selected current folders and of the selected older copies.
+func (sc mailScope) reach() (current, older time.Time) {
 	for _, c := range sc.coverage {
-		if !c.OldestAt.IsZero() && (out.IsZero() || c.OldestAt.Before(out)) {
-			out = c.OldestAt
+		switch {
+		case c.OldestAt.IsZero():
+		case c.Current && (current.IsZero() || c.OldestAt.Before(current)):
+			current = c.OldestAt
+		case !c.Current && (older.IsZero() || c.OldestAt.Before(older)):
+			older = c.OldestAt
 		}
 	}
-	return out
+	return current, older
 }
 
 func sameFolder(f store.MailFolderRow, c store.CoverageRow) bool {
@@ -403,7 +426,7 @@ func (rt *runtime) mailScope(st *store.Store, folder string) (mailScope, error) 
 func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 	out := make([]mailCoverageOut, len(rows))
 	for i, c := range rows {
-		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count}
+		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count, Current: c.Current}
 	}
 	return out
 }
@@ -450,12 +473,27 @@ func (rt *runtime) emptyNote(st *store.Store, sc mailScope, filtered bool, since
 		return "no mail has been read yet: run m365crawl sync"
 	}
 	if cut := sc.since(); filtered && !since.IsZero() && !cut.IsZero() && since.Before(cut) {
-		return "no message matched, and the cache covers only since " + cut.In(displayZone).Format("2006-01-02") + ": older mail is not in it"
+		return beforeCacheNote(since, cut, sc)
 	}
 	if filtered {
 		return "no message matched the filters"
 	}
 	return "the mailbox is empty: the cache holds no messages"
+}
+
+// beforeCacheNote explains an empty result that reaches before the current cache. An older copy
+// of a folder (from a folder set Outlook replaced, which no read uses any more) may reach further
+// back; the note says how far, and whether that reaches the requested start.
+func beforeCacheNote(since, cut time.Time, sc mailScope) string {
+	day := func(t time.Time) string { return t.In(displayZone).Format("2006-01-02") }
+	current, older := sc.reach()
+	switch {
+	case current.IsZero() || older.IsZero() || !older.Before(cut):
+		return "no message matched, and the cache covers only since " + day(cut) + ": older mail is not in it"
+	case !since.Before(older):
+		return "no message matched; the current cache covers only since " + day(cut) + ", and only an older copy of the folder, from a folder set Outlook replaced and no sync reads any more, reaches back to " + day(older) + ": mail it did not hold from then is not in the archive"
+	}
+	return "no message matched; the current cache covers only since " + day(cut) + ", and an older copy of the folder, from a folder set Outlook replaced, reached back only to " + day(older) + ": older mail is not in it"
 }
 
 func plural(n int, one, many string) string {
@@ -495,8 +533,9 @@ type mailListResult struct {
 	SyncedAt  *time.Time `json:"synced_at"`
 	// CacheFreshAt is when Outlook last wrote the local cache behind synced_at (the earliest across
 	// accounts): mail Outlook received after it cannot be in the archive.
-	CacheFreshAt *time.Time        `json:"cache_fresh_at,omitempty"`
-	Coverage     []mailCoverageOut `json:"coverage"`
+	CacheFreshAt *time.Time          `json:"cache_fresh_at,omitempty"`
+	Coverage     []mailCoverageOut   `json:"coverage"`
+	FolderCopies []mailFolderCopyOut `json:"folder_copies,omitempty"`
 	meta
 	rows   []store.MailRow // the items, for the text output
 	typed  bool            // the items are mailListItem (no --fields)
@@ -613,6 +652,9 @@ func mailState(m store.MailRow) string {
 	if !m.EvictedAt.IsZero() {
 		s = append(s, "evicted")
 	}
+	if m.OlderCopy {
+		s = append(s, "older copy")
+	}
 	return strings.Join(s, ",")
 }
 
@@ -653,6 +695,7 @@ type mailListCmd struct {
 	HasAttachments bool   `name:"has-attachments" help:"Only messages with attachments."`
 	IncludeGone    bool   `name:"include-gone" help:"Also list messages a sync saw disappear."`
 	IncludeEvicted bool   `name:"include-evicted" help:"Also list messages that fell out of the cache's covered range."`
+	IncludeCopies  bool   `name:"include-copies" help:"Also list older copies of a message that a newer folder set holds too; copy_of names the newer one."`
 	Limit          int    `default:"50" help:"Maximum messages to return; truncated says whether more exist." placeholder:"N"`
 }
 
@@ -682,7 +725,7 @@ func (c *mailListCmd) Run(rt *runtime) error {
 		}
 		f := store.MailFilter{Account: rt.g.Account, Folder: c.Folder, From: c.From, Since: since, Until: until,
 			Unread: c.Unread, Flagged: c.Flagged, HasAttachments: c.HasAttachments,
-			IncludeGone: c.IncludeGone, IncludeEvicted: c.IncludeEvicted, Limit: c.Limit + 1}
+			IncludeGone: c.IncludeGone, IncludeEvicted: c.IncludeEvicted, IncludeCopies: c.IncludeCopies, Limit: c.Limit + 1}
 		rows, err := st.MailList(rt.ctx, f)
 		if err != nil {
 			return nil, err
@@ -692,6 +735,11 @@ func (c *mailListCmd) Run(rt *runtime) error {
 			rows = rows[:c.Limit]
 		}
 		res := rt.newMailList(rows, truncated, sc)
+		if !since.IsZero() || !until.IsZero() {
+			if err := rt.checkFolderCopies(st, res, sc, store.MailCopyRange{Since: since, Until: until, IncludeGone: c.IncludeGone, IncludeEvicted: c.IncludeEvicted}); err != nil {
+				return nil, err
+			}
+		}
 		var note []string
 		if len(rows) == 0 {
 			filtered := c.From != "" || !since.IsZero() || !until.IsZero() || c.Unread || c.Flagged || c.HasAttachments || c.Folder != ""
@@ -721,7 +769,7 @@ func unreadFolders(all []store.MailFolderRow, rows []store.MailRow) []mailUnread
 		seen[key] = true
 		for _, f := range all {
 			if f.Account == r.Account && f.FolderKey == r.FolderKey {
-				out = append(out, mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages})
+				out = append(out, mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages, Current: f.Current})
 			}
 		}
 	}
@@ -1005,7 +1053,7 @@ func (c *mailFoldersCmd) Run(rt *runtime) error {
 		items := make([]mailFolderItem, len(sc.folders))
 		for i, f := range sc.folders {
 			items[i] = mailFolderItem{Account: f.Account, Folder: f.Name, Kind: f.Kind, Messages: f.Messages, Unread: f.Unread,
-				OldestAt: tp(f.OldestAt), NewestAt: tp(f.NewestAt), ReadAt: tp(f.ReadAt)}
+				OldestAt: tp(f.OldestAt), NewestAt: tp(f.NewestAt), ReadAt: tp(f.ReadAt), Current: f.Current}
 		}
 		res := &mailFoldersResult{mailListResult: *rt.newMailList(nil, false, sc)}
 		res.Items, res.typed = shape(rt, items), len(rt.fields) == 0
@@ -1080,7 +1128,7 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 			if f.Messages == 0 && f.Unread == 0 {
 				continue
 			}
-			line := mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages}
+			line := mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages, Current: f.Current}
 			res.Folders = append(res.Folders, line)
 			res.UnreadTotal += f.Unread
 			if f.Unread > 0 {

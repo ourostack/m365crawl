@@ -26,13 +26,15 @@ var ErrUnknownMailFolder = errors.New("no such mail folder")
 const mailThreadCap = 200
 
 // MailFilter selects messages for MailList. Folder matches a folder name first (ignoring case),
-// then a folder kind. Gone and evicted messages are left out unless asked for. Query is an FTS5
-// search of subject, sender and body text, with the same syntax as Search.
+// then a folder kind. Gone and evicted messages are left out unless asked for, and so are copies
+// of a message that a newer folder set also holds (see mail_copies.go) unless IncludeCopies.
+// Query is an FTS5 search of subject, sender and body text, with the same syntax as Search.
 type MailFilter struct {
 	Account, Folder, From, Query    string
 	Since, Until                    time.Time
 	Unread, Flagged, HasAttachments bool
 	IncludeGone, IncludeEvicted     bool
+	IncludeCopies                   bool
 	Limit                           int
 }
 
@@ -78,13 +80,19 @@ type MailRow struct {
 	FirstSeenAt, StateSeenAt, GoneAt, EvictedAt time.Time
 	Recipients                                  []MailRecipient
 	Attachments                                 []MailAttachment
+	// OlderCopy is true when the message's folder belongs to a folder set the account's latest
+	// read did not use. CopyOf is the id of the row that stands for the same message in a newer
+	// set, empty when there is none.
+	OlderCopy bool
+	CopyOf    string
 }
 
 // ID is the message's id as the commands print it: account:detail_key.
 func (r MailRow) ID() string { return fmt.Sprintf("%s:%d", r.Account, r.DetailKey) }
 
 // MailFolderRow is one folder with its counts: messages and unread messages the archive holds
-// (gone and evicted ones left out), and the range the last read covered.
+// (gone and evicted ones and copies that a newer folder set also holds left out), and the range
+// the last read covered. Current is false for a folder of an older folder set.
 type MailFolderRow struct {
 	Account            string
 	FolderKey          uint32
@@ -93,9 +101,12 @@ type MailFolderRow struct {
 	Messages, Unread   int
 	OldestAt, NewestAt time.Time
 	ReadAt             time.Time
+	Current            bool
 }
 
-// CoverageRow is one folder's coverage: how far back the cache reached at the last read.
+// CoverageRow is one folder's coverage: how far back the cache reached at the last read of the
+// folder. Current is false for a folder of an older folder set, whose range stopped at the last
+// read that used that set.
 type CoverageRow struct {
 	Account            string
 	FolderKey          uint32
@@ -103,6 +114,7 @@ type CoverageRow struct {
 	OldestAt, NewestAt time.Time
 	Count              int
 	ReadAt             time.Time
+	Current            bool
 }
 
 // MailParticipant is one distinct person in a thread.
@@ -134,6 +146,15 @@ const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_
 const mailJoin = ` left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key`
 
 func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any) ([]MailRow, error) {
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	return s.mailRowsMarked(ctx, copies, body, from, args)
+}
+
+// mailRowsMarked is mailRows with the copies already found.
+func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool, from string, args []any) ([]MailRow, error) {
 	conversationCol, roleCol, err := s.mailColumnNames(ctx)
 	if err != nil {
 		return nil, err
@@ -164,6 +185,7 @@ func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any
 	if err != nil {
 		return nil, err
 	}
+	copies.mark(out)
 	return out, s.mailChildren(ctx, out, roleCol)
 }
 
@@ -267,11 +289,18 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	if !f.IncludeEvicted {
 		w.add(`m.evicted_at is null`)
 	}
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	if cond := copies.notCopy(`m.rowid`); cond != "" && !f.IncludeCopies {
+		w.add(cond)
+	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	return s.mailRows(ctx, false, from+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit))
+	return s.mailRowsMarked(ctx, copies, false, from+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit))
 }
 
 // narrowed reports whether f selects messages by anything but the account and the listing
@@ -374,7 +403,7 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 	return rows[0], nil
 }
 
-// MailThread returns the conversation a message belongs to, oldest first, and how it was grouped: "conversation" when its native conversation id joins at least two account-scoped messages; otherwise "reply_chain" when In-Reply-To links join it to another Message-ID, else "subject" (messages with the same normalised subject that share a participant with the seed; an empty subject gives the seed alone). Gone and evicted messages are included. A thread holds at most mailThreadCap messages, the seed always among them; truncated says more belong to it.
+// MailThread returns the conversation a message belongs to, oldest first, and how it was grouped: "conversation" when its native conversation id joins at least two account-scoped messages; otherwise "reply_chain" when In-Reply-To links join it to another Message-ID, else "subject" (messages with the same normalised subject that share a participant with the seed; an empty subject gives the seed alone). Gone and evicted messages are included; a copy that a newer folder set also holds is not, unless it is the seed. A thread holds at most mailThreadCap messages, the seed always among them; truncated says more belong to it.
 func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32) (rows []MailRow, grouping string, truncated bool, err error) {
 	seed, err := s.MailGet(ctx, account, detailKey)
 	if err != nil {
@@ -397,11 +426,17 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 			}
 		}
 	}
+	// A copy that a newer folder set also holds is left out, unless it is the seed.
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, "", false, err
+	}
+	ids = slices.DeleteFunc(ids, func(id int64) bool { return id != seed.Rowid && copies.newer[id] != "" })
 	// Each grouping gathers one message past the cap, so exactly the cap is not truncated.
 	if truncated = len(ids) > mailThreadCap; truncated {
 		ids = ids[:mailThreadCap] // the seed is first, so it stays
 	}
-	rows, err = s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
+	rows, err = s.mailRowsMarked(ctx, copies, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
 	return rows, grouping, truncated, err
 }
 
@@ -527,17 +562,26 @@ func MailParticipants(rows []MailRow) []MailParticipant {
 // MailFolders lists every archived folder with its counts and the range the last read covered.
 func (s *Store) MailFolders(ctx context.Context) ([]MailFolderRow, error) {
 	out := []MailFolderRow{}
-	err := mailEach(ctx, s.db, `select f.account, f.folder_key, f.parent_key, f.name, f.kind,
-  (select count(*) from mail_messages m where m.account=f.account and m.folder_key=f.folder_key and m.gone_at is null and m.evicted_at is null),
-  (select count(*) from mail_messages m where m.account=f.account and m.folder_key=f.folder_key and m.gone_at is null and m.evicted_at is null and m.is_read=0),
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	live := `m.account=f.account and m.folder_key=f.folder_key and m.gone_at is null and m.evicted_at is null`
+	if cond := copies.notCopy(`m.rowid`); cond != "" {
+		live += ` and ` + cond
+	}
+	err = mailEach(ctx, s.db, `select f.account, f.folder_key, f.parent_key, f.name, f.kind,
+  (select count(*) from mail_messages m where `+live+`),
+  (select count(*) from mail_messages m where `+live+` and m.is_read=0),
   c.oldest_at, c.newest_at, c.read_at
-from mail_folders f left join mail_coverage c on c.account=f.account and c.folder_key=f.folder_key`, nil, func(r *sql.Rows) error {
+from mail_folders f left join mail_coverage c on c.account=f.account and c.folder_key=f.folder_key`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: live is fixed text and integer row ids
 		var f MailFolderRow
 		var oldest, newest, read sql.NullString
 		if err := r.Scan(&f.Account, &f.FolderKey, &f.ParentKey, &f.Name, &f.Kind, &f.Messages, &f.Unread, &oldest, &newest, &read); err != nil {
 			return err
 		}
 		f.OldestAt, f.NewestAt, f.ReadAt = parseTime(oldest), parseTime(newest), parseTime(read)
+		f.Current = copies.sets.isCurrent(f.Account, f.FolderKey)
 		out = append(out, f)
 		return nil
 	})
@@ -548,7 +592,7 @@ from mail_folders f left join mail_coverage c on c.account=f.account and c.folde
 	err = mailEach(ctx, s.db, `select m.account, count(*), sum(coalesce(m.is_read=0, 0))
 from mail_messages m where m.gone_at is null and m.evicted_at is null
   and not exists(select 1 from mail_folders f where f.account=m.account and f.folder_key=m.folder_key) group by m.account`, nil, func(r *sql.Rows) error {
-		f := MailFolderRow{Kind: outlookmail.KindUnknown}
+		f := MailFolderRow{Kind: outlookmail.KindUnknown, Current: true}
 		if err := r.Scan(&f.Account, &f.Messages, &f.Unread); err != nil {
 			return err
 		}
@@ -594,7 +638,11 @@ func mailKindRank(kind string) int {
 // MailCoverage lists, per folder, how far back the cache reached at the last read.
 func (s *Store) MailCoverage(ctx context.Context) ([]CoverageRow, error) {
 	out := []CoverageRow{}
-	err := mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), c.oldest_at, c.newest_at, c.count, c.read_at
+	sets, err := loadMailSets(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	err = mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), c.oldest_at, c.newest_at, c.count, c.read_at
 from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key order by c.account, c.folder_key`, nil, func(r *sql.Rows) error {
 		var c CoverageRow
 		var oldest, newest, read sql.NullString
@@ -602,6 +650,7 @@ from mail_coverage c left join mail_folders f on f.account=c.account and f.folde
 			return err
 		}
 		c.OldestAt, c.NewestAt, c.ReadAt = parseTime(oldest), parseTime(newest), parseTime(read)
+		c.Current = sets.isCurrent(c.Account, c.FolderKey)
 		out = append(out, c)
 		return nil
 	})

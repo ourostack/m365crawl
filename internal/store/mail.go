@@ -221,13 +221,17 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 			}
 		}
 	}
-	if err := writeMailCoverage(ctx, tx, b, at); err != nil {
+	other, err := otherSetFolders(ctx, tx, b)
+	if err != nil {
+		return res, err
+	}
+	if err := writeMailCoverage(ctx, tx, b, at, other); err != nil {
 		return res, err
 	}
 	if !b.Trusted {
 		return res, nil
 	}
-	return judgeMissing(ctx, tx, b, at, byKey, absent, live, res)
+	return judgeMissing(ctx, tx, b, at, byKey, absent, live, other, res)
 }
 
 // mailRootChanged records the account root of this read in meta and reports whether it differs
@@ -572,7 +576,10 @@ func insertNewAttachments(ctx context.Context, tx *sql.Tx, ex *mailExisting, m o
 	return insertMailChildren(ctx, tx, ex.rowid, m, ex.atts, !ex.hasRecips)
 }
 
-func writeMailCoverage(ctx context.Context, tx *sql.Tx, b MailBatch, at string) error {
+// writeMailCoverage stores the read's ranges. A trusted read clears the coverage of a folder it
+// found empty, but never of a folder in another folder set (other): it did not read that folder,
+// whose coverage stays as the last range a read of its set saw.
+func writeMailCoverage(ctx context.Context, tx *sql.Tx, b MailBatch, at string, other map[uint32]bool) error {
 	type line struct {
 		oldest, newest sql.NullString
 		count          int
@@ -608,7 +615,7 @@ on conflict(account, folder_key) do update set oldest_at=excluded.oldest_at, new
 	}
 	// A trusted read that holds nothing of a folder says the folder is empty now.
 	for k := range held {
-		if in[k] {
+		if in[k] || other[k] {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `delete from mail_coverage where account=? and folder_key=?`, b.Account, k); err != nil {
@@ -647,7 +654,7 @@ type mailAbsent struct {
 }
 
 // judgeMissing applies the two-read rule to the messages a trusted read did not hold.
-func judgeMissing(ctx context.Context, tx *sql.Tx, b MailBatch, at string, byKey map[uint32]*mailExisting, absent map[uint32]mailAbsent, live int, res MailResult) (MailResult, error) {
+func judgeMissing(ctx context.Context, tx *sql.Tx, b MailBatch, at string, byKey map[uint32]*mailExisting, absent map[uint32]mailAbsent, live int, other map[uint32]bool, res MailResult) (MailResult, error) {
 	var missing []*mailExisting
 	named := make(map[uint32]bool, len(b.Result.SeenDetailKeys))
 	for _, k := range b.Result.SeenDetailKeys {
@@ -659,7 +666,7 @@ func judgeMissing(ctx context.Context, tx *sql.Tx, b MailBatch, at string, byKey
 			missing = append(missing, ex)
 		}
 	}
-	rng, err := loadMailRanges(ctx, tx, b.Account)
+	rng, err := loadMailRanges(ctx, tx, b.Account, other)
 	if err != nil {
 		return res, err
 	}
@@ -715,7 +722,9 @@ type mailRanges struct {
 	combined string            // the earliest of them
 }
 
-func loadMailRanges(ctx context.Context, tx *sql.Tx, account string) (mailRanges, error) {
+// loadMailRanges reads the ranges of the read's own folder set: an older set's retained coverage
+// (other) says nothing about what this read could hold.
+func loadMailRanges(ctx context.Context, tx *sql.Tx, account string, other map[uint32]bool) (mailRanges, error) {
 	r := mailRanges{own: map[uint32]string{}}
 	err := eachRow(ctx, tx, `select c.folder_key, c.oldest_at from mail_coverage c join mail_folders f on f.account=c.account and f.folder_key=c.folder_key
 where c.account=? and f.kind in ('inbox','to_me','sent') and c.oldest_at is not null`, []any{account}, func(rows *sql.Rows) error {
@@ -723,6 +732,9 @@ where c.account=? and f.kind in ('inbox','to_me','sent') and c.oldest_at is not 
 		var oldest string
 		if err := rows.Scan(&k, &oldest); err != nil {
 			return err
+		}
+		if other[k] {
+			return nil
 		}
 		r.own[k] = oldest
 		if r.combined == "" || oldest < r.combined {

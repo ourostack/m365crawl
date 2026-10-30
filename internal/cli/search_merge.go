@@ -92,6 +92,8 @@ type searchMailItem struct {
 	ICalUID           *string    `json:"ical_uid"`
 	GoneAt            *time.Time `json:"gone_at"`
 	EvictedAt         *time.Time `json:"evicted_at"`
+	OlderCopy         bool       `json:"older_copy"`
+	CopyOf            *string    `json:"copy_of"`
 	TextTruncated     bool       `json:"text_truncated,omitempty"`
 }
 
@@ -262,7 +264,7 @@ func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo), ConversationID: searchNZ(r.ConversationID),
 		ReceivedAt: searchTime(r.ReceivedAt), SentAt: searchTime(r.SentAt), IsRead: r.IsRead, Flag: searchNZ(r.Flag), Importance: searchNZ(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: searchNZ(r.InternetMessageID), ICalUID: searchNZ(r.ICalUID),
-		GoneAt: searchTime(r.GoneAt), EvictedAt: searchTime(r.EvictedAt),
+		GoneAt: searchTime(r.GoneAt), EvictedAt: searchTime(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: searchNZ(r.CopyOf),
 	}
 	for i, rc := range r.Recipients {
 		if i == 3 {
