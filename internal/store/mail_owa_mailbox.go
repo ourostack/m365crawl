@@ -119,3 +119,10 @@ func (s *Store) OWAMailSourceOverlap(ctx context.Context, account string, folder
 	}
 	return n, nil
 }
+
+// OWAMailSourceCount counts the native identities the account holds.
+func (s *Store) OWAMailSourceCount(ctx context.Context, account string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `select count(*) from mail_source_ids where account=?`, account).Scan(&n)
+	return n, err
+}

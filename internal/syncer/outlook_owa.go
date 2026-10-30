@@ -103,53 +103,82 @@ func (r *runner) rememberOWAFailure(ctx context.Context, profile string, err err
 var ErrOWASnapshotRetained = errors.New("reader release was not proved and its snapshot was retained")
 
 func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (SourceReport, bool, error) {
-	mail, _ := r.readOWAProfile(ctx, p, false)
-	return mail.report, mail.decoded, mail.err
+	mails, _ := r.readOWAProfile(ctx, p, false)
+	for _, mail := range mails {
+		if mail.err != nil || mail.key == mailKey(outlookKey(p.Name)) {
+			return mail.report, mail.decoded, mail.err
+		}
+	}
+	return mails[0].report, mails[0].decoded, mails[0].err
 }
 
-// readOWAProfile owns the single attempt check and copy; each requested lane keeps its own receipt.
-func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withCalendar bool) (mail, cal outlookOutcome) {
+// readOWAProfile owns the single attempt check and copy; each requested lane keeps its own
+// receipt, and every mailbox account of the profile keeps its own mail receipt.
+func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withCalendar bool) (mails []outlookOutcome, cal outlookOutcome) {
 	begun := outlookNow()
-	key, account := mailKey(outlookKey(p.Name)), outlookAccount(p.Name)
-	mail.key, cal.key = key, outlookKey(p.Name)
-	fail := func(err error) (outlookOutcome, outlookOutcome) {
-		mail.err = err
+	scope := outlookAccount(p.Name)
+	cal.key = outlookKey(p.Name)
+	accounts, err := r.owaMailAccounts(ctx, scope)
+	for _, a := range accounts {
+		mails = append(mails, outlookOutcome{key: owaMailKey(a)})
+	}
+	if len(mails) == 0 {
+		mails = []outlookOutcome{{key: mailKey(outlookKey(p.Name))}}
+	}
+	setMail := func(err error) {
+		for i := range mails {
+			mails[i].err = err
+		}
+	}
+	fail := func(err error) ([]outlookOutcome, outlookOutcome) {
+		setMail(err)
 		if withCalendar {
 			cal.err = err
 		}
-		return mail, cal
+		return mails, cal
 	}
-	prior, err := r.st.OutlookState(ctx, p.Name, key, account)
 	if err != nil {
 		return fail(errs.DBError(err))
 	}
-	mailState, err := r.st.MailState(ctx, account)
-	if err != nil {
-		return fail(errs.DBError(err))
+	prior := make([]store.OutlookState, len(accounts))
+	mailStates := make([]store.MailState, len(accounts))
+	for i, a := range accounts {
+		if prior[i], err = r.st.OutlookState(ctx, p.Name, mails[i].key, a); err != nil {
+			return fail(errs.DBError(err))
+		}
+		if mailStates[i], err = r.st.MailState(ctx, a); err != nil {
+			return fail(errs.DBError(err))
+		}
 	}
 	var calPrior store.OutlookState
 	var receipt store.OutlookReadReceipt
 	origin := ""
 	if withCalendar {
-		calPrior, err = r.st.OutlookState(ctx, p.Name, cal.key, account)
+		calPrior, err = r.st.OutlookState(ctx, p.Name, cal.key, scope)
 		if err != nil {
 			return fail(errs.DBError(err))
 		}
-		receipt, err = r.st.OutlookReadReceipt(ctx, account)
+		receipt, err = r.st.OutlookReadReceipt(ctx, scope)
 		if err != nil {
 			return fail(errs.DBError(err))
 		}
 		origin = outlookSourceOrigin(p.Source.LevelDBDir)
 	}
+	// The last attempt is recorded per profile, so every mailbox shares it.
+	lastAttempt := prior[0].LastAttempt
 	if gap := r.o.OutlookMinReadInterval; gap >= 0 {
 		if gap == 0 {
 			gap = OutlookMinReadInterval
 		}
-		if next := prior.LastAttempt.Add(gap); begun.Before(next) && !prior.LastAttempt.After(begun) {
-			if f := mailState.Failure; f != nil {
-				mail.err = &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
-			} else {
-				mail.report = SourceReport{Source: key, Status: StatusSkippedInterval, Omissions: prior.Omissions, NextReadAfter: &next}
+		if next := lastAttempt.Add(gap); begun.Before(next) && !lastAttempt.After(begun) {
+			anyMail := false
+			for i := range mails {
+				if f := mailStates[i].Failure; f != nil {
+					mails[i].err = &errs.Coded{Code: f.Code, Message: f.Message, Fix: f.Fix, Exit: f.Exit}
+				} else {
+					mails[i].report = SourceReport{Source: mails[i].key, Status: StatusSkippedInterval, Omissions: prior[i].Omissions, NextReadAfter: &next}
+					anyMail = true
+				}
 			}
 			if withCalendar {
 				if f := calPrior.Failure; f != nil {
@@ -158,12 +187,12 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 					cal.report = SourceReport{Source: cal.key, Status: StatusSkippedInterval, Omissions: calPrior.Omissions, NextReadAfter: &next}
 				}
 			}
-			if mail.err == nil || withCalendar && cal.err == nil {
+			if anyMail || withCalendar && cal.err == nil {
 				if err := r.st.SetOutlookSkipped(ctx, p.Name); err != nil {
 					return fail(errs.DBError(err))
 				}
 			}
-			return mail, cal
+			return mails, cal
 		}
 	}
 	if err := r.st.SetOutlookChecked(ctx, p.Name, begun); err != nil {
@@ -174,7 +203,10 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 		return fail(err)
 	}
 	// IdentityRead is a calendar marker. OWA mail uses its own read/failure marker only.
-	needMail := fp != prior.Fingerprint || r.o.FullRead || !mailState.Read || mailState.Failure != nil
+	needMail := r.o.FullRead
+	for i := range mails {
+		needMail = needMail || fp != prior[i].Fingerprint || !mailStates[i].Read || mailStates[i].Failure != nil
+	}
 	needCalendar := false
 	if withCalendar {
 		switch {
@@ -192,30 +224,34 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 		}
 	}
 	if !needMail {
-		mail.report, mail.err = r.owaUnchanged(ctx, key, prior, begun, fp)
+		for i := range mails {
+			mails[i].report, mails[i].err = r.owaUnchanged(ctx, mails[i].key, prior[i], begun, fp)
+		}
 	}
 	if withCalendar && !needCalendar && cal.err == nil {
 		cal.report, cal.err = r.owaUnchanged(ctx, cal.key, calPrior, begun, fp)
 	}
 	if !needMail && !needCalendar {
-		return mail, cal
+		return mails, cal
 	}
 	if err := r.st.SetOutlookLastAttempt(ctx, p.Name, begun); err != nil {
 		return fail(errs.DBError(err))
 	}
 	if needMail {
-		if err := r.st.ClearMailRead(ctx, account); err != nil {
-			return fail(errs.DBError(err))
+		for _, a := range accounts {
+			if err := r.st.ClearMailRead(ctx, a); err != nil {
+				return fail(errs.DBError(err))
+			}
 		}
 	}
-	failNeeded := func(err error) (outlookOutcome, outlookOutcome) {
+	failNeeded := func(err error) ([]outlookOutcome, outlookOutcome) {
 		if needMail {
-			mail.err = err
+			setMail(err)
 		}
 		if needCalendar {
 			cal.err = err
 		}
-		return mail, cal
+		return mails, cal
 	}
 	mailClosed, calendarClosed := true, true
 	snap, cleanup, err := outlookOWAPrivateSnapshot(ctx, p.Source)
@@ -225,7 +261,9 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 			return
 		}
 		if !mailClosed {
-			mail.err = errors.Join(mail.err, ErrOWASnapshotRetained)
+			for i := range mails {
+				mails[i].err = errors.Join(mails[i].err, ErrOWASnapshotRetained)
+			}
 		}
 		if !calendarClosed {
 			cal.err = errors.Join(cal.err, ErrOWASnapshotRetained)
@@ -244,18 +282,20 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 	}
 	stable := fp == afterFP && fresh.Equal(afterFresh)
 	if needMail {
-		mail.err = contained(func() (err error) {
-			mail.report, mail.decoded, err = r.commitOWAMailSnapshot(ctx, snap, account, key, fp, begun, fresh, stable, &mailClosed)
-			return err
-		})
+		if err := contained(func() error {
+			mails = r.commitOWAMailboxes(ctx, snap, scope, mails, fp, begun, fresh, stable, &mailClosed)
+			return nil
+		}); err != nil {
+			setMail(err)
+		}
 	}
 	if needCalendar {
 		cal.err = contained(func() (err error) {
-			cal.report, cal.decoded, err = r.commitOWACalendarSnapshot(ctx, snap, account, cal.key, fp, origin, begun, fresh, stable, calPrior.HoldsEvents, &calendarClosed)
+			cal.report, cal.decoded, err = r.commitOWACalendarSnapshot(ctx, snap, scope, cal.key, fp, origin, begun, fresh, stable, calPrior.HoldsEvents, &calendarClosed)
 			return err
 		})
 	}
-	return mail, cal
+	return mails, cal
 }
 
 func (r *runner) owaUnchanged(ctx context.Context, key string, prior store.OutlookState, begun time.Time, fp string) (SourceReport, error) {
@@ -269,15 +309,16 @@ func (r *runner) owaUnchanged(ctx context.Context, key string, prior store.Outlo
 	return SourceReport{Source: key, Status: status, Omissions: prior.Omissions}, nil
 }
 
-func (r *runner) commitOWAMailSnapshot(ctx context.Context, snap, account, key, fp string, begun, fresh time.Time, stable bool, closed *bool) (SourceReport, bool, error) {
-	expect, err := r.st.MailHolds(ctx, account)
+func (r *runner) commitOWAMailbox(ctx context.Context, mb outlookowa.Mailbox, a owaAssignment, scope, key, fp string, begun, fresh time.Time, stable bool) (SourceReport, bool, error) {
+	expect, err := r.st.MailHolds(ctx, a.account)
 	if err != nil {
 		return SourceReport{}, false, errs.DBError(err)
 	}
-	res, err := collectOWAMail(ctx, snap, account, expect, closed)
-	if err != nil {
+	if err := outlookowa.CheckExpected(mb.Result, expect); err != nil {
 		return SourceReport{}, false, err
 	}
+	res := mb.Result
+	res.SetAccount(a.account)
 	omissions := map[string]int{}
 	for _, loss := range res.Losses {
 		omissions[loss.Code] += loss.Count
@@ -293,11 +334,15 @@ func (r *runner) commitOWAMailSnapshot(ctx context.Context, snap, account, key, 
 	} else {
 		omissions = nil
 	}
-	mail, err := r.st.CommitOWAMail(ctx, store.OWAMailBatch{Account: account, ReadAt: begun, FreshAt: fresh, Result: res, Trusted: stable})
+	mail, err := r.st.CommitOWAMail(ctx, store.OWAMailBatch{Account: a.account, ReadAt: begun, FreshAt: fresh, Result: res, Trusted: stable,
+		Identity: mb.Identity, Scope: scope, Rebind: a.rebind})
 	if err != nil {
 		var coded *errs.Coded
 		if errors.As(err, &coded) && coded.Code == "outlook_mail_key_exhausted" {
 			return SourceReport{}, false, owaSourceError(coded)
+		}
+		if errors.Is(err, store.ErrOWAMailboxBinding) {
+			return SourceReport{}, false, layoutGuard("mailbox_binding_ambiguous")
 		}
 		return SourceReport{}, false, errs.DBError(err)
 	}
@@ -305,11 +350,11 @@ func (r *runner) commitOWAMailSnapshot(ctx context.Context, snap, account, key, 
 		return SourceReport{}, false, errs.DBError(err)
 	}
 	// Vouch for this read last: cancellation while recording its receipt must leave it retryable.
-	if err := r.st.SetMailRead(ctx, account, begun); err != nil {
+	if err := r.st.SetMailRead(ctx, a.account, begun); err != nil {
 		return SourceReport{}, false, errs.DBError(err)
 	}
 	r.progress("%s: %s (%d messages)", key, status, len(res.Messages))
-	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{account}, Counts: &SourceCounts{Mail: &mail}}, true, nil
+	return SourceReport{Source: key, Status: status, Omissions: omissions, Accounts: []string{a.account}, Counts: &SourceCounts{Mail: &mail}}, true, nil
 }
 
 // Copy cancellation follows the caller until handoff; the original reader context still cancels reads/deadlines, but this owner removes the snapshot only after Close.
@@ -352,7 +397,7 @@ func ownedOWASnapshot(ctx context.Context, source teamsdesktop.Source) (string, 
 }
 
 // released is true only when no reader was acquired or its Close succeeded.
-func collectOWAMail(ctx context.Context, snap, account string, expect bool, released *bool) (res outlookowa.Result, err error) {
+func collectOWAMailboxes(ctx context.Context, snap string, released *bool) (res []outlookowa.Mailbox, err error) {
 	if err := ctx.Err(); err != nil {
 		return res, err
 	}
@@ -373,7 +418,7 @@ func collectOWAMail(ctx context.Context, snap, account string, expect bool, rele
 			*released = true
 		}
 	}()
-	return outlookowa.Collect(ctx, o, account, expect)
+	return outlookOWACollectMailboxes(ctx, o)
 }
 
 // Only fixed diagnostics cross the source boundary; Windows access failures are not macOS FDA.
@@ -390,7 +435,7 @@ func owaSourceError(err error) (result error) {
 	var guard *hxstore.GuardError
 	if errors.As(err, &guard) {
 		return &errs.Coded{Code: guard.Code, Exit: errs.ExitEnvironment, Message: "the Outlook mail layout is not supported: " + guard.Detail,
-			Fix: "Update m365crawl; only one supported OWA mail database per profile is read. Nothing of this mail read was applied."}
+			Fix: "Update m365crawl; each OWA mail database of a profile is read only when its mailbox is attributed to exactly one account. Nothing of this mail read was applied."}
 	}
 	var c *errs.Coded
 	if errors.As(err, &c) {
@@ -424,12 +469,13 @@ func owaRetainedError(err error) error {
 }
 
 var (
-	outlookOWAFingerprint     = outlookowa.Fingerprint
-	outlookOWADefaultRoot     = outlookowa.DefaultRoot
-	outlookOWADiscover        = outlookowa.Discover
-	outlookOWAOpen            = outlookowa.Open
-	outlookOWAClose           = (*indexeddb.Origin).Close
-	outlookOWASnapshot        = teamsdesktop.Snapshot
-	outlookOWAPrivateSnapshot = ownedOWASnapshot
-	outlookOWARecordRun       = func(ctx context.Context, st *store.Store, run store.Run) error { return st.RecordRun(ctx, run) }
+	outlookOWAFingerprint      = outlookowa.Fingerprint
+	outlookOWADefaultRoot      = outlookowa.DefaultRoot
+	outlookOWADiscover         = outlookowa.Discover
+	outlookOWAOpen             = outlookowa.Open
+	outlookOWACollectMailboxes = outlookowa.CollectMailboxes
+	outlookOWAClose            = (*indexeddb.Origin).Close
+	outlookOWASnapshot         = teamsdesktop.Snapshot
+	outlookOWAPrivateSnapshot  = ownedOWASnapshot
+	outlookOWARecordRun        = func(ctx context.Context, st *store.Store, run store.Run) error { return st.RecordRun(ctx, run) }
 )
