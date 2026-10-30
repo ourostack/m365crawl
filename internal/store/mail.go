@@ -85,7 +85,11 @@ type MailResult struct {
 func (s *Store) CommitMail(ctx context.Context, b MailBatch) (res MailResult, err error) {
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var cerr error
-		res, cerr = commitMail(ctx, tx, b)
+		if res, cerr = commitMail(ctx, tx, b); cerr != nil || b.FreshAt.IsZero() {
+			return cerr
+		}
+		_, cerr = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`,
+			mailFreshKey+b.Account, b.FreshAt.UTC().Format(timeLayout))
 		return cerr
 	})
 	if err != nil {

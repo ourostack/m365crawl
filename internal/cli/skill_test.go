@@ -99,7 +99,7 @@ func shellWords(s string) []string {
 
 // skillKeys are the JSON keys and error codes the guide may name.
 func skillKeys() []string {
-	keys := []string{errs.CodeMailUnsupportedPlatform, errs.CodeSigninRequired}
+	keys := []string{errs.CodeMailUnsupportedPlatform, errs.CodeSigninRequired, store.OutlookCacheStaleCode}
 	for _, typ := range []reflect.Type{reflect.TypeFor[store.SourceHealth](), reflect.TypeFor[syncer.Report](), reflect.TypeFor[draftsResult](), reflect.TypeFor[draftItem](), reflect.TypeFor[listResult](), reflect.TypeFor[meta](), reflect.TypeFor[messageItem](), reflect.TypeFor[mailListItem](),
 		reflect.TypeFor[mailShowItem](), reflect.TypeFor[calendarItem](), reflect.TypeFor[errorBody](), reflect.TypeFor[overviewResult](), reflect.TypeFor[overviewSource](),
 		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage](),

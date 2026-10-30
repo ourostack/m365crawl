@@ -24,6 +24,7 @@ func (rt *runtime) window(sinceFlag, sinceRaw, untilFlag, untilRaw string) (sinc
 		rt.windowNotice = fmt.Sprintf("the time window is empty, so nothing can match: %s %s ends it at or before %s %s starts it (a date alone as %s includes that whole day; a time is exclusive)",
 			untilFlag, untilRaw, sinceFlag, sinceRaw, untilFlag)
 	}
+	rt.healthUntil = until
 	return since, until, nil
 }
 

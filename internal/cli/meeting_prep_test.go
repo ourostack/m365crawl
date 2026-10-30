@@ -62,7 +62,12 @@ func prepEnv(t *testing.T) (*env, string) {
 	}
 	defer func() { _ = st.Close() }()
 	res := outlookmail.Result{Messages: []outlookmail.Message{invite, reply, tooLate, stranger, lunch}, Folders: []outlookmail.Folder{{Key: 1, Name: "Inbox", Kind: "inbox"}}}
-	if _, err := st.CommitMail(context.Background(), store.MailBatch{Account: "outlook/Main", ReadAt: day(28, 12), FreshAt: day(28, 12), Result: res}); err != nil {
+	// The synthetic mail stands for the copy the sync just read, so it keeps that copy's write time.
+	info, err := os.Stat(filepath.Join(root, "Main", "HxStore.hxd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CommitMail(context.Background(), store.MailBatch{Account: "outlook/Main", ReadAt: day(28, 12), FreshAt: info.ModTime(), Result: res}); err != nil {
 		t.Fatal(err)
 	}
 	return e, root

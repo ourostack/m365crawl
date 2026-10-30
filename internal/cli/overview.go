@@ -110,7 +110,9 @@ type overviewSource struct {
 	// LastSyncAt is the last sync of chats, mail and the calendar, the last admitted capture of
 	// documents, notes and native people, the last Loop projection, and the last transcript fetch.
 	LastSyncAt *time.Time `json:"last_sync_at"`
-	Note       string     `json:"note,omitempty"`
+	// CacheFreshAt is when Outlook last wrote the local cache behind mail's last read. Mail only.
+	CacheFreshAt *time.Time `json:"cache_fresh_at,omitempty"`
+	Note         string     `json:"note,omitempty"`
 }
 
 // overviewResult is what a bare `m365crawl` prints.
@@ -399,7 +401,7 @@ func (rt *runtime) overviewMail(st *store.Store) (overviewSource, error) {
 	if err != nil {
 		return overviewSource{}, err
 	}
-	src := overviewSource{Source: "mail", State: overviewOK, Messages: &b.Messages, NewestAt: at(b.NewestAt), OldestAt: at(b.OldestAt), LastSyncAt: at(b.SyncedAt)}
+	src := overviewSource{Source: "mail", State: overviewOK, Messages: &b.Messages, NewestAt: at(b.NewestAt), OldestAt: at(b.OldestAt), LastSyncAt: at(b.SyncedAt), CacheFreshAt: at(b.CacheFreshAt)}
 	switch {
 	case b.SourceError != nil:
 		src.State, src.Note = mailStateUnavailable, mailSourceNote(b.SourceError)

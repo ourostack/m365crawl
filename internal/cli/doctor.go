@@ -380,9 +380,13 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 		return check{Name: name, OK: true, Warn: true, Detail: e.Message, Fix: e.Fix}
 	}
 	var state map[string]store.CalendarSource
+	var stale []store.SourceHealth
 	var details, fixes []string
 	if st != nil {
 		res, err := readCalendarSources(st, rt.ctx, store.CalendarSourcesFilter{Now: rt.now(), ReadInterval: syncer.OutlookMinReadInterval})
+		if err == nil {
+			stale, err = outlookCacheHealth(st, rt.ctx)
+		}
 		if err != nil {
 			details, fixes = append(details, "cannot read the Outlook state: "+err.Error()), append(fixes, "Run `m365crawl sync`.")
 		}
@@ -396,7 +400,7 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 	}
 	for _, p := range profiles {
 		row := state["outlook/"+p.Name]
-		d, fix := outlookProfileState(p, row, rt.now())
+		d, fix := outlookProfileState(p, row, store.OutlookCacheStale(stale, "outlook_calendar", "outlook/"+p.Name), rt.now())
 		if row.Link == "config" || row.Link == "address" {
 			d += "; linked to a Teams account (" + row.Link + ")"
 		}
@@ -413,7 +417,7 @@ func (rt *runtime) outlookStoreCheck(st *store.Store) check {
 }
 
 // outlookProfileState is one profile's line of the check, and the fix when it is a problem.
-func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, now time.Time) (detail, fix string) {
+func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, stale *store.SourceHealth, now time.Time) (detail, fix string) {
 	detail = "profile " + p.Name + ": "
 	hdr, err := outlookOpenStore(p.StorePath)
 	if err == nil {
@@ -432,7 +436,11 @@ func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, now
 			return detail + "; the last read failed (" + o.Status + "): " + f.Code + ": " + f.Message, firstOf(f.Fix, "Run `m365crawl sync` and read its error.")
 		}
 		if !o.LastReadAt.IsZero() {
-			return detail + "; last read " + oneUnit(now.Sub(o.LastReadAt)) + " ago, " + o.Status, ""
+			detail += "; last read " + oneUnit(now.Sub(o.LastReadAt)) + " ago, " + o.Status
+			if stale != nil {
+				return detail + ", but " + outlookStaleDetail(*stale), outlookStaleFix
+			}
+			return detail, ""
 		}
 	}
 	return detail + "; not read yet", ""

@@ -136,11 +136,17 @@ func (rt *runtime) mailReadableCheck(st *store.Store) check {
 	var details, fixes []string
 	for _, p := range profiles {
 		ms, err := st.MailState(rt.ctx, "outlook/"+p.Name)
+		var stale *store.SourceHealth
+		if err == nil {
+			stale, err = rt.outlookStale(st, "outlook_mail", "outlook/"+p.Name)
+		}
 		switch {
 		case err != nil:
 			details, fixes = append(details, "profile "+p.Name+": cannot read the mail state: "+err.Error()), append(fixes, "Run `m365crawl sync`.")
 		case ms.Failure != nil:
 			details, fixes = append(details, "profile "+p.Name+": the last mail read failed: "+ms.Failure.Code+": "+ms.Failure.Message), append(fixes, firstOf(ms.Failure.Fix, "Run `m365crawl sync` and read its error."))
+		case ms.Read && stale != nil:
+			details, fixes = append(details, "profile "+p.Name+": mail read "+oneUnit(rt.now().Sub(ms.ReadAt))+" ago, but "+outlookStaleDetail(*stale)), append(fixes, outlookStaleFix)
 		case ms.Read:
 			details, fixes = append(details, "profile "+p.Name+": mail read "+oneUnit(rt.now().Sub(ms.ReadAt))+" ago"), append(fixes, "")
 		default:

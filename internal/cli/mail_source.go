@@ -129,6 +129,10 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 				c.Warn, c.Fix = true, "Run `m365crawl sync` and read its coded error."
 			case state.Read:
 				detail = "profile " + p.Name + ": cached paths readable; mail read " + oneUnit(rt.now().Sub(state.ReadAt)) + " ago"
+				if stale, err := rt.outlookStale(st, "outlook_mail", "outlook/"+p.Name); err != nil || stale != nil {
+					detail += "; " + owaStaleDetail(stale, err)
+					c.Warn, c.Fix = true, owaStaleFix(err)
+				}
 			}
 		}
 		calendarDetail := "calendar not read yet"
@@ -141,10 +145,29 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 			c.Warn, c.Fix = true, "Run `m365crawl sync` and read its coded error."
 		case o != nil && !o.LastReadAt.IsZero():
 			calendarDetail = "calendar read " + oneUnit(rt.now().Sub(o.LastReadAt)) + " ago, " + o.Status
+			if stale, err := rt.outlookStale(st, "outlook_calendar", "outlook/"+p.Name); err != nil || stale != nil {
+				calendarDetail += "; " + owaStaleDetail(stale, err)
+				c.Warn, c.Fix = true, owaStaleFix(err)
+			}
 		}
 		detail += "; " + calendarDetail
 		details = append(details, detail)
 	}
 	c.Detail = strings.Join(details, "; ")
 	return c
+}
+
+// owaStaleDetail is the doctor wording of a stale OWA cache, or of a failure to tell.
+func owaStaleDetail(stale *store.SourceHealth, err error) string {
+	if err != nil {
+		return "cannot read the Outlook cache state"
+	}
+	return outlookStaleDetail(*stale)
+}
+
+func owaStaleFix(err error) string {
+	if err != nil {
+		return "Run `m365crawl sync`."
+	}
+	return outlookStaleFix
 }
