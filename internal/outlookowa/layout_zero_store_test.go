@@ -82,14 +82,18 @@ func TestCollectIgnoresOnlyZeroStoreMatchingMetadata(t *testing.T) {
 func TestZeroStoreRefusalsDoNotRequestValues(t *testing.T) {
 	full := readerWith().dbs[0]
 	for _, tc := range []struct {
-		name   string
-		dbs    []indexeddb.Database
-		reason string
+		name         string
+		dbs          []indexeddb.Database
+		reason, open string
 	}{
-		{"all_zero", []indexeddb.Database{{ID: 1, Name: "owa-offline-data"}, {ID: 2, Name: "owa-offline-data-zero"}}, "required_store_missing"},
-		{"full_partial", []indexeddb.Database{full, {ID: 2, Name: "owa-offline-data-partial", Stores: []indexeddb.Store{{ID: 9, Name: "credentials"}}}}, "multiple_mailboxes"},
-		{"duplicate", []indexeddb.Database{{ID: full.ID, Name: full.Name, Stores: append(append([]indexeddb.Store{}, full.Stores...), full.Stores[0])}, {ID: 2, Name: "owa-offline-data-zero"}}, "required_store_ambiguous"},
+		{"all_zero", []indexeddb.Database{{ID: 1, Name: "owa-offline-data"}, {ID: 2, Name: "owa-offline-data-zero"}}, "required_store_missing", ""},
+		// Open admits several populated mailboxes, but each must still hold every required store.
+		{"full_partial", []indexeddb.Database{full, {ID: 2, Name: "owa-offline-data-partial", Stores: []indexeddb.Store{{ID: 9, Name: "credentials"}}}}, "multiple_mailboxes", "required_store_missing"},
+		{"duplicate", []indexeddb.Database{{ID: full.ID, Name: full.Name, Stores: append(append([]indexeddb.Store{}, full.Stores...), full.Stores[0])}, {ID: 2, Name: "owa-offline-data-zero"}}, "required_store_ambiguous", ""},
 	} {
+		if tc.open == "" {
+			tc.open = tc.reason
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			oldCensus, oldOpen := mailCensus, mailOpenWith
 			t.Cleanup(func() { mailCensus, mailOpenWith = oldCensus, oldOpen })
@@ -102,7 +106,7 @@ func TestZeroStoreRefusalsDoNotRequestValues(t *testing.T) {
 			}
 			o, err := Open(context.Background(), "synthetic-metadata-only", "")
 			var guard *hxstore.GuardError
-			if o != nil || !errors.As(err, &guard) || guard.Detail != tc.reason {
+			if o != nil || !errors.As(err, &guard) || guard.Detail != tc.open {
 				t.Fatal("metadata_open_refusal_missing")
 			}
 			reader := &zeroStoreMetadataReader{faultReader: &faultReader{dbs: tc.dbs}, t: t}
