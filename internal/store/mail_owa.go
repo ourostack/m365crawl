@@ -15,12 +15,20 @@ type OWAMailBatch struct {
 	Result          outlookowa.Result
 	// Trusted requires a stable snapshot; decoder losses or doubt independently prevent absence.
 	Trusted bool
+	// Identity, when set, is the mailbox identity bound to Account in this transaction within
+	// Scope, the profile's own account. Rebind replaces an existing binding the caller proved
+	// belongs to the same mailbox.
+	Identity, Scope string
+	Rebind          bool
 }
 
 // CommitOWAMail assigns native identities and writes mail in the same transaction.
 func (s *Store) CommitOWAMail(ctx context.Context, b OWAMailBatch) (MailResult, error) {
 	var res MailResult
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := bindOWAMailbox(ctx, tx, b); err != nil {
+			return err
+		}
 		r, err := b.Result.Normalize(func(kind, sourceID string) (uint32, error) {
 			return mailSourceKey(ctx, tx, b.Account, kind, sourceID)
 		})
