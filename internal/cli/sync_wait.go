@@ -96,12 +96,16 @@ func (rt *runtime) printLockWait() {
 }
 
 // syncAfterOtherRun runs when the implicit sync found another m365crawl run holding the archive
-// lock. It waits for that run. When the run leaves a complete sync newer than prev (or one younger
-// than --max-age), the read uses it and does not sync again: implicit_sync is waited_for_other_sync.
+// lock. It waits for that run. When, after it, every account the read covers has a complete sync
+// younger than --max-age or finished after this read began waiting, the read uses it and does not
+// sync again: implicit_sync is waited_for_other_sync. Freshness is the stalest covered account's,
+// so a run that synced only some accounts (`sync --account X`) does not count for the others.
 // When the run leaves no such sync (it failed, or it was a fetch), the read runs its own sync and
 // ran is true. When the wait is spent first, implicit_sync is other_sync_in_progress and the read
 // answers from the archive as it is. err is cancellation or an archive failure, never `locked`.
-func (rt *runtime) syncAfterOtherRun(prev time.Time, o syncer.Options) (rep syncer.Report, syncErr error, ran bool, err error) {
+func (rt *runtime) syncAfterOtherRun(o syncer.Options) (rep syncer.Report, syncErr error, ran bool, err error) {
+	// The archive keeps milliseconds: a sync finished after this moment is never stored before it.
+	waiting := rt.now().UTC().Truncate(time.Millisecond)
 	rt.printLockWait()
 	for {
 		more, err := rt.pause()
@@ -115,7 +119,7 @@ func (rt *runtime) syncAfterOtherRun(prev time.Time, o syncer.Options) (rep sync
 		var done bool
 		free, err := rt.tryLock(func() error {
 			last, pending, err := rt.lastSuccess()
-			done = err == nil && !pending && !last.IsZero() && (last.After(prev) || rt.now().Sub(last) <= rt.maxAge)
+			done = err == nil && !pending && !last.IsZero() && (!last.Before(waiting) || rt.now().Sub(last) <= rt.maxAge)
 			return err
 		})
 		if err != nil {

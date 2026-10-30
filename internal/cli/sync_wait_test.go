@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -110,6 +111,78 @@ func TestReadWaitsForAnotherRunsSyncInsteadOfFailingLocked(t *testing.T) {
 	}
 	if !strings.Contains(stderr, `"notice":"waiting_for_other_sync"`) {
 		t.Fatalf("no waiting notice on stderr: %s", stderr)
+	}
+}
+
+// A run that syncs one account (`sync --account X`) can raise the stalest account's time without
+// making every account fresh. A read of every account must not take that as a fresh archive.
+func TestReadSyncsItselfWhenTheOtherRunSyncedOnlyOneAccount(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	db, err := sql.Open("sqlite", e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accounts []string
+	rows, err := db.Query(`select tenant_id || '/' || user_id from accounts order by 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		accounts = append(accounts, a)
+	}
+	_ = rows.Close()
+	_ = db.Close()
+	if len(accounts) < 2 {
+		t.Fatalf("the fixture needs two accounts, has %v", accounts)
+	}
+	x, y := accounts[0], accounts[1]
+	// Every account was last synced 3 hours ago, then y alone 1 hour ago: x is the stalest.
+	e.exec(`update sync_runs set started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 hours'), finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 hours')`)
+	e.exec(`insert into sync_runs(started_at, finished_at, source, status, accounts_json) values(strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hours'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hours'), '', 'ok', '["` + y + `"]')`)
+
+	shortLockWait(t, 10*time.Second)
+	syncs, started := countSyncs(t)
+	release, err := store.AcquireLock(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { // the other run: `sync --account x`, which completes while the read waits
+		defer close(done)
+		defer release()
+		<-started
+		time.Sleep(200 * time.Millisecond)
+		st, err := store.Open(context.Background(), e.db)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = st.Close() }()
+		now := time.Now().UTC()
+		if err := st.RecordRun(context.Background(), store.Run{StartedAt: now, FinishedAt: now, Status: syncer.StatusOK, Accounts: []string{x}}); err != nil {
+			t.Error(err)
+		}
+	}()
+	t.Cleanup(func() { <-done })
+
+	code, stdout, stderr := e.run("search", "Fixture", "--json") // the default --max-age 15m
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	m := decode(t, stdout)
+	if m["implicit_sync"] == implicitSyncWaited {
+		t.Fatalf("account %s is still an hour old, yet the read reported a fresh archive: %v", y, m)
+	}
+	if m["synced"] == nil || syncs.Load() != 2 {
+		t.Fatalf("synced %v after %d syncs; want this read's own sync", m["synced"], syncs.Load())
+	}
+	if age, _ := m["archive_age_seconds"].(float64); age > 60 {
+		t.Fatalf("archive_age_seconds = %v after this read's own sync", age)
 	}
 }
 

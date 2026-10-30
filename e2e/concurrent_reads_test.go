@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // waitResult waits up to 60 s for a started process and returns what it printed and its exit.
@@ -22,37 +24,51 @@ func (s *started) waitResult() result {
 }
 
 // Agents run reads in parallel. Two reads that both find the archive stale must share one sync:
-// the first runs it, the second waits for it and reads its result, and neither reports `locked`.
+// one runs it, the other waits for it and reads its result, and neither reports `locked`. The test
+// holds the archive lock until both reads say they are waiting, so they always contend.
 func TestConcurrentReadsShareOneSync(t *testing.T) {
 	e := newEnv(t)
+	release, err := store.AcquireLock(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
 	args := append([]string{"search", "Fixture", "--json"}, e.baseArgs()...)
-	first := e.start([]string{"M365CRAWL_TEST_PAUSE_AFTER_SNAPSHOT=1s"}, args...)
-	first.waitFor("the first read's sync", func() bool { return strings.Contains(first.stderr.String(), pausedMarker) })
-	second := e.start(nil, args...)
-	a, b := first.waitResult(), second.waitResult()
-	for _, res := range []result{a, b} {
+	a, b := e.start(nil, args...), e.start(nil, args...)
+	for _, r := range []*started{a, b} {
+		r.waitFor("the read's wait", func() bool { return strings.Contains(r.stderr.String(), `"notice":"waiting_for_other_sync"`) })
+	}
+	release()
+	released = true
+	var synced, waited int
+	for _, res := range []result{a.waitResult(), b.waitResult()} {
 		mustExit(t, res, 0)
 		if strings.Contains(res.stderr, `"locked"`) {
 			t.Fatalf("a read reported locked:\n%s", res.stderr)
 		}
-	}
-	ma, mb := mustJSON(t, a.stdout), mustJSON(t, b.stdout)
-	for _, m := range []map[string]any{ma, mb} {
+		m := mustJSON(t, res.stdout)
 		if m["sync_error"] != nil {
 			t.Fatalf("sync_error = %v", m["sync_error"])
 		}
 		if hits, _ := m["items"].([]any); len(hits) == 0 {
-			t.Fatalf("no hits: %v", m)
+			t.Fatalf("no hits: %s", res.stdout)
+		}
+		switch {
+		case m["synced"] != nil && m["implicit_sync"] == nil:
+			synced++
+		case m["synced"] == nil && m["implicit_sync"] == "waited_for_other_sync":
+			waited++
+		default:
+			t.Fatalf("synced %v, implicit_sync %v", m["synced"], m["implicit_sync"])
 		}
 	}
-	if ma["synced"] == nil || ma["implicit_sync"] != nil {
-		t.Fatalf("first read: synced %v, implicit_sync %v; want its own sync", ma["synced"], ma["implicit_sync"])
-	}
-	if mb["synced"] != nil || mb["implicit_sync"] != "waited_for_other_sync" {
-		t.Fatalf("second read: synced %v, implicit_sync %v; want waited_for_other_sync", mb["synced"], mb["implicit_sync"])
-	}
-	if !strings.Contains(b.stderr, `"notice":"waiting_for_other_sync"`) {
-		t.Fatalf("second read stderr: %s", b.stderr)
+	if synced != 1 || waited != 1 {
+		t.Fatalf("%d reads synced and %d waited; want one of each", synced, waited)
 	}
 }
 
