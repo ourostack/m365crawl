@@ -1,0 +1,37 @@
+{
+  "name": "07-refuse-agent-changes-switch",
+  "description": "Only the person can turn writes on, even when they are off.",
+  "state": {
+    "writes": "off",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "turn_writes_on",
+    "agent": "synthetic-helper",
+    "reason": "I need to send a message."
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "person_only",
+    "exit_class": "person_needed",
+    "tell_person": true
+  }
+}

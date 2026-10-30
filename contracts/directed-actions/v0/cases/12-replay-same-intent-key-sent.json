@@ -1,0 +1,72 @@
+{
+  "name": "12-replay-same-intent-key-sent",
+  "description": "A retry with the same intent key returns the earlier sent request and sends nothing.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": [
+      {
+        "request_id": "req-1",
+        "outcome": "sent",
+        "request": {
+          "contract": "directed-actions/v0",
+          "action": "send_teams_message",
+          "agent": "synthetic-helper",
+          "reason": "Pat asked me to tell Sam the review is done.",
+          "identity": "pat@example.test",
+          "target": {
+            "conversation": "19:synthetic-chat-1@thread.v2",
+            "recipients": [
+              "pat@example.test",
+              "sam@example.test"
+            ]
+          },
+          "content": {
+            "text": "The review is done."
+          },
+          "intent_key": "synthetic-intent-1"
+        }
+      }
+    ]
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_teams_message",
+    "agent": "synthetic-helper",
+    "reason": "Retrying after a timeout.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "text": "The review is done."
+    },
+    "intent_key": "synthetic-intent-1"
+  },
+  "expect": {
+    "decision": "replay",
+    "replay_of": "req-1",
+    "earlier_outcome": "sent",
+    "exit_class": "done"
+  }
+}

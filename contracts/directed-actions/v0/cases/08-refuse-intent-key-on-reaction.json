@@ -1,0 +1,49 @@
+{
+  "name": "08-refuse-intent-key-on-reaction",
+  "description": "An intent key is allowed only on sends.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "add_reaction",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to acknowledge Sam's message.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "message": "synthetic-chat-message-9",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "reaction": "like"
+    },
+    "intent_key": "synthetic-intent-2"
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "intent_key_not_allowed",
+    "exit_class": "request_problem"
+  }
+}

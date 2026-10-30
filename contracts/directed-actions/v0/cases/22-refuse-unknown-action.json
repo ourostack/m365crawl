@@ -1,0 +1,47 @@
+{
+  "name": "22-refuse-unknown-action",
+  "description": "An action outside the table is refused.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "delete_teams_message",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to tell Sam the review is done.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "text": "The review is done."
+    }
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "unknown_action",
+    "exit_class": "request_problem"
+  }
+}

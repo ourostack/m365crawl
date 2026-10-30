@@ -1,0 +1,49 @@
+{
+  "name": "23-refuse-version-without-target",
+  "description": "An expected version needs a target to compare against.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_mail",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to send Kim the agenda.",
+    "identity": "pat@example.test",
+    "target": {
+      "recipients": [
+        "kim@example.test"
+      ]
+    },
+    "content": {
+      "subject": "Agenda",
+      "text": "Here is the agenda for Thursday."
+    },
+    "intent_key": "synthetic-intent-4",
+    "expected_version": "v1"
+  },
+  "expect": {
+    "decision": "refuse",
+    "code": "invalid_request",
+    "field": "expected_version",
+    "exit_class": "request_problem"
+  }
+}

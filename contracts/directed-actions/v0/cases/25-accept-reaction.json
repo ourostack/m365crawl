@@ -1,0 +1,47 @@
+{
+  "name": "25-accept-reaction",
+  "description": "A reaction others will see is accepted without an intent key.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "add_reaction",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to acknowledge Sam's message.",
+    "identity": "pat@example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "message": "synthetic-chat-message-9",
+      "recipients": [
+        "pat@example.test",
+        "sam@example.test"
+      ]
+    },
+    "content": {
+      "reaction": "like"
+    }
+  },
+  "expect": {
+    "decision": "accept",
+    "effect": "visible_to_others"
+  }
+}

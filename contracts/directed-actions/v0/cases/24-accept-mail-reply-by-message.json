@@ -1,0 +1,47 @@
+{
+  "name": "24-accept-mail-reply-by-message",
+  "description": "A reply is looked up by its message, and its version and audience match.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "reply_mail",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to confirm the date with Lee.",
+    "identity": "pat@example.test",
+    "target": {
+      "message": "synthetic-mail-message-1",
+      "recipients": [
+        "pat@example.test",
+        "lee@example.test"
+      ]
+    },
+    "content": {
+      "text": "Thursday works."
+    },
+    "expected_version": "v2"
+  },
+  "expect": {
+    "decision": "accept",
+    "effect": "visible_to_others"
+  }
+}

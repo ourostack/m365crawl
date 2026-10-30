@@ -1,0 +1,46 @@
+{
+  "name": "03-accept-recipients-ignore-case-and-order",
+  "description": "Recipients compare as a set, ignoring letter case and order.",
+  "state": {
+    "writes": "on",
+    "signed_in": "pat@example.test",
+    "targets": {
+      "19:synthetic-chat-1@thread.v2": {
+        "recipients": [
+          "pat@example.test",
+          "sam@example.test"
+        ],
+        "version": "v7"
+      },
+      "synthetic-mail-message-1": {
+        "recipients": [
+          "pat@example.test",
+          "lee@example.test"
+        ],
+        "version": "v2"
+      }
+    },
+    "earlier": []
+  },
+  "request": {
+    "contract": "directed-actions/v0",
+    "action": "send_teams_message",
+    "agent": "synthetic-helper",
+    "reason": "Pat asked me to tell Sam the review is done.",
+    "identity": "PAT@Example.test",
+    "target": {
+      "conversation": "19:synthetic-chat-1@thread.v2",
+      "recipients": [
+        "SAM@example.test",
+        "pat@example.test"
+      ]
+    },
+    "content": {
+      "text": "The review is done."
+    }
+  },
+  "expect": {
+    "decision": "accept",
+    "effect": "visible_to_others"
+  }
+}
