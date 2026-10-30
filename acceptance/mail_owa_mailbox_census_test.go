@@ -101,7 +101,7 @@ func TestOWAMailboxIdentityCensus(t *testing.T) {
 	}
 	data, _ := json.MarshalIndent(report, "", " ")
 	if path := os.Getenv(owaMailboxCensusEnv + "_PATH"); path != "" {
-		if err := os.WriteFile(path, data, 0o600); err != nil {
+		if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec // the operator chooses the private report path
 			t.Fatalf("write report refused")
 		}
 	}
@@ -152,7 +152,11 @@ func owaCensusProfile(index int, source teamsdesktop.Source) (pc *owaProfileCens
 		pc.Error = "open_refused"
 		return pc
 	}
-	defer o.Close()
+	defer func() {
+		if o.Close() != nil {
+			pc.Error = "close_refused"
+		}
+	}()
 	for i, db := range content {
 		dc := &owaDBCensus{Index: i, BareName: db.Name == "owa-offline-data", StoreCount: len(db.Stores), Records: map[string]int{}, Undecoded: map[string]int{},
 			InfoKeys: map[string]map[string]int{}, Fields: map[string]*owaFieldCensus{}, Consistency: map[string]int{}, tuples: map[[32]byte]bool{}, folderTuples: map[string][32]byte{}}
