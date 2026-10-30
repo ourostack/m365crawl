@@ -388,7 +388,8 @@ type owaSyncCensus struct {
 // owaCensusSync runs the product's sync twice into a private scratch archive and reports counts only.
 func owaCensusSync(t *testing.T, root string) *owaSyncCensus {
 	t.Helper()
-	dir := t.TempDir()
+	// Windows archives need a directory only the current user and SYSTEM can read.
+	dir := owaScratch(t)
 	db := filepath.Join(dir, "census.db")
 	out := &owaSyncCensus{}
 	for i := 0; i < 2; i++ {
