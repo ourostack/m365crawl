@@ -178,7 +178,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		// Another run holds the archive: wait for it rather than report `locked`.
 		var ran bool
 		var waitErr error
-		if rep, err, ran, waitErr = rt.syncAfterOtherRun(last, o); waitErr != nil {
+		if rep, err, ran, waitErr = rt.syncAfterOtherRun(o); waitErr != nil {
 			if rt.ctx.Err() != nil || errors.Is(waitErr, context.Canceled) {
 				return nil, errors.Join(rt.ctx.Err(), waitErr)
 			}
