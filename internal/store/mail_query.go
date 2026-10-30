@@ -145,15 +145,13 @@ const mailSelect = `select m.rowid, m.account, m.detail_key, m.internet_message_
 
 const mailJoin = ` left join mail_folders f on f.account=m.account and f.folder_key=m.folder_key`
 
+// mailRows reads rows without marking folder copies (OlderCopy false, CopyOf empty): for queries
+// that only gather ids, so a thread's reply chain does not scan the account once per step.
 func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any) ([]MailRow, error) {
-	copies, err := loadMailCopies(ctx, s.db)
-	if err != nil {
-		return nil, err
-	}
-	return s.mailRowsMarked(ctx, copies, body, from, args)
+	return s.mailRowsMarked(ctx, mailCopies{}, body, from, args)
 }
 
-// mailRowsMarked is mailRows with the copies already found.
+// mailRowsMarked reads rows and marks them with the folder copies found (loadMailCopies).
 func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool, from string, args []any) ([]MailRow, error) {
 	conversationCol, roleCol, err := s.mailColumnNames(ctx)
 	if err != nil {
@@ -393,7 +391,11 @@ func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) err
 // MailGet returns one message with its body text, recipients and attachments, whether or not it
 // is gone or evicted.
 func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (MailRow, error) {
-	rows, err := s.mailRows(ctx, true, ` from mail_messages m`+mailJoin+` where m.account=? and m.detail_key=?`, []any{account, detailKey})
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return MailRow{}, err
+	}
+	rows, err := s.mailRowsMarked(ctx, copies, true, ` from mail_messages m`+mailJoin+` where m.account=? and m.detail_key=?`, []any{account, detailKey})
 	if err != nil {
 		return MailRow{}, err
 	}

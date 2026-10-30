@@ -386,30 +386,34 @@ func TestMailCopyCheckOnlyWhereOlderCopiesExist(t *testing.T) {
 	}
 }
 
-// Gone and evicted messages count in the check only when the list includes them.
+// The list's gone and evicted switches apply to the current copy's messages. An older copy's
+// messages count whatever their marks: later trusted reads of the new set find them missing and
+// mark them, and the check must still say the current copy lacks them.
 func TestMailCopyCheckFollowsGoneAndEvicted(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
-	seedTwoSets(t, s, []outlookmail.Message{setMsg(1001, aSent, "<lost@t>", 3)}, []outlookmail.Message{setMsg(2001, bSent, "<x@t>", 5)})
-	if _, err := s.db.Exec(`update mail_messages set gone_at=? where detail_key=1001`, fmtTime(hr(9))); err != nil {
-		t.Fatal(err)
+	seedTwoSets(t, s, []outlookmail.Message{setMsg(1001, aSent, "<lost@t>", 3)}, []outlookmail.Message{setMsg(2001, bSent, "<x@t>", 5), setMsg(2002, bSent, "<y@t>", 4)})
+	mustCommitMail(t, s, setBatch(hr(4), rootB, setMsg(2001, bSent, "<x@t>", 5), setMsg(2002, bSent, "<y@t>", 4)))
+	if m, err := s.MailGet(ctx, mailAcct, 1001); err != nil || m.GoneAt.IsZero() {
+		t.Fatalf("the older copy's message is marked gone by two trusted reads: %+v %v", m, err)
 	}
-	if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 1 || c.State != "consistent" {
-		t.Fatalf("%+v", c)
+	if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 3 || c.LackingInCurrentRange != 1 || c.State != "partial" {
+		t.Fatalf("an older copy's gone message still counts: %+v", c)
 	}
-	checks, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}}, MailCopyRange{IncludeGone: true})
-	if err != nil || checks[0].Messages != 2 || checks[0].State != "partial" {
-		t.Fatalf("%+v %v", checks, err)
-	}
-	if _, err := s.db.Exec(`update mail_messages set gone_at=null, evicted_at=? where detail_key=1001`, fmtTime(hr(9))); err != nil {
-		t.Fatal(err)
-	}
-	if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 1 {
-		t.Fatalf("%+v", c)
-	}
-	checks, err = s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}}, MailCopyRange{IncludeEvicted: true})
-	if err != nil || checks[0].Messages != 2 {
-		t.Fatalf("%+v %v", checks, err)
+	for col, mark := range map[string]string{
+		"gone_at":    `update mail_messages set gone_at=?, evicted_at=null where detail_key=2002`,
+		"evicted_at": `update mail_messages set evicted_at=?, gone_at=null where detail_key=2002`,
+	} {
+		if _, err := s.db.Exec(mark, fmtTime(hr(9))); err != nil {
+			t.Fatal(err)
+		}
+		if c := checkOf(t, s, "sent", time.Time{}, time.Time{}); c.Messages != 2 || c.InCurrentCopy != 1 {
+			t.Fatalf("%s: a current message the list hides is not counted: %+v", col, c)
+		}
+		checks, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}}, MailCopyRange{IncludeGone: true, IncludeEvicted: true})
+		if err != nil || checks[0].Messages != 3 || checks[0].InCurrentCopy != 2 {
+			t.Fatalf("%s: %+v %v", col, checks, err)
+		}
 	}
 }
 

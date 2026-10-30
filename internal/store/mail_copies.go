@@ -272,7 +272,9 @@ func (c mailCopies) mark(rows []MailRow) {
 type MailCopyScope struct{ Account, Kind string }
 
 // MailCopyRange is the received-time range [Since, Until) a check covers (a zero end is open) and
-// whether gone and evicted messages count, as in MailFilter.
+// whether gone and evicted messages of the current folder set count, as in MailFilter. Messages of
+// an older set count whatever their marks: once Outlook replaces a set, a trusted read finds its
+// messages missing and marks them, which says nothing about whether the current set holds them.
 type MailCopyRange struct {
 	Since, Until                time.Time
 	IncludeGone, IncludeEvicted bool
@@ -376,24 +378,21 @@ func (s *Store) mailCopyCheck(ctx context.Context, sets mailSets, k MailCopyScop
 	if !rng.Until.IsZero() {
 		w.add(`received_at<?`, rng.Until.UTC().Format(timeLayout))
 	}
-	if !rng.IncludeGone {
-		w.add(`gone_at is null`)
-	}
-	if !rng.IncludeEvicted {
-		w.add(`evicted_at is null`)
-	}
 	type message struct{ current, lacking bool }
 	msgs := map[string]*message{}
-	err = mailEach(ctx, s.db, `select rowid, internet_message_id, folder_key, received_at from mail_messages`+w.sql(), w.args, func(r *sql.Rows) error {
+	err = mailEach(ctx, s.db, `select rowid, internet_message_id, folder_key, received_at, gone_at is not null, evicted_at is not null from mail_messages`+w.sql(), w.args, func(r *sql.Rows) error {
 		var rowid int64
 		var msgID string
 		var key uint32
 		var received sql.NullString
-		if err := r.Scan(&rowid, &msgID, &key, &received); err != nil {
+		var gone, evicted bool
+		if err := r.Scan(&rowid, &msgID, &key, &received, &gone, &evicted); err != nil {
 			return err
 		}
 		role, current := inRole(key)
-		if !role {
+		// The list's gone and evicted switches apply to the current copy. An older copy's marks
+		// follow its set leaving the store, so its messages count whatever their marks.
+		if !role || current && (gone && !rng.IncludeGone || evicted && !rng.IncludeEvicted) {
 			return nil
 		}
 		id := normalizeMailMessageID(msgID)
