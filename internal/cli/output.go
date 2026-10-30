@@ -23,6 +23,11 @@ import (
 type meta struct {
 	SourceHealth      *[]store.SourceHealth `json:"source_health,omitempty"`
 	ArchiveAgeSeconds *int64                `json:"archive_age_seconds"`
+	// ImplicitSync is present when this read's implicit sync found another m365crawl run holding
+	// the archive lock: waited_for_other_sync (that run synced while this read waited, so the
+	// result is fresh) or other_sync_in_progress (the wait ran out; the result is the archive as
+	// it was, and a notice says so).
+	ImplicitSync string `json:"implicit_sync,omitempty"`
 	// Synced is present only when this read ran the implicit sync first (--max-age): how long the
 	// sync took and how it ended. Absent when the archive was fresh enough to read as it was.
 	Synced    *syncedInfo `json:"synced,omitempty"`
@@ -52,6 +57,8 @@ type syncedInfo struct {
 
 func (m *meta) setSynced(si *syncedInfo) { m.Synced = si }
 
+func (m *meta) setImplicitSync(state string) { m.ImplicitSync = state }
+
 func (m *meta) setMeta(age *int64, se *syncError) { m.ArchiveAgeSeconds, m.SyncError = age, se }
 
 func (m *meta) addNotice(s string) { m.Notices = append(m.Notices, s) }
@@ -69,6 +76,7 @@ type result interface {
 	setSourceHealth([]store.SourceHealth)
 	setMeta(*int64, *syncError)
 	setSynced(*syncedInfo)
+	setImplicitSync(string)
 	setNeedsSync(hint string)
 	addNotice(string)
 }

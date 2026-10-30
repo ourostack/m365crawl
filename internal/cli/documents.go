@@ -420,7 +420,11 @@ func (rt *runtime) documentFlags() error {
 }
 
 func (rt *runtime) refreshDocuments(sourceID int64) (*noteCoverage, error) {
-	report, refreshErr := runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
+	var report syncer.DocumentReport
+	refreshErr := rt.besideOtherRun(func() (err error) {
+		report, err = runDocumentsSync(rt.ctx, syncer.DocumentOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
+		return err
+	})
 	if refreshErr == nil {
 		return rt.documentsCoverage(report.Sources), nil
 	}

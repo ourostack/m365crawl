@@ -16,7 +16,7 @@ Start with `m365crawl doctor`. It checks every prerequisite, and each failed che
 
 ## Sync
 
-**`locked` (exit 4).** Another `sync` or `watch` is using the archive. Wait for it to finish, or stop the other `watch`, and run again.
+**`locked` (exit 4).** Another `sync` or `watch` is using the archive. Wait for it to finish, or stop the other `watch`, and run again. Only explicit `sync` and the fetch commands stop with `locked`; read commands wait for the other run instead (up to 2 minutes) and then answer, with `implicit_sync` saying whether they used that run's sync or read the archive as it was.
 
 **`partial_sync` (exit 1).** Some sources synced and at least one failed. The report on stdout names each failed source and its code. What synced is already in the archive; fix the failing source (`m365crawl doctor` helps) and sync again.
 

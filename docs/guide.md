@@ -205,7 +205,7 @@ Run `m365crawl` for an overview and `m365crawl --help` for where to start; every
 
 Flags that matter for agents:
 
-- `--max-age 15m` (or `M365CRAWL_MAX_AGE`) makes a read command sync first when the last successful sync is older. `0` disables it. When a read syncs first it prints one line on stderr beforehand and the result gains `synced: {seconds, status}`. If that sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field.
+- `--max-age 15m` (or `M365CRAWL_MAX_AGE`) makes a read command sync first when the last successful sync is older. `0` disables it. When a read syncs first it prints one line on stderr beforehand and the result gains `synced: {seconds, status}`. If that sync fails, the command still answers from the archive, warns on stderr and adds a `sync_error` field. Reads can run in parallel: when another m365crawl run is already syncing, a read waits for it (up to 2 minutes) and answers from that sync with `implicit_sync: "waited_for_other_sync"`; if the wait runs out it answers from the archive as it is with `implicit_sync: "other_sync_in_progress"` and a notice. It never fails with `locked`.
 - `--fields a,b,c` keeps only those top-level keys of each item.
 - `--max-text N` truncates each item's text to N characters, including the trailing `…`, and sets `text_truncated`.
 - An archive with no complete sync yet adds `"needs_sync": true` and `"hint": "run m365crawl sync"` to every read result. Check for it before you read an empty result as "no match".

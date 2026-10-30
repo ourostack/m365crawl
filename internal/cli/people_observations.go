@@ -111,7 +111,11 @@ var runPeopleSync = syncer.SyncPeople
 var openPeopleRead = store.OpenReadOnly
 
 func (rt *runtime) refreshPeople() (*noteCoverage, error) {
-	report, refreshErr := runPeopleSync(rt.ctx, syncer.PeopleOptions{DBPath: rt.dbPath, MaxAge: rt.maxAge})
+	var report syncer.PeopleReport
+	refreshErr := rt.besideOtherRun(func() (err error) {
+		report, err = runPeopleSync(rt.ctx, syncer.PeopleOptions{DBPath: rt.dbPath, MaxAge: rt.maxAge})
+		return err
+	})
 	if refreshErr == nil {
 		return peopleCoverage(report.Sources), nil
 	}
