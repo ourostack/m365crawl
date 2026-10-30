@@ -101,9 +101,9 @@ func (s *Store) OutlookCacheHealth(ctx context.Context) ([]SourceHealth, error) 
 		at  time.Time
 	}
 	var checks []check
-	err = s.each(ctx, `select r.source, r.finished_at from sync_runs r where r.source like 'outlook|%'
-		and r.status in ('ok','ok_with_omissions','unchanged')
-		and r.id=(select max(id) from sync_runs where source=r.source and status<>'skipped_interval') order by r.source`, func(rs *sql.Rows) error {
+	err = s.each(ctx, `select r.source, r.finished_at from sync_runs r join (select max(id) id from sync_runs
+		where source like 'outlook|%' and status<>'skipped_interval' group by source) l on r.id=l.id
+		where r.status in ('ok','ok_with_omissions','unchanged') order by r.source`, func(rs *sql.Rows) error {
 		var c check
 		var at sql.NullString
 		if err := rs.Scan(&c.key, &at); err != nil {
