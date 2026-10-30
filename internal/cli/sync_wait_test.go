@@ -14,17 +14,22 @@ import (
 	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
-// countSyncs counts the implicit syncs a read starts, still running each one.
-func countSyncs(t *testing.T) *atomic.Int32 {
+// countSyncs counts the implicit syncs a read starts, still running each one. The returned
+// channel closes when the first one has started, so a test can let the lock go only once the read
+// has met it.
+func countSyncs(t *testing.T) (*atomic.Int32, <-chan struct{}) {
 	t.Helper()
 	var n atomic.Int32
+	started := make(chan struct{})
 	old := runSync
 	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
-		n.Add(1)
+		if n.Add(1) == 1 {
+			defer close(started)
+		}
 		return old(ctx, o)
 	}
 	t.Cleanup(func() { runSync = old })
-	return &n
+	return &n, started
 }
 
 func shortLockWait(t *testing.T, wait time.Duration) {
@@ -34,9 +39,10 @@ func shortLockWait(t *testing.T, wait time.Duration) {
 	t.Cleanup(func() { lockWait, lockPoll = oldWait, oldPoll })
 }
 
-// holdLock plays another m365crawl run: it holds the archive lock and lets it go after hold. With
-// synced, that run records a complete sync just before it lets go, as a successful sync does.
-func holdLock(t *testing.T, db string, hold time.Duration, synced bool) <-chan struct{} {
+// holdLock plays another m365crawl run: it holds the archive lock and lets it go hold after start
+// closes (nil: at once). With synced, that run records a complete sync just before it lets go, as a
+// successful sync does.
+func holdLock(t *testing.T, db string, start <-chan struct{}, hold time.Duration, synced bool) {
 	t.Helper()
 	release, err := store.AcquireLock(db)
 	if err != nil {
@@ -46,6 +52,12 @@ func holdLock(t *testing.T, db string, hold time.Duration, synced bool) <-chan s
 	go func() {
 		defer close(done)
 		defer release()
+		if start != nil {
+			select {
+			case <-start:
+			case <-time.After(time.Minute):
+			}
+		}
 		time.Sleep(hold)
 		if !synced {
 			return
@@ -62,21 +74,20 @@ func holdLock(t *testing.T, db string, hold time.Duration, synced bool) <-chan s
 		}
 	}()
 	t.Cleanup(func() { <-done })
-	return done
 }
 
 func TestReadWaitsForAnotherRunsSyncInsteadOfFailingLocked(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 10*time.Second)
-	syncs := countSyncs(t)
-	holdLock(t, e.db, 300*time.Millisecond, true)
+	syncs, started := countSyncs(t)
+	holdLock(t, e.db, started, 300*time.Millisecond, true)
 	began := time.Now()
 	code, stdout, stderr := e.run("--max-age", "1ns", "search", "Fixture", "--json")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	if time.Since(began) < 250*time.Millisecond {
+	if time.Since(began) < 300*time.Millisecond {
 		t.Fatal("the read did not wait for the other run")
 	}
 	m := decode(t, stdout)
@@ -104,8 +115,8 @@ func TestReadSyncsItselfWhenTheOtherRunLeftTheArchiveStale(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 10*time.Second)
-	syncs := countSyncs(t)
-	holdLock(t, e.db, 200*time.Millisecond, false) // a fetch, or a sync that failed
+	syncs, started := countSyncs(t)
+	holdLock(t, e.db, started, 200*time.Millisecond, false) // a fetch, or a sync that failed
 	code, stdout, stderr := e.run("--max-age", "1ns", "search", "Fixture", "--json")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -127,14 +138,14 @@ func TestReadAnswersFromTheArchiveWhenAnotherRunOutlastsTheWait(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 300*time.Millisecond)
-	holdLock(t, e.db, 2*time.Second, false)
+	holdLock(t, e.db, nil, 5*time.Second, false)
 	began := time.Now()
 	code, stdout, stderr := e.run("--max-age", "1ns", "search", "Fixture", "--json")
 	if code != 0 {
 		t.Fatalf("read must succeed on the existing archive: exit %d, %s", code, stderr)
 	}
-	if took := time.Since(began); took < 300*time.Millisecond || took > 1500*time.Millisecond {
-		t.Fatalf("the read took %s; it should wait about its 300ms budget", took)
+	if took := time.Since(began); took < 300*time.Millisecond || took > 4*time.Second {
+		t.Fatalf("the read took %s; it should give up after its 300ms budget, long before the other run ends", took)
 	}
 	m := decode(t, stdout)
 	if m["sync_error"] != nil || strings.Contains(stderr, `"warning"`) {
@@ -156,7 +167,7 @@ func TestReadWaitingForAnotherRunSaysSoInText(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 200*time.Millisecond)
-	holdLock(t, e.db, time.Second, false)
+	holdLock(t, e.db, nil, 5*time.Second, false)
 	code, stdout, stderr := e.run("--max-age", "1ns", "--format", "text", "search", "Fixture")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -173,7 +184,7 @@ func TestReadWaitingForAnotherRunStopsOnCancel(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 10*time.Second)
-	holdLock(t, e.db, 2*time.Second, false)
+	holdLock(t, e.db, nil, 5*time.Second, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(200*time.Millisecond, cancel)
 	var out, errb bytes.Buffer
@@ -182,7 +193,7 @@ func TestReadWaitingForAnotherRunStopsOnCancel(t *testing.T) {
 	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted {
 		t.Fatalf("exit %d, stderr %s", code, errb.String())
 	}
-	if time.Since(began) > 1500*time.Millisecond {
+	if time.Since(began) > 4*time.Second {
 		t.Fatal("cancellation did not end the wait")
 	}
 }
@@ -191,12 +202,15 @@ func TestSourceRefreshWaitsForAnotherRun(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 10*time.Second)
-	holdLock(t, e.db, 200*time.Millisecond, false)
+	first := make(chan struct{})
+	holdLock(t, e.db, first, 200*time.Millisecond, false)
 	rt := newRuntime(context.Background(), &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
 	rt.dbPath = e.db
 	calls := 0
 	err := rt.besideOtherRun(func() error {
-		calls++
+		if calls++; calls == 1 {
+			close(first)
+		}
 		release, err := store.AcquireLock(e.db)
 		if err != nil {
 			return err
@@ -213,7 +227,7 @@ func TestSourceRefreshGivesUpAfterTheWait(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	shortLockWait(t, 100*time.Millisecond)
-	holdLock(t, e.db, time.Second, false)
+	holdLock(t, e.db, nil, 5*time.Second, false)
 	rt := newRuntime(context.Background(), &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
 	rt.dbPath = e.db
 	err := rt.besideOtherRun(func() error { return errs.Locked("held") })
