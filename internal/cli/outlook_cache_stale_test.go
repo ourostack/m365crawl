@@ -128,7 +128,7 @@ func TestMailCacheFreshOnStatusAndOverview(t *testing.T) {
 
 func TestDoctorWarnsWhenOutlookStoppedWritingItsCache(t *testing.T) {
 	forceMailSupported(t)
-	rt, st, e := mailRuntime(t, mailStoreRoot(t), true)
+	rt, st, _ := mailRuntime(t, mailStoreRoot(t), true)
 	w, err := store.Open(context.Background(), rt.dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,9 @@ func TestDoctorWarnsWhenOutlookStoppedWritingItsCache(t *testing.T) {
 	if err := w.SetMailRead(context.Background(), "outlook/Main", read); err != nil {
 		t.Fatal(err)
 	}
-	e.exec(`insert into meta(key, value) values('outlook_mail_fresh:outlook/Main', '` + fresh.Format("2006-01-02T15:04:05.000Z") + `')`)
+	if _, err := w.CommitMail(context.Background(), store.MailBatch{Account: "outlook/Main", ReadAt: read, FreshAt: fresh}); err != nil {
+		t.Fatal(err)
+	}
 	for _, key := range []string{"outlook|Main|mail", "outlook|Main"} {
 		if err := w.RecordRun(context.Background(), store.Run{Source: key, Status: "unchanged", Fingerprint: "fp", StartedAt: read, FinishedAt: read}); err != nil {
 			t.Fatal(err)
@@ -197,9 +199,13 @@ func TestOWADoctorNamesAStaleCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	stamp := func(t time.Time) string { return t.Format("2006-01-02T15:04:05.000Z") }
-	e.exec(`insert into meta(key, value) values('outlook_mail_fresh:outlook/Default', '` + stamp(fresh) + `')`)
+	// The mail's write time comes from the OWA mail commit itself: the calendar row is from another
+	// read, so the calendar fallback cannot supply it.
+	if _, err := st.CommitOWAMail(rt.ctx, store.OWAMailBatch{Account: "outlook/Default", ReadAt: read, FreshAt: fresh}); err != nil {
+		t.Fatal(err)
+	}
 	e.exec(`insert into calendar_sources(source, account_id, window_start, window_end, synced_at, cache_fresh_at) values('outlook','outlook/Default','` +
-		stamp(now.Add(-24*time.Hour)) + `','` + stamp(now.Add(24*time.Hour)) + `','` + stamp(read) + `','` + stamp(fresh) + `')`)
+		stamp(now.Add(-24*time.Hour)) + `','` + stamp(now.Add(24*time.Hour)) + `','` + stamp(read.Add(-time.Minute)) + `','` + stamp(fresh) + `')`)
 	for _, key := range []string{"outlook|Default|mail", "outlook|Default"} {
 		if err := st.RecordRun(rt.ctx, store.Run{Source: key, Status: "unchanged", Fingerprint: "fp", StartedAt: read, FinishedAt: read}); err != nil {
 			t.Fatal(err)

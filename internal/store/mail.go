@@ -85,11 +85,7 @@ type MailResult struct {
 func (s *Store) CommitMail(ctx context.Context, b MailBatch) (res MailResult, err error) {
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var cerr error
-		if res, cerr = commitMail(ctx, tx, b); cerr != nil || b.FreshAt.IsZero() {
-			return cerr
-		}
-		_, cerr = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`,
-			mailFreshKey+b.Account, b.FreshAt.UTC().Format(timeLayout))
+		res, cerr = commitMail(ctx, tx, b)
 		return cerr
 	})
 	if err != nil {
@@ -113,7 +109,19 @@ type mailExisting struct {
 
 type rekeyKey struct{ msgID, kind string }
 
+// commitMail writes one read's mail and, with it, the store write time behind that read (the
+// mail's cache_fresh_at), for HxStore and OWA reads alike.
 func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error) {
+	res, err := commitMailRows(ctx, tx, b)
+	if err != nil || b.FreshAt.IsZero() {
+		return res, err
+	}
+	_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`,
+		mailFreshKey+b.Account, b.FreshAt.UTC().Format(timeLayout))
+	return res, err
+}
+
+func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error) {
 	var res MailResult
 	at := b.ReadAt.UTC().Format(timeLayout)
 	if err := upsertMailFolders(ctx, tx, b); err != nil {
