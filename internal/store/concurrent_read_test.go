@@ -14,7 +14,7 @@ import (
 // holds a transaction open or commits.
 func TestReadsNeverErrorBesideAWriter(t *testing.T) {
 	ctx := context.Background()
-	db := filepath.Join(t.TempDir(), "m365crawl.db")
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db") // a parent m365crawl creates itself, as on Windows it must
 	st, err := Open(ctx, db)
 	if err != nil {
 		t.Fatal(err)

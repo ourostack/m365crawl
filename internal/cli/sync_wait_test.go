@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -244,5 +246,67 @@ func TestReadWaitBudgetIsSharedByOneRead(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if rt.lockDeadline() != first {
 		t.Fatal("a second wait in the same read got a fresh budget")
+	}
+}
+
+func TestWaitText(t *testing.T) {
+	if got := waitText(90 * time.Second); got != "1m30s" {
+		t.Fatalf("waitText(90s) = %q", got)
+	}
+	if got := waitText(300 * time.Millisecond); got != "300ms" {
+		t.Fatalf("waitText(300ms) = %q", got)
+	}
+}
+
+func TestLockWaitTestEnvSetsTheBudget(t *testing.T) {
+	t.Setenv(lockWaitTestEnv, "3s")
+	rt := newRuntime(context.Background(), &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
+	if left := time.Until(rt.lockDeadline()); left <= 2*time.Second || left > 3*time.Second || rt.lockBudget != 3*time.Second {
+		t.Fatalf("budget %s, left %s", rt.lockBudget, left)
+	}
+}
+
+// unlockableRuntime is a read with no archive yet whose lock file cannot be opened: it is a directory.
+func unlockableRuntime(t *testing.T, ctx context.Context) *runtime {
+	t.Helper()
+	shortLockWait(t, 10*time.Second)
+	db := filepath.Join(t.TempDir(), "m365crawl.db")
+	if err := os.Mkdir(db+".lock", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rt := newRuntime(ctx, &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
+	rt.maxAge, rt.dbPath = defaultMaxAge, db
+	return rt
+}
+
+func TestReadWaitStopsOnAnArchiveFailure(t *testing.T) {
+	old := runSync
+	runSync = func(context.Context, syncer.Options) (syncer.Report, []syncer.Change, error) {
+		return syncer.Report{}, nil, errs.Locked("held")
+	}
+	t.Cleanup(func() { runSync = old })
+	rt := unlockableRuntime(t, context.Background())
+	_, err := rt.ensureFresh()
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeDBError {
+		t.Fatalf("err = %v, want db_error", err)
+	}
+}
+
+func TestSourceRefreshWaitStopsOnAnArchiveFailure(t *testing.T) {
+	rt := unlockableRuntime(t, context.Background())
+	err := rt.besideOtherRun(func() error { return errs.Locked("held") })
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeDBError {
+		t.Fatalf("err = %v, want db_error", err)
+	}
+}
+
+func TestSourceRefreshWaitStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rt := unlockableRuntime(t, ctx)
+	if err := rt.besideOtherRun(func() error { return errs.Locked("held") }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
