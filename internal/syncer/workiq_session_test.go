@@ -27,7 +27,7 @@ func TestWorkIQRetryPolicyHonorsObservableDeadlinesAndFiniteBudget(t *testing.T)
 		{"first-transient", "", 504, 0, time.Minute, time.Second, true, false},
 		{"second-transient", "", 503, 1, time.Minute, 2 * time.Second, true, false},
 		{"third-transient", "", 500, 2, time.Minute, 4 * time.Second, true, false},
-		{"no-fourth-retry", "", 504, 3, time.Minute, 0, false, false},
+		{"no-fourth-retry", "", 504, 3, time.Minute, 0, false, true},
 		{"permanent", "", 403, 0, time.Minute, 0, false, false},
 		{"unobservable-header", "", 429, 0, time.Minute, 0, false, true},
 		{"too-late", "61", 429, 0, time.Minute, 0, false, true},

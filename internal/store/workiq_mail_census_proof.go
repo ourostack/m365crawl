@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,7 +25,6 @@ and p.prepared_attempt_id=? and p.prepared_complete=1
 and ((?=0 and p.state='staged' and p.expected_revision>=f.admitted_revision)
 or (?=1 and p.state='admitted' and f.admitted_revision=f.revision))
 and p.expected_revision<f.revision
-and (f.resource='/me/mailFolders?includeHiddenFolders=true' or f.resource like '%/messages/delta()')
 order by p.id`, []any{scope.Account, scope.Qualification, attempt, admitted, admitted}, func(row *sql.Rows) error {
 		var id int64
 		var observed, resource string
@@ -33,24 +33,25 @@ order by p.id`, []any{scope.Account, scope.Qualification, attempt, admitted, adm
 			return err
 		}
 		root := resource == "/me/mailFolders?includeHiddenFolders=true"
-		if !root || folders == 0 {
+		messages := strings.HasSuffix(resource, "/messages/delta")
+		if messages || root && folders == 0 {
 			_, _ = fmt.Fprintf(h, "%d,", id)
 			hashed++
 		}
+		at, err := workIQStoredTime(sql.NullString{String: observed, Valid: true})
+		if err != nil {
+			return err
+		}
+		if at.IsZero() {
+			return errors.New("mail census original page clock is unknown")
+		}
+		if oldest == nil || at.Before(*oldest) {
+			oldest = at
+		}
 		if terminal {
-			at, err := workIQStoredTime(sql.NullString{String: observed, Valid: true})
-			if err != nil {
-				return err
-			}
-			if at.IsZero() {
-				return errors.New("mail census original page clock is unknown")
-			}
-			if oldest == nil || at.Before(*oldest) {
-				oldest = at
-			}
 			if root {
 				roots++
-			} else {
+			} else if messages {
 				terminals++
 			}
 		}

@@ -13,6 +13,7 @@ import (
 
 type WorkIQOptions struct {
 	DBPath, Source, Account string
+	Kind                    string
 	Invocation              workiq.Invocation
 	Since                   time.Time
 	MaxChats                int
@@ -20,25 +21,76 @@ type WorkIQOptions struct {
 	restarted               map[string]bool
 	pageWork                int
 	censusPasses            int
+	runLocks                *workIQRunLocks
 }
 
 type WorkIQAccountReport struct {
-	Family, Account, Status string
-	Counts, Gaps            map[string]int
+	Family  string         `json:"family"`
+	Account string         `json:"account_id"`
+	Status  string         `json:"status"`
+	Counts  map[string]int `json:"counts"`
+	Gaps    map[string]int `json:"gaps"`
 }
 
 type WorkIQReport struct {
-	Accounts []WorkIQAccountReport
-	Counts   map[string]int
-	Gaps     map[string]int
+	Accounts []WorkIQAccountReport `json:"accounts"`
+	Counts   map[string]int        `json:"counts"`
+	Gaps     map[string]int        `json:"gaps"`
+	Kind     string                `json:"kind"`
+	Enabled  bool                  `json:"enabled"`
+	Mail     []WorkIQMailCoverage  `json:"mail"`
+	Chats    []WorkIQChatCoverage  `json:"chats"`
+	Probes   []WorkIQPathProbe     `json:"probes"`
+	// Resumable says the run stopped only at a resumable stop (page budget, busy archive or a
+	// transient server failure) with its position kept, so the same command run again continues.
+	// It is not part of the report's JSON shape.
+	Resumable bool `json:"-"`
+}
+
+type WorkIQMailCoverage struct {
+	Account      string `json:"account_id"`
+	FolderID     string `json:"folder_id"`
+	Basis        string `json:"basis"`
+	ServerTotal  *int64 `json:"server_total"`
+	ArchiveCount *int   `json:"archive_count"`
+	Overlap      *int   `json:"overlap"`
+}
+
+type WorkIQChatCoverage struct {
+	Account      string    `json:"account_id"`
+	Conversation string    `json:"conversation_id"`
+	ServerBasis  string    `json:"server_basis"`
+	ArchiveBasis string    `json:"archive_basis"`
+	Since        time.Time `json:"since"`
+	Until        time.Time `json:"until"`
+	ServerCount  int       `json:"server_count"`
+	ArchiveCount int       `json:"archive_count"`
+	UnknownClock int       `json:"unknown_clock"`
+	Complete     bool      `json:"complete"`
+}
+
+type WorkIQPathProbe struct {
+	Family    string `json:"family"`
+	Account   string `json:"account_id,omitempty"`
+	PathClass string `json:"path_class"`
+	State     string `json:"state"`
+	Code      string `json:"code,omitempty"`
+	Scope     string `json:"scope"`
+	// Next is the exact command that probes this account when it needs an explicit --account; the
+	// command line fills it in.
+	Next string `json:"next,omitempty"`
 }
 
 func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error) {
-	report := WorkIQReport{Counts: map[string]int{}, Gaps: map[string]int{}}
+	report := WorkIQReport{Kind: "sync", Counts: map[string]int{}, Gaps: map[string]int{}}
+	if options.Kind == "" {
+		options.Kind = "sync"
+	}
 	if options.Source == "" {
 		options.Source = "all"
 	}
 	if options.DBPath == "" || options.Source != "mail" && options.Source != "chats" && options.Source != "all" ||
+		options.Kind != "sync" && options.Kind != "coverage" && options.Kind != "status" ||
 		options.MaxChats < 0 || options.MaxChats > 100000 || !options.Since.IsZero() && options.Since.After(workIQNow()) {
 		return report, errs.Usage("an explicit archive and valid source selection are required")
 	}
@@ -52,13 +104,21 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		}
 		options.Source = family
 	}
+	if options.runLocks == nil {
+		options.runLocks = &workIQRunLocks{}
+		defer options.runLocks.release()
+	}
+	if options.Kind != "sync" {
+		return runWorkIQProbe(ctx, options)
+	}
 	if options.Source == "chats" {
 		return runWorkIQChats(ctx, options)
 	}
 	if options.Source == "mail" {
 		return runWorkIQMail(ctx, options)
 	}
-	var resultErr error
+	var resultErr, mailErr, chatsErr error
+	mailResumable, chatsResumable := false, false
 	for _, family := range []string{"mail", "chats"} {
 		part := options
 		part.Source = family
@@ -66,10 +126,13 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		var err error
 		if family == "mail" {
 			next, err = runWorkIQMail(ctx, part)
+			mailErr, mailResumable = err, next.Resumable
 		} else {
 			next, err = runWorkIQChats(ctx, part)
+			chatsErr, chatsResumable = err, next.Resumable
 		}
 		report.Accounts = append(report.Accounts, next.Accounts...)
+		report.Enabled = report.Enabled || next.Enabled
 		for key, n := range next.Counts {
 			report.Counts[key] += n
 		}
@@ -78,11 +141,16 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		}
 		resultErr = errors.Join(resultErr, err)
 	}
+	report.Resumable = resultErr != nil && (mailErr == nil || mailResumable) && (chatsErr == nil || chatsResumable)
 	return report, resultErr
 }
 
+// workIQResumableCodes are the mail and chat sync stops that keep their position, so the same command run
+// again continues from it.
+var workIQResumableCodes = map[string]bool{"workiq_page_limit": true, "workiq_archive_busy": true, "workiq_retry_later": true}
+
 func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, error) {
-	report := WorkIQReport{Counts: map[string]int{}, Gaps: map[string]int{}}
+	report := WorkIQReport{Kind: "sync", Counts: map[string]int{}, Gaps: map[string]int{}}
 	var enabled bool
 	var facts []workiq.AccountFact
 	if err := workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
@@ -94,20 +162,25 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	}); err != nil {
 		return report, err
 	}
+	report.Enabled = enabled
 	if !enabled {
 		return report, workIQFailure("workiq_disabled")
 	}
 	user, err := workIQBootstrap(ctx, options)
 	if err != nil {
-		return report, err
+		return failedWorkIQStartupReport(ctx, options, report, facts, "mail", options.Account, err)
 	}
 	binding, err := workiq.SelectMailAccount(user, facts, options.Account)
 	if err != nil {
+		return failedWorkIQStartupReport(ctx, options, report, facts, "mail", options.Account, workIQAccountChoice(err, facts))
+	}
+	options.Account = binding.Fact.ID
+	if err := holdWorkIQScope(ctx, options, store.WorkIQScope{Family: "mail", Account: binding.Fact.ID}); err != nil {
 		return report, err
 	}
 	client, pinned, err := workIQPinned(ctx, options, binding)
 	if err != nil {
-		return report, err
+		return failedWorkIQStartupReport(ctx, options, report, facts, "mail", binding.Fact.ID, err)
 	}
 	session := &workIQSession{options: options, binding: binding, client: client}
 	var attempt int64
@@ -135,7 +208,21 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 		if err == nil && pending {
 			fullRecheck = true
 			options.censusPasses++
-			err = resetWorkIQMailCensus(ctx, options, attempt)
+			// Reset once per owed check: a run after a page-budget stop continues the same rebuild,
+			// so a recheck larger than one run's page budget still finishes.
+			continues := false
+			err = workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
+				continues, err = s.WorkIQMailRecheckContinues(ctx, attempt)
+				return err
+			})
+			if err == nil && !continues {
+				err = resetWorkIQMailCensus(ctx, options, attempt)
+				if err == nil {
+					err = workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
+						return s.MarkWorkIQMailRecheckRestarted(writeCtx, attempt)
+					})
+				}
+			}
 			if err == nil {
 				account.Counts["census_rechecks"] = 1
 			}
@@ -187,11 +274,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	account.Status = "ok"
 	code := ""
 	if err != nil {
-		account.Status, code = "failed", "workiq_failed"
-		var coded *errs.Coded
-		if errors.As(err, &coded) {
-			code = coded.Code
-		}
+		account.Status, code = "failed", workIQOutcomeCode(err)
 		var expired *workIQExpired
 		if errors.As(err, &expired) {
 			code = "workiq_delta_expired"
@@ -206,7 +289,7 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	}
 	var persistErr error
 	if attempt != 0 {
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workIQPersistBudget)
 		persistErr = workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: account.Status, ErrorCode: code, FinishedAt: workIQNow(), AllFolders: err == nil && len(account.Gaps) == 0 && !pending,
@@ -228,6 +311,9 @@ func runWorkIQMail(ctx context.Context, options WorkIQOptions) (WorkIQReport, er
 	for name, n := range account.Gaps {
 		report.Gaps[name] += n
 	}
+	// Only a stop that kept its position is resumable; an owed recheck continues after a page-budget
+	// stop rather than resetting, so the next run never discards this run's progress.
+	report.Resumable = workIQResumableCodes[code] && account.Gaps[code] > 0 && cleanupErr == nil && persistErr == nil
 	var expired *workIQExpired
 	if errors.As(err, &expired) && cleanupErr == nil && persistErr == nil {
 		return retryWorkIQBaseline(ctx, options, report, expired)

@@ -240,27 +240,51 @@ func TestWriterRoleCancellationDuringAndAfterWait(t *testing.T) {
 
 func TestWriterShortOperationBoundsContextRollsBackAndCloses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "archive.db")
-	must0(WithWorkIQWriter(context.Background(), path, func(ctx context.Context, s *Store) error {
+	oldLock := writerLock
+	t.Cleanup(func() { writerLock = oldLock })
+	lockTime := time.Duration(0)
+	writerLock = func(path string) (func(), error) {
+		start := time.Now()
+		release, err := oldLock(path)
+		lockTime += time.Since(start)
+		return release, err
+	}
+	start := time.Now()
+	firstEntered := false
+	firstErr := WithWorkIQWriter(context.Background(), path, func(ctx context.Context, s *Store) error {
+		firstEntered = true
 		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > 2*time.Second || time.Until(deadline) <= 0 {
-			t.Fatal("short writer has no two-second operation budget")
+		t.Logf("short-writer initial callback: elapsed=%s locks=%s remaining=%s", time.Since(start), lockTime, time.Until(deadline))
+		if !ok || time.Until(deadline) > WorkIQWriteBudget || time.Until(deadline) <= 0 {
+			t.Fatal("short writer has no bounded operation budget")
 		}
 		return s.SetWorkIQEnabled(ctx, true)
-	}))
+	})
+	t.Logf("short-writer initial result: elapsed=%s locks=%s entered=%t err=%T:%v", time.Since(start), lockTime, firstEntered, firstErr, firstErr)
+	must0(firstErr)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	start, lockTime = time.Now(), 0
+	entered, inserted, canceled := false, false, false
 	err := WithWorkIQWriter(ctx, path, func(ctx context.Context, s *Store) error {
+		entered = true
+		deadline, _ := ctx.Deadline()
+		t.Logf("short-writer cancellation callback: elapsed=%s locks=%s remaining=%s", time.Since(start), lockTime, time.Until(deadline))
 		return s.inTx(ctx, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `insert into meta(key,value) values('short-writer-rollback','unsafe')`)
 			if err != nil {
 				return err
 			}
+			inserted = true
 			cancel()
+			canceled = true
 			return ctx.Err()
 		})
 	})
+	t.Logf("short-writer cancellation result: elapsed=%s locks=%s entered=%t inserted=%t canceled=%t parent=%v is_canceled=%t is_deadline=%t err=%T:%v",
+		time.Since(start), lockTime, entered, inserted, canceled, ctx.Err(), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), err, err)
 	if !errors.Is(err, context.Canceled) {
-		t.Fatal("cancelled short write was not surfaced")
+		t.Fatal("cancelled short write was not surfaced", err)
 	}
 	s := must(Open(context.Background(), path))
 	defer func() { _ = s.Close() }()

@@ -16,7 +16,7 @@ func prepareRealMailInventory(t *testing.T, s *Store, attempt int64, values []js
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, id, 128); err != nil || !done {
 		t.Fatal("actual root inventory preparation failed")
 	}
-	resource := "/me/mailFolders/inbox-id/messages/delta()"
+	resource := "/me/mailFolders/inbox-id/messages/delta"
 	id = stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{"value": values, "@odata.deltaLink": resource + "?$deltatoken=next"})
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, id, 128); err != nil || !done {
 		t.Fatal("actual message inventory preparation failed")

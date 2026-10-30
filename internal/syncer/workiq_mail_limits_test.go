@@ -75,9 +75,12 @@ func TestWorkIQMailStoredPageBoundsAndInvalidCursorFailBeforeFetch(t *testing.T)
 		s, run := workIQStagedMailRun(t)
 		stageWorkIQRunRoot(t, s, run, root+"&$skiptoken=second")
 		stageWorkIQRunRoot(t, s, run, "")
-		run.pages = 9999
-		if err := run.prepare(ctx, root); err == nil || run.report.Gaps["workiq_page_limit"] != 1 {
-			t.Fatal("resumed original pages exceeded the actual account page bound")
+		run.pages = workIQMailPageLimit
+		if err := run.prepare(ctx, root); err != nil || run.pages != workIQMailPageLimit || len(run.report.Gaps) != 0 {
+			t.Fatal("re-preparing pages an earlier run fetched spent this run's fetch budget", err)
+		}
+		if err := run.fetchResource(ctx, "/me/mailFolders/inbox"); err == nil || run.report.Gaps["workiq_page_limit"] != 1 {
+			t.Fatal("a run fetched past its page budget")
 		}
 	})
 	t.Run("invalid-pending", func(t *testing.T) {

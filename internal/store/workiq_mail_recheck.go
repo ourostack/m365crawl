@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
@@ -42,34 +44,74 @@ from workiq_censuses where attempt_id=? and account_id=?`, attempt, binding.Fact
 // completed census identities. Cancellation cannot erase the request, and
 // replaying one enumeration cannot satisfy it twice.
 func (s *Store) WorkIQMailRecheckPending(ctx context.Context, attempt int64) (bool, error) {
+	_, _, pending, err := s.workIQMailRecheck(ctx, attempt)
+	return pending, err
+}
+
+// workIQMailRecheck is the recheck an attempt's mail account owes. key scopes its restart record
+// to the account and qualification; epoch names the recheck by its latest removal census and the
+// complete checks that followed it, so each owed check has its own epoch.
+func (s *Store) workIQMailRecheck(ctx context.Context, attempt int64) (key, epoch string, pending bool, err error) {
 	binding, err := s.validateWorkIQAttemptOwner(ctx, attempt)
 	if err != nil {
-		return false, err
+		return "", "", false, err
 	}
 	if binding.Fact.Family != "mail" {
-		return false, errors.New("mail census recheck requires a mail owner")
+		return "", "", false, errors.New("mail census recheck requires a mail owner")
 	}
 	var trigger int64
 	if err := s.db.QueryRowContext(ctx, `select coalesce(max(c.id),0) from workiq_censuses c
 join workiq_census_members m on m.census_id=c.id where c.account_id=? and m.removed=1`,
 		binding.Fact.ID).Scan(&trigger); err != nil {
-		return false, err
+		return "", "", false, err
 	}
 	if trigger == 0 {
-		return false, nil
+		return "", "", false, nil
 	}
 	var completed int
-	if err := s.db.QueryRowContext(ctx, `select count(distinct c.enumeration_key) from workiq_censuses c
+	var qualification string
+	if err := s.db.QueryRowContext(ctx, `select count(distinct c.enumeration_key),
+(select qualification from workiq_attempts where id=?) from workiq_censuses c
 join workiq_attempts a on a.id=c.attempt_id
 where c.account_id=? and c.id>? and c.complete=1 and c.full_enumeration=1
 and c.confirmation_complete=1 and c.enumeration_key<>'' and c.source_data_at is not null
 and a.family='mail' and a.account_id=c.account_id
 and (a.status='ok' or (a.id=? and a.status='open'))
 and not exists(select 1 from workiq_gaps g where g.attempt_id=a.id and g.resolved=0)`,
-		binding.Fact.ID, trigger, attempt).Scan(&completed); err != nil {
+		attempt, binding.Fact.ID, trigger, attempt).Scan(&completed, &qualification); err != nil {
+		return "", "", false, err
+	}
+	scope, _ := json.Marshal([]string{binding.Fact.ID, qualification}) // strings always encode
+	return "workiq_mail_recheck:" + string(scope), fmt.Sprintf("%d:%d", trigger, completed), completed < 2, nil
+}
+
+// WorkIQMailRecheckContinues says the owed recheck already retired the account's cursors and the
+// previous mail sync stopped at its page budget with its position kept, so this run continues that
+// rebuild instead of retiring its progress. Any other earlier outcome restarts the check.
+func (s *Store) WorkIQMailRecheckContinues(ctx context.Context, attempt int64) (bool, error) {
+	key, epoch, pending, err := s.workIQMailRecheck(ctx, attempt)
+	if err != nil || !pending {
 		return false, err
 	}
-	return completed < 2, nil
+	var recorded, previous string
+	err = s.db.QueryRowContext(ctx, `select coalesce((select value from meta where key=?),''),
+coalesce((select p.error_code from workiq_attempts p join workiq_attempts a on a.id=?
+where p.family='mail' and p.account_id=a.account_id and p.kind='sync' and p.qualification=a.qualification
+and p.id<a.id and p.status<>'open' order by p.id desc limit 1),'')`, key, attempt).Scan(&recorded, &previous)
+	return recorded == epoch && previous == "workiq_page_limit", err
+}
+
+// MarkWorkIQMailRecheckRestarted records that the owed recheck retired the account's cursors.
+func (s *Store) MarkWorkIQMailRecheckRestarted(ctx context.Context, attempt int64) error {
+	key, epoch, pending, err := s.workIQMailRecheck(ctx, attempt)
+	if err != nil {
+		return err
+	}
+	if !pending {
+		return errors.New("no mail census recheck is owed")
+	}
+	_, err = s.db.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do update set value=excluded.value`, key, epoch)
+	return err
 }
 
 func (s *Store) WorkIQMailResetFrontiers(ctx context.Context, attempt, after int64, limit int) ([]WorkIQMailFrontier, error) {

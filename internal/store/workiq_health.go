@@ -160,7 +160,8 @@ and a.gap_count=0 and r.enumeration_key<>''`, outcome.id, outcome.account).Scan(
 		return nil, err
 	}
 	if done.IsZero() || data.IsZero() || !done.Equal(outcome.at) || done.After(now) ||
-		done.Before(*data) || !data.After(failed) || !done.After(failed) || now.Sub(*done) >= 24*time.Hour {
+		done.Before(*data) || !data.After(failed) || !done.After(failed) ||
+		now.Sub(*done) >= 24*time.Hour || now.Sub(*data) >= 24*time.Hour {
 		return nil, nil
 	}
 	return done, nil

@@ -194,7 +194,8 @@ where kind='conversation' and account_id=? and item_rowid=?`, account.ID, rowid)
 	members, last, horizon, cacheRaw := jsonOrNil(next.Members), fmtTime(next.LastMessageAt), fmtTime(next.ReadHorizonAt), rawOrNil(next.Raw)
 	hash := hashOf(next.Kind, next.Title, next.Topic, next.DisplayName, next.TeamID, next.ParentID, members, last, horizon, next.ReadHorizonClientMessageID, next.Favorite, cacheRaw)
 	changed := !exists || next.Title != canonical.Title || next.Topic != canonical.Topic || next.DisplayName != canonical.DisplayName
-	if !exists {
+	switch {
+	case !exists:
 		result, err := tx.ExecContext(ctx, `insert into conversations(tenant_id,user_id,id,kind,title,topic,display_name,content_hash,updated_at)
 values(?,?,?,?,?,?,?,?,?)`, next.TenantID, next.UserID, next.ID, next.Kind, next.Title, next.Topic, next.DisplayName, hash, nowText())
 		if err != nil {
@@ -205,15 +206,15 @@ values(?,?,?,?,?,?,?,?,?)`, next.TenantID, next.UserID, next.ID, next.Kind, next
 			return Counts{}, err
 		}
 		counts.Inserted++
-	} else if changed {
+	case changed:
 		if _, err := tx.ExecContext(ctx, `update conversations set title=?,topic=?,display_name=?,content_hash=?,updated_at=? where rowid=?`,
 			next.Title, next.Topic, next.DisplayName, hash, nowText(), rowid); err != nil {
 			return Counts{}, err
 		}
 		counts.Updated++
-	} else if oldWinner == "" {
+	case oldWinner == "":
 		counts.Updated++
-	} else {
+	default:
 		counts.Unchanged++
 	}
 	var cacheProjection any

@@ -188,8 +188,10 @@ func TestWorkIQChatAcquisitionReadWriteAndClientFailuresStayNegative(t *testing.
 				workIQAcquisitionStub(t)
 				seedWorkIQChatOwner(t, db)
 				t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+				releaseFixture := workIQBoundaryFixture(t, db)
+				defer releaseFixture()
 				oldRead, oldWrite, oldOpen, oldClose := workIQRead, workIQWrite, workIQOpen, workIQClose
-				t.Cleanup(func() { workIQRead, workIQWrite, workIQOpen, workIQClose = oldRead, oldWrite, oldOpen, oldClose })
+				defer func() { workIQRead, workIQWrite, workIQOpen, workIQClose = oldRead, oldWrite, oldOpen, oldClose }()
 				n := 0
 				broken := errors.New("synthetic chat operation failure")
 				switch role {
@@ -421,8 +423,8 @@ func TestWorkIQChatAccountPageBudgetDoesNotAdmitTheOverLimitPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := &workIQSession{options: options, binding: binding, client: client}
-	// This account has spent its page budget on preceding selected resources.
-	// Fetch/stage is real; the next page must not be prepared or admitted.
+	// This account has spent its fetched-page budget on preceding selected resources, so the next
+	// page is neither fetched, staged, prepared nor admitted.
 	report := WorkIQAccountReport{Counts: map[string]int{"pages": 10000}, Gaps: map[string]int{}}
 	err = acquireWorkIQChat(ctx, options, session, attempt, scope, chat, &report)
 	closeErr := session.close()
@@ -436,8 +438,8 @@ func TestWorkIQChatAccountPageBudgetDoesNotAdmitTheOverLimitPage(t *testing.T) {
 	}
 	defer func() { _ = read.Close() }()
 	progress, err := read.WorkIQTraversalProgressFor(ctx, scope, "/chats/chat/messages")
-	if err != nil || progress.Revision != 1 || progress.AdmittedRevision != 0 {
-		t.Fatal("over-limit page was discarded or admitted", err)
+	if err != nil || progress.Revision != 0 || progress.AdmittedRevision != 0 {
+		t.Fatal("over-limit page was fetched or admitted", err)
 	}
 }
 

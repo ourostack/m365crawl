@@ -48,7 +48,7 @@ func TestWorkIQMailInventoryUsesActualPreparedTreeAndTerminalPages(t *testing.T)
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, rootPage, 1); err != nil || !done {
 		t.Fatal("root folder page did not prepare its durable bounded inventory")
 	}
-	delta := "/me/mailFolders/inbox-id/messages/delta()"
+	delta := "/me/mailFolders/inbox-id/messages/delta"
 	cursor := delta + "?$deltatoken=opaque%2bstate"
 	page := stageWorkIQInventoryPage(t, s, attempt, delta, map[string]any{"value": []json.RawMessage{graphMailFixture("one", "inbox-id", "one@example.test")}, "@odata.deltaLink": cursor})
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, page, 1); err != nil || !done {
@@ -99,7 +99,7 @@ func TestWorkIQMailPreparationResumesChunksAndRehydratesEarlierAttempt(t *testin
 		t.Fatal("new attempt did not resume the saved page offset")
 	}
 	for _, folder := range []string{"a", "b"} {
-		resource := "/me/mailFolders/" + folder + "/messages/delta()"
+		resource := "/me/mailFolders/" + folder + "/messages/delta"
 		page := stageWorkIQInventoryPage(t, s, next, resource, map[string]any{"value": []any{}, "@odata.deltaLink": resource + "?$deltatoken=end"})
 		if done, err := s.PrepareWorkIQMailPage(ctx, next, page, 128); err != nil || !done {
 			t.Fatal("empty folder baseline did not prepare")
@@ -138,7 +138,7 @@ func TestWorkIQMailInventoryRejectsCyclicFolderEvidence(t *testing.T) {
 		}
 	}
 	for _, folder := range []string{"a", "b"} {
-		resource := "/me/mailFolders/" + folder + "/messages/delta()"
+		resource := "/me/mailFolders/" + folder + "/messages/delta"
 		id := stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{"value": []any{}, "@odata.deltaLink": resource + "?$deltatoken=end"})
 		if done, err := s.PrepareWorkIQMailPage(ctx, attempt, id, 128); err != nil || !done {
 			t.Fatal("empty folder baseline did not prepare")
@@ -172,7 +172,7 @@ func TestWorkIQMailInventoryRequiresStableDeclaredChildCount(t *testing.T) {
 				}
 			}
 			for _, folder := range []string{"a", "b"} {
-				resource := "/me/mailFolders/" + folder + "/messages/delta()"
+				resource := "/me/mailFolders/" + folder + "/messages/delta"
 				id := stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{"value": []any{}, "@odata.deltaLink": resource + "?$deltatoken=end"})
 				if done, err := s.PrepareWorkIQMailPage(ctx, attempt, id, 128); err != nil || !done {
 					t.Fatal("actual empty folder baseline did not prepare")

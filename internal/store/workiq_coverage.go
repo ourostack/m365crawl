@@ -3,7 +3,66 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/ourostack/m365crawl/internal/workiq"
 )
+
+// WorkIQMailFolderCount requires a retained Graph binding, never a name match.
+func (s *Store) WorkIQMailFolderCount(ctx context.Context, account, folder string) (*int, error) {
+	if account == "" || folder == "" {
+		return nil, errors.New("invalid mail coverage scope")
+	}
+	present, err := s.hasWorkIQ(ctx)
+	if err != nil || !present {
+		return nil, err
+	}
+	var key int64
+	err = s.db.QueryRowContext(ctx, `select folder_key from workiq_folders where account_id=? and graph_id=?`, account, folder).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from mail_messages where account=? and folder_key=?
+and gone_at is null and evicted_at is null`, account, key).Scan(&count); err != nil {
+		return nil, err
+	}
+	return &count, nil
+}
+
+// WorkIQChatCoverageCount counts the archive's documented comparable classes.
+func (s *Store) WorkIQChatCoverageCount(ctx context.Context, account workiq.AccountFact, chat string, start, end time.Time) (int, error) {
+	if account.Family != "chats" || account.TenantID == "" || account.UserID == "" ||
+		account.ID != account.TenantID+"/"+account.UserID || chat == "" || start.IsZero() || end.Before(start) {
+		return 0, errors.New("invalid chat coverage scope")
+	}
+	var count int
+	err := s.each(ctx, `select sent_at from messages where tenant_id=? and user_id=? and conversation_id=?
+and deleted_at is null
+and message_type in ('RichText/Html','Text','RichText/Media_Card','RichText/Media_CallRecording')`,
+		func(rows *sql.Rows) error {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			at, err := workIQStoredTime(sql.NullString{String: raw, Valid: true})
+			if err != nil {
+				return err
+			}
+			if !at.Before(start) && !at.After(end) {
+				count++
+			}
+			return nil
+		}, account.TenantID, account.UserID, chat)
+	if err != nil {
+		return 0, err
+	}
+	return count, err
+}
 
 func (s *Store) workIQMailCoverage(ctx context.Context) ([]CoverageRow, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

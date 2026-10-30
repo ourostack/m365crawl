@@ -11,7 +11,7 @@ import (
 func beginRealFullWorkIQCensus(t *testing.T, s *Store, previous int64, values []json.RawMessage) int64 {
 	t.Helper()
 	ctx := context.Background()
-	resource := "/me/mailFolders/inbox-id/messages/delta()"
+	resource := "/me/mailFolders/inbox-id/messages/delta"
 	var attempt int64
 	if previous == 0 {
 		attempt = seedWorkIQMailAttempt(t, s)
@@ -277,7 +277,7 @@ func TestWorkIQMailCensusBatchRehydratedPagesAreNotASecondEnumeration(t *testing
 	must0(s.CompleteWorkIQAttempt(ctx, run, WorkIQSummary{Status: "partial", FinishedAt: mailT0}))
 	next := must(s.BeginWorkIQAttempt(ctx, WorkIQScope{Family: "mail", Account: mailAcct}, mailT0))
 	verifyWorkIQTestAttempt(t, s, next)
-	for _, path := range []string{"/me/mailFolders?includeHiddenFolders=true", "/me/mailFolders/inbox-id/messages/delta()"} {
+	for _, path := range []string{"/me/mailFolders?includeHiddenFolders=true", "/me/mailFolders/inbox-id/messages/delta"} {
 		var id int64
 		must0(s.db.QueryRowContext(ctx, `select p.id from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id where f.resource=? and f.retired=0 and p.state='staged' order by p.expected_revision`, path).Scan(&id))
 		if done, err := s.PrepareWorkIQMailPage(ctx, next, id, 128); err != nil || !done {

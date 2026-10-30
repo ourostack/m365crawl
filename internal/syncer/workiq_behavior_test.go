@@ -42,7 +42,7 @@ func TestWorkIQMailAcquisitionRefusalsNeverPublishSourceSuccess(t *testing.T) {
 }
 
 func TestWorkIQMailAcquisitionLargeMissingIDPageRemainsBoundedAndSeparate(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "200")
 	t.Setenv("WORKIQ_ACQUISITION_MODE", "no-message-id")
@@ -61,7 +61,7 @@ func TestWorkIQMailAcquisitionLargeMissingIDPageRemainsBoundedAndSeparate(t *tes
 }
 
 func TestWorkIQMailAcquisitionIncrementalCarryDoesNotFabricateNewSightings(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "200")
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}

@@ -55,7 +55,8 @@ func TestWorkIQMalformedHealthKeysAndOwnerScopeCannotBecomeCheckedEmpty(t *testi
 func TestWorkIQNativeMailCoverageRequiresTheExactRecentDataOutcome(t *testing.T) {
 	ctx := context.Background()
 	for _, mode := range []string{"covered", "equal-data-clock", "older-data", "exact-24h", "future",
-		"later-local-failure", "later-data-failure", "noncovering-same-clock", "probe-success", "disabled", "other-account", "retained-legacy"} {
+		"recent-original-data", "exact-original-24h", "old-original-recent-completion",
+		"later-local-failure", "later-data-failure", "noncovering-same-clock", "probe-success", "disabled", "other-account", "retained-legacy", "legacy-missing-code"} {
 		t.Run(mode, func(t *testing.T) {
 			s := newStore(t)
 			attempt := seedCompletedWorkIQMail(t, s)
@@ -73,6 +74,13 @@ func TestWorkIQNativeMailCoverageRequiresTheExactRecentDataOutcome(t *testing.T)
 				now = finish.Add(24 * time.Hour)
 			case "future":
 				now = finish.Add(-time.Nanosecond)
+			case "recent-original-data":
+				now = mailT0.Add(24*time.Hour - time.Nanosecond)
+			case "exact-original-24h":
+				now = mailT0.Add(24 * time.Hour)
+			case "old-original-recent-completion":
+				finish = mailT0.Add(48 * time.Hour)
+				now = finish.Add(time.Hour)
 			case "later-local-failure":
 				failed = finish.Add(time.Millisecond)
 			case "other-account":
@@ -85,8 +93,11 @@ func TestWorkIQNativeMailCoverageRequiresTheExactRecentDataOutcome(t *testing.T)
 values(?,?,?,'ok','',?),(?,?,?,'failed','outlook_mail_layout_unsupported',?)`,
 				fmtTime(lastOK), fmtTime(lastOK), key, scope,
 				fmtTime(failed), fmtTime(failed), key, scope))
-			if mode == "retained-legacy" {
+			if mode == "retained-legacy" || mode == "legacy-missing-code" {
 				must0(s.SetMailFailure(ctx, account, OutlookFailure{Code: "outlook_mail_layout_unsupported"}))
+				if mode == "legacy-missing-code" {
+					must(s.db.ExecContext(ctx, `update sync_runs set error_code='' where source=? and status='failed'`, key))
+				}
 			}
 			must0(s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "ok", FinishedAt: finish, MailProof: &proof}))
 			if mode == "later-data-failure" || mode == "noncovering-same-clock" || mode == "probe-success" {
@@ -124,7 +135,8 @@ values(?,?,?,'ok','',?),(?,?,?,'failed','outlook_mail_layout_unsupported',?)`,
 				}
 			}
 			want := "failing"
-			if mode == "covered" || mode == "probe-success" || mode == "retained-legacy" {
+			if mode == "covered" || mode == "probe-success" || mode == "retained-legacy" ||
+				mode == "recent-original-data" || mode == "legacy-missing-code" {
 				want = "covered_by_server"
 			}
 			if native == nil || native.State != want || native.LastErrorCode != "outlook_mail_layout_unsupported" ||
@@ -135,6 +147,9 @@ values(?,?,?,'ok','',?),(?,?,?,'failed','outlook_mail_layout_unsupported',?)`,
 			must0(json.Unmarshal(must(json.Marshal(native)), &public))
 			if (public["covered_through"] != nil) != (want == "covered_by_server") {
 				t.Fatal("covered clock was fabricated or omitted")
+			}
+			if want == "covered_by_server" && !native.CoveredThrough.Equal(finish) {
+				t.Fatal("coverage replaced actual completion with the original observation clock")
 			}
 		})
 	}

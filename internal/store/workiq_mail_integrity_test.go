@@ -34,6 +34,7 @@ func TestWorkIQMailRetainedSourceIdentityCannotCrossCanonicalBindings(t *testing
 	for _, edit := range []string{
 		`update workiq_rows set server_projection='broken'`,
 		`update workiq_rows set server_projection=json_set(server_projection,'$.ID','other-graph')`,
+		`update workiq_rows set graph_id='other-graph',server_projection=json_set(server_projection,'$.ID','other-graph')`,
 		`update workiq_rows set cache_seen=1,cache_projection='broken'`,
 		`update workiq_rows set cache_seen=1,cache_projection='{"Account":"outlook/other","DetailKey":99,"Body":{"HTML":"eA=="}}'`,
 		`update workiq_rows set server_deleted_at='2026-09-10T08:00:00Z',server_deleted_version='bad'`,

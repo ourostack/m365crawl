@@ -24,7 +24,7 @@ func TestWorkIQPreparationControlsFaultsRemainResumable(t *testing.T) {
 							if done, err := s.PrepareWorkIQMailPage(ctx, attempt, id, 128); err != nil || !done {
 								t.Fatal("root setup failed")
 							}
-							resource = "/me/mailFolders/inbox-id/messages/delta()"
+							resource = "/me/mailFolders/inbox-id/messages/delta"
 							id = stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{"value": []json.RawMessage{graphMailFixture("one", "inbox-id", "one@example.test")}, "@odata.deltaLink": resource + "?$deltatoken=end"})
 						}
 						inj := injectFaults(t, s)

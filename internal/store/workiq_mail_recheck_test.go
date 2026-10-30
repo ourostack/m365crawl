@@ -83,6 +83,13 @@ func TestWorkIQMailRecheckReadFaultsRemainErrors(t *testing.T) {
 			_, err := s.ConfirmWorkIQMailCensusIfFull(ctx, 1, 128)
 			return err
 		},
+		"continues": func(ctx context.Context, s *Store) error {
+			_, err := s.WorkIQMailRecheckContinues(ctx, 1)
+			return err
+		},
+		"mark": func(ctx context.Context, s *Store) error {
+			return s.MarkWorkIQMailRecheckRestarted(ctx, 1)
+		},
 	} {
 		t.Run(name, func(t *testing.T) { sweepReadFaults(t, setup, op) })
 		t.Run("closed-"+name, func(t *testing.T) {
@@ -118,5 +125,42 @@ func TestWorkIQMailConditionalConfirmationNeverPromotesAnIncrementalInventory(t 
 	if !must(s.ConfirmWorkIQMailCensusIfFull(ctx, next, 128)) ||
 		rowCount(t, s, `select count(*) from workiq_censuses where attempt_id=? and confirmation_complete=1`, next) != 0 {
 		t.Fatal("incremental inventory was silently promoted to full absence evidence")
+	}
+}
+
+func TestWorkIQMailRecheckContinuesOnlyThePageLimitedRebuildOfItsOwnCheck(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	first := seedWorkIQMailAttempt(t, s)
+	if must(s.WorkIQMailRecheckContinues(ctx, first)) {
+		t.Fatal("no owed recheck continued")
+	}
+	if err := s.MarkWorkIQMailRecheckRestarted(ctx, first); err == nil {
+		t.Fatal("a restart was recorded for a recheck nobody owes")
+	}
+	prepareRealMailInventory(t, s, first, []json.RawMessage{[]byte(`{"id":"removed","@removed":{}}`)})
+	must(s.CommitWorkIQMailGroup(ctx, first, ""))
+	must0(s.MarkWorkIQMailRecheckRestarted(ctx, first))
+	must0(s.CompleteWorkIQAttempt(ctx, first, WorkIQSummary{Status: "failed", ErrorCode: "workiq_page_limit", FinishedAt: mailT0}))
+	next := func(t *testing.T) int64 {
+		t.Helper()
+		id := must(s.BeginWorkIQAttempt(ctx, WorkIQScope{Family: "mail", Account: mailAcct}, mailT0))
+		verifyWorkIQTestAttempt(t, s, id)
+		return id
+	}
+	second := next(t)
+	if !must(s.WorkIQMailRecheckContinues(ctx, second)) {
+		t.Fatal("a run after a page-budget stop restarted the same owed check")
+	}
+	must0(s.CompleteWorkIQAttempt(ctx, second, WorkIQSummary{Status: "failed", ErrorCode: "workiq_failed", FinishedAt: mailT0}))
+	third := next(t)
+	if must(s.WorkIQMailRecheckContinues(ctx, third)) {
+		t.Fatal("a rebuild that stopped for another reason was continued instead of restarted")
+	}
+	must0(s.MarkWorkIQMailRecheckRestarted(ctx, third))
+	must0(s.CompleteWorkIQAttempt(ctx, third, WorkIQSummary{Status: "failed", ErrorCode: "workiq_page_limit", FinishedAt: mailT0}))
+	must(s.db.ExecContext(ctx, `update meta set value='0:0' where key like 'workiq_mail_recheck:%'`))
+	if must(s.WorkIQMailRecheckContinues(ctx, next(t))) {
+		t.Fatal("a restart recorded for another check continued this one")
 	}
 }

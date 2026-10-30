@@ -196,3 +196,27 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code
 		return err
 	})
 }
+
+// CloseStaleWorkIQAttempts settles every open attempt of one (family, account, kind) scope as failed
+// with workiq_interrupted. Only a caller holding that scope's WorkIQ run lock may call it: the
+// operating system releases the lock when its process dies, so no open attempt of the scope then
+// has a live owner. Attempts of other scopes may have live owners and are never touched.
+func (s *Store) CloseStaleWorkIQAttempts(ctx context.Context, scope WorkIQScope, at time.Time) (int, error) {
+	var ids []int64
+	if err := mailEach(ctx, s.db, `select id from workiq_attempts where family=? and account_id=? and kind=? and status='open' order by id`,
+		[]any{scope.Family, scope.Account, scope.Kind}, func(r *sql.Rows) error {
+			var id int64
+			err := r.Scan(&id)
+			ids = append(ids, id)
+			return err
+		}); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := s.CompleteWorkIQAttempt(ctx, id, WorkIQSummary{Status: "failed", ErrorCode: "workiq_interrupted",
+			FinishedAt: at, Gaps: map[string]int{"workiq_interrupted": 1}}); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
+}

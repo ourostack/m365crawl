@@ -13,7 +13,7 @@ import (
 )
 
 func TestWorkIQExpiredDeltaStartsVerifiedBaselineAndRetainsGoodCursor(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
 	if _, err := RunWorkIQ(context.Background(), options); err != nil {
@@ -34,9 +34,9 @@ func TestWorkIQExpiredDeltaStartsVerifiedBaselineAndRetainsGoodCursor(t *testing
 		t.Fatal("baseline recovery duplicated/reidentified mail or left a falsely resolved/current gap")
 	}
 	if count(t, db, `select count(*) from workiq_frontiers
-where resource='/me/mailFolders/folder-inbox/messages/delta()' and retired=1 and cursor like '%stable%2bstate'`) != 1 ||
+where resource='/me/mailFolders/folder-inbox/messages/delta' and retired=1 and cursor like '%stable%2bstate'`) != 1 ||
 		count(t, db, `select count(*) from workiq_frontiers
-where resource='/me/mailFolders/folder-inbox/messages/delta()' and retired=0 and generation=1 and admitted_revision>0`) != 1 {
+where resource='/me/mailFolders/folder-inbox/messages/delta' and retired=0 and generation=1 and admitted_revision>0`) != 1 {
 		t.Fatal("expired baseline overwrote the good cursor or failed to admit a new generation")
 	}
 	if count(t, db, `select count(*) from workiq_attempts where status='failed' and error_code='workiq_delta_expired'`) != 1 {
@@ -45,9 +45,9 @@ where resource='/me/mailFolders/folder-inbox/messages/delta()' and retired=0 and
 }
 
 func TestWorkIQExpiredDeltaCannotRestartSameResourceTwice(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
-	resource := "/me/mailFolders/folder-inbox/messages/delta()"
+	resource := "/me/mailFolders/folder-inbox/messages/delta"
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account, restarted: map[string]bool{resource: true}}
 	if _, err := RunWorkIQ(context.Background(), options); err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestWorkIQExpiredDeltaCannotRestartSameResourceTwice(t *testing.T) {
 }
 
 func TestWorkIQExpiredDeltaRecoveryIsBoundedPrivateAndCancelable(t *testing.T) {
-	expired := &workIQExpired{resource: "/me/mailFolders/private-opaque-id/messages/delta()", revision: 1}
+	expired := &workIQExpired{resource: "/me/mailFolders/private-opaque-id/messages/delta", revision: 1}
 	if text := fmt.Sprintf("%v|%#v", expired, expired); strings.Contains(text, "private-opaque") ||
 		!strings.Contains(text, "workiq_delta_expired") {
 		t.Fatal("an expired frontier exposed its private resource in diagnostics")

@@ -54,7 +54,7 @@ f.resource,f.family,f.account_id,p.state,f.qualification,f.scope from workiq_pag
 	root := u.Path == "/me/mailFolders"
 	escaped := strings.TrimPrefix(u.EscapedPath(), "/me/mailFolders/")
 	child := strings.HasSuffix(escaped, "/childFolders")
-	messages := strings.HasSuffix(escaped, "/messages/delta()")
+	messages := strings.HasSuffix(escaped, "/messages/delta")
 	var fixedKind string
 	if !root && !child && !messages {
 		switch escaped {
@@ -99,7 +99,7 @@ f.resource,f.family,f.account_id,p.state,f.qualification,f.scope from workiq_pag
 	if child || messages {
 		suffix := "/childFolders"
 		if messages {
-			suffix = "/messages/delta()"
+			suffix = "/messages/delta"
 		}
 		// RelativePath already validated every percent escape in this URI.
 		folder, _ = url.PathUnescape(strings.TrimSuffix(escaped, suffix))
@@ -265,7 +265,7 @@ where account_id=? and inventory_attempt=?`, []any{scope.Account, attempt}, func
 				return err
 			}
 		}
-		progress, err := loadWorkIQProgress(ctx, tx, scope, base+"/messages/delta()")
+		progress, err := loadWorkIQProgress(ctx, tx, scope, base+"/messages/delta")
 		if err != nil {
 			return err
 		}

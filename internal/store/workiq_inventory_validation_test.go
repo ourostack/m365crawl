@@ -81,7 +81,7 @@ func TestWorkIQInventoryValidationReceiptCASAndWindow(t *testing.T) {
 			s := newStore(t)
 			ctx := context.Background()
 			attempt := seedWorkIQMailAttempt(t, s)
-			resource := "/me/mailFolders/inbox-id/messages/delta()"
+			resource := "/me/mailFolders/inbox-id/messages/delta"
 			if mode == "prepare" {
 				id := stageWorkIQInventoryPage(t, s, attempt, "/me/mailFolders?includeHiddenFolders=true", map[string]any{"value": []any{}})
 				_, err := s.db.ExecContext(ctx, `create trigger block_receipt before update on workiq_pages begin select raise(ignore); end`)
@@ -220,8 +220,8 @@ func TestWorkIQInventoryValidationMissingAncestryAndProof(t *testing.T) {
 		`update workiq_folders set root_listed=0,parent_graph_id='unlisted'`,
 		`update workiq_folders set root_listed=0,parent_graph_id=graph_id,child_count=1`,
 		`update workiq_folders set child_count=null`,
-		`update workiq_frontiers set retired=1 where resource like '%/messages/delta()'`,
-		`update workiq_pages set prepared_complete=0 where frontier_id=(select id from workiq_frontiers where resource like '%/messages/delta()')`,
+		`update workiq_frontiers set retired=1 where resource like '%/messages/delta'`,
+		`update workiq_pages set prepared_complete=0 where frontier_id=(select id from workiq_frontiers where resource like '%/messages/delta')`,
 		`update meta set key='test-retained-index-key' where key like 'workiq_mail_index:%'`,
 		`update workiq_census_members set page_id=null`,
 	} {
@@ -248,7 +248,7 @@ func TestWorkIQInventoryValidationMalformedFolderAndMessageResources(t *testing.
 		{"/me/mailFolders//childFolders", map[string]any{"value": []any{}}},
 		{"/me/mailFolders/a/childFolders?includeHiddenFolders=true", map[string]any{"value": []any{map[string]any{"id": "b", "parentFolderId": "foreign"}}}},
 		{"/me/mailFolders?includeHiddenFolders=true", map[string]any{"value": []any{map[string]any{}}}},
-		{"/me/mailFolders/inbox-id/messages/delta()", map[string]any{"value": []any{map[string]any{}}}},
+		{"/me/mailFolders/inbox-id/messages/delta", map[string]any{"value": []any{map[string]any{}}}},
 	} {
 		t.Run(p.path+fmt.Sprint(p.value), func(t *testing.T) {
 			s := newStore(t)

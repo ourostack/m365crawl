@@ -61,7 +61,8 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
 		return nil, err
 	}
-	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: writerPragmas + schemaDDL, SchemaVersion: SchemaVersion})
+	// Batch schema creation so cold opens do not commit each DDL statement or retain a partial schema after failure.
+	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: writerPragmas + "begin;\n" + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +550,9 @@ from accounts a order by a.tenant_id, a.user_id`)
 	var started, finished sql.NullString
 	var r RunRow
 	var counts, omissions sql.NullString
-	err = s.db.QueryRowContext(ctx, `select id, started_at, finished_at, source, fingerprint, status, counts_json, omissions_json from sync_runs order by id desc limit 1`).
+	// WorkIQ runs are explicit server commands with their own health and doctor check, not the last sync.
+	err = s.db.QueryRowContext(ctx, `select id, started_at, finished_at, source, fingerprint, status, counts_json, omissions_json from sync_runs
+where source not like 'workiq:%' order by id desc limit 1`).
 		Scan(&id, &started, &finished, &r.Source, &r.Fingerprint, &r.Status, &counts, &omissions)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

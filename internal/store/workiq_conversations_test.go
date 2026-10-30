@@ -230,13 +230,13 @@ func TestWorkIQConversationUpdatesKeepCanonicalIdentityAndCacheReadState(t *test
 	for _, column := range []string{"server_projection", "cache_projection"} {
 		previous := ""
 		must0(s.db.QueryRowContext(ctx, `select `+column+` from workiq_rows`).Scan(&previous))
-		_, err := s.db.ExecContext(ctx, `update workiq_rows set `+column+`='broken'`)
+		_, err := s.db.ExecContext(ctx, `update workiq_rows set `+column+`='broken'`) //nolint:gosec // G202: column comes from the fixed two-column corruption-control list above.
 		must0(err)
 		before := dump(t, s)
 		if _, err := s.ApplyConversations(ctx, []teamsdesktop.Conversation{native}); err == nil || dump(t, s) != before {
 			t.Fatal("native source transaction accepted malformed projection or partially changed data")
 		}
-		_, err = s.db.ExecContext(ctx, `update workiq_rows set `+column+`=?`, previous)
+		_, err = s.db.ExecContext(ctx, `update workiq_rows set `+column+`=?`, previous) //nolint:gosec // G202: fixed corruption-control column, bound replacement value.
 		must0(err)
 	}
 	original := scrubWorkIQProjection

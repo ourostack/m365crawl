@@ -30,6 +30,7 @@ func TestWorkIQAcquisitionEveryArchiveBoundaryFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	maxReads, maxWrites := reads, writes
+	t.Logf("discovered archive boundaries: %d reads, %d writes", maxReads, maxWrites)
 	workIQRead, workIQWrite = originalRead, originalWrite
 	for _, boundary := range []struct {
 		name string
@@ -39,6 +40,9 @@ func TestWorkIQAcquisitionEveryArchiveBoundaryFailsClosed(t *testing.T) {
 			t.Run(fmt.Sprintf("%s-%d", boundary.name, at), func(t *testing.T) {
 				db, account := workIQAcquisitionArchive(t)
 				workIQAcquisitionStub(t)
+				releaseFixture := workIQBoundaryFixture(t, db)
+				defer releaseFixture()
+				fixtureRead, fixtureWrite := workIQRead, workIQWrite
 				failure := errors.New("synthetic archive boundary failure")
 				calls := 0
 				workIQRead = func(ctx context.Context, path string, op func(*store.Store) error) error {
@@ -48,7 +52,7 @@ func TestWorkIQAcquisitionEveryArchiveBoundaryFailsClosed(t *testing.T) {
 							return failure
 						}
 					}
-					return originalRead(ctx, path, op)
+					return fixtureRead(ctx, path, op)
 				}
 				workIQWrite = func(ctx context.Context, path string, op func(context.Context, *store.Store) error) error {
 					if boundary.name == "write" {
@@ -57,10 +61,13 @@ func TestWorkIQAcquisitionEveryArchiveBoundaryFailsClosed(t *testing.T) {
 							return failure
 						}
 					}
-					return originalWrite(ctx, path, op)
+					return fixtureWrite(ctx, path, op)
 				}
 				report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "mail", Account: account})
 				workIQRead, workIQWrite = originalRead, originalWrite
+				if calls < at {
+					t.Fatal("discovered archive boundary was not reached")
+				}
 				if !errors.Is(err, failure) {
 					t.Fatal("an archive boundary failure became empty success or lost its cause", err)
 				}

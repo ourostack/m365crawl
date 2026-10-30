@@ -108,18 +108,38 @@ func writerContention(err error) bool {
 	return errors.As(err, &coded) && coded.Code == "locked"
 }
 
-func WithWorkIQWriter(ctx context.Context, path string, operation func(context.Context, *Store) error) (err error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	release, err := AcquireWriter(ctx, path, WriterShortServer)
+// WorkIQWriteBudget is the default time one short WorkIQ write may take once the writer is held.
+const WorkIQWriteBudget = 10 * time.Second
+
+// WithWorkIQWriter runs one short WorkIQ write with the default operation budget.
+func WithWorkIQWriter(ctx context.Context, path string, operation func(context.Context, *Store) error) error {
+	return WithWorkIQWriterFor(ctx, path, 0, operation)
+}
+
+// WithWorkIQWriterFor acquires the short server writer and opens the archive within two seconds,
+// then gives the operation its own budget (WorkIQWriteBudget when zero), so a large page is not
+// held to the acquisition budget. A write that returned success is never reported as a deadline.
+func WithWorkIQWriterFor(ctx context.Context, path string, budget time.Duration, operation func(context.Context, *Store) error) (err error) {
+	acquire, cancelAcquire := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelAcquire()
+	release, err := AcquireWriter(acquire, path, WriterShortServer)
 	if err != nil {
 		return err
 	}
 	defer release()
-	s, err := Open(ctx, path)
+	s, err := Open(acquire, path)
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, s.Close(), ctx.Err()) }()
-	return operation(ctx, s)
+	if budget <= 0 {
+		budget = WorkIQWriteBudget
+	}
+	opCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	defer func() {
+		if err = errors.Join(err, s.Close()); err != nil {
+			err = errors.Join(err, opCtx.Err())
+		}
+	}()
+	return operation(opCtx, s)
 }

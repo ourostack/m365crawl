@@ -123,7 +123,7 @@ join workiq_censuses c on c.id=cm.census_id where c.attempt_id=? and pg.frontier
 			p.ID, p.Revision-1).Scan(&delta); err != nil {
 			return err
 		}
-		if strings.Contains(resource, "/messages/delta()") && delta == "" {
+		if strings.HasSuffix(resource, "/messages/delta") && delta == "" {
 			return errors.New("WorkIQ mail baseline has no terminal delta cursor")
 		}
 		result, err := tx.ExecContext(ctx, `update workiq_frontiers set cursor=?,pending_cursor=?,admitted_revision=revision,baseline=0

@@ -10,7 +10,7 @@ func TestWorkIQInventoryControlsAtomicProofAndReceiptFaults(t *testing.T) {
 	for _, mode := range []string{"seal", "seal-empty", "seal-child", "admit", "carry", "carry-unknown", "restart"} {
 		t.Run(mode, func(t *testing.T) {
 			var attempt int64
-			resource := "/me/mailFolders/inbox-id/messages/delta()"
+			resource := "/me/mailFolders/inbox-id/messages/delta"
 			setup := func(t *testing.T, s *Store) {
 				ctx := context.Background()
 				attempt = seedWorkIQMailAttempt(t, s)
@@ -29,7 +29,7 @@ func TestWorkIQInventoryControlsAtomicProofAndReceiptFaults(t *testing.T) {
 						_, err = s.PrepareWorkIQMailPage(ctx, attempt, id, 128)
 						must0(err)
 						for _, folder := range []string{"a", "b"} {
-							path := "/me/mailFolders/" + folder + "/messages/delta()"
+							path := "/me/mailFolders/" + folder + "/messages/delta"
 							id = stageWorkIQInventoryPage(t, s, attempt, path, map[string]any{"value": []any{}, "@odata.deltaLink": path + "?$deltatoken=end"})
 							_, err = s.PrepareWorkIQMailPage(ctx, attempt, id, 128)
 							must0(err)

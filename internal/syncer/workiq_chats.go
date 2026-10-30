@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
@@ -121,8 +120,14 @@ func discoverWorkIQChats(ctx context.Context, options WorkIQOptions, facts []wor
 	return out, nil
 }
 
+// workIQChatPageLimit bounds the pages one chat sync fetches per account; a test seam.
+var workIQChatPageLimit = 10000
+
+// workIQChatSeenLimit bounds the run-local message IDs one chat sync remembers; a test seam.
+var workIQChatSeenLimit = 1000000
+
 func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, error) {
-	report := WorkIQReport{Counts: map[string]int{}, Gaps: map[string]int{}}
+	report := WorkIQReport{Kind: "sync", Counts: map[string]int{}, Gaps: map[string]int{}}
 	if options.MaxChats == 0 {
 		options.MaxChats = 200
 	}
@@ -137,6 +142,7 @@ func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 	}); err != nil {
 		return report, err
 	}
+	report.Enabled = enabled
 	if !enabled {
 		return report, workIQFailure("workiq_disabled")
 	}
@@ -151,7 +157,7 @@ func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 	}
 	chats, err := discoverWorkIQChats(ctx, options, facts, &report)
 	if err != nil {
-		return report, err
+		return failedWorkIQStartupReport(ctx, options, report, facts, "chats", options.Account, err)
 	}
 	groups := map[string][]workIQSelectedChat{}
 	var accounts []string
@@ -163,8 +169,10 @@ func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 		groups[id] = append(groups[id], chat)
 	}
 	sort.Strings(accounts)
+	resumable := true
 	for _, id := range accounts {
 		account, accountErr := acquireWorkIQChatAccount(ctx, options, groups[id])
+		resumable = resumable && (accountErr == nil || workIQResumableCodes[workIQOutcomeCode(accountErr)])
 		report.Accounts = append(report.Accounts, account)
 		for key, n := range account.Counts {
 			report.Counts[key] += n
@@ -176,6 +184,7 @@ func runWorkIQChats(ctx context.Context, options WorkIQOptions) (WorkIQReport, e
 		}
 		err = errors.Join(err, accountErr)
 	}
+	report.Resumable = err != nil && resumable
 	return report, err
 }
 
@@ -202,11 +211,13 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 		report.Gaps["workiq_failed"]++
 		return report, err
 	}
+	if err := holdWorkIQScope(ctx, options, store.WorkIQScope{Family: "chats", Account: binding.Fact.ID}); err != nil {
+		report.Status = "failed"
+		return report, err
+	}
 	client, pinned, err := workIQPinned(ctx, options, binding)
 	if err != nil {
-		report.Status = "failed"
-		report.Gaps["workiq_failed"]++
-		return report, err
+		return recordWorkIQStartupFailure(ctx, options, true, report, err)
 	}
 	session := &workIQSession{options: options, binding: binding, client: client}
 	scope := store.WorkIQScope{Family: "chats", Account: binding.Fact.ID, Qualification: window.Qualification,
@@ -241,11 +252,7 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 	report.Status = "ok"
 	code := ""
 	if err != nil {
-		report.Status, code = "failed", "workiq_failed"
-		var coded *errs.Coded
-		if errors.As(err, &coded) {
-			code = coded.Code
-		}
+		report.Status, code = "failed", workIQOutcomeCode(err)
 		gap := code
 		if !strings.HasPrefix(gap, "workiq_") {
 			gap = "workiq_failed"
@@ -255,7 +262,7 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 		report.Status = "ok_with_omissions"
 	}
 	if attempt != 0 {
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workIQPersistBudget)
 		persistErr := workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.CompleteWorkIQAttempt(writeCtx, attempt, store.WorkIQSummary{
 				Status: report.Status, ErrorCode: code, FinishedAt: workIQNow(), Counts: report.Counts, Gaps: report.Gaps,
@@ -274,6 +281,8 @@ func acquireWorkIQChatAccount(ctx context.Context, options WorkIQOptions, chats 
 func acquireWorkIQChat(ctx context.Context, options WorkIQOptions, session *workIQSession, attempt int64, scope store.WorkIQScope, chat workiq.Chat, report *WorkIQAccountReport) error {
 	resource := "/chats/" + url.PathEscape(chat.ID) + "/messages"
 	var after int64
+	// The run-local seen set counts Graph's cross-page repeats once, within the same bounds as coverage.
+	seen, seenBytes := map[string]string{}, 0
 	prepare := func() error {
 		for {
 			var ids []int64
@@ -287,15 +296,11 @@ func acquireWorkIQChat(ctx context.Context, options WorkIQOptions, session *work
 				return nil
 			}
 			for _, id := range ids {
-				report.Counts["pages"]++
-				if report.Counts["pages"] > 10000 {
-					return workIQFailure("workiq_page_limit")
-				}
 				done, limit := false, 128
 				for !done {
 					var result store.WorkIQChatPageResult
 					err := workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) (err error) {
-						result, err = s.PrepareWorkIQChatPage(writeCtx, attempt, id, chat.Raw, limit)
+						result, err = s.PrepareWorkIQChatPageSeen(writeCtx, attempt, id, chat.Raw, limit, seen)
 						return err
 					})
 					if err != nil {
@@ -306,6 +311,10 @@ func acquireWorkIQChat(ctx context.Context, options WorkIQOptions, session *work
 						return err
 					}
 					report.Counts["messages_seen"] += result.Seen
+					report.Counts["duplicates_skipped"] += result.DuplicatesSkipped
+					if seenBytes += result.SeenBytes; len(seen) > workIQChatSeenLimit || seenBytes > 64*1024*1024 {
+						return workIQFailure("workiq_message_count_limit")
+					}
 					report.Counts["messages_in_window"] += result.InWindow
 					report.Counts["messages_outside_window"] += result.OutsideWindow
 					report.Counts["messages_unknown_clock"] += result.UnknownClock
@@ -350,11 +359,17 @@ func acquireWorkIQChat(ctx context.Context, options WorkIQOptions, session *work
 		if err != nil {
 			return err
 		}
+		// Only pages fetched in this run count: pages staged by earlier runs are prepared again for
+		// free, so a chat larger than the cap continues on the next run.
+		if report.Counts["pages"] >= workIQChatPageLimit {
+			return workIQFailure("workiq_page_limit")
+		}
 		page, err := session.fetch(ctx, path)
 		if err != nil {
 			return err
 		}
-		if err := workIQWrite(ctx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
+		report.Counts["pages"]++
+		if err := workIQWrite(workIQPageWrite(ctx, len(page.JSON)), options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.StageWorkIQPage(writeCtx, store.WorkIQPageBatch{AttemptID: attempt, Resource: resource,
 				ExpectedRevision: p.Revision, Page: page, ObservedAt: workIQNow()})
 		}); err != nil {

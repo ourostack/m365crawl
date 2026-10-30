@@ -181,25 +181,30 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 	}
 	cacheFirst := false
 	cacheSeen := false
-	var oldProjection string
 	var oldWinner string
 	var cachedProjection sql.NullString
 	var initialCacheSeen *time.Time
 	var initialCacheVersion any
-	if bound {
-		if err := tx.QueryRowContext(ctx, `select cache_first,cache_seen,server_projection,winner,cache_projection from workiq_rows where kind='mail' and account_id=? and item_rowid=?`,
-			account, rowid).Scan(&cacheFirst, &cacheSeen, &oldProjection, &oldWinner, &cachedProjection); err != nil {
+	var previous *workiq.MailMessage
+	loadPrevious := func() error {
+		var raw, graphID string
+		if err := tx.QueryRowContext(ctx, `select cache_first,cache_seen,server_projection,winner,cache_projection,graph_id from workiq_rows where kind='mail' and account_id=? and item_rowid=?`,
+			account, rowid).Scan(&cacheFirst, &cacheSeen, &raw, &oldWinner, &cachedProjection, &graphID); err != nil {
 			return err
 		}
-		var previous workiq.MailMessage
-		if json.Unmarshal([]byte(oldProjection), &previous) != nil || previous.ID != server.ID {
+		var retained workiq.MailMessage
+		if json.Unmarshal([]byte(raw), &retained) != nil || retained.ID != graphID {
 			return errors.New("invalid retained server mail projection")
 		}
-		if server.ModifiedAt != nil && previous.ModifiedAt != nil && server.ModifiedAt.Before(*previous.ModifiedAt) {
-			return nil
+		previous = &retained
+		return nil
+	}
+	if bound {
+		if err := loadPrevious(); err != nil {
+			return err
 		}
-		if server.Body == "" && previous.Body != "" {
-			server.Body, server.BodyType, server.BodyPresent = previous.Body, previous.BodyType, previous.BodyPresent
+		if previous.ID != server.ID {
+			return errors.New("invalid retained server mail projection")
 		}
 	}
 	if !bound && workiq.NormalizeMessageID(server.InternetMessageID) != "" {
@@ -225,7 +230,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 					return err
 				}
 				if existing {
-					if err := tx.QueryRowContext(ctx, `select cache_first,cache_seen from workiq_rows where kind='mail' and account_id=? and item_rowid=?`, account, rowid).Scan(&cacheFirst, &cacheSeen); err != nil {
+					if err := loadPrevious(); err != nil {
 						return err
 					}
 				} else {
@@ -237,6 +242,16 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 		} else if copies > 1 || len(candidates) > 1 {
 			result.Gaps["workiq_mail_identity_ambiguous"]++
 		}
+	}
+	moved := false
+	if previous != nil {
+		if server.ModifiedAt != nil && previous.ModifiedAt != nil && server.ModifiedAt.Before(*previous.ModifiedAt) {
+			return nil
+		}
+		if server.Body == "" && previous.Body != "" {
+			server.Body, server.BodyType, server.BodyPresent = previous.Body, previous.BodyType, previous.BodyPresent
+		}
+		moved = server.FolderID != previous.FolderID
 	}
 	m, err := workIQMailProjection(ctx, tx, account, server)
 	if err != nil {
@@ -289,6 +304,12 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 		}
 		if cacheHasBody {
 			winner = "desktop_cache"
+			if moved {
+				if _, err := tx.ExecContext(ctx, `update mail_messages set folder_key=?,state_seen_at=?,modified_at=? where rowid=? and folder_key<>?`,
+					m.FolderKey, fmtTime(observed), fmtTime(observed), rowid, m.FolderKey); err != nil {
+					return err
+				}
+			}
 		} else {
 			if cacheSeen {
 				if nativeRead.Valid {

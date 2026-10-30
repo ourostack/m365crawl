@@ -25,6 +25,7 @@ func retainWorkIQMailCacheMarks(ctx context.Context, tx *sql.Tx, account string,
 		return err
 	}
 	scope, args := workIQMailMarkSelection(account, ids)
+	//nolint:gosec // G202: scope contains only fixed predicates/placeholders; all values are bound.
 	_, err = tx.ExecContext(ctx, `update workiq_rows set
 cache_first_miss_at=coalesce(cache_first_miss_at,(select a.first_missed_at from mail_absent a join mail_messages m on m.account=a.account and m.detail_key=a.detail_key where m.account=workiq_rows.account_id and m.rowid=workiq_rows.item_rowid)),
 cache_gone_at=coalesce(cache_gone_at,(select m.gone_at from mail_messages m where m.account=workiq_rows.account_id and m.rowid=workiq_rows.item_rowid)),

@@ -15,9 +15,22 @@ type WorkIQChatPageResult struct {
 	WorkIQMessageResult
 	Complete                                    bool
 	Seen, InWindow, OutsideWindow, UnknownClock int
+	DuplicatesSkipped                           int
+	// SeenBytes is the ID and clock bytes this chunk added to the run's seen map, for its bound.
+	SeenBytes int
 }
 
+// PrepareWorkIQChatPage prepares one chunk of a page that is counted on its own.
 func (s *Store) PrepareWorkIQChatPage(ctx context.Context, attempt, pageID int64, rawChat json.RawMessage, limit int) (WorkIQChatPageResult, error) {
+	return s.PrepareWorkIQChatPageSeen(ctx, attempt, pageID, rawChat, limit, map[string]string{})
+}
+
+// PrepareWorkIQChatPageSeen prepares one chunk of a chat page. seen maps each message ID this run
+// already counted for the chat to its server clocks; it changes only after the chunk commits, so a
+// retried chunk never counts twice. Graph repeats unchanged messages on the next page, so a repeat
+// with the same clocks is counted once; a repeat with other clocks is a gap for this chat. Earlier
+// chunks of the same page are already in seen, and a page naming one ID twice is refused.
+func (s *Store) PrepareWorkIQChatPageSeen(ctx context.Context, attempt, pageID int64, rawChat json.RawMessage, limit int, seen map[string]string) (WorkIQChatPageResult, error) {
 	if limit < 1 || limit > 128 {
 		return WorkIQChatPageResult{}, errors.New("invalid bounded chat page preparation")
 	}
@@ -84,16 +97,17 @@ join workiq_attempts o on o.id=p.attempt_id join workiq_attempts a on a.id=? whe
 	}
 	values := *collection.Value
 	headers := make([]workiq.MessageHeader, len(values))
-	seen := map[string]bool{}
+	inPage := map[string]bool{}
 	for i, raw := range values {
 		header, err := workiq.DecodeMessageHeader(ctx, raw)
 		if err != nil {
 			return WorkIQChatPageResult{}, err
 		}
-		if seen[header.ID] {
+		// Live repeats were only ever across pages; one page naming an ID twice stays corrupt.
+		if inPage[header.ID] {
 			return WorkIQChatPageResult{}, errors.New("chat page repeats an identity across preparation chunks")
 		}
-		seen[header.ID] = true
+		inPage[header.ID] = true
 		headers[i] = header
 	}
 	oldOffset := offset
@@ -110,14 +124,25 @@ join workiq_attempts o on o.id=p.attempt_id join workiq_attempts a on a.id=? whe
 	}
 	until := min(offset+int64(limit), int64(len(values)))
 	var selected []json.RawMessage
+	chunk, changed := map[string]string{}, 0
 	for i := offset; i < until; i++ {
-		result.Seen++
 		header := headers[i]
-		if header.CreatedAt == nil {
+		if version, repeated := seen[header.ID]; repeated {
+			if version == header.Version {
+				result.DuplicatesSkipped++
+			} else {
+				changed++
+			}
+			continue
+		}
+		chunk[header.ID] = header.Version
+		result.Seen++
+		switch {
+		case header.CreatedAt == nil:
 			result.UnknownClock++
-		} else if header.CreatedAt.Before(*begin) || header.CreatedAt.After(*end) {
+		case header.CreatedAt.Before(*begin) || header.CreatedAt.After(*end):
 			result.OutsideWindow++
-		} else {
+		default:
 			result.InWindow++
 			selected = append(selected, values[i])
 		}
@@ -131,6 +156,9 @@ join workiq_attempts o on o.id=p.attempt_id join workiq_attempts a on a.id=? whe
 	result.WorkIQMessageResult = mapped
 	if result.UnknownClock > 0 {
 		result.Gaps["workiq_clock_unknown"] += result.UnknownClock
+	}
+	if changed > 0 {
+		result.Gaps["workiq_message_changed_during_traversal"] += changed
 	}
 	result.Complete = until == int64(len(values))
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
@@ -163,6 +191,10 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`,
 	})
 	if err != nil {
 		return WorkIQChatPageResult{}, err
+	}
+	for id, version := range chunk {
+		seen[id] = version
+		result.SeenBytes += len(id) + len(version)
 	}
 	return result, nil
 }

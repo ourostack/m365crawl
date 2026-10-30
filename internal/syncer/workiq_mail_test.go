@@ -53,7 +53,7 @@ func workIQAcquisitionArchive(t *testing.T) (string, string) {
 }
 
 func TestWorkIQRemovedDeltaSchedulesTwoActualGapFreeAccountCensuses(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	ctx := context.Background()
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
@@ -78,7 +78,7 @@ func TestWorkIQRemovedDeltaSchedulesTwoActualGapFreeAccountCensuses(t *testing.T
 }
 
 func TestWorkIQFailedCensusClientCleanupCannotPublishSecondMiss(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	ctx := context.Background()
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
@@ -130,7 +130,7 @@ func TestWorkIQFailedCensusClientCleanupCannotPublishSecondMiss(t *testing.T) {
 }
 
 func TestWorkIQMovedDeltaRechecksEveryFolderWithoutChangingPublicIdentity(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	ctx := context.Background()
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
@@ -166,7 +166,7 @@ func TestWorkIQMovedDeltaRechecksEveryFolderWithoutChangingPublicIdentity(t *tes
 }
 
 func TestWorkIQCensusRechecksRetainEarlierCommandWriteCounts(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	ctx := context.Background()
 	options := WorkIQOptions{DBPath: db, Source: "mail", Account: account}
@@ -255,19 +255,19 @@ func workIQAcquisitionStub(t *testing.T) string {
 		}
 		exe = filepath.Join(t.TempDir(), name)
 		acquisitionStubBuild.Do(func() {
-			cmd := osexec.Command("go", "build", "-o", exe, "../workiq/testdata/stub")
+			cmd := osexec.Command("go", "build", "-o", exe, "../workiq/testdata/stub") //nolint:gosec // G204: fixed synthetic source, private test executable output.
 			cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off")
 			if output, err := cmd.CombinedOutput(); err != nil {
 				acquisitionStubBuildErr = fmt.Errorf("build synthetic helper: %w: %s", err, output)
 				return
 			}
-			acquisitionStubImage, acquisitionStubBuildErr = os.ReadFile(filepath.Clean(exe))
+			acquisitionStubImage, acquisitionStubBuildErr = os.ReadFile(filepath.Clean(exe)) //nolint:gosec // G703: just-built synthetic helper in t.TempDir.
 		})
 		if acquisitionStubBuildErr != nil {
 			t.Fatal(acquisitionStubBuildErr)
 		}
-		if _, err := os.Stat(exe); os.IsNotExist(err) {
-			if err := os.WriteFile(exe, acquisitionStubImage, 0o700); err != nil {
+		if _, err := os.Stat(exe); os.IsNotExist(err) { //nolint:gosec // G703: trusted test-only helper override or t.TempDir output, never server content.
+			if err := os.WriteFile(exe, acquisitionStubImage, 0o700); err != nil { //nolint:gosec // G306: synthetic executable, private to the test.
 				t.Fatal(err)
 			}
 		} else if err != nil {
@@ -361,7 +361,7 @@ func TestWorkIQMailAcquisitionRetriesOnlyAfterReopeningAndRepinning(t *testing.T
 		if call.Path == "/me" {
 			me++
 		}
-		if call.Path == "/me/mailFolders/folder-inbox/messages/delta()" {
+		if call.Path == "/me/mailFolders/folder-inbox/messages/delta" {
 			page++
 		}
 	}

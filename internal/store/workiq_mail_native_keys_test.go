@@ -20,7 +20,7 @@ func TestWorkIQMailFutureNativeFolderKeyCannotReplaceGraphFolder(t *testing.T) {
 	root := stageWorkIQInventoryPage(t, s, attempt, "/me/mailFolders?includeHiddenFolders=true", map[string]any{"value": []any{map[string]any{"id": "server-folder", "displayName": "Server folder", "childFolderCount": 0}}})
 	_, err = s.PrepareWorkIQMailPage(ctx, attempt, root, 128)
 	must0(err)
-	resource := "/me/mailFolders/server-folder/messages/delta()"
+	resource := "/me/mailFolders/server-folder/messages/delta"
 	page := stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{"value": []json.RawMessage{graphMailFixture("one", "server-folder", "one@example.test")}, "@odata.deltaLink": resource + "?$deltatoken=end"})
 	_, err = s.PrepareWorkIQMailPage(ctx, attempt, page, 128)
 	must0(err)

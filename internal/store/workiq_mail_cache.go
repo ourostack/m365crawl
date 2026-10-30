@@ -47,6 +47,12 @@ func prepareWorkIQCacheMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailB
 	if err != nil || !have {
 		return b, nil, err
 	}
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_rows where kind='mail' and account_id=?)`, b.Account).Scan(&have); err != nil {
+		return b, nil, err
+	}
+	if !have {
+		return b, nil, nil
+	}
 	counts := map[string]int{}
 	var reservedHigh uint32
 	for _, m := range b.Result.Messages {
@@ -187,8 +193,10 @@ or exists(select 1 from workiq_aliases where kind='mail' and account_id=? and na
 func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed, fresh time.Time) (outlookmail.Message, error) {
 	var raw, originalHeader, oldWinner, retainedGraphID string
 	var oldCache sql.NullString
-	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner,w.graph_id from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
-where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan(&raw, &originalHeader, &oldCache, &oldWinner, &retainedGraphID)
+	var currentFolder uint32
+	var cacheVersion sql.NullInt64
+	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner,w.graph_id,m.folder_key,w.cache_version from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
+where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan(&raw, &originalHeader, &oldCache, &oldWinner, &retainedGraphID, &currentFolder, &cacheVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, nil
 	}
@@ -228,15 +236,23 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		effective.HasAttachments = &yes
 	}
 	effective.MessageID = originalHeader
+	newCopy := false
 	if !fresh.IsZero() {
 		copyVersion, err := workIQNativeMailCopyVersion(fresh)
 		if err != nil {
 			return m, err
 		}
+		newCopy = !cacheVersion.Valid || copyVersion > cacheVersion.Int64
 		if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_seen_at=?,cache_version=?,
 cache_first_miss_at=null,cache_gone_at=null,cache_evicted_at=null where kind='mail' and account_id=? and item_rowid=?
 and (cache_version is null or cache_version<?)`, workIQTimeValue(&observed), copyVersion, account, rowid, copyVersion); err != nil {
 			return m, err
+		}
+	}
+	if !newCopy {
+		effective.FolderKey, effective.Folder.Key = currentFolder, currentFolder
+		if mapped.FolderKey == currentFolder {
+			effective.Folder = mapped.Folder
 		}
 	}
 	if oldCache.Valid && oldCache.String == string(safe) && oldWinner == winner {

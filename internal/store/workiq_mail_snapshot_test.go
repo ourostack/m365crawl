@@ -148,7 +148,7 @@ func TestWorkIQMailNativeSnapshotRejectsInvalidScrubAndClocks(t *testing.T) {
 		t.Run(column, func(t *testing.T) {
 			s := newStore(t)
 			mustCommitMail(t, s, mailBatch(mailT0, local))
-			_, err := s.db.Exec(`update mail_messages set ` + column + `='bad'`)
+			_, err := s.db.Exec(`update mail_messages set ` + column + `='bad'`) //nolint:gosec // G202: column is selected from the fixed corruption-control list above.
 			must0(err)
 			must0(s.inTx(context.Background(), func(tx *sql.Tx) error {
 				var id int64

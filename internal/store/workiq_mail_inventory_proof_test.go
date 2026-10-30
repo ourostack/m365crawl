@@ -22,7 +22,7 @@ func prepareUnsealedWorkIQInventory(t *testing.T, s *Store) int64 {
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, root, 128); err != nil || !done {
 		t.Fatal("actual root did not prepare")
 	}
-	path := "/me/mailFolders/inbox-id/messages/delta()"
+	path := "/me/mailFolders/inbox-id/messages/delta"
 	page := stageWorkIQInventoryPage(t, s, attempt, path, map[string]any{"value": []any{}, "@odata.deltaLink": path + "?$deltatoken=end"})
 	if done, err := s.PrepareWorkIQMailPage(ctx, attempt, page, 128); err != nil || !done {
 		t.Fatal("actual folder baseline did not prepare")
@@ -199,7 +199,7 @@ func TestWorkIQMailInventoryProofFileIdentityAndPrivateRendering(t *testing.T) {
 			if dump(t, s) != before {
 				t.Fatal("archive identity failure changed readiness")
 			}
-			text := fmt.Sprintf("%v %#v", proof, proof) + string(must(json.Marshal(proof)))
+			text := fmt.Sprintf("%v %#v", proof, proof) + string(must(json.Marshal(proof))) //nolint:staticcheck // SA9005: this capability must not expose its private proof when serialized.
 			if strings.Contains(text, s.cs.Path()) || strings.Contains(text, proof.enumeration) {
 				t.Fatal("opaque inventory proof formatting exposed private source state")
 			}
@@ -226,7 +226,7 @@ func TestWorkIQMailInventoryProofScopeAndCompletedCarryReplay(t *testing.T) {
 		t.Fatal("chat owner sealed a mail proof")
 	}
 	must0(s.SealWorkIQMailInventoryProof(ctx, first, proof, mailT0))
-	resource := "/me/mailFolders/inbox-id/messages/delta()"
+	resource := "/me/mailFolders/inbox-id/messages/delta"
 	must0(s.AdmitWorkIQFrontier(ctx, first, resource, 1))
 	must0(s.AdmitWorkIQFrontier(ctx, first, "/me/mailFolders?includeHiddenFolders=true", 1))
 	must0(s.CompleteWorkIQAttempt(ctx, first, WorkIQSummary{Status: "ok", FinishedAt: mailT0}))

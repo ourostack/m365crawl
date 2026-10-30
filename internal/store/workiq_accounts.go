@@ -146,6 +146,20 @@ where source=? and database=? and store=? and key_json=? and removed_at is null`
 			}
 		}
 	}
+	err = s.each(ctx, `select family,account_id,address from workiq_accounts`, func(rs *sql.Rows) error {
+		var family, id, address string
+		if err := rs.Scan(&family, &id, &address); err != nil {
+			return err
+		}
+		if fact := facts[id]; fact != nil && fact.Family == family && len(fact.Addresses) == 0 &&
+			(family == "chats" || !fact.IdentityPresent) {
+			fact.Addresses = append(fact.Addresses, address)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	var result []workiq.AccountFact
 	for _, fact := range facts {
 		result = append(result, *fact)

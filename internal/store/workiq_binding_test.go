@@ -108,8 +108,8 @@ func TestWorkIQAttemptOwnerIsRevalidatedBeforeEachPage(t *testing.T) {
 	must0(s.SetWorkIQEnabled(ctx, true))
 	attempt := must(s.BeginWorkIQAttempt(ctx, WorkIQScope{Family: "mail", Account: account}, base))
 	verifyWorkIQTestAttempt(t, s, attempt)
-	page := must(workiq.DecodePage(ctx, []byte(`{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[],"@odata.nextLink":"/me/mailFolders/inbox/messages/delta()?$skiptoken=one"}}]}}`)))
-	batch := WorkIQPageBatch{AttemptID: attempt, Resource: "/me/mailFolders/inbox/messages/delta()", Page: page, ObservedAt: base}
+	page := must(workiq.DecodePage(ctx, []byte(`{"structuredContent":{"results":[{"statusCode":200,"data":{"value":[],"@odata.nextLink":"/me/mailFolders/inbox/messages/delta?$skiptoken=one"}}]}}`)))
+	batch := WorkIQPageBatch{AttemptID: attempt, Resource: "/me/mailFolders/inbox/messages/delta", Page: page, ObservedAt: base}
 	must0(s.StageWorkIQPage(ctx, batch))
 	_, err := s.db.ExecContext(ctx, `insert into meta(key,value) values(?,?)`, outlookIdentityKey+account, "contradictory@example.invalid")
 	must0(err)

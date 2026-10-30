@@ -4,21 +4,29 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
+// workIQMailPageLimit bounds the pages one mail run fetches; a test seam. Pages staged by earlier
+// runs are re-prepared without counting, so a mailbox larger than one run's budget finishes over
+// several runs from its stored position.
+var workIQMailPageLimit = 10000
+
 type workIQMailRun struct {
-	options  WorkIQOptions
-	session  *workIQSession
-	attempt  int64
-	account  string
-	report   *WorkIQAccountReport
-	prepared map[string]int64
-	visited  map[string]bool
-	jobs     []string
-	pages    int
+	options   WorkIQOptions
+	session   *workIQSession
+	attempt   int64
+	account   string
+	report    *WorkIQAccountReport
+	prepared  map[string]int64
+	visited   map[string]bool
+	jobs      []string
+	pages     int
+	disk      *workIQMailDiskRun
+	inventory int64
 }
 
 func (r *workIQMailRun) progress(ctx context.Context, resource string) (store.WorkIQTraversalProgress, error) {
@@ -43,12 +51,6 @@ func (r *workIQMailRun) prepare(ctx context.Context, resource string) error {
 			return nil
 		}
 		for _, id := range ids {
-			r.pages++
-			r.report.Counts["pages"] = r.pages
-			if r.pages > 10000 {
-				r.report.Gaps["workiq_page_limit"]++
-				return workIQFailure("workiq_page_limit")
-			}
 			done, limit := false, 128
 			for !done {
 				err := workIQWrite(ctx, r.options.DBPath, func(writeCtx context.Context, s *store.Store) (err error) {
@@ -90,6 +92,16 @@ func (r *workIQMailRun) fetchResource(ctx context.Context, resource string) erro
 		if _, err := workiq.RelativePath(path, base.Path); err != nil {
 			return err
 		}
+		if r.pages >= workIQMailPageLimit {
+			r.report.Gaps["workiq_page_limit"]++
+			return workIQFailure("workiq_page_limit")
+		}
+		messages := strings.HasSuffix(resource, "/messages/delta")
+		if messages {
+			if err := r.checkDisk(ctx); err != nil {
+				return err
+			}
+		}
 		page, err := r.session.fetch(ctx, path)
 		if err != nil {
 			if page.StatusCode == 410 && p.ID != 0 && path != resource {
@@ -97,12 +109,17 @@ func (r *workIQMailRun) fetchResource(ctx context.Context, resource string) erro
 			}
 			return err
 		}
-		if err := workIQWrite(ctx, r.options.DBPath, func(writeCtx context.Context, s *store.Store) error {
+		r.pages++
+		r.report.Counts["pages"] = r.pages
+		if err := workIQWrite(workIQPageWrite(ctx, len(page.JSON)), r.options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.StageWorkIQPage(writeCtx, store.WorkIQPageBatch{
 				AttemptID: r.attempt, Resource: resource, ExpectedRevision: p.Revision, Page: page, ObservedAt: workIQNow(),
 			})
 		}); err != nil {
 			return err
+		}
+		if messages {
+			r.noteStaged(page)
 		}
 		if err := r.prepare(ctx, resource); err != nil {
 			return err
@@ -186,7 +203,8 @@ func acquireWorkIQMail(ctx context.Context, options WorkIQOptions, session *work
 				return err
 			}
 		}
-		resource := "/me/mailFolders/" + url.PathEscape(folder.ID) + "/messages/delta()"
+		resource := "/me/mailFolders/" + url.PathEscape(folder.ID) + "/messages/delta"
+		r.inventory = workIQInventoryItems(queue)
 		if err := r.fetchResource(ctx, resource); err != nil {
 			return err
 		}

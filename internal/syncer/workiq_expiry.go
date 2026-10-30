@@ -2,7 +2,6 @@ package syncer
 
 import (
 	"context"
-	"errors"
 )
 
 type workIQExpired struct {
@@ -36,8 +35,10 @@ func retryWorkIQBaseline(ctx context.Context, options WorkIQOptions, report Work
 	for _, account := range next.Accounts {
 		account.Counts["baseline_restarts"]++
 	}
+	// The restarted run settled its own attempt; report that outcome so the printed and stored codes
+	// agree, whether it kept its position (resumable) or not.
 	if err != nil {
-		return next, errors.Join(workIQFailure("workiq_delta_expired"), err)
+		return next, err
 	}
 	return next, nil
 }

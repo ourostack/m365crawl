@@ -43,9 +43,10 @@ func workIQServerMailBody(server workiq.MailMessage) outlookmail.Body {
 	body := outlookmail.Body{State: outlookmail.BodyNone}
 	if server.BodyPresent {
 		body.State = outlookmail.BodyInline
-		if server.BodyType == "html" {
+		switch server.BodyType {
+		case "html":
 			body.HTML = []byte(server.Body)
-		} else if server.BodyType == "text" {
+		case "text":
 			body.HTML = []byte("<p>" + html.EscapeString(server.Body) + "</p>")
 		}
 	}

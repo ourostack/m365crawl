@@ -60,7 +60,7 @@ func TestWorkIQTraversalReadsResumeActualStoredPagesAndOrderedInventory(t *testi
 		if folder == "b" {
 			header = ""
 		}
-		resource := "/me/mailFolders/" + folder + "/messages/delta()"
+		resource := "/me/mailFolders/" + folder + "/messages/delta"
 		page := stageWorkIQInventoryPage(t, s, attempt, resource, map[string]any{
 			"value": []json.RawMessage{graphMailFixture(folder, folder, header)}, "@odata.deltaLink": resource + "?$deltatoken=end",
 		})

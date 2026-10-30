@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -212,7 +213,7 @@ func TestWorkIQStableIDCorruptAliasesAreNotCheckedEmpty(t *testing.T) {
 	ctx := context.Background()
 	_, err := s.db.Exec(`insert into workiq_aliases(kind,account_id,namespace,alias,item_rowid) values('mail',?,'public','101',90000)`, mailAcct)
 	must0(err)
-	if _, err := s.MailGet(ctx, mailAcct, 101); err == nil || err == ErrMailNotFound {
+	if _, err := s.MailGet(ctx, mailAcct, 101); err == nil || errors.Is(err, ErrMailNotFound) {
 		t.Fatal("orphan alias silently became a missing message")
 	}
 	_, err = s.db.Exec(`update workiq_aliases set alias='not-numeric'`)

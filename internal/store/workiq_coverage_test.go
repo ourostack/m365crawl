@@ -6,6 +6,10 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
+	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
 func TestWorkIQCoverageCountsCanonicalRowsWithoutInventingCacheRange(t *testing.T) {
@@ -89,5 +93,23 @@ func TestWorkIQCoverageDoesNotInventCountsFromInvalidSourceEvidence(t *testing.T
 	must0(err)
 	if rows, err := s.MailCoverage(ctx); err == nil || rows != nil {
 		t.Fatal("invalid source evidence was reported as computed canonical coverage")
+	}
+
+}
+
+func TestWorkIQProbeArchiveCountsRespectExactWindowAndCanonicalFolderBinding(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	must0(s.ApplyAccount(ctx, acctA))
+	fact := workiq.AccountFact{ID: acctA.TenantID + "/" + acctA.UserID, Family: "chats", TenantID: acctA.TenantID, UserID: acctA.UserID}
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "chat", "before", "before", base)}))
+	if n := must(s.WorkIQChatCoverageCount(ctx, fact, "chat", base.Add(time.Nanosecond), base.Add(time.Hour))); n != 0 {
+		t.Fatal("sub-millisecond window admitted a message strictly before its lower bound")
+	}
+	if n := must(s.WorkIQChatCoverageCount(ctx, fact, "chat", base, base.Add(time.Hour))); n != 1 {
+		t.Fatal("exact lower bound omitted a comparable archive message")
+	}
+	if n := must(s.WorkIQMailFolderCount(ctx, mailAcct, "unknown-folder")); n != nil {
+		t.Fatal("unbound folder got an invented canonical count")
 	}
 }
