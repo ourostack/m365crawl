@@ -29,29 +29,67 @@ func inOWAMailboxScope(scope, account string) bool {
 	return account == scope || strings.HasPrefix(account, scope+OWAMailboxInfix) && !strings.Contains(strings.TrimPrefix(account, scope+OWAMailboxInfix), "/")
 }
 
-// OWAMailboxBindings maps each account of the profile account's scope to its bound mailbox identity.
-func (s *Store) OWAMailboxBindings(ctx context.Context, scope string) (map[string]string, error) {
-	return owaMailboxBindings(ctx, s.db, scope)
+// scopeArgs selects the profile's account and its mailbox accounts; callers filter exactly.
+func scopeArgs(prefix, scope string) []any {
+	return []any{prefix + scope, escapeLike(prefix+scope+OWAMailboxInfix) + "%"}
 }
 
-func owaMailboxBindings(ctx context.Context, q queryer, scope string) (map[string]string, error) {
-	rows, err := q.QueryContext(ctx, `select key, value from meta where key=? or key like ? escape '\'`,
-		owaMailboxIdentityKey+scope, escapeLike(owaMailboxIdentityKey+scope+OWAMailboxInfix)+"%")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
+func owaMailboxBindings(ctx context.Context, q mailQuerier, scope string) (map[string]string, error) {
 	out := map[string]string{}
-	for rows.Next() {
+	err := mailEach(ctx, q, `select key, value from meta where key=? or key like ? escape '\'`, scopeArgs(owaMailboxIdentityKey, scope), func(rows *sql.Rows) error {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
-			return nil, err
+			return err
 		}
 		if account := strings.TrimPrefix(key, owaMailboxIdentityKey); inOWAMailboxScope(scope, account) {
 			out[account] = value
 		}
+		return nil
+	})
+	return out, err
+}
+
+// OWAMailboxView is what attributing a profile's mailboxes needs of its archived accounts.
+type OWAMailboxView struct {
+	Bindings map[string]string          // account → bound mailbox identity
+	Holds    map[string]bool            // accounts holding mail rows
+	Native   map[string]map[string]bool // account → held native "folder\x00id" and "message\x00id"
+}
+
+// NativeKey is the OWAMailboxView.Native key of a native identity.
+func NativeKey(kind, id string) string { return kind + "\x00" + id }
+
+// OWAMailboxView reads the bindings, mail and native identities of the profile account's scope.
+func (s *Store) OWAMailboxView(ctx context.Context, scope string) (OWAMailboxView, error) {
+	v := OWAMailboxView{Holds: map[string]bool{}, Native: map[string]map[string]bool{}}
+	var err error
+	if v.Bindings, err = owaMailboxBindings(ctx, s.db, scope); err != nil {
+		return OWAMailboxView{}, err
 	}
-	return out, rows.Err()
+	err = mailEach(ctx, s.db, `select distinct account from mail_messages where account=? or account like ? escape '\'`, scopeArgs("", scope), func(rows *sql.Rows) error {
+		var account string
+		err := rows.Scan(&account)
+		v.Holds[account] = inOWAMailboxScope(scope, account)
+		return err
+	})
+	if err != nil {
+		return OWAMailboxView{}, err
+	}
+	err = mailEach(ctx, s.db, `select account, kind, source_id from mail_source_ids where (account=? or account like ? escape '\') and kind in ('folder','message')`, scopeArgs("", scope), func(rows *sql.Rows) error {
+		var account, kind, id string
+		if err := rows.Scan(&account, &kind, &id); err != nil {
+			return err
+		}
+		if v.Native[account] == nil {
+			v.Native[account] = map[string]bool{}
+		}
+		v.Native[account][NativeKey(kind, id)] = inOWAMailboxScope(scope, account)
+		return nil
+	})
+	if err != nil {
+		return OWAMailboxView{}, err
+	}
+	return v, nil
 }
 
 // bindOWAMailbox records the account's identity inside the commit's transaction. A bound account
@@ -60,14 +98,11 @@ func bindOWAMailbox(ctx context.Context, tx *sql.Tx, b OWAMailBatch) error {
 	if b.Identity == "" {
 		return nil
 	}
-	if !inOWAMailboxScope(b.Scope, b.Account) {
-		return ErrOWAMailboxBinding
-	}
 	bound, err := owaMailboxBindings(ctx, tx, b.Scope)
 	if err != nil {
 		return err
 	}
-	if old, ok := bound[b.Account]; ok && old != b.Identity && !b.Rebind {
+	if !inOWAMailboxScope(b.Scope, b.Account) || bound[b.Account] != "" && bound[b.Account] != b.Identity && !b.Rebind {
 		return ErrOWAMailboxBinding
 	}
 	for account, identity := range bound {
@@ -86,14 +121,11 @@ func (s *Store) OWAMailboxes(ctx context.Context, scope string) ([]string, error
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
 	var out []string
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, err
+	if err == nil {
+		err = json.Unmarshal([]byte(raw), &out)
 	}
-	return out, nil
+	return out, err
 }
 
 // SetOWAMailboxes records the accounts an attributed read of the profile found.
@@ -105,45 +137,19 @@ func (s *Store) SetOWAMailboxes(ctx context.Context, scope string, accounts []st
 	return err
 }
 
-// OWAMailSourceOverlap counts the native folder and message identities the account already holds.
-// A mailbox keeps its native identities across reads, so a match is evidence of the same mailbox.
-func (s *Store) OWAMailSourceOverlap(ctx context.Context, account string, folders, messages []string) (int, error) {
-	n := 0
-	for kind, ids := range map[string][]string{"folder": folders, "message": messages} {
-		for _, id := range ids {
-			var hit int
-			if err := s.db.QueryRowContext(ctx, `select count(*) from mail_source_ids where account=? and kind=? and source_id=?`, account, kind, id).Scan(&hit); err != nil {
-				return 0, err
-			}
-			n += hit
-		}
-	}
-	return n, nil
-}
-
-// OWAMailSourceCount counts the native identities the account holds.
-func (s *Store) OWAMailSourceCount(ctx context.Context, account string) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `select count(*) from mail_source_ids where account=?`, account).Scan(&n)
-	return n, err
-}
-
 // OWAProfileMailState combines the mail state of every mailbox account the profile held at its
 // last attributed read: the first failure, read only when every mailbox was read (at the oldest
 // read), and how many mailboxes there are.
 func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailState, int, error) {
 	accounts, err := s.OWAMailboxes(ctx, scope)
-	if err != nil {
-		return MailState{}, 0, err
-	}
 	if len(accounts) == 0 {
 		accounts = []string{scope}
 	}
 	out := MailState{Read: true}
 	for _, a := range accounts {
-		st, err := s.MailState(ctx, a)
-		if err != nil {
-			return MailState{}, 0, err
+		var st MailState
+		if err == nil {
+			st, err = s.MailState(ctx, a)
 		}
 		if st.Failure != nil && out.Failure == nil {
 			out.Failure = st.Failure
@@ -153,6 +159,9 @@ func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailStat
 		} else if out.ReadAt.IsZero() || st.ReadAt.Before(out.ReadAt) {
 			out.ReadAt = st.ReadAt
 		}
+	}
+	if err != nil {
+		return MailState{}, 0, err
 	}
 	if !out.Read || out.Failure != nil {
 		out.Read, out.ReadAt = false, time.Time{}

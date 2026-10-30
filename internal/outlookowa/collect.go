@@ -178,10 +178,10 @@ func (ids *identities) resolved() string {
 	if ids.missing || len(ids.seen) != 1 {
 		return ""
 	}
-	for id := range ids.seen {
-		return id
+	var only string
+	for only = range ids.seen {
 	}
-	return ""
+	return only
 }
 
 func collectDatabase(ctx context.Context, o reader, db indexeddb.Database, stores map[string]int64, account string) (Result, string, error) {

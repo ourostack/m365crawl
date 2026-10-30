@@ -218,15 +218,17 @@ func TestSyncOWAUnrelatedSingleMailboxIsNotConflated(t *testing.T) {
 
 func TestSyncOWAAttributionRefusalsApplyNothing(t *testing.T) {
 	for name, tc := range map[string]struct {
-		before []string // prefix=address of mailboxes committed first; empty address is unproved
-		after  []string
+		phases [][]string // prefix=address mailboxes per sync; an empty address is unproved; the last sync must refuse
 		detail string
 	}{
-		"several_unproved":   {[]string{"A=owner@example.invalid"}, []string{"A=owner@example.invalid", "B="}, "multiple_mailboxes"},
-		"duplicate_identity": {[]string{"A=owner@example.invalid"}, []string{"A=owner@example.invalid", "B=owner@example.invalid"}, "mailbox_identity_duplicate"},
-		"ambiguous_overlap":  {[]string{"A=owner@example.invalid", "B=shared@example.invalid"}, []string{"AB=renamed@example.invalid"}, "mailbox_binding_ambiguous"},
-		"legacy_unrelated":   {[]string{"A="}, []string{"C="}, "mailbox_binding_unproved"},
-		"unproved_with_more": {[]string{"A=owner@example.invalid", "B=shared@example.invalid"}, []string{"A="}, "mailbox_identity_unresolved"},
+		"several_unproved":   {[][]string{{"A=owner@example.invalid"}, {"A=owner@example.invalid", "B="}}, "multiple_mailboxes"},
+		"duplicate_identity": {[][]string{{"A=owner@example.invalid"}, {"A=owner@example.invalid", "B=owner@example.invalid"}}, "mailbox_identity_duplicate"},
+		"ambiguous_overlap":  {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"AB=renamed@example.invalid"}}, "mailbox_binding_ambiguous"},
+		"two_claim_one":      {[][]string{{"A=owner@example.invalid"}, {"A=one@example.invalid", "A=two@example.invalid"}}, "mailbox_binding_ambiguous"},
+		"name_taken": {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"A=owner@example.invalid", "B=renamed@example.invalid"},
+			{"A=owner@example.invalid", "B=renamed@example.invalid", "C=shared@example.invalid"}}, "mailbox_binding_ambiguous"},
+		"legacy_unrelated":   {[][]string{{"A="}, {"C="}}, "mailbox_binding_unproved"},
+		"unproved_with_more": {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"A="}}, "mailbox_identity_unresolved"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			isolateTmp(t)
@@ -238,8 +240,7 @@ func TestSyncOWAAttributionRefusalsApplyNothing(t *testing.T) {
 					prefix, address, _ := strings.Cut(spec, "=")
 					if prefix == "AB" {
 						mb := owaSyntheticMailbox(base, "A", address)
-						other := owaSyntheticMailbox(base, "B", address)
-						mb.Result.Folders = append(mb.Result.Folders, other.Result.Folders...)
+						mb.Result.Folders = append(mb.Result.Folders, owaSyntheticMailbox(base, "B", address).Result.Folders...)
 						out = append(out, mb)
 						continue
 					}
@@ -247,14 +248,19 @@ func TestSyncOWAAttributionRefusalsApplyNothing(t *testing.T) {
 				}
 				return out
 			}
-			current := build(tc.before)
+			var current []outlookowa.Mailbox
 			stubOWAMailboxes(t, &current)
 			o := outlookOpts(db, root)
-			run(t, o)
+			last := len(tc.phases) - 1
+			for _, phase := range tc.phases[:last] {
+				current = build(phase)
+				run(t, o)
+				o.FullRead = true
+			}
+			held := len(tc.phases[last-1])
 			rows := count(t, db, `select count(*) from mail_messages`)
 			identities := count(t, db, `select count(*) from meta where key like 'outlook_mailbox_identity:%'`)
-			current = build(tc.after)
-			o.FullRead = true
+			current = build(tc.phases[last])
 			r, _, err := Run(context.Background(), o)
 			if err == nil {
 				t.Fatal("refusal reported success")
@@ -268,15 +274,42 @@ func TestSyncOWAAttributionRefusalsApplyNothing(t *testing.T) {
 					failed++
 				}
 			}
-			if failed != len(tc.before) {
-				t.Fatalf("failed sources = %d, want every held account", failed)
+			if failed != held {
+				t.Fatalf("failed sources = %d, want every held account (%d)", failed, held)
 			}
 			if count(t, db, `select count(*) from mail_messages`) != rows || count(t, db, `select count(*) from mail_absent`) != 0 ||
 				count(t, db, `select count(*) from meta where key like 'outlook_mailbox_identity:%'`) != identities ||
 				count(t, db, `select count(*) from meta where key like 'outlook_mail_read:%'`) != 0 ||
-				count(t, db, `select count(*) from meta where key like 'outlook_mail_failure:%'`) != len(tc.before) {
+				count(t, db, `select count(*) from meta where key like 'outlook_mail_failure:%'`) != held {
 				t.Fatal("refused attribution applied mail, absence, bindings or freshness")
 			}
 		})
+	}
+}
+
+func TestSyncOWAEmptiedMailboxFailsAlone(t *testing.T) {
+	isolateTmp(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
+	base := owaBaseResult(t, root)
+	a, b := owaSyntheticMailbox(base, "A", "owner@example.invalid"), owaSyntheticMailbox(base, "B", "shared@example.invalid")
+	current := []outlookowa.Mailbox{a, b}
+	stubOWAMailboxes(t, &current)
+	o := outlookOpts(db, root)
+	run(t, o)
+	empty := b
+	empty.Result.Messages, empty.Result.SeenIDs, empty.Result.Notes.HeadersSeen = nil, nil, 0
+	current = []outlookowa.Mailbox{a, empty}
+	o.FullRead = true
+	r, _, err := Run(context.Background(), o)
+	second := mailboxAccount("shared@example.invalid")
+	m := sourceKeyed(t, r, "outlook|"+strings.TrimPrefix(second, "outlook/")+"|mail")
+	if err == nil || m.Status != StatusFailed || m.Error == nil || !strings.HasSuffix(m.Error.Message, "no_mail_objects") {
+		t.Fatalf("emptied mailbox = %+v %v", m, err)
+	}
+	if first := sourceKeyed(t, r, "outlook|Default/mailbox-"+outlookowa.MailboxIdentity("owner@example.invalid", "owner@example.invalid")[:16]+"|mail"); first.Status != StatusOK {
+		t.Fatalf("the other mailbox did not read independently: %+v", r.Sources)
+	}
+	if len(detailKeys(t, db, second)) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 {
+		t.Fatal("emptied mailbox lost rows")
 	}
 }

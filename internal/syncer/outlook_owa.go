@@ -104,12 +104,14 @@ var ErrOWASnapshotRetained = errors.New("reader release was not proved and its s
 
 func (r *runner) outlookOWAMail(ctx context.Context, p outlookowa.Profile) (SourceReport, bool, error) {
 	mails, _ := r.readOWAProfile(ctx, p, false)
-	for _, mail := range mails {
-		if mail.err != nil || mail.key == mailKey(outlookKey(p.Name)) {
-			return mail.report, mail.decoded, mail.err
+	mail := mails[0]
+	for _, m := range mails {
+		if m.err != nil {
+			mail = m
+			break
 		}
 	}
-	return mails[0].report, mails[0].decoded, mails[0].err
+	return mail.report, mail.decoded, mail.err
 }
 
 // readOWAProfile owns the single attempt check and copy; each requested lane keeps its own
@@ -118,12 +120,13 @@ func (r *runner) readOWAProfile(ctx context.Context, p outlookowa.Profile, withC
 	begun := outlookNow()
 	scope := outlookAccount(p.Name)
 	cal.key = outlookKey(p.Name)
-	accounts, err := r.owaMailAccounts(ctx, scope)
+	// The profile's mailbox accounts as of its last attributed read; only its own account before.
+	accounts, err := r.st.OWAMailboxes(ctx, scope)
+	if len(accounts) == 0 {
+		accounts = []string{scope}
+	}
 	for _, a := range accounts {
 		mails = append(mails, outlookOutcome{key: owaMailKey(a)})
-	}
-	if len(mails) == 0 {
-		mails = []outlookOutcome{{key: mailKey(outlookKey(p.Name))}}
 	}
 	setMail := func(err error) {
 		for i := range mails {
@@ -309,11 +312,7 @@ func (r *runner) owaUnchanged(ctx context.Context, key string, prior store.Outlo
 	return SourceReport{Source: key, Status: status, Omissions: prior.Omissions}, nil
 }
 
-func (r *runner) commitOWAMailbox(ctx context.Context, mb outlookowa.Mailbox, a owaAssignment, scope, key, fp string, begun, fresh time.Time, stable bool) (SourceReport, bool, error) {
-	expect, err := r.st.MailHolds(ctx, a.account)
-	if err != nil {
-		return SourceReport{}, false, errs.DBError(err)
-	}
+func (r *runner) commitOWAMailbox(ctx context.Context, mb outlookowa.Mailbox, a owaAssignment, expect bool, scope, key, fp string, begun, fresh time.Time, stable bool) (SourceReport, bool, error) {
 	if err := outlookowa.CheckExpected(mb.Result, expect); err != nil {
 		return SourceReport{}, false, err
 	}
@@ -340,9 +339,6 @@ func (r *runner) commitOWAMailbox(ctx context.Context, mb outlookowa.Mailbox, a 
 		var coded *errs.Coded
 		if errors.As(err, &coded) && coded.Code == "outlook_mail_key_exhausted" {
 			return SourceReport{}, false, owaSourceError(coded)
-		}
-		if errors.Is(err, store.ErrOWAMailboxBinding) {
-			return SourceReport{}, false, layoutGuard("mailbox_binding_ambiguous")
 		}
 		return SourceReport{}, false, errs.DBError(err)
 	}

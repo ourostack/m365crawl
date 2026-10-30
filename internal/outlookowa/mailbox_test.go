@@ -3,6 +3,8 @@ package outlookowa
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/hxstore"
@@ -14,22 +16,28 @@ import (
 func notesWithHeaders(n int) outlookmail.Notes { return outlookmail.Notes{HeadersSeen: n} }
 
 type mailboxReader struct {
-	dbs    []indexeddb.Database
-	values map[[2]int64][]any
+	dbs              []indexeddb.Database
+	values           map[[2]int64][]any
+	metaErr, scanErr error
 }
 
 func (m *mailboxReader) Stats() leveldb.Stats                     { return leveldb.Stats{} }
-func (m *mailboxReader) Databases() ([]indexeddb.Database, error) { return m.dbs, nil }
+func (m *mailboxReader) Databases() ([]indexeddb.Database, error) { return m.dbs, m.metaErr }
 func (m *mailboxReader) Records(db, store int64, fn func(indexeddb.Record) error) error {
 	for i := range m.values[[2]int64{db, store}] {
-		if err := fn(indexeddb.Record{Key: "synthetic-key", Raw: []byte{byte(db), byte(store), byte(i)}}); err != nil {
+		if err := fn(indexeddb.Record{Key: "synthetic-key", Raw: []byte(fmt.Sprintf("%d/%d/%d", db, store, i))}); err != nil {
 			return err
 		}
 	}
-	return nil
+	return m.scanErr
 }
 func (m *mailboxReader) Decode(_ int64, raw []byte) (any, error) {
-	return m.values[[2]int64{int64(raw[0]), int64(raw[1])}][raw[2]], nil
+	var db, store int64
+	var i int
+	if _, err := fmt.Sscanf(string(raw), "%d/%d/%d", &db, &store, &i); err != nil {
+		return nil, err
+	}
+	return m.values[[2]int64{db, store}][i], nil
 }
 
 func info(smtp, user any) *objectBuilder {
@@ -41,7 +49,7 @@ type objectBuilder struct{ kv []any }
 func (b *objectBuilder) build() any { return obj(b.kv...) }
 
 func mailboxDB(id int64) indexeddb.Database {
-	return indexeddb.Database{ID: id, Name: "owa-offline-data-synthetic-" + string(rune('a'+id)), Stores: []indexeddb.Store{{ID: 1, Name: "folders"}, {ID: 2, Name: "messages"}, {ID: 3, Name: "messageBodies"}, {ID: 4, Name: "events"}}}
+	return indexeddb.Database{ID: id, Name: "owa-offline-data-synthetic-" + strconv.FormatInt(id, 10), Stores: []indexeddb.Store{{ID: 1, Name: "folders"}, {ID: 2, Name: "messages"}, {ID: 3, Name: "messageBodies"}, {ID: 4, Name: "events"}}}
 }
 
 // mailboxRecords builds one populated content database whose folder and message records carry the given mailboxInfo.
@@ -159,5 +167,33 @@ func TestExpectMailRefusesEmptyHeldMailbox(t *testing.T) {
 	}
 	if CheckExpected(Result{}, false) != nil || CheckExpected(Result{Notes: notesWithHeaders(1)}, true) != nil {
 		t.Fatal("expected mail check refused a valid read")
+	}
+}
+
+func TestCollectMailboxesFailuresAreFixed(t *testing.T) {
+	good := func() *mailboxReader {
+		r := newMailboxReader()
+		owner := info("owner@example.invalid", "owner@example.invalid").build()
+		mailboxRecords(r, 1, "A", owner, owner)
+		return r
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := collectMailboxes(canceled, good()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled = %v", err)
+	}
+	meta := good()
+	meta.metaErr = errors.New("synthetic-private-detail")
+	if _, err := collectMailboxes(context.Background(), meta); err == nil || err.Error() != "outlookowa: metadata_unreadable" {
+		t.Fatalf("metadata = %v", err)
+	}
+	var guard *hxstore.GuardError
+	if _, err := collectMailboxes(context.Background(), newMailboxReader()); !errors.As(err, &guard) || guard.Detail != "content_database_missing" {
+		t.Fatalf("layout = %v", err)
+	}
+	scan := good()
+	scan.scanErr = errors.New("synthetic-private-detail")
+	if _, err := collectMailboxes(context.Background(), scan); err == nil || err.Error() != "outlookowa: records_unreadable" {
+		t.Fatalf("records = %v", err)
 	}
 }

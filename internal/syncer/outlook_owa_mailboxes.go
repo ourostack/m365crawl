@@ -26,75 +26,45 @@ func layoutGuard(detail string) error {
 	return &hxstore.GuardError{Code: outlookmail.CodeMailLayoutUnsupported, Detail: detail}
 }
 
-// owaMailAccounts lists the accounts whose mailboxes the profile held at its last attributed read.
-func (r *runner) owaMailAccounts(ctx context.Context, scope string) ([]string, error) {
-	accounts, err := r.st.OWAMailboxes(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	if len(accounts) == 0 {
-		return []string{scope}, nil
-	}
-	return accounts, nil
-}
-
 type owaAssignment struct {
 	account string
 	// rebind replaces the account's recorded identity; only native-identity overlap proves it.
 	rebind bool
 }
 
-// owaOverlap counts the mailbox's native folder, then message, identities the account holds.
-func (r *runner) owaOverlap(ctx context.Context, account string, mb outlookowa.Mailbox) (int, error) {
-	var folders []string
-	if mb.Result.RootID != "" {
-		folders = append(folders, mb.Result.RootID)
+// owaOverlap counts the mailbox's native folder and message identities the account holds.
+func owaOverlap(native map[string]bool, mb outlookowa.Mailbox) int {
+	n := 0
+	count := func(kind, id string) {
+		if native[store.NativeKey(kind, id)] {
+			n++
+		}
 	}
+	count("folder", mb.Result.RootID)
 	for _, f := range mb.Result.Folders {
-		folders = append(folders, f.ID, f.ParentID)
+		count("folder", f.ID)
+		count("folder", f.ParentID)
 	}
-	n, err := r.st.OWAMailSourceOverlap(ctx, account, folders, nil)
-	if err != nil || n > 0 {
-		return n, err
+	for _, id := range mb.Result.SeenIDs {
+		count("message", id)
 	}
-	return r.st.OWAMailSourceOverlap(ctx, account, nil, mb.Result.SeenIDs)
+	return n
 }
 
 // attributeOWAMailboxes assigns each populated mailbox to exactly one account of the profile, or
 // refuses the whole read. A recorded identity binding decides first; an unbound mailbox takes the
 // unclaimed account whose archived native identities it shares; a mailbox sharing none is new.
-func (r *runner) attributeOWAMailboxes(ctx context.Context, scope string, mailboxes []outlookowa.Mailbox) ([]owaAssignment, error) {
-	bindings, err := r.st.OWAMailboxBindings(ctx, scope)
-	if err != nil {
-		return nil, errs.DBError(err)
-	}
-	holds := func(account string) (bool, error) { return r.st.MailHolds(ctx, account) }
+func attributeOWAMailboxes(view store.OWAMailboxView, scope string, mailboxes []outlookowa.Mailbox) ([]owaAssignment, error) {
 	if len(mailboxes) == 1 && mailboxes[0].Identity == "" {
-		// The single-mailbox read of earlier releases, kept only while nothing else is bound here.
-		for account := range bindings {
+		// The single-mailbox read of earlier releases, kept only while nothing else is bound here
+		// and, when the account holds mail with native identities, only for a mailbox sharing some.
+		for account := range view.Bindings {
 			if account != scope {
 				return nil, layoutGuard("mailbox_identity_unresolved")
 			}
 		}
-		held, err := holds(scope)
-		if err != nil {
-			return nil, errs.DBError(err)
-		}
-		native := 0
-		if held {
-			if native, err = r.st.OWAMailSourceCount(ctx, scope); err != nil {
-				return nil, errs.DBError(err)
-			}
-		}
-		// Archived mail with native identities must share some with this mailbox.
-		if native > 0 {
-			n, err := r.owaOverlap(ctx, scope, mailboxes[0])
-			if err != nil {
-				return nil, errs.DBError(err)
-			}
-			if n == 0 {
-				return nil, layoutGuard("mailbox_binding_unproved")
-			}
+		if view.Holds[scope] && len(view.Native[scope]) > 0 && owaOverlap(view.Native[scope], mailboxes[0]) == 0 {
+			return nil, layoutGuard("mailbox_binding_unproved")
 		}
 		return []owaAssignment{{account: scope}}, nil
 	}
@@ -111,7 +81,7 @@ func (r *runner) attributeOWAMailboxes(ctx context.Context, scope string, mailbo
 	out := make([]owaAssignment, len(mailboxes))
 	claimed, bound := map[string]bool{}, map[string]bool{}
 	for i, mb := range mailboxes {
-		for account, identity := range bindings {
+		for account, identity := range view.Bindings {
 			if identity == mb.Identity {
 				out[i].account = account
 				claimed[account], bound[account] = true, true
@@ -119,7 +89,7 @@ func (r *runner) attributeOWAMailboxes(ctx context.Context, scope string, mailbo
 		}
 	}
 	candidates := []string{scope}
-	for account := range bindings {
+	for account := range view.Bindings {
 		if account != scope {
 			candidates = append(candidates, account)
 		}
@@ -132,79 +102,34 @@ func (r *runner) attributeOWAMailboxes(ctx context.Context, scope string, mailbo
 		}
 		var match []string
 		for _, c := range candidates {
-			if bound[c] {
-				continue
-			}
-			n, err := r.owaOverlap(ctx, c, mb)
-			if err != nil {
-				return nil, errs.DBError(err)
-			}
-			if n > 0 {
+			if !bound[c] && owaOverlap(view.Native[c], mb) > 0 {
 				match = append(match, c)
 			}
 		}
-		switch len(match) {
-		case 0:
-			fresh = append(fresh, i)
-		case 1:
-			if claimed[match[0]] {
-				return nil, layoutGuard("mailbox_binding_ambiguous")
-			}
-			_, rebind := bindings[match[0]]
-			out[i] = owaAssignment{account: match[0], rebind: rebind}
-			claimed[match[0]] = true
-		default:
+		if len(match) > 1 || len(match) == 1 && claimed[match[0]] {
 			return nil, layoutGuard("mailbox_binding_ambiguous")
 		}
+		if len(match) == 0 {
+			fresh = append(fresh, i)
+			continue
+		}
+		_, rebind := view.Bindings[match[0]]
+		out[i] = owaAssignment{account: match[0], rebind: rebind}
+		claimed[match[0]] = true
 	}
 	for _, i := range fresh {
 		account := scope + store.OWAMailboxInfix + mailboxes[i].Identity[:16]
-		if len(mailboxes) == 1 && !claimed[scope] {
-			// A profile's only mailbox keeps the profile's account unless that account holds another mailbox.
-			if _, bound := bindings[scope]; !bound {
-				held, err := holds(scope)
-				if err != nil {
-					return nil, errs.DBError(err)
-				}
-				if !held {
-					account = scope
-				}
-			}
+		// A profile's only mailbox keeps the profile's account unless that account holds another mailbox.
+		if _, scopeBound := view.Bindings[scope]; len(mailboxes) == 1 && !claimed[scope] && !scopeBound && !view.Holds[scope] {
+			account = scope
 		}
-		if _, bound := bindings[account]; bound || claimed[account] {
+		if _, taken := view.Bindings[account]; taken || claimed[account] {
 			return nil, layoutGuard("mailbox_binding_ambiguous")
-		}
-		if account != scope {
-			held, err := holds(account)
-			if err != nil {
-				return nil, errs.DBError(err)
-			}
-			if held {
-				return nil, layoutGuard("mailbox_binding_ambiguous")
-			}
 		}
 		out[i].account = account
 		claimed[account] = true
 	}
 	return out, nil
-}
-
-// refuseOWAMailboxes is the read-only part of attribution and the expected-mail check.
-func (r *runner) refuseOWAMailboxes(ctx context.Context, scope string, mailboxes []outlookowa.Mailbox) error {
-	assigned, err := r.attributeOWAMailboxes(ctx, scope, mailboxes)
-	if err != nil {
-		return err
-	}
-	for i, a := range assigned {
-		expect, err := r.st.MailHolds(ctx, a.account)
-		if err != nil {
-			return errs.DBError(err)
-		}
-		if err := outlookowa.CheckExpected(mailboxes[i].Result, expect); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // commitOWAMailboxes reads every mailbox of the snapshot and commits each to its own account. An
@@ -218,21 +143,20 @@ func (r *runner) commitOWAMailboxes(ctx context.Context, snap, scope string, kno
 		return known
 	}
 	mailboxes, err := collectOWAMailboxes(ctx, snap, closed)
+	view, viewErr := r.st.OWAMailboxView(ctx, scope)
+	var assigned []owaAssignment
+	if err == nil && viewErr == nil {
+		assigned, err = attributeOWAMailboxes(view, scope, mailboxes)
+	}
 	if err != nil {
-		if mailboxes != nil && errors.Is(err, outlookowa.ErrReaderClose) && ctx.Err() == nil {
+		if mailboxes != nil && viewErr == nil && errors.Is(err, outlookowa.ErrReaderClose) {
 			// The read finished before its release failed: keep its own refusal as the primary cause.
-			if primary := r.refuseOWAMailboxes(ctx, scope, mailboxes); primary != nil {
-				err = errors.Join(primary, err)
-			}
+			err = errors.Join(owaRefusal(view, scope, mailboxes), err)
 		}
 		return failAll(err)
 	}
-	if err := ctx.Err(); err != nil {
-		return failAll(err)
-	}
-	assigned, err := r.attributeOWAMailboxes(ctx, scope, mailboxes)
-	if err != nil {
-		return failAll(err)
+	if viewErr != nil {
+		return failAll(errs.DBError(viewErr))
 	}
 	accounts := make([]string, len(assigned))
 	for i, a := range assigned {
@@ -245,15 +169,21 @@ func (r *runner) commitOWAMailboxes(ctx context.Context, snap, scope string, kno
 	for i, mb := range mailboxes {
 		a := assigned[i]
 		out[i].key = owaMailKey(a.account)
-		if err := ctx.Err(); err != nil {
-			out[i].err = err
-			continue
-		}
 		out[i].err = contained(func() (err error) {
-			out[i].report, out[i].decoded, err = r.commitOWAMailbox(ctx, mb, a, scope, out[i].key, fp, begun, fresh, stable)
+			out[i].report, out[i].decoded, err = r.commitOWAMailbox(ctx, mb, a, view.Holds[a.account], scope, out[i].key, fp, begun, fresh, stable)
 			return err
 		})
 	}
 	slices.SortFunc(out, func(a, b outlookOutcome) int { return strings.Compare(a.key, b.key) })
 	return out
+}
+
+// owaRefusal is the read-only attribution and expected-mail check of mailboxes whose reader
+// release failed, or nil.
+func owaRefusal(view store.OWAMailboxView, scope string, mailboxes []outlookowa.Mailbox) error {
+	assigned, err := attributeOWAMailboxes(view, scope, mailboxes)
+	for i := range assigned {
+		err = errors.Join(err, outlookowa.CheckExpected(mailboxes[i].Result, view.Holds[assigned[i].account]))
+	}
+	return err
 }

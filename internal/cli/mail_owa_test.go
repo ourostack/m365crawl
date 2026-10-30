@@ -92,8 +92,18 @@ func TestMailOWADoctorArchivedStates(t *testing.T) {
 	if err := st.SetMailRead(rt.ctx, "outlook/Default", now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if c := rt.outlookStoreCheck(st); c.Warn || !strings.Contains(c.Detail, "mail read 1m ago") {
+	if c := rt.outlookStoreCheck(st); c.Warn || !strings.Contains(c.Detail, "mail read 1m ago") || strings.Contains(c.Detail, "mailboxes") {
 		t.Fatalf("read state = %+v", c)
+	}
+	second := "outlook/Default/mailbox-0123456789abcdef"
+	if err := st.SetOWAMailboxes(rt.ctx, "outlook/Default", []string{"outlook/Default", second}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMailRead(rt.ctx, second, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if c := rt.outlookStoreCheck(st); c.Warn || !strings.Contains(c.Detail, "mail read 2m ago (2 mailboxes)") {
+		t.Fatalf("several mailboxes = %+v", c)
 	}
 	if err := st.SetMailFailure(rt.ctx, "outlook/Default", store.OutlookFailure{Code: "outlook_mail_layout_unsupported", Message: "fixed layout failure"}); err != nil {
 		t.Fatal(err)
