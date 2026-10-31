@@ -2,8 +2,10 @@
 // without ever downloading one. A file OneDrive keeps only in the cloud is reported as cloud_only
 // and never opened, and on macOS every open and directory listing runs with dataless-file
 // materialization turned off for the thread, so a file that turns cloud-only during the read
-// fails instead of being fetched. Acquisition is supported on macOS (APFS) and Linux (local
-// filesystems); Windows acquisition is refused until it is verified on a Windows machine.
+// fails instead of being fetched. On Windows a file is opened only when its directory listing
+// shows every byte on this computer, every open asks for no download, and the attributes are
+// checked again on the open file. Acquisition is supported on macOS (APFS), Windows (local fixed
+// NTFS drives) and Linux (local filesystems); other platforms refuse it.
 package scoutcapture
 
 import "time"

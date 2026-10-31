@@ -35,7 +35,7 @@ const scoutResidencyHelp = "OneDrive can keep a file only in the cloud (Files On
 
 func (scoutGroup) Help() string {
 	return scoutAboutHelp + scoutResidencyHelp +
-		"Acquisition is supported on macOS, which reads ~/Library/CloudStorage/OneDrive-*/Apps/*/ and keeps any app folder with a sessions/devices folder. On Linux, name the folder with --root. Windows acquisition is refused (scout_platform_unqualified) until it is verified on a Windows computer; reading an archive works everywhere.\n" +
+		"Acquisition is supported on macOS, which reads ~/Library/CloudStorage/OneDrive-*/Apps/*/, and on Windows, which reads the Apps folder of each OneDrive folder named by the OneDriveCommercial, OneDriveConsumer and OneDrive environment variables; both keep any app folder with a sessions/devices folder. On Linux, name the folder with --root. Other platforms refuse acquisition (scout_platform_unqualified); reading an archive works everywhere.\n" +
 		"Private Microsoft 365 Copilot chat history and Copilot Cowork history are not available: Microsoft's only export of Copilot interactions works for a whole organization with administrator consent, not for one signed-in user."
 }
 
@@ -236,8 +236,8 @@ func scoutError(err error) error {
 			Fix: "Run `m365crawl scout list` for archived scout-session:IDs; --observation takes an observation_id of that same session."}
 	case errors.Is(err, scoutcapture.ErrPlatformUnqualified):
 		return &errs.Coded{Code: "scout_platform_unqualified", Exit: errs.ExitEnvironment,
-			Message: "reading Scout session files without downloading cloud-only ones is not verified on this platform, so nothing was read",
-			Fix:     "Run scout sync on macOS, or on Linux with --root; archived sessions can still be read here with scout list, search and show."}
+			Message: "reading Scout session files without downloading cloud-only ones is not supported on this platform, so nothing was read",
+			Fix:     "Run scout sync on macOS or Windows, or on Linux with --root; archived sessions can still be read here with scout list, search and show."}
 	case errors.Is(err, syncer.ErrScoutFolderNotFound):
 		return &errs.Coded{Code: "scout_folder_not_found", Exit: errs.ExitEnvironment,
 			Message: "no Scout session folder was found in a local OneDrive folder",
@@ -343,7 +343,7 @@ var (
 )
 
 type scoutSyncCmd struct {
-	Root []string `name:"root" sep:"none" help:"A Scout app folder to read (the folder that holds sessions/devices); repeatable. Default: every such folder under the Apps folder of each local OneDrive folder (macOS)." placeholder:"DIR"`
+	Root []string `name:"root" sep:"none" help:"A Scout app folder to read (the folder that holds sessions/devices); repeatable. Default: every such folder under the Apps folder of each local OneDrive folder (macOS and Windows)." placeholder:"DIR"`
 }
 
 func (scoutSyncCmd) Help() string {
