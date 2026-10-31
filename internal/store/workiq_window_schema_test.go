@@ -215,7 +215,9 @@ func TestWorkIQWindowMigrationFailsTheOpenWhenSettingsCannotBeRestored(t *testin
 				c, err := db.Conn(ctx)
 				return failingPragmaConn{pragmaConn: c, fail: fail}, err
 			}
-			t.Cleanup(func() { pinWorkIQConn = func(ctx context.Context, db *sql.DB) (pragmaConn, error) { return db.Conn(ctx) } })
+			t.Cleanup(func() {
+				pinWorkIQConn = func(ctx context.Context, db *sql.DB) (pragmaConn, error) { return db.Conn(ctx) }
+			})
 			if fail == "rollback" {
 				workIQWindowFault = func(step string) error {
 					if step == "columns" {

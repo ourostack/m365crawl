@@ -140,7 +140,7 @@ and message_ids_json='["late-1","late-2"]' and cleared_at is not null`) != 1 {
 		t.Fatal("an undated item's page body was not kept")
 	}
 	facts := must(s.WorkIQWindowFactsFor(ctx, attempt, resource))
-	if facts.InWindow != 1 || facts.OutOfWindow != 2 || facts.StagedIn != 1 || facts.LargestPage == 0 || facts.StagedBytes == 0 {
+	if facts.InWindow != 1 || facts.OutOfWindow != 1 || facts.StagedIn != 1 || facts.LargestPage == 0 || facts.StagedBytes == 0 || facts.ClockUnknown != 1 {
 		t.Fatalf("window facts = %+v", facts)
 	}
 	if rowCount(t, s, `select count(*) from workiq_accounts where inventory_revision<>0`) != 0 {

@@ -555,7 +555,7 @@ func admitWorkIQWindowItem(ctx context.Context, tx *sql.Tx, account string, serv
 
 // WorkIQWindowFacts is what one window position holds, for the disk check.
 type WorkIQWindowFacts struct {
-	InWindow, OutOfWindow, StagedIn, StagedBytes, LargestPage int64
+	InWindow, OutOfWindow, StagedIn, StagedBytes, LargestPage, ClockUnknown int64
 }
 
 func (s *Store) WorkIQWindowFactsFor(ctx context.Context, attempt int64, resource string) (WorkIQWindowFacts, error) {
@@ -566,11 +566,12 @@ func (s *Store) WorkIQWindowFactsFor(ctx context.Context, attempt int64, resourc
 	var f WorkIQWindowFacts
 	err = s.db.QueryRowContext(ctx, `with fr as (select id from workiq_frontiers where family='mail' and account_id=? and resource=? and scope=? and qualification=? and retired=0)
 select coalesce((select sum(in_window) from workiq_window_members where frontier_id in fr and removed=0),0),
-coalesce((select sum(1-in_window) from workiq_window_members where frontier_id in fr and removed=0),0),
+coalesce((select sum(1-in_window) from workiq_window_members where frontier_id in fr and removed=0 and clock_unknown=0),0),
 coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and in_window=1 and state in ('staged','deferred')),0),
 coalesce((select sum(length(cast(data_json as blob))) from workiq_pages where frontier_id in fr),0),
-coalesce((select max(body_bytes) from workiq_pages where frontier_id in fr),0)`,
-		w.binding.Fact.ID, resource, w.scope, w.qualification).Scan(&f.InWindow, &f.OutOfWindow, &f.StagedIn, &f.StagedBytes, &f.LargestPage)
+coalesce((select max(body_bytes) from workiq_pages where frontier_id in fr),0),
+coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and clock_unknown=1),0)`,
+		w.binding.Fact.ID, resource, w.scope, w.qualification).Scan(&f.InWindow, &f.OutOfWindow, &f.StagedIn, &f.StagedBytes, &f.LargestPage, &f.ClockUnknown)
 	return f, err
 }
 
