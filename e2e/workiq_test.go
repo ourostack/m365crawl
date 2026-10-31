@@ -157,18 +157,11 @@ func TestWorkIQRouteFromAnOldMailReadLeadsAnAgentToServerMail(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	helper := os.Getenv("M365CRAWL_TEST_ACQUISITION_STUB")
-	if helper == "" {
-		helper = filepath.Join(e.tmp, "synthetic-workiq.exe")
-		cmd := exec.Command("go", "build", "-o", helper, "../internal/workiq/testdata/stub") //nolint:gosec // G204: fixed synthetic source, private test executable output.
-		cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("build synthetic transport: %v: %s", err, output)
-		}
-	}
 	transcript := filepath.Join(e.tmp, "fetch-only.jsonl")
-	extra := []string{"M365CRAWL_WORKIQ_BIN=" + helper, "WORKIQ_ACQUISITION_TRANSCRIPT=" + transcript,
-		"WORKIQ_ACQUISITION_LOCK_PATH=" + e.db, "PATH="}
+	// The read's route is a mail window of the range before the cache; the synthetic mailbox holds
+	// server mail in it.
+	extra := append(windowStub(t, e, 0, "", [4]string{"server-route", "inbox-id", "<server-route@example.test>", "2001-02-03T04:05:06Z"}),
+		"WORKIQ_ACQUISITION_TRANSCRIPT="+transcript, "WORKIQ_ACQUISITION_LOCK_PATH="+e.db)
 	read := ok(t, e.runWith(extra, append(e.baseArgs(), "--max-age", "0", "mail", "list", "--since", "2000-01-01")...))
 	routes, _ := read["workiq_routes"].([]any)
 	if len(routes) != 1 {

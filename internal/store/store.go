@@ -80,6 +80,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = cs.Close()
 		return nil, err
 	}
+	if err := st.migrateWorkIQWindow(ctx); err != nil {
+		_ = cs.Close()
+		return nil, err
+	}
 	return st, nil
 }
 

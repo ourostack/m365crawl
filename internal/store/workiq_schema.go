@@ -4,6 +4,22 @@ package store
 // 22, after the Scout tables of version 21). An archive below it has no WorkIQ state to read.
 const WorkIQSchemaVersion = 22
 
+// workIQAttemptsColumns is the workiq_attempts definition, shared by the schema and the version 25
+// rebuild that adds the mail_window kind.
+const workIQAttemptsColumns = `(
+ id integer primary key autoincrement,
+ family text not null check(family in ('mail','chats')), account_id text not null,
+ started_at text not null, finished_at text,
+ kind text not null default 'sync' check(kind in ('sync','coverage','status','mail_window')),
+ status text not null default 'open' check(status in ('open','ok','ok_with_omissions','partial','failed')),
+ window_start text, window_end text, qualification text not null default 'workiq-v1',
+ bound_user_id text not null default '', bound_address text not null default '',
+ bound_mail text not null default '', bound_upn text not null default '', verified_at text,
+ error_code text not null default '', counts_json text not null default '{}',
+ gap_count integer not null default 0 check(gap_count>=0),
+ all_folders integer not null default 0 check(all_folders in (0,1))
+)`
+
 // WorkIQ state is append/update-only, including retired pages and cursors.
 const workiqSchemaDDL = `
 create table if not exists workiq_accounts(
@@ -13,19 +29,7 @@ create table if not exists workiq_accounts(
  bound_at text not null, inventory_revision integer not null default 0,
  primary key(family,account_id)
 );
-create table if not exists workiq_attempts(
- id integer primary key autoincrement,
- family text not null check(family in ('mail','chats')), account_id text not null,
- started_at text not null, finished_at text,
- kind text not null default 'sync' check(kind in ('sync','coverage','status')),
- status text not null default 'open' check(status in ('open','ok','ok_with_omissions','partial','failed')),
- window_start text, window_end text, qualification text not null default 'workiq-v1',
- bound_user_id text not null default '', bound_address text not null default '',
- bound_mail text not null default '', bound_upn text not null default '', verified_at text,
- error_code text not null default '', counts_json text not null default '{}',
- gap_count integer not null default 0 check(gap_count>=0),
- all_folders integer not null default 0 check(all_folders in (0,1))
-);
+create table if not exists workiq_attempts` + workIQAttemptsColumns + `;
 create index if not exists workiq_attempts_account on workiq_attempts(family,account_id,id);
 create table if not exists workiq_frontiers(
  id integer primary key autoincrement,
@@ -46,6 +50,7 @@ create table if not exists workiq_pages(
  prepared_attempt_id integer not null default 0, prepared_offset integer not null default 0,
  prepared_complete integer not null default 0,
  state text not null default 'staged' check(state in ('staged','admitted','retired')),
+ body_bytes integer, body_sha256 text, message_ids_json text, cleared_at text,
  unique(attempt_id,frontier_id,expected_revision)
 );
 create table if not exists workiq_rows(
@@ -61,6 +66,7 @@ create table if not exists workiq_rows(
  cache_deleted_at text, server_deleted_at text, cache_first_miss_at text,
  cache_gone_at text, cache_evicted_at text, server_gone_at text,
  server_first_missing_census integer, modified_at text not null,
+ identity_unproven integer not null default 0 check(identity_unproven in (0,1)),
  primary key(kind,account_id,item_rowid)
 );
 create index if not exists workiq_rows_graph on workiq_rows(kind,account_id,graph_id);

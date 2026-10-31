@@ -289,13 +289,13 @@ func workIQStopAt(err error) string {
 // the stop stays the ordinary resumable one.
 func workIQStuck(ctx context.Context, options WorkIQOptions, family, account string, cause error) error {
 	at := workIQStopAt(cause)
-	if at == "" || options.Kind != "sync" {
+	if at == "" || options.Kind != "sync" && options.Kind != "mail_window" {
 		return cause
 	}
 	var last string
 	ctx = context.WithoutCancel(ctx)
 	if err := workIQRead(ctx, options.DBPath, func(s *store.Store) (err error) {
-		last, err = s.LastWorkIQStop(ctx, family, account, "sync")
+		last, err = s.LastWorkIQStop(ctx, family, account, options.Kind)
 		return err
 	}); err != nil || last != at {
 		return cause

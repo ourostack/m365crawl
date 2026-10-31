@@ -43,6 +43,8 @@ var sqlTables = []sqlTable{
 	{"workiq_document_checks", "every document rights check: outcome, refusal code, contentProtection, label and byte inspection; never text"},
 	{"workiq_document_bodies", "admitted excerpts WorkIQ retrieve released, deleted when a later check refuses"},
 	{"workiq_document_fts", "full-text index over admitted document titles and excerpts"},
+	{"workiq_window_members", "WorkIQ mail window members: per window position and Graph ID the folder, version, received_at, in_window and state (staged, admitted, deferred, resolved or removed)"},
+	{"workiq_window_coverage", "WorkIQ mail window coverage: account, Graph folder_id ('' for all folders), since, until, snapshot_at and deferred count of each proven window"},
 	{"mail_coverage", "how far back each mail folder was read, and when"},
 	{"mail_absent", "mail that a read missed, counted until it is marked gone or evicted"},
 	{"calendar_source_events", "calendar events, one row per occurrence and source"},
