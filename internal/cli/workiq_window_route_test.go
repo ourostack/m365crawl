@@ -59,9 +59,10 @@ func TestOlderMailRouteOffersAWindowOfTheRangeTheCacheLacks(t *testing.T) {
 		!strings.Contains(routeStepDoes(t, routes[0], "workiq sync"), "prove it complete") {
 		t.Fatalf("window step = %q", cmds[2])
 	}
-	// A read that ends earlier asks only for its own range, rounded out to whole seconds.
+	// A read that ends earlier asks for its own range and an hour past its end, rounded out to whole
+	// seconds: Sent Items count a window only up to a minute before its end.
 	routes = read("--since", "2026-01-01T00:00:00.5Z", "--until", "2026-03-01T00:00:00.5Z")
-	if cmds := routeCommands(t, routes[0]); !strings.Contains(cmds[2], "--since 2026-01-01T00:00:00Z --until 2026-03-01T00:00:01Z") {
+	if cmds := routeCommands(t, routes[0]); !strings.Contains(cmds[2], "--since 2026-01-01T00:00:00Z --until 2026-03-01T01:00:01Z") {
 		t.Fatalf("window bounds = %q", cmds[2])
 	}
 
@@ -130,4 +131,17 @@ func TestOlderMailWindowRouteFailureFailsTheRead(t *testing.T) {
 		return store.WorkIQWindowRoute{}, errors.New("broken")
 	}
 	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01T00:00:00Z")
+}
+
+// Spans compare by instant: a window recorded in UTC covers a day bounded in another zone.
+func TestSameSpansComparesInstantsAcrossZones(t *testing.T) {
+	zone := time.FixedZone("PDT", -7*3600)
+	a, b := time.Date(2026, 9, 1, 7, 0, 0, 0, time.UTC), time.Date(2026, 9, 2, 7, 0, 0, 0, time.UTC)
+	if !sameSpans([]store.TimeSpan{{From: a, To: b}}, []store.TimeSpan{{From: a.In(zone), To: b.In(zone)}}) {
+		t.Fatal("the same instants in two zones were judged different spans")
+	}
+	if sameSpans([]store.TimeSpan{{From: a, To: b}}, []store.TimeSpan{{From: a, To: b.Add(time.Second)}}) ||
+		sameSpans([]store.TimeSpan{{From: a, To: b}}, nil) {
+		t.Fatal("different spans were judged the same")
+	}
 }
