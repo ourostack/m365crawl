@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -11,10 +15,13 @@ import (
 )
 
 const (
-	// owaMailboxIdentityKey + account holds the mailbox identity (outlookowa.MailboxIdentity) bound
-	// to a Windows Outlook mail account. It is written in the transaction that commits that
-	// mailbox's mail, so an account never holds mail of an identity it is not bound to.
+	// owaMailboxIdentityKey + account holds the sealed mailbox identity bound to a Windows Outlook
+	// mail account. It is written in the transaction that commits that mailbox's mail, so an
+	// account never holds mail of an identity it is not bound to.
 	owaMailboxIdentityKey = "outlook_mailbox_identity:"
+	// owaMailboxSealKey holds the archive's random key that seals mailbox identities, so a stored
+	// binding cannot confirm a guessed address without the archive's own key.
+	owaMailboxSealKey = "outlook_mailbox_seal"
 	// owaMailboxesKey + the profile's account lists the accounts whose mailboxes the profile held
 	// at its last attributed read; a profile without it has only its own account.
 	owaMailboxesKey = "outlook_mailboxes:"
@@ -51,9 +58,38 @@ func owaMailboxBindings(ctx context.Context, q mailQuerier, scope string) (map[s
 
 // OWAMailboxView is what attributing a profile's mailboxes needs of its archived accounts.
 type OWAMailboxView struct {
-	Bindings map[string]string          // account → bound mailbox identity
+	Bindings map[string]string          // account → sealed bound mailbox identity
 	Holds    map[string]bool            // accounts holding mail rows
 	Native   map[string]map[string]bool // account → held native "folder\x00id" and "message\x00id"
+	seal     []byte
+}
+
+// Sealed is the identity as bindings store it; empty before the archive bound any mailbox.
+func (v OWAMailboxView) Sealed(identity string) string {
+	if v.seal == nil {
+		return ""
+	}
+	return sealIdentity(v.seal, identity)
+}
+
+func sealIdentity(key []byte, identity string) string {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(identity))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// owaSeal reads the archive's sealing key, or nil when none exists yet.
+func owaSeal(ctx context.Context, q mailQuerier) ([]byte, error) {
+	var seal []byte
+	err := mailEach(ctx, q, `select value from meta where key=?`, []any{owaMailboxSealKey}, func(rows *sql.Rows) error {
+		var raw string
+		err := rows.Scan(&raw)
+		if err == nil {
+			seal, err = hex.DecodeString(raw)
+		}
+		return err
+	})
+	return seal, err
 }
 
 // NativeKey is the OWAMailboxView.Native key of a native identity.
@@ -63,6 +99,9 @@ func NativeKey(kind, id string) string { return kind + "\x00" + id }
 func (s *Store) OWAMailboxView(ctx context.Context, scope string) (OWAMailboxView, error) {
 	v := OWAMailboxView{Holds: map[string]bool{}, Native: map[string]map[string]bool{}}
 	var err error
+	if v.seal, err = owaSeal(ctx, s.db); err != nil {
+		return OWAMailboxView{}, err
+	}
 	if v.Bindings, err = owaMailboxBindings(ctx, s.db, scope); err != nil {
 		return OWAMailboxView{}, err
 	}
@@ -98,19 +137,29 @@ func bindOWAMailbox(ctx context.Context, tx *sql.Tx, b OWAMailBatch) error {
 	if b.Identity == "" {
 		return nil
 	}
-	bound, err := owaMailboxBindings(ctx, tx, b.Scope)
+	seal, err := owaSeal(ctx, tx)
+	if err == nil && seal == nil {
+		seal = make([]byte, 32)
+		_, _ = rand.Read(seal) // crypto/rand.Read never fails
+		_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?)`, owaMailboxSealKey, hex.EncodeToString(seal))
+	}
+	var bound map[string]string
+	if err == nil {
+		bound, err = owaMailboxBindings(ctx, tx, b.Scope)
+	}
 	if err != nil {
 		return err
 	}
-	if !inOWAMailboxScope(b.Scope, b.Account) || bound[b.Account] != "" && bound[b.Account] != b.Identity && !b.Rebind {
+	sealed := sealIdentity(seal, b.Identity)
+	if !inOWAMailboxScope(b.Scope, b.Account) || bound[b.Account] != "" && bound[b.Account] != sealed && !b.Rebind {
 		return ErrOWAMailboxBinding
 	}
 	for account, identity := range bound {
-		if account != b.Account && identity == b.Identity {
+		if account != b.Account && identity == sealed {
 			return ErrOWAMailboxBinding
 		}
 	}
-	_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, owaMailboxIdentityKey+b.Account, b.Identity)
+	_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`, owaMailboxIdentityKey+b.Account, sealed)
 	return err
 }
 
@@ -139,8 +188,8 @@ func (s *Store) SetOWAMailboxes(ctx context.Context, scope string, accounts []st
 
 // OWAProfileMailState combines the mail state of every mailbox account the profile held at its
 // last attributed read: the first failure, read only when every mailbox was read (at the oldest
-// read), and how many mailboxes there are.
-func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailState, int, error) {
+// read), and those accounts.
+func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailState, []string, error) {
 	accounts, err := s.OWAMailboxes(ctx, scope)
 	if len(accounts) == 0 {
 		accounts = []string{scope}
@@ -161,10 +210,10 @@ func (s *Store) OWAProfileMailState(ctx context.Context, scope string) (MailStat
 		}
 	}
 	if err != nil {
-		return MailState{}, 0, err
+		return MailState{}, nil, err
 	}
 	if !out.Read || out.Failure != nil {
 		out.Read, out.ReadAt = false, time.Time{}
 	}
-	return out, len(accounts), nil
+	return out, accounts, nil
 }

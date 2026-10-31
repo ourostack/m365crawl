@@ -102,7 +102,8 @@ type Mailbox struct {
 }
 
 // MailboxIdentity hashes the normalized mailbox and signed-in addresses of a mailboxInfo. The
-// database name is never part of it.
+// database name is never part of it. It is unkeyed, so it stays in memory: the archive stores only
+// a copy sealed with its own key, and public account names never derive from it.
 func MailboxIdentity(mailboxAddress, userIdentity string) string {
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 	sum := sha256.Sum256([]byte("m365crawl-owa-mailbox-v1\x00" + norm(mailboxAddress) + "\x00" + norm(userIdentity)))

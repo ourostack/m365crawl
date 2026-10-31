@@ -21,7 +21,7 @@ func owaMailboxBatch(account, identity, prefix string, at time.Time) OWAMailBatc
 
 func TestOWAMailboxBindingsAreTransactionalAndScoped(t *testing.T) {
 	s, ctx := newStore(t), context.Background()
-	second := mailAcct + "/mailbox-0123456789abcdef"
+	second := mailAcct + "/mailbox-2"
 	if got := bindingsOf(t, s); len(got) != 0 {
 		t.Fatalf("empty bindings = %v", got)
 	}
@@ -43,7 +43,7 @@ func TestOWAMailboxBindingsAreTransactionalAndScoped(t *testing.T) {
 	outside := owaMailboxBatch("outlook/elsewhere", "identity-d", "d", mailT0.Add(time.Hour))
 	for name, b := range map[string]OWAMailBatch{
 		"changed":   owaMailboxBatch(second, "identity-c", "b", mailT0.Add(time.Hour)),
-		"duplicate": owaMailboxBatch(mailAcct+"/mailbox-fedcba9876543210", "identity-a", "c", mailT0.Add(time.Hour)),
+		"duplicate": owaMailboxBatch(mailAcct+"/mailbox-3", "identity-a", "c", mailT0.Add(time.Hour)),
 		"outside":   outside,
 	} {
 		if _, err := s.CommitOWAMail(ctx, b); !errors.Is(err, ErrOWAMailboxBinding) {
@@ -71,13 +71,46 @@ func TestOWAMailboxBindingsAreTransactionalAndScoped(t *testing.T) {
 	}
 }
 
+// bindingsOf reports each binding by the plain identity it seals, or "?" when none matches.
 func bindingsOf(t *testing.T, s *Store) map[string]string {
 	t.Helper()
 	v, err := s.OWAMailboxView(context.Background(), mailAcct)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return v.Bindings
+	out := map[string]string{}
+	for account, sealed := range v.Bindings {
+		out[account] = "?"
+		for _, plain := range []string{"identity-a", "identity-b", "identity-c"} {
+			if v.Sealed(plain) == sealed {
+				out[account] = plain
+			}
+		}
+	}
+	return out
+}
+
+func TestOWAMailboxIdentitiesAreSealedPerArchive(t *testing.T) {
+	ctx := context.Background()
+	var sealed []string
+	for range 2 {
+		s := newStore(t)
+		if v, err := s.OWAMailboxView(ctx, mailAcct); err != nil || v.Sealed("identity-a") != "" {
+			t.Fatalf("an archive without bindings sealed an identity: %v", err)
+		}
+		mustCommitOWA(t, s, owaMailboxBatch(mailAcct, "identity-a", "a", mailT0))
+		v, err := s.OWAMailboxView(ctx, mailAcct)
+		if err != nil || v.Bindings[mailAcct] != v.Sealed("identity-a") || len(v.Bindings[mailAcct]) != 64 {
+			t.Fatalf("sealed binding = %v, %v", v.Bindings, err)
+		}
+		if countRows(t, s, `select count(*) from meta where value like '%identity-a%'`) != 0 {
+			t.Fatal("a plain identity was stored")
+		}
+		sealed = append(sealed, v.Bindings[mailAcct])
+	}
+	if sealed[0] == sealed[1] {
+		t.Fatal("two archives sealed one identity alike, so a stored binding confirms a guess")
+	}
 }
 
 func TestOWAMailboxSetAndView(t *testing.T) {
@@ -85,11 +118,11 @@ func TestOWAMailboxSetAndView(t *testing.T) {
 	if got, err := s.OWAMailboxes(ctx, mailAcct); err != nil || got != nil {
 		t.Fatalf("absent set = %v, %v", got, err)
 	}
-	set := []string{mailAcct + "/mailbox-b", mailAcct}
+	set := []string{mailAcct + "/mailbox-2", mailAcct}
 	if err := s.SetOWAMailboxes(ctx, mailAcct, set); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.OWAMailboxes(ctx, mailAcct); err != nil || !reflect.DeepEqual(got, []string{mailAcct, mailAcct + "/mailbox-b"}) {
+	if got, err := s.OWAMailboxes(ctx, mailAcct); err != nil || !reflect.DeepEqual(got, []string{mailAcct, mailAcct + "/mailbox-2"}) {
 		t.Fatalf("set = %v, %v", got, err)
 	}
 	mustCommitOWA(t, s, owaMailboxBatch(mailAcct, "identity-a", "a", mailT0))
@@ -97,7 +130,7 @@ func TestOWAMailboxSetAndView(t *testing.T) {
 	other.Scope = mailAcct + "0"
 	mustCommitOWA(t, s, other)
 	v, err := s.OWAMailboxView(ctx, mailAcct)
-	if err != nil || !reflect.DeepEqual(v.Bindings, map[string]string{mailAcct: "identity-a"}) || !reflect.DeepEqual(v.Holds, map[string]bool{mailAcct: true}) {
+	if err != nil || !reflect.DeepEqual(v.Bindings, map[string]string{mailAcct: v.Sealed("identity-a")}) || !reflect.DeepEqual(v.Holds, map[string]bool{mailAcct: true}) {
 		t.Fatalf("view = %+v, %v", v, err)
 	}
 	if len(v.Native) != 1 || !v.Native[mailAcct][NativeKey("folder", "a/inbox")] || !v.Native[mailAcct][NativeKey("message", "a/message")] || v.Native[mailAcct][NativeKey("folder", "z/inbox")] {
@@ -132,28 +165,31 @@ func TestOWAMailboxReadsAndBindingFaults(t *testing.T) {
 		_, _, err := s.OWAProfileMailState(ctx, mailAcct)
 		return err
 	}, 2) // the mail state's own columns are nullable
-	sweepFaults(t, setup, func(ctx context.Context, s *Store) error {
-		_, err := s.CommitOWAMail(ctx, owaMailboxBatch(mailAcct+"/mailbox-b", "identity-b", "b", mailT0.Add(time.Hour)))
+	bindSecond := func(ctx context.Context, s *Store) error {
+		_, err := s.CommitOWAMail(ctx, owaMailboxBatch(mailAcct+"/mailbox-2", "identity-b", "b", mailT0.Add(time.Hour)))
 		return err
-	})
+	}
+	sweepFaults(t, setup, bindSecond)
+	// The first binding also creates the archive's sealing key.
+	sweepFaults(t, nil, bindSecond)
 }
 
 func TestOWAProfileMailStateCombinesMailboxes(t *testing.T) {
 	s, ctx := newStore(t), context.Background()
-	second := mailAcct + "/mailbox-b"
-	if st, n, err := s.OWAProfileMailState(ctx, mailAcct); err != nil || n != 1 || st.Read {
-		t.Fatalf("unread single = %+v %d %v", st, n, err)
+	second := mailAcct + "/mailbox-2"
+	if st, n, err := s.OWAProfileMailState(ctx, mailAcct); err != nil || len(n) != 1 || st.Read {
+		t.Fatalf("unread single = %+v %v %v", st, n, err)
 	}
 	if err := s.SetMailRead(ctx, mailAcct, mailT0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); !st.Read || n != 1 || !st.ReadAt.Equal(mailT0.Add(time.Hour)) {
+	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); !st.Read || len(n) != 1 || !st.ReadAt.Equal(mailT0.Add(time.Hour)) {
 		t.Fatalf("read single = %+v", st)
 	}
 	if err := s.SetOWAMailboxes(ctx, mailAcct, []string{mailAcct, second}); err != nil {
 		t.Fatal(err)
 	}
-	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); st.Read || n != 2 {
+	if st, n, _ := s.OWAProfileMailState(ctx, mailAcct); st.Read || len(n) != 2 {
 		t.Fatalf("one unread mailbox reported read: %+v", st)
 	}
 	if err := s.SetMailRead(ctx, second, mailT0); err != nil {

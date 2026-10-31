@@ -95,15 +95,46 @@ func TestMailOWADoctorArchivedStates(t *testing.T) {
 	if c := rt.outlookStoreCheck(st); c.Warn || !strings.Contains(c.Detail, "mail read 1m ago") || strings.Contains(c.Detail, "mailboxes") {
 		t.Fatalf("read state = %+v", c)
 	}
-	second := "outlook/Default/mailbox-0123456789abcdef"
+	second := "outlook/Default/mailbox-2"
 	if err := st.SetOWAMailboxes(rt.ctx, "outlook/Default", []string{"outlook/Default", second}); err != nil {
 		t.Fatal(err)
+	}
+	if c := rt.mailReadableCheck(st); !c.Warn || c.Detail != "profile Default: mail not read yet (2 mailboxes)" {
+		t.Fatalf("unread second mailbox = %+v", c)
 	}
 	if err := st.SetMailRead(rt.ctx, second, now.Add(-2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if c := rt.outlookStoreCheck(st); c.Warn || !strings.Contains(c.Detail, "mail read 2m ago (2 mailboxes)") {
 		t.Fatalf("several mailboxes = %+v", c)
+	}
+	if c := rt.mailReadableCheck(st); c.Warn || c.Detail != "profile Default: mail read 2m ago (2 mailboxes)" {
+		t.Fatalf("readable several mailboxes = %+v", c)
+	}
+	if err := st.SetMailFailure(rt.ctx, second, store.OutlookFailure{Code: "outlook_mail_layout_unsupported", Message: "fixed layout failure", Fix: "fixed remedy"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := rt.mailReadableCheck(st); !c.Warn || !strings.Contains(c.Detail, "outlook_mail_layout_unsupported") || !strings.HasSuffix(c.Detail, "(2 mailboxes)") || c.Fix != "fixed remedy" {
+		t.Fatalf("a failing second mailbox was hidden: %+v", c)
+	}
+	// The profile's first mailbox left Outlook: its unread account no longer holds the profile back.
+	if err := st.SetMailRead(rt.ctx, second, now.Add(-3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOWAMailboxes(rt.ctx, "outlook/Default", []string{second}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMailFailure(rt.ctx, "outlook/Default", store.OutlookFailure{Code: "stale_failure"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := rt.mailReadableCheck(st); c.Warn || c.Detail != "profile Default: mail read 3m ago" {
+		t.Fatalf("removed first mailbox = %+v", c)
+	}
+	if err := st.SetOWAMailboxes(rt.ctx, "outlook/Default", []string{"outlook/Default"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMailRead(rt.ctx, "outlook/Default", now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
 	}
 	if err := st.SetMailFailure(rt.ctx, "outlook/Default", store.OutlookFailure{Code: "outlook_mail_layout_unsupported", Message: "fixed layout failure"}); err != nil {
 		t.Fatal(err)
@@ -217,5 +248,44 @@ func TestMailOWASourceCLI(t *testing.T) {
 	c := rt.outlookStoreCheck(nil)
 	if c.Warn || !strings.Contains(c.Detail, "OWA") || !strings.Contains(c.Detail, "calendar") {
 		t.Fatalf("OWA metadata check = %+v", c)
+	}
+}
+
+func TestOWADoctorNamesAStaleSecondMailbox(t *testing.T) {
+	root := createdOWARoot(t)
+	copyTree(t, filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "mail"), filepath.Join(root, "Default"))
+	e := textEnv(t)
+	e.emptyArchive()
+	st, err := store.Open(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	rt := &runtime{ctx: context.Background(), outlookOn: true, outlookRoot: root, now: func() time.Time { return now }}
+	read, fresh := now.Add(-time.Minute), now.Add(-5*time.Hour)
+	second := "outlook/Default/mailbox-2"
+	if err := st.SetOWAMailboxes(rt.ctx, "outlook/Default", []string{"outlook/Default", second}); err != nil {
+		t.Fatal(err)
+	}
+	// Only the second mailbox's cache stopped changing; the profile's own account is current.
+	for account, at := range map[string]time.Time{"outlook/Default": read, second: fresh} {
+		if err := st.SetMailRead(rt.ctx, account, read); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.CommitOWAMail(rt.ctx, store.OWAMailBatch{Account: account, ReadAt: read, FreshAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []string{"outlook|Default|mail", "outlook|Default/mailbox-2|mail"} {
+		if err := st.RecordRun(rt.ctx, store.Run{Source: key, Status: "unchanged", Fingerprint: "fp", StartedAt: read, FinishedAt: read}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c := rt.mailReadableCheck(st); !c.Warn || c.Fix != outlookStaleFix || !strings.HasPrefix(c.Detail, "profile Default: mail read 1m ago (2 mailboxes), but Outlook has not updated its local cache since ") {
+		t.Fatalf("mail_readable = %+v", c)
+	}
+	if c := rt.outlookStoreCheck(st); !c.Warn || c.Fix != outlookStaleFix || !strings.Contains(c.Detail, "mail read 1m ago; ") || !strings.Contains(c.Detail, "(2 mailboxes)") {
+		t.Fatalf("outlook_store = %+v", c)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,9 +67,7 @@ func stubOWAMailboxes(t *testing.T, mailboxes *[]outlookowa.Mailbox) {
 	}
 }
 
-func mailboxAccount(address string) string {
-	return "outlook/Default/mailbox-" + outlookowa.MailboxIdentity(address, "owner@example.invalid")[:16]
-}
+func mailboxAccount(n int) string { return "outlook/Default/mailbox-" + strconv.Itoa(n) }
 
 func detailKeys(t *testing.T, db, account string) []int {
 	t.Helper()
@@ -115,7 +114,7 @@ func TestSyncOWASeveralMailboxesStayAccountIsolated(t *testing.T) {
 	current = []outlookowa.Mailbox{a, b}
 	o.FullRead = true
 	r, _ = run(t, o)
-	second := mailboxAccount("shared@example.invalid")
+	second := mailboxAccount(2)
 	secondKey := "outlook|" + strings.TrimPrefix(second, "outlook/") + "|mail"
 	if m := sourceKeyed(t, r, secondKey); m.Status != StatusOK || m.Counts.Mail.Added != 5 || len(m.Accounts) != 1 || m.Accounts[0] != second {
 		t.Fatalf("second mailbox: %+v", r.Sources)
@@ -186,7 +185,7 @@ func TestSyncOWALegacyArchiveMigratesByNativeOverlap(t *testing.T) {
 	if m := sourceKeyed(t, r, "outlook|Default|mail"); m.Status != StatusOK || m.Counts.Mail.Added != 0 || !slices.Equal(detailKeys(t, db, "outlook/Default"), keys) {
 		t.Fatalf("legacy mailbox moved: %+v", m)
 	}
-	if len(detailKeys(t, db, mailboxAccount("shared@example.invalid"))) != 5 {
+	if len(detailKeys(t, db, mailboxAccount(2))) != 5 {
 		t.Fatal("new mailbox not archived separately")
 	}
 	if accountCount(t, db, `select count(*) from meta where key='outlook_mailbox_identity:'||?`, "outlook/Default") != 1 {
@@ -207,7 +206,7 @@ func TestSyncOWAUnrelatedSingleMailboxIsNotConflated(t *testing.T) {
 	current = []outlookowa.Mailbox{owaSyntheticMailbox(base, "C", "other@example.invalid")}
 	o.FullRead = true
 	r, _ := run(t, o)
-	other := mailboxAccount("other@example.invalid")
+	other := mailboxAccount(2)
 	if m := sourceKeyed(t, r, "outlook|"+strings.TrimPrefix(other, "outlook/")+"|mail"); m.Status != StatusOK || m.Counts.Mail.Added != 5 {
 		t.Fatalf("unrelated mailbox: %+v", r.Sources)
 	}
@@ -225,8 +224,6 @@ func TestSyncOWAAttributionRefusalsApplyNothing(t *testing.T) {
 		"duplicate_identity": {[][]string{{"A=owner@example.invalid"}, {"A=owner@example.invalid", "B=owner@example.invalid"}}, "mailbox_identity_duplicate"},
 		"ambiguous_overlap":  {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"AB=renamed@example.invalid"}}, "mailbox_binding_ambiguous"},
 		"two_claim_one":      {[][]string{{"A=owner@example.invalid"}, {"A=one@example.invalid", "A=two@example.invalid"}}, "mailbox_binding_ambiguous"},
-		"name_taken": {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"A=owner@example.invalid", "B=renamed@example.invalid"},
-			{"A=owner@example.invalid", "B=renamed@example.invalid", "C=shared@example.invalid"}}, "mailbox_binding_ambiguous"},
 		"legacy_unrelated":   {[][]string{{"A="}, {"C="}}, "mailbox_binding_unproved"},
 		"unproved_with_more": {[][]string{{"A=owner@example.invalid", "B=shared@example.invalid"}, {"A="}}, "mailbox_identity_unresolved"},
 	} {
@@ -301,15 +298,60 @@ func TestSyncOWAEmptiedMailboxFailsAlone(t *testing.T) {
 	current = []outlookowa.Mailbox{a, empty}
 	o.FullRead = true
 	r, _, err := Run(context.Background(), o)
-	second := mailboxAccount("shared@example.invalid")
+	// Both mailboxes were new together, so each took the next number in read order.
+	second := mailboxAccount(3)
 	m := sourceKeyed(t, r, "outlook|"+strings.TrimPrefix(second, "outlook/")+"|mail")
 	if err == nil || m.Status != StatusFailed || m.Error == nil || !strings.HasSuffix(m.Error.Message, "no_mail_objects") {
 		t.Fatalf("emptied mailbox = %+v %v", m, err)
 	}
-	if first := sourceKeyed(t, r, "outlook|Default/mailbox-"+outlookowa.MailboxIdentity("owner@example.invalid", "owner@example.invalid")[:16]+"|mail"); first.Status != StatusOK {
+	if first := sourceKeyed(t, r, "outlook|Default/mailbox-2|mail"); first.Status != StatusOK {
 		t.Fatalf("the other mailbox did not read independently: %+v", r.Sources)
 	}
 	if len(detailKeys(t, db, second)) != 5 || count(t, db, `select count(*) from mail_absent`) != 0 {
 		t.Fatal("emptied mailbox lost rows")
+	}
+}
+
+func TestSyncOWAMailboxNumbersAreSequentialAndAddressFree(t *testing.T) {
+	isolateTmp(t)
+	root, db := owaRoot(t, "calendar"), newDB(t)
+	base := owaBaseResult(t, root)
+	a := owaSyntheticMailbox(base, "A", "owner@example.invalid")
+	b := owaSyntheticMailbox(base, "B", "shared@example.invalid")
+	renamed := owaSyntheticMailbox(base, "B", "renamed@example.invalid")
+	c := owaSyntheticMailbox(base, "C", "shared@example.invalid")
+	current := []outlookowa.Mailbox{a}
+	stubOWAMailboxes(t, &current)
+	o := outlookOpts(db, root)
+	run(t, o)
+	o.FullRead = true
+	for _, phase := range [][]outlookowa.Mailbox{{a, b}, {a, renamed}, {a, renamed, c}} {
+		current = phase
+		run(t, o)
+	}
+	// B kept mailbox-2 through its rename; C reuses B's old address but is a new mailbox, so it
+	// gets the next number rather than anything derived from that address.
+	rows, err := openRaw(t, db).Query(`select distinct account from mail_messages order by account`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var accounts []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		accounts = append(accounts, a)
+	}
+	if !slices.Equal(accounts, []string{"outlook/Default", mailboxAccount(2), mailboxAccount(3)}) {
+		t.Fatalf("accounts = %v", accounts)
+	}
+	for _, address := range []string{"owner@example.invalid", "shared@example.invalid", "renamed@example.invalid"} {
+		identity := outlookowa.MailboxIdentity(address, "owner@example.invalid")
+		if count(t, db, `select count(*) from meta where instr(key, '`+identity[:16]+`') > 0 or instr(value, '`+identity[:16]+`') > 0`) != 0 ||
+			count(t, db, `select count(*) from sync_runs where instr(source, '`+identity[:16]+`') > 0`) != 0 {
+			t.Fatal("an address-derived identity is stored or published")
+		}
 	}
 }

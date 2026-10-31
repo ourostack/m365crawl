@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 )
 
 // A Windows profile's first mailbox keeps the profile's own account (outlook/<profile>) and source
-// (outlook|<profile>|mail), so existing public IDs never move. Every further mailbox gets
-// outlook/<profile>/mailbox-<identity prefix> and its own source, read state and absence.
+// (outlook|<profile>|mail), so existing public IDs never move. Every further mailbox gets the next
+// unused outlook/<profile>/mailbox-<n> (n from 2) and its own source, read state and absence. The
+// number says nothing about the mailbox; only the archive's sealed binding links it to an identity.
 
 func owaMailKey(account string) string {
 	return mailKey(outlookKey(strings.TrimPrefix(account, "outlook/")))
@@ -81,8 +83,9 @@ func attributeOWAMailboxes(view store.OWAMailboxView, scope string, mailboxes []
 	out := make([]owaAssignment, len(mailboxes))
 	claimed, bound := map[string]bool{}, map[string]bool{}
 	for i, mb := range mailboxes {
+		sealed := view.Sealed(mb.Identity)
 		for account, identity := range view.Bindings {
-			if identity == mb.Identity {
+			if identity == sealed {
 				out[i].account = account
 				claimed[account], bound[account] = true, true
 			}
@@ -117,19 +120,38 @@ func attributeOWAMailboxes(view store.OWAMailboxView, scope string, mailboxes []
 		out[i] = owaAssignment{account: match[0], rebind: rebind}
 		claimed[match[0]] = true
 	}
+	next := nextOWAMailboxNumber(view, scope)
 	for _, i := range fresh {
-		account := scope + store.OWAMailboxInfix + mailboxes[i].Identity[:16]
 		// A profile's only mailbox keeps the profile's account unless that account holds another mailbox.
 		if _, scopeBound := view.Bindings[scope]; len(mailboxes) == 1 && !claimed[scope] && !scopeBound && !view.Holds[scope] {
-			account = scope
+			out[i].account = scope
+			continue
 		}
-		if _, taken := view.Bindings[account]; taken || claimed[account] {
-			return nil, layoutGuard("mailbox_binding_ambiguous")
-		}
-		out[i].account = account
-		claimed[account] = true
+		out[i].account = scope + store.OWAMailboxInfix + strconv.Itoa(next)
+		next++
 	}
 	return out, nil
+}
+
+// nextOWAMailboxNumber is one past the highest mailbox number any archived account of the
+// profile uses, so a number is never reused for another mailbox.
+func nextOWAMailboxNumber(view store.OWAMailboxView, scope string) int {
+	next := 2
+	use := func(account string) {
+		if n, err := strconv.Atoi(strings.TrimPrefix(account, scope+store.OWAMailboxInfix)); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	for account := range view.Bindings {
+		use(account)
+	}
+	for account := range view.Holds {
+		use(account)
+	}
+	for account := range view.Native {
+		use(account)
+	}
+	return next
 }
 
 // commitOWAMailboxes reads every mailbox of the snapshot and commits each to its own account. An
