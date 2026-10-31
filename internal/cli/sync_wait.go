@@ -144,6 +144,9 @@ func (rt *runtime) syncAfterOtherRun(o syncer.Options) (rep syncer.Report, syncE
 // that run left due. Once the read's wait is spent it gives up with `locked`, which the caller
 // reports as the refresh error beside the archived sources.
 func (rt *runtime) besideOtherRun(refresh func() error) error {
+	if err := rt.checkFeed(); err != nil {
+		return err
+	}
 	err := refresh()
 	for isLocked(err) {
 		more, perr := rt.pause()

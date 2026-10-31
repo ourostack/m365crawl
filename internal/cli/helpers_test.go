@@ -37,7 +37,16 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, root: root, db: filepath.Join(t.TempDir(), "data", "m365crawl.db")}
+	e := &env{t: t, root: root, db: filepath.Join(t.TempDir(), "data", "m365crawl.db")}
+	// The env's archive, even after a test moves it, counts as this test machine's default archive,
+	// which reads always sync (#295).
+	prev := isDefaultPath
+	isDefaultPath = func(path string) bool {
+		db, err := filepath.Abs(e.db)
+		return err == nil && db == path || prev(path)
+	}
+	t.Cleanup(func() { isDefaultPath = prev })
+	return e
 }
 
 // run invokes Main in-process with the env's root and db; stdout is a buffer, so it is not a TTY.

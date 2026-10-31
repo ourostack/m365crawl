@@ -35,6 +35,7 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	_ = os.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	_ = os.Setenv("M365CRAWL_REAL_CACHE", "0")
 	// doctor names the browser transcripts fetch would run: the same one on every machine.
 	findBrowser = func(string) (string, browser.Kind, error) { return testBrowserPath, browser.KindEdge, nil }
