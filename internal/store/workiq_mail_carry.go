@@ -43,7 +43,7 @@ from workiq_censuses where attempt_id=? and account_id=?`, attempt, binding.Fact
 		}
 		var entries []entry
 		if err := eachRow(ctx, tx, `select item_rowid,graph_id,server_projection,server_seen_at,server_gone_at,server_deleted_at,server_version,server_deleted_version
-from workiq_rows where kind='mail' and account_id=? and server_seen=1 and item_rowid>? order by item_rowid limit ?`,
+from workiq_rows where kind='mail' and account_id=? and server_seen=1 and identity_unproven=0 and item_rowid>? order by item_rowid limit ?`,
 			[]any{binding.Fact.ID, after, limit}, func(row *sql.Rows) error {
 				var item entry
 				if err := row.Scan(&item.id, &item.graph, &item.raw, &item.seen, &item.gone, &item.deleted, &item.liveVersion, &item.deleteVersion); err != nil {

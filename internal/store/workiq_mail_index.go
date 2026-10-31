@@ -37,7 +37,7 @@ or exists(select 1 from meta where key=?)`, account, workIQMailIndexPrefix+accou
 }
 
 func (s *Store) IndexWorkIQMailCandidates(ctx context.Context, attempt, after int64, limit int) (int64, bool, error) {
-	binding, err := s.validateWorkIQAttemptOwner(ctx, attempt)
+	binding, err := s.validateWorkIQMailRetention(ctx, attempt)
 	if err != nil {
 		return 0, false, err
 	}

@@ -91,11 +91,14 @@ where a.kind='mail_native_presence' and a.account_id=? and a.namespace=?`, []any
 			}
 			if len(ids) == 1 {
 				var raw string
-				err := tx.QueryRowContext(ctx, `select server_projection from workiq_rows where kind='mail' and account_id=? and item_rowid=?`, b.Account, ids[0]).Scan(&raw)
+				var unproven bool
+				err := tx.QueryRowContext(ctx, `select server_projection,identity_unproven from workiq_rows where kind='mail' and account_id=? and item_rowid=?`, b.Account, ids[0]).Scan(&raw, &unproven)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return b, nil, err
 				}
-				if err == nil {
+				// A window row's identity is unproven until a whole-account census vouches for it, so a
+				// cache message never joins it.
+				if err == nil && !unproven {
 					var server workiq.MailMessage
 					if json.Unmarshal([]byte(raw), &server) != nil {
 						return b, nil, errors.New("invalid retained server mail projection")
