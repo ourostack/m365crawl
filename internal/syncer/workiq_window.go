@@ -480,11 +480,8 @@ func (r *workIQWindowRun) expire(ctx context.Context, f *workIQWindowFolderRun, 
 }
 
 // stage fetches one page of a folder's position and stores it, after the disk check.
+// Staging checked every cursor it saved against the folder, so path is always the folder's own.
 func (r *workIQWindowRun) stage(ctx context.Context, f *workIQWindowFolderRun, path string, revision int64) (store.WorkIQWindowPage, error) {
-	scope, _ := url.ParseRequestURI(f.resource)
-	if _, err := workiq.RelativePath(path, scope.Path); err != nil {
-		return store.WorkIQWindowPage{}, err
-	}
 	if err := r.checkDisk(false, false); err != nil {
 		return store.WorkIQWindowPage{}, err
 	}

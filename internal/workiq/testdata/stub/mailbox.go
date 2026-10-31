@@ -33,6 +33,10 @@ type mailbox struct {
 	// two processes at a known point.
 	PauseAt   int    `json:"pause_at"`
 	PauseFile string `json:"pause_file"`
+	// Break makes one kind of answer malformed, for refusal tests: count (no @odata.count), folder
+	// (an entity without an id), collection (no value array), child_parent (a child naming another
+	// parent), next_scope (a next link outside its folder) or many_folders (more than 100000).
+	Break string `json:"break"`
 }
 
 type mbFolder struct {
@@ -111,7 +115,7 @@ func (mb *mailbox) tick() mbState {
 	return st
 }
 
-func (mb *mailbox) saveExpired(folder string) bool {
+func (mb *mailbox) saveExpired(key string) bool {
 	lock := mb.State + ".lock"
 	for os.Mkdir(lock, 0o700) != nil {
 		time.Sleep(5 * time.Millisecond)
@@ -123,10 +127,10 @@ func (mb *mailbox) saveExpired(folder string) bool {
 	if st.Expired == nil {
 		st.Expired = map[string]int{}
 	}
-	if st.Expired[folder] > 0 {
+	if st.Expired[key] > 0 {
 		return false
 	}
-	st.Expired[folder]++
+	st.Expired[key]++
 	raw, _ = json.Marshal(st)
 	_ = os.WriteFile(mb.State, raw, 0o600)
 	return true
@@ -255,6 +259,9 @@ func (mb *mailbox) fetch(path string) (any, int, bool) {
 	q := u.Query()
 	rest := strings.TrimPrefix(u.Path, "/me/mailFolders")
 	folders := mb.foldersAt(st.Applied)
+	if broken, ok := mb.broken(rest, q); ok {
+		return broken, 200, true
+	}
 	if rest == "" {
 		var values []any
 		for _, f := range folders {
@@ -289,6 +296,40 @@ func (mb *mailbox) fetch(path string) (any, int, bool) {
 		return mb.delta(id, q, st)
 	}
 	return nil, 404, true
+}
+
+func (mb *mailbox) broken(rest string, q url.Values) (any, bool) {
+	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
+	switch {
+	case mb.Break == "count" && q.Get("$top") == "1":
+		return map[string]any{"value": []any{}}, true
+	case mb.Break == "folder" && len(parts) == 1 && rest != "":
+		return map[string]any{"displayName": "no id"}, true
+	case mb.Break == "collection" && rest == "":
+		return map[string]any{"value": "not-a-collection"}, true
+	case mb.Break == "dup_child" && strings.HasSuffix(rest, "/childFolders"):
+		return map[string]any{"value": []any{map[string]any{"id": "inbox-id", "childFolderCount": 0}}}, true
+	case mb.Break == "bad_child" && strings.HasSuffix(rest, "/childFolders"):
+		return map[string]any{"value": []any{map[string]any{"displayName": "no id"}}}, true
+	case mb.Break == "root_next_scope" && rest == "":
+		return map[string]any{"value": []any{}, "@odata.nextLink": "/me/messages?$skip=1"}, true
+	case mb.Break == "child_parent" && strings.HasSuffix(rest, "/childFolders"):
+		return map[string]any{"value": []any{map[string]any{"id": "stray", "parentFolderId": "elsewhere", "childFolderCount": 0}}}, true
+	case mb.Break == "next_scope" && strings.HasSuffix(rest, "/messages/delta") && q.Get("$skiptoken") == "" && q.Get("$deltatoken") == "":
+		return map[string]any{"value": []any{}, "@odata.nextLink": "/me/mailFolders/elsewhere/messages/delta?$skiptoken=x"}, true
+	case mb.Break == "many_folders" && rest == "":
+		page := q.Get("$skiptoken")
+		values := make([]any, 0, 60000)
+		for i := 0; i < 60000; i++ {
+			values = append(values, map[string]any{"id": fmt.Sprintf("f-%s-%d", page, i)})
+		}
+		out := map[string]any{"value": values}
+		if page == "" {
+			out["@odata.nextLink"] = "/me/mailFolders?includeHiddenFolders=true&$skiptoken=2"
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 func (mb *mailbox) folderJSON(f mbFolder, folders []mbFolder) map[string]any {
@@ -371,7 +412,7 @@ func (mb *mailbox) delta(folder string, q url.Values, st mbState) (any, int, boo
 	}
 	if token != "" {
 		for _, e := range mb.Expire {
-			if e.Folder == folder && st.Fetches >= e.At && mb.saveExpired(folder) {
+			if e.Folder == folder && st.Fetches >= e.At && mb.saveExpired(fmt.Sprintf("%s@%d", folder, e.At)) {
 				return map[string]any{"error": map[string]any{"code": "SyncStateNotFound", "message": "expired"}}, 410, true
 			}
 		}

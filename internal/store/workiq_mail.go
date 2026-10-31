@@ -228,10 +228,11 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 		if err != nil {
 			return err
 		}
-		if unproven > 0 && !(copies == 1 && len(candidates) == 1 && movable) {
+		switch {
+		case unproven > 0 && (copies != 1 || len(candidates) != 1 || !movable):
 			// A window row no complete census has vouched for: merging into it could join twins.
 			result.Gaps["workiq_mail_identity_ambiguous"]++
-		} else if copies == 1 && len(candidates) == 1 {
+		case copies == 1 && len(candidates) == 1:
 			var header, subject, sender string
 			var sent sql.NullString
 			if err := tx.QueryRowContext(ctx, `select internet_message_id,subject,sender_address,sent_at from mail_messages where rowid=?`, candidates[0]).Scan(&header, &subject, &sender, &sent); err != nil {
@@ -258,7 +259,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 			} else {
 				result.Gaps["workiq_mail_identity_uncorroborated"]++
 			}
-		} else if copies > 1 || len(candidates) > 1 {
+		case copies > 1 || len(candidates) > 1:
 			result.Gaps["workiq_mail_identity_ambiguous"]++
 		}
 	}
