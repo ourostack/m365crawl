@@ -74,6 +74,8 @@ func TestRangeCoverageFailsTheReadWhenWindowSpansCannotBeRead(t *testing.T) {
 	e := routeEnv(t)
 	old := mailWindowSpans
 	t.Cleanup(func() { mailWindowSpans = old })
-	mailWindowSpans = func(*store.Store, context.Context, string) ([]store.TimeSpan, error) { return nil, errors.New("broken") }
+	mailWindowSpans = func(*store.Store, context.Context, string) ([]store.TimeSpan, error) {
+		return nil, errors.New("broken")
+	}
 	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01T00:00:00Z")
 }

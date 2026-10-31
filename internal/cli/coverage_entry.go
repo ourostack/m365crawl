@@ -253,7 +253,7 @@ type mailCoverageEvidence struct {
 	server time.Time
 	// windows are the proven all-folder WorkIQ mail windows, on the received clock.
 	windows []store.TimeSpan
-	roles  map[string]bool // the roles the account has an archived folder of
+	roles   map[string]bool // the roles the account has an archived folder of
 }
 
 // mailCoverageSpans and mailServerThrough are test seams of the archive's mail evidence.
