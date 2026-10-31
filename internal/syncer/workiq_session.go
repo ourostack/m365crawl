@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -230,20 +231,48 @@ type workIQStop struct {
 
 func (e *workIQStop) Unwrap() error { return e.error }
 
+// workIQIdentityStop is an identity check stopped by an unexplained failure. It is never a stuck
+// candidate on its own: at startup it means WorkIQ is unavailable. When it ends a reopen during a
+// traversal, the stop is marked at the page in progress.
+type workIQIdentityStop struct {
+	error
+	reason string
+}
+
+func (e *workIQIdentityStop) Unwrap() error { return e.error }
+
+// workIQStopParts are the parts of a server descriptor that say why a request failed without
+// naming the request: its status, its Graph or JSON-RPC code and its kind. Request IDs and other
+// text vary per request, so they are not compared.
+var workIQStopParts = regexp.MustCompile(`^(?:status [1-5][0-9]{2}|code -?[A-Za-z0-9]{1,64}|tool error|rpc error)$`)
+
+// workIQStopReason is why a failure stopped a run, in terms that repeat when the failure repeats.
+func workIQStopReason(cause error) string {
+	reason := workIQOutcomeCode(cause)
+	d, _ := workiq.DiagnosticOf(cause)
+	for _, part := range strings.Split(d.Server, "; ") {
+		if part, _, _ = strings.Cut(part, ":"); workIQStopParts.MatchString(part) {
+			reason += " " + part
+		}
+	}
+	return reason
+}
+
+// workIQStopMark says where (a hash of the request path) and why a run stopped.
+func workIQStopMark(path, reason string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:8]) + " " + reason
+}
+
 // workIQStopped keeps the failure's diagnostic with the retry policy's stop, and marks where an
-// unexplained (transient) failure stopped. A throttle or server error the server explained is not
-// marked: waiting can clear it.
+// unexplained (transient) failure stopped a page. A throttle or server error the server explained
+// is not marked: waiting can clear it.
 func workIQStopped(transient bool, path string, policyErr, cause error) error {
 	err := errors.Join(policyErr, cause)
 	if !transient {
 		return err
 	}
-	sum := sha256.Sum256([]byte(path))
-	reason := workIQOutcomeCode(cause)
-	if d, ok := workiq.DiagnosticOf(cause); ok {
-		reason += " " + d.Server
-	}
-	return &workIQStop{error: err, at: hex.EncodeToString(sum[:8]) + " " + reason}
+	return &workIQStop{error: err, at: workIQStopMark(path, workIQStopReason(cause))}
 }
 
 // workIQStopAt is where and why an error's unexplained failure stopped the run, or "".
@@ -290,8 +319,7 @@ func workIQOpenUser(ctx context.Context, inv workiq.Invocation, address string) 
 		if err != nil {
 			return nil, workiq.User{}, err
 		}
-		const path = "/me"
-		page, err := client.Fetch(ctx, path)
+		page, err := client.Fetch(ctx, "/me")
 		if err == nil {
 			var user workiq.User
 			if user, err = workiq.DecodeUser(ctx, page.Data); err == nil {
@@ -310,8 +338,11 @@ func workIQOpenUser(ctx context.Context, inv workiq.Invocation, address string) 
 		}
 		now := workIQNow()
 		wait, retryable, policyErr := workIQRetryDelay(status, page.RetryAfter, retry, now, deadline.Sub(now))
+		if policyErr != nil && transient {
+			return nil, workiq.User{}, &workIQIdentityStop{error: errors.Join(policyErr, err), reason: workIQStopReason(err)}
+		}
 		if policyErr != nil {
-			return nil, workiq.User{}, workIQStopped(transient, path, policyErr, err)
+			return nil, workiq.User{}, errors.Join(policyErr, err)
 		}
 		if !retryable {
 			return nil, workiq.User{}, err
@@ -381,6 +412,10 @@ func (s *workIQSession) fetch(ctx context.Context, path string) (workiq.Page, er
 		}
 		if s.client == nil {
 			client, _, err := workIQPinned(ctx, s.options, s.binding)
+			var lost *workIQIdentityStop
+			if errors.As(err, &lost) { // the reopen of a lost page kept failing: the page is where it stopped
+				return workiq.Page{}, &workIQStop{error: err, at: workIQStopMark(path, lost.reason)}
+			}
 			if err != nil {
 				return workiq.Page{}, err
 			}

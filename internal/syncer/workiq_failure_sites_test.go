@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,34 @@ func TestWorkIQPinnedIdentityCheckReopensALostSession(t *testing.T) {
 	if count(t, db, `select count(*) from workiq_attempts where error_code='workiq_retry_later' and finished_at is not null`) != 1 ||
 		count(t, db, `select count(*) from meta where key like 'workiq_diagnostic:%'`) != 1 {
 		t.Fatal("the stopped identity check left no closed attempt or diagnostic")
+	}
+	// An identity check lost again on the next run is an outage, not a stuck position.
+	if report, err := RunWorkIQ(context.Background(), options); workIQCode(err) != "workiq_retry_later" || !report.Resumable {
+		t.Fatalf("a second lost identity check was not resumable: %v %v", err, report.Resumable)
+	}
+}
+
+// Live: WorkIQ was lost mid-traversal and its reopen kept failing. The stop belongs to the page in
+// progress, not to the identity check the reopen repeats, so two runs that each got further before
+// losing WorkIQ stay resumable; only a second loss at the same page is stuck.
+func TestWorkIQLostSessionReopenStopIsKeyedOnItsPage(t *testing.T) {
+	db, _ := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	seedWorkIQChatOwner(t, db)
+	noWorkIQWait(t)
+	t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+	options := WorkIQOptions{DBPath: db, Source: "chats", MaxChats: 1}
+	for run, tc := range []struct{ path, code string }{
+		{"/chats/chat/messages", "workiq_retry_later"},
+		{"/chats/chat/messages?$skiptoken=second", "workiq_retry_later"},
+		{"/chats/chat/messages?$skiptoken=second", "workiq_stuck"},
+	} {
+		t.Setenv("WORKIQ_ACQUISITION_DIE_PATH", tc.path)
+		t.Setenv("WORKIQ_ACQUISITION_DIE_MARK", filepath.Join(t.TempDir(), "died"))
+		report, err := RunWorkIQ(context.Background(), options)
+		if workIQCode(err) != tc.code || report.Resumable != (tc.code == "workiq_retry_later") {
+			t.Fatalf("run %d, lost at %s: %v resumable %v", run+1, tc.path, err, report.Resumable)
+		}
 	}
 }
 
@@ -158,13 +187,14 @@ func TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult(t *testing.T) {
 				if tc.name == "chats-coverage" {
 					continue
 				}
-				// Every later fetch keeps failing, so reruns stop at the identity check: by the third
-				// run the same stop repeats and the result no longer invites another rerun.
+				// Every later fetch keeps failing, so reruns stop at the identity check. That is an
+				// outage, never a stuck position, so each rerun stays resumable with its own attempt.
 				for range 2 {
 					report, err = RunWorkIQ(context.Background(), tc.options(db, account))
 				}
-				if workIQCode(err) != "workiq_stuck" || report.Resumable {
-					t.Fatalf("a failure repeating from fetch %d of %d still invited a rerun: %v resumable %v", from, fetches, err, report.Resumable)
+				if workIQCode(err) != "workiq_retry_later" || !report.Resumable ||
+					count(t, db, `select count(*) from workiq_attempts where status='open'`) != 0 {
+					t.Fatalf("a failure repeating from fetch %d of %d at the identity check was not a resumable stop: %v resumable %v", from, fetches, err, report.Resumable)
 				}
 			}
 		})
@@ -192,6 +222,14 @@ func TestWorkIQIdentityCheckStopsOnCleanupFailureOrCanceledBackoff(t *testing.T)
 	workIQWait = func(context.Context, time.Duration) error { return context.Canceled }
 	if _, _, err := workIQOpenUser(ctx, workiq.Invocation{}, "test.user@example.invalid"); !errors.Is(err, context.Canceled) {
 		t.Fatal("a canceled backoff did not stop the identity check", err)
+	}
+	// A server error that outlasts its retries is an explained stop, not an identity-check loss.
+	workIQWait = func(context.Context, time.Duration) error { return nil }
+	t.Setenv("WORKIQ_ACQUISITION_ME_DIE", "")
+	t.Setenv("WORKIQ_ACQUISITION_ME", "unavailable")
+	var lost *workIQIdentityStop
+	if _, _, err := workIQOpenUser(ctx, workiq.Invocation{}, ""); workIQCode(err) != "workiq_retry_later" || errors.As(err, &lost) {
+		t.Fatal("an unavailable identity check was not an explained resumable stop", err)
 	}
 }
 
@@ -222,20 +260,25 @@ func TestWorkIQFailureRecordingNeedsOneArchivedAccount(t *testing.T) {
 func TestWorkIQRepeatedUnexplainedStopAtOnePositionIsStuck(t *testing.T) {
 	noWorkIQWait(t)
 	ctx := context.Background()
+	mail := func(db, account string) WorkIQOptions {
+		return WorkIQOptions{DBPath: db, Source: "mail", Account: account}
+	}
 	for _, tc := range []struct {
-		name, path string
-		options    func(db, account string) WorkIQOptions
+		name, path, shape string
+		options           func(db, account string) WorkIQOptions
 	}{
-		{"mail", "folder-inbox/messages", func(db, account string) WorkIQOptions {
-			return WorkIQOptions{DBPath: db, Source: "mail", Account: account}
-		}},
-		{"chats", "/chats/chat/messages", func(db, _ string) WorkIQOptions { return WorkIQOptions{DBPath: db, Source: "chats", MaxChats: 1} }},
+		{"mail", "folder-inbox/messages", "", mail},
+		{"chats", "/chats/chat/messages", "", func(db, _ string) WorkIQOptions { return WorkIQOptions{DBPath: db, Source: "chats", MaxChats: 1} }},
+		// The same failure names a fresh request ID each time; only the outcome, status and Graph
+		// code are compared, so it still repeats.
+		{"mail-request-id", "folder-inbox/messages", "tool-error-request-id", mail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, account := workIQAcquisitionArchive(t)
 			workIQAcquisitionStub(t)
 			seedWorkIQChatOwner(t, db)
 			t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+			t.Setenv("WORKIQ_ACQUISITION_FAIL_SHAPE", tc.shape)
 			t.Setenv("WORKIQ_ACQUISITION_FAIL_PATH", tc.path)
 			options := tc.options(db, account)
 			if report, err := RunWorkIQ(ctx, options); workIQCode(err) != "workiq_retry_later" || !report.Resumable {
@@ -244,7 +287,7 @@ func TestWorkIQRepeatedUnexplainedStopAtOnePositionIsStuck(t *testing.T) {
 			for run := 2; run <= 3; run++ {
 				report, err := RunWorkIQ(ctx, options)
 				if workIQCode(err) != "workiq_stuck" || report.Resumable || len(report.Accounts) == 0 || report.Accounts[0].Diagnostic == nil ||
-					report.Accounts[0].Diagnostic.Server != "tool error: Unhandled server failure for [redacted]" {
+					!strings.HasPrefix(report.Accounts[0].Diagnostic.Server, "tool error: Unhandled server failure ") {
 					t.Fatalf("run %d repeated the stop without reporting it stuck: %v resumable %v %+v", run, err, report.Resumable, report.Accounts)
 				}
 			}

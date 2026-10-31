@@ -50,7 +50,11 @@ func folder(kind string) map[string]any {
 // every fetch from the Nth on.
 func failFrom(path string) map[string]any {
 	failure := map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "Unhandled server failure for subject Quarterly plan"}}}
-	if os.Getenv("WORKIQ_ACQUISITION_FAIL_SHAPE") == "graph-404" {
+	switch os.Getenv("WORKIQ_ACQUISITION_FAIL_SHAPE") {
+	case "tool-error-request-id": // live: the same failure names a new request each time
+		failure = map[string]any{"isError": true, "content": []any{map[string]any{"type": "text",
+			"text": fmt.Sprintf("Unhandled server failure request-id %08x-1111-2222-3333-444455556666", time.Now().UnixNano()&0xffffffff)}}}
+	case "graph-404":
 		failure = map[string]any{"isError": true, "structuredContent": map[string]any{"results": []any{map[string]any{"data": nil, "statusCode": 404,
 			"error": map[string]any{"error": map[string]any{"code": "itemNotFound", "message": "The chat Quarterly plan was not found"}}}}}}
 	}
@@ -110,7 +114,9 @@ func fetch(path string) (any, int) {
 		return map[string]any{"value": values, "@odata.nextLink": fmt.Sprintf("/chats/chat/messages?$skiptoken=%d", page+1)}, 200
 	}
 	if path == "/me" && len(os.Args) == 4 { // live: WorkIQ lost during the pinned identity check
-		if die := os.Getenv("WORKIQ_ACQUISITION_ME_DIE"); die != "" && (die == "always" || createOnce(die)) {
+		// After a child died mid-traversal (WORKIQ_ACQUISITION_DIE_MARK exists), every reopen dies too.
+		_, marked := os.Stat(os.Getenv("WORKIQ_ACQUISITION_DIE_MARK"))
+		if die := os.Getenv("WORKIQ_ACQUISITION_ME_DIE"); die != "" && (die == "always" || createOnce(die)) || os.Getenv("WORKIQ_ACQUISITION_DIE_MARK") != "" && marked == nil {
 			_, _ = fmt.Fprintln(os.Stderr, "fatal: connection lost for user@example.invalid")
 			os.Exit(3)
 		}
@@ -127,6 +133,8 @@ func fetch(path string) (any, int) {
 			}
 		case "fail":
 			return nil, 403
+		case "unavailable":
+			return nil, 503
 		case "missing-id":
 			return map[string]any{"mail": "test.user@example.invalid"}, 200
 		case "invalid-address":
@@ -497,6 +505,13 @@ func main() {
 			if result := refusal(path); result != nil {
 				reply["result"] = result
 				break
+			}
+			if die := os.Getenv("WORKIQ_ACQUISITION_DIE_PATH"); die != "" && path == die { // live: WorkIQ lost mid-traversal
+				if f, err := os.Create(os.Getenv("WORKIQ_ACQUISITION_DIE_MARK")); err == nil {
+					_ = f.Close()
+				}
+				_, _ = fmt.Fprintln(os.Stderr, "fatal: connection lost")
+				os.Exit(3)
 			}
 			if result := failFrom(path); result != nil {
 				reply["result"] = result
