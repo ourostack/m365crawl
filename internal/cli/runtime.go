@@ -54,7 +54,6 @@ type runtime struct {
 	implicitSync     string      // implicit_sync: ran, skipped_fresh, disabled, waited_for_other_sync, other_sync_in_progress, foreign_archive or no_archive
 	feedChecked      bool        // checkFeed has run for this read
 	notFed           string      // foreign_archive or no_archive: this machine's sources do not feed the archive, so the read does not sync
-	notFedNoted      bool        // the read's result carries the not-fed notice
 	lockBudget       time.Duration
 	lockUntil        time.Time // when this read stops waiting for other runs; set by its first wait
 	query            listQuery // what the running list command asked for, to explain an empty result

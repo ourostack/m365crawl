@@ -114,12 +114,12 @@ func TestReadOnAnArchiveThisMachineSyncedKeepsSyncing(t *testing.T) {
 	}
 	// A copy of it, even on this machine, is another archive: a forensic or scratch copy stays as
 	// it was copied.
-	raw, err := os.ReadFile(own)
+	raw, err := os.ReadFile(own) //nolint:gosec // G304: the test's own archive
 	if err != nil {
 		t.Fatal(err)
 	}
 	copied := filepath.Join(t.TempDir(), "copy.db")
-	if err := os.WriteFile(copied, raw, 0o600); err != nil {
+	if err := os.WriteFile(copied, raw, 0o600); err != nil { //nolint:gosec // G703: under the test's temp dir
 		t.Fatal(err)
 	}
 	if m := readOn(t, e, copied, "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncForeignArchive {

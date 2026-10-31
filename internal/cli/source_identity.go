@@ -228,16 +228,13 @@ func (rt *runtime) legacyFed(sources []string) bool {
 }
 
 // noteNotFed marks a read that did not sync because this machine does not feed its archive, with a
-// notice naming the explicit sync that would. It adds the notice once per read.
+// notice naming the explicit sync that would. Each read's result passes here once: from read, or
+// from noteRegisteredSyncOff for a registered-source read.
 func (rt *runtime) noteNotFed(res result) {
 	if rt.notFed == "" {
 		return
 	}
 	res.setImplicitSync(rt.notFed)
-	if rt.notFedNoted {
-		return
-	}
-	rt.notFedNoted = true
 	run := rt.recoveryCommand(true, "", "sync")
 	if strings.HasPrefix(run, "no executable") {
 		run = rt.archiveCommand("sync")
