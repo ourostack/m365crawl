@@ -72,37 +72,38 @@ type searchChatItem struct {
 
 // searchMailItem is a mail message in a search result: the item of mail list, plus the source.
 type searchMailItem struct {
-	Source              string     `json:"source"`
-	Provenance          string     `json:"provenance"`
-	ID                  string     `json:"id"`
-	Account             string     `json:"account"`
-	Folder              *string    `json:"folder"`
-	FolderKind          *string    `json:"folder_kind"`
-	ToMe                bool       `json:"to_me"`
-	Subject             *string    `json:"subject"`
-	FromName            *string    `json:"from_name"`
-	FromAddress         *string    `json:"from_address"`
-	RecipientCount      int        `json:"recipient_count"`
-	RecipientsPreview   []string   `json:"recipients_preview"`
-	InReplyTo           *string    `json:"in_reply_to"`
-	ConversationID      *string    `json:"conversation_id"`
-	ReceivedAt          *time.Time `json:"received_at"`
-	SentAt              *time.Time `json:"sent_at"`
-	DatedAt             *time.Time `json:"dated_at"`
-	IsRead              *bool      `json:"is_read"`
-	Flag                *string    `json:"flag"`
-	Importance          *string    `json:"importance"`
-	HasAttachments      bool       `json:"has_attachments"`
-	Preview             *string    `json:"preview"`
-	InternetMessageID   *string    `json:"internet_message_id"`
-	ICalUID             *string    `json:"ical_uid"`
-	GoneAt              *time.Time `json:"gone_at"`
-	EvictedAt           *time.Time `json:"evicted_at"`
-	DeletedAt           *time.Time `json:"deleted_at"`
-	OlderCopy           bool       `json:"older_copy"`
-	CopyOf              *string    `json:"copy_of"`
-	ReceivedAtDisagrees bool       `json:"received_at_disagrees"`
-	TextTruncated       bool       `json:"text_truncated,omitempty"`
+	Source              string             `json:"source"`
+	Provenance          string             `json:"provenance"`
+	ID                  string             `json:"id"`
+	Account             string             `json:"account"`
+	Folder              *string            `json:"folder"`
+	FolderKind          *string            `json:"folder_kind"`
+	Folders             []mailFolderRefOut `json:"folders"`
+	ToMe                bool               `json:"to_me"`
+	Subject             *string            `json:"subject"`
+	FromName            *string            `json:"from_name"`
+	FromAddress         *string            `json:"from_address"`
+	RecipientCount      int                `json:"recipient_count"`
+	RecipientsPreview   []string           `json:"recipients_preview"`
+	InReplyTo           *string            `json:"in_reply_to"`
+	ConversationID      *string            `json:"conversation_id"`
+	ReceivedAt          *time.Time         `json:"received_at"`
+	SentAt              *time.Time         `json:"sent_at"`
+	DatedAt             *time.Time         `json:"dated_at"`
+	IsRead              *bool              `json:"is_read"`
+	Flag                *string            `json:"flag"`
+	Importance          *string            `json:"importance"`
+	HasAttachments      bool               `json:"has_attachments"`
+	Preview             *string            `json:"preview"`
+	InternetMessageID   *string            `json:"internet_message_id"`
+	ICalUID             *string            `json:"ical_uid"`
+	GoneAt              *time.Time         `json:"gone_at"`
+	EvictedAt           *time.Time         `json:"evicted_at"`
+	DeletedAt           *time.Time         `json:"deleted_at"`
+	OlderCopy           bool               `json:"older_copy"`
+	CopyOf              *string            `json:"copy_of"`
+	ReceivedAtDisagrees bool               `json:"received_at_disagrees"`
+	TextTruncated       bool               `json:"text_truncated,omitempty"`
 }
 
 // searchTranscriptItem is one part of a recorded meeting whose fetched transcript matched: the
@@ -268,7 +269,7 @@ func searchTime(t time.Time) *time.Time {
 func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 	it := searchMailItem{
 		Provenance: r.Provenance, DeletedAt: searchTime(r.DeletedAt),
-		Source: searchMail, ID: r.ID(), Account: r.Account, Folder: searchNZ(r.Folder), FolderKind: searchNZ(r.FolderKind), ToMe: r.ToMe,
+		Source: searchMail, ID: r.ID(), Account: r.Account, Folder: searchNZ(r.Folder), FolderKind: searchNZ(r.FolderKind), Folders: foldersOut(r), ToMe: r.ToMe,
 		Subject: searchNZ(r.Subject), FromName: searchNZ(r.SenderName), FromAddress: searchNZ(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo), ConversationID: searchNZ(r.ConversationID),
 		ReceivedAt: searchTime(r.ReceivedAt), SentAt: searchTime(r.SentAt), DatedAt: searchTime(r.DatedAt), IsRead: r.IsRead, Flag: searchNZ(r.Flag), Importance: searchNZ(r.Importance),

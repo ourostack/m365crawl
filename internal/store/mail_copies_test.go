@@ -510,14 +510,15 @@ func TestMailCopyReadsSurfaceFailures(t *testing.T) {
 	})
 }
 
-// The status mail block checks its tables (one scan), loads the copies (21 scans: the recorded
-// root, ten folders, ten rows with a Message-ID), then reads its counts (one scan); the cache write
-// time it reads last tolerates a NULL at its third scan, as in TestOutlookCacheReadFailuresSurface.
+// The status mail block checks its tables (one scan), loads the copies (22 scans: the recorded
+// root, ten folders, the membership table check, ten rows with a Message-ID), then reads its
+// counts (one scan); the cache write time it reads last tolerates a NULL at its third scan, as in
+// TestOutlookCacheReadFailuresSurface.
 func TestMailStatusSurfacesCopyReadFailures(t *testing.T) {
 	sweepReadFaults(t, seedCopiesForFaults, func(ctx context.Context, s *Store) error {
 		_, err := s.MailStatusOf(ctx, mailAcct)
 		return err
-	}, 1+21+1+3)
+	}, 1+22+1+3)
 }
 
 func TestMailCopyCheckOverEveryShape(t *testing.T) {

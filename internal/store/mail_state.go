@@ -153,13 +153,17 @@ func (s *Store) MailStatusOf(ctx context.Context, account string) (MailStatus, e
 	if cond := copies.notCopy(`rowid`); cond != "" {
 		live += ` and ` + cond // a copy that a newer folder set also holds counts once, through it
 	}
+	unread := `is_read=0`
+	if copies.members { // unread in any folder it is in, as mail unread counts it
+		unread = `(is_read=0 or exists(select 1 from mail_message_folders u where u.message_rowid=mail_messages.rowid and u.is_read=0))`
+	}
 	marker := escapeLike(mailReadKey) + "%"
 	if account != "" {
 		marker = escapeLike(mailReadKey + account)
 	}
 	err = s.db.QueryRowContext(ctx, `select
   (select count(*) from mail_messages where `+live+`),
-  (select count(*) from mail_messages where `+live+` and is_read=0),
+  (select count(*) from mail_messages where `+live+` and `+unread+`),
   (select count(*) from mail_folders where ?='' or account=?),
   (select min(received_at) from mail_messages where `+live+`),
   (select max(received_at) from mail_messages where `+live+`),

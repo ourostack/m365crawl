@@ -40,8 +40,9 @@ from workiq_aliases where kind='mail' and account_id=? and namespace='public'`
 		query = `select folder_key as k from mail_folders where account=?
 union all select parent_key from mail_folders where account=?
 union all select folder_key from mail_messages where account=?
-union all select folder_key from mail_coverage where account=?`
-		args = []any{account, account, account, account}
+union all select folder_key from mail_coverage where account=?
+union all select folder_key from mail_message_folders where account=?`
+		args = []any{account, account, account, account, account}
 	case "attachment":
 		query = `select a.attachment_key as k from mail_attachments a join mail_messages m on m.rowid=a.message_rowid where m.account=?`
 		args = []any{account}

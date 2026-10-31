@@ -111,9 +111,16 @@ where a.kind='mail_native_presence' and a.account_id=? and a.namespace=?`, []any
 			if err := tx.QueryRowContext(ctx, `select detail_key from mail_messages where account=? and rowid=?`, b.Account, rowid).Scan(&m.DetailKey); err != nil {
 				return b, nil, err
 			}
-			m, err = applyWorkIQCacheMail(ctx, tx, b.Account, rowid, m, b.ReadAt, b.FreshAt)
+			var held bool
+			m, held, err = applyWorkIQCacheMail(ctx, tx, b.Account, rowid, m, b.ReadAt, b.FreshAt)
 			if err != nil {
 				return b, nil, err
+			}
+			if held {
+				if b.heldFolders == nil {
+					b.heldFolders = map[uint32]bool{}
+				}
+				b.heldFolders[m.DetailKey] = true
 			}
 		} else {
 			// A never-published native numeric key is not authority to replace
@@ -190,7 +197,9 @@ or exists(select 1 from workiq_aliases where kind='mail' and account_id=? and na
 	return nil
 }
 
-func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed, fresh time.Time) (outlookmail.Message, error) {
+// applyWorkIQCacheMail merges a native read of a server-bound message. held says the read's copy
+// is not newer than what the row holds, so the row keeps its folder and its membership.
+func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid int64, m outlookmail.Message, observed, fresh time.Time) (outlookmail.Message, bool, error) {
 	var raw, originalHeader, oldWinner, retainedGraphID string
 	var oldCache sql.NullString
 	var currentFolder uint32
@@ -198,32 +207,35 @@ func applyWorkIQCacheMail(ctx context.Context, tx *sql.Tx, account string, rowid
 	err := tx.QueryRowContext(ctx, `select w.server_projection,m.internet_message_id,w.cache_projection,w.winner,w.graph_id,m.folder_key,w.cache_version from workiq_rows w join mail_messages m on m.rowid=w.item_rowid and m.account=w.account_id
 where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan(&raw, &originalHeader, &oldCache, &oldWinner, &retainedGraphID, &currentFolder, &cacheVersion)
 	if errors.Is(err, sql.ErrNoRows) {
-		return m, nil
+		return m, false, nil
 	}
 	if err != nil {
-		return m, err
+		return m, false, err
 	}
 	var server workiq.MailMessage
 	if json.Unmarshal([]byte(raw), &server) != nil || server.ID != retainedGraphID {
-		return m, errors.New("invalid retained server mail projection")
+		return m, false, errors.New("invalid retained server mail projection")
 	}
 	var previous outlookmail.Message
 	if oldCache.Valid {
 		if json.Unmarshal([]byte(oldCache.String), &previous) != nil || previous.Account != account || previous.DetailKey != m.DetailKey {
-			return m, errors.New("invalid retained native mail projection")
+			return m, false, errors.New("invalid retained native mail projection")
 		}
 	}
 	mapped, err := workIQMailProjection(ctx, tx, account, server)
 	if err != nil {
-		return m, err
+		return m, false, err
 	}
+	// The retained projection is the message's content; its folder membership is kept apart, so
+	// the projection and its comparison below stay as they were.
 	cache := m
+	cache.FolderCopies = nil
 	if len(cache.Body.HTML) == 0 && len(previous.Body.HTML) > 0 {
 		cache.Body = previous.Body
 	}
 	cleaned, safe, err := cleanWorkIQNativeMail(cache)
 	if err != nil {
-		return m, err
+		return m, false, err
 	}
 	winner := "desktop_cache"
 	effective := cleaned
@@ -236,17 +248,18 @@ where w.kind='mail' and w.account_id=? and w.item_rowid=?`, account, rowid).Scan
 		effective.HasAttachments = &yes
 	}
 	effective.MessageID = originalHeader
+	effective.FolderCopies = m.FolderCopies
 	newCopy := false
 	if !fresh.IsZero() {
 		copyVersion, err := workIQNativeMailCopyVersion(fresh)
 		if err != nil {
-			return m, err
+			return m, false, err
 		}
 		newCopy = !cacheVersion.Valid || copyVersion > cacheVersion.Int64
 		if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_seen_at=?,cache_version=?,
 cache_first_miss_at=null,cache_gone_at=null,cache_evicted_at=null where kind='mail' and account_id=? and item_rowid=?
 and (cache_version is null or cache_version<?)`, workIQTimeValue(&observed), copyVersion, account, rowid, copyVersion); err != nil {
-			return m, err
+			return m, false, err
 		}
 	}
 	if !newCopy {
@@ -256,21 +269,21 @@ and (cache_version is null or cache_version<?)`, workIQTimeValue(&observed), cop
 		}
 	}
 	if oldCache.Valid && oldCache.String == string(safe) && oldWinner == winner {
-		return effective, nil
+		return effective, !newCopy, nil
 	}
 	d := deriveMail(effective)
 	d.body(effective)
 	if _, err := tx.ExecContext(ctx, `update mail_messages set body_state=?,body_html_gz=?,body_text=?,body_text_version=?,modified_at=? where rowid=?
 and (body_state<>? or body_html_gz is not ? or body_text<>? or body_text_version<>?)`,
 		d.state, d.gz, d.text, MailTextVersion, fmtTime(observed), rowid, d.state, d.gz, d.text, MailTextVersion); err != nil {
-		return m, err
+		return m, false, err
 	}
 	if err := reindexMail(ctx, tx, rowid, effective, d.text); err != nil {
-		return m, err
+		return m, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `update workiq_rows set cache_seen=1,cache_projection=?,winner=? where kind='mail' and account_id=? and item_rowid=?`,
 		string(safe), winner, account, rowid); err != nil {
-		return m, err
+		return m, false, err
 	}
-	return effective, nil
+	return effective, !newCopy, nil
 }

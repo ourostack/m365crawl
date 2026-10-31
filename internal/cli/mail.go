@@ -114,36 +114,53 @@ type mailPersonOut struct {
 	Address *string `json:"address"`
 }
 
+// mailFolderRefOut is one folder a message is in, with its copy's read state there.
+type mailFolderRefOut struct {
+	Folder     *string `json:"folder"`
+	FolderKind string  `json:"folder_kind"`
+	IsRead     *bool   `json:"is_read"`
+}
+
+// foldersOut is every folder a message has a copy in (store.MailRow.Folders).
+func foldersOut(r store.MailRow) []mailFolderRefOut {
+	out := make([]mailFolderRefOut, len(r.Folders))
+	for i, f := range r.Folders {
+		out[i] = mailFolderRefOut{Folder: nz(f.Name), FolderKind: f.Kind, IsRead: f.IsRead}
+	}
+	return out
+}
+
 // mailListItem is one message in a list.
 type mailListItem struct {
-	Provenance        string     `json:"provenance"`
-	ID                string     `json:"id"`
-	Account           string     `json:"account"`
-	Folder            *string    `json:"folder"`
-	FolderKind        *string    `json:"folder_kind"`
-	ToMe              bool       `json:"to_me"`
-	Subject           *string    `json:"subject"`
-	FromName          *string    `json:"from_name"`
-	FromAddress       *string    `json:"from_address"`
-	RecipientCount    int        `json:"recipient_count"`
-	RecipientsPreview []string   `json:"recipients_preview"`
-	InReplyTo         *string    `json:"in_reply_to"`
-	ConversationID    *string    `json:"conversation_id"`
-	ReceivedAt        *time.Time `json:"received_at"`
-	SentAt            *time.Time `json:"sent_at"`
-	DatedAt           *time.Time `json:"dated_at"`
-	IsRead            *bool      `json:"is_read"`
-	Flag              *string    `json:"flag"`
-	Importance        *string    `json:"importance"`
-	HasAttachments    bool       `json:"has_attachments"`
-	Preview           *string    `json:"preview"`
-	InternetMessageID *string    `json:"internet_message_id"`
-	ICalUID           *string    `json:"ical_uid"`
-	GoneAt            *time.Time `json:"gone_at"`
-	EvictedAt         *time.Time `json:"evicted_at"`
-	DeletedAt         *time.Time `json:"deleted_at"`
-	OlderCopy         bool       `json:"older_copy"`
-	CopyOf            *string    `json:"copy_of"`
+	Provenance        string             `json:"provenance"`
+	ID                string             `json:"id"`
+	Account           string             `json:"account"`
+	Folder            *string            `json:"folder"`
+	FolderKind        *string            `json:"folder_kind"`
+	Folders           []mailFolderRefOut `json:"folders"`
+	ToMe              bool               `json:"to_me"`
+	Subject           *string            `json:"subject"`
+	FromName          *string            `json:"from_name"`
+	FromAddress       *string            `json:"from_address"`
+	RecipientCount    int                `json:"recipient_count"`
+	RecipientsPreview []string           `json:"recipients_preview"`
+	InReplyTo         *string            `json:"in_reply_to"`
+	ConversationID    *string            `json:"conversation_id"`
+	ReceivedAt        *time.Time         `json:"received_at"`
+	SentAt            *time.Time         `json:"sent_at"`
+	DatedAt           *time.Time         `json:"dated_at"`
+	IsRead            *bool              `json:"is_read"`
+	Flag              *string            `json:"flag"`
+	Importance        *string            `json:"importance"`
+	HasAttachments    bool               `json:"has_attachments"`
+	Preview           *string            `json:"preview"`
+	InternetMessageID *string            `json:"internet_message_id"`
+	ICalUID           *string            `json:"ical_uid"`
+	GoneAt            *time.Time         `json:"gone_at"`
+	EvictedAt         *time.Time         `json:"evicted_at"`
+	DeletedAt         *time.Time         `json:"deleted_at"`
+	OlderCopy         bool               `json:"older_copy"`
+	CopyOf            *string            `json:"copy_of"`
 	// ReceivedAtDisagrees is true when copies of the message in other folder sets hold received
 	// times more than a minute apart; dated_at then uses the one chosen (store.MailRow).
 	ReceivedAtDisagrees bool `json:"received_at_disagrees"`
@@ -157,6 +174,7 @@ type mailShowItem struct {
 	Account             string              `json:"account"`
 	Folder              *string             `json:"folder"`
 	FolderKind          *string             `json:"folder_kind"`
+	Folders             []mailFolderRefOut  `json:"folders"`
 	ToMe                bool                `json:"to_me"`
 	Subject             *string             `json:"subject"`
 	FromName            *string             `json:"from_name"`
@@ -254,7 +272,7 @@ func recipientLabel(r store.MailRecipient) string {
 func listItemOf(r store.MailRow, max int) mailListItem {
 	it := mailListItem{
 		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
-		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
+		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), Folders: foldersOut(r), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
 		ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt), DatedAt: tp(r.DatedAt), IsRead: r.IsRead, Flag: nz(r.Flag), Importance: nz(r.Importance),
@@ -278,7 +296,7 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 func showItemOf(r store.MailRow, max int) mailShowItem {
 	it := mailShowItem{
 		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
-		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
+		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), Folders: foldersOut(r), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),
 		DatedAt: tp(r.DatedAt), IsRead: r.IsRead, ReadState: nz(r.ReadState), Flag: nz(r.Flag), Importance: nz(r.Importance),
@@ -450,6 +468,9 @@ func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 }
 
 // ---- notes ----
+
+// mailCount is the test seam of mail unread's total.
+var mailCount = (*store.Store).MailCount
 
 // mailReadAccounts is the test seam of the read markers.
 var mailReadAccounts = (*store.Store).MailReadAccounts
@@ -772,7 +793,11 @@ func (c *mailListCmd) Run(rt *runtime) error {
 			note = append(note, rt.emptyNote(st, sc, filtered, since))
 		}
 		if c.Unread {
-			n := unreadNote(unreadFolders(sc.all, rows))
+			var selected []store.MailFolderRow
+			if c.Folder != "" {
+				selected = sc.folders
+			}
+			n := unreadNote(unreadFolders(sc.all, selected, rows))
 			if n == "" {
 				n = "no unread mail in the cache; Outlook may show more"
 			}
@@ -783,19 +808,34 @@ func (c *mailListCmd) Run(rt *runtime) error {
 	})
 }
 
-// unreadFolders is, for each folder the rows sit in, its unread and cached counts.
-func unreadFolders(all []store.MailFolderRow, rows []store.MailRow) []mailUnreadFolder {
+// unreadFolders is, for each folder the rows sit in, its unread and cached counts. With a
+// --folder selection, a row sits in each selected folder it has a copy in (store.MailRow.Folders);
+// without one, in the folder it is shown from.
+func unreadFolders(all, selected []store.MailFolderRow, rows []store.MailRow) []mailUnreadFolder {
 	var out []mailUnreadFolder
 	seen := map[string]bool{}
 	for _, r := range rows {
-		key := r.Account + "\x00" + strconv.Itoa(int(r.FolderKey))
-		if seen[key] {
-			continue
+		keys := []uint32{r.FolderKey}
+		if selected != nil {
+			keys = nil
+			for _, f := range r.Folders {
+				for _, sf := range selected {
+					if sf.Account == r.Account && sf.FolderKey == f.Key {
+						keys = append(keys, f.Key)
+					}
+				}
+			}
 		}
-		seen[key] = true
-		for _, f := range all {
-			if f.Account == r.Account && f.FolderKey == r.FolderKey {
-				out = append(out, mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages, Current: f.Current})
+		for _, k := range keys {
+			key := r.Account + "\x00" + strconv.Itoa(int(k))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			for _, f := range all {
+				if f.Account == r.Account && f.FolderKey == k {
+					out = append(out, mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages, Current: f.Current})
+				}
 			}
 		}
 	}
@@ -1161,6 +1201,10 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 			rows = rows[:c.Limit]
 		}
 		res := &mailUnreadResult{Folders: []mailUnreadFolder{}, mailListResult: *rt.newMailList(rows, truncated, sc)}
+		// Each unread message counts once, however many of the folders it is in.
+		if res.UnreadTotal, err = mailCount(st, rt.ctx, store.MailFilter{Account: rt.g.Account, Folder: c.Folder, Unread: true}); err != nil {
+			return nil, err
+		}
 		var withUnread []mailUnreadFolder
 		for _, f := range sc.folders {
 			if f.Messages == 0 && f.Unread == 0 {
@@ -1168,7 +1212,6 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 			}
 			line := mailUnreadFolder{Account: f.Account, Folder: f.Name, Kind: f.Kind, Unread: f.Unread, Cached: f.Messages, Current: f.Current}
 			res.Folders = append(res.Folders, line)
-			res.UnreadTotal += f.Unread
 			if f.Unread > 0 {
 				withUnread = append(withUnread, line)
 			}

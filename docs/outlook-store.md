@@ -315,7 +315,7 @@ A string is a pair: an offset word at `w` (counted from the string area base: fi
 | Inbox mark | +1040 bit 27 | set on 1,038 of 1,038 inbox copies and on none of the others | established |
 | Conversation id | none found | no word in the 0x4f, 0xc9 or 0xca fixed region is shared across replies | unknown |
 
-A message has one logical identity, its detail key (2,185 distinct in the copy). It can have several header copies, in To Me, Inbox and Sent Items (2,133 detail keys have one header key, 51 have two, 1 has six). Per key the copy with the highest +112 is current, ties by block offset; file order alone is not reliable.
+A message has one logical identity, its detail key (2,185 distinct in the copy). It can have several header copies, in To Me, Inbox and Sent Items (2,133 detail keys have one header key, 51 have two, 1 has six). Per key the copy with the highest +112 is current, ties by block offset; file order alone is not reliable. The archive shows the message from that copy and records every copy's folder, with its own read state, in `mail_message_folders` (schema 24).
 
 ### Detail (class 0xc9, string base 1551 + lead)
 

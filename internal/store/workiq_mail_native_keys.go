@@ -62,6 +62,9 @@ func prepareWorkIQNativeMailMetadata(ctx context.Context, tx *sql.Tx, b MailBatc
 	}
 	for _, message := range b.Result.Messages {
 		folderSet[message.FolderKey] = true
+		for _, c := range message.FolderCopies {
+			folderSet[c.Key] = true
+		}
 		for _, a := range message.Attachments {
 			attachmentFloor = max(attachmentFloor, a.Key)
 		}
@@ -97,6 +100,10 @@ func prepareWorkIQNativeMailMetadata(ctx context.Context, tx *sql.Tx, b MailBatc
 	for i, message := range b.Result.Messages {
 		message.FolderKey = folders[message.FolderKey]
 		message.Folder.Key = message.FolderKey
+		message.FolderCopies = append([]outlookmail.FolderCopy(nil), message.FolderCopies...)
+		for j := range message.FolderCopies {
+			message.FolderCopies[j].Key = folders[message.FolderCopies[j].Key]
+		}
 		message.Attachments = append([]outlookmail.Attachment(nil), message.Attachments...)
 		for j, a := range message.Attachments {
 			key, err := workIQNativeMailKey(ctx, tx, b.Account, "attachment", a.Key, attachmentFloor)

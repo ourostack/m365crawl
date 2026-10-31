@@ -305,7 +305,10 @@ func TestMailListUsesIndexes(t *testing.T) {
 	} {
 		plan := queryPlan(t, s, f)
 		joined := strings.Join(plan, "\n")
-		if !strings.Contains(joined, "USING INDEX mail_messages_received") && !strings.Contains(joined, "USING INDEX mail_messages_folder") {
+		// With --account, the account's prefix of mail_messages_folder or of the (account,
+		// detail_key) key reads the same rows; either is a search, not a scan.
+		if !strings.Contains(joined, "USING INDEX mail_messages_received") && !strings.Contains(joined, "USING INDEX mail_messages_folder") &&
+			(f.Account == "" || !strings.Contains(joined, "USING INDEX sqlite_autoindex_mail_messages_1 (account=?)")) {
 			t.Fatalf("%s: no index on received time:\n%s", name, joined)
 		}
 		if !strings.Contains(joined, "INTEGER PRIMARY KEY") {

@@ -7,6 +7,12 @@ package store
 // body_state is what the read found: inline, file (read), pending (a body file not read yet),
 // missing, unreadable or none. mail_absent holds the first trusted read that missed a message; a
 // second trusted read of a different store copy confirms the absence (see CommitMail).
+//
+// mail_message_folders (schema 24) is the folder membership of a message a native read found in
+// two or more folders (mail_membership.go), with each copy's own read state. It declares no
+// foreign key: mail_messages has no INTEGER PRIMARY KEY, so a reference to its rowid would fail
+// every insert with foreign keys on. Like mail_recipients and mail_attachments, its rows follow
+// the message's rowid, which re-keying and replacement keep.
 const mailSchemaDDL = `
 create table if not exists mail_folders(
   account text not null,
@@ -94,6 +100,14 @@ create table if not exists mail_absent(
   primary key(account, detail_key)
 );
 create virtual table if not exists mail_fts using fts5(subject, sender_name, sender_address, body_text);
+create table if not exists mail_message_folders(
+  message_rowid integer not null,
+  account text not null,
+  folder_key integer not null,
+  is_read integer,
+  primary key(message_rowid, folder_key)
+) without rowid;
+create index if not exists mail_message_folders_folder on mail_message_folders(account, folder_key, message_rowid);
 create table if not exists mail_source_ids(
   account text not null,
   kind text not null check(kind in ('message','folder','attachment')),

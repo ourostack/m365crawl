@@ -53,6 +53,9 @@ type MailBatch struct {
 	// Unstable says the read came from a snapshot that changed while it was taken (Windows OWA):
 	// it may add and update, but it records no covered span (recordMailSpans).
 	Unstable bool
+	// heldFolders names the (canonical) detail keys whose folder a WorkIQ server write set and this
+	// read's copy is not newer than: their stored membership stays (prepareWorkIQCacheMail).
+	heldFolders map[uint32]bool
 }
 
 // MailResult is what one CommitMail did. Gone and Evicted count the messages marked by this call.
@@ -156,6 +159,14 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 	if err != nil {
 		return res, err
 	}
+	members, err := loadMailMembers(ctx, tx, b.Account)
+	if err != nil {
+		return res, err
+	}
+	var ready bool
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, mailFoldersReadyKey+b.Account).Scan(&ready); err != nil {
+		return res, err
+	}
 	absent, err := loadMailAbsent(ctx, tx, b.Account)
 	if err != nil {
 		return res, err
@@ -215,25 +226,41 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 		if b.RekeyAcrossFolders && m.HasAttachments == nil {
 			d.hasAtt = false // Native unavailable headers do not inherit Mac's metadata-derived flag.
 		}
+		var rowid int64
+		counted := true
 		switch {
 		case ex == nil:
-			if err := insertMail(ctx, tx, b.Account, m, d, at); err != nil {
+			if rowid, err = insertMail(ctx, tx, b.Account, m, d, at); err != nil {
 				return res, err
 			}
 			res.Added++
 		case ex.msgID != "" && m.MessageID != "" && ex.msgID != m.MessageID:
-			ex.seen = true
+			ex.seen, rowid = true, ex.rowid
 			if err := replaceMail(ctx, tx, ex, m, d, at); err != nil {
 				return res, err
 			}
 			res.Replaced++
 		default:
-			ex.seen = true
+			ex.seen, rowid = true, ex.rowid
 			changed, err := updateMail(ctx, tx, ex, m, d, at, moved, b.RekeyAcrossFolders)
 			if err != nil {
 				return res, err
 			}
 			if changed {
+				res.Updated++
+			}
+			counted = changed
+		}
+		if !b.heldFolders[m.DetailKey] {
+			wrote, err := syncMailMembers(ctx, tx, b.Account, rowid, members[rowid], wantMailMembers(m))
+			if err != nil {
+				return res, err
+			}
+			// The first read that writes membership fills it for messages archived before: no change.
+			if wrote && !counted && ready {
+				if _, err := tx.ExecContext(ctx, `update mail_messages set modified_at=? where rowid=?`, at, rowid); err != nil {
+					return res, err
+				}
 				res.Updated++
 			}
 		}
@@ -243,6 +270,11 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 			if _, err := tx.ExecContext(ctx, `delete from mail_absent where account=? and detail_key=?`, b.Account, m.DetailKey); err != nil {
 				return res, err
 			}
+		}
+	}
+	if !ready {
+		if _, err := tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?)`, mailFoldersReadyKey+b.Account, at); err != nil {
+			return res, err
 		}
 	}
 	other, err := otherSetFolders(ctx, tx, b)
@@ -442,7 +474,8 @@ func readFlag(m outlookmail.Message) any {
 	return b2i(!*m.Unread)
 }
 
-func insertMail(ctx context.Context, tx *sql.Tx, account string, m outlookmail.Message, d mailDerived, at string) error {
+// insertMail stores a new message and returns its rowid.
+func insertMail(ctx context.Context, tx *sql.Tx, account string, m outlookmail.Message, d mailDerived, at string) (int64, error) {
 	d.body(m)
 	r, err := tx.ExecContext(ctx, `insert into mail_messages(account, detail_key, internet_message_id, conversation_id, folder_key, to_me, subject, subject_norm, sender_name, sender_address, preview,
   in_reply_to, received_at, sent_at, class, importance, ical_uid, is_read, read_state, flag, has_attachments, body_state, body_html_gz, body_text, body_text_version, first_seen_at, state_seen_at, modified_at)
@@ -450,19 +483,19 @@ values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		account, m.DetailKey, m.MessageID, m.ConversationID, m.FolderKey, b2i(m.ToMe), m.Subject, d.norm, m.SenderName, m.SenderAddress, m.Preview,
 		m.InReplyTo, fmtTime(m.Received), fmtTime(m.Sent), m.Class, m.Importance, strings.ToLower(m.ICalUID), readFlag(m), m.ReadState, m.Flag, b2i(d.hasAtt), d.state, d.gz, d.text, MailTextVersion, at, at, at)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	id, err := r.LastInsertId()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := insertMailChildren(ctx, tx, id, m, nil, true); err != nil {
-		return err
+		return 0, err
 	}
 	if err := maybeIndexWorkIQMail(ctx, tx, account, id, m.MessageID); err != nil {
-		return err
+		return 0, err
 	}
-	return indexMail(ctx, tx, id, m, d.text)
+	return id, indexMail(ctx, tx, id, m, d.text)
 }
 
 // replaceMail rewrites a stored message with the content of a different one that took its key.

@@ -3,7 +3,6 @@ package store
 import (
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -15,8 +14,10 @@ import (
 // a sent message is often when its draft was started (days or weeks before it was sent) or a time
 // after it was sent, on another day. Every other folder, Drafts included, is dated by when the
 // message was received: a draft has not been sent. A Sent Items row without a send time falls back
-// to its received time. The received time is the one chosen across the message's folder copies
-// when they disagree (mailCopies.chooseReceived), otherwise the row's own.
+// to its received time. A message counts as in Sent Items when any folder it has a copy in is one
+// (mail_membership.go), so a message sent to oneself is dated by its send time in every list. The
+// received time is the one chosen across the message's folder copies when they disagree
+// (mailCopies.chooseReceived), otherwise the row's own.
 
 // MailClock is the column a folder kind is dated by: sent_at for sent, received_at otherwise.
 func MailClock(kind string) string {
@@ -26,10 +27,10 @@ func MailClock(kind string) string {
 	return "received_at"
 }
 
-// datedAt is the time a row of a folder kind is dated by, given its received time (as chosen) and
-// its send time.
-func datedAt(kind string, received, sent time.Time) time.Time {
-	if MailClock(kind) == "sent_at" && !sent.IsZero() {
+// datedAt is the time a row is dated by, given whether it is in Sent Items (through its stored
+// folder or its membership), its received time (as chosen) and its send time.
+func datedAt(inSent bool, received, sent time.Time) time.Time {
+	if inSent && !sent.IsZero() {
 		return sent
 	}
 	return received
@@ -44,8 +45,9 @@ func (c mailCopies) receivedAt(rowid int64, own time.Time) time.Time {
 	return own
 }
 
-// sentWhere is a condition on m that holds for a message in a folder of kind sent (with its
-// arguments), or "" when the archive has no such folder. Folder keys are integers, written inline.
+// sentWhere is a condition on m that holds for a message in a folder of kind sent, through its
+// stored folder or its membership (with its arguments), or "" when the archive has no such
+// folder. Folder keys are integers, written inline.
 func (c mailCopies) sentWhere() (string, []any) {
 	keys := map[string][]uint32{}
 	for id, kind := range c.sets.kind {
@@ -53,22 +55,7 @@ func (c mailCopies) sentWhere() (string, []any) {
 			keys[id.account] = append(keys[id.account], id.key)
 		}
 	}
-	var conds []string
-	var args []any
-	for _, account := range slices.Sorted(maps.Keys(keys)) {
-		ks := keys[account]
-		slices.Sort(ks)
-		list := make([]string, len(ks))
-		for i, k := range ks {
-			list[i] = strconv.FormatUint(uint64(k), 10)
-		}
-		conds = append(conds, `(m.account=? and m.folder_key in (`+strings.Join(list, ",")+`))`)
-		args = append(args, account)
-	}
-	if len(conds) == 0 {
-		return "", nil
-	}
-	return `(` + strings.Join(conds, " or ") + `)`, args
+	return inFolders(keys, false, c.members)
 }
 
 // datedRows is a compound select of (rid, at) over mail_messages m: every message that meets cond
