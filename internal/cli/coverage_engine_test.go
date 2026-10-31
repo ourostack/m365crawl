@@ -21,7 +21,7 @@ func setSeam[T any](t *testing.T, p *T, v T) {
 // engineRun is a coverage run over an empty archive at covNow, with the Outlook source on.
 func engineRun(t *testing.T) (*coverageRun, *runtime) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "m365crawl.db")
+	path := filepath.Join(t.TempDir(), "data", "m365crawl.db") // a directory of the archive's own, as Windows requires
 	st, err := store.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -243,12 +243,6 @@ func TestMailNoAccountSaysWhy(t *testing.T) {
 	rt.outlookOn = false
 	if e := run.mailNoAccount("sent"); codes(e) != "source_off" || e.Account != nil {
 		t.Fatalf("%+v", e)
-	}
-}
-
-func chatLog(reads ...time.Time) func(*store.Store, context.Context, string) (store.TeamsReadLog, error) {
-	return func(*store.Store, context.Context, string) (store.TeamsReadLog, error) {
-		return store.TeamsReadLog{Reads: reads}, nil
 	}
 }
 
