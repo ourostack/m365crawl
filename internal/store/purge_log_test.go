@@ -105,13 +105,79 @@ func TestPurgeLeavesNoCopyOnDisk(t *testing.T) {
 				if v, _, _ := recRow(t, s, dbA, "events", `"kept"`); v != `{"v":"ordinary"}` {
 					t.Fatalf("an ordinary row changed: %q", v)
 				}
-				// The purge's connection returns to its earlier setting.
+				// The purge's connection keeps the archive's own setting: on.
 				var secure int
-				if err := s.db.QueryRowContext(context.Background(), `pragma secure_delete`).Scan(&secure); err != nil || secure != 0 {
+				if err := s.db.QueryRowContext(context.Background(), `pragma secure_delete`).Scan(&secure); err != nil || secure != 1 {
 					t.Fatalf("secure_delete left at %d (%v)", secure, err)
 				}
 			})
 		}
+	}
+}
+
+// A credential in a record's key is gone from the bytes on disk after the purge, from the table and
+// from the primary-key index, whether the row takes the scrubbed key or is deleted because another
+// row holds it.
+func TestPurgedKeyLeavesNoCopyOnDisk(t *testing.T) {
+	const marker = "SYNTHETICKEYCREDENTIAL"
+	key := `{"access_token":"` + marker + `"}`
+	for name, held := range map[string]bool{"rekeyed": false, "deleted": true} {
+		t.Run(name, func(t *testing.T) {
+			s, path := openAt(t)
+			recs := []teamsdesktop.GenericRecord{
+				grec(&acctA, dbA, "events", `"a-kept"`, `{"v":"ordinary"}`),
+				grec(&acctA, dbA, "events", key, `{"v":"value"}`),
+				grec(&acctA, dbA, "events", `"kept"`, `{"v":"ordinary"}`),
+			}
+			if held {
+				recs = append(recs, grec(&acctA, dbA, "events", `{"access_token":"[redacted]"}`, `{"v":"current"}`))
+			}
+			upsert(t, s, recs, base)
+			if db, wal := archiveBytes(t, path); !bytes.Contains(db, []byte(marker)) && !bytes.Contains(wal, []byte(marker)) {
+				t.Fatal("the synthetic key is not on disk before the purge")
+			}
+			inSession(t, s, func(x *Session) {
+				if n, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base.Add(time.Hour)); err != nil || n != 1 {
+					t.Fatalf("purge: %d %v", n, err)
+				}
+			})
+			if res, err := s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
+				t.Fatalf("ClearPurgedLog: %+v %v", res, err)
+			}
+			db, wal := archiveBytes(t, path)
+			if i := bytes.Index(db, []byte(marker)); i >= 0 {
+				t.Fatalf("purged key still in the database file at byte %d", i)
+			}
+			if bytes.Contains(wal, []byte(marker)) {
+				t.Fatal("purged key still in the write-ahead log")
+			}
+			// Rekeyed, the row stays; deleted, the row under the scrubbed key stays unchanged.
+			if got := rowCount(t, s, `select count(*) from records`); got != 3 {
+				t.Fatalf("%d rows, want 3", got)
+			}
+			if v, _, _ := recRow(t, s, dbA, "events", `{"access_token":"[redacted]"}`); held && v != `{"v":"current"}` {
+				t.Fatalf("the row under the scrubbed key changed: %q", v)
+			}
+		})
+	}
+}
+
+// Ordinary writes overwrite what they replace: a value a sync updates is not left in free space.
+func TestWritableArchiveOverwritesReplacedValues(t *testing.T) {
+	const marker = "SYNTHETICREPLACEDVALUE"
+	s, path := openAt(t)
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e"`, `{"v":"`+strings.Repeat(marker, 2000)+`"}`)}, base)
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e"`, `{"v":"new"}`)}, base.Add(time.Hour))
+	if _, err := s.db.Exec(`pragma wal_checkpoint(truncate)`); err != nil {
+		t.Fatal(err)
+	}
+	db, wal := archiveBytes(t, path)
+	if bytes.Contains(db, []byte(marker)) || bytes.Contains(wal, []byte(marker)) {
+		t.Fatal("a replaced value is still on disk")
+	}
+	var secure int
+	if err := s.db.QueryRow(`pragma secure_delete`).Scan(&secure); err != nil || secure != 1 {
+		t.Fatalf("writable archive secure_delete=%d (%v)", secure, err)
 	}
 }
 

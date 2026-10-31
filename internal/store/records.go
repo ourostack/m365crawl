@@ -190,17 +190,20 @@ func (x *Session) PurgeDenied(source string, denied func(name string) bool, at t
 }
 
 // PurgeUnscrubbedKeys clears the rows of source whose key_json changes when scrub is applied to
-// it (a row archived under a key that held credential material before keys were scrubbed):
-// value_json becomes NULL, content_hash ” and removed_at is set when it was not, as PurgeDenied
-// does. The record is archived again under its scrubbed key on the next read. It returns how many
-// rows it cleared.
+// it (a row archived under a key that held credential material before keys were scrubbed),
+// including rows an earlier version already cleared. The credential is in the key, so the key goes
+// too: when no row of the same database and store holds the scrubbed key, the row takes it, with
+// value_json NULL, content_hash empty and removed_at set when it was not, as PurgeDenied does, and the
+// next read archives the record into it again; when one does, that row is the one reads use and
+// the unscrubbed row is deleted, the one deletion of a row the archive makes. Calendar losses kept
+// under the unscrubbed key are deleted with it. It returns how many rows it changed.
 func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte, int), at time.Time) (int, error) {
 	ctx := context.Background()
-	rows, err := x.tx.QueryContext(ctx, `select database, store, key_json from records where source=? and (value_json is not null or content_hash != '')`, source)
+	rows, err := x.tx.QueryContext(ctx, `select database, store, key_json from records where source=?`, source)
 	if err != nil {
 		return 0, err
 	}
-	var hit [][3]string
+	var hit [][4]string
 	for rows.Next() {
 		var db, st, key string
 		if err := rows.Scan(&db, &st, &key); err != nil {
@@ -208,7 +211,7 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 			return 0, err
 		}
 		if scrubbed, _ := scrub([]byte(key)); !bytes.Equal(scrubbed, []byte(key)) {
-			hit = append(hit, [3]string{db, st, key})
+			hit = append(hit, [4]string{db, st, key, string(scrubbed)})
 		}
 	}
 	err = rows.Err()
@@ -217,8 +220,19 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 		return 0, err
 	}
 	return x.purge(ctx, len(hit), func(i int) (sql.Result, error) {
-		return x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
-			fmtTime(at), source, hit[i][0], hit[i][1], hit[i][2])
+		db, st, key, scrubbed := hit[i][0], hit[i][1], hit[i][2], hit[i][3]
+		if _, err := x.tx.ExecContext(ctx, `delete from calendar_losses where source=? and database=? and store=? and key_json=?`, source, db, st, key); err != nil {
+			return nil, err
+		}
+		var held int
+		if err := x.tx.QueryRowContext(ctx, `select count(*) from records where source=? and database=? and store=? and key_json=?`, source, db, st, scrubbed).Scan(&held); err != nil {
+			return nil, err
+		}
+		if held > 0 {
+			return x.tx.ExecContext(ctx, `delete from records where source=? and database=? and store=? and key_json=?`, source, db, st, key)
+		}
+		return x.tx.ExecContext(ctx, `update records set key_json=?, value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
+			scrubbed, fmtTime(at), source, db, st, key)
 	})
 }
 

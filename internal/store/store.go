@@ -61,7 +61,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
 		return nil, err
 	}
-	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: schemaDDL, SchemaVersion: SchemaVersion})
+	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: writerPragmas + schemaDDL, SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +76,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	return st, nil
 }
+
+// writerPragmas run on the writable archive's connection before its schema. secure_delete makes
+// SQLite overwrite with zeros the content it deletes or replaces, in its page and in the pages it
+// frees, instead of leaving it in free space, so a value the archive replaces or clears is not left
+// on disk (SPEC section 3.2). crawlkit's pool holds that one connection for the Store's life.
+const writerPragmas = "pragma secure_delete=on;\n"
 
 // checkSchemaNotNewer fails with the coded archive_newer error when the archive at path records a
 // schema version above SchemaVersion. crawlkit refuses such an archive too, but with a plain error.

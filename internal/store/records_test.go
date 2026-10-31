@@ -678,8 +678,10 @@ func TestUpsertRecordsRescrubbedValueReplacesStored(t *testing.T) {
 	}
 }
 
-// A row archived under a key that scrubs differently loses its value and hash and is marked
-// removed; rows whose keys scrub to themselves are untouched.
+// A row archived under a key that scrubs differently loses its value and hash, is marked removed
+// and takes the scrubbed key; when another row already holds that key the unscrubbed row is
+// deleted. A row an earlier version already cleared loses its key too, and calendar losses kept
+// under an unscrubbed key go with it. Rows whose keys scrub to themselves are untouched.
 func TestPurgeUnscrubbedKeys(t *testing.T) {
 	s := newStore(t)
 	const bad = `"Bearer abc"`
@@ -689,7 +691,15 @@ func TestPurgeUnscrubbedKeys(t *testing.T) {
 		grec(&acctA, dbA, "events", `"https://x/y?sig=[redacted]"`, `{"n":4}`),
 		grec(&acctA, dbA, "events", `{"password":"[redacted]"}`, `{"n":5}`),
 		grec(&acctA, dbA, "events", `"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2ln"`, `{"n":3}`),
+		grec(&acctA, dbA, "events", `{"access_token":"old"}`, `{"n":6}`),
 	}, base)
+	// Cleared by an earlier version, which kept the key.
+	if _, err := s.db.Exec(`update records set value_json=null, content_hash='', removed_at=? where key_json='{"access_token":"old"}'`, fmtTime(base)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`insert into calendar_losses(source,database,store,key_json,kind,reason,n) values(?,?,?,?,'k','r',1),(?,?,?,'"fine"','k','r',1)`, srcA, dbA, "events", bad, srcA, dbA, "events"); err != nil {
+		t.Fatal(err)
+	}
 	later := base.Add(time.Hour)
 	var n int
 	inSession(t, s, func(x *Session) {
@@ -704,11 +714,24 @@ func TestPurgeUnscrubbedKeys(t *testing.T) {
 			t.Fatalf("other source: %d %v", other, err)
 		}
 	})
-	if n != 2 {
-		t.Fatalf("cleared %d rows, want 2", n)
+	if n != 3 {
+		t.Fatalf("changed %d rows, want 3", n)
 	}
-	if v, removed, _ := recRow(t, s, dbA, "events", bad); v != "" || removed != fmtTime(later) {
-		t.Fatalf("bad key row: %q %q", v, removed)
+	// The first unscrubbed key that scrubs to "[redacted]" took it; the second was deleted.
+	if v, removed, _ := recRow(t, s, dbA, "events", `"[redacted]"`); v != "" || removed != fmtTime(later) {
+		t.Fatalf("rekeyed row: %q %q", v, removed)
+	}
+	if v, removed, _ := recRow(t, s, dbA, "events", `{"access_token":"[redacted]"}`); v != "" || removed != fmtTime(base) {
+		t.Fatalf("earlier cleared row: %q %q (its removal time is kept)", v, removed)
+	}
+	if got := rowCount(t, s, `select count(*) from records`); got != 5 {
+		t.Fatalf("%d rows, want 5 (one deleted)", got)
+	}
+	if got := rowCount(t, s, `select count(*) from records where key_json like '%Bearer%' or key_json like '%eyJ%' or key_json like '%old%'`); got != 0 {
+		t.Fatalf("%d rows still under an unscrubbed key", got)
+	}
+	if got := rowCount(t, s, `select count(*) from calendar_losses`); got != 1 {
+		t.Fatalf("%d calendar losses, want only the fine row's", got)
 	}
 	if v, removed, _ := recRow(t, s, dbA, "events", `"fine"`); v != `{"n":2}` || removed != "" {
 		t.Fatalf("fine row changed: %q %q", v, removed)
