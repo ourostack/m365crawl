@@ -185,6 +185,15 @@
       ],
       "json": true
     },
+    "coverage": {
+      "title": "coverage: per day and source, whether the archive holds everything the app cached (a real zero versus an uncovered day)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "coverage"
+      ],
+      "json": true
+    },
     "docs list": {
       "title": "docs list (local metadata only; show needs document-observation:ID; no document opened or fetched)",
       "argv": [

@@ -39,6 +39,9 @@ func metaLines(w io.Writer, m meta, color bool) {
 	for _, n := range m.Notices {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
 	}
+	for _, e := range m.RangeCoverage {
+		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("coverage: "+coverageLine(e), color))
+	}
 	for _, r := range m.WorkIQRoutes {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("route: "+r.Fix, color))
 		for _, step := range r.Next {
@@ -75,6 +78,9 @@ func (rt *runtime) renderText(label string, v any) error {
 	}
 	if native, ok := v.(interface{ renderAttendees(*runtime) error }); ok {
 		return native.renderAttendees(rt)
+	}
+	if r, ok := v.(interface{ renderCoverage(*runtime) error }); ok {
+		return r.renderCoverage(rt)
 	}
 	w, color := rt.stdout, rt.color
 	if textBanners[label] {

@@ -22,6 +22,9 @@ var (
 const (
 	routeRangeBeforeCache  = "range_before_cache"
 	routeParentNotArchived = "parent_not_archived"
+	// routeRangeNotCovered: the read's range_coverage says the archive does not hold all of the
+	// range, inside what the apps cached as well as before it.
+	routeRangeNotCovered = "range_not_covered"
 )
 
 // workIQRoute tells an agent which explicit WorkIQ commands reach history the apps did not cache.

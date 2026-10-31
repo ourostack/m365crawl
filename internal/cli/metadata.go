@@ -29,6 +29,8 @@ func manifest() control.Manifest {
 			Title: "workiq " + name + " (explicit optional server source; coverage/status retain no content or data cursors)"}
 	}
 	m.Commands["calendar"] = control.Command{Argv: []string{"m365crawl", "--json", "calendar"}, JSON: true}
+	m.Commands["coverage"] = control.Command{Argv: []string{"m365crawl", "--json", "coverage"}, JSON: true,
+		Title: "coverage: per day and source, whether the archive holds everything the app cached (a real zero versus an uncovered day)"}
 	m.Commands["overview"] = control.Command{Argv: []string{"m365crawl", "--json"}, JSON: true, Title: "overview (m365crawl with no command): what the archive holds per source and where to start"}
 	for _, name := range []string{"mail list", "mail show", "mail thread", "mail folders", "mail unread"} {
 		argv := append([]string{"m365crawl", "--json"}, strings.Fields(name)...)

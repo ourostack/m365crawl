@@ -86,6 +86,7 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 | Inspect the native evidence behind a meeting roster | Explicit `calendar attendees sync`, then offline `calendar attendees list <event>` and `show attendee-observation:N`; [keep source evidence separate from the displayed roster](docs/local-sources.md#native-meeting-attendee-evidence) |
 | Which mails had the deck attached? | `m365crawl mail list --has-attachments` · `m365crawl mail show <id>` for each file's name, size and type |
 | What's in the archive and how fresh is it? | `m365crawl` |
+| Did I really send no mail yesterday, or is the day not in the archive? | `m365crawl coverage --day yesterday` — per source, `covered` (a zero is a real zero), `partial` or `not_covered`, with the fix |
 | Find my notes about that discussion | `m365crawl notes sync` once, then `m365crawl search "budget review"` or `m365crawl notes search "budget review"` |
 | Read the note and check its coverage | `m365crawl notes show note:ID` · `m365crawl notes sources` |
 | Find the document mentioned in that work | `m365crawl docs sync` once, then shared `search` or `docs search "words"` |

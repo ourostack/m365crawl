@@ -40,6 +40,10 @@ type meta struct {
 	// Notices are short plain sentences about the result that an agent should know before it
 	// trusts it, such as archived Outlook events that this run did not refresh. Omitted when empty.
 	Notices []string `json:"notices,omitempty"`
+	// RangeCoverage says, for a read bounded by --since or --until, whether the archive holds
+	// every item of each source, scope and account over the range (coverageEntry). Omitted on
+	// unbounded reads and on commands that do not judge it.
+	RangeCoverage []coverageEntry `json:"range_coverage,omitempty"`
 	// WorkIQRoutes name the explicit WorkIQ commands that reach history older than the apps
 	// cached, when a read asks for it. Omitted when empty; a read never starts WorkIQ itself.
 	WorkIQRoutes []workIQRoute `json:"workiq_routes,omitempty"`

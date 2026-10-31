@@ -39,6 +39,7 @@ func (s *Store) CommitOWAMail(ctx context.Context, b OWAMailBatch) (MailResult, 
 			Account: b.Account, ReadAt: b.ReadAt, FreshAt: b.FreshAt, Result: r,
 			Trusted:            b.Trusted && !r.Doubtful && len(r.Losses) == 0,
 			RekeyAcrossFolders: true,
+			Unstable:           !b.Trusted,
 		})
 		return err
 	})

@@ -761,6 +761,11 @@ func (c *mailListCmd) Run(rt *runtime) error {
 		if res.WorkIQRoutes, err = rt.sinceRoutes(st, sc.coverage, since); err != nil {
 			return nil, err
 		}
+		if !since.IsZero() || !until.IsZero() {
+			if err := rt.mailRangeCoverage(st, sc, since, until, res); err != nil {
+				return nil, err
+			}
+		}
 		var note []string
 		if len(rows) == 0 {
 			filtered := c.From != "" || !since.IsZero() || !until.IsZero() || c.Unread || c.Flagged || c.HasAttachments || c.Folder != ""
