@@ -192,7 +192,10 @@ func holes(pieces []store.TimeSpan, a, b time.Time) []store.TimeSpan {
 	return out
 }
 
-func sameSpans(x, y []store.TimeSpan) bool { return slices.Equal(x, y) }
+// sameSpans compares spans by instant: a span read in UTC equals one bounded in the display zone.
+func sameSpans(x, y []store.TimeSpan) bool {
+	return slices.EqualFunc(x, y, func(p, q store.TimeSpan) bool { return p.From.Equal(q.From) && p.To.Equal(q.To) })
+}
 
 // stamp of a time in the display zone, for reason details.
 func covStamp(t time.Time) string { return t.In(displayZone).Format(time.RFC3339) }

@@ -252,13 +252,14 @@ func (rt *runtime) chatRoutes(st *store.Store, since time.Time) ([]workIQRoute, 
 // workIQRouteNow is the read's clock; a test seam.
 var workIQRouteNow = time.Now
 
-// workIQWindowOverlap is how far past a folder's cache start a routed window reaches.
+// workIQWindowOverlap is how far past a folder's cache start, or the read's end, a routed window
+// reaches.
 const workIQWindowOverlap = time.Hour
 
 // windowRoute routes a read that starts before the cache to a WorkIQ mail window of the range the
 // cache does not hold: from the read's start to an hour past the latest cache start among the
-// folders it reaches, or the read's end when that is earlier. The hour lets the window overlap the
-// cache for Sent Items, which coverage dates by sent time. The route disappears once windows have
+// folders it reaches, or past the read's end when that is earlier. The hour lets the window overlap
+// the cache, and reach past the read's end, for Sent Items, which coverage dates by sent time. The route disappears once windows have
 // proven that range on every folder.
 func (rt *runtime) windowRoute(st *store.Store, account, situation string, since, until time.Time, folders []routeFolder, named bool) (r workIQRoute, ok bool, err error) {
 	setup, ok, err := rt.mailRouteSetup(st, account)
@@ -270,7 +271,7 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 	var keys []uint32
 	var kinds []string
 	for _, f := range folders {
-		end = laterTime(end, earlierTime(until, f.CacheCoversSince.Add(workIQWindowOverlap)))
+		end = laterTime(end, earlierTime(until, *f.CacheCoversSince).Add(workIQWindowOverlap))
 		keys = append(keys, f.key)
 		kinds = append(kinds, f.Kind)
 	}
