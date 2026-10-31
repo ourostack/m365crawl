@@ -27,7 +27,9 @@ type meta struct {
 	// (younger than --max-age), disabled (--no-sync or a zero max age), waited_for_other_sync
 	// (another m365crawl run synced while this read waited, so the result is fresh) or
 	// other_sync_in_progress (the wait ran out; the result is the archive as it was, and a notice
-	// says so). Omitted on reads that never sync first by design.
+	// says so), foreign_archive (this machine's sources do not feed the --db archive, so it was read
+	// as it is, with a notice) or no_archive (no archive at the --db path, and none was created).
+	// Omitted on reads that never sync first by design.
 	ImplicitSync string `json:"implicit_sync,omitempty"`
 	// Synced is present only when this read ran the implicit sync first (--max-age): how long the
 	// sync took and how it ended. Absent when the archive was fresh enough to read as it was.

@@ -57,6 +57,10 @@ type Options struct {
 	// names. It needs OutlookEnabled and no Account filter.
 	OutlookLink        string
 	OutlookLinkProfile string
+	// SourceIdentity are the source keys of the machine and roots this sync reads (the CLI derives
+	// them). They are recorded in the archive before any source is read, so a later read can tell
+	// an archive this machine feeds from a copied or foreign one (#295). Nil records nothing.
+	SourceIdentity []string
 }
 
 // Run syncs every Teams origin under o.Root into the archive at o.DBPath while holding the
@@ -94,7 +98,12 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 	// An archive written by an older build gets its derived fields recomputed first, so that this
 	// sync's content hashes compare against current ones and the upgrade is not read as edits.
 	var migrated *store.Migration
-	err = contained(func() (e error) { migrated, e = rederiveArchive(ctx, st); return })
+	err = contained(func() (e error) {
+		if migrated, e = rederiveArchive(ctx, st); e == nil {
+			e = st.RecordSourceIdentity(ctx, o.SourceIdentity, started)
+		}
+		return
+	})
 	var coded *errs.Coded
 	if errors.As(err, &coded) && coded.Code == errs.CodeArchiveNewer {
 		return Report{}, nil, err // before any write: not even a failed-run record
