@@ -482,6 +482,22 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// A process paused after the write-ahead record must not send a write the person has settled since.
+	var current store.DirectedWrite
+	if err := readArchive(ctx, opts.DBPath, func(st *store.Store) (err error) {
+		current, _, err = st.DirectedWriteByID(ctx, row.ID)
+		return err
+	}); err != nil {
+		result := save(ctx, opts, row, "in_flight", store.DirectedWriteChange{Outcome: string(da.Failed), Phase: "answered",
+			ErrorCode: "write_log_unreadable", Cause: "not_sent"})
+		result.Decision = da.Accept
+		return result, nil
+	}
+	if current.Outcome != string(da.Unknown) || current.Phase != "in_flight" {
+		settled := ofWrite(current)
+		settled.Decision, settled.Notice = da.Accept, "the write changed before it was sent, so nothing was sent; the log is the record"
+		return settled, nil
+	}
 	var answer workiq.WriteAnswer
 	if req.Action == SendTeamsMessage {
 		answer = s.CreateChatMessage(ctx, row.Conversation, text)
@@ -547,6 +563,10 @@ func save(ctx context.Context, opts Options, row store.DirectedWrite, fromPhase 
 			// The log moved on meanwhile (the person settled it): it, not this answer, is the record.
 			moved := ofWrite(stored)
 			moved.Notice = "the write log changed while the server answered (" + string(change.Outcome) + "); it now says " + stored.Outcome
+			if stored.Outcome != change.Outcome {
+				// The log and the server disagree, so neither may free the intent key for a resend.
+				moved.ExitClass, moved.TellPerson = da.ExitUnknown, true
+			}
 			return moved
 		}
 		if err == nil {

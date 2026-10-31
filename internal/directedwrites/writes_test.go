@@ -664,7 +664,67 @@ func TestAnAnswerAfterThePersonSettledKeepsTheLog(t *testing.T) {
 		return store.WithWorkIQWriter(ctx, path, fn)
 	}
 	got, err := Send(ctx, opts, notesRequest("hello there"))
-	if err != nil || got.Outcome != da.Failed || got.Phase != "settled" || !strings.Contains(got.Notice, "(sent); it now says failed") {
-		t.Fatalf("%+v %v", got, err)
+	if err != nil || got.Outcome != da.Failed || got.Phase != "settled" || !strings.Contains(got.Notice, "(sent); it now says failed") ||
+		got.ExitClass != da.ExitUnknown || !got.TellPerson {
+		t.Fatalf("a late sent answer freed the intent key: %+v %v", got, err)
+	}
+	_, opts = newServer(t, true, true)
+	turnOn(t, opts)
+	calls = 0
+	writeArchive = func(ctx context.Context, path string, fn func(context.Context, *store.Store) error) error {
+		calls++
+		if calls == 2 {
+			if err := store.WithWorkIQWriter(ctx, path, func(ctx context.Context, s *store.Store) error {
+				_, err := s.UpdateDirectedWrite(ctx, 1, "unknown", "in_flight", store.DirectedWriteChange{Outcome: "sent", Phase: "verified", Verification: "found", Cause: "verified_by_read"})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return store.WithWorkIQWriter(ctx, path, fn)
+	}
+	if got, err := Send(ctx, opts, notesRequest("hello there")); err != nil || got.Outcome != da.Sent || got.ExitClass != da.ExitDone {
+		t.Fatalf("agreeing log and answer: %+v %v", got, err)
+	}
+}
+
+func TestAWriteSettledBeforeItsCallIsNeverSent(t *testing.T) {
+	ctx := context.Background()
+	srv, opts := newServer(t, true, true)
+	turnOn(t, opts)
+	calls := 0
+	readArchive = func(ctx context.Context, path string, fn func(*store.Store) error) error {
+		calls++
+		if calls == 4 {
+			if err := store.WithWorkIQWriter(ctx, path, func(ctx context.Context, s *store.Store) error {
+				_, err := s.UpdateDirectedWrite(ctx, 1, "unknown", "in_flight", store.DirectedWriteChange{Outcome: "failed", Phase: "settled", Verification: "person", Cause: "person_not_sent"})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return readOnly(ctx, path, fn)
+	}
+	got, err := Send(ctx, opts, notesRequest("hello there"))
+	if err != nil || len(srv.created) != 0 || got.Outcome != da.Failed || got.Decision != da.Accept || !strings.Contains(got.Notice, "nothing was sent") {
+		t.Fatalf("%+v %v %v", got, err, srv.created)
+	}
+	srv, opts = newServer(t, true, true)
+	turnOn(t, opts)
+	calls = 0
+	readArchive = func(ctx context.Context, path string, fn func(*store.Store) error) error {
+		calls++
+		if calls == 4 {
+			return errors.New("unreadable")
+		}
+		return readOnly(ctx, path, fn)
+	}
+	got, err = Send(ctx, opts, notesRequest("hello there"))
+	if err != nil || len(srv.created) != 0 || got.Outcome != da.Failed || got.ExitClass != da.ExitFailed {
+		t.Fatalf("%+v %v %v", got, err, srv.created)
+	}
+	readArchive = readOnly
+	if row := logged(t, opts)[0]; row.Outcome != "failed" || row.ErrorCode != "write_log_unreadable" {
+		t.Fatalf("%+v", row)
 	}
 }
