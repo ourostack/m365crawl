@@ -48,7 +48,7 @@ type mailGroup struct {
 	Unread  mailUnreadCmd  `cmd:"" help:"Unread mail by folder."`
 }
 
-const mailCommon = `Mail comes from new Outlook's local cache: HxStore on Mac, OWA IndexedDB on Windows. It holds only cached mail, not server totals. Explicit copied supported sources also work on Linux. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers.
+const mailCommon = `Mail comes from new Outlook's local cache: HxStore on Mac, OWA IndexedDB on Windows. It holds only cached mail, not server totals. Explicit copied supported sources also work on Linux. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers and when Outlook last wrote it (cache_fresh_at): mail Outlook received after that is not in the archive, and source_health reports a cache Outlook stopped writing (state stale).
 --account takes the mail account as printed in the ids, outlook/<profile>.
 A field the archive does not hold is null: subject, sender, in_reply_to, ical_uid and internet_message_id when Outlook stored none, is_read when the read state is not known, sent_at when the store has no send time, address on a recipient with no address, gone_at and evicted_at while the message is present.
 Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is the store's own number. Windows preserves To/Cc/Bcc order with role to/cc/bcc and kind_raw=0; ReplyTo is not inferred. conversation_id is null when absent; threads use a shared conversation identity before reply_chain and subject fallback.
@@ -288,6 +288,7 @@ type mailScope struct {
 	folders  []store.MailFolderRow // the folders --folder names (all when it is empty)
 	coverage []store.CoverageRow   // the coverage of those folders
 	syncedAt time.Time             // when mail was last read, over every folder of the account filter
+	fresh    time.Time             // the earliest store write time behind the last reads of the account filter
 	marked   bool                  // a sync has read the mail of the account filter (the outlook_mail_read marker)
 }
 
@@ -359,6 +360,9 @@ func (rt *runtime) mailScope(st *store.Store, folder string) (mailScope, error) 
 	if err != nil {
 		return sc, err
 	}
+	if sc.fresh, err = mailCacheFresh(st, rt.ctx, rt.g.Account); err != nil {
+		return sc, err
+	}
 	for _, a := range marked {
 		sc.marked = sc.marked || rt.g.Account == "" || a == rt.g.Account
 	}
@@ -408,6 +412,9 @@ func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 
 // mailReadAccounts is the test seam of the read markers.
 var mailReadAccounts = (*store.Store).MailReadAccounts
+
+// mailCacheFresh is the test seam of the mail's cache write time.
+var mailCacheFresh = (*store.Store).MailCacheFresh
 
 // mailProfileCount counts the Outlook profiles under root (the default root when empty); a test seam.
 var mailProfileCount = func(rt *runtime) (int, *mailSourceError) {
@@ -482,11 +489,14 @@ func unreadNote(rows []mailUnreadFolder) string {
 
 // mailListResult is the document of every mail list command.
 type mailListResult struct {
-	Items     []any             `json:"items"`
-	Count     int               `json:"count"`
-	Truncated bool              `json:"truncated"`
-	SyncedAt  *time.Time        `json:"synced_at"`
-	Coverage  []mailCoverageOut `json:"coverage"`
+	Items     []any      `json:"items"`
+	Count     int        `json:"count"`
+	Truncated bool       `json:"truncated"`
+	SyncedAt  *time.Time `json:"synced_at"`
+	// CacheFreshAt is when Outlook last wrote the local cache behind synced_at (the earliest across
+	// accounts): mail Outlook received after it cannot be in the archive.
+	CacheFreshAt *time.Time        `json:"cache_fresh_at,omitempty"`
+	Coverage     []mailCoverageOut `json:"coverage"`
 	meta
 	rows   []store.MailRow // the items, for the text output
 	typed  bool            // the items are mailListItem (no --fields)
@@ -498,7 +508,7 @@ func (rt *runtime) newMailList(rows []store.MailRow, truncated bool, sc mailScop
 	for i, r := range rows {
 		items[i] = listItemOf(r, rt.g.MaxText)
 	}
-	res := &mailListResult{Items: shape(rt, items), Truncated: truncated, SyncedAt: tp(sc.syncedAt), Coverage: coverageOut(sc.coverage),
+	res := &mailListResult{Items: shape(rt, items), Truncated: truncated, SyncedAt: tp(sc.syncedAt), CacheFreshAt: tp(sc.fresh), Coverage: coverageOut(sc.coverage),
 		rows: rows, typed: len(rt.fields) == 0, covers: sc.since()}
 	res.Count = len(res.Items)
 	return res

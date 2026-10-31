@@ -109,7 +109,19 @@ type mailExisting struct {
 
 type rekeyKey struct{ msgID, kind string }
 
+// commitMail writes one read's mail and, with it, the store write time behind that read (the
+// mail's cache_fresh_at), for HxStore and OWA reads alike.
 func commitMail(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error) {
+	res, err := commitMailRows(ctx, tx, b)
+	if err != nil || b.FreshAt.IsZero() {
+		return res, err
+	}
+	_, err = tx.ExecContext(ctx, `insert into meta(key, value) values(?, ?) on conflict(key) do update set value=excluded.value`,
+		mailFreshKey+b.Account, b.FreshAt.UTC().Format(timeLayout))
+	return res, err
+}
+
+func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, error) {
 	var res MailResult
 	at := b.ReadAt.UTC().Format(timeLayout)
 	if err := upsertMailFolders(ctx, tx, b); err != nil {

@@ -15,6 +15,9 @@ const (
 	mailReadKey = "outlook_mail_read:"
 	// mailFailureKey holds the last failed mail read of an account, until a read succeeds.
 	mailFailureKey = "outlook_mail_failure:"
+	// mailFreshKey holds the store write time of the copy behind the account's last committed
+	// mail read: the mail's cache_fresh_at, the clock the Outlook calendar keeps in calendar_sources.
+	mailFreshKey = "outlook_mail_fresh:"
 )
 
 // MailState is what the archive remembers of one account's mail reads.
@@ -118,6 +121,9 @@ type MailStatus struct {
 	OldestAt time.Time `json:"oldest_at,omitzero"`
 	NewestAt time.Time `json:"newest_at,omitzero"`
 	SyncedAt time.Time `json:"synced_at,omitzero"`
+	// CacheFreshAt is when Outlook last wrote the local cache behind the last read (the earliest
+	// across accounts); zero when no write time is known.
+	CacheFreshAt time.Time `json:"cache_fresh_at,omitzero"`
 }
 
 // MailStatus counts the archive's live mail and finds when it was last read.
@@ -157,5 +163,8 @@ func (s *Store) MailStatusOf(ctx context.Context, account string) (MailStatus, e
 		return MailStatus{}, err
 	}
 	m.OldestAt, m.NewestAt, m.SyncedAt = parseTime(oldest), parseTime(newest), parseTime(synced)
+	if m.CacheFreshAt, err = s.MailCacheFresh(ctx, account); err != nil {
+		return MailStatus{}, err
+	}
 	return m, nil
 }

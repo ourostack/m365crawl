@@ -56,6 +56,10 @@ type runtime struct {
 	healthSources    []string // resolved search families, independent of returned hits
 	healthAccount    string   // mail ID account or calendar event principal
 	healthUnknown    bool     // this implicit refresh could not persist or derive its source health
+
+	// healthUntil is the read's upper time bound: a stale Outlook cache written at or after it hides
+	// nothing the read asks for.
+	healthUntil time.Time
 }
 
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {

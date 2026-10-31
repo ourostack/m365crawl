@@ -56,6 +56,7 @@
       "state": "ok"
     },
     {
+      "cache_fresh_at": "2026-09-10T09:00:00Z",
       "last_sync_at": null,
       "messages": 6,
       "newest_at": "2026-09-09T08:00:00Z",

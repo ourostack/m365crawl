@@ -20,6 +20,8 @@ type SourceHealth struct {
 	LastErrorCode string     `json:"last_error_code"`
 	LastOKAt      *time.Time `json:"last_ok_at"`
 	NewestItemAt  *time.Time `json:"newest_item_at"`
+	// CacheFreshAt is set only on a stale Outlook entry: when Outlook last wrote its local cache.
+	CacheFreshAt *time.Time `json:"cache_fresh_at,omitempty"`
 }
 
 // SourceFamily recognizes only the three sync-backed source families, not independent observations.

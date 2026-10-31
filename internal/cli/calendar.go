@@ -305,6 +305,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
+	rt.healthUntil = to
 	return rt.read("calendar", func(st *store.Store) (result, error) {
 		gap := true
 		out := newList(nil, false)

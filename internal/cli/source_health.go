@@ -30,6 +30,18 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 	if err != nil {
 		return err
 	}
+	var stale []store.SourceHealth
+	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
+		if stale, err = outlookCacheHealth(st, rt.ctx); err != nil {
+			return err
+		}
+	}
+	for _, h := range stale {
+		failing := slices.ContainsFunc(all, func(f store.SourceHealth) bool { return f.SourceKey == h.SourceKey })
+		if !failing && (rt.healthUntil.IsZero() || rt.healthUntil.After(*h.CacheFreshAt)) {
+			all = append(all, h)
+		}
+	}
 	health := []store.SourceHealth{}
 	for _, h := range all {
 		if !slices.Contains(families, h.Source) || h.Source != "teams" && !rt.outlookOn {
@@ -93,9 +105,39 @@ func sourceHealthNotice(h store.SourceHealth) string {
 	if h.AccountID != nil {
 		name += " for " + *h.AccountID
 	}
+	if h.State == store.SourceStale {
+		return name + ": " + outlookStaleSentence(h)
+	}
 	since := "has never been read successfully"
 	if h.LastOKAt != nil {
 		since = "has not been read successfully since " + h.LastOKAt.UTC().Format(time.RFC3339)
 	}
 	return fmt.Sprintf("%s %s (%s); newer items may be missing. Run m365crawl doctor.", name, since, h.LastErrorCode)
 }
+
+// outlookStaleSentence says what a stale Outlook cache means for a read and how to refresh it.
+func outlookStaleSentence(h store.SourceHealth) string {
+	return outlookStaleDetail(h) + ". " + outlookStaleFix
+}
+
+// outlookStaleDetail says since when Outlook has not written its cache and what that leaves out.
+func outlookStaleDetail(h store.SourceHealth) string {
+	what := "mail"
+	if h.Source == "outlook_calendar" {
+		what = "an event created or changed"
+	}
+	return fmt.Sprintf("Outlook has not updated its local cache since %s (checked %s, %s); %s after that is not in it",
+		h.CacheFreshAt.UTC().Format(time.RFC3339), h.LastOKAt.UTC().Format(time.RFC3339), store.OutlookCacheStaleCode, what)
+}
+
+// outlookCacheHealth is the test seam of the stale Outlook sources.
+var outlookCacheHealth = (*store.Store).OutlookCacheHealth
+
+// outlookStale is the stale entry of one Outlook source family and account, or nil.
+func (rt *runtime) outlookStale(st *store.Store, family, account string) (*store.SourceHealth, error) {
+	stale, err := outlookCacheHealth(st, rt.ctx)
+	return store.OutlookCacheStale(stale, family, account), err
+}
+
+// outlookStaleFix is the fix of a stale Outlook cache.
+const outlookStaleFix = "Open Outlook and let it sync, then run `m365crawl sync`."
