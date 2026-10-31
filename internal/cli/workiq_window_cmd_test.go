@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
 )
 
@@ -66,4 +68,12 @@ func TestWorkIQRouteDurationSaysHoursForLongProofs(t *testing.T) {
 	if workIQRouteDuration(119) != "119 minutes" || workIQRouteDuration(121) != "3 hours" {
 		t.Fatal(workIQRouteDuration(121))
 	}
+}
+
+func TestRangeCoverageFailsTheReadWhenWindowSpansCannotBeRead(t *testing.T) {
+	e := routeEnv(t)
+	old := mailWindowSpans
+	t.Cleanup(func() { mailWindowSpans = old })
+	mailWindowSpans = func(*store.Store, context.Context, string) ([]store.TimeSpan, error) { return nil, errors.New("broken") }
+	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01T00:00:00Z")
 }

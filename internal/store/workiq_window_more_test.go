@@ -290,3 +290,35 @@ func TestWorkIQMailWindowRouteOnAnArchiveWithoutWindows(t *testing.T) {
 		t.Fatalf("an archive without windows reported window state: %+v", got)
 	}
 }
+
+func TestWorkIQMailWindowSpansMergeProvenWindows(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if spans := must(s.WorkIQMailWindowSpans(ctx, mailAcct)); spans != nil {
+		t.Fatalf("an archive without windows has spans: %v", spans)
+	}
+	seedWindowRoute(t, s, "2026-09-01T00:00:00Z", "2026-09-04T00:00:00Z", true, `{}`)
+	seedWindowRoute(t, s, "2026-09-03T00:00:00Z", "2026-09-08T00:00:00Z", true, `{}`)
+	seedWindowRoute(t, s, "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z", false, `{}`)
+	spans := must(s.WorkIQMailWindowSpans(ctx, mailAcct))
+	if len(spans) != 1 || !spans[0].From.Equal(windowSince) || !spans[0].To.Equal(windowUntil) {
+		t.Fatalf("spans = %v", spans)
+	}
+	sweepReadFaults(t, func(t *testing.T, r *Store) {
+		seedWindowRoute(t, r, "2026-09-01T00:00:00Z", "2026-09-08T00:00:00Z", true, `{}`)
+	}, func(ctx context.Context, r *Store) error {
+		_, err := r.WorkIQMailWindowSpans(ctx, mailAcct)
+		return err
+	})
+	must(s.db.ExecContext(ctx, `update workiq_window_coverage set until='bad'`))
+	if _, err := s.WorkIQMailWindowSpans(ctx, mailAcct); err == nil {
+		t.Fatal("corrupt window coverage was read")
+	}
+	path := writableArchivePath(t)
+	cs := must(crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), workiqWindowSchemaDDL, "", 1), SchemaVersion: 20}))
+	legacy := &Store{cs: cs, db: cs.DB()}
+	if spans, err := legacy.WorkIQMailWindowSpans(ctx, mailAcct); err != nil || spans != nil {
+		t.Fatal("an old archive reported window spans", err)
+	}
+	must0(legacy.Close())
+}
