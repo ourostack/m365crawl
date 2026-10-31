@@ -1199,7 +1199,7 @@ func TestSyncReportsThePurgedLog(t *testing.T) {
 func TestSyncClearsThePurgedLogWhenCancelled(t *testing.T) {
 	old := clearPurgedLog
 	t.Cleanup(func() { clearPurgedLog = old })
-	var cancelled error = errors.New("not called")
+	cancelled := errors.New("not called")
 	clearPurgedLog = func(_ *store.Store, ctx context.Context) (store.PurgedLog, error) {
 		cancelled = ctx.Err()
 		return store.PurgedLog{}, errors.New("disk I/O error")
