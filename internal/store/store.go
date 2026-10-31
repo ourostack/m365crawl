@@ -63,8 +63,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	// Batch schema creation, writer pragmas included, so cold opens do not commit each DDL statement
 	// or retain a partial schema after failure. The vacuum marker reads the tables before the schema
-	// creates them, so it stays first inside the batch.
-	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: "begin;\n" + writerPragmas + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
+	// creates them, so it stays first inside the batch. The batch takes the write lock when it begins
+	// (begin immediate): a transaction that reads before it writes cannot wait for another writer,
+	// because SQLite does not call the busy handler for that upgrade, so a deferred batch failed at
+	// once with "database is locked" instead of waiting out the connection's busy timeout (#301).
+	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: "begin immediate;\n" + writerPragmas + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}

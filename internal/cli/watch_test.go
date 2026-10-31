@@ -238,8 +238,23 @@ func TestArchiveCountDoesNotCreateArchive(t *testing.T) {
 	}
 }
 
+// exec writes to the archive the way another m365crawl writer would: holding the archive writer
+// lock, so it never overlaps a sync of the running watch. A direct write that overlapped one could
+// make that sync fail with SQLITE_BUSY, which no real run causes (#301). A watch tick that finds
+// the lock held warns on stderr and retries.
 func (w *watchEnv) exec(q string, args ...any) {
 	w.t.Helper()
+	deadline := time.Now().Add(watchTestWaitTimeout)
+	release, err := store.AcquireWriter(context.Background(), w.db, store.WriterOrdinarySync)
+	for err != nil {
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Code != errs.CodeLocked || time.Now().After(deadline) {
+			w.t.Fatalf("archive writer lock: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+		release, err = store.AcquireWriter(context.Background(), w.db, store.WriterOrdinarySync)
+	}
+	defer release()
 	db, err := sql.Open("sqlite", w.db+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		w.t.Fatal(err)
