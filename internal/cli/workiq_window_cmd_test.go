@@ -79,3 +79,16 @@ func TestRangeCoverageFailsTheReadWhenWindowSpansCannotBeRead(t *testing.T) {
 	}
 	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01T00:00:00Z")
 }
+
+// A route whose window would end within the current second past now ends at now instead, so the
+// sync it names is not cut short.
+func TestOlderMailWindowRouteNeverEndsAfterNow(t *testing.T) {
+	e := routeEnv(t)
+	old := workIQRouteNow
+	t.Cleanup(func() { workIQRouteNow = old })
+	workIQRouteNow = func() time.Time { return time.Date(2026, 9, 7, 8, 30, 0, 500e6, time.UTC) }
+	routes := routesOf(t, mailJSON(t, e, "mail", "list", "--since", "2026-01-01T00:00:00Z"))
+	if len(routes) != 1 || !strings.Contains(routeCommands(t, routes[0])[2], "--until 2026-09-07T08:30:00Z") {
+		t.Fatalf("routes = %v", routes)
+	}
+}
