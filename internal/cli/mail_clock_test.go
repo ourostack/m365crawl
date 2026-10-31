@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +83,25 @@ func TestMailListFolderCopiesNameTheClock(t *testing.T) {
 	m = mailJSON(t, e, append([]string{"mail", "list", "--folder", "inbox"}, dayFlags(25)...)...)
 	if c := m["folder_copies"].([]any)[0].(map[string]any); c["dated_by"] != "received_at" {
 		t.Fatalf("%v", c)
+	}
+}
+
+// mail show says when copies of the message disagree on received time, and the date it is listed by.
+func TestMailShowSaysWhenCopiesDisagree(t *testing.T) {
+	e := copyEnv(t)
+	db, err := sql.Open("sqlite", e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`update mail_messages set received_at='2026-08-20T08:00:00.000Z' where detail_key=2001`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	code, out, _ := e.mail("--format", "text", "--no-color", "mail", "show", "outlook/Main:2001")
+	if code != 0 || !strings.Contains(out, "2026-08-20 08:00 UTC (copies disagree; dated 2026-09-07 07:59 UTC)") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if m := mailJSON(t, e, "mail", "show", "outlook/Main:2001"); m["received_at_disagrees"] != true || m["dated_at"] != "2026-09-07T07:59:00Z" {
+		t.Fatalf("%v", m)
 	}
 }

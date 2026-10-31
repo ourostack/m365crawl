@@ -1,7 +1,8 @@
 package store
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -48,11 +49,7 @@ func (c mailCopies) receivedAt(rowid int64, own time.Time) time.Time {
 func (c mailCopies) dated() (join string, args []any, expr string) {
 	received := `m.received_at`
 	if len(c.received) > 0 {
-		ids := make([]int64, 0, len(c.received))
-		for id := range c.received {
-			ids = append(ids, id)
-		}
-		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		ids := slices.Sorted(maps.Keys(c.received))
 		values := make([]string, len(ids))
 		for i, id := range ids {
 			values[i] = `(?,?)`
