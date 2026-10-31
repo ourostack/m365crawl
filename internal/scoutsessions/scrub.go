@@ -2,10 +2,10 @@ package scoutsessions
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"regexp"
 
@@ -45,14 +45,15 @@ var scoutRules = []scrubRule{
 
 // Stamp identifies everything that decides what the archive keeps of a session file: the parser
 // version, the Scout scrub code and rules, and the Teams scrub rules. An archived read made under
-// another stamp is read again, or scrubbed again from what the archive holds.
+// another stamp is read again, or scrubbed again from what the archive holds. The digest only
+// detects a changed rule table, so a fast non-cryptographic hash is enough.
 func Stamp() string {
-	h := sha256.New()
+	h := fnv.New64a()
 	_, _ = fmt.Fprintf(h, "parser=%d scrub=%d teams=%s\n", ParserVersion, ScrubVersion, teamsdesktop.RulesStamp())
 	for _, rule := range scoutRules {
 		_, _ = fmt.Fprintf(h, "%t %s\n", rule.keep, rule.pattern)
 	}
-	return fmt.Sprintf("%d.%d.%x", ParserVersion, ScrubVersion, h.Sum(nil)[:8])
+	return fmt.Sprintf("%d.%d.%016x", ParserVersion, ScrubVersion, h.Sum64())
 }
 
 // Scrub applies the Teams scrub rules to the raw JSON, then the Scout rules to every decoded
