@@ -114,17 +114,18 @@ type mailPersonOut struct {
 	Address *string `json:"address"`
 }
 
-// mailFolderRefOut is one folder a message is in.
+// mailFolderRefOut is one folder a message is in, with its copy's read state there.
 type mailFolderRefOut struct {
 	Folder     *string `json:"folder"`
 	FolderKind string  `json:"folder_kind"`
+	IsRead     *bool   `json:"is_read"`
 }
 
 // foldersOut is every folder a message has a copy in (store.MailRow.Folders).
 func foldersOut(r store.MailRow) []mailFolderRefOut {
 	out := make([]mailFolderRefOut, len(r.Folders))
 	for i, f := range r.Folders {
-		out[i] = mailFolderRefOut{Folder: nz(f.Name), FolderKind: f.Kind}
+		out[i] = mailFolderRefOut{Folder: nz(f.Name), FolderKind: f.Kind, IsRead: f.IsRead}
 	}
 	return out
 }

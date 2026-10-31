@@ -35,10 +35,12 @@ import (
 // already archived without counting them as updated.
 const mailFoldersReadyKey = "mail_folders_ready:"
 
-// MailFolderRef is one folder a message is in.
+// MailFolderRef is one folder a message is in, with the read state of its copy there (nil when
+// unknown).
 type MailFolderRef struct {
 	Key        uint32
 	Name, Kind string
+	IsRead     *bool
 }
 
 // hasMailMembership reports whether the archive has the membership table (schema 23); a
@@ -199,12 +201,17 @@ func loadMailFolderRefs(ctx context.Context, q mailQuerier, rows []MailRow) erro
 			return err
 		}
 		if table {
-			err = mailEach(ctx, q, `select f.message_rowid, f.folder_key, coalesce(d.name,''), coalesce(d.kind,'unknown') from mail_message_folders f
+			err = mailEach(ctx, q, `select f.message_rowid, f.folder_key, coalesce(d.name,''), coalesce(d.kind,'unknown'), f.is_read from mail_message_folders f
 left join mail_folders d on d.account=f.account and d.folder_key=f.folder_key where f.message_rowid in (`+joinIDs(ids)+`)`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: row ids are integers
 				var rowid int64
 				var f MailFolderRef
-				if err := r.Scan(&rowid, &f.Key, &f.Name, &f.Kind); err != nil {
+				var isRead sql.NullInt64
+				if err := r.Scan(&rowid, &f.Key, &f.Name, &f.Kind, &isRead); err != nil {
 					return err
+				}
+				if isRead.Valid {
+					v := isRead.Int64 == 1
+					f.IsRead = &v
 				}
 				rows[at[rowid]].Folders = append(rows[at[rowid]].Folders, f)
 				return nil
@@ -217,7 +224,7 @@ left join mail_folders d on d.account=f.account and d.folder_key=f.folder_key wh
 	for i := range rows {
 		r := &rows[i]
 		if len(r.Folders) == 0 {
-			r.Folders = []MailFolderRef{{Key: r.FolderKey, Name: r.Folder, Kind: r.FolderKind}}
+			r.Folders = []MailFolderRef{{Key: r.FolderKey, Name: r.Folder, Kind: r.FolderKind, IsRead: r.IsRead}}
 		}
 		slices.SortStableFunc(r.Folders, func(a, b MailFolderRef) int {
 			if ra, rb := mailKindRank(a.Kind), mailKindRank(b.Kind); ra != rb {

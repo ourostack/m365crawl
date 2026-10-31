@@ -26,6 +26,12 @@ func TestMailListFindsAMessageThroughEveryFolderItIsIn(t *testing.T) {
 		folders[0].(map[string]any)["folder_kind"] != "inbox" || folders[1].(map[string]any)["folder"] != "Sent Items" || folders[2].(map[string]any)["folder_kind"] != "other" {
 		t.Fatalf("item %v", it)
 	}
+	if folders[0].(map[string]any)["is_read"] != false || folders[1].(map[string]any)["is_read"] != true {
+		t.Fatalf("per-copy read state %v", folders)
+	}
+	if one := items(t, mailJSON(t, e, "mail", "list", "--folder", "sent"))[0]["folders"].([]any); len(one) != 1 || one[0].(map[string]any)["is_read"] != true {
+		t.Fatalf("a message in one folder carries its own read state: %v", one)
+	}
 	if its := items(t, mailJSON(t, e, "mail", "list", "--folder", "sent", "--unread")); len(its) != 0 {
 		t.Fatalf("read in Sent Items, listed unread: %v", ids(its))
 	}
