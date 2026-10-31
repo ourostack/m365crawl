@@ -95,6 +95,7 @@ type cliApp struct {
 	Teams         teamsCmd         `cmd:"" help:"List teams with their channel count, last activity and unread count; the team_id or display_name is what --team takes."`
 	People        peopleGroup      `cmd:"" help:"List Teams and mail people with registered native Outlook observations; inspect unresolved source evidence."`
 	Activity      activityCmd      `cmd:"" help:"List activity-feed items (mentions, replies, reactions) with their messages."`
+	Coverage      coverageCmd      `cmd:"" help:"Per day and source, whether the archive holds everything the app cached: tell a real zero (no mail sent, no message posted) from a day the archive does not cover. Default: today; --day, --since/--until (at most 31 days), --source, --tz."`
 	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams and Outlook caches hold the days each app has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook cached mail offline on Mac and Windows: list, show, thread, folders and unread. Every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
 	WorkIQ        workIQGroup      `cmd:"" name:"workiq" help:"Explicit optional WorkIQ mail/chat source: configure, sync, count or probe; never runs from ordinary reads."`

@@ -109,6 +109,10 @@ type Result struct {
 	Messages []Message // sorted by detail key
 	Folders  []Folder  // the account's folders, sorted by key
 	Coverage []Coverage
+	// MissingDetailFolders counts, per folder key, the header copies of the messages skipped for a
+	// missing detail object (Notes.MissingDetail). Such a message is in the store but not in the
+	// result, so no claim that the read holds every message of those folders can rest on it.
+	MissingDetailFolders map[uint32]int
 	// SeenDetailKeys is every detail key a seen header names, whether or not the message mapped
 	// (a header with no detail object or no folder is seen all the same), sorted. The archive
 	// never records such a key as absent: the store still holds it.
@@ -484,6 +488,12 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		dw, ok := details.wins[dk]
 		if !ok {
 			n.MissingDetail++
+			if res.MissingDetailFolders == nil {
+				res.MissingDetailFolders = map[uint32]int{}
+			}
+			for _, h := range copies[dk] {
+				res.MissingDetailFolders[h.FolderKey]++
+			}
 			continue
 		}
 		d, err := dw.val, dw.err

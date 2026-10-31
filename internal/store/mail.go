@@ -50,6 +50,9 @@ type MailBatch struct {
 	Trusted bool
 	// RekeyAcrossFolders opts into Windows native moves and sparse metadata; false keeps Mac's policy, including attachment inference.
 	RekeyAcrossFolders bool
+	// Unstable says the read came from a snapshot that changed while it was taken (Windows OWA):
+	// it may add and update, but it records no covered span (recordMailSpans).
+	Unstable bool
 }
 
 // MailResult is what one CommitMail did. Gone and Evicted count the messages marked by this call.
@@ -252,17 +255,18 @@ func commitMailRows(ctx context.Context, tx *sql.Tx, b MailBatch) (MailResult, e
 	if err := writeMailCoverage(ctx, tx, b, at, other); err != nil {
 		return res, err
 	}
-	if !b.Trusted {
-		return res, nil
+	if b.Trusted {
+		if res, err = judgeMissing(ctx, tx, b, at, byKey, absent, live, other, res); err != nil {
+			return res, err
+		}
+		if err := retainWorkIQMailCacheMarks(ctx, tx, b.Account); err != nil {
+			return res, err
+		}
+		if err := reduceWorkIQMailMarks(ctx, tx, b.Account); err != nil {
+			return res, err
+		}
 	}
-	res, err = judgeMissing(ctx, tx, b, at, byKey, absent, live, other, res)
-	if err != nil {
-		return res, err
-	}
-	if err := retainWorkIQMailCacheMarks(ctx, tx, b.Account); err != nil {
-		return res, err
-	}
-	return res, reduceWorkIQMailMarks(ctx, tx, b.Account)
+	return res, recordMailSpans(ctx, tx, b, res.Withheld)
 }
 
 // mailRootChanged records the account root of this read in meta and reports whether it differs

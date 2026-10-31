@@ -405,6 +405,9 @@ func (c *messagesCmd) Run(rt *runtime) error {
 		res, err := excludingChannels(rt.messageList(rt.ctx, st, rows, trunc, *f.Total, c.HTML))(c.Unread && !c.IncludeChannels)
 		if l, ok := res.(*listResult); ok {
 			l.WorkIQRoutes = routes
+			if err == nil && (!f.Since.IsZero() || !f.Until.IsZero()) {
+				err = rt.messagesRangeCoverage(st, f.Since, f.Until, l)
+			}
 		}
 		return res, err
 	})

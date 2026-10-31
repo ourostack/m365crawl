@@ -18,7 +18,7 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 		families = []string{"teams"}
 	case "calendar", "calendar actions":
 		families = []string{"teams", "outlook_calendar"}
-	case "calendar event", "sql":
+	case "calendar event", "sql", "coverage":
 		families = []string{"teams", "outlook_calendar", "outlook_mail"}
 	case "search":
 		families = rt.healthSources

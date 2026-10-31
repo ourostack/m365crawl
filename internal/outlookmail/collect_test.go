@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -261,6 +262,11 @@ func TestCollectMissingDetailSkipsTheMessageAndIsNoLoss(t *testing.T) {
 	if len(r.Messages) != 1 || r.Messages[0].DetailKey != 22 || r.Notes.MissingDetail != 1 || len(r.Losses) != 0 || !slices.Equal(r.SeenDetailKeys, []uint32{21, 22}) {
 		t.Fatalf("%+v %+v", r.Notes, r.Losses)
 	}
+	// Every folder a skipped message's header copies name is recorded, so no role's coverage
+	// rests on this read.
+	if !maps.Equal(r.MissingDetailFolders, map[uint32]int{fInbox: 1, fSent: 1}) {
+		t.Fatalf("missing detail folders %v", r.MissingDetailFolders)
+	}
 }
 
 func TestCollectOrphans(t *testing.T) {
@@ -383,8 +389,8 @@ func TestCollectManyMissingFoldersAreALoss(t *testing.T) {
 func TestCollectMissingFolderAndDetailIsNotCounted(t *testing.T) {
 	objs := append(folderObjs(), hdr(11, 21, 999, 1, "x", 2))
 	r := collect(t, storeOf(t, framed(objs...)), Options{})
-	if len(r.Messages) != 0 || r.Notes.MissingFolder != 0 || r.Notes.MissingDetail != 1 {
-		t.Fatalf("%+v", r.Notes)
+	if len(r.Messages) != 0 || r.Notes.MissingFolder != 0 || r.Notes.MissingDetail != 1 || !maps.Equal(r.MissingDetailFolders, map[uint32]int{999: 1}) {
+		t.Fatalf("%+v %v", r.Notes, r.MissingDetailFolders)
 	}
 }
 

@@ -8,7 +8,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 
 | Group | Commands |
 | --- | --- |
-| Overview and health | [`m365crawl`](#overview), [`doctor`](#doctor), [`status`](#status), [`whoami`](#whoami), [`sync`](#sync), [`watch`](#watch) |
+| Overview and health | [`m365crawl`](#overview), [`coverage`](#coverage), [`doctor`](#doctor), [`status`](#status), [`whoami`](#whoami), [`sync`](#sync), [`watch`](#watch) |
 | Across sources | [`search`](#search), [`people`](#people), [`sql`](#sql) |
 | Teams | [`messages`](#messages), [`unread`](#unread), [`thread`](#thread), [`conversations`](#conversations), [`teams`](#teams), [`activity`](#activity), [`stores`](#stores), [`records`](#records) |
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
@@ -753,6 +753,44 @@ Lists source health and preserved capture evidence. A locator is a cache registr
 
 `--fields` keys: `kind`, `source_id`, `locator_id`, `attempt_id`, `admitted_id`, `platform`, `locator`, `boundary`, `status`, `coverage`, `qualification`, `acquisition_signature`, `content_digest`, `reason`, `attempted_at`, `admitted_at`, `complete_at`, `source_observed_at`, `losses`, `locator_tail`, `fix`, `effect`.
 
+## coverage
+
+Per day and source, whether the archive holds everything the app cached: tell a real zero (no mail sent, no message posted) from a day the archive does not cover. It reads the archive only, like every read (the implicit sync follows `--max-age` and `--no-sync`; WorkIQ never starts).
+
+```
+m365crawl coverage [flags]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--day=DATE` | One local day: YYYY-MM-DD, `today` or `yesterday`. Default: today. |
+| `--since=DATE` | First day of a range of days (YYYY-MM-DD, `today` or `yesterday`); with `--until`, at most 31 days. |
+| `--until=DATE` | Last day of the range, included. Default: today. |
+| `--tz=ZONE` | IANA time zone the days are read in, such as `America/Los_Angeles`. Default: this machine's zone. |
+| `--source=LIST` | Comma-separated: `mail` (`mail:sent` and `mail:inbox`), `mail:sent`, `mail:inbox`, `chats` (1:1 and group chats and your notes), `meetings` (meeting chats), `channels` (channels and teams; unopened channels are never cached), `calendar`. Default: `mail,chats,meetings,calendar`. |
+
+`--account` keeps each source to that account: an `outlook/<profile>` account to mail (and its calendar), a `<tenantId>/<userId>` account to chats and its calendar.
+
+Result: `{"range": {"from", "to", "zone"}, "days": [{"day", "from", "to", "entries": [ENTRY]}], "summary": [{"source", "scope"?, "state", "items", "my_items"?}]}` plus `source_health`, `notices` and the usual freshness keys. `summary` has one row per source and scope: the worst state over every day and account, and the summed items. ENTRY:
+
+```json
+{"source": "mail", "scope": "sent", "account": "outlook/<profile>", "state": "covered", "items": 0, "marked_items": 0,
+ "covered_from": "2026-10-25T00:00:00-07:00", "covered_until": "2026-10-26T00:00:00-07:00", "basis": "desktop_cache", "reasons": []}
+```
+
+- `state` is `covered` (the desktop cache held the whole day and the archive read it, so `items: 0` means none), `partial` (`covered_from`/`covered_until` bound the covered part) or `not_covered`. The vocabulary is open: treat anything but `covered` as unknown, never as none. A day that has not ended is never `covered`.
+- `items` is exact and independent of any limit. Mail counts each message once across folder copies, gone and evicted ones included (`marked_items` says how many of them `mail list` hides without `--include-gone --include-evicted`). Chats count authored messages that are not deleted (`my_items`: the ones the account sent; `deleted_items` apart), never call events, thread activity or recording notices. `possibly_missing` (chats) counts Teams sequence numbers absent around the day.
+- `basis` is `desktop_cache`, `workiq_server` (a complete WorkIQ mail sync holds the covered part) or `both`; `desktop_cache` is not a server total.
+- `reasons` (`[{"code", "detail"}]`, most important first) say why a part is not covered: `future`, `in_progress`, `never_read`, `source_off`, `no_profile`, `folder_not_synced`, `no_complete_read`, `before_cache`, `only_older_cache_copy`, `folder_copies_disagree`, `source_failing`, `after_cache_fresh`, `after_newest_mail`, `after_last_read`, `before_archive_start`, `read_gap`, `conversation_behind`, `sequence_gap`, `day_not_shown`. `fix` is the first reason's fix; `next` lists WorkIQ steps (`{command, does}`) when WorkIQ can help: the mail sync for mail before the cache or missing from it, counts-only chat coverage before the archive's first Teams read.
+
+Text output is a table `day | source | scope | account | state | items | covered until | reasons`, then one `fix:` line per entry that has one.
+
+```sh
+m365crawl coverage
+m365crawl coverage --day 2026-10-25 --source mail:sent,chats
+m365crawl coverage --since 2026-10-19 --until 2026-10-25 --tz America/Los_Angeles
+```
+
 ## doctor
 
 Check that every prerequisite and the archive are ready.
@@ -1040,6 +1078,8 @@ Application evidence. Every Teams message item carries `app_observation`, the ap
 - `--fields app_summary` gives each message a compact `app_summary` instead of the whole `app_observation`: `{"state", "app_name", "app_id", "reply_to_id", "citations_total", "losses_total"}`. `citations_total` is every citation read from the message (`served.total_admitted`), not the at most 100 an item shows (`served.citations_count`). `losses_total` is the sum of the counts in `served.losses`, the native fields that could not be read. Both and the three claims are `null` when nothing is served (`not_derived`, or `failed` with nothing retained): unknown, not zero. It is printed only when `--fields` names it, on `messages`, `unread`, `thread` and chat hits of `search` (not `calendar event`); text output prints it as one readable cell.
 - Text output marks an app message `[app: NAME]` in the text column (the marker is never clipped; a name wider than 24 terminal columns is shortened inside it), lists its citations under the table as `citations: N read from the message, M shown; K more could not be read`, and ends with an `app evidence of N returned Teams messages` line and a `posted by an app (names an app): K of N` line, which says `at least K of N` when some returned messages are not derived or failed.
 
+With `--since` or `--until`, `range_coverage` holds one [coverage](#coverage) ENTRY per Teams account for each of `chats`, `meetings` and `channels` over the read's range (an open end read as now), whatever the other filters, the limit and the hits. A range before the archive's first Teams read adds a counts-only `workiq_routes` entry with reason `range_not_covered` for an account without a route.
+
 ```sh
 m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text 80
 m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
@@ -1256,6 +1296,8 @@ m365crawl mail list [flags]
 Filters combine with AND. Item keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview` (the first three names), `in_reply_to`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`.
 
 With `--since` or `--until`, `folder_copies` holds one entry per account and checked folder kind among the selected folders that has older copies: `{"account", "kind", "copies", "state", "messages", "in_current_copy", "only_in_older_copies", "lacking_in_current_range", "older_copies_marked", "current_oldest_at", "dated_by"}`. It selects messages over the range by the clock the list uses, named in `dated_by`: `sent_at` for `sent`, `received_at` for `inbox` (the received time chosen across copies, as in "Dates"). `current_oldest_at` is a received time, the oldest message the cache held, so whether a message lies inside the current copy's range is judged by its received time. The checked kinds are `inbox` (Inbox and To Me together) and `sent`; Drafts, Deleted Items and Archive are not checked, because their coverage is only the oldest item they hold. The entry compares the current copy with the older ones over the range and counts each message once, the way the list does: a message the current set holds in any folder, even one marked gone since, is never counted as missing, and a message without a Message-ID counts on its own. `--include-gone` and `--include-evicted` apply to the current copy; a message only an older copy holds counts even when a sync marked it gone or evicted after Outlook replaced its folder set, and `older_copies_marked` counts those the list hides without `--include-gone --include-evicted`. No other filter applies. `state` is `partial` when an older copy holds messages dated inside the current copy's range (from `current_oldest_at` on) that the current set does not hold (`lacking_in_current_range`): the current cache is missing them, and the archive cannot tell whether Outlook did not download them again or they left the mailbox. It is `older_copy_only` when the range lies before the current copy's range and only an older copy's range reaches it, and `consistent` otherwise. `partial` and `older_copy_only` also add a sentence to `notices`, which names `--include-gone --include-evicted` when `older_copies_marked` is not zero.
+
+With `--since` or `--until`, `range_coverage` holds one [coverage](#coverage) ENTRY per account and checked folder kind among the selected folders (`sent`, then `inbox`: the Inbox and To Me folders only) over the read's range, an open end read as now. It is independent of `--limit`, `--fields` and the other filters and present with zero hits; other folder kinds are never judged. A range it does not cover for a reason WorkIQ can help with adds a `workiq_routes` entry with reason `range_not_covered` when the account has no route yet.
 
 ```sh
 m365crawl mail list --folder sent --since 2026-10-27 --until 2026-10-27 --limit 1000

@@ -435,8 +435,12 @@ type MailCopyCheck struct {
 	// OlderCopiesMarked is how many of OnlyInOlderCopies a sync marked gone or evicted (after the
 	// set left the store) and the list therefore hides unless the range includes them.
 	OlderCopiesMarked int
-	CurrentOldestAt   time.Time
-	State             string
+	// Marked is how many messages a sync marked gone or evicted in every row the check counted:
+	// the ones mail list hides without --include-gone --include-evicted when the range includes
+	// them (MailRoleCount).
+	Marked          int
+	CurrentOldestAt time.Time
+	State           string
 	// DatedBy is the clock the range selects messages by (MailClock): sent_at for sent, received_at
 	// for inbox, as mail list dates them.
 	DatedBy string
@@ -469,6 +473,24 @@ func (s *Store) MailCopyChecks(ctx context.Context, scopes []MailCopyScope, rng 
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// MailRoleCount counts, for one account and role (inbox or sent) over a range, every message the
+// archive holds once, the way MailCopyChecks does, gone and evicted ones included (Marked says
+// how many of them carry such a mark), whether or not the role has older copies. State is the
+// copy check's. An account without a folder of the role holds nothing.
+func (s *Store) MailRoleCount(ctx context.Context, account, role string, since, until time.Time) (MailCopyCheck, error) {
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return MailCopyCheck{}, err
+	}
+	k := MailCopyScope{account, role}
+	for id, kind := range copies.sets.kind {
+		if id.account == account && mailCopyRole(kind) == role {
+			return s.mailCopyCheck(ctx, copies, k, MailCopyRange{Since: since, Until: until, IncludeGone: true, IncludeEvicted: true})
+		}
+	}
+	return MailCopyCheck{Account: account, Kind: role, DatedBy: MailClock(role), State: "consistent"}, nil
 }
 
 // hasOlder reports whether the account has a folder of the role outside its current set.
@@ -525,7 +547,7 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 	}
 	slices.Sort(keys)
 	rows, args := copies.datedRows(`m.account=? and m.folder_key in (`+strings.Join(keys, ",")+`)`, []any{k.Account}, rng.Since, rng.Until)
-	type message struct{ current, lacking, shown bool }
+	type message struct{ current, lacking, shown, unmarked bool }
 	msgs := map[string]*message{}
 	err = mailEach(ctx, s.db, `select m.rowid, m.internet_message_id, m.folder_key, m.received_at, m.gone_at is not null, m.evicted_at is not null from (`+rows+`) p join mail_messages m on m.rowid=p.rid`, args, func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants and integers; values are placeholders
 		var rowid int64
@@ -554,6 +576,7 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 		}
 		m.current = m.current || current
 		m.shown = m.shown || !hidden
+		m.unmarked = m.unmarked || !gone && !evicted
 		// The current copy's range is a range of received times (the oldest message the cache held),
 		// so whether a message lies inside it is judged by its received time, whatever the clock
 		// that selected it.
@@ -577,6 +600,9 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 		}
 		if !m.current && !m.shown {
 			c.OlderCopiesMarked++
+		}
+		if !m.unmarked {
+			c.Marked++
 		}
 	}
 	beforeCurrent := c.CurrentOldestAt.IsZero() || !rng.Until.IsZero() && !rng.Until.After(c.CurrentOldestAt)
