@@ -261,7 +261,7 @@ func TestWritesTextOutput(t *testing.T) {
 		t.Fatal(code, out)
 	}
 	code, out, _ = e.run("--format", "text", "writes", "status")
-	if code != 0 || !strings.HasPrefix(out, "writes: on; unknown outcomes: 0\n2 ") || !strings.Contains(out, "save_mail_draft sent by a: r\n  body\n") ||
+	if code != 0 || !strings.HasPrefix(out, "writes: on; unknown outcomes: 0\n2 ") || !strings.Contains(out, "save_mail_draft sent (verified) by a: r\n  body\n") ||
 		!strings.Contains(out, "  chat 48:notes\n  hello\n") {
 		t.Fatal(code, out)
 	}
@@ -365,6 +365,9 @@ func TestWritesOutcomeErrorsAndSafeText(t *testing.T) {
 	var coded *errs.Coded
 	if err := outcomeError(directedwrites.Result{ExitClass: da.ExitUnknown, RequestID: "7"}); !errors.As(err, &coded) || coded.Exit != 5 || !strings.Contains(coded.Fix, "writes verify 7") {
 		t.Fatal(err)
+	}
+	if err := outcomeError(directedwrites.Result{ExitClass: da.ExitUnknown, ReplayOf: "3"}); !errors.As(err, &coded) || !strings.Contains(coded.Fix, "writes verify 3") {
+		t.Fatal("a replayed unknown write lost its id", err)
 	}
 	if got := safeLine("a\nb\tc\x1b[31m\u202e\u200bz\U000E0041"); got != `a b c\u001b[31m\u202e\u200bz\ue0041` {
 		t.Fatalf("%q", got)

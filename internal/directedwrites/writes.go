@@ -248,9 +248,10 @@ type chat struct {
 	watermarkAt time.Time
 }
 
-// gone says a read answered that the target is not there or not readable as a chat.
+// gone says a read answered that the target is not there or not a chat this account can read.
+// Throttling, an expired sign-in and other answers stay errors: they say nothing about the target.
 func gone(page workiq.Page, err error) bool {
-	return err != nil && page.StatusCode >= 400 && page.StatusCode < 500
+	return err != nil && (page.StatusCode == 400 || page.StatusCode == 403 || page.StatusCode == 404)
 }
 
 func readChat(ctx context.Context, s session, id string, p person) (chat, error) {
@@ -534,10 +535,20 @@ func save(ctx context.Context, opts Options, row store.DirectedWrite, fromPhase 
 		if attempt > 0 {
 			time.Sleep(savePause)
 		}
-		err = writeArchive(context.WithoutCancel(ctx), opts.DBPath, func(ctx context.Context, st *store.Store) error {
-			_, err := st.UpdateDirectedWrite(ctx, row.ID, string(da.Unknown), fromPhase, change)
+		var changed bool
+		var stored store.DirectedWrite
+		err = writeArchive(context.WithoutCancel(ctx), opts.DBPath, func(ctx context.Context, st *store.Store) (err error) {
+			if changed, err = st.UpdateDirectedWrite(ctx, row.ID, string(da.Unknown), fromPhase, change); err == nil && !changed {
+				stored, _, err = st.DirectedWriteByID(ctx, row.ID)
+			}
 			return err
 		})
+		if err == nil && !changed {
+			// The log moved on meanwhile (the person settled it): it, not this answer, is the record.
+			moved := ofWrite(stored)
+			moved.Notice = "the write log changed while the server answered (" + string(change.Outcome) + "); it now says " + stored.Outcome
+			return moved
+		}
 		if err == nil {
 			return result
 		}

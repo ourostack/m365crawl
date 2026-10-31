@@ -121,7 +121,7 @@ func (r writesStatusResult) renderWrites(rt *runtime) error {
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "writes: %s; unknown outcomes: %d\n", r.Writes, r.Unknown)
 	for _, w := range r.Items {
-		fmt.Fprintf(&out, "%s %s %s %s by %s: %s\n", w.RequestID, stamp(w.CreatedAt), w.Action, w.Outcome, safeLine(w.Agent), safeLine(w.Reason))
+		fmt.Fprintf(&out, "%s %s %s %s (%s) by %s: %s\n", w.RequestID, stamp(w.CreatedAt), w.Action, w.Outcome, w.Phase, safeLine(w.Agent), safeLine(w.Reason))
 		if w.Conversation != "" {
 			fmt.Fprintf(&out, "  chat %s\n", safeLine(w.Conversation))
 		}
@@ -260,6 +260,10 @@ func (rt *runtime) writeOutcome(r writesOutcome) error {
 }
 
 func outcomeError(r directedwrites.Result) error {
+	id := r.RequestID
+	if id == "" {
+		id = r.ReplayOf
+	}
 	what := string(r.Code)
 	if r.Field != "" {
 		what += " (" + r.Field + ")"
@@ -279,7 +283,7 @@ func outcomeError(r directedwrites.Result) error {
 			Fix: "Fix the problem the printed object names, then ask again."}
 	case da.ExitUnknown:
 		return &errs.Coded{Code: "write_outcome_unknown", Exit: exitWriteUnknown, Message: "m365crawl cannot tell whether the directed write happened",
-			Fix: "Do not send it again. Tell the person; `m365crawl writes verify " + r.RequestID + "` may settle it, otherwise the person checks and runs `m365crawl writes settle " + r.RequestID + "`."}
+			Fix: "Do not send it again. Tell the person; `m365crawl writes verify " + id + "` may settle it, otherwise the person checks and runs `m365crawl writes settle " + id + "`."}
 	}
 	return nil
 }

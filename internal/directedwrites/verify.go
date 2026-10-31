@@ -144,6 +144,9 @@ func Settle(ctx context.Context, opts Options, id int64, sent bool) (Result, err
 	if w.Outcome != string(da.Unknown) {
 		return Result{}, errs.Usage("directed write " + strconv.FormatInt(id, 10) + " is already " + w.Outcome + "; only an unknown write is settled")
 	}
+	if w.Phase == "in_flight" && now().Sub(w.CreatedAt) < notSentAfter {
+		return Result{}, errs.Usage("directed write " + strconv.FormatInt(id, 10) + " may still be in progress; settle it once it has been running for 10 minutes")
+	}
 	change := store.DirectedWriteChange{Outcome: string(da.Failed), Phase: "settled", Verification: "person", ErrorCode: w.ErrorCode, Cause: "person_not_sent"}
 	if sent {
 		change.Outcome, change.Cause = string(da.Sent), "person_sent"

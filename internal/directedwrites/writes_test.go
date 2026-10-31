@@ -458,6 +458,8 @@ func TestSendStopsWhenTheServerCannotBeRead(t *testing.T) {
 	busy := reply{status: 503, err: errs.Usage("busy")}
 	for _, pages := range []map[string]reply{
 		{info: busy},
+		{info: {status: 429, err: errs.Usage("throttled")}},
+		{info: {status: 401, err: errs.Usage("signed out")}},
 		{info: {data: `{}`}, members: busy},
 		{info: {data: `{}`}, members: {data: two}, newestPath: busy},
 		{info: {data: `{}`}, members: {data: two}, newestPath: {data: `{"value":[{"id":""}]}`}},
@@ -641,5 +643,28 @@ func TestAnAnswerThatCannotBeSavedIsStillPrinted(t *testing.T) {
 	}
 	if row := logged(t, opts)[0]; row.Outcome != "unknown" || row.Phase != "in_flight" {
 		t.Fatalf("%+v", row)
+	}
+}
+
+func TestAnAnswerAfterThePersonSettledKeepsTheLog(t *testing.T) {
+	ctx := context.Background()
+	_, opts := newServer(t, true, true)
+	turnOn(t, opts)
+	calls := 0
+	writeArchive = func(ctx context.Context, path string, fn func(context.Context, *store.Store) error) error {
+		calls++
+		if calls == 2 {
+			if err := store.WithWorkIQWriter(ctx, path, func(ctx context.Context, s *store.Store) error {
+				_, err := s.UpdateDirectedWrite(ctx, 1, "unknown", "in_flight", store.DirectedWriteChange{Outcome: "failed", Phase: "settled", Verification: "person", Cause: "person_not_sent"})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return store.WithWorkIQWriter(ctx, path, fn)
+	}
+	got, err := Send(ctx, opts, notesRequest("hello there"))
+	if err != nil || got.Outcome != da.Failed || got.Phase != "settled" || !strings.Contains(got.Notice, "(sent); it now says failed") {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

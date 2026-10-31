@@ -309,3 +309,24 @@ func TestTheDefaultSessionIsTheGuardedWorkIQWriter(t *testing.T) {
 	_, err := openSession(context.Background(), workiq.Invocation{}, "")
 	requireCode(t, err, "workiq_hermetic_required")
 }
+
+func TestSettleWaitsForAWriteThatMayStillBeSending(t *testing.T) {
+	ctx := context.Background()
+	_, opts := newServer(t, true, true)
+	inFlight := store.DirectedWrite{Contract: da.Contract, Action: SendTeamsMessage, Effect: "visible_to_others", Agent: "a", Reason: "r",
+		Identity: selfAddr, Conversation: "48:notes", Recipients: []string{selfAddr}, Text: "x", UserID: "u", AccountPin: selfAddr,
+		Outcome: "unknown", Phase: "in_flight"}
+	if err := store.WithWorkIQWriter(ctx, opts.DBPath, func(ctx context.Context, s *store.Store) error {
+		_, err := s.BeginDirectedWrite(ctx, inFlight, func([]store.DirectedWrite) error { return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Settle(ctx, opts, 1, false); err == nil || !strings.Contains(err.Error(), "may still be in progress") {
+		t.Fatal(err)
+	}
+	now = later(11 * time.Minute)
+	if got, err := Settle(ctx, opts, 1, false); err != nil || got.Outcome != da.Failed {
+		t.Fatal(got, err)
+	}
+}
