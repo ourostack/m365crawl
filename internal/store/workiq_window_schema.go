@@ -270,16 +270,20 @@ where m.type='table' and k."table"='workiq_attempts' group by m.name order by m.
 	return nil
 }
 
-// hasWorkIQWindows reports whether the archive holds the window tables.
+// hasWorkIQWindows reports whether the archive holds the window tables (workIQWindowFeature) and the
+// identity mark their migration adds to workiq_rows; a migration that failed after the tables were
+// created leaves the mark out, and the archive reads as having no windows.
 func (s *Store) hasWorkIQWindows(ctx context.Context) (bool, error) {
 	ok, err := s.hasWorkIQ(ctx)
 	if err != nil || !ok {
 		return false, err
 	}
-	var tables, column int
-	if err := s.db.QueryRowContext(ctx, `select (select count(*) from sqlite_master where type='table' and name in ('workiq_window_members','workiq_window_coverage')),
-(select count(*) from pragma_table_info('workiq_rows') where name='identity_unproven')`).Scan(&tables, &column); err != nil {
+	if ok, err = hasFeature(ctx, s.db, workIQWindowFeature); err != nil || !ok {
 		return false, err
 	}
-	return tables == 2 && column == 1, nil
+	var column int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from pragma_table_info('workiq_rows') where name='identity_unproven'`).Scan(&column); err != nil {
+		return false, err
+	}
+	return column == 1, nil
 }
