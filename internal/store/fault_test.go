@@ -205,7 +205,12 @@ func (r *faultResult) LastInsertId() (int64, error) {
 	}
 	return r.inner.LastInsertId()
 }
-func (r *faultResult) RowsAffected() (int64, error) { return r.inner.RowsAffected() }
+func (r *faultResult) RowsAffected() (int64, error) {
+	if r.inj.hit("rowsaffected") {
+		return 0, errInjected
+	}
+	return r.inner.RowsAffected()
+}
 
 type faultRows struct {
 	inner driver.Rows
@@ -227,6 +232,11 @@ func (r *faultRows) Next(dest []driver.Value) error {
 	}
 	if err := r.inner.Next(dest); err != nil {
 		return err
+	}
+	for i, column := range r.inner.Columns() {
+		if column == "winner" && r.inj.hit("mail-winner-corrupt") {
+			dest[i] = "not-a-source"
+		}
 	}
 	if r.inj.hit("scan") {
 		for i := range dest {
@@ -260,6 +270,26 @@ func injectFaults(t *testing.T, s *Store) *injector {
 func dump(t *testing.T, s *Store) string {
 	t.Helper()
 	var b strings.Builder
+	// Source progress and aliases are part of the same rollback promise as items and FTS.
+	for _, tbl := range []string{"workiq_accounts", "workiq_attempts", "workiq_frontiers", "workiq_pages", "workiq_rows", "workiq_aliases", "workiq_source_keys", "workiq_folders", "workiq_censuses", "workiq_census_members", "workiq_gaps", "workiq_mail_receipts"} {
+		rows, err := s.cs.DB().Query(`select rowid, * from ` + tbl + ` order by rowid`)
+		if err != nil {
+			t.Fatalf("dump %s: %v", tbl, err)
+		}
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				t.Fatalf("dump scan: %v", err)
+			}
+			fmt.Fprintln(&b, tbl, vals)
+		}
+		_ = rows.Close()
+	}
 	for _, tbl := range []string{"accounts", "conversations", "messages", "people", "activity", "records", "sync_runs", "meta", "message_fts", "conversation_fts", "calendar_source_events", "calendar_sources", "calendar_covered_days", "calendar_recaps", "calendar_recap_items", "mail_folders", "mail_messages", "mail_recipients", "mail_attachments", "mail_coverage", "mail_absent", "mail_fts", "knowledge_locators", "knowledge_attempts", "knowledge_sources", "note_entities", "note_elements", "note_flags", "note_fts", "people_observations", "people_capture_members", "people_group_ambiguities", "people_capture_metadata", "people_capture_links", "document_locator_metadata", "document_observations", "document_capture_members", "document_capture_metadata", "document_fts", "document_usage_relations", "message_app_observations", "message_app_current", "loop_locator_metadata", "loop_attempt_evidence", "loop_snapshots", "loop_snapshot_losses", "loop_channels", "loop_fts", "outlook_calendar_reads", "outlook_calendar_read_state", "outlook_link_events", "outlook_link_state", "outlook_attendee_sources", "outlook_attendee_requests", "outlook_attendee_snapshots", "outlook_attendee_occurrences", "outlook_attendee_bindings", "outlook_attendee_members", "scout_sources", "scout_runs", "scout_files", "scout_observations", "scout_messages", "scout_fts", "sqlite_sequence"} {
 		rows, err := s.cs.DB().Query(`select rowid, * from ` + tbl + ` order by rowid`)
 		if err != nil {

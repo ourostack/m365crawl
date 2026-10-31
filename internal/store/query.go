@@ -72,6 +72,7 @@ func (f Filter) limit() int {
 
 // MessageRow is a message as read back, with its conversation's composed display name.
 type MessageRow struct {
+	Provenance              string                 `json:"provenance"`
 	TenantID                string                 `json:"tenant_id"`
 	UserID                  string                 `json:"user_id"`
 	ConversationID          string                 `json:"conversation_id"`
@@ -118,6 +119,7 @@ type MessageRow struct {
 
 // ConversationRow is a conversation with its composed display name.
 type ConversationRow struct {
+	Provenance    string    `json:"provenance"`
 	TenantID      string    `json:"tenant_id"`
 	UserID        string    `json:"user_id"`
 	ID            string    `json:"id"`
@@ -338,7 +340,7 @@ func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 		var r MessageRow
 		var sent, edited, deleted, mentions, reactions, files, links sql.NullString
 		var mentionsMe, pinned, root int
-		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &r.MentionKind, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &root); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ConversationID, &r.ConversationDisplayName, &r.ID, &r.ReplyChainID, &r.ParentMessageID, &r.ClientMessageID, &r.SenderID, &r.SenderName, &sent, &edited, &deleted, &r.MessageType, &r.ContentType, &r.ContentText, &r.Version, &mentions, &mentionsMe, &r.MentionKind, &reactions, &files, &links, &r.Subject, &r.Importance, &pinned, &r.Link, &root, &r.Provenance); err != nil {
 			return nil, err
 		}
 		r.SentAt, r.EditedAt, r.DeletedAt, r.replyRoot = parseTime(sent), parseTime(edited), parseTime(deleted), root == 1
@@ -358,7 +360,7 @@ func (s *Store) runMessages(ctx context.Context, from string, w *where, limit in
 
 // runMessagesWith is runMessages; evidence false leaves Application zero and reads no evidence.
 func (s *Store) runMessagesWith(ctx context.Context, from string, w *where, limit int, total *int, evidence bool) ([]MessageRow, bool, error) {
-	q := `select ` + msgCols + from + w.sql() + ` order by m.sent_at desc, m.id desc limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
+	q := from + w.sql() + ` order by m.sent_at desc, m.id desc limit ?`
 	return s.selectMessages(ctx, q, append(w.args, limit+1), limit, evidence, func(tx *sql.Tx) error { return countTotalIn(ctx, tx, total, from, w) })
 }
 
@@ -372,7 +374,11 @@ func (s *Store) selectMessages(ctx context.Context, q string, args []any, limit 
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }() // after Commit it does nothing
-	rows, err := tx.QueryContext(ctx, q, args...)
+	provenance, _, err := workIQReadColumns(ctx, tx, "message")
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := tx.QueryContext(ctx, `select `+msgCols+`,`+provenance+q, args...) //nolint:gosec // G202: fixed source projection and package query fragments
 	if err != nil {
 		return nil, false, err
 	}
@@ -641,7 +647,7 @@ func (s *Store) Thread(ctx context.Context, conversationID, rootID string, f Fil
 	if !f.IncludeSystem {
 		w.add(notSystemCond(`m.conversation_id`))
 	}
-	q := `select ` + msgCols + ` from messages m` + msgJoin + w.sql() + ` order by m.sent_at, m.id limit ?` //nolint:gosec // G202: fragments are package constants; values are placeholders
+	q := ` from messages m` + msgJoin + w.sql() + ` order by m.sent_at, m.id limit ?`
 	return s.selectMessages(ctx, q, append(w.args, f.limit()+1), f.limit(), true, func(tx *sql.Tx) error {
 		return countTotalIn(ctx, tx, f.Total, ` from messages m`+msgJoin, &w)
 	})
@@ -695,7 +701,16 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 		w.add(`c.last_message_at<=?`, fmtTime(f.Until))
 	}
 	limit := f.limit()
-	rows, err := s.db.QueryContext(ctx, `select c.tenant_id,c.user_id,c.id,c.kind,c.title,c.topic,`+cdnExpr+`,c.team_id,c.parent_id,c.members_json,c.last_message_at,c.read_horizon_at,c.favorite`+ //nolint:gosec // G202: fragments are package constants; values are placeholders
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	provenance, _, err := workIQReadColumns(ctx, tx, "conversation")
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := tx.QueryContext(ctx, `select c.tenant_id,c.user_id,c.id,c.kind,c.title,c.topic,`+cdnExpr+`,c.team_id,c.parent_id,c.members_json,c.last_message_at,c.read_horizon_at,c.favorite,`+provenance+ //nolint:gosec // G202: fixed source projection and package query fragments
 		from+w.sql()+order+` limit ?`, append(append(w.args, orderArgs...), limit+1)...)
 	if err != nil {
 		return nil, false, err
@@ -706,7 +721,7 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 		var r ConversationRow
 		var members, last, horizon sql.NullString
 		var fav int
-		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ID, &r.Kind, &r.Title, &r.Topic, &r.DisplayName, &r.TeamID, &r.ParentID, &members, &last, &horizon, &fav); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.UserID, &r.ID, &r.Kind, &r.Title, &r.Topic, &r.DisplayName, &r.TeamID, &r.ParentID, &members, &last, &horizon, &fav, &r.Provenance); err != nil {
 			return nil, false, err
 		}
 		r.Members, r.LastMessageAt, r.ReadHorizonAt, r.Favorite = unmarshalNull[string](members), parseTime(last), parseTime(horizon), fav == 1
@@ -718,9 +733,12 @@ func (s *Store) Conversations(ctx context.Context, kind, query string, f Filter)
 	trunc := len(out) > limit
 	if trunc {
 		out = out[:limit]
-		if err := s.countTotal(ctx, f.Total, from, &w); err != nil {
+		if err := countTotalIn(ctx, tx, f.Total, from, &w); err != nil {
 			return nil, false, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
 	}
 	if err := nameUntitled(ctx, s, out, func(r *ConversationRow) (convRef, *string) {
 		return convRef{r.TenantID, r.UserID, r.ID}, &r.DisplayName

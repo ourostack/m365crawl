@@ -1,0 +1,7 @@
+WorkIQ coverage: ok_with_omissions; enabled true
+mail outlook/Synthetic: ok_with_omissions
+mail folder folder-one: server total 4; current overlap unknown (not a windowed count)
+mail folder folder-unknown: server total unknown; current overlap unknown (not a windowed count)
+chat chat: server all-type count 3; archive comparable count 1; complete true; 2026-09-01 00:00 UTC to 2026-10-01 00:00 UTC
+mail path mail_folders: allowed; initial page only
+gap workiq_folder_count_unknown: 1

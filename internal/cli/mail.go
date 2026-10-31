@@ -49,6 +49,8 @@ type mailGroup struct {
 }
 
 const mailCommon = `Mail comes from new Outlook's local cache: HxStore on Mac, OWA IndexedDB on Windows. It holds only cached mail, not server totals. Explicit copied supported sources also work on Linux. Every result says when mail was last read (synced_at) and, as a list, how far back the cache covers and when Outlook last wrote it (cache_fresh_at): mail Outlook received after that is not in the archive, and source_health reports a cache Outlook stopped writing (state stale).
+Items also retain their acquisition provenance: desktop_cache, workiq_server or both. This is not a content winner or a freshness claim. deleted_at is an effective explicit deletion mark, not inferred cache absence. For an account with retained server mail, coverage[].count counts canonical rows of all provenances, excluding inferred gone/evicted rows. count_basis is canonical_archive and cache_count retains the last native census count when known. The coverage range and synced_at still describe native cache reads; a server-only folder has null native range/read clocks. These counts are not server totals.
+When --since reaches before the cached mail of a folder being read (each folder judged on its own), or a thread reply's parent is not archived, workiq_routes lists the WorkIQ commands that fetch older server mail; the read never starts WorkIQ.
 --account takes the mail account as printed in the ids, outlook/<profile>.
 A field the archive does not hold is null: subject, sender, in_reply_to, ical_uid and internet_message_id when Outlook stored none, is_read when the read state is not known, sent_at when the store has no send time, address on a recipient with no address, gone_at and evicted_at while the message is present.
 Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is the store's own number. Windows preserves To/Cc/Bcc order with role to/cc/bcc and kind_raw=0; ReplyTo is not inferred. conversation_id is null when absent; threads use a shared conversation identity before reply_chain and subject fallback.
@@ -114,6 +116,7 @@ type mailPersonOut struct {
 
 // mailListItem is one message in a list.
 type mailListItem struct {
+	Provenance        string     `json:"provenance"`
 	ID                string     `json:"id"`
 	Account           string     `json:"account"`
 	Folder            *string    `json:"folder"`
@@ -138,6 +141,7 @@ type mailListItem struct {
 	ICalUID           *string    `json:"ical_uid"`
 	GoneAt            *time.Time `json:"gone_at"`
 	EvictedAt         *time.Time `json:"evicted_at"`
+	DeletedAt         *time.Time `json:"deleted_at"`
 	OlderCopy         bool       `json:"older_copy"`
 	CopyOf            *string    `json:"copy_of"`
 	// ReceivedAtDisagrees is true when copies of the message in other folder sets hold received
@@ -148,6 +152,7 @@ type mailListItem struct {
 
 // mailShowItem is one message in full.
 type mailShowItem struct {
+	Provenance          string              `json:"provenance"`
 	ID                  string              `json:"id"`
 	Account             string              `json:"account"`
 	Folder              *string             `json:"folder"`
@@ -175,6 +180,7 @@ type mailShowItem struct {
 	ICalUID             *string             `json:"ical_uid"`
 	GoneAt              *time.Time          `json:"gone_at"`
 	EvictedAt           *time.Time          `json:"evicted_at"`
+	DeletedAt           *time.Time          `json:"deleted_at"`
 	OlderCopy           bool                `json:"older_copy"`
 	CopyOf              *string             `json:"copy_of"`
 	ReceivedAtDisagrees bool                `json:"received_at_disagrees"`
@@ -205,13 +211,15 @@ type mailUnreadFolder struct {
 }
 
 type mailCoverageOut struct {
-	Account  string     `json:"account"`
-	Folder   string     `json:"folder"`
-	Kind     string     `json:"kind"`
-	OldestAt *time.Time `json:"oldest_at"`
-	NewestAt *time.Time `json:"newest_at"`
-	Count    int        `json:"count"`
-	Current  bool       `json:"current"`
+	Account    string     `json:"account"`
+	Folder     string     `json:"folder"`
+	Kind       string     `json:"kind"`
+	OldestAt   *time.Time `json:"oldest_at"`
+	NewestAt   *time.Time `json:"newest_at"`
+	Count      int        `json:"count"`
+	CountBasis string     `json:"count_basis,omitempty"`
+	CacheCount *int       `json:"cache_count,omitempty"`
+	Current    bool       `json:"current"`
 }
 
 func nz(s string) *string {
@@ -245,6 +253,7 @@ func recipientLabel(r store.MailRecipient) string {
 
 func listItemOf(r store.MailRow, max int) mailListItem {
 	it := mailListItem{
+		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
@@ -268,6 +277,7 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 
 func showItemOf(r store.MailRow, max int) mailShowItem {
 	it := mailShowItem{
+		Provenance: r.Provenance, DeletedAt: tp(r.DeletedAt),
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),
@@ -433,7 +443,8 @@ func (rt *runtime) mailScope(st *store.Store, folder string) (mailScope, error) 
 func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 	out := make([]mailCoverageOut, len(rows))
 	for i, c := range rows {
-		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count, Current: c.Current}
+		out[i] = mailCoverageOut{Account: c.Account, Folder: c.Folder, Kind: c.Kind, OldestAt: tp(c.OldestAt), NewestAt: tp(c.NewestAt), Count: c.Count,
+			CountBasis: c.CountBasis, CacheCount: c.CacheCount, Current: c.Current}
 	}
 	return out
 }
@@ -747,6 +758,9 @@ func (c *mailListCmd) Run(rt *runtime) error {
 				return nil, err
 			}
 		}
+		if res.WorkIQRoutes, err = rt.sinceRoutes(st, sc.coverage, since); err != nil {
+			return nil, err
+		}
 		var note []string
 		if len(rows) == 0 {
 			filtered := c.From != "" || !since.IsZero() || !until.IsZero() || c.Unread || c.Flagged || c.HasAttachments || c.Folder != ""
@@ -1007,6 +1021,15 @@ func (c *mailThreadCmd) Run(rt *runtime) error {
 		res := &mailThreadResult{Grouping: grouping, Participants: []mailPersonOut{}, mailListResult: *rt.newMailList(rows, truncated, sc)}
 		if len(rows) == 1 {
 			res.Note = "no other message shares its subject and a participant"
+		}
+		if !truncated && threadReachesBack(rows) {
+			r, ok, err := rt.mailRoute(st, account, routeParentNotArchived, "A reply in this thread answers a message this archive does not hold.")
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				res.WorkIQRoutes = []workIQRoute{r}
+			}
 		}
 		for _, p := range store.MailParticipants(rows) {
 			res.Participants = append(res.Participants, mailPersonOut{Name: nz(p.Name), Address: nz(p.Address)})

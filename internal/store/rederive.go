@@ -32,8 +32,8 @@ const (
 	derivationKey  = "derivation_version"
 	rederiveBatch  = 500
 	alpha1Version  = 1 // an archive with no meta.derivation_version
-	selectMessages = `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from messages where rowid>? order by rowid limit ?`
-	selectConvs    = `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from conversations where rowid>? order by rowid limit ?`
+	selectMessages = `select rowid, tenant_id, user_id, conversation_id, id, reply_chain_id, parent_message_id, client_message_id, sender_id, sender_name, sent_at, edited_at, deleted_at, message_type, content_type, content_html, content_text, version, mentions_json, mentions_me, reactions_json, files_json, links_json, subject, importance, pinned, link, raw_json, content_hash from messages where rowid>? and not exists(select 1 from workiq_rows w where w.kind='message' and w.account_id=messages.tenant_id||'/'||messages.user_id and w.item_rowid=messages.rowid) order by rowid limit ?`
+	selectConvs    = `select rowid, tenant_id, user_id, id, kind, title, topic, display_name, team_id, parent_id, members_json, last_message_at, read_horizon_at, read_horizon_client_message_id, favorite, raw_json, content_hash from conversations where rowid>? and ` + workIQCacheConversationFilter + ` order by rowid limit ?`
 )
 
 // Rederive brings an archive written by an older build up to DerivationVersion: it recomputes the
@@ -104,6 +104,11 @@ func rederive(ctx context.Context, tx *sql.Tx) (*Migration, error) {
 	if err != nil {
 		return nil, err
 	}
+	sourceRows, err := rederiveWorkIQMessages(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	rows += sourceRows
 	n, err := rederiveConversations(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -296,7 +301,7 @@ func readConversations(ctx context.Context, tx *sql.Tx, after int64) ([]storedCo
 const (
 	mailTextKey         = "mail_text_version"
 	mailRederiveBatch   = 100
-	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>? order by rowid limit ?`
+	selectMailRederive  = `select rowid, subject, subject_norm, sender_name, sender_address, body_text, body_html_gz from mail_messages where body_text_version<? and rowid>?`
 	updateMailRederived = `update mail_messages set subject_norm=?, body_text=?, body_text_version=?, modified_at=? where rowid=?`
 )
 
@@ -323,6 +328,15 @@ func rederiveMail(ctx context.Context, tx *sql.Tx) (int, error) {
 	if from == MailTextVersion {
 		return 0, nil
 	}
+	query := selectMailRederive
+	have, err := workIQHasRows(ctx, tx, "mail")
+	if err != nil {
+		return 0, err
+	}
+	if have {
+		query += " and " + workIQCacheMailFilter
+	}
+	query += " order by rowid limit ?"
 	changed, last := 0, int64(0)
 	for {
 		type row struct {
@@ -331,7 +345,7 @@ func rederiveMail(ctx context.Context, tx *sql.Tx) (int, error) {
 			gz                              []byte
 		}
 		var batch []row
-		err := eachRow(ctx, tx, selectMailRederive, []any{MailTextVersion, last, mailRederiveBatch}, func(r *sql.Rows) error {
+		err := eachRow(ctx, tx, query, []any{MailTextVersion, last, mailRederiveBatch}, func(r *sql.Rows) error {
 			var x row
 			if err := r.Scan(&x.rowid, &x.subject, &x.norm, &x.name, &x.addr, &x.text, &x.gz); err != nil {
 				return err

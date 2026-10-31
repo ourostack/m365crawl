@@ -98,7 +98,7 @@ func backfillMessageApplications(ctx context.Context, tx *sql.Tx, at time.Time) 
 // before the caller writes.
 func readAppBackfillBatch(ctx context.Context, tx *sql.Tx, last int64) ([]appBackfillRow, error) {
 	rows, err := tx.QueryContext(ctx, `select rowid, tenant_id, user_id, conversation_id, id, sender_id, coalesce(raw_json,''), raw_json is not null, coalesce(lower(hex(raw_digest)),''), raw_digest is not null
- from messages where rowid>? order by rowid limit ?`, last, appBackfillBatch)
+ from messages where rowid>? and `+workIQCacheMessageFilter+` order by rowid limit ?`, last, appBackfillBatch)
 	if err != nil {
 		return nil, err
 	}

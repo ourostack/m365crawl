@@ -26,6 +26,18 @@ var sqlTables = []sqlTable{
 	{"mail_attachments", "attachment names, sizes and types of a mail message"},
 	{"mail_folders", "Outlook mail folders"},
 	{"mail_source_ids", "the native ids of mail messages, folders and attachments, and the keys the mail tables use for them"},
+	{"workiq_accounts", "private verified WorkIQ bindings to existing archive accounts"},
+	{"workiq_attempts", "typed sync/coverage/status outcomes, independent of desktop sync freshness; probes retain no content or data cursors"},
+	{"workiq_frontiers", "private resumable server cursors and compare-and-swap revisions"},
+	{"workiq_pages", "scrubbed staged server pages and their admission state"},
+	{"workiq_rows", "independent cache/server projections, source sightings and effective winners"},
+	{"workiq_aliases", "retained alternate ids resolving to a stable canonical row"},
+	{"workiq_source_keys", "Graph mail ids and their separately reserved numeric keys"},
+	{"workiq_folders", "server folder inventory and proven native folder bridges"},
+	{"workiq_censuses", "independent all-folder server enumerations"},
+	{"workiq_census_members", "corroborating mail identities in a server enumeration"},
+	{"workiq_gaps", "counted gaps of a WorkIQ attempt, each stored once: a row with a resource is a page's or mail group's own, the row with an empty resource holds the rest, so sum(n) by attempt and code is the run's count"},
+	{"workiq_mail_receipts", "gap-free whole-account mail receipts linked to the exact sync_run_id, with original source_data_at and actual completed_at"},
 	{"mail_coverage", "how far back each mail folder was read, and when"},
 	{"mail_absent", "mail that a read missed, counted until it is marked gone or evicted"},
 	{"calendar_source_events", "calendar events, one row per occurrence and source"},
@@ -111,6 +123,7 @@ var sqlTables = []sqlTable{
 }
 
 const sqlHelp = "The archive is opened read-only, so nothing a query does can change it. One statement per run: SELECT, WITH, EXPLAIN or VALUES. PRAGMA statements are refused; read a table's columns with the pragma_table_info() table function, as shown below.\n" +
+	"Source-aware archives also expose item_sources, a read-only view of message, conversation and mail origins. It has kind, account_id, item_rowid, graph_id, server_json, cache_seen_at, server_seen_at and provenance. Join its kind and item_rowid to the corresponding canonical table's rowid; provenance describes independent sightings, not the winning body. Native rows have null server evidence. Older read-only schemas have no view and read commands report desktop_cache without migrating them.\n" +
 	"Native attendee full_record_sql joins the occurrence to its own snapshot and extracts exactly its indexed JSON object plus own losses/ambiguity; it does not repeat the entire capture blob for every observation. Full-capture SQL reads the snapshot separately. All native follow-ups keep the selected absolute --db, --no-sync and unbounded --max-text 0.\n" +
 	"For immutable content full_text_sql follow-ups, keep the same explicit --db and pass --no-sync: SQL otherwise retains the generic implicit freshness workflow before its read-only query.\n" +
 	"Blob columns print as lowercase hex. messages.raw_digest is the SHA-256 of the archived raw JSON (the exact bytes of messages.raw_json), stored as 32 bytes and printed as 64 lowercase hex characters; it is null when no raw JSON is archived. raw_digest in app_observation and in message_app_observations is the same digest as lowercase hex text.\n" +

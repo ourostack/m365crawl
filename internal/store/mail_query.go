@@ -60,6 +60,7 @@ type MailAttachment struct {
 // MailRow is one archived message. BodyText is filled by MailGet only. Recipients and
 // Attachments are filled by every query that returns messages.
 type MailRow struct {
+	Provenance                                  string
 	Rowid                                       int64
 	Account                                     string
 	DetailKey                                   uint32
@@ -78,6 +79,7 @@ type MailRow struct {
 	HasAttachments                              bool
 	BodyState, BodyText                         string
 	FirstSeenAt, StateSeenAt, GoneAt, EvictedAt time.Time
+	DeletedAt                                   time.Time
 	Recipients                                  []MailRecipient
 	Attachments                                 []MailAttachment
 	// OlderCopy is true when the message's folder belongs to a folder set the account's latest
@@ -121,6 +123,8 @@ type CoverageRow struct {
 	Count              int
 	ReadAt             time.Time
 	Current            bool
+	CountBasis         string
+	CacheCount         *int
 }
 
 // MailParticipant is one distinct person in a thread.
@@ -159,7 +163,16 @@ func (s *Store) mailRows(ctx context.Context, body bool, from string, args []any
 
 // mailRowsMarked reads rows and marks them with the folder copies found (loadMailCopies).
 func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool, from string, args []any) ([]MailRow, error) {
-	conversationCol, roleCol, err := s.mailColumnNames(ctx)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	conversationCol, roleCol, err := s.mailColumnNames(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	provenance, deletedCol, err := workIQReadColumns(ctx, tx, "mail")
 	if err != nil {
 		return nil, err
 	}
@@ -168,17 +181,18 @@ func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool
 		bodyCol = `m.body_text`
 	}
 	var out []MailRow
-	err = mailEach(ctx, s.db, fmt.Sprintf(mailSelect, conversationCol, bodyCol)+from, args, func(r *sql.Rows) error {
+	err = mailEach(ctx, tx, fmt.Sprintf(mailSelect, conversationCol, bodyCol)+`,`+provenance+`,`+deletedCol+from, args, func(r *sql.Rows) error {
 		var m MailRow
-		var recv, sent, first, seen, gone, evicted sql.NullString
+		var recv, sent, first, seen, gone, evicted, deleted sql.NullString
 		var isRead sql.NullInt64
 		if err := r.Scan(&m.Rowid, &m.Account, &m.DetailKey, &m.InternetMessageID, &m.ConversationID, &m.FolderKey, &m.Folder, &m.FolderKind, &m.ToMe,
 			&m.Subject, &m.SubjectNorm, &m.SenderName, &m.SenderAddress, &m.Preview, &m.InReplyTo, &recv, &sent, &m.Class, &m.Importance, &m.ICalUID,
-			&isRead, &m.ReadState, &m.Flag, &m.HasAttachments, &m.BodyState, &m.BodyText, &first, &seen, &gone, &evicted); err != nil {
+			&isRead, &m.ReadState, &m.Flag, &m.HasAttachments, &m.BodyState, &m.BodyText, &first, &seen, &gone, &evicted, &m.Provenance, &deleted); err != nil {
 			return err
 		}
 		m.ReceivedAt, m.SentAt, m.FirstSeenAt, m.StateSeenAt = parseTime(recv), parseTime(sent), parseTime(first), parseTime(seen)
 		m.GoneAt, m.EvictedAt = parseTime(gone), parseTime(evicted)
+		m.DeletedAt = parseTime(deleted)
 		if isRead.Valid {
 			v := isRead.Int64 == 1
 			m.IsRead = &v
@@ -190,12 +204,18 @@ func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool
 		return nil, err
 	}
 	copies.mark(out)
-	return out, s.mailChildren(ctx, out, roleCol)
+	if err := s.mailChildren(ctx, tx, out, roleCol); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-func (s *Store) mailColumnNames(ctx context.Context) (string, string, error) {
+func (s *Store) mailColumnNames(ctx context.Context, tx *sql.Tx) (string, string, error) {
 	var conversation, role int
-	if err := s.db.QueryRowContext(ctx, `select
+	if err := tx.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('mail_messages') where name='conversation_id'),
   (select count(*) from pragma_table_info('mail_recipients') where name='role')`).Scan(&conversation, &role); err != nil {
 		return "", "", err
@@ -211,7 +231,7 @@ func (s *Store) mailColumnNames(ctx context.Context) (string, string, error) {
 }
 
 // mailChildren fills the recipients and attachments of rows.
-func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string) error {
+func (s *Store) mailChildren(ctx context.Context, q mailQuerier, rows []MailRow, roleCol string) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -221,8 +241,8 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string
 		at[r.Rowid] = i
 		ids[i] = fmt.Sprint(r.Rowid)
 	}
-	in := strings.Join(ids, ",")                                                                                                                                                                             // row ids are integers
-	err := mailEach(ctx, s.db, `select message_rowid, name, address, kind_raw, `+roleCol+` from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: row ids are integers and roleCol is a fixed schema expression
+	in := strings.Join(ids, ",")                                                                                                                                                                          // row ids are integers
+	err := mailEach(ctx, q, `select message_rowid, name, address, kind_raw, `+roleCol+` from mail_recipients where message_rowid in (`+in+`) order by message_rowid, ord`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: row ids are integers and roleCol is a fixed schema expression
 		var id int64
 		var rc MailRecipient
 		var addr, role sql.NullString
@@ -237,7 +257,7 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string
 	if err != nil {
 		return err
 	}
-	return mailEach(ctx, s.db, `select message_rowid, attachment_key, name, size, content_type, inline, downloaded from mail_attachments where message_rowid in (`+in+`) order by message_rowid, attachment_key`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: in is integers
+	return mailEach(ctx, q, `select message_rowid, attachment_key, name, size, content_type, inline, downloaded from mail_attachments where message_rowid in (`+in+`) order by message_rowid, attachment_key`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: in is integers
 		var id int64
 		var a MailAttachment
 		if err := r.Scan(&id, &a.Key, &a.Name, &a.Size, &a.ContentType, &a.Inline, &a.Downloaded); err != nil {
@@ -411,7 +431,19 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 		return MailRow{}, err
 	}
 	if len(rows) == 0 {
-		return MailRow{}, ErrMailNotFound
+		rowid, err := s.mailPublicAlias(ctx, account, detailKey)
+		if err != nil {
+			return MailRow{}, err
+		}
+		if rowid != 0 {
+			rows, err = s.mailRows(ctx, true, ` from mail_messages m`+mailJoin+` where m.account=? and m.rowid=?`, []any{account, rowid})
+			if err != nil {
+				return MailRow{}, err
+			}
+		}
+		if len(rows) == 0 {
+			return MailRow{}, ErrMailNotFound
+		}
 	}
 	return rows[0], nil
 }
@@ -661,24 +693,8 @@ func mailKindRank(kind string) int {
 	return 5
 }
 
-// MailCoverage lists, per folder, how far back the cache reached at the last read.
+// MailCoverage preserves native ranges/read clocks. Source-containing accounts
+// count canonical rows, retaining the native census count separately.
 func (s *Store) MailCoverage(ctx context.Context) ([]CoverageRow, error) {
-	out := []CoverageRow{}
-	sets, err := loadMailSets(ctx, s.db)
-	if err != nil {
-		return nil, err
-	}
-	err = mailEach(ctx, s.db, `select c.account, c.folder_key, coalesce(f.name,''), coalesce(f.kind,'unknown'), c.oldest_at, c.newest_at, c.count, c.read_at
-from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key order by c.account, c.folder_key`, nil, func(r *sql.Rows) error {
-		var c CoverageRow
-		var oldest, newest, read sql.NullString
-		if err := r.Scan(&c.Account, &c.FolderKey, &c.Folder, &c.Kind, &oldest, &newest, &c.Count, &read); err != nil {
-			return err
-		}
-		c.OldestAt, c.NewestAt, c.ReadAt = parseTime(oldest), parseTime(newest), parseTime(read)
-		c.Current = sets.isCurrent(c.Account, c.FolderKey)
-		out = append(out, c)
-		return nil
-	})
-	return out, err
+	return s.workIQMailCoverage(ctx)
 }

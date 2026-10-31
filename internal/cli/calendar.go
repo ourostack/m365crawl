@@ -604,27 +604,30 @@ type calendarChat struct {
 // prefixes, dated (sent for Sent Items, received otherwise) from 14 days before to 7 days after the start, and sent or received by an
 // attendee or the organizer other than the mailbox owner when the event names any).
 type relatedMail struct {
-	ID             string    `json:"id"`
-	Match          string    `json:"match"`
-	ConversationID *string   `json:"conversation_id"`
-	Account        string    `json:"account"`
-	Folder         string    `json:"folder,omitempty"`
-	FolderKind     string    `json:"folder_kind,omitempty"`
-	Subject        string    `json:"subject"`
-	FromName       string    `json:"from_name,omitempty"`
-	FromAddress    string    `json:"from_address,omitempty"`
-	ReceivedAt     time.Time `json:"received_at,omitzero"`
-	DatedAt        time.Time `json:"dated_at,omitzero"`
-	IsRead         *bool     `json:"is_read,omitempty"`
-	HasAttachments bool      `json:"has_attachments"`
-	Preview        string    `json:"preview,omitempty"`
-	ICalUID        string    `json:"ical_uid,omitempty"`
+	Provenance     string     `json:"provenance"`
+	DeletedAt      *time.Time `json:"deleted_at"`
+	ID             string     `json:"id"`
+	Match          string     `json:"match"`
+	ConversationID *string    `json:"conversation_id"`
+	Account        string     `json:"account"`
+	Folder         string     `json:"folder,omitempty"`
+	FolderKind     string     `json:"folder_kind,omitempty"`
+	Subject        string     `json:"subject"`
+	FromName       string     `json:"from_name,omitempty"`
+	FromAddress    string     `json:"from_address,omitempty"`
+	ReceivedAt     time.Time  `json:"received_at,omitzero"`
+	DatedAt        time.Time  `json:"dated_at,omitzero"`
+	IsRead         *bool      `json:"is_read,omitempty"`
+	HasAttachments bool       `json:"has_attachments"`
+	Preview        string     `json:"preview,omitempty"`
+	ICalUID        string     `json:"ical_uid,omitempty"`
 }
 
 func relatedMailOf(in []store.MailRelated) []relatedMail {
 	out := make([]relatedMail, len(in))
 	for i, m := range in {
 		out[i] = relatedMail{ID: m.ID(), Match: m.Match, ConversationID: nz(m.ConversationID), Account: m.Account, Folder: m.Folder, FolderKind: m.FolderKind, Subject: m.Subject,
+			Provenance: m.Provenance, DeletedAt: tp(m.DeletedAt),
 			FromName: m.SenderName, FromAddress: m.SenderAddress, ReceivedAt: m.ReceivedAt.UTC(), DatedAt: m.DatedAt.UTC(), IsRead: m.IsRead, HasAttachments: m.HasAttachments,
 			Preview: m.Preview, ICalUID: m.ICalUID}
 	}

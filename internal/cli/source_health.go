@@ -26,25 +26,21 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 	if len(families) == 0 || st == nil {
 		return nil
 	}
-	all, err := st.SourceHealth(rt.ctx)
+	read := (*store.Store).SourceHealth
+	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
+		read = readSourceHealth // adds stale Outlook caches that WorkIQ has not covered
+	}
+	all, err := read(st, rt.ctx)
 	if err != nil {
 		return err
 	}
-	var stale []store.SourceHealth
-	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
-		if stale, err = outlookCacheHealth(st, rt.ctx); err != nil {
-			return err
-		}
-	}
-	for _, h := range stale {
-		failing := slices.ContainsFunc(all, func(f store.SourceHealth) bool { return f.SourceKey == h.SourceKey })
-		if !failing && (rt.healthUntil.IsZero() || rt.healthUntil.After(*h.CacheFreshAt)) {
-			all = append(all, h)
-		}
-	}
 	health := []store.SourceHealth{}
 	for _, h := range all {
-		if !slices.Contains(families, h.Source) || h.Source != "teams" && !rt.outlookOn {
+		if h.State == store.SourceStale && !rt.healthUntil.IsZero() && !rt.healthUntil.After(*h.CacheFreshAt) {
+			continue // the read ends before the cache stopped being written
+		}
+		family := sourceHealthFamily(h)
+		if !slices.Contains(families, family) || h.Source != "workiq" && h.Source != "teams" && !rt.outlookOn {
 			continue
 		}
 		ok, err := rt.sourceHealthInScope(st, label, h)
@@ -63,6 +59,9 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 }
 
 func (rt *runtime) sourceHealthInScope(st *store.Store, label string, h store.SourceHealth) (bool, error) {
+	if h.Source == "workiq" {
+		h.Source = sourceHealthFamily(h)
+	}
 	account := ""
 	if h.AccountID != nil {
 		account = *h.AccountID
@@ -101,7 +100,7 @@ func (rt *runtime) sourceHealthInScope(st *store.Store, label string, h store.So
 }
 
 func sourceHealthNotice(h store.SourceHealth) string {
-	name := map[string]string{"teams": "Teams", "outlook_mail": "Outlook mail", "outlook_calendar": "Outlook calendar"}[h.Source]
+	name := map[string]string{"teams": "Teams", "outlook_mail": "Outlook mail", "outlook_calendar": "Outlook calendar", "workiq": "WorkIQ"}[h.Source]
 	if h.AccountID != nil {
 		name += " for " + *h.AccountID
 	}
@@ -111,6 +110,16 @@ func sourceHealthNotice(h store.SourceHealth) string {
 	since := "has never been read successfully"
 	if h.LastOKAt != nil {
 		since = "has not been read successfully since " + h.LastOKAt.UTC().Format(time.RFC3339)
+	}
+	if h.State == "covered_by_server" && h.CoveredThrough != nil {
+		return fmt.Sprintf("%s is still failing locally (%s); WorkIQ covers every mail folder through %s. Local reads have not recovered. Run m365crawl doctor.",
+			name, h.LastErrorCode, h.CoveredThrough.UTC().Format(time.RFC3339))
+	}
+	if h.Source == "workiq" {
+		return fmt.Sprintf("%s %s (%s); retry explicitly with m365crawl workiq status, then m365crawl workiq sync.", name, since, h.LastErrorCode)
+	}
+	if h.Source == "outlook_mail" && h.WorkIQEnabled {
+		return fmt.Sprintf("%s %s (%s); newer items may be missing. Run m365crawl doctor, or explicitly try m365crawl workiq sync for server mail recovery.", name, since, h.LastErrorCode)
 	}
 	return fmt.Sprintf("%s %s (%s); newer items may be missing. Run m365crawl doctor.", name, since, h.LastErrorCode)
 }
@@ -130,6 +139,9 @@ func outlookStaleDetail(h store.SourceHealth) string {
 		h.CacheFreshAt.UTC().Format(time.RFC3339), h.LastOKAt.UTC().Format(time.RFC3339), store.OutlookCacheStaleCode, what)
 }
 
+// readSourceHealth is the test seam of a read's failing and stale sources.
+var readSourceHealth = (*store.Store).ReadSourceHealth
+
 // outlookCacheHealth is the test seam of the stale Outlook sources.
 var outlookCacheHealth = (*store.Store).OutlookCacheHealth
 
@@ -141,3 +153,17 @@ func (rt *runtime) outlookStale(st *store.Store, family, account string) (*store
 
 // outlookStaleFix is the fix of a stale Outlook cache.
 const outlookStaleFix = "Open Outlook and let it sync, then run `m365crawl sync`."
+
+func sourceHealthFamily(h store.SourceHealth) string {
+	if h.Source != "workiq" {
+		return h.Source
+	}
+	switch h.WorkIQFamily {
+	case "mail":
+		return "outlook_mail"
+	case "chats":
+		return "teams"
+	default:
+		return ""
+	}
+}

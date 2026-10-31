@@ -1,0 +1,131 @@
+package store
+
+// WorkIQSchemaVersion is the archive schema that added the optional WorkIQ source state (version
+// 22, after the Scout tables of version 21). An archive below it has no WorkIQ state to read.
+const WorkIQSchemaVersion = 22
+
+// WorkIQ state is append/update-only, including retired pages and cursors.
+const workiqSchemaDDL = `
+create table if not exists workiq_accounts(
+ family text not null check(family in ('mail','chats')), account_id text not null,
+ user_id text not null, tenant_id text not null default '', address text not null,
+ binding text not null check(binding in ('stored_identity','explicit_bootstrap')),
+ bound_at text not null, inventory_revision integer not null default 0,
+ primary key(family,account_id)
+);
+create table if not exists workiq_attempts(
+ id integer primary key autoincrement,
+ family text not null check(family in ('mail','chats')), account_id text not null,
+ started_at text not null, finished_at text,
+ kind text not null default 'sync' check(kind in ('sync','coverage','status')),
+ status text not null default 'open' check(status in ('open','ok','ok_with_omissions','partial','failed')),
+ window_start text, window_end text, qualification text not null default 'workiq-v1',
+ bound_user_id text not null default '', bound_address text not null default '',
+ bound_mail text not null default '', bound_upn text not null default '', verified_at text,
+ error_code text not null default '', counts_json text not null default '{}',
+ gap_count integer not null default 0 check(gap_count>=0),
+ all_folders integer not null default 0 check(all_folders in (0,1))
+);
+create index if not exists workiq_attempts_account on workiq_attempts(family,account_id,id);
+create table if not exists workiq_frontiers(
+ id integer primary key autoincrement,
+ family text not null, account_id text not null, resource text not null,
+ scope text not null default '', qualification text not null,
+ cursor text not null default '', pending_cursor text not null default '', revision integer not null default 0,
+ admitted_revision integer not null default 0,
+ baseline integer not null default 1, retired integer not null default 0,
+ generation integer not null default 0,
+ unique(family,account_id,resource,scope,qualification,generation)
+);
+create unique index if not exists workiq_frontiers_active on workiq_frontiers(family,account_id,resource,scope,qualification) where retired=0;
+create table if not exists workiq_pages(
+ id integer primary key autoincrement, attempt_id integer not null references workiq_attempts(id),
+ frontier_id integer not null references workiq_frontiers(id), expected_revision integer not null,
+ data_json text not null, next_cursor text not null default '', delta_cursor text not null default '',
+ observed_at text not null,
+ prepared_attempt_id integer not null default 0, prepared_offset integer not null default 0,
+ prepared_complete integer not null default 0,
+ state text not null default 'staged' check(state in ('staged','admitted','retired')),
+ unique(attempt_id,frontier_id,expected_revision)
+);
+create table if not exists workiq_rows(
+ kind text not null check(kind in ('mail','message','conversation')),
+ account_id text not null, item_rowid integer not null,
+ graph_id text not null, server_json text not null, server_projection text not null default '{}',
+ cache_projection text, cache_first integer not null check(cache_first in (0,1)),
+ cache_seen integer not null check(cache_seen in (0,1)), server_seen integer not null default 1,
+ cache_seen_at text, server_seen_at text,
+ winner text not null check(winner in ('desktop_cache','workiq_server')),
+ cache_version integer, server_version text,
+ cache_raw_json text, cache_deleted_version integer, server_deleted_version text,
+ cache_deleted_at text, server_deleted_at text, cache_first_miss_at text,
+ cache_gone_at text, cache_evicted_at text, server_gone_at text,
+ server_first_missing_census integer, modified_at text not null,
+ primary key(kind,account_id,item_rowid)
+);
+create index if not exists workiq_rows_graph on workiq_rows(kind,account_id,graph_id);
+create table if not exists workiq_aliases(
+ kind text not null, account_id text not null, namespace text not null,
+ alias text not null, item_rowid integer not null,
+ primary key(kind,account_id,namespace,alias)
+);
+create table if not exists workiq_source_keys(
+ account text not null,
+ kind text not null check(kind in ('message','folder','attachment')),
+ namespace text not null default 'graph' check(namespace in ('graph','native')),
+ source_id text not null,
+ key integer not null check(typeof(key)='integer' and key between 1 and 4294967295),
+ primary key(account,kind,namespace,source_id), unique(account,kind,key)
+);
+create table if not exists workiq_folders(
+ account_id text not null, graph_id text not null, folder_key integer not null,
+ parent_graph_id text not null default '', well_known text not null default 'other',
+ inventory_attempt integer not null, total_items integer, resource_path text not null default '',
+ child_count integer, root_listed integer not null default 0,
+ primary key(account_id,graph_id)
+);
+create table if not exists workiq_censuses(
+ id integer primary key autoincrement, attempt_id integer not null references workiq_attempts(id),
+ account_id text not null, completed_at text, complete integer not null default 0,
+ full_enumeration integer not null default 0,
+ inventory_ready integer not null default 0, carry_complete integer not null default 0,
+ carried_through integer not null default 0,
+ identity_checked_through integer not null default 0, identity_check_complete integer not null default 0,
+ confirmed_through integer not null default 0, confirmation_complete integer not null default 0,
+ enumeration_key text not null default '', source_data_at text,
+ unique(attempt_id,account_id)
+);
+create table if not exists workiq_census_members(
+ census_id integer not null references workiq_censuses(id), normalized_id text not null,
+ graph_id text not null, folder_id text not null,
+ sender text not null, sent_at text, subject_norm text not null,
+ data_json text not null default '{}', observed_at text, removed integer not null default 0,
+ admitted integer not null default 0,
+ page_id integer, retained integer not null default 0,
+ primary key(census_id,graph_id)
+);
+create table if not exists workiq_gaps(
+ attempt_id integer not null references workiq_attempts(id), code text not null,
+ resource text not null default '', n integer not null check(n>0),
+ resolved integer not null default 0 check(resolved in (0,1)),
+ primary key(attempt_id,code,resource)
+);
+create table if not exists workiq_mail_receipts(
+ id integer primary key autoincrement, attempt_id integer not null unique references workiq_attempts(id),
+ sync_run_id integer not null unique references sync_runs(id),
+ account_id text not null, completed_at text not null, source_data_at text not null,
+ folders integer not null check(folders>=0), enumeration_key text not null
+);
+create view if not exists item_sources as
+select 'message' as kind,m.tenant_id||'/'||m.user_id as account_id,m.rowid as item_rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + ` as provenance
+from messages m left join workiq_rows w on w.kind='message' and w.account_id=m.tenant_id||'/'||m.user_id and w.item_rowid=m.rowid
+union all
+select 'conversation',c.tenant_id||'/'||c.user_id,c.rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + `
+from conversations c left join workiq_rows w on w.kind='conversation' and w.account_id=c.tenant_id||'/'||c.user_id and w.item_rowid=c.rowid
+union all
+select 'mail',m.account,m.rowid,
+w.graph_id,w.server_json,w.cache_seen_at,w.server_seen_at,` + workIQOriginSQL + `
+from mail_messages m left join workiq_rows w on w.kind='mail' and w.account_id=m.account and w.item_rowid=m.rowid;
+`

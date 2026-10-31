@@ -92,15 +92,15 @@ func TestStaleOutlookCacheShowsOnMailReadsPastIt(t *testing.T) {
 
 func TestStaleOutlookCacheReadErrorStopsTheRead(t *testing.T) {
 	e := staleMailEnv(t)
-	old := outlookCacheHealth
-	t.Cleanup(func() { outlookCacheHealth = old })
-	outlookCacheHealth = func(*store.Store, context.Context) ([]store.SourceHealth, error) {
+	old := readSourceHealth
+	t.Cleanup(func() { readSourceHealth = old })
+	readSourceHealth = func(*store.Store, context.Context) ([]store.SourceHealth, error) {
 		return nil, errors.New("disk on fire")
 	}
 	if code, out, errOut := e.mail("--json", "mail", "list"); code != 1 || out != "" || errorOf(t, errOut)["code"] != "db_error" {
 		t.Fatalf("exit=%d out=%q err=%q", code, out, errOut)
 	}
-	outlookCacheHealth = old
+	readSourceHealth = old
 	oldFresh := mailCacheFresh
 	t.Cleanup(func() { mailCacheFresh = oldFresh })
 	mailCacheFresh = func(*store.Store, context.Context, string) (time.Time, error) {

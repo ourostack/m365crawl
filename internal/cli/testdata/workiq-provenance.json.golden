@@ -1,0 +1,126 @@
+[
+  {
+    "case": "desktop_cache",
+    "command": "messages",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "unread",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "conversations",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "search Fixture --source chats",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "search Quarterly --source mail",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "mail list",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "mail unread",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "mail thread outlook/Main:101",
+    "item": {
+      "provenance": "desktop_cache"
+    }
+  },
+  {
+    "case": "desktop_cache",
+    "command": "mail show",
+    "deleted_at": null,
+    "provenance": "desktop_cache"
+  },
+  {
+    "case": "both",
+    "command": "messages",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "unread",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "conversations",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "search Fixture --source chats",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "search Quarterly --source mail",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "mail list",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "mail unread",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "mail thread outlook/Main:101",
+    "item": {
+      "provenance": "both"
+    }
+  },
+  {
+    "case": "both",
+    "command": "mail show",
+    "deleted_at": null,
+    "provenance": "both"
+  }
+]

@@ -149,7 +149,7 @@ func retireMissingProfiles(rep *Report, health []store.SourceHealth, record func
 		}
 	}
 	for _, h := range health {
-		if h.Source == "teams" {
+		if h.Source == "teams" || h.Source == "workiq" { // only Outlook sources are profiles
 			continue
 		}
 		if h.SourceKey == "outlook" && rootAttempt {

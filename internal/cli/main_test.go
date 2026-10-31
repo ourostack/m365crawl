@@ -11,6 +11,10 @@ import (
 	"github.com/ourostack/m365crawl/internal/transcripts"
 )
 
+// goBuildEnv builds the synthetic WorkIQ stub with the toolchain environment the tests started
+// with: TestMain gives tests a temporary home, where Go would find an empty module cache.
+var goBuildEnv []string
+
 // testBrowserPath is the browser doctor finds in tests; nothing ever runs it.
 const testBrowserPath = "/opt/m365crawl-test/msedge"
 
@@ -20,6 +24,7 @@ func TestMain(m *testing.M) {
 	browsertest.RunIfFake() // the fake browser of the launch tests is this binary
 	// The synthetic SharePoint hosts of the fixtures live under the reserved .invalid domain.
 	transcripts.AllowHostSuffixForTests(".sharepoint.example.invalid")
+	goBuildEnv = append(os.Environ(), "GOWORK=off", "GOPROXY=off")
 	home, err := os.MkdirTemp("", "m365crawl-cli-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

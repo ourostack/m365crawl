@@ -61,7 +61,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
 		return nil, err
 	}
-	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: writerPragmas + schemaDDL, SchemaVersion: SchemaVersion})
+	// Batch schema creation, writer pragmas included, so cold opens do not commit each DDL statement
+	// or retain a partial schema after failure. The vacuum marker reads the tables before the schema
+	// creates them, so it stays first inside the batch.
+	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: "begin;\n" + writerPragmas + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +99,8 @@ insert into meta(key,value) select '` + vacuumKey + `',
 
 // checkSchemaNotNewer fails with the coded archive_newer error when the archive at path records a
 // schema version above SchemaVersion. crawlkit refuses such an archive too, but with a plain error.
-// A missing file, or one without a version, passes.
+// A missing file, or one without a version, passes. Current WorkIQ identity state must exist
+// before writable DDL can recreate a missing table and erase evidence of corruption.
 func checkSchemaNotNewer(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
@@ -109,6 +113,10 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 	}
 	if found > SchemaVersion {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
+	}
+	if found >= WorkIQSchemaVersion {
+		_, err := (&Store{db: db}).hasWorkIQ(ctx)
+		return err
 	}
 	return nil
 }
@@ -154,7 +162,7 @@ var chmodFile = os.Chmod
 // adds the document usage_json and native_key columns.
 func (s *Store) migrate(ctx context.Context) error {
 	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts, mailModified, folderModified int
-	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture int
+	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture, mailDeleted int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -175,11 +183,15 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('sync_runs') where name='error_code'),
   (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
   (select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
-  (select count(*) from pragma_table_info('mail_folders') where name='modified_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
-		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified); err != nil {
+  (select count(*) from pragma_table_info('mail_folders') where name='modified_at'),
+  (select count(*) from pragma_table_info('mail_messages') where name='deleted_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified, &mailDeleted); err != nil {
 		return err
 	}
 	var stmts []string
+	if mailDeleted == 0 {
+		stmts = append(stmts, `alter table mail_messages add column deleted_at text`)
+	}
 	if errorCode == 0 {
 		stmts = append(stmts, `alter table sync_runs add column error_code text not null default ''`)
 	}
@@ -430,6 +442,9 @@ const successStatuses = `('ok','ok_with_omissions','unchanged')`
 func (s *Store) RecordRun(ctx context.Context, r Run) error { return recordRun(ctx, s.db, r) }
 
 func recordRun(ctx context.Context, db execer, r Run) error {
+	if strings.HasPrefix(r.Source, "workiq:") {
+		return errors.New("a WorkIQ outcome is written only with its attempt")
+	}
 	var counts, omissions any
 	if r.Counts != nil {
 		b, err := json.Marshal(r.Counts)
@@ -540,7 +555,9 @@ from accounts a order by a.tenant_id, a.user_id`)
 	var started, finished sql.NullString
 	var r RunRow
 	var counts, omissions sql.NullString
-	err = s.db.QueryRowContext(ctx, `select id, started_at, finished_at, source, fingerprint, status, counts_json, omissions_json from sync_runs order by id desc limit 1`).
+	// WorkIQ runs are explicit server commands with their own health and doctor check, not the last sync.
+	err = s.db.QueryRowContext(ctx, `select id, started_at, finished_at, source, fingerprint, status, counts_json, omissions_json from sync_runs
+where source not like 'workiq:%' order by id desc limit 1`).
 		Scan(&id, &started, &finished, &r.Source, &r.Fingerprint, &r.Status, &counts, &omissions)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

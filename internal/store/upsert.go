@@ -118,11 +118,23 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 		}
 		defer func() { _ = upd.Close() }()
 		now := nowText()
+		observed := time.Now().UTC()
+		haveWorkIQ, err := workIQHasRows(ctx, tx, "conversation")
+		if err != nil {
+			return err
+		}
 		var touched []teamsdesktop.Conversation
 		for _, c := range cs {
 			n.Seen++
 			if c.TenantID == "" || c.UserID == "" || c.ID == "" {
 				return errors.New("conversation needs tenant, user and id")
+			}
+			sourceChanged := false
+			if haveWorkIQ {
+				c, sourceChanged, err = applyWorkIQCacheConversation(ctx, tx, c, observed)
+				if err != nil {
+					return err
+				}
 			}
 			members, last, horizon := jsonOrNil(c.Members), fmtTime(c.LastMessageAt), fmtTime(c.ReadHorizonAt)
 			raw := rawOrNil(c.Raw)
@@ -154,7 +166,7 @@ func applyConversations(ctx context.Context, tx *sql.Tx, cs []teamsdesktop.Conve
 				n.Inserted++
 			case err != nil:
 				return err
-			case old == hash:
+			case old == hash && !sourceChanged:
 				n.Unchanged++
 				rows = append(rows, RowState{rowid, old, false})
 				continue
@@ -305,6 +317,12 @@ func (s *Store) ApplyMessagesChanges(ctx context.Context, ms []teamsdesktop.Mess
 }
 
 func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (Counts, []Change, []RowState, error) {
+	return applyMessageSources(ctx, tx, ms, nil)
+}
+
+// reduced is nonnil only after verified, code-qualified server reduction for one conversation.
+// Those projections must not be interpreted again as native cache arrivals.
+func applyMessageSources(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message, reduced map[string]workIQCacheMessageResult) (Counts, []Change, []RowState, error) {
 	var n Counts
 	var changes []Change
 	rows := make([]RowState, 0, len(ms))
@@ -337,10 +355,24 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 		now, derivedAt := nowText(), time.Now().UTC()
 		apps := newAppPublisher(tx)
 		defer apps.close()
+		haveWorkIQ, err := workIQHasRows(ctx, tx, "message")
+		if err != nil {
+			return err
+		}
 		for _, m := range ms {
 			n.Seen++
 			if m.TenantID == "" || m.UserID == "" || m.ConversationID == "" || m.ID == "" {
 				return errors.New("message needs tenant, user, conversation and id")
+			}
+			source := workIQCacheMessageResult{Message: m, PublishApps: true}
+			if reduced != nil {
+				source = reduced[m.ID]
+			} else if haveWorkIQ {
+				source, err = applyWorkIQCacheMessage(ctx, tx, m, derivedAt)
+				if err != nil {
+					return err
+				}
+				m = source.Message
 			}
 			sent, edited, deleted := fmtTime(m.SentAt), fmtTime(m.EditedAt), fmtTime(m.DeletedAt)
 			if sent == nil {
@@ -359,7 +391,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			var old string
 			var oldDeleted sql.NullString
 			err := sel.QueryRowContext(ctx, m.TenantID, m.UserID, m.ConversationID, m.ID).Scan(&rowid, &version, &old, &oldDeleted)
-			if err == nil && deleted == nil && oldDeleted.Valid && m.Version <= version {
+			if err == nil && !source.Bound && deleted == nil && oldDeleted.Valid && m.Version <= version {
 				deleted = oldDeleted.String // a known tombstone is sticky
 			}
 			hash := hashOf(m.ReplyChainID, m.ParentMessageID, m.ClientMessageID, m.SenderID, m.SenderName, sent, edited, deleted, m.MessageType, m.ContentType, m.ContentHTML, m.ContentText, m.Version, mentions, m.MentionsMe, reactions, files, links, m.Subject, m.Importance, m.Pinned, m.Link, raw)
@@ -377,7 +409,7 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 				changes = append(changes, Change{Change: ChangeNew, Key: key})
 			case err != nil:
 				return err
-			case m.Version < version, old == hash:
+			case !source.Bound && m.Version < version, old == hash && !source.Changed:
 				n.Unchanged++
 				rows = append(rows, RowState{rowid, old, false})
 				continue
@@ -400,8 +432,10 @@ func applyMessages(ctx context.Context, tx *sql.Tx, ms []teamsdesktop.Message) (
 			}
 			// Only an accepted insert or update publishes evidence: an older or unchanged copy above
 			// never moves the current or last good pointer.
-			if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
-				return err
+			if source.PublishApps {
+				if _, err := apps.publish(ctx, rowid, messageIdentity{m.TenantID, m.UserID, m.ConversationID, m.ID, m.SenderID}, m.Raw, rawPresent, digestText, derivedAt); err != nil {
+					return err
+				}
 			}
 			rows = append(rows, RowState{rowid, hash, true})
 		}

@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
 // SourceHealth discloses a failed source without claiming that the archive is current.
@@ -21,11 +24,24 @@ type SourceHealth struct {
 	LastOKAt      *time.Time `json:"last_ok_at"`
 	NewestItemAt  *time.Time `json:"newest_item_at"`
 	// CacheFreshAt is set only on a stale Outlook entry: when Outlook last wrote its local cache.
-	CacheFreshAt *time.Time `json:"cache_fresh_at,omitempty"`
+	CacheFreshAt   *time.Time `json:"cache_fresh_at,omitempty"`
+	WorkIQFamily   string     `json:"-"`
+	WorkIQEnabled  bool       `json:"-"`
+	CoveredThrough *time.Time `json:"covered_through,omitempty"`
+	// LastDiagnostic is the redacted trace the WorkIQ child left on the failure it reports.
+	LastDiagnostic *workiq.Diagnostic `json:"last_diagnostic,omitempty"`
+	attemptedAt    time.Time
 }
 
-// SourceFamily recognizes only the three sync-backed source families, not independent observations.
+// SourceFamily recognizes sync-backed source families, not independent observations.
 func SourceFamily(key string) (family, account string) {
+	if strings.HasPrefix(key, "workiq:") {
+		_, owner, _, ok := WorkIQSourceScope(key)
+		if !ok {
+			return "", ""
+		}
+		return "workiq", owner
+	}
 	if key == "outlook_mail" {
 		return "outlook_mail", ""
 	}
@@ -74,6 +90,7 @@ func SourceFailureState(status, code string, succeeded bool) string {
 type sourceAttempt struct {
 	status, code     string
 	lastOK           time.Time
+	at               time.Time
 	accountObserved  bool
 	goodFingerprints map[string]bool
 	byAccount        map[string]*sourceAttempt
@@ -110,6 +127,7 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 			continue
 		}
 		state.status, state.code = status, code
+		state.at = at
 		if status == "ok" || status == "ok_with_omissions" || status == "unchanged" {
 			state.lastOK = at
 			if status != "unchanged" && account != "" {
@@ -122,9 +140,23 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 	}
 }
 
-// SourceHealth derives health from sync outcomes; retained legacy refusals supply missing error information.
+// SourceHealth derives health from sync outcomes; retained legacy refusals supply missing error
+// information. It reports failures only, as sync's failed_source_health does.
 func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
+	return s.sourceHealth(ctx, false)
+}
+
+// ReadSourceHealth is the health a read reports: SourceHealth plus each stale Outlook cache whose
+// source is not failing. A stale mail cache goes through WorkIQ's server coverage like a failure,
+// with the check that found it stale as its attempt time, and is left out when a WorkIQ sync
+// covered every folder after that check.
+func (s *Store) ReadSourceHealth(ctx context.Context) ([]SourceHealth, error) {
+	return s.sourceHealth(ctx, true)
+}
+
+func (s *Store) sourceHealth(ctx context.Context, stale bool) ([]SourceHealth, error) {
 	attempts := map[string]*sourceAttempt{}
+	var workiqOutcomes []workIQHealthOutcome
 	var codes, accounts, schema int
 	var hasRecords bool
 	if err := s.db.QueryRowContext(ctx, `select
@@ -160,11 +192,28 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 	if accounts > 0 {
 		accountColumn = "source_accounts_json"
 	}
-	err := s.each(ctx, `select source,status,`+codeColumn+`,fingerprint,finished_at,`+accountColumn+` from sync_runs where source<>'' order by id`, func(rs *sql.Rows) error {
+	err := s.each(ctx, `select id,source,status,`+codeColumn+`,fingerprint,finished_at,`+accountColumn+` from sync_runs where source<>'' order by id`, func(rs *sql.Rows) error {
+		var id int64
 		var key, status, code, fp string
 		var at, accounts sql.NullString
-		if err := rs.Scan(&key, &status, &code, &fp, &at, &accounts); err != nil {
+		if err := rs.Scan(&id, &key, &status, &code, &fp, &at, &accounts); err != nil {
 			return err
+		}
+		if strings.HasPrefix(key, "workiq:") {
+			// A row that cannot be read as a WorkIQ outcome is that source's reported failure, not a
+			// failure of every read (withWorkIQHealth).
+			family, account, kind, valid := WorkIQSourceScope(key)
+			var scope []string
+			clock, clockErr := workIQStoredTime(at)
+			invalid := !valid || !accounts.Valid || json.Unmarshal([]byte(accounts.String), &scope) != nil ||
+				len(scope) != 1 || scope[0] != account || clockErr != nil || clock == nil || clock.IsZero()
+			outcome := workIQHealthOutcome{id: id, key: key, family: family, account: account, kind: kind,
+				status: status, code: code, invalid: invalid}
+			if !invalid {
+				outcome.at = *clock
+			}
+			workiqOutcomes = append(workiqOutcomes, outcome)
+			return nil
 		}
 		a := attempts[key]
 		if a == nil {
@@ -219,7 +268,7 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 				accounts = []string{scopeAccount}
 			}
 			for _, account := range accounts {
-				h := SourceHealth{SourceKey: key, Source: family, State: state, LastErrorCode: a.code, LastOKAt: healthTime(a.lastOK)}
+				h := SourceHealth{SourceKey: key, Source: family, State: state, LastErrorCode: a.code, LastOKAt: healthTime(a.lastOK), attemptedAt: a.at}
 				if account != "" {
 					h.AccountID = &account
 				}
@@ -255,7 +304,19 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 			}
 		}
 	}
-	return out, nil
+	if stale {
+		cached, err := s.OutlookCacheHealth(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range cached {
+			if !slices.ContainsFunc(out, func(f SourceHealth) bool { return f.SourceKey == h.SourceKey }) {
+				h.attemptedAt = *h.LastOKAt
+				out = append(out, h)
+			}
+		}
+	}
+	return s.withWorkIQHealth(ctx, out, workiqOutcomes)
 }
 
 func healthTime(at time.Time) *time.Time {
@@ -292,9 +353,24 @@ func (s *Store) legacySourceAttempts(ctx context.Context, attempts map[string]*s
 			a = &sourceAttempt{}
 			attempts[source] = a
 		}
+		// Canonical outcomes carry the attempt clock. Retained legacy refusals
+		// supplement missing error information, not overwrite a scoped outcome.
+		for _, state := range a.byAccount {
+			if state.code != "" {
+				return nil
+			}
+		}
 		prior := a.byAccount[""]
 		if prior == nil || prior.code == "" {
-			a.apply("failed", f.Code, "", time.Time{}, nil)
+			at := time.Time{}
+			if len(a.byAccount) == 1 {
+				for _, state := range a.byAccount {
+					if state.status == "failed" || state.status == "unavailable" {
+						at = state.at
+					}
+				}
+			}
+			a.apply("failed", f.Code, "", at, nil)
 		}
 		return nil
 	})

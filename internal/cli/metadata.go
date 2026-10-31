@@ -23,6 +23,11 @@ func manifest() control.Manifest {
 	for _, name := range []string{"status", "sync", "doctor", "search"} {
 		m.Commands[name] = control.Command{Argv: []string{"m365crawl", "--json", name}, JSON: true, Mutates: name == "sync"}
 	}
+	for _, name := range []string{"enable", "disable", "sync", "coverage", "status"} {
+		m.Commands["workiq "+name] = control.Command{Argv: []string{"m365crawl", "--json", "workiq", name},
+			JSON: true, Mutates: name == "enable" || name == "disable" || name == "sync",
+			Title: "workiq " + name + " (explicit optional server source; coverage/status retain no content or data cursors)"}
+	}
 	m.Commands["calendar"] = control.Command{Argv: []string{"m365crawl", "--json", "calendar"}, JSON: true}
 	m.Commands["overview"] = control.Command{Argv: []string{"m365crawl", "--json"}, JSON: true, Title: "overview (m365crawl with no command): what the archive holds per source and where to start"}
 	for _, name := range []string{"mail list", "mail show", "mail thread", "mail folders", "mail unread"} {
@@ -118,7 +123,7 @@ func manifest() control.Manifest {
 		m.Commands[command] = control.Command{Argv: argv, JSON: true, Mutates: command == "calendar attendees sync",
 			Title: command + " (native source-selected detail, not displayed/current roster; reads always offline; show needs attendee-observation:ID)"}
 	}
-	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "native_calendar_attendee_evidence", "transcripts", "notes", "documents", "loop", "content", "scout"}
+	m.Capabilities = []string{"doctor", "status", "sync", "watch", "search", "sql", "chats", "mail", "calendar", "native_calendar_attendee_evidence", "transcripts", "notes", "documents", "loop", "content", "scout", "workiq"}
 	m.Privacy = control.Privacy{ContainsPrivateMessages: true, ExportsSecrets: false, LocalOnlyScopes: []string{"teams_cache", "outlook_store", "onenote_index", "outlook_people", "outlook_attendee_evidence", "office_json_metadata", "office_registry_metadata", "onedrive_usage_metadata", "explicit_resident_office_text", "scout_session_history"}}
 	return m
 }

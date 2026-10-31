@@ -72,7 +72,7 @@ type Options struct {
 // account's data from a later run. changes lists the messages and activity items the store inserted or updated.
 func Run(ctx context.Context, o Options) (rep Report, changes []Change, err error) {
 	started := time.Now().UTC()
-	release, err := store.AcquireLock(o.DBPath)
+	release, err := store.AcquireWriter(ctx, o.DBPath, store.WriterOrdinarySync)
 	if err != nil {
 		return Report{}, nil, err
 	}
@@ -100,6 +100,12 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		return Report{}, nil, err // before any write: not even a failed-run record
 	}
 	if err != nil {
+		_ = record(StatusFailed)
+		return Report{}, nil, migrationError(err)
+	}
+	// Server projection upgrades are distinct from native mail text versions:
+	// neither may reinterpret the other source or invent a new sighting.
+	if _, err := st.EnsureWorkIQMailProjection(ctx); err != nil {
 		_ = record(StatusFailed)
 		return Report{}, nil, migrationError(err)
 	}

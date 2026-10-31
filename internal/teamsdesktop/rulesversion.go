@@ -9,7 +9,7 @@ import (
 // RulesVersion numbers the code that applies the denylist (deny.go) and the scrub rules
 // (scrub.go). Raise it in the same change that alters how either one works. A change to a rule
 // table needs no raise: RulesStamp covers the tables itself.
-const RulesVersion = 1
+const RulesVersion = 2
 
 // RulesStamp identifies the denylist and scrub rules in force: RulesVersion and a digest of every
 // rule table. The archive remembers the stamp the calendar tables were derived under, and a

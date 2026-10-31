@@ -568,6 +568,59 @@
         "\u003cmeeting\u003e"
       ],
       "json": true
+    },
+    "workiq coverage": {
+      "title": "workiq coverage (explicit optional server source; coverage/status retain no content or data cursors)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "workiq",
+        "coverage"
+      ],
+      "json": true
+    },
+    "workiq disable": {
+      "title": "workiq disable (explicit optional server source; coverage/status retain no content or data cursors)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "workiq",
+        "disable"
+      ],
+      "json": true,
+      "mutates": true
+    },
+    "workiq enable": {
+      "title": "workiq enable (explicit optional server source; coverage/status retain no content or data cursors)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "workiq",
+        "enable"
+      ],
+      "json": true,
+      "mutates": true
+    },
+    "workiq status": {
+      "title": "workiq status (explicit optional server source; coverage/status retain no content or data cursors)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "workiq",
+        "status"
+      ],
+      "json": true
+    },
+    "workiq sync": {
+      "title": "workiq sync (explicit optional server source; coverage/status retain no content or data cursors)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "workiq",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
     }
   },
   "capabilities": [
@@ -586,7 +639,8 @@
     "documents",
     "loop",
     "content",
-    "scout"
+    "scout",
+    "workiq"
   ],
   "privacy": {
     "contains_private_messages": true,

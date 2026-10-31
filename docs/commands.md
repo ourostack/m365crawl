@@ -12,6 +12,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Across sources | [`search`](#search), [`people`](#people), [`sql`](#sql) |
 | Teams | [`messages`](#messages), [`unread`](#unread), [`thread`](#thread), [`conversations`](#conversations), [`teams`](#teams), [`activity`](#activity), [`stores`](#stores), [`records`](#records) |
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
+| Optional server source | [`workiq enable/disable/sync/coverage/status`](#workiq), explicit only |
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
 | Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
@@ -21,6 +22,34 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
 | Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
+
+## WorkIQ
+
+```text
+m365crawl [--db PATH] workiq enable
+m365crawl [--db PATH] workiq disable
+m365crawl [--db PATH] [--account ACCOUNT] workiq sync [--source all|mail|chats] [--since TIME] [--max-chats 200]
+m365crawl [--db PATH] [--account ACCOUNT] workiq coverage [--source all|mail|chats] [--since TIME] [--max-chats 200]
+m365crawl [--db PATH] [--account ACCOUNT] workiq status [--source all|mail|chats]
+```
+
+WorkIQ is disabled by default. A person installs it, signs in and accepts its EULA once, through WorkIQ; after that, agents may run every command here on their own. `M365CRAWL_WORKIQ_BIN` overrides the executable; explicit Teams/Outlook roots and tests require that override. No command installs, logs in, accepts an EULA or grants consent. `enable`/`disable` return `{enabled}` and change only archive opt-in. Disable preserves retained data and progress. `--outlook-account`/`--outlook-profile` linking options are refused; use the existing global `--account outlook/<profile>` for a known Outlook profile or `<tenant>/<user>` for chats.
+
+Sync/coverage require enabled state. `--source` defaults to `all`; an account selector narrows its family (the result's `notices` names the family left out) and conflicting flags refuse. Chat `--since` accepts RFC3339, YYYY-MM-DD or a relative duration, default365 days. `--max-chats` defaults to200, is positive and at most100000, and is a selection cap, not completeness. Those chat flags are invalid for mail-only work. An unknown explicit account refuses before a subprocess; stored address mismatches have no override.
+
+Results contain `status`, `resumable`, `kind`, `enabled`, `accounts`, `counts`, `gaps`, `mail`, `chats` and `probes`, plus `notices` when an account narrowed `--source all`. Arrays remain arrays when empty. Account entries have `family`, `account_id`, `status`, `counts` and `gaps`. No account address, cursor, child stderr or content body appears. Independent successful work can accompany nonzero exit and `status: partial`; never treat that as a complete run. `--fields`/`--max-text` do not apply to these reports.
+
+Coverage fetches but never retains payloads, content, data cursors, absence marks or covering-success receipts. `mail[]` has `account_id`, `folder_id`, `basis: folder_total`, nullable `server_total`, nullable `archive_count` and `overlap: null`. Archive folder counts require an existing proven Graph binding and include every canonical provenance; an unknown folder bridge is not zero. Folder totals are not time-windowed or distinct-mailbox totals. `chats[]` has account/conversation, exact `since`/`until`, `server_basis: all_message_types`, `archive_basis: comparable_message_types`, counts, `unknown_clock` and `complete`. Different type definitions and unknown overlap prevent subtracting one count from the other as missing-message proof. Graph can repeat an unchanged message on the next page; coverage counts it once (`counts.duplicates_skipped`), and a repeat whose clocks changed marks that chat `complete: false` with gap `workiq_message_changed_during_traversal`.
+
+Cursors are kept byte-for-byte except one rewrite WorkIQ requires: a mail link's leading `/me/mailFolders('<id>')` becomes `/me/mailFolders/<id>`, with the query unchanged. A 429 waits for the result's `retryAfterSeconds` within the retry budget. WorkIQ's `Access denied for GET path` refusal becomes `workiq_policy_denied` without its echoed path. These shapes were first observed through WorkIQ's MCP `fetch` connector and then confirmed over the installed `workiq mcp` 1.0.1 stdio executable.
+
+A WorkIQ with no signed-in account stays silent and may open its own sign-in window; after 30 seconds without any output, the command fails with `workiq_signin_required`, and a person signs in once through WorkIQ. Mail and chat sync fetch at most 10000 pages per run and keep their position: when one stops with `workiq_page_limit`, the result says `resumable: true`: run the same command again; only `status: ok` means finished. A recheck owed after a server removal also continues across runs this way instead of restarting. `workiq_archive_busy` (the archive could not save a page in time) and `workiq_retry_later` (throttling or server errors outlasted three retries) are resumable the same way. If a sync stops for an unexplained reason (a lost WorkIQ process or a tool error with no status) at the same page and for the same reason as the previous run, it reports `workiq_stuck` with `resumable: false` (a run that got further first, or WorkIQ being unavailable at the start, stays resumable): running again will not help, so stop and report it with its `diagnostic`. `resumable` is false for every other failure, including those that still report `status: partial`, such as `workiq_signin_required`; follow that error's fix instead of retrying. WorkIQ mail pages hold 10 items, so a very large mailbox takes several runs. Whole-account mail sync admits server mail only once every folder is fetched, so before every message page it checks that the archive's disk can hold the rest of the fetch and the admission of everything fetched, about 340 KB per mailbox item (roughly 35 GB and 5.5 hours per 100,000 items) on the first pass; a catch-up after a complete sync fetches only changes and needs about 1.4 GB of headroom. If not, it stops with `workiq_disk_space`, position kept, not resumable; its fix states the estimate. `counts` report it as `disk_*` values. Fetching only a date range is tracked in ourostack/m365crawl#262. Sync lists every folder, child folders included, before the first message page, so the refusal comes before any message is fetched. A route's sync step states the cost the last run measured; on an archive that cannot hold the account the route instead says whole-account sync is refused there, how much space to free, and that its remaining steps only check WorkIQ. A WorkIQ process that ends mid-run, including during the account identity check, is reopened and the same request retried, and so is a WorkIQ tool error that gives no reason; if it keeps failing, the run stops with resumable `workiq_retry_later`. Graph can list the same chat more than once; discovery keeps one copy, the most recently updated, and counts the repeats in `counts.chats_repeated`. A failed run's `diagnostic` (also source health's `last_diagnostic`) gives the process's exit status and the allowlisted shape of its output (common log words, error class names, status numbers, hashed request IDs; everything else `[redacted]`), never message content; for a failed server, tool or JSON-RPC result, `server` (at most 256 bytes) adds the HTTP status and Graph error code, or the JSON-RPC error code. A three-digit number is kept only right after `status`, `http` or `code`. A WorkIQ log level that writes to stdout breaks the protocol (`workiq_protocol`); m365crawl never passes log flags.
+
+Status is the sole disabled-source probe exception. Without `--account` it probes chats and lists each Outlook account that needs `--account outlook/<profile>`, with the exact command, rather than failing. One WorkIQ run per source, account and kind works on an archive at a time; a second for the same account and kind gets `locked`, while other accounts, sources and kinds proceed. A run whose outcome could not be saved is closed by the next run of the same source, account and kind as `workiq_interrupted`. `probes[]` names the actually tested `path_class`, `state`, optional fixed `code` and `scope: initial_page_only`; an allowed initial listing does not qualify pagination, child folders, mail deltas or chat-message access. Disabled status writes no settings/binding/attempt. Enabled coverage/status can record only their own typed identity/outcome/count metadata, not data completion. Enabled doctor runs version only and cannot certify sign-in or path access. Ordinary reads, plain sync, ordinary status and watch never launch WorkIQ.
+
+Reads route to these commands without starting WorkIQ. When `mail list` or mail-including `search` has `--since` before the oldest cached message of a folder it reads (each folder judged on its own), or `mail thread` holds a reply whose parent is not archived, the result carries `workiq_routes`: per account `source`, `account`, `reason` (`range_before_cache` or `parent_not_archived`), mail `folders[]` (`folder`, `kind`, `cache_covers_since`), `workiq` (`enabled`, `disabled` or `not_installed`), `fix` and `next[]` `{command, does}` steps: `workiq status`, `workiq enable` when disabled, `--account outlook/<profile> workiq sync --source mail`, then the same read. An account with a complete WorkIQ mail sync gets none. `messages` and chat-including `search` reaching before the oldest archived Teams message get at most a `chats` route ending in `workiq coverage --source chats --since TIME`; chats stay counts-only. Text output prints routes as `route:` and `next:` lines. A range inside a folder's cached coverage gets no route even if that folder misses messages on some day; such in-range gaps are not detectable yet and are tracked separately.
+
+Message/conversation/mail reads expose `provenance: desktop_cache|workiq_server|both`, including `--fields`, nested related items and shared search. Source-health `covered_by_server` retains the local Outlook failure and actual `covered_through`: both original gap-free all-folder observations and completion must be under24 hours old and after that failure. Replaying old data, counts, probes or a partial sync cannot cover it. Native WorkIQ/Windows, ID-class and cross-source-clock qualification remain separate from synthetic tests; unqualified message classes are counted with gaps, not inserted.
 
 ## Drafts
 
@@ -835,7 +864,7 @@ Result: JSON Lines, the one exception to the one-document rule (SPEC.md section 
 m365crawl watch --every 30s --fields id,type,text --max-text 200
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `type`, `subtype`, `is_read`, `at`, `message_id`, `app_id`, `message_sent_at`, `actor_id`, `actor_name`, `actor_inferred`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `type`, `subtype`, `is_read`, `at`, `message_id`, `app_id`, `message_sent_at`, `actor_id`, `actor_name`, `actor_inferred`.
 
 ## search
 
@@ -888,7 +917,7 @@ m365crawl search --mentions-me --since 7d --max-text 200
 m365crawl search "release date" --source transcripts --from ada
 ```
 
-`--fields` keys: `source`, `tenant_id`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `dated_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `kind`, `registration_id`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `state`, `partial`, `losses`, `paragraphs`, `cells`, `occurrences_total`, `preview_truncated`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `full_text_sql`, `references`, `references_total`, `references_truncated`, `descriptive_fields_truncated`, `scope`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
+`--fields` keys: `source`, `provenance`, `id`, `source_id`, `capture_id`, `application`, `surface`, `title`, `url`, `web_url`, `native`, `modified_at`, `captured_at`, `source_observed_at`, `retained`, `association_state`, `text_state`, `text_truncated`, `variant`, `registry_native`, `opened_at`, `usage_native`, `full_inspection`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`, `account`, `folder`, `folder_kind`, `to_me`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `received_at`, `dated_at`, `is_read`, `flag`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `call_id`, `event_key`, `ordinal`, `speaker`, `at`, `matches`, `fetched_at`, `goid`, `guid`, `gosid`, `parent_goid`, `grandparent_goids`, `kind`, `registration_id`, `representation_digest`, `snapshot`, `current_snapshot`, `requested_kind`, `verified_kind`, `state`, `partial`, `losses`, `paragraphs`, `cells`, `occurrences_total`, `preview_truncated`, `file_label`, `file_label_truncated`, `file_modified_at`, `clock_domain`, `snapshot_match`, `snapshot_match_scope`, `full_text_sql`, `references`, `references_total`, `references_truncated`, `descriptive_fields_truncated`, `scope`, `selection_match`, `selected_transcript`, `native_file`, `native_account`, `controls_total`, `text_occurrences_total`, `entries_total`, `controls_preview`, `entries_preview`, `snapshot_id`, `file_id`, `path`, `path_truncated`, `sequence`, `snapshot_sequence`, `latest_sequence`, `markers`, `pending_operations`, `snapshot_pending_operations`, `missing_blobs`, `record_updated_at_at_admission`, `projected_at`, `raw_updated_at`, `raw_removed_at`, `raw_present`, `matches_retained_value`, `latest_cached_snapshot`, `snapshot_tenant_id`, `snapshot_user_id`.
 
 ## people
 
@@ -950,6 +979,14 @@ m365crawl people --query @example.com
 
 Run one read-only SQL query against the archive.
 
+Source-aware schemas also expose the read-only `item_sources` view:
+`kind` (`message`, `conversation`, `mail`), `account_id`, `item_rowid`,
+`graph_id`, `server_json`, `cache_seen_at`, `server_seen_at`, and `provenance`.
+Join its kind and item rowid to the corresponding canonical table's rowid.
+Provenance records independent sightings, not the winning body; native-only
+rows have null server evidence. Older read-only schemas have no such view and
+ordinary read commands report `desktop_cache` without migrating them.
+
 ```
 m365crawl sql <query> [flags]
 ```
@@ -1008,7 +1045,7 @@ m365crawl messages -c "Fixture team 1 › General" --since 2023-11-14 --max-text
 m365crawl messages --unread --include-channels --limit 5 --fields id,sender_name,text
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
 
 ## unread
 
@@ -1036,7 +1073,7 @@ m365crawl unread --limit 5
 m365crawl unread --by-conversation --since 7d
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`. With `--by-conversation`: `conversation_id`, `conversation_display_name`, `kind`, `unread_count`, `oldest_unread_at`, `newest_unread_at`, `link`.
 
 ## thread
 
@@ -1062,7 +1099,7 @@ m365crawl thread 19:topicchannel1@thread.tacv2 1700000045000
 m365crawl thread "https://teams.microsoft.com/l/message/19:topicchannel1@thread.tacv2/1700000046000?parentMessageId=1700000045000"
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `conversation_id`, `conversation_display_name`, `id`, `reply_chain_id`, `parent_message_id`, `sender_id`, `sender_name`, `sent_at`, `edited_at`, `deleted_at`, `message_type`, `text`, `text_truncated`, `html`, `mentions`, `mentions_me`, `mention_kind`, `reactions`, `files`, `links`, `subject`, `importance`, `pinned`, `link`, `reply_count`, `last_reply_at`, `app_observation`, `app_summary`.
 
 ## conversations
 
@@ -1087,7 +1124,7 @@ m365crawl conversations --kind Space
 m365crawl conversations --query planning
 ```
 
-`--fields` keys: `tenant_id`, `user_id`, `id`, `kind`, `title`, `display_name`, `team_id`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`, `calendar_series_key`, `calendar_event_count`.
+`--fields` keys: `provenance`, `tenant_id`, `user_id`, `id`, `kind`, `title`, `display_name`, `team_id`, `member_count`, `last_message_at`, `read_horizon_at`, `favorite`, `calendar_series_key`, `calendar_event_count`.
 
 ## teams
 
@@ -1170,7 +1207,17 @@ m365crawl records --database Teams:pinned-manager --store pins --since 7d
 
 ## mail
 
-The `mail` commands read new Outlook cached mail from the archive: HxStore on Mac and OWA IndexedDB on Windows; explicit supported OWA copies work portably. The archive holds only cached mail plus what earlier syncs kept. Every result says when mail was last synced and how far back the cache reaches; lists also give `cache_fresh_at`, when Outlook last wrote its cache. Mail Outlook received after that is not in the archive. When a sync finds Outlook has not written its cache for over an hour (Outlook closed, asleep or not syncing), `source_health` carries a `stale` entry (`outlook_cache_stale`) and a notice: open Outlook, let it sync, then run `m365crawl sync`.
+The `mail` commands read new Outlook cached mail from the archive: HxStore on Mac and OWA IndexedDB on Windows; explicit supported OWA copies work portably. The archive holds only cached mail plus what earlier syncs kept. Every result says when mail was last synced and how far back the cache reaches; lists also give `cache_fresh_at`, when Outlook last wrote its cache. Mail Outlook received after that is not in the archive. When a sync finds Outlook has not written its cache for over an hour (Outlook closed, asleep or not syncing), `source_health` carries a `stale` entry (`outlook_cache_stale`) and a notice: open Outlook, let it sync, then run `m365crawl sync`. A WorkIQ mail sync that covered every folder after that check clears the mail entry, because the server copy holds the newer mail.
+
+Message items retain `provenance` (`desktop_cache`, `workiq_server`, `both`)
+independently of the winning body or acquisition enablement. `deleted_at` is
+effective explicit deletion, not inferred cache absence. For an account with
+retained server mail, `coverage[].count` counts canonical rows of all origins,
+excluding inferred gone/evicted rows. `count_basis: "canonical_archive"`
+distinguishes this from a native census; `cache_count` retains that census's
+original count when known. Range and read clocks remain native cache evidence:
+a server-only folder has null native range/read clocks. These are not server
+folder totals or a whole-account freshness claim.
 
 - **Ids.** A message id is `<account>:<detail_key>`, split on the last colon, as `mail list` prints it (for example `outlook/Main:12345`). `--account` takes the mail account as it appears in the ids (`outlook/<profile>`), not a Teams account.
 - **List results** are `{"items": [...], "count", "truncated", "synced_at", "coverage": [{"account", "folder", "kind", "oldest_at", "newest_at", "count", "current"}], "note"}`, and a bounded `mail list` can add `folder_copies` (see "Folder copies"). `note` explains an empty result (no archive yet, Outlook source off, no Outlook profile, mail not read yet, filters matched nothing, or the cache covers only since a date, measured on the current folder copies; when an older copy reaches further back, the note says how far). For unread results it says how many messages the cache holds in each folder, for example "the local cache holds 17 messages in Inbox; Outlook may show more", or "no unread mail in the cache; Outlook may show more". Text output of every `mail` list ends with `synced <time> · cache covers since <date>`.
@@ -1220,7 +1267,7 @@ m365crawl mail list --from pat --since 7d --fields id,subject,from_name,received
 m365crawl mail list --has-attachments --limit 20
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail show
 
@@ -1236,7 +1283,7 @@ Keys are those of `mail list`, with `recipients` (every recipient, each `{name, 
 m365crawl mail show outlook/Main:12345 --max-text 2000
 ```
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipients`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `read_state`, `flag`, `importance`, `has_attachments`, `attachments`, `preview`, `body_text`, `body_state`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail thread
 
@@ -1248,7 +1295,7 @@ m365crawl mail thread <id>
 
 Items have the shape of `mail list`, oldest first by `dated_at`. A copy of a message that a newer folder set holds too is left out, unless it is the message asked for. `grouping` first tries `conversation` (at least two messages sharing an exact nonempty account-scoped `conversation_id`), otherwise `reply_chain` (In-Reply-To and Message-ID links followed in both directions), otherwise `subject` (the same subject, ignoring `Re:`, `Fw:` and similar prefixes, with at least one shared participant). `participants` lists each person in the thread once (`name`, `address`). When no other message joins it, the thread is the message alone and `note` says so. `mail thread` takes the same ids as `mail show` and returns the same id errors.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ### mail folders
 
@@ -1272,7 +1319,7 @@ m365crawl mail unread [--folder NAME|KIND] [--limit N]
 
 `folders` holds one `{account, folder, kind, unread, cached, current}` per folder that holds messages; `current` is `false` for a folder of an older folder set, whose unread state stopped at its last read. `unread_total` is the sum of the folders' `unread`, every folder included. `items` are the newest unread messages (`--limit`, default 20). `cached` is what the archive holds in the folder; Outlook may show more.
 
-`--fields` keys: `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
+`--fields` keys: `provenance`, `id`, `account`, `folder`, `folder_kind`, `to_me`, `subject`, `from_name`, `from_address`, `recipient_count`, `recipients_preview`, `in_reply_to`, `conversation_id`, `received_at`, `sent_at`, `dated_at`, `is_read`, `flag`, `importance`, `has_attachments`, `preview`, `internet_message_id`, `ical_uid`, `gone_at`, `evicted_at`, `deleted_at`, `older_copy`, `copy_of`, `received_at_disagrees`, `text_truncated`.
 
 ## calendar
 

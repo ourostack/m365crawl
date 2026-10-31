@@ -29,6 +29,8 @@ type ruleSet struct {
 	SecretName *regexp.Regexp
 	// Sig matches the value of a sig= query parameter (a signed URL's signature), any case.
 	Sig *regexp.Regexp
+	// Tempauth matches the temporary authentication value of a server URL.
+	Tempauth *regexp.Regexp
 	// MaxStringifiedDepth bounds how many levels of JSON-inside-a-string Scrub unwraps.
 	MaxStringifiedDepth int
 	// SiblingNameFields are the fields (compared in lower case) of an object whose value, when it
@@ -52,11 +54,13 @@ var rules = ruleSet{
 	SecretKeys: map[string]bool{
 		"access_token": true, "refresh_token": true, "id_token": true,
 		"authorization": true, "client_secret": true, "password": true,
+		"@microsoft.graph.downloadurl": true,
 	},
 	JWT:                 regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`),
 	Bearer:              regexp.MustCompile(`(?i)"bearer(?:\s|\\[tnr]|\\u00(?:09|0a|0d|20|a0))(?:[^"\\]|\\.)*"`),
-	SecretName:          regexp.MustCompile(`(?i)["\\](?:access_token|refresh_token|id_token|authorization|client_secret|password)["\\]`),
+	SecretName:          regexp.MustCompile(`(?i)["\\](?:access_token|refresh_token|id_token|authorization|client_secret|password|@microsoft\.graph\.downloadurl)["\\]`),
 	Sig:                 regexp.MustCompile(`(?i)([?&]sig=)[^&"\\\s#]+`),
+	Tempauth:            regexp.MustCompile(`(?i)([?&]tempauth=)[^&"\\\s#]+`),
 	MaxStringifiedDepth: 4,
 	SiblingNameFields:   []string{"type", "name", "key"},
 	SiblingValueField:   "value",
