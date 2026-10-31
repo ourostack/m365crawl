@@ -4,7 +4,7 @@ package store
 // 22, after the Scout tables of version 21). An archive below it has no WorkIQ state to read.
 const WorkIQSchemaVersion = 22
 
-// workIQAttemptsColumns is the workiq_attempts definition, shared by the schema and the version 25
+// workIQAttemptsColumns is the workiq_attempts definition, shared by the schema and the version 27
 // rebuild that adds the mail_window kind.
 const workIQAttemptsColumns = `(
  id integer primary key autoincrement,

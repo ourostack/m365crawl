@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	crawlstore "github.com/openclaw/crawlkit/store"
 )
 
 // downgradeWorkIQWindowSchema puts an open archive back to the version 22 WorkIQ layout: the
@@ -231,4 +234,54 @@ func TestWorkIQWindowMigrationFailsTheOpenWhenSettingsCannotBeRestored(t *testin
 			}
 		})
 	}
+}
+
+// TestWorkIQWindowMigrationFromRecordedVersions opens archives an earlier build left at version 24
+// (before the directed write log) and 26 (with it), and a fresh one: the window schema is detected
+// from the tables, not the recorded version, so each reaches SchemaVersion with its data kept.
+func TestWorkIQWindowMigrationFromRecordedVersions(t *testing.T) {
+	ctx := context.Background()
+	fresh := newStore(t)
+	if rowCount(t, fresh, `select max(version) from schema_migrations`) != SchemaVersion || !attemptsAllowWindows(t, fresh) ||
+		!must(fresh.hasWorkIQWindows(ctx)) || rowCount(t, fresh, `select count(*) from sqlite_master where name in ('directed_writes','directed_write_events')`) != 2 {
+		t.Fatal("a fresh archive lacks the window or directed write schema")
+	}
+	for _, version := range []int{24, 26} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			path := writableArchivePath(t)
+			ddl := strings.Replace(schemaDDL, workiqWindowSchemaDDL, "", 1)
+			if version < 26 {
+				ddl = strings.Replace(ddl, directedWriteSchemaDDL, "", 1)
+			}
+			cs := must(crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: ddl, SchemaVersion: version}))
+			legacy := &Store{cs: cs, db: cs.DB()}
+			downgradeWorkIQWindowSchema(t, legacy)
+			must(legacy.db.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,kind,status) values('mail',?,?,'sync','ok')`, mailAcct, fmtTime(mailT0)))
+			if rowCount(t, legacy, `select max(version) from schema_migrations`) != version || attemptsAllowWindows(t, legacy) ||
+				rowCount(t, legacy, `select count(*) from sqlite_master where name like 'workiq_window_%'`) != 0 {
+				t.Fatalf("the fixture is not a version %d archive", version)
+			}
+			directed := rowCount(t, legacy, `select count(*) from sqlite_master where name in ('directed_writes','directed_write_events')`)
+			attempts := windowAttemptRows(t, legacy)
+			must0(legacy.Close())
+			s := must(Open(ctx, path))
+			defer func() { _ = s.Close() }()
+			if got := rowCount(t, s, `select max(version) from schema_migrations`); got != SchemaVersion {
+				t.Fatalf("version %d archive is at %d, want %d", version, got, SchemaVersion)
+			}
+			if !attemptsAllowWindows(t, s) || !must(s.hasWorkIQWindows(ctx)) || windowAttemptRows(t, s) != attempts || attempts == "" ||
+				rowCount(t, s, `select count(*) from pragma_table_info('workiq_rows') where name='identity_unproven'`) != 1 ||
+				rowCount(t, s, `select count(*) from sqlite_master where name in ('directed_writes','directed_write_events')`) != 2 {
+				t.Fatalf("version %d archive did not gain the window schema with its attempts kept (directed tables before: %d)", version, directed)
+			}
+			must(s.db.ExecContext(ctx, `insert into workiq_attempts(family,account_id,started_at,kind) values('mail',?,?,'mail_window')`, mailAcct, fmtTime(mailT0)))
+		})
+	}
+}
+
+func windowAttemptRows(t *testing.T, s *Store) string {
+	t.Helper()
+	var out sql.NullString
+	must0(s.db.QueryRowContext(context.Background(), `select group_concat(id||'/'||family||'/'||account_id||'/'||kind||'/'||status||'/'||started_at,'|') from workiq_attempts`).Scan(&out))
+	return out.String
 }

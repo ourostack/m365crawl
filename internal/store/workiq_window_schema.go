@@ -10,7 +10,7 @@ import (
 
 // WorkIQWindowSchemaVersion is the archive schema that added WorkIQ mail windows. An archive below
 // it has no window state to read: no window coverage, and its routes are the whole-account ones.
-const WorkIQWindowSchemaVersion = 25
+const WorkIQWindowSchemaVersion = 27
 
 // A window member is the latest observation of one Graph message in one window position (a
 // frontier). Out-of-window members keep only this row; in-window ones keep their staged page body
@@ -44,7 +44,7 @@ create table if not exists workiq_window_coverage(
 create index if not exists workiq_window_coverage_account on workiq_window_coverage(account_id,folder_id,since);
 `
 
-// workIQWindowColumns are the columns version 25 adds to tables an older archive already has.
+// workIQWindowColumns are the columns version 27 adds to tables an older archive already has.
 var workIQWindowColumns = []struct{ table, column, definition string }{
 	{"workiq_pages", "body_bytes", "integer"},
 	{"workiq_pages", "body_sha256", "text"},
@@ -66,7 +66,7 @@ type pragmaConn interface {
 
 var pinWorkIQConn = func(ctx context.Context, db *sql.DB) (pragmaConn, error) { return db.Conn(ctx) }
 
-// migrateWorkIQWindow brings an earlier WorkIQ archive to version 25: it rebuilds workiq_attempts
+// migrateWorkIQWindow brings an earlier WorkIQ archive to version 27: it rebuilds workiq_attempts
 // so its kind check allows mail_window, and adds the new columns. crawlkit records the version
 // before this runs, so the change is detected from the archive itself and a failed attempt is
 // retried by the next writable open. SQLite honors foreign_keys and legacy_alter_table only
