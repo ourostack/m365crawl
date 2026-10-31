@@ -254,6 +254,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		if r.Redacted > 0 {
 			_, _ = fmt.Fprintf(w, "redacted: %d credential-looking values in generic records\n", r.Redacted)
 		}
+		if r.PurgedLogPending {
+			_, _ = fmt.Fprintln(w, "purged credential values may still be in the archive's write-ahead log: another program reading the archive kept it from being cleared; the next sync tries again")
+		}
 		for _, src := range r.Sources {
 			if src.Error != nil {
 				_, _ = fmt.Fprintf(w, "failed %s: %s: %s\n", src.Source, src.Error.Code, src.Error.Message)

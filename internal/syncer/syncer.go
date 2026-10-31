@@ -137,6 +137,13 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 			Message: "archived Scout sessions could not all be scrubbed again under the current rules (" + scoutErr.Error() + "); Teams and Outlook were still synced",
 			Fix:     "Free disk space if the disk is full, then run m365crawl sync or m365crawl scout sync again; the re-scrub resumes where it stopped."}
 	}
+	// Credential values a purge overwrote must not stay in the write-ahead log: a truncating
+	// checkpoint clears it, in this run or, when readers block it, in a later one.
+	purgedLog, logErr := clearPurgedLog(st, ctx)
+	rep.PurgedLogPending = purgedLog.Pending
+	if logErr != nil && err == nil {
+		err = errs.DBError(logErr)
+	}
 	if healthErr := r.recordSourceHealth(context.WithoutCancel(ctx), &rep, err); healthErr != nil {
 		rep.FailedSourceHealth = nil // The persistence boundary did not establish checked health.
 		return rep, changes, errs.DBError(errors.Join(err, healthErr, record(StatusFailed)))
@@ -714,15 +721,23 @@ func (w *writer) flushActivity() error {
 // values flush sooner than batchSize records would (a variable so a test can lower it).
 var recordBatchBytes = 4 << 20
 
-// readGeneric archives every record of the object stores that no typed mapper consumes. Right
-// after each database is read it flushes that database's records and, when the database was read
-// completely, marks the rows that are not seen any more as removed, so the keys seen are dropped
-// before the next database is read. Then it marks the rows of databases the origin no longer
-// holds, and clears the rows whose database or store name is denied now (credential material is
-// cleared, not kept). Marking is skipped for an incomplete or unreadable database, and entirely
-// when ReadGeneric fails (the source then fails and nothing of it is kept). It returns the
-// omissions the generic read counted and how many values it redacted.
+// readGeneric archives every record of the object stores that no typed mapper consumes. First it
+// clears the rows whose database or store name is denied now, or whose key scrubs differently
+// (credential material is cleared, not kept). Right after each database is read it flushes that
+// database's records and, when the database was read completely, marks the rows that are not seen
+// any more as removed, so the keys seen are dropped before the next database is read. Then it
+// marks the rows of databases the origin no longer holds. Marking is skipped for an incomplete or
+// unreadable database, and entirely when ReadGeneric fails (the source then fails and nothing of
+// it is kept). It returns the omissions the generic read counted and how many values it redacted.
 func (w *writer) readGeneric(ctx context.Context, snap, source string, account *teamsdesktop.Account, sig []byte, at time.Time) (map[string]int, int, error) {
+	// The purges come first: a row they clear is then never rewritten, value and all, by the
+	// removal marks below, which would leave a copy of the value in space the purge cannot see.
+	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
+		return nil, 0, asCoded(err)
+	}
+	if _, err := w.sess.PurgeUnscrubbedKeys(source, teamsdesktop.Scrub, at); err != nil {
+		return nil, 0, asCoded(err)
+	}
 	opts := teamsdesktop.GenericOptions{Sig: sig, Known: w.known, OnDatabase: func(db string, complete bool, seen map[string]map[string]struct{}) error {
 		w.memo.gen, w.memo.genDB = nil, "" // the next database loads its own
 		if !complete {
@@ -757,12 +772,6 @@ func (w *writer) readGeneric(ctx context.Context, snap, source string, account *
 		}
 	} else {
 		w.present = nil
-	}
-	if _, err := w.sess.PurgeDenied(source, deniedFn, at); err != nil {
-		return nil, 0, asCoded(err)
-	}
-	if _, err := w.sess.PurgeUnscrubbedKeys(source, teamsdesktop.Scrub, at); err != nil {
-		return nil, 0, asCoded(err)
 	}
 	return res.Omissions, res.Redacted, nil
 }
@@ -903,4 +912,6 @@ var (
 	beforeRead           = func(*writer) {}
 	memoSignature        = teamsdesktop.MemoSignature
 	conflictFn           = (*memo).conflict
+	// clearPurgedLog is store.ClearPurgedLog; tests make it fail or stay pending.
+	clearPurgedLog = (*store.Store).ClearPurgedLog
 )

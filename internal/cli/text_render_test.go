@@ -68,6 +68,15 @@ func TestSyncTextShowsRedactionsOnlyWhenThereAreAny(t *testing.T) {
 	}
 }
 
+func TestSyncTextShowsAPendingPurgedLog(t *testing.T) {
+	if got := renderToString(t, "sync", syncer.Report{Status: "ok", PurgedLogPending: true}); !strings.Contains(got, "write-ahead log") {
+		t.Fatalf("pending log missing:\n%s", got)
+	}
+	if got := renderToString(t, "sync", syncer.Report{Status: "ok"}); strings.Contains(got, "write-ahead log") {
+		t.Fatalf("a log that is not pending shown:\n%s", got)
+	}
+}
+
 func TestWhoamiTextNamesUnnamedAccountsAndSaysWhenThereAreNone(t *testing.T) {
 	got := renderToString(t, "whoami", &whoamiResult{Accounts: []store.WhoamiRow{{TenantID: tenantA, UserID: userA}}, Archive: &statusResult{}})
 	if !strings.Contains(got, "(name not seen yet)") || strings.Contains(got, "no accounts archived yet") {

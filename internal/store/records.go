@@ -159,7 +159,8 @@ func (x *Session) MarkDatabasesRemoved(source string, present []string, account 
 // name now satisfies denied: value_json becomes NULL, content_hash ” and removed_at is set when
 // it was not. It is the one place the archive deletes content (a name added to the denylist after
 // rows were archived under it) and it is a no-op for rows already cleared. It returns how many
-// rows it cleared.
+// rows it cleared. The cleared values are overwritten on disk and the write-ahead log is cleared
+// after the commit (see purge and ClearPurgedLog).
 func (x *Session) PurgeDenied(source string, denied func(name string) bool, at time.Time) (int, error) {
 	ctx := context.Background()
 	rows, err := x.tx.QueryContext(ctx, `select distinct database, store from records where source=? and (value_json is not null or content_hash != '')`, source)
@@ -182,17 +183,10 @@ func (x *Session) PurgeDenied(source string, denied func(name string) bool, at t
 	if err != nil {
 		return 0, err
 	}
-	total := 0
-	for _, h := range hit {
-		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
-			fmtTime(at), source, h[0], h[1])
-		if err != nil {
-			return total, err
-		}
-		n, _ := res.RowsAffected()
-		total += int(n)
-	}
-	return total, nil
+	return x.purge(ctx, len(hit), func(i int) (sql.Result, error) {
+		return x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and (value_json is not null or content_hash != '')`,
+			fmtTime(at), source, hit[i][0], hit[i][1])
+	})
 }
 
 // PurgeUnscrubbedKeys clears the rows of source whose key_json changes when scrub is applied to
@@ -222,17 +216,34 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 	if err != nil {
 		return 0, err
 	}
-	total := 0
-	for _, h := range hit {
-		res, err := x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
-			fmtTime(at), source, h[0], h[1], h[2])
-		if err != nil {
-			return total, err
-		}
-		n, _ := res.RowsAffected()
-		total += int(n)
+	return x.purge(ctx, len(hit), func(i int) (sql.Result, error) {
+		return x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
+			fmtTime(at), source, hit[i][0], hit[i][1], hit[i][2])
+	})
+}
+
+// purge runs the n clearing statements of a credential purge and returns how many rows they
+// cleared. When there is anything to clear it runs them with secure_delete on, so the cleared
+// values are overwritten on disk, and asks for the write-ahead log to be cleared after the commit
+// (ClearPurgedLog), so no older page image of them stays in the log.
+func (x *Session) purge(ctx context.Context, n int, clear func(i int) (sql.Result, error)) (total int, err error) {
+	if n == 0 {
+		return 0, nil
 	}
-	return total, nil
+	restore, err := secureDelete(ctx, x.tx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = errors.Join(err, restore()) }()
+	for i := range n {
+		res, cerr := clear(i)
+		if cerr != nil {
+			return total, cerr
+		}
+		cleared, _ := res.RowsAffected()
+		total += int(cleared)
+	}
+	return total, markPurgedLog(ctx, x.tx)
 }
 
 // StoreRow is one object store of one database, as `stores` lists it. Records counts the live
