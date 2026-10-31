@@ -128,19 +128,8 @@ var afterWorkIQDocumentCommit = func() {}
 
 // hasWorkIQDocuments says whether the archive's schema has document state; q is the database or
 // the transaction that will use it.
-func hasWorkIQDocuments(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}) (bool, error) {
-	var version, tables int
-	if err := q.QueryRowContext(ctx, `select coalesce(max(version),0),(select count(*) from sqlite_master where name in
-('workiq_documents','workiq_document_checks','workiq_document_bodies','workiq_document_fts'))
-from schema_migrations`).Scan(&version, &tables); err != nil || version < WorkIQDocumentSchemaVersion {
-		return false, err
-	}
-	if tables != 4 {
-		return false, errors.New("WorkIQ document archive state is incomplete")
-	}
-	return true, nil
+func hasWorkIQDocuments(ctx context.Context, q rowQuerier) (bool, error) {
+	return hasFeature(ctx, q, workIQDocumentFeature)
 }
 
 func documentDigest(text string) string {

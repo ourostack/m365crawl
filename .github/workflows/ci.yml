@@ -58,6 +58,19 @@ jobs:
         run: scripts/changelog-assemble.sh --check
       - name: Check tidy, format, vet and lint
         run: make tidy-check fmt-check vet lint
+      # A feature schema number picked when a pull request opened may since have been used on the
+      # base branch (#306). Pull requests check against their base commit, and the merge queue
+      # against the queue's base, which is what the change will land on.
+      - name: Schema numbers are free on the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            go run ./scripts/schemaguard "$BASE_SHA"
+          else
+            go run ./scripts/schemaguard
+          fi
 
   # Each platform runs the unit tests once. Linux runs them with the race detector, split over
   # several runners because the detector makes them several times slower. macOS and Windows run
