@@ -290,3 +290,21 @@ func TestWorkIQDocumentLogClearFaults(t *testing.T) {
 		t.Fatalf("a failed log clear was hidden: %+v %v", w, err)
 	}
 }
+
+func TestWorkIQDocumentLogClearIgnoresExpiredCallerDeadline(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
+	s := newStore(t)
+	must(s.RecordWorkIQDocument(ctx, documentRecord(at, "admitted", "", "text")))
+	// Cancelling right after commit stands in for a deadline that expires before the log clear.
+	cctx, cancel := context.WithCancel(ctx)
+	afterWorkIQDocumentCommit = cancel
+	defer func() { afterWorkIQDocumentCommit = func() {} }()
+	w, err := s.RecordWorkIQDocument(cctx, documentRecord(at.Add(time.Minute), "refused", "document_rights_unknown", ""))
+	if err != nil || !w.BodyDeleted || w.LogPending {
+		t.Fatalf("%+v %v", w, err)
+	}
+	if n := rowCount(t, s, `select count(*) from workiq_document_checks`); n != 2 {
+		t.Fatalf("checks=%d", n)
+	}
+}

@@ -122,6 +122,9 @@ type WorkIQDocumentWrite struct {
 
 var ErrWorkIQDocumentUnknown = errors.New("workiq document not found")
 
+// afterWorkIQDocumentCommit runs between a document check's commit and its log clear; a test seam.
+var afterWorkIQDocumentCommit = func() {}
+
 // hasWorkIQDocuments says whether the archive's schema has document state; q is the database or
 // the transaction that will use it.
 func hasWorkIQDocuments(ctx context.Context, q interface {
@@ -217,7 +220,10 @@ label_encrypted,attribution,bytes_state,rights_source,qualification) values(?,?,
 	if err = tx.Commit(); err != nil || deleted == 0 {
 		return w, err
 	}
-	log, err := s.ClearPurgedLog(ctx)
+	afterWorkIQDocumentCommit()
+	// The check is committed, so a caller's deadline must not turn this into a retried write; the
+	// clear is bounded by its own attempts, and a blocked one stays pending for the next sync.
+	log, err := s.ClearPurgedLog(context.WithoutCancel(ctx))
 	w.LogPending = log.Pending
 	return w, err
 }
