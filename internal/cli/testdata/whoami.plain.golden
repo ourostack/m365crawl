@@ -16,7 +16,7 @@ ARCHIVE
 archive path   : <db>
 fts present    : yes
 last run       : ok at <stamp> UTC
-schema version : 24
+schema version : 25
 
 account                                                                    conversations  messages  people  activity  newest
 -------------------------------------------------------------------------  -------------  --------  ------  --------  --------------------
