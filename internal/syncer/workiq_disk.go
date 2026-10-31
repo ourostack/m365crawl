@@ -114,7 +114,7 @@ func workIQDiskFailure(d store.WorkIQMailDisk, need, free int64) error {
 	return &errs.Coded{Code: "workiq_disk_space", Exit: errs.ExitEnvironment,
 		Message: "the explicit WorkIQ source could not complete (workiq_disk_space)",
 		Fix: "Whole-account WorkIQ mail sync stopped before fetching more messages: " + WorkIQMailDiskCost(d, need, free) +
-			" Its position is kept. Free space or move the archive, then run the same workiq sync again. Fetching only a date range is tracked in ourostack/m365crawl#262."}
+			" Its position is kept. Free space or move the archive, then run the same workiq sync again, or fetch only a date range with workiq sync --source mail --since and --until."}
 }
 
 // WorkIQMailDiskCost says what the rest of an account's whole-account mail sync needs.

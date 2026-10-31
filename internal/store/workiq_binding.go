@@ -83,6 +83,28 @@ func (s *Store) validateWorkIQAttemptOwner(ctx context.Context, attempt int64) (
 }
 
 func (s *Store) validateWorkIQOwner(ctx context.Context, attempt int64, retention bool) (workiq.AccountBinding, error) {
+	return s.validateWorkIQOwnerKind(ctx, attempt, retention, false)
+}
+
+// validateWorkIQMailRetention admits a verified whole-account or window mail attempt, for the
+// steps both share, such as preparing the Message-ID index.
+func (s *Store) validateWorkIQMailRetention(ctx context.Context, attempt int64) (workiq.AccountBinding, error) {
+	binding, err := s.validateWorkIQAttemptOwner(ctx, attempt)
+	if err != nil {
+		if window, windowErr := s.validateWorkIQWindowOwner(ctx, attempt); windowErr == nil {
+			return window, nil
+		}
+	}
+	return binding, err
+}
+
+// validateWorkIQWindowOwner admits only an open, verified mail window attempt: window retention
+// never runs under a whole-account attempt, and whole-account retention never under a window.
+func (s *Store) validateWorkIQWindowOwner(ctx context.Context, attempt int64) (workiq.AccountBinding, error) {
+	return s.validateWorkIQOwnerKind(ctx, attempt, true, true)
+}
+
+func (s *Store) validateWorkIQOwnerKind(ctx context.Context, attempt int64, retention, window bool) (workiq.AccountBinding, error) {
 	enabled, err := s.WorkIQEnabled(ctx)
 	if err != nil {
 		return workiq.AccountBinding{}, err
@@ -99,7 +121,11 @@ from workiq_attempts where id=?`, attempt).Scan(&family, &account, &status, &use
 	if status != "open" || userID == "" || !verified.Valid {
 		return workiq.AccountBinding{}, errors.New("WorkIQ data attempt has not been identity verified")
 	}
-	if kind != "sync" && kind != "coverage" && kind != "status" || retention && kind != "sync" {
+	allowed := map[string]bool{"sync": true, "coverage": !retention, "status": !retention, "mail_window": !retention}
+	if window {
+		allowed = map[string]bool{"mail_window": true}
+	}
+	if !allowed[kind] {
 		return workiq.AccountBinding{}, errors.New("WorkIQ outcome kind does not permit data retention")
 	}
 	clock, err := workIQStoredTime(verified)

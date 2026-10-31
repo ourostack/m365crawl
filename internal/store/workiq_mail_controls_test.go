@@ -221,7 +221,7 @@ func TestWorkIQMailControlsPopulatedAndBoundFaultsRollback(t *testing.T) {
 
 func TestWorkIQMailControlsMigratesActualMissingDeletedColumn(t *testing.T) {
 	ctx := context.Background()
-	legacyDDL := strings.Replace(schemaDDL, workiqSchemaDDL, "", 1)
+	legacyDDL := strings.Replace(strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), workiqWindowSchemaDDL, "", 1)
 	legacyDDL = strings.Replace(legacyDDL, "  deleted_at text,\n  unique(account, detail_key)", "  unique(account, detail_key)", 1)
 	path := writableArchivePath(t)
 	cs := must(crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: legacyDDL, SchemaVersion: 20}))
