@@ -936,9 +936,9 @@ func (rt *runtime) eventBlock(r *eventResult) {
 		_, _ = fmt.Fprintln(w)
 		rows := make([][]string, len(ev.RelatedMail))
 		for i, m := range ev.RelatedMail {
-			rows[i] = []string{stamp(m.ReceivedAt), render.Truncate(firstOf(m.FromName, m.FromAddress), 30), render.Truncate(oneLine(m.Subject), eventTextWidth), m.Match}
+			rows[i] = []string{stamp(m.DatedAt), render.Truncate(firstOf(m.FromName, m.FromAddress), 30), render.Truncate(oneLine(m.Subject), eventTextWidth), m.Match}
 		}
-		render.Table(w, []string{"received_at", "mail from", "subject", "match"}, rows, color)
+		render.Table(w, []string{"date", "mail from", "subject", "match"}, rows, color)
 	}
 	metaLines(w, r.meta, color)
 }

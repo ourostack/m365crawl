@@ -19,8 +19,8 @@ const (
 )
 
 // MailRelated is a message related to a calendar event. Match says how: "invite" (the message's
-// ical_uid is the event's iCalUId) or "subject" (the same normalised subject, received from 14 days
-// before to 7 days after the occurrence's start, and, when the event names any attendee or
+// ical_uid is the event's iCalUId) or "subject" (the same normalised subject, dated (DatedAt: sent
+// for Sent Items, received otherwise) from 14 days before to 7 days after the occurrence's start, and, when the event names any attendee or
 // organizer address, sent or received by at least one of them other than the mailbox owner; see
 // eventParticipants).
 type MailRelated struct {
@@ -29,7 +29,7 @@ type MailRelated struct {
 }
 
 // EventMail lists the mail related to one occurrence: invite matches first, then subject matches,
-// each newest first, at most limit (EventMailLimit when limit is 0 or less). Gone messages are left
+// each newest first by DatedAt, at most limit (EventMailLimit when limit is 0 or less). Gone messages are left
 // out. An archive without mail tables has no related mail.
 func (s *Store) EventMail(ctx context.Context, ev calendar.Event, limit int) ([]MailRelated, error) {
 	if limit <= 0 {
@@ -48,9 +48,15 @@ func (s *Store) EventMail(ctx context.Context, ev calendar.Event, limit int) ([]
 	if cond := copies.notCopy(`m.rowid`); cond != "" {
 		notCopy = ` and ` + cond
 	}
+	// Each match is read through datedRows, newest first by the time mail list dates a message by
+	// (mail_clock.go): a reply in Sent Items by when it was sent.
+	dated := func(cond string, args []any, since, until time.Time, n int) ([]MailRow, error) {
+		rows, rowArgs := copies.datedRows(cond+notCopy, args, since, until)
+		return s.mailRowsMarked(ctx, copies, false, ` from (`+rows+` order by 2 desc, 1 desc limit ?) p join mail_messages m on m.rowid=p.rid`+mailJoin+` order by p.at desc, m.rowid desc`, append(rowArgs, n)) //nolint:gosec // G202: fragments are package constants and integers; values are placeholders
+	}
 	uid := strings.ToLower(ev.ICalUID)
 	if uid != "" {
-		rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+` where m.ical_uid=? and m.gone_at is null`+notCopy+` order by m.received_at desc, m.rowid desc limit ?`, []any{uid, limit})
+		rows, err := dated(`m.ical_uid=? and m.gone_at is null`, []any{uid}, time.Time{}, time.Time{}, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -69,13 +75,15 @@ func (s *Store) EventMail(ctx context.Context, ev calendar.Event, limit int) ([]
 	// The invite matches are already listed; the participant check runs here, before the limit, so
 	// a match is never lost behind newer same-subject mail between other people.
 	w := where{}
-	w.add(`m.subject_norm=? and m.received_at>=? and m.received_at<=? and m.gone_at is null and (?='' or m.ical_uid<>?)`, norm, fmtTime(ev.Start.Add(-eventMailBefore)), fmtTime(ev.Start.Add(eventMailAfter)), uid, uid)
+	w.add(`m.subject_norm=? and m.gone_at is null and (?='' or m.ical_uid<>?)`, norm, uid, uid)
 	if len(people) > 0 {
 		in := inList(len(people))
 		args := stringArgs(people)
 		w.add(`(lower(m.sender_address) in `+in+` or exists(select 1 from mail_recipients r where r.message_rowid=m.rowid and lower(r.address) in `+in+`))`, append(args, args...)...)
 	}
-	rows, err := s.mailRows(ctx, false, ` from mail_messages m`+mailJoin+w.sql()+notCopy+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit-len(out))) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	// The window includes its end; stored times have millisecond precision, so one millisecond
+	// past it is the half-open bound datedRows takes.
+	rows, err := dated(strings.Join(w.conds, " and "), w.args, ev.Start.Add(-eventMailBefore), ev.Start.Add(eventMailAfter+time.Millisecond), limit-len(out))
 	if err != nil {
 		return nil, err
 	}
