@@ -108,6 +108,8 @@ func skillKeys() []string {
 		reflect.TypeFor[coverageResult](), reflect.TypeFor[coverageEntry]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
+	keys = append(keys, syncer.DocumentExtractNotAllowed, syncer.DocumentRightsUnknown, syncer.DocumentProtectionUnattributed,
+		syncer.DocumentProtectionUnverifiable, syncer.DocumentKindUnsupported)
 	return append(keys, documentFailureReasons...)
 }
 

@@ -28,7 +28,8 @@ type wireMessage struct {
 	Error  json.RawMessage `json:"error"`
 }
 
-// Client exposes only fetch; callers cannot select an MCP tool or client capability.
+// Client exposes fetch, and fixed document retrieve and fetch_blob calls; callers cannot select an
+// MCP tool, its arguments or a client capability.
 type Client struct {
 	p       *process
 	mu      contextMutex
@@ -250,6 +251,11 @@ func (c *Client) Fetch(ctx context.Context, path string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+	return c.fetchPath(ctx, relative)
+}
+
+// fetchPath fetches a path its caller already validated or built.
+func (c *Client) fetchPath(ctx context.Context, relative string) (Page, error) {
 	raw, err := c.call(ctx, requestTimeout, "tools/call", map[string]any{"name": "fetch", "arguments": map[string]any{"entityUrls": []string{relative}}})
 	if err != nil {
 		_ = c.Close()

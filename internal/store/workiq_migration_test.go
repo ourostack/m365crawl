@@ -33,7 +33,7 @@ func TestWorkIQSettingsAndScope(t *testing.T) {
 func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	ctx := context.Background()
 	path := writableArchivePath(t)
-	legacyDDL := strings.Replace(schemaDDL, workiqSchemaDDL, "", 1)
+	legacyDDL := strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1)
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: legacyDDL, SchemaVersion: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -66,8 +66,8 @@ func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	must0(old.Close())
 	s := must(Open(ctx, path))
 	defer func() { _ = s.Close() }()
-	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != WorkIQSchemaVersion {
-		t.Fatalf("migration version=%d, want %d", got, WorkIQSchemaVersion)
+	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != SchemaVersion {
+		t.Fatalf("migration version=%d, want %d", got, SchemaVersion)
 	}
 	var oldClock string
 	must0(s.db.QueryRowContext(ctx, `select value from meta where key='historical-clock'`).Scan(&oldClock))
@@ -136,10 +136,10 @@ func TestWorkIQSchema22MigratesEitherVersion21(t *testing.T) {
 			must0(old.Close())
 			s := must(Open(ctx, path))
 			defer func() { _ = s.Close() }()
-			if got := rowCount(t, s, `select max(version) from schema_migrations`); got != WorkIQSchemaVersion ||
+			if got := rowCount(t, s, `select max(version) from schema_migrations`); got != SchemaVersion ||
 				rowCount(t, s, `select count(*) from sqlite_master where name in ('scout_sources','workiq_attempts')`) != 2 ||
 				rowCount(t, s, `select count(*) from accounts`) != 1 {
-				t.Fatalf("version 21 did not migrate to %d with both sources' tables and its data (version %d)", WorkIQSchemaVersion, got)
+				t.Fatalf("version 21 did not migrate to %d with both sources' tables and its data (version %d)", SchemaVersion, got)
 			}
 			if enabled := must(s.WorkIQEnabled(ctx)); enabled != (tc.without == scoutSchemaDDL) {
 				t.Fatal("migration changed the earlier build's WorkIQ opt-in", enabled)

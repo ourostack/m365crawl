@@ -462,7 +462,13 @@ func main() {
 				Caps     map[string]any `json:"capabilities"`
 				Name     string         `json:"name"`
 				Args     struct {
-					URLs []string `json:"entityUrls"`
+					URLs  []string `json:"entityUrls"`
+					Query string   `json:"query"`
+					Path  string   `json:"path"`
+					Caps  []struct {
+						Name  string              `json:"name"`
+						Items []map[string]string `json:"items_by_sharepoint_ids"`
+					} `json:"capabilities"`
 				} `json:"arguments"`
 			} `json:"params"`
 		}
@@ -490,6 +496,10 @@ func main() {
 			reply["result"] = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}},
 				"serverInfo": map[string]any{"name": "synthetic-acquisition", "version": "1"}}
 		case "tools/call":
+			if result := documentTool(request.Params.Name, request.Params.Args.Query, request.Params.Args.Path, request.Params.Args.Caps); result != nil {
+				reply["result"] = result
+				break
+			}
 			if request.Params.Name != "fetch" || len(request.Params.Args.URLs) != 1 {
 				os.Exit(82)
 			}
@@ -515,6 +525,12 @@ func main() {
 			}
 			if result := failFrom(path); result != nil {
 				reply["result"] = result
+				break
+			}
+			if data, status, ok := documentItem(path); ok {
+				reply["result"] = map[string]any{"structuredContent": map[string]any{"results": []any{
+					map[string]any{"data": data, "statusCode": status},
+				}}}
 				break
 			}
 			data, status := fetch(path)

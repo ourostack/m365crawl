@@ -19,7 +19,7 @@ type contentGroup struct {
 	Signin  contentSigninCmd  `cmd:"" help:"Explicit user-agreed visible window for the tool-owned profile."`
 	List    contentListCmd    `cmd:"" help:"List immutable retained observations offline, known native text-modified newest first."`
 	Search  contentSearchCmd  `cmd:"" help:"Search supported retained text/title/native metadata offline."`
-	Show    contentShowCmd    `cmd:"" help:"Read one cloud/local-text/engage-observation:N offline, with first100 occurrences and full archive SQL."`
+	Show    contentShowCmd    `cmd:"" help:"Read one cloud/local-text/engage-observation:N or workiq-document:N offline, with first100 occurrences and full archive SQL."`
 	Sources contentSourcesCmd `cmd:"" help:"Read registered source coverage offline, including failed and metadata-only zero-hit participants."`
 }
 type contentFetchGroup struct {
@@ -27,6 +27,7 @@ type contentFetchGroup struct {
 	EngageHome   contentFetchEngageHomeCmd   `cmd:"" help:"Explicitly capture bounded native Engage Home-session thread-starter observations (always partial; no URL or account selector)."`
 	Page         contentFetchPageCmd         `cmd:"" help:"Explicitly acquire a supported rich-text page projection (always partial)."`
 	Stream       contentFetchStreamCmd       `cmd:"" help:"Explicitly acquire one verified selected transcript, or verified metadata without a selected body."`
+	Doc          contentFetchDocCmd          `cmd:"" help:"Explicitly read one OneDrive/SharePoint Office file through WorkIQ, only when its rights allow extraction (always partial)."`
 }
 
 const contentHelp = "Explicit fetch only: `content fetch page URL` or `content fetch stream URL [--transcript-id ID]`. Supported HTTPS tenant.sharepoint.com or tenant.sharepoint-df.com /sites/NAME or /teams/NAME targets: /SitePages/NAME.aspx, or /_layouts/15/stream.aspx?id=ENCODED_NATIVE_FILE_PATH. No sharing-ticket replay, library crawl or automatic retry.\n" +
@@ -34,9 +35,11 @@ const contentHelp = "Explicit fetch only: `content fetch page URL` or `content f
 	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Generated retries/fixes/next commands name this same absolute --db archive; run them as printed. A retry preserves the original request, not an automatic format correction. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
 func (contentGroup) Help() string {
-	return engageSelectedHelp + engageHelp + localContentHelp + contentHelp
+	return engageSelectedHelp + engageHelp + localContentHelp + contentHelp + documentHelp
 }
-func (contentFetchGroup) Help() string { return engageSelectedHelp + engageHelp + contentHelp }
+func (contentFetchGroup) Help() string {
+	return engageSelectedHelp + engageHelp + contentHelp + documentHelp
+}
 func splitContentSite(path string) string {
 	parts := strings.Split(path, "/")
 	return "/" + parts[1] + "/" + parts[2]
@@ -153,6 +156,9 @@ func (c *contentShowCmd) Run(rt *runtime) error {
 	if strings.HasPrefix(c.ID, "engage-observation:") {
 		return rt.showEngage(c.ID)
 	}
+	if strings.HasPrefix(c.ID, "workiq-document:") {
+		return rt.showWorkIQDocument(c.ID)
+	}
 	if strings.HasPrefix(c.ID, "local-text-observation:") {
 		id, err := localObservationID(c.ID)
 		if err != nil {
@@ -201,8 +207,12 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 		sources := []store.CloudSource{}
 		local := []store.LocalTextSource{}
 		engage := store.EngageSnapshot{}
+		var documents []store.WorkIQDocument
 		if st != nil {
 			var err error
+			if documents, err = st.WorkIQDocuments(rt.ctx); err != nil {
+				return nil, err
+			}
 			sources, err = st.CloudSources(rt.ctx, 0)
 			if err != nil {
 				return nil, err
@@ -225,6 +235,7 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 			if len(engage.Sources) == 0 {
 				engage.Registrations = nil
 			}
+			documents = nil // documents are not knowledge sources
 			if len(sources)+len(local)+len(engage.Sources) == 0 {
 				return nil, store.ErrKnowledgeSourceUnknown
 			}
@@ -247,6 +258,10 @@ func (c *contentSourcesCmd) Run(rt *runtime) error {
 		}
 		for _, item := range res.EngageContentCoverage.Instances {
 			out = append(out, item)
+		}
+		res.WorkIQDocumentCoverage = workIQDocumentCoverageOf(documents)
+		for _, d := range documents {
+			out = append(out, workIQDocumentItemOf(d, rt.g.MaxText))
 		}
 		res.Items = shape(rt, out)
 		res.Count = len(out)
@@ -288,7 +303,7 @@ func (rt *runtime) contentRead(label string, fn func(*store.Store) (*listResult,
 	}
 	res.sourceOnly = true
 	if res.Count == 0 {
-		res.Note = "no matching archived content; inspect content sources, explicitly content capture --file FILE or content fetch page/stream URL or content fetch engage-home"
+		res.Note = "no matching archived content; inspect content sources, explicitly content capture --file FILE, content fetch page/stream URL, content fetch engage-home or content fetch doc LINK"
 	}
 	return rt.write(label, res)
 }
