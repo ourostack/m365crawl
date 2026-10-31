@@ -60,27 +60,29 @@ func markPurgedLog(ctx context.Context, tx *sql.Tx) error {
 // nothing unless a purge asked for it. A reader still using an older snapshot keeps the checkpoint
 // from finishing; ClearPurgedLog then tries again, and when every attempt is blocked it reports
 // Pending and keeps the request for the next call. It never reports a log it could not truncate
-// as cleared. Removing the request writes the meta table's page to the new log; that page holds
-// no purged content.
+// as cleared: every return that leaves the request in place, errors included, reports Pending
+// (an error before the request could be read reports it too, since it may be there). Removing the
+// request writes the meta table's page to the new log; that page holds no purged content.
 func (s *Store) ClearPurgedLog(ctx context.Context) (res PurgedLog, err error) {
+	res.Pending = true
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return PurgedLog{}, err
+		return res, err
 	}
 	defer func() { err = errors.Join(err, conn.Close()) }()
 	var pending int
 	if err := conn.QueryRowContext(ctx, `select count(*) from meta where key=?`, purgedLogKey).Scan(&pending); err != nil {
-		return PurgedLog{}, err
+		return res, err
 	}
 	if pending == 0 {
 		return PurgedLog{}, nil
 	}
 	var wait int
 	if err := conn.QueryRowContext(ctx, `pragma busy_timeout`).Scan(&wait); err != nil {
-		return PurgedLog{}, err
+		return res, err
 	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`pragma busy_timeout=%d`, purgedLogWait.Milliseconds())); err != nil {
-		return PurgedLog{}, err
+		return res, err
 	}
 	defer func() {
 		_, rerr := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf(`pragma busy_timeout=%d`, wait))
@@ -92,19 +94,20 @@ func (s *Store) ClearPurgedLog(ctx context.Context) (res PurgedLog, err error) {
 		// log counts are -1 and there is no log to clear.
 		var busy, frames, done int
 		if err := conn.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done); err != nil {
-			return PurgedLog{Pending: true, Attempts: res.Attempts}, err
-		}
-		if busy == 0 {
-			_, err := conn.ExecContext(ctx, `delete from meta where key=?`, purgedLogKey)
 			return res, err
 		}
+		if busy == 0 {
+			if _, err := conn.ExecContext(ctx, `delete from meta where key=?`, purgedLogKey); err != nil {
+				return res, err
+			}
+			res.Pending = false
+			return res, nil
+		}
 		if res.Attempts >= purgedLogAttempts {
-			res.Pending = true
 			return res, nil
 		}
 		select {
 		case <-ctx.Done():
-			res.Pending = true
 			return res, ctx.Err()
 		case <-time.After(purgedLogPause):
 		}

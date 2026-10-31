@@ -138,9 +138,11 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 			Fix:     "Free disk space if the disk is full, then run m365crawl sync or m365crawl scout sync again; the re-scrub resumes where it stopped."}
 	}
 	// Credential values a purge overwrote must not stay in the write-ahead log: a truncating
-	// checkpoint clears it, in this run or, when readers block it, in a later one.
-	purgedLog, logErr := clearPurgedLog(st, ctx)
-	rep.PurgedLogPending = purgedLog.Pending
+	// checkpoint clears it, in this run or, when readers block it, in a later one. A purge that
+	// committed is cleared after even when the run was cancelled, as the run is recorded then, and
+	// a clear that failed may have left the log as it was, so it is reported pending.
+	purgedLog, logErr := clearPurgedLog(st, context.WithoutCancel(ctx))
+	rep.PurgedLogPending = purgedLog.Pending || logErr != nil
 	if logErr != nil && err == nil {
 		err = errs.DBError(logErr)
 	}

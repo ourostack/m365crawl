@@ -202,6 +202,10 @@ func TestClearPurgedLogFaultsSurface(t *testing.T) {
 				if err == nil && res.Pending {
 					return errors.New("nothing blocks the checkpoint, yet it is pending")
 				}
+				// A failure before the log was truncated leaves the request, and says so.
+				if err != nil && !res.Pending && pendingPurgedLog(t, s) {
+					t.Errorf("%s: an error left the request but reported nothing pending: %v", kind, err)
+				}
 				return err
 			}
 			sweepKind(t, s, inj, kind, false, op, nil)
@@ -218,8 +222,8 @@ func TestClearPurgedLogStopsWhenCancelled(t *testing.T) {
 	purgeOne(t, s)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := s.ClearPurgedLog(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled before starting: %v", err)
+	if res, err := s.ClearPurgedLog(ctx); !errors.Is(err, context.Canceled) || !res.Pending {
+		t.Fatalf("cancelled before starting: %+v %v", res, err)
 	}
 
 	reader, err := sql.Open("sqlite", sqliteFileURI(path, "mode=ro"))

@@ -1194,6 +1194,27 @@ func TestSyncReportsThePurgedLog(t *testing.T) {
 	}
 }
 
+// A cancelled run still clears the log (the purge it follows has committed), and a failure to
+// clear it is reported as pending even when the run already failed.
+func TestSyncClearsThePurgedLogWhenCancelled(t *testing.T) {
+	old := clearPurgedLog
+	t.Cleanup(func() { clearPurgedLog = old })
+	var cancelled error = errors.New("not called")
+	clearPurgedLog = func(_ *store.Store, ctx context.Context) (store.PurgedLog, error) {
+		cancelled = ctx.Err()
+		return store.PurgedLog{}, errors.New("disk I/O error")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldRead := beforeRead
+	t.Cleanup(func() { beforeRead = oldRead })
+	beforeRead = func(*writer) { cancel() } // Ctrl-C while the source is read
+	r, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: newDB(t)})
+	if err == nil || cancelled != nil || !r.PurgedLogPending {
+		t.Fatalf("err=%v clear saw %v pending=%v", err, cancelled, r.PurgedLogPending)
+	}
+}
+
 // Records of a database that was not read completely are flushed after the read, and a failure of
 // that last flush fails the source.
 func TestFinalRecordFlushFailureFailsTheSource(t *testing.T) {
