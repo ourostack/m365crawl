@@ -54,8 +54,8 @@ func TestOlderMailRouteOffersAWindowOfTheRangeTheCacheLacks(t *testing.T) {
 		t.Fatalf("want one route, got %v", routes)
 	}
 	cmds := routeCommands(t, routes[0])
-	// The window ends at the latest cache start among the folders the read reaches (Sent Items).
-	if !strings.Contains(cmds[2], "workiq sync --source mail --since 2026-01-01T00:00:00Z --until 2026-09-07T08:00:00Z") ||
+	// The window ends an hour past the latest cache start among the folders the read reaches (Sent Items).
+	if !strings.Contains(cmds[2], "workiq sync --source mail --since 2026-01-01T00:00:00Z --until 2026-09-07T09:00:00Z") ||
 		!strings.Contains(routeStepDoes(t, routes[0], "workiq sync"), "prove it complete") {
 		t.Fatalf("window step = %q", cmds[2])
 	}
@@ -66,7 +66,7 @@ func TestOlderMailRouteOffersAWindowOfTheRangeTheCacheLacks(t *testing.T) {
 	}
 
 	// A listing-only window leaves the range unproven: the route offers proof with its cost.
-	seedWindow(t, e, "2026-01-01T00:00:00Z", "2026-09-07T08:00:00Z", false)
+	seedWindow(t, e, "2026-01-01T00:00:00Z", "2026-09-07T09:00:00Z", false)
 	routes = read("--since", "2026-01-01T00:00:00Z")
 	if len(routes) != 1 || !strings.Contains(routes[0]["fix"].(string), "completeness is not proven") {
 		t.Fatalf("unproven route = %v", routes)
@@ -77,7 +77,7 @@ func TestOlderMailRouteOffersAWindowOfTheRangeTheCacheLacks(t *testing.T) {
 
 	// Two proven windows whose union holds the range end the route; a gap between them does not.
 	seedWindow(t, e, "2026-01-01T00:00:00Z", "2026-05-01T00:00:00Z", true)
-	seedWindow(t, e, "2026-05-01T00:00:01Z", "2026-09-07T08:00:00Z", true)
+	seedWindow(t, e, "2026-05-01T00:00:01Z", "2026-09-07T09:00:00Z", true)
 	if routes := read("--since", "2026-01-01T00:00:00Z"); len(routes) != 1 || !strings.Contains(routeCommands(t, routes[0])[2], "--coverage proof") {
 		t.Fatalf("a one-second hole between windows was treated as proven: %v", routes)
 	}
@@ -92,7 +92,7 @@ func TestOlderMailRouteOffersAWindowOfTheRangeTheCacheLacks(t *testing.T) {
 
 func TestOlderMailRouteForANamedFolderWeighsDeferredTwins(t *testing.T) {
 	e := routeEnv(t)
-	seedWindow(t, e, "2026-01-01T00:00:00Z", "2026-09-07T08:00:00Z", true,
+	seedWindow(t, e, "2026-01-01T00:00:00Z", "2026-09-07T09:00:00Z", true,
 		`insert into workiq_frontiers(family,account_id,resource,scope,qualification) values('mail','`+mailAccount+`','/me/mailFolders/g-sent/messages/delta','window:x','workiq-v1')`,
 		`insert into workiq_folders(account_id,graph_id,folder_key,well_known,inventory_attempt) values('`+mailAccount+`','g-sent',900,'sent',0)`,
 		`insert into workiq_window_members(frontier_id,graph_id,account_id,folder_id,received_at,in_window,state,observed_at,match_rowid)
