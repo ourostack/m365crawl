@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,7 +48,7 @@ func attemptsAllowWindows(t *testing.T, s *Store) bool {
 
 func TestWorkIQWindowMigrationKeepsEveryAttemptAndReference(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "m365crawl.db")
+	path := writableArchivePath(t)
 	s := must(Open(ctx, path))
 	attempt := seedCompletedWorkIQMail(t, s)
 	proof := must(s.InspectWorkIQMailCompletion(ctx, attempt))
@@ -192,7 +191,7 @@ func (c failingPragmaConn) ExecContext(ctx context.Context, q string, args ...an
 
 func TestWorkIQWindowMigrationFailsTheOpenWhenSettingsCannotBeRestored(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "m365crawl.db")
+	path := writableArchivePath(t)
 	s := must(Open(ctx, path))
 	downgradeWorkIQWindowSchema(t, s)
 	must0(s.Close())
