@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -97,7 +98,8 @@ func list(messages ...string) string { return `{"value":[` + strings.Join(messag
 func newServer(t *testing.T, enabled, account bool) (*server, Options) {
 	t.Helper()
 	ctx := context.Background()
-	db := filepath.Join(t.TempDir(), "m365crawl.db")
+	// A missing parent is created private by store.Open; an existing temporary one is refused on Windows.
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
 	s, err := store.Open(ctx, db)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +203,7 @@ func TestSwitchFailsClosedAndRoundTrips(t *testing.T) {
 			t.Fatal("read back", got)
 		}
 		info, err := os.Stat(SwitchPath(db))
-		if err != nil || info.Mode().Perm() != 0o600 {
+		if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Fatal("switch file is not private", info, err)
 		}
 	}

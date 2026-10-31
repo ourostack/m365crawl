@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openclaw/crawlkit/output"
 
@@ -416,6 +417,26 @@ func TestWritesOutcomeThatCannotBePrinted(t *testing.T) {
 	rt := newRuntime(context.Background(), &Globals{}, failingWriter{}, &bytes.Buffer{})
 	rt.format = output.JSON
 	if err := rt.writeOutcome(writesOutcome{directedwrites.Result{ExitClass: da.ExitUnknown}}); err == nil || !strings.Contains(err.Error(), "pipe closed") {
+		t.Fatal(err)
+	}
+}
+
+func TestTheConfirmationDoesNotWaitForever(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	old, oldWait := openTerminal, confirmWait
+	openTerminal = func() (io.ReadWriteCloser, error) {
+		return struct {
+			io.Reader
+			io.Writer
+			io.Closer
+		}{reader, io.Discard, reader}, nil
+	}
+	confirmWait = 20 * time.Millisecond
+	t.Cleanup(func() { openTerminal, confirmWait = old, oldWait })
+	err := confirmOnTerminal("Type on: ", "on")
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != "write_terminal_required" || !strings.Contains(coded.Message, "in time") {
 		t.Fatal(err)
 	}
 }

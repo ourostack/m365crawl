@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	da "github.com/ourostack/m365crawl/internal/directedactions"
 	"github.com/ourostack/m365crawl/internal/directedwrites"
@@ -61,12 +62,26 @@ func confirmOnTerminal(prompt, want string) error {
 	if _, err := fmt.Fprint(term, prompt); err != nil {
 		return terminalRequired("the terminal could not be written")
 	}
-	line, _ := bufio.NewReader(io.LimitReader(term, 1024)).ReadString('\n')
-	if strings.TrimSpace(line) != want {
-		return terminalRequired("the typed confirmation did not match")
+	typed := make(chan string, 1)
+	go func() {
+		line, _ := bufio.NewReader(io.LimitReader(term, 1024)).ReadString('\n')
+		typed <- line
+	}()
+	timer := time.NewTimer(confirmWait)
+	defer timer.Stop()
+	select {
+	case line := <-typed:
+		if strings.TrimSpace(line) != want {
+			return terminalRequired("the typed confirmation did not match")
+		}
+		return nil
+	case <-timer.C:
+		return terminalRequired("nobody typed the confirmation in time")
 	}
-	return nil
 }
+
+// confirmWait bounds the wait for the person to type, so a console nobody watches cannot hang a run.
+var confirmWait = 2 * time.Minute
 
 type writesOnCmd struct{}
 type writesOffCmd struct{}

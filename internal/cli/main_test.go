@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,6 +41,8 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("M365CRAWL_REAL_CACHE", "0")
 	// doctor names the browser transcripts fetch would run: the same one on every machine.
 	findBrowser = func(string) (string, browser.Kind, error) { return testBrowserPath, browser.KindEdge, nil }
+	// No test may wait on the machine's own terminal or console; writes tests install a fake one.
+	openTerminal = func() (io.ReadWriteCloser, error) { return nil, errors.New("no terminal in tests") }
 	code := m.Run()
 	removeSearchTemplates()
 	_ = os.RemoveAll(home)
