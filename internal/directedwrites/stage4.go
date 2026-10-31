@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	da "github.com/ourostack/m365crawl/internal/directedactions"
+	"github.com/ourostack/m365crawl/internal/outlookmail"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
@@ -111,6 +112,15 @@ func draftDigest(subject, contentType, content string, to, cc, bcc []string) str
 	return "sha256:" + hex.EncodeToString(digest.Sum(nil))[:32]
 }
 
+// bodyIs says a whole body is text. An update replaces the body, so unlike a reply's check, a body
+// that only starts with the text does not prove the update applied.
+func bodyIs(contentType, content, text string) bool {
+	if strings.EqualFold(contentType, "html") {
+		content = outlookmail.HTMLText([]byte(content))
+	}
+	return collapse(content) == collapse(workiq.ScrubText(text))
+}
+
 // draftUpdated says the draft now holds what the update wrote.
 func draftUpdated(ctx context.Context, s session, row store.DirectedWrite, p person) bool {
 	page, err := s.Fetch(ctx, "/me/messages/"+row.Message+"?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,body")
@@ -120,7 +130,7 @@ func draftUpdated(ctx context.Context, s session, row store.DirectedWrite, p per
 		Body                                      struct{ ContentType, Content string }
 		ToRecipients, CcRecipients, BccRecipients []address
 	}
-	if err != nil || json.Unmarshal(page.Data, &m) != nil || !m.IsDraft || !bodyMatches(m.Body.ContentType, m.Body.Content, row.Text) {
+	if err != nil || json.Unmarshal(page.Data, &m) != nil || !m.IsDraft || !bodyIs(m.Body.ContentType, m.Body.Content, row.Text) {
 		return false
 	}
 	if row.Subject != "" && !sameText(row.Subject, m.Subject) {

@@ -461,3 +461,22 @@ func TestVerifyOtherActions(t *testing.T) {
 }
 
 var oldVersion = draftDigest("Old", "text", "old", nil, nil, nil)
+
+func TestAnUnknownUpdateIsNotDoneByAPrefix(t *testing.T) {
+	ctx := context.Background()
+	srv, opts := draftServer(t)
+	srv.pages[editDraft] = reply{data: `{"id":"edit-1","isDraft":true,"subject":"New","toRecipients":[{"emailAddress":{"address":"a@example.invalid"}}],"body":{"contentType":"text","content":"new text. Thanks"}}`}
+	req := updateRequest()
+	req.ExpectedVersion = ""
+	srv.actAnswer = workiq.WriteAnswer{Kind: workiq.WriteUnknown, Code: "workiq_timeout"}
+	srv.onAct = nil // the update did not apply
+	if got, _ := Send(ctx, opts, req); got.Outcome != da.Unknown {
+		t.Fatal("an unchanged draft whose body starts with the text counted as updated", got)
+	}
+	if got, err := Verify(ctx, opts, 1); err != nil || got.Outcome != da.Unknown {
+		t.Fatal(got, err)
+	}
+	if !bodyIs("html", "<p>new  text</p>", "new text") || bodyIs("text", "new text. Thanks", "new text") {
+		t.Fatal("bodyIs")
+	}
+}
