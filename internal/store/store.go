@@ -61,8 +61,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
 		return nil, err
 	}
-	// Batch schema creation so cold opens do not commit each DDL statement or retain a partial schema after failure.
-	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: writerPragmas + "begin;\n" + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
+	// Batch schema creation, writer pragmas included, so cold opens do not commit each DDL statement
+	// or retain a partial schema after failure. The vacuum marker reads the tables before the schema
+	// creates them, so it stays first inside the batch.
+	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: "begin;\n" + writerPragmas + schemaDDL + "\ncommit;", SchemaVersion: SchemaVersion})
 	if err != nil {
 		return nil, err
 	}
