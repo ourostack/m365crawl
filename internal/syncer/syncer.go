@@ -124,7 +124,19 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 		_ = record(StatusFailed)
 		return Report{}, nil, errs.DBError(err)
 	}
+	// Scout sessions archived under older scrub or parser rules are scrubbed again from the archive
+	// alone, as the Teams credential purge runs at every sync; no Scout folder is read. A failure
+	// (a full disk, say) is reported and does not stop Teams and Outlook: what committed stays, and
+	// the next sync resumes.
+	var scoutRescrub store.ScoutRescrub
+	scoutErr := contained(func() (e error) { scoutRescrub, e = scoutArchiveRescrub(ctx, st); return })
 	rep, changes, err = r.run(ctx, started)
+	rep.ScoutRescrubbed, rep.ScoutRescrubUnparseable = scoutRescrub.Rewritten, scoutRescrub.Unparseable
+	if scoutErr != nil && ctx.Err() == nil {
+		rep.ScoutRescrubError = &SourceError{Code: "scout_rescrub_failed",
+			Message: "archived Scout sessions could not all be scrubbed again under the current rules (" + scoutErr.Error() + "); Teams and Outlook were still synced",
+			Fix:     "Free disk space if the disk is full, then run m365crawl sync or m365crawl scout sync again; the re-scrub resumes where it stopped."}
+	}
 	if healthErr := r.recordSourceHealth(context.WithoutCancel(ctx), &rep, err); healthErr != nil {
 		rep.FailedSourceHealth = nil // The persistence boundary did not establish checked health.
 		return rep, changes, errs.DBError(errors.Join(err, healthErr, record(StatusFailed)))
@@ -877,9 +889,11 @@ var (
 		return st.EnsureCalendar(ctx, calendarZone(), at)
 	}
 	ensureTranscripts = (*store.Store).EnsureTranscriptParts
-	deriveTranscripts = (*store.Session).DeriveTranscriptParts
-	calendarZone      = func() *time.Location { return time.Local }
-	rederiveArchive   = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
+	// scoutArchiveRescrub is RescrubScoutArchive; tests make it fail.
+	scoutArchiveRescrub = RescrubScoutArchive
+	deriveTranscripts   = (*store.Session).DeriveTranscriptParts
+	calendarZone        = func() *time.Location { return time.Local }
+	rederiveArchive     = func(ctx context.Context, st *store.Store) (*store.Migration, error) { return st.Rederive(ctx) }
 	// backfillApplications is store.BackfillMessageApplications; tests make it fail.
 	backfillApplications = (*store.Store).BackfillMessageApplications
 	batchSize            = 2000

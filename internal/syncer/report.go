@@ -57,9 +57,17 @@ type Report struct {
 	// reply and citation evidence from their stored raw_json: the first sync after an upgrade, or
 	// after a new mapper version. Those messages count as no update and no edit.
 	ApplicationBackfill *store.ApplicationBackfillReport `json:"application_backfill,omitempty"`
-	StartedAt           time.Time                        `json:"started_at"`
-	FinishedAt          time.Time                        `json:"finished_at"`
-	FailedSourceHealth  []store.SourceHealth             `json:"failed_source_health"`
+	// ScoutRescrubbed counts archived Scout session versions scrubbed and mapped again under new
+	// rules before the sources were read (see RescrubScoutArchive). Omitted when zero.
+	ScoutRescrubbed int `json:"scout_rescrubbed,omitempty"`
+	// ScoutRescrubUnparseable counts re-scrubbed versions that no longer mapped and were blanked.
+	ScoutRescrubUnparseable int `json:"scout_rescrub_unparseable,omitempty"`
+	// ScoutRescrubError is a re-scrub that stopped (code scout_rescrub_failed); it never fails the
+	// sync, and the next sync resumes it.
+	ScoutRescrubError  *SourceError         `json:"scout_rescrub_error,omitempty"`
+	StartedAt          time.Time            `json:"started_at"`
+	FinishedAt         time.Time            `json:"finished_at"`
+	FailedSourceHealth []store.SourceHealth `json:"failed_source_health"`
 }
 
 // SourceReport is one Teams origin's outcome.

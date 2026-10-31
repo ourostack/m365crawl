@@ -102,7 +102,10 @@ type listResult struct {
 	NativeAttendeeEvidence *AttendeeEvidenceCoverage `json:"native_attendee_evidence,omitempty"`
 	// LoopCoverage is the participating Loop sources of a Loop or shared search result, outside
 	// --fields, clipping and zero hits.
-	LoopCoverage          *loopCoverage          `json:"loop_coverage,omitempty"`
+	LoopCoverage *loopCoverage `json:"loop_coverage,omitempty"`
+	// ScoutCoverage is every registered Scout folder beside a Scout result, outside --fields,
+	// clipping and zero hits.
+	ScoutCoverage         *scoutCoverage         `json:"scout_coverage,omitempty"`
 	ContentCoverage       *cloudCoverage         `json:"content_coverage,omitempty"`
 	LocalContentCoverage  *localCoverage         `json:"local_content_coverage,omitempty"`
 	EngageContentCoverage *EngageContentCoverage `json:"engage_content_coverage,omitempty"`

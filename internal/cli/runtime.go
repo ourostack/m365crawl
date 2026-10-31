@@ -211,6 +211,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		began = rt.now()
 	}
 	rt.synced = &syncedInfo{Seconds: math.Round(rt.now().Sub(began).Seconds()*10) / 10, Status: rep.Status}
+	rt.warnScoutRescrub(rep)
 	if err == nil {
 		return nil, nil
 	}

@@ -2,7 +2,7 @@
   "schema_version": "crawlkit.control.v1",
   "id": "m365crawl",
   "display_name": "m365crawl",
-  "description": "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline. Private Copilot history and Planner/Microsoft To Do assigned-task ingestion are not included and remain uncommitted/deferred. Shared-chat bot/citation claims and recap action items are not substitutes for those workflows.",
+  "description": "Mirror Microsoft 365 on this machine — Teams chats, Outlook mail and your calendar — into one local SQLite archive that agents can read offline. Private Copilot chat history is not included: Microsoft offers no route for one signed-in user to read it, only an organization-wide export that an administrator must approve. Planner/Microsoft To Do assigned-task ingestion is not included and remains uncommitted/deferred. Shared-chat bot/citation claims and recap action items are not substitutes for those workflows.",
   "binary": {
     "name": "m365crawl"
   },
@@ -471,6 +471,59 @@
       "json": true,
       "mutates": true
     },
+    "scout list": {
+      "title": "scout list (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "scout",
+        "list"
+      ],
+      "json": true
+    },
+    "scout search": {
+      "title": "scout search (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "scout",
+        "search",
+        "\u003cwords\u003e"
+      ],
+      "json": true
+    },
+    "scout show": {
+      "title": "scout show (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "scout",
+        "show",
+        "\u003cscout-session-id\u003e"
+      ],
+      "json": true
+    },
+    "scout sources": {
+      "title": "scout sources (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "scout",
+        "sources"
+      ],
+      "json": true
+    },
+    "scout sync": {
+      "title": "scout sync (opt-in Scout session history from the local OneDrive folder; sync never downloads; show needs scout-session:ID)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "scout",
+        "sync"
+      ],
+      "json": true,
+      "mutates": true
+    },
     "search": {
       "argv": [
         "m365crawl",
@@ -532,7 +585,8 @@
     "notes",
     "documents",
     "loop",
-    "content"
+    "content",
+    "scout"
   ],
   "privacy": {
     "contains_private_messages": true,
@@ -546,7 +600,8 @@
       "office_json_metadata",
       "office_registry_metadata",
       "onedrive_usage_metadata",
-      "explicit_resident_office_text"
+      "explicit_resident_office_text",
+      "scout_session_history"
     ]
   }
 }

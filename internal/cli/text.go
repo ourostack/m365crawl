@@ -88,6 +88,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		rt.renderNoteDetails(r)
 		rt.renderPeopleDetails(r)
 		rt.renderLoopDetails(r)
+		rt.renderScoutDetails(r)
 		if err := rt.renderDocumentDetails(r); err != nil {
 			return err
 		}
@@ -97,6 +98,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		}
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
+		rt.renderScoutCoverage(r.ScoutCoverage)
 		rt.renderEngageCoverage(r.EngageContentCoverage)
 		if rt.cmd == "content show" {
 			for _, item := range r.Items {
@@ -203,6 +205,8 @@ func (rt *runtime) renderText(label string, v any) error {
 			}
 			_, _ = fmt.Fprintf(w, "discovery %s: %s: %s\n", where, outcome.Code, outcome.Meaning)
 		}
+	case scoutSyncResult:
+		rt.renderScoutSync(r)
 	case loopSyncResult:
 		_, _ = fmt.Fprintf(w, "loop: %d projected, %d unchanged, %d skipped, %d failed\n", r.Projected, r.Unchanged, r.Skipped, r.Failed)
 		rt.renderLoopCoverage(r.LoopCoverage)
@@ -228,6 +232,13 @@ func (rt *runtime) renderText(label string, v any) error {
 		render.Table(w, []string{"kind", "seen", "inserted", "updated", "unchanged"}, rows, color)
 		if m := r.Migrated; m != nil {
 			_, _ = fmt.Fprintf(w, "migrated: %d rows re-derived from stored records (derivation %d to %d); not counted as updates\n", m.Rows, m.From, m.To)
+		}
+		if r.ScoutRescrubbed > 0 {
+			_, _ = fmt.Fprintf(w, "scout: %s scrubbed and mapped again under new rules, from the archive alone (%d no longer mapped and were blanked)\n",
+				plural(r.ScoutRescrubbed, "archived session version", "archived session versions"), r.ScoutRescrubUnparseable)
+		}
+		if e := r.ScoutRescrubError; e != nil {
+			_, _ = fmt.Fprintf(w, "failed scout re-scrub: %s: %s\nfix: %s\n", e.Code, e.Message, e.Fix)
 		}
 		if a := r.ApplicationBackfill; a != nil {
 			_, _ = fmt.Fprintf(w, "application evidence: %d archived messages projected (mapper v%d; %d failed, %d with no application claims); not counted as updates\n", a.Processed, a.MapperVersion, a.Failed, a.Absent)
@@ -488,6 +499,18 @@ func (rt *runtime) listTable(r *listResult) {
 		case searchLoopItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{"-", x.Source, x.Path, x.TextState, "loop show " + x.ID, oneLine(x.Text)})
+		case scoutSessionItem:
+			cols, textCol = scoutSessionColumns, 6
+			rows = append(rows, scoutSessionRow(x))
+		case scoutDetailItem:
+			cols, textCol = scoutSessionColumns, 6
+			rows = append(rows, scoutSessionRow(x.scoutSessionItem))
+		case scoutMessageItem:
+			cols, textCol = scoutMessageColumns, 4
+			rows = append(rows, scoutMessageRow(x))
+		case scoutSourceItem:
+			cols, textCol = scoutSourceColumns, -1
+			rows = append(rows, scoutSourceRow(x))
 		case loopSourceItem:
 			cols, textCol = []string{"source", "status", "coverage", "snapshot_match", "last_snapshot", "reason", "retry"}, -1
 			retry := "-" // a healthy source needs none

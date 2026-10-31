@@ -100,6 +100,7 @@ type cliApp struct {
 	Notes         notesGroup       `cmd:"" help:"Capture and read local OneNote indexed notes, text and OCR with retained content and explicit source coverage."`
 	Docs          documentsGroup   `cmd:"" help:"Capture and inspect Office document metadata and sharing claims; no implicit file opening or text fetch."`
 	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive; every row names the one cached snapshot it comes from. No fetch, replay or full page."`
+	Scout         scoutGroup       `cmd:"" help:"Opt in to Microsoft Scout session history: copy session files already in your local OneDrive folder into the archive, then list, search and show them offline. Never downloads a cloud-only file."`
 	Drafts        draftsGroup      `cmd:"" help:"Inspect own cached Teams compose-body projections already archived; never refresh or send."`
 	Content       contentGroup     `cmd:"" help:"Explicitly fetch supported SharePoint page/Stream evidence; read and search retained observations offline."`
 	Transcripts   transcriptsGroup `cmd:"" help:"List meetings with recordings and their transcript parts, in order, with what is fetched. Offline: reads only the archive. With <meeting> (an event id or key, a meeting chat link or thread id, or a call id) it lists that meeting's parts. The list flags (--since, --until, --state, --limit) are listed by: m365crawl transcripts list --help."`
@@ -194,7 +195,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "content list", "content search", "content show", "content sources", "content capture", "drafts list"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "scout list", "scout search", "scout show", "scout sources", "content list", "content search", "content show", "content sources", "content capture", "drafts list"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
