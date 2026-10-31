@@ -349,7 +349,11 @@ func (rt *runtime) searchRangeCoverage(st *store.Store, p searchPlan, f store.Fi
 		}
 	}
 	if folder != "" {
-		folders = matchFolders(folders, folder)
+		// --folder unknown (messages without a folder row) and other folders no row names hold
+		// no judged role; only an archive without any mail folder says why there is no mail.
+		if folders = matchFolders(folders, folder); len(folders) == 0 {
+			return nil
+		}
 	}
 	return run.mailRangeCoverage(folders, f.Since, f.Until, m)
 }

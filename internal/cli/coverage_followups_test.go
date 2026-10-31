@@ -57,6 +57,9 @@ func TestSearchRangeCoverage(t *testing.T) {
 	if got := scopesOf(rangeCoverage(t, search("--source", "chats", "--since", since, "--limit", "1"))); got != "chats:chats,chats:meetings,chats:channels" {
 		t.Fatalf("chats %s", got)
 	}
+	if m := search("--source", "mail", "--folder", "unknown", "--since", since, "words"); m["range_coverage"] != nil {
+		t.Fatalf("folder unknown %v", m["range_coverage"])
+	}
 	if m := search("--source", "notes", "--since", since, "words"); m["range_coverage"] != nil {
 		t.Fatalf("notes %v", m["range_coverage"])
 	}
