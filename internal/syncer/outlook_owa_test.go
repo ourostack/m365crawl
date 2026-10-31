@@ -450,6 +450,10 @@ func TestSyncOWADatabaseFailuresCannotVouchForRead(t *testing.T) {
 		{"run-row", `create trigger owa_fail before insert on sync_runs when new.source='outlook|Default|mail' begin select raise(abort,'synthetic'); end`, false, false},
 		{"unchanged-run", `create trigger owa_fail before insert on sync_runs when new.source='outlook|Default|mail' and new.status='unchanged' begin select raise(abort,'synthetic'); end`, false, true},
 		{"skip-marker", `create trigger owa_fail before insert on meta when new.key='outlook_skipped:Default' begin select raise(abort,'synthetic'); end`, true, false},
+		{"mailbox-set", `update meta set value='{' where key='outlook_mailboxes:outlook/Default'`, false, false},
+		{"mailbox-set-write", `create trigger owa_fail before insert on meta when new.key='outlook_mailboxes:outlook/Default' begin select raise(abort,'synthetic'); end`, false, false},
+		// Archive opening recreates a dropped table, so a view without the identity column stands in.
+		{"mailbox-view", `alter table mail_source_ids rename to mail_source_ids_hidden; create view mail_source_ids as select account, kind from mail_source_ids_hidden`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, db := owaRoot(t, "calendar"), newDB(t)

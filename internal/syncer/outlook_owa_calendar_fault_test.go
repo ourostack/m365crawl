@@ -245,7 +245,7 @@ func TestOWACollectorsCanceledBeforeOpenOwnNoReader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	mailClosed, calClosed := true, true
-	_, mailErr := collectOWAMail(ctx, "unused", "outlook/Default", false, &mailClosed)
+	_, mailErr := collectOWAMailboxes(ctx, "unused", &mailClosed)
 	_, calErr := collectOWACalendar(ctx, "unused", "outlook/Default", false, &calClosed)
 	if !errors.Is(mailErr, context.Canceled) || !errors.Is(calErr, context.Canceled) || !mailClosed || !calClosed {
 		t.Fatal("an unstarted read acquired ownership or lost cancellation")

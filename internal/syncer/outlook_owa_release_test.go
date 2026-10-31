@@ -126,7 +126,7 @@ func TestOWAMailCanceledBeforeCollectorOwnsNoReader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	released := true
-	_, err := collectOWAMail(ctx, "unused", "outlook/Default", false, &released)
+	_, err := collectOWAMailboxes(ctx, "unused", &released)
 	if !errors.Is(err, context.Canceled) || !released {
 		t.Fatal("an unstarted collector acquired ownership or lost cancellation")
 	}

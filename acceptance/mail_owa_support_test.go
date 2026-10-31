@@ -376,9 +376,19 @@ func owaExpectRefusal(t *testing.T, s owaObservation) {
 	t.Helper()
 	o, err := outlookowa.Open(s.ctx, s.profile.Source.LevelDBDir, s.profile.Source.BlobDir)
 	if o != nil {
+		// Several populated mailboxes open; the product refuses them unless each identity is proved.
+		mailboxes, readErr := outlookowa.CollectMailboxes(s.ctx, o)
 		if closeErr := o.Close(); closeErr != nil {
 			t.Error("origin_close_failed")
 		}
+		unproved := false
+		for _, mb := range mailboxes {
+			unproved = unproved || mb.Identity == ""
+		}
+		if readErr != nil || len(mailboxes) < 2 || !unproved {
+			t.Fatal("fixed_layout_refusal_missing")
+		}
+		return
 	}
 	var guard *hxstore.GuardError
 	if !errors.As(err, &guard) || guard.Code != "outlook_mail_layout_unsupported" {

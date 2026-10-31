@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 
@@ -119,7 +120,7 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 	for _, p := range s.native {
 		detail := "profile " + p.Name + ": cached paths readable; mail not read yet"
 		if st != nil {
-			state, err := st.MailState(rt.ctx, "outlook/"+p.Name)
+			state, mailboxes, err := st.OWAProfileMailState(rt.ctx, "outlook/"+p.Name)
 			switch {
 			case err != nil:
 				detail = "profile " + p.Name + ": cannot read the archived mail state"
@@ -129,10 +130,13 @@ func (rt *runtime) outlookNativeCheck(s outlookMailSource, st *store.Store) chec
 				c.Warn, c.Fix = true, "Run `m365crawl sync` and read its coded error."
 			case state.Read:
 				detail = "profile " + p.Name + ": cached paths readable; mail read " + oneUnit(rt.now().Sub(state.ReadAt)) + " ago"
-				if stale, err := rt.outlookStale(st, "outlook_mail", "outlook/"+p.Name); err != nil || stale != nil {
+				if stale, err := rt.outlookMailStale(st, mailboxes); err != nil || stale != nil {
 					detail += "; " + owaStaleDetail(stale, err)
 					c.Warn, c.Fix = true, owaStaleFix(err)
 				}
+			}
+			if err == nil && len(mailboxes) > 1 {
+				detail += fmt.Sprintf(" (%d mailboxes)", len(mailboxes))
 			}
 		}
 		calendarDetail := "calendar not read yet"
@@ -170,4 +174,16 @@ func owaStaleFix(err error) string {
 		return "Run `m365crawl sync`."
 	}
 	return outlookStaleFix
+}
+
+// outlookMailStale is the stale cache health of the first of a profile's mailbox accounts whose
+// Outlook cache stopped changing, or nil.
+func (rt *runtime) outlookMailStale(st *store.Store, accounts []string) (*store.SourceHealth, error) {
+	health, err := outlookCacheHealth(st, rt.ctx)
+	for _, a := range accounts {
+		if stale := store.OutlookCacheStale(health, "outlook_mail", a); stale != nil {
+			return stale, err
+		}
+	}
+	return nil, err
 }

@@ -55,7 +55,7 @@ func TestOpenFiltersValuesBeforeCollection(t *testing.T) {
 }
 
 func TestOpenRefusesLayoutsBeforeLoadingValues(t *testing.T) {
-	for _, tc := range []struct{ variant, reason string }{{"unknown", "content_database_missing"}, {"multiple", "multiple_mailboxes"}, {"missing-store", "required_store_missing"}} {
+	for _, tc := range []struct{ variant, reason string }{{"unknown", "content_database_missing"}, {"missing-store", "required_store_missing"}} {
 		t.Run(tc.variant, func(t *testing.T) {
 			base := filepath.Join("..", "..", "testdata", "outlook-owa-fixture", tc.variant, "IndexedDB")
 			o, err := Open(context.Background(), filepath.Join(base, fixtureOrigin+".indexeddb.leveldb"), "")
@@ -235,5 +235,31 @@ func TestOpenRealLazySnapshotReadsCloseBeforeCleanup(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(snap); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("closed private table snapshot was not cleaned: %v", err)
+	}
+}
+
+func TestOpenAdmitsSeveralMailboxesWithoutProvingTheirIdentity(t *testing.T) {
+	base := filepath.Join("..", "..", "testdata", "outlook-owa-fixture", "multiple", "IndexedDB")
+	o, err := Open(context.Background(), filepath.Join(base, fixtureOrigin+".indexeddb.leveldb"), filepath.Join(base, fixtureOrigin+".indexeddb.blob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = o.Close() })
+	mailboxes, err := CollectMailboxes(context.Background(), o)
+	if err != nil || len(mailboxes) != 2 {
+		t.Fatalf("several mailboxes = %d, %v", len(mailboxes), err)
+	}
+	for _, mb := range mailboxes {
+		// The synthetic fixture carries no mailboxInfo, so neither mailbox is attributable.
+		if mb.Identity != "" || len(mb.Result.Messages) != 5 {
+			t.Fatalf("fixture mailbox = %q, %d messages", mb.Identity, len(mb.Result.Messages))
+		}
+	}
+	var guard *hxstore.GuardError
+	if _, err := Collect(context.Background(), o, "outlook/Default", true); !errors.As(err, &guard) || guard.Detail != "multiple_mailboxes" {
+		t.Fatalf("single-mailbox collection must still refuse several mailboxes: %v", err)
+	}
+	if _, err := CollectMailboxes(context.Background(), nil); err == nil {
+		t.Fatal("nil origin accepted")
 	}
 }

@@ -2,6 +2,8 @@ package outlookowa
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"reflect"
 	"sort"
@@ -81,7 +83,111 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 	if err != nil {
 		return Result{}, err
 	}
+	r, _, err := collectDatabase(ctx, o, db, stores, account)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := CheckExpected(r, expectMail); err != nil {
+		return Result{}, err
+	}
+	return r, nil
+}
+
+// Mailbox is one populated content database's mail, read before it is attributed to an account.
+type Mailbox struct {
+	// Identity is MailboxIdentity of the mailboxInfo every folder and message record carries;
+	// empty when any record lacks it or the records disagree.
+	Identity string
+	Result   Result
+}
+
+// MailboxIdentity hashes the normalized mailbox and signed-in addresses of a mailboxInfo. The
+// database name is never part of it. It is unkeyed, so it stays in memory: the archive stores only
+// a copy sealed with its own key, and public account names never derive from it.
+func MailboxIdentity(mailboxAddress, userIdentity string) string {
+	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+	sum := sha256.Sum256([]byte("m365crawl-owa-mailbox-v1\x00" + norm(mailboxAddress) + "\x00" + norm(userIdentity)))
+	return hex.EncodeToString(sum[:])
+}
+
+// CollectMailboxes reads every populated content database; attribution belongs to the caller.
+func CollectMailboxes(ctx context.Context, origin *indexeddb.Origin) ([]Mailbox, error) {
+	if origin == nil {
+		return nil, errors.New("outlookowa: origin_missing")
+	}
+	return collectMailboxes(ctx, origin)
+}
+
+func collectMailboxes(ctx context.Context, o reader) ([]Mailbox, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dbs, err := o.Databases()
+	if err != nil {
+		return nil, errors.New("outlookowa: metadata_unreadable")
+	}
+	selected, err := selectMailboxes(dbs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Mailbox, 0, len(selected))
+	for _, s := range selected {
+		r, identity, err := collectDatabase(ctx, o, s.db, s.stores, "")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Mailbox{Identity: identity, Result: r})
+	}
+	return out, nil
+}
+
+// CheckExpected refuses a read that found no headers for an account whose archive holds mail.
+func CheckExpected(r Result, expectMail bool) error {
+	if expectMail && r.Notes.HeadersSeen == 0 {
+		return layout("no_mail_objects")
+	}
+	return nil
+}
+
+// SetAccount attributes the collected messages to the account chosen by the caller.
+func (r *Result) SetAccount(account string) {
+	for i := range r.Messages {
+		r.Messages[i].Value.Account = account
+	}
+}
+
+// identities proves one mailbox identity across a database's folder and message records.
+type identities struct {
+	seen    map[string]bool
+	missing bool
+}
+
+func (ids *identities) observe(info any) {
+	smtp, _ := field(info, "mailboxSmtpAddress").(string)
+	user, _ := field(info, "userIdentity").(string)
+	if !validID(smtp) || !validID(user) {
+		ids.missing = true
+		return
+	}
+	if ids.seen == nil {
+		ids.seen = map[string]bool{}
+	}
+	ids.seen[MailboxIdentity(smtp, user)] = true
+}
+
+func (ids *identities) resolved() string {
+	if ids.missing || len(ids.seen) != 1 {
+		return ""
+	}
+	var only string
+	for only = range ids.seen {
+	}
+	return only
+}
+
+func collectDatabase(ctx context.Context, o reader, db indexeddb.Database, stores map[string]int64, account string) (Result, string, error) {
 	r := Result{}
+	ids := identities{}
 	folders, headers, bodies := newRecords(), newRecords(), newRecords()
 	seen := map[string]bool{}
 	folderUncertain := false
@@ -91,7 +197,7 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 		folderUncertain = true
 	}
 	for _, name := range []string{"folders", "messages", "messageBodies"} {
-		err = o.Records(db.ID, stores[name], func(rec indexeddb.Record) error {
+		err := o.Records(db.ID, stores[name], func(rec indexeddb.Record) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -119,6 +225,7 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 					folderUncertain = true
 					return nil
 				}
+				ids.observe(field(value, "mailboxInfo"))
 				folders.put(id, value, &r)
 			case "messages":
 				id := r.text(value, "ItemId", "Id")
@@ -129,6 +236,10 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 					return nil
 				}
 				seen[id] = true
+				ids.observe(field(field(value, "ItemId"), "mailboxInfo"))
+				if parent := field(field(value, "ParentFolderId"), "mailboxInfo"); parent != nil {
+					ids.observe(parent)
+				}
 				headers.put(id, value, &r)
 			case "messageBodies":
 				id := r.text(value, "ItemId", "Id")
@@ -146,14 +257,11 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 			return nil
 		})
 		if err := ctx.Err(); err != nil {
-			return Result{}, err
+			return Result{}, "", err
 		}
 		if err != nil {
-			return Result{}, errors.New("outlookowa: records_unreadable")
+			return Result{}, "", errors.New("outlookowa: records_unreadable")
 		}
-	}
-	if expectMail && r.Notes.HeadersSeen == 0 {
-		return Result{}, layout("no_mail_objects")
 	}
 	mappedFolders := map[string]Folder{}
 	for id, value := range folders.values {
@@ -210,7 +318,7 @@ func collect(ctx context.Context, o reader, account string, expectMail bool) (Re
 	sort.Slice(r.Messages, func(i, j int) bool { return r.Messages[i].ID < r.Messages[j].ID })
 	sort.Strings(r.SeenIDs)
 	sort.Slice(r.Losses, func(i, j int) bool { return r.Losses[i].Code < r.Losses[j].Code })
-	return r, nil
+	return r, ids.resolved(), nil
 }
 
 // selectMailStores is the single case-exact layout guard shared by opening and collecting.
@@ -251,6 +359,49 @@ func selectMailStores(dbs []indexeddb.Database) (indexeddb.Database, map[string]
 		}
 	}
 	return db, stores, nil
+}
+
+type selectedMailbox struct {
+	db     indexeddb.Database
+	stores map[string]int64
+}
+
+// selectMailboxes applies the same case-exact store guard to every populated content database.
+func selectMailboxes(dbs []indexeddb.Database) ([]selectedMailbox, error) {
+	matched := false
+	var out []selectedMailbox
+	for _, db := range dbs {
+		if db.Name != "owa-offline-data" && !strings.HasPrefix(db.Name, "owa-offline-data-") {
+			continue
+		}
+		matched = true
+		if len(db.Stores) == 0 {
+			continue
+		}
+		stores := map[string]int64{}
+		for _, s := range db.Stores {
+			switch s.Name {
+			case "folders", "messages", "messageBodies":
+				if _, exists := stores[s.Name]; exists {
+					return nil, layout("required_store_ambiguous")
+				}
+				stores[s.Name] = s.ID
+			}
+		}
+		for _, name := range []string{"folders", "messages", "messageBodies"} {
+			if _, ok := stores[name]; !ok {
+				return nil, layout("required_store_missing")
+			}
+		}
+		out = append(out, selectedMailbox{db: db, stores: stores})
+	}
+	if !matched {
+		return nil, layout("content_database_missing")
+	}
+	if len(out) == 0 {
+		return nil, layout("required_store_missing")
+	}
+	return out, nil
 }
 
 func folderRoot(folders map[string]Folder, messages []Message) string {

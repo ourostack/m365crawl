@@ -24,15 +24,21 @@ func Open(ctx context.Context, leveldbDir, blobDir string) (*indexeddb.Origin, e
 	if err != nil {
 		return nil, sourceFailure("metadata_unreadable", err)
 	}
-	db, stores, err := selectMailStores(dbs)
+	selected, err := selectMailboxes(dbs)
 	if err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	keep := map[[2]int64]bool{}
+	for _, s := range selected {
+		for _, name := range []string{"folders", "messages", "messageBodies"} {
+			keep[[2]int64{s.db.ID, s.stores[name]}] = true
+		}
+	}
 	o, err := mailOpenWith(leveldbDir, blobDir, indexeddb.OpenOptions{KeepStore: func(dbID, storeID int64) bool {
-		return dbID == db.ID && (storeID == stores["folders"] || storeID == stores["messages"] || storeID == stores["messageBodies"])
+		return keep[[2]int64{dbID, storeID}]
 	}})
 	if err != nil {
 		return nil, sourceFailure("records_unreadable", err)

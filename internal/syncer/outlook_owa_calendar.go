@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/errs"
@@ -24,23 +25,29 @@ var (
 )
 
 func (r *runner) outlookOWAProfile(ctx context.Context, p outlookowa.Profile) []outlookOutcome {
-	mail := outlookOutcome{key: mailKey(outlookKey(p.Name))}
+	mails := []outlookOutcome{{key: mailKey(outlookKey(p.Name))}}
 	cal := outlookOutcome{key: outlookKey(p.Name)}
 	if err := contained(func() error {
-		mail, cal = r.readOWAProfile(ctx, p, true)
+		mails, cal = r.readOWAProfile(ctx, p, true)
 		return nil
 	}); err != nil {
-		mail.err, cal.err = err, err
+		for i := range mails {
+			mails[i].err = err
+		}
+		cal.err = err
 	}
-	if mail.err != nil {
-		mail.err = owaSourceError(mail.err)
-		r.rememberOWAFailure(ctx, p.Name, mail.err)
+	for i := range mails {
+		if mails[i].err != nil {
+			mails[i].err = owaSourceError(mails[i].err)
+			// The key names the account: outlook|<profile>[/mailbox-<id>]|mail.
+			r.rememberOWAFailure(ctx, strings.TrimSuffix(strings.TrimPrefix(mails[i].key, "outlook|"), "|mail"), mails[i].err)
+		}
 	}
 	if cal.err != nil {
 		cal.err = owaCalendarSourceError(cal.err)
 		r.rememberOWACalendarFailure(ctx, p.Name, cal.err)
 	}
-	return []outlookOutcome{cal, mail}
+	return append([]outlookOutcome{cal}, mails...)
 }
 
 func (r *runner) rememberOWACalendarFailure(ctx context.Context, profile string, err error) {
