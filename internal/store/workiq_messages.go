@@ -26,7 +26,7 @@ func workIQHasRows(ctx context.Context, tx *sql.Tx, kind string) (bool, error) {
 	if err := tx.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return false, err
 	}
-	if version < 21 {
+	if version < WorkIQSchemaVersion {
 		return false, nil
 	}
 	var exists bool

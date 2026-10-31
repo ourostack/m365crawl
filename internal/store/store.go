@@ -112,7 +112,7 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 	if found > SchemaVersion {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
 	}
-	if found >= 21 {
+	if found >= WorkIQSchemaVersion {
 		_, err := (&Store{db: db}).hasWorkIQ(ctx)
 		return err
 	}

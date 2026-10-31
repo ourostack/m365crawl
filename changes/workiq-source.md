@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Writable archives migrate to schema21 for optional, disabled-by-default WorkIQ source state. Older read-only archives are not migrated; older binaries are not promised to read the new schema.
+- Writable archives migrate to schema 22 (after the Scout tables of schema 21) for optional, disabled-by-default WorkIQ source state. Older read-only archives are not migrated; older binaries are not promised to read the new schema.
 - Apply schema creation atomically, avoiding a separate commit per DDL statement and partial table creation when setup fails.
 - Check before every WorkIQ mail page that the archive's disk can hold the rest of a whole-account sync, including admitting every fetched item, and stop with `workiq_disk_space` (position kept) and the estimate otherwise. The whole folder tree is listed before the first message page, so the check refuses before any message is fetched; a catch-up after a complete sync needs only headroom. Routes state the measured cost, or say whole-account sync is refused on that archive and how much space to free.
 - Reopen a WorkIQ process that ends mid-run and retry the same page; when it keeps ending, stop with resumable `workiq_retry_later`. Failed runs report an allowlisted `diagnostic` (exit status and output tails reduced to common log words, error class names, status numbers and hashed request IDs, never message content), kept as source health's `last_diagnostic`; a failed server, tool or JSON-RPC result adds `server` (HTTP status, Graph error code from WorkIQ's nested error object or JSON-RPC code, and the allowlisted shape of its text, at most 256 bytes); other numbers, such as counts and phone numbers, are redacted.

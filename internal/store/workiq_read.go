@@ -30,7 +30,7 @@ func workIQReadColumns(ctx context.Context, tx *sql.Tx, kind string) (string, st
 	if err := tx.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return "", "", err
 	}
-	if version < 21 {
+	if version < WorkIQSchemaVersion {
 		return "'desktop_cache'", "NULL", nil
 	}
 	// All SQL fragments are fixed above. No item or sender-controlled value is

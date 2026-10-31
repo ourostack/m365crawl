@@ -22,7 +22,7 @@ func maybeIndexWorkIQMail(ctx context.Context, tx *sql.Tx, account string, rowid
 	if err := tx.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return err
 	}
-	if version < 21 {
+	if version < WorkIQSchemaVersion {
 		return nil
 	}
 	var active bool

@@ -1,5 +1,9 @@
 package store
 
+// WorkIQSchemaVersion is the archive schema that added the optional WorkIQ source state (version
+// 22, after the Scout tables of version 21). An archive below it has no WorkIQ state to read.
+const WorkIQSchemaVersion = 22
+
 // WorkIQ state is append/update-only, including retired pages and cursors.
 const workiqSchemaDDL = `
 create table if not exists workiq_accounts(

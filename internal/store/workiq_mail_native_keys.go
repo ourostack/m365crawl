@@ -44,7 +44,7 @@ func prepareWorkIQNativeMailMetadata(ctx context.Context, tx *sql.Tx, b MailBatc
 	if err := tx.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return b, err
 	}
-	if version < 21 {
+	if version < WorkIQSchemaVersion {
 		return b, nil
 	}
 	var active bool

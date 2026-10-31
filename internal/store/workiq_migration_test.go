@@ -66,8 +66,8 @@ func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	must0(old.Close())
 	s := must(Open(ctx, path))
 	defer func() { _ = s.Close() }()
-	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != 21 {
-		t.Fatalf("migration version=%d, want21", got)
+	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != WorkIQSchemaVersion {
+		t.Fatalf("migration version=%d, want %d", got, WorkIQSchemaVersion)
 	}
 	var oldClock string
 	must0(s.db.QueryRowContext(ctx, `select value from meta where key='historical-clock'`).Scan(&oldClock))
@@ -103,6 +103,46 @@ func TestWorkIQCurrentSchemaMissingTablesRefusedBeforeRepair(t *testing.T) {
 			if err == nil {
 				must0(reopened.Close())
 				t.Fatal("current incomplete source state was accepted or recreated as checked-empty metadata")
+			}
+		})
+	}
+}
+
+// Version 21 was assigned twice before release: the Scout tables (the released schema 21) and an
+// earlier WorkIQ build. Opening either at version 22 adds the missing tables and keeps what each
+// already holds; reads below 22 treat WorkIQ as absent.
+func TestWorkIQSchema22MigratesEitherVersion21(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, without string
+	}{{"scout-21", workiqSchemaDDL}, {"earlier-workiq-21", scoutSchemaDDL}} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writableArchivePath(t)
+			cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(schemaDDL, tc.without, "", 1), SchemaVersion: 21})
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := &Store{cs: cs, db: cs.DB()}
+			must0(legacy.migrate(ctx))
+			must0(legacy.ApplyAccount(ctx, acctA))
+			if tc.without == scoutSchemaDDL {
+				must(cs.DB().ExecContext(ctx, `insert into meta(key,value) values('workiq_enabled','1')`))
+			}
+			must0(cs.Close())
+			old := must(OpenReadOnly(ctx, path))
+			if enabled, err := old.WorkIQEnabled(ctx); err != nil || enabled {
+				t.Fatalf("a version-21 archive read WorkIQ state: %v %v", enabled, err)
+			}
+			must0(old.Close())
+			s := must(Open(ctx, path))
+			defer func() { _ = s.Close() }()
+			if got := rowCount(t, s, `select max(version) from schema_migrations`); got != WorkIQSchemaVersion ||
+				rowCount(t, s, `select count(*) from sqlite_master where name in ('scout_sources','workiq_attempts')`) != 2 ||
+				rowCount(t, s, `select count(*) from accounts`) != 1 {
+				t.Fatalf("version 21 did not migrate to %d with both sources' tables and its data (version %d)", WorkIQSchemaVersion, got)
+			}
+			if enabled := must(s.WorkIQEnabled(ctx)); enabled != (tc.without == scoutSchemaDDL) {
+				t.Fatal("migration changed the earlier build's WorkIQ opt-in", enabled)
 			}
 		})
 	}

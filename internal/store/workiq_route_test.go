@@ -37,7 +37,7 @@ func TestWorkIQMailCompleteNeedsARecordedWholeAccountSync(t *testing.T) {
 func TestWorkIQMailCompleteOnOlderAndBrokenArchives(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
-	must(s.db.ExecContext(ctx, `delete from schema_migrations where version>=21`))
+	must(s.db.ExecContext(ctx, `delete from schema_migrations where version>=22`))
 	if must(s.WorkIQMailComplete(ctx, mailAcct)) {
 		t.Fatal("an older schema claimed WorkIQ mail")
 	}

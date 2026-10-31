@@ -82,7 +82,7 @@ func (s *Store) workIQMailCoverage(ctx context.Context) ([]CoverageRow, error) {
 c.oldest_at,c.newest_at,c.count,c.read_at,'',NULL
 from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key
 order by c.account,c.folder_key`
-	if version >= 21 {
+	if version >= WorkIQSchemaVersion {
 		query = `with source_accounts as (
 select account_id,min(case when cache_seen in (0,1) and server_seen in (0,1) and cache_seen+server_seen>0 then 1 else 0 end) as valid
 from workiq_rows where kind='mail' group by account_id),

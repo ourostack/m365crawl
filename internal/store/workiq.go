@@ -54,7 +54,7 @@ func (s *Store) hasWorkIQ(ctx context.Context) (bool, error) {
 	if err := s.db.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return false, err
 	}
-	if version < 21 {
+	if version < WorkIQSchemaVersion {
 		return false, nil
 	}
 	var tables int
