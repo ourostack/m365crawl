@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,7 +256,7 @@ func TestWorkIQHealthReadFaultsDoNotInventCheckedOrCoveredState(t *testing.T) {
 			seedWorkIQCoveredHealth(t, s)
 			inj := injectFaults(t, s)
 			sweepKind(t, s, inj, kind, false, func(ctx context.Context, s *Store) error {
-				_, err := s.SourceHealth(ctx)
+				_, err := s.ReadSourceHealth(ctx) // every SourceHealth read, then the stale-cache reads
 				return err
 			}, nil)
 		})
@@ -305,12 +306,17 @@ func TestReadSourceHealthLetsWorkIQCoverAStaleMailCache(t *testing.T) {
 			checked = mailT0.Add(time.Millisecond)
 		}
 		must0(s.RecordRun(ctx, Run{Source: "outlook|" + strings.TrimPrefix(mailAcct, "outlook/") + "|mail", Status: "ok", Fingerprint: "fp", StartedAt: checked, FinishedAt: checked}))
+		// An unrelated failing source stays alongside the stale entry.
+		must0(s.RecordRun(ctx, Run{Source: "teams", Status: "failed", ErrorCode: "teams_cache_unreadable", StartedAt: checked, FinishedAt: checked}))
 		old := workIQHealthNow
 		workIQHealthNow = func() time.Time { return finish.Add(time.Hour) }
 		stale := OutlookCacheStale(must(s.ReadSourceHealth(ctx)), "outlook_mail", mailAcct)
 		workIQHealthNow = old
 		if covers && stale != nil || !covers && (stale == nil || !stale.LastOKAt.Equal(checked)) {
 			t.Fatalf("covers=%t: stale entry %+v", covers, stale)
+		}
+		if rows := must(s.ReadSourceHealth(ctx)); !slices.ContainsFunc(rows, func(h SourceHealth) bool { return h.Source == "teams" }) {
+			t.Fatal("the failing source was lost beside the stale cache")
 		}
 		if OutlookCacheStale(must(s.SourceHealth(ctx)), "outlook_mail", mailAcct) != nil {
 			t.Fatal("failures-only health carried a stale cache entry")
