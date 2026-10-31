@@ -179,8 +179,17 @@ func (rt *runtime) sinceRoutes(st *store.Store, coverage []store.CoverageRow, si
 		for _, f := range reached[account] {
 			starts = append(starts, f.Folder+" from "+f.CacheCoversSince.In(displayZone).Format("2006-01-02"))
 		}
-		r, ok, err := rt.windowRoute(st, account, "This read starts before the cached mail of "+account+" in "+
-			strings.Join(starts, ", ")+".", since, until, reached[account], named)
+		end := time.Time{}
+		var keys []uint32
+		var kinds []string
+		for _, f := range reached[account] {
+			end = laterTime(end, earlierTime(until, *f.CacheCoversSince).Add(workIQWindowOverlap))
+			if named {
+				keys, kinds = append(keys, f.key), append(kinds, f.Kind)
+			}
+		}
+		r, ok, err := rt.windowRoute(st, account, routeRangeBeforeCache, "This read starts before the cached mail of "+account+" in "+
+			strings.Join(starts, ", ")+".", since, end, keys, kinds)
 		if err != nil {
 			return nil, err
 		}
@@ -256,25 +265,20 @@ var workIQRouteNow = time.Now
 // reaches.
 const workIQWindowOverlap = time.Hour
 
-// windowRoute routes a read that starts before the cache to a WorkIQ mail window of the range the
-// cache does not hold: from the read's start to an hour past the latest cache start among the
-// folders it reaches, or past the read's end when that is earlier. The hour lets the window overlap
-// the cache, and reach past the read's end, for Sent Items, which coverage dates by sent time. The route disappears once windows have
-// proven that range on every folder.
-func (rt *runtime) windowRoute(st *store.Store, account, situation string, since, until time.Time, folders []routeFolder, named bool) (r workIQRoute, ok bool, err error) {
+// windowRoute routes an account to a WorkIQ mail window from since to end, rounded out to whole
+// seconds and never ending after now, and then the same read; reason is the route's. A read before
+// the cache asks for the range the cache does not hold: from its start to an hour past the latest
+// cache start among the folders it reaches, or past its end when that is earlier. A range the
+// archive does not cover asks for that range and an hour past it. The hour lets the window overlap
+// the cache, and reach past the range's end, for Sent Items, which coverage dates by sent time.
+// keys and kinds name the folders of a read that names its folders, for the deferred-twin check.
+// The route disappears once windows have proven the range on every folder.
+func (rt *runtime) windowRoute(st *store.Store, account, reason, situation string, since, end time.Time, keys []uint32, kinds []string) (r workIQRoute, ok bool, err error) {
 	setup, ok, err := rt.mailRouteSetup(st, account)
 	if err != nil || !ok {
 		return r, false, err
 	}
 	since = since.UTC().Truncate(time.Second)
-	end := time.Time{}
-	var keys []uint32
-	var kinds []string
-	for _, f := range folders {
-		end = laterTime(end, earlierTime(until, *f.CacheCoversSince).Add(workIQWindowOverlap))
-		keys = append(keys, f.key)
-		kinds = append(kinds, f.Kind)
-	}
 	if t := end.UTC().Truncate(time.Second); t.Before(end) {
 		end = t.Add(time.Second)
 	} else {
@@ -284,9 +288,6 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 	if now := workIQRouteNow().UTC().Truncate(time.Second); end.After(now) {
 		end = now
 	}
-	if !named {
-		keys, kinds = nil, nil
-	}
 	info, err := workIQMailWindowRoute(st, rt.ctx, account, since, end, keys, kinds)
 	if err != nil {
 		return r, false, err
@@ -295,13 +296,13 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 	case info.Covered && info.Twins == 0:
 		return r, false, nil
 	case info.Covered:
-		return rt.wholeAccountRoute(st, setup, account, routeRangeBeforeCache, situation+fmt.Sprintf(
+		return rt.wholeAccountRoute(st, setup, account, reason, situation+fmt.Sprintf(
 			" WorkIQ mail windows proved this range, but %d server messages in it match mail cached in other folders; only a whole-account sync can tell them apart.", info.Twins))
 	}
 	bounds := []string{"workiq", "sync", "--source", "mail", "--since", since.Format(time.RFC3339), "--until", end.Format(time.RFC3339)}
 	if info.Unproven {
 		pages := (info.OpenItems + store.WorkIQMailItemsPerPage - 1) / store.WorkIQMailItemsPerPage
-		r = rt.newWorkIQRoute(setup, "mail", account, routeRangeBeforeCache, situation+
+		r = rt.newWorkIQRoute(setup, "mail", account, reason, situation+
 			" Some matching server mail was fetched; completeness is not proven. Prove the range with one more sync, then repeat the read.", time.Time{})
 		r.Next = append(r.Next, startStep{Command: rt.recoveryCommand(false, account, append(bounds, "--coverage", "proof")...),
 			Does: fmt.Sprintf("prove this range complete by following every folder's changes from its start: about %d items in about %d pages (roughly %s). "+
@@ -309,12 +310,21 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 				workIQRouteDuration((pages+store.WorkIQMailPagesPerMinute-1)/store.WorkIQMailPagesPerMinute))}, rt.repeatStep())
 		return r, true, nil
 	}
-	r = rt.newWorkIQRoute(setup, "mail", account, routeRangeBeforeCache, situation+
+	r = rt.newWorkIQRoute(setup, "mail", account, reason, situation+
 		" WorkIQ can fetch this range of the account's server mail into this archive: run these steps, then repeat the read.", time.Time{})
 	r.Next = append(r.Next, startStep{Command: rt.recoveryCommand(false, account, bounds...),
 		Does: "fetch this account's server mail received in this range and prove it complete: it lists the folders, counts each one, and stops before " +
 			"fetching more than the archive's disk can hold. Run it again only while its result says resumable: true, otherwise follow the error's fix"}, rt.repeatStep())
 	return r, true, nil
+}
+
+// rangeRoute routes a range the archive does not cover, [since, until), to a WorkIQ mail window of
+// that range (#313). A range without a start cannot be a window: it keeps the whole-account sync.
+func (rt *runtime) rangeRoute(st *store.Store, account, situation string, since, until time.Time) (workIQRoute, bool, error) {
+	if since.IsZero() {
+		return rt.mailRoute(st, account, routeRangeNotCovered, situation)
+	}
+	return rt.windowRoute(st, account, routeRangeNotCovered, situation, since, until.Add(workIQWindowOverlap), nil, nil)
 }
 
 func workIQRouteDuration(minutes int64) string {

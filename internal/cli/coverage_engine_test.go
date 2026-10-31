@@ -215,17 +215,20 @@ func TestMailEntryReportsEvidenceFailures(t *testing.T) {
 	})
 }
 
-// A route is looked up once per account; one that does not apply gives no steps.
+// A route is looked up once per account and range; one that does not apply gives no steps.
 func TestMailStepsAreLookedUpOnce(t *testing.T) {
 	run, _ := engineRun(t)
 	asked := 0
 	setSeam(t, &workIQMailComplete, func(*store.Store, context.Context, string) (bool, error) { asked++; return true, nil })
 	for range 2 {
-		if steps, err := run.mailSteps("outlook/x"); err != nil || steps != nil {
+		if steps, _, err := run.mailSteps("outlook/x", day(5), day(4)); err != nil || steps != nil {
 			t.Fatalf("%v %v", steps, err)
 		}
 	}
-	if asked != 1 || run.addRoutes(nil, []coverageEntry{newCoverageEntry("mail", "sent", "")}) != nil {
+	if _, _, err := run.mailSteps("outlook/x", day(4), day(3)); err != nil {
+		t.Fatal(err)
+	}
+	if asked != 2 || run.addRoutes(nil, []coverageEntry{newCoverageEntry("mail", "sent", "")}) != nil {
 		t.Fatalf("asked %d", asked)
 	}
 }
