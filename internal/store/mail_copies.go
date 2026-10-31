@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -516,18 +517,17 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 	if err != nil {
 		return c, err
 	}
-	join, args, dated := copies.dated()
-	var w where
-	w.add(`m.account=?`, k.Account)
-	if !rng.Since.IsZero() {
-		w.add(dated+`>=?`, rng.Since.UTC().Format(timeLayout))
+	var keys []string
+	for id, kind := range sets.kind {
+		if id.account == k.Account && mailCopyRole(kind) == k.Kind {
+			keys = append(keys, strconv.FormatUint(uint64(id.key), 10))
+		}
 	}
-	if !rng.Until.IsZero() {
-		w.add(dated+`<?`, rng.Until.UTC().Format(timeLayout))
-	}
+	slices.Sort(keys)
+	rows, args := copies.datedRows(`m.account=? and m.folder_key in (`+strings.Join(keys, ",")+`)`, []any{k.Account}, rng.Since, rng.Until)
 	type message struct{ current, lacking, shown bool }
 	msgs := map[string]*message{}
-	err = mailEach(ctx, s.db, `select m.rowid, m.internet_message_id, m.folder_key, m.received_at, m.gone_at is not null, m.evicted_at is not null from mail_messages m`+mailJoin+join+w.sql(), append(args, w.args...), func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants; values are placeholders
+	err = mailEach(ctx, s.db, `select m.rowid, m.internet_message_id, m.folder_key, m.received_at, m.gone_at is not null, m.evicted_at is not null from (`+rows+`) p join mail_messages m on m.rowid=p.rid`, args, func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants and integers; values are placeholders
 		var rowid int64
 		var msgID string
 		var key uint32

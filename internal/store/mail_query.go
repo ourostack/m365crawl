@@ -251,22 +251,31 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string
 // MailList lists archived messages, newest first by the time each is dated by (mail_clock.go),
 // which is also the time Since and Until select on.
 func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
+	from, args, copies, err := s.mailListQuery(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return s.mailRowsMarked(ctx, copies, false, from, args)
+}
+
+// mailListQuery is the FROM clause onward of MailList's statement, with its arguments, and the
+// folder copies it was built from. The filters apply inside each part of datedRows, which reads
+// its parts in order and stops at the limit.
+func (s *Store) mailListQuery(ctx context.Context, f MailFilter) (string, []any, mailCopies, error) {
 	var w where
-	from := ` from mail_messages m` + mailJoin
 	if strings.TrimSpace(f.Query) != "" {
 		match := buildFTSQuery(f.Query)
 		if match == "" {
-			return nil, searchUsage("mail query has no searchable terms")
+			return "", nil, mailCopies{}, searchUsage("mail query has no searchable terms")
 		}
-		w.add(`mail_fts match ?`, match)
-		from = ` from mail_fts join mail_messages m on m.rowid=mail_fts.rowid` + mailJoin
+		w.add(`m.rowid in (select rowid from mail_fts where mail_fts match ?)`, match)
 	}
 	if f.Account != "" {
 		w.add(`m.account=?`, f.Account)
 	}
 	if f.Folder != "" {
 		if err := s.mailFolderWhere(ctx, &w, f); err != nil {
-			return nil, err
+			return "", nil, mailCopies{}, err
 		}
 	}
 	if f.From != "" {
@@ -275,15 +284,7 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	}
 	copies, err := loadMailCopies(ctx, s.db)
 	if err != nil {
-		return nil, err
-	}
-	join, args, dated := copies.dated()
-	from += join
-	if !f.Since.IsZero() {
-		w.add(dated+`>=?`, f.Since.UTC().Format(timeLayout))
-	}
-	if !f.Until.IsZero() {
-		w.add(dated+`<?`, f.Until.UTC().Format(timeLayout))
+		return "", nil, copies, err
 	}
 	if f.Unread {
 		w.add(`m.is_read=0`)
@@ -307,8 +308,8 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	args = append(append(args, w.args...), limit)
-	return s.mailRowsMarked(ctx, copies, false, from+w.sql()+` order by `+dated+` desc, m.rowid desc limit ?`, args) //nolint:gosec // G202: fragments are package constants; values are placeholders
+	rows, args := copies.datedRows(strings.Join(w.conds, " and "), w.args, f.Since, f.Until)
+	return ` from (` + rows + ` order by 2 desc, 1 desc limit ?) p join mail_messages m on m.rowid=p.rid` + mailJoin + ` order by p.at desc, m.rowid desc`, append(args, limit), copies, nil
 }
 
 // narrowed reports whether f selects messages by anything but the account and the listing
@@ -415,7 +416,7 @@ func (s *Store) MailGet(ctx context.Context, account string, detailKey uint32) (
 	return rows[0], nil
 }
 
-// MailThread returns the conversation a message belongs to, oldest first, and how it was grouped: "conversation" when its native conversation id joins at least two account-scoped messages; otherwise "reply_chain" when In-Reply-To links join it to another Message-ID, else "subject" (messages with the same normalised subject that share a participant with the seed; an empty subject gives the seed alone). Gone and evicted messages are included; a copy that a newer folder set also holds is not, unless it is the seed. A thread holds at most mailThreadCap messages, the seed always among them; truncated says more belong to it.
+// MailThread returns the conversation a message belongs to, oldest first by DatedAt, and how it was grouped: "conversation" when its native conversation id joins at least two account-scoped messages; otherwise "reply_chain" when In-Reply-To links join it to another Message-ID, else "subject" (messages with the same normalised subject that share a participant with the seed; an empty subject gives the seed alone). Gone and evicted messages are included; a copy that a newer folder set also holds is not, unless it is the seed. A thread holds at most mailThreadCap messages, the seed always among them; truncated says more belong to it.
 func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32) (rows []MailRow, grouping string, truncated bool, err error) {
 	seed, err := s.MailGet(ctx, account, detailKey)
 	if err != nil {
@@ -452,7 +453,14 @@ func (s *Store) MailThread(ctx context.Context, account string, detailKey uint32
 	if truncated = len(ids) > mailThreadCap; truncated {
 		ids = ids[:mailThreadCap] // the seed is first, so it stays
 	}
-	rows, err = s.mailRowsMarked(ctx, copies, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`) order by m.received_at, m.rowid`, nil) //nolint:gosec // G202: integers
+	rows, err = s.mailRowsMarked(ctx, copies, false, ` from mail_messages m`+mailJoin+` where m.rowid in (`+joinIDs(ids)+`)`, nil) //nolint:gosec // G202: integers
+	// Oldest first by the time each message is dated by, which the thread's table shows.
+	sort.SliceStable(rows, func(i, j int) bool {
+		if a, b := rows[i].DatedAt, rows[j].DatedAt; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return rows[i].Rowid < rows[j].Rowid
+	})
 	return rows, grouping, truncated, err
 }
 

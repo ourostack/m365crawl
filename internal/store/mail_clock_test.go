@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,5 +230,141 @@ func TestMailCopyCheckUsesTheChosenReceivedTime(t *testing.T) {
 	}
 	if c := checkOf(t, s, "inbox", utc("2026-10-12T07:00:00Z"), utc("2026-10-13T07:00:00Z")); c.Messages != 0 {
 		t.Fatalf("%+v", c)
+	}
+}
+
+// A thread is oldest first by the time each message is dated by, as its table shows it: a Sent
+// reply whose stored received time is the draft's start, before the message it answers, still
+// comes after it and after what arrived before it was sent.
+func TestMailThreadOrdersByDatedTime(t *testing.T) {
+	s := newStore(t)
+	parent := timed(mailMsg(1, fInbox, "<p@t>", "s", 0), "2026-09-01T10:00:00Z", "2026-09-01T09:59:00Z")
+	between := timed(mailMsg(2, fInbox, "<b@t>", "s", 0), "2026-09-03T10:00:00Z", "2026-09-03T09:59:00Z")
+	between.InReplyTo = "<p@t>"
+	reply := timed(mailMsg(3, fSent, "<r@t>", "s", 0), "2026-09-01T09:00:00Z", "2026-10-08T19:28:45Z")
+	reply.InReplyTo = "<p@t>"
+	mustCommitMail(t, s, mailBatch(hr(0), parent, between, reply))
+	rows, grouping, _, err := s.MailThread(context.Background(), mailAcct, 3)
+	if err != nil || grouping != "reply_chain" {
+		t.Fatalf("%v %v", grouping, err)
+	}
+	var got []uint32
+	for _, r := range rows {
+		got = append(got, r.DetailKey)
+	}
+	if !sameKeys(got, 1, 2, 3) {
+		t.Fatalf("thread order %v", got)
+	}
+}
+
+// queryPlan is the EXPLAIN QUERY PLAN detail lines of the statement MailList runs for f.
+func queryPlan(t *testing.T, s *Store, f MailFilter) []string {
+	t.Helper()
+	ctx := context.Background()
+	q, args, _, err := s.mailListQuery(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.db.QueryContext(ctx, `explain query plan select m.rowid`+q, args...) //nolint:gosec // G202: the statement MailList builds, values are placeholders
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// The list reads received-time folders through the received-time index in order and stops at
+// the limit, reads Sent Items through the folder index, and looks the messages whose received time
+// was chosen across copies up by rowid: no read scans every message or matches every message
+// against the chosen times.
+func TestMailListUsesIndexes(t *testing.T) {
+	s := newStore(t)
+	sent := "2026-10-15T16:50:39Z"
+	seedTwoSets(t, s,
+		[]outlookmail.Message{timed(setMsg(1001, aInbox, "<m@t>", 0), "2026-10-15T16:50:48Z", sent), timed(setMsg(1002, aSent, "<s@t>", 0), sent, sent)},
+		[]outlookmail.Message{timed(setMsg(2001, bInbox, "<m@t>", 0), "2026-10-12T23:34:55Z", sent), timed(setMsg(2002, bSent, "<s@t>", 0), sent, sent)})
+	if got := listRows(t, s, MailFilter{})[2001]; !got.ReceivedAtDisagrees {
+		t.Fatalf("the fixture needs a chosen received time: %+v", got)
+	}
+	for name, f := range map[string]MailFilter{
+		"plain":   {},
+		"window":  {Since: utc("2026-10-01T00:00:00Z"), Until: utc("2026-10-20T00:00:00Z")},
+		"account": {Account: mailAcct, Since: utc("2026-10-01T00:00:00Z")},
+	} {
+		plan := queryPlan(t, s, f)
+		joined := strings.Join(plan, "\n")
+		if !strings.Contains(joined, "USING INDEX mail_messages_received") && !strings.Contains(joined, "USING INDEX mail_messages_folder") {
+			t.Fatalf("%s: no index on received time:\n%s", name, joined)
+		}
+		if !strings.Contains(joined, "INTEGER PRIMARY KEY") {
+			t.Fatalf("%s: chosen times are not looked up by rowid:\n%s", name, joined)
+		}
+		for _, d := range plan {
+			if d == "SCAN m" || d == "SCAN mail_messages" || strings.HasPrefix(d, "SCAN m ") && !strings.Contains(d, "INDEX") {
+				t.Fatalf("%s: a full scan of the messages:\n%s", name, joined)
+			}
+		}
+	}
+	if plan := strings.Join(queryPlan(t, s, MailFilter{}), "\n"); !strings.Contains(plan, "USING INDEX mail_messages_received") || !strings.Contains(plan, "MERGE") {
+		t.Fatalf("the plain list reads received time in index order and merges the parts:\n%s", plan)
+	}
+}
+
+// BenchmarkMailListChosenTimes lists a month from an archive where every message's copies disagree
+// on received time, so each has a chosen time; the time per list should grow about linearly with
+// the number of chosen times, not with their square.
+func BenchmarkMailListChosenTimes(b *testing.B) {
+	for _, n := range []int{25, 500, 4000} {
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			s := newStore(b)
+			var a, cur []outlookmail.Message
+			for i := range n {
+				id := fmt.Sprintf("<m%d@t>", i)
+				sent := utc("2026-10-15T16:50:39Z").Add(-time.Duration(i) * time.Minute)
+				ma := setMsg(uint32(10000+i), aInbox, id, 0)
+				ma.Received, ma.Sent = sent.Add(9*time.Second), sent
+				mb := setMsg(uint32(50000+i), bInbox, id, 0)
+				mb.Received, mb.Sent = sent.Add(-72*time.Hour), sent
+				a, cur = append(a, ma), append(cur, mb)
+			}
+			seedTwoSets(b, s, a, cur)
+			f := MailFilter{Since: utc("2026-10-01T00:00:00Z"), Until: utc("2026-11-01T00:00:00Z"), Limit: 50}
+			b.ResetTimer()
+			for range b.N {
+				if _, err := s.MailList(context.Background(), f); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// Without any Sent Items folder, the list still dates a message by its chosen received time.
+func TestMailChosenTimeWithoutSentItems(t *testing.T) {
+	s := newStore(t)
+	sent := "2026-10-15T16:50:39Z"
+	seedTwoSets(t, s,
+		[]outlookmail.Message{timed(setMsg(1001, aInbox, "<m@t>", 0), "2026-10-15T16:50:48Z", sent)},
+		[]outlookmail.Message{timed(setMsg(2001, bInbox, "<m@t>", 0), "2026-10-12T23:34:55Z", sent)})
+	if _, err := s.db.Exec(`update mail_folders set kind='other' where kind='sent'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := listKeys(t, s, MailFilter{Since: utc("2026-10-15T07:00:00Z"), Until: utc("2026-10-16T07:00:00Z")}); !sameKeys(got, 2001) {
+		t.Fatalf("%v", got)
+	}
+	if got := listKeys(t, s, MailFilter{Until: utc("2026-10-13T07:00:00Z")}); len(got) != 0 {
+		t.Fatalf("%v", got)
 	}
 }
