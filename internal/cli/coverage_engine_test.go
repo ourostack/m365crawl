@@ -340,35 +340,52 @@ func TestChatEntryReportsEvidenceFailures(t *testing.T) {
 	}
 }
 
-// Copies an older folder set or WorkIQ holds are dated before the last read or the server spans'
-// end, so the folder-copy check of a range ending later (today, an open-ended read) is judged up
-// to there: a window proven that far ends the disagreement and its route instead of asking for a
-// new window on every read (#313).
-func TestCopiesDisagreeAreJudgedUpToTheLastReadOrServerEnd(t *testing.T) {
+// A folder-copy disagreement concerns only messages dated up to the latest one the cache lacks, so
+// a range ending later (today, an open-ended read) is judged and routed only up to just past it: a
+// window proven that far ends the disagreement and its route, also after later reads move the
+// last read on, instead of asking for a new window on every read (#313).
+func TestCopiesDisagreeAreJudgedUpToTheLatestLackingMessage(t *testing.T) {
 	setSeam(t, &workIQMailComplete, func(*store.Store, context.Context, string) (bool, error) { return false, nil })
 	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return true, nil })
-	setSeam(t, &mailRoleCount, roleCount(3, "partial"))
-	whole := []store.TimeSpan{{From: day(20), To: day(1)}}
-	run, _ := engineRun(t)
-	ev := mailEvidence(whole, day(1), time.Time{}, "inbox")
-	ev.windows = []store.TimeSpan{{From: day(5), To: day(1).Add(time.Hour)}}
-	run.mail["outlook/x"] = ev
-	e, err := run.mailEntry("outlook/x", "inbox", nil, day(5), covNow.Add(24*time.Hour))
-	if err != nil || e.has(reasonCopiesDisagree) || len(e.Next) != 0 {
-		t.Fatalf("a range past now asked again for proven mail: %s %v %v", codes(e), e.Next, err)
+	lacking := day(2).Add(5 * time.Hour)
+	count := func(through time.Time) func(*store.Store, context.Context, string, string, time.Time, time.Time) (store.MailCopyCheck, error) {
+		return func(*store.Store, context.Context, string, string, time.Time, time.Time) (store.MailCopyCheck, error) {
+			return store.MailCopyCheck{Messages: 3, State: "partial", LackingInCurrentRange: 1, LackingThrough: through}, nil
+		}
 	}
-	// Without a proven window the range up to the last read is routed, once.
-	run, _ = engineRun(t)
-	run.mail["outlook/x"] = mailEvidence(whole, day(1), time.Time{}, "inbox")
-	e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), covNow.Add(24*time.Hour))
+	setSeam(t, &mailRoleCount, count(lacking))
+	whole := []store.TimeSpan{{From: day(20), To: day(0)}}
+	past := covNow.Add(24 * time.Hour)
+	for _, role := range []string{"inbox", "sent"} {
+		run, _ := engineRun(t)
+		ev := mailEvidence(whole, covNow, time.Time{}, role)
+		ev.windows = []store.TimeSpan{{From: day(5), To: lacking.Add(time.Hour + time.Second)}}
+		run.mail["outlook/x"] = ev
+		if e, err := run.mailEntry("outlook/x", role, nil, day(5), past); err != nil || e.has(reasonCopiesDisagree) || len(e.Next) != 0 {
+			t.Fatalf("%s: a range past now asked again for proven mail: %s %v %v", role, codes(e), e.Next, err)
+		}
+	}
+	// Without a proven window the range up to just past the latest lacking message is routed.
+	run, _ := engineRun(t)
+	run.mail["outlook/x"] = mailEvidence(whole, covNow, time.Time{}, "inbox")
+	e, err := run.mailEntry("outlook/x", "inbox", nil, day(5), past)
 	if err != nil || !e.has(reasonCopiesDisagree) || len(e.Next) == 0 ||
-		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+day(1).Add(time.Hour).Format(time.RFC3339)) {
+		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+lacking.Add(time.Hour+time.Second).Format(time.RFC3339)) {
 		t.Fatalf("route %s %v %v", codes(e), e.Next, err)
 	}
-	// A last read before the range says nothing about it: the whole range is judged.
+	// A hole before the cache keeps the whole range in the route.
 	run, _ = engineRun(t)
-	run.mail["outlook/x"] = mailEvidence(whole, day(10), time.Time{}, "inbox")
-	if e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), day(4)); err != nil || !e.has(reasonCopiesDisagree) {
-		t.Fatalf("early read %s %v", codes(e), err)
+	run.mail["outlook/x"] = mailEvidence([]store.TimeSpan{{From: day(3), To: day(0)}}, covNow, time.Time{}, "inbox")
+	if e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), day(1)); err != nil || !e.has(reasonBeforeCache) ||
+		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+day(1).Add(time.Hour).Format(time.RFC3339)) {
+		t.Fatalf("hole route %s %v %v", codes(e), e.Next, err)
+	}
+	// Without a date for the lacking messages the whole range is judged.
+	setSeam(t, &mailRoleCount, count(time.Time{}))
+	run, _ = engineRun(t)
+	run.mail["outlook/x"] = mailEvidence(whole, covNow, time.Time{}, "inbox")
+	if e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), day(4)); err != nil || !e.has(reasonCopiesDisagree) ||
+		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+day(4).Add(time.Hour).Format(time.RFC3339)) {
+		t.Fatalf("undated %s %v", codes(e), err)
 	}
 }

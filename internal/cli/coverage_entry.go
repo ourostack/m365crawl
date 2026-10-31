@@ -386,15 +386,12 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 			c.mailTail(&e, account, ev, cacheEnd, b)
 		}
 	}
-	// What an older folder set or WorkIQ holds is dated before the last read or the server spans'
-	// end, so a disagreement concerns the range only up to there; a range ending later (today, an
-	// open-ended read) is judged and routed up to there, or a window could never prove it (#313).
-	bound, judged := ev.spans.FreshAt, b
-	if len(server) > 0 {
-		bound = laterTime(bound, server[len(server)-1].To)
-	}
-	if bound.After(a) && bound.Before(b) {
-		judged = bound
+	// The disagreement concerns only messages dated up to the latest one the current cache lacks, so
+	// a range ending later (today, an open-ended read) is judged and routed only up to just past it;
+	// a window, which ends when it runs, could otherwise never prove the range (#313).
+	judged := b
+	if t := count.LackingThrough.Add(time.Second); count.State == "partial" && t.After(a) && t.Before(b) {
+		judged = t
 	}
 	serverCovers := sameSpans(clip(server, a, judged), []store.TimeSpan{{From: a, To: judged}})
 	if count.State == "partial" && !serverCovers {
@@ -402,7 +399,12 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 		e.reason(reasonCopiesDisagree, fmt.Sprintf("an older copy of the folder holds %d of %d messages in this range that the current cache lacks although its range covers them", count.LackingInCurrentRange, count.Messages))
 	}
 	if e.has(reasonBeforeCache, reasonOnlyOlderCopy, reasonCopiesDisagree) {
-		if e.Next, e.route, err = c.mailSteps(account, a, judged); err != nil {
+		// Holes before the cache end where the cache starts, and a window fills them once.
+		end := judged
+		if e.has(reasonBeforeCache, reasonOnlyOlderCopy) {
+			end = b
+		}
+		if e.Next, e.route, err = c.mailSteps(account, a, end); err != nil {
 			return e, err
 		}
 	}
