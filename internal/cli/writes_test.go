@@ -550,16 +550,18 @@ func TestStageFourWritesThroughTheSyntheticWorkIQ(t *testing.T) {
 	}
 	draft := run(0, append([]string{"save-mail-draft", "--subject", "Draft", "--text", "one"}, who...)...)["server_id"].(string)
 	target := run(0, "target", "--draft", draft)
-	if target["known"] != true || target["version"] != "ck-0" {
+	v0, _ := target["version"].(string)
+	if target["known"] != true || !strings.HasPrefix(v0, "sha256:") {
 		t.Fatal(target)
 	}
-	if got := run(0, append([]string{"save-mail-draft", "--draft", draft, "--text", "two", "--expected-version", "ck-0"}, who...)...); got["outcome"] != "sent" || got["effect"] != "only_you" {
+	if got := run(0, append([]string{"save-mail-draft", "--draft", draft, "--text", "two", "--expected-version", v0}, who...)...); got["outcome"] != "sent" || got["effect"] != "only_you" {
 		t.Fatal(got)
 	}
-	if got := run(2, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", "ck-0"}, who...)...); got["code"] != "stale_version" {
+	v1, _ := run(0, "target", "--draft", draft)["version"].(string)
+	if got := run(2, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", v0}, who...)...); got["code"] != "stale_version" {
 		t.Fatal(got)
 	}
-	if got := run(0, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", "ck-1"}, who...)...); got["outcome"] != "sent" {
+	if got := run(0, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", v1}, who...)...); got["outcome"] != "sent" {
 		t.Fatal(got)
 	}
 	if got := run(0, "target", "--draft", draft); got["known"] != false {

@@ -2,6 +2,8 @@ package directedwrites
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -62,7 +64,7 @@ func readDraft(ctx context.Context, opts Options, s session, id string) (draftTa
 	if !workiq.ValidMessageID(id) {
 		return draftTarget{}, nil
 	}
-	page, err := s.Fetch(ctx, "/me/messages/"+id+"?$select=id,isDraft,changeKey")
+	page, err := s.Fetch(ctx, "/me/messages/"+id+"?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,body")
 	if gone(page, err) {
 		return draftTarget{}, nil
 	}
@@ -70,13 +72,16 @@ func readDraft(ctx context.Context, opts Options, s session, id string) (draftTa
 		return draftTarget{}, err
 	}
 	var m struct {
-		ChangeKey string
-		IsDraft   bool
-		ETag      string `json:"@odata.etag"`
+		IsDraft                                   bool
+		Subject                                   string
+		ETag                                      string `json:"@odata.etag"`
+		Body                                      struct{ ContentType, Content string }
+		ToRecipients, CcRecipients, BccRecipients []address
 	}
 	if json.Unmarshal(page.Data, &m) != nil {
 		return draftTarget{}, nil
 	}
+
 	held := false
 	if err := readArchive(ctx, opts.DBPath, func(st *store.Store) (err error) {
 		held, err = st.DirectedDraftHeld(ctx, id)
@@ -84,11 +89,26 @@ func readDraft(ctx context.Context, opts Options, s session, id string) (draftTa
 	}); err != nil {
 		return draftTarget{}, err
 	}
-	t := draftTarget{known: true, kind: da.KindMailDraft, version: m.ChangeKey, etag: m.ETag}
+	t := draftTarget{known: true, kind: da.KindMailDraft, version: draftDigest(m.Subject, m.Body.ContentType, m.Body.Content,
+		addresses(m.ToRecipients), addresses(m.CcRecipients), addresses(m.BccRecipients)), etag: m.ETag}
 	if !m.IsDraft || held {
 		t.kind = da.KindMailMessage
 	}
 	return t, nil
+}
+
+// draftDigest is a draft's version. Exchange bumps a draft's changeKey on its own for a while after it
+// is saved (seen live), so the version is a digest of what the draft says, which only an edit changes.
+func draftDigest(subject, contentType, content string, to, cc, bcc []string) string {
+	digest := sha256.New()
+	for _, part := range [][]string{{subject, contentType, content}, to, cc, bcc} {
+		for _, v := range part {
+			digest.Write([]byte(v))
+			digest.Write([]byte{0})
+		}
+		digest.Write([]byte{1})
+	}
+	return "sha256:" + hex.EncodeToString(digest.Sum(nil))[:32]
 }
 
 // draftUpdated says the draft now holds what the update wrote.

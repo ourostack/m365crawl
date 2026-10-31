@@ -31,8 +31,9 @@ var (
 	internetMessageID = regexp.MustCompile(`^<[!-;=?-~]{1,994}@[!-;=?-~]{1,994}>$`)
 	horizontalRule    = regexp.MustCompile(`(?i)<hr[\s/>]`)
 	// refindAttempts and refindPause bound waiting for a sent reply to reach Sent Items.
-	refindAttempts = 6
-	refindPause    = 2 * time.Second
+	// Live, a sent mail took longer than ten seconds to show in Sent Items, so wait about half a minute.
+	refindAttempts = 10
+	refindPause    = 3 * time.Second
 )
 
 // mail is what a reply knows about the mail it answers.

@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	editDraft     = "/me/messages/edit-1?$select=id,isDraft,changeKey"
-	editDraftRead = "/me/messages/edit-1?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,body"
+	editDraft     = "/me/messages/edit-1?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,body"
+	editDraftRead = editDraft
 	editDraftGone = "/me/messages/edit-1?$select=id"
 	editDraftNow  = "/me/messages/edit-1?$select=id,isDraft"
 	noteMessage   = "/chats/48:notes/messages/1700"
+	oldDraft      = `{"id":"edit-1","isDraft":true,"subject":"Old","body":{"contentType":"text","content":"old"},"@odata.etag":"W/\"ck-d\""}`
 	newMailDraft  = `{"id":"draft-1","isDraft":true,"internetMessageId":"<reply@example.invalid>","subject":"Plan",
 	"toRecipients":[{"emailAddress":{"address":"friend@example.invalid"}}],"body":{"contentType":"text","content":"hello & you\nthere"}}`
 )
@@ -112,9 +113,10 @@ func TestAReplyAllIsNotAResendOfAnUnknownReply(t *testing.T) {
 func draftServer(t *testing.T) (*server, Options) {
 	t.Helper()
 	srv, opts := mailServer(t)
-	srv.pages[editDraft] = reply{data: `{"id":"edit-1","isDraft":true,"changeKey":"ck-d","@odata.etag":"W/\"ck-d\""}`}
-	srv.pages[editDraftRead] = reply{data: `{"id":"edit-1","isDraft":true,"subject":"New","toRecipients":[{"emailAddress":{"address":"a@example.invalid"}}],
+	srv.pages[editDraft] = reply{data: oldDraft}
+	updated := reply{data: `{"id":"edit-1","isDraft":true,"subject":"New","toRecipients":[{"emailAddress":{"address":"a@example.invalid"}}],
 	"body":{"contentType":"html","content":"<p>new text</p>"}}`}
+	srv.onAct = func() { srv.pages[editDraftRead] = updated }
 	srv.pages[editDraftNow] = reply{data: `{"id":"edit-1","isDraft":true}`}
 	srv.actAnswer = workiq.WriteAnswer{Kind: workiq.WriteCreated, Status: 200, ServerID: "edit-1", IsDraft: true}
 	return srv, opts
@@ -122,7 +124,7 @@ func draftServer(t *testing.T) (*server, Options) {
 
 func updateRequest() da.Request {
 	return da.Request{Contract: da.Contract, Action: SaveMailDraft, Agent: "agent", Reason: "asked",
-		Target: da.Target{Message: "edit-1", Recipients: []string{"A@example.invalid"}}, Content: da.Content{Text: "new text", Subject: "New"}, ExpectedVersion: "ck-d"}
+		Target: da.Target{Message: "edit-1", Recipients: []string{"A@example.invalid"}}, Content: da.Content{Text: "new text", Subject: "New"}, ExpectedVersion: oldVersion}
 }
 
 func TestDraftUpdate(t *testing.T) {
@@ -133,7 +135,7 @@ func TestDraftUpdate(t *testing.T) {
 		t.Fatalf("%+v %v %v", got, err, srv.created)
 	}
 	target, err := Target(ctx, opts, TargetQuery{Draft: "edit-1"})
-	if err != nil || !target.Known || target.Version != "ck-d" || target.Draft != "edit-1" {
+	if err != nil || !target.Known || target.Version == oldVersion || target.Draft != "edit-1" {
 		t.Fatalf("%+v %v", target, err)
 	}
 	for _, tc := range []struct {
@@ -153,7 +155,8 @@ func TestDraftUpdate(t *testing.T) {
 			srv, opts := draftServer(t)
 			srv.actAnswer = tc.answer
 			if tc.read != nil {
-				srv.pages[editDraftRead] = *tc.read
+				read := *tc.read
+				srv.onAct = func() { srv.pages[editDraftRead] = read }
 			}
 			if got, err := Send(ctx, opts, updateRequest()); err != nil || got.Outcome != tc.outcome {
 				t.Fatalf("%+v %v", got, err)
@@ -163,7 +166,9 @@ func TestDraftUpdate(t *testing.T) {
 	srv, opts = draftServer(t)
 	textOnly := updateRequest()
 	textOnly.Target.Recipients, textOnly.Content.Subject = nil, ""
-	srv.pages[editDraftRead] = reply{data: `{"isDraft":true,"subject":"Anything","ccRecipients":[{"emailAddress":{"address":"b@example.invalid"}}],"body":{"content":"new text"}}`}
+	srv.onAct = func() {
+		srv.pages[editDraftRead] = reply{data: `{"isDraft":true,"subject":"Anything","ccRecipients":[{"emailAddress":{"address":"b@example.invalid"}}],"body":{"content":"new text"}}`}
+	}
 	if got, err := Send(ctx, opts, textOnly); err != nil || got.Outcome != da.Sent || srv.created[0] != `update|edit-1|W/"ck-d"|new text||` {
 		t.Fatalf("an update of the text alone: %+v %v %v", got, err, srv.created)
 	}
@@ -180,8 +185,8 @@ func TestDraftTargets(t *testing.T) {
 		{"bad id", "edit/1", nil, da.CodeUnknownTarget},
 		{"gone", "edit-1", &reply{status: 404, err: errs.Usage("x")}, da.CodeUnknownTarget},
 		{"unreadable", "edit-1", &reply{data: `[]`}, da.CodeUnknownTarget},
-		{"received mail", "edit-1", &reply{data: `{"id":"edit-1","isDraft":false,"changeKey":"ck-d"}`}, da.CodeTargetMismatch},
-		{"stale", "edit-1", &reply{data: `{"id":"edit-1","isDraft":true,"changeKey":"ck-e"}`}, da.CodeStaleVersion},
+		{"received mail", "edit-1", &reply{data: strings.Replace(oldDraft, `"isDraft":true`, `"isDraft":false`, 1)}, da.CodeTargetMismatch},
+		{"stale", "edit-1", &reply{data: strings.Replace(oldDraft, `"Old"`, `"Edited"`, 1)}, da.CodeStaleVersion},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, opts := draftServer(t)
@@ -231,7 +236,7 @@ func TestDraftTargets(t *testing.T) {
 }
 
 func discardRequest() da.Request {
-	return da.Request{Contract: da.Contract, Action: DiscardMailDraft, Agent: "agent", Reason: "asked", Target: da.Target{Message: "edit-1"}, ExpectedVersion: "ck-d"}
+	return da.Request{Contract: da.Contract, Action: DiscardMailDraft, Agent: "agent", Reason: "asked", Target: da.Target{Message: "edit-1"}, ExpectedVersion: oldVersion}
 }
 
 func TestDraftDiscard(t *testing.T) {
@@ -272,7 +277,7 @@ func TestDraftDiscard(t *testing.T) {
 	srv.onFetch = func(path string) {
 		if path == editDraft {
 			if reads++; reads == 2 {
-				srv.pages[editDraft] = reply{data: `{"id":"edit-1","isDraft":true,"changeKey":"ck-e"}`}
+				srv.pages[editDraft] = reply{data: strings.Replace(oldDraft, `"Old"`, `"Edited"`, 1)}
 			}
 		}
 	}
@@ -408,7 +413,7 @@ func TestVerifyOtherActions(t *testing.T) {
 	// An unknown update becomes sent once the draft reads as written.
 	srv, opts := draftServer(t)
 	srv.actAnswer = workiq.WriteAnswer{Kind: workiq.WriteUnknown, Code: "workiq_timeout"}
-	srv.pages[editDraftRead] = reply{status: 503, err: errs.Usage("x")}
+	srv.onAct = func() { srv.pages[editDraftRead] = reply{status: 503, err: errs.Usage("x")} }
 	if got, _ := Send(ctx, opts, updateRequest()); got.Outcome != da.Unknown {
 		t.Fatal(got)
 	}
@@ -454,3 +459,5 @@ func TestVerifyOtherActions(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+var oldVersion = draftDigest("Old", "text", "old", nil, nil, nil)
