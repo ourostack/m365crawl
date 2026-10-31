@@ -305,3 +305,62 @@ func TestSortPutsDocumentsAfterOtherUnknownClockContent(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedSearchIncludesAdmittedDocuments(t *testing.T) {
+	e, _ := documentEnv(t)
+	t.Setenv("WORKIQ_DOCUMENT_CASE", "labeled")
+	if code, _, stderr := e.run("--json", "content", "fetch", "doc", documentLink); code != 0 {
+		t.Fatal(stderr)
+	}
+	for _, args := range [][]string{{"search", "walrus", "--source", "content"}, {"search", "walrus"}} {
+		code, out, stderr := e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
+		if code != 0 || !strings.Contains(out, `"kind":"workiq_document"`) || !strings.Contains(out, `"source":"content"`) ||
+			!strings.Contains(out, "purple walrus") || !strings.Contains(out, `"workiq_document_coverage"`) {
+			t.Fatalf("%v: %d %s %s", args, code, out, stderr)
+		}
+	}
+	for _, args := range [][]string{{"search", "walrus", "--source", "content"}, {"content", "list"}, {"content", "show", "workiq-document:1"}} {
+		code, out, _ := e.run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+		if code != 0 || !strings.Contains(out, "Synthetic plan.docx") || !strings.Contains(out, "Synthetic dummy t") ||
+			!strings.Contains(out, "workiq-document:1 Synthetic plan.docx: admitted; text kept true") {
+			t.Fatalf("text %v: %d %s", args, code, out)
+		}
+	}
+	_, out, _ := e.run("--json", "--max-age", "0", "search", "walrus", "--source", "content", "--since", "2020-01-01")
+	if strings.Contains(out, `"kind":"workiq_document"`) {
+		t.Fatalf("a document without a modified clock matched a window: %s", out)
+	}
+	t.Setenv("WORKIQ_DOCUMENT_CASE", "refused")
+	if code, _, _ := e.run("--json", "content", "fetch", "doc", documentLink); code != 3 {
+		t.Fatal(code)
+	}
+	_, out, _ = e.run("--json", "--max-age", "0", "search", "walrus", "--source", "content")
+	if strings.Contains(out, "purple walrus") || strings.Contains(out, `"kind":"workiq_document"`) || !strings.Contains(out, `"text_kept":false`) {
+		t.Fatalf("refused text was searchable: %s", out)
+	}
+	e.exec(`drop table workiq_document_fts; create table workiq_document_fts(title,text)`)
+	if code, _, _ := e.run("--json", "--max-age", "0", "search", "walrus", "--source", "content"); code == 0 {
+		t.Fatal("a broken document index was hidden from shared search")
+	}
+}
+
+func TestDocumentSearchReportsMoreThanTheLimit(t *testing.T) {
+	e, _ := documentEnv(t)
+	t.Setenv("WORKIQ_DOCUMENT_CASE", "labeled")
+	if code, _, stderr := e.run("--json", "content", "fetch", "doc", documentLink); code != 0 {
+		t.Fatal(stderr)
+	}
+	e.exec(`insert into workiq_documents(account_id,drive_id,item_id,name,web_url,first_checked_at,last_checked_at,last_check_id)
+select account_id,drive_id,item_id||'2',name||' 2',web_url,first_checked_at,last_checked_at,last_check_id from workiq_documents;
+insert into workiq_document_bodies(document_id,check_id,text,digest,extracts,truncated)
+select (select max(id) from workiq_documents),check_id,text,digest,extracts,truncated from workiq_document_bodies;
+update workiq_documents set body_check_id=last_check_id`)
+	_, out, _ := e.run("--json", "--max-age", "0", "search", "walrus", "--source", "content", "--limit", "1")
+	if !strings.Contains(out, `"matched_at_least":1`) || !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("a cut document count looked exact: %s", out)
+	}
+	_, out, _ = e.run("--json", "--max-age", "0", "content", "search", "walrus", "--limit", "1")
+	if !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("content search hid more documents: %s", out)
+	}
+}

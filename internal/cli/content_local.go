@@ -473,13 +473,13 @@ func contentListResult(rt *runtime, st *store.Store, c contentListCmd, query str
 		src := localSourceFor(local.Sources, row.SourceID)
 		hits = append(hits, searchHit{at: at, source: searchContent, localText: true, cloudLabel: src.Path, cloudSourceID: row.SourceID, cloudObservationID: row.ID, item: localItemOf(row, src, rt.g.MaxText)})
 	}
-	documentHits, documents, err := workIQDocumentHits(rt, st, query, c.SourceID > 0 || !since.IsZero() || !until.IsZero(), c.Limit)
+	documentHits, documents, moreDocuments, err := workIQDocumentHits(rt, st, query, c.SourceID > 0 || !since.IsZero() || !until.IsZero(), c.Limit)
 	if err != nil {
 		return nil, err
 	}
 	hits = append(hits, documentHits...)
 	sortSearchHits(hits)
-	truncated := cloud.Truncated || local.Truncated || engage.Truncated || len(hits) > c.Limit
+	truncated := cloud.Truncated || local.Truncated || engage.Truncated || moreDocuments || len(hits) > c.Limit
 	hits = hits[:min(c.Limit, len(hits))]
 	items := make([]any, len(hits))
 	for i, h := range hits {
