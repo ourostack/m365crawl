@@ -416,7 +416,7 @@ func (s *Store) AdmitWorkIQWindow(ctx context.Context, attempt int64, resources 
 		if err := eachRow(ctx, tx, `select m.frontier_id,m.graph_id,coalesce(m.page_id,0),m.item_index,m.observed_at from workiq_window_members m
 join workiq_frontiers f on f.id=m.frontier_id where f.family='mail' and f.account_id=? and f.scope=? and f.qualification=? and f.retired=0
 and f.resource in (select value from json_each(?)) and m.state='staged' and m.in_window=1 and m.removed=0 and m.clock_unknown=0
-order by m.frontier_id,m.graph_id limit ?`, []any{account, w.scope, w.qualification, string(resourceJSON), limit}, func(row *sql.Rows) error {
+order by m.frontier_id,m.page_id,m.item_index,m.graph_id limit ?`, []any{account, w.scope, w.qualification, string(resourceJSON), limit}, func(row *sql.Rows) error {
 			var item member
 			if err := row.Scan(&item.frontier, &item.graph, &item.page, &item.index, &item.observed); err != nil {
 				return err
@@ -426,8 +426,20 @@ order by m.frontier_id,m.graph_id limit ?`, []any{account, w.scope, w.qualificat
 		}); err != nil {
 			return err
 		}
+		// The batch runs in page order, so each staged page is decoded once.
+		var (
+			loaded int64 = -1
+			values []json.RawMessage
+			err    error
+		)
 		for _, item := range batch {
-			server, err := loadWorkIQWindowItem(ctx, tx, item.page, item.index, item.graph)
+			if item.page != loaded {
+				if values, err = loadWorkIQWindowPage(ctx, tx, item.page); err != nil {
+					return err
+				}
+				loaded = item.page
+			}
+			server, err := workIQWindowPageItem(ctx, values, item.index, item.graph)
 			if err != nil {
 				return err
 			}
@@ -485,25 +497,36 @@ order by p.id limit ?)`, workIQTimeValue(&at), account, limit)
 	return out, nil
 }
 
-func loadWorkIQWindowItem(ctx context.Context, tx *sql.Tx, page int64, index int, graph string) (workiq.MailMessage, error) {
+// decodeWorkIQWindowPage decodes and scrubs a staged page body; a test seam.
+var decodeWorkIQWindowPage = workiq.DecodePage
+
+func loadWorkIQWindowPage(ctx context.Context, tx *sql.Tx, page int64) ([]json.RawMessage, error) {
 	var body string
 	if err := tx.QueryRowContext(ctx, `select data_json from workiq_pages where id=?`, page).Scan(&body); err != nil {
-		return workiq.MailMessage{}, err
+		return nil, err
 	}
 	if body == "" {
-		return workiq.MailMessage{}, errors.New("a WorkIQ window page was cleared before its in-window mail was admitted")
+		return nil, errors.New("a WorkIQ window page was cleared before its in-window mail was admitted")
 	}
-	decoded, err := workiq.DecodePage(ctx, []byte(body))
+	decoded, err := decodeWorkIQWindowPage(ctx, []byte(body))
 	if err != nil {
-		return workiq.MailMessage{}, err
+		return nil, err
 	}
 	var data struct {
 		Value []json.RawMessage `json:"value"`
 	}
-	if json.Unmarshal(decoded.Data, &data) != nil || index < 0 || index >= len(data.Value) {
+	if json.Unmarshal(decoded.Data, &data) != nil {
+		return nil, errors.New("a WorkIQ window member does not match its staged page")
+	}
+	return data.Value, nil
+}
+
+// workIQWindowPageItem decodes the staged item a window member names.
+func workIQWindowPageItem(ctx context.Context, values []json.RawMessage, index int, graph string) (workiq.MailMessage, error) {
+	if index < 0 || index >= len(values) {
 		return workiq.MailMessage{}, errors.New("a WorkIQ window member does not match its staged page")
 	}
-	m, err := workiq.DecodeMail(ctx, data.Value[index])
+	m, err := workiq.DecodeMail(ctx, values[index])
 	if err != nil {
 		return workiq.MailMessage{}, err
 	}
