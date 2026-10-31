@@ -145,12 +145,19 @@ func (s *Store) MailStatusOf(ctx context.Context, account string) (MailStatus, e
 	if tables < 3 {
 		return m, nil
 	}
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return MailStatus{}, err
+	}
 	live := `gone_at is null and evicted_at is null and (?='' or account=?)`
+	if cond := copies.notCopy(`rowid`); cond != "" {
+		live += ` and ` + cond // a copy that a newer folder set also holds counts once, through it
+	}
 	marker := escapeLike(mailReadKey) + "%"
 	if account != "" {
 		marker = escapeLike(mailReadKey + account)
 	}
-	err := s.db.QueryRowContext(ctx, `select
+	err = s.db.QueryRowContext(ctx, `select
   (select count(*) from mail_messages where `+live+`),
   (select count(*) from mail_messages where `+live+` and is_read=0),
   (select count(*) from mail_folders where ?='' or account=?),

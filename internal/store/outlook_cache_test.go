@@ -181,7 +181,7 @@ func TestOutlookCacheReadFailuresSurface(t *testing.T) {
 	sweepReadFaults(t, seedOutlookCacheEvidence, func(ctx context.Context, s *Store) error {
 		_, err := s.MailStatusOf(ctx, mailAcct)
 		return err
-	}, 5)
+	}, 6+5) // MailStatusOf also finds folder copies: six more scans (the recorded root, five folders)
 }
 
 func TestCommitMailRecordsTheStoreWriteTime(t *testing.T) {
