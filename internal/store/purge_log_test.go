@@ -14,8 +14,8 @@ import (
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
-// archiveBytes is the archive file and its write-ahead log, read raw from disk.
-func archiveBytes(t *testing.T, path string) (db, wal []byte) {
+// diskBytes is the archive file and its write-ahead log, read raw from disk.
+func diskBytes(t *testing.T, path string) (db, wal []byte) {
 	t.Helper()
 	db, err := os.ReadFile(path) //nolint:gosec // test temp dir
 	if err != nil {
@@ -76,7 +76,7 @@ func TestPurgeLeavesNoCopyOnDisk(t *testing.T) {
 					grec(&acctA, dbA, "zzz", `"z-kept"`, `{"v":"ordinary"}`),
 				}, base)
 				// The value is on disk to start with, so its absence below means something.
-				db, wal := archiveBytes(t, path)
+				db, wal := diskBytes(t, path)
 				if !bytes.Contains(db, []byte(marker)) && !bytes.Contains(wal, []byte(marker)) {
 					t.Fatal("the synthetic value is not on disk before the purge")
 				}
@@ -95,7 +95,7 @@ func TestPurgeLeavesNoCopyOnDisk(t *testing.T) {
 				if pendingPurgedLog(t, s) {
 					t.Fatal("the request to clear the log is still there")
 				}
-				db, wal = archiveBytes(t, path)
+				db, wal = diskBytes(t, path)
 				if i := bytes.Index(db, []byte(marker)); i >= 0 {
 					t.Fatalf("purged value still in the database file at byte %d", i)
 				}
@@ -153,7 +153,7 @@ func TestClearPurgedLogReportsAReaderThatBlocksIt(t *testing.T) {
 	if res, err = s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
 		t.Fatalf("after the reader left: %+v %v", res, err)
 	}
-	db, wal := archiveBytes(t, path)
+	db, wal := diskBytes(t, path)
 	if bytes.Contains(db, []byte(marker)) || bytes.Contains(wal, []byte(marker)) {
 		t.Fatal("purged value still on disk")
 	}
