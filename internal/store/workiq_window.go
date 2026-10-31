@@ -383,9 +383,10 @@ type WorkIQWindowAdmission struct {
 	Done                                           bool
 }
 
-// workIQWindowBlocking is a member that still needs its page body: a live in-window item not yet
-// admitted, a deferred one, or an undated one.
-const workIQWindowBlocking = `m.removed=0 and (m.in_window=1 or m.clock_unknown=1) and m.state in ('staged','deferred')`
+// workIQWindowBlocking is a member that still needs its page body: a deferred in-window item, or a
+// live in-window or undated item its position may still admit. A retired position admits nothing;
+// its next walk fetches those items again, so only its deferred items keep their bodies.
+const workIQWindowBlocking = `m.removed=0 and (m.in_window=1 or m.clock_unknown=1) and (m.state='deferred' or m.state='staged' and f.retired=0)`
 
 // AdmitWorkIQWindow admits at most limit staged in-window members of the window's positions for
 // the given resources: by Graph ID into the row it is bound to, deferred when the archive already

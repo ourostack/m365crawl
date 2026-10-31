@@ -314,7 +314,7 @@ func TestWorkIQMailWindowRestartsAFolderWhoseDeltaExpired(t *testing.T) {
 	writeMailbox(t, mbScenario{Messages: windowMessages(), Expire: []map[string]any{{"folder": "inbox-id", "at": 30}}})
 	report, err := runWindow(t, db, account, "")
 	if err != nil || !report.Window.Covered || count(t, db, `select count(*) from workiq_frontiers where retired=1`) != 1 ||
-		count(t, db, `select count(*) from mail_messages`) != 5 {
+		count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from workiq_pages where data_json<>''`) != 0 {
 		t.Fatalf("an expired delta link was not restarted: %v %v", report.Counts, err)
 	}
 }
