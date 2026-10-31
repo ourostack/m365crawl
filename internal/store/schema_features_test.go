@@ -50,7 +50,11 @@ func TestSchemaFeatureNumbers(t *testing.T) {
 	for _, f := range schemaFeatures {
 		for _, table := range f.tables {
 			var n int
-			if err := s.db.QueryRow(`select count(*) from sqlite_master where type='table' and name=?`, table).Scan(&n); err != nil || n != 1 {
+			query, args := `select count(*) from sqlite_master where type='table' and name=?`, []any{table}
+			if name, column, ok := strings.Cut(table, "."); ok {
+				query, args = `select count(*) from pragma_table_info(?) where name=?`, []any{name, column}
+			}
+			if err := s.db.QueryRow(query, args...).Scan(&n); err != nil || n != 1 {
 				t.Errorf("%s: a fresh archive has no table %s (%v)", f.name, table, err)
 			}
 		}

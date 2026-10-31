@@ -43,7 +43,7 @@ var sqlTables = []sqlTable{
 	{"workiq_document_checks", "every document rights check: outcome, refusal code, contentProtection, label and byte inspection; never text"},
 	{"workiq_document_bodies", "admitted excerpts WorkIQ retrieve released, deleted when a later check refuses"},
 	{"workiq_document_fts", "full-text index over admitted document titles and excerpts"},
-	{"directed_writes", "each directed write the person allowed: agent, reason, acting identity, chat, recipients, text, outcome (sent, failed, unknown), verification and server id"},
+	{"directed_writes", "each directed write the person allowed: agent, reason, acting identity, chat or message, recipients, text, reaction, outcome (sent, failed, unknown), verification and server id"},
 	{"directed_write_events", "append-only changes of each directed write's outcome and phase, without content"},
 	{"directed_write_drafts", "the reply draft a directed reply made before sending it: its Graph id and Internet Message-ID"},
 	{"workiq_window_members", "WorkIQ mail window members: per window position and Graph ID the folder, version, received_at, in_window and state (staged, admitted, deferred, resolved or removed)"},

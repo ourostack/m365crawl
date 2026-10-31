@@ -61,7 +61,9 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // window member and coverage tables, staged page body receipts and the identity_unproven mark on
 // server rows. An archive at version 22 through 28 gains them on its next writable open: the
 // migration checks the tables themselves, not the recorded version.
-const SchemaVersion = 29
+// Version 30 adds directed_writes.reaction, the reaction a directed add_reaction or remove_reaction
+// names. A writable open adds the column to an older archive.
+const SchemaVersion = 30
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as

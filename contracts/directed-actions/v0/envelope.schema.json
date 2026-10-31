@@ -18,6 +18,7 @@
         "send_teams_message",
         "send_mail",
         "reply_mail",
+        "reply_all_mail",
         "add_reaction",
         "remove_reaction",
         "save_mail_draft",

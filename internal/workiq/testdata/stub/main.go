@@ -466,6 +466,7 @@ func main() {
 					URLs   []string        `json:"entityUrls"`
 					Parent string          `json:"parentUrl"`
 					Action string          `json:"actionUrl"`
+					Entity string          `json:"entityUrl"`
 					Body   json.RawMessage `json:"jsonBody"`
 					Query  string          `json:"query"`
 					Path   string          `json:"path"`
@@ -504,18 +505,21 @@ func main() {
 				reply["result"] = result
 				break
 			}
-			if request.Params.Name == "create_entity" || request.Params.Name == "do_action" {
+			if request.Params.Name == "create_entity" || request.Params.Name == "do_action" || request.Params.Name == "update_entity" || request.Params.Name == "delete_entity" {
 				if name := os.Getenv("WORKIQ_ACQUISITION_TRANSCRIPT"); name != "" {
 					f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 					if err != nil {
 						os.Exit(83)
 					}
-					_ = json.NewEncoder(f).Encode(map[string]any{"tool": request.Params.Name, "path": request.Params.Args.Parent + request.Params.Args.Action, "pinned": len(os.Args) == 4})
+					_ = json.NewEncoder(f).Encode(map[string]any{"tool": request.Params.Name, "path": request.Params.Args.Parent + request.Params.Args.Action + request.Params.Args.Entity, "pinned": len(os.Args) == 4})
 					_ = f.Close()
 				}
 				result, ok := createEntity(request.Params.Args.Parent, request.Params.Args.Body)
-				if request.Params.Args.Action != "" {
+				switch {
+				case request.Params.Args.Action != "":
 					result, ok = doAction(request.Params.Args.Action, request.Params.Args.Body)
+				case request.Params.Args.Entity != "":
+					result, ok = changeEntity(request.Params.Name, request.Params.Args.Entity, request.Params.Args.Body)
 				}
 				if !ok {
 					os.Exit(93)

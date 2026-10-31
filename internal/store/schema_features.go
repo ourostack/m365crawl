@@ -7,7 +7,8 @@ import (
 )
 
 // schemaFeature is a feature whose archive state a presence check reads: the schema version that
-// added it, its <Feature>SchemaVersion constant and the tables it adds.
+// added it, its <Feature>SchemaVersion constant and the tables it adds. An entry table.column is a
+// column the feature adds to an existing table.
 type schemaFeature struct {
 	name     string
 	constant string
@@ -27,6 +28,8 @@ var (
 		[]string{"directed_write_drafts"}}
 	workIQWindowFeature = schemaFeature{"WorkIQ mail windows", "WorkIQWindowSchemaVersion", WorkIQWindowSchemaVersion,
 		[]string{"workiq_window_members", "workiq_window_coverage"}}
+	directedReactionFeature = schemaFeature{"directed write reactions", "DirectedReactionSchemaVersion", DirectedReactionSchemaVersion,
+		[]string{"directed_writes.reaction"}}
 )
 
 // schemaFeatures lists every <Feature>SchemaVersion, one entry per line, so two changes that add
@@ -41,16 +44,22 @@ var schemaFeatures = []schemaFeature{
 	directedWriteFeature,
 	directedDraftFeature,
 	workIQWindowFeature,
+	directedReactionFeature,
 }
 
-// featureState reads the archive's recorded schema version and how many of f's tables it has.
+// featureState reads the archive's recorded schema version and how many of f's tables and columns
+// it has.
 func featureState(ctx context.Context, q rowQuerier, f schemaFeature) (version, tables int, err error) {
-	args := make([]any, len(f.tables))
-	for i, t := range f.tables {
-		args[i] = t
+	var counts []string
+	var args []any
+	for _, t := range f.tables {
+		if table, column, ok := strings.Cut(t, "."); ok {
+			counts, args = append(counts, `(select count(*) from pragma_table_info(?) where name=?)`), append(args, table, column)
+			continue
+		}
+		counts, args = append(counts, `(select count(*) from sqlite_master where type='table' and name=?)`), append(args, t)
 	}
-	err = q.QueryRowContext(ctx, `select coalesce(max(version),0),(select count(*) from sqlite_master where type='table' and name in (`+
-		strings.TrimSuffix(strings.Repeat("?,", len(f.tables)), ",")+`)) from schema_migrations`, args...).Scan(&version, &tables)
+	err = q.QueryRowContext(ctx, `select coalesce(max(version),0),`+strings.Join(counts, "+")+` from schema_migrations`, args...).Scan(&version, &tables)
 	return version, tables, err
 }
 

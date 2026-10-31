@@ -483,7 +483,7 @@ func TestReplyMailThroughTheSyntheticWorkIQ(t *testing.T) {
 		t.Fatal(code, out)
 	}
 	code, out, _ = e.run("--format", "text", "writes", "status")
-	if code != 0 || !strings.Contains(out, "  reply to <self@example.invalid>\n") {
+	if code != 0 || !strings.Contains(out, "  on <self@example.invalid>\n") {
 		t.Fatal(code, out)
 	}
 	code, out, _ = e.run("--format", "text", "writes", "target", "--message", self)
@@ -521,5 +521,104 @@ func TestReplyMailThroughTheSyntheticWorkIQ(t *testing.T) {
 	}
 	if actions != 4 { // two replies, each a createReply and a send
 		t.Fatal("actions", actions)
+	}
+}
+
+func TestStageFourWritesThroughTheSyntheticWorkIQ(t *testing.T) {
+	e, transcript := writesEnv(t)
+	useTerminal(t, "on\n")
+	if code, _, stderr := e.run("--json", "writes", "on"); code != 0 {
+		t.Fatal(code, stderr)
+	}
+	who := []string{"--agent", "test-agent", "--reason", "the person asked"}
+	run := func(want int, args ...string) map[string]any {
+		t.Helper()
+		code, out, stderr := e.run(append([]string{"--json", "writes"}, args...)...)
+		if code != want {
+			t.Fatal(args, code, out, stderr)
+		}
+		return decode(t, out)
+	}
+	if got := run(0, append([]string{"send-mail", "--to", synthetic, "--identity", synthetic, "--subject", "Plan", "--text", "New mail", "--intent-key", "m1"}, who...)...); got["outcome"] != "sent" || got["server_id"] != "sent-draft-1700000000001" {
+		t.Fatal(got)
+	}
+	if got := run(0, "target", "--message", "<self@example.invalid>", "--all"); got["all"] != true || got["recipients"].([]any)[0] != synthetic {
+		t.Fatal(got)
+	}
+	if got := run(0, append([]string{"reply-all-mail", "--message", "<self@example.invalid>", "--to", synthetic, "--identity", synthetic, "--text", "To all"}, who...)...); got["outcome"] != "sent" {
+		t.Fatal(got)
+	}
+	draft := run(0, append([]string{"save-mail-draft", "--subject", "Draft", "--text", "one"}, who...)...)["server_id"].(string)
+	target := run(0, "target", "--draft", draft)
+	if target["known"] != true || target["version"] != "ck-0" {
+		t.Fatal(target)
+	}
+	if got := run(0, append([]string{"save-mail-draft", "--draft", draft, "--text", "two", "--expected-version", "ck-0"}, who...)...); got["outcome"] != "sent" || got["effect"] != "only_you" {
+		t.Fatal(got)
+	}
+	if got := run(2, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", "ck-0"}, who...)...); got["code"] != "stale_version" {
+		t.Fatal(got)
+	}
+	if got := run(0, append([]string{"discard-mail-draft", "--draft", draft, "--expected-version", "ck-1"}, who...)...); got["outcome"] != "sent" {
+		t.Fatal(got)
+	}
+	if got := run(0, "target", "--draft", draft); got["known"] != false {
+		t.Fatal("a discarded draft is still a target", got)
+	}
+	note := run(0, sendArgs("react to me")[2:]...)["server_id"].(string)
+	message := run(0, "target", "--chat", "48:notes", "--chat-message", note)
+	version, _ := message["version"].(string)
+	if message["known"] != true || !strings.HasPrefix(version, "2026-10-31T11:") || message["recipients"].([]any)[0] != synthetic {
+		t.Fatal(message)
+	}
+	react := func(verb string, reaction string, want int) map[string]any {
+		return run(want, append([]string{verb, "--chat", "48:notes", "--message", note, "--to", synthetic, "--identity", synthetic,
+			"--reaction", reaction, "--expected-version", version}, who...)...)
+	}
+	if got := react("add-reaction", "👍", 0); got["outcome"] != "sent" || got["verification"] != "found" {
+		t.Fatal(got)
+	}
+	if got := react("remove-reaction", "👍", 0); got["outcome"] != "sent" {
+		t.Fatal(got)
+	}
+	if got := react("add-reaction", "like", 2); got["field"] != "content.reaction" {
+		t.Fatal(got)
+	}
+	code, out, _ := e.run("--format", "text", "writes", "status")
+	if code != 0 || !strings.Contains(out, "  reaction 👍 on "+note+"\n") || !strings.Contains(out, "  on "+draft+"\n") {
+		t.Fatal(code, out)
+	}
+	code, out, _ = e.run("--format", "text", "writes", "target", "--chat", "48:notes", "--chat-message", note)
+	if code != 0 || !strings.HasPrefix(out, "chat message 48:notes "+note+" as ") {
+		t.Fatal(code, out)
+	}
+	code, out, _ = e.run("--format", "text", "writes", "target", "--draft", draft)
+	if code != 0 || out != "draft "+draft+": not a draft a write can name (unknown_target)\n" {
+		t.Fatal(code, out)
+	}
+	for _, args := range [][]string{{"target", "--chat-message", "1"}, {"target", "--all", "--chat", "48:notes"}, {"target", "--draft", "d", "--chat", "48:notes"},
+		{"send-mail", "--text", "a", "--text-file", "b"}, {"reply-all-mail", "--text", "a", "--text-file", "b"}} {
+		if code, _, stderr := e.run(append([]string{"--json", "writes"}, args...)...); code != 2 || writeErrorCode(t, stderr) != "usage" {
+			t.Fatal(args, code, stderr)
+		}
+	}
+	raw, err := os.ReadFile(transcript) //nolint:gosec // G304: own synthetic transcript.
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var entry struct {
+			Tool   string
+			Pinned bool
+		}
+		if json.Unmarshal([]byte(line), &entry) != nil || entry.Tool != "fetch" && !entry.Pinned {
+			t.Fatal("an unpinned write:", line)
+		}
+		tools[entry.Tool]++
+	}
+	// create_entity: new mail, the draft, the chat message; do_action: send x2, reply-all, two reactions.
+	if tools["create_entity"] != 3 || tools["do_action"] != 5 || tools["update_entity"] != 1 || tools["delete_entity"] != 1 {
+		t.Fatal(tools)
 	}
 }

@@ -178,6 +178,11 @@ var actions = map[string]action{
 		required: []string{fMessage, fRecipients, fText}, optional: []string{fVersion},
 		messageKind: KindMailMessage, audience: lookupMessage, version: lookupMessage,
 	},
+	"reply_all_mail": {
+		effect: VisibleToOthers, send: true,
+		required: []string{fMessage, fRecipients, fText}, optional: []string{fVersion},
+		messageKind: KindMailMessage, audience: lookupMessage, version: lookupMessage,
+	},
 	// Everyone now in the chat sees a reaction, so its audience is the conversation's, while
 	// its version is the message's.
 	"add_reaction": {
@@ -340,6 +345,15 @@ func sameRequest(a, b Request) bool {
 		a.Content == b.Content
 }
 
+// sameReply says two normalized requests answer the same message with the same text as the same
+// account, one as a reply and one as a reply-all, so neither may resend the other after an unknown
+// outcome whatever their recipients.
+func sameReply(a, b Request) bool {
+	replies := []string{"reply_mail", "reply_all_mail"}
+	return slices.Contains(replies, a.Action) && slices.Contains(replies, b.Action) &&
+		a.Identity == b.Identity && a.Target.Message == b.Target.Message && a.Content == b.Content
+}
+
 // Decide applies the contract's checks in order and returns the first refusal, a replay of an
 // earlier request with the same intent key, or acceptance.
 func Decide(state State, req Request) Result {
@@ -437,7 +451,7 @@ func Decide(state State, req Request) Result {
 		return refuse(CodeStaleVersion)
 	}
 	for _, e := range earlier {
-		if e.Outcome == Unknown && sameRequest(e.Request, req) {
+		if e.Outcome == Unknown && (sameRequest(e.Request, req) || sameReply(e.Request, req)) {
 			return refuse(CodeOutcomeUnknown)
 		}
 	}

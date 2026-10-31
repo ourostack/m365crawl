@@ -14,6 +14,9 @@ const DirectedWriteSchemaVersion = 26
 // DirectedDraftSchemaVersion is the archive schema that added the reply drafts of directed writes.
 const DirectedDraftSchemaVersion = 28
 
+// DirectedReactionSchemaVersion is the archive schema that added directed_writes.reaction.
+const DirectedReactionSchemaVersion = 30
+
 // The write log is append/update-only: no row of either table is ever deleted, and an event is
 // never changed.
 const directedWriteSchemaDDL = `
@@ -32,7 +35,8 @@ create table if not exists directed_writes(
  verification text not null default '' check(verification in ('','found','not_sent_proven','person')),
  server_id text not null default '', server_status integer not null default 0,
  watermark_id text not null default '', watermark_at text not null default '',
- error_code text not null default '', m365crawl_version text not null default ''
+ error_code text not null default '', m365crawl_version text not null default '',
+ reaction text not null default ''
 );
 create unique index if not exists directed_writes_intent on directed_writes(intent_key) where intent_key<>'' and outcome<>'failed';
 create unique index if not exists directed_writes_server on directed_writes(action,conversation,server_id) where server_id<>'';
@@ -74,6 +78,7 @@ type DirectedWrite struct {
 	ServerStatus                 int
 	WatermarkID, WatermarkAt     string
 	ErrorCode, Version           string
+	Reaction                     string
 }
 
 // DirectedWriteChange is a later state of a write and why it changed.
@@ -94,13 +99,23 @@ const directedWriteColumns = `id,created_at,updated_at,contract,action,effect,ag
 recipients_json,subject,text,intent_key,expected_version,user_id,tenant_id,account_pin,outcome,phase,verification,
 server_id,server_status,watermark_id,watermark_at,error_code,m365crawl_version`
 
+// directedColumns is directedWriteColumns with the reaction column, read as empty on an archive
+// without it, which a read-only open does not migrate.
+func directedColumns(ctx context.Context, q rowQuerier) (string, error) {
+	has, err := hasFeature(ctx, q, directedReactionFeature)
+	if !has {
+		return directedWriteColumns + `,'' as reaction`, err
+	}
+	return directedWriteColumns + `,reaction`, nil
+}
+
 func scanDirectedWrite(rs interface{ Scan(...any) error }) (DirectedWrite, error) {
 	var w DirectedWrite
 	var created, updated, recipients string
 	err := rs.Scan(&w.ID, &created, &updated, &w.Contract, &w.Action, &w.Effect, &w.Agent, &w.Reason, &w.Identity,
 		&w.Conversation, &w.Message, &recipients, &w.Subject, &w.Text, &w.IntentKey, &w.ExpectedVersion, &w.UserID,
 		&w.TenantID, &w.AccountPin, &w.Outcome, &w.Phase, &w.Verification, &w.ServerID, &w.ServerStatus,
-		&w.WatermarkID, &w.WatermarkAt, &w.ErrorCode, &w.Version)
+		&w.WatermarkID, &w.WatermarkAt, &w.ErrorCode, &w.Version, &w.Reaction)
 	if err != nil {
 		return DirectedWrite{}, err
 	}
@@ -125,7 +140,11 @@ func directedWrites(ctx context.Context, q directedQuerier, limit int) ([]Direct
 	if limit <= 0 {
 		limit = -1
 	}
-	rows, err := q.QueryContext(ctx, `select `+directedWriteColumns+` from directed_writes order by id desc limit ?`, limit)
+	columns, err := directedColumns(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.QueryContext(ctx, `select `+columns+` from directed_writes order by id desc limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -149,10 +168,15 @@ func (s *Store) DirectedWrites(ctx context.Context, limit int) ([]DirectedWrite,
 
 // DirectedWriteByID reads one write; ok is false when there is none.
 func (s *Store) DirectedWriteByID(ctx context.Context, id int64) (DirectedWrite, bool, error) {
-	if has, err := hasDirectedWrites(ctx, s.db); err != nil || !has {
+	has, err := hasDirectedWrites(ctx, s.db)
+	if err != nil || !has {
 		return DirectedWrite{}, false, err
 	}
-	w, err := scanDirectedWrite(s.db.QueryRowContext(ctx, `select `+directedWriteColumns+` from directed_writes where id=?`, id))
+	columns, err := directedColumns(ctx, s.db)
+	if err != nil {
+		return DirectedWrite{}, false, err
+	}
+	w, err := scanDirectedWrite(s.db.QueryRowContext(ctx, `select `+columns+` from directed_writes where id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return DirectedWrite{}, false, nil
 	}
@@ -190,11 +214,11 @@ func (s *Store) BeginDirectedWrite(ctx context.Context, w DirectedWrite, gate fu
 	now := directedWriteNow().UTC().Format(timeLayout)
 	res, err := tx.ExecContext(ctx, `insert into directed_writes(created_at,updated_at,contract,action,effect,agent,reason,
 identity,conversation,message,recipients_json,subject,text,intent_key,expected_version,user_id,tenant_id,account_pin,
-outcome,phase,verification,server_id,server_status,watermark_id,watermark_at,error_code,m365crawl_version)
-values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now, now, w.Contract, w.Action, w.Effect, w.Agent,
+outcome,phase,verification,server_id,server_status,watermark_id,watermark_at,error_code,m365crawl_version,reaction)
+values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now, now, w.Contract, w.Action, w.Effect, w.Agent,
 		w.Reason, w.Identity, w.Conversation, w.Message, string(recipients), w.Subject, w.Text, w.IntentKey,
 		w.ExpectedVersion, w.UserID, w.TenantID, w.AccountPin, w.Outcome, w.Phase, w.Verification, w.ServerID,
-		w.ServerStatus, w.WatermarkID, w.WatermarkAt, w.ErrorCode, w.Version)
+		w.ServerStatus, w.WatermarkID, w.WatermarkAt, w.ErrorCode, w.Version, w.Reaction)
 	if err != nil {
 		return 0, err
 	}
@@ -280,4 +304,16 @@ func (s *Store) DirectedDraft(ctx context.Context, id int64) (draftID, internetM
 		return "", "", false, nil
 	}
 	return draftID, internetMessageID, err == nil, err
+}
+
+// DirectedDraftHeld says a directed send recorded draftID and has not failed: the draft is the
+// evidence of that send and may be sent by it, so no other write may change or discard it.
+func (s *Store) DirectedDraftHeld(ctx context.Context, draftID string) (bool, error) {
+	if has, err := hasDirectedDrafts(ctx, s.db); err != nil || !has {
+		return false, err
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, `select count(*) from directed_write_drafts d join directed_writes w on w.id=d.write_id
+where d.draft_id=? and w.outcome<>'failed'`, draftID).Scan(&n)
+	return n > 0, err
 }

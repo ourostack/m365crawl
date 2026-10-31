@@ -46,8 +46,8 @@ type server struct {
 	closeErr error
 	fetched  []string
 	// replies
-	replyAnswer, sendAnswer workiq.WriteAnswer
-	onReply, onSend         func()
+	replyAnswer, sendAnswer, actAnswer workiq.WriteAnswer
+	onReply, onSend, onAct             func()
 }
 
 type fake struct{ s *server }
@@ -94,6 +94,42 @@ func (f fake) CreateReply(_ context.Context, messageID, comment string) workiq.W
 		f.s.onReply()
 	}
 	return f.s.replyAnswer
+}
+
+func (f fake) CreateReplyAll(_ context.Context, messageID, comment string) workiq.WriteAnswer {
+	f.s.created = append(f.s.created, "replyall|"+messageID+"|"+comment)
+	if f.s.onReply != nil {
+		f.s.onReply()
+	}
+	return f.s.replyAnswer
+}
+
+func (f fake) UpdateDraft(_ context.Context, draftID, etag string, change workiq.DraftChange) workiq.WriteAnswer {
+	f.s.created = append(f.s.created, "update|"+draftID+"|"+etag+"|"+change.Text+"|"+change.Subject+"|"+strings.Join(change.To, ","))
+	if f.s.onAct != nil {
+		f.s.onAct()
+	}
+	return f.s.actAnswer
+}
+
+func (f fake) DeleteDraft(_ context.Context, draftID, etag string) workiq.WriteAnswer {
+	f.s.created = append(f.s.created, "delete|"+draftID+"|"+etag)
+	if f.s.onAct != nil {
+		f.s.onAct()
+	}
+	return f.s.actAnswer
+}
+
+func (f fake) SetReaction(_ context.Context, chat, messageID, reaction string, remove bool) workiq.WriteAnswer {
+	verb := "react"
+	if remove {
+		verb = "unreact"
+	}
+	f.s.created = append(f.s.created, verb+"|"+chat+"|"+messageID+"|"+reaction)
+	if f.s.onAct != nil {
+		f.s.onAct()
+	}
+	return f.s.actAnswer
 }
 
 func (f fake) SendDraft(_ context.Context, draftID string) workiq.WriteAnswer {
@@ -418,7 +454,7 @@ func TestSendToAGroupChatChecksItsWholeAudience(t *testing.T) {
 	if row := logged(t, opts)[0]; row.WatermarkID != "" || row.WatermarkAt != "" {
 		t.Fatalf("an empty chat has a watermark: %+v", row)
 	}
-	target, err := Target(ctx, opts, chat, "", "")
+	target, err := Target(ctx, opts, TargetQuery{Chat: chat, Message: "", Identity: ""})
 	if err != nil || !target.Known || target.Identity != selfAddr || target.Version != "none" || target.WatermarkAt != "" ||
 		!slices.Equal(target.Recipients, []string{selfAddr, "friend@example.invalid", "w-guest"}) {
 		t.Fatalf("%+v %v", target, err)
@@ -495,7 +531,7 @@ func TestSendStopsWhenTheServerCannotBeRead(t *testing.T) {
 		if _, err := Send(ctx, opts, req); err == nil || len(srv.created) != 0 {
 			t.Fatal("sent without reading the target", pages)
 		}
-		if _, err := Target(ctx, opts, chat, "", selfAddr); err == nil {
+		if _, err := Target(ctx, opts, TargetQuery{Chat: chat, Message: "", Identity: selfAddr}); err == nil {
 			t.Fatal("target read without the server")
 		}
 	}

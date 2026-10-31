@@ -62,6 +62,10 @@ type session interface {
 	CreateChatMessage(ctx context.Context, chat, text string) workiq.WriteAnswer
 	CreateMailDraft(ctx context.Context, subject, text string, to []string) workiq.WriteAnswer
 	CreateReply(ctx context.Context, messageID, comment string) workiq.WriteAnswer
+	CreateReplyAll(ctx context.Context, messageID, comment string) workiq.WriteAnswer
+	UpdateDraft(ctx context.Context, draftID, etag string, change workiq.DraftChange) workiq.WriteAnswer
+	DeleteDraft(ctx context.Context, draftID, etag string) workiq.WriteAnswer
+	SetReaction(ctx context.Context, chat, messageID, reaction string, remove bool) workiq.WriteAnswer
 	SendDraft(ctx context.Context, draftID string) workiq.WriteAnswer
 	Close() error
 }
@@ -168,6 +172,9 @@ func checkInput(req da.Request) (string, bool) {
 		if !clean(strings.TrimSpace(r), true, 254) {
 			return "target.recipients", false
 		}
+	}
+	if reaction := strings.TrimSpace(req.Content.Reaction); reaction != "" && !validReaction(reaction) {
+		return "content.reaction", false
 	}
 	return "", true
 }
@@ -339,7 +346,7 @@ func earlierOf(rows []store.DirectedWrite) []da.Earlier {
 		out = append(out, da.Earlier{RequestID: strconv.FormatInt(w.ID, 10), Outcome: da.Outcome(w.Outcome), Request: da.Request{
 			Contract: w.Contract, Action: w.Action, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity,
 			Target:  da.Target{Conversation: w.Conversation, Message: w.Message, Recipients: w.Recipients},
-			Content: da.Content{Text: w.Text, Subject: w.Subject}, ExpectedVersion: w.ExpectedVersion, IntentKey: w.IntentKey,
+			Content: da.Content{Text: w.Text, Subject: w.Subject, Reaction: w.Reaction}, ExpectedVersion: w.ExpectedVersion, IntentKey: w.IntentKey,
 		}})
 	}
 	return out
@@ -430,7 +437,7 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 	state := da.State{Writes: writes, SignedIn: p.canonical, Targets: map[string]da.TargetState{}}
 	tenant := ""
 	var target chat
-	if req.Action == SendTeamsMessage {
+	if req.Action == SendTeamsMessage || isReaction(req.Action) {
 		if tenant, err = teamsAccount(ctx, opts, p); err != nil {
 			return Result{}, err
 		}
@@ -443,13 +450,30 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 		}
 	}
 	var original mail
-	if req.Action == ReplyMail {
-		message := strings.TrimSpace(req.Target.Message)
-		if original, err = readMail(ctx, s, message, p); err != nil {
+	var draft draftTarget
+	var reacted chatMessage
+	message := strings.TrimSpace(req.Target.Message)
+	switch {
+	case req.Action == ReplyMail || req.Action == ReplyAllMail:
+		if original, err = readMail(ctx, s, message, p, req.Action == ReplyAllMail); err != nil {
 			return Result{}, err
 		}
 		if original.known {
 			state.Targets[message] = da.TargetState{Kind: original.kind, Recipients: original.recipients, Version: original.version}
+		}
+	case (req.Action == SaveMailDraft || req.Action == DiscardMailDraft) && message != "":
+		if draft, err = readDraft(ctx, opts, s, message); err != nil {
+			return Result{}, err
+		}
+		if draft.known {
+			state.Targets[message] = da.TargetState{Kind: draft.kind, Version: draft.version}
+		}
+	case isReaction(req.Action):
+		if reacted, err = readChatMessage(ctx, s, strings.TrimSpace(req.Target.Conversation), message, p); err != nil {
+			return Result{}, err
+		}
+		if reacted.known {
+			state.Targets[message] = da.TargetState{Kind: da.KindChatMessage, Conversation: reacted.chat, Version: reacted.version}
 		}
 	}
 	rows, err := earlierWrites(ctx, opts)
@@ -464,7 +488,7 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 	text := normalized(req.Content.Text)
 	row := store.DirectedWrite{Contract: da.Contract, Action: req.Action, Effect: string(effect), Agent: strings.TrimSpace(req.Agent),
 		Reason: strings.TrimSpace(req.Reason), Identity: p.canonical, Conversation: strings.TrimSpace(req.Target.Conversation),
-		Message:    strings.TrimSpace(req.Target.Message),
+		Message: message, Reaction: strings.TrimSpace(req.Content.Reaction),
 		Recipients: lower(req.Target.Recipients), Subject: normalized(req.Content.Subject), Text: text,
 		IntentKey: strings.TrimSpace(req.IntentKey), ExpectedVersion: strings.TrimSpace(req.ExpectedVersion), UserID: p.user.ID,
 		TenantID: tenant, AccountPin: p.pin, Outcome: string(da.Unknown), Phase: "in_flight", WatermarkID: target.watermarkID,
@@ -508,8 +532,15 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 		settled.Decision, settled.Notice = da.Accept, "the write changed before it was sent, so nothing was sent; the log is the record"
 		return settled, nil
 	}
-	if req.Action == ReplyMail {
+	switch {
+	case throughDraft(req.Action):
 		return sendReply(ctx, opts, s, row, original, p), nil
+	case req.Action == SaveMailDraft && message != "":
+		return updateDraft(ctx, opts, s, row, draft, p), nil
+	case req.Action == DiscardMailDraft:
+		return discardDraft(ctx, opts, s, row, draft), nil
+	case isReaction(req.Action):
+		return react(ctx, opts, s, row, reacted, p), nil
 	}
 	var answer workiq.WriteAnswer
 	if req.Action == SendTeamsMessage {
