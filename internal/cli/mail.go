@@ -55,6 +55,7 @@ Recipients: Mac To and Cc are not yet told apart: role is null and kind_raw is t
 Windows: to_me is false, in_reply_to is null, attachments are metadata only (downloaded=false; missing size=0). Unknown HasAttachments stays unavailable in decoding and is not inferred from attachment metadata. Cached HTML can be truncated at source. Each content mailbox of a profile is read into its own account once its identity is proved; ambiguous or unsupported layouts are coded refusals. Cached OWA calendar events are read independently from mail; ` + "`calendar sources`" + ` reports their read state. Calendar absence does not establish deletion, and an unverified sign-in identity never creates an automatic link.
 Mac importance is likely right (low, normal, high) but is read from one store field that is not fully confirmed.
 Folder copies: Outlook for Mac can rebuild an account in its store with a new set of folders and new ids for the same messages; the archive keeps the older sets. A message from an older set that the current set holds in any folder (Sent Items only with Sent Items), or a newer older set in the same kind of folder (same Message-ID), is listed and counted once, from the newer copy; mail list --include-copies also lists the older copies, with copy_of naming the newer one. older_copy is true for a message from an older set, and current is false for an older set's folder in coverage, mail folders and mail unread: no sync reads it any more, so its range stopped at its last read.
+Dates: every mail message has dated_at, the time --since and --until select it by and lists sort it by: sent_at in Sent Items (Outlook's stored received time on a sent message is often when the draft was started, or a later day), received_at in every other folder, Drafts included. When copies of a message in older folder sets disagree on received time by more than a minute, received_at_disagrees is true and dated_at uses the earliest copy's received time at or after sent_at (15 minutes of clock skew allowed), or the listed row's own when none is; received_at stays the row's own.
 An id is account:detail_key, as printed by mail list.`
 
 // Help is the long help of the mail group, shared by every mail command.
@@ -66,7 +67,7 @@ const mailSeeGroup = "What every mail command shares (null fields, ids, --accoun
 
 // Help is the long help of mail list.
 func (mailListCmd) Help() string {
-	return mailSeeGroup + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. --since and --until take YYYY-MM-DD, RFC3339 or a relative age such as 7d; a date alone as --until includes that whole day, a time is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more. With --since or --until, folder_copies compares, for Inbox and Sent Items when they have older copies, the current copy with the older ones over that range, counting each message once: state partial means an older copy holds messages dated inside the current cache's range that the current set does not hold anywhere, older_copy_only means only an older copy reaches the range, and consistent means neither. older_copies_marked counts older-copy messages the list shows only with --include-gone --include-evicted."
+	return mailSeeGroup + "\nmail list shows recipient_count and the first three recipient names (recipients_preview); mail show lists everyone. Messages are newest first by dated_at: when they were sent in Sent Items, when they were received elsewhere. --since and --until select on dated_at and take YYYY-MM-DD, RFC3339 or a relative age such as 7d; a date alone as --until includes that whole day, a time is exclusive. --unread also reports how many messages the cache holds in the folder, because Outlook may show more. With --since or --until, folder_copies compares, for Inbox and Sent Items when they have older copies, the current copy with the older ones over that range, counting each message once: state partial means an older copy holds messages dated inside the current cache's range that the current set does not hold anywhere, older_copy_only means only an older copy reaches the range, and consistent means neither; dated_by names the clock that selected its messages (sent_at for sent, received_at for inbox), while the current cache's range (current_oldest_at) is a received time. older_copies_marked counts older-copy messages the list shows only with --include-gone --include-evicted."
 }
 
 // Help is the long help of mail show.
@@ -127,6 +128,7 @@ type mailListItem struct {
 	ConversationID    *string    `json:"conversation_id"`
 	ReceivedAt        *time.Time `json:"received_at"`
 	SentAt            *time.Time `json:"sent_at"`
+	DatedAt           *time.Time `json:"dated_at"`
 	IsRead            *bool      `json:"is_read"`
 	Flag              *string    `json:"flag"`
 	Importance        *string    `json:"importance"`
@@ -138,40 +140,45 @@ type mailListItem struct {
 	EvictedAt         *time.Time `json:"evicted_at"`
 	OlderCopy         bool       `json:"older_copy"`
 	CopyOf            *string    `json:"copy_of"`
-	TextTruncated     bool       `json:"text_truncated,omitempty"`
+	// ReceivedAtDisagrees is true when copies of the message in other folder sets hold received
+	// times more than a minute apart; dated_at then uses the one chosen (store.MailRow).
+	ReceivedAtDisagrees bool `json:"received_at_disagrees"`
+	TextTruncated       bool `json:"text_truncated,omitempty"`
 }
 
 // mailShowItem is one message in full.
 type mailShowItem struct {
-	ID                string              `json:"id"`
-	Account           string              `json:"account"`
-	Folder            *string             `json:"folder"`
-	FolderKind        *string             `json:"folder_kind"`
-	ToMe              bool                `json:"to_me"`
-	Subject           *string             `json:"subject"`
-	FromName          *string             `json:"from_name"`
-	FromAddress       *string             `json:"from_address"`
-	Recipients        []mailRecipientOut  `json:"recipients"`
-	InReplyTo         *string             `json:"in_reply_to"`
-	ConversationID    *string             `json:"conversation_id"`
-	ReceivedAt        *time.Time          `json:"received_at"`
-	SentAt            *time.Time          `json:"sent_at"`
-	IsRead            *bool               `json:"is_read"`
-	ReadState         *string             `json:"read_state"`
-	Flag              *string             `json:"flag"`
-	Importance        *string             `json:"importance"`
-	HasAttachments    bool                `json:"has_attachments"`
-	Attachments       []mailAttachmentOut `json:"attachments"`
-	Preview           *string             `json:"preview"`
-	BodyText          *string             `json:"body_text"`
-	BodyState         *string             `json:"body_state"`
-	InternetMessageID *string             `json:"internet_message_id"`
-	ICalUID           *string             `json:"ical_uid"`
-	GoneAt            *time.Time          `json:"gone_at"`
-	EvictedAt         *time.Time          `json:"evicted_at"`
-	OlderCopy         bool                `json:"older_copy"`
-	CopyOf            *string             `json:"copy_of"`
-	TextTruncated     bool                `json:"text_truncated,omitempty"`
+	ID                  string              `json:"id"`
+	Account             string              `json:"account"`
+	Folder              *string             `json:"folder"`
+	FolderKind          *string             `json:"folder_kind"`
+	ToMe                bool                `json:"to_me"`
+	Subject             *string             `json:"subject"`
+	FromName            *string             `json:"from_name"`
+	FromAddress         *string             `json:"from_address"`
+	Recipients          []mailRecipientOut  `json:"recipients"`
+	InReplyTo           *string             `json:"in_reply_to"`
+	ConversationID      *string             `json:"conversation_id"`
+	ReceivedAt          *time.Time          `json:"received_at"`
+	SentAt              *time.Time          `json:"sent_at"`
+	DatedAt             *time.Time          `json:"dated_at"`
+	IsRead              *bool               `json:"is_read"`
+	ReadState           *string             `json:"read_state"`
+	Flag                *string             `json:"flag"`
+	Importance          *string             `json:"importance"`
+	HasAttachments      bool                `json:"has_attachments"`
+	Attachments         []mailAttachmentOut `json:"attachments"`
+	Preview             *string             `json:"preview"`
+	BodyText            *string             `json:"body_text"`
+	BodyState           *string             `json:"body_state"`
+	InternetMessageID   *string             `json:"internet_message_id"`
+	ICalUID             *string             `json:"ical_uid"`
+	GoneAt              *time.Time          `json:"gone_at"`
+	EvictedAt           *time.Time          `json:"evicted_at"`
+	OlderCopy           bool                `json:"older_copy"`
+	CopyOf              *string             `json:"copy_of"`
+	ReceivedAtDisagrees bool                `json:"received_at_disagrees"`
+	TextTruncated       bool                `json:"text_truncated,omitempty"`
 }
 
 // mailFolderItem is one folder with its counts.
@@ -241,9 +248,9 @@ func listItemOf(r store.MailRow, max int) mailListItem {
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID),
-		ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt), IsRead: r.IsRead, Flag: nz(r.Flag), Importance: nz(r.Importance),
+		ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt), DatedAt: tp(r.DatedAt), IsRead: r.IsRead, Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID),
-		GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf),
+		GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf), ReceivedAtDisagrees: r.ReceivedAtDisagrees,
 	}
 	for i, rc := range r.Recipients {
 		if i == 3 {
@@ -264,10 +271,10 @@ func showItemOf(r store.MailRow, max int) mailShowItem {
 		ID: r.ID(), Account: r.Account, Folder: nz(r.Folder), FolderKind: nz(r.FolderKind), ToMe: r.ToMe,
 		Subject: nz(r.Subject), FromName: nz(r.SenderName), FromAddress: nz(r.SenderAddress),
 		Recipients: []mailRecipientOut{}, InReplyTo: nz(r.InReplyTo), ConversationID: nz(r.ConversationID), ReceivedAt: tp(r.ReceivedAt), SentAt: tp(r.SentAt),
-		IsRead: r.IsRead, ReadState: nz(r.ReadState), Flag: nz(r.Flag), Importance: nz(r.Importance),
+		DatedAt: tp(r.DatedAt), IsRead: r.IsRead, ReadState: nz(r.ReadState), Flag: nz(r.Flag), Importance: nz(r.Importance),
 		HasAttachments: r.HasAttachments, Attachments: []mailAttachmentOut{}, BodyState: nz(r.BodyState),
 		InternetMessageID: nz(r.InternetMessageID), ICalUID: nz(r.ICalUID), GoneAt: tp(r.GoneAt), EvictedAt: tp(r.EvictedAt),
-		OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf),
+		OlderCopy: r.OlderCopy, CopyOf: nz(r.CopyOf), ReceivedAtDisagrees: r.ReceivedAtDisagrees,
 	}
 	for _, rc := range r.Recipients {
 		it.Recipients = append(it.Recipients, mailRecipientOut{Name: nz(rc.Name), Address: nz(rc.Address), Role: nz(rc.Role), KindRaw: rc.KindRaw})
@@ -598,9 +605,9 @@ func (r *mailListResult) messages(rt *runtime) {
 	}
 	rows := make([][]string, len(r.rows))
 	for i, m := range r.rows {
-		rows[i] = []string{m.ID(), stamp(m.ReceivedAt), mailState(m), firstOf(m.SenderName, m.SenderAddress), oneLine(m.Subject), m.Folder}
+		rows[i] = []string{m.ID(), stamp(m.DatedAt), mailState(m), firstOf(m.SenderName, m.SenderAddress), oneLine(m.Subject), m.Folder}
 	}
-	rt.fitTable([]string{"id", "received", "state", "from", "subject", "folder"}, rows, 4, 0)
+	rt.fitTable([]string{"id", "date", "state", "from", "subject", "folder"}, rows, 4, 0)
 }
 
 // fitTable prints a table whose text column is clipped to the terminal; keep names a column that
@@ -688,8 +695,8 @@ func (rt *runtime) noteMailFailures(st *store.Store, res result, account string)
 type mailListCmd struct {
 	Folder         string `help:"Only this folder, by name (checked first) or kind: inbox, sent, drafts, archive, deleted, to_me, other." placeholder:"NAME|KIND"`
 	From           string `help:"Only messages whose sender name or address contains this text, ignoring case." placeholder:"TEXT"`
-	Since          string `help:"Only messages received at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d)." placeholder:"DATE"`
-	Until          string `help:"Only messages received before this time; a date alone includes that whole local day, a time is exclusive." placeholder:"DATE"`
+	Since          string `help:"Only messages dated at or after this time (YYYY-MM-DD, RFC3339 or an age such as 7d): Sent Items by when they were sent, other folders by when they were received." placeholder:"DATE"`
+	Until          string `help:"Only messages dated before this time (sent for Sent Items, received otherwise); a date alone includes that whole local day, a time is exclusive." placeholder:"DATE"`
 	Unread         bool   `help:"Only unread messages."`
 	Flagged        bool   `help:"Only flagged messages."`
 	HasAttachments bool   `name:"has-attachments" help:"Only messages with attachments."`
@@ -880,6 +887,9 @@ func (r *mailShowResult) renderMail(rt *runtime) {
 		return
 	}
 	head := map[string]any{"id": it.ID, "folder": sv(it.Folder), "received": stamp(derefTime(it.ReceivedAt))}
+	if it.ReceivedAtDisagrees {
+		head["received"] = head["received"].(string) + " (copies disagree; dated " + stamp(derefTime(it.DatedAt)) + ")"
+	}
 	set := func(k, v string) {
 		if v != "" {
 			head[k] = v

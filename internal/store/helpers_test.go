@@ -18,7 +18,7 @@ var (
 
 func selfMRI(a teamsdesktop.Account) string { return "8:orgid:" + a.UserID }
 
-func newStore(t *testing.T) *Store {
+func newStore(t testing.TB) *Store {
 	t.Helper()
 	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "data", "m365crawl.db"))
 	if err != nil {

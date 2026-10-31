@@ -86,7 +86,7 @@ func mailBatch(read time.Time, msgs ...outlookmail.Message) MailBatch {
 	return MailBatch{Account: mailAcct, ReadAt: read, FreshAt: read, Result: res, Trusted: true}
 }
 
-func mustCommitMail(t *testing.T, s *Store, b MailBatch) MailResult {
+func mustCommitMail(t testing.TB, s *Store, b MailBatch) MailResult {
 	t.Helper()
 	r, err := s.CommitMail(context.Background(), b)
 	if err != nil {

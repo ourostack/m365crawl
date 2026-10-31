@@ -82,7 +82,7 @@ func maxTime(a, b time.Time) time.Time {
 
 // commitUnmappedThenMapped reads the set under root twice: first with its folders unmapped, so its
 // messages cannot be matched to archived ones, then mapped.
-func commitUnmappedThenMapped(t *testing.T, s *Store, hour int, root uint32, msgs ...outlookmail.Message) {
+func commitUnmappedThenMapped(t testing.TB, s *Store, hour int, root uint32, msgs ...outlookmail.Message) {
 	t.Helper()
 	unmapped := make([]outlookmail.Message, len(msgs))
 	for i, m := range msgs {
@@ -99,7 +99,7 @@ func commitUnmappedThenMapped(t *testing.T, s *Store, hour int, root uint32, msg
 // read while its folders are still unmapped (kind unknown), so its copies are archived as new
 // messages instead of being re-keyed; a later read maps B's folders and the copies land in B's
 // Sent Items beside A's.
-func seedTwoSets(t *testing.T, s *Store, a []outlookmail.Message, b []outlookmail.Message) {
+func seedTwoSets(t testing.TB, s *Store, a []outlookmail.Message, b []outlookmail.Message) {
 	t.Helper()
 	mustCommitMail(t, s, setBatch(hr(1), rootA, a...))
 	commitUnmappedThenMapped(t, s, 2, rootB, b...)
@@ -524,7 +524,8 @@ func TestMailCopyCheckOverEveryShape(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedCopiesForFaults(t, s)
-	if got := listKeys(t, s, MailFilter{Folder: "sent"}); !sameKeys(got, 2001, 2002, 1003, 1009) {
+	// Sent Items is dated by sent time, so 1009, which has no received time, sorts by its send time.
+	if got := listKeys(t, s, MailFilter{Folder: "sent"}); !sameKeys(got, 2001, 2002, 1009, 1003) {
 		t.Fatalf("sent %v", got)
 	}
 	checks, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}, {Account: mailAcct, Kind: "inbox"}, {Account: mailAcct, Kind: "archive"}}, MailCopyRange{})
