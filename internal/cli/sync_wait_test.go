@@ -197,7 +197,7 @@ func TestReadSyncsItselfWhenTheOtherRunLeftTheArchiveStale(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	m := decode(t, stdout)
-	if m["sync_error"] != nil || m["implicit_sync"] != nil {
+	if m["sync_error"] != nil || m["implicit_sync"] != implicitSyncRan {
 		t.Fatalf("sync_error %v, implicit_sync %v", m["sync_error"], m["implicit_sync"])
 	}
 	synced, _ := m["synced"].(map[string]any)

@@ -109,7 +109,7 @@ func TestTextGoldens(t *testing.T) {
 	}
 	for _, c := range cases {
 		for _, color := range []bool{false, true} {
-			args := append([]string{"--format", "text", "--max-age", "0"}, c.args...)
+			args := append([]string{"--format", "text", "--no-sync"}, c.args...)
 			suffix := "plain"
 			t.Setenv("CLICOLOR_FORCE", "")
 			if color {
@@ -141,7 +141,7 @@ func TestTextDoctorSyncAndBanner(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "local-first Microsoft 365 mirror for SQLite  |  sync") {
 		t.Fatalf("sync banner: %d %q", code, out)
 	}
-	_, out, _ = e.run("--format", "text", "--max-age", "0", "search", "Hello")
+	_, out, _ = e.run("--format", "text", "--no-sync", "search", "Hello")
 	if strings.Contains(out, "local-first") {
 		t.Errorf("list commands carry no banner: %q", out)
 	}
@@ -182,7 +182,7 @@ func TestColorSwitches(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
 	run := func(args ...string) string {
-		_, out, _ := e.run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+		_, out, _ := e.run(append([]string{"--format", "text", "--no-sync"}, args...)...)
 		return out
 	}
 	t.Setenv("CLICOLOR_FORCE", "1")
@@ -207,7 +207,7 @@ func TestTextTruncatesToTerminalWidth(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
 	t.Setenv("COLUMNS", "80")
-	_, out, _ := e.run("--format", "text", "--max-age", "0", "unread")
+	_, out, _ := e.run("--format", "text", "--no-sync", "unread")
 	for _, l := range strings.Split(out, "\n") {
 		if l != "" && len([]rune(l)) > 80 {
 			t.Errorf("row not clipped: %q", l)
@@ -226,7 +226,7 @@ var jsonNoise = regexp.MustCompile(`"(archive_age_seconds|started_at|finished_at
 func TestJSONUnaffectedByTextPath(t *testing.T) {
 	e := textEnv(t)
 	e.sync()
-	_, out, _ := e.run("--max-age", "0", "search", "Hello")
+	_, out, _ := e.run("--no-sync", "search", "Hello")
 	first := decode(t, out)["items"].([]any)[0].(map[string]any)
 	cmds := [][]string{
 		{"doctor"}, {"status"}, {"whoami"}, {"search", "Hello"}, {"messages"}, {"conversations"}, {"people"},
@@ -235,12 +235,12 @@ func TestJSONUnaffectedByTextPath(t *testing.T) {
 		{"--fields", "id,text", "--max-text", "9", "messages"},
 	}
 	for _, c := range cmds {
-		args := append([]string{"--max-age", "0", "--json"}, c...)
+		args := append([]string{"--no-sync", "--json"}, c...)
 		t.Setenv("CLICOLOR_FORCE", "")
 		_, plain, _ := e.run(args...)
 		t.Setenv("CLICOLOR_FORCE", "1")
 		_, forced, _ := e.run(args...)
-		_, withFlag, _ := e.run(append([]string{"--format", "json"}, args[2:]...)...)
+		_, withFlag, _ := e.run(append([]string{"--format", "json", "--no-sync"}, args[2:]...)...)
 		if strings.Contains(forced, "\x1b") || strings.Contains(plain, "\x1b") {
 			t.Errorf("%v: escape in JSON", c)
 		}

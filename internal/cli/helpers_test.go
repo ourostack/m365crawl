@@ -30,6 +30,7 @@ func newEnv(t *testing.T) *env {
 	t.Setenv("TMP", tmp)
 	t.Setenv("TEMP", tmp)
 	t.Setenv("M365CRAWL_MAX_AGE", "")
+	t.Setenv("M365CRAWL_NO_SYNC", "")
 	t.Setenv("M365CRAWL_DB", "")
 	t.Setenv("M365CRAWL_TEAMS_ROOT", "")
 	root, err := filepath.Abs(fixtureRoot)

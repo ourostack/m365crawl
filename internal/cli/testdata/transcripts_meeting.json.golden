@@ -108,6 +108,7 @@
   "truncated": false,
   "source": "archive",
   "archive_age_seconds": 0,
+  "implicit_sync": "disabled",
   "notices": [
     "1 of the 2 meetings listed has transcript parts that are not fetched yet; run m365crawl transcripts fetch <call-id>"
   ]

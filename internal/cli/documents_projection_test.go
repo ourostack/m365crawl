@@ -37,7 +37,7 @@ func TestDocumentsMixedSearchIncludesMetadataWithoutClaimingChatTotal(t *testing
 	e := newEnv(t)
 	id := seedDocumentsCLI(t, e)
 	seedNotesCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "search", "Quarterly", "--source", "all", "--limit", "10")
+	code, stdout, stderr := e.run("--no-sync", "search", "Quarterly", "--source", "all", "--limit", "10")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -52,7 +52,7 @@ func TestDocumentsMixedSearchIncludesMetadataWithoutClaimingChatTotal(t *testing
 		t.Fatal("mixed metadata source absent or chat total claimed for mixed results")
 	}
 	for _, flag := range [][]string{{"--account", "tenant/user"}, {"--from", "someone"}, {"--include-system"}, {"--html"}} {
-		args := append([]string{"--max-age", "0", "search", "Quarterly", "--source", "all"}, flag...)
+		args := append([]string{"--no-sync", "search", "Quarterly", "--source", "all"}, flag...)
 		code, stdout, stderr := e.run(args...)
 		if code != 0 {
 			t.Fatal(stderr)
@@ -76,11 +76,11 @@ func TestDocumentsCLISelectedShowRefreshesOnlyItsSource(t *testing.T) {
 		}
 		return run(ctx, options)
 	}
-	code, _, stderr := e.run("--max-age", "0", "docs", "show", id)
+	code, _, stderr := e.run("--no-sync", "docs", "show", id)
 	if code != 0 || calls != 1 {
 		t.Fatalf("selected show route failed: %s", stderr)
 	}
-	code, _, _ = e.run("--max-age", "0", "docs", "show", "document-observation:999")
+	code, _, _ = e.run("--no-sync", "docs", "show", "document-observation:999")
 	if code != 2 || calls != 1 {
 		t.Fatal("missing detail ID refreshed a source before lookup")
 	}

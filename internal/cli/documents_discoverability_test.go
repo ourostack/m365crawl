@@ -72,7 +72,7 @@ func sourceByKind(t *testing.T, doc map[string]any, kind string) map[string]any 
 func TestDocumentsFailedSourcesHaveIdentityRemedyAndEffect(t *testing.T) {
 	e := newEnv(t)
 	seedDocumentSourcesCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "docs", "sources")
+	code, stdout, stderr := e.run("--no-sync", "docs", "sources")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -92,7 +92,7 @@ func TestDocumentsFailedSourcesHaveIdentityRemedyAndEffect(t *testing.T) {
 	if healthy["fix"] != nil || healthy["effect"] != nil {
 		t.Fatalf("healthy source carries a remedy: %v", healthy)
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "--format", "text", "docs", "sources")
+	code, stdout, stderr = e.run("--no-sync", "--format", "text", "docs", "sources")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -129,7 +129,7 @@ func TestDocumentsHelpDefinesTermsClocksAndOrder(t *testing.T) {
 		}
 	}
 	seedDocumentSourcesCLI(t, e)
-	code, stdout, stderr := e.run("--max-age", "0", "--format", "text", "docs", "show", "document-observation:1")
+	code, stdout, stderr := e.run("--no-sync", "--format", "text", "docs", "show", "document-observation:1")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -155,7 +155,7 @@ func TestDocumentsApplicationAndSurfaceFilters(t *testing.T) {
 		{[]string{"docs", "search", "--surface", "recent"}, "Synthetic Word recent", 1},
 		{[]string{"docs", "search", "Synthetic", "--application", "Word", "--surface", "shared"}, "", 0},
 	} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, tt.args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, tt.args...)...)
 		if code != 0 {
 			t.Fatalf("%v: %s", tt.args, stderr)
 		}
@@ -168,7 +168,7 @@ func TestDocumentsApplicationAndSurfaceFilters(t *testing.T) {
 		{"--application", "Visio", "Word, Excel, PowerPoint"},
 		{"--surface", "pinned", "recent, shared, recommended, dialog"},
 	} {
-		code, _, stderr := e.run("--max-age", "0", "docs", "list", tt.flag, tt.value)
+		code, _, stderr := e.run("--no-sync", "docs", "list", tt.flag, tt.value)
 		if code == 0 || !strings.Contains(stderr, tt.want) {
 			t.Fatalf("%s %s accepted or unexplained: %s", tt.flag, tt.value, stderr)
 		}

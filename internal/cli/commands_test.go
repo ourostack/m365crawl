@@ -122,7 +122,7 @@ func TestUsageErrorListsValidFields(t *testing.T) {
 
 func TestEmptyArchiveSearch(t *testing.T) {
 	e := newEnv(t)
-	code, stdout, stderr := e.run("--max-age", "0", "search", "anything")
+	code, stdout, stderr := e.run("--no-sync", "search", "anything")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -226,7 +226,7 @@ func TestImplicitSyncNoTeamsEmptyArchive(t *testing.T) {
 
 func syncRunCount(t *testing.T, e *env) int {
 	t.Helper()
-	_, stdout, _ := e.run("--max-age", "0", "sql", "select count(*) as n from sync_runs where accounts_json is not null")
+	_, stdout, _ := e.run("--no-sync", "sql", "select count(*) as n from sync_runs where accounts_json is not null")
 	rows := decode(t, stdout)["rows"].([]any)
 	return int(rows[0].([]any)[0].(float64))
 }
@@ -247,7 +247,11 @@ func TestMaxAgeControlsImplicitSync(t *testing.T) {
 	}
 	e.run("--max-age", "0", "messages")
 	if n := syncRunCount(t, e); n != 2 {
-		t.Fatalf("--max-age 0 must not sync, runs = %d", n)
+		t.Fatalf("--max-age 0 keeps its 1.x meaning and must not sync, runs = %d", n)
+	}
+	e.run("--no-sync", "messages")
+	if n := syncRunCount(t, e); n != 2 {
+		t.Fatalf("--no-sync must not sync, runs = %d", n)
 	}
 	t.Setenv("M365CRAWL_MAX_AGE", "1ns")
 	e.run("messages")
@@ -268,13 +272,13 @@ func TestImplicitSyncProgressNotOnStdout(t *testing.T) {
 func TestFormatDefaultNonTTY(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "conversations")
+	_, stdout, _ := e.run("--no-sync", "conversations")
 	decode(t, stdout)
-	code, stdout, _ := e.run("--max-age", "0", "--format", "text", "conversations")
+	code, stdout, _ := e.run("--no-sync", "--format", "text", "conversations")
 	if code != 0 || strings.HasPrefix(strings.TrimSpace(stdout), "{") || !strings.Contains(stdout, "Fixture") {
 		t.Fatalf("text format: exit %d, %q", code, stdout)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--format", "log", "conversations")
+	_, stdout, _ = e.run("--no-sync", "--format", "log", "conversations")
 	if !strings.HasPrefix(stdout, "conversations={") {
 		t.Fatalf("log format: %q", stdout)
 	}
@@ -283,7 +287,7 @@ func TestFormatDefaultNonTTY(t *testing.T) {
 func TestSQLReadOnly(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "sql", "select count(*) as n from messages")
+	code, stdout, stderr := e.run("--no-sync", "sql", "select count(*) as n from messages")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -292,7 +296,7 @@ func TestSQLReadOnly(t *testing.T) {
 		t.Fatalf("sql result = %s", stdout)
 	}
 	for _, q := range []string{"delete from messages", "insert into people(tenant_id,id) values('a','b')", "drop table messages", "attach database 'x.db' as x", "select 1; delete from messages"} {
-		code, _, stderr := e.run("--max-age", "0", "sql", q, "--json")
+		code, _, stderr := e.run("--no-sync", "sql", q, "--json")
 		if code == 0 {
 			t.Errorf("%q must fail", q)
 			continue
@@ -301,7 +305,7 @@ func TestSQLReadOnly(t *testing.T) {
 			t.Errorf("%q: exit %d, stderr %s", q, code, stderr)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "sql", "select count(*) as n from messages")
+	_, stdout, _ = e.run("--no-sync", "sql", "select count(*) as n from messages")
 	if decode(t, stdout)["rows"].([]any)[0].([]any)[0].(float64) < 100 {
 		t.Fatal("archive was modified")
 	}
@@ -310,7 +314,7 @@ func TestSQLReadOnly(t *testing.T) {
 func TestMessagesByConversationTitle(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "messages", "--conversation", "Fixture chat 1", "--account", tenantA+"/"+userA)
+	code, stdout, stderr := e.run("--no-sync", "messages", "--conversation", "Fixture chat 1", "--account", tenantA+"/"+userA)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -336,7 +340,7 @@ func TestIncludeDeleted(t *testing.T) {
 	e.sync()
 	has := func(args ...string) (bool, map[string]any) {
 		t.Helper()
-		_, stdout, _ := e.run(append([]string{"--max-age", "0"}, args...)...)
+		_, stdout, _ := e.run(append([]string{"--no-sync"}, args...)...)
 		for _, it := range items(t, decode(t, stdout)) {
 			if it["id"] == "1700000012000" && it["user_id"] == userA {
 				return true, it
@@ -362,7 +366,7 @@ func TestIncludeDeleted(t *testing.T) {
 func TestMentionsMeAndUnread(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "messages", "--mentions-me", "--account", tenantA+"/"+userA)
+	_, stdout, _ := e.run("--no-sync", "messages", "--mentions-me", "--account", tenantA+"/"+userA)
 	its := items(t, decode(t, stdout))
 	if len(its) == 0 {
 		t.Fatal("expected mentions of me")
@@ -372,11 +376,11 @@ func TestMentionsMeAndUnread(t *testing.T) {
 			t.Fatalf("not a mention: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "search", "review", "--mentions-me")
+	_, stdout, _ = e.run("--no-sync", "search", "review", "--mentions-me")
 	if len(items(t, decode(t, stdout))) == 0 {
 		t.Fatal("search --mentions-me found nothing")
 	}
-	code, stdout, stderr := e.run("--max-age", "0", "unread", "--account", tenantA+"/"+userA)
+	code, stdout, stderr := e.run("--no-sync", "unread", "--account", tenantA+"/"+userA)
 	if code != 0 {
 		t.Fatalf("unread: %s", stderr)
 	}
@@ -389,7 +393,7 @@ func TestMentionsMeAndUnread(t *testing.T) {
 			t.Fatalf("own message counted unread: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "messages", "--unread", "--account", tenantA+"/"+userA)
+	_, stdout, _ = e.run("--no-sync", "messages", "--unread", "--account", tenantA+"/"+userA)
 	if len(items(t, decode(t, stdout))) != len(un) {
 		t.Fatal("messages --unread and unread disagree")
 	}
@@ -398,7 +402,7 @@ func TestMentionsMeAndUnread(t *testing.T) {
 func TestActivity(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "activity")
+	_, stdout, _ := e.run("--no-sync", "activity")
 	all := items(t, decode(t, stdout))
 	if len(all) == 0 {
 		t.Fatal("no activity")
@@ -408,13 +412,13 @@ func TestActivity(t *testing.T) {
 			t.Errorf("activity item lacks %q: %v", k, all[0])
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "activity", "--unread", "--type", "mentionInChat")
+	_, stdout, _ = e.run("--no-sync", "activity", "--unread", "--type", "mentionInChat")
 	for _, it := range items(t, decode(t, stdout)) {
 		if it["is_read"] != false || it["type"] != "mentionInChat" {
 			t.Fatalf("filter ignored: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "activity", "--since", "1h")
+	_, stdout, _ = e.run("--no-sync", "activity", "--since", "1h")
 	if len(items(t, decode(t, stdout))) != 0 {
 		t.Fatal("fixture activity is years old; --since 1h must exclude it")
 	}
@@ -423,7 +427,7 @@ func TestActivity(t *testing.T) {
 func TestThreadByIDAndLink(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "thread", "19:topicchannel1@thread.tacv2", "1700000045000", "--account", tenantA+"/"+userA)
+	_, stdout, _ := e.run("--no-sync", "thread", "19:topicchannel1@thread.tacv2", "1700000045000", "--account", tenantA+"/"+userA)
 	its := items(t, decode(t, stdout))
 	if len(its) != 2 || its[0]["id"] != "1700000045000" || its[1]["id"] != "1700000046000" {
 		t.Fatalf("thread = %v", its)
@@ -435,7 +439,7 @@ func TestThreadByIDAndLink(t *testing.T) {
 	if !strings.HasPrefix(link, "https://teams.microsoft.com/l/message/") {
 		t.Fatalf("link = %q", link)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "thread", link, "--account", tenantA+"/"+userA)
+	_, stdout, _ = e.run("--no-sync", "thread", link, "--account", tenantA+"/"+userA)
 	byLink := items(t, decode(t, stdout))
 	if len(byLink) != 2 || byLink[0]["id"] != "1700000045000" {
 		t.Fatalf("thread by reply deep link must resolve the root via parentMessageId: %v", byLink)
@@ -456,7 +460,7 @@ func TestWhoamiAndStatus(t *testing.T) {
 	if _, ok := m["archive_age_seconds"]; !ok {
 		t.Fatal("archive_age_seconds missing")
 	}
-	code, stdout, _ = e.run("--max-age", "0", "status")
+	code, stdout, _ = e.run("--no-sync", "status")
 	st := decode(t, stdout)
 	if code != 0 || st["schema_version"].(float64) < 1 || len(st["accounts"].([]any)) != 2 {
 		t.Fatalf("status = %s", stdout)
@@ -468,7 +472,7 @@ func TestWhoamiAndStatus(t *testing.T) {
 
 func TestStatusEmptyArchive(t *testing.T) {
 	e := newEnv(t)
-	code, stdout, stderr := e.run("--max-age", "0", "status")
+	code, stdout, stderr := e.run("--no-sync", "status")
 	if code != 0 || strings.Contains(stderr, "hint:") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
@@ -482,7 +486,7 @@ func TestStatusEmptyArchive(t *testing.T) {
 func TestConversationsAndPeople(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "conversations", "--kind", "Chat")
+	_, stdout, _ := e.run("--no-sync", "conversations", "--kind", "Chat")
 	cs := items(t, decode(t, stdout))
 	if len(cs) == 0 {
 		t.Fatal("no conversations")
@@ -495,11 +499,11 @@ func TestConversationsAndPeople(t *testing.T) {
 			t.Fatalf("member_count missing: %v", c)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "conversations", "--query", "standup")
+	_, stdout, _ = e.run("--no-sync", "conversations", "--query", "standup")
 	if len(items(t, decode(t, stdout))) == 0 {
 		t.Fatal("conversation query found nothing")
 	}
-	_, stdout, _ = e.run("--max-age", "0", "people", "--query", "alex")
+	_, stdout, _ = e.run("--no-sync", "people", "--query", "alex")
 	ps := items(t, decode(t, stdout))
 	if len(ps) == 0 || ps[0]["display_name"] == nil {
 		t.Fatalf("people = %v", ps)
@@ -509,7 +513,7 @@ func TestConversationsAndPeople(t *testing.T) {
 func TestFieldsAndMaxText(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "--fields", "id,text", "--max-text", "5", "search", "Hello")
+	_, stdout, _ := e.run("--no-sync", "--fields", "id,text", "--max-text", "5", "search", "Hello")
 	its := items(t, decode(t, stdout))
 	if len(its) == 0 {
 		t.Fatal("no hits")
@@ -523,19 +527,19 @@ func TestFieldsAndMaxText(t *testing.T) {
 			t.Fatalf("truncation: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--fields", "id", "--max-text", "500", "search", "Hello")
+	_, stdout, _ = e.run("--no-sync", "--fields", "id", "--max-text", "500", "search", "Hello")
 	for _, it := range items(t, decode(t, stdout)) {
 		if len(it) != 1 {
 			t.Fatalf("fields id only: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--max-text", "500", "search", "Hello")
+	_, stdout, _ = e.run("--no-sync", "--max-text", "500", "search", "Hello")
 	for _, it := range items(t, decode(t, stdout)) {
 		if _, has := it["text_truncated"]; has {
 			t.Fatalf("short text must not be flagged: %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--fields", "id,text_truncated", "--max-text", "5", "search", "Hello")
+	_, stdout, _ = e.run("--no-sync", "--fields", "id,text_truncated", "--max-text", "5", "search", "Hello")
 	for _, it := range items(t, decode(t, stdout)) {
 		if len(it) != 2 || it["id"] == nil || it["text_truncated"] != true {
 			t.Fatalf("explicit text_truncated field: %v", it)
@@ -546,7 +550,7 @@ func TestFieldsAndMaxText(t *testing.T) {
 func TestHTMLFlag(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "search", "Hello", "--html")
+	_, stdout, _ := e.run("--no-sync", "search", "Hello", "--html")
 	for _, it := range items(t, decode(t, stdout)) {
 		if h, _ := it["html"].(string); !strings.Contains(h, "<p>") {
 			t.Fatalf("html missing: %v", it)
@@ -557,9 +561,9 @@ func TestHTMLFlag(t *testing.T) {
 func TestAccountFilter(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "messages", "--conversation", "19:shared-fixture-conversation@thread.v2")
+	_, stdout, _ := e.run("--no-sync", "messages", "--conversation", "19:shared-fixture-conversation@thread.v2")
 	both := items(t, decode(t, stdout))
-	_, stdout, _ = e.run("--max-age", "0", "messages", "--conversation", "19:shared-fixture-conversation@thread.v2", "--account", tenantA+"/"+userA)
+	_, stdout, _ = e.run("--no-sync", "messages", "--conversation", "19:shared-fixture-conversation@thread.v2", "--account", tenantA+"/"+userA)
 	one := items(t, decode(t, stdout))
 	if len(one) == 0 || len(both) != 2*len(one) {
 		t.Fatalf("both=%d one=%d", len(both), len(one))
@@ -574,11 +578,11 @@ func TestAccountFilter(t *testing.T) {
 func TestSinceUntil(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "messages", "--since", "2023-11-14", "--until", "2023-11-16T00:00:00Z", "--limit", "500")
+	_, stdout, _ := e.run("--no-sync", "messages", "--since", "2023-11-14", "--until", "2023-11-16T00:00:00Z", "--limit", "500")
 	if len(items(t, decode(t, stdout))) == 0 {
 		t.Fatal("date range should match fixture messages (Nov 2023)")
 	}
-	_, stdout, _ = e.run("--max-age", "0", "messages", "--since", "7d")
+	_, stdout, _ = e.run("--no-sync", "messages", "--since", "7d")
 	if len(items(t, decode(t, stdout))) != 0 {
 		t.Fatal("relative since must count back from now")
 	}
@@ -586,7 +590,7 @@ func TestSinceUntil(t *testing.T) {
 
 func TestMalformedLinkNoPanic(t *testing.T) {
 	e := newEnv(t)
-	code, _, stderr := e.run("--max-age", "0", "thread", "https://teams.microsoft.com/l/message/%zz/1", "--json")
+	code, _, stderr := e.run("--no-sync", "thread", "https://teams.microsoft.com/l/message/%zz/1", "--json")
 	if code != 2 || strings.Contains(stderr, "goroutine") || errorOf(t, stderr)["code"] != "usage" {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -623,8 +627,8 @@ func TestCommandSpecificUsageFix(t *testing.T) {
 	}{
 		{[]string{"thread"}, []string{"m365crawl thread --help"}},
 		{[]string{"messages", "--since", "zzz"}, []string{"m365crawl messages --help"}},
-		{[]string{"--max-age", "0", "sql", "delete from messages"}, []string{"read-only by design", "SELECT"}},
-		{[]string{"--max-age", "0", "messages", "--fields", "bogus"}, []string{"Pick keys from the list in the message"}},
+		{[]string{"--no-sync", "sql", "delete from messages"}, []string{"read-only by design", "SELECT"}},
+		{[]string{"--no-sync", "messages", "--fields", "bogus"}, []string{"Pick keys from the list in the message"}},
 	}
 	for _, c := range cases {
 		code, _, stderr := e.run(append(c.args, "--json")...)
@@ -645,7 +649,7 @@ func TestFieldsMaxTextOnNonListCommands(t *testing.T) {
 	e.sync()
 	for _, cmd := range []string{"status", "whoami", "sync", "doctor", "sql"} {
 		for _, flag := range [][]string{{"--fields", "id"}, {"--max-text", "5"}} {
-			args := append([]string{"--max-age", "0", cmd}, flag...)
+			args := append([]string{"--no-sync", cmd}, flag...)
 			if cmd == "sql" {
 				args = append(args, "select 1")
 			}
@@ -664,7 +668,7 @@ func TestLinkBytesIdenticalWithAndWithoutFields(t *testing.T) {
 	e.sync()
 	linkOf := func(args ...string) string {
 		t.Helper()
-		_, stdout, _ := e.run(append([]string{"--max-age", "0", "messages", "--conversation", "Fixture chat 1", "--limit", "1"}, args...)...)
+		_, stdout, _ := e.run(append([]string{"--no-sync", "messages", "--conversation", "Fixture chat 1", "--limit", "1"}, args...)...)
 		i := strings.Index(stdout, `"link":"`)
 		if i < 0 {
 			t.Fatalf("no link in %s", stdout)
@@ -681,7 +685,7 @@ func TestLinkBytesIdenticalWithAndWithoutFields(t *testing.T) {
 func TestNeedsSyncSignalInBand(t *testing.T) {
 	e := newEnv(t)
 	for _, args := range [][]string{{"search", "x"}, {"messages"}, {"unread"}, {"unread", "--by-conversation"}, {"conversations"}, {"people"}, {"activity"}, {"stores"}, {"records", "--database", "Teams:"}, {"status"}, {"whoami"}, {"sql", "select 1"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
@@ -695,7 +699,7 @@ func TestNeedsSyncSignalInBand(t *testing.T) {
 		}
 	}
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "messages")
+	_, stdout, _ := e.run("--no-sync", "messages")
 	m := decode(t, stdout)
 	if _, ok := m["needs_sync"]; ok {
 		t.Fatalf("needs_sync must be omitted after a sync: %s", stdout)
@@ -720,7 +724,7 @@ func TestErrorJSONNotHTMLEscaped(t *testing.T) {
 func TestUnreadByConversationJSON(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "unread", "--by-conversation", "--account", tenantA+"/"+userA)
+	code, stdout, stderr := e.run("--no-sync", "unread", "--by-conversation", "--account", tenantA+"/"+userA)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -748,16 +752,16 @@ func TestUnreadByConversationJSON(t *testing.T) {
 		prev = n
 		total += n
 	}
-	_, stdout, _ = e.run("--max-age", "0", "unread", "--limit", "1000", "--account", tenantA+"/"+userA)
+	_, stdout, _ = e.run("--no-sync", "unread", "--limit", "1000", "--account", tenantA+"/"+userA)
 	if float64(len(items(t, decode(t, stdout)))) != total {
 		t.Fatalf("by-conversation counts (%v) disagree with unread messages", total)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "unread", "--by-conversation", "--limit", "1", "--fields", "conversation_id,unread_count")
+	_, stdout, _ = e.run("--no-sync", "unread", "--by-conversation", "--limit", "1", "--fields", "conversation_id,unread_count")
 	its = items(t, decode(t, stdout))
 	if len(its) != 1 || len(its[0]) != 2 {
 		t.Fatalf("limit/fields: %s", stdout)
 	}
-	code, _, stderr = e.run("--max-age", "0", "unread", "--by-conversation", "--fields", "id")
+	code, _, stderr = e.run("--no-sync", "unread", "--by-conversation", "--fields", "id")
 	if code != 2 || !strings.Contains(stderr, "unread_count") {
 		t.Fatalf("--fields must validate against the by-conversation keys: %d %q", code, stderr)
 	}
@@ -767,14 +771,14 @@ func TestIncludeChannelsFlags(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	for _, args := range [][]string{{"unread", "--include-channels"}, {"messages", "--unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
 		_ = decode(t, stdout)
 	}
-	_, a, _ := e.run("--max-age", "0", "unread", "--limit", "1000")
-	_, b, _ := e.run("--max-age", "0", "unread", "--include-channels", "--limit", "1000")
+	_, a, _ := e.run("--no-sync", "unread", "--limit", "1000")
+	_, b, _ := e.run("--no-sync", "unread", "--include-channels", "--limit", "1000")
 	if len(items(t, decode(t, b))) < len(items(t, decode(t, a))) {
 		t.Fatal("--include-channels cannot return fewer messages")
 	}
@@ -798,7 +802,7 @@ func TestSystemConversationsFlag(t *testing.T) {
 	_ = st.Close()
 	n := func(args ...string) int {
 		t.Helper()
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
@@ -840,7 +844,7 @@ func TestHelpStatesOrderingAndFlags(t *testing.T) {
 func TestSearchEmptyQueryFixPointsToMessages(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, _, stderr := e.run("--max-age", "0", "search", "")
+	code, _, stderr := e.run("--no-sync", "search", "")
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
 	}
@@ -855,13 +859,13 @@ func TestChannelsExcludedFlag(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	for _, args := range [][]string{{"unread"}, {"unread", "--by-conversation"}, {"messages", "--unread"}} {
-		_, stdout, _ := e.run(append([]string{"--max-age", "0"}, args...)...)
+		_, stdout, _ := e.run(append([]string{"--no-sync"}, args...)...)
 		if m := decode(t, stdout); m["channels_excluded"] != true {
 			t.Fatalf("%v: channels_excluded = %v in %s", args, m["channels_excluded"], stdout)
 		}
 	}
 	for _, args := range [][]string{{"unread", "--include-channels"}, {"unread", "--by-conversation", "--include-channels"}, {"messages", "--unread", "--include-channels"}, {"messages"}, {"search", "x"}} {
-		_, stdout, _ := e.run(append([]string{"--max-age", "0"}, args...)...)
+		_, stdout, _ := e.run(append([]string{"--no-sync"}, args...)...)
 		if _, ok := decode(t, stdout)["channels_excluded"]; ok {
 			t.Fatalf("%v: channels_excluded must be omitted: %s", args, stdout)
 		}
@@ -871,7 +875,7 @@ func TestChannelsExcludedFlag(t *testing.T) {
 func TestThreadLimit(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	base := []string{"--max-age", "0", "thread", "19:topicchannel1@thread.tacv2", "1700000045000", "--account", tenantA + "/" + userA}
+	base := []string{"--no-sync", "thread", "19:topicchannel1@thread.tacv2", "1700000045000", "--account", tenantA + "/" + userA}
 	m := decode(t, func() string { _, o, _ := e.run(append(base, "--limit", "1")...); return o }())
 	if its := items(t, m); len(its) != 1 || its[0]["id"] != "1700000045000" || m["truncated"] != true {
 		t.Fatalf("--limit 1 = %v", m)

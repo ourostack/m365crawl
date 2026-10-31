@@ -29,7 +29,7 @@ func (peopleGroup) Help() string {
 		"IDs: 8:orgid:<guid> is a person; 28:<id> is a bot or app; 19:<id>@thread... is a chat, channel or team named in a mention; everyone is the @everyone mention; mail:<address> is a mail correspondent; person-observation:ID is a native Outlook observation. " +
 		"--account takes <tenant_id>/<user_id> as `m365crawl whoami` (or `status`) lists the accounts; it narrows Teams people to that account's tenant, does not narrow mail correspondents, and leaves native observations out.\n" +
 		"Sort: known last_seen_at newest first, then unknown times; ties use display name (ASCII case-insensitive), then source and observation ID for native rows, otherwise person ID. Native copies are evidence, not current contacts: names, email pairs and profile-owner links do not prove subject tenancy or last contact. No native identities are merged into existing people.\n" +
-		"Run `people sync` for available Mac HxStore profiles, or `people sync --root DIR` for supported copied <root>/<profile>/HxStore.hxd inputs. Windows OWA people discovery is unsupported. Ordinary reads refresh registered sources only; --max-age 0 performs no capture. Partial and failed capture retains observations and contradictions.\n" +
+		"Run `people sync` for available Mac HxStore profiles, or `people sync --root DIR` for supported copied <root>/<profile>/HxStore.hxd inputs. Windows OWA people discovery is unsupported. Ordinary reads refresh registered sources only; --no-sync performs no capture. Partial and failed capture retains observations and contradictions.\n" +
 		"Follow person-observation:ID with `people show`; existing Teams/mail IDs retain their previous workflows. Profile link evidence is not a resolved person. Automatic copies respect the five-minute HxStore minimum interval."
 }
 
@@ -161,6 +161,7 @@ func (c *peopleCmd) runConnectedPeople(rt *runtime, coverage *noteCoverage) erro
 		return asCoded(err)
 	}
 	res.sourceOnly = true
+	rt.noteRegisteredSyncOff(res, "native people", sourceAttempts(coverage))
 	return rt.write("people", res)
 }
 
@@ -275,6 +276,7 @@ func (rt *runtime) peopleRead(label string, fn func(*store.Store) (*listResult, 
 		return asCoded(readErr)
 	}
 	res.SourceCoverage, res.sourceOnly = coverage, true
+	rt.noteRegisteredSyncOff(res, "native people", sourceAttempts(coverage))
 	return rt.write(label, res)
 }
 

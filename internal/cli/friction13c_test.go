@@ -25,7 +25,7 @@ func mentionKinds(t *testing.T, its []map[string]any) map[string]int {
 func TestMessagesCarryMentionKind(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "messages", "--mentions-me", "--limit", "100")
+	code, stdout, stderr := e.run("--no-sync", "messages", "--mentions-me", "--limit", "100")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -42,14 +42,14 @@ func TestMessagesCarryMentionKind(t *testing.T) {
 		}
 	}
 	// A message that does not mention the account has no mention_kind key at all.
-	_, stdout, _ = e.run("--max-age", "0", "messages", "--limit", "200")
+	_, stdout, _ = e.run("--no-sync", "messages", "--limit", "200")
 	for _, it := range items(t, decode(t, stdout)) {
 		if _, has := it["mention_kind"]; has && it["mentions_me"] != true {
 			t.Fatalf("mention_kind on a message that does not mention me: %v", it)
 		}
 	}
 	// It survives --fields.
-	_, stdout, _ = e.run("--max-age", "0", "--fields", "id,mentions_me,mention_kind", "messages", "--mentions-me", "--limit", "1")
+	_, stdout, _ = e.run("--no-sync", "--fields", "id,mentions_me,mention_kind", "messages", "--mentions-me", "--limit", "1")
 	if it := items(t, decode(t, stdout))[0]; it["mention_kind"] == nil {
 		t.Fatalf("--fields dropped mention_kind: %v", it)
 	}
@@ -59,7 +59,7 @@ func TestDirectMentionsFlag(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	for _, args := range [][]string{{"messages"}, {"search", "see this"}, {"search"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, append(args, "--direct-mentions")...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, append(args, "--direct-mentions")...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
@@ -73,12 +73,12 @@ func TestDirectMentionsFlag(t *testing.T) {
 			}
 		}
 	}
-	_, stdout, _ := e.run("--max-age", "0", "messages", "--mentions-me", "--direct-mentions", "--limit", "100")
+	_, stdout, _ := e.run("--no-sync", "messages", "--mentions-me", "--direct-mentions", "--limit", "100")
 	if n := len(items(t, decode(t, stdout))); n != 4 {
 		t.Errorf("direct mentions of me across both accounts = %d, want 4", n)
 	}
 	// activity: only mention items whose subtype is person.
-	_, stdout, _ = e.run("--max-age", "0", "activity", "--direct-mentions", "--limit", "100")
+	_, stdout, _ = e.run("--no-sync", "activity", "--direct-mentions", "--limit", "100")
 	acts := items(t, decode(t, stdout))
 	if len(acts) != 2 {
 		t.Fatalf("direct activity = %d, want 2", len(acts))
@@ -93,7 +93,7 @@ func TestDirectMentionsFlag(t *testing.T) {
 func TestActivityActors(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	_, stdout, _ := e.run("--max-age", "0", "--account", tenantA+"/"+userA, "activity", "--limit", "100")
+	_, stdout, _ := e.run("--no-sync", "--account", tenantA+"/"+userA, "activity", "--limit", "100")
 	byType := map[string]map[string]any{}
 	for _, it := range items(t, decode(t, stdout)) {
 		sub, _ := it["subtype"].(string)
@@ -134,7 +134,7 @@ func TestActivityActors(t *testing.T) {
 			t.Errorf("%s has an actor name: %v", k, it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--fields", "id,actor_name", "activity", "--limit", "1")
+	_, stdout, _ = e.run("--no-sync", "--fields", "id,actor_name", "activity", "--limit", "1")
 	if len(items(t, decode(t, stdout))) != 1 {
 		t.Fatal("--fields actor_name must be accepted")
 	}
@@ -143,7 +143,7 @@ func TestActivityActors(t *testing.T) {
 func TestTeamsCommand(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "teams")
+	code, stdout, stderr := e.run("--no-sync", "teams")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -162,34 +162,34 @@ func TestTeamsCommand(t *testing.T) {
 			t.Errorf("team = %v", it)
 		}
 	}
-	_, stdout, _ = e.run("--max-age", "0", "--account", tenantA+"/"+userA, "teams", "--fields", "team_id,unread_count")
+	_, stdout, _ = e.run("--no-sync", "--account", tenantA+"/"+userA, "teams", "--fields", "team_id,unread_count")
 	one := items(t, decode(t, stdout))
 	if len(one) != 1 || len(one[0]) != 2 {
 		t.Fatalf("--account/--fields: %v", one)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "teams", "--limit", "1")
+	_, stdout, _ = e.run("--no-sync", "teams", "--limit", "1")
 	cut := decode(t, stdout)
 	if len(items(t, cut)) != 1 || cut["truncated"] != true || cut["total"] != float64(2) {
 		t.Fatalf("--limit: %v", cut)
 	}
 	// A team_id from the list works as --team.
 	id := one[0]["team_id"].(string)
-	if code, _, stderr := e.run("--max-age", "0", "conversations", "--team", id); code != 0 {
+	if code, _, stderr := e.run("--no-sync", "conversations", "--team", id); code != 0 {
 		t.Fatalf("--team %s: %s", id, stderr)
 	}
 	for _, args := range [][]string{{"teams", "--limit", "0"}, {"teams", "--fields", "nope"}} {
-		if code, _, _ := e.run(append([]string{"--max-age", "0"}, args...)...); code != errs.ExitUsage {
+		if code, _, _ := e.run(append([]string{"--no-sync"}, args...)...); code != errs.ExitUsage {
 			t.Errorf("%v: exit %d, want usage", args, code)
 		}
 	}
 	// Text mode.
-	code, stdout, _ = e.run("--max-age", "0", "--format", "text", "teams")
+	code, stdout, _ = e.run("--no-sync", "--format", "text", "teams")
 	if code != 0 || !strings.Contains(stdout, "Fixture team 1") || !strings.Contains(stdout, "channels") {
 		t.Fatalf("text: %d %s", code, stdout)
 	}
 	// Nothing archived yet.
 	fresh := newEnv(t)
-	_, stdout, _ = fresh.run("--max-age", "0", "teams")
+	_, stdout, _ = fresh.run("--no-sync", "teams")
 	if m := decode(t, stdout); m["count"] != float64(0) || m["needs_sync"] != true {
 		t.Fatalf("empty archive: %v", m)
 	}
@@ -198,7 +198,7 @@ func TestTeamsCommand(t *testing.T) {
 func TestUnknownTeamErrorPointsAtTeams(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, _, stderr := e.run("--max-age", "0", "messages", "--team", "no such team")
+	code, _, stderr := e.run("--no-sync", "messages", "--team", "no such team")
 	if code != errs.ExitUsage || !strings.Contains(errorOf(t, stderr)["fix"].(string), "m365crawl teams") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -209,7 +209,7 @@ func TestUnreadSince(t *testing.T) {
 	e.sync()
 	total := func(args ...string) float64 {
 		t.Helper()
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0", "unread", "--limit", "1"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync", "unread", "--limit", "1"}, args...)...)
 		if code != 0 {
 			t.Fatalf("%v: exit %d: %s", args, code, stderr)
 		}
@@ -236,15 +236,15 @@ func TestUnreadSince(t *testing.T) {
 		t.Errorf("--since mid = %v (all %v)", mid, all)
 	}
 	// --by-conversation, --team and --include-channels honor the same cutoff.
-	_, stdout, _ := e.run("--max-age", "0", "unread", "--by-conversation", "--since", "7d")
+	_, stdout, _ := e.run("--no-sync", "unread", "--by-conversation", "--since", "7d")
 	if m := decode(t, stdout); m["count"] != float64(0) {
 		t.Errorf("by-conversation since 7d = %v", m)
 	}
-	_, stdout, _ = e.run("--max-age", "0", "unread", "--by-conversation", "--include-channels", "--team", "fixture team 1", "--since", "2023-01-01")
+	_, stdout, _ = e.run("--no-sync", "unread", "--by-conversation", "--include-channels", "--team", "fixture team 1", "--since", "2023-01-01")
 	if m := decode(t, stdout); m["count"].(float64) < 1 {
 		t.Errorf("by-conversation team since = %v", m)
 	}
-	if code, _, _ := e.run("--max-age", "0", "unread", "--since", "yesterday-ish"); code != errs.ExitUsage {
+	if code, _, _ := e.run("--no-sync", "unread", "--since", "yesterday-ish"); code != errs.ExitUsage {
 		t.Errorf("bad --since: exit %d", code)
 	}
 }
@@ -280,7 +280,10 @@ func TestImplicitSyncNotice(t *testing.T) {
 	if stderr != "" || decode(t, stdout)["synced"] != nil {
 		t.Fatalf("fresh read: stderr %q, stdout %s", stderr, stdout)
 	}
-	// --max-age 0 never syncs.
+	// --no-sync and --max-age 0 never sync.
+	if _, _, stderr = e.run("--no-sync", "messages"); stderr != "" {
+		t.Fatalf("--no-sync: %q", stderr)
+	}
 	if _, _, stderr = e.run("--max-age", "0", "messages"); stderr != "" {
 		t.Fatalf("--max-age 0: %q", stderr)
 	}

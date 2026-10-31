@@ -34,6 +34,10 @@ type runtime struct {
 	format           output.Format
 	cmd              string // the running command, for command-specific fixes
 	maxAge           time.Duration
+	syncOff          string // what turned the implicit sync off for this read, such as "--no-sync" or "--max-age 0"
+	explicitMaxAge   bool   // --max-age was given on the command line
+	explicitNoSync   bool   // --no-sync was given on the command line, maybe as --no-sync=false
+	syncNever        bool   // the command never syncs first by design, so its result reports no implicit_sync
 	fields           []string
 	dbPath           string
 	root             string
@@ -47,7 +51,7 @@ type runtime struct {
 	exitErr          error       // a failure while printing for a flag that ends the run (--version)
 	team             string      // --team of the running read command, validated before any implicit sync
 	synced           *syncedInfo // the implicit sync this read ran, if any
-	implicitSync     string      // waited_for_other_sync or other_sync_in_progress when another run held the lock
+	implicitSync     string      // implicit_sync: ran, skipped_fresh, disabled, waited_for_other_sync or other_sync_in_progress
 	lockBudget       time.Duration
 	lockUntil        time.Time // when this read stops waiting for other runs; set by its first wait
 	query            listQuery // what the running list command asked for, to explain an empty result
@@ -87,6 +91,18 @@ func (rt *runtime) setup() error {
 		rt.maxAge = defaultMaxAge
 	} else if rt.maxAge, err = parseMaxAge(maxAge); err != nil {
 		return errs.Usage(err.Error())
+	} else if rt.maxAge == 0 {
+		rt.syncOff = syncOffMaxAgeEnv
+		if rt.explicitMaxAge {
+			rt.syncOff = syncOffMaxAge
+		}
+	}
+	// The flag (even --no-sync=false) beats M365CRAWL_NO_SYNC, and so does an explicit --max-age.
+	if bool(g.NoSync) && (rt.explicitNoSync || !rt.explicitMaxAge) {
+		rt.maxAge, rt.syncOff = 0, syncOffNoSyncEnv
+		if rt.explicitNoSync {
+			rt.syncOff = syncOffNoSync
+		}
 	}
 	rt.fields = splitFields(g.Fields)
 	if g.MaxText < 0 {
@@ -142,6 +158,9 @@ func (rt *runtime) progress() io.Writer {
 // older than --max-age. A failed sync does not stop the read: it comes back as a warning. Only
 // cancellation is returned as an error.
 func (rt *runtime) ensureFresh() (*syncError, error) {
+	if rt.maxAge <= 0 {
+		rt.implicitSync = implicitSyncDisabled
+	}
 	if rt.maxAge <= 0 && rt.outlookLink == "" {
 		return nil, nil
 	}
@@ -153,7 +172,7 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		if !pending {
 			return nil, nil
 		}
-		c := errs.Usage("--outlook-account is not applied while --max-age is 0, which turns the implicit sync off")
+		c := errs.Usage("--outlook-account is not applied while the implicit sync is off (" + rt.syncOff + ")")
 		args := []string{"sync"}
 		if rt.outlookProfile != "" {
 			args = append(args, "--outlook-profile", rt.outlookProfile)
@@ -163,8 +182,10 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 		return nil, c
 	}
 	if !last.IsZero() && rt.now().Sub(last) <= rt.maxAge && !pending {
+		rt.implicitSync = implicitSyncSkippedFresh
 		return nil, nil
 	}
+	rt.implicitSync = implicitSyncRan
 	age := time.Duration(0) // zero: no complete sync yet
 	if !last.IsZero() {
 		age = rt.now().Sub(last)
@@ -319,6 +340,9 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 		sr.Outlook = &b
 	}
 	res.setMeta(age, syncErr)
+	if rt.syncNever {
+		rt.implicitSync = ""
+	}
 	res.setSynced(rt.synced)
 	res.setImplicitSync(rt.implicitSync)
 	if rt.implicitSync == implicitSyncOtherInProgress {
@@ -326,6 +350,8 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	}
 	if age == nil {
 		res.setNeedsSync(syncHint)
+	} else if rt.implicitSync == implicitSyncDisabled {
+		rt.noteSyncOff(res, time.Duration(*age)*time.Second, syncHint)
 	}
 	if err := rt.noteSourceHealth(st, label, res, age == nil); err != nil {
 		return asCoded(err)
@@ -361,17 +387,141 @@ func checkLimit(n int) error {
 	return nil
 }
 
+// The values of implicit_sync: what the implicit sync did before this read answered.
+const (
+	implicitSyncRan          = "ran"           // the archive was older than --max-age, so the read synced first
+	implicitSyncSkippedFresh = "skipped_fresh" // the archive was younger than --max-age
+	implicitSyncDisabled     = "disabled"      // --no-sync or --max-age 0: the archive was read as it is
+)
+
+// What can turn the implicit sync off. The notice names the one in effect, so an agent is told to
+// undo what it (or its environment) actually set.
+const (
+	syncOffNoSync    = "--no-sync"
+	syncOffNoSyncEnv = "M365CRAWL_NO_SYNC"
+	syncOffMaxAge    = "--max-age 0"
+	syncOffMaxAgeEnv = "M365CRAWL_MAX_AGE=0"
+)
+
+// syncOffUndo is how to turn the implicit sync back on, and whether the cause is a zero max age,
+// which agents read as "nothing cached is fresh enough".
+func (rt *runtime) syncOffUndo() (undo string, zeroAge bool) {
+	switch rt.syncOff {
+	case syncOffMaxAge:
+		return "drop --max-age 0", true
+	case syncOffMaxAgeEnv:
+		return "unset M365CRAWL_MAX_AGE or pass a positive --max-age", true
+	case syncOffNoSyncEnv:
+		return "unset M365CRAWL_NO_SYNC or pass --no-sync=false", false
+	}
+	return "drop --no-sync", false
+}
+
+// noteSyncOff cautions a read that skipped its implicit sync, so an empty or short answer from an
+// old archive cannot pass as fresh. --no-sync says so once the archive is older than the default
+// max age; a zero max age always does, because agents read it as "nothing cached is fresh enough".
+// syncHint is "run <the sync command>".
+func (rt *runtime) noteSyncOff(res result, age time.Duration, syncHint string) {
+	undo, zeroAge := rt.syncOffUndo()
+	if !zeroAge && age <= defaultMaxAge {
+		return
+	}
+	run := strings.TrimPrefix(syncHint, "run ")
+	if strings.HasPrefix(run, "no executable") {
+		run = "m365crawl sync"
+	}
+	old := "the archive is " + compactDuration(roundAge(age)) + " old"
+	if zeroAge {
+		res.addNotice("This read did not sync: " + rt.syncOff + " turns the implicit sync off, it does not mean fresh, and " + old +
+			", so newer items may be missing. For fresh data run `" + run + "` first or " + undo + "; pass --no-sync to read the archive as it is.")
+	} else {
+		res.addNotice("This read did not sync (" + rt.syncOff + ") and " + old + ", so newer items may be missing. For fresh data run `" + run + "` first or " + undo + ".")
+	}
+	if rt.format != output.Text {
+		return // JSON and log results carry the notice; their stderr stays for warnings
+	}
+	hint := "this read did not sync; " + old + ". Run `" + run + "` first for fresh data, or " + undo
+	if zeroAge {
+		hint += " (" + rt.syncOff + " turns syncing off; --no-sync reads as is)"
+	}
+	rt.hint(hint)
+}
+
+// noteRegisteredSyncOff marks a registered-source read (notes, documents, Loop, native people)
+// whose refresh --no-sync or a zero max age skipped: its coverage object cannot tell skipped from
+// not due, so the result always says implicit_sync: disabled. The notice is added only when it can
+// matter: never with no registered source; always for a zero max age, which agents read as "fresh";
+// and for --no-sync when the oldest selected source was last attempted more than the default max
+// age ago (a source never attempted counts as old as the Teams archive, or stale when that is
+// unknown). attempts are the selected sources' attempted_at.
+func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*time.Time) {
+	if rt.syncOff == "" {
+		return
+	}
+	res.setImplicitSync(implicitSyncDisabled)
+	if len(attempts) == 0 {
+		return
+	}
+	undo, zeroAge := rt.syncOffUndo()
+	notice := "This read did not refresh its registered " + what + " sources: " + rt.syncOff +
+		" turns the refresh off, it does not mean fresh, so newer items may be missing. For fresh data " + undo + "; pass --no-sync to read the archive as it is."
+	if !zeroAge {
+		oldest, known := rt.oldestAttempt(attempts)
+		if known && oldest <= defaultMaxAge {
+			return
+		}
+		read := "the oldest has not been read since the archive's last complete sync"
+		if known {
+			read = "the oldest was last read " + compactDuration(roundAge(oldest)) + " ago"
+		}
+		notice = "This read did not refresh its registered " + what + " sources (" + rt.syncOff + ") and " + read + ", so newer items may be missing. For fresh data " + undo + "."
+	}
+	res.addNotice(notice)
+	if rt.format == output.Text {
+		rt.hint("this read did not refresh its registered " + what + " sources (" + rt.syncOff + "); for fresh data " + undo)
+	}
+}
+
+// oldestAttempt is how long ago the stalest of attempts was made. A source never attempted counts
+// as old as the archive's last complete sync; known is false when that is unknown too.
+func (rt *runtime) oldestAttempt(attempts []*time.Time) (oldest time.Duration, known bool) {
+	for _, at := range attempts {
+		if at != nil {
+			oldest = max(oldest, rt.now().Sub(*at))
+			continue
+		}
+		age := rt.loopArchiveAge()
+		if age == nil {
+			return 0, false
+		}
+		oldest = max(oldest, time.Duration(*age)*time.Second)
+	}
+	return oldest, true
+}
+
+// sourceAttempts are the attempted_at of a coverage object's sources.
+func sourceAttempts(coverage *noteCoverage) []*time.Time {
+	out := []*time.Time{}
+	for _, source := range coverage.Sources {
+		out = append(out, source.AttemptedAt)
+	}
+	return out
+}
+
+// roundAge drops the parts of an archive age a person does not need: seconds once it is a minute.
+func roundAge(age time.Duration) time.Duration {
+	if age >= time.Minute {
+		return age.Truncate(time.Minute)
+	}
+	return age.Truncate(time.Second)
+}
+
 // syncNotice is the line a read prints to stderr before its implicit sync, so a wait of several
 // seconds is not silent. An age of zero means the archive has no complete sync yet.
 func syncNotice(age, maxAge time.Duration) string {
 	why := "no complete sync yet"
 	if age > 0 {
-		if age >= time.Minute {
-			age = age.Truncate(time.Minute)
-		} else {
-			age = age.Truncate(time.Second)
-		}
-		why = "archive is " + compactDuration(age) + " old"
+		why = "archive is " + compactDuration(roundAge(age)) + " old"
 	}
 	return "m365crawl: syncing — " + why + " (max-age " + compactDuration(maxAge) + ")"
 }

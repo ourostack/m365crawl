@@ -54,7 +54,7 @@ func TestPeopleAccountExcludedTextPreservesJSONMeaning(t *testing.T) {
 	for _, projected := range []bool{false, true} {
 		e := newEnv(t)
 		peopleFixture(t, e)
-		args := []string{"--max-age", "0", "--account", "tenant/user", "people"}
+		args := []string{"--no-sync", "--account", "tenant/user", "people"}
 		if projected {
 			args = append(args, "--fields", "id")
 		}

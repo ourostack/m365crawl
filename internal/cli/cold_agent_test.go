@@ -107,18 +107,18 @@ func TestOverviewWithoutOptionalSourcesSaysHowToAddThem(t *testing.T) {
 func TestPeopleUnscopedSaysWhatItIncluded(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, out, stderr := e.run("--max-age", "0", "people")
+	code, out, stderr := e.run("--no-sync", "people")
 	if code != 0 || !strings.Contains(out, "no native Outlook people sources are registered") {
 		t.Fatalf("legacy unscoped people lacks its inclusion notice: %s %s", out, stderr)
 	}
 	seedPeopleCLI(t, e)
-	code, out, stderr = e.run("--max-age", "0", "people")
+	code, out, stderr = e.run("--no-sync", "people")
 	notices, _ := decode(t, out)["notices"].([]any)
 	if code != 0 || len(notices) == 0 || !strings.Contains(notices[0].(string), "native Outlook people observations") ||
 		!strings.Contains(notices[0].(string), "unresolved account ownership") {
 		t.Fatalf("connected unscoped people lacks its inclusion notice: %s %s", out, stderr)
 	}
-	code, out, _ = e.run("--max-age", "0", "--format", "text", "people")
+	code, out, _ = e.run("--no-sync", "--format", "text", "people")
 	if code != 0 || !strings.Contains(out, "notice: included Teams people") {
 		t.Fatalf("text people lacks the notice:\n%s", out)
 	}
@@ -145,7 +145,7 @@ func TestTextTimesNameTheirZone(t *testing.T) {
 	seedDocumentSourcesCLI(t, e)
 	seedNotesCLI(t, e)
 	for _, args := range [][]string{{"docs", "list"}, {"notes", "list"}, {"people"}} {
-		code, out, stderr := e.run(append([]string{"--max-age", "0", "--format", "text"}, args...)...)
+		code, out, stderr := e.run(append([]string{"--no-sync", "--format", "text"}, args...)...)
 		if code != 0 || !zonedStamp.MatchString(out) {
 			t.Fatalf("%v text times lack the zone:\n%s%s", args, out, stderr)
 		}

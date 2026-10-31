@@ -71,7 +71,7 @@ func TestCalendarOutlookTranscriptPrincipalIsolation(t *testing.T) {
 		if !ok {
 			t.Fatal("linked event lost its stable identity")
 		}
-		want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", "json",
+		want := []string{"m365crawl", "--db", e.db, "--format", "json",
 			"--account", trAccount, "transcripts", "fetch", eventID}
 		if !slices.Equal(got, want) {
 			t.Fatalf("transcript remedy lost the real principal/archive/event context:\ngot %q\nwant %q", got, want)
@@ -105,7 +105,7 @@ func TestTranscriptFetchRecoveryCommandKeepsDestinationAccountScope(t *testing.T
 					format: format.value, account: tc.explicit, fields: []string{"subject"}}
 				eventID := trEventID()
 				got := attendeeCommandWords(t, rt.transcriptFetchRecoveryCommand(tc.account, eventID))
-				want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", format.name}
+				want := []string{"m365crawl", "--db", e.db, "--format", format.name}
 				want = append(want, tc.wantAccount...)
 				want = append(want, "transcripts", "fetch", eventID)
 				if !slices.Equal(got, want) {

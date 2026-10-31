@@ -71,7 +71,7 @@ func TestCalendarOWADoctorIndependentHealth(t *testing.T) {
 			if _, has := row["blocks_invalid_ratio"]; has {
 				t.Fatalf("OWA source invents HxStore block health = %v", row)
 			}
-			agenda := mailJSON(t, e, "--max-age", "0", "calendar", "--from", "2031-03-01", "--to", "2031-04-01")
+			agenda := mailJSON(t, e, "--no-sync", "calendar", "--from", "2031-03-01", "--to", "2031-04-01")
 			if num(t, agenda, "count") != wantEvents {
 				t.Fatalf("cached calendar query count = %v", agenda)
 			}
@@ -80,7 +80,7 @@ func TestCalendarOWADoctorIndependentHealth(t *testing.T) {
 					t.Fatalf("unverified principal linked an event = %v", event)
 				}
 			}
-			status := mailJSON(t, e, "--max-age", "0", "--outlook-root", root, "status")
+			status := mailJSON(t, e, "--no-sync", "--outlook-root", root, "status")
 			if m := mailBlockOf(t, status); m["state"] != "ok" || m["messages"] != float64(5) {
 				t.Fatalf("calendar outcome poisoned cached mail status = %v", m)
 			}

@@ -35,7 +35,7 @@ func seedLoopFault(t *testing.T) (*env, string) {
 		t.Fatal(err)
 	}
 	runOK(t, e, "loop", "sync")
-	return e, items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "list")))[0]["id"].(string)
+	return e, items(t, decode(t, runOK(t, e, "--no-sync", "loop", "list")))[0]["id"].(string)
 }
 
 // breakLoopChannels makes every channel read fail without removing the table.
@@ -68,13 +68,13 @@ func TestLoopCommandErrors(t *testing.T) {
 		{"--account", "t/u", "loop", "sources"}, {"loop", "show", "loop-channel:0"}, {"loop", "show", "loop-channel:01"},
 		{"loop", "show", "channel:1"}, {"loop", "show", "loop-channel:x"},
 	} {
-		wantCode(t, e, 2, "usage", append([]string{"--max-age", "0"}, args...)...)
+		wantCode(t, e, 2, "usage", append([]string{"--no-sync"}, args...)...)
 	}
-	wantCode(t, e, 2, "loop_source_unknown", "--max-age", "0", "loop", "sources", "--source-id", "999")
+	wantCode(t, e, 2, "loop_source_unknown", "--no-sync", "loop", "sources", "--source-id", "999")
 	wantCode(t, e, 2, "loop_source_unknown", "loop", "sync", "--source-id", "999")
-	wantCode(t, e, 2, "loop_source_unknown", "--max-age", "0", "loop", "list", "--source-id", "999")
-	wantCode(t, e, 2, "loop_channel_unknown", "--max-age", "0", "loop", "show", "loop-channel:999")
-	wantCode(t, newEnv(t), 2, "loop_channel_unknown", "--max-age", "0", "loop", "show", "loop-channel:1")
+	wantCode(t, e, 2, "loop_source_unknown", "--no-sync", "loop", "list", "--source-id", "999")
+	wantCode(t, e, 2, "loop_channel_unknown", "--no-sync", "loop", "show", "loop-channel:999")
+	wantCode(t, newEnv(t), 2, "loop_channel_unknown", "--no-sync", "loop", "show", "loop-channel:1")
 }
 
 func TestLoopRefreshFailureServesRetainedArchive(t *testing.T) {
@@ -123,7 +123,7 @@ func TestLoopReadFaults(t *testing.T) {
 	stubLoopSync(t, func(int, syncer.LoopOptions) (syncer.LoopReport, error) { return syncer.LoopReport{}, nil })
 	wantCode(t, e, 1, "db_error", "loop", "list")
 	wantCode(t, e, 1, "db_error", "search", "synthetic", "--source", "loop")
-	wantCode(t, e, 1, "db_error", "--max-age", "0", "search", "synthetic")
+	wantCode(t, e, 1, "db_error", "--no-sync", "search", "synthetic")
 
 	if err := os.WriteFile(e.db, []byte("not a database"), 0o600); err != nil {
 		t.Fatal(err)

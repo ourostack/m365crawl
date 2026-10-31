@@ -56,7 +56,7 @@ func calEnv(t *testing.T) *env {
 
 func agenda(t *testing.T, e *env, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "calendar"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "calendar"}, args...)...)
 	if code != 0 {
 		t.Fatalf("calendar %v: exit %d: %s", args, code, errOut)
 	}
@@ -211,13 +211,13 @@ func TestCalendarAgendaUsageErrors(t *testing.T) {
 		"event field":   {[]string{"--fields", "attendees"}, "calendar event"},
 		"unknown field": {[]string{"--fields", "nope"}, "nope"},
 	} {
-		code, _, errOut := e.run(append([]string{"--max-age", "0", "calendar"}, c.args...)...)
+		code, _, errOut := e.run(append([]string{"--no-sync", "calendar"}, c.args...)...)
 		if code != 2 || !strings.Contains(errOut, c.msg) {
 			t.Errorf("%s: exit %d %s", name, code, errOut)
 		}
 	}
 	// The command named in a fields error is the one the reader typed.
-	_, _, errOut := e.run("--max-age", "0", "calendar", "--fields", "attendees")
+	_, _, errOut := e.run("--no-sync", "calendar", "--fields", "attendees")
 	if !strings.Contains(errOut, "m365crawl calendar event <event_id> --fields attendees") {
 		t.Errorf("fix: %s", errOut)
 	}
@@ -225,7 +225,7 @@ func TestCalendarAgendaUsageErrors(t *testing.T) {
 
 func eventDoc(t *testing.T, e *env, ref string, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "calendar", "event", ref}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "calendar", "event", ref}, args...)...)
 	if code != 0 {
 		t.Fatalf("calendar event %s: exit %d: %s", ref, code, errOut)
 	}
@@ -284,16 +284,16 @@ func TestCalendarEventDetail(t *testing.T) {
 
 func TestCalendarEventErrors(t *testing.T) {
 	e := calEnv(t)
-	code, _, errOut := e.run("--max-age", "0", "calendar", "event", "ev_nothing")
+	code, _, errOut := e.run("--no-sync", "calendar", "event", "ev_nothing")
 	if code != 2 || !strings.Contains(errOut, "no calendar event matches") {
 		t.Errorf("not found: %d %s", code, errOut)
 	}
 	// "ev_" names every event.
-	code, _, errOut = e.run("--max-age", "0", "calendar", "event", "ev_")
+	code, _, errOut = e.run("--no-sync", "calendar", "event", "ev_")
 	if code != 2 || !strings.Contains(errOut, "matches") || !strings.Contains(errOut, "full event_id") {
 		t.Errorf("ambiguous: %d %s", code, errOut)
 	}
-	code, _, errOut = e.run("--max-age", "0", "calendar", "event", "ev_x", "--fields", "nope")
+	code, _, errOut = e.run("--no-sync", "calendar", "event", "ev_x", "--fields", "nope")
 	if code != 2 || !strings.Contains(errOut, "valid keys") {
 		t.Errorf("fields: %d %s", code, errOut)
 	}
@@ -303,7 +303,7 @@ func TestCalendarOldArchiveAndNoArchive(t *testing.T) {
 	e := calEnv(t)
 	e.exec(`drop table calendar_recaps`)
 	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions"}} {
-		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, out, errOut := e.run(append([]string{"--no-sync"}, args...)...)
 		m := decode(t, out)
 		if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run m365crawl sync") {
 			t.Errorf("%v on an old archive: %d %s %s", args, code, out, errOut)
@@ -314,7 +314,7 @@ func TestCalendarOldArchiveAndNoArchive(t *testing.T) {
 	}
 	empty := newEnv(t)
 	for _, args := range [][]string{{"calendar"}, {"calendar", "event", "ev_x"}, {"calendar", "actions", "--mine"}} {
-		code, out, errOut := empty.run(append([]string{"--max-age", "0"}, args...)...)
+		code, out, errOut := empty.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 || decode(t, out)["needs_sync"] != true {
 			t.Errorf("%v with no archive: %d %s %s", args, code, out, errOut)
 		}
@@ -345,7 +345,7 @@ func TestCalendarTextGoldens(t *testing.T) {
 				suffix = "color"
 				t.Setenv("CLICOLOR_FORCE", "1")
 			}
-			code, out, errOut := e.run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+			code, out, errOut := e.run(append([]string{"--format", "text", "--no-sync"}, args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", c.name, code, errOut)
 			}
@@ -536,7 +536,7 @@ func TestCalendarReadFailuresAreReported(t *testing.T) {
 	e.exec(`alter table calendar_source_events rename column event_type to et`)
 	e.exec(`alter table calendar_source_events rename column time_zone to tz`)
 	for _, args := range [][]string{{"calendar", "--from", "2023-11-22", "--days", "1"}, {"calendar", "event", "ev_x"}, {"calendar", "sources"}} {
-		code, out, errOut := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, out, errOut := e.run(append([]string{"--no-sync"}, args...)...)
 		if code == 0 || out != "" || !strings.Contains(errOut, `"error"`) {
 			t.Errorf("%v: exit %d %q %q", args, code, out, errOut)
 		}
@@ -573,7 +573,7 @@ func TestCalendarListsRecapsWithNoEvent(t *testing.T) {
 	}
 	e.exec(`update calendar_recaps set meeting_start_at=null where call_id like '%orphan%'`)
 	text := e
-	code, out, errOut := text.run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
+	code, out, errOut := text.run("--format", "text", "--no-sync", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
 	if code != 0 || !strings.Contains(out, "recaps with no event in the archive") || !strings.Contains(out, "Orphan task") {
 		t.Errorf("text: %d %s %s", code, out, errOut)
 	}
@@ -685,7 +685,7 @@ func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
 			suffix = "color"
 			t.Setenv("CLICOLOR_FORCE", "1")
 		}
-		code, out, errOut := e.run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
+		code, out, errOut := e.run("--format", "text", "--no-sync", "calendar", "--from", "2023-11-15", "--days", "1", "--account", tenantA+"/"+userA)
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
@@ -695,7 +695,7 @@ func TestCalendarGoldenForTheRecapWithNoEvent(t *testing.T) {
 
 func actionsDoc(t *testing.T, e *env, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "calendar", "actions"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "calendar", "actions"}, args...)...)
 	if code != 0 {
 		t.Fatalf("calendar actions %v: exit %d: %s", args, code, errOut)
 	}
@@ -762,13 +762,13 @@ func TestCalendarActionsUsageErrors(t *testing.T) {
 		{[]string{"--limit", "0"}, "limit"},
 		{[]string{"--fields", "nope"}, "nope"},
 	} {
-		code, _, errOut := e.run(append([]string{"--max-age", "0", "calendar", "actions"}, c.args...)...)
+		code, _, errOut := e.run(append([]string{"--no-sync", "calendar", "actions"}, c.args...)...)
 		if code != 2 || !strings.Contains(errOut, c.want) {
 			t.Errorf("%v: exit %d: %s", c.args, code, errOut)
 		}
 	}
 	// Without --mine an unknown name is no problem: nothing needs it.
-	if code, _, errOut := e.run("--max-age", "0", "calendar", "actions", "--from", "2023-11-20"); code != 0 {
+	if code, _, errOut := e.run("--no-sync", "calendar", "actions", "--from", "2023-11-20"); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
 }
@@ -822,7 +822,7 @@ func TestActionTextTable(t *testing.T) {
 			suffix = "color"
 			t.Setenv("CLICOLOR_FORCE", "1")
 		}
-		code, out, errOut := e.run("--format", "text", "--max-age", "0", "calendar", "actions", "--from", "2023-11-20", "--days", "1", "--account", tenantA+"/"+userA)
+		code, out, errOut := e.run("--format", "text", "--no-sync", "calendar", "actions", "--from", "2023-11-20", "--days", "1", "--account", tenantA+"/"+userA)
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
@@ -842,7 +842,7 @@ const fixtureStandupSeries = "040000008200e00074c5b7101a82e008000000004649585455
 // a conversation no event names carries neither key.
 func TestConversationsCarryTheCalendarSeries(t *testing.T) {
 	e := calEnv(t)
-	code, out, errOut := e.run("--max-age", "0", "conversations", "--account", tenantA+"/"+userA)
+	code, out, errOut := e.run("--no-sync", "conversations", "--account", tenantA+"/"+userA)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -866,7 +866,7 @@ func TestConversationsCarryTheCalendarSeries(t *testing.T) {
 	}
 	// An archive from before the calendar tables lists conversations as it always did.
 	e.exec(`drop table calendar_recaps`)
-	code, out, errOut = e.run("--max-age", "0", "conversations")
+	code, out, errOut = e.run("--no-sync", "conversations")
 	if code != 0 || strings.Contains(out, "calendar_event_count") {
 		t.Fatalf("old archive: %d %s %s", code, out, errOut)
 	}

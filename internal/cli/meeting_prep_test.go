@@ -132,7 +132,7 @@ func TestCalendarEventPrepAddsRelatedMailAndRecentChat(t *testing.T) {
 		t.Fatalf("max-text: %v %v %v", cut["text_truncated"], msg0, mail0)
 	}
 	// The agenda points to calendar event for related_mail.
-	code, _, errOut := e.run("--max-age", "0", "calendar", "--fields", "related_mail")
+	code, _, errOut := e.run("--no-sync", "calendar", "--fields", "related_mail")
 	if code != 2 || !strings.Contains(errOut, "calendar event") {
 		t.Fatalf("agenda --fields related_mail: %d %s", code, errOut)
 	}
@@ -143,7 +143,7 @@ func TestCalendarEventPrepAddsRelatedMailAndRecentChat(t *testing.T) {
 func TestCalendarEventPrepForAnOutlookOnlyEvent(t *testing.T) {
 	e, root := prepEnv(t)
 	id := planningID(t, e, "outlook")
-	code, out, errOut := e.run("--max-age", "0", "--outlook-root", root, "calendar", "event", id)
+	code, out, errOut := e.run("--no-sync", "--outlook-root", root, "calendar", "event", id)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -174,14 +174,14 @@ func TestCalendarEventPrepReportsAMailReadError(t *testing.T) {
 	e, _ := prepEnv(t)
 	id := planningID(t, e, "teams")
 	e.exec(`drop table mail_recipients`)
-	if code, _, errOut := e.run("--max-age", "0", "calendar", "event", id); code == 0 || !strings.Contains(errOut, "mail_recipients") {
+	if code, _, errOut := e.run("--no-sync", "calendar", "event", id); code == 0 || !strings.Contains(errOut, "mail_recipients") {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
 }
 
 func TestPeopleIncludesMailCorrespondents(t *testing.T) {
 	e, _ := prepEnv(t)
-	code, out, errOut := e.run("--max-age", "0", "people", "--limit", "200")
+	code, out, errOut := e.run("--no-sync", "people", "--limit", "200")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -200,7 +200,7 @@ func TestPeopleIncludesMailCorrespondents(t *testing.T) {
 	}
 	// A query matches a mail address; a mail id matches exactly.
 	for _, q := range []string{"quinn@", "mail:quinn@example.invalid"} {
-		code, out, _ := e.run("--max-age", "0", "people", "--query", q)
+		code, out, _ := e.run("--no-sync", "people", "--query", q)
 		if got := items(t, decode(t, out)); code != 0 || len(got) != 1 || got[0]["id"] != "mail:quinn@example.invalid" {
 			t.Fatalf("%s: %v", q, got)
 		}
@@ -224,7 +224,7 @@ func TestMeetingPrepGoldens(t *testing.T) {
 				suffix = "color"
 				t.Setenv("CLICOLOR_FORCE", "1")
 			}
-			code, out, errOut := e.run(append([]string{"--format", "text", "--max-age", "0"}, c.args...)...)
+			code, out, errOut := e.run(append([]string{"--format", "text", "--no-sync"}, c.args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", c.name, code, errOut)
 			}

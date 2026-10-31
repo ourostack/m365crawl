@@ -36,7 +36,7 @@ func (loopGroup) Help() string {
 		"Run `loop sync` to register and project them, then `loop list`, `loop search WORDS` or `search WORDS --source loop`, and follow a returned loop-channel:ID with `loop show loop-channel:ID`. `loop sources` lists each registration, its snapshot_match (no_admission, matches, differs, unavailable) and why it failed; a failed or cancelled source is retried with `loop sync --source-id N`.\n" +
 		loopSemanticsHelp + loopRecoveryHelp +
 		"archive_age_seconds on a Loop result is the age of the last complete `m365crawl sync`, the sync that archives the cached records Loop is projected from; it is null when no sync has completed, and it is not the age of the Loop text.\n" +
-		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --max-age 0 and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice.\n" +
+		"Ordinary reads refresh registered sources whose last attempt is older than --max-age; --no-sync and `loop sources` only read the archive. Date, account, author, conversation, team, folder, mention, deletion, HTML and profile filters cannot qualify Loop channels: with --source loop they are refused, and they leave Loop out of --source all with a notice.\n" +
 		fmt.Sprintf("`loop sync` registers at most %d new archived records per run and never fails on a larger backlog: while its result has discovery_remaining true, run it again.", store.LoopDiscoveryBatch)
 }
 
@@ -195,6 +195,11 @@ func (rt *runtime) loopRead(label string, sourceID int64, fn func(*store.Store) 
 	if result.Count == 0 && result.Note == "" {
 		result.Note = loopEmptyNote(result.LoopCoverage)
 	}
+	attempts := []*time.Time{}
+	for _, item := range coverage.items {
+		attempts = append(attempts, item.AttemptedAt)
+	}
+	rt.noteRegisteredSyncOff(result, "Loop", attempts)
 	return rt.write(label, result)
 }
 

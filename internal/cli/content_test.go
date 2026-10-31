@@ -170,7 +170,7 @@ func TestCloudZeroHitCoverageShared(t *testing.T) {
 		t.Fatal(stderr)
 	}
 	for _, query := range []string{"absent", "searchableword"} {
-		code, out, stderr := e.run("--max-age", "0", "search", query, "--source", "content", "--fields", "id")
+		code, out, stderr := e.run("--no-sync", "search", query, "--source", "content", "--fields", "id")
 		if code != 0 {
 			t.Fatal(stderr)
 		}
@@ -229,7 +229,7 @@ func TestCloudMergeTiesUseFullNativeKeys(t *testing.T) {
 func TestCloudZeroHitCoverageAfterGlobalClip(t *testing.T) {
 	e := cloudCLIEnv(t)
 	e.sync()
-	code, before, stderr := e.run("--max-age", "0", "search", "Hello", "--limit", "1", "--fields", "id,sent_at")
+	code, before, stderr := e.run("--no-sync", "search", "Hello", "--limit", "1", "--fields", "id,sent_at")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -253,7 +253,7 @@ func TestCloudZeroHitCoverageAfterGlobalClip(t *testing.T) {
 	if code, _, stderr := e.run("content", "fetch", "page", "https://fixture.sharepoint.com/sites/sample/SitePages/Page.aspx"); code != 0 {
 		t.Fatal(stderr)
 	}
-	code, out, stderr := e.run("--max-age", "0", "search", "Hello", "--limit", "1", "--fields", "id")
+	code, out, stderr := e.run("--no-sync", "search", "Hello", "--limit", "1", "--fields", "id")
 	if code != 0 {
 		t.Fatal(stderr)
 	}

@@ -302,28 +302,28 @@ func TestWhoamiNestedArchiveCarriesTheSameMeta(t *testing.T) {
 func TestSQLAcceptsWordsInLiteralsAndExplainsEngineErrors(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "sql", "select 'attach' as w, 'detach; pragma' as v", "--json")
+	code, stdout, stderr := e.run("--no-sync", "sql", "select 'attach' as w, 'detach; pragma' as v", "--json")
 	if code != 0 {
 		t.Fatalf("literal words: exit %d: %s", code, stderr)
 	}
 	if rows := decode(t, stdout)["rows"].([]any); len(rows) != 1 {
 		t.Fatalf("rows: %v", rows)
 	}
-	code, _, stderr = e.run("--max-age", "0", "sql", "select * from no_such_table", "--json")
+	code, _, stderr = e.run("--no-sync", "sql", "select * from no_such_table", "--json")
 	body := errorOf(t, stderr)
 	if code != errs.ExitUsage || strings.Contains(body["fix"].(string), "read-only by design") || !strings.Contains(body["fix"].(string), "sqlite_master") {
 		t.Fatalf("engine error: %d %v", code, body)
 	}
 	// Statements that are not reads keep the read-only explanation, including attach.
 	for _, q := range []string{"attach database ':memory:' as x", "select 1; select 2", "delete from messages"} {
-		code, _, stderr = e.run("--max-age", "0", "sql", q, "--json")
+		code, _, stderr = e.run("--no-sync", "sql", q, "--json")
 		body = errorOf(t, stderr)
 		if code != errs.ExitUsage || !strings.Contains(body["fix"].(string), "read-only by design") {
 			t.Errorf("%q: %d %v", q, code, body)
 		}
 	}
 	// The cut is made while streaming: no total, truncated says more exist.
-	_, stdout, _ = e.run("--max-age", "0", "sql", "select id from messages", "--limit", "2", "--json")
+	_, stdout, _ = e.run("--no-sync", "sql", "select id from messages", "--limit", "2", "--json")
 	m := decode(t, stdout)
 	if m["truncated"] != true || m["count"].(float64) != 2 {
 		t.Fatalf("cut: %v", m)
@@ -648,7 +648,7 @@ func TestDoctorReportsAnUnreadableDerivationVersion(t *testing.T) {
 func TestTeamCheckReportsAnUnreadableArchive(t *testing.T) {
 	e := newEnv(t)
 	e.garbageArchive()
-	code, _, stderr := e.run("--max-age", "0", "messages", "--team", "x", "--json")
+	code, _, stderr := e.run("--no-sync", "messages", "--team", "x", "--json")
 	if code != errs.ExitRuntime || errorOf(t, stderr)["code"] != errs.CodeDBError {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}

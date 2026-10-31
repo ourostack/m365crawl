@@ -16,7 +16,7 @@
     <text x="28" y="252" font-size="16">attendee-observation:1  Native A  ambiguous=true</text>
     <text x="28" y="280" font-size="16">Physical IDs stored once; bindings are separate.</text>
     <text x="28" y="308" font-size="16">Preview100 + own losses/clocks + full indexed JSON object.</text>
-    <text x="28" y="348" font-size="15" fill="#8ee0c4">Follow-ups: selected absolute --db / --max-age 0 / unclipped SQL</text>
+    <text x="28" y="348" font-size="15" fill="#8ee0c4">Follow-ups: selected absolute --db / --no-sync / unclipped SQL</text>
     <text x="28" y="382" font-size="14" fill="#a8b6cc">No identity resolution, active membership or Windows/OWA native proof.</text>
   </g>
 </svg>

@@ -65,12 +65,12 @@ and repeated blocks. `blocks_total`, `preview_truncated` and `text_truncated`
 explain clipping. Native IDs, raw clocks, version and nullable flags stay exact;
 display clipping operates on copies, never the archived evidence.
 
-Run the emitted `full_text_sql` with `m365crawl --db /same/archive.db --max-age 0 sql 'SQL'`
+Run the emitted `full_text_sql` with `m365crawl --db /same/archive.db --no-sync sql 'SQL'`
 to read the full occurrence and its complete original session Result. The SQL
 contains only a generated positive archive row ID; native identifiers are never
 interpolated. No targeted-thread URL, person, task or document join is invented.
 `full_text_command` is the ready-to-run equivalent: it quotes the same selected
-archive and pins `--max-age 0`. Run it as printed instead of accidentally invoking
+archive and pins `--no-sync`. Run it as printed instead of accidentally invoking
 generic SQL's implicit freshness workflow.
 
 Every read audits complete retained canonical results, source binding, original

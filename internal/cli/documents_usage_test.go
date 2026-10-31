@@ -104,7 +104,7 @@ func usageCLIRun(t *testing.T, e *env, args ...string) (map[string]any, string) 
 // usageCLIText runs an archive-only command that must succeed and returns its output.
 func usageCLIText(t *testing.T, e *env, args ...string) string {
 	t.Helper()
-	code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+	code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 	if code != 0 {
 		t.Fatalf("%v: exit %d %s", args, code, stderr)
 	}
@@ -185,11 +185,11 @@ func TestUsagePreviewAndZeroHitCoverage(t *testing.T) {
 	}
 	inspect, _ := detail["full_inspection"].(string)
 	rowid := strings.TrimPrefix(id, "document-observation:")
-	want := `m365crawl --db ` + quoteArg(e.db) + ` --max-age 0 sql "select usage_json from document_observations where rowid=` + rowid + `" --limit 1`
+	want := `m365crawl --db ` + quoteArg(e.db) + ` --no-sync sql "select usage_json from document_observations where rowid=` + rowid + `" --limit 1`
 	if inspect != want {
 		t.Fatalf("full inspection = %q, want %q", inspect, want)
 	}
-	code, full, stderr := e.run("--max-age", "0", "--max-text", "0", "sql", "select usage_json from document_observations where rowid="+rowid, "--limit", "1")
+	code, full, stderr := e.run("--no-sync", "--max-text", "0", "sql", "select usage_json from document_observations where rowid="+rowid, "--limit", "1")
 	if code != 0 || !strings.Contains(full, "Hiddenlater Participant") || !strings.Contains(full, "Hiddenlast Sharer") {
 		t.Fatalf("the printed SQL does not return the complete payload: %d %s", code, stderr)
 	}
@@ -312,14 +312,14 @@ func TestUsageUnresolvedFollowups(t *testing.T) {
 	rows := items(t, doc)
 	id := usageCLIItem(t, rows, "document", "native-1")["id"].(string)
 	rowid := strings.TrimPrefix(id, "document-observation:")
-	allowed := `m365crawl --db ` + quoteArg(e.db) + ` --max-age 0 sql "select usage_json from document_observations where rowid=`
+	allowed := `m365crawl --db ` + quoteArg(e.db) + ` --no-sync sql "select usage_json from document_observations where rowid=`
 	for _, args := range [][]string{{"docs", "list", "--application", "onedrive"}, {"docs", "show", id}, {"docs", "search", "Collision"},
 		{"search", "Collision", "--source", "documents"}, {"search", "Collision"},
 		{"docs", "show", usageCLIItem(t, rows, "recent", "native-1")["id"].(string)},
 		{"docs", "show", usageCLIItem(t, rows, "collaborator", "person-1")["id"].(string)},
 		{"--format", "text", "docs", "show", id}, {"--format", "text", "docs", "list", "--application", "onedrive"},
 		{"--format", "text", "search", "Collision"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 || !strings.Contains(stdout, "Collision") && !strings.Contains(stdout, "native-1") && !strings.Contains(stdout, "person-1") {
 			t.Fatalf("%v: %d %s", args, code, stderr)
 		}
@@ -359,17 +359,17 @@ func TestUsageUnresolvedFollowups(t *testing.T) {
 	}
 	// A wrong ID is an error that says where real IDs come from; a native ID is never accepted.
 	for _, wrong := range []string{"document-observation:99999", "native-1", conversation, "document-observation:0", "document-observation:" + rowid + " or 1=1"} {
-		code, stdout, stderr := e.run("--max-age", "0", "docs", "show", wrong)
+		code, stdout, stderr := e.run("--no-sync", "docs", "show", wrong)
 		if code != 2 || stdout != "" || !strings.Contains(stderr, "docs list") {
 			t.Fatalf("docs show %q: exit %d %s", wrong, code, stderr)
 		}
 	}
-	if code, _, stderr := e.run("--max-age", "0", "docs", "show", id); code != 0 {
+	if code, _, stderr := e.run("--no-sync", "docs", "show", id); code != 0 {
 		t.Fatalf("a correct ID after a wrong one: %s", stderr)
 	}
 	// Account, author and message-only filters cannot qualify unresolved usage rows.
 	for _, args := range [][]string{{"--account", "any", "docs", "list"}, {"search", "Collision", "--source", "documents", "--from", person}} {
-		if code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code != 2 || stdout != "" || strings.Contains(stderr, "unknown flag") ||
+		if code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...); code != 2 || stdout != "" || strings.Contains(stderr, "unknown flag") ||
 			!strings.Contains(stderr, "account") {
 			t.Fatalf("%v accepted an ownership filter for unresolved documents: %d %s", args, code, stderr)
 		}
@@ -532,7 +532,7 @@ func TestUsageCLIReadOnlyAndClocks(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, args := range reads {
-			args = append([]string{"--max-age", "0"}, args...)
+			args = append([]string{"--no-sync"}, args...)
 			code, first, stderr := e.run(args...)
 			_, second, _ := e.run(args...)
 			if code != wantCode[args[len(args)-2]+" "+args[len(args)-1]] || first != second {
@@ -645,10 +645,10 @@ func TestUsageSyncFlagsDiscoveryAndRemedies(t *testing.T) {
 		t.Fatalf("runner refusal: %d %s", code, stderr)
 	}
 	runDocumentsSync = run
-	if code, stdout, _ := e.run("--max-age", "0", "docs", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 1 {
+	if code, stdout, _ := e.run("--no-sync", "docs", "sources"); code != 0 || len(items(t, decode(t, stdout))) != 1 {
 		t.Fatalf("a usage error registered a source: %s", stdout)
 	}
-	if code, _, stderr := e.run("--max-age", "0", "docs", "list", "--application", "dropbox"); code != 2 || !strings.Contains(stderr, "onedrive") {
+	if code, _, stderr := e.run("--no-sync", "docs", "list", "--application", "dropbox"); code != 2 || !strings.Contains(stderr, "onedrive") {
 		t.Fatalf("--application error does not name onedrive: %d %s", code, stderr)
 	}
 	// Nothing usable in any family stays a coded failure that names all three and every route.
@@ -819,7 +819,7 @@ func TestUsageSearchSourceCounts(t *testing.T) {
 		}
 		return out
 	}
-	all, _ := usageCLIRun(t, e, "--max-age", "0", "search", "quartzword")
+	all, _ := usageCLIRun(t, e, "--no-sync", "search", "quartzword")
 	if got := documents(all); got["returned"] != float64(3) || got["matched"] != float64(3) || got["truncated"] != false {
 		t.Fatalf("documents source of a complete search = %v", got)
 	}
@@ -828,13 +828,13 @@ func TestUsageSearchSourceCounts(t *testing.T) {
 			t.Fatalf("search item is not a usage document row: %v", row)
 		}
 	}
-	cut, _ := usageCLIRun(t, e, "--max-age", "0", "search", "quartzword", "--limit", "2")
+	cut, _ := usageCLIRun(t, e, "--no-sync", "search", "quartzword", "--limit", "2")
 	got := documents(cut)
 	if _, exact := got["matched"]; exact || got["returned"] != float64(2) || got["matched_at_least"] == nil || got["truncated"] != true {
 		t.Fatalf("documents source of a cut search = %v", got)
 	}
 	for _, args := range [][]string{{"search", "quartzword", "--limit", "2"}, {"search", "quartzword", "--limit", "2", "--source", "documents"}} {
-		text := usageCLIText(t, e, append([]string{"--max-age", "0", "--format", "text"}, args...)...)
+		text := usageCLIText(t, e, append([]string{"--no-sync", "--format", "text"}, args...)...)
 		if strings.Contains(text, "use --source documents") && slices.Contains(args, "--source") {
 			t.Fatalf("%v: the hint names the source already selected:\n%s", args, text)
 		}
@@ -875,7 +875,7 @@ func printedStrings(stdout string) []string {
 // The follow-up scan reads JSON output as decoded strings, so an archive path with backslashes
 // (every Windows path) is compared as the reader sees it and not as JSON escapes it.
 func TestPrintedStringsDecodeJSONPaths(t *testing.T) {
-	command := `m365crawl --db "C:\\synthetic dir\\m365crawl.db" --max-age 0 sql`
+	command := `m365crawl --db "C:\\synthetic dir\\m365crawl.db" --no-sync sql`
 	encoded, err := json.Marshal(map[string]any{"items": []any{map[string]any{"full_inspection": command}}})
 	if err != nil {
 		t.Fatal(err)

@@ -25,7 +25,7 @@ func searchSourceCount(t *testing.T, doc map[string]any, source string) map[stri
 func TestLoopGlobalLimitCoverageAndClipping(t *testing.T) {
 	e := newEnv(t)
 	seedLoopSearch(t, e)
-	full := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--limit", "500"))
+	full := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--limit", "500"))
 	var legacy, loop int
 	for _, item := range items(t, full) {
 		if item["source"] == "loop" {
@@ -43,7 +43,7 @@ func TestLoopGlobalLimitCoverageAndClipping(t *testing.T) {
 	if full["total"] != nil {
 		t.Fatal("legacy-only total presented for an all-source search")
 	}
-	clipped := decode(t, runOK(t, e, "--max-age", "0", "--fields", "source,text", "search", "Hello", "--limit", "1"))
+	clipped := decode(t, runOK(t, e, "--no-sync", "--fields", "source,text", "search", "Hello", "--limit", "1"))
 	if len(items(t, clipped)) != 1 || items(t, clipped)[0]["source"] == "loop" || clipped["truncated"] != true || clipped["total"] != nil {
 		t.Fatalf("global clip: %v", clipped)
 	}
@@ -58,7 +58,7 @@ func TestLoopGlobalLimitCoverageAndClipping(t *testing.T) {
 	if len(sources) != 3 || !states["matches/complete"] || !states["no_admission/failed"] || !states["matches/metadata_only"] {
 		t.Fatalf("participating coverage clipped with rows: %v", states)
 	}
-	zero := decode(t, runOK(t, e, "--max-age", "0", "search", "Meeting", "--limit", "5"))
+	zero := decode(t, runOK(t, e, "--no-sync", "search", "Meeting", "--limit", "5"))
 	for _, item := range items(t, zero) {
 		if item["source"] == "loop" {
 			t.Fatal("Loop hit for a word it does not hold")
@@ -68,11 +68,11 @@ func TestLoopGlobalLimitCoverageAndClipping(t *testing.T) {
 		len(loopCoverageSources(t, zero)) != 3 {
 		t.Fatalf("true zero Loop matches lost coverage: %v", zero)
 	}
-	only := decode(t, runOK(t, e, "--max-age", "0", "search", "nothingatall", "--source", "loop"))
+	only := decode(t, runOK(t, e, "--no-sync", "search", "nothingatall", "--source", "loop"))
 	if len(items(t, only)) != 0 || len(loopCoverageSources(t, only)) != 3 || !strings.Contains(only["note"].(string), "loop") {
 		t.Fatalf("Loop-only zero hits: %v", only)
 	}
-	text := runOK(t, e, "--max-age", "0", "--format", "text", "search", "Hello", "--source", "loop")
+	text := runOK(t, e, "--no-sync", "--format", "text", "search", "Hello", "--source", "loop")
 	if !strings.Contains(text, "loop show loop-channel:") || !strings.Contains(text, "loop coverage") {
 		t.Fatalf("text search lacks the Loop follow-up or coverage:\n%s", text)
 	}
@@ -84,30 +84,30 @@ func TestLoopScopeExclusions(t *testing.T) {
 	for _, flags := range [][]string{{"--since", "2023-01-01"}, {"--until", "2030-01-01"}, {"--from", "Someone"},
 		{"--conversation", "19:x"}, {"--team", "Team"}, {"--folder", "inbox"}, {"--mentions-me"}, {"--direct-mentions"},
 		{"--include-deleted"}, {"--include-system"}, {"--html"}} {
-		args := append([]string{"--max-age", "0", "search", "Hello", "--source", "loop"}, flags...)
+		args := append([]string{"--no-sync", "search", "Hello", "--source", "loop"}, flags...)
 		code, _, stderr := e.run(args...)
 		if code != 2 || !strings.Contains(stderr, CodeFlagSourceConflict) {
 			t.Fatalf("--source loop accepted %v: %d %s", flags, code, stderr)
 		}
 	}
 	for _, global := range [][]string{{"--account", "tenant/user"}, {"--outlook-profile", "Main"}} {
-		args := append(append([]string{"--max-age", "0"}, global...), "search", "Hello", "--source", "loop")
+		args := append(append([]string{"--no-sync"}, global...), "search", "Hello", "--source", "loop")
 		if code, _, stderr := e.run(args...); code != 2 || !strings.Contains(stderr, CodeFlagSourceConflict) {
 			t.Fatalf("--source loop accepted %v: %s", global, stderr)
 		}
-		args = append(append([]string{"--max-age", "0"}, global...), "loop", "list")
+		args = append(append([]string{"--no-sync"}, global...), "loop", "list")
 		if code, _, _ := e.run(args...); code == 0 {
 			t.Fatalf("loop list accepted %v", global)
 		}
 	}
-	if code, _, _ := e.run("--max-age", "0", "search", "--source", "loop"); code == 0 {
+	if code, _, _ := e.run("--no-sync", "search", "--source", "loop"); code == 0 {
 		t.Fatal("blank Loop search accepted")
 	}
-	if code, _, _ := e.run("--max-age", "0", "loop", "search", "  "); code == 0 {
+	if code, _, _ := e.run("--no-sync", "loop", "search", "  "); code == 0 {
 		t.Fatal("blank loop search accepted")
 	}
-	plain := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--limit", "500"))
-	bounded := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--limit", "500", "--since", "2023-01-01"))
+	plain := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--limit", "500"))
+	bounded := decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--limit", "500", "--since", "2023-01-01"))
 	if searchSourceCount(t, bounded, "loop") != nil || bounded["loop_coverage"] != nil {
 		t.Fatalf("bounded all searched Loop: %v", bounded["sources"])
 	}

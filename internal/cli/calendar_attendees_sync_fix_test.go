@@ -23,7 +23,7 @@ func TestAttendeeSyncFailureFixKeepsRequest(t *testing.T) {
 		t.Fatal("native sync conflict hidden")
 	}
 	fix, _ := errorOf(t, stderr)["fix"].(string)
-	if !strings.Contains(fix, e.db) || !strings.Contains(fix, "--max-age 0") || !strings.Contains(fix, "/synthetic/exact root") || strings.Contains(fix, " content ") {
+	if !strings.Contains(fix, e.db) || !strings.Contains(fix, "--no-sync") || !strings.Contains(fix, "/synthetic/exact root") || strings.Contains(fix, " content ") {
 		t.Fatal("failure remedy escaped selected request", fix)
 	}
 	for _, flags := range [][]string{{}, {"--source-id", "1"}} {

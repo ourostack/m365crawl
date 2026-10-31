@@ -235,7 +235,7 @@ func draftInspectionCommand(goos, db, account, id, revision string, includeRemov
 	if goos == "windows" {
 		quote = draftPowerShellLiteral
 	}
-	words := []string{"m365crawl", "--db", quote(db), "--max-age", "0", "--max-text", "0"}
+	words := []string{"m365crawl", "--db", quote(db), "--no-sync", "--max-text", "0"}
 	if account != "" {
 		words = append(words, "--account", quote(account))
 	}

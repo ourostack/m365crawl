@@ -41,7 +41,7 @@ delete from schema_migrations where version=11`)
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"docs", "list"}, {"docs", "sources"}, {"search", "Quarterly", "--source", "documents"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != 0 || strings.Contains(stdout, "needs_upgrade") || strings.Contains(stdout, "needs_sync") ||
 			len(items(t, decode(t, stdout))) != 0 {
 			t.Fatalf("old optional archive touched legacy freshness or became a capture: %s", stderr)
@@ -64,7 +64,7 @@ delete from schema_migrations where version=11`)
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"docs", "list"}, {"docs", "sources"}, {"search", "Quarterly", "--source", "documents"}} {
-		code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...)
+		code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...)
 		if code != errs.ExitEnvironment || errorOf(t, stderr)["code"] != errs.CodeArchiveNewer {
 			t.Fatalf("future archive became successful empty output: %s", stderr)
 		}

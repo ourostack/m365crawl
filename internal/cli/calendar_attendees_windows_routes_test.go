@@ -14,7 +14,7 @@ func TestAttendeeWindowsCommandConsumerPreservesNativePaths(t *testing.T) {
 	teams := `D:\a\m365crawl\testdata\teams-fixture\EBWebView`
 	command := archiveScopedCommand(db, "sync", "--outlook-root", root, "--teams-root", teams)
 	got := attendeeCommandWordsFor(t, command, "windows")
-	want := []string{"m365crawl", "--db", db, "--max-age", "0", "sync", "--outlook-root", root, "--teams-root", teams}
+	want := []string{"m365crawl", "--db", db, "sync", "--outlook-root", root, "--teams-root", teams}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal("test consumer damaged actual Windows follow-up arguments", got, want)
 	}

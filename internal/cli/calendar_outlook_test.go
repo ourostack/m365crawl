@@ -62,7 +62,7 @@ func syncedWithOutlook(t *testing.T, names ...string) (*env, func(args ...string
 
 func agendaVia(t *testing.T, run func(args ...string) (int, string, string), args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := run(append([]string{"--max-age", "0", "calendar", "--limit", "200"}, args...)...)
+	code, out, errOut := run(append([]string{"--no-sync", "calendar", "--limit", "200"}, args...)...)
 	if code != 0 {
 		t.Fatalf("calendar %v: exit %d: %s", args, code, errOut)
 	}
@@ -71,7 +71,7 @@ func agendaVia(t *testing.T, run func(args ...string) (int, string, string), arg
 
 func eventVia(t *testing.T, run func(args ...string) (int, string, string), ref string) map[string]any {
 	t.Helper()
-	code, out, errOut := run("--max-age", "0", "calendar", "event", ref)
+	code, out, errOut := run("--no-sync", "calendar", "event", ref)
 	if code != 0 {
 		t.Fatalf("calendar event %s: exit %d: %s", ref, code, errOut)
 	}
@@ -157,7 +157,7 @@ func TestCalendarOutlookOnlyEvents(t *testing.T) {
 	if far["coverage_gap"] != true || len(asStrings(far["uncovered_days"])) != 3 || far["count"].(float64) != 0 {
 		t.Fatalf("an uncovered range: %v", far)
 	}
-	code, out, errOut := run("--format", "text", "--max-age", "0", "calendar", "--from", "2040-01-01", "--days", "3")
+	code, out, errOut := run("--format", "text", "--no-sync", "calendar", "--from", "2040-01-01", "--days", "3")
 	if code != 0 || !strings.Contains(out, "no cached data covers 3 day(s) of this range: 2040-01-01, 2040-01-02, 2040-01-03") {
 		t.Fatalf("text: %d %s %s", code, out, errOut)
 	}
@@ -213,13 +213,13 @@ func TestCalendarOutlookGoldens(t *testing.T) {
 			"calendar_outlook":       {"calendar", "--from", "2023-11-21", "--days", "2", "--account", "outlook/Main"},
 			"calendar_outlook_event": {"calendar", "event", item["event_id"].(string)},
 		} {
-			code, out, errOut := run(append([]string{"--format", "text", "--max-age", "0"}, args...)...)
+			code, out, errOut := run(append([]string{"--format", "text", "--no-sync"}, args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", name, code, errOut)
 			}
 			checkGolden(t, name+"."+suffix, scrub(out))
 		}
-		code, out, errOut := run("--format", "text", "--max-age", "0", "calendar", "--from", "2023-11-21", "--days", "2")
+		code, out, errOut := run("--format", "text", "--no-sync", "calendar", "--from", "2023-11-21", "--days", "2")
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
@@ -418,7 +418,7 @@ func TestOutlookLinkUsageErrors(t *testing.T) {
 		{"unknown profile", []string{"sync", "--outlook-profile", "Nope", "--outlook-account", teamsAccount}, "one of: Main, Second"},
 		{"profile alone", []string{"sync", "--outlook-profile", "Main"}, ""},
 		{"with a Teams filter", []string{"--account", teamsAccount, "sync", "--outlook-profile", "Main", "--outlook-account", teamsAccount}, "Drop --account"},
-		{"on a read", []string{"--max-age", "0", "calendar", "--outlook-profile", "Main", "--outlook-account", "teams-me"}, "whoami"},
+		{"on a read", []string{"--no-sync", "calendar", "--outlook-profile", "Main", "--outlook-account", "teams-me"}, "whoami"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			code, stdout, stderr := run(c.args...)
@@ -654,12 +654,12 @@ func TestOutlookLinkWithMaxAgeZero(t *testing.T) {
 	if code, _, errOut := run("sync", "--outlook-account", teamsAccount); code != 0 {
 		t.Fatal(errOut)
 	}
-	if code, _, errOut := run("--max-age", "0", "--outlook-account", teamsAccount, "calendar", "--days", "1"); code != 0 {
+	if code, _, errOut := run("--no-sync", "--outlook-account", teamsAccount, "calendar", "--days", "1"); code != 0 {
 		t.Fatalf("a link already in place: exit %d: %s", code, errOut)
 	}
 	// With no archive at all there is nothing pending to refuse.
 	fresh := textEnv(t)
-	if code, _, errOut := fresh.run("--max-age", "0", "--outlook-root", "none", "calendar", "--days", "1"); code != 0 {
+	if code, _, errOut := fresh.run("--no-sync", "--outlook-root", "none", "calendar", "--days", "1"); code != 0 {
 		t.Fatal(errOut)
 	}
 }
@@ -671,22 +671,22 @@ func TestOutlookAccountEnvironment(t *testing.T) {
 	e.sync()
 	t.Setenv("M365CRAWL_OUTLOOK_ACCOUNT", "not-an-account")
 	for _, cmd := range [][]string{{"whoami"}, {"status"}, {"--version"}} {
-		if code, _, errOut := e.run(append([]string{"--max-age", "0"}, cmd...)...); code != 0 {
+		if code, _, errOut := e.run(append([]string{"--no-sync"}, cmd...)...); code != 0 {
 			t.Fatalf("%v: exit %d: %s", cmd, code, errOut)
 		}
 	}
-	code, out, errOut := e.run("--max-age", "0", "calendar", "--days", "1")
+	code, out, errOut := e.run("--no-sync", "calendar", "--days", "1")
 	if code != 0 || !strings.Contains(errOut, "needs the Outlook source") || decode(t, out)["items"] == nil {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	if code, _, _ = e.run("--max-age", "0", "calendar", "event", "ev_x", "--outlook-account", "a-flag"); code != 2 {
+	if code, _, _ = e.run("--no-sync", "calendar", "event", "ev_x", "--outlook-account", "a-flag"); code != 2 {
 		t.Fatalf("calendar event: exit %d", code)
 	}
 	// The same value as a flag is a mistake, and with Outlook on a bad value is one either way.
-	if code, _, _ = e.run("--max-age", "0", "--outlook-account", "a-flag", "calendar"); code != 2 {
+	if code, _, _ = e.run("--no-sync", "--outlook-account", "a-flag", "calendar"); code != 2 {
 		t.Fatalf("exit %d", code)
 	}
-	if code, _, _ = e.run("--max-age", "0", "--outlook-root", outlookProfiles(t, "Main"), "calendar"); code != 2 {
+	if code, _, _ = e.run("--no-sync", "--outlook-root", outlookProfiles(t, "Main"), "calendar"); code != 2 {
 		t.Fatalf("exit %d", code)
 	}
 }

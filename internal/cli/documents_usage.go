@@ -16,7 +16,7 @@ const usagePreview = 100
 // documentUsageHelp says what a OneDrive usage row is and what it does not prove.
 const documentUsageHelp = "OneDrive usage rows (variant onedrive_usage, application onedrive, no surface) are records of OneDrive's local usage file, kept in usage_native exactly as that file states them. usage_native.Type is recent (one recently used file: native IDs, type, extension and clocks, no title), document (one formatted variant of a recent file, identified by its native ID plus Format: title, URL, owner, size and the sharing claims) or collaborator (one frequent-collaborator profile). One native ID can have a recent row and several document rows; none is preferred or merged. " +
 	"Each clock is {Raw, Value}: Raw is the file's exact text and Value is UTC, or null when Raw is empty or is not an RFC 3339 time with an explicit offset. modified_at is the file modification time only (Document.Modified, or Recent.FileModified), so --since/--until never match access, sharing, saved or capture time, and a collaborator has none. In the OneDrive files examined so far every clock of a recent row is written without a zone (YYYY-MM-DD HH:MM:SS): m365crawl does not guess one, so those rows' Value clocks and modified_at are null and date windows exclude them. A recent row with a parsed explicit-offset FileModified clock can match a date window. " +
-	"Document.History previews the first 100 sharing instances in native order (Position is the native index) and each instance previews its first 100 Participants; HistoryCaptured, ParticipantsCaptured and the *Truncated flags give the full captured counts, ParticipantsCount is the number the file itself states (or null), and PreviewTruncated is true when anything was cut. full_inspection is an archive-only `m365crawl --db PATH --max-age 0 sql` command that prints the row's complete stored record; run it as printed. " +
+	"Document.History previews the first 100 sharing instances in native order (Position is the native index) and each instance previews its first 100 Participants; HistoryCaptured, ParticipantsCaptured and the *Truncated flags give the full captured counts, ParticipantsCount is the number the file itself states (or null), and PreviewTruncated is true when anything was cut. full_inspection is an archive-only `m365crawl --db PATH --no-sync sql` command that prints the row's complete stored record; run it as printed. " +
 	"Names, addresses, thread IDs, meeting IDs and collaborator profiles are the file's claims: m365crawl links none of them to an archived person, chat, mail or account, so no thread or person command is offered for them. The documents and URLs are never opened, checked or resolved."
 
 // usageClock is a native clock: its exact text, and its UTC value or null.
@@ -169,7 +169,7 @@ func usageNativeOf(native store.UsageNative, maxText int) (usageNativeItem, bool
 // It is a fixed template around the positive observation row ID and the archive path db, which
 // it names with --db so the command reads the archive the result came from; never source text.
 func usageInspection(id int64, db string) string {
-	return fmt.Sprintf(`m365crawl --db %s --max-age 0 sql "select usage_json from document_observations where rowid=%d" --limit 1`, quoteArg(db), id)
+	return fmt.Sprintf(`m365crawl --db %s --no-sync sql "select usage_json from document_observations where rowid=%d" --limit 1`, quoteArg(db), id)
 }
 
 // usageItemOf is the item of a OneDrive usage row. Title and URL are the document's own; a recent

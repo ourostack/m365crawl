@@ -373,7 +373,7 @@ func TestAccountTheArchiveDoesNotHold(t *testing.T) {
 			teamsArchive(t, e)
 			e.exec("drop table accounts")
 			e.exec("create table accounts (x)")
-			code, _, errOut := e.run(append([]string{"--json", "--max-age", "0", "--account", other}, args...)...)
+			code, _, errOut := e.run(append([]string{"--json", "--no-sync", "--account", other}, args...)...)
 			if code == 0 || errorOf(t, errOut)["code"] != "db_error" {
 				t.Fatalf("exit %d, stderr %q", code, errOut)
 			}

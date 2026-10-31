@@ -130,7 +130,7 @@ func trEnv(t *testing.T) *env {
 }
 
 func (e *env) tr(args ...string) (int, string, string) {
-	return e.run(append([]string{"--max-age", "0"}, args...)...)
+	return e.run(append([]string{"--no-sync"}, args...)...)
 }
 
 func trJSON(t *testing.T, e *env, args ...string) map[string]any {
@@ -359,7 +359,7 @@ func TestShow(t *testing.T) {
 	if m := trJSON(t, e, "transcripts", "show", trEventID()); m["call_id"] != "call-1" || m["notices"] != nil {
 		t.Fatalf("by event %v", m)
 	}
-	if m := trJSON(t, e, "--fields", "call_id,complete", "transcripts", "show", "call-1"); len(m) != 3 || m["complete"] != false || m["archive_age_seconds"] == nil {
+	if m := trJSON(t, e, "--fields", "call_id,complete", "transcripts", "show", "call-1"); len(m) != 4 || m["complete"] != false || m["archive_age_seconds"] == nil || m["implicit_sync"] != "disabled" {
 		t.Fatalf("--fields %v", m)
 	}
 }

@@ -27,10 +27,10 @@ func TestPeopleObservationsMixedLegacyOrdering(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
 	peopleFixture(t, e)
-	if code, out, stderr := e.run("--max-age", "0", "people", "--limit", "3"); code != 0 || !containsJSONKey(out, "source_coverage") {
+	if code, out, stderr := e.run("--no-sync", "people", "--limit", "3"); code != 0 || !containsJSONKey(out, "source_coverage") {
 		t.Fatalf("mixed read: %d %s %s", code, out, stderr)
 	}
-	code, out, _ := e.run("--max-age", "0", "people", "--query", "no-matches")
+	code, out, _ := e.run("--no-sync", "people", "--query", "no-matches")
 	if code != 0 || !containsJSONKey(out, "source_coverage") {
 		t.Fatalf("mixed zero matches: %s", out)
 	}
@@ -63,7 +63,7 @@ func TestPeopleObservationsOpenAndQueryFaults(t *testing.T) {
 				}
 				return s, nil
 			}
-			args := []string{"--max-age", "0", "people"}
+			args := []string{"--no-sync", "people"}
 			if stage == "detail-query" {
 				args = append(args, "show", "person-observation:1")
 			}
@@ -87,7 +87,7 @@ func TestPeopleObservationsOpenAndQueryFaults(t *testing.T) {
 func TestPeopleObservationsMixedTextIncludesConflicts(t *testing.T) {
 	e := textEnv(t)
 	peopleFixture(t, e)
-	if code, out, _ := e.run("--format", "text", "--max-age", "0", "people", "show", "person-observation:1"); code != 0 || !strings.Contains(out, "conflicting claim") {
+	if code, out, _ := e.run("--format", "text", "--no-sync", "people", "show", "person-observation:1"); code != 0 || !strings.Contains(out, "conflicting claim") {
 		t.Fatalf("native text conflicts: %d %s", code, out)
 	}
 }

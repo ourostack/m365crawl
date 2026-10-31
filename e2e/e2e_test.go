@@ -345,7 +345,7 @@ func TestE2EErrors(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(e.root, 0o700) }) //nolint:gosec // G302: a directory must be searchable
 		wantError(t, e.cmd("sync"), 3, "no_full_disk_access")
-		wantError(t, e.cmd("sync", "--max-age", "0"), 3, "no_full_disk_access")
+		wantError(t, e.cmd("sync", "--no-sync"), 3, "no_full_disk_access")
 
 		// doctor reports the failing check on stdout and fails with doctor_failed on stderr.
 		res := e.cmd("doctor")
@@ -588,7 +588,7 @@ func TestE2ENoSnapshotLeft(t *testing.T) {
 // lastRunStatuses lists the recorded sync_runs statuses, oldest first.
 func lastRunStatuses(t *testing.T, e *env) []string {
 	t.Helper()
-	res := e.cmd("sql", "--max-age", "0", "select status from sync_runs where accounts_json is not null order by id")
+	res := e.cmd("sql", "--no-sync", "select status from sync_runs where accounts_json is not null order by id")
 	mustExit(t, res, 0) // stderr may carry the "run m365crawl sync" hint: no run has succeeded
 	var out []string
 	for _, r := range mustJSON(t, res.stdout)["rows"].([]any) {
@@ -714,7 +714,7 @@ func TestE2EThread(t *testing.T) {
 
 func TestE2EWhoami(t *testing.T) {
 	e := newEnv(t)
-	res := e.cmd("whoami", "--max-age", "0")
+	res := e.cmd("whoami", "--no-sync")
 	mustExit(t, res, 0)
 	if res.stderr != "" {
 		t.Fatalf("JSON mode keeps stderr empty (the hint is in the result): %q", res.stderr)
@@ -798,7 +798,7 @@ func TestE2EMaxAge(t *testing.T) {
 		res := e.cmd("messages", "--max-age", "0")
 		mustExit(t, res, 0)
 		whole := mustJSON(t, res.stdout)
-		if whole["needs_sync"] != true || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) {
+		if whole["needs_sync"] != true || whole["archive_age_seconds"] != nil || whole["count"] != float64(0) || whole["implicit_sync"] != "disabled" {
 			t.Fatalf("never synced with --max-age 0 = %v", whole)
 		}
 		assertScopedSyncHint(t, e, whole["hint"])
@@ -812,6 +812,13 @@ func TestE2EMaxAge(t *testing.T) {
 		res = e.runWith([]string{"M365CRAWL_MAX_AGE=0"}, append([]string{"people"}, e.baseArgs()...)...)
 		if mustExit(t, res, 0); mustJSON(t, res.stdout)["needs_sync"] != true {
 			t.Fatalf("M365CRAWL_MAX_AGE=0: %s", res.stdout)
+		}
+		res = e.runWith([]string{"M365CRAWL_NO_SYNC=1"}, append([]string{"people"}, e.baseArgs()...)...)
+		if mustExit(t, res, 0); mustJSON(t, res.stdout)["implicit_sync"] != "disabled" {
+			t.Fatalf("M365CRAWL_NO_SYNC=1: %s", res.stdout)
+		}
+		if _, err := os.Stat(e.db); err == nil {
+			t.Fatal("--no-sync must not create the archive")
 		}
 	})
 
@@ -1438,7 +1445,7 @@ func TestE2EAlpha1PhysicalSchemaUpgrade(t *testing.T) {
 	archiveExec(t, e.db, `alter table sync_runs drop column accounts_json`)
 	archiveExec(t, e.db, `update schema_migrations set version=1`)
 	before := archiveCount(t, e.db, `select count(*) from messages`)
-	res := e.cmd("messages", "--max-age", "0")
+	res := e.cmd("messages", "--no-sync")
 	mustExit(t, res, 0)
 	if whole := mustJSON(t, res.stdout); whole["needs_sync"] != true || whole["sync_error"] != nil {
 		t.Fatalf("old physical schema must remain readable without repair: %s", res.stdout)
@@ -1456,7 +1463,7 @@ func TestE2EAlpha1PhysicalSchemaUpgrade(t *testing.T) {
 	if got := archiveCount(t, e.db, `select count(*) from messages`); got != before {
 		t.Fatalf("migration lost retained messages: %d -> %d", before, got)
 	}
-	mustExit(t, e.cmd("messages", "--max-age", "0"), 0)
+	mustExit(t, e.cmd("messages", "--no-sync"), 0)
 }
 
 // hostWarning says a doctor warning comes from the fixture or the host, not from the archive: the

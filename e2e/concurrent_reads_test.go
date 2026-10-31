@@ -59,7 +59,7 @@ func TestConcurrentReadsShareOneSync(t *testing.T) {
 			t.Fatalf("no hits: %s", res.stdout)
 		}
 		switch {
-		case m["synced"] != nil && m["implicit_sync"] == nil:
+		case m["synced"] != nil && m["implicit_sync"] == "ran":
 			synced++
 		case m["synced"] == nil && m["implicit_sync"] == "waited_for_other_sync":
 			waited++

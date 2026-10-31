@@ -46,7 +46,7 @@ func TestReview248CalendarEventHealthCoversMailItActuallyReads(t *testing.T) {
 		t.Fatalf("reproduction did not read Other mail: %+v %v", related, err)
 	}
 	_ = st.Close()
-	code, out, stderr := e.run("--json", "--max-age", "0", "--outlook-root", root, "calendar", "event", id)
+	code, out, stderr := e.run("--json", "--no-sync", "--outlook-root", root, "calendar", "event", id)
 	if code != 0 || stderr != "" {
 		t.Fatalf("exit=%d stderr=%s", code, stderr)
 	}

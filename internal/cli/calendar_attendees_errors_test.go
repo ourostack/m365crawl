@@ -34,7 +34,7 @@ func TestAttendeeReadOutputAndUsageFailures(t *testing.T) {
 		{"calendar", "attendees", "show", "attendee-observation:999"},
 		{"calendar", "attendees", "list", "no-such-event"},
 	} {
-		if code, _, _ := e.run(append([]string{"--max-age", "0"}, args...)...); code == 0 {
+		if code, _, _ := e.run(append([]string{"--no-sync"}, args...)...); code == 0 {
 			t.Fatal("invalid native read accepted", args)
 		}
 	}

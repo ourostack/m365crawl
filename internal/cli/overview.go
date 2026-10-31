@@ -231,7 +231,7 @@ func (rt *runtime) overviewArchived(st *store.Store, chatsSynced *time.Time) ([]
 		ppl.State, ppl.Note = overviewEmpty, "no people archived yet: run m365crawl sync; m365crawl people sync adds native Outlook people observations"
 	}
 	if len(people) > 0 {
-		ppl.Note = "native observation identities stay unresolved; m365crawl --max-age 0 people sources shows their coverage (keep --db, omit --account)"
+		ppl.Note = "native observation identities stay unresolved; m365crawl --no-sync people sources shows their coverage (keep --db, omit --account)"
 		if rt.account != nil {
 			ppl.Note += "; native Outlook observations are " + unscoped
 		}

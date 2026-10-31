@@ -30,7 +30,7 @@ func loopHitsEnv(t *testing.T) *env {
 
 func textRun(t *testing.T, e *env, args ...string) string {
 	t.Helper()
-	return runOK(t, e, append([]string{"--max-age", "0", "--format", "text"}, args...)...)
+	return runOK(t, e, append([]string{"--no-sync", "--format", "text"}, args...)...)
 }
 
 // A hint never names the source already selected, and says to raise --limit when a source alone
@@ -72,18 +72,18 @@ func manyHello(n int) []teamsdesktop.Message {
 // exact number.
 func TestSearchMatchedIsExactOrALowerBound(t *testing.T) {
 	e := loopHitsEnv(t)
-	loop := searchSourceCount(t, decode(t, runOK(t, e, "--max-age", "0", "search", "Hello", "--source", "loop", "--limit", "2")), "loop")
+	loop := searchSourceCount(t, decode(t, runOK(t, e, "--no-sync", "search", "Hello", "--source", "loop", "--limit", "2")), "loop")
 	if loop["returned"] != float64(2) || loop["matched"] != float64(3) || loop["matched_at_least"] != nil || loop["truncated"] != true {
 		t.Fatalf("Loop cut by the limit: %v", loop)
 	}
 	seedTwoNotes(t, e)
 	seedTwoDocuments(t, e)
 	for source, query := range map[string]string{"mail": "Hello", "transcripts": "Hello", "notes": "Quarterly", "documents": "Quarterly"} {
-		cut := searchSourceCount(t, decode(t, runOK(t, e, "--max-age", "0", "search", query, "--source", source, "--limit", "1")), source)
+		cut := searchSourceCount(t, decode(t, runOK(t, e, "--no-sync", "search", query, "--source", source, "--limit", "1")), source)
 		if _, exact := cut["matched"]; exact || cut["matched_at_least"] != float64(1) || cut["returned"] != float64(1) || cut["truncated"] != true {
 			t.Fatalf("%s cut at the limit claims an exact count: %v", source, cut)
 		}
-		all := searchSourceCount(t, decode(t, runOK(t, e, "--max-age", "0", "search", query, "--source", source, "--limit", "500")), source)
+		all := searchSourceCount(t, decode(t, runOK(t, e, "--no-sync", "search", query, "--source", source, "--limit", "500")), source)
 		if _, bound := all["matched_at_least"]; bound || all["matched"] != all["returned"] || all["returned"].(float64) < 2 {
 			t.Fatalf("%s read whole is not exact: %v", source, all)
 		}
@@ -142,7 +142,7 @@ func seedTwoDocuments(t *testing.T, e *env) {
 // With no archive nothing was searched, so no source reports a matched count.
 func TestSearchWithoutAnArchiveReportsNoMatchedCount(t *testing.T) {
 	e := newEnv(t)
-	doc := decode(t, runOK(t, e, "--max-age", "0", "search", "Hello"))
+	doc := decode(t, runOK(t, e, "--no-sync", "search", "Hello"))
 	sources := doc["sources"].(map[string]any)
 	if len(sources) == 0 || doc["needs_sync"] != true {
 		t.Fatalf("fixture: %v", doc)
@@ -174,7 +174,7 @@ func TestHelpMentionsAppSummaryOnlyWhereItIsAccepted(t *testing.T) {
 		}
 		if accepts {
 			mentioned++
-			if code, _, stderr := appEnv(t).run(append([]string{"--max-age", "0", "--fields", "app_summary"}, append(strings.Fields(cmd), summaryArgs[cmd]...)...)...); code != 0 {
+			if code, _, stderr := appEnv(t).run(append([]string{"--no-sync", "--fields", "app_summary"}, append(strings.Fields(cmd), summaryArgs[cmd]...)...)...); code != 0 {
 				t.Fatalf("%s refuses the key its help offers: %s", cmd, stderr)
 			}
 		}
@@ -182,7 +182,7 @@ func TestHelpMentionsAppSummaryOnlyWhereItIsAccepted(t *testing.T) {
 	if mentioned != 4 {
 		t.Fatalf("%d commands accept app_summary", mentioned)
 	}
-	if code, _, stderr := appEnv(t).run("--max-age", "0", "--fields", "app_summary", "calendar", "event", "x"); code != 2 || !strings.Contains(stderr, "app_summary") {
+	if code, _, stderr := appEnv(t).run("--no-sync", "--fields", "app_summary", "calendar", "event", "x"); code != 2 || !strings.Contains(stderr, "app_summary") {
 		t.Fatalf("calendar event: %d %s", code, stderr)
 	}
 }
@@ -323,7 +323,7 @@ func TestAppMarkerIsBoundedByDisplayWidth(t *testing.T) {
 
 func TestRetryNeededOnlyWhereARetryCanHelp(t *testing.T) {
 	e := loopRowsEnv(t)
-	for _, source := range items(t, decode(t, runOK(t, e, "--max-age", "0", "loop", "sources"))) {
+	for _, source := range items(t, decode(t, runOK(t, e, "--no-sync", "loop", "sources"))) {
 		key := source["tuple"].(map[string]any)["key_json"].(string)
 		fix, _ := source["fix"].(string)
 		switch key {

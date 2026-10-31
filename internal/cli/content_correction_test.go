@@ -50,7 +50,7 @@ func TestCloudCorrectionPublicChangedIncarnation(t *testing.T) {
 				{"content", "list"}, {"content", "search", "streamword"},
 				{"content", "show", "cloud-observation:1"}, {"search", "streamword", "--source", "content"},
 			} {
-				doc := decode(t, runOK(t, e, append([]string{"--max-age", "0"}, args...)...))
+				doc := decode(t, runOK(t, e, append([]string{"--no-sync"}, args...)...))
 				found := false
 				for _, item := range items(t, doc) {
 					if item["id"] != "cloud-observation:1" {
@@ -105,7 +105,7 @@ func TestCloudCorrectionPublicCorruptRetainedBody(t *testing.T) {
 		{"content", "show", "cloud-observation:1"}, {"content", "list"},
 		{"search", "absent", "--source", "content"}, {"search", "absent"},
 	} {
-		if code, _, _ := e.run(append([]string{"--max-age", "0"}, args...)...); code == 0 {
+		if code, _, _ := e.run(append([]string{"--no-sync"}, args...)...); code == 0 {
 			t.Fatalf("%v accepted corrupt retained body", args)
 		}
 	}

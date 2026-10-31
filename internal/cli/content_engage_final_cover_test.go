@@ -43,7 +43,7 @@ func TestEngageFullSQLCancellationDuringRead(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	var out, stderr bytes.Buffer
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "sql",
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "sql",
 		"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n"}, &out, &stderr)
 	if code == 0 || ctx.Err() == nil {
 		t.Fatal("cancelled full SQL falsely succeeded")

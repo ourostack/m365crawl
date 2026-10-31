@@ -100,7 +100,7 @@ func TestAttendeeHistoricalOwnCaptureRouteExecutes(t *testing.T) {
 			}
 			for _, route := range []string{command, source["full_capture_command"].(string)} {
 				words := attendeeCommandWords(t, route)
-				if !strings.Contains(route, "--max-age 0") || !strings.Contains(route, "--max-text 0") {
+				if !strings.Contains(route, "--no-sync") || !strings.Contains(route, "--max-text 0") {
 					t.Fatal("full-capture route clips or refreshes", route)
 				}
 				var stdout, stderr bytes.Buffer
@@ -132,7 +132,7 @@ func TestAttendeeHistoricalOwnCaptureRouteExecutes(t *testing.T) {
 			}
 		})
 	}
-	code, text, stderr := e.run("--format", "text", "--fields", "name", "--max-age", "0", "calendar", "attendees", "show", "attendee-observation:2")
+	code, text, stderr := e.run("--format", "text", "--fields", "name", "--no-sync", "calendar", "attendees", "show", "attendee-observation:2")
 	if code != 0 || !strings.Contains(text, "own snapshot 2 full capture:") || !strings.Contains(text, "WHERE rowid=2") || !strings.Contains(text, "WHERE rowid=3") {
 		t.Fatal("text projection lost independent historical/current capture recovery", code, text, stderr)
 	}

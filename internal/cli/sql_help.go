@@ -105,8 +105,8 @@ var sqlTables = []sqlTable{
 }
 
 const sqlHelp = "The archive is opened read-only, so nothing a query does can change it. One statement per run: SELECT, WITH, EXPLAIN or VALUES. PRAGMA statements are refused; read a table's columns with the pragma_table_info() table function, as shown below.\n" +
-	"Native attendee full_record_sql joins the occurrence to its own snapshot and extracts exactly its indexed JSON object plus own losses/ambiguity; it does not repeat the entire capture blob for every observation. Full-capture SQL reads the snapshot separately. All native follow-ups keep the selected absolute --db, --max-age 0 and unbounded --max-text 0.\n" +
-	"For immutable content full_text_sql follow-ups, keep the same explicit --db and pass --max-age 0: SQL otherwise retains the generic implicit freshness workflow before its read-only query.\n" +
+	"Native attendee full_record_sql joins the occurrence to its own snapshot and extracts exactly its indexed JSON object plus own losses/ambiguity; it does not repeat the entire capture blob for every observation. Full-capture SQL reads the snapshot separately. All native follow-ups keep the selected absolute --db, --no-sync and unbounded --max-text 0.\n" +
+	"For immutable content full_text_sql follow-ups, keep the same explicit --db and pass --no-sync: SQL otherwise retains the generic implicit freshness workflow before its read-only query.\n" +
 	"Blob columns print as lowercase hex. messages.raw_digest is the SHA-256 of the archived raw JSON (the exact bytes of messages.raw_json), stored as 32 bytes and printed as 64 lowercase hex characters; it is null when no raw JSON is archived. raw_digest in app_observation and in message_app_observations is the same digest as lowercase hex text.\n" +
 	"Archive clocks are UTC text. Engage canonical Result clocks preserve original native offsets; engage_occurrences.starter_modified_at is checked derived evidence only, may have extended UTC years and must not be used as an RFC3339 parser, lexical ordering or filter key. A column named *_json holds JSON as text: a query returns it as a JSON string, to decode a second time or to read with json_extract().\n"
 

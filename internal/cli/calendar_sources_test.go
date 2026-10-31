@@ -36,7 +36,7 @@ func outlookStoreRoot(t *testing.T, file string) string {
 
 func sourceRows(t *testing.T, e *env, args ...string) map[string]map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "calendar", "sources"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "calendar", "sources"}, args...)...)
 	if code != 0 {
 		t.Fatalf("calendar sources: exit %d: %s", code, errOut)
 	}
@@ -91,11 +91,11 @@ func TestCalendarSourcesOnTheFixtureArchive(t *testing.T) {
 	if got := sourceRows(t, e, "--account", teamsAccount); len(got) != 1 || got[teamsAccount] == nil {
 		t.Errorf("--account: %v", got)
 	}
-	code, out, _ := e.run("--max-age", "0", "--fields", "account_id,covered_days", "calendar", "sources", "--account", teamsAccount)
+	code, out, _ := e.run("--no-sync", "--fields", "account_id,covered_days", "calendar", "sources", "--account", teamsAccount)
 	if m := items(t, decode(t, out)); code != 0 || len(m) != 1 || len(m[0]) != 2 {
 		t.Errorf("--fields: %d %s", code, out)
 	}
-	code, _, errOut := e.run("--max-age", "0", "--fields", "nope", "calendar", "sources")
+	code, _, errOut := e.run("--no-sync", "--fields", "nope", "calendar", "sources")
 	if code != 2 || !strings.Contains(errOut, "unknown --fields key") {
 		t.Errorf("a bad field: %d %s", code, errOut)
 	}
@@ -104,12 +104,12 @@ func TestCalendarSourcesOnTheFixtureArchive(t *testing.T) {
 func TestCalendarSourcesOldArchiveAndNoArchive(t *testing.T) {
 	e := calEnv(t)
 	e.exec(`drop table calendar_recaps`)
-	code, out, errOut := e.run("--max-age", "0", "calendar", "sources")
+	code, out, errOut := e.run("--no-sync", "calendar", "sources")
 	m := decode(t, out)
 	if code != 0 || m["needs_sync"] != true || !strings.Contains(out, "run m365crawl sync") || len(items(t, m)) != 0 {
 		t.Errorf("an old archive: %d %s %s", code, out, errOut)
 	}
-	code, out, errOut = newEnv(t).run("--max-age", "0", "calendar", "sources")
+	code, out, errOut = newEnv(t).run("--no-sync", "calendar", "sources")
 	if code != 0 || decode(t, out)["needs_sync"] != true {
 		t.Errorf("no archive: %d %s %s", code, out, errOut)
 	}
@@ -257,7 +257,7 @@ func TestCalendarSourcesTextGoldens(t *testing.T) {
 				suffix = "color"
 				t.Setenv("CLICOLOR_FORCE", "1")
 			}
-			code, out, errOut := e.run(append([]string{"--format", "text", "--max-age", "0"}, c.args...)...)
+			code, out, errOut := e.run(append([]string{"--format", "text", "--no-sync"}, c.args...)...)
 			if code != 0 {
 				t.Fatalf("%s: exit %d: %s", c.name, code, errOut)
 			}

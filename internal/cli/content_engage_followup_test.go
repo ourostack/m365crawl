@@ -30,7 +30,7 @@ func TestEngageGeneratedFullSQLKeepsSelectedArchive(t *testing.T) {
 		t.Fatal("no scoped executable full-record follow-up")
 	}
 	words := requireContentFollowupArchive(t, e, command)
-	if !strings.Contains(command, "--max-age 0") || words[len(words)-1] != item["full_text_sql"] {
+	if !strings.Contains(command, "--no-sync") || words[len(words)-1] != item["full_text_sql"] {
 		t.Fatal("full SQL intent changed:", command)
 	}
 	before, err := os.ReadFile(e.db)

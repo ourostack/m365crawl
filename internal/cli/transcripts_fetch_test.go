@@ -394,7 +394,7 @@ func TestFetchCommandCancelledClosesBrowser(t *testing.T) {
 	}
 	closer, _ := fakeBrowser(t, page)
 	var out, errb bytes.Buffer
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "fetch", "call-4"}, &out, &errb)
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "--json", "transcripts", "fetch", "call-4"}, &out, &errb)
 	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted || closer.n.Load() != 1 {
 		t.Fatalf("exit %d, closed %d: %s", code, closer.n.Load(), errb.String())
 	}
@@ -665,7 +665,7 @@ func TestSigninInterruptedAtThePrompt(t *testing.T) {
 	defer cancel()
 	var out, errb bytes.Buffer
 	prompt := &signinCancelAtPrompt{out: &errb, cancel: cancel}
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "signin"}, &out, prompt)
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "--json", "transcripts", "signin"}, &out, prompt)
 	if code != errs.ExitRuntime || !strings.Contains(errb.String(), errs.CodeInterrupted) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
@@ -759,7 +759,7 @@ func TestSigninFailures(t *testing.T) {
 	fakeBrowser(t, page)
 	time.AfterFunc(30*time.Millisecond, cancel)
 	var out, errb bytes.Buffer
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "signin", "--user-agreed"}, &out, &errb)
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "--json", "transcripts", "signin", "--user-agreed"}, &out, &errb)
 	if code != errs.ExitRuntime || !strings.Contains(errb.String(), errs.CodeInterrupted) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
@@ -1154,7 +1154,7 @@ func TestFetchCommandCancelledWhileLaunching(t *testing.T) {
 		return nil, nil, c.Err()
 	}
 	var out, errb bytes.Buffer
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "transcripts", "fetch", "call-4"}, &out, &errb)
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "--json", "transcripts", "fetch", "call-4"}, &out, &errb)
 	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}

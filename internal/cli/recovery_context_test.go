@@ -103,7 +103,13 @@ func assertRecoveryEnvCommand(t *testing.T, e *env, value any, prefix, suffix, f
 		t.Fatalf("recovery instruction lost its message framing: %v; want %q...%q", value, prefix, suffix)
 	}
 	words := recoveryWords(t, strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix))
-	want := []string{"m365crawl", "--db", e.db, "--max-age", "0", "--format", format}
+	want := []string{"m365crawl", "--db", e.db}
+	if !slices.ContainsFunc(args[:min(3, len(args))], func(arg string) bool {
+		return arg == "sync" || arg == "fetch" || arg == "capture" || arg == "signin"
+	}) {
+		want = append(want, "--no-sync") // a read pins it; an explicit acquisition carries no freshness flag
+	}
+	want = append(want, "--format", format)
 	if args[0] == "sync" {
 		want = append(want, "--teams-root", e.root, "--outlook-root", "none")
 	}
@@ -170,7 +176,7 @@ func TestRecoveryLoopRetryAndInspectStayInSelectedArchive(t *testing.T) {
 				}
 				runOK(t, setup.e, "--json", "loop", "sync")
 			}
-			args := append([]string{"--max-age", "0"}, tc.flags...)
+			args := append([]string{"--no-sync"}, tc.flags...)
 			args = append(args, "--fields", "id", "loop", "list")
 			out := runOK(t, a, args...)
 			var retry string
@@ -189,7 +195,7 @@ func TestRecoveryLoopRetryAndInspectStayInSelectedArchive(t *testing.T) {
 				}
 				retry, _ = sources[0]["retry"].(string)
 			}
-			search := decode(t, runOK(t, a, "--json", "--max-age", "0", "search", "unmatched", "--source", "loop"))
+			search := decode(t, runOK(t, a, "--json", "--no-sync", "search", "unmatched", "--source", "loop"))
 			compact := loopCoverageSources(t, search)
 			if len(compact) != 1 || compact[0]["source_id"] != float64(1) {
 				t.Fatalf("compact coverage must expose selected source 1: %v", compact)
@@ -233,7 +239,7 @@ func TestRecoveryLoopRetryAndInspectStayInSelectedArchive(t *testing.T) {
 			} else if doc := recoveryDocument(t, replayed, tc.format, "loop_sync"); doc["projected"] != float64(1) {
 				t.Errorf("retry did not project selected source: %v", doc)
 			}
-			got := runOK(t, a, "--json", "--max-age", "0", "loop", "list")
+			got := runOK(t, a, "--json", "--no-sync", "loop", "list")
 			if !strings.Contains(got, "Selected archive recovered") || strings.Contains(got, "Unrelated default text") {
 				t.Errorf("actual retry did not recover A's content: %s", got)
 			}
@@ -350,7 +356,7 @@ func TestRecoveryDocumentRegisteredAndNullSelectors(t *testing.T) {
 					return syncer.DocumentReport{Captured: 1, Sources: recoveryDocumentSources(t, target)}, nil
 				}
 				t.Cleanup(func() { runDocumentsSync = run })
-				doc := decode(t, runOK(t, a, "--json", "--max-age", "0", "docs", "sources"))
+				doc := decode(t, runOK(t, a, "--json", "--no-sync", "docs", "sources"))
 				sources := coverageSources(t, doc)
 				if len(sources) != 1 || (sources[0]["source_id"] != nil) != registered {
 					t.Fatalf("setup did not establish registered/null distinction: %v", sources)
@@ -377,7 +383,7 @@ func TestRecoveryDocumentRegisteredAndNullSelectors(t *testing.T) {
 				if recoveryDocument(t, out, "json", "docs_sync")["captured"] != float64(1) {
 					t.Errorf("actual capture result not returned: %s", out)
 				}
-				list := runOK(t, a, "--json", "--max-age", "0", "docs", "list")
+				list := runOK(t, a, "--json", "--no-sync", "docs", "list")
 				if !strings.Contains(list, "Selected document recovered") {
 					t.Errorf("document retry did not admit recovered content in A: %s", list)
 				}
@@ -409,7 +415,7 @@ func TestRecoveryCommandPolicyBoundaries(t *testing.T) {
 	rt := &runtime{dbPath: "selected archive.db", outlookOn: true}
 	words := recoveryWords(t, rt.recoveryCommand(true, "", "docs", "sync"))
 	want := []string{"m365crawl", "--db", filepath.Join(wd, "selected archive.db"),
-		"--max-age", "0", "--format", "json", "docs", "sync"}
+		"--format", "json", "docs", "sync"}
 	if !slices.Equal(words, want) {
 		t.Errorf("default format, empty roots or relative archive changed argv: got %q want %q", words, want)
 	}
@@ -501,7 +507,7 @@ func TestRecoveryExplicitLinkAndTranscriptContext(t *testing.T) {
 		seedTranscripts(t, b)
 		a.root = teamsRoot(t)
 		root := t.TempDir()
-		code, _, stderr := a.run("--json", "--format", "text", "--max-age", "0", "--outlook-root", root,
+		code, _, stderr := a.run("--json", "--format", "text", "--no-sync", "--outlook-root", root,
 			"--outlook-profile", "Main", "--outlook-account", trAccount, "calendar", "--days", "1")
 		if code != 2 {
 			t.Fatalf("expected actual pending-link refusal, got %d: %s", code, stderr)
@@ -553,7 +559,7 @@ func TestRecoveryExplicitLinkAndTranscriptContext(t *testing.T) {
 		other := recoveryOtherTranscriptAccount(t, a)
 		trSharePointHosts(a)
 		fakeBrowser(t, newTrPage())
-		doc := decode(t, runOK(t, a, "--json", "--max-age", "0", "--account", trAccount,
+		doc := decode(t, runOK(t, a, "--json", "--no-sync", "--account", trAccount,
 			"--fields", "event_id,transcripts", "calendar", "event", trEventID()))
 		var command string
 		for _, notice := range noticesOf(doc) {
@@ -677,7 +683,7 @@ func TestRecoveryLoopBatchContinuationReplaysSelectedArchive(t *testing.T) {
 				}
 				notice, _ = doc["notice"].(string)
 			}
-			registered := decode(t, runOK(t, a, "--json", "--max-age", "0", "loop", "sources"))
+			registered := decode(t, runOK(t, a, "--json", "--no-sync", "loop", "sources"))
 			if len(items(t, registered)) != 128 {
 				t.Fatal("qualification: first actual batch did not register exactly128 sources")
 			}
@@ -687,7 +693,7 @@ func TestRecoveryLoopBatchContinuationReplaysSelectedArchive(t *testing.T) {
 				t.Fatalf("actual batch continuation replay: %d %s", code, stderr)
 			}
 			recoveryContext(t, words, a.db, format)
-			final := decode(t, runOK(t, a, "--json", "--max-age", "0", "loop", "sources"))
+			final := decode(t, runOK(t, a, "--json", "--no-sync", "loop", "sources"))
 			if len(items(t, final)) != 129 {
 				t.Errorf("actual_continuation_stranded_selected_backlog: count=%d", len(items(t, final)))
 			}
@@ -746,7 +752,7 @@ func TestRecoveryRuntimeHintAndEmptyNoteReplayAcquisitionContext(t *testing.T) {
 					}
 					return syncer.Report{Status: syncer.StatusOK}, nil, nil
 				}
-				args := append([]string{"--max-age", "0", "--outlook-root", "none"}, tc.flags...)
+				args := append([]string{"--no-sync", "--outlook-root", "none"}, tc.flags...)
 				if state == "missing-account" {
 					args = append(args, "--account", trAccount)
 				}
@@ -908,7 +914,7 @@ func TestRecoveryCalendarRemediesKeepDestinationValidAccountScope(t *testing.T) 
 					}
 					return syncer.Report{Status: syncer.StatusOK}, nil, st.Close()
 				}
-				args := append([]string{"--max-age", "0", "--outlook-root", outlook, "--account", account}, tc.flags...)
+				args := append([]string{"--no-sync", "--outlook-root", outlook, "--account", account}, tc.flags...)
 				if scope == "applied-link" {
 					args = append(args, "--outlook-profile", "Main", "--outlook-account", trAccount)
 				}

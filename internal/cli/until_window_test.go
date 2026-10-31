@@ -16,7 +16,7 @@ func setZone(t *testing.T, loc *time.Location) {
 
 func readJSON(t *testing.T, e *env, args ...string) map[string]any {
 	t.Helper()
-	code, out, errOut := e.run(append([]string{"--max-age", "0", "--json"}, args...)...)
+	code, out, errOut := e.run(append([]string{"--no-sync", "--json"}, args...)...)
 	if code != 0 {
 		t.Fatalf("%v: exit %d: %s", args, code, errOut)
 	}
@@ -168,7 +168,7 @@ func TestEmptyTimeWindowCarriesANotice(t *testing.T) {
 	if m["notices"] != nil {
 		t.Fatalf("a one-day window is not empty: %v", m["notices"])
 	}
-	code, out, _ := e.run("--max-age", "0", "--format", "text", "messages", "--since", "2023-11-14", "--until", "2023-11-13")
+	code, out, _ := e.run("--no-sync", "--format", "text", "messages", "--since", "2023-11-14", "--until", "2023-11-13")
 	if code != 0 || !strings.Contains(out, "the time window is empty") {
 		t.Fatalf("text output: exit %d: %s", code, out)
 	}

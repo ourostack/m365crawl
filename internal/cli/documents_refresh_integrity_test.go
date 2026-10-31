@@ -30,7 +30,7 @@ func TestDocumentsCLIListRejectsUnqualifiedScopeBeforeReading(t *testing.T) {
 		{"docs", "list", "--source-id=-1"}, {"docs", "list", "--limit=-1"},
 		{"docs", "sources", "--source-id=999"}, {"docs", "sources", "--source-id=-1"},
 	} {
-		if code, _, stderr := e.run(append([]string{"--max-age", "0"}, args...)...); code != 2 {
+		if code, _, stderr := e.run(append([]string{"--no-sync"}, args...)...); code != 2 {
 			t.Fatalf("invalid source/scope accepted: %v %s", args, stderr)
 		}
 	}

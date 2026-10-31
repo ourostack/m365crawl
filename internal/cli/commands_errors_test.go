@@ -81,7 +81,7 @@ func TestDamagedArchivesSurfaceAsDatabaseErrors(t *testing.T) {
 			e := newEnv(t)
 			e.sync()
 			e.exec(c.damage)
-			code, stdout, stderr := e.run(append([]string{"--max-age", "0"}, c.args...)...)
+			code, stdout, stderr := e.run(append([]string{"--no-sync"}, c.args...)...)
 			if code != errs.ExitRuntime || errorOf(t, stderr)["code"] != errs.CodeDBError {
 				t.Fatalf("exit %d, stdout %q, stderr %s", code, stdout, stderr)
 			}
@@ -99,7 +99,7 @@ func TestSQLInterruptedMidQueryIsCoded(t *testing.T) {
 	time.AfterFunc(300*time.Millisecond, cancel)
 	defer cancel()
 	var out, errb syncBuf
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "0", "--json", "sql",
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--no-sync", "--json", "sql",
 		"with recursive c(x) as (select 1 union all select x+1 from c) select count(*) from c"}, &out, &errb)
 	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted {
 		t.Fatalf("exit %d, stderr %s", code, errb.String())
@@ -109,7 +109,7 @@ func TestSQLInterruptedMidQueryIsCoded(t *testing.T) {
 func TestSQLShapesEmptyAndTruncatedResults(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, stdout, stderr := e.run("--max-age", "0", "sql", "select 1 as one where 0")
+	code, stdout, stderr := e.run("--no-sync", "sql", "select 1 as one where 0")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -117,7 +117,7 @@ func TestSQLShapesEmptyAndTruncatedResults(t *testing.T) {
 	if rows, ok := m["rows"].([]any); !ok || len(rows) != 0 || m["count"].(float64) != 0 || m["truncated"] != false {
 		t.Fatalf("empty result = %v", m)
 	}
-	code, stdout, stderr = e.run("--max-age", "0", "sql", "values (1),(2),(3)", "--limit", "2")
+	code, stdout, stderr = e.run("--no-sync", "sql", "values (1),(2),(3)", "--limit", "2")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -131,7 +131,7 @@ func TestStatusAndWhoamiFallBackToTheDefaultRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var out, errb syncBuf
 	dbPath := t.TempDir() + "/a.db"
-	code := Main([]string{"--db", dbPath, "--max-age", "0", "status"}, &out, &errb)
+	code := Main([]string{"--db", dbPath, "--no-sync", "status"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
@@ -142,7 +142,7 @@ func TestStatusAndWhoamiFallBackToTheDefaultRoot(t *testing.T) {
 
 func TestThreadWithoutAnArchiveIsAnEmptyList(t *testing.T) {
 	e := newEnv(t)
-	code, stdout, stderr := e.run("--max-age", "0", "thread", "19:abc@thread.v2", "1")
+	code, stdout, stderr := e.run("--no-sync", "thread", "19:abc@thread.v2", "1")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -155,7 +155,7 @@ func TestThreadWithoutAnArchiveIsAnEmptyList(t *testing.T) {
 // A mail id given to thread is named as one, and the fix is the mail thread command.
 func TestThreadOfAMailIDPointsToMailThread(t *testing.T) {
 	e := newEnv(t)
-	code, _, stderr := e.run("--json", "--max-age", "0", "thread", "outlook/Main:3001")
+	code, _, stderr := e.run("--json", "--no-sync", "thread", "outlook/Main:3001")
 	body := errorOf(t, stderr)
 	if code != errs.ExitUsage || body["message"] != "outlook/Main:3001 is a mail id; thread reads Teams chats and channels" ||
 		body["fix"] != "Run `m365crawl mail thread outlook/Main:3001`." {
@@ -166,7 +166,7 @@ func TestThreadOfAMailIDPointsToMailThread(t *testing.T) {
 func TestSQLErrorsAreUsageErrorsWithTheDatabaseMessage(t *testing.T) {
 	e := newEnv(t)
 	e.sync()
-	code, _, stderr := e.run("--max-age", "0", "sql", "select * from no_such_table")
+	code, _, stderr := e.run("--no-sync", "sql", "select * from no_such_table")
 	body := errorOf(t, stderr)
 	if code != errs.ExitUsage || body["code"] != errs.CodeUsage || !strings.Contains(body["message"].(string), "no_such_table") {
 		t.Fatalf("exit %d, error %v", code, body)

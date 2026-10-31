@@ -10,7 +10,7 @@ import (
 
 func TestDocumentsSharedSearchRejectsEmptyWordsWithoutDate(t *testing.T) {
 	e := newEnv(t)
-	if code, _, stderr := e.run("--max-age", "0", "search", "--source", "documents"); code != 2 ||
+	if code, _, stderr := e.run("--no-sync", "search", "--source", "documents"); code != 2 ||
 		!strings.Contains(stderr, "docs list") {
 		t.Fatal("empty metadata search lacked unfiltered-list remedy")
 	}
@@ -24,7 +24,7 @@ func TestDocumentsSharedSearchProjectionAndCoverageErrorsStayErrors(t *testing.T
 		e := newEnv(t)
 		seedDocumentsCLI(t, e)
 		e.exec(fault)
-		if code, _, stderr := e.run("--max-age", "0", "search", "Quarterly", "--source", "documents"); code == 0 ||
+		if code, _, stderr := e.run("--no-sync", "search", "Quarterly", "--source", "documents"); code == 0 ||
 			!strings.Contains(stderr, "db_error") {
 			t.Fatal("document shared query/source integrity failure became empty healthy result")
 		}
@@ -48,7 +48,7 @@ func TestDocumentsTypedHumanCommandsKeepFollowUpAndCoverage(t *testing.T) {
 	e := newEnv(t)
 	seedDocumentsCLI(t, e)
 	for _, command := range [][]string{{"docs", "list"}, {"search", "Quarterly", "--source", "documents"}} {
-		code, stdout, stderr := e.run(append([]string{"--max-age", "0", "--format", "text"}, command...)...)
+		code, stdout, stderr := e.run(append([]string{"--no-sync", "--format", "text"}, command...)...)
 		if code != 0 || !strings.Contains(stdout, "document-observation:1") ||
 			!strings.Contains(stdout, "documents coverage:") ||
 			(!strings.Contains(stdout, "not_captured") && !strings.Contains(stdout, "metadata only")) {
