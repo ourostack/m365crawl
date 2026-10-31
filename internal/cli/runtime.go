@@ -51,7 +51,10 @@ type runtime struct {
 	exitErr          error       // a failure while printing for a flag that ends the run (--version)
 	team             string      // --team of the running read command, validated before any implicit sync
 	synced           *syncedInfo // the implicit sync this read ran, if any
-	implicitSync     string      // implicit_sync: ran, skipped_fresh, disabled, waited_for_other_sync or other_sync_in_progress
+	implicitSync     string      // implicit_sync: ran, skipped_fresh, disabled, waited_for_other_sync, other_sync_in_progress, foreign_archive or no_archive
+	feedChecked      bool        // checkFeed has run for this read
+	notFed           string      // foreign_archive or no_archive: this machine's sources do not feed the archive, so the read does not sync
+	notFedNoted      bool        // the read's result carries the not-fed notice
 	lockBudget       time.Duration
 	lockUntil        time.Time // when this read stops waiting for other runs; set by its first wait
 	query            listQuery // what the running list command asked for, to explain an empty result
@@ -161,8 +164,14 @@ func (rt *runtime) progress() io.Writer {
 // older than --max-age. A failed sync does not stop the read: it comes back as a warning. Only
 // cancellation is returned as an error.
 func (rt *runtime) ensureFresh() (*syncError, error) {
+	if err := rt.checkFeed(); err != nil {
+		return nil, err
+	}
 	if rt.maxAge <= 0 {
 		rt.implicitSync = implicitSyncDisabled
+		if rt.notFed != "" {
+			rt.implicitSync = rt.notFed
+		}
 	}
 	if rt.maxAge <= 0 && rt.outlookLink == "" {
 		return nil, nil
@@ -352,6 +361,7 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	if rt.implicitSync == implicitSyncOtherInProgress {
 		res.addNotice(rt.otherSyncNotice())
 	}
+	rt.noteNotFed(res)
 	if age == nil {
 		res.setNeedsSync(syncHint)
 	} else if rt.implicitSync == implicitSyncDisabled {
@@ -459,6 +469,10 @@ func (rt *runtime) noteSyncOff(res result, age time.Duration, syncHint string) {
 // age ago (a source never attempted counts as old as the Teams archive, or stale when that is
 // unknown). attempts are the selected sources' attempted_at.
 func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*time.Time) {
+	if rt.notFed != "" {
+		rt.noteNotFed(res)
+		return
+	}
 	if rt.syncOff == "" {
 		return
 	}
@@ -725,5 +739,6 @@ func (rt *runtime) linkPending(st *store.Store) bool {
 // syncOptions adds the Outlook choice to a run's options.
 func (rt *runtime) syncOptions(o syncer.Options) syncer.Options {
 	o.OutlookEnabled, o.OutlookRoot, o.OutlookImplicit = rt.outlookOn, rt.outlookRoot, rt.outlookDefault
+	o.SourceIdentity = rt.sourceIdentity(true)
 	return o
 }

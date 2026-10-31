@@ -73,7 +73,7 @@ type env struct {
 	home string
 	tmp  string
 	root string // a private copy of the fixture's EBWebView directory
-	db   string // explicit archive path, used unless a test passes its own --db
+	db   string // the default archive's path, passed explicitly unless a test passes its own --db
 }
 
 func newEnv(t *testing.T) *env {
@@ -85,7 +85,9 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	e.db = filepath.Join(base, "archive", "m365crawl.db")
+	// Reads sync only into the default archive or one this machine's sources feed (#295); the
+	// tests' own archive is this machine's default one.
+	e.db = e.defaultArchivePath()
 	return e
 }
 
@@ -108,12 +110,12 @@ func (e *env) environ(extra ...string) []string {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch {
-		case strings.HasPrefix(k, "M365CRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA", k == "APPDATA":
+		case strings.HasPrefix(k, "M365CRAWL_"), k == "NO_COLOR", k == "CLICOLOR", k == "CLICOLOR_FORCE", k == "HOME", k == "TMPDIR", k == "TMP", k == "TEMP", k == "USERPROFILE", k == "LOCALAPPDATA", k == "APPDATA", k == "XDG_CONFIG_HOME":
 			continue
 		}
 		out = append(out, kv)
 	}
-	out = append(out, "HOME="+e.home, "TMPDIR="+e.tmp, "TMP="+e.tmp, "TEMP="+e.tmp, "USERPROFILE="+e.home, "LOCALAPPDATA="+e.localAppData(), "APPDATA="+filepath.Join(e.home, "AppData", "Roaming"), "M365CRAWL_REAL_CACHE=0")
+	out = append(out, "HOME="+e.home, "TMPDIR="+e.tmp, "TMP="+e.tmp, "TEMP="+e.tmp, "USERPROFILE="+e.home, "LOCALAPPDATA="+e.localAppData(), "APPDATA="+filepath.Join(e.home, "AppData", "Roaming"), "XDG_CONFIG_HOME="+filepath.Join(e.home, ".config"), "M365CRAWL_REAL_CACHE=0")
 	return append(out, extra...)
 }
 
