@@ -297,9 +297,11 @@ func TestWriteDocumentCheckVariants(t *testing.T) {
 }
 
 func TestSortPutsDocumentsAfterOtherUnknownClockContent(t *testing.T) {
-	hits := []searchHit{{source: searchContent, workIQDocument: true, cloudLabel: "a"}, {source: searchContent, cloudLabel: "z"}}
-	sortSearchHits(hits)
-	if hits[0].workIQDocument || !hits[1].workIQDocument {
-		t.Fatal("document sorted before other unknown-clock content")
+	for _, other := range []searchHit{{source: searchContent, cloudLabel: "z"}, {source: searchContent, engage: true, cloudLabel: "z"}} {
+		hits := []searchHit{{source: searchContent, workIQDocument: true, cloudLabel: "a"}, other}
+		sortSearchHits(hits)
+		if hits[0].workIQDocument || !hits[1].workIQDocument {
+			t.Fatalf("document sorted before other unknown-clock content %+v", other)
+		}
 	}
 }

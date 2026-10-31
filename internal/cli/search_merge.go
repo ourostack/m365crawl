@@ -526,6 +526,9 @@ func sortSearchHits(hits []searchHit) {
 		if !a.at.Equal(b.at) {
 			return a.at.After(b.at)
 		}
+		if a.workIQDocument != b.workIQDocument {
+			return !a.workIQDocument
+		}
 		if a.engage != b.engage {
 			return !a.engage
 		}
@@ -537,9 +540,6 @@ func sortSearchHits(hits []searchHit) {
 		}
 		if b.source != searchContent {
 			return false
-		}
-		if a.workIQDocument != b.workIQDocument {
-			return !a.workIQDocument
 		}
 		if a.localText != b.localText {
 			return !a.localText

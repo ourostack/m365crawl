@@ -19,7 +19,9 @@ const WorkIQDocumentSchemaVersion = 23
 const WorkIQDocumentQualification = "workiq-document-v1"
 
 // A document is one drive item per WorkIQ account. Every explicit fetch appends a check; only an
-// admitted check has a body, and a later refused check deletes the body and its search row.
+// admitted check has a body, and a later refused check deletes the body and its search row. The
+// index runs in FTS5 secure-delete mode, so a deleted row's words leave its segments at once rather
+// than at the next merge.
 const workiqDocumentSchemaDDL = `
 create table if not exists workiq_documents(
  id integer primary key autoincrement,
@@ -51,6 +53,7 @@ create table if not exists workiq_document_bodies(
  extracts integer not null check(extracts>=0), truncated integer not null check(truncated in (0,1))
 );
 create virtual table if not exists workiq_document_fts using fts5(title,text);
+insert into workiq_document_fts(workiq_document_fts,rank) values('secure-delete',1);
 create trigger if not exists workiq_document_bodies_fts_insert after insert on workiq_document_bodies begin
  insert into workiq_document_fts(rowid,title,text) select new.document_id,d.name,new.text from workiq_documents d where d.id=new.document_id;
 end;
@@ -112,6 +115,9 @@ type WorkIQDocumentWrite struct {
 	DocumentID  int64
 	CheckID     int64
 	BodyDeleted bool // a previously admitted body was deleted by this refusal
+	// LogPending says replaced or deleted text may still be in the write-ahead log, because a reader
+	// kept the checkpoint from truncating it; the next sync clears it (ClearPurgedLog).
+	LogPending bool
 }
 
 var ErrWorkIQDocumentUnknown = errors.New("workiq document not found")
@@ -191,6 +197,12 @@ label_encrypted,attribution,bytes_state,rights_source,qualification) values(?,?,
 	}
 	deleted, _ := res.RowsAffected()
 	w.BodyDeleted = !admitted && deleted > 0
+	if deleted > 0 {
+		// Older page images of the removed text are cleared from the write-ahead log after commit.
+		if err = markPurgedLog(ctx, tx); err != nil {
+			return w, err
+		}
+	}
 	var body any
 	if admitted {
 		body = w.CheckID
@@ -202,7 +214,11 @@ label_encrypted,attribution,bytes_state,rights_source,qualification) values(?,?,
 	if _, err = tx.ExecContext(ctx, `update workiq_documents set last_check_id=?,body_check_id=? where id=?`, w.CheckID, body, w.DocumentID); err != nil {
 		return w, err
 	}
-	err = tx.Commit()
+	if err = tx.Commit(); err != nil || deleted == 0 {
+		return w, err
+	}
+	log, err := s.ClearPurgedLog(ctx)
+	w.LogPending = log.Pending
 	return w, err
 }
 
@@ -253,7 +269,7 @@ func (s *Store) workIQDocumentRows(ctx context.Context, tail string, args ...any
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []WorkIQDocument
 	for rows.Next() {
 		d, err := scanWorkIQDocument(rows)
@@ -289,7 +305,7 @@ bytes_state,rights_source,qualification from workiq_document_checks where docume
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var checks []WorkIQDocumentCheck
 	for rows.Next() {
 		var c WorkIQDocumentCheck

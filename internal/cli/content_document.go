@@ -43,6 +43,7 @@ type documentFetchResult struct {
 	Extracts          int                       `json:"extracts"`
 	ServiceTruncated  bool                      `json:"service_truncated"`
 	KeptTextDeleted   bool                      `json:"kept_text_deleted"`
+	TextLogPending    bool                      `json:"text_log_pending"`
 	Check             store.WorkIQDocumentCheck `json:"check"`
 	Show              string                    `json:"show"`
 	RefusalLiveStatus string                    `json:"refusal_live_status"`
@@ -63,7 +64,7 @@ func (c *contentFetchDocCmd) Run(rt *runtime) error {
 	res := documentFetchResult{Status: report.Check.Outcome, ID: fmt.Sprintf("workiq-document:%d", report.Write.DocumentID),
 		Code: report.Check.Code, Account: report.Account, Name: report.Item.Name, WebURL: report.Item.WebURL,
 		DriveID: report.Item.Ref.DriveID, ItemID: report.Item.Ref.ItemID, Scope: "none", Extracts: report.Extracts,
-		ServiceTruncated: report.Truncated, KeptTextDeleted: report.Write.BodyDeleted, Check: report.Check,
+		ServiceTruncated: report.Truncated, KeptTextDeleted: report.Write.BodyDeleted, TextLogPending: report.Write.LogPending, Check: report.Check,
 		RefusalLiveStatus: refusalLiveStatus}
 	res.Show = rt.contentCommand("show", res.ID)
 	if report.Check.Outcome == "admitted" {

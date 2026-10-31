@@ -62,7 +62,7 @@ func judgeDocument(item workiq.DocumentItem, hits []workiq.RetrievalHit) documen
 		j.code = DocumentKindUnsupported
 		return j
 	}
-	unknown, notAllowed, labelConflict := false, false, false
+	unknown, notAllowed, labelConflict, unlabeled := false, false, false, false
 	seen := map[string]bool{}
 	for _, hit := range hits {
 		if hit.Ref != item.Ref {
@@ -80,13 +80,14 @@ func judgeDocument(item workiq.DocumentItem, hits []workiq.RetrievalHit) documen
 		case j.protection == nil:
 			j.protection = hit.ContentProtection
 		}
-		if hit.Label != nil {
-			if j.label != nil && (j.label.ID != hit.Label.ID || !sameBool(j.label.Encrypted, hit.Label.Encrypted)) {
-				labelConflict = true
-			}
-			if j.label == nil {
-				j.label = hit.Label
-			}
+		// A hit without a label does not agree with one that has a label.
+		switch {
+		case hit.Label == nil:
+			unlabeled = true
+		case j.label == nil:
+			j.label = hit.Label
+		case j.label.ID != hit.Label.ID || !sameBool(j.label.Encrypted, hit.Label.Encrypted):
+			labelConflict = true
 		}
 		if hit.Snippet != "" && !seen[hit.Snippet] {
 			seen[hit.Snippet] = true
@@ -101,7 +102,7 @@ func judgeDocument(item workiq.DocumentItem, hits []workiq.RetrievalHit) documen
 	switch {
 	case notAllowed:
 		j.code = DocumentExtractNotAllowed
-	case j.matched == 0 || unknown || labelConflict:
+	case j.matched == 0 || unknown || labelConflict || unlabeled && j.label != nil:
 		j.code = DocumentRightsUnknown
 	case j.label == nil || j.label.Encrypted == nil || !*j.label.Encrypted:
 		j.needBytes = true
@@ -175,11 +176,12 @@ func FetchWorkIQDocument(ctx context.Context, options WorkIQDocumentOptions) (re
 		check.LabelID, check.LabelName, check.LabelEncrypted = &judgment.label.ID, &judgment.label.Name, judgment.label.Encrypted
 	}
 	check.Outcome, check.Code = "admitted", judgment.code
-	if judgment.code != "" {
+	switch {
+	case judgment.code != "":
 		check.Outcome = "refused"
-	} else if check.BytesState == "not_inspected" {
+	case check.BytesState == "not_inspected":
 		check.Attribution = "label"
-	} else {
+	default:
 		check.Attribution = "none"
 	}
 	item := report.Item

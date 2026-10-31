@@ -1,8 +1,12 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -232,5 +236,57 @@ func TestWorkIQDocumentReadFaults(t *testing.T) {
 	}
 	if _, err := s.SearchWorkIQDocuments(ctx, "***", 5); err == nil {
 		t.Fatal("an empty query searched")
+	}
+}
+
+func TestWorkIQDocumentRefusalLeavesNoTextOnDisk(t *testing.T) {
+	ctx := context.Background()
+	path := writableArchivePath(t)
+	s := must(Open(ctx, path))
+	at := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ { // several segments, so the words are not only in the newest one
+		r := documentRecord(at.Add(time.Duration(i)*time.Minute), "admitted", "", "zebrasecretword sentinel")
+		r.ItemID = fmt.Sprintf("ITEM000%dAB", i)
+		must(s.RecordWorkIQDocument(ctx, r))
+	}
+	for i := 0; i < 3; i++ {
+		r := documentRecord(at.Add(time.Hour+time.Duration(i)*time.Minute), "refused", "document_extract_not_allowed", "")
+		r.ItemID = fmt.Sprintf("ITEM000%dAB", i)
+		w := must(s.RecordWorkIQDocument(ctx, r))
+		if !w.BodyDeleted || w.LogPending {
+			t.Fatalf("refusal %d: %+v", i, w)
+		}
+	}
+	if n := rowCount(t, s, `select count(*) from workiq_document_fts_data where instr(block,'zebrasecretword')>0`); n != 0 {
+		t.Fatalf("the index kept refused words in %d blocks", n)
+	}
+	if n := rowCount(t, s, `select count(*) from meta where key='`+purgedLogKey+`'`); n != 0 {
+		t.Fatal("the log clear request was left behind")
+	}
+	must0(s.Close())
+	for _, name := range []string{path, path + "-wal"} {
+		raw, err := os.ReadFile(name) //nolint:gosec // G304: the test's own archive.
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("zebrasecretword")) {
+			t.Fatalf("%s still holds refused text", filepath.Base(name))
+		}
+	}
+}
+
+func TestWorkIQDocumentLogClearFaults(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
+	s := newStore(t)
+	must(s.RecordWorkIQDocument(ctx, documentRecord(at, "admitted", "", "text")))
+	must(s.db.ExecContext(ctx, `create trigger f before insert on meta begin select raise(fail,'x'); end`))
+	if _, err := s.RecordWorkIQDocument(ctx, documentRecord(at.Add(time.Minute), "admitted", "", "new")); err == nil {
+		t.Fatal("an unrecorded log clear request was hidden")
+	}
+	must(s.db.ExecContext(ctx, `drop trigger f; create trigger f before delete on meta begin select raise(fail,'x'); end`))
+	w, err := s.RecordWorkIQDocument(ctx, documentRecord(at.Add(2*time.Minute), "refused", "document_rights_unknown", ""))
+	if err == nil || !w.LogPending || !w.BodyDeleted {
+		t.Fatalf("a failed log clear was hidden: %+v %v", w, err)
 	}
 }

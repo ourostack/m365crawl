@@ -37,6 +37,8 @@ func TestJudgeDocument(t *testing.T) {
 		{name: "no hit is unknown", code: DocumentRightsUnknown},
 		{name: "another item's hit is ignored", hits: []workiq.RetrievalHit{other}, code: DocumentRightsUnknown},
 		{name: "conflicting labels are unknown", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), encrypted, "a"), docHit(ptr("allowed"), plain, "b")}, code: DocumentRightsUnknown},
+		{name: "labeled and unlabeled hits disagree", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), encrypted, "a"), docHit(ptr("allowed"), nil, "b")}, code: DocumentRightsUnknown},
+		{name: "unlabeled then labeled hits disagree", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), nil, "a"), docHit(ptr("allowed"), encrypted, "b")}, code: DocumentRightsUnknown},
 		{name: "no label needs bytes", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), nil, "a")}, needBytes: true, text: "a"},
 		{name: "non-encrypting label needs bytes", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), plain, "a")}, needBytes: true, text: "a"},
 		{name: "label without encryption flag needs bytes", hits: []workiq.RetrievalHit{docHit(ptr("allowed"), &workiq.DocumentLabel{ID: encrypted.ID}, "a")}, needBytes: true, text: "a"},
@@ -91,4 +93,3 @@ func TestDocumentAccount(t *testing.T) {
 	}
 }
 
-func docPtr[T any](v T) *T { return &v }
