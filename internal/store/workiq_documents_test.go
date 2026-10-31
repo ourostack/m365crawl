@@ -139,7 +139,7 @@ func TestWorkIQDocumentSchema23MigratesVersion22(t *testing.T) {
 	must0(old.Close())
 	s := must(Open(ctx, path))
 	defer func() { _ = s.Close() }()
-	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != WorkIQDocumentSchemaVersion {
+	if got := rowCount(t, s, `select max(version) from schema_migrations`); got != SchemaVersion {
 		t.Fatalf("version=%d", got)
 	}
 	if _, err := s.RecordWorkIQDocument(ctx, documentRecord(time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC), "admitted", "", "x")); err != nil {
