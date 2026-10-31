@@ -262,21 +262,21 @@ func TestStatusReadsTheSwitchAndLogOffline(t *testing.T) {
 func TestTargetReadsWithoutWriting(t *testing.T) {
 	ctx := context.Background()
 	srv, opts := newServer(t, true, true)
-	got, err := Target(ctx, opts, " 48:notes ", "", "")
+	got, err := Target(ctx, opts, TargetQuery{Chat: " 48:notes ", Message: "", Identity: ""})
 	if err != nil || !got.Known || got.Chat != "48:notes" || got.Identity != selfAddr || got.Version != "100" ||
 		got.WatermarkAt != "2026-10-31T10:00:00Z" || len(got.Recipients) != 1 || len(srv.created) != 0 {
 		t.Fatalf("%+v %v", got, err)
 	}
-	got, err = Target(ctx, opts, "48:saved", "", selfAddr)
+	got, err = Target(ctx, opts, TargetQuery{Chat: "48:saved", Message: "", Identity: selfAddr})
 	if err != nil || got.Known || len(got.Recipients) != 0 || got.Recipients == nil {
 		t.Fatalf("%+v %v", got, err)
 	}
 	srv.openErr[selfAddr] = errs.Usage("x")
-	if _, err := Target(ctx, opts, "48:notes", "", selfAddr); err == nil {
+	if _, err := Target(ctx, opts, TargetQuery{Chat: "48:notes", Message: "", Identity: selfAddr}); err == nil {
 		t.Fatal("read without WorkIQ")
 	}
 	_, opts = newServer(t, false, true)
-	_, err = Target(ctx, opts, "48:notes", "", "")
+	_, err = Target(ctx, opts, TargetQuery{Chat: "48:notes", Message: "", Identity: ""})
 	requireCode(t, err, "workiq_disabled")
 }
 

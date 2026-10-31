@@ -17,13 +17,13 @@ import (
 const (
 	originalID = "<orig@example.invalid>"
 	replyID    = "<reply@example.invalid>"
-	draftPage  = "/me/messages/draft-1?$select=id,isDraft,toRecipients,ccRecipients,bccRecipients,internetMessageId,body"
+	draftPage  = "/me/messages/draft-1?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,internetMessageId,body"
 	draftState = "/me/messages/draft-1?$select=id,isDraft"
 	sentFolder = "/me/mailFolders/sentitems?$select=id"
 )
 
 var (
-	originalLookup = byInternetMessageID("", originalID, "id,parentFolderId,changeKey,isDraft,from,replyTo,subject")
+	originalLookup = byInternetMessageID("", originalID, "id,parentFolderId,changeKey,isDraft,from,replyTo,toRecipients,ccRecipients,subject")
 	sentLookup     = byInternetMessageID("sentitems", replyID, "id,internetMessageId,toRecipients,ccRecipients,bccRecipients")
 )
 
@@ -90,7 +90,7 @@ func TestReplyIsSentThroughACheckedDraftAndFoundInSentItems(t *testing.T) {
 	if again, _ := Send(ctx, opts, req); again.Decision != da.Replay || len(srv.created) != 2 {
 		t.Fatalf("%+v", again)
 	}
-	target, err := Target(ctx, opts, "", " "+originalID+" ", "")
+	target, err := Target(ctx, opts, TargetQuery{Chat: "", Message: " " + originalID + " ", Identity: ""})
 	if err != nil || !target.Known || target.Message != originalID || target.Chat != "" || target.Version != "ck-1" ||
 		!slices.Equal(target.Recipients, []string{selfAddr}) {
 		t.Fatalf("%+v %v", target, err)
@@ -104,7 +104,7 @@ func TestReplyAudienceAndVersion(t *testing.T) {
 	if got, _ := Send(ctx, opts, replyRequest()); got.Code != da.CodeRecipientsChanged {
 		t.Fatalf("%+v", got)
 	}
-	target, err := Target(ctx, opts, "", originalID, selfAddr)
+	target, err := Target(ctx, opts, TargetQuery{Chat: "", Message: originalID, Identity: selfAddr})
 	if err != nil || !slices.Equal(target.Recipients, []string{"list@example.invalid"}) {
 		t.Fatalf("%+v %v", target, err)
 	}
@@ -152,10 +152,10 @@ func TestReplyRefusesMailItCannotPinDown(t *testing.T) {
 	}
 	srv, opts := mailServer(t)
 	srv.pages[originalLookup] = reply{data: list(other, receivedCopy)}
-	if target, err := Target(ctx, opts, "", originalID, ""); err != nil || !target.Known || len(srv.created) != 0 {
+	if target, err := Target(ctx, opts, TargetQuery{Chat: "", Message: originalID, Identity: ""}); err != nil || !target.Known || len(srv.created) != 0 {
 		t.Fatalf("agreeing copies: %+v %v", target, err)
 	}
-	if got, err := Target(ctx, opts, "", "nope", ""); err != nil || got.Known || got.Message != "nope" {
+	if got, err := Target(ctx, opts, TargetQuery{Chat: "", Message: "nope", Identity: ""}); err != nil || got.Known || got.Message != "nope" {
 		t.Fatalf("%+v %v", got, err)
 	}
 	for _, folder := range []string{`{}`, `[]`} {
@@ -172,7 +172,7 @@ func TestReplyRefusesMailItCannotPinDown(t *testing.T) {
 		if _, err := Send(ctx, opts, replyRequest()); err == nil || len(srv.created) != 0 {
 			t.Fatal("replied without reading the mail", broken)
 		}
-		if _, err := Target(ctx, opts, "", originalID, ""); err == nil {
+		if _, err := Target(ctx, opts, TargetQuery{Chat: "", Message: originalID, Identity: ""}); err == nil {
 			t.Fatal("target read without the server", broken)
 		}
 	}

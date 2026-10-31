@@ -80,6 +80,67 @@ func (w *Writer) CreateReply(ctx context.Context, messageID, comment string) Wri
 		"jsonBody": map[string]any{"comment": comment}}, false)
 }
 
+// CreateReplyAll makes a reply-all draft to one mail; it never sends.
+func (w *Writer) CreateReplyAll(ctx context.Context, messageID, comment string) WriteAnswer {
+	if !ValidMessageID(messageID) {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	return w.act(ctx, "do_action", map[string]any{"actionUrl": "/me/messages/" + messageID + "/createReplyAll",
+		"jsonBody": map[string]any{"comment": comment}}, false)
+}
+
+// DraftChange is what an update writes into a draft: always the text body; the subject and the
+// recipients only when set (recipients then replace To and empty Cc and Bcc).
+type DraftChange struct {
+	Text, Subject string
+	SetSubject    bool
+	To            []string
+	SetTo         bool
+}
+
+// UpdateDraft changes one draft of the person's own mailbox, only while its etag is etag.
+func (w *Writer) UpdateDraft(ctx context.Context, draftID, etag string, change DraftChange) WriteAnswer {
+	if !ValidMessageID(draftID) || etag == "" {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	body := map[string]any{"body": map[string]any{"contentType": "text", "content": change.Text}}
+	if change.SetSubject {
+		body["subject"] = change.Subject
+	}
+	if change.SetTo {
+		body["toRecipients"], body["ccRecipients"], body["bccRecipients"] = recipients(change.To), []any{}, []any{}
+	}
+	return w.act(ctx, "update_entity", map[string]any{"entityUrl": "/me/messages/" + draftID, "jsonBody": body,
+		"headers": map[string]any{"If-Match": etag}}, false)
+}
+
+// DeleteDraft deletes one draft of the person's own mailbox. WorkIQ 1.0.1 does not honor If-Match on
+// a delete; the caller reads the draft again just before.
+func (w *Writer) DeleteDraft(ctx context.Context, draftID, etag string) WriteAnswer {
+	if !ValidMessageID(draftID) || etag == "" {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	return w.act(ctx, "delete_entity", map[string]any{"entityUrl": "/me/messages/" + draftID, "headers": map[string]any{"If-Match": etag}}, true)
+}
+
+var chatMessageID = regexp.MustCompile(`^[0-9]{1,32}$`)
+
+// ValidChatMessageID says whether id is a Teams message id a directed write may put into a path.
+func ValidChatMessageID(id string) bool { return chatMessageID.MatchString(id) }
+
+// SetReaction adds (or, with remove, takes away) the person's reaction on one chat message.
+func (w *Writer) SetReaction(ctx context.Context, chat, messageID, reaction string, remove bool) WriteAnswer {
+	if !ValidChatID(chat) || !ValidChatMessageID(messageID) {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	action := "/setReaction"
+	if remove {
+		action = "/unsetReaction"
+	}
+	return w.act(ctx, "do_action", map[string]any{"actionUrl": "/chats/" + chat + "/messages/" + messageID + action,
+		"jsonBody": map[string]any{"reactionType": reaction}}, true)
+}
+
 // SendDraft sends one draft of the person's own mailbox.
 func (w *Writer) SendDraft(ctx context.Context, draftID string) WriteAnswer {
 	if !ValidMessageID(draftID) {
@@ -95,13 +156,17 @@ func (w *Writer) CreateChatMessage(ctx context.Context, chat, text string) Write
 	return w.create(ctx, "/chats/"+chat+"/messages", map[string]any{"body": map[string]any{"contentType": "text", "content": text}})
 }
 
-func (w *Writer) CreateMailDraft(ctx context.Context, subject, text string, to []string) WriteAnswer {
-	recipients := make([]any, 0, len(to))
+func recipients(to []string) []any {
+	out := make([]any, 0, len(to))
 	for _, address := range to {
-		recipients = append(recipients, map[string]any{"emailAddress": map[string]any{"address": address}})
+		out = append(out, map[string]any{"emailAddress": map[string]any{"address": address}})
 	}
+	return out
+}
+
+func (w *Writer) CreateMailDraft(ctx context.Context, subject, text string, to []string) WriteAnswer {
 	return w.create(ctx, "/me/messages", map[string]any{"subject": subject,
-		"body": map[string]any{"contentType": "text", "content": text}, "toRecipients": recipients})
+		"body": map[string]any{"contentType": "text", "content": text}, "toRecipients": recipients(to)})
 }
 
 func (w *Writer) create(ctx context.Context, parent string, body map[string]any) WriteAnswer {

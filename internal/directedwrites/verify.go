@@ -35,7 +35,7 @@ func Verify(ctx context.Context, opts Options, id int64) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if w.Outcome != string(da.Unknown) || w.Action == SaveMailDraft && w.ServerID == "" {
+	if w.Outcome != string(da.Unknown) || w.Action == SaveMailDraft && w.ServerID == "" && w.Message == "" {
 		return ofWrite(w), nil
 	}
 	if err := workIQEnabled(ctx, opts); err != nil {
@@ -49,8 +49,12 @@ func Verify(ctx context.Context, opts Options, id int64) (Result, error) {
 	if user.ID != w.UserID {
 		return Result{}, identityChanged()
 	}
-	if w.Action == ReplyMail {
-		return verifyReply(ctx, opts, s, w, person{user: user, canonical: w.Identity, pin: w.AccountPin})
+	p := person{user: user, canonical: w.Identity, pin: w.AccountPin}
+	switch {
+	case throughDraft(w.Action):
+		return verifyReply(ctx, opts, s, w, p)
+	case w.Action == SaveMailDraft && w.Message != "", w.Action == DiscardMailDraft, isReaction(w.Action):
+		return verifyOther(ctx, opts, s, w, p), nil
 	}
 	var change store.DirectedWriteChange
 	switch {
@@ -169,10 +173,13 @@ func Settle(ctx context.Context, opts Options, id int64, sent bool) (Result, err
 	return ofWrite(w), nil
 }
 
-// TargetResult is what a send to a chat, or a reply to a mail, needs to name.
+// TargetResult is what a write needs to name: who it reaches and the version of what it acts on.
 type TargetResult struct {
 	Chat        string   `json:"chat,omitempty"`
+	ChatMessage string   `json:"chat_message,omitempty"`
 	Message     string   `json:"message,omitempty"`
+	All         bool     `json:"all,omitempty"`
+	Draft       string   `json:"draft,omitempty"`
 	Identity    string   `json:"identity"`
 	Known       bool     `json:"known"`
 	Recipients  []string `json:"recipients"`
@@ -180,40 +187,64 @@ type TargetResult struct {
 	WatermarkAt string   `json:"watermark_at,omitempty"`
 }
 
-// Target reads a chat's or a mail's current audience and version, without writing anything. message,
-// when set, is a mail's Internet Message-ID; otherwise chat is read.
-func Target(ctx context.Context, opts Options, chat, message, identity string) (TargetResult, error) {
+// TargetQuery names one target: a chat (and, for a reaction, one of its messages), a mail by its
+// Internet Message-ID (All for a reply-all), or a draft by its Graph id.
+type TargetQuery struct {
+	Chat, ChatMessage, Message, Draft, Identity string
+	All                                         bool
+}
+
+// Target reads a target's current audience and version, without writing anything.
+func Target(ctx context.Context, opts Options, q TargetQuery) (TargetResult, error) {
 	if err := workIQEnabled(ctx, opts); err != nil {
 		return TargetResult{}, err
 	}
-	s, p, err := openPinned(ctx, opts, identity)
+	s, p, err := openPinned(ctx, opts, q.Identity)
 	if err != nil {
 		return TargetResult{}, err
 	}
 	defer func() { _ = s.Close() }()
 	result := TargetResult{Identity: p.canonical, Recipients: []string{}}
-	if message = strings.TrimSpace(message); message != "" {
-		m, err := readMail(ctx, s, message, p)
+	switch {
+	case strings.TrimSpace(q.Message) != "":
+		result.Message, result.All = strings.TrimSpace(q.Message), q.All
+		m, err := readMail(ctx, s, result.Message, p, q.All)
 		if err != nil {
 			return TargetResult{}, err
 		}
-		result.Message, result.Known = message, m.known && m.kind == da.KindMailMessage
-		if result.Known {
+		if result.Known = m.known && m.kind == da.KindMailMessage; result.Known {
 			result.Recipients, result.Version = m.recipients, m.version
 		}
 		return result, nil
+	case strings.TrimSpace(q.Draft) != "":
+		result.Draft = strings.TrimSpace(q.Draft)
+		d, err := readDraft(ctx, opts, s, result.Draft)
+		if err != nil {
+			return TargetResult{}, err
+		}
+		if result.Known = d.known && d.kind == da.KindMailDraft; result.Known {
+			result.Version = d.version
+		}
+		return result, nil
 	}
-	result.Chat = strings.TrimSpace(chat)
+	result.Chat = strings.TrimSpace(q.Chat)
 	c, err := readChat(ctx, s, result.Chat, p)
 	if err != nil {
 		return TargetResult{}, err
 	}
 	result.Known, result.Version = c.known, c.version
-	if c.known {
-		result.Recipients = c.recipients
-	}
 	if !c.watermarkAt.IsZero() {
 		result.WatermarkAt = c.watermarkAt.Format(time.RFC3339Nano)
+	}
+	if result.ChatMessage = strings.TrimSpace(q.ChatMessage); result.ChatMessage != "" && c.known {
+		m, err := readChatMessage(ctx, s, result.Chat, result.ChatMessage, p)
+		if err != nil {
+			return TargetResult{}, err
+		}
+		result.Known, result.Version, result.WatermarkAt = m.known && m.chat == result.Chat, m.version, ""
+	}
+	if result.Known {
+		result.Recipients = c.recipients
 	}
 	return result, nil
 }
@@ -237,6 +268,7 @@ type LogItem struct {
 	Identity     string    `json:"identity"`
 	Conversation string    `json:"conversation,omitempty"`
 	Message      string    `json:"message,omitempty"`
+	Reaction     string    `json:"reaction,omitempty"`
 	Recipients   []string  `json:"recipients"`
 	Subject      string    `json:"subject,omitempty"`
 	Text         string    `json:"text"`
@@ -274,7 +306,7 @@ func Status(ctx context.Context, opts Options, limit int) (StatusResult, error) 
 	}
 	for _, w := range rows {
 		result.Items = append(result.Items, LogItem{RequestID: strconv.FormatInt(w.ID, 10), CreatedAt: w.CreatedAt, Action: w.Action,
-			Effect: w.Effect, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity, Conversation: w.Conversation, Message: w.Message,
+			Effect: w.Effect, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity, Conversation: w.Conversation, Message: w.Message, Reaction: w.Reaction,
 			Recipients: w.Recipients, Subject: w.Subject, Text: w.Text, IntentKey: w.IntentKey, Outcome: w.Outcome,
 			Phase: w.Phase, Verification: w.Verification, ServerID: w.ServerID, ErrorCode: w.ErrorCode})
 	}

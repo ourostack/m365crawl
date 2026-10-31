@@ -16,14 +16,24 @@ import (
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
 
-const ReplyMail = "reply_mail"
+const (
+	ReplyMail    = "reply_mail"
+	ReplyAllMail = "reply_all_mail"
+	SendMail     = "send_mail"
+)
+
+// throughDraft says an action sends mail by making a draft, checking it and sending it.
+func throughDraft(action string) bool {
+	return action == ReplyMail || action == ReplyAllMail || action == SendMail
+}
 
 var (
 	internetMessageID = regexp.MustCompile(`^<[!-;=?-~]{1,994}@[!-;=?-~]{1,994}>$`)
 	horizontalRule    = regexp.MustCompile(`(?i)<hr[\s/>]`)
 	// refindAttempts and refindPause bound waiting for a sent reply to reach Sent Items.
-	refindAttempts = 6
-	refindPause    = 2 * time.Second
+	// Live, a sent mail took longer than ten seconds to show in Sent Items, so wait about half a minute.
+	refindAttempts = 10
+	refindPause    = 3 * time.Second
 )
 
 // mail is what a reply knows about the mail it answers.
@@ -41,7 +51,7 @@ type mailCopy struct {
 	ID, ParentFolderID, ChangeKey, Subject string
 	IsDraft                                bool
 	From                                   *address
-	ReplyTo                                []address
+	ReplyTo, ToRecipients, CcRecipients    []address
 }
 
 // byInternetMessageID lists the mail with one Internet Message-ID, in every folder or in one.
@@ -74,13 +84,14 @@ func addresses(list []address) []string {
 }
 
 // readMail finds the received copy of the mail with Internet Message-ID id. Its audience is who a
-// reply reaches: its replyTo addresses, else its sender. A mail found only in Sent Items, copies that
-// disagree, or a sender without an address are not a known target.
-func readMail(ctx context.Context, s session, id string, p person) (mail, error) {
+// reply reaches: its replyTo addresses, else its sender, and for a reply-all (all) also its To and Cc
+// recipients other than the person. A mail found only in Sent Items, copies that disagree, or a
+// sender without an address are not a known target.
+func readMail(ctx context.Context, s session, id string, p person, all bool) (mail, error) {
 	if !internetMessageID.MatchString(id) {
 		return mail{}, nil
 	}
-	page, err := s.Fetch(ctx, byInternetMessageID("", id, "id,parentFolderId,changeKey,isDraft,from,replyTo,subject"))
+	page, err := s.Fetch(ctx, byInternetMessageID("", id, "id,parentFolderId,changeKey,isDraft,from,replyTo,toRecipients,ccRecipients,subject"))
 	if gone(page, err) {
 		return mail{}, nil
 	}
@@ -117,13 +128,25 @@ func readMail(ctx context.Context, s session, id string, p person) (mail, error)
 	}
 	slices.SortFunc(received, func(a, b mailCopy) int { return strings.Compare(a.ID, b.ID) })
 	audience := func(c mailCopy) []string {
-		if len(c.ReplyTo) > 0 {
-			return p.own(addresses(c.ReplyTo))
-		}
-		if c.From == nil {
+		var base []string
+		switch {
+		case len(c.ReplyTo) > 0:
+			base = p.own(addresses(c.ReplyTo))
+		case c.From != nil:
+			base = p.own([]string{c.From.EmailAddress.Address})
+		default:
 			return nil
 		}
-		return p.own([]string{c.From.EmailAddress.Address})
+		if all {
+			for _, a := range append(addresses(c.ToRecipients), addresses(c.CcRecipients)...) {
+				if !p.alias(a) {
+					base = append(base, strings.ToLower(strings.TrimSpace(a)))
+				}
+			}
+			slices.Sort(base)
+			base = slices.Compact(base)
+		}
+		return base
 	}
 	chosen := received[0]
 	recipients := audience(chosen)
@@ -145,34 +168,41 @@ func replyHTML(text string) string {
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// draftMatches reads the reply draft back and says whether it is still a draft, addressed to exactly
-// the decided recipients, with the request's text above the quoted mail.
+// draftMatches reads the draft back and says whether it is still a draft, addressed to exactly the
+// decided recipients (no Bcc, and Cc only for a reply-all), with the request's subject for new mail
+// and its text above any quoted mail.
 func draftMatches(ctx context.Context, s session, draft string, row store.DirectedWrite, p person) bool {
-	page, err := s.Fetch(ctx, "/me/messages/"+draft+"?$select=id,isDraft,toRecipients,ccRecipients,bccRecipients,internetMessageId,body")
+	page, err := s.Fetch(ctx, "/me/messages/"+draft+"?$select=id,isDraft,subject,toRecipients,ccRecipients,bccRecipients,internetMessageId,body")
 	if err != nil {
 		return false
 	}
 	var m struct {
 		IsDraft                                   bool
-		InternetMessageID                         string
+		InternetMessageID, Subject                string
 		Body                                      struct{ ContentType, Content string }
 		ToRecipients, CcRecipients, BccRecipients []address
 	}
 	if json.Unmarshal(page.Data, &m) != nil {
 		return false
 	}
-	all := append(append(addresses(m.ToRecipients), addresses(m.CcRecipients)...), addresses(m.BccRecipients)...)
-	if !m.IsDraft || m.InternetMessageID == "" || !sameSet(p.own(all), row.Recipients) {
+	all := append(addresses(m.ToRecipients), addresses(m.CcRecipients)...)
+	if !m.IsDraft || m.InternetMessageID == "" || !sameSet(p.own(all), row.Recipients) || len(m.BccRecipients) > 0 ||
+		len(m.CcRecipients) > 0 && row.Action != ReplyAllMail || row.Action == SendMail && !sameText(row.Subject, m.Subject) {
 		return false
 	}
-	want := collapse(workiq.ScrubText(row.Text))
-	if !strings.EqualFold(m.Body.ContentType, "html") {
-		return strings.HasPrefix(collapse(m.Body.Content), want)
+	return bodyMatches(m.Body.ContentType, m.Body.Content, row.Text)
+}
+
+// bodyMatches says a mail body holds text: the text above its first rule, or, without one, at its start.
+func bodyMatches(contentType, content, text string) bool {
+	want := collapse(workiq.ScrubText(text))
+	if !strings.EqualFold(contentType, "html") {
+		return strings.HasPrefix(collapse(content), want)
 	}
-	if at := horizontalRule.FindStringIndex(m.Body.Content); at != nil {
-		return collapse(outlookmail.HTMLText([]byte(m.Body.Content[:at[0]]))) == want
+	if at := horizontalRule.FindStringIndex(content); at != nil {
+		return collapse(outlookmail.HTMLText([]byte(content[:at[0]]))) == want
 	}
-	return strings.HasPrefix(collapse(outlookmail.HTMLText([]byte(m.Body.Content))), want)
+	return strings.HasPrefix(collapse(outlookmail.HTMLText([]byte(content))), want)
 }
 
 // stillDraft says a read of the draft by id answered that it is still an unsent draft.
@@ -227,7 +257,8 @@ func draftOf(ctx context.Context, opts Options, id int64) (draft, imid string, o
 	return draft, imid, ok, err
 }
 
-// sendReply makes the reply draft, records it, checks it and only then sends it.
+// sendReply makes the draft (a reply, a reply-all or new mail), records it, checks it and only then
+// sends it.
 func sendReply(ctx context.Context, opts Options, s session, row store.DirectedWrite, m mail, p person) Result {
 	finish := func(change store.DirectedWriteChange, notice string, tell bool) Result {
 		r := save(ctx, opts, row, "in_flight", change)
@@ -241,11 +272,19 @@ func sendReply(ctx context.Context, opts Options, s session, row store.DirectedW
 	notSent := func(code, cause, notice string, status int) Result {
 		return finish(store.DirectedWriteChange{Outcome: string(da.Failed), Phase: "answered", ServerStatus: status, ErrorCode: code, Cause: cause}, notice, false)
 	}
-	made := s.CreateReply(ctx, m.id, replyHTML(row.Text))
+	var made workiq.WriteAnswer
+	switch row.Action {
+	case ReplyMail:
+		made = s.CreateReply(ctx, m.id, replyHTML(row.Text))
+	case ReplyAllMail:
+		made = s.CreateReplyAll(ctx, m.id, replyHTML(row.Text))
+	default:
+		made = s.CreateMailDraft(ctx, row.Subject, row.Text, row.Recipients)
+	}
 	if made.Kind != workiq.WriteCreated || !made.IsDraft || made.InternetMessageID == "" || !workiq.ValidMessageID(made.ServerID) {
-		notice := "nothing was sent; a reply draft may be in the person's Drafts"
+		notice := "nothing was sent; a draft may be in the person's Drafts"
 		if made.ServerID != "" {
-			notice = "nothing was sent; reply draft " + made.ServerID + " stays in the person's Drafts"
+			notice = "nothing was sent; draft " + made.ServerID + " stays in the person's Drafts"
 		}
 		code := made.Code
 		if made.Kind == workiq.WriteCreated {
@@ -254,7 +293,7 @@ func sendReply(ctx context.Context, opts Options, s session, row store.DirectedW
 		return notSent(code, "reply_draft_not_made", notice, made.Status)
 	}
 	draft := made.ServerID
-	leftover := "nothing was sent; reply draft " + draft + " stays in the person's Drafts"
+	leftover := "nothing was sent; draft " + draft + " stays in the person's Drafts"
 	var recorded bool
 	err := writeArchive(ctx, opts.DBPath, func(ctx context.Context, st *store.Store) (err error) {
 		recorded, err = st.RecordDirectedDraft(ctx, row.ID, draft, made.InternetMessageID)

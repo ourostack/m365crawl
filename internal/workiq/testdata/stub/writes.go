@@ -20,7 +20,9 @@ type writtenItem struct {
 	ID, Parent, Subject, Text, Created string
 	To                                 []string
 	MessageID                          string
-	Sent                               bool
+	Sent, Deleted                      bool
+	Revision                           int
+	Reactions                          []string
 }
 
 func writesState() []writtenItem {
@@ -40,8 +42,78 @@ func saveWritesState(items []writtenItem) {
 }
 
 func chatMessage(item writtenItem) map[string]any {
-	return map[string]any{"id": item.ID, "chatId": "48:notes", "createdDateTime": item.Created,
+	reactions := []any{}
+	for _, r := range item.Reactions {
+		reactions = append(reactions, map[string]any{"reactionType": r, "user": map[string]any{"user": map[string]any{"id": "synthetic-user"}}})
+	}
+	return map[string]any{"id": item.ID, "chatId": "48:notes", "createdDateTime": item.Created, "reactions": reactions,
 		"from": map[string]any{"user": map[string]any{"id": "synthetic-user"}}, "body": map[string]any{"contentType": "text", "content": item.Text}}
+}
+
+// changeEntity answers update_entity and delete_entity on a draft the stub saved.
+func changeEntity(tool, entity string, body json.RawMessage) (any, bool) {
+	items := writesState()
+	id := strings.TrimPrefix(entity, "/me/messages/")
+	for i := range items {
+		if items[i].ID != id || items[i].Parent != "/me/messages" || items[i].Deleted {
+			continue
+		}
+		if tool == "delete_entity" {
+			items[i].Deleted = true
+			saveWritesState(items)
+			return map[string]any{"structuredContent": map[string]any{"statusCode": 204, "data": nil}}, true
+		}
+		var wire struct {
+			Subject *string
+			Body    struct{ Content string }
+			To      *[]struct{ EmailAddress struct{ Address string } } `json:"toRecipients"`
+		}
+		if json.Unmarshal(body, &wire) != nil {
+			return nil, false
+		}
+		items[i].Text, items[i].Revision = wire.Body.Content, items[i].Revision+1
+		if wire.Subject != nil {
+			items[i].Subject = *wire.Subject
+		}
+		if wire.To != nil {
+			items[i].To = nil
+			for _, to := range *wire.To {
+				items[i].To = append(items[i].To, to.EmailAddress.Address)
+			}
+		}
+		saveWritesState(items)
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 200, "data": map[string]any{"id": id, "isDraft": true}}}, true
+	}
+	return map[string]any{"isError": true, "structuredContent": map[string]any{"statusCode": 404, "error": map[string]any{"code": "ErrorItemNotFound"}}}, true
+}
+
+// react answers setReaction and unsetReaction on a Notes-to-self message the stub created.
+func react(action string, body json.RawMessage) (any, bool) {
+	var wire struct{ ReactionType string }
+	rest := strings.TrimPrefix(action, "/chats/48:notes/messages/")
+	id, verb, ok := strings.Cut(rest, "/")
+	if !ok || json.Unmarshal(body, &wire) != nil || wire.ReactionType == "" {
+		return nil, false
+	}
+	items := writesState()
+	for i := range items {
+		if items[i].ID != id || items[i].Parent != "/chats/48:notes/messages" {
+			continue
+		}
+		var kept []string
+		for _, r := range items[i].Reactions {
+			if r != wire.ReactionType {
+				kept = append(kept, r)
+			}
+		}
+		if verb == "setReaction" {
+			kept = append(kept, wire.ReactionType)
+		}
+		items[i].Reactions = kept
+		saveWritesState(items)
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 204, "data": nil}}, true
+	}
+	return nil, false
 }
 
 // createEntity answers create_entity; ok is false for any other parent, which the caller refuses.
@@ -69,11 +141,12 @@ func createEntity(parent string, body json.RawMessage) (any, bool) {
 	}
 	if parent == "/me/messages" {
 		item.ID = "draft-" + item.ID
+		item.MessageID = "<" + item.ID + "@example.invalid>"
 	}
 	saveWritesState(append(items, item))
 	data := chatMessage(item)
 	if parent == "/me/messages" {
-		data = map[string]any{"id": item.ID, "isDraft": true}
+		data = map[string]any{"id": item.ID, "isDraft": true, "internetMessageId": item.MessageID}
 	}
 	return map[string]any{"structuredContent": map[string]any{"statusCode": 201, "data": data}}, true
 }
@@ -107,7 +180,7 @@ func writeFetch(path string) (any, int, bool) {
 		id := strings.TrimPrefix(strings.TrimPrefix(path, "/chats/48:notes/messages/"), "/me/messages/")
 		id, _, _ = strings.Cut(id, "?")
 		for _, item := range items {
-			if item.ID != id || hidden {
+			if item.ID != id || hidden || item.Deleted {
 				continue
 			}
 			if item.Parent == "/me/messages" {
@@ -115,7 +188,8 @@ func writeFetch(path string) (any, int, bool) {
 				for _, address := range item.To {
 					to = append(to, map[string]any{"emailAddress": map[string]any{"address": address}})
 				}
-				return map[string]any{"id": item.ID, "isDraft": true, "subject": item.Subject,
+				return map[string]any{"id": item.ID, "isDraft": !item.Sent, "subject": item.Subject, "internetMessageId": item.MessageID,
+					"changeKey": fmt.Sprintf("ck-%d", item.Revision), "@odata.etag": fmt.Sprintf("W/\"ck-%d\"", item.Revision),
 					"body": map[string]any{"contentType": "text", "content": item.Text}, "toRecipients": to}, 200, true
 			}
 			return chatMessage(item), 200, true
@@ -143,7 +217,10 @@ func doAction(action string, body json.RawMessage) (any, bool) {
 			"error": map[string]any{"error": map[string]any{"code": "BadRequest", "message": "Synthetic private refusal"}}}}, true
 	}
 	items := writesState()
-	if action == "/me/messages/inbox-self/createReply" {
+	if strings.HasPrefix(action, "/chats/48:notes/messages/") {
+		return react(action, body)
+	}
+	if action == "/me/messages/inbox-self/createReply" || action == "/me/messages/inbox-self/createReplyAll" {
 		var wire struct{ Comment string }
 		if json.Unmarshal(body, &wire) != nil || wire.Comment == "" {
 			return nil, false
@@ -160,7 +237,7 @@ func doAction(action string, body json.RawMessage) (any, bool) {
 		return nil, false
 	}
 	for i := range items {
-		if items[i].ID == draft && items[i].Parent == "reply" && !items[i].Sent {
+		if items[i].ID == draft && (items[i].Parent == "reply" || items[i].Parent == "/me/messages") && !items[i].Sent && !items[i].Deleted {
 			items[i].Sent = true
 			saveWritesState(items)
 			return map[string]any{"structuredContent": map[string]any{"statusCode": 202, "data": nil}}, true

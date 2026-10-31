@@ -169,7 +169,7 @@ var chmodFile = os.Chmod
 // adds the document usage_json and native_key columns.
 func (s *Store) migrate(ctx context.Context) error {
 	var old, has, digest, redacted, conversation, role, conversationIndex, messageDigest, errorCode, sourceAccounts, mailModified, folderModified int
-	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture, mailDeleted int
+	var locatorVariant, observationVariant, registryJSON, openedAt, captureVariant, usageJSON, nativeKey, membersCapture, mailDeleted, directedReaction int
 	if err := s.db.QueryRowContext(ctx, `select
   (select count(*) from pragma_table_info('conversations') where name='read_horizon_message_id'),
   (select count(*) from pragma_table_info('sync_runs') where name='accounts_json'),
@@ -191,8 +191,9 @@ func (s *Store) migrate(ctx context.Context) error {
   (select count(*) from pragma_table_info('sync_runs') where name='source_accounts_json'),
   (select count(*) from pragma_table_info('mail_messages') where name='modified_at'),
   (select count(*) from pragma_table_info('mail_folders') where name='modified_at'),
-  (select count(*) from pragma_table_info('mail_messages') where name='deleted_at')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
-		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified, &mailDeleted); err != nil {
+  (select count(*) from pragma_table_info('mail_messages') where name='deleted_at'),
+  (select count(*) from pragma_table_info('directed_writes') where name='reaction')`).Scan(&old, &has, &digest, &redacted, &conversation, &role, &conversationIndex, &messageDigest,
+		&locatorVariant, &observationVariant, &registryJSON, &openedAt, &captureVariant, &usageJSON, &nativeKey, &membersCapture, &errorCode, &sourceAccounts, &mailModified, &folderModified, &mailDeleted, &directedReaction); err != nil {
 		return err
 	}
 	var stmts []string
@@ -250,6 +251,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		{nativeKey, "document_observations", "native_key text not null default ''"},
 		{membersCapture, "document_capture_metadata", "members_capture integer"},
 		{captureVariant, "document_capture_metadata", "variant text not null default 'office_json'"},
+		{directedReaction, "directed_writes", "reaction text not null default ''"},
 	} {
 		if column.present == 0 {
 			stmts = append(stmts, "alter table "+column.table+" add column "+column.added)

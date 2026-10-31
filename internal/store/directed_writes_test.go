@@ -256,3 +256,81 @@ values('x','x','c','reply_mail','visible_to_others','a','r','i','u','unknown','i
 		t.Fatal("an archive below 28 has drafts", ok, err)
 	}
 }
+
+func TestDirectedDraftHeldUntilItsWriteFails(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	if held, err := s.DirectedDraftHeld(ctx, "draft-1"); held || err != nil {
+		t.Fatal(held, err)
+	}
+	if _, err := s.BeginDirectedWrite(ctx, sampleDirectedWrite(""), func([]DirectedWrite) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordDirectedDraft(ctx, 1, "draft-1", "<d@x>"); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := s.DirectedDraftHeld(ctx, "draft-1"); !held || err != nil {
+		t.Fatal(held, err)
+	}
+	if _, err := s.UpdateDirectedWrite(ctx, 1, "unknown", "in_flight", DirectedWriteChange{Outcome: "failed", Phase: "answered", Cause: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := s.DirectedDraftHeld(ctx, "draft-1"); held || err != nil {
+		t.Fatal("a failed write still holds its draft", held, err)
+	}
+	s.qExec(t, `alter table directed_write_drafts rename column draft_id to other`)
+	if _, err := s.DirectedDraftHeld(ctx, "draft-1"); err == nil {
+		t.Fatal("read a damaged draft table")
+	}
+	s.qExec(t, `update schema_migrations set version=26`)
+	if held, err := s.DirectedDraftHeld(ctx, "draft-1"); held || err != nil {
+		t.Fatal(held, err)
+	}
+}
+
+func TestDirectedWriteReactionsAndOlderArchives(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	w := sampleDirectedWrite("")
+	w.Action, w.Reaction, w.Text = "add_reaction", "👍", ""
+	if _, err := s.BeginDirectedWrite(ctx, w, func([]DirectedWrite) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := s.DirectedWriteByID(ctx, 1); err != nil || got.Reaction != "👍" {
+		t.Fatal(got, err)
+	}
+	s.qExec(t, `update schema_migrations set version=28`)
+	if got, err := s.DirectedWrites(ctx, 0); err != nil || len(got) != 1 || got[0].Reaction != "" {
+		t.Fatal("an archive below 30 reads its reaction as empty", got, err)
+	}
+	s.qExec(t, `drop table schema_migrations`)
+	if _, _, err := s.DirectedWriteByID(ctx, 1); err == nil {
+		t.Fatal("read without a schema version")
+	}
+}
+
+func TestOpenAddsTheReactionColumn(t *testing.T) {
+	ctx := context.Background()
+	path := writableArchivePath(t)
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An archive written at schema 28: directed_writes without its reaction column.
+	s.qExec(t, `drop trigger directed_writes_no_delete`)
+	s.qExec(t, `drop index directed_writes_intent`)
+	s.qExec(t, `drop index directed_writes_server`)
+	s.qExec(t, `alter table directed_writes drop column reaction`)
+	s.qExec(t, `update schema_migrations set version=28`)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if n := rowCount(t, s, `select count(*) from pragma_table_info('directed_writes') where name='reaction'`); n != 1 {
+		t.Fatal("the reaction column was not added")
+	}
+}

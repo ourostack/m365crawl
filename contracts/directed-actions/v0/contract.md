@@ -30,6 +30,7 @@ Every action has one effect class:
 | `send_teams_message` | `visible_to_others` | yes | `target.conversation`, `target.recipients`, `content.text` | `expected_version` | not allowed | conversation | conversation |
 | `send_mail` | `visible_to_others` | yes | `target.recipients`, `content.subject`, `content.text` | none | not allowed | none; a new mail has no earlier audience | none |
 | `reply_mail` | `visible_to_others` | yes | `target.message`, `target.recipients`, `content.text` | `expected_version` | `mail_message` | message | message |
+| `reply_all_mail` | `visible_to_others` | yes | `target.message`, `target.recipients`, `content.text` | `expected_version` | `mail_message` | message | message |
 | `add_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | `chat_message` in that conversation | conversation | message |
 | `remove_reaction` | `visible_to_others` | no | `target.conversation`, `target.message`, `target.recipients`, `content.reaction` | `expected_version` | `chat_message` in that conversation | conversation | message |
 | `save_mail_draft` | `only_you` | no | `content.text` | `target.message` (a draft to update), `target.recipients`, `content.subject`, `expected_version` | `mail_draft` | none | message |
@@ -37,7 +38,7 @@ Every action has one effect class:
 | `turn_writes_on` | the person's switch | no | none; always refused | none | not allowed | none | none |
 | `turn_writes_off` | the person's switch | no | none; always refused | none | not allowed | none | none |
 
-A reaction is seen by everyone in the chat now, not only by the people the message first reached, so its audience comes from the conversation while its version comes from the message.
+A mail message's audience is who the reply reaches, so it depends on the action: for `reply_mail` the message's reply-to addresses, else its sender; for `reply_all_mail` also its other To and Cc recipients, without the person's own addresses unless the person sent it. A reaction is seen by everyone in the chat now, not only by the people the message first reached, so its audience comes from the conversation while its version comes from the message.
 
 `identity` is allowed on every action, and `intent_key` only on sends. Any other target or content field, or `expected_version` where the table does not list it, is refused. An unused field must never make a request look different from an earlier one.
 
@@ -72,10 +73,10 @@ The tool checks a request in this order and stops at the first refusal:
 10. Every named target must be known: `unknown_target`. Each must be the kind the action needs, and a reaction's message must belong to the named conversation: `target_mismatch`.
 11. The recipients must match the target's audience: `recipients_changed`.
 12. The expected version must match: `stale_version`.
-13. If the same request was made earlier and its outcome is `unknown`, the request is refused until the person settles the earlier one: `outcome_unknown`. A new intent key does not get around this.
+13. If the same request was made earlier and its outcome is `unknown`, the request is refused until the person settles the earlier one: `outcome_unknown`. A new intent key does not get around this. For this rule a `reply_mail` and a `reply_all_mail` with the same identity, message and content are the same request, whatever their recipients, so a reply cannot be resent as a reply-all.
 14. Otherwise the request is accepted and the tool acts.
 
-The decision uses what the tool already knows. Before an action that cannot be undone, the tool checks again at the source: before discarding a draft, it fetches the message again and confirms it is still a draft, and refuses if it is not.
+The decision uses what the tool already knows. Before an action that cannot be undone, the tool checks again at the source: before discarding a draft, it fetches the message again and confirms it is still a draft; if it is not, it does not act and the outcome is `failed`.
 
 ## The answer
 

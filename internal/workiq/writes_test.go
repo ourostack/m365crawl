@@ -31,6 +31,39 @@ func writeStubResult(mode string, params json.RawMessage) (result any, die bool)
 			return nil, true
 		}
 		return map[string]any{"structuredContent": map[string]any{"statusCode": 201, "data": map[string]any{"id": "draft-1", "isDraft": true, "internetMessageId": "<d@example.invalid>"}}}, false
+	case "write-replyall":
+		if call.Name != "do_action" || !reflect.DeepEqual(call.Args, map[string]any{"actionUrl": "/me/messages/orig-1/createReplyAll", "jsonBody": map[string]any{"comment": "all"}}) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 201, "data": map[string]any{"id": "draft-2", "isDraft": true, "internetMessageId": "<e@example.invalid>"}}}, false
+	case "write-update":
+		want := map[string]any{"entityUrl": "/me/messages/draft-1", "headers": map[string]any{"If-Match": "W/\"ck\""}, "jsonBody": map[string]any{
+			"body": map[string]any{"contentType": "text", "content": "new"}, "subject": "S", "toRecipients": []any{map[string]any{"emailAddress": map[string]any{"address": "a@example.invalid"}}},
+			"ccRecipients": []any{}, "bccRecipients": []any{}}}
+		if call.Name != "update_entity" || !reflect.DeepEqual(call.Args, want) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 200, "data": map[string]any{"id": "draft-1", "isDraft": true}}}, false
+	case "write-update-text":
+		want := map[string]any{"entityUrl": "/me/messages/draft-1", "headers": map[string]any{"If-Match": "e"}, "jsonBody": map[string]any{"body": map[string]any{"contentType": "text", "content": "new"}}}
+		if call.Name != "update_entity" || !reflect.DeepEqual(call.Args, want) {
+			return nil, true
+		}
+		return map[string]any{"isError": true, "structuredContent": map[string]any{"statusCode": 412, "error": map[string]any{"error": map[string]any{"code": "ErrorIrresolvableConflict"}}}}, false
+	case "write-delete":
+		if call.Name != "delete_entity" || !reflect.DeepEqual(call.Args, map[string]any{"entityUrl": "/me/messages/draft-1", "headers": map[string]any{"If-Match": "e"}}) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 204, "data": nil}}, false
+	case "write-react", "write-unreact":
+		action := "/setReaction"
+		if mode == "write-unreact" {
+			action = "/unsetReaction"
+		}
+		if call.Name != "do_action" || !reflect.DeepEqual(call.Args, map[string]any{"actionUrl": "/chats/48:notes/messages/1700" + action, "jsonBody": map[string]any{"reactionType": "👍"}}) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 204, "data": nil}}, false
 	case "write-send":
 		if call.Name != "do_action" || !reflect.DeepEqual(call.Args, map[string]any{"actionUrl": "/me/messages/draft-1/send", "jsonBody": map[string]any{}}) {
 			return nil, true
@@ -237,6 +270,39 @@ func TestWorkIQActionAnswersWithoutAResult(t *testing.T) {
 	} {
 		if got := decodeWrite(context.Background(), []byte(raw), true); got.Kind != kind {
 			t.Fatalf("%s: %+v", raw, got)
+		}
+	}
+}
+
+func TestWorkIQWriterStageFourCalls(t *testing.T) {
+	ctx := context.Background()
+	if got := openWriter(t, "write-replyall").CreateReplyAll(ctx, "orig-1", "all"); got.Kind != WriteCreated || got.ServerID != "draft-2" || got.InternetMessageID != "<e@example.invalid>" {
+		t.Fatalf("%+v", got)
+	}
+	change := DraftChange{Text: "new", Subject: "S", SetSubject: true, To: []string{"a@example.invalid"}, SetTo: true}
+	if got := openWriter(t, "write-update").UpdateDraft(ctx, "draft-1", `W/"ck"`, change); got.Kind != WriteCreated || got.ServerID != "draft-1" {
+		t.Fatalf("%+v", got)
+	}
+	if got := openWriter(t, "write-update-text").UpdateDraft(ctx, "draft-1", "e", DraftChange{Text: "new"}); got.Kind != WriteRejected || got.Code != "ErrorIrresolvableConflict" {
+		t.Fatalf("%+v", got)
+	}
+	if got := openWriter(t, "write-delete").DeleteDraft(ctx, "draft-1", "e"); got.Kind != WriteAccepted || got.Status != 204 {
+		t.Fatalf("%+v", got)
+	}
+	if got := openWriter(t, "write-react").SetReaction(ctx, NotesToSelf, "1700", "👍", false); got.Kind != WriteAccepted {
+		t.Fatalf("%+v", got)
+	}
+	w := openWriter(t, "write-unreact")
+	if got := w.SetReaction(ctx, NotesToSelf, "1700", "👍", true); got.Kind != WriteAccepted {
+		t.Fatalf("%+v", got)
+	}
+	for _, got := range []WriteAnswer{
+		w.CreateReplyAll(ctx, "a/b", "x"), w.UpdateDraft(ctx, "a/b", "e", change), w.UpdateDraft(ctx, "d", "", change),
+		w.DeleteDraft(ctx, "a/b", "e"), w.DeleteDraft(ctx, "d", ""), w.SetReaction(ctx, "48:saved", "1", "x", false),
+		w.SetReaction(ctx, NotesToSelf, "1a", "x", false), w.SetReaction(ctx, NotesToSelf, "", "x", true),
+	} {
+		if got.Kind != WriteRejected || got.Code != "workiq_path_invalid" {
+			t.Fatalf("%+v", got)
 		}
 	}
 }

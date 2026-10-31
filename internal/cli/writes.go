@@ -16,31 +16,42 @@ import (
 )
 
 type writesGroup struct {
-	On               writesOnCmd     `cmd:"" help:"Turn writes on for this archive. Only the person, typing on the controlling terminal; never an agent."`
-	Off              writesOffCmd    `cmd:"" help:"Turn writes off for this archive. Only the person, typing on the controlling terminal."`
-	Status           writesStatusCmd `cmd:"" help:"Show the writes switch and the newest directed writes, offline."`
-	Target           writesTargetCmd `cmd:"" help:"Read a chat's current recipients and version through WorkIQ, the values a send must name; writes nothing."`
-	SendTeamsMessage writesSendCmd   `cmd:"" name:"send-teams-message" help:"Send a plain-text Teams chat message the person directed, through WorkIQ."`
-	SaveMailDraft    writesDraftCmd  `cmd:"" name:"save-mail-draft" help:"Save a new plain-text mail draft the person directed in their own mailbox, through WorkIQ."`
-	ReplyMail        writesReplyCmd  `cmd:"" name:"reply-mail" help:"Reply in plain text to one mail, as the person directed, through WorkIQ: the reply goes to the mail's reply-to addresses, else its sender."`
-	Verify           writesVerifyCmd `cmd:"" help:"Re-read the server to settle a write whose outcome is unknown; writes nothing to the server."`
-	Settle           writesSettleCmd `cmd:"" help:"The person settles an unknown write after checking it, typing its id on the controlling terminal."`
+	On               writesOnCmd       `cmd:"" help:"Turn writes on for this archive. Only the person, typing on the controlling terminal; never an agent."`
+	Off              writesOffCmd      `cmd:"" help:"Turn writes off for this archive. Only the person, typing on the controlling terminal."`
+	Status           writesStatusCmd   `cmd:"" help:"Show the writes switch and the newest directed writes, offline."`
+	Target           writesTargetCmd   `cmd:"" help:"Read a chat's current recipients and version through WorkIQ, the values a send must name; writes nothing."`
+	SendTeamsMessage writesSendCmd     `cmd:"" name:"send-teams-message" help:"Send a plain-text Teams chat message the person directed, through WorkIQ."`
+	SaveMailDraft    writesDraftCmd    `cmd:"" name:"save-mail-draft" help:"Save a new plain-text mail draft the person directed in their own mailbox, through WorkIQ."`
+	ReplyMail        writesReplyCmd    `cmd:"" name:"reply-mail" help:"Reply in plain text to one mail, as the person directed, through WorkIQ: the reply goes to the mail's reply-to addresses, else its sender."`
+	ReplyAllMail     writesReplyAllCmd `cmd:"" name:"reply-all-mail" help:"Reply to everyone on one mail in plain text, as the person directed, through WorkIQ: the mail's reply-to addresses (else its sender) and its other To and Cc recipients."`
+	SendMail         writesSendMailCmd `cmd:"" name:"send-mail" help:"Send a new plain-text mail the person directed, through WorkIQ."`
+	DiscardMailDraft writesDiscardCmd  `cmd:"" name:"discard-mail-draft" help:"Discard one draft of the person's own mailbox, as the person directed, through WorkIQ."`
+	AddReaction      writesReactCmd    `cmd:"" name:"add-reaction" help:"Add the person's emoji reaction to one chat message, as the person directed, through WorkIQ."`
+	RemoveReaction   writesUnreactCmd  `cmd:"" name:"remove-reaction" help:"Remove the person's emoji reaction from one chat message, as the person directed, through WorkIQ."`
+	Verify           writesVerifyCmd   `cmd:"" help:"Re-read the server to settle a write whose outcome is unknown; writes nothing to the server."`
+	Settle           writesSettleCmd   `cmd:"" help:"The person settles an unknown write after checking it, typing its id on the controlling terminal."`
 }
 
 func (writesGroup) Help() string {
 	return "m365crawl is read-only unless the person turns writes on. While writes are on and the person directs an agent, the agent acts through these commands with no second confirmation (contracts/directed-actions/v0). Every write names the agent and a reason; a send to a chat names the acting identity and the chat's exact recipients (`writes target` prints them), and may name the version it read and an intent key, so a retry replays instead of sending twice.\n" +
 		"Each write command prints one object: decision (accept, refuse or replay), outcome (sent, failed or unknown) and exit_class. Exit 0 done, 1 failed, 2 request problem, 3 person needed, 5 unknown. Never resend a write whose outcome is unknown: tell the person. `writes verify ID` may settle it by reading the server, otherwise the person checks and runs `writes settle`.\n" +
-		"Only a Teams chat message, a new mail draft and a reply to one mail are supported; a reply is sent only after its draft is read back addressed exactly as the request said, and counts as sent once it is found in Sent Items. The gates stop accidental writes through m365crawl; they are not a security boundary against an agent with shell access."
+		"Supported: a Teams chat message, a reaction on a chat message, new mail, a reply and a reply-all to one mail, and saving, updating or discarding a draft in the person's own mailbox. Mail is sent only after its draft is read back addressed exactly as the request said, and counts as sent once it is found in Sent Items. The gates stop accidental writes through m365crawl; they are not a security boundary against an agent with shell access."
 }
 
-func (writesOnCmd) Help() string     { return (writesGroup{}).Help() }
-func (writesOffCmd) Help() string    { return (writesGroup{}).Help() }
-func (writesStatusCmd) Help() string { return (writesGroup{}).Help() }
-func (writesTargetCmd) Help() string { return (writesGroup{}).Help() }
-func (writesSendCmd) Help() string   { return (writesGroup{}).Help() }
-func (writesDraftCmd) Help() string  { return (writesGroup{}).Help() }
-func (writesVerifyCmd) Help() string { return (writesGroup{}).Help() }
-func (writesSettleCmd) Help() string { return (writesGroup{}).Help() }
+func (writesOnCmd) Help() string       { return (writesGroup{}).Help() }
+func (writesOffCmd) Help() string      { return (writesGroup{}).Help() }
+func (writesStatusCmd) Help() string   { return (writesGroup{}).Help() }
+func (writesTargetCmd) Help() string   { return (writesGroup{}).Help() }
+func (writesSendCmd) Help() string     { return (writesGroup{}).Help() }
+func (writesDraftCmd) Help() string    { return (writesGroup{}).Help() }
+func (writesVerifyCmd) Help() string   { return (writesGroup{}).Help() }
+func (writesSettleCmd) Help() string   { return (writesGroup{}).Help() }
+func (writesReplyCmd) Help() string    { return (writesGroup{}).Help() }
+func (writesReplyAllCmd) Help() string { return (writesGroup{}).Help() }
+func (writesSendMailCmd) Help() string { return (writesGroup{}).Help() }
+func (writesDiscardCmd) Help() string  { return (writesGroup{}).Help() }
+func (writesReactCmd) Help() string    { return (writesGroup{}).Help() }
+func (writesUnreactCmd) Help() string  { return (writesGroup{}).Help() }
 func (rt *runtime) writesOptions() directedwrites.Options {
 	return directedwrites.Options{DBPath: rt.dbPath, Invocation: rt.workIQInvocation(), Version: version}
 }
@@ -141,8 +152,11 @@ func (r writesStatusResult) renderWrites(rt *runtime) error {
 		if w.Conversation != "" {
 			fmt.Fprintf(&out, "  chat %s\n", safeLine(w.Conversation))
 		}
-		if w.Message != "" {
-			fmt.Fprintf(&out, "  reply to %s\n", safeLine(w.Message))
+		switch {
+		case w.Reaction != "":
+			fmt.Fprintf(&out, "  reaction %s on %s\n", safeLine(w.Reaction), safeLine(w.Message))
+		case w.Message != "":
+			fmt.Fprintf(&out, "  on %s\n", safeLine(w.Message))
 		}
 		fmt.Fprintf(&out, "  %s\n", safeLine(w.Text))
 	}
@@ -169,18 +183,28 @@ func safeLine(s string) string {
 }
 
 type writesTargetCmd struct {
-	Chat     string `help:"The chat id: 48:notes (Notes to self) or a 19: chat id."`
-	Message  string `help:"A mail's internet_message_id, as mail list and mail show print it, for a reply. Its version changes whenever the mail is read, flagged or moved."`
-	Identity string `help:"The account to act as; default WorkIQ's signed-in account."`
+	Chat        string `help:"The chat id: 48:notes (Notes to self) or a 19: chat id."`
+	ChatMessage string `name:"chat-message" help:"With --chat, one of its messages, for a reaction: its version is when its text last changed."`
+	Message     string `help:"A mail's internet_message_id, as mail list and mail show print it, for a reply. Its version changes whenever the mail is read, flagged or moved."`
+	All         bool   `help:"With --message, who a reply-all reaches."`
+	Draft       string `help:"A draft's id, as save-mail-draft printed it as server_id, to update or discard it."`
+	Identity    string `help:"The account to act as; default WorkIQ's signed-in account."`
 }
 
 type writesTargetResult struct{ directedwrites.TargetResult }
 
 func (c writesTargetCmd) Run(rt *runtime) error {
-	if (c.Chat == "") == (c.Message == "") {
-		return errs.Usage("give exactly one of --chat and --message")
+	given := 0
+	for _, v := range []string{c.Chat, c.Message, c.Draft} {
+		if v != "" {
+			given++
+		}
 	}
-	result, err := directedwrites.Target(rt.ctx, rt.writesOptions(), c.Chat, c.Message, c.Identity)
+	if given != 1 || c.ChatMessage != "" && c.Chat == "" || c.All && c.Message == "" {
+		return errs.Usage("give exactly one of --chat (with --chat-message for a reaction), --message (with --all for a reply-all) and --draft")
+	}
+	result, err := directedwrites.Target(rt.ctx, rt.writesOptions(), directedwrites.TargetQuery{Chat: c.Chat, ChatMessage: c.ChatMessage,
+		Message: c.Message, All: c.All, Draft: c.Draft, Identity: c.Identity})
 	if err != nil {
 		return asCoded(err)
 	}
@@ -189,8 +213,13 @@ func (c writesTargetCmd) Run(rt *runtime) error {
 
 func (r writesTargetResult) renderWrites(rt *runtime) error {
 	what, name := "chat", r.Chat
-	if r.Message != "" {
+	switch {
+	case r.Message != "":
 		what, name = "mail", r.Message
+	case r.Draft != "":
+		what, name = "draft", r.Draft
+	case r.ChatMessage != "":
+		what, name = "chat message", r.Chat+" "+r.ChatMessage
 	}
 	if !r.Known {
 		_, err := fmt.Fprintf(rt.stdout, "%s %s: not a %s a write can name (unknown_target)\n", what, safeLine(name), what)
@@ -244,7 +273,83 @@ type writesSendCmd struct {
 
 type writesDraftCmd struct {
 	writesRequest
-	Subject string `help:"The draft's subject."`
+	Subject         string `help:"The draft's subject."`
+	Draft           string `help:"Update this draft (its id, as save-mail-draft printed it as server_id) instead of saving a new one; --subject and --to then replace the draft's, and are kept when not given."`
+	ExpectedVersion string `name:"expected-version" help:"With --draft, the draft version the agent read (writes target --draft prints it); refused if the draft has changed."`
+}
+
+type writesReplyAllCmd struct{ writesReplyCmd }
+
+func (c writesReplyAllCmd) Run(rt *runtime) error {
+	req, err := c.request(directedwrites.ReplyAllMail)
+	if err != nil {
+		return err
+	}
+	req.Target.Message, req.IntentKey, req.ExpectedVersion = c.Message, c.IntentKey, c.ExpectedVersion
+	return rt.directedWrite(req)
+}
+
+type writesSendMailCmd struct {
+	writesRequest
+	Subject   string `help:"The mail's subject."`
+	IntentKey string `name:"intent-key" help:"A key for this mail: asking again with the same key replays the earlier send instead of sending twice."`
+}
+
+func (c writesSendMailCmd) Run(rt *runtime) error {
+	req, err := c.request(directedwrites.SendMail)
+	if err != nil {
+		return err
+	}
+	req.Content.Subject, req.IntentKey = c.Subject, c.IntentKey
+	return rt.directedWrite(req)
+}
+
+// writesActionFlags are the request flags of a write without text.
+type writesActionFlags struct {
+	Agent           string `help:"The agent that is acting (recorded)."`
+	Reason          string `help:"Why the agent acts (recorded)."`
+	Identity        string `help:"The account that acts: the signed-in account's address."`
+	ExpectedVersion string `name:"expected-version" help:"The version the agent read (writes target prints it); refused if it has changed."`
+}
+
+func (f writesActionFlags) request(action string) da.Request {
+	return da.Request{Contract: da.Contract, Action: action, Agent: f.Agent, Reason: f.Reason, Identity: f.Identity, ExpectedVersion: f.ExpectedVersion}
+}
+
+type writesDiscardCmd struct {
+	writesActionFlags
+	Draft string `help:"The draft to discard: its id, as save-mail-draft printed it as server_id."`
+}
+
+func (c writesDiscardCmd) Run(rt *runtime) error {
+	req := c.request(directedwrites.DiscardMailDraft)
+	req.Target.Message = c.Draft
+	return rt.directedWrite(req)
+}
+
+type writesReactCmd struct {
+	writesActionFlags
+	Chat     string   `help:"The chat id: 48:notes (Notes to self) or a 19: chat id."`
+	Message  string   `help:"The chat message's id."`
+	To       []string `help:"Everyone in the chat, as writes target --chat prints them; repeat for each."`
+	Reaction string   `help:"An emoji, such as 👍. Named reactions such as like are refused."`
+}
+
+type writesUnreactCmd struct{ writesReactCmd }
+
+func (c writesReactCmd) reaction(action string) da.Request {
+	req := c.request(action)
+	req.Target = da.Target{Conversation: c.Chat, Message: c.Message, Recipients: c.To}
+	req.Content.Reaction = c.Reaction
+	return req
+}
+
+func (c writesReactCmd) Run(rt *runtime) error {
+	return rt.directedWrite(c.reaction(directedwrites.AddReaction))
+}
+
+func (c writesUnreactCmd) Run(rt *runtime) error {
+	return rt.directedWrite(c.reaction(directedwrites.RemoveReaction))
 }
 
 func (c writesSendCmd) Run(rt *runtime) error {
@@ -277,7 +382,7 @@ func (c writesDraftCmd) Run(rt *runtime) error {
 	if err != nil {
 		return err
 	}
-	req.Content.Subject = c.Subject
+	req.Content.Subject, req.Target.Message, req.ExpectedVersion = c.Subject, c.Draft, c.ExpectedVersion
 	return rt.directedWrite(req)
 }
 
