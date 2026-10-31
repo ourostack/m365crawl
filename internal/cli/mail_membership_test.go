@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/outlookmail"
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // A message sent to oneself, shown from Inbox with a Sent Items copy: --folder sent lists it,
@@ -55,4 +58,12 @@ func TestMailListFindsAMessageThroughEveryFolderItIsIn(t *testing.T) {
 	if unreadIn["Inbox"] != 1 || unreadIn["Projects"] != 1 || unreadIn["Sent Items"] != 0 {
 		t.Fatalf("folders %v", unreadIn)
 	}
+}
+
+func TestMailUnreadTotalFailure(t *testing.T) {
+	e := mailEnv(t)
+	old := mailCount
+	mailCount = func(*store.Store, context.Context, store.MailFilter) (int, error) { return 0, errors.New("boom") }
+	t.Cleanup(func() { mailCount = old })
+	mailFails(t, e, "db_error", 1, "mail", "unread")
 }

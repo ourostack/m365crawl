@@ -469,6 +469,9 @@ func coverageOut(rows []store.CoverageRow) []mailCoverageOut {
 
 // ---- notes ----
 
+// mailCount is the test seam of mail unread's total.
+var mailCount = (*store.Store).MailCount
+
 // mailReadAccounts is the test seam of the read markers.
 var mailReadAccounts = (*store.Store).MailReadAccounts
 
@@ -1199,7 +1202,7 @@ func (c *mailUnreadCmd) Run(rt *runtime) error {
 		}
 		res := &mailUnreadResult{Folders: []mailUnreadFolder{}, mailListResult: *rt.newMailList(rows, truncated, sc)}
 		// Each unread message counts once, however many of the folders it is in.
-		if res.UnreadTotal, err = st.MailCount(rt.ctx, store.MailFilter{Account: rt.g.Account, Folder: c.Folder, Unread: true}); err != nil {
+		if res.UnreadTotal, err = mailCount(st, rt.ctx, store.MailFilter{Account: rt.g.Account, Folder: c.Folder, Unread: true}); err != nil {
 			return nil, err
 		}
 		var withUnread []mailUnreadFolder

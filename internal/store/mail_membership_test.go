@@ -220,6 +220,9 @@ func TestMailMembershipOnAnArchiveBeforeSchema23(t *testing.T) {
 	if got := listKeys(t, ro, MailFilter{Folder: "sent"}); !slices.Equal(got, []uint32{100}) {
 		t.Fatalf("read-only list %v", got)
 	}
+	if got := sortedKeys(listKeys(t, ro, MailFilter{Unread: true})); !slices.Equal(got, []uint32{100, 101}) {
+		t.Fatalf("read-only unread %v", got)
+	}
 	if counts := folderCounts(t, ro); counts["Sent Items"] != [2]int{1, 1} {
 		t.Fatalf("read-only counts %v", counts)
 	}
@@ -409,5 +412,77 @@ func TestMailMembershipUnreadAnywhere(t *testing.T) {
 	}
 	if st := must(s.MailStatus(ctx)); st.Unread != 2 {
 		t.Fatalf("status unread %d", st.Unread)
+	}
+}
+
+// A failure anywhere in a membership write rolls the whole read back, and a failed membership read
+// surfaces.
+func TestMailMembershipFaults(t *testing.T) {
+	seed := func(t *testing.T, s *Store) {
+		mustCommitMail(t, s, mailBatch(mailT0, withCopies(mailMsg(100, fInbox, "<a@x>", "A", 0), []uint32{fInbox, fSent}), mailMsg(102, fSent, "<c@x>", "C", 2)))
+	}
+	t.Run("write", func(t *testing.T) {
+		sweepFaults(t, seed, func(ctx context.Context, s *Store) error {
+			_, err := s.CommitMail(ctx, mailBatch(hr(1), withCopies(mailMsg(100, fInbox, "<a@x>", "A", 0), []uint32{fInbox, fDeleted}),
+				withCopies(mailMsg(101, fInbox, "<b@x>", "B", 1), []uint32{fInbox, fSent}), mailMsg(102, fSent, "<c@x>", "C", 2)))
+			return err
+		})
+	})
+	t.Run("read", func(t *testing.T) {
+		sweepReadFaults(t, func(t *testing.T, s *Store) {
+			seedTwoSets(t, s, []outlookmail.Message{setMsg(1001, aSent, "<s@t>", 0)}, []outlookmail.Message{withCopies(setMsg(2001, bInbox, "<s@t>", 0), []uint32{bInbox, bSent})})
+		}, func(ctx context.Context, s *Store) error {
+			if _, err := s.MailList(ctx, MailFilter{Folder: "sent", Unread: true}); err != nil {
+				return err
+			}
+			if _, err := s.MailCount(ctx, MailFilter{Unread: true}); err != nil {
+				return err
+			}
+			if _, err := s.MailFolders(ctx); err != nil {
+				return err
+			}
+			_, err := s.MailCopyChecks(ctx, []MailCopyScope{{mailAcct, "sent"}}, MailCopyRange{Since: mailT0.AddDate(0, 0, -1)})
+			return err
+		})
+	})
+}
+
+// A server move clears the membership in the same transaction as the rest of the server write.
+func TestMailMembershipServerMoveFaults(t *testing.T) {
+	var run int64
+	sweepFaults(t, func(t *testing.T, s *Store) {
+		ctx := context.Background()
+		attempt := seedWorkIQMailAttempt(t, s)
+		mustCommitMail(t, s, mailBatch(mailT0, withCopies(mailMsg(100, fInbox, "<one@example.test>", "Subject", 0), []uint32{fInbox, fSent})))
+		must0(s.StageWorkIQMailFolder(ctx, attempt, workiq.Folder{ID: "inbox-id", Name: "Inbox", WellKnown: "inbox"}))
+		must0(s.StageWorkIQMailItems(ctx, attempt, "inbox-id", []json.RawMessage{graphMailFixture("graph-one", "inbox-id", "one@example.test")}, mailT0))
+		settleWorkIQMailFixture(t, s, attempt)
+		_ = must(s.CommitWorkIQMailGroup(ctx, attempt, "one@example.test"))
+		run = must(s.BeginWorkIQAttempt(ctx, WorkIQScope{Family: "mail", Account: mailAcct}, mailT0))
+		verifyWorkIQTestAttempt(t, s, run)
+		must0(s.StageWorkIQMailFolder(ctx, run, workiq.Folder{ID: "archive-id", WellKnown: "archive"}))
+		raw := []byte(strings.ReplaceAll(string(graphMailFixture("graph-one", "archive-id", "one@example.test")), "2026-09-10T08:01:00Z", "2026-09-11T08:01:00Z"))
+		must0(s.StageWorkIQMailItems(ctx, run, "archive-id", []json.RawMessage{raw}, mailT0.Add(time.Hour)))
+		settleWorkIQMailFixture(t, s, run)
+	}, func(ctx context.Context, s *Store) error {
+		_, err := s.CommitWorkIQMailGroup(ctx, run, "one@example.test")
+		return err
+	})
+}
+
+// Folders of one kind are listed by name, then by key.
+func TestMailMembershipFolderOrder(t *testing.T) {
+	s := newStore(t)
+	const fAlpha, fProjects2 = 30, 31
+	m := withCopies(mailMsg(100, fInbox, "<a@x>", "A", 0), []uint32{fInbox, fProject, fAlpha, fProjects2})
+	b := mailBatch(mailT0, m)
+	b.Result.Folders = append(b.Result.Folders, outlookmail.Folder{Key: fAlpha, Parent: 1, Name: "alpha", Kind: "other"}, outlookmail.Folder{Key: fProjects2, Parent: 1, Name: "Projects", Kind: "other"})
+	mustCommitMail(t, s, b)
+	var keys []uint32
+	for _, f := range listRows(t, s, MailFilter{})[100].Folders {
+		keys = append(keys, f.Key)
+	}
+	if !slices.Equal(keys, []uint32{fInbox, fAlpha, fProject, fProjects2}) {
+		t.Fatalf("order %v", keys)
 	}
 }
