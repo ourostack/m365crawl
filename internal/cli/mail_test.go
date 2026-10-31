@@ -797,17 +797,19 @@ func TestMailReadMarkerFailure(t *testing.T) {
 	mailFails(t, e, "db_error", 1, "mail", "folders")
 }
 
-func TestMailFolderParentCorruptionFailsAfterCoverageRead(t *testing.T) {
+// Coverage places each folder in its mailbox set (`current`), so it needs the folders' parents too:
+// corrupt folder metadata fails the read with its cause instead of an empty list.
+func TestMailFolderParentCorruptionFailsTheRead(t *testing.T) {
 	e := mailEnv(t)
 	e.exec(`alter table mail_folders drop column parent_key`)
 	st, err := store.OpenReadOnly(context.Background(), e.db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	coverage, err := st.MailCoverage(context.Background())
+	_, err = st.MailCoverage(context.Background())
 	closeErr := st.Close()
-	if err != nil || closeErr != nil || len(coverage) == 0 {
-		t.Fatal("fixture did not retain independently readable coverage", err, closeErr)
+	if err == nil || !strings.Contains(err.Error(), "parent_key") || closeErr != nil {
+		t.Fatal("coverage ignored missing folder parents", err, closeErr)
 	}
 	failure := mailFails(t, e, "db_error", 1, "mail", "list")
 	if !strings.Contains(failure["message"].(string), "parent_key") {
