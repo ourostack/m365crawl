@@ -386,13 +386,23 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 			c.mailTail(&e, account, ev, cacheEnd, b)
 		}
 	}
-	serverCovers := sameSpans(clip(server, a, b), []store.TimeSpan{{From: a, To: b}})
+	// What an older folder set or WorkIQ holds is dated before the last read or the server spans'
+	// end, so a disagreement concerns the range only up to there; a range ending later (today, an
+	// open-ended read) is judged and routed up to there, or a window could never prove it (#313).
+	bound, judged := ev.spans.FreshAt, b
+	if len(server) > 0 {
+		bound = laterTime(bound, server[len(server)-1].To)
+	}
+	if bound.After(a) && bound.Before(b) {
+		judged = bound
+	}
+	serverCovers := sameSpans(clip(server, a, judged), []store.TimeSpan{{From: a, To: judged}})
 	if count.State == "partial" && !serverCovers {
 		e.downgrade()
 		e.reason(reasonCopiesDisagree, fmt.Sprintf("an older copy of the folder holds %d of %d messages in this range that the current cache lacks although its range covers them", count.LackingInCurrentRange, count.Messages))
 	}
 	if e.has(reasonBeforeCache, reasonOnlyOlderCopy, reasonCopiesDisagree) {
-		if e.Next, e.route, err = c.mailSteps(account, a, b); err != nil {
+		if e.Next, e.route, err = c.mailSteps(account, a, judged); err != nil {
 			return e, err
 		}
 	}
