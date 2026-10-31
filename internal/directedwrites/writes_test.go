@@ -290,7 +290,7 @@ func TestSendToNotesToSelfIsVerifiedThenReplayed(t *testing.T) {
 	req := notesRequest("  hello\r\nthere ")
 	req.IntentKey, req.ExpectedVersion = "k1", "100"
 	got, err := Send(ctx, opts, req)
-	want := Result{Contract: da.Contract, Action: SendTeamsMessage, Effect: da.VisibleToOthers, RequestID: "1", Outcome: da.Sent,
+	want := Result{Contract: da.Contract, Action: SendTeamsMessage, Decision: da.Accept, Effect: da.VisibleToOthers, RequestID: "1", Outcome: da.Sent,
 		Phase: "verified", Verification: "found", ServerID: "1700", ExitClass: da.ExitDone}
 	if err != nil || got != want {
 		t.Fatalf("%+v %v", got, err)

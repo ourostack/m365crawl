@@ -99,6 +99,7 @@ type cliApp struct {
 	Calendar      calendarGroup    `cmd:"" help:"Read the calendar offline: the agenda for a range (default today), or one event with everything about it. The Teams and Outlook caches hold the days each app has loaded; coverage_gap says when part of the range is not covered. The agenda flags (--from, --to, --days, --query, --limit, --include-*) are listed by: m365crawl calendar agenda --help."`
 	Mail          mailGroup        `cmd:"" help:"Read Outlook cached mail offline on Mac and Windows: list, show, thread, folders and unread. Every result says when it was read and how far back it reaches. List flags: m365crawl mail list --help."`
 	WorkIQ        workIQGroup      `cmd:"" name:"workiq" help:"Explicit optional WorkIQ mail/chat source: configure, sync, count or probe; never runs from ordinary reads."`
+	Writes        writesGroup      `cmd:"" help:"Directed writes the person allows: turn writes on or off, send a Teams chat message or save a mail draft through WorkIQ, and settle an unknown outcome. Off by default."`
 	Notes         notesGroup       `cmd:"" help:"Capture and read local OneNote indexed notes, text and OCR with retained content and explicit source coverage."`
 	Docs          documentsGroup   `cmd:"" help:"Capture and inspect Office document metadata and sharing claims; no implicit file opening or text fetch."`
 	Loop          loopGroup        `cmd:"" help:"Project, search and inspect cached Loop channel text already in the archive; every row names the one cached snapshot it comes from. No fetch, replay or full page."`

@@ -500,7 +500,9 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 	case answer.Kind == workiq.WriteCreated:
 		change.ServerID, change.Cause = answer.ServerID, "server_created_elsewhere"
 	}
-	return save(ctx, opts, row, "in_flight", change), nil
+	result := save(ctx, opts, row, "in_flight", change)
+	result.Decision = da.Accept
+	return result, nil
 }
 
 // createdAsAsked says a created answer names the requested chat and the signed-in sender, or is a draft.
