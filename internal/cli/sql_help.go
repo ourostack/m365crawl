@@ -38,6 +38,8 @@ var sqlTables = []sqlTable{
 	{"workiq_census_members", "corroborating mail identities in a server enumeration"},
 	{"workiq_gaps", "counted gaps of a WorkIQ attempt, each stored once: a row with a resource is a page's or mail group's own, the row with an empty resource holds the rest, so sum(n) by attempt and code is the run's count"},
 	{"workiq_mail_receipts", "gap-free whole-account mail receipts linked to the exact sync_run_id, with original source_data_at and actual completed_at"},
+	{"workiq_window_members", "WorkIQ mail window members: per window position and Graph ID the folder, version, received_at, in_window and state (staged, admitted, deferred, resolved or removed)"},
+	{"workiq_window_coverage", "WorkIQ mail window coverage: account, Graph folder_id ('' for all folders), since, until, snapshot_at and deferred count of each proven window"},
 	{"mail_coverage", "how far back each mail folder was read, and when"},
 	{"mail_absent", "mail that a read missed, counted until it is marked gone or evicted"},
 	{"calendar_source_events", "calendar events, one row per occurrence and source"},

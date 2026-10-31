@@ -298,7 +298,7 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 		return r, true, nil
 	}
 	r = rt.newWorkIQRoute(setup, "mail", account, routeRangeBeforeCache, situation+
-		" WorkIQ can fetch the server mail received in this range into this archive: run these steps, then repeat the read.", time.Time{})
+		" WorkIQ can fetch this range of the account's server mail into this archive: run these steps, then repeat the read.", time.Time{})
 	r.Next = append(r.Next, startStep{Command: rt.recoveryCommand(false, account, bounds...),
 		Does: "fetch this account's server mail received in this range and prove it complete: it lists the folders, counts each one, and stops before " +
 			"fetching more than the archive's disk can hold. Run it again only while its result says resumable: true, otherwise follow the error's fix"}, rt.repeatStep())
