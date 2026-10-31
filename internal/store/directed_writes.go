@@ -99,14 +99,19 @@ const directedWriteColumns = `id,created_at,updated_at,contract,action,effect,ag
 recipients_json,subject,text,intent_key,expected_version,user_id,tenant_id,account_pin,outcome,phase,verification,
 server_id,server_status,watermark_id,watermark_at,error_code,m365crawl_version`
 
-// directedColumns is directedWriteColumns with the reaction column, read as empty on an archive
-// without it, which a read-only open does not migrate.
-func directedColumns(ctx context.Context, q rowQuerier) (string, error) {
-	has, err := hasFeature(ctx, q, directedReactionFeature)
-	if !has {
-		return directedWriteColumns + `,'' as reaction`, err
+// directedColumns says whether the archive has the directed write log and, when it does, gives
+// directedWriteColumns with the reaction column, read as empty on an archive without it, which a
+// read-only open does not migrate.
+func directedColumns(ctx context.Context, q rowQuerier) (string, bool, error) {
+	ok, err := hasDirectedWrites(ctx, q)
+	if err != nil || !ok {
+		return "", false, err
 	}
-	return directedWriteColumns + `,reaction`, nil
+	reaction, err := hasFeature(ctx, q, directedReactionFeature)
+	if !reaction {
+		return directedWriteColumns + `,'' as reaction`, err == nil, err
+	}
+	return directedWriteColumns + `,reaction`, true, nil
 }
 
 func scanDirectedWrite(rs interface{ Scan(...any) error }) (DirectedWrite, error) {
@@ -133,16 +138,12 @@ type directedQuerier interface {
 }
 
 func directedWrites(ctx context.Context, q directedQuerier, limit int) ([]DirectedWrite, error) {
-	ok, err := hasDirectedWrites(ctx, q)
+	columns, ok, err := directedColumns(ctx, q)
 	if err != nil || !ok {
 		return nil, err
 	}
 	if limit <= 0 {
 		limit = -1
-	}
-	columns, err := directedColumns(ctx, q)
-	if err != nil {
-		return nil, err
 	}
 	rows, err := q.QueryContext(ctx, `select `+columns+` from directed_writes order by id desc limit ?`, limit)
 	if err != nil {
@@ -168,12 +169,8 @@ func (s *Store) DirectedWrites(ctx context.Context, limit int) ([]DirectedWrite,
 
 // DirectedWriteByID reads one write; ok is false when there is none.
 func (s *Store) DirectedWriteByID(ctx context.Context, id int64) (DirectedWrite, bool, error) {
-	has, err := hasDirectedWrites(ctx, s.db)
+	columns, has, err := directedColumns(ctx, s.db)
 	if err != nil || !has {
-		return DirectedWrite{}, false, err
-	}
-	columns, err := directedColumns(ctx, s.db)
-	if err != nil {
 		return DirectedWrite{}, false, err
 	}
 	w, err := scanDirectedWrite(s.db.QueryRowContext(ctx, `select `+columns+` from directed_writes where id=?`, id))
