@@ -96,7 +96,7 @@ func TestWorkIQReadMailPublishesEffectiveDeletionAndOrigin(t *testing.T) {
 func TestWorkIQReadOldArchiveRemainsNativeWithoutMigration(t *testing.T) {
 	ctx := context.Background()
 	path := writableArchivePath(t)
-	cs := must(crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), SchemaVersion: 20}))
+	cs := must(crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), workiqWindowSchemaDDL, "", 1), SchemaVersion: 20}))
 	legacy := &Store{cs: cs, db: cs.DB()}
 	must0(legacy.migrate(ctx))
 	must0(legacy.ApplyAccount(ctx, acctA))

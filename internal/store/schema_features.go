@@ -25,6 +25,8 @@ var (
 		[]string{"directed_writes", "directed_write_events"}}
 	directedDraftFeature = schemaFeature{"directed write drafts", "DirectedDraftSchemaVersion", DirectedDraftSchemaVersion,
 		[]string{"directed_write_drafts"}}
+	workIQWindowFeature = schemaFeature{"WorkIQ mail windows", "WorkIQWindowSchemaVersion", WorkIQWindowSchemaVersion,
+		[]string{"workiq_window_members", "workiq_window_coverage"}}
 )
 
 // schemaFeatures lists every <Feature>SchemaVersion, one entry per line, so two changes that add
@@ -38,6 +40,7 @@ var schemaFeatures = []schemaFeature{
 	workIQDocumentFeature,
 	directedWriteFeature,
 	directedDraftFeature,
+	workIQWindowFeature,
 }
 
 // featureState reads the archive's recorded schema version and how many of f's tables it has.

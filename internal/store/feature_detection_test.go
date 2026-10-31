@@ -23,6 +23,8 @@ func TestFeatureDetectionTrustsTablesNotTheRecordedVersion(t *testing.T) {
 			func(s *Store) (bool, error) { return hasDirectedDrafts(ctx, s.db) }, ``},
 		{"WorkIQ documents", `drop table workiq_document_fts; drop table workiq_document_bodies; drop table workiq_document_checks; drop table workiq_documents`,
 			func(s *Store) (bool, error) { return hasWorkIQDocuments(ctx, s.db) }, `drop table workiq_document_bodies`},
+		{"WorkIQ mail windows", `drop table workiq_window_coverage; drop table workiq_window_members`,
+			func(s *Store) (bool, error) { return s.hasWorkIQWindows(ctx) }, `drop table workiq_window_coverage`},
 	} {
 		s := openTest(t)
 		if has, err := tc.has(s); err != nil || !has {
