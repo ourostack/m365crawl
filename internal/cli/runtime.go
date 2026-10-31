@@ -448,22 +448,64 @@ func (rt *runtime) noteSyncOff(res result, age time.Duration, syncHint string) {
 }
 
 // noteRegisteredSyncOff marks a registered-source read (notes, documents, Loop, native people)
-// whose refresh --no-sync or a zero max age skipped. Its coverage object cannot tell skipped from
-// not due, so the result says implicit_sync: disabled and adds a notice whatever the age.
-func (rt *runtime) noteRegisteredSyncOff(res result, what string) {
+// whose refresh --no-sync or a zero max age skipped: its coverage object cannot tell skipped from
+// not due, so the result always says implicit_sync: disabled. The notice is added only when it can
+// matter: never with no registered source; always for a zero max age, which agents read as "fresh";
+// and for --no-sync when the oldest selected source was last attempted more than the default max
+// age ago (a source never attempted counts as old as the Teams archive, or stale when that is
+// unknown). attempts are the selected sources' attempted_at.
+func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*time.Time) {
 	if rt.syncOff == "" {
 		return
 	}
 	res.setSynced(implicitSyncDisabled, nil)
+	if len(attempts) == 0 {
+		return
+	}
 	undo, zeroAge := rt.syncOffUndo()
-	notice := "This read did not refresh its registered " + what + " sources (" + rt.syncOff + "), so newer items may be missing. For fresh data " + undo + "."
-	if zeroAge {
-		notice = "This read did not refresh its registered " + what + " sources: " + rt.syncOff + " turns the refresh off, it does not mean fresh, so newer items may be missing. For fresh data " + undo + "; pass --no-sync to read the archive as it is."
+	notice := "This read did not refresh its registered " + what + " sources: " + rt.syncOff +
+		" turns the refresh off, it does not mean fresh, so newer items may be missing. For fresh data " + undo + "; pass --no-sync to read the archive as it is."
+	if !zeroAge {
+		oldest, known := rt.oldestAttempt(attempts)
+		if known && oldest <= defaultMaxAge {
+			return
+		}
+		read := "the oldest has not been read since the archive's last complete sync"
+		if known {
+			read = "the oldest was last read " + compactDuration(roundAge(oldest)) + " ago"
+		}
+		notice = "This read did not refresh its registered " + what + " sources (" + rt.syncOff + ") and " + read + ", so newer items may be missing. For fresh data " + undo + "."
 	}
 	res.addNotice(notice)
 	if rt.format == output.Text {
 		rt.hint("this read did not refresh its registered " + what + " sources (" + rt.syncOff + "); for fresh data " + undo)
 	}
+}
+
+// oldestAttempt is how long ago the stalest of attempts was made. A source never attempted counts
+// as old as the archive's last complete sync; known is false when that is unknown too.
+func (rt *runtime) oldestAttempt(attempts []*time.Time) (oldest time.Duration, known bool) {
+	for _, at := range attempts {
+		if at != nil {
+			oldest = max(oldest, rt.now().Sub(*at))
+			continue
+		}
+		age := rt.loopArchiveAge()
+		if age == nil {
+			return 0, false
+		}
+		oldest = max(oldest, time.Duration(*age)*time.Second)
+	}
+	return oldest, true
+}
+
+// sourceAttempts are the attempted_at of a coverage object's sources.
+func sourceAttempts(coverage *noteCoverage) []*time.Time {
+	out := []*time.Time{}
+	for _, source := range coverage.Sources {
+		out = append(out, source.AttemptedAt)
+	}
+	return out
 }
 
 // roundAge drops the parts of an archive age a person does not need: seconds once it is a minute.

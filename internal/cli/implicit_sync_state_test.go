@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/openclaw/crawlkit/output"
 )
 
 // ageArchive makes the archive's only complete sync look the given SQLite modifier old ('-8 minutes').
@@ -268,37 +272,88 @@ func TestOutlookLinkRefusalNamesTheEnvironment(t *testing.T) {
 }
 
 // Registered-source reads skip their own refresh under --no-sync or --max-age 0; their coverage
-// objects cannot tell "skipped" from "not due", so the result says so (#264 review).
+// objects cannot tell "skipped" from "not due", so the result always says implicit_sync: disabled
+// (#264 review). The notice comes only where it can matter.
 func TestRegisteredSourceReadsSayTheyDidNotRefresh(t *testing.T) {
 	e := newEnv(t)
-	peopleFixture(t, e)
-	for _, args := range [][]string{
+	e.sync()
+	read := func(args ...string) (map[string]any, string) {
+		t.Helper()
+		code, stdout, stderr := e.run(append([]string{"--json"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, stderr)
+		}
+		return decode(t, stdout), stderr
+	}
+	unregistered := [][]string{
 		{"notes", "list"}, {"notes", "sources"}, {"search", "words", "--source", "notes"},
 		{"docs", "list"}, {"search", "words", "--source", "documents"},
 		{"loop", "list"}, {"search", "words", "--source", "loop"},
-		{"people"}, {"people", "sources"},
-	} {
+	}
+	// No registered source: nothing was skipped that could hold newer items, so no notice.
+	for _, args := range unregistered {
 		for _, off := range [][]string{{"--no-sync"}, {"--max-age", "0"}} {
-			code, stdout, stderr := e.run(append(append([]string{"--json"}, off...), args...)...)
-			if code != 0 {
-				t.Fatalf("%v %v: exit %d: %s", off, args, code, stderr)
-			}
-			m := decode(t, stdout)
-			notices := noticesOf(m)
-			if m["implicit_sync"] != "disabled" || len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "did not refresh its registered") ||
-				!strings.Contains(notices[len(notices)-1], strings.Join(off, " ")) || stderr != "" {
-				t.Errorf("%v %v: implicit_sync %v notices %q stderr %q", off, args, m["implicit_sync"], notices, stderr)
+			m, stderr := read(append(off, args...)...)
+			if m["implicit_sync"] != "disabled" || m["notices"] != nil || stderr != "" {
+				t.Errorf("%v %v: implicit_sync %v notices %v stderr %q", off, args, m["implicit_sync"], m["notices"], stderr)
 			}
 		}
-		code, stdout, _ := e.run(append([]string{"--json"}, args...)...)
-		if m := decode(t, stdout); code != 0 || m["implicit_sync"] != nil {
+		if m, _ := read(args...); m["implicit_sync"] != nil {
 			t.Errorf("%v: an ordinary refresh adds no implicit_sync: %v", args, m["implicit_sync"])
 		}
 	}
-	_, _, stderr := e.run("--format", "text", "--no-sync", "notes", "list")
-	if !strings.HasPrefix(stderr, "hint: this read did not refresh its registered") {
+	peopleFixture(t, e) // a native people source attempted just now
+	// The overview prints `m365crawl --no-sync people sources`; following it on a fresh source says
+	// disabled and nothing else.
+	if _, stdout, _ := e.run("--json"); !strings.Contains(stdout, "m365crawl --no-sync people sources") {
+		t.Fatalf("overview route changed: %s", stdout)
+	}
+	for _, args := range [][]string{{"people", "sources"}, {"people"}} {
+		m, stderr := read(append([]string{"--no-sync"}, args...)...)
+		if m["implicit_sync"] != "disabled" || strings.Contains(strings.Join(noticesOf(m), " "), "did not refresh") || stderr != "" {
+			t.Errorf("fresh --no-sync %v: implicit_sync %v notices %q", args, m["implicit_sync"], noticesOf(m))
+		}
+		// A zero max age always cautions: agents read it as "fresh". (With Teams people archived,
+		// `people` is a sync-backed read and carries that read's own --max-age 0 notice.)
+		m, _ = read(append([]string{"--max-age", "0"}, args...)...)
+		if notices := noticesOf(m); m["implicit_sync"] != "disabled" || len(notices) == 0 || !strings.Contains(strings.Join(notices, " "), "--max-age 0 turns the") {
+			t.Errorf("fresh --max-age 0 %v: notices %q", args, notices)
+		}
+	}
+	// The source was last attempted three hours ago: --no-sync now cautions, naming the age.
+	e.exec(`update knowledge_attempts set started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-3 hours')`)
+	m, _ := read("--no-sync", "people", "sources")
+	if notices := noticesOf(m); len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "(--no-sync) and the oldest was last read 3h ago") ||
+		!strings.Contains(notices[len(notices)-1], "drop --no-sync") {
+		t.Errorf("stale --no-sync: notices %q", notices)
+	}
+	_, _, stderr := e.run("--format", "text", "--no-sync", "people", "sources")
+	if !strings.HasPrefix(stderr, "hint: this read did not refresh its registered native people sources (--no-sync)") {
 		t.Fatalf("text hint %q", stderr)
 	}
+}
+
+// A source never attempted counts as old as the archive's last complete sync, or as stale when
+// the archive cannot say.
+func TestRegisteredSyncOffNeverAttemptedSource(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	check := func(db string, want bool) {
+		t.Helper()
+		rt := &runtime{ctx: t.Context(), g: &Globals{}, dbPath: db, now: time.Now, syncOff: syncOffNoSync, format: output.JSON}
+		res := newList(nil, false)
+		rt.noteRegisteredSyncOff(res, "notes", []*time.Time{nil})
+		if res.ImplicitSync != implicitSyncDisabled || (len(res.Notices) == 1) != want {
+			t.Errorf("%s: implicit_sync %q notices %q", db, res.ImplicitSync, res.Notices)
+		}
+		if want && !strings.Contains(res.Notices[0], "has not been read since") && !strings.Contains(res.Notices[0], "last read") {
+			t.Errorf("%s: notice %q", db, res.Notices[0])
+		}
+	}
+	check(e.db, false) // the archive synced just now
+	e.ageArchive("-3 hours")
+	check(e.db, true)
+	check(filepath.Join(t.TempDir(), "missing.db"), true) // no archive age at all
 }
 
 func TestCoverageRouteIsAnAcquisition(t *testing.T) {

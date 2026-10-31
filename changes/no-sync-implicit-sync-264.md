@@ -1,7 +1,7 @@
 ### Added
 
 - `--no-sync` (also `M365CRAWL_NO_SYNC=1`) reads the archive as it is: a read never syncs first, whatever `--max-age` says. The flag, including `--no-sync=false`, and an explicit `--max-age` beat the variable. Explicit `sync`, `fetch`, `capture` and `signin` commands are unaffected.
-- Every sync-backed read result carries `implicit_sync`: `ran`, `skipped_fresh` (the archive was younger than `--max-age`) or `disabled` (`--no-sync` or `--max-age 0`), beside `archive_age_seconds`. Notes, docs, Loop and native people reads say `implicit_sync: "disabled"` with a notice when `--no-sync` or a zero max age skipped their registered-source refresh.
+- Every sync-backed read result carries `implicit_sync`: `ran`, `skipped_fresh` (the archive was younger than `--max-age`) or `disabled` (`--no-sync` or `--max-age 0`), beside `archive_age_seconds`. Notes, docs, Loop and native people reads say `implicit_sync: "disabled"` when `--no-sync` or a zero max age skipped their registered-source refresh, with a notice for a zero max age, or for `--no-sync` once their oldest registered source was last read more than 15m ago.
 
 ### Changed
 

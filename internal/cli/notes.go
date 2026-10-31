@@ -245,7 +245,7 @@ func (rt *runtime) notesRead(label string, sourceID int64, fn func(*store.Store)
 			result.Note = "no indexed note matched; source_coverage describes retained or unavailable input"
 		}
 	}
-	rt.noteRegisteredSyncOff(result, "notes")
+	rt.noteRegisteredSyncOff(result, "notes", sourceAttempts(coverage))
 	return rt.write(label, result)
 }
 
