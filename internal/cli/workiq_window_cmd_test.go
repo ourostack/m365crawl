@@ -61,3 +61,9 @@ func TestWorkIQSyncWithASinceSelectsAWholeSecondMailWindow(t *testing.T) {
 		t.Fatal("a whole-account sync became a window")
 	}
 }
+
+func TestWorkIQRouteDurationSaysHoursForLongProofs(t *testing.T) {
+	if workIQRouteDuration(119) != "119 minutes" || workIQRouteDuration(121) != "3 hours" {
+		t.Fatal(workIQRouteDuration(121))
+	}
+}

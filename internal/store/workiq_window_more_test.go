@@ -119,7 +119,9 @@ func TestWorkIQWindowMigrationNeedsItsPinnedConnection(t *testing.T) {
 	s := newStore(t)
 	failure := errors.New("no connection")
 	pinWorkIQConn = func(context.Context, *sql.DB) (pragmaConn, error) { return nil, failure }
-	t.Cleanup(func() { pinWorkIQConn = func(ctx context.Context, db *sql.DB) (pragmaConn, error) { return db.Conn(ctx) } })
+	t.Cleanup(func() {
+		pinWorkIQConn = func(ctx context.Context, db *sql.DB) (pragmaConn, error) { return db.Conn(ctx) }
+	})
 	if err := s.migrateWorkIQWindow(context.Background()); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
@@ -257,7 +259,6 @@ values((select max(id) from workiq_frontiers),'twin',?,'g-sent','2026-09-05T00:0
 	for _, mutation := range []string{
 		`update workiq_window_coverage set since='bad'`,
 		`update workiq_window_coverage set until='bad'`,
-		
 	} {
 		r := newStore(t)
 		seedWindowRoute(t, r, "2026-09-01T00:00:00Z", "2026-09-08T00:00:00Z", true, `{}`)

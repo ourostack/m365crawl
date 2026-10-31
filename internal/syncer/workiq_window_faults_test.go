@@ -167,12 +167,12 @@ func TestWorkIQMailWindowRefusesMalformedAnswers(t *testing.T) {
 			workIQAcquisitionStub(t)
 			sc := mbScenario{Messages: windowMessages()}
 			writeMailbox(t, sc)
-			raw, err := os.ReadFile(os.Getenv("WORKIQ_MAILBOX"))
+			raw, err := os.ReadFile(os.Getenv("WORKIQ_MAILBOX")) //nolint:gosec // G304: the test's own scenario file.
 			if err != nil {
 				t.Fatal(err)
 			}
 			patched := strings.Replace(string(raw), `"state":`, `"break":"`+tc.broken+`","state":`, 1)
-			if err := os.WriteFile(os.Getenv("WORKIQ_MAILBOX"), []byte(patched), 0o600); err != nil {
+			if err := os.WriteFile(os.Getenv("WORKIQ_MAILBOX"), []byte(patched), 0o600); err != nil { //nolint:gosec // G703: the test's own scenario file.
 				t.Fatal(err)
 			}
 			report, err := runWindow(t, db, account, "")
