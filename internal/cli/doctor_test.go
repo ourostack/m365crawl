@@ -447,3 +447,34 @@ func TestDoctorSnapshotGroups(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want nil", s)
 	}
 }
+
+// An archive an older version wrote warns until its one-time rewrite runs; the check says how much
+// space it needs and, when short, how much there is.
+func TestDoctorWarnsWhileTheVacuumIsDue(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	if _, stdout, _ := e.run("doctor", "--json"); checks(t, decode(t, stdout))["vacuum_pending"] != nil {
+		t.Fatal("a new archive needs no rewrite")
+	}
+	e.exec(`update meta set value='needed' where key='free_space_vacuum'`)
+	code, stdout, stderr := e.run("doctor", "--json")
+	c := checks(t, decode(t, stdout))["vacuum_pending"]
+	if code != 0 || c == nil || c["ok"] != true || c["warn"] != true || !strings.Contains(c["detail"].(string), "one-time rewrite") || c["fix"] != "Run `m365crawl sync`." {
+		t.Fatalf("exit %d: %v %s", code, c, stderr)
+	}
+	old := vacuumStateFn
+	t.Cleanup(func() { vacuumStateFn = old })
+	free := uint64(1 << 20)
+	vacuumStateFn = func(*store.Store, context.Context) (*store.VacuumPending, error) {
+		return &store.VacuumPending{NeedBytes: 2 << 30, FreeBytes: &free, Reason: store.VacuumDiskSpace}, nil
+	}
+	_, stdout, _ = e.run("doctor", "--json")
+	if c = checks(t, decode(t, stdout))["vacuum_pending"]; !strings.Contains(c["detail"].(string), "1.0 MB is free") || !strings.Contains(c["fix"].(string), "Free at least 2.0 GB") {
+		t.Fatalf("low space: %v", c)
+	}
+	vacuumStateFn = func(*store.Store, context.Context) (*store.VacuumPending, error) { return nil, errors.New("boom") }
+	_, stdout, _ = e.run("doctor", "--json")
+	if c = checks(t, decode(t, stdout))["vacuum_pending"]; c["warn"] != true || !strings.Contains(c["detail"].(string), "boom") {
+		t.Fatalf("unreadable: %v", c)
+	}
+}

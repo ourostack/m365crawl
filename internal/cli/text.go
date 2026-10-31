@@ -254,6 +254,12 @@ func (rt *runtime) renderText(label string, v any) error {
 		if r.Redacted > 0 {
 			_, _ = fmt.Fprintf(w, "redacted: %d credential-looking values in generic records\n", r.Redacted)
 		}
+		if r.Vacuumed {
+			_, _ = fmt.Fprintln(w, "vacuumed: the archive was rewritten once, so nothing an older version left in its free space remains in the file")
+		}
+		if v := r.VacuumPending; v != nil {
+			_, _ = fmt.Fprintln(w, vacuumPendingText(v))
+		}
 		if r.PurgedLogPending {
 			_, _ = fmt.Fprintln(w, "purged credential values may still be in the archive's write-ahead log: another program reading the archive kept it from being cleared; the next sync tries again")
 		}
@@ -983,4 +989,30 @@ func uncoveredNote(r *listResult) string {
 		return "no cached data covers " + strconv.Itoa(n) + " day(s) of this range: " + strings.Join(r.UncoveredDays, ", ")
 	}
 	return "no cached data covers " + strconv.Itoa(n) + " days of this range, from " + r.UncoveredDays[0]
+}
+
+// vacuumPendingText says in words why the archive's one-time VACUUM has not run yet.
+func vacuumPendingText(v *store.VacuumPending) string {
+	need := humanBytes(v.NeedBytes)
+	switch v.Reason {
+	case store.VacuumDiskSpace:
+		return fmt.Sprintf("vacuum pending: the archive's one-time rewrite needs %s free on its disk and %s is free; free some space, then run m365crawl sync", need, humanBytes(*v.FreeBytes))
+	case store.VacuumUnmeasured:
+		return fmt.Sprintf("vacuum pending: the archive's one-time rewrite needs %s free on its disk, and the free space could not be measured", need)
+	case store.VacuumLogPending:
+		return "vacuum: the archive was rewritten once, but another program reading it kept the rewrite's write-ahead log from being emptied; the next m365crawl sync empties it"
+	case store.VacuumCancelled:
+		return "vacuum pending: the sync was stopped before the archive's one-time rewrite finished, so nothing changed; the next m365crawl sync tries again"
+	case store.VacuumFailed:
+		return fmt.Sprintf("vacuum pending: the archive's one-time rewrite failed (%s) and changed nothing; the next m365crawl sync tries again", v.Error)
+	}
+	return fmt.Sprintf("vacuum pending: the next m365crawl sync rewrites the archive once (needs %s free on its disk)", need)
+}
+
+// humanBytes is n in GB or MB, one decimal.
+func humanBytes(n uint64) string {
+	if n >= 1<<30 {
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 }

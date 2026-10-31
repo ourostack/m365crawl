@@ -135,3 +135,26 @@ func TestListTableShowsEachItemKind(t *testing.T) {
 		})
 	}
 }
+
+func TestSyncTextShowsTheVacuum(t *testing.T) {
+	free := uint64(1 << 20)
+	for _, c := range []struct {
+		r    syncer.Report
+		want string
+	}{
+		{syncer.Report{Status: "ok", Vacuumed: true}, "vacuumed: the archive was rewritten once"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{NeedBytes: 3 << 30, FreeBytes: &free, Reason: store.VacuumDiskSpace}}, "needs 3.0 GB free on its disk and 1.0 MB is free"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{NeedBytes: 1 << 20, Reason: store.VacuumUnmeasured}}, "could not be measured"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{Reason: store.VacuumCancelled}}, "stopped before"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{Reason: store.VacuumFailed, Error: "disk I/O error"}}, "failed (disk I/O error)"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{Reason: store.VacuumLogPending}}, "kept the rewrite's write-ahead log"},
+		{syncer.Report{Status: "ok", VacuumPending: &store.VacuumPending{NeedBytes: 1 << 20, Reason: store.VacuumNotRun}}, "the next m365crawl sync rewrites the archive once"},
+	} {
+		if got := renderToString(t, "sync", c.r); !strings.Contains(got, c.want) {
+			t.Errorf("want %q in:\n%s", c.want, got)
+		}
+	}
+	if got := renderToString(t, "sync", syncer.Report{Status: "ok"}); strings.Contains(got, "vacuum") {
+		t.Fatalf("vacuum shown without one:\n%s", got)
+	}
+}

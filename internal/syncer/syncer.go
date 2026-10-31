@@ -32,6 +32,9 @@ type Options struct {
 	// The archive comes out the same either way; this is the check, not a repair. The read
 	// memory is refreshed by it.
 	FullRead bool
+	// Explicit says the operator asked for this sync (`sync`, `watch`), not a read's implicit sync.
+	// Only an explicit sync runs the archive's one-time VACUUM (store.VacuumOnce).
+	Explicit bool
 	// OutlookEnabled reads the new Outlook store as a second source, after the Teams sources. It
 	// is off unless the caller turns it on. OutlookRoot is the Outlook profiles directory; empty
 	// means outlookdesktop.DefaultRoot(). OutlookMinReadInterval is the least time between two
@@ -137,12 +140,32 @@ func Run(ctx context.Context, o Options) (rep Report, changes []Change, err erro
 			Message: "archived Scout sessions could not all be scrubbed again under the current rules (" + scoutErr.Error() + "); Teams and Outlook were still synced",
 			Fix:     "Free disk space if the disk is full, then run m365crawl sync or m365crawl scout sync again; the re-scrub resumes where it stopped."}
 	}
+	// An archive an older version wrote is rewritten once, so nothing it left in free space
+	// survives; a read's implicit sync never does this.
+	// A cancelled run does not start it and says it is still due.
+	if o.Explicit {
+		var vacErr error
+		if ctx.Err() != nil {
+			rep.VacuumPending, vacErr = vacuumState(st, context.WithoutCancel(ctx))
+			if rep.VacuumPending != nil {
+				rep.VacuumPending.Reason = store.VacuumCancelled
+			}
+		} else {
+			rep.VacuumPending, rep.Vacuumed, vacErr = vacuumOnce(st, ctx)
+		}
+		if vacErr != nil && err == nil {
+			err = errs.DBError(vacErr)
+		}
+	}
 	// Credential values a purge overwrote must not stay in the write-ahead log: a truncating
 	// checkpoint clears it, in this run or, when readers block it, in a later one. A purge that
 	// committed is cleared after even when the run was cancelled, as the run is recorded then, and
 	// a clear that failed may have left the log as it was, so it is reported pending.
 	purgedLog, logErr := clearPurgedLog(st, context.WithoutCancel(ctx))
 	rep.PurgedLogPending = purgedLog.Pending || logErr != nil
+	if rep.Vacuumed && rep.PurgedLogPending {
+		rep.VacuumPending = &store.VacuumPending{Reason: store.VacuumLogPending}
+	}
 	if logErr != nil && err == nil {
 		err = errs.DBError(logErr)
 	}
@@ -916,4 +939,7 @@ var (
 	conflictFn           = (*memo).conflict
 	// clearPurgedLog is store.ClearPurgedLog; tests make it fail or stay pending.
 	clearPurgedLog = (*store.Store).ClearPurgedLog
+	// vacuumOnce is store.VacuumOnce; tests make it fail or stay pending.
+	vacuumOnce  = (*store.Store).VacuumOnce
+	vacuumState = (*store.Store).VacuumState
 )

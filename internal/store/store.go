@@ -81,7 +81,18 @@ func Open(ctx context.Context, path string) (*Store, error) {
 // SQLite overwrite with zeros the content it deletes or replaces, in its page and in the pages it
 // frees, instead of leaving it in free space, so a value the archive replaces or clears is not left
 // on disk (SPEC section 3.2). crawlkit's pool holds that one connection for the Store's life.
-const writerPragmas = "pragma secure_delete=on;\n"
+// The first time this version opens an archive for writing it records whether the archive needs
+// its one-time VACUUM (VacuumOnce): not when the file had no tables yet (this version creates it),
+// and yes when an older version wrote it.
+const writerPragmas = `pragma secure_delete=on;
+create table if not exists meta(
+  key text primary key,
+  value text not null
+);
+insert into meta(key,value) select '` + vacuumKey + `',
+  case when (select count(*) from sqlite_master where tbl_name<>'meta')=0 then 'done' else 'needed' end
+  where not exists(select 1 from meta where key='` + vacuumKey + `');
+`
 
 // checkSchemaNotNewer fails with the coded archive_newer error when the archive at path records a
 // schema version above SchemaVersion. crawlkit refuses such an archive too, but with a plain error.

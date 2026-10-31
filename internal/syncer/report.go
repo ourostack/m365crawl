@@ -49,8 +49,14 @@ type Report struct {
 	// PurgedLogPending is set when credential values a purge cleared (in this run or an earlier
 	// one) may still be in the archive's write-ahead log, because readers of the archive kept every
 	// checkpoint from truncating it. The next sync tries again.
-	PurgedLogPending bool     `json:"purged_log_pending,omitempty"`
-	OtherOrigins     []string `json:"other_origins"`
+	PurgedLogPending bool `json:"purged_log_pending,omitempty"`
+	// Vacuumed is set on the explicit sync that ran the archive's one-time VACUUM: an archive an
+	// older version wrote was rewritten, so nothing it left in free space survives in the file.
+	Vacuumed bool `json:"vacuumed,omitempty"`
+	// VacuumPending is set when that VACUUM is still due and did not run: the space it needs on the
+	// archive's volume, the space there was, and why. A later explicit sync tries again.
+	VacuumPending *store.VacuumPending `json:"vacuum_pending,omitempty"`
+	OtherOrigins  []string             `json:"other_origins"`
 	// OutlookClassicOnly names Outlook profile directories that hold only the classic Outlook's
 	// database, which is not read. It is a note, not a loss.
 	OutlookClassicOnly []string `json:"outlook_classic_only,omitempty"`

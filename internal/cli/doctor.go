@@ -225,6 +225,9 @@ func (rt *runtime) archiveChecks() []check {
 	if old {
 		cs = append(cs, check{Name: "archive_upgrade", OK: true, Warn: true, Detail: "archive from an older version; the next sync upgrades it", Fix: "Run `m365crawl sync`."})
 	}
+	if c, ok := rt.vacuumCheck(st); ok {
+		cs = append(cs, c)
+	}
 	if c, ok := lastSyncStatusCheck(row.LastRun); ok {
 		cs = append(cs, c)
 	}
@@ -444,4 +447,25 @@ func outlookProfileState(p outlookdesktop.Profile, row store.CalendarSource, sta
 		}
 	}
 	return detail + "; not read yet", ""
+}
+
+// vacuumStateFn is store.VacuumState; tests replace it.
+var vacuumStateFn = (*store.Store).VacuumState
+
+// vacuumCheck warns, never fails, while the archive's one-time VACUUM is still due: an older
+// version wrote it, so it can hold content it replaced or cleared in free space. It is absent when
+// nothing is due.
+func (rt *runtime) vacuumCheck(st *store.Store) (check, bool) {
+	v, err := vacuumStateFn(st, rt.ctx)
+	switch {
+	case err != nil:
+		return check{Name: "vacuum_pending", OK: true, Warn: true, Detail: "cannot read whether the archive still needs its one-time rewrite: " + err.Error(), Fix: "Run `m365crawl sync`."}, true
+	case v == nil:
+		return check{}, false
+	case v.Reason == store.VacuumDiskSpace:
+		return check{Name: "vacuum_pending", OK: true, Warn: true, Detail: fmt.Sprintf("the archive, written by an older version, still needs its one-time rewrite, which needs %s free on its disk; %s is free", humanBytes(v.NeedBytes), humanBytes(*v.FreeBytes)),
+			Fix: "Free at least " + humanBytes(v.NeedBytes) + " on the archive's disk, then run `m365crawl sync`."}, true
+	}
+	return check{Name: "vacuum_pending", OK: true, Warn: true, Detail: "the archive, written by an older version, still needs its one-time rewrite (" + humanBytes(v.NeedBytes) + " free on its disk)",
+		Fix: "Run `m365crawl sync`."}, true
 }
