@@ -310,10 +310,8 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		gap := true
 		out := newList(nil, false)
 		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
-		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
-			return nil, err
-		}
 		if st == nil {
+			out.RangeCoverage, _ = rt.calendarRangeCoverage(nil, from, to) // without an archive it cannot fail
 			return out, nil
 		}
 		agenda, err := st.CalendarAgenda(rt.ctx, store.CalendarFilter{
@@ -321,6 +319,9 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			IncludeCancelled: c.IncludeCancelled, IncludeDeclined: c.IncludeDeclined, IncludeMasters: c.IncludeMasters, IncludeRemoved: c.IncludeRemoved,
 		})
 		if err != nil {
+			return nil, err
+		}
+		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
 			return nil, err
 		}
 		if agenda.NoTables {
