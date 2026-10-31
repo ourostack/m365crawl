@@ -320,10 +320,10 @@ func TestRegisteredSourceReadsSayTheyDidNotRefresh(t *testing.T) {
 			t.Errorf("fresh --max-age 0 %v: notices %q", args, notices)
 		}
 	}
-	// The source was last attempted three hours ago: --no-sync now cautions, naming the age.
-	e.exec(`update knowledge_attempts set started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-3 hours')`)
+	// The source was last attempted long ago: --no-sync now cautions, naming when.
+	e.exec(`update knowledge_attempts set started_at='2026-10-11T03:00:00.000Z'`)
 	m, _ := read("--no-sync", "people", "sources")
-	if notices := noticesOf(m); len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "(--no-sync) and the oldest was last read 3h ago") ||
+	if notices := noticesOf(m); len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "(--no-sync) and the oldest was last read at 2026-10-11T03:00:00Z") ||
 		!strings.Contains(notices[len(notices)-1], "drop --no-sync") {
 		t.Errorf("stale --no-sync: notices %q", notices)
 	}

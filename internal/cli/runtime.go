@@ -69,8 +69,11 @@ type runtime struct {
 	healthUntil time.Time
 }
 
+// runtimeClock is every command's clock; tests pin it to make clock-dependent output repeatable.
+var runtimeClock = time.Now
+
 func newRuntime(ctx context.Context, g *Globals, stdout, stderr io.Writer) *runtime {
-	return &runtime{ctx: ctx, g: g, stdout: stdout, stderr: stderr, stdoutTTY: isTTY(stdout), stderrTTY: isTTY(stderr), now: time.Now}
+	return &runtime{ctx: ctx, g: g, stdout: stdout, stderr: stderr, stdoutTTY: isTTY(stdout), stderrTTY: isTTY(stderr), now: runtimeClock}
 }
 
 // setup validates the global flags and resolves their defaults.
@@ -468,12 +471,13 @@ func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*ti
 		" turns the refresh off, it does not mean fresh, so newer items may be missing. For fresh data " + undo + "; pass --no-sync to read the archive as it is."
 	if !zeroAge {
 		oldest, known := rt.oldestAttempt(attempts)
-		if known && oldest <= defaultMaxAge {
+		if known && rt.now().Sub(oldest) <= defaultMaxAge {
 			return
 		}
+		// An absolute time, not an age: two reads of the same archive print the same caution.
 		read := "the oldest has not been read since the archive's last complete sync"
 		if known {
-			read = "the oldest was last read " + compactDuration(roundAge(oldest)) + " ago"
+			read = "the oldest was last read at " + oldest.UTC().Format(time.RFC3339)
 		}
 		notice = "This read did not refresh its registered " + what + " sources (" + rt.syncOff + ") and " + read + ", so newer items may be missing. For fresh data " + undo + "."
 	}
@@ -483,21 +487,34 @@ func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*ti
 	}
 }
 
-// oldestAttempt is how long ago the stalest of attempts was made. A source never attempted counts
-// as old as the archive's last complete sync; known is false when that is unknown too.
-func (rt *runtime) oldestAttempt(attempts []*time.Time) (oldest time.Duration, known bool) {
+// oldestAttempt is when the stalest of attempts was made. A source never attempted counts as
+// read at the archive's last complete sync; known is false when that is unknown too.
+func (rt *runtime) oldestAttempt(attempts []*time.Time) (oldest time.Time, known bool) {
 	for _, at := range attempts {
-		if at != nil {
-			oldest = max(oldest, rt.now().Sub(*at))
-			continue
+		if at == nil {
+			last := rt.lastCompleteSync()
+			if last.IsZero() {
+				return time.Time{}, false
+			}
+			at = &last
 		}
-		age := rt.loopArchiveAge()
-		if age == nil {
-			return 0, false
+		if oldest.IsZero() || at.Before(oldest) {
+			oldest = *at
 		}
-		oldest = max(oldest, time.Duration(*age)*time.Second)
 	}
 	return oldest, true
+}
+
+// lastCompleteSync is when the accounts this read covers were last fully synced, or zero when the
+// archive is missing or cannot say.
+func (rt *runtime) lastCompleteSync() time.Time {
+	st, err := store.OpenReadOnly(rt.ctx, rt.dbPath)
+	if err != nil {
+		return time.Time{}
+	}
+	defer func() { _ = st.Close() }()
+	last, _ := rt.freshness(st)
+	return last
 }
 
 // sourceAttempts are the attempted_at of a coverage object's sources.
