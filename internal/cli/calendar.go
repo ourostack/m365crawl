@@ -1160,9 +1160,6 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		gap := true
 		out := newList(nil, false)
 		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
-		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
-			return nil, err
-		}
 		if st == nil {
 			return out, nil
 		}
