@@ -49,22 +49,17 @@ const workIQCacheMailFilter = `not exists(select 1 from workiq_rows w
 where w.kind='mail' and w.account_id=mail_messages.account
 and w.item_rowid=mail_messages.rowid and w.winner='workiq_server')`
 
+// hasWorkIQ is the one presence check that does not read "no tables" as "no feature": WorkIQ's
+// identity and progress state is evidence a writable open must not recreate empty, so an archive
+// recorded at WorkIQSchemaVersion or above without it is refused as incomplete (checkSchemaNotNewer
+// runs this before every open). Its number was settled long before #306.
 func (s *Store) hasWorkIQ(ctx context.Context) (bool, error) {
-	var version int
-	if err := s.db.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
+	version, tables, err := featureState(ctx, s.db, workIQFeature)
+	if err != nil || version < workIQFeature.version {
 		return false, err
 	}
-	if version < WorkIQSchemaVersion {
-		return false, nil
-	}
-	var tables int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table' and name in
-('workiq_accounts','workiq_attempts','workiq_frontiers','workiq_pages','workiq_rows','workiq_aliases','workiq_source_keys',
-'workiq_folders','workiq_censuses','workiq_census_members','workiq_gaps','workiq_mail_receipts')`).Scan(&tables); err != nil {
-		return false, err
-	}
-	if tables != 12 {
-		return false, errors.New("WorkIQ archive state is incomplete")
+	if tables != len(workIQFeature.tables) {
+		return false, errors.New(workIQFeature.name + " is incomplete")
 	}
 	return true, nil
 }

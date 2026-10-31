@@ -86,18 +86,8 @@ type DirectedWriteChange struct {
 // directedWriteNow is the log's clock; a test seam.
 var directedWriteNow = time.Now
 
-func hasDirectedWrites(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}) (bool, error) {
-	var version, tables int
-	if err := q.QueryRowContext(ctx, `select coalesce(max(version),0),(select count(*) from sqlite_master where type='table' and name in
-('directed_writes','directed_write_events')) from schema_migrations`).Scan(&version, &tables); err != nil || version < DirectedWriteSchemaVersion {
-		return false, err
-	}
-	if tables != 2 {
-		return false, errors.New("directed write log is incomplete")
-	}
-	return true, nil
+func hasDirectedWrites(ctx context.Context, q rowQuerier) (bool, error) {
+	return hasFeature(ctx, q, directedWriteFeature)
 }
 
 const directedWriteColumns = `id,created_at,updated_at,contract,action,effect,agent,reason,identity,conversation,message,
@@ -247,14 +237,8 @@ values(?,?,?,?,?,?)`, id, now, change.Outcome, change.Phase, change.Verification
 	return true, tx.Commit()
 }
 
-func hasDirectedDrafts(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}) (bool, error) {
-	var version int
-	if err := q.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil || version < DirectedDraftSchemaVersion {
-		return false, err
-	}
-	return true, nil
+func hasDirectedDrafts(ctx context.Context, q rowQuerier) (bool, error) {
+	return hasFeature(ctx, q, directedDraftFeature)
 }
 
 // RecordDirectedDraft records the reply draft a write made, before the write may send it. It
