@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -18,6 +19,8 @@ const notesNewest = "/chats/48:notes/messages?$top=1&$orderby=createdDateTime%20
 type writtenItem struct {
 	ID, Parent, Subject, Text, Created string
 	To                                 []string
+	MessageID                          string
+	Sent                               bool
 }
 
 func writesState() []writtenItem {
@@ -77,6 +80,9 @@ func createEntity(parent string, body json.RawMessage) (any, bool) {
 
 // writeFetch answers the reads a directed write makes; ok is false for other paths.
 func writeFetch(path string) (any, int, bool) {
+	if data, status, ok := replyFetch(path); ok {
+		return data, status, true
+	}
 	items := writesState()
 	hidden := os.Getenv("WORKIQ_WRITES_MODE") == "hidden"
 	watermark := map[string]any{"id": "1000", "chatId": "48:notes", "createdDateTime": "2026-10-31T10:00:00Z",
@@ -115,6 +121,84 @@ func writeFetch(path string) (any, int, bool) {
 			return chatMessage(item), 200, true
 		}
 		return map[string]any{"error": map[string]any{"code": "NotFound"}}, 404, true
+	}
+	return nil, 0, false
+}
+
+// The reply world: one mail the synthetic user sent to themselves, with its sent and received copies.
+const selfMail = "<self@example.invalid>"
+
+func selfCopy(id, folder, changeKey string) map[string]any {
+	return map[string]any{"id": id, "parentFolderId": folder, "changeKey": changeKey, "isDraft": false, "subject": "Synthetic plan",
+		"from": map[string]any{"emailAddress": map[string]any{"address": "test.user@example.invalid"}}}
+}
+
+// doAction answers do_action: createReply on the received copy, and send of a reply draft.
+func doAction(action string, body json.RawMessage) (any, bool) {
+	switch os.Getenv("WORKIQ_WRITES_MODE") {
+	case "lost":
+		os.Exit(3)
+	case "reject":
+		return map[string]any{"isError": true, "structuredContent": map[string]any{"statusCode": 400,
+			"error": map[string]any{"error": map[string]any{"code": "BadRequest", "message": "Synthetic private refusal"}}}}, true
+	}
+	items := writesState()
+	if action == "/me/messages/inbox-self/createReply" {
+		var wire struct{ Comment string }
+		if json.Unmarshal(body, &wire) != nil || wire.Comment == "" {
+			return nil, false
+		}
+		n := len(items) + 1
+		item := writtenItem{ID: fmt.Sprintf("reply-%d", n), Parent: "reply", Text: wire.Comment, To: []string{"test.user@example.invalid"},
+			MessageID: fmt.Sprintf("<reply-%d@example.invalid>", n), Created: fmt.Sprintf("2026-10-31T11:%02d:00Z", n)}
+		saveWritesState(append(items, item))
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 201,
+			"data": map[string]any{"id": item.ID, "isDraft": true, "internetMessageId": item.MessageID}}}, true
+	}
+	draft, ok := strings.CutSuffix(strings.TrimPrefix(action, "/me/messages/"), "/send")
+	if !ok || string(body) != "{}" {
+		return nil, false
+	}
+	for i := range items {
+		if items[i].ID == draft && items[i].Parent == "reply" && !items[i].Sent {
+			items[i].Sent = true
+			saveWritesState(items)
+			return map[string]any{"structuredContent": map[string]any{"statusCode": 202, "data": nil}}, true
+		}
+	}
+	return map[string]any{"isError": true, "structuredContent": map[string]any{"statusCode": 404, "error": map[string]any{"code": "ErrorItemNotFound"}}}, true
+}
+
+// replyFetch answers the reads a reply makes; ok is false for other paths.
+func replyFetch(path string) (any, int, bool) {
+	filter := ""
+	if u, err := url.ParseRequestURI(path); err == nil {
+		filter = u.Query().Get("$filter")
+	}
+	switch {
+	case path == "/me/mailFolders/sentitems?$select=id":
+		return map[string]any{"id": "sent-folder"}, 200, true
+	case strings.HasPrefix(path, "/me/messages?$filter=") && strings.Contains(filter, selfMail):
+		return map[string]any{"value": []any{selfCopy("sent-self", "sent-folder", "ck-sent"), selfCopy("inbox-self", "inbox", "ck-1")}}, 200, true
+	case strings.HasPrefix(path, "/me/mailFolders/sentitems/messages?$filter="):
+		values := []any{}
+		for _, item := range writesState() {
+			if item.Sent && strings.Contains(filter, item.MessageID) && os.Getenv("WORKIQ_WRITES_MODE") != "hidden" {
+				values = append(values, map[string]any{"id": "sent-" + item.ID, "internetMessageId": item.MessageID,
+					"toRecipients": []any{map[string]any{"emailAddress": map[string]any{"address": "test.user@example.invalid"}}}})
+			}
+		}
+		return map[string]any{"value": values}, 200, true
+	case strings.HasPrefix(path, "/me/messages/reply-"):
+		id, _, _ := strings.Cut(strings.TrimPrefix(path, "/me/messages/"), "?")
+		for _, item := range writesState() {
+			if item.ID == id {
+				return map[string]any{"id": item.ID, "isDraft": !item.Sent, "internetMessageId": item.MessageID,
+					"toRecipients": []any{map[string]any{"emailAddress": map[string]any{"address": "test.user@example.invalid"}}},
+					"body":         map[string]any{"contentType": "html", "content": "<html><body>" + item.Text + "<hr>quoted</body></html>"}}, 200, true
+			}
+		}
+		return map[string]any{"error": map[string]any{"code": "ErrorItemNotFound"}}, 404, true
 	}
 	return nil, 0, false
 }

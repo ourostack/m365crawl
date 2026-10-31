@@ -114,7 +114,7 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 - **Start with the apps you already use.** Desktop capture needs no API token or app registration. It reads the signed-in apps' caches, with Full Disk Access on macOS.
 - **Built for agent context budgets.** Every item carries a stable id, and every Teams item a deep link. `--fields` and `--max-text` return only what you need.
 - **Query locally.** Search and recall read SQLite, with full-text search or plain SQL, instead of making a service request for each question. Explicit transcript fetch and sign-in use the tool-owned browser; desktop-app and browser access can still be governed by your organization's policies.
-- **Read-only unless you turn writes on.** By default it cannot send, reply, react, move or mark messages read. If you run `m365crawl writes on` yourself, agents you direct can send a Teams chat message or save a mail draft as you through WorkIQ, each recorded with the agent and its reason; see [docs/commands.md](docs/commands.md#writes). Sync writes its own archive and private working files, never the source apps.
+- **Read-only unless you turn writes on.** By default it cannot send, reply, react, move or mark messages read. If you run `m365crawl writes on` yourself, agents you direct can send a Teams chat message, save a mail draft or reply to a mail as you through WorkIQ, each recorded with the agent and its reason; see [docs/commands.md](docs/commands.md#writes). Sync writes its own archive and private working files, never the source apps.
 - **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
 
 ## Scope and requesting support
@@ -131,7 +131,7 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 
 - It sees only what the desktop apps cached, so sync regularly.
 - Supported: macOS and Windows with the new Teams app, plus new Outlook's cached mail and calendar on Mac and Windows. OWA calendar retains source uncertainty and does not infer deletions; several content mailboxes in one Windows profile are each read into their own account. Classic Teams and classic Outlook are not supported. Linux can read archives and explicit copied supported sources, but desktop-cache discovery is not supported.
-- Read-only by default. With writes on, only a Teams chat message and a new mail draft, through WorkIQ; no replying to mail, reacting, moving or marking read.
+- Read-only by default. With writes on, only a Teams chat message, a new mail draft and a reply to one mail, through WorkIQ; no reply-all, new mail, reacting, moving or marking read.
 - Attachments are recorded as metadata; their bytes are not copied into the archive.
 - Mac Outlook's local store does not separate To from Cc; Windows preserves To/Cc/Bcc roles and cached conversation identities. Importance is read but not yet verified against Outlook's own display.
 - The calendar holds only the days Teams cached plus what Outlook's store holds, and attendees, body and rooms only for meetings someone opened.

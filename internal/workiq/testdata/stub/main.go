@@ -465,6 +465,7 @@ func main() {
 				Args     struct {
 					URLs   []string        `json:"entityUrls"`
 					Parent string          `json:"parentUrl"`
+					Action string          `json:"actionUrl"`
 					Body   json.RawMessage `json:"jsonBody"`
 					Query  string          `json:"query"`
 					Path   string          `json:"path"`
@@ -503,16 +504,19 @@ func main() {
 				reply["result"] = result
 				break
 			}
-			if request.Params.Name == "create_entity" {
+			if request.Params.Name == "create_entity" || request.Params.Name == "do_action" {
 				if name := os.Getenv("WORKIQ_ACQUISITION_TRANSCRIPT"); name != "" {
 					f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 					if err != nil {
 						os.Exit(83)
 					}
-					_ = json.NewEncoder(f).Encode(map[string]any{"tool": "create_entity", "path": request.Params.Args.Parent, "pinned": len(os.Args) == 4})
+					_ = json.NewEncoder(f).Encode(map[string]any{"tool": request.Params.Name, "path": request.Params.Args.Parent + request.Params.Args.Action, "pinned": len(os.Args) == 4})
 					_ = f.Close()
 				}
 				result, ok := createEntity(request.Params.Args.Parent, request.Params.Args.Body)
+				if request.Params.Args.Action != "" {
+					result, ok = doAction(request.Params.Args.Action, request.Params.Args.Body)
+				}
 				if !ok {
 					os.Exit(93)
 				}

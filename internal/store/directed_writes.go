@@ -11,6 +11,9 @@ import (
 // DirectedWriteSchemaVersion is the archive schema that added the directed write log.
 const DirectedWriteSchemaVersion = 26
 
+// DirectedDraftSchemaVersion is the archive schema that added the reply drafts of directed writes.
+const DirectedDraftSchemaVersion = 28
+
 // The write log is append/update-only: no row of either table is ever deleted, and an event is
 // never changed.
 const directedWriteSchemaDDL = `
@@ -35,6 +38,14 @@ create unique index if not exists directed_writes_intent on directed_writes(inte
 create unique index if not exists directed_writes_server on directed_writes(action,conversation,server_id) where server_id<>'';
 create trigger if not exists directed_writes_no_delete before delete on directed_writes
 begin select raise(abort,'directed_writes rows are never deleted'); end;
+create table if not exists directed_write_drafts(
+ write_id integer primary key references directed_writes(id),
+ draft_id text not null, internet_message_id text not null, recorded_at text not null
+);
+create trigger if not exists directed_write_drafts_no_delete before delete on directed_write_drafts
+begin select raise(abort,'directed_write_drafts rows are never deleted'); end;
+create trigger if not exists directed_write_drafts_no_update before update on directed_write_drafts
+begin select raise(abort,'directed_write_drafts rows are never changed'); end;
 create table if not exists directed_write_events(
  id integer primary key autoincrement,
  write_id integer not null references directed_writes(id),
@@ -234,4 +245,55 @@ values(?,?,?,?,?,?)`, id, now, change.Outcome, change.Phase, change.Verification
 	}
 	changed = true
 	return true, tx.Commit()
+}
+
+func hasDirectedDrafts(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (bool, error) {
+	var version int
+	if err := q.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil || version < DirectedDraftSchemaVersion {
+		return false, err
+	}
+	return true, nil
+}
+
+// RecordDirectedDraft records the reply draft a write made, before the write may send it. It
+// applies only while the write is still unknown and in flight; recorded is false otherwise.
+func (s *Store) RecordDirectedDraft(ctx context.Context, id int64, draftID, internetMessageID string) (recorded bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if err != nil || !recorded {
+			_ = tx.Rollback()
+		}
+	}()
+	now := directedWriteNow().UTC().Format(timeLayout)
+	res, err := tx.ExecContext(ctx, `insert into directed_write_drafts(write_id,draft_id,internet_message_id,recorded_at)
+select id,?,?,? from directed_writes where id=? and outcome='unknown' and phase='in_flight'`, draftID, internetMessageID, now, id)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return false, nil
+	}
+	if _, err = tx.ExecContext(ctx, `insert into directed_write_events(write_id,at,outcome,phase,verification,cause)
+values(?,?,'unknown','in_flight','','drafted')`, id, now); err != nil {
+		return false, err
+	}
+	recorded = true
+	return true, tx.Commit()
+}
+
+// DirectedDraft reads the reply draft a write recorded; ok is false when it recorded none.
+func (s *Store) DirectedDraft(ctx context.Context, id int64) (draftID, internetMessageID string, ok bool, err error) {
+	if has, err := hasDirectedDrafts(ctx, s.db); err != nil || !has {
+		return "", "", false, err
+	}
+	err = s.db.QueryRowContext(ctx, `select draft_id,internet_message_id from directed_write_drafts where write_id=?`, id).Scan(&draftID, &internetMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return draftID, internetMessageID, err == nil, err
 }

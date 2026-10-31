@@ -55,7 +55,10 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 26 adds the directed write log (directed_writes.go): one row per accepted directed
 // write and its append-only events. It is additive and stays empty until the person turns writes
 // on. (Version 25 is reserved by a concurrent change; the number is settled at merge.)
-const SchemaVersion = 26
+// Version 28 adds directed_write_drafts, the reply drafts directed writes make before they send
+// them (directed_writes.go). It is additive. (Version 27 is taken by a concurrent change; the
+// number is settled at merge.)
+const SchemaVersion = 28
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
