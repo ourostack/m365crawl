@@ -23,7 +23,7 @@ func TestE2EReadsDoNotFillAForeignArchive(t *testing.T) {
 	}
 
 	other := newEnv(t) // another machine, with its own home and machine ID
-	shared := filepath.Join(other.tmp, "shared.db")
+	shared := filepath.Join(other.tmp, "shared", "m365crawl.db") // a new folder: Windows refuses an existing unprotected one
 	mustExit(t, other.run("sync", "--teams-root", other.root, "--db", shared), 0)
 	read := []string{"messages", "--teams-root", other.root, "--db", shared, "--max-age", "1ns"}
 	m = ok(t, e.run(read...))

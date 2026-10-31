@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -81,11 +82,25 @@ func readMachineID(path string) string {
 	return string(b)
 }
 
-// sourceKey is one source's identity: a hash of the machine ID, the source kind and its root ("" for
-// the default root), so the archive holds no machine, path or account in clear.
-func sourceKey(machine, kind, root string) string {
-	sum := sha256.Sum256([]byte("m365crawl source identity v1\x00" + machine + "\x00" + kind + "\x00" + root))
+// sourceKey is one source's identity in one archive: a hash of the machine ID, the source kind, its
+// root ("" for the default root) and the archive's own path, so the archive holds no machine, path
+// or account in clear, and a copy of it at another path, even on this machine, does not match.
+func sourceKey(machine, kind, root, archive string) string {
+	sum := sha256.Sum256([]byte("m365crawl source identity v1\x00" + machine + "\x00" + kind + "\x00" + root + "\x00" + archive))
 	return kind + ":" + hex.EncodeToString(sum[:])
+}
+
+// canonicalPath is the absolute path p with its symbolic links resolved as far as it exists, so
+// one archive named through a link, from another working directory or before its file exists has
+// one path.
+func canonicalPath(p string) string {
+	dir, rest := filepath.Clean(p), ""
+	real, err := filepath.EvalSymlinks(dir)
+	for err != nil && dir != filepath.Dir(dir) {
+		dir, rest = filepath.Dir(dir), filepath.Join(filepath.Base(dir), rest)
+		real, err = filepath.EvalSymlinks(dir)
+	}
+	return filepath.Join(cmp.Or(real, dir), rest)
 }
 
 // sourceIdentity is the keys of the sources this run's sync reads: Teams first, then Outlook when it
@@ -95,9 +110,10 @@ func (rt *runtime) sourceIdentity(create bool) []string {
 	if id == "" {
 		return nil
 	}
-	keys := []string{sourceKey(id, "teams", rt.rootRef(rt.root))}
+	archive := canonicalPath(rt.archiveRef())
+	keys := []string{sourceKey(id, "teams", rt.rootRef(rt.root), archive)}
 	if rt.outlookOn {
-		keys = append(keys, sourceKey(id, "outlook", rt.rootRef(rt.outlookRoot)))
+		keys = append(keys, sourceKey(id, "outlook", rt.rootRef(rt.outlookRoot), archive))
 	}
 	return keys
 }
@@ -164,11 +180,11 @@ func (rt *runtime) checkFeed() error {
 }
 
 // fed says whether this machine's sources feed the archive. An archive with a recorded identity is
-// fed when it holds the key of every source this read would sync; an Outlook source that is on only
-// by default also counts when the archive never recorded an Outlook source, because it is this
-// machine's own default (a sync with --outlook-root none fed it). An archive no sync recorded an
-// identity in, written by an older m365crawl, is fed when every Teams source its sync history
-// names is under this read's Teams root (legacyFed).
+// fed when it holds this machine's key, for this archive's path, of every source this read would
+// sync; an Outlook source that is on only by default also counts when the archive never recorded an
+// Outlook source, because it is this machine's own default (a sync with --outlook-root none fed it).
+// An archive no sync recorded an identity in, written by an older m365crawl, is fed when its sync
+// history names a Teams profile under this read's Teams root (legacyFed).
 func (rt *runtime) fed(id store.SourceIdentity) bool {
 	if len(id.Recorded) == 0 {
 		return rt.legacyFed(id.TeamsSources)
@@ -189,24 +205,26 @@ func (rt *runtime) fed(id store.SourceIdentity) bool {
 }
 
 // legacyFed is the evidence an archive from before source identities has: the Teams sources
-// (<profile>|<origin>) its successful syncs read. It is fed when it names at least one and every
-// one is under this read's Teams root now. The first sync then records this machine's identity.
+// (<profile>|<origin>) its successful syncs read. It is fed when one of those Teams profiles is under
+// this read's Teams root now: profiles come and go (a sign-out, Teams' move to another origin), and
+// a fixture or another folder setup has other profile names. The first sync then records this
+// machine's identity for the archive.
 func (rt *runtime) legacyFed(sources []string) bool {
 	root := rt.root
 	if root == "" {
 		root = teamsdesktop.DefaultRoot()
 	}
-	found, _, err := discover(root)
+	found, _, _ := discover(root)
 	here := map[string]bool{}
 	for _, src := range found {
-		here[src.Key()] = true
+		here[src.Profile] = true
 	}
 	for _, src := range sources {
-		if !here[src] {
-			return false
+		if profile, _, _ := strings.Cut(src, "|"); here[profile] {
+			return true
 		}
 	}
-	return err == nil && len(sources) > 0
+	return false
 }
 
 // noteNotFed marks a read that did not sync because this machine does not feed its archive, with a

@@ -110,6 +110,19 @@ func TestReadOnAnArchiveThisMachineSyncedKeepsSyncing(t *testing.T) {
 	if m := readOn(t, e, own, "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncRan || m["notices"] != nil {
 		t.Fatalf("a read of this machine's archive = %v", m)
 	}
+	// A copy of it, even on this machine, is another archive: a forensic or scratch copy stays as
+	// it was copied.
+	raw, err := os.ReadFile(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(t.TempDir(), "copy.db")
+	if err := os.WriteFile(copied, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if m := readOn(t, e, copied, "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncForeignArchive {
+		t.Fatalf("a local copy of this machine's archive = %v", m)
+	}
 	// The same archive named by a relative path from its folder.
 	t.Chdir(filepath.Dir(own))
 	if m := readOn(t, e, filepath.Base(own), "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncRan {
@@ -305,8 +318,13 @@ func TestLegacyFedDiscoversTheDefaultTeamsRoot(t *testing.T) {
 	if !rt.legacyFed([]string{"P|https_teams.microsoft.com_0"}) || asked != teamsdesktop.DefaultRoot() {
 		t.Fatalf("default root %q", asked)
 	}
-	if rt.legacyFed(nil) {
-		t.Fatal("no sync history is no evidence")
+	// Profiles come and go, and Teams moves origins: one profile of the history that is here is
+	// enough.
+	if !rt.legacyFed([]string{"Gone|https_teams.microsoft.com_0", "P|https_teams.cloud.microsoft_0"}) {
+		t.Fatal("a moved origin and a profile that is gone")
+	}
+	if rt.legacyFed(nil) || rt.legacyFed([]string{"Other|https_teams.microsoft.com_0"}) {
+		t.Fatal("no sync history, or only other profiles, is no evidence")
 	}
 	discover = func(string) ([]teamsdesktop.Source, []string, error) { return nil, nil, errors.New("no Teams") }
 	if rt.legacyFed([]string{"P|https_teams.microsoft.com_0"}) {
@@ -370,8 +388,10 @@ func TestCheckFeedReportsAnUnreadableArchive(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("not an archive"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, stderr := runOn(e, bad, "--max-age", "1ns", "messages"); code == 0 || stderr == "" {
-		t.Fatalf("an unreadable archive = %d %q", code, stderr)
+	for _, args := range [][]string{{"messages"}, {"notes", "list"}} {
+		if code, _, stderr := runOn(e, bad, append([]string{"--max-age", "1ns"}, args...)...); code == 0 || stderr == "" {
+			t.Fatalf("%v on an unreadable archive = %d %q", args, code, stderr)
+		}
 	}
 }
 
@@ -384,5 +404,17 @@ func TestNotFedNoticeWithoutAnExecutableSync(t *testing.T) {
 	m := readOn(t, e, "scratch.db", "messages")
 	if m["implicit_sync"] != implicitSyncNoArchive || !hasNotice(m, "There is no archive at scratch.db", "run `m365crawl --db scratch.db sync`") {
 		t.Fatalf("no working directory = %v", m)
+	}
+}
+
+func TestCanonicalPathResolvesLinksAsFarAsThePathExists(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symbolic links here")
+	}
+	want := filepath.Join(canonicalPath(real), "not", "yet.db")
+	if got := canonicalPath(filepath.Join(link, "not", "yet.db")); got != want {
+		t.Fatalf("through a link = %q, want %q", got, want)
 	}
 }
