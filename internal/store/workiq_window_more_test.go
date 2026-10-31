@@ -322,3 +322,43 @@ func TestWorkIQMailWindowSpansMergeProvenWindows(t *testing.T) {
 	}
 	must0(legacy.Close())
 }
+
+func TestWorkIQWindowAdmissionDecodesEachStagedPageOncePerBatch(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	attempt := seedWorkIQWindowAttempt(t, s)
+	must0(s.EnsureWorkIQWindowFolders(ctx, attempt, []workiq.Folder{{ID: "inbox-id", Name: "Inbox", WellKnown: "inbox"}}))
+	resource := WorkIQWindowDeltaResource("inbox-id", windowSince)
+	in := windowSince.Add(time.Hour)
+	// Graph IDs alternate between the two pages, so an order by Graph ID would revisit each page.
+	stageWindow(t, s, attempt, "inbox-id", resource, []json.RawMessage{
+		windowMail("a", "inbox-id", "a@example.test", in, "2026-09-02T00:00:00Z"),
+		windowMail("c", "inbox-id", "c@example.test", in, "2026-09-02T00:00:00Z"),
+		windowMail("e", "inbox-id", "e@example.test", in, "2026-09-02T00:00:00Z"),
+	}, "/me/mailFolders/inbox-id/messages/delta?$skiptoken=two", "")
+	stageWindow(t, s, attempt, "inbox-id", resource, []json.RawMessage{
+		windowMail("b", "inbox-id", "b@example.test", in, "2026-09-02T00:00:00Z"),
+		windowMail("d", "inbox-id", "d@example.test", in, "2026-09-02T00:00:00Z"),
+		windowMail("f", "inbox-id", "f@example.test", in, "2026-09-02T00:00:00Z"),
+	}, "", "/me/mailFolders/inbox-id/messages/delta?$deltatoken=x")
+	decodes := 0
+	defer func(old func(context.Context, []byte) (workiq.Page, error)) { decodeWorkIQWindowPage = old }(decodeWorkIQWindowPage)
+	decodeWorkIQWindowPage = func(ctx context.Context, raw []byte) (workiq.Page, error) {
+		decodes++
+		return workiq.DecodePage(ctx, raw)
+	}
+	got := must(s.AdmitWorkIQWindow(ctx, attempt, []string{resource}, 128))
+	if got.Admitted != 6 || !got.Done || decodes != 2 {
+		t.Fatalf("admission decoded %d pages for two staged pages: %+v", decodes, got)
+	}
+	// A page whose items are not a list matches no member.
+	stageWindow(t, s, attempt, "inbox-id", resource, []json.RawMessage{
+		windowMail("g", "inbox-id", "g@example.test", in, "2026-09-02T00:00:00Z"),
+	}, "", "/me/mailFolders/inbox-id/messages/delta?$deltatoken=y")
+	decodeWorkIQWindowPage = func(context.Context, []byte) (workiq.Page, error) {
+		return workiq.Page{Data: json.RawMessage(`{"value":1}`)}, nil
+	}
+	if _, err := s.AdmitWorkIQWindow(ctx, attempt, []string{resource}, 128); err == nil || !strings.Contains(err.Error(), "does not match its staged page") {
+		t.Fatalf("a page without an item list was admitted: %v", err)
+	}
+}
