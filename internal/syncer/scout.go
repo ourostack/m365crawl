@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"runtime"
 	"time"
 
@@ -46,26 +47,65 @@ type ScoutReport struct {
 var ErrScoutFolderNotFound = &scoutcapture.Error{Code: "scout_folder_not_found"}
 
 var (
-	scoutScan      = scoutcapture.Scan
-	scoutCheck     = scoutcapture.Check
-	scoutStamp     = scoutsessions.Stamp
-	scoutScrub     = scoutsessions.Scrub
-	scoutDiscover  = scoutcapture.Discover
-	scoutSupported = scoutcapture.Supported
-	scoutOpen      = store.Open
-	scoutAcquire   = store.AcquireLock
-	scoutPlatform  = runtime.GOOS
-	scoutNow       = time.Now
+	scoutScan  = scoutcapture.Scan
+	scoutCheck = scoutcapture.Check
+	scoutStamp = scoutsessions.Stamp
+	scoutScrub = scoutsessions.Scrub
+	// scoutCheckpoint is store.CheckpointScoutRescrub; tests make it fail.
+	scoutCheckpoint = (*store.Store).CheckpointScoutRescrub
+	scoutDiscover   = scoutcapture.Discover
+	scoutSupported  = scoutcapture.Supported
+	scoutOpen       = store.Open
+	scoutAcquire    = store.AcquireLock
+	scoutPlatform   = runtime.GOOS
+	scoutNow        = time.Now
 )
 
-// SyncScout reads the selected app folders into the archive. First it scrubs and maps again every
-// archived observation stored under another stamp (scoutsessions.Stamp), gone files included.
-// Then each resident session file whose size, time or stamp changed is read once, digested,
-// scrubbed (scoutsessions.Scrub) and parsed; cloud-only files are counted and never opened. A folder that cannot be scanned is reported as failed and the others are still
-// read. The error is the archive's, the context's or discovery's; a run that fails after writing
-// still returns what it committed.
-func SyncScout(ctx context.Context, opts ScoutOptions) (ScoutReport, error) {
-	var report ScoutReport
+// RescrubScoutArchive scrubs and maps again every archived Scout observation stored under another
+// stamp (scoutsessions.Stamp), gone files included, then clears the write-ahead log. It reads only
+// the archive: both scout sync and sync run it, as sync runs the Teams credential purge, so a rule
+// change reaches the archive even when no Scout folder can be read any more.
+func RescrubScoutArchive(ctx context.Context, st *store.Store) (int, error) {
+	n, err := st.RescrubScout(ctx, scoutStamp(), scoutScrub)
+	if err == nil && n > 0 {
+		err = scoutCheckpoint(st, ctx)
+	}
+	return n, err
+}
+
+// SyncScout reads the selected app folders into the archive. When the archive exists it first
+// re-scrubs it (RescrubScoutArchive), before the platform check and discovery, so an archive with
+// no reachable Scout folder still loses secrets a newer rule covers. Then each resident session
+// file whose size, time or stamp changed is read once, digested, scrubbed (scoutsessions.Scrub)
+// and parsed; cloud-only files are counted and never opened. A folder that cannot be scanned is
+// reported as failed and the others are still read. The error is the archive's, the context's,
+// the platform's or discovery's; a run that fails after writing still returns what it committed.
+func SyncScout(ctx context.Context, opts ScoutOptions) (report ScoutReport, err error) {
+	var st *store.Store
+	release := func() {}
+	defer func() {
+		if st != nil {
+			err = errors.Join(err, st.Close())
+		}
+		release()
+	}()
+	open := func() error {
+		r, err := scoutAcquire(opts.DBPath)
+		if err != nil {
+			return err
+		}
+		release = r
+		st, err = scoutOpen(ctx, opts.DBPath)
+		return err
+	}
+	if _, statErr := os.Stat(opts.DBPath); statErr == nil {
+		if err = open(); err != nil {
+			return report, err
+		}
+		if report.Rescrubbed, err = RescrubScoutArchive(ctx, st); err != nil {
+			return report, err
+		}
+	}
 	if !scoutSupported() {
 		return report, scoutcapture.ErrPlatformUnqualified
 	}
@@ -80,26 +120,19 @@ func SyncScout(ctx context.Context, opts ScoutOptions) (ScoutReport, error) {
 		}
 		roots, report.Discovered = found, true
 	}
-	release, err := scoutAcquire(opts.DBPath)
-	if err != nil {
-		return report, err
-	}
-	defer release()
-	st, err := scoutOpen(ctx, opts.DBPath)
-	if err != nil {
-		return report, err
-	}
-	if report.Rescrubbed, err = st.RescrubScout(ctx, scoutStamp(), scoutScrub); err != nil {
-		return report, errors.Join(err, st.Close())
+	if st == nil {
+		if err = open(); err != nil {
+			return report, err
+		}
 	}
 	for _, root := range roots {
 		folder, err := syncScoutFolder(ctx, st, root)
 		report.Folders = append(report.Folders, folder)
 		if err != nil {
-			return report, errors.Join(err, st.Close())
+			return report, err
 		}
 	}
-	return report, st.Close()
+	return report, nil
 }
 
 func syncScoutFolder(ctx context.Context, st *store.Store, root string) (ScoutFolderReport, error) {

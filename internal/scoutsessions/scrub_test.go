@@ -90,3 +90,41 @@ func TestStampCoversParserAndBothRuleSets(t *testing.T) {
 		t.Fatal("a new rule did not change the stamp")
 	}
 }
+
+// A secret can sit under a JSON key that names it, with nothing in the value that looks secret.
+func TestScrubRedactsValuesUnderSecretKeys(t *testing.T) {
+	raw := `{"messages":[{"role":"tool","toolCalls":[{"args":{"api_key":"opaque1","token":"o2","env":{"GITHUB_TOKEN":"o3","x-api-key":"o4","clientSecret":"o7","client_secret":"o5","Access-Key":"o6"},` +
+		`"max_tokens":"5","tokens":"7","token":"[redacted]","password":12345,"secret":{"value":"nested"}}}],"content":"plain"}]}`
+	out, n := Scrub([]byte(raw))
+	// Seven by key name, and the Teams rules take the numeric password whole.
+	if !json.Valid(out) || n != 8 {
+		t.Fatalf("%d %s", n, out)
+	}
+	for _, gone := range []string{"opaque1", `"o2"`, "o3", "o4", "o5", "o6", "o7", "12345"} {
+		if strings.Contains(string(out), gone) {
+			t.Fatalf("%s kept in %s", gone, out)
+		}
+	}
+	for _, kept := range []string{`"max_tokens":"5"`, `"tokens":"7"`, `"value":"nested"`, `"api_key":"[redacted]"`} {
+		if !strings.Contains(string(out), kept) {
+			t.Fatalf("%s lost in %s", kept, out)
+		}
+	}
+	if again, m := Scrub(out); m != 0 || string(again) != string(out) {
+		t.Fatalf("second pass: %d", m)
+	}
+}
+
+func TestScrubTextRedactsQuotedAndHyphenatedNames(t *testing.T) {
+	for in, want := range map[string]string{ // #nosec G101 -- synthetic values in secret shapes
+		`{"GITHUB_TOKEN": "abcdefgh12"}`: `{"GITHUB_TOKEN": "[redacted]"}`,
+		`{'api_key': 'abcdefgh123'}`:     `{'api_key': '[redacted]'}`,
+		"x-api-key: abcdef123456":        "x-api-key: [redacted]",
+		"MY-SECRET=abcdefgh12 next":      "MY-SECRET=[redacted] next",
+		"the token: is short":            "the token: is short",
+	} {
+		if got, _ := scrubText(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

@@ -233,6 +233,9 @@ func (rt *runtime) renderText(label string, v any) error {
 		if m := r.Migrated; m != nil {
 			_, _ = fmt.Fprintf(w, "migrated: %d rows re-derived from stored records (derivation %d to %d); not counted as updates\n", m.Rows, m.From, m.To)
 		}
+		if r.ScoutRescrubbed > 0 {
+			_, _ = fmt.Fprintf(w, "scout: %s scrubbed and mapped again under new rules, from the archive alone\n", plural(r.ScoutRescrubbed, "archived session version", "archived session versions"))
+		}
 		if a := r.ApplicationBackfill; a != nil {
 			_, _ = fmt.Fprintf(w, "application evidence: %d archived messages projected (mapper v%d; %d failed, %d with no application claims); not counted as updates\n", a.Processed, a.MapperVersion, a.Failed, a.Absent)
 		}

@@ -389,3 +389,24 @@ func TestScoutSyncReadsARealFolder(t *testing.T) {
 		t.Fatalf("search after sync: %s", out)
 	}
 }
+
+// A refused scout sync that re-scrubbed the archive first still prints what it re-scrubbed.
+func TestScoutSyncReportsARescrubBeforeARefusal(t *testing.T) {
+	e := newEnv(t)
+	stubScoutSync(t, syncer.ScoutReport{Rescrubbed: 2}, scoutcapture.ErrPlatformUnqualified)
+	code, out, stderr := e.run("--json", "scout", "sync")
+	if code != 3 || decode(t, out)["rescrubbed"] != float64(2) || !strings.Contains(stderr, "scout_platform_unqualified") {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+}
+
+func TestSyncTextReportsScoutRescrub(t *testing.T) {
+	var out bytes.Buffer
+	rt := &runtime{stdout: &out}
+	if err := rt.renderText("sync", syncer.Report{Status: "ok", ScoutRescrubbed: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "scout: 2 archived session versions scrubbed and mapped again") {
+		t.Fatal(out.String())
+	}
+}

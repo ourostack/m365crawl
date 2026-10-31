@@ -39,7 +39,7 @@ var scoutRules = []scrubRule{
 	{pattern: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----|[\s\S]*$)`)},
 	{pattern: regexp.MustCompile(`(?i)\b((?:AccountKey|SharedAccessKey|SharedAccessSignature|Password|Pwd)=)[^;"\s\\\[][^;"\s\\]*`), keep: true},
 	{pattern: regexp.MustCompile(`(?i)([?&](?:access_token|refresh_token|id_token|client_secret|code|token)=)[^&"\s\\\[][^&"\s\\]*`), keep: true},
-	{pattern: regexp.MustCompile(`(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_?KEY)\s*[=:]\s*["']?)[^\s"'\\\[][^\s"'\\]{7,}`), keep: true},
+	{pattern: regexp.MustCompile(`(?i)\b([A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY)["']?\s*[=:]\s*["']?)[^\s"'\\\[][^\s"'\\]{7,}`), keep: true},
 	{pattern: regexp.MustCompile(`(?i)\b((?:Set-)?Cookie:\s*)[^"\\\s\[][^"\\\n]*`), keep: true},
 }
 
@@ -61,6 +61,9 @@ func Stamp() string {
 // redact come back unchanged; bytes that are not JSON get only the Teams rules.
 func Scrub(raw []byte) ([]byte, int) {
 	out, n := teamsdesktop.Scrub(raw)
+	if bytes.Equal(out, raw) {
+		n = 0 // the Teams rules count a credential-named value already [redacted] again
+	}
 	clean, m, ok := scrubStrings(out)
 	if !ok {
 		return out, n
@@ -86,13 +89,18 @@ func scrubText(s string) (string, int) {
 	return s, n
 }
 
+// secretKey names a JSON object key whose string value is a secret whatever it looks like.
+var secretKey = regexp.MustCompile(`(?i)(^|[_-])(token|secret|password|passwd|api[_-]?key|apikey|authorization|cookie|client[_-]?secret|access[_-]?key)$`)
+
 type scrubFrame struct {
 	object bool
 	n      int
+	key    string // the object's current key
 }
 
 // scrubStrings rebuilds one JSON value token by token, scrubbing string values (object keys
-// stay as written) and keeping numbers verbatim. It returns the input unchanged when nothing was
+// stay as written) and keeping numbers verbatim. A string value whose key names a secret
+// (secretKey) is redacted whole. It returns the input unchanged when nothing was
 // redacted, and ok false when the input is not exactly one JSON value.
 func scrubStrings(data []byte) (_ []byte, redactions int, ok bool) {
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -107,7 +115,7 @@ func scrubStrings(data []byte) (_ []byte, redactions int, ok bool) {
 		if err != nil {
 			return nil, 0, false
 		}
-		key := false
+		key, secret := false, false
 		if delim, isDelim := tok.(json.Delim); len(stack) > 0 && (!isDelim || (delim != '}' && delim != ']')) {
 			top := &stack[len(stack)-1]
 			switch {
@@ -117,6 +125,10 @@ func scrubStrings(data []byte) (_ []byte, redactions int, ok bool) {
 				b.WriteByte(',')
 			}
 			key = top.object && top.n%2 == 0
+			if str, isString := tok.(string); key && isString {
+				top.key = str
+			}
+			secret = top.object && !key && secretKey.MatchString(top.key)
 			top.n++
 		}
 		switch v := tok.(type) {
@@ -128,7 +140,11 @@ func scrubStrings(data []byte) (_ []byte, redactions int, ok bool) {
 				stack = stack[:len(stack)-1]
 			}
 		case string:
-			if !key {
+			switch {
+			case secret && v != redacted:
+				v = redacted
+				redactions++
+			case !key && !secret:
 				var n int
 				v, n = scrubText(v)
 				redactions += n

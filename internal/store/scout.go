@@ -291,9 +291,23 @@ var ErrScoutRescrub = errors.New("scout: a stored session no longer maps after s
 // RescrubScout scrubs and maps again, in place and in one transaction, every observation stored
 // under a stamp other than stamp, gone files included, and returns how many it rewrote. It starts
 // from the observation's stored (already scrubbed) JSON, so a rule added later reaches sessions the
-// folder no longer has; the observation's redactions add the new ones.
+// folder no longer has; the observation's redactions add the new ones. Observations are loaded one
+// at a time, so memory holds one session however many are stale; a crash leaves each one either
+// under its old stamp or fully rewritten. The rewrite runs on a connection with secure_delete on
+// and ends by merging the FTS index, so replaced text is overwritten in freed pages and dropped
+// from the index; CheckpointScoutRescrub then clears the write-ahead log. That connection keeps
+// secure_delete on when it returns to the pool, which only makes its later deletes overwrite
+// their pages too.
 func (s *Store) RescrubScout(ctx context.Context, stamp string, scrub func([]byte) ([]byte, int)) (rewritten int, err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = errors.Join(err, conn.Close()) }()
+	if _, err = conn.ExecContext(ctx, `pragma secure_delete=on`); err != nil {
+		return 0, err
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -302,38 +316,53 @@ func (s *Store) RescrubScout(ctx context.Context, stamp string, scrub func([]byt
 			_ = tx.Rollback()
 		}
 	}()
-	rows, err := tx.QueryContext(ctx, `select id,raw_json,redactions from scout_observations where stamp<>? order by id`, stamp)
+	rows, err := tx.QueryContext(ctx, `select id from scout_observations where stamp<>? order by id`, stamp)
 	if err != nil {
 		return 0, err
 	}
-	type stored struct {
-		id         int64
-		raw        string
-		redactions int
-	}
-	var stale []stored
+	var stale []int64
 	for rows.Next() {
-		var o stored
-		if err = rows.Scan(&o.id, &o.raw, &o.redactions); err != nil {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
 			return 0, errors.Join(err, rows.Close())
 		}
-		stale = append(stale, o)
+		stale = append(stale, id)
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return 0, err
 	}
-	for _, o := range stale {
-		clean, n := scrub([]byte(o.raw))
+	for _, id := range stale {
+		var raw string
+		var redactions int
+		if err = tx.QueryRowContext(ctx, `select raw_json,redactions from scout_observations where id=?`, id).Scan(&raw, &redactions); err != nil {
+			return 0, err
+		}
+		clean, n := scrub([]byte(raw))
 		session, parseErr := scoutsessions.Parse(clean)
 		if parseErr != nil {
 			err = ErrScoutRescrub
 			return 0, err
 		}
-		if err = rewriteScoutObservation(ctx, tx, o.id, stamp, clean, o.redactions+n, &session); err != nil {
+		if err = rewriteScoutObservation(ctx, tx, id, stamp, clean, redactions+n, &session); err != nil {
+			return 0, err
+		}
+	}
+	if len(stale) > 0 {
+		// FTS5 keeps a replaced row's tokens in its index until segments merge; merging them all
+		// drops those tokens, and secure_delete overwrites the pages they leave.
+		if _, err = tx.ExecContext(ctx, `insert into scout_fts(scout_fts) values('optimize')`); err != nil {
 			return 0, err
 		}
 	}
 	return len(stale), tx.Commit()
+}
+
+// CheckpointScoutRescrub copies the write-ahead log into the database and truncates it, so text a
+// re-scrub replaced does not linger in the log. A checkpoint blocked by a concurrent reader is
+// not an error: the log is truncated by a later checkpoint.
+func (s *Store) CheckpointScoutRescrub(ctx context.Context) error {
+	var busy, frames, done int
+	return s.db.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done)
 }
 
 // FinishScoutRun records the run's outcome and marks gone every file of a completely listed

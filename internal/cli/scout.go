@@ -25,7 +25,7 @@ type scoutGroup struct {
 // scoutAboutHelp says what the source is, that it is opt-in and private, and how to read it.
 const scoutAboutHelp = "Microsoft Scout keeps a JSON copy of each session (one conversation, or one automation run) in your own OneDrive, one folder per device. m365crawl reads those files only when you run `scout sync`: it is off until then, and `sync`, `watch` and `search` never read them. " +
 	"Afterwards `scout list`, `scout search WORDS` and `scout show scout-session:N` read the archive offline, and `scout sources` shows what each scan read and skipped.\n" +
-	"These files are private AI conversation history: everything the agent saw and did, including tool output that can quote mail, chats and files. m365crawl handles them like your private chats: they stay in the local archive, are never uploaded, and are never written to logs. Before anything is stored, secrets are replaced with [redacted]: the Teams rules (JWTs, strings that start with Bearer, credential-named keys, sig= parameters) and Scout rules for tool output (Bearer tokens anywhere, GitHub, OpenAI-style sk-, Slack, AWS and npm tokens, private key blocks, connection-string keys and passwords, token-like URL parameters, NAME_TOKEN/SECRET/PASSWORD/API_KEY assignments, Cookie headers). When those rules or the parser change, the next scout sync scrubs and maps every archived session again, gone ones included. Secrets of other shapes are kept as written.\n" +
+	"These files are private AI conversation history: everything the agent saw and did, including tool output that can quote mail, chats and files. m365crawl handles them like your private chats: they stay in the local archive, are never uploaded, and are never written to logs. Before anything is stored, secrets are replaced with [redacted]: the Teams rules (JWTs, strings that start with Bearer, credential-named keys, sig= parameters) and Scout rules for tool output (Bearer tokens anywhere, GitHub, OpenAI-style sk-, Slack, AWS and npm tokens, private key blocks, connection-string keys and passwords, token-like URL parameters, NAME_TOKEN/SECRET/PASSWORD/API_KEY assignments, Cookie headers, values under JSON keys that name a secret). When those rules or the parser change, the next sync or scout sync scrubs and maps every archived session again from the archive alone, gone ones included. Secrets of other shapes are kept as written.\n" +
 	"The session file format is not a documented interface and can change between Scout releases, so the source is best-effort (scout_coverage.format is \"unofficial\"). A file that cannot be read is counted, never guessed.\n"
 
 // scoutResidencyHelp says why a session can be missing and what fixes it.
@@ -400,7 +400,7 @@ func (c *scoutSyncCmd) Run(rt *runtime) error {
 		result.ScoutCoverage = scoutCoverageOf(nil)
 	}
 	if runErr != nil {
-		if len(report.Folders) > 0 {
+		if len(report.Folders) > 0 || report.Rescrubbed > 0 {
 			_ = rt.write("scout sync", result) // the run's own error is the one to return
 		}
 		return scoutError(runErr)

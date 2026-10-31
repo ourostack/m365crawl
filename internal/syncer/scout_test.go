@@ -211,6 +211,7 @@ func TestSyncScoutDiscoveryAndRefusals(t *testing.T) {
 	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, synthetic) {
 		t.Fatal(err)
 	}
+	scoutSwap(t, &scoutOpen, store.Open)
 	scoutSwap(t, &scoutSupported, func() bool { return false })
 	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, scoutcapture.ErrPlatformUnqualified) {
 		t.Fatal(err)
@@ -309,5 +310,91 @@ func TestSyncScoutStopsOnCheckAndRescrubErrors(t *testing.T) {
 	scoutSwap(t, &scoutScrub, func([]byte) ([]byte, int) { return []byte("not json"), 0 })
 	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, store.ErrScoutRescrub) {
 		t.Fatalf("rescrub: %v", err)
+	}
+}
+
+// laterRule makes "world" a secret under a new stamp.
+func laterRule(t *testing.T, stamp string) {
+	t.Helper()
+	scoutSwap(t, &scoutStamp, func() string { return stamp })
+	scoutSwap(t, &scoutScrub, func(raw []byte) ([]byte, int) {
+		out, n := scoutsessions.Scrub(raw)
+		return []byte(strings.ReplaceAll(string(out), "world", "[redacted]")), n + strings.Count(string(out), "world")
+	})
+}
+
+func scoutWorldHits(t *testing.T, db string) int {
+	t.Helper()
+	st, err := store.OpenReadOnly(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	hits, _, err := st.ScoutSearch(context.Background(), "world", store.ScoutFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(hits)
+}
+
+// With no Scout folder reachable (the platform refuses, or discovery finds none) the archive is
+// still scrubbed again before the refusal.
+func TestSyncScoutRescrubsBeforeRefusing(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	root := scoutFolder(t)
+	fakeScan(t, []scoutcapture.File{read("a.json", scoutSession)}, nil, nil)
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil || scoutWorldHits(t, db) != 1 {
+		t.Fatal(err)
+	}
+	laterRule(t, "rules-2")
+	scoutSwap(t, &scoutSupported, func() bool { return false })
+	report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db})
+	if !errors.Is(err, scoutcapture.ErrPlatformUnqualified) || report.Rescrubbed != 1 || scoutWorldHits(t, db) != 0 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	scoutSwap(t, &scoutSupported, func() bool { return true })
+	scoutSwap(t, &scoutStamp, func() string { return "rules-3" })
+	scoutSwap(t, &scoutDiscover, func(context.Context, string) ([]string, error) { return nil, nil })
+	if report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db}); !errors.Is(err, ErrScoutFolderNotFound) || report.Rescrubbed != 1 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	// A failing re-scrub or checkpoint is the run's error.
+	synthetic := errors.New("synthetic")
+	scoutSwap(t, &scoutStamp, func() string { return "rules-4" })
+	scoutSwap(t, &scoutCheckpoint, func(*store.Store, context.Context) error { return synthetic })
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db}); !errors.Is(err, synthetic) {
+		t.Fatal(err)
+	}
+	scoutSwap(t, &scoutAcquire, func(string) (func(), error) { return nil, synthetic })
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db}); !errors.Is(err, synthetic) {
+		t.Fatal(err)
+	}
+	// With no archive yet, the archive opens only after the folders are known.
+	fresh := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: fresh, Roots: []string{root}}); !errors.Is(err, synthetic) {
+		t.Fatal(err)
+	}
+}
+
+// An ordinary sync scrubs archived Scout sessions again from the archive alone.
+func TestSyncRescrubsScoutSessions(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	root := scoutFolder(t)
+	fakeScan(t, []scoutcapture.File{read("a.json", scoutSession)}, nil, nil)
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	laterRule(t, "rules-2")
+	scoutSwap(t, &scoutScan, func(context.Context, scoutcapture.Options, func(scoutcapture.File) error) (scoutcapture.Result, error) {
+		t.Fatal("sync read a Scout folder")
+		return scoutcapture.Result{}, nil
+	})
+	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	if err != nil || rep.ScoutRescrubbed != 1 || scoutWorldHits(t, db) != 0 {
+		t.Fatalf("%d %v", rep.ScoutRescrubbed, err)
+	}
+	scoutSwap(t, &scoutArchiveRescrub, func(context.Context, *store.Store) (int, error) { return 0, errors.New("synthetic") })
+	if _, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db}); err == nil {
+		t.Fatal("a failing re-scrub did not fail the sync")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -534,4 +535,51 @@ func TestScoutRescrubFaultsLeaveArchiveUnchanged(t *testing.T) {
 		_, err := s.RescrubScout(ctx, scoutStampB, grow)
 		return err
 	})
+}
+
+// archiveBytes is the database file and its write-ahead log, as they are on disk.
+func archiveBytes(t *testing.T, s *Store) string {
+	t.Helper()
+	var seq int
+	var name, path string
+	if err := s.db.QueryRowContext(context.Background(), `select seq,name,file from pragma_database_list where name='main'`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	main, err := os.ReadFile(path) //nolint:gosec // G304: the test's own archive
+	if err != nil {
+		t.Fatal(err)
+	}
+	wal, _ := os.ReadFile(path + "-wal") //nolint:gosec // G304: the test's own archive
+	return strings.ToLower(string(main) + string(wal))
+}
+
+func TestScoutRescrubLeavesNoCopyOfReplacedText(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	if !strings.Contains(archiveBytes(t, s), "quarterly") {
+		t.Fatal("setup holds no copy to remove")
+	}
+	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", false)); err != nil || n != 3 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if err := s.CheckpointScoutRescrub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(archiveBytes(t, s), "quarterly") {
+		t.Fatal("the replaced text survives in the database file or its log")
+	}
+}
+
+func TestScoutRescrubHonoursCancellation(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.RescrubScout(ctx, scoutStampB, redactWord("x", false)); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestScoutCheckpointFaults(t *testing.T) {
+	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error { return s.CheckpointScoutRescrub(ctx) })
 }
