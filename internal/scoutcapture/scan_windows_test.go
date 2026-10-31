@@ -338,7 +338,7 @@ func TestWindowsLinksAreNotFollowed(t *testing.T) {
 	outside := t.TempDir()
 	write(t, filepath.Join(outside, devB, "z.json"), `{}`)
 	link := filepath.Join(filepath.Dir(root), "linked")
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, root).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, root).CombinedOutput(); err != nil { //nolint:gosec // G204: test folders
 		t.Skipf("mklink: %v %s", err, out)
 	}
 	if _, err := Check(context.Background(), link); code(err) != "scout_root_invalid" {
@@ -348,7 +348,7 @@ func TestWindowsLinksAreNotFollowed(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(devices, devB)); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", filepath.Join(devices, devB), filepath.Join(outside, devB)).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", filepath.Join(devices, devB), filepath.Join(outside, devB)).CombinedOutput(); err != nil { //nolint:gosec // G204: test folders
 		t.Fatalf("mklink: %v %s", err, out)
 	}
 	res, files := collect(t, Options{Root: root, MaxBytes: 1 << 20})
@@ -400,22 +400,22 @@ func TestWindowsListingFailures(t *testing.T) {
 	})
 	t.Run("malformed listing", func(t *testing.T) {
 		swap(t, &winInfoEx, func(windows.Handle, uint32, *byte, uint32) error { return nil })
-		dir, err := os.Open(root)
+		dir, err := os.Open(root) //nolint:gosec // G304: a test folder
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer dir.Close()
+		defer func() { _ = dir.Close() }()
 		if _, err := listDir(dir); err == nil {
 			t.Fatal("a zero listing was accepted")
 		}
 	})
 	t.Run("listing error", func(t *testing.T) {
 		swap(t, &winInfoEx, func(windows.Handle, uint32, *byte, uint32) error { return windows.ERROR_ACCESS_DENIED })
-		dir, err := os.Open(root)
+		dir, err := os.Open(root) //nolint:gosec // G304: a test folder
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer dir.Close()
+		defer func() { _ = dir.Close() }()
 		if _, err := listDir(dir); err == nil {
 			t.Fatal("accepted")
 		}

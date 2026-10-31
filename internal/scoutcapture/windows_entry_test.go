@@ -97,12 +97,12 @@ func dirRecord(name string, attrs, eaSize uint32, size, writeTicks int64, last b
 	padded := (length + 7) &^ 7
 	b := make([]byte, padded)
 	if !last {
-		binary.LittleEndian.PutUint32(b[0:], uint32(padded))
+		binary.LittleEndian.PutUint32(b[0:], uint32(padded)) //nolint:gosec // G115: a synthetic record
 	}
-	binary.LittleEndian.PutUint64(b[24:], uint64(writeTicks))
-	binary.LittleEndian.PutUint64(b[40:], uint64(size))
+	binary.LittleEndian.PutUint64(b[24:], uint64(writeTicks)) //nolint:gosec // G115: a synthetic record
+	binary.LittleEndian.PutUint64(b[40:], uint64(size))       //nolint:gosec // G115: a synthetic record
 	binary.LittleEndian.PutUint32(b[56:], attrs)
-	binary.LittleEndian.PutUint32(b[60:], uint32(2*len(units)))
+	binary.LittleEndian.PutUint32(b[60:], uint32(2*len(units))) //nolint:gosec // G115: a synthetic record
 	binary.LittleEndian.PutUint32(b[64:], eaSize)
 	for i, u := range units {
 		binary.LittleEndian.PutUint16(b[winDirNameOffset+2*i:], u)

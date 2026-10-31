@@ -94,7 +94,9 @@ func Scan(ctx context.Context, opts Options, consume func(File) error) (Result, 
 
 func handleOf(f *os.File) windows.Handle { return windows.Handle(f.Fd()) }
 
-// openChild opens name inside parent. access is added to SYNCHRONIZE.
+// openChild opens name inside parent. access is added to SYNCHRONIZE. A folder is opened without
+// FILE_DIRECTORY_FILE, which Windows refuses next to FILE_OPEN_NO_RECALL; the caller checks the
+// folder attribute on the open handle instead.
 func openChild(parent windows.Handle, name string, directory bool, access uint32) (*os.File, error) {
 	if name == "" || strings.ContainsAny(name, `\/:`) {
 		return nil, errors.New("unqualified name")
@@ -106,9 +108,7 @@ func openChild(parent windows.Handle, name string, directory bool, access uint32
 	attributes := windows.OBJECT_ATTRIBUTES{RootDirectory: parent, ObjectName: objectName, Attributes: windows.OBJ_CASE_INSENSITIVE}
 	attributes.Length = uint32(unsafe.Sizeof(attributes))
 	options := uint32(winOptions)
-	if directory {
-		options |= windows.FILE_DIRECTORY_FILE
-	} else {
+	if !directory {
 		options |= windows.FILE_NON_DIRECTORY_FILE
 	}
 	var handle windows.Handle
@@ -122,7 +122,7 @@ func openChild(parent windows.Handle, name string, directory bool, access uint32
 // attrTag reads an open file's attributes and reparse tag.
 func attrTag(f *os.File) (uint32, uint32, error) {
 	var info struct{ Attributes, Tag uint32 }
-	err := winInfoEx(handleOf(f), windows.FileAttributeTagInfo, (*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)))
+	err := winInfoEx(handleOf(f), windows.FileAttributeTagInfo, (*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))) //nolint:gosec // G103: the documented FILE_ATTRIBUTE_TAG_INFO buffer
 	return info.Attributes, info.Tag, err
 }
 
@@ -196,11 +196,11 @@ func openLayout(root string) (*os.File, error) {
 // listDir lists an open folder from its handle, without opening any entry.
 func listDir(dir *os.File) ([]winEntry, error) {
 	words := make([]uint64, 8192)
-	buf := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), len(words)*8)
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), len(words)*8) //nolint:gosec // G103: an 8-byte aligned listing buffer
 	out := []winEntry{}
 	class := uint32(windows.FileIdBothDirectoryRestartInfo)
 	for {
-		err := winInfoEx(handleOf(dir), class, &buf[0], uint32(len(buf)))
+		err := winInfoEx(handleOf(dir), class, &buf[0], uint32(len(buf))) //nolint:gosec // G115: 64 KiB
 		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 			return out, nil
 		}
