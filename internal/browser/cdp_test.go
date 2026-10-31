@@ -16,9 +16,20 @@ func testBrowser(s *browsertest.Server) *Browser {
 	return &Browser{wsURL: s.URL(), exited: make(chan struct{})}
 }
 
+// testPage opens a page on a fake browser and closes its connection when the test ends, so its
+// read loop never runs into later tests.
 func testPage(t *testing.T, s *browsertest.Server) *Page {
 	t.Helper()
-	p, err := testBrowser(s).Page(context.Background())
+	b := testBrowser(s)
+	t.Cleanup(func() {
+		b.mu.Lock()
+		c := b.conn
+		b.mu.Unlock()
+		if c != nil {
+			c.close()
+		}
+	})
+	p, err := b.Page(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,5 +529,23 @@ func TestCtxErrPrefersContext(t *testing.T) {
 	cancel()
 	if got := ctxErr(ctx, boom); !errors.Is(got, context.Canceled) {
 		t.Fatalf("done context: %v", got)
+	}
+}
+
+// Closing a client stops its read loop before close returns, so nothing of a closed client keeps
+// running into whatever runs next (#286).
+func TestClientCloseWaitsForTheReadLoop(t *testing.T) {
+	s := browsertest.NewServer(t)
+	for range 20 {
+		c, err := dialCDP(context.Background(), s.URL())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.close()
+		select {
+		case <-c.done:
+		default:
+			t.Fatal("the read loop was still running after close returned")
+		}
 	}
 }

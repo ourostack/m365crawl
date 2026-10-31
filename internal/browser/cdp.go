@@ -49,6 +49,7 @@ type client struct {
 	nextID  int
 	pending map[int]chan reply
 	dead    error
+	done    chan struct{} // closed when readLoop has returned
 }
 
 // dialCDP connects to a browser debugging URL, which must point at this machine.
@@ -66,12 +67,13 @@ func dialCDP(ctx context.Context, rawurl string) (*client, error) {
 	}
 	conn.SetReadLimit(readLimit)
 	loopCtx, cancel := context.WithCancel(context.Background())
-	c := &client{conn: conn, cancel: cancel, pending: map[int]chan reply{}}
+	c := &client{conn: conn, cancel: cancel, pending: map[int]chan reply{}, done: make(chan struct{})}
 	go c.readLoop(loopCtx)
 	return c, nil
 }
 
 func (c *client) readLoop(ctx context.Context) {
+	defer close(c.done)
 	for {
 		_, data, err := c.conn.Read(ctx)
 		if err != nil {
@@ -182,7 +184,10 @@ func (c *client) forget(id int) {
 	c.mu.Unlock()
 }
 
+// close ends the connection and returns once the read loop has stopped, so nothing of a closed
+// client keeps running.
 func (c *client) close() {
 	c.cancel()
 	_ = c.conn.CloseNow()
+	<-c.done
 }
