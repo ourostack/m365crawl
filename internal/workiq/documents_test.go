@@ -80,10 +80,10 @@ func TestRetrievalSnippet(t *testing.T) {
 
 func TestDocumentLink(t *testing.T) {
 	path, err := DocumentLink("https://contoso.sharepoint.com/:w:/t/team/EabcDEF?e=1")
-	if err != nil || !strings.HasPrefix(path, "/shares/u!") || !strings.HasSuffix(path, "/driveItem?$select=id,name,webUrl,size,file,parentReference") {
+	if err != nil || !strings.HasPrefix(path, "/shares/u!") || !strings.HasSuffix(path, "/driveItem?$select=id,name,webUrl,size,file,parentReference,sharepointIds") {
 		t.Fatalf("path=%q err=%v", path, err)
 	}
-	id := strings.TrimSuffix(strings.TrimPrefix(path, "/shares/u!"), "/driveItem?$select=id,name,webUrl,size,file,parentReference")
+	id := strings.TrimSuffix(strings.TrimPrefix(path, "/shares/u!"), "/driveItem?$select=id,name,webUrl,size,file,parentReference,sharepointIds")
 	if strings.ContainsAny(id, "=+/") {
 		t.Fatalf("share id not unpadded base64url: %q", id)
 	}
@@ -103,9 +103,11 @@ func TestDocumentLink(t *testing.T) {
 }
 
 func TestDecodeDocumentItem(t *testing.T) {
-	good := `{"id":"01LC55GA2YKE3IMU2MGNBZ2M2W2EJCTRJ5","name":"a.docx","webUrl":"https://contoso-my.sharepoint.com/personal/u/Documents/a.docx","size":3681,"file":{"mimeType":"x"},"parentReference":{"driveId":"b!2kdIZxq3p0SDWyXTw5A9FDg"}}`
+	good := `{"id":"01LC55GA2YKE3IMU2MGNBZ2M2W2EJCTRJ5","name":"a.docx","webUrl":"https://contoso-my.sharepoint.com/personal/u/Documents/a.docx","size":3681,"file":{"mimeType":"x"},"parentReference":{"driveId":"b!2kdIZxq3p0SDWyXTw5A9FDg"},"sharepointIds":{"listId":"5E5AC0E0-F6BC-4FCA-ABF0-5C2AB4C1B66D","listItemUniqueId":"86365158-4c53-4333-9d33-56d11229c53d","siteId":"674847da-b71a-44a7-835b-25d3c3903d14","webId":"9b233f38-2f7b-4900-a116-9e03525c9e63","siteUrl":"https://contoso-my.sharepoint.com/personal/u"}}`
 	item, err := decodeDocumentItem(context.Background(), json.RawMessage(good))
-	if err != nil || !item.File || item.Size != 3681 || item.Ref.DriveID != "b!2kdIZxq3p0SDWyXTw5A9FDg" {
+	if err != nil || !item.File || item.Size != 3681 || item.Ref.DriveID != "b!2kdIZxq3p0SDWyXTw5A9FDg" ||
+		item.SharePoint != (SharePointIDs{SiteID: "674847da-b71a-44a7-835b-25d3c3903d14", WebID: "9b233f38-2f7b-4900-a116-9e03525c9e63",
+			ListID: "5e5ac0e0-f6bc-4fca-abf0-5c2ab4c1b66d", UniqueID: "86365158-4c53-4333-9d33-56d11229c53d"}) {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 	folder := strings.Replace(good, `"file":{"mimeType":"x"}`, `"folder":{}`, 1)
@@ -117,6 +119,7 @@ func TestDecodeDocumentItem(t *testing.T) {
 		strings.Replace(good, `https://contoso-my.sharepoint.com`, `https://evil.example`, 1),
 		strings.Replace(good, `"name":"a.docx"`, `"name":""`, 1),
 		strings.Replace(good, `"size":3681`, `"size":-1`, 1),
+		strings.Replace(good, `"listItemUniqueId":"86365158-4c53-4333-9d33-56d11229c53d",`, ``, 1),
 	} {
 		if _, err := decodeDocumentItem(context.Background(), json.RawMessage(bad)); !hasCode(err, "workiq_protocol") {
 			t.Errorf("%s: %v", bad, err)

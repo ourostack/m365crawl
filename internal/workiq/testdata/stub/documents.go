@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"os"
 	"strings"
 )
@@ -43,7 +44,9 @@ func documentItem(path string) (any, int, bool) {
 	}
 	item := map[string]any{"id": stubItem, "name": "Synthetic plan.docx", "webUrl": stubWebURL, "size": 3681,
 		"file":            map[string]any{"mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-		"parentReference": map[string]any{"driveId": stubDrive, "driveType": "business"}}
+		"parentReference": map[string]any{"driveId": stubDrive, "driveType": "business"},
+		"sharepointIds": map[string]any{"siteId": stubSharePoint["site_id"], "webId": stubSharePoint["web_id"], "listId": stubSharePoint["list_id"],
+			"listItemUniqueId": stubSharePoint["unique_id"], "siteUrl": "https://contoso-my.sharepoint.com/personal/test_user"}}
 	switch documentCase() {
 	case "folder":
 		delete(item, "file")
@@ -55,19 +58,20 @@ func documentItem(path string) (any, int, bool) {
 }
 
 type capability = struct {
-	Name  string `json:"name"`
-	Items []struct {
-		URL string `json:"url"`
-	} `json:"items_by_url"`
+	Name  string              `json:"name"`
+	Items []map[string]string `json:"items_by_sharepoint_ids"`
 }
+
+var stubSharePoint = map[string]string{"site_id": "674847da-b71a-44a7-835b-25d3c3903d14", "web_id": "9b233f38-2f7b-4900-a116-9e03525c9e63",
+	"list_id": "5e5ac0e0-f6bc-4fca-abf0-5c2ab4c1b66d", "unique_id": "86365158-4c53-4333-9d33-56d11229c53d"}
 
 func documentTool(name, query, path string, caps []capability) any {
 	switch name {
 	case "retrieve":
-		if query == "" || len(caps) != 1 || caps[0].Name != "OneDriveAndSharePoint" || len(caps[0].Items) != 1 || caps[0].Items[0].URL != stubWebURL {
+		if query == "" || len(caps) != 1 || caps[0].Name != "OneDriveAndSharePoint" || len(caps[0].Items) != 1 || !maps.Equal(caps[0].Items[0], stubSharePoint) {
 			os.Exit(88)
 		}
-		recordDocumentCall(map[string]any{"tool": "retrieve", "query": query, "url": caps[0].Items[0].URL})
+		recordDocumentCall(map[string]any{"tool": "retrieve", "query": query, "ids": caps[0].Items[0]})
 		return retrieval()
 	case "fetch_blob":
 		if path != "/drives/"+stubDrive+"/items/"+stubItem+"/content" {

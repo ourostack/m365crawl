@@ -466,10 +466,8 @@ func main() {
 					Query string   `json:"query"`
 					Path  string   `json:"path"`
 					Caps  []struct {
-						Name  string `json:"name"`
-						Items []struct {
-							URL string `json:"url"`
-						} `json:"items_by_url"`
+						Name  string              `json:"name"`
+						Items []map[string]string `json:"items_by_sharepoint_ids"`
 					} `json:"capabilities"`
 				} `json:"arguments"`
 			} `json:"params"`

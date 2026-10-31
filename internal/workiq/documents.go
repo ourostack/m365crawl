@@ -24,7 +24,7 @@ var (
 	sharePointHost  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}\.sharepoint(-df)?\.com$`)
 	driveIDPattern  = regexp.MustCompile(`^b![A-Za-z0-9_-]{8,256}$`)
 	itemIDPattern   = regexp.MustCompile(`^[A-Za-z0-9]{8,128}$`)
-	labelIDPattern  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	guidPattern  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	protectionValue = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 )
 
@@ -40,13 +40,20 @@ func (r DocumentRef) valid() bool {
 
 func (r DocumentRef) path() string { return "/drives/" + r.DriveID + "/items/" + r.ItemID }
 
+// SharePointIDs are the item's SharePoint identity, which scopes retrieve to exactly that item.
+// Live WorkIQ 1.0.1 matched no hit for an item scoped by its Doc.aspx webUrl, but did by these.
+type SharePointIDs struct {
+	SiteID, WebID, ListID, UniqueID string
+}
+
 // DocumentItem is the drive item a link resolved to.
 type DocumentItem struct {
-	Ref    DocumentRef
-	Name   string
-	WebURL string
-	Size   int64
-	File   bool // the item has a file facet; folders and packages do not
+	Ref        DocumentRef
+	Name       string
+	WebURL     string
+	Size       int64
+	File       bool // the item has a file facet; folders and packages do not
+	SharePoint SharePointIDs
 }
 
 // DocumentLabel is the sensitivity label a retrieval hit reported. Encrypted is nil when the hit
@@ -79,7 +86,7 @@ func DocumentLink(raw string) (string, error) {
 		return "", linkUnsupported()
 	}
 	id := "u!" + strings.TrimRight(base64.URLEncoding.EncodeToString([]byte(raw)), "=")
-	return "/shares/" + id + "/driveItem?$select=id,name,webUrl,size,file,parentReference", nil
+	return "/shares/" + id + "/driveItem?$select=id,name,webUrl,size,file,parentReference,sharepointIds", nil
 }
 
 // ResolveDocument resolves a link to exactly one file through WorkIQ fetch.
@@ -102,33 +109,40 @@ func decodeDocumentItem(ctx context.Context, raw json.RawMessage) (DocumentItem,
 		Size             *int64
 		File             json.RawMessage
 		ParentReference  struct{ DriveID string }
+		SharePointIDs    struct{ SiteID, WebID, ListID, ListItemUniqueID string } `json:"sharepointIds"`
 	}
 	if _, err := decodeEntity(ctx, raw, &wire); err != nil {
 		return DocumentItem{}, err
 	}
-	item := DocumentItem{Ref: DocumentRef{DriveID: wire.ParentReference.DriveID, ItemID: wire.ID}, Name: wire.Name, WebURL: wire.WebURL}
+	ids := wire.SharePointIDs
+	item := DocumentItem{Ref: DocumentRef{DriveID: wire.ParentReference.DriveID, ItemID: wire.ID}, Name: wire.Name, WebURL: wire.WebURL,
+		SharePoint: SharePointIDs{SiteID: strings.ToLower(ids.SiteID), WebID: strings.ToLower(ids.WebID), ListID: strings.ToLower(ids.ListID),
+			UniqueID: strings.ToLower(ids.ListItemUniqueID)}}
 	if wire.Size != nil {
 		item.Size = *wire.Size
 	}
 	web, err := url.Parse(wire.WebURL)
 	if !item.Ref.valid() || err != nil || web.Scheme != "https" || !sharePointHost.MatchString(strings.ToLower(web.Hostname())) ||
-		wire.Name == "" || len(wire.Name) > 1024 || !utf8.ValidString(wire.Name) || item.Size < 0 {
+		wire.Name == "" || len(wire.Name) > 1024 || !utf8.ValidString(wire.Name) || item.Size < 0 ||
+		!guidPattern.MatchString(ids.SiteID) || !guidPattern.MatchString(ids.WebID) || !guidPattern.MatchString(ids.ListID) ||
+		!guidPattern.MatchString(ids.ListItemUniqueID) {
 		return DocumentItem{}, failure("workiq_protocol")
 	}
 	item.File = len(wire.File) > 0 && string(wire.File) != "null"
 	return item, nil
 }
 
-// RetrieveDocument asks WorkIQ retrieve about exactly one file URL. Only hits for that file are
-// meaningful to the caller; the rest are returned for the caller to discard.
+// RetrieveDocument asks WorkIQ retrieve about exactly one file, scoped by its SharePoint IDs. Only
+// hits for that file are meaningful to the caller; the rest are returned for the caller to discard.
 func (c *Client) RetrieveDocument(ctx context.Context, item DocumentItem, query string) ([]RetrievalHit, error) {
-	if !item.Ref.valid() || item.WebURL == "" || strings.TrimSpace(query) == "" || len(query) > 1500 {
+	ids := item.SharePoint
+	if !item.Ref.valid() || !guidPattern.MatchString(ids.UniqueID) || strings.TrimSpace(query) == "" || len(query) > 1500 {
 		return nil, failure("workiq_protocol")
 	}
 	raw, err := c.call(ctx, requestTimeout, "tools/call", map[string]any{"name": "retrieve", "arguments": map[string]any{
 		"query": query,
 		"capabilities": []any{map[string]any{"name": "OneDriveAndSharePoint",
-			"items_by_url": []any{map[string]any{"url": item.WebURL}}}},
+			"items_by_sharepoint_ids": []any{map[string]any{"site_id": ids.SiteID, "web_id": ids.WebID, "list_id": ids.ListID, "unique_id": ids.UniqueID}}}},
 	}})
 	if err != nil {
 		_ = c.Close()
@@ -189,7 +203,7 @@ func decodeRetrieval(ctx context.Context, raw []byte) ([]RetrievalHit, error) {
 			hit.ContentProtection = &value
 		}
 		if result.Label != nil {
-			if !labelIDPattern.MatchString(result.Label.ID) {
+			if !guidPattern.MatchString(result.Label.ID) {
 				return nil, failure("workiq_protocol")
 			}
 			hit.Label = &DocumentLabel{ID: strings.ToLower(result.Label.ID), Name: boundText(result.Label.DisplayName, 256), Encrypted: result.Label.IsEncrypted}

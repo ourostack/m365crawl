@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -17,10 +18,8 @@ func documentStubResult(mode string, raw json.RawMessage) any {
 			Path  string   `json:"path"`
 			Query string   `json:"query"`
 			Caps  []struct {
-				Name  string `json:"name"`
-				Items []struct {
-					URL string `json:"url"`
-				} `json:"items_by_url"`
+				Name  string              `json:"name"`
+				Items []map[string]string `json:"items_by_sharepoint_ids"`
 			} `json:"capabilities"`
 		} `json:"arguments"`
 	}
@@ -35,10 +34,12 @@ func documentStubResult(mode string, raw json.RawMessage) any {
 		}
 		return map[string]any{"structuredContent": map[string]any{"results": []any{map[string]any{"statusCode": 200, "data": map[string]any{
 			"id": "SYNTHETICITEM0001", "name": "Plan.docx", "webUrl": "https://contoso.sharepoint.com/sites/s/Plan.docx", "size": 10,
-			"file": map[string]any{}, "parentReference": map[string]any{"driveId": "b!syntheticDrive0001"}}}}}}
+			"file": map[string]any{}, "parentReference": map[string]any{"driveId": "b!syntheticDrive0001"},
+			"sharepointIds": map[string]any{"siteId": stubGUID(1), "webId": stubGUID(2), "listId": stubGUID(3), "listItemUniqueId": stubGUID(4)}}}}}}
 	case "retrieve":
 		if params.Args.Query != "Plan" || len(params.Args.Caps) != 1 || params.Args.Caps[0].Name != "OneDriveAndSharePoint" ||
-			len(params.Args.Caps[0].Items) != 1 || params.Args.Caps[0].Items[0].URL != "https://contoso.sharepoint.com/sites/s/Plan.docx" {
+			len(params.Args.Caps[0].Items) != 1 || params.Args.Caps[0].Items[0]["unique_id"] != stubGUID(4) || params.Args.Caps[0].Items[0]["site_id"] != stubGUID(1) ||
+			params.Args.Caps[0].Items[0]["web_id"] != stubGUID(2) || params.Args.Caps[0].Items[0]["list_id"] != stubGUID(3) {
 			return map[string]any{"isError": true}
 		}
 		return json.RawMessage(liveRetrieval)
@@ -163,3 +164,5 @@ func TestDocumentDecoderEdges(t *testing.T) {
 		t.Fatalf("%+v %v", hits, err)
 	}
 }
+
+func stubGUID(n int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012d", n) }
