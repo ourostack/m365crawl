@@ -98,3 +98,27 @@ order by a.id desc limit 1`, account, workIQTimeValue(&since), workIQTimeValue(&
 	out.Unproven, out.OpenItems = true, parsed["window_items_open"]
 	return out, nil
 }
+
+// WorkIQMailWindowSpans is the account's proven all-folder window coverage on the received clock,
+// merged, for range coverage to count as server coverage; none without window tables.
+func (s *Store) WorkIQMailWindowSpans(ctx context.Context, account string) ([]TimeSpan, error) {
+	ok, err := s.hasWorkIQWindows(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var spans []TimeSpan
+	err = mailEach(ctx, s.db, `select since,until from workiq_window_coverage where account_id=? and folder_id=''`, []any{account}, func(r *sql.Rows) error {
+		var a, b string
+		if err := r.Scan(&a, &b); err != nil {
+			return err
+		}
+		from, errA := time.Parse(time.RFC3339Nano, a)
+		to, errB := time.Parse(time.RFC3339Nano, b)
+		if errA != nil || errB != nil {
+			return errors.New("invalid WorkIQ window coverage")
+		}
+		spans = append(spans, TimeSpan{From: from, To: to})
+		return nil
+	})
+	return MergeSpans(spans), err
+}
