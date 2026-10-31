@@ -107,6 +107,8 @@ func skillKeys() []string {
 		reflect.TypeFor[loopChannelItem](), reflect.TypeFor[loopSourceItem](), reflect.TypeFor[loopSyncResult](), reflect.TypeFor[documentItem](), reflect.TypeFor[scoutSessionItem](), reflect.TypeFor[scoutCoverage]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
+	keys = append(keys, syncer.DocumentExtractNotAllowed, syncer.DocumentRightsUnknown, syncer.DocumentProtectionUnattributed,
+		syncer.DocumentProtectionUnverifiable, syncer.DocumentKindUnsupported)
 	return append(keys, documentFailureReasons...)
 }
 

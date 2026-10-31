@@ -141,6 +141,10 @@ func serveStub() int {
 		return 0
 	}
 	for dec.Decode(&req) == nil {
+		if strings.HasPrefix(mode, "doc") {
+			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": documentStubResult(mode, req.Params)})
+			continue
+		}
 		var params struct {
 			Name string `json:"name"`
 			Args struct {

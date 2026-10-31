@@ -502,6 +502,7 @@ type searchHit struct {
 	cloudSourceID, cloudObservationID int64
 	localText                         bool
 	engage, engageKnown               bool
+	workIQDocument                    bool // native modified clock unknown; after every other content hit of its tier
 	engageSessionID                   int64
 	engageOrdinal                     int
 }
@@ -536,6 +537,9 @@ func sortSearchHits(hits []searchHit) {
 		}
 		if b.source != searchContent {
 			return false
+		}
+		if a.workIQDocument != b.workIQDocument {
+			return !a.workIQDocument
 		}
 		if a.localText != b.localText {
 			return !a.localText

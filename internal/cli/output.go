@@ -112,6 +112,8 @@ type listResult struct {
 	ContentCoverage       *cloudCoverage         `json:"content_coverage,omitempty"`
 	LocalContentCoverage  *localCoverage         `json:"local_content_coverage,omitempty"`
 	EngageContentCoverage *EngageContentCoverage `json:"engage_content_coverage,omitempty"`
+	// WorkIQDocumentCoverage is every explicitly fetched WorkIQ document and its latest check.
+	WorkIQDocumentCoverage *workIQDocumentCoverage `json:"workiq_document_coverage,omitempty"`
 	// ApplicationEvidenceCoverage summarizes the application evidence of the Teams messages the
 	// result returned, whatever --fields kept. Nil on results that read no Teams messages.
 	ApplicationEvidenceCoverage *applicationCoverage `json:"application_evidence_coverage,omitempty"`

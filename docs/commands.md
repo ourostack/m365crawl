@@ -20,7 +20,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
 | Scout session history (opt-in) | [`scout sync`](#scout-sync), [`scout list`](#scout-list), [`scout search`](#scout-search), [`scout show`](#scout-show), [`scout sources`](#scout-sources) |
 | Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
-| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
+| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content fetch doc`](#content-fetch-doc), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## WorkIQ
@@ -123,6 +123,16 @@ activity/shared search or FTS and have no message actions.
 `--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`, `full_inspection_shell`.
 
 ## Content: explicit acquisition, offline reads
+
+### content fetch doc
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] content fetch doc LINK
+```
+
+Reads one OneDrive or SharePoint Office file (`.docx`, `.docm`, `.pptx`, `.pptm`, `.xlsx`, `.xlsm`) through the optional WorkIQ source, for example the file a Teams message links to. LINK is a sharing link, a `Doc.aspx` link or the file's URL; it is used once and never stored. WorkIQ must be enabled and signed in as the archived Teams account (`--account` picks one when there are several).
+
+Text is kept only when WorkIQ `retrieve` reports `contentProtection: "allowed"` for that exact file, the per-file decision Microsoft 365 Copilot makes from the EXTRACT (Copy) usage right. If no encrypting label accounts for the file's protection, its bytes (at most 4 MB) are inspected without decryption and discarded; encryption without such a label is refused. Only the excerpts WorkIQ released are kept, so `scope` is always `partial`. The result has `status` (`admitted` or `refused`), `id` (`workiq-document:N`), `code`, `account`, `name`, `web_url`, `drive_id`, `item_id`, `text`, `extracts`, `service_truncated`, `kept_text_deleted`, `check` (label, `content_protection`, `protection_attribution`, `bytes_state`, `rights_source`) and `refusal_live_status`. A refusal keeps no text, deletes text a previous fetch kept, and exits 3 with `document_extract_not_allowed`, `document_rights_unknown`, `document_protection_unattributed`, `document_protection_unverifiable` or `document_kind_unsupported`. A live view-only refusal has not been observed yet; any value other than `allowed`, or none, refuses. Read it back offline with `content show workiq-document:N`, `content list`, `content search` and `content sources`.
 
 ### content fetch engage-thread
 
