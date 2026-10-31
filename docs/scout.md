@@ -34,17 +34,17 @@ m365crawl scout sources                   # what each scan read and skipped
 | --- | --- |
 | macOS | `~/Library/CloudStorage/OneDrive-*/Apps/*/sessions/devices/*/*.json`, or a folder named with `--root` |
 | Linux | Only a folder named with `--root`, on a local disk |
-| Windows | Nothing yet: acquisition is refused with `scout_platform_unqualified` until it is verified on a Windows computer. An archive read on Windows works. |
+| Windows | `<OneDrive folder>\Apps\*\sessions\devices\*\*.json` for each OneDrive folder named by the `OneDriveCommercial`, `OneDriveConsumer` and `OneDrive` environment variables (for example `C:\Users\<you>\OneDrive - Contoso`), or a folder named with `--root`, on a local fixed NTFS drive |
 
 ## Files that live only in the cloud
 
-OneDrive can keep a file only in the cloud and download it when it is opened (Files On-Demand). m365crawl never downloads a file. On macOS every read runs with downloads of cloud-only files turned off, so a file that becomes cloud-only during the read fails instead of being fetched.
+OneDrive can keep a file only in the cloud and download it when it is opened (Files On-Demand). m365crawl never downloads a file. On macOS every read runs with downloads of cloud-only files turned off, so a file that becomes cloud-only during the read fails instead of being fetched. On Windows OneDrive marks a cloud-only file in its folder listing (offline and recall-on-data-access attributes, and a partly downloaded file is sparse); m365crawl reads those marks from the listing and never opens such a file, opens the others asking Windows not to download, and checks the marks again before and after the read.
 
 `scout sync` counts such files as `cloud_only` and skips them, and every Scout result carries `scout_coverage` with those counts. A missing session is therefore not evidence that the agent did nothing.
 
 To include those sessions:
 
-1. In Finder, open your OneDrive's `Apps` folder.
+1. In Finder (macOS) or File Explorer (Windows), open your OneDrive's `Apps` folder.
 2. Right-click the Scout app folder and choose **Always keep on this device**.
 3. Wait for OneDrive to finish downloading.
 4. Run `m365crawl scout sync` again.
