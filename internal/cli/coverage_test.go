@@ -70,13 +70,6 @@ func minTime(a, b time.Time) time.Time {
 	return a
 }
 
-func maxTime(a, b time.Time) time.Time {
-	if b.After(a) {
-		return b
-	}
-	return a
-}
-
 // covMailMessages: Inbox from 20 days ago to yesterday, Sent Items with a message sent 10 days ago
 // whose draft started a day before, and one sent 3 days ago; a Projects message from long ago,
 // which must not extend any range.

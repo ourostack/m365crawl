@@ -44,10 +44,10 @@ func TestCommitMailRecordsSpansThatNeverShrink(t *testing.T) {
 	inbox := mailMsg(1, fInbox, "<a@x.test>", "a", 20)
 	toMe := mailMsg(2, fToMe, "<b@x.test>", "b", 30) // To Me reaching further back does not move Inbox's start
 	sent := sentMsg(3, "<c@x.test>", 10, 2)
-	newest := mailMsg(4, fProject, "<d@x.test>", "d", 1)
-	draft := mailMsg(5, fInbox, "<e@x.test>", "e", 0)
-	draft.Folder.Kind = "drafts" // a draft proves nothing about Outlook's sync
-	b := mailBatch(mailT0, inbox, toMe, sent, newest, draft)
+	newest := mailMsg(4, fInbox, "<d@x.test>", "d", 1)
+	local := mailMsg(5, fDeleted, "<e@x.test>", "e", 0) // a discarded draft proves nothing about Outlook's sync
+	project := mailMsg(8, fProject, "<h@x.test>", "h", 0)
+	b := mailBatch(mailT0, inbox, toMe, sent, newest, local, project)
 	mustCommitMail(t, s, b)
 	got := spansOf(t, s, mailAcct)
 	if !got.Recorded || got.Legacy || !got.FreshAt.Equal(mailT0) {
@@ -177,7 +177,7 @@ func TestLegacyMailSpansNeedAQualifyingLastRead(t *testing.T) {
 	key := "outlook|profile-1|mail"
 	setup := func(t *testing.T) *Store {
 		s := newStore(t)
-		mustCommitMail(t, s, mailBatch(mailT0, mailMsg(1, fInbox, "<a@x.test>", "a", 5), sentMsg(2, "<b@x.test>", 4, 1), mailMsg(3, fProject, "<c@x.test>", "c", 1)))
+		mustCommitMail(t, s, mailBatch(mailT0, mailMsg(1, fInbox, "<a@x.test>", "a", 5), sentMsg(2, "<b@x.test>", 4, 1), mailMsg(3, fInbox, "<c@x.test>", "c", 1), mailMsg(4, fProject, "<d@x.test>", "d", 0)))
 		other := mailBatch(mailT0, mailMsg(9, fInbox, "<o@x.test>", "o", 30)) // another account's ranges are not this one's
 		other.Account = "outlook/Other"
 		other.Result.Messages[0].Account = other.Account

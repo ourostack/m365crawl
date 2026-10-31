@@ -520,11 +520,9 @@ func (c *coverageRun) chatEntry(tenantID, userID, scope string, a, b time.Time) 
 	if len(pieces) == 0 && e.has(reasonBeforeArchiveStart) && ev.Items+ev.Deleted > 0 {
 		e.State = covPartial // Teams had cached some of it
 	}
-	if i, _ := slices.BinarySearchFunc(log.Reads, b, time.Time.Compare); i < len(log.Reads) && len(pieces) > 0 {
-		if gap := log.Reads[i].Sub(b); gap > teamsReadGap {
-			e.downgrade()
-			e.reason(reasonReadGap, fmt.Sprintf("the first read after this range came %s after it ended; Teams may have dropped messages before any read saw them", gap.Round(time.Hour)))
-		}
+	if gap := worstReadGap(log.Reads, maxTime(a, first), b); len(pieces) > 0 && gap > teamsReadGap {
+		e.downgrade()
+		e.reason(reasonReadGap, fmt.Sprintf("part of this range waited %s for the next Teams read; Teams may have dropped messages before any read saw them", gap.Round(time.Hour)))
 	}
 	if ev.Behind > 0 {
 		e.downgrade()
@@ -543,6 +541,32 @@ func (c *coverageRun) chatEntry(tenantID, userID, scope string, a, b time.Time) 
 	}
 	e.finish()
 	return e, nil
+}
+
+// worstReadGap is the longest any moment of [from, b) waited for the next read: from each read
+// in the range (and from the range's start) to the read after it, up to the first read at or
+// after b. Time after the last read is not counted; it is not covered at all.
+func worstReadGap(reads []time.Time, from, b time.Time) time.Duration {
+	var worst time.Duration
+	at := from
+	for _, r := range reads {
+		if !r.After(at) {
+			continue
+		}
+		worst = max(worst, r.Sub(at))
+		if !r.Before(b) {
+			break
+		}
+		at = r
+	}
+	return worst
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // chatSteps is the WorkIQ chat counting steps from since: counts only, no messages.

@@ -142,8 +142,10 @@ func mailRoleBlocked(b MailBatch, role string) bool {
 // of the role's anchor folders (Inbox for inbox: To Me holds copies of Inbox mail and may reach
 // less far back; Sent Items for sent), the latest such start when there are several, so every
 // anchor folder reaches back that far. It ends at the store's write time, or earlier at the
-// newest message the read holds outside Drafts: Outlook keeps writing its store while offline, so
-// only a message that arrived proves it had synced up to then. Sent Items count by sent time,
+// newest message the read holds in the Inbox, To Me or Sent Items: Outlook keeps writing its
+// store while offline, so only mail that arrived (or a send that reached Sent Items) proves it
+// had synced up to then. Other folders can hold items made on this machine, such as a discarded
+// draft in Deleted Items or a message waiting in the Outbox. Sent Items count by sent time,
 // because their received time is often when a draft was started.
 func mailReadSpan(b MailBatch, role string) (TimeSpan, bool) {
 	kinds := map[uint32]string{}
@@ -158,10 +160,10 @@ func mailReadSpan(b MailBatch, role string) (TimeSpan, bool) {
 	}
 	var newest time.Time
 	for _, m := range b.Result.Messages {
-		at := m.Received
+		var at time.Time
 		switch m.Folder.Kind {
-		case "drafts", outlookmail.KindUnknown:
-			continue
+		case MailRoleInbox, "to_me":
+			at = m.Received
 		case MailRoleSent:
 			at = m.Sent
 		}
@@ -311,9 +313,9 @@ func (s *Store) mailLegacySpans(ctx context.Context, account string, out *MailSp
 		if (c.Kind == MailRoleSent || c.Kind == MailRoleInbox) && c.OldestAt.After(from[c.Kind]) {
 			from[c.Kind] = c.OldestAt
 		}
-		// A Sent row's newest received time can be a draft's start or a later guess, so only
-		// other folders prove how far Outlook had synced.
-		if c.Kind != MailRoleSent && c.Kind != "drafts" && c.Kind != outlookmail.KindUnknown && c.NewestAt.After(newest) {
+		// Only arrived mail proves how far Outlook had synced; a Sent row's newest received time
+		// can be a draft's start, and other folders hold items made on this machine.
+		if (c.Kind == MailRoleInbox || c.Kind == "to_me") && c.NewestAt.After(newest) {
 			newest = c.NewestAt
 		}
 	}

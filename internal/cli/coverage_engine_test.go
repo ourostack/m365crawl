@@ -281,6 +281,8 @@ func TestChatEntryVerdicts(t *testing.T) {
 		{name: "not writing", reads: []time.Time{day(20), day(6)}, stale: day(5), a: day(5), b: day(4), state: covNotCovered, want: "after_cache_fresh"},
 		{name: "last read", reads: []time.Time{day(20), day(6)}, stale: day(6).Add(time.Minute), a: day(5), b: day(4), state: covNotCovered, want: "after_last_read"},
 		{name: "read gap", reads: []time.Time{day(20), day(19), day(2)}, a: day(15), b: day(14), state: covPartial, want: "read_gap"},
+		{name: "read gap inside a long range", reads: []time.Time{day(20), day(19), day(2)}, a: day(19).Add(time.Hour), b: day(3), state: covPartial, want: "read_gap"},
+		{name: "daily reads", reads: []time.Time{day(20), day(19), day(18), day(17), day(16), day(15), day(14), day(13), day(12), day(6)}, a: day(19), b: day(13), state: covCovered},
 		{name: "behind and gaps", reads: []time.Time{day(20), day(3)}, ev: store.ChatEvidence{Behind: 1, GapConversations: 1, PossiblyMissing: 4}, a: day(5), b: day(4), state: covPartial, want: "conversation_behind,sequence_gap"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
