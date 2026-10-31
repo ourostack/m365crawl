@@ -339,7 +339,11 @@ func (s *Store) mailDatedRows(ctx context.Context, f MailFilter) (string, []any,
 		like := "%" + strings.ToLower(escapeLike(f.From)) + "%"
 		w.add(`(lower(m.sender_name) like ? escape '\' or lower(m.sender_address) like ? escape '\')`, like, like)
 	}
-	if f.Unread && !unreadInFolder {
+	switch {
+	case f.Unread && !unreadInFolder && copies.members:
+		// Unread in any folder it is in, as mail folders counts it.
+		w.add(`(m.is_read=0 or exists(select 1 from mail_message_folders u where u.message_rowid=m.rowid and u.is_read=0))`)
+	case f.Unread && !unreadInFolder:
 		w.add(`m.is_read=0`)
 	}
 	if f.Flagged {

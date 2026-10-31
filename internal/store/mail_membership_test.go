@@ -384,3 +384,30 @@ func TestMailMembershipFolderListUsesIndexes(t *testing.T) {
 		}
 	}
 }
+
+// Without --folder, --unread keeps a message unread in any folder it is in, so the list, the count
+// and the folder counts agree: a message read in Inbox (the copy it is shown from) and unread in a
+// folder a rule copied it to.
+func TestMailMembershipUnreadAnywhere(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	read := false
+	m := withCopies(mailMsg(100, fInbox, "<a@x>", "A", 0), []uint32{fInbox, fProject}, fInbox)
+	m.Unread, m.ReadState = &read, "read"
+	mustCommitMail(t, s, mailBatch(mailT0, m, mailMsg(101, fSent, "<b@x>", "B", 1)))
+	if got := sortedKeys(listKeys(t, s, MailFilter{Unread: true})); !slices.Equal(got, []uint32{100, 101}) {
+		t.Fatalf("--unread %v", got)
+	}
+	if n := must(s.MailCount(ctx, MailFilter{Unread: true})); n != 2 {
+		t.Fatalf("count %d", n)
+	}
+	if got := listKeys(t, s, MailFilter{Folder: "inbox", Unread: true}); got != nil {
+		t.Fatalf("--folder inbox --unread %v", got)
+	}
+	if counts := folderCounts(t, s); counts["Projects"] != [2]int{1, 1} || counts["Inbox"] != [2]int{1, 0} {
+		t.Fatalf("counts %v", counts)
+	}
+	if st := must(s.MailStatus(ctx)); st.Unread != 2 {
+		t.Fatalf("status unread %d", st.Unread)
+	}
+}
