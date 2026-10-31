@@ -514,7 +514,7 @@ Opt-in: m365crawl reads the session files Microsoft Scout keeps in your local On
 - **IDs.** `source_id` is one app folder. `scout-session:N` is one session file and stays the same across versions; `observation_id` is one immutable version (distinct bytes, with their SHA-256 `digest`); `scout-message:N` is one message of one observation.
 - **Archive.** A version once read is never changed. Bytes seen before reuse their observation. A file that leaves OneDrive is marked `file_state` `gone` and keeps its archived versions.
 - **Coverage.** Every Scout result carries `scout_coverage` outside `--fields`, `--limit` and zero hits: `state` (`not_registered` or `registered`), `format` (`unofficial`: the file format is not a documented interface), `totals` (`present_files`, `archived_files`, `cloud_only_files`, `failed_files`, `gone_files`, `sessions`), `sources` (as `scout sources` prints them) and a `note` when cloud-only files mean sessions can be missing. `archive_age_seconds` is the age of the newest finished `scout sync` scan.
-- **Reads.** `scout list`, `scout search`, `scout show` and `scout sources` read only the archive on every `--max-age` and never create one. They refuse `--account`, `--outlook-account` and `--outlook-profile`.
+- **Reads.** `scout list`, `scout search`, `scout show` and `scout sources` read only the archive whatever `--max-age` or `--no-sync` says, never create one, and carry no `implicit_sync` because they never sync first. They refuse `--account`, `--outlook-account` and `--outlook-profile`.
 
 ### scout sync
 
