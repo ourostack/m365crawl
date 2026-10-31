@@ -86,12 +86,12 @@ func TestCompletionNativeJobListRejectsTruncation(t *testing.T) {
 			t.Fatal("must query the private job's PID list")
 		}
 		info := (*completionJobPIDList)(ptr)
-		info.assigned, info.returned = 2, 1
+		info.assigned, info.returned = 4097, 4096
 		info.pids[0] = 42
 		return nil
 	}
 	if _, err := jobPIDs(7, 4096); err == nil {
-		t.Fatal("truncated job membership must refuse without buffer growth")
+		t.Fatal("a job with more members than the buffer must refuse without buffer growth")
 	}
 	completionQueryJob = func(_ windows.Handle, _ int32, ptr unsafe.Pointer, _ uint32, _ *uint32) error {
 		info := (*completionJobPIDList)(ptr)

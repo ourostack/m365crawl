@@ -50,7 +50,12 @@ func jobPIDs(job windows.Handle, limit int) ([]uint32, error) {
 	if err != nil {
 		return nil, &completionFailure{code: "browser_completion_job_query_failed", cause: err}
 	}
-	if info.assigned != info.returned || info.returned > uint32(limit) { //nolint:gosec // limit checked against fixed 4096 cap above
+	// A member exiting or being created while the job is read can be counted in assigned and
+	// missing from the list, or the reverse (#309). That is not a list the buffer cut short: the
+	// buffer holds every member of a job within the limit, completion waits for the job's active
+	// process count to reach zero and TerminateJobObject reaches every member, so the members
+	// listed are the ones to watch. Only a job with more members than the limit is too large.
+	if max(info.assigned, info.returned) > uint32(limit) { //nolint:gosec // limit checked against fixed 4096 cap above
 		return nil, &completionFailure{code: "browser_completion_too_large"}
 	}
 	pids := make([]uint32, info.returned)
