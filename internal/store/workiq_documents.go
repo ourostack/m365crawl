@@ -53,7 +53,8 @@ create table if not exists workiq_document_bodies(
  extracts integer not null check(extracts>=0), truncated integer not null check(truncated in (0,1))
 );
 create virtual table if not exists workiq_document_fts using fts5(title,text);
-insert into workiq_document_fts(workiq_document_fts,rank) values('secure-delete',1);
+insert into workiq_document_fts(workiq_document_fts,rank) select 'secure-delete',1
+ where not exists(select 1 from workiq_document_fts_config where k='secure-delete' and v=1);
 create trigger if not exists workiq_document_bodies_fts_insert after insert on workiq_document_bodies begin
  insert into workiq_document_fts(rowid,title,text) select new.document_id,d.name,new.text from workiq_documents d where d.id=new.document_id;
 end;

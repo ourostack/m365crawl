@@ -16,7 +16,8 @@ const syntheticDocumentLink = "https://contoso.sharepoint.com/:w:/t/team/EabcSyn
 
 func documentArchive(t *testing.T, enabled bool, accounts ...teamsdesktop.Account) string {
 	t.Helper()
-	db := filepath.Join(t.TempDir(), "archive.db")
+	isolateTmp(t)
+	db := newDB(t)
 	st, err := store.Open(context.Background(), db)
 	if err != nil {
 		t.Fatal(err)
