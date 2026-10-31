@@ -93,6 +93,9 @@ type MailRow struct {
 	// times more than a minute apart; ReceivedAt stays the row's own.
 	DatedAt             time.Time
 	ReceivedAtDisagrees bool
+	// Folders is every folder the message has a copy in (mail_membership.go), its own folder first
+	// among equals as mail folders orders them; the stored folder alone when it has no other.
+	Folders []MailFolderRef
 }
 
 // ID is the message's id as the commands print it: account:detail_key.
@@ -203,6 +206,9 @@ func (s *Store) mailRowsMarked(ctx context.Context, copies mailCopies, body bool
 	if err != nil {
 		return nil, err
 	}
+	if err := loadMailFolderRefs(ctx, tx, out); err != nil {
+		return nil, err
+	}
 	copies.mark(out)
 	if err := s.mailChildren(ctx, tx, out, roleCol); err != nil {
 		return nil, err
@@ -282,6 +288,32 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 // folder copies it was built from. The filters apply inside each part of datedRows, which reads
 // its parts in order and stops at the limit.
 func (s *Store) mailListQuery(ctx context.Context, f MailFilter) (string, []any, mailCopies, error) {
+	rows, args, copies, err := s.mailDatedRows(ctx, f)
+	if err != nil {
+		return "", nil, copies, err
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
+	return ` from (` + rows + ` order by 2 desc, 1 desc limit ?) p join mail_messages m on m.rowid=p.rid` + mailJoin + ` order by p.at desc, m.rowid desc`, append(args, limit), copies, nil
+}
+
+// MailCount is how many messages MailList would list for f without a limit, each counted once
+// however many folders it is in.
+func (s *Store) MailCount(ctx context.Context, f MailFilter) (int, error) {
+	rows, args, _, err := s.mailDatedRows(ctx, f)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	err = s.db.QueryRowContext(ctx, `select count(*) from (`+rows+`)`, args...).Scan(&n) //nolint:gosec // G202: fragments are package constants and integers; values are placeholders
+	return n, err
+}
+
+// mailDatedRows is the datedRows select of the messages f selects (every filter but the limit),
+// with its arguments, and the folder copies it was built from.
+func (s *Store) mailDatedRows(ctx context.Context, f MailFilter) (string, []any, mailCopies, error) {
 	var w where
 	if strings.TrimSpace(f.Query) != "" {
 		match := buildFTSQuery(f.Query)
@@ -293,8 +325,13 @@ func (s *Store) mailListQuery(ctx context.Context, f MailFilter) (string, []any,
 	if f.Account != "" {
 		w.add(`m.account=?`, f.Account)
 	}
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return "", nil, copies, err
+	}
+	unreadInFolder := false
 	if f.Folder != "" {
-		if err := s.mailFolderWhere(ctx, &w, f); err != nil {
+		if unreadInFolder, err = s.mailFolderWhere(ctx, &w, f, copies.members); err != nil {
 			return "", nil, mailCopies{}, err
 		}
 	}
@@ -302,11 +339,7 @@ func (s *Store) mailListQuery(ctx context.Context, f MailFilter) (string, []any,
 		like := "%" + strings.ToLower(escapeLike(f.From)) + "%"
 		w.add(`(lower(m.sender_name) like ? escape '\' or lower(m.sender_address) like ? escape '\')`, like, like)
 	}
-	copies, err := loadMailCopies(ctx, s.db)
-	if err != nil {
-		return "", nil, copies, err
-	}
-	if f.Unread {
+	if f.Unread && !unreadInFolder {
 		w.add(`m.is_read=0`)
 	}
 	if f.Flagged {
@@ -324,12 +357,8 @@ func (s *Store) mailListQuery(ctx context.Context, f MailFilter) (string, []any,
 	if cond := copies.notCopy(`m.rowid`); cond != "" && !f.IncludeCopies {
 		w.add(cond)
 	}
-	limit := f.Limit
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
 	rows, args := copies.datedRows(strings.Join(w.conds, " and "), w.args, f.Since, f.Until)
-	return ` from (` + rows + ` order by 2 desc, 1 desc limit ?) p join mail_messages m on m.rowid=p.rid` + mailJoin + ` order by p.at desc, m.rowid desc`, append(args, limit), copies, nil
+	return rows, args, copies, nil
 }
 
 // narrowed reports whether f selects messages by anything but the account and the listing
@@ -373,14 +402,16 @@ func (s *Store) HasMail(ctx context.Context) (bool, error) {
 	return has, err
 }
 
-// mailFolderWhere limits the list to the folders the filter names: by name first, then by kind.
-func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) error {
+// mailFolderWhere limits the list to the messages in the folders the filter names (by name first,
+// then by kind), through their stored folder or their membership. With f.Unread it keeps those
+// whose copy in such a folder is unread, and reports that it did (unread).
+func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter, members bool) (unread bool, err error) {
 	type fk struct {
 		account string
 		key     uint32
 	}
 	var byName, byKind []fk
-	err := mailEach(ctx, s.db, `select account, folder_key, name, kind from mail_folders where (?='' or account=?) order by account, folder_key`, []any{f.Account, f.Account}, func(r *sql.Rows) error {
+	err = mailEach(ctx, s.db, `select account, folder_key, name, kind from mail_folders where (?='' or account=?) order by account, folder_key`, []any{f.Account, f.Account}, func(r *sql.Rows) error {
 		var k fk
 		var name, kind string
 		if err := r.Scan(&k.account, &k.key, &name, &kind); err != nil {
@@ -395,7 +426,7 @@ func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) err
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	keys := byName
 	if len(keys) == 0 {
@@ -404,19 +435,18 @@ func (s *Store) mailFolderWhere(ctx context.Context, w *where, f MailFilter) err
 	if len(keys) == 0 && strings.EqualFold(f.Folder, outlookmail.KindUnknown) {
 		// Messages whose folder object the store does not hold have no folder row to match.
 		w.add(`not exists(select 1 from mail_folders f2 where f2.account=m.account and f2.folder_key=m.folder_key)`)
-		return nil
+		return false, nil
 	}
 	if len(keys) == 0 {
-		return ErrUnknownMailFolder
+		return false, ErrUnknownMailFolder
 	}
-	conds := make([]string, len(keys))
-	args := make([]any, 0, 2*len(keys))
-	for i, k := range keys {
-		conds[i] = `(m.account=? and m.folder_key=?)`
-		args = append(args, k.account, k.key)
+	byAccount := map[string][]uint32{}
+	for _, k := range keys {
+		byAccount[k.account] = append(byAccount[k.account], k.key)
 	}
-	w.add(`(`+strings.Join(conds, " or ")+`)`, args...)
-	return nil
+	cond, args := inFolders(byAccount, f.Unread, members)
+	w.add(cond, args...)
+	return f.Unread, nil
 }
 
 // MailGet returns one message with its body text, recipients and attachments, whether or not it
@@ -624,13 +654,16 @@ func (s *Store) MailFolders(ctx context.Context) ([]MailFolderRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	live := `m.account=f.account and m.folder_key=f.folder_key and m.gone_at is null and m.evicted_at is null`
+	// A message counts in every folder it is in, and as unread in a folder when its copy there is.
+	in, _ := memberRowids(`f.account`, `(f.folder_key)`, false, copies.members)
+	unread, _ := memberRowids(`f.account`, `(f.folder_key)`, true, copies.members)
+	live := `m.gone_at is null and m.evicted_at is null`
 	if cond := copies.notCopy(`m.rowid`); cond != "" {
 		live += ` and ` + cond
 	}
 	err = mailEach(ctx, s.db, `select f.account, f.folder_key, f.parent_key, f.name, f.kind,
-  (select count(*) from mail_messages m where `+live+`),
-  (select count(*) from mail_messages m where `+live+` and m.is_read=0),
+  (select count(*) from mail_messages m where m.rowid in (`+in+`) and `+live+`),
+  (select count(*) from mail_messages m where m.rowid in (`+unread+`) and `+live+`),
   c.oldest_at, c.newest_at, c.read_at
 from mail_folders f left join mail_coverage c on c.account=f.account and c.folder_key=f.folder_key`, nil, func(r *sql.Rows) error { //nolint:gosec // G202: live is fixed text and integer row ids
 		var f MailFolderRow

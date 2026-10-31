@@ -25,6 +25,7 @@ var sqlTables = []sqlTable{
 	{"mail_recipients", "recipients of a mail message, by the message's rowid"},
 	{"mail_attachments", "attachment names, sizes and types of a mail message"},
 	{"mail_folders", "Outlook mail folders"},
+	{"mail_message_folders", "every folder a mail message has a copy in, by the message's rowid, with that copy's is_read; only for a message in two or more folders"},
 	{"mail_source_ids", "the native ids of mail messages, folders and attachments, and the keys the mail tables use for them"},
 	{"workiq_accounts", "private verified WorkIQ bindings to existing archive accounts"},
 	{"workiq_attempts", "typed sync/coverage/status outcomes, independent of desktop sync freshness; probes retain no content or data cursors"},

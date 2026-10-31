@@ -26,9 +26,19 @@ func (s *Store) WorkIQMailFolderCount(ctx context.Context, account, folder strin
 	if err != nil {
 		return nil, err
 	}
+	members, err := hasMailMembership(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	// A canonical row counts in every folder it is in, as Graph counts an item per folder.
+	in, n := memberRowids(`?`, `(?)`, false, members)
+	args := []any{}
+	for range n {
+		args = append(args, account, key)
+	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from mail_messages where account=? and folder_key=?
-and gone_at is null and evicted_at is null`, account, key).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select count(*) from mail_messages m where m.rowid in (`+in+`)
+and m.gone_at is null and m.evicted_at is null`, args...).Scan(&count); err != nil { //nolint:gosec // G202: fixed fragments, values are placeholders
 		return nil, err
 	}
 	return &count, nil
@@ -78,6 +88,11 @@ func (s *Store) workIQMailCoverage(ctx context.Context) ([]CoverageRow, error) {
 	if err := tx.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
 		return nil, err
 	}
+	members, err := hasMailMembership(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	in, _ := memberRowids(`k.account`, `(k.folder_key)`, false, members)
 	query := `select c.account,c.folder_key,coalesce(f.name,''),coalesce(f.kind,'unknown'),
 c.oldest_at,c.newest_at,c.count,c.read_at,'',NULL
 from mail_coverage c left join mail_folders f on f.account=c.account and f.folder_key=c.folder_key
@@ -90,7 +105,7 @@ keys as (select account,folder_key from mail_coverage union
 select m.account,m.folder_key from mail_messages m join source_accounts s on s.account_id=m.account)
 select k.account,k.folder_key,coalesce(f.name,''),coalesce(f.kind,'unknown'),c.oldest_at,c.newest_at,
 case when s.valid=0 then NULL when s.account_id is null then c.count else
-(select count(*) from mail_messages m where m.account=k.account and m.folder_key=k.folder_key and m.gone_at is null and m.evicted_at is null) end,
+(select count(*) from mail_messages m where m.rowid in (` + in + `) and m.gone_at is null and m.evicted_at is null) end,
 c.read_at,case when s.account_id is null then '' else 'canonical_archive' end,
 case when s.account_id is null then NULL else c.count end
 from keys k left join mail_coverage c on c.account=k.account and c.folder_key=k.folder_key

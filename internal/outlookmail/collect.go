@@ -51,6 +51,8 @@ type Loss struct {
 
 // Message is one logical message: the current header copy, its detail, folder, recipients,
 // attachments and body. Copies counts the header objects (To Me, Inbox, Sent ...) that hold it.
+// FolderCopies lists each folder those copies sit in once (see FolderCopy); a reader that has one
+// folder per message (Windows OWA, WorkIQ) leaves it empty.
 type Message struct {
 	Account string
 	// Header and Detail are embedded and both have a Key field, so m.Key is ambiguous: use
@@ -63,6 +65,17 @@ type Message struct {
 	Attachments []Attachment
 	Body        Body
 	Copies      int
+	// FolderCopies is omitted from JSON when empty, so a retained projection of a message without
+	// it serializes as before.
+	FolderCopies []FolderCopy `json:",omitempty"`
+}
+
+// FolderCopy is one folder a message has a header copy in, with the read state of the newest
+// copy there: Outlook keeps the read state per copy (a message sent to oneself is read in Sent
+// Items and can be unread in Inbox). Unread is nil when that copy's state is unknown.
+type FolderCopy struct {
+	Key    uint32
+	Unread *bool
 }
 
 // Coverage is what one folder held in this read: the oldest and newest received time and the
@@ -511,7 +524,7 @@ func assemble(ctx context.Context, res *Result, root, account string, opt Option
 		}
 		m := Message{
 			Account: account, Header: cur, Detail: d, Folder: folder, ToMe: toMe,
-			Copies: len(copies[dk]), Attachments: attByMsg[dk],
+			Copies: len(copies[dk]), Attachments: attByMsg[dk], FolderCopies: folderCopies(copies[dk]),
 		}
 		m.Recipients = recByMsg[dk]
 		if bw, ok := bodies.wins[dk]; ok {
@@ -558,6 +571,23 @@ func currentCopy(copies []Header, folders map[uint32]Folder) (cur Header, toMe b
 		best = bestToMe
 	}
 	return *best, toMe
+}
+
+// folderCopies lists the folders of a message's copies once each, by key, with the read state of
+// the newest copy in each.
+func folderCopies(copies []Header) []FolderCopy {
+	newest := map[uint32]Header{}
+	for _, h := range copies {
+		if n, ok := newest[h.FolderKey]; !ok || h.newerThan(n) {
+			newest[h.FolderKey] = h
+		}
+	}
+	out := make([]FolderCopy, 0, len(newest))
+	for k, h := range newest {
+		out = append(out, FolderCopy{Key: k, Unread: h.Unread})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
 }
 
 // newerThan orders header copies by stamp, then block offset.

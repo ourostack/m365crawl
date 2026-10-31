@@ -262,20 +262,17 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 	}
 	winner := "workiq_server"
 	if rowid == 0 {
-		if err := insertMail(ctx, tx, account, m, deriveMail(m), observed.UTC().Format(timeLayout)); err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `select rowid from mail_messages where account=? and detail_key=?`, account, m.DetailKey).Scan(&rowid); err != nil {
+		if rowid, err = insertMail(ctx, tx, account, m, deriveMail(m), observed.UTC().Format(timeLayout)); err != nil {
 			return err
 		}
 		result.Added++
 	} else {
-		var canonical uint32
+		var canonical, storedFolder uint32
 		var currentText string
 		var nativeRead sql.NullInt64
 		var readState, flag, importance string
-		if err := tx.QueryRowContext(ctx, `select detail_key,body_text,subject,sender_name,sender_address,is_read,read_state,flag,importance from mail_messages where rowid=?`, rowid).
-			Scan(&canonical, &currentText, &m.Subject, &m.SenderName, &m.SenderAddress, &nativeRead, &readState, &flag, &importance); err != nil {
+		if err := tx.QueryRowContext(ctx, `select detail_key,folder_key,body_text,subject,sender_name,sender_address,is_read,read_state,flag,importance from mail_messages where rowid=?`, rowid).
+			Scan(&canonical, &storedFolder, &currentText, &m.Subject, &m.SenderName, &m.SenderAddress, &nativeRead, &readState, &flag, &importance); err != nil {
 			return err
 		}
 		m.DetailKey = canonical
@@ -301,6 +298,13 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 				return errors.New("invalid retained native mail projection")
 			}
 			cacheHasBody = len(cached.Body.HTML) > 0
+		}
+		// A server write that sets a folder other than the stored one supersedes the native copies'
+		// membership: server folders have their own keys (mail_membership.go).
+		if storedFolder != m.FolderKey && (moved || !cacheHasBody) {
+			if err := clearMailMembers(ctx, tx, rowid); err != nil {
+				return err
+			}
 		}
 		if cacheHasBody {
 			winner = "desktop_cache"
@@ -330,6 +334,10 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 body_state=?,body_html_gz=?,body_text=?,body_text_version=?,state_seen_at=?,modified_at=? where rowid=?`,
 				m.FolderKey, readFlag(m), m.ReadState, m.Flag, m.Importance, d.state, d.gz, d.text, MailTextVersion,
 				fmtTime(observed), fmtTime(observed), rowid); err != nil {
+				return err
+			}
+			// The stored folder's membership row carries the same copy's read state.
+			if _, err := tx.ExecContext(ctx, `update mail_message_folders set is_read=? where message_rowid=? and folder_key=?`, readFlag(m), rowid, m.FolderKey); err != nil {
 				return err
 			}
 			if err := reindexMail(ctx, tx, rowid, m, d.text); err != nil {

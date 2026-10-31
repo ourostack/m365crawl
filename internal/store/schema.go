@@ -48,7 +48,11 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // Version 23 adds explicitly fetched WorkIQ documents (workiq_documents.go): one row per drive item
 // and WorkIQ account, every rights check, and the admitted excerpts with their search index. It is
 // additive and stays empty until `content fetch doc`.
-const SchemaVersion = 23
+// Version 24 adds mail_message_folders, the folders a message has a header copy in when there
+// are several (mail_membership.go). An archive at version 23 gains the table, empty, on its next
+// writable open; the next native mail read fills it, and until then every message is in its
+// stored folder alone.
+const SchemaVersion = 24
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as

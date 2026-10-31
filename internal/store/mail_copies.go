@@ -26,16 +26,18 @@ import (
 // folder of the account is an older copy. When no recorded root is known, or no archived folder
 // hangs from it, every folder counts as current and nothing is called a copy.
 //
-// A row in an older set is a copy of another row with the same nonempty Message-ID (compared with
-// normalizeMailMessageID) in a different set, chosen in this order: a current-set row in a folder
-// of the same role (mailCopyRole), so mail sent to oneself still pairs Sent with Sent; any
-// current-set row, whatever its folder, because the current set says where the message is now
-// (moved, or deleted after the rebuild), except that a row in Sent Items on either side needs a
-// row in Sent Items (the archive keeps one folder per message, so another folder says nothing
-// about Sent Items membership); a row of another older set in the same role that ranks
-// higher (seen more recently, then archived later). Rows of one set never merge, so a message in
-// Sent Items and Inbox of one set stays two rows. Current-set rows count whatever their gone and
-// evicted marks. No row is deleted or re-keyed: the copy keeps its id and its own marks.
+// A row's roles (mailCopyRole) are those of every folder it is in: its stored folder and its
+// membership (mail_membership.go). A row in an older set is a copy of another row with the same
+// nonempty Message-ID (compared with normalizeMailMessageID) in a different set, chosen in this
+// order: a current-set row that shares a role with it, so mail sent to oneself pairs Sent with
+// Sent even when the current row is shown from Inbox; any current-set row, whatever its folder,
+// because the current set says where the message is now (moved, or deleted after the rebuild),
+// except when either row is in Sent Items (a current row without a Sent Items copy may only mean
+// the cache dropped that copy, since each folder has its own cached range); a row of another
+// older set that shares a role and ranks higher (seen more recently, then archived later). Rows
+// of one set never merge, so two rows of one set with one Message-ID (a user folder copy) stay
+// two rows. Current-set rows count whatever their gone and evicted marks. No row is deleted or
+// re-keyed: the copy keeps its id and its own marks.
 
 // mailFolderID is one archived folder.
 type mailFolderID struct {
@@ -175,8 +177,12 @@ func normalizeMailMessageID(s string) string {
 // mailCopies is the folder sets plus, for every row that is a copy, the row that stands for it,
 // and where copies of one message disagree on received time, the time chosen for it.
 type mailCopies struct {
-	sets  mailSets
-	newer map[int64]string // rowid of a copy to the id (account:detail_key) of the row that stands for it
+	sets mailSets
+	// members says the archive has the membership table; member holds the membership of the
+	// rows of accounts with an older set, by rowid.
+	members bool
+	member  map[int64][]uint32
+	newer   map[int64]string // rowid of a copy to the id (account:detail_key) of the row that stands for it
 	// received maps the rowid of a row that stands for copies disagreeing on received time to the
 	// received time chosen for the message (chooseReceived), when it differs from the row's own.
 	received map[int64]time.Time
@@ -197,8 +203,11 @@ type copyRow struct {
 // loadMailCopies finds the copies. Only accounts with an older folder set are read row by row.
 func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 	sets, err := loadMailSets(ctx, q)
-	c := mailCopies{sets: sets, newer: map[int64]string{}, received: map[int64]time.Time{}, disagree: map[int64]bool{}}
+	c := mailCopies{sets: sets, member: map[int64][]uint32{}, newer: map[int64]string{}, received: map[int64]time.Time{}, disagree: map[int64]bool{}}
 	if err != nil {
+		return c, err
+	}
+	if c.members, err = hasMailMembership(ctx, q); err != nil {
 		return c, err
 	}
 	accounts := make([]string, 0, len(sets.older))
@@ -207,6 +216,17 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 	}
 	sort.Strings(accounts)
 	for _, account := range accounts {
+		if c.members {
+			members, err := loadMailMembers(ctx, q, account)
+			if err != nil {
+				return c, err
+			}
+			for rowid, ms := range members {
+				for _, m := range ms {
+					c.member[rowid] = append(c.member[rowid], m.key)
+				}
+			}
+		}
 		byID := map[string][]copyCand{}
 		err := mailEach(ctx, q, `select rowid, detail_key, internet_message_id, folder_key, state_seen_at, received_at, sent_at from mail_messages where account=? and internet_message_id<>''`, []any{account}, func(r *sql.Rows) error {
 			var row copyRow
@@ -224,7 +244,7 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 				return nil // a folder the store does not hold sits in no known set
 			}
 			row.id, row.set, row.current = fmt.Sprintf("%s:%d", account, key), sets.set[id], sets.current[id]
-			byID[norm] = append(byID[norm], copyCand{mailCopyRole(kind), row})
+			byID[norm] = append(byID[norm], copyCand{c.roles(account, row.rowid, folder, kind), row})
 			return nil
 		})
 		if err != nil {
@@ -245,7 +265,7 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 				if r.row.current {
 					continue
 				}
-				if n, ok := newerCopy(g[:i], r.role, r.row.set); ok {
+				if n, ok := newerCopy(g[:i], r.roles, r.row.set); ok {
 					c.newer[r.row.rowid] = n
 				}
 			}
@@ -340,27 +360,56 @@ func latest(a, b time.Time) time.Time {
 	return a
 }
 
-// copyCand is one row of a Message-ID with the role of its folder ("" when it has none).
+// copyCand is one row of a Message-ID with the roles of the folders it is in.
 type copyCand struct {
-	role string
-	row  copyRow
+	roles []string
+	row   copyRow
+}
+
+// roles is the copy roles of a row: those of its stored folder (of kind) and of its membership,
+// without the empty role.
+func (c mailCopies) roles(account string, rowid int64, folder uint32, kind string) []string {
+	var out []string
+	add := func(k string) {
+		if r := mailCopyRole(k); r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	add(kind)
+	for _, key := range c.member[rowid] {
+		if key != folder {
+			add(c.sets.kind[mailFolderID{account, key}])
+		}
+	}
+	return out
+}
+
+// sharesRole reports whether two role lists have a role in common.
+func sharesRole(a, b []string) bool {
+	for _, r := range a {
+		if slices.Contains(b, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // newerCopy picks, from the rows of one Message-ID that rank above an older row (best first;
-// current-set rows always rank first), the row that the older row, of role and set, is a copy
-// of (see the rule above). The any-folder step never crosses into or out of Sent Items: the
-// archive stores a message under one folder only, so a current row under Deleted Items or To Me
-// says nothing about whether the message is still in Sent Items.
-func newerCopy(g []copyCand, role string, set uint32) (string, bool) {
+// current-set rows always rank first), the row that the older row, of roles and set, is a copy
+// of (see the rule above). The any-folder step never crosses into or out of Sent Items: a current
+// row without a Sent Items copy says nothing certain about whether the message is still in Sent
+// Items, since the cache keeps each folder's own range.
+func newerCopy(g []copyCand, roles []string, set uint32) (string, bool) {
 	var anyCurrent, olderSameRole string
+	sent := slices.Contains(roles, "sent")
 	for _, n := range g {
 		switch {
 		case n.row.set == set:
-		case n.row.current && role != "" && n.role == role:
+		case n.row.current && sharesRole(roles, n.roles):
 			return n.row.id, true
-		case n.row.current && anyCurrent == "" && role != "sent" && n.role != "sent":
+		case n.row.current && anyCurrent == "" && !sent && !slices.Contains(n.roles, "sent"):
 			anyCurrent = n.row.id
-		case !n.row.current && role != "" && n.role == role && olderSameRole == "":
+		case !n.row.current && olderSameRole == "" && sharesRole(roles, n.roles):
 			olderSameRole = n.row.id
 		}
 	}
@@ -395,7 +444,7 @@ func (c mailCopies) mark(rows []MailRow) {
 		r.OlderCopy = !c.sets.isCurrent(r.Account, r.FolderKey)
 		r.CopyOf = c.newer[r.Rowid]
 		r.ReceivedAtDisagrees = c.disagree[r.Rowid]
-		r.DatedAt = datedAt(r.FolderKind, c.receivedAt(r.Rowid, r.ReceivedAt), r.SentAt)
+		r.DatedAt = datedAt(r.inSent(), c.receivedAt(r.Rowid, r.ReceivedAt), r.SentAt)
 	}
 }
 
@@ -513,6 +562,12 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 		id := mailFolderID{k.Account, key}
 		return mailCopyRole(sets.kind[id]) == k.Kind, sets.current[id]
 	}
+	// A row is in the role when any folder it is in has the role; it is current when its stored
+	// folder is (its membership is of the same set).
+	rowInRole := func(rowid int64, key uint32) (bool, bool) {
+		role, current := inRole(key)
+		return role || slices.Contains(copies.roles(k.Account, rowid, key, sets.kind[mailFolderID{k.Account, key}]), k.Kind), current
+	}
 	for id, kind := range sets.kind {
 		if id.account == k.Account && mailCopyRole(kind) == k.Kind {
 			c.Copies++
@@ -539,14 +594,14 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 	if err != nil {
 		return c, err
 	}
-	var keys []string
+	var keys []uint32
 	for id, kind := range sets.kind {
 		if id.account == k.Account && mailCopyRole(kind) == k.Kind {
-			keys = append(keys, strconv.FormatUint(uint64(id.key), 10))
+			keys = append(keys, id.key)
 		}
 	}
-	slices.Sort(keys)
-	rows, args := copies.datedRows(`m.account=? and m.folder_key in (`+strings.Join(keys, ",")+`)`, []any{k.Account}, rng.Since, rng.Until)
+	cond, condArgs := inFolders(map[string][]uint32{k.Account: keys}, false, copies.members)
+	rows, args := copies.datedRows(cond, condArgs, rng.Since, rng.Until)
 	type message struct{ current, lacking, shown, unmarked bool }
 	msgs := map[string]*message{}
 	err = mailEach(ctx, s.db, `select m.rowid, m.internet_message_id, m.folder_key, m.received_at, m.gone_at is not null, m.evicted_at is not null from (`+rows+`) p join mail_messages m on m.rowid=p.rid`, args, func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants and integers; values are placeholders
@@ -558,7 +613,7 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 		if err := r.Scan(&rowid, &msgID, &key, &received, &gone, &evicted); err != nil {
 			return err
 		}
-		role, current := inRole(key)
+		role, current := rowInRole(rowid, key)
 		hidden := gone && !rng.IncludeGone || evicted && !rng.IncludeEvicted
 		// A copy counts through the row that stands for it. The list's gone and evicted switches
 		// apply to the current set; an older set's marks follow it leaving the store.
