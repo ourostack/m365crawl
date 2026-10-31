@@ -123,7 +123,7 @@ func TestCoverageReportsArchiveFailures(t *testing.T) {
 		run(t, "chats")
 	})
 	t.Run("chat evidence", func(t *testing.T) {
-		setSeam(t, &chatEvidence, func(*store.Store, context.Context, string, string, string, time.Time, time.Time) (store.ChatEvidence, error) {
+		setSeam(t, &chatEvidence, func(*store.Store, context.Context, string, string, string, time.Time, time.Time, store.ChatNarrow) (store.ChatEvidence, error) {
 			return store.ChatEvidence{}, fail
 		})
 		run(t, "chats")

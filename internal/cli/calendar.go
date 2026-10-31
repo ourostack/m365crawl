@@ -311,6 +311,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		out := newList(nil, false)
 		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
 		if st == nil {
+			out.RangeCoverage, _ = rt.calendarRangeCoverage(nil, from, to) // without an archive it cannot fail
 			return out, nil
 		}
 		agenda, err := st.CalendarAgenda(rt.ctx, store.CalendarFilter{
@@ -318,6 +319,9 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			IncludeCancelled: c.IncludeCancelled, IncludeDeclined: c.IncludeDeclined, IncludeMasters: c.IncludeMasters, IncludeRemoved: c.IncludeRemoved,
 		})
 		if err != nil {
+			return nil, err
+		}
+		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
 			return nil, err
 		}
 		if agenda.NoTables {
@@ -332,7 +336,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			hasOutlook = hasOutlook || slices.Contains(items[i].Sources, string(calendar.SourceOutlook))
 		}
 		list := newList(shape(rt, items), agenda.Truncated).withTotal(agenda.Total)
-		list.CoverageGap, list.Range, list.UnlinkedAccounts = &agenda.Gap, out.Range, agenda.Unlinked
+		list.CoverageGap, list.Range, list.UnlinkedAccounts, list.RangeCoverage = &agenda.Gap, out.Range, agenda.Unlinked, out.RangeCoverage
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}

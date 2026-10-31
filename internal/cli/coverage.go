@@ -206,7 +206,7 @@ func (rt *runtime) coverageEntries(run *coverageRun, src string, a, b time.Time)
 	if source == "calendar" {
 		return rt.calendarCoverageEntries(run, a, b)
 	}
-	return rt.chatCoverageEntries(run, []string{source}, a, b)
+	return rt.chatCoverageEntries(run, []string{source}, a, b, store.ChatNarrow{})
 }
 
 // mailCoverageEntries judges the roles of every mail account in scope (--account).
@@ -273,16 +273,23 @@ func (c *coverageRun) folders() ([]store.MailFolderRow, error) {
 // mailRangeCoverage adds range_coverage to a mail list bounded by --since or --until: Sent Items
 // and the Inbox of each account among the selected folders, over [since, until) with an open end
 // read as now. Other folders hold only part of their mail locally and are never judged.
-func (rt *runtime) mailRangeCoverage(st *store.Store, sc mailScope, since, until time.Time, res *mailListResult) error {
+func (rt *runtime) mailRangeCoverage(st *store.Store, sc mailScope, since, until time.Time, m *meta) error {
 	run, err := rt.newCoverageRun(st)
 	if err != nil {
 		return err
 	}
+	return run.mailRangeCoverage(sc.folders, since, until, m)
+}
+
+// mailRangeCoverage adds the mail entries of the judged roles among folders over [since, until),
+// an open end read as now, with the WorkIQ routes and notices they need. No folder at all gives
+// the entries that say why there is no mail.
+func (c *coverageRun) mailRangeCoverage(folders []store.MailFolderRow, since, until time.Time, m *meta) error {
 	if until.IsZero() {
-		until = run.now
+		until = c.now
 	}
 	var roles, accounts []string
-	for _, f := range sc.folders {
+	for _, f := range folders {
 		role := mailRoleOf(f.Kind)
 		if role != store.MailRoleSent && role != store.MailRoleInbox {
 			continue
@@ -295,37 +302,85 @@ func (rt *runtime) mailRangeCoverage(st *store.Store, sc mailScope, since, until
 		}
 	}
 	slices.SortFunc(roles, func(x, y string) int { return strings.Compare(y, x) }) // sent before inbox
+	if len(folders) == 0 {
+		roles = []string{store.MailRoleSent, store.MailRoleInbox}
+	}
 	if len(roles) == 0 {
 		return nil
 	}
-	entries, err := run.mailEntries(accounts, roles, since, until)
+	entries, err := c.mailEntries(accounts, roles, since, until)
 	if err != nil {
 		return err
 	}
-	res.RangeCoverage = entries
-	res.WorkIQRoutes = run.addRoutes(res.WorkIQRoutes, entries)
-	for _, n := range run.notices() {
-		res.addNotice(n)
+	m.RangeCoverage = append(m.RangeCoverage, entries...)
+	m.WorkIQRoutes = c.addRoutes(m.WorkIQRoutes, entries)
+	for _, n := range c.notices() {
+		m.addNotice(n)
 	}
 	return nil
 }
 
-// messagesRangeCoverage adds range_coverage to messages bounded by --since or --until: chats,
-// meeting chats and channels of each Teams account in scope.
-func (rt *runtime) messagesRangeCoverage(st *store.Store, since, until time.Time, l *listResult) error {
+// searchRangeCoverage adds range_coverage to a search bounded by --since or --until, for the
+// sources it planned: chats narrowed like messages, and mail across the accounts and folders mail
+// search reads (every Outlook account unless --account names one, the folders --folder matches).
+// Transcripts, notes, documents, Loop and content are never judged.
+func (rt *runtime) searchRangeCoverage(st *store.Store, p searchPlan, f store.Filter, folder string, m *meta) error {
 	run, err := rt.newCoverageRun(st)
 	if err != nil {
 		return err
 	}
-	if until.IsZero() {
-		until = run.now
+	if p.chats {
+		if err := run.chatRangeCoverage(f.Since, f.Until, store.ChatNarrow{Conversation: f.Conversation, Team: f.Team}, m); err != nil {
+			return err
+		}
 	}
-	entries, err := rt.chatCoverageEntries(run, []string{store.ChatScopeChats, store.ChatScopeMeetings, store.ChatScopeChannels}, since, until)
+	if !p.mail {
+		return nil
+	}
+	all, err := run.folders()
 	if err != nil {
 		return err
 	}
-	l.RangeCoverage = entries
-	l.WorkIQRoutes = run.addRoutes(l.WorkIQRoutes, entries)
+	account := mailAccountOf(rt.g.Account)
+	var folders []store.MailFolderRow
+	for _, x := range all {
+		if account == "" || x.Account == account {
+			folders = append(folders, x)
+		}
+	}
+	if folder != "" && len(folders) > 0 {
+		// --folder unknown (messages without a folder row) and other folders no row names hold
+		// no judged role; an archive without any mail folder still says why there is no mail.
+		if folders = matchFolders(folders, folder); len(folders) == 0 {
+			return nil
+		}
+	}
+	return run.mailRangeCoverage(folders, f.Since, f.Until, m)
+}
+
+// messagesRangeCoverage adds range_coverage to messages bounded by --since or --until: chats,
+// meeting chats and channels of each Teams account in scope, narrowed to --conversation and
+// --team.
+func (rt *runtime) messagesRangeCoverage(st *store.Store, since, until time.Time, narrow store.ChatNarrow, m *meta) error {
+	run, err := rt.newCoverageRun(st)
+	if err != nil {
+		return err
+	}
+	return run.chatRangeCoverage(since, until, narrow, m)
+}
+
+// chatRangeCoverage adds the chat entries of [since, until) to a result's range_coverage, an
+// open end read as now, and the WorkIQ routes they need.
+func (c *coverageRun) chatRangeCoverage(since, until time.Time, narrow store.ChatNarrow, m *meta) error {
+	if until.IsZero() {
+		until = c.now
+	}
+	entries, err := c.rt.chatCoverageEntries(c, []string{store.ChatScopeChats, store.ChatScopeMeetings, store.ChatScopeChannels}, since, until, narrow)
+	if err != nil {
+		return err
+	}
+	m.RangeCoverage = append(m.RangeCoverage, entries...)
+	m.WorkIQRoutes = c.addRoutes(m.WorkIQRoutes, entries)
 	return nil
 }
 
@@ -341,8 +396,10 @@ func noMailAccount(rt *runtime, roles []string) []coverageEntry {
 // teamsAccountsOf is the test seam of the archive's Teams accounts.
 var teamsAccountsOf = (*store.Store).Whoami
 
-// chatCoverageEntries judges the scopes of every Teams account in scope (--account).
-func (rt *runtime) chatCoverageEntries(run *coverageRun, scopes []string, a, b time.Time) ([]coverageEntry, error) {
+// chatCoverageEntries judges the scopes of every Teams account in scope (--account), narrowed to
+// what narrow selects: a scope without a selected conversation gets no entry, and an account
+// without any gets one conversation_not_archived entry.
+func (rt *runtime) chatCoverageEntries(run *coverageRun, scopes []string, a, b time.Time, narrow store.ChatNarrow) ([]coverageEntry, error) {
 	if rt.mailAccount() != "" {
 		return nil, nil // an Outlook account names no Teams chats
 	}
@@ -359,16 +416,25 @@ func (rt *runtime) chatCoverageEntries(run *coverageRun, scopes []string, a, b t
 		}
 	}
 	var out []coverageEntry
+	matchedAny := map[teamsdesktop.Account]bool{}
 	for _, scope := range scopes {
 		if len(accounts) == 0 {
 			out = append(out, chatNoAccount(scope))
 		}
 		for _, acct := range accounts {
-			e, err := run.chatEntry(acct.TenantID, acct.UserID, scope, a, b)
+			e, matched, err := run.chatEntry(acct.TenantID, acct.UserID, scope, a, b, narrow)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, e)
+			if matched {
+				matchedAny[acct] = true
+				out = append(out, e)
+			}
+		}
+	}
+	for _, acct := range accounts {
+		if !matchedAny[acct] {
+			out = append(out, notArchived(acct.TenantID+"/"+acct.UserID, narrow))
 		}
 	}
 	return out, nil
@@ -407,6 +473,66 @@ func (rt *runtime) calendarCoverageEntries(run *coverageRun, a, b time.Time) ([]
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// calendarRangeCoverage is the calendar agenda's range_coverage: one entry per principal in scope
+// over [from, to), covered on the days a calendar cache showed. items counts the principal's
+// events with the default filters, whatever the read's own filters and limit; a schedule, so a
+// coming day can be covered. No calendar gives one never_read entry.
+func (rt *runtime) calendarRangeCoverage(st *store.Store, from, to time.Time) ([]coverageEntry, error) {
+	none := newCoverageEntry("calendar", "", "")
+	none.reason(reasonNeverRead, "no calendar is in the archive")
+	none.finish()
+	if st == nil {
+		return []coverageEntry{none}, nil
+	}
+	agenda, err := calendarAgendaOf(st, rt.ctx, store.CalendarFilter{Account: rt.account, From: from, To: to, Limit: 1 << 30})
+	if err != nil {
+		return nil, err
+	}
+	if len(agenda.Accounts) == 0 {
+		return []coverageEntry{none}, nil
+	}
+	type day struct {
+		name     string
+		from, to time.Time
+	}
+	var days []day
+	for d := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location()); d.Before(to); d = d.AddDate(0, 0, 1) {
+		days = append(days, day{d.Format("2006-01-02"), maxTime(d, from), minTime(d.AddDate(0, 0, 1), to)})
+	}
+	var out []coverageEntry
+	for _, acct := range agenda.Accounts {
+		e := newCoverageEntry("calendar", "", acct.AccountID)
+		for _, r := range agenda.Rows {
+			if r.Principal == acct.AccountID {
+				e.Items++
+			}
+		}
+		var covered []store.TimeSpan
+		for _, d := range days {
+			if !slices.Contains(acct.Uncovered, d.name) {
+				covered = append(covered, store.TimeSpan{From: d.from, To: d.to})
+			}
+		}
+		e.settle(store.MergeSpans(covered), from, to)
+		if len(covered) > 0 {
+			e.Basis = basisCache
+		}
+		if missing := len(days) - len(covered); missing > 0 {
+			e.reason(reasonDayNotShown, fmt.Sprintf("%d of %s in this range no Teams or Outlook calendar cache showed, so an event missing on them is not evidence; Outlook shows only days that hold an event", missing, plural(len(days), "day", "days")))
+		}
+		e.finish()
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }
 
 // summarize adds one summary row per source and scope: the worst state and the summed items.

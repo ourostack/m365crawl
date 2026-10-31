@@ -59,17 +59,17 @@ func TestChatEvidenceCountsAuthoredMessagesPerScope(t *testing.T) {
 	covMsg(t, s, "19:chat@unq.gbl.spaces", "old", covSelf, "Text", covT0.AddDate(0, 0, -3), 0, false)
 
 	for scope, want := range map[string]ChatEvidence{
-		ChatScopeChats:    {Items: 3, MyItems: 2, Deleted: 1},
-		ChatScopeMeetings: {Items: 1, MyItems: 1},
-		ChatScopeChannels: {Items: 1},
+		ChatScopeChats:    {Items: 3, MyItems: 2, Deleted: 1, Matched: true},
+		ChatScopeMeetings: {Items: 1, MyItems: 1, Matched: true},
+		ChatScopeChannels: {Items: 1, Matched: true},
 	} {
-		got := must(s.ChatEvidence(ctx, covTenant, covUser, scope, covT0, covT0.AddDate(0, 0, 1)))
+		got := must(s.ChatEvidence(ctx, covTenant, covUser, scope, covT0, covT0.AddDate(0, 0, 1), ChatNarrow{}))
 		if got != want {
 			t.Fatalf("%s: %+v, want %+v", scope, got, want)
 		}
 	}
 	// An open start (the zero time) counts everything before the end.
-	if got := must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, time.Time{}, covT0.AddDate(0, 0, 1))); got.Items != 4 {
+	if got := must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, time.Time{}, covT0.AddDate(0, 0, 1), ChatNarrow{})); got.Items != 4 {
 		t.Fatalf("open start %+v", got)
 	}
 }
@@ -105,19 +105,19 @@ func TestChatEvidenceFindsBehindConversationsAndSequenceGaps(t *testing.T) {
 	covMsg(t, s, "19:quiet@unq.gbl.spaces", "q1", covSelf, "Text", day.Add(-50*time.Hour), 1, false)
 	covMsg(t, s, "19:quiet@unq.gbl.spaces", "q3", covSelf, "Text", day.Add(-48*time.Hour), 3, false)
 
-	got := must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, day, next))
-	want := ChatEvidence{Items: 4, MyItems: 4, Behind: 2, GapConversations: 2, PossiblyMissing: 4}
+	got := must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, day, next, ChatNarrow{}))
+	want := ChatEvidence{Items: 4, MyItems: 4, Behind: 2, GapConversations: 2, PossiblyMissing: 4, Matched: true}
 	if got != want {
 		t.Fatalf("%+v, want %+v", got, want)
 	}
 	// The next day: behind's newest message is before it, so the missing tail is not in it; the
 	// gap 8 is.
-	got = must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, next, next.AddDate(0, 0, 1)))
+	got = must(s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, next, next.AddDate(0, 0, 1), ChatNarrow{}))
 	if got.Behind != 0 || got.GapConversations != 2 || got.PossiblyMissing != 3 {
 		t.Fatalf("next day %+v", got)
 	}
 	must0(s.Close())
-	if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, day, next); err == nil {
+	if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, day, next, ChatNarrow{}); err == nil {
 		t.Fatal("a closed archive answered")
 	}
 }
@@ -154,5 +154,68 @@ func TestTeamsReadsUsesSuccessfulRunsOfTheAccount(t *testing.T) {
 	must0(s.Close())
 	if _, err := s.TeamsReads(ctx, covAccount); err == nil {
 		t.Fatal("a closed archive answered")
+	}
+}
+
+// A narrowing keeps the evidence to the conversations a read selects, by id, title, display name
+// or composed team name, or to a team's own conversation and channels.
+func TestChatEvidenceNarrowsToWhatTheReadSelects(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	day, next := covT0, covT0.AddDate(0, 0, 1)
+	at := func(h int) time.Time { return day.Add(time.Duration(h) * time.Hour) }
+	must(s.db.ExecContext(ctx, `insert into conversations(tenant_id,user_id,id,kind,title,display_name,team_id,last_message_at,updated_at) values
+ (?,?,'19:a@unq.gbl.spaces','Chat','Ann','',  '',?,?),
+ (?,?,'19:b@unq.gbl.spaces','Chat','','Bob',  '',?,?),
+ (?,?,'19:team@thread.tacv2','Space','','Fixture team','19:team@thread.tacv2',?,?),
+ (?,?,'19:gen@thread.tacv2','Topic','','General','19:team@thread.tacv2',?,?)`,
+		covTenant, covUser, fmtTime(at(9)), nowText(), covTenant, covUser, fmtTime(at(9)), nowText(),
+		covTenant, covUser, fmtTime(at(9)), nowText(), covTenant, covUser, fmtTime(at(20)), nowText()))
+	covMsg(t, s, "19:a@unq.gbl.spaces", "a1", covSelf, "Text", at(1), 1, false)
+	covMsg(t, s, "19:a@unq.gbl.spaces", "a2", covSelf, "Text", at(9), 2, false)
+	covMsg(t, s, "19:b@unq.gbl.spaces", "b1", "8:orgid:other", "Text", at(2), 1, false)
+	covMsg(t, s, "19:b@unq.gbl.spaces", "b4", "8:orgid:other", "Text", at(9), 4, false) // b skips 2..3
+	covMsg(t, s, "19:gen@thread.tacv2", "g1", covSelf, "Text", at(3), 1, false)         // General is behind
+	ev := func(scope string, n ChatNarrow) ChatEvidence {
+		t.Helper()
+		return must(s.ChatEvidence(ctx, covTenant, covUser, scope, day, next, n))
+	}
+	if got := ev(ChatScopeChats, ChatNarrow{}); got.Items != 4 || got.PossiblyMissing != 2 {
+		t.Fatalf("unnarrowed %+v", got)
+	}
+	for _, name := range []string{"19:a@unq.gbl.spaces", "ann", "ANN"} {
+		if got := ev(ChatScopeChats, ChatNarrow{Conversation: name}); got != (ChatEvidence{Items: 2, MyItems: 2, Matched: true}) {
+			t.Fatalf("%s: %+v", name, got)
+		}
+	}
+	if got := ev(ChatScopeChats, ChatNarrow{Conversation: "bob"}); got.Items != 2 || got.PossiblyMissing != 2 {
+		t.Fatalf("bob %+v", got)
+	}
+	if got := ev(ChatScopeChannels, ChatNarrow{Conversation: "Fixture team › General"}); got.Items != 1 || got.Behind != 1 {
+		t.Fatalf("composed name %+v", got)
+	}
+	if got := ev(ChatScopeMeetings, ChatNarrow{Conversation: "ann"}); got.Matched {
+		t.Fatalf("meetings %+v", got)
+	}
+	if got := ev(ChatScopeChats, ChatNarrow{Conversation: "nobody"}); got.Matched {
+		t.Fatalf("no match %+v", got)
+	}
+	if got := ev(ChatScopeChannels, ChatNarrow{Team: "fixture team"}); got != (ChatEvidence{Items: 1, MyItems: 1, Behind: 2, Matched: true}) {
+		t.Fatalf("team %+v", got)
+	}
+	if got := ev(ChatScopeChats, ChatNarrow{Team: "fixture team"}); got.Matched {
+		t.Fatalf("team chats %+v", got)
+	}
+	if got := ev(ChatScopeChannels, ChatNarrow{Team: "No such team"}); got.Matched {
+		t.Fatalf("unknown team %+v", got)
+	}
+	must(s.db.ExecContext(ctx, `insert into conversations(tenant_id,user_id,id,kind,display_name,team_id,updated_at) values(?,?,'19:twin@thread.tacv2','Space','Fixture team','19:twin@thread.tacv2',?)`, covTenant, covUser, nowText()))
+	if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChannels, day, next, ChatNarrow{Team: "Fixture team"}); err == nil {
+		t.Fatal("an ambiguous team was not an error")
+	}
+	must(s.db.ExecContext(ctx, `alter table conversations rename to conversations_real`))
+	must(s.db.ExecContext(ctx, `create view conversations as select tenant_id, user_id, id, kind, title, display_name, team_id from conversations_real`))
+	if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, day, next, ChatNarrow{Conversation: "ann"}); err == nil {
+		t.Fatal("a broken archive answered")
 	}
 }

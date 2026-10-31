@@ -17,4 +17,25 @@ notes and documents coverage: unknown (registered_optional_sources)
 no rows
 [2m8 items[0m
 [2mnotice: Loop channels were not searched: date, account/author, chat/mail-only and profile filters cannot qualify cached Loop channels, which have no native date or resolved owner[0m
+[2mcoverage: chats chats 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1: partial (29 items) before_archive_start, conversation_behind, sequence_gap[0m
+[2mcoverage: chats chats 00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2: partial (29 items) before_archive_start, conversation_behind, sequence_gap[0m
+[2mcoverage: chats meetings 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1: partial (4 items) before_archive_start, sequence_gap[0m
+[2mcoverage: chats meetings 00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2: partial (4 items) before_archive_start, sequence_gap[0m
+[2mcoverage: chats channels 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1: partial (19 items) before_archive_start, conversation_behind, sequence_gap[0m
+[2mcoverage: chats channels 00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2: partial (19 items) before_archive_start, conversation_behind, sequence_gap[0m
+[2mcoverage: mail sent outlook/SearchTest: partial (1 item; covered 2023-11-12 08:00 UTC to 2023-11-14 22:15 UTC) before_cache, after_newest_mail[0m
+[2mcoverage: mail inbox outlook/SearchTest: not_covered (3 items) no_complete_read[0m
+[2mroute: The archive does not hold all of this range's chat messages. WorkIQ chat history stays counts-only: coverage counts the server's messages in this range, but adds no messages to the archive. WorkIQ is not installed: a person must install WorkIQ, sign in and accept its EULA through WorkIQ once; m365crawl never does this. Then run these steps.[0m
+[2m  next: m365crawl --db <db> --no-sync --format text --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1 workiq status --source chats[0m
+[2m  next: m365crawl --db <db> --no-sync --format text workiq enable[0m
+[2m  next: m365crawl --db <db> --format text --account 00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-0000000000a1 workiq coverage --source chats[0m
+[2mroute: The archive does not hold all of this range's chat messages. WorkIQ chat history stays counts-only: coverage counts the server's messages in this range, but adds no messages to the archive. WorkIQ is not installed: a person must install WorkIQ, sign in and accept its EULA through WorkIQ once; m365crawl never does this. Then run these steps.[0m
+[2m  next: m365crawl --db <db> --no-sync --format text --account 00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2 workiq status --source chats[0m
+[2m  next: m365crawl --db <db> --no-sync --format text workiq enable[0m
+[2m  next: m365crawl --db <db> --format text --account 00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-0000000000a2 workiq coverage --source chats[0m
+[2mroute: The archive does not hold all of this range's mail. WorkIQ can fetch the account's server mail into this archive: run these steps, then repeat the read. WorkIQ is not installed: a person must install WorkIQ, sign in and accept its EULA through WorkIQ once; m365crawl never does this. Then run these steps.[0m
+[2m  next: m365crawl --db <db> --no-sync --format text --account outlook/SearchTest workiq status --source mail[0m
+[2m  next: m365crawl --db <db> --no-sync --format text workiq enable[0m
+[2m  next: m365crawl --db <db> --format text --account outlook/SearchTest workiq sync --source mail[0m
+[2m  next: m365crawl --db <db> --teams-root <teams-root> --format text --no-sync search hello --until 2023-11-14T23:00:00Z[0m
 [2marchive age: <age>[0m

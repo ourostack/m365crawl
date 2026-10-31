@@ -63,7 +63,7 @@ func TestCoverageReadsReportDatabaseFailures(t *testing.T) {
 		for _, q := range stmts {
 			must(s.db.ExecContext(ctx, q))
 		}
-		if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, covT0, covT0.AddDate(0, 0, 1)); err == nil {
+		if _, err := s.ChatEvidence(ctx, covTenant, covUser, ChatScopeChats, covT0, covT0.AddDate(0, 0, 1), ChatNarrow{}); err == nil {
 			t.Fatal("a broken archive answered")
 		}
 	}

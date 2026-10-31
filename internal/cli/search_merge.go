@@ -813,6 +813,11 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 		res.WorkIQRoutes = append(res.WorkIQRoutes, routes...)
 	}
+	if st != nil && (p.chats || p.mail) && (!f.Since.IsZero() || !f.Until.IsZero()) {
+		if err := rt.searchRangeCoverage(st, p, f, c.Folder, &res.meta); err != nil {
+			return nil, err
+		}
+	}
 	if p.noteExclusion != "" {
 		res.addNotice(p.noteExclusion)
 	}

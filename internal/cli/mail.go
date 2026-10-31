@@ -783,7 +783,7 @@ func (c *mailListCmd) Run(rt *runtime) error {
 			return nil, err
 		}
 		if !since.IsZero() || !until.IsZero() {
-			if err := rt.mailRangeCoverage(st, sc, since, until, res); err != nil {
+			if err := rt.mailRangeCoverage(st, sc, since, until, &res.meta); err != nil {
 				return nil, err
 			}
 		}
