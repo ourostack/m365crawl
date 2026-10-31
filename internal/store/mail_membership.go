@@ -43,7 +43,7 @@ type MailFolderRef struct {
 	IsRead     *bool
 }
 
-// hasMailMembership reports whether the archive has the membership table (schema 23); a
+// hasMailMembership reports whether the archive has the membership table (schema 24); a
 // read-only open of an older archive does not.
 func hasMailMembership(ctx context.Context, q mailQuerier) (bool, error) {
 	var n int

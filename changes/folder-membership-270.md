@@ -8,4 +8,4 @@
 ### Added
 
 - Mail message outputs (`mail list`, `mail show`, `mail thread`, `mail unread` and mail `search` items) add `folders`, every folder the message is in, each with the read state of the copy there. The item's own `is_read` stays the state of the copy it is shown from.
-- Archive schema 23 adds `mail_message_folders`. An older archive gains the table, empty, on its next writable open, and the next mail sync fills it.
+- Archive schema 24 adds `mail_message_folders`. An older archive gains the table, empty, on its next writable open, and the next mail sync fills it.

@@ -197,9 +197,9 @@ where not exists(select 1 from mail_message_folders g where g.message_rowid=m.ro
 	}
 }
 
-// An archive at schema 22 has no membership table: a read-only open lists as before, and a
+// An archive at schema 23 has no membership table: a read-only open lists as before, and a
 // writable open adds the table empty, for the next read to fill.
-func TestMailMembershipOnAnArchiveBeforeSchema23(t *testing.T) {
+func TestMailMembershipOnAnArchiveBeforeSchema24(t *testing.T) {
 	ctx := context.Background()
 	path := writableArchivePath(t)
 	s, err := Open(ctx, path)
@@ -207,7 +207,7 @@ func TestMailMembershipOnAnArchiveBeforeSchema23(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustCommitMail(t, s, mailBatch(mailT0, mailMsg(100, fSent, "<a@x>", "A", 0), mailMsg(101, fInbox, "<b@x>", "B", 0)))
-	for _, q := range []string{`drop table mail_message_folders`, `update schema_migrations set version = 22`, `delete from meta where key like 'mail_folders_ready:%'`} {
+	for _, q := range []string{`drop table mail_message_folders`, `update schema_migrations set version = 23`, `delete from meta where key like 'mail_folders_ready:%'`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestMailMembershipOnAnArchiveBeforeSchema23(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion || SchemaVersion < 23 {
+	if v := rowCount(t, s, `select max(version) from schema_migrations`); v != SchemaVersion || SchemaVersion < 24 {
 		t.Fatalf("version %d", v)
 	}
 	if n := rowCount(t, s, `select count(*) from mail_message_folders`); n != 0 {

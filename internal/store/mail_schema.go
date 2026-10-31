@@ -8,7 +8,7 @@ package store
 // missing, unreadable or none. mail_absent holds the first trusted read that missed a message; a
 // second trusted read of a different store copy confirms the absence (see CommitMail).
 //
-// mail_message_folders (schema 23) is the folder membership of a message a native read found in
+// mail_message_folders (schema 24) is the folder membership of a message a native read found in
 // two or more folders (mail_membership.go), with each copy's own read state. It declares no
 // foreign key: mail_messages has no INTEGER PRIMARY KEY, so a reference to its rowid would fail
 // every insert with foreign keys on. Like mail_recipients and mail_attachments, its rows follow
