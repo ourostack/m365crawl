@@ -198,6 +198,9 @@ func (r workIQResult) renderWorkIQ(rt *runtime) error {
 		fmt.Fprintf(&out, "chat %s: server all-type count %d; archive comparable count %d; complete %t; %s to %s\n",
 			oneLine(chat.Conversation), chat.ServerCount, chat.ArchiveCount, chat.Complete, stamp(chat.Since), stamp(chat.Until))
 	}
+	for _, notice := range r.Notices {
+		fmt.Fprintf(&out, "note: %s\n", oneLine(notice))
+	}
 	for _, probe := range r.Probes {
 		fmt.Fprintf(&out, "%s path %s: %s; initial page only\n", probe.Family, probe.PathClass, probe.State)
 		if probe.Next != "" {

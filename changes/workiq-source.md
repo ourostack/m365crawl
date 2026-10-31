@@ -17,3 +17,4 @@
 - Add explicit WorkIQ enable/disable, all-folder mail sync, selected-chat counts, coverage and initial-path status probes through the user's subprocess. Ordinary reads/sync/watch never launch WorkIQ; enabled doctor runs version only. No login, consent or agreement automation.
 - Preserve canonical IDs and per-source evidence, report provenance on message/conversation/mail reads, and keep server content through desktop rebuilds. Unqualified message-ID/clock classes remain conservative gaps rather than duplicate chat rows or unsupported resurrection.
 - Distinguish original observations from replay completion when reporting server-covered mail health; both must be under24 hours old, and the original local failure stays visible.
+- Count each WorkIQ gap once in `workiq_gaps`, say when an account narrowed `--source all` to one family (`notices`), and let a WorkIQ mail sync that covered every folder clear a stale Outlook mail cache warning.

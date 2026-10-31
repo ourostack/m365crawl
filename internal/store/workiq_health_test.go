@@ -287,3 +287,33 @@ func TestWorkIQReceiptCannotCoverANativeFailureWithUnknownClock(t *testing.T) {
 		t.Fatal("unknown native failure clock was replaced by a server freshness claim")
 	}
 }
+
+// A stale Outlook mail cache is a read warning unless a WorkIQ sync covered every folder after the
+// cache check found it stale; failures-only health never carries the stale entry.
+func TestReadSourceHealthLetsWorkIQCoverAStaleMailCache(t *testing.T) {
+	ctx := context.Background()
+	for _, covers := range []bool{true, false} {
+		s := newStore(t)
+		attempt := seedCompletedWorkIQMail(t, s)
+		proof := must(s.InspectWorkIQMailCompletion(ctx, attempt))
+		finish := mailT0.Add(time.Hour)
+		must0(s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "ok", FinishedAt: finish, MailProof: &proof}))
+		must(s.db.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do update set value=excluded.value`,
+			mailFreshKey+mailAcct, fmtTime(mailT0.Add(-3*time.Hour))))
+		checked := mailT0.Add(-time.Millisecond) // WorkIQ's data (observed at mailT0) is newer than the check
+		if !covers {
+			checked = mailT0.Add(time.Millisecond)
+		}
+		must0(s.RecordRun(ctx, Run{Source: "outlook|" + strings.TrimPrefix(mailAcct, "outlook/") + "|mail", Status: "ok", Fingerprint: "fp", StartedAt: checked, FinishedAt: checked}))
+		old := workIQHealthNow
+		workIQHealthNow = func() time.Time { return finish.Add(time.Hour) }
+		stale := OutlookCacheStale(must(s.ReadSourceHealth(ctx)), "outlook_mail", mailAcct)
+		workIQHealthNow = old
+		if covers && stale != nil || !covers && (stale == nil || !stale.LastOKAt.Equal(checked)) {
+			t.Fatalf("covers=%t: stale entry %+v", covers, stale)
+		}
+		if OutlookCacheStale(must(s.SourceHealth(ctx)), "outlook_mail", mailAcct) != nil {
+			t.Fatal("failures-only health carried a stale cache entry")
+		}
+	}
+}

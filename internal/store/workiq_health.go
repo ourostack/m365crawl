@@ -89,23 +89,27 @@ func (s *Store) withWorkIQHealth(ctx context.Context, native []SourceHealth, out
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for i := range native {
-		h := &native[i]
-		if h.Source != "outlook_mail" || h.AccountID == nil || h.attemptedAt.IsZero() || h.attemptedAt.After(now) {
-			continue
+	kept := native[:0]
+	for _, h := range native {
+		group := map[string]*workIQHealthState(nil)
+		if h.Source == "outlook_mail" && h.AccountID != nil && !h.attemptedAt.IsZero() && !h.attemptedAt.After(now) {
+			group = groups["mail\x00"+*h.AccountID]
 		}
-		group := groups["mail\x00"+*h.AccountID]
-		if group == nil || group["sync"] == nil {
-			continue
+		if group != nil && group["sync"] != nil {
+			through, err := s.workIQCoveredMail(ctx, group["sync"].latest, h.attemptedAt, now)
+			if err != nil {
+				return nil, err
+			}
+			if through != nil && h.State == SourceStale {
+				continue // WorkIQ holds the mail the stale cache is missing
+			}
+			if through != nil {
+				h.State, h.CoveredThrough = "covered_by_server", through
+			}
 		}
-		through, err := s.workIQCoveredMail(ctx, group["sync"].latest, h.attemptedAt, now)
-		if err != nil {
-			return nil, err
-		}
-		if through != nil {
-			h.State, h.CoveredThrough = "covered_by_server", through
-		}
+		kept = append(kept, h)
 	}
+	native = kept
 	for _, key := range keys {
 		group := groups[key]
 		selected := group["sync"]

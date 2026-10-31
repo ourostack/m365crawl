@@ -43,6 +43,8 @@ type WorkIQReport struct {
 	Mail     []WorkIQMailCoverage  `json:"mail"`
 	Chats    []WorkIQChatCoverage  `json:"chats"`
 	Probes   []WorkIQPathProbe     `json:"probes"`
+	// Notices say how the request was narrowed, such as an account that selects only one family.
+	Notices []string `json:"notices,omitempty"`
 	// Resumable says the run stopped only at a resumable stop (page budget, busy archive or a
 	// transient server failure) with its position kept, so the same command run again continues.
 	// It is not part of the report's JSON shape.
@@ -104,7 +106,14 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		if options.Source != "all" && options.Source != family {
 			return report, errs.Usage("the selected archive account conflicts with the explicit source")
 		}
-		options.Source = family
+		if options.Source == "all" {
+			options.Source = family
+			left := map[string]string{"mail": "chats were", "chats": "mail was"}[family]
+			report, err := RunWorkIQ(ctx, options)
+			report.Notices = append(report.Notices, "the account "+options.Account+" selects "+family+" only, so "+left+
+				" not checked; leave out the account to check both")
+			return report, err
+		}
 	}
 	if options.runLocks == nil {
 		options.runLocks = &workIQRunLocks{}

@@ -62,3 +62,34 @@ func TestWorkIQLastStopIsTheScopesLatestSettledAttempt(t *testing.T) {
 		t.Fatal("a closed archive answered")
 	}
 }
+
+// A gap a page or mail group already recorded counts toward the run's total once: the run-level
+// row (empty resource) holds only the rest, so the table sums to the run's gaps.
+func TestWorkIQGapTableStoresEachGapOnce(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	attempt := seedWorkIQMailAttempt(t, s)
+	for _, row := range []struct {
+		code, resource string
+		n              int
+	}{{"workiq_message_identity_unverified", "chat-page:1:0", 2}, {"workiq_message_identity_unverified", "chat-page:2:0", 1}, {"workiq_clock_unknown", "chat-page:1:0", 4}} {
+		must(s.db.ExecContext(ctx, `insert into workiq_gaps(attempt_id,code,resource,n) values(?,?,?,?)`, attempt, row.code, row.resource, row.n))
+	}
+	// Every failing query leaves the attempt open and the table unchanged; the unfaulted call settles it.
+	sweepKind(t, s, injectFaults(t, s), "query", true, func(ctx context.Context, s *Store) error {
+		return s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "failed", ErrorCode: "workiq_failed", FinishedAt: mailT0,
+			Gaps: map[string]int{"workiq_message_identity_unverified": 5, "workiq_clock_unknown": 4, "workiq_selection_capped": 1}})
+	}, nil)
+	for code, want := range map[string]int{"workiq_message_identity_unverified": 5, "workiq_clock_unknown": 4, "workiq_selection_capped": 1} {
+		var got int
+		must0(s.db.QueryRowContext(ctx, `select coalesce(sum(n),0) from workiq_gaps where attempt_id=? and code=?`, attempt, code).Scan(&got))
+		if got != want {
+			t.Fatalf("%s sums to %d, want %d", code, got, want)
+		}
+	}
+	var runRows int
+	must0(s.db.QueryRowContext(ctx, `select count(*) from workiq_gaps where attempt_id=? and resource='' and code='workiq_clock_unknown'`, attempt).Scan(&runRows))
+	if runRows != 0 {
+		t.Fatal("a gap fully recorded by its pages was stored again as a run total")
+	}
+}

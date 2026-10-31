@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -139,8 +140,21 @@ func (a *sourceAttempt) apply(status, code, fp string, at time.Time, accounts []
 	}
 }
 
-// SourceHealth derives health from sync outcomes; retained legacy refusals supply missing error information.
+// SourceHealth derives health from sync outcomes; retained legacy refusals supply missing error
+// information. It reports failures only, as sync's failed_source_health does.
 func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
+	return s.sourceHealth(ctx, false)
+}
+
+// ReadSourceHealth is the health a read reports: SourceHealth plus each stale Outlook cache whose
+// source is not failing. A stale mail cache goes through WorkIQ's server coverage like a failure,
+// with the check that found it stale as its attempt time, and is left out when a WorkIQ sync
+// covered every folder after that check.
+func (s *Store) ReadSourceHealth(ctx context.Context) ([]SourceHealth, error) {
+	return s.sourceHealth(ctx, true)
+}
+
+func (s *Store) sourceHealth(ctx context.Context, stale bool) ([]SourceHealth, error) {
 	attempts := map[string]*sourceAttempt{}
 	var workiqOutcomes []workIQHealthOutcome
 	var codes, accounts, schema int
@@ -288,6 +302,18 @@ func (s *Store) SourceHealth(ctx context.Context) ([]SourceHealth, error) {
 				if h.NewestItemAt, err = s.sourceNewestItem(ctx, family, account); err != nil {
 					return nil, err
 				}
+				out = append(out, h)
+			}
+		}
+	}
+	if stale {
+		cached, err := s.OutlookCacheHealth(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range cached {
+			if !slices.ContainsFunc(out, func(f SourceHealth) bool { return f.SourceKey == h.SourceKey }) {
+				h.attemptedAt = *h.LastOKAt
 				out = append(out, h)
 			}
 		}

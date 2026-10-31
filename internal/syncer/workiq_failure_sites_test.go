@@ -320,3 +320,22 @@ func TestWorkIQStuckNeedsTheArchiveToSay(t *testing.T) {
 		t.Fatal("an unreadable archive turned a resumable stop into another outcome", err)
 	}
 }
+
+// An account narrows `--source all` to that account's family; the result says which family was
+// left out instead of reading as a full check.
+func TestWorkIQAccountNarrowingAllSourcesSaysWhatWasLeftOut(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	owner := seedWorkIQChatOwner(t, db)
+	ctx := context.Background()
+	for _, tc := range []struct{ source, account, want string }{
+		{"all", account, "chats were not checked"},
+		{"all", owner.TenantID + "/" + owner.UserID, "mail was not checked"},
+		{"mail", account, ""},
+	} {
+		report, _ := RunWorkIQ(ctx, WorkIQOptions{DBPath: db, Kind: "status", Source: tc.source, Account: tc.account})
+		if got := strings.Join(report.Notices, " "); tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+			t.Fatalf("%s %s: notices %q", tc.source, tc.account, report.Notices)
+		}
+	}
+}

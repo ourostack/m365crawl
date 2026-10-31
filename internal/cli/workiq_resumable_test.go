@@ -94,3 +94,20 @@ func TestWorkIQAccountRequiredProbeNamesItsExactCommand(t *testing.T) {
 		t.Fatal("text output lost the account-required command", text)
 	}
 }
+
+func TestWorkIQNarrowedScopeNoticeIsShown(t *testing.T) {
+	e := newEnv(t)
+	e.emptyArchive()
+	old := runWorkIQSyncer
+	t.Cleanup(func() { runWorkIQSyncer = old })
+	runWorkIQSyncer = func(context.Context, syncer.WorkIQOptions) (syncer.WorkIQReport, error) {
+		return syncer.WorkIQReport{Notices: []string{"the account outlook/Main selects mail only; chats were not checked"}}, nil
+	}
+	_, out, _ := e.run("--json", "--account", mailAccount, "workiq", "status")
+	if notices, _ := decode(t, out)["notices"].([]any); len(notices) != 1 {
+		t.Fatal("JSON lost the narrowed-scope notice", out)
+	}
+	if _, text, _ := e.run("--format", "text", "--account", mailAccount, "workiq", "status"); !strings.Contains(text, "note: the account outlook/Main selects mail only") {
+		t.Fatal("text output lost the narrowed-scope notice", text)
+	}
+}

@@ -26,24 +26,19 @@ func (rt *runtime) noteSourceHealth(st *store.Store, label string, res result, n
 	if len(families) == 0 || st == nil {
 		return nil
 	}
-	all, err := st.SourceHealth(rt.ctx)
+	read := (*store.Store).SourceHealth
+	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
+		read = readSourceHealth // adds stale Outlook caches that WorkIQ has not covered
+	}
+	all, err := read(st, rt.ctx)
 	if err != nil {
 		return err
 	}
-	var stale []store.SourceHealth
-	if rt.outlookOn && slices.ContainsFunc(families, func(f string) bool { return strings.HasPrefix(f, "outlook_") }) {
-		if stale, err = outlookCacheHealth(st, rt.ctx); err != nil {
-			return err
-		}
-	}
-	for _, h := range stale {
-		failing := slices.ContainsFunc(all, func(f store.SourceHealth) bool { return f.SourceKey == h.SourceKey })
-		if !failing && (rt.healthUntil.IsZero() || rt.healthUntil.After(*h.CacheFreshAt)) {
-			all = append(all, h)
-		}
-	}
 	health := []store.SourceHealth{}
 	for _, h := range all {
+		if h.State == store.SourceStale && !rt.healthUntil.IsZero() && !rt.healthUntil.After(*h.CacheFreshAt) {
+			continue // the read ends before the cache stopped being written
+		}
 		family := sourceHealthFamily(h)
 		if !slices.Contains(families, family) || h.Source != "workiq" && h.Source != "teams" && !rt.outlookOn {
 			continue
@@ -143,6 +138,9 @@ func outlookStaleDetail(h store.SourceHealth) string {
 	return fmt.Sprintf("Outlook has not updated its local cache since %s (checked %s, %s); %s after that is not in it",
 		h.CacheFreshAt.UTC().Format(time.RFC3339), h.LastOKAt.UTC().Format(time.RFC3339), store.OutlookCacheStaleCode, what)
 }
+
+// readSourceHealth is the test seam of a read's failing and stale sources.
+var readSourceHealth = (*store.Store).ReadSourceHealth
 
 // outlookCacheHealth is the test seam of the stale Outlook sources.
 var outlookCacheHealth = (*store.Store).OutlookCacheHealth

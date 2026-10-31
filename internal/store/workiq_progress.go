@@ -168,8 +168,18 @@ func (s *Store) CompleteWorkIQAttempt(ctx context.Context, attempt int64, summar
 				return errors.New("invalid WorkIQ gap count")
 			}
 			gapCount += n
+			// A page or mail group already stored the gaps it found under its own resource; the run's
+			// row (empty resource) holds only the rest, so the table counts each gap once.
+			var found int
+			if err := tx.QueryRowContext(ctx, `select coalesce(sum(n),0) from workiq_gaps where attempt_id=? and code=? and resource<>''`,
+				attempt, code).Scan(&found); err != nil {
+				return err
+			}
+			if n <= found {
+				continue
+			}
 			if _, err := tx.ExecContext(ctx, `insert into workiq_gaps(attempt_id,code,n) values(?,?,?)
-on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code, n); err != nil {
+on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code, n-found); err != nil {
 				return err
 			}
 		}

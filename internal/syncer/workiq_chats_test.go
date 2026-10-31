@@ -537,3 +537,22 @@ func TestWorkIQMailRecheckHelpersStopOnReadWriteCancelAndBudgetBoundaries(t *tes
 		})
 	}
 }
+
+// Live: summing the gap table counted a chat page's gaps twice, once on the page and again in the
+// run's total. Each gap is stored once, so the table sums to the run's own gap counts.
+func TestWorkIQGapTableSumsToTheRunsGaps(t *testing.T) {
+	db, _ := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	t.Setenv("WORKIQ_ACQUISITION_CHATS", "paged")
+	seedWorkIQChatOwner(t, db)
+	report, err := RunWorkIQ(context.Background(), WorkIQOptions{DBPath: db, Source: "chats", Since: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), MaxChats: 1,
+		Invocation: workiq.Invocation{ExplicitTeamsRoot: true}})
+	if err != nil || report.Gaps["workiq_message_identity_unverified"] == 0 || report.Gaps["workiq_selection_capped"] == 0 {
+		t.Fatal("fixture has no page and run gaps", err, report.Gaps)
+	}
+	for code, n := range report.Gaps {
+		if got := count(t, db, `select coalesce(sum(n),0) from workiq_gaps where code='`+code+`'`); got != n {
+			t.Fatalf("gap table sums %s to %d, the run reported %d", code, got, n)
+		}
+	}
+}
