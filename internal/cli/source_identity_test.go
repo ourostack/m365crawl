@@ -42,6 +42,8 @@ func readOn(t *testing.T, e *env, db string, args ...string) map[string]any {
 	return decode(t, out)
 }
 
+// syncOn runs an explicit sync into db. db must be in a folder that does not exist yet: Windows
+// refuses an existing custom parent a test made itself.
 func syncOn(t *testing.T, e *env, db string) {
 	t.Helper()
 	if code, _, stderr := runOn(e, db, "sync"); code != 0 {
@@ -105,7 +107,7 @@ func TestReadOnAMissingArchiveCreatesNothing(t *testing.T) {
 
 func TestReadOnAnArchiveThisMachineSyncedKeepsSyncing(t *testing.T) {
 	e := newEnv(t)
-	own := filepath.Join(t.TempDir(), "own.db")
+	own := filepath.Join(t.TempDir(), "own", "m365crawl.db")
 	syncOn(t, e, own)
 	if m := readOn(t, e, own, "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncRan || m["notices"] != nil {
 		t.Fatalf("a read of this machine's archive = %v", m)
@@ -132,7 +134,7 @@ func TestReadOnAnArchiveThisMachineSyncedKeepsSyncing(t *testing.T) {
 
 func TestReadOnACopyFromAnotherMachineDoesNotSync(t *testing.T) {
 	e := newEnv(t)
-	copied := filepath.Join(t.TempDir(), "copy.db")
+	copied := filepath.Join(t.TempDir(), "copy", "m365crawl.db")
 	otherMachine(t)
 	syncOn(t, e, copied)
 	otherMachine(t)
@@ -164,7 +166,7 @@ func TestReadOnACopyFromAnotherMachineDoesNotSync(t *testing.T) {
 
 func TestReadWithAnotherTeamsRootDoesNotSync(t *testing.T) {
 	e := newEnv(t)
-	own := filepath.Join(t.TempDir(), "own.db")
+	own := filepath.Join(t.TempDir(), "own", "m365crawl.db")
 	syncOn(t, e, own)
 	code, out, stderr := runOn(e, own, "--max-age", "1ns", "--teams-root", filepath.Join(t.TempDir(), "elsewhere"), "messages")
 	if m := decode(t, out); code != 0 || m["implicit_sync"] != implicitSyncForeignArchive || stderr != "" {
@@ -174,7 +176,7 @@ func TestReadWithAnotherTeamsRootDoesNotSync(t *testing.T) {
 
 func TestLegacyArchiveIsAdoptedOnlyWhenItsTeamsSourcesAreHere(t *testing.T) {
 	e := newEnv(t)
-	legacy := filepath.Join(t.TempDir(), "legacy.db")
+	legacy := filepath.Join(t.TempDir(), "legacy", "m365crawl.db")
 	syncOn(t, e, legacy)
 	archiveSQL(t, legacy, `delete from meta where key like 'source_identity:%'`)
 	if m := readOn(t, e, legacy, "--max-age", "1ns", "messages"); m["implicit_sync"] != implicitSyncRan {
@@ -189,7 +191,7 @@ func TestLegacyArchiveIsAdoptedOnlyWhenItsTeamsSourcesAreHere(t *testing.T) {
 	if err != nil || len(id.Recorded) != 1 {
 		t.Fatalf("the adopting sync recorded %+v, %v", id, err)
 	}
-	other := filepath.Join(t.TempDir(), "other.db")
+	other := filepath.Join(t.TempDir(), "other", "m365crawl.db")
 	syncOn(t, e, other)
 	archiveSQL(t, other, `delete from meta where key like 'source_identity:%'`)
 	archiveSQL(t, other, `update sync_runs set source = 'Elsewhere|https_teams.microsoft.com_0' where source like '%|https_teams.%'`)
