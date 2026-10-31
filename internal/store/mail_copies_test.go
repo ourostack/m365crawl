@@ -502,15 +502,22 @@ func TestMailCopyReadsSurfaceFailures(t *testing.T) {
 		if _, _, _, err := s.MailThread(ctx, mailAcct, 2001); err != nil {
 			return err
 		}
-		if _, err := s.MailStatusOf(ctx, mailAcct); err != nil {
-			return err
-		}
 		if _, err := s.EventMail(ctx, calendar.Event{ICalUID: "none"}, 0); err != nil {
 			return err
 		}
 		_, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}, {Account: mailAcct, Kind: "inbox"}, {Account: mailAcct, Kind: "archive"}}, MailCopyRange{Since: day(30), Until: day(0)})
 		return err
 	})
+}
+
+// The status mail block checks its tables (one scan), loads the copies (21 scans: the recorded
+// root, ten folders, ten rows with a Message-ID), then reads its counts (one scan); the cache write
+// time it reads last tolerates a NULL at its third scan, as in TestOutlookCacheReadFailuresSurface.
+func TestMailStatusSurfacesCopyReadFailures(t *testing.T) {
+	sweepReadFaults(t, seedCopiesForFaults, func(ctx context.Context, s *Store) error {
+		_, err := s.MailStatusOf(ctx, mailAcct)
+		return err
+	}, 1+21+1+3)
 }
 
 func TestMailCopyCheckOverEveryShape(t *testing.T) {
