@@ -348,9 +348,9 @@ func (rt *runtime) searchRangeCoverage(st *store.Store, p searchPlan, f store.Fi
 			folders = append(folders, x)
 		}
 	}
-	if folder != "" {
+	if folder != "" && len(folders) > 0 {
 		// --folder unknown (messages without a folder row) and other folders no row names hold
-		// no judged role; only an archive without any mail folder says why there is no mail.
+		// no judged role; an archive without any mail folder still says why there is no mail.
 		if folders = matchFolders(folders, folder); len(folders) == 0 {
 			return nil
 		}

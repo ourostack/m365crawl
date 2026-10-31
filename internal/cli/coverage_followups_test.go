@@ -117,6 +117,10 @@ func TestSearchRangeCoverageWithoutMail(t *testing.T) {
 	if scopesOf(rc) != "mail:sent,mail:inbox" || reasonCodes(rc[0]) != "no_profile" {
 		t.Fatalf("%v", rc)
 	}
+	code, out, errOut = e.run("--no-sync", "--json", "--outlook-root", outlook, "search", "--source", "mail", "--folder", "inbox", "--since", "2026-09-01", "words")
+	if rc := rangeCoverage(t, decode(t, out)); code != 0 || scopesOf(rc) != "mail:sent,mail:inbox" {
+		t.Fatalf("with --folder: %d %s %v", code, errOut, rc)
+	}
 }
 
 // --conversation and --team keep messages' verdict to what the read selects, say so in
