@@ -63,8 +63,12 @@ func owaOracleScalarPrivacyRules(ctx context.Context, source string) (string, in
 		return "[redacted]"
 	})
 	clean = owaOracleSig.ReplaceAllStringFunc(clean, func(match string) string {
+		prefix := match[:strings.IndexByte(match, '=')+1]
+		if match[len(prefix):] == "[redacted]" {
+			return match // an inner level already redacted this value
+		}
 		count++
-		return match[:strings.IndexByte(match, '=')+1] + "[redacted]"
+		return prefix + "[redacted]"
 	})
 	if err := ctx.Err(); err != nil {
 		return "", 0, err

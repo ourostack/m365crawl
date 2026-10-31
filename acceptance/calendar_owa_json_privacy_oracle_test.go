@@ -48,8 +48,9 @@ func owaOracleStructuredPrivacy(ctx context.Context, source string, depth int) (
 	if count == 0 {
 		return source, 0, nil
 	}
-	// Counters measure rule applications, not distinct secrets: an enclosing
-	// JSON string applies its scalar rules after the inner structure is scrubbed.
+	// Counters measure redacted values: an enclosing JSON string applies its scalar
+	// rules after the inner structure is scrubbed, and a value already redacted
+	// there is not counted again (#291).
 	enclosed, outerCount, err := owaOracleScalarPrivacyRules(ctx, string(clean))
 	return enclosed, count + outerCount, err
 }

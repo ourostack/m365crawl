@@ -24,8 +24,8 @@ func TestOWACalendarStructuredPrivacyLiterals(t *testing.T) {
 		{`{"$map":[["Password",{"x":1}],["k",1]]}`, `{"$map":[["Password","[redacted]"],["k",1]]}`, 1},
 		{`  [ {"password" : 1}, "normal<&>" ]  `, `[ {"password" : "[redacted]"}, "normal<&>" ]`, 1},
 		{`{"data":"{\"refresh_token\":\"SYNTHETIC\"}"}`, `{"data":"{\"refresh_token\":\"[redacted]\"}"}`, 1},
-		{`{"data":"{\"url\":\"https://example.invalid/?sig=SYNTHETIC\"}"}`, `{"data":"{\"url\":\"https://example.invalid/?sig=[redacted]\"}"}`, 3},
-		{`{"a":"Bearer SYNTHETIC","b":"https://example.invalid/?x=1&sig=SYNTHETIC"}`, `{"a":"[redacted]","b":"https://example.invalid/?x=1&sig=[redacted]"}`, 3},
+		{`{"data":"{\"url\":\"https://example.invalid/?sig=SYNTHETIC\"}"}`, `{"data":"{\"url\":\"https://example.invalid/?sig=[redacted]\"}"}`, 1},
+		{`{"a":"Bearer SYNTHETIC","b":"https://example.invalid/?x=1&sig=SYNTHETIC"}`, `{"a":"[redacted]","b":"https://example.invalid/?x=1&sig=[redacted]"}`, 2},
 		{` {"ok": 1, "text":"normal"} `, ` {"ok": 1, "text":"normal"} `, 0},
 		{` [] `, ` [] `, 0},
 	} {
