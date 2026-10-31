@@ -171,25 +171,32 @@ func normalizeMailMessageID(s string) string {
 	return strings.ToLower(s)
 }
 
-// mailCopies is the folder sets plus, for every row that is a copy, the row that stands for it.
+// mailCopies is the folder sets plus, for every row that is a copy, the row that stands for it,
+// and where copies of one message disagree on received time, the time chosen for it.
 type mailCopies struct {
 	sets  mailSets
 	newer map[int64]string // rowid of a copy to the id (account:detail_key) of the row that stands for it
+	// received maps the rowid of a row that stands for copies disagreeing on received time to the
+	// received time chosen for the message (chooseReceived), when it differs from the row's own.
+	received map[int64]time.Time
+	// disagree holds the rowid of every row, standing or copy, of a message whose copies disagree.
+	disagree map[int64]bool
 }
 
 // copyRow is one row as the copy rule compares it.
 type copyRow struct {
-	rowid   int64
-	id      string
-	set     uint32
-	current bool
-	seen    string
+	rowid          int64
+	id             string
+	set            uint32
+	current        bool
+	seen           string
+	received, sent time.Time
 }
 
 // loadMailCopies finds the copies. Only accounts with an older folder set are read row by row.
 func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 	sets, err := loadMailSets(ctx, q)
-	c := mailCopies{sets: sets, newer: map[int64]string{}}
+	c := mailCopies{sets: sets, newer: map[int64]string{}, received: map[int64]time.Time{}, disagree: map[int64]bool{}}
 	if err != nil {
 		return c, err
 	}
@@ -200,13 +207,15 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 	sort.Strings(accounts)
 	for _, account := range accounts {
 		byID := map[string][]copyCand{}
-		err := mailEach(ctx, q, `select rowid, detail_key, internet_message_id, folder_key, state_seen_at from mail_messages where account=? and internet_message_id<>''`, []any{account}, func(r *sql.Rows) error {
+		err := mailEach(ctx, q, `select rowid, detail_key, internet_message_id, folder_key, state_seen_at, received_at, sent_at from mail_messages where account=? and internet_message_id<>''`, []any{account}, func(r *sql.Rows) error {
 			var row copyRow
 			var key, folder uint32
 			var msgID string
-			if err := r.Scan(&row.rowid, &key, &msgID, &folder, &row.seen); err != nil {
+			var received, sent sql.NullString
+			if err := r.Scan(&row.rowid, &key, &msgID, &folder, &row.seen, &received, &sent); err != nil {
 				return err
 			}
+			row.received, row.sent = parseTime(received), parseTime(sent)
 			id := mailFolderID{account, folder}
 			kind, known := sets.kind[id]
 			norm := normalizeMailMessageID(msgID)
@@ -239,9 +248,95 @@ func loadMailCopies(ctx context.Context, q mailQuerier) (mailCopies, error) {
 					c.newer[r.row.rowid] = n
 				}
 			}
+			c.chooseReceived(g)
 		}
 	}
 	return c, nil
+}
+
+// receivedAgreement is how far apart copies' received times may be and still agree; sendSkew is
+// how far before the send time a received time may lie and still agree with it (clock skew).
+const (
+	receivedAgreement = time.Minute
+	sendSkew          = 15 * time.Minute
+)
+
+// chooseReceived looks at the rows of one Message-ID (best first, as loadMailCopies ranks them),
+// groups each copy with the row that stands for it, and for a group whose received times are more
+// than receivedAgreement apart records the disagreement and the received time chosen for the
+// message: the earliest received time of the group at or after the send time (less sendSkew),
+// since a message cannot arrive before it was sent and Outlook stores a draft's start or a
+// rebuild's guess as the received time of some copies; when no copy qualifies, the standing
+// row's own. The majority of copies does not decide: a wrong time is often repeated across sets.
+func (c mailCopies) chooseReceived(g []copyCand) {
+	if len(g) < 2 {
+		return
+	}
+	byID := make(map[string]copyRow, len(g))
+	for _, r := range g {
+		byID[r.row.id] = r.row
+	}
+	groups := map[int64][]copyRow{}
+	var order []int64
+	for _, r := range g {
+		top := r.row
+		for range len(g) {
+			n, ok := c.newer[top.rowid]
+			if !ok {
+				break
+			}
+			top = byID[n]
+		}
+		if _, seen := groups[top.rowid]; !seen {
+			order = append(order, top.rowid)
+		}
+		groups[top.rowid] = append(groups[top.rowid], r.row)
+	}
+	for _, standing := range order {
+		rows := groups[standing]
+		var lo, hi time.Time
+		for _, r := range rows {
+			lo, hi = earliest(lo, r.received), latest(hi, r.received)
+		}
+		if len(rows) < 2 || hi.Sub(lo) <= receivedAgreement {
+			continue
+		}
+		var own, sent time.Time
+		for _, r := range rows {
+			if r.rowid == standing {
+				own = r.received
+			}
+			if sent.IsZero() {
+				sent = r.sent
+			}
+		}
+		chosen := own
+		if !sent.IsZero() {
+			var best time.Time
+			for _, r := range rows {
+				if !r.received.IsZero() && !r.received.Before(sent.Add(-sendSkew)) {
+					best = earliest(best, r.received)
+				}
+			}
+			if !best.IsZero() {
+				chosen = best
+			}
+		}
+		for _, r := range rows {
+			c.disagree[r.rowid] = true
+		}
+		if !chosen.IsZero() && !chosen.Equal(own) {
+			c.received[standing] = chosen
+		}
+	}
+}
+
+// latest is the later of two times, a zero time standing for none.
+func latest(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // copyCand is one row of a Message-ID with the role of its folder ("" when it has none).
@@ -292,18 +387,22 @@ func (c mailCopies) notCopy(col string) string {
 	return col + ` not in (` + joinIDs(c.copyIDs()) + `)`
 }
 
-// mark sets OlderCopy and CopyOf on rows.
+// mark sets OlderCopy, CopyOf, ReceivedAtDisagrees and DatedAt on rows.
 func (c mailCopies) mark(rows []MailRow) {
 	for i := range rows {
-		rows[i].OlderCopy = !c.sets.isCurrent(rows[i].Account, rows[i].FolderKey)
-		rows[i].CopyOf = c.newer[rows[i].Rowid]
+		r := &rows[i]
+		r.OlderCopy = !c.sets.isCurrent(r.Account, r.FolderKey)
+		r.CopyOf = c.newer[r.Rowid]
+		r.ReceivedAtDisagrees = c.disagree[r.Rowid]
+		r.DatedAt = datedAt(r.FolderKind, c.receivedAt(r.Rowid, r.ReceivedAt), r.SentAt)
 	}
 }
 
 // MailCopyScope names an account and a folder kind to check.
 type MailCopyScope struct{ Account, Kind string }
 
-// MailCopyRange is the received-time range [Since, Until) a check covers (a zero end is open) and
+// MailCopyRange is the range [Since, Until) a check covers, on the clock mail list dates messages
+// by (mail_clock.go; a zero end is open), and
 // whether gone and evicted messages of the current folder set count, as in MailFilter. Messages
 // only an older set holds count whatever their marks: once Outlook replaces a set, a trusted read
 // finds its messages missing and marks them, which says nothing about whether the current set
@@ -337,6 +436,9 @@ type MailCopyCheck struct {
 	OlderCopiesMarked int
 	CurrentOldestAt   time.Time
 	State             string
+	// DatedBy is the clock the range selects messages by (MailClock): sent_at for sent, received_at
+	// for inbox, as mail list dates them.
+	DatedBy string
 }
 
 // checkedRole is true for the roles a copy check runs for: Inbox (with To Me) and Sent Items, whose
@@ -382,7 +484,7 @@ func (m mailSets) hasOlder(account, role string) bool {
 }
 
 func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopyScope, rng MailCopyRange) (MailCopyCheck, error) {
-	c := MailCopyCheck{Account: k.Account, Kind: k.Kind}
+	c := MailCopyCheck{Account: k.Account, Kind: k.Kind, DatedBy: MailClock(k.Kind)}
 	sets := copies.sets
 	inRole := func(key uint32) (bool, bool) {
 		id := mailFolderID{k.Account, key}
@@ -414,17 +516,18 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 	if err != nil {
 		return c, err
 	}
+	join, args, dated := copies.dated()
 	var w where
-	w.add(`account=?`, k.Account)
+	w.add(`m.account=?`, k.Account)
 	if !rng.Since.IsZero() {
-		w.add(`received_at>=?`, rng.Since.UTC().Format(timeLayout))
+		w.add(dated+`>=?`, rng.Since.UTC().Format(timeLayout))
 	}
 	if !rng.Until.IsZero() {
-		w.add(`received_at<?`, rng.Until.UTC().Format(timeLayout))
+		w.add(dated+`<?`, rng.Until.UTC().Format(timeLayout))
 	}
 	type message struct{ current, lacking, shown bool }
 	msgs := map[string]*message{}
-	err = mailEach(ctx, s.db, `select rowid, internet_message_id, folder_key, received_at, gone_at is not null, evicted_at is not null from mail_messages`+w.sql(), w.args, func(r *sql.Rows) error {
+	err = mailEach(ctx, s.db, `select m.rowid, m.internet_message_id, m.folder_key, m.received_at, m.gone_at is not null, m.evicted_at is not null from mail_messages m`+mailJoin+join+w.sql(), append(args, w.args...), func(r *sql.Rows) error { //nolint:gosec // G202: fragments are package constants; values are placeholders
 		var rowid int64
 		var msgID string
 		var key uint32
@@ -451,7 +554,10 @@ func (s *Store) mailCopyCheck(ctx context.Context, copies mailCopies, k MailCopy
 		}
 		m.current = m.current || current
 		m.shown = m.shown || !hidden
-		at := parseTime(received)
+		// The current copy's range is a range of received times (the oldest message the cache held),
+		// so whether a message lies inside it is judged by its received time, whatever the clock
+		// that selected it.
+		at := copies.receivedAt(rowid, parseTime(received))
 		m.lacking = m.lacking || !current && !c.CurrentOldestAt.IsZero() && !at.IsZero() && !at.Before(c.CurrentOldestAt)
 		return nil
 	})

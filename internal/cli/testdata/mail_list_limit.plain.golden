@@ -1,4 +1,4 @@
-id                received              state  from              subject          folder
+id                date                  state  from              subject          folder
 ----------------  --------------------  -----  ----------------  ---------------  ------
 outlook/Main:106  2026-09-09 08:00 UTC  -      Ann Sender        Lunch on Friday  Inbox
 outlook/Main:104  2026-09-08 08:00 UTC  ?      ann@example.test  Lunch on Friday  Inbox

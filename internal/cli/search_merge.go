@@ -68,33 +68,35 @@ type searchChatItem struct {
 
 // searchMailItem is a mail message in a search result: the item of mail list, plus the source.
 type searchMailItem struct {
-	Source            string     `json:"source"`
-	ID                string     `json:"id"`
-	Account           string     `json:"account"`
-	Folder            *string    `json:"folder"`
-	FolderKind        *string    `json:"folder_kind"`
-	ToMe              bool       `json:"to_me"`
-	Subject           *string    `json:"subject"`
-	FromName          *string    `json:"from_name"`
-	FromAddress       *string    `json:"from_address"`
-	RecipientCount    int        `json:"recipient_count"`
-	RecipientsPreview []string   `json:"recipients_preview"`
-	InReplyTo         *string    `json:"in_reply_to"`
-	ConversationID    *string    `json:"conversation_id"`
-	ReceivedAt        *time.Time `json:"received_at"`
-	SentAt            *time.Time `json:"sent_at"`
-	IsRead            *bool      `json:"is_read"`
-	Flag              *string    `json:"flag"`
-	Importance        *string    `json:"importance"`
-	HasAttachments    bool       `json:"has_attachments"`
-	Preview           *string    `json:"preview"`
-	InternetMessageID *string    `json:"internet_message_id"`
-	ICalUID           *string    `json:"ical_uid"`
-	GoneAt            *time.Time `json:"gone_at"`
-	EvictedAt         *time.Time `json:"evicted_at"`
-	OlderCopy         bool       `json:"older_copy"`
-	CopyOf            *string    `json:"copy_of"`
-	TextTruncated     bool       `json:"text_truncated,omitempty"`
+	Source              string     `json:"source"`
+	ID                  string     `json:"id"`
+	Account             string     `json:"account"`
+	Folder              *string    `json:"folder"`
+	FolderKind          *string    `json:"folder_kind"`
+	ToMe                bool       `json:"to_me"`
+	Subject             *string    `json:"subject"`
+	FromName            *string    `json:"from_name"`
+	FromAddress         *string    `json:"from_address"`
+	RecipientCount      int        `json:"recipient_count"`
+	RecipientsPreview   []string   `json:"recipients_preview"`
+	InReplyTo           *string    `json:"in_reply_to"`
+	ConversationID      *string    `json:"conversation_id"`
+	ReceivedAt          *time.Time `json:"received_at"`
+	SentAt              *time.Time `json:"sent_at"`
+	DatedAt             *time.Time `json:"dated_at"`
+	IsRead              *bool      `json:"is_read"`
+	Flag                *string    `json:"flag"`
+	Importance          *string    `json:"importance"`
+	HasAttachments      bool       `json:"has_attachments"`
+	Preview             *string    `json:"preview"`
+	InternetMessageID   *string    `json:"internet_message_id"`
+	ICalUID             *string    `json:"ical_uid"`
+	GoneAt              *time.Time `json:"gone_at"`
+	EvictedAt           *time.Time `json:"evicted_at"`
+	OlderCopy           bool       `json:"older_copy"`
+	CopyOf              *string    `json:"copy_of"`
+	ReceivedAtDisagrees bool       `json:"received_at_disagrees"`
+	TextTruncated       bool       `json:"text_truncated,omitempty"`
 }
 
 // searchTranscriptItem is one part of a recorded meeting whose fetched transcript matched: the
@@ -262,9 +264,9 @@ func searchMailItemOf(r store.MailRow, maxText int) searchMailItem {
 		Source: searchMail, ID: r.ID(), Account: r.Account, Folder: searchNZ(r.Folder), FolderKind: searchNZ(r.FolderKind), ToMe: r.ToMe,
 		Subject: searchNZ(r.Subject), FromName: searchNZ(r.SenderName), FromAddress: searchNZ(r.SenderAddress),
 		RecipientCount: len(r.Recipients), RecipientsPreview: []string{}, InReplyTo: searchNZ(r.InReplyTo), ConversationID: searchNZ(r.ConversationID),
-		ReceivedAt: searchTime(r.ReceivedAt), SentAt: searchTime(r.SentAt), IsRead: r.IsRead, Flag: searchNZ(r.Flag), Importance: searchNZ(r.Importance),
+		ReceivedAt: searchTime(r.ReceivedAt), SentAt: searchTime(r.SentAt), DatedAt: searchTime(r.DatedAt), IsRead: r.IsRead, Flag: searchNZ(r.Flag), Importance: searchNZ(r.Importance),
 		HasAttachments: r.HasAttachments, InternetMessageID: searchNZ(r.InternetMessageID), ICalUID: searchNZ(r.ICalUID),
-		GoneAt: searchTime(r.GoneAt), EvictedAt: searchTime(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: searchNZ(r.CopyOf),
+		GoneAt: searchTime(r.GoneAt), EvictedAt: searchTime(r.EvictedAt), OlderCopy: r.OlderCopy, CopyOf: searchNZ(r.CopyOf), ReceivedAtDisagrees: r.ReceivedAtDisagrees,
 	}
 	for i, rc := range r.Recipients {
 		if i == 3 {
@@ -620,7 +622,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 			notes = append(notes, "--account names a Teams account; mail was searched across all Outlook accounts")
 		}
 		for _, r := range rows {
-			hits = append(hits, searchHit{at: r.ReceivedAt, item: searchMailItemOf(r, rt.g.MaxText), source: searchMail})
+			hits = append(hits, searchHit{at: r.DatedAt, item: searchMailItemOf(r, rt.g.MaxText), source: searchMail})
 		}
 	}
 	tr, err := c.searchTranscripts(rt, p, f, st)

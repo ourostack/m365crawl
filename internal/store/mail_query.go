@@ -85,6 +85,12 @@ type MailRow struct {
 	// set, empty when there is none.
 	OlderCopy bool
 	CopyOf    string
+	// DatedAt is the time the message is dated by (mail_clock.go): its send time in Sent Items,
+	// otherwise its received time, chosen across its folder copies when they disagree.
+	// ReceivedAtDisagrees is true when copies of the message in other folder sets hold received
+	// times more than a minute apart; ReceivedAt stays the row's own.
+	DatedAt             time.Time
+	ReceivedAtDisagrees bool
 }
 
 // ID is the message's id as the commands print it: account:detail_key.
@@ -242,7 +248,8 @@ func (s *Store) mailChildren(ctx context.Context, rows []MailRow, roleCol string
 	})
 }
 
-// MailList lists archived messages, newest first.
+// MailList lists archived messages, newest first by the time each is dated by (mail_clock.go),
+// which is also the time Since and Until select on.
 func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	var w where
 	from := ` from mail_messages m` + mailJoin
@@ -266,11 +273,17 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 		like := "%" + strings.ToLower(escapeLike(f.From)) + "%"
 		w.add(`(lower(m.sender_name) like ? escape '\' or lower(m.sender_address) like ? escape '\')`, like, like)
 	}
+	copies, err := loadMailCopies(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	join, args, dated := copies.dated()
+	from += join
 	if !f.Since.IsZero() {
-		w.add(`m.received_at>=?`, f.Since.UTC().Format(timeLayout))
+		w.add(dated+`>=?`, f.Since.UTC().Format(timeLayout))
 	}
 	if !f.Until.IsZero() {
-		w.add(`m.received_at<?`, f.Until.UTC().Format(timeLayout))
+		w.add(dated+`<?`, f.Until.UTC().Format(timeLayout))
 	}
 	if f.Unread {
 		w.add(`m.is_read=0`)
@@ -287,10 +300,6 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	if !f.IncludeEvicted {
 		w.add(`m.evicted_at is null`)
 	}
-	copies, err := loadMailCopies(ctx, s.db)
-	if err != nil {
-		return nil, err
-	}
 	if cond := copies.notCopy(`m.rowid`); cond != "" && !f.IncludeCopies {
 		w.add(cond)
 	}
@@ -298,7 +307,8 @@ func (s *Store) MailList(ctx context.Context, f MailFilter) ([]MailRow, error) {
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	return s.mailRowsMarked(ctx, copies, false, from+w.sql()+` order by m.received_at desc, m.rowid desc limit ?`, append(w.args, limit))
+	args = append(append(args, w.args...), limit)
+	return s.mailRowsMarked(ctx, copies, false, from+w.sql()+` order by `+dated+` desc, m.rowid desc limit ?`, args) //nolint:gosec // G202: fragments are package constants; values are placeholders
 }
 
 // narrowed reports whether f selects messages by anything but the account and the listing

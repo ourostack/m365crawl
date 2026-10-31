@@ -1,10 +1,10 @@
 thread: reply chain
 
-id                received              state                 from        subject               folder
+id                date                  state                 from        subject               folder
 ----------------  --------------------  --------------------  ----------  --------------------  ----------
 outlook/Main:101  2026-09-05 08:00 UTC  unread,flagged,files  Ann Sender  Quarterly plan        Inbox
 outlook/Main:102  2026-09-06 08:00 UTC  -                     Bob Reader  Re: Quarterly plan    Inbox
-outlook/Main:103  2026-09-07 08:00 UTC  -                     Ann Sender  Re: Re: Quarterly...  Sent Items
+outlook/Main:103  2026-09-07 07:59 UTC  -                     Ann Sender  Re: Re: Quarterly...  Sent Items
 
 participants: Ann Sender <ann@example.test>, Bob Reader <bob@example.test>, Cy Copy <cy@example.test>, Di Dee <di@example.test>, eve@example.test, No Address
 

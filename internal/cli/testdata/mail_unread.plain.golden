@@ -4,7 +4,7 @@ Inbox       inbox  1       4
 Sent Items  sent   0       1
 Projects    other  1       1
 
-id                received              state                 from        subject         folder
+id                date                  state                 from        subject         folder
 ----------------  --------------------  --------------------  ----------  --------------  --------
 outlook/Main:101  2026-09-05 08:00 UTC  unread,flagged,files  Ann Sender  Quarterly plan  Inbox
 outlook/Main:105  2026-08-01 08:00 UTC  unread                Ann Sender  Old report      Projects

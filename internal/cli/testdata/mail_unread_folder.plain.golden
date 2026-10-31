@@ -2,7 +2,7 @@ folder  kind   unread  cached
 ------  -----  ------  ------
 Inbox   inbox  1       4
 
-id                received              state                 from        subject         folder
+id                date                  state                 from        subject         folder
 ----------------  --------------------  --------------------  ----------  --------------  ------
 outlook/Main:101  2026-09-05 08:00 UTC  unread,flagged,files  Ann Sender  Quarterly plan  Inbox
 

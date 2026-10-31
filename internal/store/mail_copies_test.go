@@ -524,7 +524,8 @@ func TestMailCopyCheckOverEveryShape(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedCopiesForFaults(t, s)
-	if got := listKeys(t, s, MailFilter{Folder: "sent"}); !sameKeys(got, 2001, 2002, 1003, 1009) {
+	// Sent Items is dated by sent time, so 1009, which has no received time, sorts by its send time.
+	if got := listKeys(t, s, MailFilter{Folder: "sent"}); !sameKeys(got, 2001, 2002, 1009, 1003) {
 		t.Fatalf("sent %v", got)
 	}
 	checks, err := s.MailCopyChecks(ctx, []MailCopyScope{{Account: mailAcct, Kind: "sent"}, {Account: mailAcct, Kind: "inbox"}, {Account: mailAcct, Kind: "archive"}}, MailCopyRange{})
