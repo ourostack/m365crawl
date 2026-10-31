@@ -111,7 +111,7 @@ func TestWorkIQWindowAndWholeAccountSyncRunConcurrently(t *testing.T) {
 	ok(t, e.runWith(extra, append(e.baseArgs(), "workiq", "enable")...))
 	whole := e.start(extra, append(e.baseArgs(), "--json", "--account", account, "workiq", "sync", "--source", "mail")...)
 	state := filepath.Join(e.tmp, "mailbox-state.json")
-	whole.waitFor("the whole-account sync to reach its first message page", func() bool {
+	waitLong(t, whole, "the whole-account sync to reach its first message page", func() bool {
 		raw, err := os.ReadFile(state) //nolint:gosec // G304: the test's own scenario state.
 		var st struct{ Fetches int }
 		return err == nil && json.Unmarshal(raw, &st) == nil && st.Fetches >= 9
@@ -161,7 +161,7 @@ where a.kind='mail' and b.kind='mail' and a.namespace='graph' and b.namespace='g
 	extra = windowStub(t, e, st.Fetches+1, pause2,
 		[4]string{"in-window", "inbox-id", "<dup@example.test>", "2026-09-02T09:00:00Z"})
 	first := e.start(extra, append(e.baseArgs(), window...)...)
-	first.waitFor("the first window to fetch", func() bool {
+	waitLong(t, first, "the first window to fetch", func() bool {
 		raw, err := os.ReadFile(state) //nolint:gosec // G304: the test's own scenario state.
 		var now struct{ Fetches int }
 		return err == nil && json.Unmarshal(raw, &now) == nil && now.Fetches > st.Fetches
@@ -175,4 +175,22 @@ where a.kind='mail' and b.kind='mail' and a.namespace='graph' and b.namespace='g
 	case <-time.After(60 * time.Second):
 		t.Fatal(fmt.Sprint("the first window did not finish: ", first.stderr.String()))
 	}
+}
+
+// waitLong is waitFor with a budget for a loaded machine: the paused process starts WorkIQ, lists
+// the folder tree and reaches its pause point first.
+func waitLong(t *testing.T, s *started, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		select {
+		case <-s.done:
+			t.Fatalf("process exited while waiting for %s (err %v)\nstdout: %s\nstderr: %s", what, s.err, s.stdout.String(), s.stderr.String())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	t.Fatalf("timed out waiting for %s\nstdout: %s\nstderr: %s", what, s.stdout.String(), s.stderr.String())
 }

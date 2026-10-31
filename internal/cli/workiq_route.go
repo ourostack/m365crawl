@@ -279,6 +279,10 @@ func (rt *runtime) windowRoute(st *store.Store, account, situation string, since
 	} else {
 		end = t
 	}
+	// A window cannot end after the sync starts, so an end rounded past now stays at this second.
+	if now := workIQRouteNow().UTC().Truncate(time.Second); end.After(now) {
+		end = now
+	}
 	if !named {
 		keys, kinds = nil, nil
 	}

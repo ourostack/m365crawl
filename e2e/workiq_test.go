@@ -143,7 +143,7 @@ func TestWorkIQRouteFromAnOldMailReadLeadsAnAgentToServerMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	account := "outlook/Synthetic"
-	cached := time.Now().Add(-time.Hour).UTC()
+	cached := time.Now().Add(-2 * time.Hour).UTC()
 	native := outlookmail.Message{Account: account, Folder: outlookmail.Folder{Key: 1, Kind: "inbox"}, Copies: 1}
 	native.DetailKey, native.FolderKey = 7, 1
 	native.MessageID, native.Subject, native.Received, native.Sent = "<native-route@example.test>", "Cached native mail", cached, cached
