@@ -521,6 +521,12 @@ func TestUsageCLIReadOnlyAndClocks(t *testing.T) {
 	}
 	reads := [][]string{{"docs", "list"}, {"docs", "search", "Clock"}, {"docs", "show", id}, {"docs", "sources"},
 		{"search", "Clock", "--source", "documents"}, {"search", "Clock"}, {"--format", "text", "docs", "list"}, {"--format", "text", "docs", "show", id}}
+	// A repeatable read is the same archive read at the same moment: pin the clock, so the
+	// --no-sync caution (whose presence depends on the sources' age) is compared on stderr too.
+	clock := runtimeClock
+	t.Cleanup(func() { runtimeClock = clock })
+	pinned := time.Now()
+	runtimeClock = func() time.Time { return pinned }
 	unchanged := func(name string, wantCode map[string]int) {
 		t.Helper()
 		before, err := os.ReadFile(e.db)
@@ -534,9 +540,9 @@ func TestUsageCLIReadOnlyAndClocks(t *testing.T) {
 		for _, args := range reads {
 			args = append([]string{"--no-sync"}, args...)
 			code, first, stderr := e.run(args...)
-			_, second, _ := e.run(args...)
-			if code != wantCode[args[len(args)-2]+" "+args[len(args)-1]] || first != second {
-				t.Fatalf("%s: %v is not a repeatable read: %d %s", name, args, code, stderr)
+			_, second, stderr2 := e.run(args...)
+			if code != wantCode[args[len(args)-2]+" "+args[len(args)-1]] || first != second || stderr != stderr2 {
+				t.Fatalf("%s: %v is not a repeatable read: %d\n%s\n%s\nstderr %q\nstderr %q", name, args, code, first, second, stderr, stderr2)
 			}
 		}
 		after, err := os.ReadFile(e.db)
