@@ -10,6 +10,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
+	"github.com/ourostack/m365crawl/internal/directedwrites"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/syncer"
@@ -105,7 +106,7 @@ func skillKeys() []string {
 		reflect.TypeFor[calendarExtras](), reflect.TypeFor[calendarChat](), reflect.TypeFor[relatedMail](), reflect.TypeFor[personItem](), reflect.TypeFor[accountCoverage](),
 		reflect.TypeFor[noteCoverage](), reflect.TypeFor[noteItem](), reflect.TypeFor[noteSourceItem](),
 		reflect.TypeFor[loopChannelItem](), reflect.TypeFor[loopSourceItem](), reflect.TypeFor[loopSyncResult](), reflect.TypeFor[documentItem](), reflect.TypeFor[scoutSessionItem](), reflect.TypeFor[scoutCoverage](),
-		reflect.TypeFor[coverageResult](), reflect.TypeFor[coverageEntry]()} {
+		reflect.TypeFor[coverageResult](), reflect.TypeFor[coverageEntry](), reflect.TypeFor[directedwrites.Result]()} {
 		keys = append(keys, jsonKeys(typ)...)
 	}
 	keys = append(keys, syncer.DocumentExtractNotAllowed, syncer.DocumentRightsUnknown, syncer.DocumentProtectionUnattributed,

@@ -1,4 +1,5 @@
-// This synthetic executable speaks fetch-only MCP. It never uses the network.
+// This synthetic executable speaks WorkIQ's MCP: fetch, the document tools and the directed-write
+// create_entity. It never uses the network.
 package main
 
 import (
@@ -462,10 +463,12 @@ func main() {
 				Caps     map[string]any `json:"capabilities"`
 				Name     string         `json:"name"`
 				Args     struct {
-					URLs  []string `json:"entityUrls"`
-					Query string   `json:"query"`
-					Path  string   `json:"path"`
-					Caps  []struct {
+					URLs   []string        `json:"entityUrls"`
+					Parent string          `json:"parentUrl"`
+					Body   json.RawMessage `json:"jsonBody"`
+					Query  string          `json:"query"`
+					Path   string          `json:"path"`
+					Caps   []struct {
 						Name  string              `json:"name"`
 						Items []map[string]string `json:"items_by_sharepoint_ids"`
 					} `json:"capabilities"`
@@ -500,6 +503,22 @@ func main() {
 				reply["result"] = result
 				break
 			}
+			if request.Params.Name == "create_entity" {
+				if name := os.Getenv("WORKIQ_ACQUISITION_TRANSCRIPT"); name != "" {
+					f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+					if err != nil {
+						os.Exit(83)
+					}
+					_ = json.NewEncoder(f).Encode(map[string]any{"tool": "create_entity", "path": request.Params.Args.Parent, "pinned": len(os.Args) == 4})
+					_ = f.Close()
+				}
+				result, ok := createEntity(request.Params.Args.Parent, request.Params.Args.Body)
+				if !ok {
+					os.Exit(93)
+				}
+				reply["result"] = result
+				break
+			}
 			if request.Params.Name != "fetch" || len(request.Params.Args.URLs) != 1 {
 				os.Exit(82)
 			}
@@ -511,6 +530,12 @@ func main() {
 				}
 				_ = json.NewEncoder(f).Encode(map[string]any{"tool": "fetch", "path": path, "pinned": len(os.Args) == 4})
 				_ = f.Close()
+			}
+			if data, status, ok := writeFetch(path); ok && os.Getenv("WORKIQ_WRITES_STATE") != "" {
+				reply["result"] = map[string]any{"structuredContent": map[string]any{"results": []any{
+					map[string]any{"data": data, "statusCode": status},
+				}}}
+				break
 			}
 			if result := refusal(path); result != nil {
 				reply["result"] = result

@@ -13,6 +13,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Teams | [`messages`](#messages), [`unread`](#unread), [`thread`](#thread), [`conversations`](#conversations), [`teams`](#teams), [`activity`](#activity), [`stores`](#stores), [`records`](#records) |
 | Mail | [`mail list`](#mail-list), [`mail show`](#mail-show), [`mail thread`](#mail-thread), [`mail folders`](#mail-folders), [`mail unread`](#mail-unread) |
 | Optional server source | [`workiq enable/disable/sync/coverage/status`](#workiq), explicit only |
+| Directed writes (off by default) | [`writes on/off/status/target/send-teams-message/save-mail-draft/verify/settle`](#writes) |
 | Calendar | [`calendar`](#calendar), [`calendar event`](#calendar-event), [`calendar actions`](#calendar-actions), [`calendar sources`](#calendar-sources) |
 | Meeting transcripts | [`transcripts`](#transcripts), [`transcripts show`](#transcripts-show), [`transcripts fetch`](#transcripts-fetch), [`transcripts signin`](#transcripts-signin) |
 | Indexed notes | [`notes sync`](#notes-sync), [`notes list`](#notes-list), [`notes search`](#notes-search), [`notes show`](#notes-show), [`notes sources`](#notes-sources) |
@@ -50,6 +51,27 @@ Status is the sole disabled-source probe exception. Without `--account` it probe
 Reads route to these commands without starting WorkIQ. When `mail list` or mail-including `search` has `--since` before the oldest cached message of a folder it reads (each folder judged on its own), or `mail thread` holds a reply whose parent is not archived, the result carries `workiq_routes`: per account `source`, `account`, `reason` (`range_before_cache` or `parent_not_archived`), mail `folders[]` (`folder`, `kind`, `cache_covers_since`), `workiq` (`enabled`, `disabled` or `not_installed`), `fix` and `next[]` `{command, does}` steps: `workiq status`, `workiq enable` when disabled, `--account outlook/<profile> workiq sync --source mail`, then the same read. An account with a complete WorkIQ mail sync gets none. `messages` and chat-including `search` reaching before the oldest archived Teams message get at most a `chats` route ending in `workiq coverage --source chats --since TIME`; chats stay counts-only. Text output prints routes as `route:` and `next:` lines. A range inside a folder's cached coverage gets no route even if that folder misses messages on some day; such in-range gaps are not detectable yet and are tracked separately.
 
 Message/conversation/mail reads expose `provenance: desktop_cache|workiq_server|both`, including `--fields`, nested related items and shared search. Source-health `covered_by_server` retains the local Outlook failure and actual `covered_through`: both original gap-free all-folder observations and completion must be under24 hours old and after that failure. Replaying old data, counts, probes or a partial sync cannot cover it. Native WorkIQ/Windows, ID-class and cross-source-clock qualification remain separate from synthetic tests; unqualified message classes are counted with gaps, not inserted.
+
+## Writes
+
+```text
+m365crawl [--db PATH] writes on
+m365crawl [--db PATH] writes off
+m365crawl [--db PATH] writes status [--limit 20]
+m365crawl [--db PATH] writes target --chat ID [--identity ADDR]
+m365crawl [--db PATH] writes send-teams-message --chat ID --to ADDR... (--text TEXT | --text-file PATH|-) --agent NAME --reason TEXT --identity ADDR [--intent-key KEY] [--expected-version V]
+m365crawl [--db PATH] writes save-mail-draft [--to ADDR...] [--subject TEXT] (--text TEXT | --text-file PATH|-) --agent NAME --reason TEXT [--identity ADDR]
+m365crawl [--db PATH] writes verify ID
+m365crawl [--db PATH] writes settle ID (--sent | --not-sent)
+```
+
+m365crawl is read-only unless the person turns writes on. `writes on` and `writes off` ask the person to type `on` or `off` on the controlling terminal; standard input does not count, and an agent without the terminal gets `write_terminal_required`. The switch is the file `<archive>.writes` beside the archive. While writes are on and the person directs an agent, the agent sends with no second confirmation, under the [directed actions contract](../contracts/directed-actions/v0/contract.md). Every write needs `workiq enable`.
+
+Only two writes exist: a plain-text Teams chat message (`48:notes`, Notes to self, or a `19:` chat) and a new plain-text mail draft in the person's own mailbox. `--agent` and `--reason` are recorded with the write. A chat message needs `--identity` (the signed-in account) and every recipient as `--to`, exactly as `writes target` prints them; `--expected-version` takes the `version` it printed and refuses the send if the chat moved on. `--intent-key` makes a retry replay the earlier send instead of sending twice. Missing fields are not parser errors: they get the contract's refusal, so an agent sees the same codes the contract lists.
+
+Every write command prints one object: `contract`, `action`, `decision` (`accept`, `refuse`, `replay`), `code` and `field` on a refusal, `effect`, `request_id`, `replay_of` and `earlier_outcome` on a replay, `outcome` (`sent`, `failed`, `unknown`), `phase`, `verification` (`found`, `not_sent_proven`, `person`), `server_id`, `exit_class`, `tell_person` and an optional `notice`. A message is `sent` only after m365crawl read it back from the server; a saved draft is also `sent`. Exit 0 done, 1 failed (`write_failed`), 2 request problem (`write_request_problem`), 3 person needed (`write_person_needed`), 5 unknown (`write_outcome_unknown`), with the error line on stderr. Exit 3 without an object is an environment error, such as WorkIQ not signed in; nothing was sent.
+
+**Never resend a write whose outcome is `unknown`.** Tell the person. `writes verify ID` re-reads the server: it makes the write `sent` when it finds the message, and `failed` only with proof (at least 10 minutes later, no newer message from the person in the chat). Otherwise the person checks and runs `writes settle ID --sent` or `--not-sent`, typing the id on the terminal; a write still in flight can be settled only 10 minutes after it began. `writes status` lists the switch and the newest writes offline, with their agent, reason and text.
 
 ## Drafts
 

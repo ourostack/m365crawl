@@ -103,7 +103,7 @@ A tool reports `failed` only with proof that nothing happened; otherwise it repo
 
 ### Exit classes
 
-| Class | Meaning | Tell the person | m365crawl exit (proposed) |
+| Class | Meaning | Tell the person | m365crawl exit |
 | --- | --- | --- | --- |
 | `done` | The action happened or is queued. A replay of a `queued` or `sent` request is `done`. | no | 0 |
 | `request_problem` | The agent's request is wrong. Fix it and ask again. | no | 2 |
@@ -111,7 +111,7 @@ A tool reports `failed` only with proof that nothing happened; otherwise it repo
 | `failed` | The action did not happen. | no | 1 |
 | `unknown` | The action may have happened. Never resend. A replay of an `unknown` request is `unknown`. | yes | 5 |
 
-The m365crawl exit numbers are a proposal. They are settled when the write commands' SPEC change lands.
+m365crawl's `writes` commands use these exit numbers (SPEC section "Directed writes through WorkIQ").
 
 ## Test cases
 

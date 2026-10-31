@@ -141,6 +141,18 @@ func serveStub() int {
 		return 0
 	}
 	for dec.Decode(&req) == nil {
+		if mode == "rpc-error-write" {
+			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32000, "message": "interaction_required"}})
+			continue
+		}
+		if strings.HasPrefix(mode, "write") {
+			result, die := writeStubResult(mode, req.Params)
+			if die {
+				return 3
+			}
+			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+			continue
+		}
 		if strings.HasPrefix(mode, "doc") {
 			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": documentStubResult(mode, req.Params)})
 			continue

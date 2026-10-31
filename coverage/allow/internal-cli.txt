@@ -1,0 +1,3 @@
+# Opening the real controlling terminal: a test would block on the developer's own terminal (or
+# fail without one in CI), so tests replace openTerminal. confirmOnTerminal and console are covered.
+internal/cli/writes_terminal.go:controllingTerminal opens the real /dev/tty or Windows console, which a deterministic test cannot drive
