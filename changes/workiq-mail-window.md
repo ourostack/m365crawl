@@ -5,5 +5,5 @@
 
 ### Changed
 
-- Writable archives migrate to schema 24: the `mail_window` attempt kind (a table rebuild on one pinned connection that keeps every attempt ID and reference), window member and coverage tables, staged page body receipts and an `identity_unproven` mark on server mail rows. Older builds refuse a schema-24 archive.
+- Writable archives migrate to schema 25: the `mail_window` attempt kind (a table rebuild on one pinned connection that keeps every attempt ID and reference), window member and coverage tables, staged page body receipts and an `identity_unproven` mark on server mail rows. Older builds refuse a schema-25 archive.
 - A window never merges server mail into other mail by Message-ID. Mail the archive already holds is left as it is; other window mail becomes its own server row that no later merge (cache insertion or whole-account sync) joins until a complete whole-account census has seen it. Whole-account censuses no longer carry such rows as their own.
