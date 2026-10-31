@@ -114,7 +114,7 @@ func TestStaleOutlookCacheReadErrorStopsTheRead(t *testing.T) {
 func TestMailCacheFreshOnStatusAndOverview(t *testing.T) {
 	pinMailSupported(t, true)
 	e := staleMailEnv(t)
-	_, out, _ := e.run("--json", "--max-age", "0", "status")
+	_, out, _ := e.run("--json", "--no-sync", "status")
 	if m := mailBlockOf(t, decode(t, out)); m["cache_fresh_at"] != "2026-09-10T09:00:00Z" {
 		t.Fatalf("status mail = %v", m)
 	}
