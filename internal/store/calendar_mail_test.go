@@ -240,3 +240,34 @@ func TestEventMailLeavesTheOwnerOutOfTheOverlap(t *testing.T) {
 		t.Fatal("a read without meta succeeded")
 	}
 }
+
+// Related mail is dated as mail list dates it: a reply in Sent Items by when it was sent, not by
+// the received time Outlook stores on it (often when the draft was started). The window's end is
+// included, and matches are newest first by that date.
+func TestEventMailDatesSentRepliesBySendTime(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	sentInside := mailMsg(1, fSent, "<s1@x>", "RE: Budget review", 0)
+	sentInside.Received, sentInside.Sent = mailT0.Add(-20*24*time.Hour), mailT0.Add(-24*time.Hour)
+	sentOutside := mailMsg(2, fSent, "<s2@x>", "RE: Budget review", 0)
+	sentOutside.Received, sentOutside.Sent = mailT0.Add(-24*time.Hour), mailT0.Add(10*24*time.Hour)
+	inbox := receivedAt(mailMsg(3, fInbox, "<i1@x>", "Budget review", 0), mailT0.Add(-2*24*time.Hour))
+	edge := receivedAt(mailMsg(4, fInbox, "<i2@x>", "FW: Budget review", 0), mailT0.Add(eventMailAfter))
+	invite := mailMsg(5, fSent, "<i3@x>", "Budget review", 0)
+	invite.ICalUID = "040000008200e00074c5b7101a82e008abcdef"
+	invite.Received, invite.Sent = mailT0.Add(-30*24*time.Hour), mailT0.Add(-3*24*time.Hour)
+	invite2 := receivedAt(mailMsg(6, fInbox, "<i4@x>", "Budget review", 0), mailT0.Add(-4*24*time.Hour))
+	invite2.ICalUID = invite.ICalUID
+	mustCommitMail(t, s, mailBatch(mailT0, sentInside, sentOutside, inbox, edge, invite, invite2))
+	got := must(s.EventMail(ctx, prepEvent(), 0))
+	var keys []string
+	for _, r := range got {
+		keys = append(keys, fmt.Sprintf("%d/%s", r.DetailKey, r.Match))
+	}
+	if strings.Join(keys, " ") != "5/invite 6/invite 4/subject 1/subject 3/subject" {
+		t.Fatalf("related %v", keys)
+	}
+	if !got[0].DatedAt.Equal(invite.Sent) || !got[3].DatedAt.Equal(sentInside.Sent) || !got[2].DatedAt.Equal(edge.Received) {
+		t.Fatalf("dated_at %+v", got)
+	}
+}

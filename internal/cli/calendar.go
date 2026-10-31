@@ -601,7 +601,7 @@ type calendarChat struct {
 
 // relatedMail is an Outlook message related to the event, with how it matched: "invite" (its
 // invite id is the event's iCalUId) or "subject" (the same subject, without reply and forward
-// prefixes, received from 14 days before to 7 days after the start, and sent or received by an
+// prefixes, dated (sent for Sent Items, received otherwise) from 14 days before to 7 days after the start, and sent or received by an
 // attendee or the organizer other than the mailbox owner when the event names any).
 type relatedMail struct {
 	ID             string    `json:"id"`
@@ -614,6 +614,7 @@ type relatedMail struct {
 	FromName       string    `json:"from_name,omitempty"`
 	FromAddress    string    `json:"from_address,omitempty"`
 	ReceivedAt     time.Time `json:"received_at,omitzero"`
+	DatedAt        time.Time `json:"dated_at,omitzero"`
 	IsRead         *bool     `json:"is_read,omitempty"`
 	HasAttachments bool      `json:"has_attachments"`
 	Preview        string    `json:"preview,omitempty"`
@@ -624,7 +625,7 @@ func relatedMailOf(in []store.MailRelated) []relatedMail {
 	out := make([]relatedMail, len(in))
 	for i, m := range in {
 		out[i] = relatedMail{ID: m.ID(), Match: m.Match, ConversationID: nz(m.ConversationID), Account: m.Account, Folder: m.Folder, FolderKind: m.FolderKind, Subject: m.Subject,
-			FromName: m.SenderName, FromAddress: m.SenderAddress, ReceivedAt: m.ReceivedAt.UTC(), IsRead: m.IsRead, HasAttachments: m.HasAttachments,
+			FromName: m.SenderName, FromAddress: m.SenderAddress, ReceivedAt: m.ReceivedAt.UTC(), DatedAt: m.DatedAt.UTC(), IsRead: m.IsRead, HasAttachments: m.HasAttachments,
 			Preview: m.Preview, ICalUID: m.ICalUID}
 	}
 	return out

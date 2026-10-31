@@ -157,6 +157,11 @@ func TestCalendarEventPrepForAnOutlookOnlyEvent(t *testing.T) {
 	if got := relatedOf(t, d); len(got) == 0 || got[0] != "Fixture planning review/invite" {
 		t.Fatalf("related_mail %v", got)
 	}
+	for _, r := range d["related_mail"].([]any) {
+		if m := r.(map[string]any); m["dated_at"] == nil || m["dated_at"] == "" {
+			t.Fatalf("each related message carries dated_at: %v", m)
+		}
+	}
 }
 
 // An event whose subject no message shares, without an invite, has an empty related_mail list.
