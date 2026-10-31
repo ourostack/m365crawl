@@ -1,3 +1,0 @@
-### Added
-
-- `scout sync` now reads Microsoft Scout session history on Windows, from the `Apps` folder of each OneDrive folder named by the `OneDriveCommercial`, `OneDriveConsumer` and `OneDrive` environment variables, or a folder named with `--root`, on a local fixed NTFS drive. As on macOS it never downloads anything: a file whose folder listing shows OneDrive keeps it only in the cloud (offline, recall-on-open, recall-on-data-access or partly downloaded) is counted as `cloud_only` and never opened; other files are opened without following links and asking Windows not to download, and their attributes are checked again before and after the read.
