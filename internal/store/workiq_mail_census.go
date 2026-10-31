@@ -48,11 +48,12 @@ or exists(select 1 from workiq_census_members where census_id=? and admitted=0)`
 			first               sql.NullInt64
 		}
 		var items []item
-		if err := eachRow(ctx, tx, `select item_rowid,server_projection,server_seen_at,server_deleted_at,server_first_missing_census,server_gone_at
+		if err := eachRow(ctx, tx, `select item_rowid,server_projection,server_seen_at,server_deleted_at,server_first_missing_census,server_gone_at,identity_unproven
 from workiq_rows where kind='mail' and account_id=?`, []any{binding.Fact.ID}, func(row *sql.Rows) error {
 			var i item
 			var raw string
-			if err := row.Scan(&i.id, &raw, &i.seen, &i.deleted, &i.first, &i.gone); err != nil {
+			var unproven bool
+			if err := row.Scan(&i.id, &raw, &i.seen, &i.deleted, &i.first, &i.gone, &unproven); err != nil {
 				return err
 			}
 			var m workiq.MailMessage
@@ -60,6 +61,9 @@ from workiq_rows where kind='mail' and account_id=?`, []any{binding.Fact.ID}, fu
 				return errors.New("invalid retained server mail identity")
 			}
 			i.normalized = workiq.NormalizeMessageID(m.InternetMessageID)
+			if i.normalized == "" && unproven {
+				return nil // a window row whole-account never saw: no Message-ID, so no absence inference
+			}
 			if i.normalized == "" {
 				return errors.New("unknown mail identity prevents a gap-free absence census")
 			}
