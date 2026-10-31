@@ -200,3 +200,59 @@ func TestDirectedWriteSchemaFailuresAreReported(t *testing.T) {
 		t.Fatal("began without a schema version")
 	}
 }
+
+func TestDirectedDraftsAreRecordedOnlyWhileInFlight(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	if _, _, ok, err := s.DirectedDraft(ctx, 1); ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if _, err := s.BeginDirectedWrite(ctx, sampleDirectedWrite(""), func([]DirectedWrite) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.RecordDirectedDraft(ctx, 1, "draft-1", "<d@x>"); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if draft, imid, ok, err := s.DirectedDraft(ctx, 1); draft != "draft-1" || imid != "<d@x>" || !ok || err != nil {
+		t.Fatal(draft, imid, ok, err)
+	}
+	if ok, err := s.RecordDirectedDraft(ctx, 1, "draft-2", "<e@x>"); ok || err == nil {
+		t.Fatal("a second draft replaced the first", ok, err)
+	}
+	if _, err := s.BeginDirectedWrite(ctx, sampleDirectedWrite(""), func([]DirectedWrite) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateDirectedWrite(ctx, 2, "unknown", "in_flight", DirectedWriteChange{Outcome: "failed", Phase: "settled", Cause: "person"}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.RecordDirectedDraft(ctx, 2, "draft-3", "<f@x>"); ok || err != nil {
+		t.Fatal("recorded a draft for a settled write", ok, err)
+	}
+	if n := rowCount(t, s, `select count(*) from directed_write_events where cause='drafted'`); n != 1 {
+		t.Fatal("events", n)
+	}
+	for _, q := range []string{`update directed_write_drafts set draft_id='x'`, `delete from directed_write_drafts`} {
+		if _, err := s.db.Exec(q); err == nil {
+			t.Fatal(q)
+		}
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.RecordDirectedDraft(cancelled, 1, "d", "i"); err == nil {
+		t.Fatal("recorded with a cancelled context")
+	}
+	s.qExec(t, `create trigger refuse_drafted before insert on directed_write_events begin select raise(abort,'no'); end`)
+	s.qExec(t, `insert into directed_writes(created_at,updated_at,contract,action,effect,agent,reason,identity,user_id,outcome,phase)
+values('x','x','c','reply_mail','visible_to_others','a','r','i','u','unknown','in_flight')`)
+	if _, err := s.RecordDirectedDraft(ctx, 3, "d", "i"); err == nil {
+		t.Fatal("recorded a draft without its event")
+	}
+	s.qExec(t, `alter table directed_write_drafts rename column draft_id to other`)
+	if _, _, _, err := s.DirectedDraft(ctx, 1); err == nil {
+		t.Fatal("read a damaged draft table")
+	}
+	s.qExec(t, `update schema_migrations set version=26`)
+	if _, _, ok, err := s.DirectedDraft(ctx, 1); ok || err != nil {
+		t.Fatal("an archive below 28 has drafts", ok, err)
+	}
+}

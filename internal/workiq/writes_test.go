@@ -25,6 +25,18 @@ func writeStubResult(mode string, params json.RawMessage) (result any, die bool)
 			"data": map[string]any{"id": "synthetic-user", "mail": "test.user@example.invalid"}}}}}, false
 	}
 	want := map[string]any{"parentUrl": "/chats/48:notes/messages", "jsonBody": map[string]any{"body": map[string]any{"contentType": "text", "content": "hello"}}}
+	switch mode {
+	case "write-reply":
+		if call.Name != "do_action" || !reflect.DeepEqual(call.Args, map[string]any{"actionUrl": "/me/messages/orig-1/createReply", "jsonBody": map[string]any{"comment": "hi &amp; you<br>x"}}) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 201, "data": map[string]any{"id": "draft-1", "isDraft": true, "internetMessageId": "<d@example.invalid>"}}}, false
+	case "write-send":
+		if call.Name != "do_action" || !reflect.DeepEqual(call.Args, map[string]any{"actionUrl": "/me/messages/draft-1/send", "jsonBody": map[string]any{}}) {
+			return nil, true
+		}
+		return map[string]any{"structuredContent": map[string]any{"statusCode": 202, "data": nil}}, false
+	}
 	if mode == "write-draft" {
 		want = map[string]any{"parentUrl": "/me/messages", "jsonBody": map[string]any{"subject": "Plan", "body": map[string]any{"contentType": "text", "content": "hello"},
 			"toRecipients": []any{map[string]any{"emailAddress": map[string]any{"address": "a@example.invalid"}}}}}
@@ -138,7 +150,7 @@ func TestWorkIQWriteAnswerClassification(t *testing.T) {
 		{`{"a":1,"a":2}`, WriteUnknown, "workiq_protocol"},
 		{strings.Repeat(" ", maxFrame+1), WriteUnknown, "workiq_protocol"},
 	} {
-		got := decodeWrite(context.Background(), []byte(tc.raw))
+		got := decodeWrite(context.Background(), []byte(tc.raw), false)
 		if got.Kind != tc.kind || got.Code != tc.code && tc.code != "" || tc.kind == WriteCreated && got.Code != "" {
 			t.Fatalf("%.80s: %+v", tc.raw, got)
 		}
@@ -146,7 +158,7 @@ func TestWorkIQWriteAnswerClassification(t *testing.T) {
 			t.Fatalf("descriptor leaked server text: %q", got.Server)
 		}
 	}
-	if got := decodeWrite(context.Background(), []byte(`{"structuredContent":{"statusCode":400,"error":{"error":{"code":"BadRequest"}}}}`)); got.Server != "status 400; code BadRequest" {
+	if got := decodeWrite(context.Background(), []byte(`{"structuredContent":{"statusCode":400,"error":{"error":{"code":"BadRequest"}}}}`), false); got.Server != "status 400; code BadRequest" {
 		t.Fatalf("descriptor %q", got.Server)
 	}
 }
@@ -190,4 +202,41 @@ func TestWorkIQOpenWriterKeepsTheSpawnGuard(t *testing.T) {
 	t.Setenv("M365CRAWL_WORKIQ_BIN", "")
 	_, err := OpenWriter(context.Background(), Invocation{}, "")
 	requireCode(t, err, "workiq_hermetic_required")
+}
+
+func TestWorkIQWriterRepliesThroughADraftThenSendsIt(t *testing.T) {
+	w := openWriter(t, "write-reply")
+	got := w.CreateReply(context.Background(), "orig-1", "hi &amp; you<br>x")
+	if got.Kind != WriteCreated || got.ServerID != "draft-1" || !got.IsDraft || got.InternetMessageID != "<d@example.invalid>" {
+		t.Fatalf("%+v", got)
+	}
+	w = openWriter(t, "write-send")
+	if got := w.SendDraft(context.Background(), "draft-1"); got.Kind != WriteAccepted || got.Status != 202 {
+		t.Fatalf("%+v", got)
+	}
+	for _, id := range []string{"", "a/b", "a?b", "a b", strings.Repeat("a", 513)} {
+		if got := w.CreateReply(context.Background(), id, "x"); got.Kind != WriteRejected || got.Code != "workiq_path_invalid" {
+			t.Fatalf("%q %+v", id, got)
+		}
+		if got := w.SendDraft(context.Background(), id); got.Kind != WriteRejected || got.Code != "workiq_path_invalid" {
+			t.Fatalf("%q %+v", id, got)
+		}
+	}
+	if !ValidMessageID("AAMkADI3-x_y=") {
+		t.Fatal("a Graph id was refused")
+	}
+}
+
+func TestWorkIQActionAnswersWithoutAResult(t *testing.T) {
+	for raw, kind := range map[string]WriteKind{
+		`{"structuredContent":{"statusCode":202,"data":null}}`:                                         WriteAccepted,
+		`{"structuredContent":{"statusCode":200,"data":{}}}`:                                           WriteAccepted,
+		`{"structuredContent":{"statusCode":202,"data":null,"error":{"code":"X"}}}`:                    WriteUnknown,
+		`{"isError":true,"structuredContent":{"statusCode":404,"error":{"code":"ErrorItemNotFound"}}}`: WriteRejected,
+		`{"isError":true,"structuredContent":{"statusCode":503}}`:                                      WriteUnknown,
+	} {
+		if got := decodeWrite(context.Background(), []byte(raw), true); got.Kind != kind {
+			t.Fatalf("%s: %+v", raw, got)
+		}
+	}
 }

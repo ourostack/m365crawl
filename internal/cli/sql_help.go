@@ -45,6 +45,7 @@ var sqlTables = []sqlTable{
 	{"workiq_document_fts", "full-text index over admitted document titles and excerpts"},
 	{"directed_writes", "each directed write the person allowed: agent, reason, acting identity, chat, recipients, text, outcome (sent, failed, unknown), verification and server id"},
 	{"directed_write_events", "append-only changes of each directed write's outcome and phase, without content"},
+	{"directed_write_drafts", "the reply draft a directed reply made before sending it: its Graph id and Internet Message-ID"},
 	{"mail_coverage", "how far back each mail folder was read, and when"},
 	{"mail_absent", "mail that a read missed, counted until it is marked gone or evicted"},
 	{"calendar_source_events", "calendar events, one row per occurrence and source"},

@@ -22,6 +22,7 @@ type writesGroup struct {
 	Target           writesTargetCmd `cmd:"" help:"Read a chat's current recipients and version through WorkIQ, the values a send must name; writes nothing."`
 	SendTeamsMessage writesSendCmd   `cmd:"" name:"send-teams-message" help:"Send a plain-text Teams chat message the person directed, through WorkIQ."`
 	SaveMailDraft    writesDraftCmd  `cmd:"" name:"save-mail-draft" help:"Save a new plain-text mail draft the person directed in their own mailbox, through WorkIQ."`
+	ReplyMail        writesReplyCmd  `cmd:"" name:"reply-mail" help:"Reply in plain text to one mail, as the person directed, through WorkIQ: the reply goes to the mail's reply-to addresses, else its sender."`
 	Verify           writesVerifyCmd `cmd:"" help:"Re-read the server to settle a write whose outcome is unknown; writes nothing to the server."`
 	Settle           writesSettleCmd `cmd:"" help:"The person settles an unknown write after checking it, typing its id on the controlling terminal."`
 }
@@ -29,7 +30,7 @@ type writesGroup struct {
 func (writesGroup) Help() string {
 	return "m365crawl is read-only unless the person turns writes on. While writes are on and the person directs an agent, the agent acts through these commands with no second confirmation (contracts/directed-actions/v0). Every write names the agent and a reason; a send to a chat names the acting identity and the chat's exact recipients (`writes target` prints them), and may name the version it read and an intent key, so a retry replays instead of sending twice.\n" +
 		"Each write command prints one object: decision (accept, refuse or replay), outcome (sent, failed or unknown) and exit_class. Exit 0 done, 1 failed, 2 request problem, 3 person needed, 5 unknown. Never resend a write whose outcome is unknown: tell the person. `writes verify ID` may settle it by reading the server, otherwise the person checks and runs `writes settle`.\n" +
-		"Only a Teams chat message and a new mail draft are supported. The gates stop accidental writes through m365crawl; they are not a security boundary against an agent with shell access."
+		"Only a Teams chat message, a new mail draft and a reply to one mail are supported; a reply is sent only after its draft is read back addressed exactly as the request said, and counts as sent once it is found in Sent Items. The gates stop accidental writes through m365crawl; they are not a security boundary against an agent with shell access."
 }
 
 func (writesOnCmd) Help() string     { return (writesGroup{}).Help() }
@@ -140,6 +141,9 @@ func (r writesStatusResult) renderWrites(rt *runtime) error {
 		if w.Conversation != "" {
 			fmt.Fprintf(&out, "  chat %s\n", safeLine(w.Conversation))
 		}
+		if w.Message != "" {
+			fmt.Fprintf(&out, "  reply to %s\n", safeLine(w.Message))
+		}
 		fmt.Fprintf(&out, "  %s\n", safeLine(w.Text))
 	}
 	_, err := io.Copy(rt.stdout, &out)
@@ -165,14 +169,18 @@ func safeLine(s string) string {
 }
 
 type writesTargetCmd struct {
-	Chat     string `required:"" help:"The chat id: 48:notes (Notes to self) or a 19: chat id."`
+	Chat     string `help:"The chat id: 48:notes (Notes to self) or a 19: chat id."`
+	Message  string `help:"A mail's internet_message_id, as mail list and mail show print it, for a reply. Its version changes whenever the mail is read, flagged or moved."`
 	Identity string `help:"The account to act as; default WorkIQ's signed-in account."`
 }
 
 type writesTargetResult struct{ directedwrites.TargetResult }
 
 func (c writesTargetCmd) Run(rt *runtime) error {
-	result, err := directedwrites.Target(rt.ctx, rt.writesOptions(), c.Chat, c.Identity)
+	if (c.Chat == "") == (c.Message == "") {
+		return errs.Usage("give exactly one of --chat and --message")
+	}
+	result, err := directedwrites.Target(rt.ctx, rt.writesOptions(), c.Chat, c.Message, c.Identity)
 	if err != nil {
 		return asCoded(err)
 	}
@@ -180,12 +188,16 @@ func (c writesTargetCmd) Run(rt *runtime) error {
 }
 
 func (r writesTargetResult) renderWrites(rt *runtime) error {
+	what, name := "chat", r.Chat
+	if r.Message != "" {
+		what, name = "mail", r.Message
+	}
 	if !r.Known {
-		_, err := fmt.Fprintf(rt.stdout, "chat %s: not a chat a write can name (unknown_target)\n", safeLine(r.Chat))
+		_, err := fmt.Fprintf(rt.stdout, "%s %s: not a %s a write can name (unknown_target)\n", what, safeLine(name), what)
 		return err
 	}
-	_, err := fmt.Fprintf(rt.stdout, "chat %s as %s\nrecipients: %s\nversion: %s\n", safeLine(r.Chat), r.Identity,
-		safeLine(strings.Join(r.Recipients, " ")), r.Version)
+	_, err := fmt.Fprintf(rt.stdout, "%s %s as %s\nrecipients: %s\nversion: %s\n", what, safeLine(name), r.Identity,
+		safeLine(strings.Join(r.Recipients, " ")), safeLine(r.Version))
 	return err
 }
 
@@ -241,6 +253,22 @@ func (c writesSendCmd) Run(rt *runtime) error {
 		return err
 	}
 	req.Target.Conversation, req.IntentKey, req.ExpectedVersion = c.Chat, c.IntentKey, c.ExpectedVersion
+	return rt.directedWrite(req)
+}
+
+type writesReplyCmd struct {
+	writesRequest
+	Message         string `help:"The mail to reply to: its internet_message_id, as mail list and mail show print it."`
+	IntentKey       string `name:"intent-key" help:"A key for this reply: asking again with the same key replays the earlier reply instead of sending twice."`
+	ExpectedVersion string `name:"expected-version" help:"The mail version the agent read (writes target --message prints it); refused if the mail has changed."`
+}
+
+func (c writesReplyCmd) Run(rt *runtime) error {
+	req, err := c.request(directedwrites.ReplyMail)
+	if err != nil {
+		return err
+	}
+	req.Target.Message, req.IntentKey, req.ExpectedVersion = c.Message, c.IntentKey, c.ExpectedVersion
 	return rt.directedWrite(req)
 }
 

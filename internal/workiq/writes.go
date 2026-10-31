@@ -48,6 +48,8 @@ const (
 	WriteRejected WriteKind = "rejected"
 	// WriteUnknown may have acted: every other answer or failure after the request could have left.
 	WriteUnknown WriteKind = "unknown"
+	// WriteAccepted is a 2xx answer to an action with no result, such as send's 202.
+	WriteAccepted WriteKind = "accepted"
 )
 
 // WriteAnswer is what one create_entity call said, without any server text.
@@ -60,6 +62,30 @@ type WriteAnswer struct {
 	ChatID     string
 	FromUserID string
 	IsDraft    bool
+	// InternetMessageID is a created mail's Internet Message-ID, which its sent copy keeps.
+	InternetMessageID string
+}
+
+var graphMessageID = regexp.MustCompile(`^[A-Za-z0-9=_-]{1,512}$`)
+
+// ValidMessageID says whether id is a Graph mail id a directed write may put into a path.
+func ValidMessageID(id string) bool { return graphMessageID.MatchString(id) }
+
+// CreateReply makes a reply draft to one mail; it never sends. comment is the reply's HTML.
+func (w *Writer) CreateReply(ctx context.Context, messageID, comment string) WriteAnswer {
+	if !ValidMessageID(messageID) {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	return w.act(ctx, "do_action", map[string]any{"actionUrl": "/me/messages/" + messageID + "/createReply",
+		"jsonBody": map[string]any{"comment": comment}}, false)
+}
+
+// SendDraft sends one draft of the person's own mailbox.
+func (w *Writer) SendDraft(ctx context.Context, draftID string) WriteAnswer {
+	if !ValidMessageID(draftID) {
+		return WriteAnswer{Kind: WriteRejected, Code: "workiq_path_invalid"}
+	}
+	return w.act(ctx, "do_action", map[string]any{"actionUrl": "/me/messages/" + draftID + "/send", "jsonBody": map[string]any{}}, true)
 }
 
 func (w *Writer) CreateChatMessage(ctx context.Context, chat, text string) WriteAnswer {
@@ -79,11 +105,15 @@ func (w *Writer) CreateMailDraft(ctx context.Context, subject, text string, to [
 }
 
 func (w *Writer) create(ctx context.Context, parent string, body map[string]any) WriteAnswer {
+	return w.act(ctx, "create_entity", map[string]any{"parentUrl": parent, "jsonBody": body}, false)
+}
+
+// act makes one write call; empty says a 2xx without a result is the answer (WriteAccepted).
+func (w *Writer) act(ctx context.Context, tool string, arguments map[string]any, empty bool) WriteAnswer {
 	if ctx.Err() != nil {
 		return WriteAnswer{Kind: WriteRejected, Code: "workiq_timeout"} // the call never started
 	}
-	raw, err := w.c.call(ctx, requestTimeout, "tools/call", map[string]any{"name": "create_entity",
-		"arguments": map[string]any{"parentUrl": parent, "jsonBody": body}})
+	raw, err := w.c.call(ctx, requestTimeout, "tools/call", map[string]any{"name": tool, "arguments": arguments})
 	if err != nil {
 		_ = w.c.Close()
 		answer := WriteAnswer{Kind: WriteUnknown, Code: "workiq_failed"}
@@ -93,7 +123,7 @@ func (w *Writer) create(ctx context.Context, parent string, body map[string]any)
 		}
 		return answer
 	}
-	return decodeWrite(ctx, raw)
+	return decodeWrite(ctx, raw, empty)
 }
 
 type writeResult struct {
@@ -102,9 +132,10 @@ type writeResult struct {
 	Error  json.RawMessage `json:"error"`
 }
 
-// decodeWrite classifies a create_entity answer. Live WorkIQ 1.0.1 answers a write with one
-// structuredContent object; a one-item results array, as fetch uses, is read the same way.
-func decodeWrite(ctx context.Context, raw []byte) WriteAnswer {
+// decodeWrite classifies a write answer. Live WorkIQ 1.0.1 answers a write with one
+// structuredContent object; a one-item results array, as fetch uses, is read the same way. empty
+// says the call has no result: any 2xx is WriteAccepted.
+func decodeWrite(ctx context.Context, raw []byte, empty bool) WriteAnswer {
 	unknown := WriteAnswer{Kind: WriteUnknown, Code: "workiq_protocol"}
 	budget := strictjson.Budget{Context: ctx, MaxDepth: 64, MaxMembers: 131072}
 	if len(raw) > maxFrame {
@@ -129,18 +160,20 @@ func decodeWrite(ctx context.Context, raw []byte) WriteAnswer {
 	answer := WriteAnswer{Kind: WriteUnknown, Status: result.Status, Code: "workiq_failed"}
 	failed := len(result.Error) > 0 && string(result.Error) != "null"
 	switch {
+	case result.Status >= 200 && result.Status < 300 && !failed && empty:
+		return WriteAnswer{Kind: WriteAccepted, Status: result.Status}
 	case result.Status >= 200 && result.Status < 300 && !failed:
 		var item struct {
-			ID, ChatID string
-			IsDraft    bool
-			From       struct{ User struct{ ID string } }
+			ID, ChatID, InternetMessageID string
+			IsDraft                       bool
+			From                          struct{ User struct{ ID string } }
 		}
 		if json.Unmarshal(result.Data, &item) != nil || item.ID == "" || len(item.ID) > maxPath {
 			answer.Code = "workiq_protocol"
 			return answer
 		}
 		return WriteAnswer{Kind: WriteCreated, Status: result.Status, ServerID: item.ID, ChatID: item.ChatID,
-			FromUserID: item.From.User.ID, IsDraft: item.IsDraft}
+			FromUserID: item.From.User.ID, IsDraft: item.IsDraft, InternetMessageID: item.InternetMessageID}
 	case result.Status >= 400 && result.Status < 500 && result.Status != 408 && failed:
 		if code := graphCode(result.Error); code != "" {
 			answer.Kind, answer.Code = WriteRejected, code

@@ -440,3 +440,86 @@ func TestTheConfirmationDoesNotWaitForever(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReplyMailThroughTheSyntheticWorkIQ(t *testing.T) {
+	e, transcript := writesEnv(t)
+	useTerminal(t, "on\n")
+	if code, _, stderr := e.run("--json", "writes", "on"); code != 0 {
+		t.Fatal(code, stderr)
+	}
+	const self = "<self@example.invalid>"
+	code, out, stderr := e.run("--json", "writes", "target", "--message", self)
+	target := decode(t, out)
+	if code != 0 || target["known"] != true || target["version"] != "ck-1" || target["message"] != self || target["recipients"].([]any)[0] != synthetic {
+		t.Fatal(code, out, stderr)
+	}
+	replyArgs := func(text string, extra ...string) []string {
+		return append([]string{"--json", "writes", "reply-mail", "--message", self, "--to", synthetic, "--identity", synthetic,
+			"--agent", "test-agent", "--reason", "the person asked", "--text", text}, extra...)
+	}
+	code, out, stderr = e.run(replyArgs("Thanks & bye", "--intent-key", "r1", "--expected-version", "ck-1")...)
+	sent := decode(t, out)
+	if code != 0 || stderr != "" || sent["outcome"] != "sent" || sent["verification"] != "found" || sent["server_id"] != "sent-reply-1" {
+		t.Fatal(code, out, stderr)
+	}
+	if code, out, _ = e.run(replyArgs("Thanks & bye", "--intent-key", "r1")...); code != 0 || decode(t, out)["decision"] != "replay" {
+		t.Fatal(code, out)
+	}
+	if code, out, _ = e.run(replyArgs("x", "--to", "other@example.invalid")...); code != 2 || decode(t, out)["code"] != "recipients_changed" {
+		t.Fatal(code, out)
+	}
+	t.Setenv("WORKIQ_WRITES_MODE", "hidden")
+	code, out, stderr = e.run(replyArgs("Second reply")...)
+	hidden := decode(t, out)
+	if code != 5 || hidden["outcome"] != "unknown" || writeErrorCode(t, stderr) != "write_outcome_unknown" {
+		t.Fatal(code, out, stderr)
+	}
+	id := hidden["request_id"].(string)
+	if code, out, _ = e.run("--json", "writes", "verify", id); code != 5 {
+		t.Fatal(code, out)
+	}
+	t.Setenv("WORKIQ_WRITES_MODE", "")
+	if code, out, _ = e.run("--json", "writes", "verify", id); code != 0 || decode(t, out)["outcome"] != "sent" {
+		t.Fatal(code, out)
+	}
+	code, out, _ = e.run("--format", "text", "writes", "status")
+	if code != 0 || !strings.Contains(out, "  reply to <self@example.invalid>\n") {
+		t.Fatal(code, out)
+	}
+	code, out, _ = e.run("--format", "text", "writes", "target", "--message", self)
+	if code != 0 || out != "mail <self@example.invalid> as test.user@example.invalid\nrecipients: test.user@example.invalid\nversion: ck-1\n" {
+		t.Fatal(code, out)
+	}
+	code, out, _ = e.run("--format", "text", "writes", "target", "--message", "nope")
+	if code != 0 || out != "mail nope: not a mail a write can name (unknown_target)\n" {
+		t.Fatal(code, out)
+	}
+	for _, args := range [][]string{{"writes", "target"}, {"writes", "target", "--chat", "48:notes", "--message", self}, {"writes", "reply-mail", "--text", "a", "--text-file", "b"}} {
+		if code, _, stderr := e.run(append([]string{"--json"}, args...)...); code != 2 || writeErrorCode(t, stderr) != "usage" {
+			t.Fatal(args, code, stderr)
+		}
+	}
+	raw, err := os.ReadFile(transcript) //nolint:gosec // G304: own synthetic transcript.
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var entry struct {
+			Tool, Path string
+			Pinned     bool
+		}
+		if json.Unmarshal([]byte(line), &entry) != nil || entry.Tool == "create_entity" {
+			t.Fatal("unexpected call:", line)
+		}
+		if entry.Tool == "do_action" {
+			actions++
+			if !entry.Pinned || entry.Path != "/me/messages/inbox-self/createReply" && !strings.HasPrefix(entry.Path, "/me/messages/reply-") {
+				t.Fatal("a write outside the reply paths:", line)
+			}
+		}
+	}
+	if actions != 4 { // two replies, each a createReply and a send
+		t.Fatal("actions", actions)
+	}
+}

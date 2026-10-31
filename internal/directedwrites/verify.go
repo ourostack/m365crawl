@@ -49,6 +49,9 @@ func Verify(ctx context.Context, opts Options, id int64) (Result, error) {
 	if user.ID != w.UserID {
 		return Result{}, identityChanged()
 	}
+	if w.Action == ReplyMail {
+		return verifyReply(ctx, opts, s, w, person{user: user, canonical: w.Identity, pin: w.AccountPin})
+	}
 	var change store.DirectedWriteChange
 	switch {
 	case w.ServerID != "":
@@ -166,9 +169,10 @@ func Settle(ctx context.Context, opts Options, id int64, sent bool) (Result, err
 	return ofWrite(w), nil
 }
 
-// TargetResult is what a send to a chat needs to name.
+// TargetResult is what a send to a chat, or a reply to a mail, needs to name.
 type TargetResult struct {
-	Chat        string   `json:"chat"`
+	Chat        string   `json:"chat,omitempty"`
+	Message     string   `json:"message,omitempty"`
 	Identity    string   `json:"identity"`
 	Known       bool     `json:"known"`
 	Recipients  []string `json:"recipients"`
@@ -176,8 +180,9 @@ type TargetResult struct {
 	WatermarkAt string   `json:"watermark_at,omitempty"`
 }
 
-// Target reads a chat's current audience and version, without writing anything.
-func Target(ctx context.Context, opts Options, id, identity string) (TargetResult, error) {
+// Target reads a chat's or a mail's current audience and version, without writing anything. message,
+// when set, is a mail's Internet Message-ID; otherwise chat is read.
+func Target(ctx context.Context, opts Options, chat, message, identity string) (TargetResult, error) {
 	if err := workIQEnabled(ctx, opts); err != nil {
 		return TargetResult{}, err
 	}
@@ -186,12 +191,24 @@ func Target(ctx context.Context, opts Options, id, identity string) (TargetResul
 		return TargetResult{}, err
 	}
 	defer func() { _ = s.Close() }()
-	id = strings.TrimSpace(id)
-	c, err := readChat(ctx, s, id, p)
+	result := TargetResult{Identity: p.canonical, Recipients: []string{}}
+	if message = strings.TrimSpace(message); message != "" {
+		m, err := readMail(ctx, s, message, p)
+		if err != nil {
+			return TargetResult{}, err
+		}
+		result.Message, result.Known = message, m.known && m.kind == da.KindMailMessage
+		if result.Known {
+			result.Recipients, result.Version = m.recipients, m.version
+		}
+		return result, nil
+	}
+	result.Chat = strings.TrimSpace(chat)
+	c, err := readChat(ctx, s, result.Chat, p)
 	if err != nil {
 		return TargetResult{}, err
 	}
-	result := TargetResult{Chat: id, Identity: p.canonical, Known: c.known, Recipients: []string{}, Version: c.version}
+	result.Known, result.Version = c.known, c.version
 	if c.known {
 		result.Recipients = c.recipients
 	}
@@ -219,6 +236,7 @@ type LogItem struct {
 	Reason       string    `json:"reason"`
 	Identity     string    `json:"identity"`
 	Conversation string    `json:"conversation,omitempty"`
+	Message      string    `json:"message,omitempty"`
 	Recipients   []string  `json:"recipients"`
 	Subject      string    `json:"subject,omitempty"`
 	Text         string    `json:"text"`
@@ -256,7 +274,7 @@ func Status(ctx context.Context, opts Options, limit int) (StatusResult, error) 
 	}
 	for _, w := range rows {
 		result.Items = append(result.Items, LogItem{RequestID: strconv.FormatInt(w.ID, 10), CreatedAt: w.CreatedAt, Action: w.Action,
-			Effect: w.Effect, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity, Conversation: w.Conversation,
+			Effect: w.Effect, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity, Conversation: w.Conversation, Message: w.Message,
 			Recipients: w.Recipients, Subject: w.Subject, Text: w.Text, IntentKey: w.IntentKey, Outcome: w.Outcome,
 			Phase: w.Phase, Verification: w.Verification, ServerID: w.ServerID, ErrorCode: w.ErrorCode})
 	}

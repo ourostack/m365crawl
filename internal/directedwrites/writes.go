@@ -61,6 +61,8 @@ type session interface {
 	Fetch(ctx context.Context, path string) (workiq.Page, error)
 	CreateChatMessage(ctx context.Context, chat, text string) workiq.WriteAnswer
 	CreateMailDraft(ctx context.Context, subject, text string, to []string) workiq.WriteAnswer
+	CreateReply(ctx context.Context, messageID, comment string) workiq.WriteAnswer
+	SendDraft(ctx context.Context, draftID string) workiq.WriteAnswer
 	Close() error
 }
 
@@ -440,6 +442,16 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 			state.Targets[conversation] = da.TargetState{Kind: da.KindConversation, Recipients: target.recipients, Version: target.version}
 		}
 	}
+	var original mail
+	if req.Action == ReplyMail {
+		message := strings.TrimSpace(req.Target.Message)
+		if original, err = readMail(ctx, s, message, p); err != nil {
+			return Result{}, err
+		}
+		if original.known {
+			state.Targets[message] = da.TargetState{Kind: original.kind, Recipients: original.recipients, Version: original.version}
+		}
+	}
 	rows, err := earlierWrites(ctx, opts)
 	if err != nil {
 		return Result{}, err
@@ -452,6 +464,7 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 	text := normalized(req.Content.Text)
 	row := store.DirectedWrite{Contract: da.Contract, Action: req.Action, Effect: string(effect), Agent: strings.TrimSpace(req.Agent),
 		Reason: strings.TrimSpace(req.Reason), Identity: p.canonical, Conversation: strings.TrimSpace(req.Target.Conversation),
+		Message:    strings.TrimSpace(req.Target.Message),
 		Recipients: lower(req.Target.Recipients), Subject: normalized(req.Content.Subject), Text: text,
 		IntentKey: strings.TrimSpace(req.IntentKey), ExpectedVersion: strings.TrimSpace(req.ExpectedVersion), UserID: p.user.ID,
 		TenantID: tenant, AccountPin: p.pin, Outcome: string(da.Unknown), Phase: "in_flight", WatermarkID: target.watermarkID,
@@ -483,11 +496,8 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 		return Result{}, err
 	}
 	// A process paused after the write-ahead record must not send a write the person has settled since.
-	var current store.DirectedWrite
-	if err := readArchive(ctx, opts.DBPath, func(st *store.Store) (err error) {
-		current, _, err = st.DirectedWriteByID(ctx, row.ID)
-		return err
-	}); err != nil {
+	current, _, err := stillInFlight(ctx, opts, row.ID)
+	if err != nil {
 		result := save(ctx, opts, row, "in_flight", store.DirectedWriteChange{Outcome: string(da.Failed), Phase: "answered",
 			ErrorCode: "write_log_unreadable", Cause: "not_sent"})
 		result.Decision = da.Accept
@@ -497,6 +507,9 @@ func Send(ctx context.Context, opts Options, req da.Request) (Result, error) {
 		settled := ofWrite(current)
 		settled.Decision, settled.Notice = da.Accept, "the write changed before it was sent, so nothing was sent; the log is the record"
 		return settled, nil
+	}
+	if req.Action == ReplyMail {
+		return sendReply(ctx, opts, s, row, original, p), nil
 	}
 	var answer workiq.WriteAnswer
 	if req.Action == SendTeamsMessage {

@@ -45,6 +45,9 @@ type server struct {
 	openErr  map[string]error
 	closeErr error
 	fetched  []string
+	// replies
+	replyAnswer, sendAnswer workiq.WriteAnswer
+	onReply, onSend         func()
 }
 
 type fake struct{ s *server }
@@ -83,6 +86,22 @@ func (f fake) CreateChatMessage(_ context.Context, chat, text string) workiq.Wri
 func (f fake) CreateMailDraft(_ context.Context, subject, text string, to []string) workiq.WriteAnswer {
 	f.s.created = append(f.s.created, "draft|"+subject+"|"+text+"|"+strings.Join(to, ","))
 	return f.s.answer
+}
+
+func (f fake) CreateReply(_ context.Context, messageID, comment string) workiq.WriteAnswer {
+	f.s.created = append(f.s.created, "reply|"+messageID+"|"+comment)
+	if f.s.onReply != nil {
+		f.s.onReply()
+	}
+	return f.s.replyAnswer
+}
+
+func (f fake) SendDraft(_ context.Context, draftID string) workiq.WriteAnswer {
+	f.s.created = append(f.s.created, "send|"+draftID)
+	if f.s.onSend != nil {
+		f.s.onSend()
+	}
+	return f.s.sendAnswer
 }
 
 func (f fake) Close() error { return f.s.closeErr }
@@ -399,7 +418,7 @@ func TestSendToAGroupChatChecksItsWholeAudience(t *testing.T) {
 	if row := logged(t, opts)[0]; row.WatermarkID != "" || row.WatermarkAt != "" {
 		t.Fatalf("an empty chat has a watermark: %+v", row)
 	}
-	target, err := Target(ctx, opts, chat, "")
+	target, err := Target(ctx, opts, chat, "", "")
 	if err != nil || !target.Known || target.Identity != selfAddr || target.Version != "none" || target.WatermarkAt != "" ||
 		!slices.Equal(target.Recipients, []string{selfAddr, "friend@example.invalid", "w-guest"}) {
 		t.Fatalf("%+v %v", target, err)
@@ -476,7 +495,7 @@ func TestSendStopsWhenTheServerCannotBeRead(t *testing.T) {
 		if _, err := Send(ctx, opts, req); err == nil || len(srv.created) != 0 {
 			t.Fatal("sent without reading the target", pages)
 		}
-		if _, err := Target(ctx, opts, chat, selfAddr); err == nil {
+		if _, err := Target(ctx, opts, chat, "", selfAddr); err == nil {
 			t.Fatal("target read without the server")
 		}
 	}
