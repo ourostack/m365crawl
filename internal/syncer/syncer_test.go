@@ -1042,7 +1042,8 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 	}{
 		{"upsert", `create trigger boom before insert on records begin select raise(abort, 'boom'); end`, nil},
 		{"mark records", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale(cal, "events"))},
-		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+		// A store the denylist does not match, so the purge (which runs first) leaves it alone.
+		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "stuff"))},
 		// Already removed, so only the purge touches it.
 		{"purge", `update records set removed_at = '2020-01-01T00:00:00.000Z' where store = 'things'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
 		// A removed row under a key that scrubs differently: only the key purge touches it.
