@@ -24,7 +24,7 @@ var (
 	sharePointHost  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}\.sharepoint(-df)?\.com$`)
 	driveIDPattern  = regexp.MustCompile(`^b![A-Za-z0-9_-]{8,256}$`)
 	itemIDPattern   = regexp.MustCompile(`^[A-Za-z0-9]{8,128}$`)
-	guidPattern  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	guidPattern     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	protectionValue = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 )
 
