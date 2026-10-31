@@ -482,8 +482,8 @@ func TestScoutRuleAddedLaterReachesArchivedAndGoneSessions(t *testing.T) {
 		t.Fatalf("%+v %v %v", hits, before, err)
 	}
 	n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true))
-	if err != nil || n != 3 {
-		t.Fatalf("rescrubbed %d %v", n, err)
+	if err != nil || n != (ScoutRescrub{Rewritten: 3}) {
+		t.Fatalf("rescrubbed %+v %v", n, err)
 	}
 	if hits, _, _ := s.ScoutSearch(ctx, "quarterly", ScoutFilter{}); len(hits) != 0 {
 		t.Fatalf("redacted word still searchable: %d", len(hits))
@@ -504,37 +504,120 @@ func TestScoutRuleAddedLaterReachesArchivedAndGoneSessions(t *testing.T) {
 	if hits, _, _ := s.ScoutSearch(ctx, "budget", ScoutFilter{}); len(hits) != 0 {
 		t.Fatalf("dropped message still searchable")
 	}
-	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true)); err != nil || n != 0 {
-		t.Fatalf("second pass %d %v", n, err)
+	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true)); err != nil || n.Rewritten != 0 {
+		t.Fatalf("second pass %+v %v", n, err)
 	}
 	// A mapping that grows a session adds messages under new IDs.
 	grow := func(raw []byte) ([]byte, int) {
 		return []byte(strings.Replace(string(raw), `]}`, `,{"id":"extra","role":"user","content":"an added synthetic turn"}]}`, 1)), 0
 	}
-	if n, err := s.RescrubScout(ctx, "stamp-c", grow); err != nil || n != 3 {
-		t.Fatalf("grow %d %v", n, err)
+	if n, err := s.RescrubScout(ctx, "stamp-c", grow); err != nil || n.Rewritten != 3 {
+		t.Fatalf("grow %+v %v", n, err)
 	}
 	// One file's two versions share the added turn, so search returns it once per file.
 	if hits, _, _ := s.ScoutSearch(ctx, "added", ScoutFilter{}); len(hits) != 2 {
 		t.Fatalf("added turns: %d", len(hits))
 	}
-	if _, err := s.RescrubScout(ctx, "stamp-d", func([]byte) ([]byte, int) { return []byte("not json"), 0 }); !errors.Is(err, ErrScoutRescrub) {
+}
+
+// A session that no longer maps after scrubbing fails closed: it is blanked under the new stamp
+// and counted, and it cannot hold back a later run.
+func TestScoutRescrubBlanksSessionsThatNoLongerParse(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	breakOne := func(raw []byte) ([]byte, int) {
+		if strings.Contains(string(raw), `"b-1"`) {
+			return []byte("not json"), 0
+		}
+		return raw, 0
+	}
+	n, err := s.RescrubScout(ctx, scoutStampB, breakOne)
+	if err != nil || n != (ScoutRescrub{Rewritten: 3, Unparseable: 1}) {
+		t.Fatalf("%+v %v", n, err)
+	}
+	var raw, losses, name string
+	var messages, rows, stale int
+	if err := s.db.QueryRowContext(ctx, `select raw_json,losses_json,name,message_count,(select count(*) from scout_messages where observation_id=2),
+(select count(*) from scout_observations where stamp<>?) from scout_observations where id=2`, scoutStampB).Scan(&raw, &losses, &name, &messages, &rows, &stale); err != nil {
 		t.Fatal(err)
+	}
+	if raw != "" || losses != `{"rescrub_unparseable":1}` || name != "" || messages != 0 || rows != 0 || stale != 0 {
+		t.Fatalf("raw %q losses %s name %q messages %d rows %d stale %d", raw, losses, name, messages, rows, stale)
+	}
+	if hits, _, _ := s.ScoutSearch(ctx, "urgent", ScoutFilter{}); len(hits) != 0 {
+		t.Fatalf("the blanked session is still searchable")
+	}
+	if n, err := s.RescrubScout(ctx, scoutStampB, breakOne); err != nil || n.Rewritten != 0 {
+		t.Fatalf("second run %+v %v", n, err)
 	}
 }
 
-func TestScoutRescrubFaultsLeaveArchiveUnchanged(t *testing.T) {
-	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
-		_, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", true))
-		return err
-	})
-	grow := func(raw []byte) ([]byte, int) {
-		return []byte(strings.Replace(string(raw), `]}`, `,{"id":"extra","role":"user","content":"added"}]}`, 1)), 0
+// scoutRescrubConsistent checks the archive after a re-scrub that may have stopped part way: each
+// observation is either under stamp A or fully rewritten under stamp B, and the FTS index agrees
+// with its content.
+func scoutRescrubConsistent(t *testing.T, s *Store) (rewritten int) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := s.cs.DB().QueryContext(ctx, `select o.id,o.stamp,lower(o.raw_json),
+(select count(*) from scout_messages m where m.observation_id=o.id and lower(m.text) like '%quarterly%') from scout_observations o order by o.id`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error {
-		_, err := s.RescrubScout(ctx, scoutStampB, grow)
-		return err
-	})
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var stamp, raw string
+		var kept int
+		if err := rows.Scan(&id, &stamp, &raw, &kept); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case stamp == scoutStampB && (strings.Contains(raw, "quarterly") || kept != 0):
+			t.Fatalf("observation %d is under the new stamp but not rewritten", id)
+		case stamp == scoutStampB:
+			rewritten++
+		case stamp != scoutStampA:
+			t.Fatalf("observation %d has stamp %q", id, stamp)
+		}
+	}
+	if _, err := s.cs.DB().ExecContext(ctx, `insert into scout_fts(scout_fts) values('integrity-check')`); err != nil {
+		t.Fatalf("FTS index disagrees with its content: %v", err)
+	}
+	return rewritten
+}
+
+// A failure at any database call (a full disk, an I/O error) leaves every observation either old
+// or fully rewritten, and the next run resumes and finishes the rest.
+func TestScoutRescrubResumesAfterAnyFailure(t *testing.T) {
+	for _, kind := range faultKinds {
+		for at := 1; ; at++ {
+			s := newStore(t)
+			setupScoutArchive(t, s)
+			inj := injectFaults(t, s)
+			inj.arm(kind, at)
+			_, err := s.RescrubScout(context.Background(), scoutStampB, redactWord("quarterly", true))
+			if !inj.disarm() {
+				if err != nil {
+					t.Fatalf("%s: unfaulted run failed: %v", kind, err)
+				}
+				break
+			}
+			if err == nil {
+				t.Fatalf("%s #%d: failure swallowed", kind, at)
+			}
+			scoutRescrubConsistent(t, s)
+			if _, err := s.RescrubScout(context.Background(), scoutStampB, redactWord("quarterly", true)); err != nil {
+				t.Fatalf("%s #%d: resume failed: %v", kind, at, err)
+			}
+			if err := s.FinishScoutRescrub(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := scoutRescrubConsistent(t, s); got != 3 {
+				t.Fatalf("%s #%d: %d rewritten after resume", kind, at, got)
+			}
+		}
+	}
 }
 
 // archiveBytes is the database file and its write-ahead log, as they are on disk.
@@ -560,10 +643,10 @@ func TestScoutRescrubLeavesNoCopyOfReplacedText(t *testing.T) {
 	if !strings.Contains(archiveBytes(t, s), "quarterly") {
 		t.Fatal("setup holds no copy to remove")
 	}
-	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", false)); err != nil || n != 3 {
-		t.Fatalf("%d %v", n, err)
+	if n, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", false)); err != nil || n.Rewritten != 3 {
+		t.Fatalf("%+v %v", n, err)
 	}
-	if err := s.CheckpointScoutRescrub(ctx); err != nil {
+	if err := s.FinishScoutRescrub(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(archiveBytes(t, s), "quarterly") {
@@ -580,6 +663,23 @@ func TestScoutRescrubHonoursCancellation(t *testing.T) {
 	}
 }
 
-func TestScoutCheckpointFaults(t *testing.T) {
-	sweepFaults(t, setupScoutArchive, func(ctx context.Context, s *Store) error { return s.CheckpointScoutRescrub(ctx) })
+// FinishScoutRescrub fails without losing its pending mark, so a later run merges and truncates.
+func TestScoutFinishRescrubFaults(t *testing.T) {
+	pending := func(t *testing.T, s *Store) {
+		setupScoutArchive(t, s)
+		if _, err := s.RescrubScout(context.Background(), scoutStampB, redactWord("quarterly", false)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweepFaults(t, pending, func(ctx context.Context, s *Store) error { return s.FinishScoutRescrub(ctx) })
+	s := newStore(t)
+	if err := s.FinishScoutRescrub(context.Background()); err != nil {
+		t.Fatal("nothing pending is not an error:", err)
+	}
+	pending(t, s)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.FinishScoutRescrub(ctx); err == nil {
+		t.Fatal("cancelled finish succeeded")
+	}
 }

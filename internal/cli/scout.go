@@ -323,16 +323,18 @@ type scoutFolderItem struct {
 }
 
 type scoutSyncResult struct {
-	Discovered    bool              `json:"discovered"`
-	Folders       []scoutFolderItem `json:"folders"`
-	Admitted      int               `json:"admitted"`
-	Unchanged     int               `json:"unchanged"`
-	Rescrubbed    int               `json:"rescrubbed"`
-	CloudOnly     int               `json:"cloud_only"`
-	Failed        int               `json:"failed"`
-	Gone          int               `json:"gone"`
-	Notices       []string          `json:"notices,omitempty"`
-	ScoutCoverage *scoutCoverage    `json:"scout_coverage"`
+	Discovered bool              `json:"discovered"`
+	Folders    []scoutFolderItem `json:"folders"`
+	Admitted   int               `json:"admitted"`
+	Unchanged  int               `json:"unchanged"`
+	Rescrubbed int               `json:"rescrubbed"`
+	// RescrubUnparseable counts re-scrubbed versions that no longer mapped and were blanked.
+	RescrubUnparseable int            `json:"rescrub_unparseable"`
+	CloudOnly          int            `json:"cloud_only"`
+	Failed             int            `json:"failed"`
+	Gone               int            `json:"gone"`
+	Notices            []string       `json:"notices,omitempty"`
+	ScoutCoverage      *scoutCoverage `json:"scout_coverage"`
 }
 
 var (
@@ -360,7 +362,8 @@ func (c *scoutSyncCmd) Run(rt *runtime) error {
 			Fix: "Pass the Scout app folder with --root DIR."}
 	}
 	report, runErr := runScoutSync(rt.ctx, syncer.ScoutOptions{DBPath: rt.dbPath, Roots: c.Root, Home: home})
-	result := scoutSyncResult{Discovered: report.Discovered, Rescrubbed: report.Rescrubbed, Folders: []scoutFolderItem{}}
+	result := scoutSyncResult{Discovered: report.Discovered, Rescrubbed: report.Rescrubbed, RescrubUnparseable: report.RescrubUnparseable,
+		Folders: []scoutFolderItem{}}
 	scanned := false
 	for _, f := range report.Folders {
 		item := scoutFolderItem{SourceID: f.SourceID, LocatorTail: locatorTail(f.Root), Outcome: f.Outcome, Reason: f.Reason, Fix: scoutFix(f.Reason, f.CloudOnly),
@@ -378,6 +381,10 @@ func (c *scoutSyncCmd) Run(rt *runtime) error {
 	if result.Rescrubbed > 0 {
 		result.Notices = append(result.Notices, plural(result.Rescrubbed, "archived session version was", "archived session versions were")+
 			" stored under older scrub or parser rules and were scrubbed and mapped again in place, gone sessions included")
+	}
+	if result.RescrubUnparseable > 0 {
+		result.Notices = append(result.Notices, plural(result.RescrubUnparseable, "archived session version", "archived session versions")+
+			" no longer mapped after scrubbing and kept nothing but its file record (loss rescrub_unparseable); read the session again from OneDrive to restore it")
 	}
 	if result.CloudOnly > 0 {
 		result.Notices = append(result.Notices, plural(result.CloudOnly, "session file is", "session files are")+
@@ -596,4 +603,11 @@ func (c *scoutSourcesCmd) Run(rt *runtime) error {
 		}
 		return newList(shape(rt, items), false), sources, nil
 	})
+}
+
+// warnScoutRescrub reports a sync whose Scout re-scrub stopped: the sync itself went on.
+func (rt *runtime) warnScoutRescrub(rep syncer.Report) {
+	if e := rep.ScoutRescrubError; e != nil {
+		rt.printWarning(&errs.Coded{Code: e.Code, Exit: errs.ExitRuntime, Message: e.Message, Fix: e.Fix})
+	}
 }

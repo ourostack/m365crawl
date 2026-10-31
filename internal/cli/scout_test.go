@@ -393,9 +393,9 @@ func TestScoutSyncReadsARealFolder(t *testing.T) {
 // A refused scout sync that re-scrubbed the archive first still prints what it re-scrubbed.
 func TestScoutSyncReportsARescrubBeforeARefusal(t *testing.T) {
 	e := newEnv(t)
-	stubScoutSync(t, syncer.ScoutReport{Rescrubbed: 2}, scoutcapture.ErrPlatformUnqualified)
+	stubScoutSync(t, syncer.ScoutReport{Rescrubbed: 2, RescrubUnparseable: 1}, scoutcapture.ErrPlatformUnqualified)
 	code, out, stderr := e.run("--json", "scout", "sync")
-	if code != 3 || decode(t, out)["rescrubbed"] != float64(2) || !strings.Contains(stderr, "scout_platform_unqualified") {
+	if code != 3 || decode(t, out)["rescrubbed"] != float64(2) || decode(t, out)["rescrub_unparseable"] != float64(1) || len(decode(t, out)["notices"].([]any)) != 2 || !strings.Contains(stderr, "scout_platform_unqualified") {
 		t.Fatalf("%d %s %s", code, out, stderr)
 	}
 }
@@ -403,10 +403,29 @@ func TestScoutSyncReportsARescrubBeforeARefusal(t *testing.T) {
 func TestSyncTextReportsScoutRescrub(t *testing.T) {
 	var out bytes.Buffer
 	rt := &runtime{stdout: &out}
-	if err := rt.renderText("sync", syncer.Report{Status: "ok", ScoutRescrubbed: 2}); err != nil {
+	if err := rt.renderText("sync", syncer.Report{Status: "ok", ScoutRescrubbed: 2, ScoutRescrubUnparseable: 1,
+		ScoutRescrubError: &syncer.SourceError{Code: "scout_rescrub_failed", Message: "m", Fix: "f"}}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "scout: 2 archived session versions scrubbed and mapped again") {
+	if !strings.Contains(out.String(), "scout: 2 archived session versions scrubbed and mapped again") || !strings.Contains(out.String(), "(1 no longer mapped") ||
+		!strings.Contains(out.String(), "failed scout re-scrub: scout_rescrub_failed") {
 		t.Fatal(out.String())
+	}
+}
+
+// An implicit sync whose Scout re-scrub stopped warns and still serves the read.
+func TestImplicitSyncWarnsAboutAFailedScoutRescrub(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		rep, changes, err := old(ctx, o)
+		rep.ScoutRescrubError = &syncer.SourceError{Code: "scout_rescrub_failed", Message: "synthetic stop", Fix: "run m365crawl sync again"}
+		return rep, changes, err
+	}
+	t.Cleanup(func() { runSync = old })
+	code, out, stderr := e.run("--json", "--max-age", "1ns", "messages", "--limit", "1")
+	if code != 0 || len(items(t, decode(t, out))) != 1 || !strings.Contains(stderr, "scout_rescrub_failed") {
+		t.Fatalf("%d %s %s", code, out, stderr)
 	}
 }

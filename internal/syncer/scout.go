@@ -40,7 +40,9 @@ type ScoutFolderReport struct {
 type ScoutReport struct {
 	Discovered bool
 	Rescrubbed int
-	Folders    []ScoutFolderReport
+	// RescrubUnparseable counts re-scrubbed observations that no longer mapped and were blanked.
+	RescrubUnparseable int
+	Folders            []ScoutFolderReport
 }
 
 // ErrScoutFolderNotFound means discovery found no app folder with a Scout session layout.
@@ -51,24 +53,26 @@ var (
 	scoutCheck = scoutcapture.Check
 	scoutStamp = scoutsessions.Stamp
 	scoutScrub = scoutsessions.Scrub
-	// scoutCheckpoint is store.CheckpointScoutRescrub; tests make it fail.
-	scoutCheckpoint = (*store.Store).CheckpointScoutRescrub
-	scoutDiscover   = scoutcapture.Discover
-	scoutSupported  = scoutcapture.Supported
-	scoutOpen       = store.Open
-	scoutAcquire    = store.AcquireLock
-	scoutPlatform   = runtime.GOOS
-	scoutNow        = time.Now
+	// scoutFinish is store.FinishScoutRescrub; tests make it fail.
+	scoutFinish    = (*store.Store).FinishScoutRescrub
+	scoutDiscover  = scoutcapture.Discover
+	scoutSupported = scoutcapture.Supported
+	scoutOpen      = store.Open
+	scoutAcquire   = store.AcquireLock
+	scoutPlatform  = runtime.GOOS
+	scoutNow       = time.Now
 )
 
 // RescrubScoutArchive scrubs and maps again every archived Scout observation stored under another
-// stamp (scoutsessions.Stamp), gone files included, then clears the write-ahead log. It reads only
-// the archive: both scout sync and sync run it, as sync runs the Teams credential purge, so a rule
-// change reaches the archive even when no Scout folder can be read any more.
-func RescrubScoutArchive(ctx context.Context, st *store.Store) (int, error) {
+// stamp (scoutsessions.Stamp), gone files included, one commit each, then merges the FTS index and
+// truncates the write-ahead log (store.FinishScoutRescrub), also for an earlier run that stopped
+// before doing so. It reads only the archive: both scout sync and sync run it, as sync runs the
+// Teams credential purge, so a rule change reaches the archive even when no Scout folder can be
+// read any more. The counts cover what committed, also when it returns an error.
+func RescrubScoutArchive(ctx context.Context, st *store.Store) (store.ScoutRescrub, error) {
 	n, err := st.RescrubScout(ctx, scoutStamp(), scoutScrub)
-	if err == nil && n > 0 {
-		err = scoutCheckpoint(st, ctx)
+	if err == nil {
+		err = scoutFinish(st, ctx)
 	}
 	return n, err
 }
@@ -102,7 +106,9 @@ func SyncScout(ctx context.Context, opts ScoutOptions) (report ScoutReport, err 
 		if err = open(); err != nil {
 			return report, err
 		}
-		if report.Rescrubbed, err = RescrubScoutArchive(ctx, st); err != nil {
+		rescrub, err := RescrubScoutArchive(ctx, st)
+		report.Rescrubbed, report.RescrubUnparseable = rescrub.Rewritten, rescrub.Unparseable
+		if err != nil {
 			return report, err
 		}
 	}

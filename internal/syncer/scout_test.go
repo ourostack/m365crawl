@@ -306,10 +306,20 @@ func TestSyncScoutStopsOnCheckAndRescrubErrors(t *testing.T) {
 	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("check: %v", err)
 	}
+	// A session that no longer maps is blanked and counted, not an error.
 	scoutSwap(t, &scoutStamp, func() string { return "broken-rules" })
 	scoutSwap(t, &scoutScrub, func([]byte) ([]byte, int) { return []byte("not json"), 0 })
-	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, store.ErrScoutRescrub) {
-		t.Fatalf("rescrub: %v", err)
+	scoutSwap(t, &scoutCheck, func(_ context.Context, root string) (string, error) { return root, nil })
+	report, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}})
+	if err != nil || report.Rescrubbed != 1 || report.RescrubUnparseable != 1 || scoutWorldHits(t, db) != 0 {
+		t.Fatalf("rescrub: %+v %v", report, err)
+	}
+	// In scout sync a re-scrub that stops is the command's error.
+	synthetic := errors.New("database or disk is full")
+	scoutSwap(t, &scoutStamp, func() string { return "rules-after-blank" })
+	scoutSwap(t, &scoutFinish, func(*store.Store, context.Context) error { return synthetic })
+	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db, Roots: []string{root}}); !errors.Is(err, synthetic) {
+		t.Fatalf("finish: %v", err)
 	}
 }
 
@@ -361,7 +371,7 @@ func TestSyncScoutRescrubsBeforeRefusing(t *testing.T) {
 	// A failing re-scrub or checkpoint is the run's error.
 	synthetic := errors.New("synthetic")
 	scoutSwap(t, &scoutStamp, func() string { return "rules-4" })
-	scoutSwap(t, &scoutCheckpoint, func(*store.Store, context.Context) error { return synthetic })
+	scoutSwap(t, &scoutFinish, func(*store.Store, context.Context) error { return synthetic })
 	if _, err := SyncScout(context.Background(), ScoutOptions{DBPath: db}); !errors.Is(err, synthetic) {
 		t.Fatal(err)
 	}
@@ -390,11 +400,33 @@ func TestSyncRescrubsScoutSessions(t *testing.T) {
 		return scoutcapture.Result{}, nil
 	})
 	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
-	if err != nil || rep.ScoutRescrubbed != 1 || scoutWorldHits(t, db) != 0 {
+	if err != nil || rep.ScoutRescrubbed != 1 || rep.ScoutRescrubError != nil || scoutWorldHits(t, db) != 0 {
 		t.Fatalf("%d %v", rep.ScoutRescrubbed, err)
 	}
-	scoutSwap(t, &scoutArchiveRescrub, func(context.Context, *store.Store) (int, error) { return 0, errors.New("synthetic") })
-	if _, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db}); err == nil {
-		t.Fatal("a failing re-scrub did not fail the sync")
+}
+
+// A full disk part way through the re-scrub is reported and does not stop Teams: the sync still
+// commits, and the next one resumes the re-scrub.
+func TestSyncReportsAFailedScoutRescrubAndCarriesOn(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "data", "m365crawl.db")
+	scoutSwap(t, &scoutArchiveRescrub, func(context.Context, *store.Store) (store.ScoutRescrub, error) {
+		return store.ScoutRescrub{Rewritten: 1}, errors.New("database or disk is full")
+	})
+	rep, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: db})
+	if err != nil || rep.Status != StatusOK || rep.Messages.Inserted == 0 || rep.ScoutRescrubbed != 1 {
+		t.Fatalf("%s %+v %v", rep.Status, rep.Messages, err)
+	}
+	if e := rep.ScoutRescrubError; e == nil || e.Code != "scout_rescrub_failed" || !strings.Contains(e.Message, "disk is full") || e.Fix == "" {
+		t.Fatalf("%+v", rep.ScoutRescrubError)
+	}
+	// A cancelled sync reports the cancellation, not a re-scrub failure.
+	ctx, cancel := context.WithCancel(context.Background())
+	scoutSwap(t, &scoutArchiveRescrub, func(context.Context, *store.Store) (store.ScoutRescrub, error) {
+		cancel()
+		return store.ScoutRescrub{}, context.Canceled
+	})
+	rep, _, _ = Run(ctx, Options{Root: fixtureRoot, DBPath: db})
+	if rep.ScoutRescrubError != nil {
+		t.Fatalf("%+v", rep.ScoutRescrubError)
 	}
 }

@@ -285,84 +285,128 @@ observation_id,ordinal) values(?,?,?,?,?,?,?,?,?,?,?)`, append(values, observati
 	return nil
 }
 
-// ErrScoutRescrub is a stored session that no longer maps after scrubbing; nothing of it changes.
-var ErrScoutRescrub = errors.New("scout: a stored session no longer maps after scrubbing")
+// ScoutRescrub counts what RescrubScout rewrote. Unparseable counts observations whose stored
+// JSON no longer maps after scrubbing: they are blanked (no JSON, messages or index rows) under the
+// new stamp, with loss rescrub_unparseable, so they cannot hold back later runs.
+type ScoutRescrub struct {
+	Rewritten, Unparseable int
+}
 
-// RescrubScout scrubs and maps again, in place and in one transaction, every observation stored
-// under a stamp other than stamp, gone files included, and returns how many it rewrote. It starts
-// from the observation's stored (already scrubbed) JSON, so a rule added later reaches sessions the
-// folder no longer has; the observation's redactions add the new ones. Observations are loaded one
-// at a time, so memory holds one session however many are stale; a crash leaves each one either
-// under its old stamp or fully rewritten. The rewrite runs on a connection with secure_delete on
-// and ends by merging the FTS index, so replaced text is overwritten in freed pages and dropped
-// from the index; CheckpointScoutRescrub then clears the write-ahead log. That connection keeps
-// secure_delete on when it returns to the pool, which only makes its later deletes overwrite
-// their pages too.
-func (s *Store) RescrubScout(ctx context.Context, stamp string, scrub func([]byte) ([]byte, int)) (rewritten int, err error) {
+// scoutMergePending is the meta key set with every re-scrub commit and cleared by
+// FinishScoutRescrub once the FTS index is merged and the write-ahead log truncated, so an
+// interrupted re-scrub still gets both later.
+const scoutMergePending = "scout_rescrub_merge_pending"
+
+// secureConn is a connection with secure_delete on, so text a re-scrub replaces is overwritten in
+// the pages it frees. The connection keeps the setting when it returns to the pool, which only
+// makes its later deletes overwrite their pages too.
+func (s *Store) secureConn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `pragma secure_delete=on`); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
+	return conn, nil
+}
+
+// RescrubScout scrubs and maps again, in place, every observation stored under a stamp other than
+// stamp, gone files included. It starts from the observation's stored (already scrubbed) JSON, so
+// a rule added later reaches sessions the folder no longer has, and the observation's redactions
+// add the new ones. Each observation commits on its own, with its new stamp, so memory holds one
+// session, a full disk or a crash leaves each observation either under its old stamp or fully
+// rewritten, and the next run resumes with the ones left. The counts cover what committed, also
+// when an error stops the run. FinishScoutRescrub must follow.
+func (s *Store) RescrubScout(ctx context.Context, stamp string, scrub func([]byte) ([]byte, int)) (out ScoutRescrub, err error) {
+	conn, err := s.secureConn(ctx)
+	if err != nil {
+		return out, err
 	}
 	defer func() { err = errors.Join(err, conn.Close()) }()
-	if _, err = conn.ExecContext(ctx, `pragma secure_delete=on`); err != nil {
-		return 0, err
+	rows, err := conn.QueryContext(ctx, `select id from scout_observations where stamp<>? order by id`, stamp)
+	if err != nil {
+		return out, err
 	}
+	var stale []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return out, errors.Join(err, rows.Close())
+		}
+		stale = append(stale, id)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	for _, id := range stale {
+		unparseable, err := rescrubScoutObservation(ctx, conn, id, stamp, scrub)
+		if err != nil {
+			return out, err
+		}
+		out.Rewritten++
+		if unparseable {
+			out.Unparseable++
+		}
+	}
+	return out, nil
+}
+
+func rescrubScoutObservation(ctx context.Context, conn *sql.Conn, id int64, stamp string, scrub func([]byte) ([]byte, int)) (unparseable bool, err error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return false, err
 	}
 	defer func() {
 		if err != nil {
 			_ = tx.Rollback()
 		}
 	}()
-	rows, err := tx.QueryContext(ctx, `select id from scout_observations where stamp<>? order by id`, stamp)
-	if err != nil {
-		return 0, err
+	var raw string
+	var redactions int
+	if err = tx.QueryRowContext(ctx, `select raw_json,redactions from scout_observations where id=?`, id).Scan(&raw, &redactions); err != nil {
+		return false, err
 	}
-	var stale []int64
-	for rows.Next() {
-		var id int64
-		if err = rows.Scan(&id); err != nil {
-			return 0, errors.Join(err, rows.Close())
-		}
-		stale = append(stale, id)
+	clean, n := scrub([]byte(raw))
+	session, parseErr := scoutsessions.Parse(clean)
+	if parseErr != nil {
+		// Fail closed: keep nothing of a session that can no longer be scrubbed with certainty.
+		unparseable, clean, n = true, nil, 0
+		session = scoutsessions.Session{Losses: map[string]int{"rescrub_unparseable": 1}}
 	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return 0, err
+	if err = rewriteScoutObservation(ctx, tx, id, stamp, clean, redactions+n, &session); err != nil {
+		return false, err
 	}
-	for _, id := range stale {
-		var raw string
-		var redactions int
-		if err = tx.QueryRowContext(ctx, `select raw_json,redactions from scout_observations where id=?`, id).Scan(&raw, &redactions); err != nil {
-			return 0, err
-		}
-		clean, n := scrub([]byte(raw))
-		session, parseErr := scoutsessions.Parse(clean)
-		if parseErr != nil {
-			err = ErrScoutRescrub
-			return 0, err
-		}
-		if err = rewriteScoutObservation(ctx, tx, id, stamp, clean, redactions+n, &session); err != nil {
-			return 0, err
-		}
+	if _, err = tx.ExecContext(ctx, `insert into meta(key,value) values(?, '1') on conflict(key) do update set value='1'`, scoutMergePending); err != nil {
+		return false, err
 	}
-	if len(stale) > 0 {
-		// FTS5 keeps a replaced row's tokens in its index until segments merge; merging them all
-		// drops those tokens, and secure_delete overwrites the pages they leave.
-		if _, err = tx.ExecContext(ctx, `insert into scout_fts(scout_fts) values('optimize')`); err != nil {
-			return 0, err
-		}
-	}
-	return len(stale), tx.Commit()
+	return unparseable, tx.Commit()
 }
 
-// CheckpointScoutRescrub copies the write-ahead log into the database and truncates it, so text a
-// re-scrub replaced does not linger in the log. A checkpoint blocked by a concurrent reader is
-// not an error: the log is truncated by a later checkpoint.
-func (s *Store) CheckpointScoutRescrub(ctx context.Context) error {
+// FinishScoutRescrub completes a re-scrub, including one an earlier run left unfinished: it merges
+// the FTS index (FTS5 keeps a replaced row's tokens until its segments merge) with secure_delete on,
+// checkpoints and truncates the write-ahead log, then clears the pending mark. With nothing pending
+// it only reads the mark. A checkpoint blocked by a concurrent reader is not an error: the mark is
+// cleared and a later checkpoint truncates the log.
+func (s *Store) FinishScoutRescrub(ctx context.Context) (err error) {
+	var pending int
+	if err = s.db.QueryRowContext(ctx, `select count(*) from meta where key=?`, scoutMergePending).Scan(&pending); err != nil || pending == 0 {
+		return err
+	}
+	conn, err := s.secureConn(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `insert into scout_fts(scout_fts) values('optimize')`)
+	if err = errors.Join(err, conn.Close()); err != nil {
+		return err
+	}
 	var busy, frames, done int
-	return s.db.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done)
+	if err = s.db.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `delete from meta where key=?`, scoutMergePending)
+	return err
 }
 
 // FinishScoutRun records the run's outcome and marks gone every file of a completely listed

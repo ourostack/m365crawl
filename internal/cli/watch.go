@@ -262,6 +262,7 @@ func (w *watcher) sync() (done bool, err error) {
 	}
 	// The sync covers every account so --account only filters what is emitted, never the archive.
 	rep, changes, err := runSync(w.rt.ctx, w.rt.syncOptions(syncer.Options{Root: w.rt.root, DBPath: w.rt.dbPath}))
+	w.rt.warnScoutRescrub(rep)
 	if w.rt.ctx.Err() != nil && errors.Is(err, syncer.ErrOWASnapshotRetained) {
 		w.rt.printWarning(withSnapshotRetention(err, errs.Interrupted()))
 	}
