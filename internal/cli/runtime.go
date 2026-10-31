@@ -47,9 +47,12 @@ type runtime struct {
 	exitErr          error       // a failure while printing for a flag that ends the run (--version)
 	team             string      // --team of the running read command, validated before any implicit sync
 	synced           *syncedInfo // the implicit sync this read ran, if any
-	query            listQuery   // what the running list command asked for, to explain an empty result
-	link             *convLink   // the Teams link the running read's conversation came from, if any
-	windowNotice     string      // set by window when the running read's time window is empty
+	implicitSync     string      // waited_for_other_sync or other_sync_in_progress when another run held the lock
+	lockBudget       time.Duration
+	lockUntil        time.Time // when this read stops waiting for other runs; set by its first wait
+	query            listQuery // what the running list command asked for, to explain an empty result
+	link             *convLink // the Teams link the running read's conversation came from, if any
+	windowNotice     string    // set by window when the running read's time window is empty
 	noteCoverage     *noteCoverage
 	documentCoverage *noteCoverage
 	loopCoverage     *loopCoverage
@@ -169,7 +172,23 @@ func (rt *runtime) ensureFresh() (*syncError, error) {
 	rt.printSyncNotice(age) // stderr only; stdout stays the result
 	began := rt.now()
 	// The implicit sync always covers every account, so --account can never hide data from a later run.
-	rep, _, err := runSync(rt.ctx, rt.linkOptions(rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()})))
+	o := rt.linkOptions(rt.syncOptions(syncer.Options{Root: rt.root, DBPath: rt.dbPath, Progress: rt.progress()}))
+	rep, _, err := runSync(rt.ctx, o)
+	if isLocked(err) {
+		// Another run holds the archive: wait for it rather than report `locked`.
+		var ran bool
+		var waitErr error
+		if rep, err, ran, waitErr = rt.syncAfterOtherRun(o); waitErr != nil {
+			if rt.ctx.Err() != nil || errors.Is(waitErr, context.Canceled) {
+				return nil, errors.Join(rt.ctx.Err(), waitErr)
+			}
+			return nil, asCoded(waitErr)
+		}
+		if !ran {
+			return nil, nil
+		}
+		began = rt.now()
+	}
 	rt.synced = &syncedInfo{Seconds: math.Round(rt.now().Sub(began).Seconds()*10) / 10, Status: rep.Status}
 	if err == nil {
 		return nil, nil
@@ -301,6 +320,10 @@ func (rt *runtime) read(label string, fn func(st *store.Store) (result, error)) 
 	}
 	res.setMeta(age, syncErr)
 	res.setSynced(rt.synced)
+	res.setImplicitSync(rt.implicitSync)
+	if rt.implicitSync == implicitSyncOtherInProgress {
+		res.addNotice(rt.otherSyncNotice())
+	}
 	if age == nil {
 		res.setNeedsSync(syncHint)
 	}

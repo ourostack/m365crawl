@@ -173,7 +173,11 @@ func notesCoverage(sources []store.KnowledgeSource) *noteCoverage {
 var runNotesSync = syncer.SyncNotes
 
 func (rt *runtime) refreshNotes(sourceID int64) (*noteCoverage, error) {
-	report, refreshErr := runNotesSync(rt.ctx, syncer.NotesOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
+	var report syncer.NotesReport
+	refreshErr := rt.besideOtherRun(func() (err error) {
+		report, err = runNotesSync(rt.ctx, syncer.NotesOptions{DBPath: rt.dbPath, SourceID: sourceID, MaxAge: rt.maxAge})
+		return err
+	})
 	if refreshErr == nil {
 		return notesCoverage(report.Sources), nil
 	}
