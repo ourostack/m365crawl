@@ -677,3 +677,42 @@ func TestMailStatusAndEventMailLeaveCopiesOut(t *testing.T) {
 		t.Fatalf("%+v %v", related, err)
 	}
 }
+
+// The archive stores a Mac message under one folder only (#270), so a current row stored under
+// Deleted Items or To Me says nothing about whether the message is still in Sent Items. A row in
+// Sent Items, older or current, is therefore matched only with a row in Sent Items: an older Sent
+// row is not hidden behind a current Deleted Items or To Me row, and an older Inbox row (mail sent
+// to oneself) is not hidden behind a current Sent row.
+func TestMailCopiesNeverCrossIntoOrOutOfSent(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seedTwoSets(t, s,
+		[]outlookmail.Message{
+			setMsg(1001, aSent, "<sent-now-deleted@t>", 3),
+			setMsg(1002, aSent, "<sent-now-tome@t>", 3),
+			setMsg(1003, aInbox, "<self@t>", 4),
+			setMsg(1004, aSent, "<still-sent@t>", 5),
+		},
+		[]outlookmail.Message{
+			setMsg(2001, bDeleted, "<sent-now-deleted@t>", 3),
+			setMsg(2002, bToMe, "<sent-now-tome@t>", 3),
+			setMsg(2003, bSent, "<self@t>", 4),
+			setMsg(2004, bSent, "<still-sent@t>", 5),
+		})
+	if got := listKeys(t, s, MailFilter{Folder: "sent"}); !sameKeys(got, 1002, 1001, 2003, 2004) {
+		t.Fatalf("--folder sent lists %v", got)
+	}
+	if got := listKeys(t, s, MailFilter{Folder: "inbox"}); !sameKeys(got, 1003) {
+		t.Fatalf("--folder inbox lists %v: the older Inbox copy of a self-sent message stays", got)
+	}
+	for dk, want := range map[uint32]string{1001: "", 1002: "", 1003: "", 1004: mailAcct + ":2004"} {
+		if r, err := s.MailGet(ctx, mailAcct, dk); err != nil || r.CopyOf != want {
+			t.Fatalf("%d: copy_of %q, want %q (%v)", dk, r.CopyOf, want, err)
+		}
+	}
+	// Day 3 in Sent Items: the current set holds neither message in Sent Items, and its Sent range
+	// (from day 5) covers the day, so the check reports both as missing from the current copy.
+	if c := checkOf(t, s, "sent", day(3).Add(-time.Hour), day(3).Add(time.Hour)); c.State != "partial" || c.Messages != 2 || c.LackingInCurrentRange != 2 {
+		t.Fatalf("%+v", c)
+	}
+}

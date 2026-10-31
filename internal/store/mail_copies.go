@@ -29,7 +29,9 @@ import (
 // normalizeMailMessageID) in a different set, chosen in this order: a current-set row in a folder
 // of the same role (mailCopyRole), so mail sent to oneself still pairs Sent with Sent; any
 // current-set row, whatever its folder, because the current set says where the message is now
-// (moved, or deleted after the rebuild); a row of another older set in the same role that ranks
+// (moved, or deleted after the rebuild), except that a row in Sent Items on either side needs a
+// row in Sent Items (the archive keeps one folder per message, so another folder says nothing
+// about Sent Items membership); a row of another older set in the same role that ranks
 // higher (seen more recently, then archived later). Rows of one set never merge, so a message in
 // Sent Items and Inbox of one set stays two rows. Current-set rows count whatever their gone and
 // evicted marks. No row is deleted or re-keyed: the copy keeps its id and its own marks.
@@ -250,7 +252,9 @@ type copyCand struct {
 
 // newerCopy picks, from the rows of one Message-ID that rank above an older row (best first;
 // current-set rows always rank first), the row that the older row, of role and set, is a copy
-// of (see the rule above).
+// of (see the rule above). The any-folder step never crosses into or out of Sent Items: the
+// archive stores a message under one folder only, so a current row under Deleted Items or To Me
+// says nothing about whether the message is still in Sent Items.
 func newerCopy(g []copyCand, role string, set uint32) (string, bool) {
 	var anyCurrent, olderSameRole string
 	for _, n := range g {
@@ -258,7 +262,7 @@ func newerCopy(g []copyCand, role string, set uint32) (string, bool) {
 		case n.row.set == set:
 		case n.row.current && role != "" && n.role == role:
 			return n.row.id, true
-		case n.row.current && anyCurrent == "":
+		case n.row.current && anyCurrent == "" && role != "sent" && n.role != "sent":
 			anyCurrent = n.row.id
 		case !n.row.current && role != "" && n.role == role && olderSameRole == "":
 			olderSameRole = n.row.id
