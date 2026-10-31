@@ -133,7 +133,7 @@ func TestPurgedKeyLeavesNoCopyOnDisk(t *testing.T) {
 				recs = append(recs, grec(&acctA, dbA, "events", `{"access_token":"[redacted]"}`, `{"v":"current"}`))
 			}
 			upsert(t, s, recs, base)
-			if db, wal := archiveBytes(t, path); !bytes.Contains(db, []byte(marker)) && !bytes.Contains(wal, []byte(marker)) {
+			if db, wal := diskBytes(t, path); !bytes.Contains(db, []byte(marker)) && !bytes.Contains(wal, []byte(marker)) {
 				t.Fatal("the synthetic key is not on disk before the purge")
 			}
 			inSession(t, s, func(x *Session) {
@@ -144,7 +144,7 @@ func TestPurgedKeyLeavesNoCopyOnDisk(t *testing.T) {
 			if res, err := s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
 				t.Fatalf("ClearPurgedLog: %+v %v", res, err)
 			}
-			db, wal := archiveBytes(t, path)
+			db, wal := diskBytes(t, path)
 			if i := bytes.Index(db, []byte(marker)); i >= 0 {
 				t.Fatalf("purged key still in the database file at byte %d", i)
 			}
@@ -171,7 +171,7 @@ func TestWritableArchiveOverwritesReplacedValues(t *testing.T) {
 	if _, err := s.db.Exec(`pragma wal_checkpoint(truncate)`); err != nil {
 		t.Fatal(err)
 	}
-	db, wal := archiveBytes(t, path)
+	db, wal := diskBytes(t, path)
 	if bytes.Contains(db, []byte(marker)) || bytes.Contains(wal, []byte(marker)) {
 		t.Fatal("a replaced value is still on disk")
 	}
@@ -395,7 +395,7 @@ func TestPurgedLoopKeyLeavesNoCopyOnDisk(t *testing.T) {
 			if res, err := s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
 				t.Fatalf("ClearPurgedLog: %+v %v", res, err)
 			}
-			db, wal := archiveBytes(t, path)
+			db, wal := diskBytes(t, path)
 			if i := bytes.Index(db, []byte(marker)); i >= 0 {
 				t.Fatalf("Loop key still in the database file at byte %d", i)
 			}

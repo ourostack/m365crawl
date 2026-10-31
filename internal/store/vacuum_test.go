@@ -48,7 +48,7 @@ func leaveOldCopy(t *testing.T, s *Store, path, marker string) {
 	if _, err := s.db.Exec(`pragma wal_checkpoint(truncate)`); err != nil {
 		t.Fatal(err)
 	}
-	if db, _ := archiveBytes(t, path); !bytes.Contains(db, []byte(marker)) {
+	if db, _ := diskBytes(t, path); !bytes.Contains(db, []byte(marker)) {
 		t.Fatal("the old copy is not in free space to start with")
 	}
 }
@@ -108,7 +108,7 @@ func TestVacuumOnceRewritesAnOlderArchive(t *testing.T) {
 	if res, err := s.ClearPurgedLog(ctx); err != nil || res.Pending || res.Attempts != 1 {
 		t.Fatalf("the VACUUM did not ask for the log to be cleared: %+v %v", res, err)
 	}
-	db, wal := archiveBytes(t, path)
+	db, wal := diskBytes(t, path)
 	if bytes.Contains(db, []byte(marker)) || bytes.Contains(wal, []byte(marker)) {
 		t.Fatal("the old copy survived the VACUUM")
 	}
