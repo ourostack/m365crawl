@@ -142,6 +142,12 @@ func (rt *runtime) renderText(label string, v any) error {
 				_, _ = fmt.Fprintf(w, "  registration %d: %s / %s; selection %s; %s\n", source.RegistrationID, source.State, source.Scope, source.SelectionMatch, source.Retry)
 			}
 		}
+		if c := r.WorkIQDocumentCoverage; c != nil {
+			_, _ = fmt.Fprintf(w, "WorkIQ documents: excerpts only, kept only when rights allow extraction; refusal path %s\n", c.RefusalLiveStatus)
+			for _, d := range c.Documents {
+				_, _ = fmt.Fprintf(w, "  %s %s: %s; text kept %t\n", d.ID, oneLine(d.Name), strings.TrimSpace(d.State+" "+d.Code), d.TextKept)
+			}
+		}
 		if r.LocalContentCoverage != nil {
 			_, _ = fmt.Fprintln(w, "local content: CURRENT/snapshot match is the archived acquisition for THIS source instance, not locator-wide or live; an old instance can be retained while its own snapshot matches")
 			for _, source := range r.LocalContentCoverage.Sources {
@@ -511,6 +517,12 @@ func (rt *runtime) listTable(r *listResult) {
 		case localSourceItem:
 			cols, textCol = []string{"registration", "source", "state", "scope", "snapshot_match", "retry"}, -1
 			rows = append(rows, []string{strconv.FormatInt(x.RegistrationID, 10), sourceLabel(x.SourceID), x.State, x.Scope, x.SnapshotMatch, x.Retry})
+		case workIQDocumentItem:
+			cols, textCol = []string{"last_checked_at", "id", "name", "state", "scope", "text"}, 5
+			rows = append(rows, []string{stamp(x.LastCheckedAt), x.ID, oneLine(x.Name), x.State, x.Scope, oneLine(searchVal(x.Text))})
+		case searchWorkIQDocumentItem: // no native modified clock
+			cols, textCol = searchColumns, 5
+			rows = append(rows, []string{"-", x.Source, oneLine(x.Name), "-", "content show " + x.ID, oneLine(searchVal(x.Text))})
 		case searchCloudItem:
 			cols, textCol = searchColumns, 5
 			rows = append(rows, []string{noteStamp(x.ModifiedAt), x.Source, oneLine(searchVal(x.Title)), "-", "content show " + x.ID, oneLine(x.Text)})

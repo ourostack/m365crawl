@@ -43,6 +43,10 @@ type searchLocalTextItem struct {
 	Source string `json:"source"`
 	LocalTextItem
 }
+type searchWorkIQDocumentItem struct {
+	Source string `json:"source"`
+	workIQDocumentItem
+}
 
 type searchNoteItem struct {
 	Source string `json:"source"`
@@ -695,6 +699,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 	cloudCoverage := rt.cloudCoverageOf(nil)
 	localCoverage := rt.localCoverageOf(nil)
 	engageCoverage := rt.engageCoverageOf(store.EngageSnapshot{})
+	var documentCoverage *workIQDocumentCoverage
 	if p.content && st != nil {
 		snapshot, err := st.CloudSnapshot(rt.ctx, store.CloudFilter{Query: c.Query, ModifiedSince: f.Since, ModifiedUntil: f.Until, Limit: f.Limit})
 		if err != nil {
@@ -743,6 +748,16 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		atLeast[searchContent] = atLeast[searchContent] || engage.Truncated
 		for _, row := range engage.Rows {
 			hits = append(hits, engageHit(rt, row, engage.Sources, true))
+		}
+		documentHits, documents, err := workIQDocumentHits(rt, st, c.Query, !f.Since.IsZero() || !f.Until.IsZero(), f.Limit)
+		if err != nil {
+			return nil, rt.contentError(err)
+		}
+		documentCoverage = workIQDocumentCoverageOf(documents)
+		matched[searchContent] += len(documentHits)
+		for _, h := range documentHits {
+			h.item = searchWorkIQDocumentItem{Source: searchContent, workIQDocumentItem: h.item.(workIQDocumentItem)}
+			hits = append(hits, h)
 		}
 	}
 	sortSearchHits(hits)
@@ -847,6 +862,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		if c.Source == searchContent || len(engageCoverage.Registrations) > 0 {
 			res.EngageContentCoverage = engageCoverage
 		}
+		res.WorkIQDocumentCoverage = documentCoverage
 	}
 	if chatTotalIsAll {
 		res.withTotal(*f.Total)
