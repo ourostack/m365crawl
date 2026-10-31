@@ -33,7 +33,7 @@ func TestWorkIQSettingsAndScope(t *testing.T) {
 func TestWorkIQMigrationPreservesCacheArchive(t *testing.T) {
 	ctx := context.Background()
 	path := writableArchivePath(t)
-	legacyDDL := strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1)
+	legacyDDL := strings.Replace(strings.Replace(strings.Replace(schemaDDL, workiqSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), workiqWindowSchemaDDL, "", 1)
 	cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: legacyDDL, SchemaVersion: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestWorkIQSchema22MigratesEitherVersion21(t *testing.T) {
 	}{{"scout-21", workiqSchemaDDL}, {"earlier-workiq-21", scoutSchemaDDL}} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writableArchivePath(t)
-			cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(schemaDDL, tc.without, "", 1), SchemaVersion: 21})
+			cs, err := crawlstore.Open(ctx, crawlstore.Options{Path: path, Schema: strings.Replace(strings.Replace(strings.Replace(schemaDDL, workiqWindowSchemaDDL, "", 1), workiqDocumentSchemaDDL, "", 1), tc.without, "", 1), SchemaVersion: 21})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +137,7 @@ func TestWorkIQSchema22MigratesEitherVersion21(t *testing.T) {
 			s := must(Open(ctx, path))
 			defer func() { _ = s.Close() }()
 			if got := rowCount(t, s, `select max(version) from schema_migrations`); got != SchemaVersion ||
-				rowCount(t, s, `select count(*) from sqlite_master where name in ('scout_sources','workiq_attempts')`) != 2 ||
+				rowCount(t, s, `select count(*) from sqlite_master where name in ('scout_sources','workiq_attempts','workiq_window_members')`) != 3 ||
 				rowCount(t, s, `select count(*) from accounts`) != 1 {
 				t.Fatalf("version 21 did not migrate to %d with both sources' tables and its data (version %d)", SchemaVersion, got)
 			}

@@ -527,6 +527,18 @@ func main() {
 				reply["result"] = result
 				break
 			}
+			if mb := loadMailbox(); mb != nil {
+				if data, status, ok := mb.fetch(path); ok {
+					result := map[string]any{"data": data, "statusCode": status}
+					if status >= 400 {
+						result = map[string]any{"data": nil, "statusCode": status, "error": data}
+						reply["result"] = map[string]any{"isError": true, "structuredContent": map[string]any{"results": []any{result}}}
+						break
+					}
+					reply["result"] = map[string]any{"structuredContent": map[string]any{"results": []any{result}}}
+					break
+				}
+			}
 			if data, status, ok := documentItem(path); ok {
 				reply["result"] = map[string]any{"structuredContent": map[string]any{"results": []any{
 					map[string]any{"data": data, "statusCode": status},

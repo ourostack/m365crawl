@@ -17,11 +17,13 @@ type WorkIQOptions struct {
 	Invocation              workiq.Invocation
 	Since                   time.Time
 	MaxChats                int
-	restart                 *workIQExpired
-	restarted               map[string]bool
-	pageWork                int
-	censusPasses            int
-	runLocks                *workIQRunLocks
+	// Window selects a range-bounded mail sync instead of the whole account.
+	Window       *WorkIQMailWindow
+	restart      *workIQExpired
+	restarted    map[string]bool
+	pageWork     int
+	censusPasses int
+	runLocks     *workIQRunLocks
 }
 
 type WorkIQAccountReport struct {
@@ -43,6 +45,8 @@ type WorkIQReport struct {
 	Mail     []WorkIQMailCoverage  `json:"mail"`
 	Chats    []WorkIQChatCoverage  `json:"chats"`
 	Probes   []WorkIQPathProbe     `json:"probes"`
+	// Window is what a range-bounded mail sync fetched and proved.
+	Window *WorkIQWindowReport `json:"window,omitempty"`
 	// Notices say how the request was narrowed, such as an account that selects only one family.
 	Notices []string `json:"notices,omitempty"`
 	// Resumable says the run stopped only at a resumable stop (page budget, busy archive or a
@@ -97,6 +101,14 @@ func RunWorkIQ(ctx context.Context, options WorkIQOptions) (WorkIQReport, error)
 		options.Kind != "sync" && options.Kind != "coverage" && options.Kind != "status" ||
 		options.MaxChats < 0 || options.MaxChats > 100000 || !options.Since.IsZero() && options.Since.After(workIQNow()) {
 		return report, errs.Usage("an explicit archive and valid source selection are required")
+	}
+	if w := options.Window; w != nil && (options.Kind != "sync" || options.Source == "chats" || options.Account != "" && !strings.HasPrefix(options.Account, "outlook/") ||
+		w.Since.IsZero() || w.Until.IsZero() || !w.Since.Before(w.Until) || w.Until.After(workIQNow()) ||
+		w.Coverage != "" && w.Coverage != "proof" && w.Coverage != "fast") {
+		return report, errs.Usage("a mail window needs mail, a start before its end, an end no later than now, and --coverage proof or fast")
+	}
+	if options.Window != nil {
+		options.Source = "mail"
 	}
 	if options.Account != "" {
 		family := "chats"
@@ -157,6 +169,9 @@ func runWorkIQFamily(ctx context.Context, options WorkIQOptions) (WorkIQReport, 
 	run := runWorkIQChats
 	if options.Source == "mail" {
 		run = runWorkIQMail
+	}
+	if options.Source == "mail" && options.Window != nil {
+		run, options.Kind = runWorkIQMailWindow, "mail_window"
 	}
 	report, err := run(ctx, options)
 	return report, recordWorkIQFailure(ctx, options, &report, options.Source, err)
