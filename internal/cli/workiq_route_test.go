@@ -298,7 +298,7 @@ func TestOlderMailRouteText(t *testing.T) {
 
 func TestWorkIQRouteSkipsFoldersWithoutANativeRange(t *testing.T) {
 	rt := newRuntime(context.Background(), &Globals{}, nil, nil)
-	routes, err := rt.sinceRoutes(nil, []store.CoverageRow{{Account: mailAccount}}, time.Now())
+	routes, err := rt.sinceRoutes(nil, []store.CoverageRow{{Account: mailAccount}}, time.Now(), time.Time{}, false)
 	if err != nil || routes != nil {
 		t.Fatal("a server-only folder without a native range produced a route", routes, err)
 	}

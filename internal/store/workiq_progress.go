@@ -21,8 +21,11 @@ func (s *Store) BeginWorkIQAttempt(ctx context.Context, scope WorkIQScope, at ti
 		return 0, err
 	}
 	if !enabled || at.IsZero() || scope.Family != "mail" && scope.Family != "chats" ||
-		scope.Kind != "sync" && scope.Kind != "coverage" && scope.Kind != "status" {
+		scope.Kind != "sync" && scope.Kind != "coverage" && scope.Kind != "status" && scope.Kind != "mail_window" {
 		return 0, errors.New("WorkIQ attempt requires opt-in and a known source scope")
+	}
+	if scope.Kind == "mail_window" && (scope.Family != "mail" || scope.WindowStart.IsZero() || scope.WindowEnd.IsZero() || !scope.WindowStart.Before(scope.WindowEnd)) {
+		return 0, errors.New("a WorkIQ mail window needs a mail account and a nonempty fixed range")
 	}
 	facts, err := s.WorkIQAccounts(ctx)
 	if err != nil {
@@ -196,6 +199,11 @@ on conflict(attempt_id,code,resource) do update set n=excluded.n`, attempt, code
 		}
 		if err != nil {
 			return err
+		}
+		if kind == "mail_window" {
+			// A window's outcome is visible only through its window and the route: no sync run, no
+			// health, no receipt.
+			return nil
 		}
 		scope := []string{family, account}
 		if kind != "sync" {

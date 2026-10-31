@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,14 +28,16 @@ func routeStepDoes(t *testing.T, route map[string]any, command string) string {
 	return ""
 }
 
-// The route states what whole-account sync costs, and says so plainly when it cannot fit here,
-// without promising anything beyond the follow-up issue.
+// A thread route ends in whole-account sync: it states what that costs, and says so plainly when it
+// cannot fit here.
 func TestOlderMailRouteStatesWholeAccountSyncCost(t *testing.T) {
-	e := routeEnv(t)
+	e := textEnv(t)
+	seedMail(t, e, seedMessages()[1:]) // the plan that the first reply answers is not archived
+	t.Setenv("M365CRAWL_WORKIQ_BIN", filepath.Join(t.TempDir(), "absent"))
 	huge := store.WorkIQMailDisk{InventoryItems: 366000, FetchedItems: 15502, StagedItems: 15502, StagedBytes: 877 << 20, LargestPage: 10 << 20}
 	read := func() map[string]any {
 		t.Helper()
-		routes := routesOf(t, mailJSON(t, e, "mail", "list", "--since", "2026-01-01"))
+		routes := routesOf(t, mailJSON(t, e, "mail", "thread", "outlook/Main:102"))
 		if len(routes) != 1 {
 			t.Fatalf("want one route, got %v", routes)
 		}
@@ -64,7 +67,7 @@ func TestOlderMailRouteStatesWholeAccountSyncCost(t *testing.T) {
 	r := read()
 	fix, _ := r["fix"].(string)
 	cmds := routeCommands(t, r)
-	if !strings.Contains(fix, "is refused on this archive") || !strings.Contains(fix, "ourostack/m365crawl#262") ||
+	if !strings.Contains(fix, "is refused on this archive") || !strings.Contains(fix, "--since and --until") ||
 		!strings.Contains(fix, "350498 more items") || len(cmds) != 2 || strings.Contains(strings.Join(cmds, " "), "workiq sync") {
 		t.Fatalf("a sync that cannot fit was still offered: %q %q", fix, cmds)
 	}
@@ -86,5 +89,5 @@ func TestOlderMailRouteStatesWholeAccountSyncCost(t *testing.T) {
 	setRouteDisk(t, func(*store.Store, context.Context, string) (store.WorkIQMailDisk, bool, error) {
 		return store.WorkIQMailDisk{}, false, errors.New("broken")
 	}, func(string) (int64, error) { return 1 << 40, nil })
-	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01")
+	mailFails(t, e, "db_error", 1, "mail", "thread", "outlook/Main:102")
 }

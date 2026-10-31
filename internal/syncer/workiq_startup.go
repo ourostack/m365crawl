@@ -32,9 +32,11 @@ func recordWorkIQStartupFailure(ctx context.Context, options WorkIQOptions, enab
 	defer cancel()
 	at := workIQNow()
 	err := workIQWrite(persistCtx, options.DBPath, func(writeCtx context.Context, s *store.Store) error {
-		id, err := s.BeginWorkIQAttempt(writeCtx, store.WorkIQScope{
-			Family: account.Family, Account: account.Account, Kind: kind,
-		}, at)
+		scope := store.WorkIQScope{Family: account.Family, Account: account.Account, Kind: kind}
+		if options.Window != nil {
+			scope.WindowStart, scope.WindowEnd = options.Window.Since, options.Window.Until
+		}
+		id, err := s.BeginWorkIQAttempt(writeCtx, scope, at)
 		if err != nil {
 			return err
 		}

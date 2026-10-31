@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/ourostack/m365crawl/internal/errs"
@@ -67,11 +68,15 @@ func (r workIQToggleResult) renderWorkIQ(rt *runtime) error {
 
 type workIQReadFlags struct {
 	Source   string `enum:"all,mail,chats" default:"all" help:"WorkIQ source family."`
-	Since    string `help:"Chat window start: RFC3339, YYYY-MM-DD or a relative duration such as 365d; default 365 days. Not a mail filter."`
+	Since    string `help:"Window start: RFC3339, YYYY-MM-DD or a relative duration such as 365d. For chats, default 365 days. With mail sync, fetch only mail received from this time."`
 	MaxChats int    `default:"200" help:"Positive chat selection cap, not a coverage promise; at most 100000."`
 }
 
-type workIQSyncCmd struct{ workIQReadFlags }
+type workIQSyncCmd struct {
+	workIQReadFlags
+	Until    string `help:"Mail window end (exclusive), same forms as --since; default now. Mail sync with --since only."`
+	Coverage string `enum:"auto,proof,fast" default:"auto" help:"Mail window mode: auto picks per folder, proof follows every folder's changes and can prove the range complete, fast lists the range and never proves it."`
+}
 type workIQCoverageCmd struct{ workIQReadFlags }
 type workIQStatusCmd struct {
 	Source string `enum:"all,mail,chats" default:"all" help:"WorkIQ source family to probe."`
@@ -94,8 +99,59 @@ func explicitWorkIQFlags(kctx *kong.Context) workIQExplicitFlags {
 }
 
 func (c workIQSyncCmd) Run(rt *runtime, flags workIQExplicitFlags) error {
-	return rt.runWorkIQ("sync", c.workIQReadFlags, flags)
+	window, err := rt.workIQMailWindow(c)
+	if err != nil {
+		return err
+	}
+	if window != nil {
+		c.Since = ""
+	}
+	return rt.runWorkIQWindow("sync", c.workIQReadFlags, flags, window)
 }
+
+// workIQMailWindow reads a mail sync's --since/--until/--coverage as a fixed UTC window of whole
+// seconds, its start rounded down and its end up; nil when the sync is not a mail window.
+func (rt *runtime) workIQMailWindow(c workIQSyncCmd) (*syncer.WorkIQMailWindow, error) {
+	mail := c.Source == "mail" || strings.HasPrefix(rt.g.Account, "outlook/")
+	if !mail || c.Since == "" {
+		if c.Until != "" || c.Coverage != "auto" {
+			return nil, errs.Usage("--until and --coverage select a mail window: use them with --source mail and --since")
+		}
+		return nil, nil
+	}
+	since, err := rt.when("--since", c.Since)
+	if err != nil {
+		return nil, err
+	}
+	until, err := rt.when("--until", c.Until)
+	if err != nil {
+		return nil, err
+	}
+	now := workIQWindowNow()
+	if until.IsZero() {
+		until = now
+	}
+	since = since.UTC().Truncate(time.Second)
+	if t := until.UTC().Truncate(time.Second); t.Before(until) {
+		until = t.Add(time.Second)
+	} else {
+		until = t
+	}
+	if until.After(now) {
+		until = now.UTC().Truncate(time.Second)
+	}
+	if !since.Before(until) {
+		return nil, errs.Usage("the mail window must start before it ends, and it cannot reach past now")
+	}
+	coverage := c.Coverage
+	if coverage == "auto" {
+		coverage = ""
+	}
+	return &syncer.WorkIQMailWindow{Since: since, Until: until, Coverage: coverage}, nil
+}
+
+// workIQWindowNow is the clock a mail window's default end reads; a test seam.
+var workIQWindowNow = time.Now
 
 func (c workIQCoverageCmd) Run(rt *runtime, flags workIQExplicitFlags) error {
 	return rt.runWorkIQ("coverage", c.workIQReadFlags, flags)
@@ -121,12 +177,16 @@ func (rt *runtime) workIQInvocation() workiq.Invocation {
 }
 
 func (rt *runtime) runWorkIQ(kind string, flags workIQReadFlags, explicit workIQExplicitFlags) error {
+	return rt.runWorkIQWindow(kind, flags, explicit, nil)
+}
+
+func (rt *runtime) runWorkIQWindow(kind string, flags workIQReadFlags, explicit workIQExplicitFlags, window *syncer.WorkIQMailWindow) error {
 	if err := rt.checkWorkIQLinks(); err != nil {
 		return err
 	}
 	mailOnly := flags.Source == "mail" || strings.HasPrefix(rt.g.Account, "outlook/")
 	if mailOnly && (flags.Since != "" || explicit.MaxChats) {
-		return errs.Usage("--since and --max-chats select chats, not mail")
+		return errs.Usage("--max-chats selects chats, not mail, and --since selects a mail window only for workiq sync")
 	}
 	if flags.MaxChats < 1 || flags.MaxChats > 100000 {
 		return errs.Usage("--max-chats must be between 1 and 100000")
@@ -140,7 +200,7 @@ func (rt *runtime) runWorkIQ(kind string, flags workIQReadFlags, explicit workIQ
 		return err
 	}
 	report, err := runWorkIQSyncer(rt.ctx, syncer.WorkIQOptions{DBPath: rt.dbPath, Source: flags.Source,
-		Account: rt.g.Account, Kind: kind, Since: since, MaxChats: flags.MaxChats, Invocation: rt.workIQInvocation()})
+		Account: rt.g.Account, Kind: kind, Since: since, MaxChats: flags.MaxChats, Invocation: rt.workIQInvocation(), Window: window})
 	report.Kind = kind
 	if report.Accounts == nil {
 		report.Accounts = []syncer.WorkIQAccountReport{}
@@ -183,6 +243,18 @@ func (r workIQResult) renderWorkIQ(rt *runtime) error {
 	fmt.Fprintf(&out, "WorkIQ %s: %s; enabled %t\n", r.Kind, r.Status, r.Enabled)
 	if r.Resumable {
 		fmt.Fprintf(&out, "resumable: mail sync kept its position; run the same command again to continue\n")
+	}
+	if w := r.Window; w != nil {
+		state := "not proven complete"
+		if w.Covered {
+			state = "proven complete"
+		}
+		modes := map[string]int{}
+		for _, f := range w.Folders {
+			modes[f.Mode]++
+		}
+		fmt.Fprintf(&out, "mail window %s to %s (received): %s; %d folders (%d delta, %d listing)\n",
+			w.Since.UTC().Format(time.RFC3339), w.Until.UTC().Format(time.RFC3339), state, len(w.Folders), modes["delta"], modes["listing"])
 	}
 	for _, account := range r.Accounts {
 		fmt.Fprintf(&out, "%s %s: %s\n", account.Family, oneLine(account.Account), account.Status)

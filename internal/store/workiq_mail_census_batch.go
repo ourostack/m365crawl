@@ -21,19 +21,23 @@ func loadWorkIQCensusMailRows(ctx context.Context, tx *sql.Tx, account string, a
 	var out []workIQCensusMailRow
 	err := eachRow(ctx, tx, `select item_rowid,graph_id,json_extract(server_projection,'$.ID'),json_type(server_projection,'$.ID'),
 json_extract(server_projection,'$.InternetMessageID'),json_type(server_projection,'$.InternetMessageID'),server_seen_at,server_gone_at,server_first_missing_census,
-server_deleted_at,server_version,server_deleted_version from workiq_rows where kind='mail' and account_id=? and item_rowid>? order by item_rowid limit ?`,
+server_deleted_at,server_version,server_deleted_version,identity_unproven from workiq_rows where kind='mail' and account_id=? and item_rowid>? order by item_rowid limit ?`,
 		[]any{account, after, limit}, func(row *sql.Rows) error {
 			var item workIQCensusMailRow
 			var graph string
 			var id, idType, header, headerType sql.NullString
 			var seen, gone, deleted, liveVersion, deletedVersion sql.NullString
-			if err := row.Scan(&item.id, &graph, &id, &idType, &header, &headerType, &seen, &gone, &item.first, &deleted, &liveVersion, &deletedVersion); err != nil {
+			var unproven bool
+			if err := row.Scan(&item.id, &graph, &id, &idType, &header, &headerType, &seen, &gone, &item.first, &deleted, &liveVersion, &deletedVersion, &unproven); err != nil {
 				return err
 			}
 			if idType.String != "text" || id.String != graph || headerType.String != "text" {
 				return errors.New("invalid retained server mail identity")
 			}
 			item.normalized = workiq.NormalizeMessageID(header.String)
+			if item.normalized == "" && unproven {
+				return nil // a window row whole-account never saw: no Message-ID, so no absence inference
+			}
 			if item.normalized == "" {
 				return errors.New("unknown mail identity prevents a gap-free absence census")
 			}

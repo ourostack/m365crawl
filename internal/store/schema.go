@@ -54,11 +54,14 @@ import "github.com/ourostack/m365crawl/internal/calendar"
 // stored folder alone.
 // Version 26 adds the directed write log (directed_writes.go): one row per accepted directed
 // write and its append-only events. It is additive and stays empty until the person turns writes
-// on. (Version 25 is reserved by a concurrent change; the number is settled at merge.)
+// on.
 // Version 28 adds directed_write_drafts, the reply drafts directed writes make before they send
-// them (directed_writes.go). It is additive. (Version 27 is taken by a concurrent change; the
-// number is settled at merge.)
-const SchemaVersion = 28
+// them (directed_writes.go). It is additive.
+// Version 29 adds WorkIQ mail windows (workiq_window_schema.go): the mail_window attempt kind, the
+// window member and coverage tables, staged page body receipts and the identity_unproven mark on
+// server rows. An archive at version 22 through 28 gains them on its next writable open: the
+// migration checks the tables themselves, not the recorded version.
+const SchemaVersion = 29
 
 // DerivationVersion numbers how the mappers turn a Teams record into the archive's derived
 // fields: message text and sender name, and the display name of a conversation. It is stored as
@@ -233,4 +236,4 @@ create table if not exists calendar_losses(
 
 // schemaDDL is every table the archive has: the Teams tables above, the calendar tables, the mail
 // tables and the meeting transcript tables.
-var schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL + engageContentSchemaDDL + attendeeSchemaDDL() + scoutSchemaDDL + workiqSchemaDDL + workiqDocumentSchemaDDL + directedWriteSchemaDDL
+var schemaDDL = teamsSchemaDDL + calendar.SchemaDDL + calendarSchemaDDL + mailSchemaDDL + transcriptsSchemaDDL + knowledgeSchemaDDL + peopleObservationsSchemaDDL + documentObservationsSchemaDDL + messageApplicationsSchemaDDL + loopObservationsSchemaDDL + cloudContentSchemaDDL + localTextSchemaDDL + engageContentSchemaDDL + attendeeSchemaDDL() + scoutSchemaDDL + workiqSchemaDDL + workiqDocumentSchemaDDL + directedWriteSchemaDDL + workiqWindowSchemaDDL

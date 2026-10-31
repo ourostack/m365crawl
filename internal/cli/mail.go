@@ -779,7 +779,7 @@ func (c *mailListCmd) Run(rt *runtime) error {
 				return nil, err
 			}
 		}
-		if res.WorkIQRoutes, err = rt.sinceRoutes(st, sc.coverage, since); err != nil {
+		if res.WorkIQRoutes, err = rt.sinceRoutes(st, sc.coverage, since, until, c.Folder != ""); err != nil {
 			return nil, err
 		}
 		if !since.IsZero() || !until.IsZero() {
