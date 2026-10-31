@@ -271,7 +271,7 @@ func dump(t *testing.T, s *Store) string {
 	t.Helper()
 	var b strings.Builder
 	// Source progress and aliases are part of the same rollback promise as items and FTS.
-	for _, tbl := range []string{"workiq_accounts", "workiq_attempts", "workiq_frontiers", "workiq_pages", "workiq_rows", "workiq_aliases", "workiq_source_keys", "workiq_folders", "workiq_censuses", "workiq_census_members", "workiq_gaps", "workiq_mail_receipts"} {
+	for _, tbl := range []string{"workiq_accounts", "workiq_attempts", "workiq_frontiers", "workiq_pages", "workiq_rows", "workiq_aliases", "workiq_source_keys", "workiq_folders", "workiq_censuses", "workiq_census_members", "workiq_gaps", "workiq_mail_receipts", "workiq_window_members", "workiq_window_coverage"} {
 		rows, err := s.cs.DB().Query(`select rowid, * from ` + tbl + ` order by rowid`)
 		if err != nil {
 			t.Fatalf("dump %s: %v", tbl, err)

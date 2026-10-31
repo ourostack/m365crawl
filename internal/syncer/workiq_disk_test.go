@@ -41,7 +41,7 @@ func TestWorkIQMailSyncRefusesUpFrontWhenAdmissionWouldNotFit(t *testing.T) {
 	if !errors.As(err, &coded) || coded.Code != "workiq_disk_space" || report.Resumable || report.Gaps["workiq_disk_space"] != 1 {
 		t.Fatal("a sync that could not admit what it fetched was not refused", err, report.Resumable)
 	}
-	if !strings.Contains(coded.Fix, "ourostack/m365crawl#262") || !strings.Contains(coded.Fix, "6 more items") || !strings.Contains(coded.Fix, "position is kept") {
+	if !strings.Contains(coded.Fix, "--since and --until") || !strings.Contains(coded.Fix, "6 more items") || !strings.Contains(coded.Fix, "position is kept") {
 		t.Fatal("the refusal did not say why, what is kept, or where range backfill is tracked:", coded.Fix)
 	}
 	if stagedWorkIQMessagePages(t, db) != 0 || report.Counts["disk_inventory_items"] != 6 || report.Counts["disk_needed_bytes"] != int(full) ||
