@@ -65,7 +65,12 @@ func TestWorkIQReadCommandsRejectConflictingChatAndLinkOptions(t *testing.T) {
 	e.emptyArchive()
 	t.Setenv("M365CRAWL_WORKIQ_BIN", filepath.Join(t.TempDir(), "must-not-start"))
 	for _, args := range [][]string{
-		{"workiq", "sync", "--source", "mail", "--since", "2w"},
+		{"workiq", "coverage", "--source", "mail", "--since", "2w"},
+		{"workiq", "sync", "--source", "mail", "--until", "2026-09-08"},
+		{"workiq", "sync", "--source", "chats", "--coverage", "proof"},
+		{"workiq", "sync", "--source", "mail", "--since", "2026-09-08", "--until", "2026-09-01"},
+		{"workiq", "sync", "--source", "mail", "--since", "2026-09-01", "--until", "unparseable"},
+		{"workiq", "sync", "--source", "mail", "--since", "unparseable"},
 		{"workiq", "coverage", "--source", "mail", "--max-chats", "200"},
 		{"workiq", "sync", "--max-chats", "0"},
 		{"workiq", "sync", "--since", "unparseable"},

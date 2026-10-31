@@ -391,6 +391,8 @@ func (r *workIQWindowRun) choose(ctx context.Context, folder workiq.Folder) (*wo
 	if f.nOpen, err = r.count(ctx, folder.ID, since); err != nil {
 		return nil, err
 	}
+	r.report.Counts["window_items"] += int(f.nWindow)
+	r.report.Counts["window_items_open"] += int(f.nOpen)
 	f.mode = "delta"
 	switch {
 	case r.window.Coverage == "fast":
