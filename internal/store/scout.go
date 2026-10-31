@@ -149,11 +149,15 @@ on conflict(source_id,device_id,file_name) do update set state=excluded.state, r
 	case state == ScoutArchived:
 		var observation int64
 		var stamp string
-		err = tx.QueryRowContext(ctx, `select id,stamp from scout_observations where file_id=? and digest=?`, fileID, in.Digest).Scan(&observation, &stamp)
+		var blank bool
+		err = tx.QueryRowContext(ctx, `select id,stamp,raw_json='' from scout_observations where file_id=? and digest=?`, fileID, in.Digest).
+			Scan(&observation, &stamp, &blank)
 		switch {
-		case err == nil && stamp == run.Stamp:
+		case err == nil && stamp == run.Stamp && !blank:
 			outcome = "unchanged"
 		case err == nil:
+			// Another stamp, or a version a re-scrub blanked because it no longer mapped: this
+			// fresh read of the same bytes stores it again.
 			outcome = "rescrubbed"
 			if err = rewriteScoutObservation(ctx, tx, observation, run.Stamp, in.Raw, in.Redactions, in.Session); err != nil {
 				return "", err
@@ -386,8 +390,9 @@ func rescrubScoutObservation(ctx context.Context, conn *sql.Conn, id int64, stam
 // FinishScoutRescrub completes a re-scrub, including one an earlier run left unfinished: it merges
 // the FTS index (FTS5 keeps a replaced row's tokens until its segments merge) with secure_delete on,
 // checkpoints and truncates the write-ahead log, then clears the pending mark. With nothing pending
-// it only reads the mark. A checkpoint blocked by a concurrent reader is not an error: the mark is
-// cleared and a later checkpoint truncates the log.
+// it only reads the mark. A checkpoint blocked by a concurrent reader (busy) is not an error, but
+// the mark stays, so the next sync merges and truncates again; the log can hold replaced text until
+// then. journal_size_limit is not needed: the truncating checkpoint empties the log file itself.
 func (s *Store) FinishScoutRescrub(ctx context.Context) (err error) {
 	var pending int
 	if err = s.db.QueryRowContext(ctx, `select count(*) from meta where key=?`, scoutMergePending).Scan(&pending); err != nil || pending == 0 {
@@ -402,7 +407,7 @@ func (s *Store) FinishScoutRescrub(ctx context.Context) (err error) {
 		return err
 	}
 	var busy, frames, done int
-	if err = s.db.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done); err != nil {
+	if err = s.db.QueryRowContext(ctx, `pragma wal_checkpoint(truncate)`).Scan(&busy, &frames, &done); err != nil || busy != 0 {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `delete from meta where key=?`, scoutMergePending)

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -681,5 +682,92 @@ func TestScoutFinishRescrubFaults(t *testing.T) {
 	cancel()
 	if err := s.FinishScoutRescrub(ctx); err == nil {
 		t.Fatal("cancelled finish succeeded")
+	}
+}
+
+func scoutMergePendingCount(t *testing.T, s *Store) int {
+	t.Helper()
+	var n int
+	if err := s.cs.DB().QueryRow(`select count(*) from meta where key=?`, scoutMergePending).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A reader that blocks the truncating checkpoint keeps the pending mark, so a later sync truncates.
+func TestScoutFinishRescrubKeepsItsMarkWhileAReaderBlocksTheCheckpoint(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	if _, err := s.RescrubScout(ctx, scoutStampB, redactWord("quarterly", false)); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := sql.Open("sqlite", sqliteFileURI(s.cs.Path(), "_pragma=busy_timeout(100)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	tx, err := reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `select count(*) from scout_observations`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	s.db.SetMaxOpenConns(1)
+	if _, err := s.db.ExecContext(ctx, `pragma busy_timeout=100`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishScoutRescrub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if scoutMergePendingCount(t, s) != 1 {
+		t.Fatal("the mark was cleared although the log could not be truncated")
+	}
+	_ = tx.Rollback()
+	if err := s.FinishScoutRescrub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if scoutMergePendingCount(t, s) != 0 {
+		t.Fatal("the mark survived a truncated log")
+	}
+}
+
+// A version blanked because it no longer mapped is restored from a fresh read of the same bytes.
+func TestScoutBlankedObservationIsRestoredByAFreshRead(t *testing.T) {
+	s := newStore(t)
+	setupScoutArchive(t, s)
+	ctx := context.Background()
+	breakOne := func(raw []byte) ([]byte, int) {
+		if strings.Contains(string(raw), `"b-1"`) {
+			return []byte("not json"), 0
+		}
+		return raw, 0
+	}
+	if n, err := s.RescrubScout(ctx, scoutStampB, breakOne); err != nil || n.Unparseable != 1 {
+		t.Fatalf("%+v %v", n, err)
+	}
+	run, err := s.BeginScoutRun(ctx, "darwin", "/synthetic/Apps/Scout", scoutStampB, scoutBase.Add(3*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := scoutRead(t, scoutDevB, "b-1.json", scoutBody("b-1", "Inbox triage", true, "triage the inbox", "two urgent threads"), scoutBase)
+	if got := mustCommitScout(t, s, run, in, scoutBase.Add(3*time.Hour)); got != "rescrubbed" {
+		t.Fatalf("outcome %s", got)
+	}
+	var raw, losses string
+	var messages int
+	if err := s.db.QueryRowContext(ctx, `select raw_json,losses_json,message_count from scout_observations where id=2`).Scan(&raw, &losses, &messages); err != nil {
+		t.Fatal(err)
+	}
+	if raw == "" || losses != `{}` || messages != 2 {
+		t.Fatalf("raw %q losses %s messages %d", raw, losses, messages)
+	}
+	if hits, _, _ := s.ScoutSearch(ctx, "urgent", ScoutFilter{}); len(hits) != 1 {
+		t.Fatalf("restored session not searchable: %d", len(hits))
+	}
+	if got := mustCommitScout(t, s, run, in, scoutBase.Add(3*time.Hour)); got != "unchanged" {
+		t.Fatalf("second read %s", got)
 	}
 }
