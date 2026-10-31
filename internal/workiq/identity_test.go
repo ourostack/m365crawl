@@ -151,3 +151,34 @@ func TestWorkIQAccountBindingFixedErrorsForMissingOrInvalidEvidence(t *testing.T
 	requireCode(t, err, "workiq_account_invalid")
 	requireCode(t, (AccountBinding{UserID: "user"}).Verify(User{ID: "user"}), "workiq_identity_mismatch")
 }
+
+// A sealed Windows mailbox identity is the account's only evidence: the user's own addresses must
+// seal to it, an account without it is never bootstrapped, and it pins no address before /me.
+func TestWorkIQSealedMailboxIdentityBindsOnlyTheUsersOwnMailbox(t *testing.T) {
+	own := func(mailbox, signedIn string) bool {
+		return mailbox == "person@example.test" && signedIn == "person.upn@example.test"
+	}
+	odd := func(mailbox, signedIn string) bool { return mailbox == "not an address" }
+	user := User{ID: "u", Mail: "Person@Example.test", UPN: "person.upn@example.test"}
+	facts := []AccountFact{
+		{ID: "outlook/Main/mailbox-2", Family: "mail", IdentityPresent: true, MatchMailbox: own},
+		{ID: "outlook/Main/mailbox-3", Family: "mail", IdentityPresent: true, MatchMailbox: odd},
+		{ID: "outlook/Main/mailbox-4", Family: "mail"},
+	}
+	binding, err := SelectMailAccount(user, facts, "outlook/Main/mailbox-2")
+	if err != nil || binding.Address != "person@example.test" || binding.Bootstrap {
+		t.Fatal("own sealed mailbox did not bind", err)
+	}
+	if binding, err := SelectMailAccount(user, facts, ""); err != nil || binding.Fact.ID != "outlook/Main/mailbox-2" {
+		t.Fatal("unselected own sealed mailbox did not bind", err)
+	}
+	_, err = SelectMailAccount(User{ID: "u", Mail: "  ", UPN: "other@example.test"}, facts, "outlook/Main/mailbox-2")
+	requireCode(t, err, "workiq_identity_mismatch")
+	_, err = SelectMailAccount(User{ID: "u", Mail: "not an address"}, facts, "outlook/Main/mailbox-3")
+	requireCode(t, err, "workiq_account_invalid")
+	_, err = SelectMailAccount(user, facts, "outlook/Main/mailbox-4")
+	requireCode(t, err, "workiq_account_invalid")
+	if address, err := facts[0].PinAddress(); address != "" || err != nil {
+		t.Fatal("a sealed mailbox pinned an address before WorkIQ named its user", address, err)
+	}
+}

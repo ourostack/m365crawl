@@ -12,6 +12,7 @@ import (
 // Test seams of the route's archive reads.
 var (
 	workIQMailComplete     = (*store.Store).WorkIQMailComplete
+	workIQMailBindable     = (*store.Store).WorkIQMailBindable
 	mailCoverageOf         = (*store.Store).MailCoverage
 	workIQMailDiskEstimate = (*store.Store).WorkIQMailDiskEstimate
 	workIQRouteFreeBytes   = store.FreeBytes
@@ -92,6 +93,10 @@ func (rt *runtime) repeatStep() startStep {
 func (rt *runtime) mailRoute(st *store.Store, account, reason, situation string) (r workIQRoute, ok bool, err error) {
 	done, err := workIQMailComplete(st, rt.ctx, account)
 	if err != nil || done {
+		return r, false, err
+	}
+	// A WorkIQ sync of an account WorkIQ cannot bind would only refuse, so it gets no route.
+	if bindable, err := workIQMailBindable(st, rt.ctx, account); err != nil || !bindable {
 		return r, false, err
 	}
 	setup, err := rt.workIQSetup(st)

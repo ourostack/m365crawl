@@ -200,21 +200,19 @@ func (s *Store) sourceHealth(ctx context.Context, stale bool) ([]SourceHealth, e
 			return err
 		}
 		if strings.HasPrefix(key, "workiq:") {
+			// A row that cannot be read as a WorkIQ outcome is that source's reported failure, not a
+			// failure of every read (withWorkIQHealth).
 			family, account, kind, valid := WorkIQSourceScope(key)
 			var scope []string
-			if !valid || !accounts.Valid || json.Unmarshal([]byte(accounts.String), &scope) != nil ||
-				len(scope) != 1 || scope[0] != account {
-				return errors.New("invalid archived WorkIQ outcome scope")
+			clock, clockErr := workIQStoredTime(at)
+			invalid := !valid || !accounts.Valid || json.Unmarshal([]byte(accounts.String), &scope) != nil ||
+				len(scope) != 1 || scope[0] != account || clockErr != nil || clock == nil || clock.IsZero()
+			outcome := workIQHealthOutcome{id: id, key: key, family: family, account: account, kind: kind,
+				status: status, code: code, invalid: invalid}
+			if !invalid {
+				outcome.at = *clock
 			}
-			clock, err := workIQStoredTime(at)
-			if err != nil {
-				return err
-			}
-			if clock == nil || clock.IsZero() {
-				return errors.New("WorkIQ outcome has no known completion clock")
-			}
-			workiqOutcomes = append(workiqOutcomes, workIQHealthOutcome{id: id, key: key,
-				family: family, account: account, kind: kind, status: status, code: code, at: *clock})
+			workiqOutcomes = append(workiqOutcomes, outcome)
 			return nil
 		}
 		a := attempts[key]

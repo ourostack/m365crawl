@@ -16,6 +16,15 @@ type AccountFact struct {
 	Addresses         []string `json:"-"`
 	IdentityPresent   bool     `json:"-"`
 	MultipleMailboxes bool     `json:"-"`
+	// MatchMailbox, when set, is the account's sealed Windows mailbox identity: it says whether a
+	// mailbox address and signed-in identity are that mailbox. It replaces Addresses as evidence.
+	MatchMailbox func(mailboxAddress, userIdentity string) bool `json:"-"`
+}
+
+// mailboxAccount says the account is a further mailbox of a Windows profile (outlook/<p>/mailbox-N),
+// which only its own recorded mailbox identity can bind.
+func (fact AccountFact) mailboxAccount() bool {
+	return strings.Contains(strings.TrimPrefix(fact.ID, "outlook/"), "/mailbox-")
 }
 
 type User struct {
@@ -34,6 +43,9 @@ type AccountBinding struct {
 func (fact AccountFact) PinAddress() (string, error) {
 	if fact.MultipleMailboxes {
 		return "", failure("workiq_multiple_mailboxes")
+	}
+	if fact.MatchMailbox != nil {
+		return "", nil // the sealed identity names no address; WorkIQ's own user is checked against it
 	}
 	addresses := make([]string, 0, len(fact.Addresses))
 	for _, address := range fact.Addresses {
@@ -77,6 +89,12 @@ func SelectMailAccount(user User, facts []AccountFact, selector string) (Account
 		if selector != "" && fact.MultipleMailboxes {
 			return AccountBinding{}, failure("workiq_multiple_mailboxes")
 		}
+		if !fact.IdentityPresent && fact.mailboxAccount() {
+			if selector != "" {
+				return AccountBinding{}, failure("workiq_account_invalid") // never bootstrapped to whoever WorkIQ has
+			}
+			continue
+		}
 		if !fact.IdentityPresent {
 			bootstrapNeeded = true
 			if selector == "" {
@@ -90,6 +108,13 @@ func SelectMailAccount(user User, facts []AccountFact, selector string) (Account
 			continue
 		}
 		matchedIdentity, address := false, ""
+		if fact.MatchMailbox != nil {
+			matchedIdentity, address = matchMailbox(fact, user)
+			if matchedIdentity {
+				matches = append(matches, AccountBinding{Fact: fact, UserID: user.ID, Address: address})
+			}
+			continue
+		}
 		for _, candidate := range []string{user.Mail, user.UPN} {
 			candidate = strings.ToLower(strings.TrimSpace(candidate))
 			matched := false
@@ -131,6 +156,28 @@ func SelectMailAccount(user User, facts []AccountFact, selector string) (Account
 	default:
 		return AccountBinding{}, failure("workiq_identity_mismatch")
 	}
+}
+
+// matchMailbox seals the WorkIQ user's own addresses as both the mailbox and the signed-in identity:
+// only the user's own mailbox matches, never another mailbox the profile opens.
+func matchMailbox(fact AccountFact, user User) (bool, string) {
+	var addresses []string
+	for _, address := range []string{user.Mail, user.UPN} {
+		if address = strings.ToLower(strings.TrimSpace(address)); address != "" {
+			addresses = append(addresses, address)
+		}
+	}
+	for _, mailbox := range addresses {
+		for _, signedIn := range addresses {
+			if fact.MatchMailbox(mailbox, signedIn) {
+				if !validAccount(mailbox) {
+					return true, ""
+				}
+				return true, mailbox
+			}
+		}
+	}
+	return false, ""
 }
 
 func SelectChatAccount(user User, chat Chat, facts []AccountFact, selector string) (AccountBinding, error) {

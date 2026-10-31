@@ -19,6 +19,7 @@ type workIQHealthOutcome struct {
 	key, family, account, kind string
 	status, code               string
 	at                         time.Time
+	invalid                    bool // the row is not a readable outcome
 }
 
 type workIQHealthState struct {
@@ -60,17 +61,20 @@ func (s *Store) withWorkIQHealth(ctx context.Context, native []SourceHealth, out
 		known[fact.Family+"\x00"+fact.ID] = true
 	}
 	groups := map[string]map[string]*workIQHealthState{}
+	invalid := map[string]workIQHealthOutcome{} // by key: rows that are not outcomes, unless a valid one follows
 	now := workIQHealthNow()
 	for _, outcome := range outcomes {
 		group := outcome.family + "\x00" + outcome.account
-		if !known[group] || outcome.at.IsZero() || outcome.at.After(now) {
-			return nil, errors.New("invalid archived WorkIQ outcome owner or clock")
-		}
 		switch outcome.status {
 		case "ok", "ok_with_omissions", "failed", "partial":
 		default:
-			return nil, errors.New("invalid archived WorkIQ outcome state")
+			outcome.invalid = true
 		}
+		if outcome.invalid || !known[group] || outcome.at.IsZero() || outcome.at.After(now) {
+			invalid[outcome.key] = outcome
+			continue
+		}
+		delete(invalid, outcome.key)
 		if groups[group] == nil {
 			groups[group] = map[string]*workIQHealthState{}
 		}
@@ -123,8 +127,8 @@ func (s *Store) withWorkIQHealth(ctx context.Context, native []SourceHealth, out
 				}
 			}
 		}
-		if selected == nil {
-			continue
+		if selected == nil || invalid[selected.latest.key].key != "" {
+			continue // a later unreadable row of the same scope is reported instead
 		}
 		outcome := selected.latest
 		status := outcome.status
@@ -143,6 +147,20 @@ func (s *Store) withWorkIQHealth(ctx context.Context, native []SourceHealth, out
 		native = append(native, SourceHealth{SourceKey: outcome.key, Source: "workiq", WorkIQFamily: outcome.family,
 			AccountID: &account, DoctorCheck: &doctor, State: state, LastErrorCode: outcome.code,
 			LastOKAt: healthTime(selected.lastOK), LastDiagnostic: diagnostic})
+	}
+	bad := make([]string, 0, len(invalid))
+	for key := range invalid {
+		bad = append(bad, key)
+	}
+	sort.Strings(bad)
+	for _, key := range bad {
+		outcome, doctor := invalid[key], "workiq"
+		h := SourceHealth{SourceKey: key, Source: "workiq", WorkIQFamily: outcome.family, DoctorCheck: &doctor,
+			State: "failing", LastErrorCode: WorkIQOutcomeInvalid}
+		if outcome.account != "" {
+			h.AccountID = &outcome.account
+		}
+		native = append(native, h)
 	}
 	return native, nil
 }
@@ -215,3 +233,7 @@ func (s *Store) workIQAttemptDiagnostic(ctx context.Context, attempt int64) (*wo
 	}
 	return &d, nil
 }
+
+// WorkIQOutcomeInvalid is the reported code of a WorkIQ source whose latest archived outcome row
+// cannot be read as one, so that row degrades to its source's failure instead of failing every read.
+const WorkIQOutcomeInvalid = "workiq_outcome_invalid"

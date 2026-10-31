@@ -46,8 +46,11 @@ func TestWorkIQMalformedHealthKeysAndOwnerScopeCannotBecomeCheckedEmpty(t *testi
 			must0(s.SetWorkIQEnabled(ctx, true))
 			must(s.db.ExecContext(ctx, `insert into sync_runs(source,status,error_code,started_at,finished_at,source_accounts_json) values(?,'failed','workiq_failed',?,?,?)`,
 				tc.key, fmtTime(mailT0), fmtTime(mailT0), tc.scope))
-			if _, err := s.SourceHealth(ctx); err == nil {
-				t.Fatal("malformed WorkIQ outcome/owner became a false checked-empty or mismatched health entry")
+			// A bad row degrades to a reported failure of that source instead of failing every read.
+			health, err := s.SourceHealth(ctx)
+			if err != nil || len(health) != 1 || health[0].Source != "workiq" || health[0].State != "failing" ||
+				health[0].LastErrorCode != WorkIQOutcomeInvalid || health[0].SourceKey != tc.key {
+				t.Fatal("malformed WorkIQ outcome/owner became a false checked-empty or failed every read", err, health)
 			}
 		})
 	}
@@ -120,11 +123,8 @@ values(?,?,?,'ok','',?),(?,?,?,'failed','outlook_mail_layout_unsupported',?)`,
 			workIQHealthNow = func() time.Time { return now }
 			t.Cleanup(func() { workIQHealthNow = old })
 			rows, err := s.SourceHealth(ctx)
-			if mode == "future" {
-				if err == nil {
-					t.Fatal("future data completion became trusted health")
-				}
-				return
+			if mode == "future" && !slices.ContainsFunc(rows, func(h SourceHealth) bool { return h.LastErrorCode == WorkIQOutcomeInvalid }) {
+				t.Fatal("future data completion became trusted health", err)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -212,8 +212,18 @@ func TestWorkIQHealthReceiptAndOutcomeCorruptionFailClosed(t *testing.T) {
 			workIQHealthNow = func() time.Time { return mailT0.Add(2 * time.Hour) }
 			t.Cleanup(func() { workIQHealthNow = old })
 			must(s.db.ExecContext(ctx, change))
-			if _, err := s.SourceHealth(ctx); err == nil {
-				t.Fatal("corrupt source/receipt evidence became checked-empty or covering health")
+			rows, err := s.SourceHealth(ctx)
+			if strings.Contains(change, "workiq_mail_receipts") {
+				if err == nil {
+					t.Fatal("corrupt receipt evidence became checked-empty or covering health")
+				}
+				return
+			}
+			// A corrupt outcome row is reported as its source's failure and never covers the mail.
+			covered := slices.ContainsFunc(rows, func(h SourceHealth) bool { return h.State == "covered_by_server" })
+			degraded := slices.ContainsFunc(rows, func(h SourceHealth) bool { return h.LastErrorCode == WorkIQOutcomeInvalid })
+			if err != nil || covered || !degraded {
+				t.Fatal("corrupt outcome evidence became checked-empty, covering health or a failure of every read", err, rows)
 			}
 		})
 	}
@@ -321,5 +331,52 @@ func TestReadSourceHealthLetsWorkIQCoverAStaleMailCache(t *testing.T) {
 		if OutlookCacheStale(must(s.SourceHealth(ctx)), "outlook_mail", mailAcct) != nil {
 			t.Fatal("failures-only health carried a stale cache entry")
 		}
+	}
+}
+
+// Live review: sync's profile retirement once wrote a WorkIQ key as an Outlook outcome, and every
+// later read failed on it. Such a row is that source's reported failure until a valid outcome of
+// the same scope follows it; RecordRun refuses WorkIQ keys outright.
+func TestWorkIQInvalidOutcomeRowDegradesToItsSourcesFailure(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	attempt := seedWorkIQMailAttempt(t, s)
+	old := workIQHealthNow
+	workIQHealthNow = func() time.Time { return mailT0.Add(time.Hour) }
+	t.Cleanup(func() { workIQHealthNow = old })
+	key := `workiq:["mail","` + mailAcct + `"]`
+	if err := s.RecordRun(ctx, Run{Source: key, Status: "unavailable", ErrorCode: "no_profile", StartedAt: mailT0, FinishedAt: mailT0}); err == nil {
+		t.Fatal("RecordRun wrote a WorkIQ outcome")
+	}
+	clock := func(at time.Time) string { return fmtTime(at).(string) }
+	for _, row := range []struct{ status, scope, at string }{
+		{"unavailable", "", clock(mailT0)},                                   // the retirement row: no account scope
+		{"failed", `["` + mailAcct + `"]`, "not a clock"},                    // unreadable clock
+		{"failed", `["` + mailAcct + `"]`, ""},                               // no clock
+		{"unknown", `["` + mailAcct + `"]`, clock(mailT0)},                   // unknown state
+		{"failed", `["` + mailAcct + `"]`, clock(mailT0.Add(2 * time.Hour))}, // a future clock
+	} {
+		must(s.db.ExecContext(ctx, `delete from sync_runs where source like 'workiq:%'`))
+		var scope any
+		if row.scope != "" {
+			scope = row.scope
+		}
+		must(s.db.ExecContext(ctx, `insert into sync_runs(source,status,error_code,started_at,finished_at,source_accounts_json) values(?,?,'no_profile',?,?,?)`,
+			key, row.status, fmtTime(mailT0), row.at, scope))
+		health, err := s.SourceHealth(ctx)
+		if err != nil || len(health) != 1 || health[0].LastErrorCode != WorkIQOutcomeInvalid || health[0].WorkIQFamily != "mail" ||
+			health[0].AccountID == nil || *health[0].AccountID != mailAcct {
+			t.Fatalf("%+v: bad outcome row did not degrade to its source's failure: %v %+v", row, err, health)
+		}
+	}
+	must(s.db.ExecContext(ctx, `delete from sync_runs where source like 'workiq:%'`))
+	must(s.db.ExecContext(ctx, `insert into sync_runs(source,status,error_code,started_at,finished_at) values(?,'unavailable','no_profile',?,?)`, key, fmtTime(mailT0), fmtTime(mailT0)))
+	must0(s.CompleteWorkIQAttempt(ctx, attempt, WorkIQSummary{Status: "failed", ErrorCode: "workiq_failed", FinishedAt: mailT0.Add(time.Minute)}))
+	if health := must(s.SourceHealth(ctx)); len(health) != 1 || health[0].LastErrorCode != "workiq_failed" {
+		t.Fatalf("a later valid outcome did not replace the bad row: %+v", health)
+	}
+	must(s.db.ExecContext(ctx, `insert into sync_runs(source,status,error_code,started_at,finished_at) values(?,'unavailable','no_profile',?,?)`, key, fmtTime(mailT0), fmtTime(mailT0)))
+	if health := must(s.SourceHealth(ctx)); len(health) != 1 || health[0].LastErrorCode != WorkIQOutcomeInvalid {
+		t.Fatalf("a later bad row did not replace the earlier outcome: %+v", health)
 	}
 }

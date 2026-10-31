@@ -440,6 +440,9 @@ const successStatuses = `('ok','ok_with_omissions','unchanged')`
 func (s *Store) RecordRun(ctx context.Context, r Run) error { return recordRun(ctx, s.db, r) }
 
 func recordRun(ctx context.Context, db execer, r Run) error {
+	if strings.HasPrefix(r.Source, "workiq:") {
+		return errors.New("a WorkIQ outcome is written only with its attempt")
+	}
 	var counts, omissions any
 	if r.Counts != nil {
 		b, err := json.Marshal(r.Counts)

@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
 
+	"github.com/ourostack/m365crawl/internal/outlookowa"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 	"github.com/ourostack/m365crawl/internal/workiq"
 )
@@ -79,11 +81,26 @@ union select account_id from calendar_account_links where source='outlook'`, fun
 	if err != nil {
 		return nil, err
 	}
+	seal, err := owaSeal(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	err = s.each(ctx, `select key,value from meta where key like 'outlook\_identity:%' escape '\'
-or key like 'outlook\_mail\_failure:%' escape '\' or key like 'outlook\_failure:%' escape '\'`, func(rs *sql.Rows) error {
+or key like 'outlook\_mail\_failure:%' escape '\' or key like 'outlook\_failure:%' escape '\'
+or key like 'outlook\_mailbox\_identity:%' escape '\'`, func(rs *sql.Rows) error {
 		var key, value string
 		if err := rs.Scan(&key, &value); err != nil {
 			return err
+		}
+		if id, ok := strings.CutPrefix(key, owaMailboxIdentityKey); ok {
+			// A Windows mailbox's identity is sealed: it identifies a mailbox only to a caller that
+			// seals the same mailbox and signed-in addresses with this archive's key.
+			fact := outlook(id)
+			fact.IdentityPresent = true
+			fact.MatchMailbox = func(mailboxAddress, userIdentity string) bool {
+				return seal != nil && hmac.Equal([]byte(sealIdentity(seal, outlookowa.MailboxIdentity(mailboxAddress, userIdentity))), []byte(value))
+			}
+			return nil
 		}
 		if id, ok := strings.CutPrefix(key, outlookIdentityKey); ok {
 			fact := outlook(id)
@@ -166,4 +183,12 @@ where source=? and database=? and store=? and key_json=? and removed_at is null`
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+// WorkIQMailBindable says whether WorkIQ could bind the Outlook mail account at all: a further
+// mailbox of a Windows profile binds only through its recorded mailbox identity, never by bootstrap.
+func (s *Store) WorkIQMailBindable(ctx context.Context, account string) (bool, error) {
+	var bound bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from meta where key=?)`, owaMailboxIdentityKey+account).Scan(&bound)
+	return bound || !strings.Contains(account, OWAMailboxInfix), err
 }

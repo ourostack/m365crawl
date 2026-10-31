@@ -315,3 +315,17 @@ func TestWorkIQRouteFailuresFailTheRead(t *testing.T) {
 		}
 	}
 }
+
+// An account WorkIQ cannot bind, such as a further Windows mailbox without a recorded identity,
+// gets no route: its sync would only refuse.
+func TestOlderMailRouteSkipsAnAccountWorkIQCannotBind(t *testing.T) {
+	e := routeEnv(t)
+	old := workIQMailBindable
+	t.Cleanup(func() { workIQMailBindable = old })
+	workIQMailBindable = func(*store.Store, context.Context, string) (bool, error) { return false, nil }
+	if routes := routesOf(t, mailJSON(t, e, "mail", "list", "--since", "2026-01-01")); routes != nil {
+		t.Fatalf("an unbindable account got a route: %v", routes)
+	}
+	workIQMailBindable = func(*store.Store, context.Context, string) (bool, error) { return false, errors.New("broken") }
+	mailFails(t, e, "db_error", 1, "mail", "list", "--since", "2026-01-01")
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,15 +26,11 @@ func TestWorkIQHealthScopesActualReadsIndependentlyOfLocalOutlook(t *testing.T) 
 	if err := st.SetWorkIQEnabled(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	for _, scope := range [][2]string{{"mail", mailAccount}, {"chats", tenantA + "/" + userA}} {
-		key, _ := json.Marshal([]string{scope[0], scope[1]})
-		if err := st.RecordRun(ctx, store.Run{Source: "workiq:" + string(key), Status: "failed", ErrorCode: "workiq_policy_denied",
-			StartedAt: mailT0, FinishedAt: mailT0, SourceAccounts: []string{scope[1]}}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
+	}
+	for _, scope := range [][2]string{{"mail", mailAccount}, {"chats", tenantA + "/" + userA}} {
+		seedWorkIQOutcome(e, scope[0], scope[1], "failed", "workiq_policy_denied", mailT0)
 	}
 	for _, tc := range []struct {
 		args []string
@@ -126,4 +123,15 @@ func TestWorkIQUnknownHealthFamilyIsNeverTreatedAsTeams(t *testing.T) {
 	if sourceHealthFamily(store.SourceHealth{Source: "workiq", WorkIQFamily: "unsupported"}) != "" {
 		t.Fatal("unknown optional family fell through to native Teams scope")
 	}
+}
+
+// seedWorkIQOutcome stands in for a settled WorkIQ attempt's outcome row; RecordRun refuses WorkIQ
+// keys because only the attempt writer may write them.
+func seedWorkIQOutcome(e *env, family, account, status, code string, at time.Time) {
+	e.t.Helper()
+	key, _ := json.Marshal([]string{family, account})
+	scope, _ := json.Marshal([]string{account})
+	clock := at.UTC().Format("2006-01-02T15:04:05.000Z")
+	e.exec(fmt.Sprintf(`insert into sync_runs(started_at,finished_at,source,status,error_code,source_accounts_json) values('%s','%s','workiq:%s','%s','%s','%s')`,
+		clock, clock, key, status, code, scope))
 }

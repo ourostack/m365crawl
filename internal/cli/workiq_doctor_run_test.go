@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/store"
@@ -17,14 +16,10 @@ func TestDoctorLastSyncIgnoresWorkIQRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := json.Marshal([]string{"mail", mailAccount})
-	if err := st.RecordRun(context.Background(), store.Run{Source: "workiq:" + string(key), Status: "failed", ErrorCode: "workiq_failed",
-		StartedAt: mailT0, FinishedAt: mailT0, SourceAccounts: []string{mailAccount}}); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
+	seedWorkIQOutcome(e, "mail", mailAccount, "failed", "workiq_failed", mailT0)
 	_, out, _ := e.run("--json", "doctor")
 	for _, raw := range decode(t, out)["checks"].([]any) {
 		c := raw.(map[string]any)
