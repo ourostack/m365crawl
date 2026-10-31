@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -1491,7 +1492,8 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 			warns = append(warns, m["name"].(string))
 		}
 	}
-	if len(warns) != 1 || warns[0] != "archive_upgrade" {
+	// An archive an older version wrote also still needs its one-time VACUUM, which the sync runs.
+	if !slices.Equal(warns, []string{"archive_upgrade", "vacuum_pending"}) {
 		t.Fatalf("warnings %v: %s", warns, res.stdout)
 	}
 	e.sync()
@@ -1502,7 +1504,7 @@ func TestE2EAlpha1ArchiveUpgradeFlow(t *testing.T) {
 			t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 		}
 	}
-	if strings.Contains(res.stdout, "archive_upgrade") {
+	if strings.Contains(res.stdout, "archive_upgrade") || strings.Contains(res.stdout, "vacuum_pending") {
 		t.Fatalf("doctor must be clean after the sync: %s", res.stdout)
 	}
 }
