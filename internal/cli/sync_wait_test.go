@@ -260,13 +260,26 @@ func TestReadWaitingForAnotherRunStopsOnCancel(t *testing.T) {
 	e.sync()
 	shortLockWait(t, 10*time.Second)
 	holdLock(t, e.db, nil, 5*time.Second, false)
+	// A loaded runner: the read takes longer than a fixed timer to reach the lock wait (#311).
+	old := runSync
+	runSync = func(ctx context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		time.Sleep(300 * time.Millisecond)
+		return old(ctx, o)
+	}
+	t.Cleanup(func() { runSync = old })
+	// Cancel exactly when the read starts waiting: it prints its waiting notice just before the
+	// wait, so no timer decides whether the wait's cancellation path runs.
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(200*time.Millisecond, cancel)
+	defer cancel()
 	var out, errb bytes.Buffer
+	stderr := cancelOnWrite{w: &errb, marker: `"waiting_for_other_sync"`, cancel: cancel}
 	began := time.Now()
-	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "1ns", "search", "Fixture"}, &out, &errb)
+	code := runCLI(ctx, []string{"--db", e.db, "--teams-root", e.root, "--max-age", "1ns", "search", "Fixture"}, &out, &stderr)
 	if code != errs.ExitRuntime || errorOf(t, errb.String())["code"] != errs.CodeInterrupted {
 		t.Fatalf("exit %d, stderr %s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), `"waiting_for_other_sync"`) {
+		t.Fatalf("the read was cancelled before it waited: %s", errb.String())
 	}
 	if time.Since(began) > 4*time.Second {
 		t.Fatal("cancellation did not end the wait")
@@ -382,4 +395,18 @@ func TestSourceRefreshWaitStopsOnCancel(t *testing.T) {
 	if err := rt.besideOtherRun(func() error { return errs.Locked("held") }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
+}
+
+// cancelOnWrite passes writes to w and calls cancel once a write holds marker.
+type cancelOnWrite struct {
+	w      *bytes.Buffer
+	marker string
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnWrite) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), c.marker) {
+		c.cancel()
+	}
+	return c.w.Write(p)
 }
