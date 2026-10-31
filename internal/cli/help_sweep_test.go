@@ -79,6 +79,8 @@ var teamsHelp = map[string]string{
 	"search --include-system":        "Teams-only: Teams' system conversations",
 	"thread --include-system":        "Teams-only: Teams' system conversations",
 	"unread --include-system":        "Teams-only: Teams' system conversations",
+	"writes":                         "names both: a Teams chat message or a mail draft",
+	"writes send-teams-message":      "Teams-only: sends a Teams chat message",
 }
 
 // No help string says "Teams" where it means the archive: only the strings of teamsHelp may, and

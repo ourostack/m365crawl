@@ -23,9 +23,9 @@ An archived recap action item is not a Planner or To Do task, a native people ob
 
 ## A complement to Graph and MCP tools
 
-The [optional WorkIQ source](commands.md#workiq) is an explicit bridge to the user's already installed WorkIQ subprocess, not m365crawl's own Graph client. Mail can fill a failing desktop source for an already archived account; coverage compares selected chat counts. The conservative production branch withholds unqualified chat/channel/reply message rows and cross-source clock overrides. It does not claim complete Microsoft 365 history, native WorkIQ/Windows qualification, new account registration or write/send support. Ordinary recall remains offline; no source probe runs implicitly.
+The [optional WorkIQ source](commands.md#workiq) is an explicit bridge to the user's already installed WorkIQ subprocess, not m365crawl's own Graph client. Mail can fill a failing desktop source for an already archived account; coverage compares selected chat counts. The conservative production branch withholds unqualified chat/channel/reply message rows and cross-source clock overrides. It does not claim complete Microsoft 365 history, native WorkIQ/Windows qualification or new account registration. The only writes are the person's directed writes through the [`writes` commands](commands.md#writes): a Teams chat message or a new mail draft, after the person turns writes on. Ordinary recall remains offline; no source probe runs implicitly.
 
-m365crawl is not a replacement for every job. Use Graph or MCP tools when you need to send or react, retrieve data the desktop apps never cached, or work on an unsupported host or app. Keep m365crawl for local recall, archive search and context-building from the sources it actually covers. Missing or stale cache data stays visible rather than becoming a claim that the work does not exist.
+m365crawl is not a replacement for every job. Use Graph or MCP tools when you need to reply to or send mail, react, post in a channel, retrieve data the desktop apps never cached, or work on an unsupported host or app. Keep m365crawl for local recall, archive search and context-building from the sources it actually covers. Missing or stale cache data stays visible rather than becoming a claim that the work does not exist.
 
 ## Planned expansion, not shipped support
 

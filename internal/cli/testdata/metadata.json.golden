@@ -630,6 +630,16 @@
       ],
       "json": true,
       "mutates": true
+    },
+    "writes status": {
+      "title": "writes status: the person's writes switch and the directed write log (offline)",
+      "argv": [
+        "m365crawl",
+        "--json",
+        "writes",
+        "status"
+      ],
+      "json": true
     }
   },
   "capabilities": [

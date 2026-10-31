@@ -289,14 +289,14 @@ const exitWriteUnknown = 5
 
 func (r writesOutcome) renderWrites(rt *runtime) error {
 	var out bytes.Buffer
-	switch {
-	case r.Decision == da.Refuse:
+	switch r.Decision {
+	case da.Refuse:
 		fmt.Fprintf(&out, "%s refused: %s", r.Action, r.Code)
 		if r.Field != "" {
 			fmt.Fprintf(&out, " (%s)", r.Field)
 		}
 		out.WriteString("; nothing was sent\n")
-	case r.Decision == da.Replay:
+	case da.Replay:
 		fmt.Fprintf(&out, "%s replayed write %s (%s); nothing was sent again\n", r.Action, r.ReplayOf, r.EarlierOutcome)
 	default:
 		what := map[da.Outcome]string{da.Sent: "sent", da.Failed: "failed: it did not happen", da.Unknown: "outcome unknown: do not send it again"}[r.Outcome]

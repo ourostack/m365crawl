@@ -480,12 +480,12 @@ func TestSendStopsWhenTheServerCannotBeRead(t *testing.T) {
 
 func TestSendNeedsAnArchivedTeamsAccountAndAWorkingWorkIQ(t *testing.T) {
 	ctx := context.Background()
-	srv, opts := newServer(t, true, false)
+	_, opts := newServer(t, true, false)
 	turnOn(t, opts)
 	_, err := Send(ctx, opts, notesRequest("hi"))
 	requireCode(t, err, "workiq_chat_account_unmatched")
 
-	srv, opts = newServer(t, true, true)
+	srv, opts := newServer(t, true, true)
 	turnOn(t, opts)
 	srv.openErr["ME@example.invalid"] = errs.Usage("not installed")
 	if _, err := Send(ctx, opts, notesRequest("hi")); err == nil {

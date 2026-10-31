@@ -28,6 +28,9 @@ func manifest() control.Manifest {
 			JSON: true, Mutates: name == "enable" || name == "disable" || name == "sync",
 			Title: "workiq " + name + " (explicit optional server source; coverage/status retain no content or data cursors)"}
 	}
+	// Only the offline status: the write commands act as the person and are never runnable templates.
+	m.Commands["writes status"] = control.Command{Argv: []string{"m365crawl", "--json", "writes", "status"}, JSON: true,
+		Title: "writes status: the person's writes switch and the directed write log (offline)"}
 	m.Commands["calendar"] = control.Command{Argv: []string{"m365crawl", "--json", "calendar"}, JSON: true}
 	m.Commands["coverage"] = control.Command{Argv: []string{"m365crawl", "--json", "coverage"}, JSON: true,
 		Title: "coverage: per day and source, whether the archive holds everything the app cached (a real zero versus an uncovered day)"}
