@@ -432,13 +432,14 @@ func (r *workIQWindowRun) refreshFacts(ctx context.Context) error {
 }
 
 // walk fetches a folder's position to its end: a delta walk to its delta link, kept across runs,
-// or a listing to its last page; a listing a previous run finished is walked again.
+// or a listing to its last page. A listing a previous run finished and admitted is walked again; one
+// whose mail still waits for admission is kept, so a resumed run admits it instead of fetching it twice.
 func (r *workIQWindowRun) walk(ctx context.Context, f *workIQWindowFolderRun) error {
 	p, err := r.progress(ctx, f)
 	if err != nil {
 		return err
 	}
-	if p.Terminal && f.mode == "listing" {
+	if p.Terminal && f.mode == "listing" && f.facts.Unadmitted == 0 {
 		if err := workIQWrite(ctx, r.options.DBPath, func(writeCtx context.Context, s *store.Store) error {
 			return s.RetireWorkIQWindowFrontier(writeCtx, r.attempt, f.resource, p.Revision)
 		}); err != nil {

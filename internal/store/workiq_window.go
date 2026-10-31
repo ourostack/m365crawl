@@ -465,7 +465,7 @@ and a.status in ('ok','ok_with_omissions') and c.complete=1 and a.started_at>wor
 		at := time.Now()
 		cleared, err := tx.ExecContext(ctx, `update workiq_pages set data_json='',cleared_at=? where id in (
 select p.id from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id
-where f.family='mail' and f.account_id=? and f.scope like 'window:%' and f.retired=0 and p.cleared_at is null and p.body_sha256 is not null
+where f.family='mail' and f.account_id=? and f.scope like 'window:%' and p.cleared_at is null and p.body_sha256 is not null
 and not exists(select 1 from workiq_window_members m where m.page_id=p.id and `+workIQWindowBlocking+`)
 order by p.id limit ?)`, workIQTimeValue(&at), account, limit)
 		if err != nil {
@@ -562,6 +562,8 @@ func admitWorkIQWindowItem(ctx context.Context, tx *sql.Tx, account string, serv
 // WorkIQWindowFacts is what one window position holds, for the disk check.
 type WorkIQWindowFacts struct {
 	InWindow, OutOfWindow, StagedIn, StagedBytes, LargestPage, ClockUnknown int64
+	// Unadmitted counts live in-window members still waiting for admission (not deferred ones).
+	Unadmitted int64
 }
 
 func (s *Store) WorkIQWindowFactsFor(ctx context.Context, attempt int64, resource string) (WorkIQWindowFacts, error) {
@@ -576,8 +578,9 @@ coalesce((select sum(1-in_window) from workiq_window_members where frontier_id i
 coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and in_window=1 and state in ('staged','deferred')),0),
 coalesce((select sum(length(cast(data_json as blob))) from workiq_pages where frontier_id in fr),0),
 coalesce((select max(body_bytes) from workiq_pages where frontier_id in fr),0),
-coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and clock_unknown=1),0)`,
-		w.binding.Fact.ID, resource, w.scope, w.qualification).Scan(&f.InWindow, &f.OutOfWindow, &f.StagedIn, &f.StagedBytes, &f.LargestPage, &f.ClockUnknown)
+coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and clock_unknown=1),0),
+coalesce((select count(*) from workiq_window_members where frontier_id in fr and removed=0 and in_window=1 and clock_unknown=0 and state='staged'),0)`,
+		w.binding.Fact.ID, resource, w.scope, w.qualification).Scan(&f.InWindow, &f.OutOfWindow, &f.StagedIn, &f.StagedBytes, &f.LargestPage, &f.ClockUnknown, &f.Unadmitted)
 	return f, err
 }
 

@@ -390,6 +390,42 @@ func TestWorkIQMailWindowDiskFailuresAndUndatedMail(t *testing.T) {
 	}
 }
 
+// A listing that a stopped run fetched but never admitted is kept, so the resumed run admits it
+// rather than fetching the same mail again and stranding the first copy.
+func TestWorkIQMailWindowResumeAdmitsAKeptListing(t *testing.T) {
+	db, account := workIQAcquisitionArchive(t)
+	workIQAcquisitionStub(t)
+	writeMailbox(t, mbScenario{Messages: windowMessages()})
+	checks := 0
+	setWorkIQFreeBytes(t, func(string) (int64, error) { checks++; return 1 << 40, nil })
+	probe, _ := workIQAcquisitionArchive(t)
+	if _, err := runWindow(t, probe, account, "fast"); err != nil {
+		t.Fatal(err)
+	}
+	last, seen := checks, 0
+	writeMailbox(t, mbScenario{Messages: windowMessages()})
+	setWorkIQFreeBytes(t, func(string) (int64, error) {
+		if seen++; seen == last {
+			return 0, nil
+		}
+		return 1 << 40, nil
+	})
+	if _, err := runWindow(t, db, account, "fast"); workIQCode(err) != "workiq_disk_reserve" {
+		t.Fatalf("the first run did not stop before admission: %v", err)
+	}
+	listed := count(t, db, `select count(*) from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id where f.resource like '%inbox-id%' or f.resource like '%child-id%'`)
+	setWorkIQFreeBytes(t, func(string) (int64, error) { return 1 << 40, nil })
+	if _, err := runWindow(t, db, account, "fast"); err != nil {
+		t.Fatal(err)
+	}
+	// Folders with mail in the window keep their listing; empty ones are cheaply listed again.
+	if count(t, db, `select count(*) from workiq_frontiers where retired=1 and (resource like '%inbox-id%' or resource like '%child-id%')`) != 0 ||
+		count(t, db, `select count(*) from mail_messages`) != 5 || count(t, db, `select count(*) from workiq_pages where data_json<>''`) != 0 ||
+		count(t, db, `select count(*) from workiq_pages p join workiq_frontiers f on f.id=p.frontier_id where f.resource like '%inbox-id%' or f.resource like '%child-id%'`) != listed {
+		t.Fatal("a resumed listing was fetched again or left page bodies behind")
+	}
+}
+
 func TestWorkIQMailWindowNeedsAnAccountWhenSeveralAreArchived(t *testing.T) {
 	db, _ := workIQAcquisitionArchive(t)
 	workIQAcquisitionStub(t)
