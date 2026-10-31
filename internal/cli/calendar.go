@@ -310,6 +310,9 @@ func (c *calendarCmd) Run(rt *runtime) error {
 		gap := true
 		out := newList(nil, false)
 		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
+		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
+			return nil, err
+		}
 		if st == nil {
 			return out, nil
 		}
@@ -332,7 +335,7 @@ func (c *calendarCmd) Run(rt *runtime) error {
 			hasOutlook = hasOutlook || slices.Contains(items[i].Sources, string(calendar.SourceOutlook))
 		}
 		list := newList(shape(rt, items), agenda.Truncated).withTotal(agenda.Total)
-		list.CoverageGap, list.Range, list.UnlinkedAccounts = &agenda.Gap, out.Range, agenda.Unlinked
+		list.CoverageGap, list.Range, list.UnlinkedAccounts, list.RangeCoverage = &agenda.Gap, out.Range, agenda.Unlinked, out.RangeCoverage
 		for _, u := range agenda.UnlinkedRecaps {
 			list.UnlinkedRecaps = append(list.UnlinkedRecaps, unlinkedRecapOf(u.Principal, u.CalendarRecap))
 		}
@@ -1157,6 +1160,9 @@ func (c *calendarActionsCmd) Run(rt *runtime) error {
 		gap := true
 		out := newList(nil, false)
 		out.CoverageGap, out.Range = &gap, rangeOf(from, to)
+		if out.RangeCoverage, err = rt.calendarRangeCoverage(st, from, to); err != nil {
+			return nil, err
+		}
 		if st == nil {
 			return out, nil
 		}

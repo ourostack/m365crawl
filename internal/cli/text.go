@@ -40,7 +40,9 @@ func metaLines(w io.Writer, m meta, color bool) {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("notice: "+n, color))
 	}
 	for _, e := range m.RangeCoverage {
-		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("coverage: "+coverageLine(e), color))
+		if e.Source != "calendar" { // the agenda already prints the days no cache showed
+			_, _ = fmt.Fprintf(w, "%s\n", render.Dim("coverage: "+coverageLine(e), color))
+		}
 	}
 	for _, r := range m.WorkIQRoutes {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim("route: "+r.Fix, color))

@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
+
+	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
 // The Teams conversation scopes a coverage answer judges on its own.
@@ -102,26 +106,91 @@ type ChatEvidence struct {
 	// than their newest archived message, which is before the range's end: Teams knows of
 	// activity the archive does not hold.
 	Behind int
+	// Matched says the scope holds a conversation the narrowing selects (always true without one).
+	Matched bool
 	// GapConversations counts conversations whose archived messages around the range skip Teams
 	// sequence numbers, and PossiblyMissing the numbers skipped. Teams also numbers events it
 	// never caches, so these are possibly, not certainly, messages.
 	GapConversations, PossiblyMissing int
 }
 
-// ChatEvidence reads the evidence of [since, until) for the account's conversations of scope.
-func (s *Store) ChatEvidence(ctx context.Context, tenantID, userID, scope string, since, until time.Time) (ChatEvidence, error) {
+// ChatNarrow keeps chat evidence to the conversations a read selects: Conversation is a
+// conversation id or name as messages takes it (--conversation, a link already resolved to its
+// id), Team a team id or name (--team). Empty fields narrow nothing.
+type ChatNarrow struct{ Conversation, Team string }
+
+// On says the narrowing selects something.
+func (n ChatNarrow) On() bool { return n.Conversation != "" || n.Team != "" }
+
+// chatNarrowCond is the condition on the conversation alias c that keeps the account's
+// conversations the narrowing selects, by the rules of messageWhere: a conversation by id, title,
+// display name or composed name; a team's own conversation and its channels. It is "" when the
+// narrowing is off. matched is false when the account holds no such conversation (or no such
+// team).
+func (s *Store) chatNarrowCond(ctx context.Context, tenantID, userID string, n ChatNarrow) (cond string, args []any, matched bool, err error) {
+	if !n.On() {
+		return "", nil, true, nil
+	}
+	var w where
+	w.add(`c.tenant_id=? and c.user_id=?`, tenantID, userID)
+	if n.Conversation != "" {
+		w.add(`(c.id=? or c.title=? collate nocase or c.display_name=? collate nocase or `+cdnExpr+`=? collate nocase)`, n.Conversation, n.Conversation, n.Conversation, n.Conversation)
+	}
+	if n.Team != "" {
+		team, err := s.resolveTeam(ctx, &teamsdesktop.Account{TenantID: tenantID, UserID: userID}, n.Team)
+		var coded *errs.Coded
+		if errors.As(err, &coded) && coded.Message == NoTeam(n.Team).Message {
+			return "", nil, false, nil // this account has no such team
+		}
+		if err != nil {
+			return "", nil, false, err
+		}
+		w.add(teamCond, team, team)
+	}
+	var ids []string
+	err = s.each(ctx, `select c.id from conversations c left join conversations t on t.tenant_id=c.tenant_id and t.user_id=c.user_id and c.team_id<>'' and c.team_id<>c.id and t.id=c.team_id`+w.sql()+` order by c.id`, func(rs *sql.Rows) error { //nolint:gosec // G202: fixed package conditions; values are placeholders
+		var id sql.NullString
+		_ = rs.Scan(&id) // scans into a NullString
+		ids = append(ids, id.String)
+		return nil
+	}, w.args...)
+	if err != nil || len(ids) == 0 {
+		return "", nil, false, err
+	}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return `c.id in (` + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + `)`, args, true, nil
+}
+
+// ChatEvidence reads the evidence of [since, until) for the account's conversations of scope,
+// narrowed to what narrow selects. With a narrowing, Matched says whether the scope holds a
+// conversation it selects; without one it is always true.
+func (s *Store) ChatEvidence(ctx context.Context, tenantID, userID, scope string, since, until time.Time, narrow ChatNarrow) (ChatEvidence, error) {
 	var out ChatEvidence
 	cond := chatScopeCond(scope)
+	narrowCond, narrowArgs, matched, err := s.chatNarrowCond(ctx, tenantID, userID, narrow)
+	if err != nil || !matched {
+		return out, err
+	}
+	if narrowCond != "" {
+		cond = `(` + cond + ` and ` + narrowCond + `)`
+		if err := s.db.QueryRowContext(ctx, `select exists(select 1 from conversations c where c.tenant_id=? and c.user_id=? and `+cond+`)`, //nolint:gosec // G202: fixed package conditions; values are placeholders
+			append([]any{tenantID, userID}, narrowArgs...)...).Scan(&out.Matched); err != nil || !out.Matched {
+			return out, err
+		}
+	}
+	out.Matched = true
 	from, to := since.UTC().Format(timeLayout), until.UTC().Format(timeLayout)
 	// The unary + keeps SQLite off the (tenant, user) index, which would scan every message of the
 	// account; the sent_at index reads only the range.
-	err := s.db.QueryRowContext(ctx, `select
+	err = s.db.QueryRowContext(ctx, `select
  coalesce(sum(m.deleted_at is null),0),
  coalesce(sum(m.deleted_at is null and lower(m.sender_id)=lower('8:orgid:'||m.user_id)),0),
  coalesce(sum(m.deleted_at is not null),0)
 from messages m join conversations c on c.tenant_id=m.tenant_id and c.user_id=m.user_id and c.id=m.conversation_id
 where +m.tenant_id=? and +m.user_id=? and m.sent_at>=? and m.sent_at<? and `+authoredCond+` and `+cond, //nolint:gosec // G202: fixed package conditions
-		tenantID, userID, from, to).Scan(&out.Items, &out.MyItems, &out.Deleted)
+		append([]any{tenantID, userID, from, to}, narrowArgs...)...).Scan(&out.Items, &out.MyItems, &out.Deleted)
 	if err != nil {
 		return out, err
 	}
@@ -133,7 +202,7 @@ from conversations c where c.tenant_id=? and c.user_id=? and c.last_message_at>=
 		_ = rs.Scan(&c.id, &c.last, &c.newest) // every column scans into a NullString
 		convs = append(convs, c)
 		return nil
-	}, tenantID, userID, from)
+	}, append([]any{tenantID, userID, from}, narrowArgs...)...)
 	if err != nil {
 		return out, err
 	}

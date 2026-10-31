@@ -45,6 +45,7 @@ const (
 	reasonBehind             = "conversation_behind"
 	reasonSequenceGap        = "sequence_gap"
 	reasonDayNotShown        = "day_not_shown"
+	reasonNotArchived        = "conversation_not_archived"
 )
 
 // teamsReadGap is how long after a range the archive may first read Teams and still call the
@@ -73,6 +74,7 @@ var coverageFixes = map[string]string{
 	reasonBehind:             "Open those chats in Teams so it loads their messages, then run `m365crawl sync`.",
 	reasonSequenceGap:        "Open those chats in Teams so it loads their messages, then run `m365crawl sync`.",
 	reasonDayNotShown:        "Open that day in the Teams or Outlook calendar, then run `m365crawl sync`.",
+	reasonNotArchived:        "Open the conversation in Teams so it is cached, then run `m365crawl sync`; `m365crawl conversations --query <name>` lists what is archived.",
 }
 
 // coverageReason is one reason an entry is not covered.
@@ -84,10 +86,13 @@ type coverageReason struct {
 // coverageEntry says whether the archive holds every item of one source, scope and account over
 // a range, and what it holds.
 type coverageEntry struct {
-	Source  string  `json:"source"`
-	Scope   string  `json:"scope,omitempty"`
-	Account *string `json:"account"`
-	State   string  `json:"state"`
+	Source string `json:"source"`
+	Scope  string `json:"scope,omitempty"`
+	// NarrowedTo (chats) says the entry judges only the conversations a read's --conversation
+	// (conversation) or --team (team) selects.
+	NarrowedTo string  `json:"narrowed_to,omitempty"`
+	Account    *string `json:"account"`
+	State      string  `json:"state"`
 	// Items is what the archive holds in the range, exact and independent of --limit.
 	Items int `json:"items"`
 	// MarkedItems (mail) is how many of Items a sync marked gone or evicted.
@@ -470,28 +475,30 @@ func (c *coverageRun) teamsLog(account string) (store.TeamsReadLog, error) {
 	return log, nil
 }
 
-// chatEntry judges one Teams account's conversations of a scope over [a, b).
-func (c *coverageRun) chatEntry(tenantID, userID, scope string, a, b time.Time) (coverageEntry, error) {
+// chatEntry judges one Teams account's conversations of a scope over [a, b), narrowed to what
+// narrow selects; matched is false when a narrowing selects no conversation of the scope.
+func (c *coverageRun) chatEntry(tenantID, userID, scope string, a, b time.Time, narrow store.ChatNarrow) (e coverageEntry, matched bool, err error) {
 	account := tenantID + "/" + userID
-	e := newCoverageEntry("chats", scope, account)
-	ev, err := chatEvidence(c.st, c.rt.ctx, tenantID, userID, scope, a, b)
-	if err != nil {
-		return e, err
+	e = newCoverageEntry("chats", scope, account)
+	e.NarrowedTo = narrowName(narrow)
+	ev, err := chatEvidence(c.st, c.rt.ctx, tenantID, userID, scope, a, b, narrow)
+	if err != nil || !ev.Matched {
+		return e, false, err
 	}
 	log, err := c.teamsLog(account)
 	if err != nil {
-		return e, err
+		return e, false, err
 	}
 	e.Items, e.MyItems, e.DeletedItems = ev.Items, &ev.MyItems, &ev.Deleted
 	switch {
 	case len(log.Reads) == 0:
 		e.reason(reasonNeverRead, "no read of this Teams account succeeded")
 		e.finish()
-		return e, nil
+		return e, true, nil
 	case !a.Before(c.now):
 		e.reason(reasonFuture, "the range starts after now")
 		e.finish()
-		return e, nil
+		return e, true, nil
 	}
 	first, last := log.Reads[0], log.Reads[len(log.Reads)-1]
 	pieces := clip([]store.TimeSpan{{From: first, To: last}}, a, b)
@@ -536,11 +543,31 @@ func (c *coverageRun) chatEntry(tenantID, userID, scope string, a, b time.Time) 
 	}
 	if e.has(reasonBeforeArchiveStart) {
 		if e.Next, err = c.chatSteps(account, a); err != nil {
-			return e, err
+			return e, false, err
 		}
 	}
 	e.finish()
-	return e, nil
+	return e, true, nil
+}
+
+// narrowName is the narrowed_to of a narrowing: conversation, team or "" when there is none.
+func narrowName(n store.ChatNarrow) string {
+	switch {
+	case n.Conversation != "":
+		return "conversation"
+	case n.Team != "":
+		return "team"
+	}
+	return ""
+}
+
+// notArchived is the entry of an account none of whose conversations a narrowing selects.
+func notArchived(account string, narrow store.ChatNarrow) coverageEntry {
+	e := newCoverageEntry("chats", "", account)
+	e.NarrowedTo = narrowName(narrow)
+	e.reason(reasonNotArchived, "the archive holds no conversation of this account that the read selects, so it cannot say whether its messages are all there")
+	e.finish()
+	return e
 }
 
 // worstReadGap is the longest any moment of [from, b) waited for the next read: from each read
@@ -580,8 +607,13 @@ func (c *coverageRun) chatSteps(account string, since time.Time) ([]startStep, e
 		return nil, err
 	}
 	r := c.rt.newWorkIQRoute(setup, "chats", account, routeRangeNotCovered, "The archive does not hold all of this range's chat messages. WorkIQ chat history stays counts-only: coverage counts the server's messages in this range, but adds no messages to the archive.", time.Time{})
-	r.Next = append(r.Next, startStep{Command: c.rt.recoveryCommand(false, account, "workiq", "coverage", "--source", "chats", "--since", since.In(time.Local).Format(time.RFC3339)),
-		Does: "count the server's chat messages from this range's start, without adding them"})
+	args, does := []string{"workiq", "coverage", "--source", "chats"}, "count the server's chat messages from this range's start, without adding them"
+	if since.IsZero() {
+		does = "count the server's chat messages over WorkIQ's default window (365 days), without adding them" // the range has no start
+	} else {
+		args = append(args, "--since", since.In(time.Local).Format(time.RFC3339))
+	}
+	r.Next = append(r.Next, startStep{Command: c.rt.recoveryCommand(false, account, args...), Does: does})
 	c.routes[key] = &r
 	return r.Next, nil
 }

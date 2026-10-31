@@ -252,7 +252,7 @@ func TestOlderChatReadRoutesOnlyToCoverage(t *testing.T) {
 			t.Fatalf("chat route hides that chats stay counts-only: %q", fix)
 		}
 	}
-	for _, args := range [][]string{{"messages"}, {"search", "--source", "chats", "--since", "1d"}} {
+	for _, args := range [][]string{{"messages"}, {"search", "--source", "chats", "words"}} {
 		code, out, stderr := e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
 		if code != 0 {
 			t.Fatal(args, code, stderr)
@@ -264,13 +264,17 @@ func TestOlderChatReadRoutesOnlyToCoverage(t *testing.T) {
 	// The archive's first Teams read was just now, so the last day is before it: messages'
 	// range_coverage routes each account to the counts-only steps, although archived messages
 	// reach further back.
-	code, out, stderr := e.run("--json", "--max-age", "0", "messages", "--since", "1d")
-	if code != 0 {
-		t.Fatal(code, stderr)
-	}
-	if routes := routesOf(t, decode(t, out)); len(routes) != 2 || routes[0]["reason"] != "range_not_covered" || routes[0]["account"] == nil ||
-		!strings.Contains(strings.Join(routeCommands(t, routes[0]), "\n"), "workiq coverage --source chats") {
-		t.Fatalf("range not covered routes = %v", routes)
+	var code int
+	var out, stderr string
+	for _, args := range [][]string{{"messages", "--since", "1d"}, {"search", "--source", "chats", "--since", "1d"}} {
+		code, out, stderr = e.run(append([]string{"--json", "--max-age", "0"}, args...)...)
+		if code != 0 {
+			t.Fatal(code, stderr)
+		}
+		if routes := routesOf(t, decode(t, out)); len(routes) != 2 || routes[0]["reason"] != "range_not_covered" || routes[0]["account"] == nil ||
+			!strings.Contains(strings.Join(routeCommands(t, routes[0]), "\n"), "workiq coverage --source chats") {
+			t.Fatalf("%v: range not covered routes = %v", args, routes)
+		}
 	}
 	code, out, _ = e.run("--json", "--max-age", "0", "--account", tenantA+"/"+userA, "messages", "--since", "2000-01-01")
 	routes := routesOf(t, decode(t, out))

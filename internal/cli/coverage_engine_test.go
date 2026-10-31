@@ -246,8 +246,9 @@ func TestMailNoAccountSaysWhy(t *testing.T) {
 	}
 }
 
-func chatEv(ev store.ChatEvidence) func(*store.Store, context.Context, string, string, string, time.Time, time.Time) (store.ChatEvidence, error) {
-	return func(*store.Store, context.Context, string, string, string, time.Time, time.Time) (store.ChatEvidence, error) {
+func chatEv(ev store.ChatEvidence) func(*store.Store, context.Context, string, string, string, time.Time, time.Time, store.ChatNarrow) (store.ChatEvidence, error) {
+	ev.Matched = true
+	return func(*store.Store, context.Context, string, string, string, time.Time, time.Time, store.ChatNarrow) (store.ChatEvidence, error) {
 		return ev, nil
 	}
 }
@@ -286,7 +287,7 @@ func TestChatEntryVerdicts(t *testing.T) {
 				return store.TeamsReadLog{Reads: c.reads, LastUnchanged: c.stale}, nil
 			})
 			setSeam(t, &chatEvidence, chatEv(c.ev))
-			e, err := run.chatEntry("t", "u", store.ChatScopeChats, c.a, c.b)
+			e, _, err := run.chatEntry("t", "u", store.ChatScopeChats, c.a, c.b, store.ChatNarrow{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -300,17 +301,17 @@ func TestChatEntryVerdicts(t *testing.T) {
 func TestChatEntryReportsEvidenceFailures(t *testing.T) {
 	fail := errors.New("broken")
 	run, _ := engineRun(t)
-	setSeam(t, &chatEvidence, func(*store.Store, context.Context, string, string, string, time.Time, time.Time) (store.ChatEvidence, error) {
+	setSeam(t, &chatEvidence, func(*store.Store, context.Context, string, string, string, time.Time, time.Time, store.ChatNarrow) (store.ChatEvidence, error) {
 		return store.ChatEvidence{}, fail
 	})
-	if _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4)); !errors.Is(err, fail) {
+	if _, _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4), store.ChatNarrow{}); !errors.Is(err, fail) {
 		t.Fatal(err)
 	}
 	setSeam(t, &chatEvidence, chatEv(store.ChatEvidence{}))
 	setSeam(t, &teamsReads, func(*store.Store, context.Context, string) (store.TeamsReadLog, error) {
 		return store.TeamsReadLog{}, fail
 	})
-	if _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4)); !errors.Is(err, fail) {
+	if _, _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4), store.ChatNarrow{}); !errors.Is(err, fail) {
 		t.Fatal(err)
 	}
 	// The log is read once per account; the WorkIQ steps once too.
@@ -321,7 +322,7 @@ func TestChatEntryReportsEvidenceFailures(t *testing.T) {
 		return store.TeamsReadLog{Reads: []time.Time{day(3)}}, nil
 	})
 	for range 2 {
-		if e, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4)); err != nil || len(e.Next) == 0 {
+		if e, _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4), store.ChatNarrow{}); err != nil || len(e.Next) == 0 {
 			t.Fatal(e, err)
 		}
 	}
@@ -331,7 +332,7 @@ func TestChatEntryReportsEvidenceFailures(t *testing.T) {
 	// A WorkIQ setup that cannot be read is an error.
 	run, _ = engineRun(t)
 	_ = run.st.Close()
-	if _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4)); err == nil {
+	if _, _, err := run.chatEntry("t", "u", store.ChatScopeChats, day(5), day(4), store.ChatNarrow{}); err == nil {
 		t.Fatal("a closed archive gave WorkIQ steps")
 	}
 }
