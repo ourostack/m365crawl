@@ -1042,7 +1042,8 @@ func TestRecordWritesFailAsArchiveErrors(t *testing.T) {
 	}{
 		{"upsert", `create trigger boom before insert on records begin select raise(abort, 'boom'); end`, nil},
 		{"mark records", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale(cal, "events"))},
-		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
+		// A store the denylist does not match, so the purge (which runs first) leaves it alone.
+		{"mark databases", `create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "stuff"))},
 		// Already removed, so only the purge touches it.
 		{"purge", `update records set removed_at = '2020-01-01T00:00:00.000Z' where store = 'things'; create trigger boom before update on records begin select raise(abort, 'boom'); end`, ptr(stale("Teams:gone-manager:react-web-client:"+acctA.UserID, "things"))},
 		// A removed row under a key that scrubs differently: only the key purge touches it.
@@ -1133,11 +1134,12 @@ func TestSyncGenericDatabaseUnreadableStillSyncsMessages(t *testing.T) {
 // Rows archived under a name the denylist now matches are cleared on the next sync: the key stays,
 // the value and hash go, and the row is marked removed.
 func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
+	const marker = "SYNTHETICDENIEDVALUE"
 	root, db := syncedStart(t)
 	acct := acctA
 	seedRecords(t, db,
-		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":1}`)},
-		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "private", KeyJSON: []byte(`"y"`), ValueJSON: []byte(`{"v":2}`)},
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:gone-manager:react-web-client:" + acctA.UserID, Store: "things", KeyJSON: []byte(`"x"`), ValueJSON: []byte(`{"v":"` + strings.Repeat(marker, 40) + `"}`)},
+		teamsdesktop.GenericRecord{Account: &acct, Database: "Teams:calendar-manager:react-web-client:" + acctA.UserID, Store: "private", KeyJSON: []byte(`"y"`), ValueJSON: []byte(`{"v":"` + strings.Repeat(marker, 2000) + `"}`)},
 	)
 	old := deniedFn
 	t.Cleanup(func() { deniedFn = old })
@@ -1146,12 +1148,70 @@ func TestSyncPurgesRowsOfNewlyDeniedNames(t *testing.T) {
 	}
 	later := time.Now().Add(time.Hour)
 	_ = os.Chtimes(logFile(t, root), later, later)
-	run(t, Options{Root: root, DBPath: db})
+	if r, _ := run(t, Options{Root: root, DBPath: db}); r.PurgedLogPending {
+		t.Fatal("nothing blocked the log, yet it is reported pending")
+	}
+	// The values are gone from the bytes on disk too: the database file and its log.
+	for _, f := range []string{db, db + "-wal"} {
+		b, err := os.ReadFile(f) //nolint:gosec // test temp dir
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if bytes.Contains(b, []byte(marker)) {
+			t.Fatalf("a purged value is still in %s", filepath.Base(f))
+		}
+	}
+	if n := recordsQuery(t, db, `select count(*) from meta where key = 'purged_log_pending'`); n != 0 {
+		t.Fatal("the request to clear the log was left behind")
+	}
 	if n := recordsQuery(t, db, `select count(*) from records where key_json in ('"x"','"y"') and value_json is null and content_hash = '' and removed_at is not null`); n != 2 {
 		t.Fatalf("%d rows purged, want 2", n)
 	}
 	if n := recordsQuery(t, db, `select count(*) from records where value_json is null`); n != 2 {
 		t.Fatalf("%d rows without a value, want only the purged 2", n)
+	}
+}
+
+// A log that readers kept from being cleared is reported, and a failure to clear it is the run's
+// error; the sources stay committed either way.
+func TestSyncReportsThePurgedLog(t *testing.T) {
+	old := clearPurgedLog
+	t.Cleanup(func() { clearPurgedLog = old })
+	clearPurgedLog = func(*store.Store, context.Context) (store.PurgedLog, error) {
+		return store.PurgedLog{Pending: true, Attempts: 3}, nil
+	}
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: newDB(t)})
+	if !r.PurgedLogPending || r.Status != StatusOK {
+		t.Fatalf("pending=%v status=%s", r.PurgedLogPending, r.Status)
+	}
+	clearPurgedLog = func(*store.Store, context.Context) (store.PurgedLog, error) {
+		return store.PurgedLog{Pending: true, Attempts: 1}, errors.New("disk I/O error")
+	}
+	r, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t)})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeDBError || !r.PurgedLogPending || r.Messages.Inserted != fixtureMessages {
+		t.Fatalf("err=%v pending=%v messages=%+v", err, r.PurgedLogPending, r.Messages)
+	}
+}
+
+// A cancelled run still clears the log (the purge it follows has committed), and a failure to
+// clear it is reported as pending even when the run already failed.
+func TestSyncClearsThePurgedLogWhenCancelled(t *testing.T) {
+	old := clearPurgedLog
+	t.Cleanup(func() { clearPurgedLog = old })
+	cancelled := errors.New("not called")
+	clearPurgedLog = func(_ *store.Store, ctx context.Context) (store.PurgedLog, error) {
+		cancelled = ctx.Err()
+		return store.PurgedLog{}, errors.New("disk I/O error")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldRead := beforeRead
+	t.Cleanup(func() { beforeRead = oldRead })
+	beforeRead = func(*writer) { cancel() } // Ctrl-C while the source is read
+	r, _, err := Run(ctx, Options{Root: fixtureRoot, DBPath: newDB(t)})
+	if err == nil || cancelled != nil || !r.PurgedLogPending {
+		t.Fatalf("err=%v clear saw %v pending=%v", err, cancelled, r.PurgedLogPending)
 	}
 }
 

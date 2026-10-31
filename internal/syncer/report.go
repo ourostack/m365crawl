@@ -45,8 +45,12 @@ type Report struct {
 	Omissions   map[string]int          `json:"omissions"`
 	// Redacted counts the credential-looking fragments removed from generic records before they
 	// were archived (JWTs, token fields, signed-URL signatures). It is a count, not an omission.
-	Redacted     int      `json:"redacted"`
-	OtherOrigins []string `json:"other_origins"`
+	Redacted int `json:"redacted"`
+	// PurgedLogPending is set when credential values a purge cleared (in this run or an earlier
+	// one) may still be in the archive's write-ahead log, because readers of the archive kept every
+	// checkpoint from truncating it. The next sync tries again.
+	PurgedLogPending bool     `json:"purged_log_pending,omitempty"`
+	OtherOrigins     []string `json:"other_origins"`
 	// OutlookClassicOnly names Outlook profile directories that hold only the classic Outlook's
 	// database, which is not read. It is a note, not a loss.
 	OutlookClassicOnly []string `json:"outlook_classic_only,omitempty"`
