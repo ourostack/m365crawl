@@ -105,13 +105,79 @@ func TestPurgeLeavesNoCopyOnDisk(t *testing.T) {
 				if v, _, _ := recRow(t, s, dbA, "events", `"kept"`); v != `{"v":"ordinary"}` {
 					t.Fatalf("an ordinary row changed: %q", v)
 				}
-				// The purge's connection returns to its earlier setting.
+				// The purge's connection keeps the archive's own setting: on.
 				var secure int
-				if err := s.db.QueryRowContext(context.Background(), `pragma secure_delete`).Scan(&secure); err != nil || secure != 0 {
+				if err := s.db.QueryRowContext(context.Background(), `pragma secure_delete`).Scan(&secure); err != nil || secure != 1 {
 					t.Fatalf("secure_delete left at %d (%v)", secure, err)
 				}
 			})
 		}
+	}
+}
+
+// A credential in a record's key is gone from the bytes on disk after the purge, from the table and
+// from the primary-key index, whether the row takes the scrubbed key or is deleted because another
+// row holds it.
+func TestPurgedKeyLeavesNoCopyOnDisk(t *testing.T) {
+	const marker = "SYNTHETICKEYCREDENTIAL"
+	key := `{"access_token":"` + marker + `"}`
+	for name, held := range map[string]bool{"rekeyed": false, "deleted": true} {
+		t.Run(name, func(t *testing.T) {
+			s, path := openAt(t)
+			recs := []teamsdesktop.GenericRecord{
+				grec(&acctA, dbA, "events", `"a-kept"`, `{"v":"ordinary"}`),
+				grec(&acctA, dbA, "events", key, `{"v":"value"}`),
+				grec(&acctA, dbA, "events", `"kept"`, `{"v":"ordinary"}`),
+			}
+			if held {
+				recs = append(recs, grec(&acctA, dbA, "events", `{"access_token":"[redacted]"}`, `{"v":"current"}`))
+			}
+			upsert(t, s, recs, base)
+			if db, wal := diskBytes(t, path); !bytes.Contains(db, []byte(marker)) && !bytes.Contains(wal, []byte(marker)) {
+				t.Fatal("the synthetic key is not on disk before the purge")
+			}
+			inSession(t, s, func(x *Session) {
+				if n, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base.Add(time.Hour)); err != nil || n != 1 {
+					t.Fatalf("purge: %d %v", n, err)
+				}
+			})
+			if res, err := s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
+				t.Fatalf("ClearPurgedLog: %+v %v", res, err)
+			}
+			db, wal := diskBytes(t, path)
+			if i := bytes.Index(db, []byte(marker)); i >= 0 {
+				t.Fatalf("purged key still in the database file at byte %d", i)
+			}
+			if bytes.Contains(wal, []byte(marker)) {
+				t.Fatal("purged key still in the write-ahead log")
+			}
+			// Rekeyed, the row stays; deleted, the row under the scrubbed key stays unchanged.
+			if got := rowCount(t, s, `select count(*) from records`); got != 3 {
+				t.Fatalf("%d rows, want 3", got)
+			}
+			if v, _, _ := recRow(t, s, dbA, "events", `{"access_token":"[redacted]"}`); held && v != `{"v":"current"}` {
+				t.Fatalf("the row under the scrubbed key changed: %q", v)
+			}
+		})
+	}
+}
+
+// Ordinary writes overwrite what they replace: a value a sync updates is not left in free space.
+func TestWritableArchiveOverwritesReplacedValues(t *testing.T) {
+	const marker = "SYNTHETICREPLACEDVALUE"
+	s, path := openAt(t)
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e"`, `{"v":"`+strings.Repeat(marker, 2000)+`"}`)}, base)
+	upsert(t, s, []teamsdesktop.GenericRecord{grec(&acctA, dbA, "events", `"e"`, `{"v":"new"}`)}, base.Add(time.Hour))
+	if _, err := s.db.Exec(`pragma wal_checkpoint(truncate)`); err != nil {
+		t.Fatal(err)
+	}
+	db, wal := diskBytes(t, path)
+	if bytes.Contains(db, []byte(marker)) || bytes.Contains(wal, []byte(marker)) {
+		t.Fatal("a replaced value is still on disk")
+	}
+	var secure int
+	if err := s.db.QueryRow(`pragma secure_delete`).Scan(&secure); err != nil || secure != 1 {
+		t.Fatalf("writable archive secure_delete=%d (%v)", secure, err)
 	}
 }
 
@@ -255,4 +321,124 @@ func TestClearPurgedLogStopsWhenCancelled(t *testing.T) {
 	if !pendingPurgedLog(t, s) {
 		t.Fatal("a cancelled clear dropped the request")
 	}
+}
+
+// seedLoop registers a Loop record key directly, with an attempt, a source, a snapshot, a loss
+// and one channel in the text index, as an admitted Loop acquisition leaves them.
+func seedLoop(t *testing.T, s *Store, id int64, key string) {
+	t.Helper()
+	locator, ok := loopLocator(LoopTuple{Source: srcA, Database: LoopDatabase, Store: LoopStore, KeyJSON: key})
+	if !ok {
+		t.Fatal("seed tuple outside Loop's limits")
+	}
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`insert into knowledge_locators(id,kind,platform,locator) values(?,?,?,?)`, []any{id, LoopKind, LoopPlatform, locator}},
+		{`insert into loop_locator_metadata(locator_id,source,database,store,key_json) values(?,?,?,?,?)`, []any{id, srcA, LoopDatabase, LoopStore, key}},
+		{`insert into knowledge_attempts(id,locator_id,started_at) values(?,?,'2026-01-01T00:00:00.000Z')`, []any{id, id}},
+		{`insert into loop_attempt_evidence(attempt_id,locator_id,tenant_id,user_id) values(?,?,'t','u')`, []any{id, id}},
+		{`insert into knowledge_sources(id,locator_id,boundary,qualification) values(?,?,'b','q')`, []any{id, id}},
+		{`insert into loop_snapshots(id,locator_id,knowledge_source_id,value_digest,qualification,file_id,sequence,latest_sequence,pending_operations,missing_blobs,partial,channel_count,tenant_id,user_id,record_updated_at_at_admission,projected_at,first_attempt)
+values(?,?,?,'d','q','f',1,1,0,0,0,1,'t','u','x','x',?)`, []any{id, id, id, id}},
+		{`insert into loop_snapshot_losses(snapshot_id,code,count) values(?,'c',1)`, []any{id}},
+		{`insert into loop_channels(id,snapshot_id,ordinal,path,sequence,text,markers,pending_operations) values(?,?,0,'p',1,'channel text',0,0)`, []any{id, id}},
+		{`insert into loop_fts(rowid,path,text) values(?,'p','channel text')`, []any{id}},
+	} {
+		if _, err := s.db.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+}
+
+// loopOwned counts the rows a Loop registration owns, over every table that holds them.
+func loopOwned(t *testing.T, s *Store, id int64) int {
+	t.Helper()
+	return rowCount(t, s, `select (select count(*) from knowledge_locators where id=?1)+(select count(*) from loop_locator_metadata where locator_id=?1)
++(select count(*) from knowledge_attempts where locator_id=?1)+(select count(*) from loop_attempt_evidence where locator_id=?1)
++(select count(*) from knowledge_sources where locator_id=?1)+(select count(*) from loop_snapshots where locator_id=?1)
++(select count(*) from loop_snapshot_losses where snapshot_id=?1)+(select count(*) from loop_channels where snapshot_id=?1)
++(select count(*) from loop_fts where rowid=?1)`, id)
+}
+
+// A Loop registration keeps its record key as its identity, in loop_locator_metadata and in its
+// knowledge locator. A key that held a credential follows the record-key rule there too: the
+// registration takes the scrubbed key, or is deleted with everything it owns when another
+// registration holds the scrubbed key or the scrubbed tuple is outside Loop's limits. Either way
+// the credential is gone from the bytes on disk.
+func TestPurgedLoopKeyLeavesNoCopyOnDisk(t *testing.T) {
+	const marker = "SYNTHETICLOOPCREDENTIAL"
+	key := `{"access_token":"` + marker + `"}`
+	scrubbed := `{"access_token":"[redacted]"}`
+	for _, c := range []string{"rekeyed", "held", "too long"} {
+		t.Run(c, func(t *testing.T) {
+			s, path := openAt(t)
+			seedLoop(t, s, 7, key)
+			if c == "held" {
+				seedLoop(t, s, 8, scrubbed)
+			}
+			if c == "too long" {
+				limit := loopLocatorLimit
+				t.Cleanup(func() { loopLocatorLimit = limit })
+				loc, _ := loopLocator(LoopTuple{Source: srcA, Database: LoopDatabase, Store: LoopStore, KeyJSON: scrubbed})
+				loopLocatorLimit = len(loc) - 1 // a later, lower limit: the scrubbed tuple no longer fits
+			}
+			inSession(t, s, func(x *Session) {
+				if n, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base); err != nil || n != 1 {
+					t.Fatalf("purge: %d %v", n, err)
+				}
+				if n, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base); err != nil || n != 0 {
+					t.Fatalf("second pass: %d %v", n, err)
+				}
+			})
+			if res, err := s.ClearPurgedLog(context.Background()); err != nil || res.Pending {
+				t.Fatalf("ClearPurgedLog: %+v %v", res, err)
+			}
+			db, wal := diskBytes(t, path)
+			if i := bytes.Index(db, []byte(marker)); i >= 0 {
+				t.Fatalf("Loop key still in the database file at byte %d", i)
+			}
+			if bytes.Contains(wal, []byte(marker)) {
+				t.Fatal("Loop key still in the write-ahead log")
+			}
+			if c == "rekeyed" {
+				want, _ := loopLocator(LoopTuple{Source: srcA, Database: LoopDatabase, Store: LoopStore, KeyJSON: scrubbed})
+				if n := rowCount(t, s, `select count(*) from loop_locator_metadata m join knowledge_locators l on l.id=m.locator_id where m.locator_id=7 and m.key_json=? and l.locator=?`, scrubbed, want); n != 1 {
+					t.Fatal("the registration did not take the scrubbed key")
+				}
+				if n := loopOwned(t, s, 7); n != 9 {
+					t.Fatalf("a rekeyed registration lost rows: %d", n)
+				}
+				return
+			}
+			if n := loopOwned(t, s, 7); n != 0 {
+				t.Fatalf("%d rows of the deleted registration remain", n)
+			}
+			if c == "held" && loopOwned(t, s, 8) != 9 {
+				t.Fatal("the registration under the scrubbed key changed")
+			}
+		})
+	}
+}
+
+func TestPurgeLoopKeysFaultsSurface(t *testing.T) {
+	seed := func(t *testing.T, s *Store) {
+		t.Helper()
+		seedLoop(t, s, 7, `{"access_token":"SYNTHETIC"}`)
+		seedLoop(t, s, 8, `{"access_token":"[redacted]"}`) // so 7 is deleted
+		seedLoop(t, s, 9, `{"password":"SYNTHETIC"}`)      // and 9 takes its scrubbed key
+	}
+	op := func(ctx context.Context, s *Store) error {
+		x, err := s.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer x.Rollback()
+		if _, err := x.PurgeUnscrubbedKeys(srcA, teamsdesktop.Scrub, base); err != nil {
+			return err
+		}
+		return x.Commit()
+	}
+	sweepFaults(t, seed, op)
 }

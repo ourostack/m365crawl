@@ -1194,6 +1194,90 @@ func TestSyncReportsThePurgedLog(t *testing.T) {
 	}
 }
 
+// Only an explicit sync runs the one-time VACUUM of an archive an older version wrote.
+func TestExplicitSyncVacuumsAnOlderArchiveOnce(t *testing.T) {
+	db := newDB(t)
+	run(t, Options{Root: fixtureRoot, DBPath: db})
+	state := func() string {
+		var v string
+		if err := openRaw(t, db).QueryRow(`select value from meta where key='free_space_vacuum'`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if got := state(); got != "done" {
+		t.Fatalf("a new archive: %q", got)
+	}
+	execSQL(t, db, `update meta set value='needed' where key='free_space_vacuum'`)
+	if r, _ := run(t, Options{Root: fixtureRoot, DBPath: db}); r.Vacuumed || r.VacuumPending != nil || state() != "needed" {
+		t.Fatalf("an implicit sync vacuumed: %+v %+v", r.Vacuumed, r.VacuumPending)
+	}
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: db, Explicit: true})
+	if !r.Vacuumed || r.VacuumPending != nil || r.PurgedLogPending || state() != "done" {
+		t.Fatalf("explicit sync: vacuumed=%v pending=%+v log=%v", r.Vacuumed, r.VacuumPending, r.PurgedLogPending)
+	}
+	if recordsQuery(t, db, `select count(*) from meta where key='purged_log_pending'`) != 0 {
+		t.Fatal("the VACUUM's write-ahead log was not emptied")
+	}
+	if r, _ := run(t, Options{Root: fixtureRoot, DBPath: db, Explicit: true}); r.Vacuumed {
+		t.Fatal("vacuumed twice")
+	}
+}
+
+// The VACUUM's outcome reaches the report: still due (with the reason), failed, cancelled, or done
+// with a log readers kept from being emptied.
+func TestSyncReportsTheVacuum(t *testing.T) {
+	oldVac, oldState, oldLog := vacuumOnce, vacuumState, clearPurgedLog
+	t.Cleanup(func() { vacuumOnce, vacuumState, clearPurgedLog = oldVac, oldState, oldLog })
+	vacuumOnce = func(*store.Store, context.Context) (*store.VacuumPending, bool, error) {
+		return &store.VacuumPending{NeedBytes: 10, Reason: store.VacuumDiskSpace}, false, nil
+	}
+	r, _ := run(t, Options{Root: fixtureRoot, DBPath: newDB(t), Explicit: true})
+	if r.VacuumPending == nil || r.VacuumPending.Reason != store.VacuumDiskSpace || r.Vacuumed {
+		t.Fatalf("pending: %+v", r.VacuumPending)
+	}
+	vacuumOnce = func(*store.Store, context.Context) (*store.VacuumPending, bool, error) {
+		return &store.VacuumPending{Reason: store.VacuumFailed}, false, errors.New("disk I/O error")
+	}
+	_, _, err := Run(context.Background(), Options{Root: fixtureRoot, DBPath: newDB(t), Explicit: true})
+	var coded *errs.Coded
+	if !errors.As(err, &coded) || coded.Code != errs.CodeDBError {
+		t.Fatalf("failed vacuum: %v", err)
+	}
+	vacuumOnce = func(*store.Store, context.Context) (*store.VacuumPending, bool, error) { return nil, true, nil }
+	clearPurgedLog = func(*store.Store, context.Context) (store.PurgedLog, error) {
+		return store.PurgedLog{Pending: true}, nil
+	}
+	if r, _ = run(t, Options{Root: fixtureRoot, DBPath: newDB(t), Explicit: true}); !r.Vacuumed || r.VacuumPending == nil || r.VacuumPending.Reason != store.VacuumLogPending {
+		t.Fatalf("log pending: %+v", r.VacuumPending)
+	}
+	clearPurgedLog = oldLog
+	// A cancelled run does not start it and reports it still due.
+	vacuumOnce = func(*store.Store, context.Context) (*store.VacuumPending, bool, error) {
+		t.Fatal("a cancelled run started the VACUUM")
+		return nil, false, nil
+	}
+	vacuumState = func(*store.Store, context.Context) (*store.VacuumPending, error) {
+		return &store.VacuumPending{NeedBytes: 10, Reason: store.VacuumNotRun}, nil
+	}
+	cancelRun := func() Report {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		oldRead := beforeRead
+		defer func() { beforeRead = oldRead }()
+		beforeRead = func(*writer) { cancel() }
+		r, _, _ := Run(ctx, Options{Root: fixtureRoot, DBPath: newDB(t), Explicit: true})
+		return r
+	}
+	if r := cancelRun(); r.VacuumPending == nil || r.VacuumPending.Reason != store.VacuumCancelled {
+		t.Fatalf("cancelled: %+v", r.VacuumPending)
+	}
+	vacuumState = func(*store.Store, context.Context) (*store.VacuumPending, error) { return nil, nil }
+	if r := cancelRun(); r.VacuumPending != nil {
+		t.Fatalf("nothing due, yet pending: %+v", r.VacuumPending)
+	}
+}
+
 // A cancelled run still clears the log (the purge it follows has committed), and a failure to
 // clear it is reported as pending even when the run already failed.
 func TestSyncClearsThePurgedLogWhenCancelled(t *testing.T) {

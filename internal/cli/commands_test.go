@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
@@ -915,5 +916,25 @@ func TestInterruptedIsCoded(t *testing.T) {
 				t.Fatalf("stderr = %s", errb.String())
 			}
 		})
+	}
+}
+
+// Only `sync` (and `watch`) is explicit: a read's implicit sync never runs the one-time VACUUM.
+func TestOnlyAnExplicitSyncMayVacuum(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	var explicit []bool
+	stubSync(t, func(_ context.Context, o syncer.Options) (syncer.Report, []syncer.Change, error) {
+		explicit = append(explicit, o.Explicit)
+		return syncer.Report{Status: syncer.StatusOK}, nil, nil
+	})
+	if code, _, stderr := e.run("sync", "--json"); code != 0 {
+		t.Fatalf("sync: exit %d %s", code, stderr)
+	}
+	if code, _, stderr := e.run("--max-age", "1ns", "search", "Fixture", "--json"); code != 0 {
+		t.Fatalf("read: exit %d %s", code, stderr)
+	}
+	if len(explicit) != 2 || !explicit[0] || explicit[1] {
+		t.Fatalf("explicit = %v, want [true false]", explicit)
 	}
 }

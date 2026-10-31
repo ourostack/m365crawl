@@ -190,17 +190,20 @@ func (x *Session) PurgeDenied(source string, denied func(name string) bool, at t
 }
 
 // PurgeUnscrubbedKeys clears the rows of source whose key_json changes when scrub is applied to
-// it (a row archived under a key that held credential material before keys were scrubbed):
-// value_json becomes NULL, content_hash ” and removed_at is set when it was not, as PurgeDenied
-// does. The record is archived again under its scrubbed key on the next read. It returns how many
-// rows it cleared.
+// it (a row archived under a key that held credential material before keys were scrubbed),
+// including rows an earlier version already cleared. The credential is in the key, so the key goes
+// too: when no row of the same database and store holds the scrubbed key, the row takes it, with
+// value_json NULL, content_hash empty and removed_at set when it was not, as PurgeDenied does, and the
+// next read archives the record into it again; when one does, that row is the one reads use and
+// the unscrubbed row is deleted, the one deletion of a row the archive makes. Calendar losses kept
+// under the unscrubbed key are deleted with it. It returns how many rows it changed.
 func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte, int), at time.Time) (int, error) {
 	ctx := context.Background()
-	rows, err := x.tx.QueryContext(ctx, `select database, store, key_json from records where source=? and (value_json is not null or content_hash != '')`, source)
+	rows, err := x.tx.QueryContext(ctx, `select database, store, key_json from records where source=?`, source)
 	if err != nil {
 		return 0, err
 	}
-	var hit [][3]string
+	var hit [][4]string
 	for rows.Next() {
 		var db, st, key string
 		if err := rows.Scan(&db, &st, &key); err != nil {
@@ -208,7 +211,7 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 			return 0, err
 		}
 		if scrubbed, _ := scrub([]byte(key)); !bytes.Equal(scrubbed, []byte(key)) {
-			hit = append(hit, [3]string{db, st, key})
+			hit = append(hit, [4]string{db, st, key, string(scrubbed)})
 		}
 	}
 	err = rows.Err()
@@ -216,10 +219,96 @@ func (x *Session) PurgeUnscrubbedKeys(source string, scrub func([]byte) ([]byte,
 	if err != nil {
 		return 0, err
 	}
-	return x.purge(ctx, len(hit), func(i int) (sql.Result, error) {
-		return x.tx.ExecContext(ctx, `update records set value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
-			fmtTime(at), source, hit[i][0], hit[i][1], hit[i][2])
+	loops, err := unscrubbedLoopKeys(ctx, x.tx, source, scrub)
+	if err != nil {
+		return 0, err
+	}
+	return x.purge(ctx, len(hit)+len(loops), func(i int) (sql.Result, error) {
+		if i >= len(hit) {
+			return purgeLoopKey(ctx, x.tx, source, loops[i-len(hit)])
+		}
+		db, st, key, scrubbed := hit[i][0], hit[i][1], hit[i][2], hit[i][3]
+		if _, err := x.tx.ExecContext(ctx, `delete from calendar_losses where source=? and database=? and store=? and key_json=?`, source, db, st, key); err != nil {
+			return nil, err
+		}
+		var held int
+		if err := x.tx.QueryRowContext(ctx, `select count(*) from records where source=? and database=? and store=? and key_json=?`, source, db, st, scrubbed).Scan(&held); err != nil {
+			return nil, err
+		}
+		if held > 0 {
+			return x.tx.ExecContext(ctx, `delete from records where source=? and database=? and store=? and key_json=?`, source, db, st, key)
+		}
+		return x.tx.ExecContext(ctx, `update records set key_json=?, value_json=null, content_hash='', raw_digest=null, value_redacted=0, removed_at=coalesce(removed_at, ?) where source=? and database=? and store=? and key_json=?`,
+			scrubbed, fmtTime(at), source, db, st, key)
 	})
+}
+
+// loopKey is a Loop registration whose stored record key changes when scrubbed.
+type loopKey struct {
+	id                    int64
+	db, st, key, scrubbed string
+}
+
+// unscrubbedLoopKeys lists the Loop registrations of source whose record key, kept as their
+// identity in loop_locator_metadata and knowledge_locators, changes when scrubbed.
+func unscrubbedLoopKeys(ctx context.Context, tx *sql.Tx, source string, scrub func([]byte) ([]byte, int)) ([]loopKey, error) {
+	rows, err := tx.QueryContext(ctx, `select locator_id, database, store, key_json from loop_locator_metadata where source=? order by locator_id`, source)
+	if err != nil {
+		return nil, err
+	}
+	var out []loopKey
+	for rows.Next() {
+		var k loopKey
+		if err := rows.Scan(&k.id, &k.db, &k.st, &k.key); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if scrubbed, _ := scrub([]byte(k.key)); !bytes.Equal(scrubbed, []byte(k.key)) {
+			k.scrubbed = string(scrubbed)
+			out = append(out, k)
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	return out, err
+}
+
+// purgeLoopKey applies the record-key rule to a Loop registration: it takes the scrubbed key, in
+// loop_locator_metadata and in its knowledge locator, when no registration holds it and the
+// scrubbed tuple is still within Loop's limits; otherwise the registration is deleted with its
+// attempts, sources, snapshots, channels and their text index rows, since the registration under
+// the scrubbed key is the one reads use.
+func purgeLoopKey(ctx context.Context, tx *sql.Tx, source string, k loopKey) (sql.Result, error) {
+	locator, ok := loopLocator(LoopTuple{Source: source, Database: k.db, Store: k.st, KeyJSON: k.scrubbed})
+	held := 0
+	if ok {
+		if err := tx.QueryRowContext(ctx, `select (select count(*) from knowledge_locators where kind=? and platform=? and locator=?)
++ (select count(*) from loop_locator_metadata where source=? and database=? and store=? and key_json=?)`,
+			LoopKind, LoopPlatform, locator, source, k.db, k.st, k.scrubbed).Scan(&held); err != nil {
+			return nil, err
+		}
+	}
+	if ok && held == 0 {
+		if _, err := tx.ExecContext(ctx, `update knowledge_locators set locator=? where id=?`, locator, k.id); err != nil {
+			return nil, err
+		}
+		return tx.ExecContext(ctx, `update loop_locator_metadata set key_json=? where locator_id=?`, k.scrubbed, k.id)
+	}
+	for _, q := range []string{
+		`delete from loop_fts where rowid in (select c.id from loop_channels c join loop_snapshots sn on sn.id=c.snapshot_id where sn.locator_id=?)`,
+		`delete from loop_channels where snapshot_id in (select id from loop_snapshots where locator_id=?)`,
+		`delete from loop_snapshot_losses where snapshot_id in (select id from loop_snapshots where locator_id=?)`,
+		`delete from loop_snapshots where locator_id=?`,
+		`delete from loop_attempt_evidence where locator_id=?`,
+		`delete from knowledge_attempts where locator_id=?`,
+		`delete from knowledge_sources where locator_id=?`,
+		`delete from knowledge_locators where id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, k.id); err != nil {
+			return nil, err
+		}
+	}
+	return tx.ExecContext(ctx, `delete from loop_locator_metadata where locator_id=?`, k.id)
 }
 
 // purge runs the n clearing statements of a credential purge and returns how many rows they
