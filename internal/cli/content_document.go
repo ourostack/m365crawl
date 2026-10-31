@@ -226,20 +226,23 @@ func workIQDocumentCoverageOf(docs []store.WorkIQDocument) *workIQDocumentCovera
 }
 
 // workIQDocumentHits are admitted documents for content list and search. Their native modified
-// clock is unknown, so a bounded window or a knowledge --source-id excludes them.
-func workIQDocumentHits(rt *runtime, st *store.Store, query string, filtered bool, limit int) ([]searchHit, []store.WorkIQDocument, error) {
+// clock is unknown, so a bounded window or a knowledge --source-id excludes them. A search reads at
+// most limit matches and says when more matched.
+func workIQDocumentHits(rt *runtime, st *store.Store, query string, filtered bool, limit int) ([]searchHit, []store.WorkIQDocument, bool, error) {
 	if st == nil {
-		return nil, nil, nil
+		return nil, nil, false, nil
 	}
 	all, err := st.WorkIQDocuments(rt.ctx)
 	if err != nil || filtered {
-		return nil, all, err
+		return nil, all, false, err
 	}
-	matched := all
+	matched, more := all, false
 	if query != "" {
 		if matched, err = st.SearchWorkIQDocuments(rt.ctx, query, limit+1); err != nil {
-			return nil, all, err
+			return nil, all, false, err
 		}
+		more = len(matched) > limit
+		matched = matched[:min(limit, len(matched))]
 	}
 	var hits []searchHit
 	for _, d := range matched {
@@ -249,5 +252,5 @@ func workIQDocumentHits(rt *runtime, st *store.Store, query string, filtered boo
 		hits = append(hits, searchHit{source: searchContent, cloudLabel: d.Name, cloudObservationID: d.ID, workIQDocument: true,
 			item: workIQDocumentItemOf(d, rt.g.MaxText)})
 	}
-	return hits, all, nil
+	return hits, all, more, nil
 }

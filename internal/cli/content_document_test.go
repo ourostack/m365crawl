@@ -343,3 +343,24 @@ func TestSharedSearchIncludesAdmittedDocuments(t *testing.T) {
 		t.Fatal("a broken document index was hidden from shared search")
 	}
 }
+
+func TestDocumentSearchReportsMoreThanTheLimit(t *testing.T) {
+	e, _ := documentEnv(t)
+	t.Setenv("WORKIQ_DOCUMENT_CASE", "labeled")
+	if code, _, stderr := e.run("--json", "content", "fetch", "doc", documentLink); code != 0 {
+		t.Fatal(stderr)
+	}
+	e.exec(`insert into workiq_documents(account_id,drive_id,item_id,name,web_url,first_checked_at,last_checked_at,last_check_id)
+select account_id,drive_id,item_id||'2',name||' 2',web_url,first_checked_at,last_checked_at,last_check_id from workiq_documents;
+insert into workiq_document_bodies(document_id,check_id,text,digest,extracts,truncated)
+select (select max(id) from workiq_documents),check_id,text,digest,extracts,truncated from workiq_document_bodies;
+update workiq_documents set body_check_id=last_check_id`)
+	_, out, _ := e.run("--json", "--max-age", "0", "search", "walrus", "--source", "content", "--limit", "1")
+	if !strings.Contains(out, `"matched_at_least":1`) || !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("a cut document count looked exact: %s", out)
+	}
+	_, out, _ = e.run("--json", "--max-age", "0", "content", "search", "walrus", "--limit", "1")
+	if !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("content search hid more documents: %s", out)
+	}
+}

@@ -749,12 +749,14 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		for _, row := range engage.Rows {
 			hits = append(hits, engageHit(rt, row, engage.Sources, true))
 		}
-		documentHits, documents, err := workIQDocumentHits(rt, st, c.Query, !f.Since.IsZero() || !f.Until.IsZero(), f.Limit)
+		documentHits, documents, more, err := workIQDocumentHits(rt, st, c.Query, !f.Since.IsZero() || !f.Until.IsZero(), f.Limit)
 		if err != nil {
 			return nil, rt.contentError(err)
 		}
 		documentCoverage = workIQDocumentCoverageOf(documents)
+		cloudTruncated = cloudTruncated || more
 		matched[searchContent] += len(documentHits)
+		atLeast[searchContent] = atLeast[searchContent] || more
 		for _, h := range documentHits {
 			h.item = searchWorkIQDocumentItem{Source: searchContent, workIQDocumentItem: h.item.(workIQDocumentItem)}
 			hits = append(hits, h)
