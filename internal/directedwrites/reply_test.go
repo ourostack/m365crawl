@@ -158,6 +158,14 @@ func TestReplyRefusesMailItCannotPinDown(t *testing.T) {
 	if got, err := Target(ctx, opts, "", "nope", ""); err != nil || got.Known || got.Message != "nope" {
 		t.Fatalf("%+v %v", got, err)
 	}
+	for _, folder := range []string{`{}`, `[]`} {
+		srv, opts := mailServer(t)
+		srv.pages[originalLookup] = reply{data: list(sentCopy)}
+		srv.pages[sentFolder] = reply{data: folder}
+		if got, err := Send(ctx, opts, replyRequest()); err != nil || got.Code != da.CodeUnknownTarget || len(srv.created) != 0 {
+			t.Fatalf("a Sent Items copy became a target without the folder id: %+v %v", got, err)
+		}
+	}
 	for _, broken := range []string{originalLookup, sentFolder} {
 		srv, opts := mailServer(t)
 		srv.pages[broken] = reply{status: 503, err: errs.Usage("busy")}
@@ -289,6 +297,15 @@ func TestReplyChecksTheLogBeforeEachCall(t *testing.T) {
 		!strings.Contains(got.Notice, "draft-1") || len(srv.created) != 1 {
 		t.Fatalf("settled before the draft was recorded: %+v %v %v", got, err, srv.created)
 	}
+	srv, opts = mailServer(t)
+	srv.onReply = func() {
+		settle(t, opts)
+		readArchive = func(context.Context, string, func(*store.Store) error) error { return errors.New("unreadable") }
+	}
+	if got, err := Send(ctx, opts, replyRequest()); err != nil || got.RequestID != "1" || got.ExitClass != da.ExitUnknown || len(srv.created) != 1 {
+		t.Fatalf("an unreadable log lost the write's id: %+v %v", got, err)
+	}
+	readArchive = readOnly
 	srv, opts = mailServer(t)
 	srv.onFetch = func(path string) {
 		if path == draftPage {

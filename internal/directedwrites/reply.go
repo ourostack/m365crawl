@@ -96,14 +96,16 @@ func readMail(ctx context.Context, s session, id string, p person) (mail, error)
 		return mail{}, err
 	}
 	var sent struct{ ID string }
-	_ = json.Unmarshal(folder.Data, &sent)
+	if json.Unmarshal(folder.Data, &sent) != nil || sent.ID == "" {
+		return mail{}, nil // without the Sent Items id a sent copy cannot be told from a received one
+	}
 	var received []mailCopy
 	drafts := 0
 	for _, c := range list.Value {
 		switch {
 		case c.IsDraft:
 			drafts++
-		case c.ParentFolderID != sent.ID || sent.ID == "":
+		case c.ParentFolderID != sent.ID:
 			received = append(received, c)
 		}
 	}
@@ -262,7 +264,10 @@ func sendReply(ctx context.Context, opts Options, s session, row store.DirectedW
 		return notSent("write_log_unreadable", "draft_not_recorded", leftover+"; it could not be recorded", 0)
 	}
 	if !recorded {
-		current, _, _ := stillInFlight(ctx, opts, row.ID)
+		current, _, err := stillInFlight(ctx, opts, row.ID)
+		if err != nil {
+			current = row
+		}
 		settled := ofWrite(current)
 		settled.Decision, settled.Notice = da.Accept, "the write changed before it was sent; "+leftover
 		return settled
