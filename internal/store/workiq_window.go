@@ -112,15 +112,21 @@ func (s *Store) RetireWorkIQWindowFrontier(ctx context.Context, attempt int64, r
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `update workiq_frontiers set retired=1 where family='mail' and account_id=? and resource=? and scope=? and qualification=?
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `update workiq_frontiers set retired=1 where family='mail' and account_id=? and resource=? and scope=? and qualification=?
 and retired=0 and revision=?`, w.binding.Fact.ID, resource, w.scope, w.qualification, expected)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n != 1 {
-		return errors.New("WorkIQ window position changed before it was retired")
-	}
-	return nil
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("WorkIQ window position changed before it was retired")
+		}
+		return nil
+	})
 }
 
 // WorkIQWindowPage says what one staged window page held and changed.
@@ -302,9 +308,9 @@ removed=0,page_id=excluded.page_id,item_index=excluded.item_index,state='staged'
 }
 
 // workIQWindowNewer says version is a different, not older, server version than old; an unknown
-// clock on either side counts as different.
+// clock on either side counts as different, as nothing shows it is the same.
 func workIQWindowNewer(version, old string) bool {
-	if version == old {
+	if version == old && version != "" {
 		return false
 	}
 	a, errA := time.Parse(time.RFC3339Nano, version)

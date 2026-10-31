@@ -79,13 +79,7 @@ func (s *Store) migrateWorkIQWindow(ctx context.Context) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, conn.Close()) }()
-	var tables int
-	if err := conn.QueryRowContext(ctx, `select count(*) from sqlite_master where type='table' and name in ('workiq_attempts','workiq_rows','workiq_pages')`).Scan(&tables); err != nil {
-		return err
-	}
-	if tables != 3 {
-		return nil // an archive with no WorkIQ tables gets them, current, from the schema itself
-	}
+	// The schema created any missing WorkIQ table current before this runs.
 	var attemptsSQL string
 	if err := conn.QueryRowContext(ctx, `select sql from sqlite_master where type='table' and name='workiq_attempts'`).Scan(&attemptsSQL); err != nil {
 		return err

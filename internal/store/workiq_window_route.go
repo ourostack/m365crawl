@@ -36,22 +36,16 @@ func (s *Store) WorkIQMailWindowRoute(ctx context.Context, account string, since
 	type interval struct{ since, until time.Time }
 	var covered []interval
 	if err := mailEach(ctx, s.db, `select since,until from workiq_window_coverage where account_id=? and folder_id='' order by since,until`, []any{account}, func(r *sql.Rows) error {
-		var a, b sql.NullString
+		var a, b string
 		if err := r.Scan(&a, &b); err != nil {
 			return err
 		}
-		start, err := workIQStoredTime(a)
-		if err != nil {
-			return err
-		}
-		end, err := workIQStoredTime(b)
-		if err != nil {
-			return err
-		}
-		if start == nil || end == nil {
+		start, errA := time.Parse(time.RFC3339Nano, a)
+		end, errB := time.Parse(time.RFC3339Nano, b)
+		if errA != nil || errB != nil {
 			return errors.New("invalid WorkIQ window coverage")
 		}
-		covered = append(covered, interval{*start, *end})
+		covered = append(covered, interval{start, end})
 		return nil
 	}); err != nil {
 		return out, err
