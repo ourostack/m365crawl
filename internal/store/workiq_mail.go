@@ -30,10 +30,12 @@ func (s *Store) CommitWorkIQMailGroup(ctx context.Context, attempt int64, normal
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var census int64
 		var complete bool
-		if err := tx.QueryRowContext(ctx, `select id,complete from workiq_censuses where attempt_id=? and account_id=?`,
-			attempt, binding.Fact.ID).Scan(&census, &complete); err != nil {
+		commit := workIQMailCommit{}
+		if err := tx.QueryRowContext(ctx, `select c.id,c.complete,c.full_enumeration,a.started_at from workiq_censuses c join workiq_attempts a on a.id=c.attempt_id
+where c.attempt_id=? and c.account_id=?`, attempt, binding.Fact.ID).Scan(&census, &complete, &commit.full, &commit.started); err != nil {
 			return err
 		}
+		commit.census = census
 		if !complete {
 			result.Pending = true
 			return nil
@@ -72,7 +74,7 @@ where census_id=? and normalized_id=? and admitted=0 order by graph_id limit 128
 				return err
 			}
 			if !server.Removed {
-				if err := commitWorkIQMailItem(ctx, tx, binding.Fact.ID, server, item.observed, copies, &result); err != nil {
+				if err := commitWorkIQMailItem(ctx, tx, binding.Fact.ID, server, item.observed, copies, &result, commit); err != nil {
 					return err
 				}
 			}
@@ -172,7 +174,17 @@ func workIQMailProjection(ctx context.Context, tx *sql.Tx, account string, serve
 	return m, nil
 }
 
-func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, server workiq.MailMessage, observed time.Time, copies int, result *WorkIQMailResult) error {
+// workIQMailCommit says who commits a server mail item. A window never merges by Message-ID and
+// marks the rows it creates identity_unproven; a whole-account census, always complete when it
+// commits, vouches for the rows it reaches and may join a moved copy to an unproven row.
+type workIQMailCommit struct {
+	window  bool
+	census  int64
+	full    bool
+	started string
+}
+
+func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, server workiq.MailMessage, observed time.Time, copies int, result *WorkIQMailResult, commit workIQMailCommit) error {
 	var rowid int64
 	err := tx.QueryRowContext(ctx, `select item_rowid from workiq_aliases where kind='mail' and account_id=? and namespace='graph' and alias=?`, account, server.ID).Scan(&rowid)
 	bound := err == nil
@@ -207,12 +219,20 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 			return errors.New("invalid retained server mail projection")
 		}
 	}
-	if !bound && workiq.NormalizeMessageID(server.InternetMessageID) != "" {
+	if !bound && !commit.window && workiq.NormalizeMessageID(server.InternetMessageID) != "" {
 		candidates, err := workIQNativeMailCandidates(ctx, tx, account, workiq.NormalizeMessageID(server.InternetMessageID))
 		if err != nil {
 			return err
 		}
-		if copies == 1 && len(candidates) == 1 {
+		unproven, movable, err := workIQUnprovenCandidates(ctx, tx, account, candidates, commit)
+		if err != nil {
+			return err
+		}
+		switch {
+		case unproven > 0 && (copies != 1 || len(candidates) != 1 || !movable):
+			// A window row no complete census has vouched for: merging into it could join twins.
+			result.Gaps["workiq_mail_identity_ambiguous"]++
+		case copies == 1 && len(candidates) == 1:
 			var header, subject, sender string
 			var sent sql.NullString
 			if err := tx.QueryRowContext(ctx, `select internet_message_id,subject,sender_address,sent_at from mail_messages where rowid=?`, candidates[0]).Scan(&header, &subject, &sender, &sent); err != nil {
@@ -239,7 +259,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 			} else {
 				result.Gaps["workiq_mail_identity_uncorroborated"]++
 			}
-		} else if copies > 1 || len(candidates) > 1 {
+		case copies > 1 || len(candidates) > 1:
 			result.Gaps["workiq_mail_identity_ambiguous"]++
 		}
 	}
@@ -261,6 +281,7 @@ func commitWorkIQMailItem(ctx context.Context, tx *sql.Tx, account string, serve
 		result.Gaps["workiq_mail_message_id_missing"]++
 	}
 	winner := "workiq_server"
+	inserted := rowid == 0
 	if rowid == 0 {
 		if rowid, err = insertMail(ctx, tx, account, m, deriveMail(m), observed.UTC().Format(timeLayout)); err != nil {
 			return err
@@ -409,9 +430,61 @@ cache_version=coalesce(workiq_rows.cache_version,excluded.cache_version)`,
 	if err := retainWorkIQMailCacheMarks(ctx, tx, account, rowid); err != nil {
 		return err
 	}
+	// A window's new row waits for a whole-account census; a census that reaches a row vouches for it.
+	mark := "update workiq_rows set identity_unproven=0 where kind='mail' and account_id=? and item_rowid=? and identity_unproven=1"
+	if commit.window {
+		mark = "update workiq_rows set identity_unproven=1 where kind='mail' and account_id=? and item_rowid=? and ?"
+	}
+	if _, err := tx.ExecContext(ctx, mark, account, rowid, inserted); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `insert into meta(key,value) values(?,?) on conflict(key) do nothing`,
 		workIQMailProjectionKey, strconv.Itoa(WorkIQMailProjectionVersion)); err != nil {
 		return err
 	}
 	return reduceWorkIQMailMarks(ctx, tx, account, rowid)
+}
+
+// workIQUnprovenCandidates counts the candidates that are window rows no complete census has
+// vouched for, and says whether the single candidate may take this copy as the same message
+// moved: its Graph ID is not a live member of this census, the window saw it before this attempt
+// began, and, when the census did not enumerate every folder (and so never carried the window
+// row), the census holds an explicit removal of that Graph ID.
+func workIQUnprovenCandidates(ctx context.Context, tx *sql.Tx, account string, candidates []int64, commit workIQMailCommit) (int, bool, error) {
+	unproven, movable := 0, false
+	for _, id := range candidates {
+		var marked bool
+		var graph string
+		var seen sql.NullString
+		err := tx.QueryRowContext(ctx, `select identity_unproven,graph_id,server_seen_at from workiq_rows where kind='mail' and account_id=? and item_rowid=?`,
+			account, id).Scan(&marked, &graph, &seen)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		if !marked {
+			continue
+		}
+		unproven++
+		if commit.census == 0 || len(candidates) != 1 {
+			continue
+		}
+		seenAt, err := workIQStoredTime(seen)
+		if err != nil {
+			return 0, false, err
+		}
+		started, err := workIQStoredTime(sql.NullString{String: commit.started, Valid: true})
+		if err != nil {
+			return 0, false, err
+		}
+		var live, removed bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from workiq_census_members where census_id=? and graph_id=? and removed=0),
+exists(select 1 from workiq_census_members where census_id=? and graph_id=? and removed=1)`, commit.census, graph, commit.census, graph).Scan(&live, &removed); err != nil {
+			return 0, false, err
+		}
+		movable = !live && seenAt != nil && seenAt.Before(*started) && (commit.full || removed)
+	}
+	return unproven, movable, nil
 }

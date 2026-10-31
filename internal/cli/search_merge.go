@@ -807,7 +807,7 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		if c.Folder != "" {
 			own = matchCoverage(own, c.Folder)
 		}
-		routes, err := rt.sinceRoutes(st, own, f.Since)
+		routes, err := rt.sinceRoutes(st, own, f.Since, f.Until, c.Folder != "")
 		if err != nil {
 			return nil, err
 		}

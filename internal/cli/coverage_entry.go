@@ -251,7 +251,9 @@ func (c *coverageRun) notices() []string {
 type mailCoverageEvidence struct {
 	spans  store.MailSpans
 	server time.Time
-	roles  map[string]bool // the roles the account has an archived folder of
+	// windows are the proven all-folder WorkIQ mail windows, on the received clock.
+	windows []store.TimeSpan
+	roles   map[string]bool // the roles the account has an archived folder of
 }
 
 // mailCoverageSpans and mailServerThrough are test seams of the archive's mail evidence.
@@ -259,7 +261,13 @@ var (
 	mailCoverageSpans = (*store.Store).MailCoverageSpans
 	mailServerThrough = (*store.Store).MailServerThrough
 	mailRoleCount     = (*store.Store).MailRoleCount
+	mailWindowSpans   = (*store.Store).WorkIQMailWindowSpans
 )
+
+// workIQWindowSentMargin is how much of a proven window's end Sent Items do not count: they are
+// dated by sent time, and a copy received just after the window's end was sent moments earlier
+// (live, 0 to 22 seconds).
+const workIQWindowSentMargin = time.Minute
 
 func (c *coverageRun) mailEvidence(account string, folders []store.MailFolderRow) (*mailCoverageEvidence, error) {
 	if ev := c.mail[account]; ev != nil {
@@ -276,6 +284,9 @@ func (c *coverageRun) mailEvidence(account string, folders []store.MailFolderRow
 		return nil, err
 	}
 	if ev.server, err = mailServerThrough(c.st, c.rt.ctx, account); err != nil {
+		return nil, err
+	}
+	if ev.windows, err = mailWindowSpans(c.st, c.rt.ctx, account); err != nil {
 		return nil, err
 	}
 	if ev.spans.Legacy {
@@ -327,6 +338,13 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 	if !ev.server.IsZero() {
 		server = []store.TimeSpan{{To: ev.server}}
 	}
+	for _, w := range ev.windows {
+		if role == store.MailRoleSent {
+			w.To = w.To.Add(-workIQWindowSentMargin)
+		}
+		server = append(server, w)
+	}
+	server = store.MergeSpans(server)
 	pieces := clip(append(append([]store.TimeSpan{}, cache...), server...), a, b)
 	e.settle(pieces, a, b)
 	if len(pieces) > 0 {

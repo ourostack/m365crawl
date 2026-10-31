@@ -46,6 +46,8 @@ var sqlTables = []sqlTable{
 	{"directed_writes", "each directed write the person allowed: agent, reason, acting identity, chat, recipients, text, outcome (sent, failed, unknown), verification and server id"},
 	{"directed_write_events", "append-only changes of each directed write's outcome and phase, without content"},
 	{"directed_write_drafts", "the reply draft a directed reply made before sending it: its Graph id and Internet Message-ID"},
+	{"workiq_window_members", "WorkIQ mail window members: per window position and Graph ID the folder, version, received_at, in_window and state (staged, admitted, deferred, resolved or removed)"},
+	{"workiq_window_coverage", "WorkIQ mail window coverage: account, Graph folder_id ('' for all folders), since, until, snapshot_at and deferred count of each proven window"},
 	{"mail_coverage", "how far back each mail folder was read, and when"},
 	{"mail_absent", "mail that a read missed, counted until it is marked gone or evicted"},
 	{"calendar_source_events", "calendar events, one row per occurrence and source"},
