@@ -16,9 +16,26 @@ func testBrowser(s *browsertest.Server) *Browser {
 	return &Browser{wsURL: s.URL(), exited: make(chan struct{})}
 }
 
+// closedAtEnd returns a fake browser whose connection closes when the test ends, so its read loop
+// never runs into later tests.
+func closedAtEnd(t *testing.T, s *browsertest.Server) *Browser {
+	t.Helper()
+	b := testBrowser(s)
+	t.Cleanup(func() {
+		b.mu.Lock()
+		c := b.conn
+		b.mu.Unlock()
+		if c != nil {
+			c.close()
+		}
+	})
+	return b
+}
+
+// testPage opens a page on a fake browser whose connection closes when the test ends.
 func testPage(t *testing.T, s *browsertest.Server) *Page {
 	t.Helper()
-	p, err := testBrowser(s).Page(context.Background())
+	p, err := closedAtEnd(t, s).Page(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +155,7 @@ func TestPageCreatesTargetWhenNone(t *testing.T) {
 
 func TestPageIsReused(t *testing.T) {
 	s := browsertest.NewServer(t)
-	b := testBrowser(s)
+	b := closedAtEnd(t, s)
 	p1, err := b.Page(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -165,14 +182,14 @@ func TestPageErrors(t *testing.T) {
 	for _, method := range []string{"Target.getTargets", "Target.attachToTarget"} {
 		s := browsertest.NewServer(t)
 		s.Handle(method, fail)
-		if _, err := testBrowser(s).Page(context.Background()); err == nil {
+		if _, err := closedAtEnd(t, s).Page(context.Background()); err == nil {
 			t.Errorf("%s failing must fail Page", method)
 		}
 	}
 	s := browsertest.NewServer(t)
 	s.Handle("Target.getTargets", func(browsertest.Request) (any, *browsertest.Error) { return map[string]any{}, nil })
 	s.Handle("Target.createTarget", fail)
-	if _, err := testBrowser(s).Page(context.Background()); err == nil {
+	if _, err := closedAtEnd(t, s).Page(context.Background()); err == nil {
 		t.Error("createTarget failing must fail Page")
 	}
 	if _, err := (&Browser{wsURL: "ws://example.com/x"}).Page(context.Background()); !errors.Is(err, errNotLoopback) {
@@ -518,5 +535,23 @@ func TestCtxErrPrefersContext(t *testing.T) {
 	cancel()
 	if got := ctxErr(ctx, boom); !errors.Is(got, context.Canceled) {
 		t.Fatalf("done context: %v", got)
+	}
+}
+
+// Closing a client stops its read loop before close returns, so nothing of a closed client keeps
+// running into whatever runs next (#286).
+func TestClientCloseWaitsForTheReadLoop(t *testing.T) {
+	s := browsertest.NewServer(t)
+	for range 20 {
+		c, err := dialCDP(context.Background(), s.URL())
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.close()
+		select {
+		case <-c.done:
+		default:
+			t.Fatal("the read loop was still running after close returned")
+		}
 	}
 }
