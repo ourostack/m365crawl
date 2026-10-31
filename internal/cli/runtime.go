@@ -458,7 +458,7 @@ func (rt *runtime) noteRegisteredSyncOff(res result, what string, attempts []*ti
 	if rt.syncOff == "" {
 		return
 	}
-	res.setSynced(implicitSyncDisabled, nil)
+	res.setImplicitSync(implicitSyncDisabled)
 	if len(attempts) == 0 {
 		return
 	}
