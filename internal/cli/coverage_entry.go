@@ -112,6 +112,10 @@ type coverageEntry struct {
 	Next            []startStep      `json:"next,omitempty"`
 	// route is the key of the WorkIQ route Next comes from (coverageRun.routes).
 	route string
+	// window (mail) says the entry needs a WorkIQ mail window from the range's start to windowEnd;
+	// mailEntries gives every entry of an account and range one route.
+	window    bool
+	windowEnd time.Time
 }
 
 func newCoverageEntry(source, scope, account string) coverageEntry {
@@ -370,13 +374,16 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 	if len(cache) > 0 {
 		cacheEnd = cache[len(cache)-1].To
 	}
+	var holeEnd time.Time // the end of the latest hole a window fills: where the cache resumes
 	for _, h := range holes(pieces, a, b) {
 		switch {
 		case len(cache) == 0:
 			e.reason(reasonNoCompleteRead, "no read of this account's mail was complete enough to show that the cache held every "+role+" message of a range")
 		case h.From.Before(cacheEnd) && count.State == "older_copy_only":
+			holeEnd = h.To
 			e.reason(reasonOnlyOlderCopy, "only an older copy of the folder, from a folder set Outlook replaced, reached these dates")
 		case h.From.Before(cacheEnd):
+			holeEnd = h.To
 			detail := "the cache did not hold all " + role + " mail before " + covStamp(h.To) + " when the archive read it"
 			if role == store.MailRoleSent && ev.spans.SentShift > 0 {
 				detail += "; Sent Items are dated by when they were sent, and a message drafted up to " + ev.spans.SentShift.Round(time.Minute).String() + " before it was sent may have left the cache before any read"
@@ -399,13 +406,11 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 		e.reason(reasonCopiesDisagree, fmt.Sprintf("an older copy of the folder holds %d of %d messages in this range that the current cache lacks although its range covers them", count.LackingInCurrentRange, count.Messages))
 	}
 	if e.has(reasonBeforeCache, reasonOnlyOlderCopy, reasonCopiesDisagree) {
-		// Holes before the cache end where the cache starts, and a window fills them once.
-		end := judged
-		if e.has(reasonBeforeCache, reasonOnlyOlderCopy) {
-			end = b
-		}
-		if e.Next, e.route, err = c.mailSteps(account, a, end); err != nil {
-			return e, err
+		// A window fills holes up to where the cache resumes, as a read before the cache asks
+		// (#315), and a disagreement up to the range it judged.
+		e.window, e.windowEnd = true, holeEnd
+		if e.has(reasonCopiesDisagree) {
+			e.windowEnd = laterTime(e.windowEnd, judged)
 		}
 	}
 	e.finish()

@@ -163,12 +163,32 @@ func (c *coverageCmd) Run(rt *runtime) error {
 				return nil, err
 			}
 		}
+		var roles []string
+		for _, src := range sources {
+			if role, ok := strings.CutPrefix(src, "mail:"); ok {
+				roles = append(roles, role)
+			}
+		}
 		for _, d := range days {
 			next := d.AddDate(0, 0, 1)
 			day := coverageDay{Day: d.Format("2006-01-02"), From: d, To: next, Entries: []coverageEntry{}}
+			// The day's mail roles are judged together, so they name the one window a read of the
+			// day would print.
+			var mail []coverageEntry
+			if len(roles) > 0 {
+				if mail, err = rt.mailCoverageEntries(run, roles, d, next); err != nil {
+					return nil, err
+				}
+			}
 			for _, src := range sources {
-				entries, err := rt.coverageEntries(run, src, d, next)
-				if err != nil {
+				var entries []coverageEntry
+				if role, ok := strings.CutPrefix(src, "mail:"); ok {
+					for _, e := range mail {
+						if e.Scope == role {
+							entries = append(entries, e)
+						}
+					}
+				} else if entries, err = rt.coverageEntries(run, src, d, next); err != nil {
 					return nil, err
 				}
 				for i := range entries {
@@ -244,12 +264,31 @@ func (c *coverageRun) mailEntries(accounts, roles []string, a, b time.Time) ([]c
 	slices.Sort(accounts)
 	var out []coverageEntry
 	for _, account := range accounts {
+		from := len(out)
+		end := time.Time{}
 		for _, role := range roles {
 			e, err := c.mailEntry(account, role, all, a, b)
 			if err != nil {
 				return nil, err
 			}
+			if e.window {
+				end = laterTime(end, e.windowEnd)
+			}
 			out = append(out, e)
+		}
+		if end.IsZero() {
+			continue
+		}
+		// One window per account and range holds what every judged role lacks, so a read prints
+		// the same command its entries name.
+		steps, key, err := c.mailSteps(account, a, end)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out[from:] {
+			if e := &out[from+i]; e.window {
+				e.Next, e.route = steps, key
+			}
 		}
 	}
 	return out, nil
@@ -312,10 +351,52 @@ func (c *coverageRun) mailRangeCoverage(folders []store.MailFolderRow, since, un
 	if err != nil {
 		return err
 	}
+	if err := c.shareReadRoutes(m.WorkIQRoutes, entries, since); err != nil {
+		return err
+	}
 	m.RangeCoverage = append(m.RangeCoverage, entries...)
 	m.WorkIQRoutes = c.addRoutes(m.WorkIQRoutes, entries)
 	for _, n := range c.notices() {
 		m.addNotice(n)
+	}
+	return nil
+}
+
+// shareReadRoutes gives the mail entries of an account the route a read already printed for it,
+// so the read names one command (#315). A read before the cache asks for a window up to where the
+// cache starts; when the entries need more of the range, that window widens to hold it.
+func (c *coverageRun) shareReadRoutes(routes []workIQRoute, entries []coverageEntry, since time.Time) error {
+	for i := range routes {
+		r := &routes[i]
+		if r.Source != "mail" {
+			continue
+		}
+		var end time.Time
+		var mine []int
+		for j, e := range entries {
+			if e.window && e.Account != nil && (r.Account == "" || *e.Account == r.Account) {
+				end, mine = laterTime(end, e.windowEnd), append(mine, j)
+			}
+		}
+		if len(mine) == 0 {
+			continue
+		}
+		if w := r.window; w != nil && !since.IsZero() {
+			from, to := windowBounds(since, end.Add(workIQWindowOverlap))
+			if from.Before(w.since) || to.After(w.end) {
+				wider, ok, err := c.rt.windowRoute(c.st, r.Account, r.Reason, w.situation, earlierTime(from, w.since), laterTime(to, w.end), w.keys, w.kinds)
+				if err != nil {
+					return err
+				}
+				if ok {
+					wider.Folders = r.Folders
+					*r = wider
+				}
+			}
+		}
+		for _, j := range mine {
+			entries[j].Next, entries[j].route = r.Next, ""
+		}
 	}
 	return nil
 }

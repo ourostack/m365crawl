@@ -103,3 +103,55 @@ func TestRangeNotCoveredRoutesToAWindowOfTheRange(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 }
+
+// windowOf is the --since/--until of the window step among cmds, or "".
+func windowOf(cmds []string) string {
+	for _, c := range cmds {
+		if i := strings.Index(c, "workiq sync --source mail --since "); i >= 0 {
+			return c[i:]
+		}
+	}
+	return ""
+}
+
+// A read that starts before the cache prints one window per account, and its range_coverage
+// entries name that same window, ending where the cache starts, not at the read's end (#315).
+func TestReadBeforeCacheAndItsRangeCoverageNameOneWindow(t *testing.T) {
+	e, outlook := covEnv(t)
+	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return true, nil })
+	since := mailT0.AddDate(0, 0, -30)
+	for _, args := range [][]string{
+		{"mail", "list", "--since", since.Format(time.RFC3339)},
+		{"mail", "list", "--since", since.In(time.FixedZone("", -7*3600)).Format(time.RFC3339), "--until", mailT0.AddDate(0, 0, -2).Format(time.RFC3339)},
+	} {
+		code, out, errOut := e.run(append([]string{"--no-sync", "--json", "--outlook-root", outlook}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d %s", args, code, errOut)
+		}
+		m := decode(t, out)
+		routes := routesOf(t, m)
+		if len(routes) != 1 {
+			t.Fatalf("%v: routes %v", args, routes)
+		}
+		window := windowOf(routeCommands(t, routes[0]))
+		// The cache's latest start (Sent Items, 10–11 days ago) bounds the window, plus the hour.
+		low := "workiq sync --source mail --since " + since.Format(time.RFC3339) + " --until " + mailT0.AddDate(0, 0, -11).Format("2006-01-02")
+		high := "workiq sync --source mail --since " + since.Format(time.RFC3339) + " --until " + mailT0.AddDate(0, 0, -10).Format("2006-01-02")
+		if !strings.HasPrefix(window, low) && !strings.HasPrefix(window, high) {
+			t.Fatalf("%v: route window %q", args, window)
+		}
+		for _, x := range rangeCoverage(t, m) {
+			if cmds := stepCommands(t, x); len(cmds) > 0 && windowOf(cmds) != window {
+				t.Fatalf("%v: %s entry names %q, route %q", args, x["scope"], windowOf(cmds), window)
+			}
+		}
+	}
+	// One coverage day: Sent and Inbox name one window, the one a read of that day would print.
+	day := mailT0.AddDate(0, 0, -20).Truncate(24 * time.Hour)
+	c := covRun(t, e, outlook, "--day", covDay(20), "--source", "mail")
+	sent, inbox := windowOf(stepCommands(t, entryOf(t, c, covDay(20), "mail", "sent"))), windowOf(stepCommands(t, entryOf(t, c, covDay(20), "mail", "inbox")))
+	want := "workiq sync --source mail --since " + day.Format(time.RFC3339) + " --until " + day.Add(25*time.Hour).Format(time.RFC3339)
+	if !strings.HasPrefix(sent, want) || !strings.HasPrefix(inbox, want) {
+		t.Fatalf("day 20: sent %q, inbox %q, want %q", sent, inbox, want)
+	}
+}

@@ -40,6 +40,16 @@ type workIQRoute struct {
 	WorkIQ           string        `json:"workiq"`
 	Fix              string        `json:"fix"`
 	Next             []startStep   `json:"next"`
+	// window is the mail window the route asks for, nil for a route that asks for none.
+	window *routeWindow
+}
+
+// routeWindow is a window route's range and what built it, so a read's range coverage can widen it.
+type routeWindow struct {
+	since, end time.Time
+	situation  string
+	keys       []uint32
+	kinds      []string
 }
 
 // routeFolder is a mail folder whose cached mail starts after the read's start.
@@ -278,16 +288,7 @@ func (rt *runtime) windowRoute(st *store.Store, account, reason, situation strin
 	if err != nil || !ok {
 		return r, false, err
 	}
-	since = since.UTC().Truncate(time.Second)
-	if t := end.UTC().Truncate(time.Second); t.Before(end) {
-		end = t.Add(time.Second)
-	} else {
-		end = t
-	}
-	// A window cannot end after the sync starts, so an end rounded past now stays at this second.
-	if now := workIQRouteNow().UTC().Truncate(time.Second); end.After(now) {
-		end = now
-	}
+	since, end = windowBounds(since, end)
 	info, err := workIQMailWindowRoute(st, rt.ctx, account, since, end, keys, kinds)
 	if err != nil {
 		return r, false, err
@@ -308,6 +309,7 @@ func (rt *runtime) windowRoute(st *store.Store, account, reason, situation strin
 			Does: fmt.Sprintf("prove this range complete by following every folder's changes from its start: about %d items in about %d pages (roughly %s). "+
 				"Run it again only while its result says resumable: true, otherwise follow the error's fix", info.OpenItems, pages,
 				workIQRouteDuration((pages+store.WorkIQMailPagesPerMinute-1)/store.WorkIQMailPagesPerMinute))}, rt.repeatStep())
+		r.window = &routeWindow{since, end, situation, keys, kinds}
 		return r, true, nil
 	}
 	r = rt.newWorkIQRoute(setup, "mail", account, reason, situation+
@@ -315,7 +317,23 @@ func (rt *runtime) windowRoute(st *store.Store, account, reason, situation strin
 	r.Next = append(r.Next, startStep{Command: rt.recoveryCommand(false, account, bounds...),
 		Does: "fetch this account's server mail received in this range and prove it complete: it lists the folders, counts each one, and stops before " +
 			"fetching more than the archive's disk can hold. Run it again only while its result says resumable: true, otherwise follow the error's fix"}, rt.repeatStep())
+	r.window = &routeWindow{since, end, situation, keys, kinds}
 	return r, true, nil
+}
+
+// windowBounds rounds a window's range out to whole UTC seconds. A window cannot end after the
+// sync starts, so an end rounded past now stays at this second.
+func windowBounds(since, end time.Time) (time.Time, time.Time) {
+	since = since.UTC().Truncate(time.Second)
+	if t := end.UTC().Truncate(time.Second); t.Before(end) {
+		end = t.Add(time.Second)
+	} else {
+		end = t
+	}
+	if now := workIQRouteNow().UTC().Truncate(time.Second); end.After(now) {
+		end = now
+	}
+	return since, end
 }
 
 // rangeRoute routes a range the archive does not cover, [since, until), to a WorkIQ mail window of
