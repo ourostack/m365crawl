@@ -50,9 +50,16 @@ type Server struct {
 	headers  []http.Header
 	onClose  func()
 	conns    map[*websocket.Conn]struct{}
+	closed   bool
+	active   int            // handlers still running; guarded by mu
+	running  sync.WaitGroup // every running handler, so Close can wait for them
+	serving  chan struct{}  // closed when the accept loop has returned
 }
 
 var listen = net.Listen
+
+// accepted runs after each websocket handshake; tests use it to close the server mid-handshake.
+var accepted = func() {}
 
 // Listen starts a server on 127.0.0.1 with an ephemeral port. It panics if loopback cannot be
 // listened on: nothing in a test can go on without it.
@@ -61,10 +68,13 @@ func Listen() *Server {
 	if err != nil {
 		panic(err)
 	}
-	s := &Server{ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, handlers: map[string]Handler{}, conns: map[*websocket.Conn]struct{}{}}
+	s := &Server{ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, handlers: map[string]Handler{}, conns: map[*websocket.Conn]struct{}{}, serving: make(chan struct{})}
 	s.setDefaults()
 	s.http = &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = s.http.Serve(ln) }()
+	go func() {
+		defer close(s.serving)
+		_ = s.http.Serve(ln)
+	}()
 	return s
 }
 
@@ -79,8 +89,22 @@ func NewServer(t testing.TB) *Server {
 // URL is the browser-level websocket URL.
 func (s *Server) URL() string { return fmt.Sprintf("ws://127.0.0.1:%d%s", s.Port, BrowserPath) }
 
-// Close stops the server and drops its connections.
-func (s *Server) Close() { _ = s.http.Close() }
+// Close stops the server, drops its websockets and waits until every goroutine that served them
+// has returned, so nothing the server started outlives the test that started it. It is safe to
+// call more than once.
+func (s *Server) Close() {
+	s.mu.Lock()
+	s.closed = true
+	for c := range s.conns {
+		_ = c.CloseNow()
+	}
+	s.mu.Unlock()
+	// http.Server.Close stops the accept loop and plain connections, but not hijacked websockets,
+	// and it does not wait for handlers; the websockets were closed above and running waits.
+	_ = s.http.Close()
+	<-s.serving
+	s.running.Wait()
+}
 
 // Handle scripts the response to one method.
 func (s *Server) Handle(method string, h Handler) {
@@ -163,14 +187,34 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		http.Error(w, "server closed", http.StatusServiceUnavailable)
+		return
+	}
+	s.running.Add(1)
+	s.active++
 	s.headers = append(s.headers, r.Header.Clone())
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.active--
+		s.mu.Unlock()
+		s.running.Done()
+	}()
 	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}
 	c.SetReadLimit(64 << 20)
+	accepted()
 	s.mu.Lock()
+	if s.closed {
+		// Close ran during the handshake and could not see this connection to drop it.
+		s.mu.Unlock()
+		_ = c.CloseNow()
+		return
+	}
 	s.conns[c] = struct{}{}
 	s.mu.Unlock()
 	defer func() {
