@@ -62,9 +62,9 @@ var coverageFixes = map[string]string{
 	reasonNoProfile:          "No new Outlook profile is on this machine; mail is read from new Outlook's local cache.",
 	reasonFolderNotSynced:    "Run `m365crawl sync`; `m365crawl mail folders` lists the folders the archive holds.",
 	reasonNoCompleteRead:     "Run `m365crawl sync` while Outlook is open; `m365crawl doctor` says why reads are incomplete.",
-	reasonBeforeCache:        "Outlook keeps only recent mail on this machine; WorkIQ can fetch the account's server mail into the archive.",
-	reasonOnlyOlderCopy:      "Outlook keeps only recent mail on this machine; WorkIQ can fetch the account's server mail into the archive.",
-	reasonCopiesDisagree:     "WorkIQ can fetch the account's server mail into the archive; until then count the archive's messages as a floor.",
+	reasonBeforeCache:        "Outlook keeps only recent mail on this machine; WorkIQ can fetch this range's server mail into the archive with the steps in next.",
+	reasonOnlyOlderCopy:      "Outlook keeps only recent mail on this machine; WorkIQ can fetch this range's server mail into the archive with the steps in next.",
+	reasonCopiesDisagree:     "WorkIQ can fetch this range's server mail into the archive with the steps in next; until then count the archive's messages as a floor.",
 	reasonSourceFailing:      "Run `m365crawl doctor`.",
 	reasonAfterCacheFresh:    "Open the app and let it sync, then run `m365crawl sync`.",
 	reasonAfterNewestMail:    "Run `m365crawl sync` again after more mail has arrived.",
@@ -110,6 +110,12 @@ type coverageEntry struct {
 	Reasons         []coverageReason `json:"reasons"`
 	Fix             string           `json:"fix,omitempty"`
 	Next            []startStep      `json:"next,omitempty"`
+	// route is the key of the WorkIQ route Next comes from (coverageRun.routes).
+	route string
+	// window (mail) says the entry needs a WorkIQ mail window from the range's start to windowEnd;
+	// mailEntries gives every entry of an account and range one route.
+	window    bool
+	windowEnd time.Time
 }
 
 func newCoverageEntry(source, scope, account string) coverageEntry {
@@ -212,6 +218,7 @@ type coverageRun struct {
 	// legacy names the mail accounts whose verdict rests on the last read's ranges.
 	legacy      []string
 	mailFolders []store.MailFolderRow
+	coverage    []store.CoverageRow // every folder's cached range, read once when a window needs it
 }
 
 func (rt *runtime) newCoverageRun(st *store.Store) (*coverageRun, error) {
@@ -368,13 +375,16 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 	if len(cache) > 0 {
 		cacheEnd = cache[len(cache)-1].To
 	}
+	var holeEnd time.Time // the end of the latest hole a window fills: where the cache resumes
 	for _, h := range holes(pieces, a, b) {
 		switch {
 		case len(cache) == 0:
 			e.reason(reasonNoCompleteRead, "no read of this account's mail was complete enough to show that the cache held every "+role+" message of a range")
 		case h.From.Before(cacheEnd) && count.State == "older_copy_only":
+			holeEnd = h.To
 			e.reason(reasonOnlyOlderCopy, "only an older copy of the folder, from a folder set Outlook replaced, reached these dates")
 		case h.From.Before(cacheEnd):
+			holeEnd = h.To
 			detail := "the cache did not hold all " + role + " mail before " + covStamp(h.To) + " when the archive read it"
 			if role == store.MailRoleSent && ev.spans.SentShift > 0 {
 				detail += "; Sent Items are dated by when they were sent, and a message drafted up to " + ev.spans.SentShift.Round(time.Minute).String() + " before it was sent may have left the cache before any read"
@@ -384,14 +394,24 @@ func (c *coverageRun) mailEntry(account, role string, folders []store.MailFolder
 			c.mailTail(&e, account, ev, cacheEnd, b)
 		}
 	}
-	serverCovers := sameSpans(clip(server, a, b), []store.TimeSpan{{From: a, To: b}})
+	// The disagreement concerns only messages dated up to the latest one the current cache lacks, so
+	// a range ending later (today, an open-ended read) is judged and routed only up to just past it;
+	// a window, which ends when it runs, could otherwise never prove the range (#313).
+	judged := b
+	if t := count.LackingThrough.Add(time.Second); count.State == "partial" && t.After(a) && t.Before(b) {
+		judged = t
+	}
+	serverCovers := sameSpans(clip(server, a, judged), []store.TimeSpan{{From: a, To: judged}})
 	if count.State == "partial" && !serverCovers {
 		e.downgrade()
 		e.reason(reasonCopiesDisagree, fmt.Sprintf("an older copy of the folder holds %d of %d messages in this range that the current cache lacks although its range covers them", count.LackingInCurrentRange, count.Messages))
 	}
 	if e.has(reasonBeforeCache, reasonOnlyOlderCopy, reasonCopiesDisagree) {
-		if e.Next, err = c.mailSteps(account); err != nil {
-			return e, err
+		// A window fills holes up to where the cache resumes, as a read before the cache asks
+		// (#315), and a disagreement up to the range it judged.
+		e.window, e.windowEnd = true, holeEnd
+		if e.has(reasonCopiesDisagree) {
+			e.windowEnd = laterTime(e.windowEnd, judged)
 		}
 	}
 	e.finish()
@@ -418,21 +438,22 @@ func (c *coverageRun) mailTail(e *coverageEntry, account string, ev *mailCoverag
 	}
 }
 
-// mailSteps is the WorkIQ mail route's steps for the account, or none when no route applies.
-func (c *coverageRun) mailSteps(account string) ([]startStep, error) {
-	key := "mail\x00" + account
+// mailSteps is the WorkIQ mail route's steps for the account's range [a, b), or none when no route
+// applies, and the route's key.
+func (c *coverageRun) mailSteps(account string, a, b time.Time) ([]startStep, string, error) {
+	key := "mail\x00" + account + "\x00" + a.UTC().Format(time.RFC3339Nano) + "/" + b.UTC().Format(time.RFC3339Nano)
 	if r, ok := c.routes[key]; ok {
-		return routeSteps(r), nil
+		return routeSteps(r), key, nil
 	}
-	r, ok, err := c.rt.mailRoute(c.st, account, routeRangeNotCovered, "The archive does not hold all of this range's mail.")
+	r, ok, err := c.rt.rangeRoute(c.st, account, "The archive does not hold all of this range's mail.", a, b)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	c.routes[key] = nil
 	if ok {
 		c.routes[key] = &r
 	}
-	return routeSteps(c.routes[key]), nil
+	return routeSteps(c.routes[key]), key, nil
 }
 
 func routeSteps(r *workIQRoute) []startStep {
@@ -451,7 +472,11 @@ func (c *coverageRun) addRoutes(routes []workIQRoute, entries []coverageEntry) [
 		}) {
 			continue
 		}
-		routes = append(routes, *c.routes[e.Source+"\x00"+*e.Account])
+		key := e.route
+		if key == "" {
+			key = e.Source + "\x00" + *e.Account
+		}
+		routes = append(routes, *c.routes[key])
 	}
 	return routes
 }

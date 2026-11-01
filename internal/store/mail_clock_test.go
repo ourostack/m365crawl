@@ -198,7 +198,8 @@ func TestMailCopyCheckDatesSentItemsBySentTime(t *testing.T) {
 			timed(setMsg(2002, bSent, "<kept@t>", 0), "2026-08-31T18:00:00Z", "2026-08-31T18:00:00Z"),
 		})
 	c := checkOf(t, s, "sent", aug31, sep1)
-	if c.Messages != 2 || c.InCurrentCopy != 1 || c.LackingInCurrentRange != 1 || c.State != "partial" || c.DatedBy != "sent_at" {
+	if c.Messages != 2 || c.InCurrentCopy != 1 || c.LackingInCurrentRange != 1 || c.State != "partial" || c.DatedBy != "sent_at" ||
+		!c.LackingThrough.Equal(utc("2026-08-31T23:05:56Z")) {
 		t.Fatalf("%+v", c)
 	}
 	if got := listKeys(t, s, MailFilter{Folder: "sent", Since: aug31, Until: sep1}); !sameKeys(got, 1001, 2002) {
@@ -225,7 +226,7 @@ func TestMailCopyCheckUsesTheChosenReceivedTime(t *testing.T) {
 			timed(setMsg(2010, bInbox, "<anchor@t>", 0), "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z"),
 		})
 	c := checkOf(t, s, "inbox", utc("2026-10-15T07:00:00Z"), utc("2026-10-16T07:00:00Z"))
-	if c.Messages != 3 || c.InCurrentCopy != 2 || c.LackingInCurrentRange != 1 || c.State != "partial" {
+	if c.Messages != 3 || c.InCurrentCopy != 2 || c.LackingInCurrentRange != 1 || c.State != "partial" || !c.LackingThrough.Equal(utc("2026-10-15T16:50:48Z")) {
 		t.Fatalf("%+v", c)
 	}
 	if c := checkOf(t, s, "inbox", utc("2026-10-12T07:00:00Z"), utc("2026-10-13T07:00:00Z")); c.Messages != 0 {
