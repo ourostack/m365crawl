@@ -217,12 +217,9 @@ func (e *coverageEntry) inZone(loc *time.Location) {
 	}
 }
 
-// coverageEntries judges one source over [a, b): one entry per account in scope.
-func (rt *runtime) coverageEntries(run *coverageRun, src string, a, b time.Time) ([]coverageEntry, error) {
-	source, scope, _ := strings.Cut(src, ":")
-	if source == "mail" {
-		return rt.mailCoverageEntries(run, []string{scope}, a, b)
-	}
+// coverageEntries judges one source other than mail over [a, b): one entry per account in scope.
+// Mail is judged per day across its roles (mailCoverageEntries).
+func (rt *runtime) coverageEntries(run *coverageRun, source string, a, b time.Time) ([]coverageEntry, error) {
 	if source == "calendar" {
 		return rt.calendarCoverageEntries(run, a, b)
 	}

@@ -218,3 +218,29 @@ func TestProvenWindowWithTwinsStillWidensToTheRangeEntriesLack(t *testing.T) {
 		}
 	}
 }
+
+// A failure to read the folders' cached ranges, or to judge a widened window, fails the command.
+func TestSharedWindowLookupFailuresFailTheCommand(t *testing.T) {
+	e, outlook := covEnv(t)
+	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return true, nil })
+	old := mailCoverageOf
+	setSeam(t, &mailCoverageOf, func(*store.Store, context.Context) ([]store.CoverageRow, error) { return nil, errors.New("broken") })
+	if code, _, _ := e.run("--no-sync", "--json", "--outlook-root", outlook, "coverage", "--tz", "UTC", "--day", covDay(100), "--source", "mail"); code != 1 {
+		t.Fatalf("coverage without cached ranges: exit %d", code)
+	}
+	mailCoverageOf = old
+	// The read's own window, then its entries' window, then the read's window widened.
+	calls := 0
+	setSeam(t, &workIQMailWindowRoute, func(*store.Store, context.Context, string, time.Time, time.Time, []uint32, []string) (store.WorkIQWindowRoute, error) {
+		if calls++; calls == 3 {
+			return store.WorkIQWindowRoute{}, errors.New("broken")
+		}
+		return store.WorkIQWindowRoute{}, nil
+	})
+	if code, _, _ := e.run("--no-sync", "--json", "--outlook-root", outlook, "mail", "list", "--since", mailT0.AddDate(0, 0, -30).Format(time.RFC3339)); code != 1 {
+		t.Fatalf("a widened window that cannot be judged: exit %d", code)
+	}
+	if calls != 3 {
+		t.Fatalf("%d window lookups", calls)
+	}
+}
