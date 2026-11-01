@@ -155,3 +155,34 @@ func TestReadBeforeCacheAndItsRangeCoverageNameOneWindow(t *testing.T) {
 		t.Fatalf("day 20: sent %q, inbox %q, want %q", sent, inbox, want)
 	}
 }
+
+// coverage --day names the window a read of that day prints, which reaches every folder the read
+// spans: a later-starting folder coverage never judges (Drafts) widens both alike (#315).
+func TestCoverageDayNamesTheWindowAReadOfTheDayPrints(t *testing.T) {
+	fixClock(t, covNow)
+	e := textEnv(t)
+	e.emptyArchive()
+	st, err := store.Open(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitCovMail(t, st, mailT0.Add(time.Hour), append(covMailMessages(), mailMsg(8, fDrafts, "<d2@x.test>", "", "d2", 2, false))...)
+	_ = st.Close()
+	outlook := t.TempDir()
+	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return true, nil })
+	day := mailT0.AddDate(0, 0, -10).Truncate(24 * time.Hour)
+	c := covRun(t, e, outlook, "--day", covDay(10), "--source", "mail")
+	sent := windowOf(stepCommands(t, entryOf(t, c, covDay(10), "mail", "sent")))
+	code, out, errOut := e.run("--no-sync", "--json", "--outlook-root", outlook, "mail", "list",
+		"--since", day.Format(time.RFC3339), "--until", day.AddDate(0, 0, 1).Format(time.RFC3339))
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	routes := routesOf(t, decode(t, out))
+	if len(routes) != 1 {
+		t.Fatalf("routes %v", routes)
+	}
+	if read := windowOf(routeCommands(t, routes[0])); sent == "" || sent != read {
+		t.Fatalf("coverage --day names %q, a read of the day %q", sent, read)
+	}
+}
