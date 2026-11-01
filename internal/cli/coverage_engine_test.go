@@ -19,6 +19,15 @@ func setSeam[T any](t *testing.T, p *T, v T) {
 }
 
 // engineRun is a coverage run over an empty archive at covNow, with the Outlook source on.
+// routedEntry judges one account and role as coverage does, with the WorkIQ route it shares.
+func routedEntry(run *coverageRun, account, role string, a, b time.Time) (coverageEntry, error) {
+	out, err := run.mailEntries([]string{account}, []string{role}, a, b, false)
+	if err != nil {
+		return coverageEntry{}, err
+	}
+	return out[0], nil
+}
+
 func engineRun(t *testing.T) (*coverageRun, *runtime) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "data", "m365crawl.db") // a directory of the archive's own, as Windows requires
@@ -131,7 +140,7 @@ func TestMailEntryVerdicts(t *testing.T) {
 			run.health = c.health
 			run.mail[acct] = c.ev
 			setSeam(t, &mailRoleCount, roleCount(3, c.state))
-			e, err := run.mailEntry(acct, "sent", nil, c.a, c.b)
+			e, err := routedEntry(run, acct, "sent", c.a, c.b)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,14 +159,14 @@ func TestMailEntrySentShift(t *testing.T) {
 	run.mail["outlook/x"] = ev
 	setSeam(t, &mailRoleCount, roleCount(0, "consistent"))
 	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return false, nil })
-	e, err := run.mailEntry("outlook/x", "sent", nil, day(19), day(18))
+	e, err := routedEntry(run, "outlook/x", "sent", day(19), day(18))
 	if err != nil || codes(e) != "before_cache" || !strings.Contains(e.Reasons[0].Detail, "drafted up to 48h0m0s") || e.Next != nil {
 		t.Fatalf("%+v %v", e, err)
 	}
-	if e, _ := run.mailEntry("outlook/x", "inbox", nil, day(19), day(18)); e.State != covCovered {
+	if e, _ := routedEntry(run, "outlook/x", "inbox", day(19), day(18)); e.State != covCovered {
 		t.Fatalf("inbox %+v", e)
 	}
-	if e, _ := run.mailEntry("outlook/x", "sent", nil, day(25), day(24)); strings.Contains(e.Reasons[0].Detail, "drafted") != true {
+	if e, _ := routedEntry(run, "outlook/x", "sent", day(25), day(24)); strings.Contains(e.Reasons[0].Detail, "drafted") != true {
 		t.Fatalf("before %+v", e)
 	}
 }
@@ -167,14 +176,14 @@ func TestMailEntryReportsEvidenceFailures(t *testing.T) {
 	t.Run("spans", func(t *testing.T) {
 		run, _ := engineRun(t)
 		setSeam(t, &mailCoverageSpans, func(*store.Store, context.Context, string) (store.MailSpans, error) { return store.MailSpans{}, fail })
-		if _, err := run.mailEntry("outlook/x", "sent", nil, day(5), day(4)); !errors.Is(err, fail) {
+		if _, err := routedEntry(run, "outlook/x", "sent", day(5), day(4)); !errors.Is(err, fail) {
 			t.Fatal(err)
 		}
 	})
 	t.Run("server", func(t *testing.T) {
 		run, _ := engineRun(t)
 		setSeam(t, &mailServerThrough, func(*store.Store, context.Context, string) (time.Time, error) { return time.Time{}, fail })
-		if _, err := run.mailEntry("outlook/x", "sent", nil, day(5), day(4)); !errors.Is(err, fail) {
+		if _, err := routedEntry(run, "outlook/x", "sent", day(5), day(4)); !errors.Is(err, fail) {
 			t.Fatal(err)
 		}
 	})
@@ -183,7 +192,7 @@ func TestMailEntryReportsEvidenceFailures(t *testing.T) {
 		setSeam(t, &mailRoleCount, func(*store.Store, context.Context, string, string, time.Time, time.Time) (store.MailCopyCheck, error) {
 			return store.MailCopyCheck{}, fail
 		})
-		if _, err := run.mailEntry("outlook/x", "sent", nil, day(5), day(4)); !errors.Is(err, fail) {
+		if _, err := routedEntry(run, "outlook/x", "sent", day(5), day(4)); !errors.Is(err, fail) {
 			t.Fatal(err)
 		}
 	})
@@ -193,7 +202,7 @@ func TestMailEntryReportsEvidenceFailures(t *testing.T) {
 		setSeam(t, &mailRoleCount, roleCount(0, "older_copy_only"))
 		setSeam(t, &workIQMailComplete, func(*store.Store, context.Context, string) (bool, error) { return false, fail })
 		run.mail["outlook/x"].spans.Spans[store.MailRoleSent] = []store.TimeSpan{{From: day(3), To: day(2)}}
-		if _, err := run.mailEntry("outlook/x", "sent", nil, day(5), day(4)); !errors.Is(err, fail) {
+		if _, err := routedEntry(run, "outlook/x", "sent", day(5), day(4)); !errors.Is(err, fail) {
 			t.Fatal(err)
 		}
 	})
@@ -361,30 +370,33 @@ func TestCopiesDisagreeAreJudgedUpToTheLatestLackingMessage(t *testing.T) {
 		ev := mailEvidence(whole, covNow, time.Time{}, role)
 		ev.windows = []store.TimeSpan{{From: day(5), To: lacking.Add(time.Hour + time.Second)}}
 		run.mail["outlook/x"] = ev
-		if e, err := run.mailEntry("outlook/x", role, nil, day(5), past); err != nil || e.has(reasonCopiesDisagree) || len(e.Next) != 0 {
+		if e, err := routedEntry(run, "outlook/x", role, day(5), past); err != nil || e.has(reasonCopiesDisagree) || len(e.Next) != 0 {
 			t.Fatalf("%s: a range past now asked again for proven mail: %s %v %v", role, codes(e), e.Next, err)
 		}
 	}
 	// Without a proven window the range up to just past the latest lacking message is routed.
 	run, _ := engineRun(t)
 	run.mail["outlook/x"] = mailEvidence(whole, covNow, time.Time{}, "inbox")
-	e, err := run.mailEntry("outlook/x", "inbox", nil, day(5), past)
+	e, err := routedEntry(run, "outlook/x", "inbox", day(5), past)
 	if err != nil || !e.has(reasonCopiesDisagree) || len(e.Next) == 0 ||
 		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+lacking.Add(time.Hour+time.Second).Format(time.RFC3339)) {
 		t.Fatalf("route %s %v %v", codes(e), e.Next, err)
 	}
-	// A hole before the cache keeps the whole range in the route.
-	run, _ = engineRun(t)
-	run.mail["outlook/x"] = mailEvidence([]store.TimeSpan{{From: day(3), To: day(0)}}, covNow, time.Time{}, "inbox")
-	if e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), day(1)); err != nil || !e.has(reasonBeforeCache) ||
-		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+day(1).Add(time.Hour).Format(time.RFC3339)) {
-		t.Fatalf("hole route %s %v %v", codes(e), e.Next, err)
+	// A hole before the cache is routed up to where the cache resumes (#315), and past the latest
+	// lacking message when that is later.
+	for _, tc := range []struct{ start, until time.Time }{{day(3), lacking.Add(time.Hour + time.Second)}, {day(2).Add(10 * time.Hour), day(2).Add(11 * time.Hour)}, {day(1).Add(time.Hour), day(1).Add(time.Hour)}} {
+		run, _ = engineRun(t)
+		run.mail["outlook/x"] = mailEvidence([]store.TimeSpan{{From: tc.start, To: day(0)}}, covNow, time.Time{}, "inbox")
+		if e, err = routedEntry(run, "outlook/x", "inbox", day(5), day(1)); err != nil || !e.has(reasonBeforeCache) ||
+			!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+tc.until.Format(time.RFC3339)) {
+			t.Fatalf("hole route from %v: %s %v %v", tc.start, codes(e), e.Next, err)
+		}
 	}
 	// Without a date for the lacking messages the whole range is judged.
 	setSeam(t, &mailRoleCount, count(time.Time{}))
 	run, _ = engineRun(t)
 	run.mail["outlook/x"] = mailEvidence(whole, covNow, time.Time{}, "inbox")
-	if e, err = run.mailEntry("outlook/x", "inbox", nil, day(5), day(4)); err != nil || !e.has(reasonCopiesDisagree) ||
+	if e, err = routedEntry(run, "outlook/x", "inbox", day(5), day(4)); err != nil || !e.has(reasonCopiesDisagree) ||
 		!strings.Contains(e.Next[len(e.Next)-2].Command, "--until "+day(4).Add(time.Hour).Format(time.RFC3339)) {
 		t.Fatalf("undated %s %v", codes(e), err)
 	}
