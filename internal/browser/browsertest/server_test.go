@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,5 +217,71 @@ func TestStdioReportNull(t *testing.T) {
 	os.Stdin, os.Stdout, os.Stderr = in, out, errf
 	if got != "null" {
 		t.Fatalf("stdioReport = %q", got)
+	}
+}
+
+func TestCloseEndsOpenConnectionsAndWaitsForThem(t *testing.T) {
+	s := Listen()
+	c := dial(t, s)
+	_ = roundTrip(t, c, `{"id":1,"method":"Target.getTargets"}`) // the connection is registered by now
+	s.Close()
+	s.mu.Lock()
+	open, active := len(s.conns), s.active
+	s.mu.Unlock()
+	if open != 0 || active != 0 {
+		t.Fatalf("after Close: %d open connections, %d running handlers", open, active)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, _, err := c.Read(ctx); err == nil || ctx.Err() != nil {
+		t.Fatalf("the client must see its connection closed: %v", err)
+	}
+	s.Close() // a second Close, as when a test closes early and its cleanup closes again
+}
+
+func TestClosedServerRefusesLateConnections(t *testing.T) {
+	s := Listen()
+	s.Close()
+	w := httptest.NewRecorder()
+	s.serve(w, httptest.NewRequest(http.MethodGet, BrowserPath, nil))
+	if w.Code != http.StatusServiceUnavailable || len(s.Headers()) != 0 {
+		t.Fatalf("a closed server answered %d and recorded %d handshakes", w.Code, len(s.Headers()))
+	}
+}
+
+func TestCloseDuringHandshakeDropsTheNewConnection(t *testing.T) {
+	s := Listen()
+	old := accepted
+	t.Cleanup(func() { accepted = old })
+	closing, closed := make(chan struct{}), make(chan struct{})
+	accepted = func() {
+		go func() {
+			s.Close()
+			close(closed)
+		}()
+		for { // Close cannot finish while this handler runs, so wait only until it has begun
+			s.mu.Lock()
+			begun := s.closed
+			s.mu.Unlock()
+			if begun {
+				close(closing)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	c := dial(t, s)
+	<-closing
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// The server, not this read's deadline, must end the connection.
+	if _, _, err := c.Read(ctx); err == nil || ctx.Err() != nil {
+		t.Fatalf("a connection accepted while the server closed must be dropped: %v", err)
+	}
+	<-closed // the Close begun mid-handshake returns once the handler has ended
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.conns) != 0 || s.active != 0 {
+		t.Fatalf("after Close: %d open connections, %d running handlers", len(s.conns), s.active)
 	}
 }
