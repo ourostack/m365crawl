@@ -186,3 +186,35 @@ func TestCoverageDayNamesTheWindowAReadOfTheDayPrints(t *testing.T) {
 		t.Fatalf("coverage --day names %q, a read of the day %q", sent, read)
 	}
 }
+
+// A read whose own window is proven but left twins still widens to what its entries lack, so it
+// names the window coverage --day names instead of a whole-account sync (#315).
+func TestProvenWindowWithTwinsStillWidensToTheRangeEntriesLack(t *testing.T) {
+	e, outlook := covEnv(t)
+	setSeam(t, &workIQMailBindable, func(*store.Store, context.Context, string) (bool, error) { return true, nil })
+	day := mailT0.AddDate(0, 0, -11).Truncate(24 * time.Hour)
+	narrow := day.Add(9 * time.Hour) // an hour past Sent Items' cache start by received time
+	setSeam(t, &workIQMailWindowRoute, func(_ *store.Store, _ context.Context, _ string, since, until time.Time, _ []uint32, _ []string) (store.WorkIQWindowRoute, error) {
+		return store.WorkIQWindowRoute{Covered: since.Equal(day) && !until.After(narrow), Twins: 1}, nil
+	})
+	code, out, errOut := e.run("--no-sync", "--json", "--outlook-root", outlook, "mail", "list",
+		"--since", day.Format(time.RFC3339), "--until", day.AddDate(0, 0, 1).Format(time.RFC3339))
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	m := decode(t, out)
+	routes := routesOf(t, m)
+	if len(routes) != 1 {
+		t.Fatalf("routes %v", routes)
+	}
+	read := windowOf(routeCommands(t, routes[0]))
+	c := covRun(t, e, outlook, "--day", covDay(11), "--source", "mail")
+	if cov := windowOf(stepCommands(t, entryOf(t, c, covDay(11), "mail", "sent"))); read == "" || read != cov {
+		t.Fatalf("read names %q (%v), coverage --day %q", read, routeCommands(t, routes[0]), cov)
+	}
+	for _, x := range rangeCoverage(t, m) {
+		if cmds := stepCommands(t, x); len(cmds) > 0 && windowOf(cmds) != read {
+			t.Fatalf("%s entry names %v, route %q", x["scope"], cmds, read)
+		}
+	}
+}

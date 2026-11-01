@@ -40,7 +40,7 @@ type workIQRoute struct {
 	WorkIQ           string        `json:"workiq"`
 	Fix              string        `json:"fix"`
 	Next             []startStep   `json:"next"`
-	// window is the mail window the route asks for, nil for a route that asks for none.
+	// window is the mail window range the route judged, nil for a route that judged none.
 	window *routeWindow
 }
 
@@ -297,8 +297,13 @@ func (rt *runtime) windowRoute(st *store.Store, account, reason, situation strin
 	case info.Covered && info.Twins == 0:
 		return r, false, nil
 	case info.Covered:
-		return rt.wholeAccountRoute(st, setup, account, reason, situation+fmt.Sprintf(
+		r, ok, err = rt.wholeAccountRoute(st, setup, account, reason, situation+fmt.Sprintf(
 			" WorkIQ mail windows proved this range, but %d server messages in it match mail cached in other folders; only a whole-account sync can tell them apart.", info.Twins))
+		if ok {
+			// A read's range coverage may still lack more of the range than this window holds.
+			r.window = &routeWindow{since, end, situation, keys, kinds}
+		}
+		return r, ok, err
 	}
 	bounds := []string{"workiq", "sync", "--source", "mail", "--since", since.Format(time.RFC3339), "--until", end.Format(time.RFC3339)}
 	if info.Unproven {

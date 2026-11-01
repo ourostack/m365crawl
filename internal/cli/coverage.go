@@ -248,30 +248,33 @@ func (rt *runtime) mailCoverageEntries(run *coverageRun, roles []string, a, b ti
 			accounts = append(accounts, f.Account)
 		}
 	}
-	rows, err := mailCoverageOf(run.st, rt.ctx)
-	if err != nil {
-		return nil, err
-	}
-	return run.mailEntries(accounts, roles, a, b, readReach(rows, a, b))
+	return run.mailEntries(accounts, roles, a, b, true)
 }
 
-// readReach is, per account, how far a read of [a, b) across every folder asks a window to reach
+// readReach is how far a read of the account's [a, b) across every folder asks a window to reach
 // before its hour: the latest of min(b, cache start) over the folders whose cache starts after a,
 // as sinceRoutes judges them, so coverage names the window such a read prints.
-func readReach(rows []store.CoverageRow, a, b time.Time) map[string]time.Time {
-	reach := map[string]time.Time{}
-	for _, c := range rows {
-		if !c.OldestAt.IsZero() && a.Before(c.OldestAt) {
-			reach[c.Account] = laterTime(reach[c.Account], earlierTime(b, c.OldestAt))
+func (c *coverageRun) readReach(account string, a, b time.Time) (time.Time, error) {
+	if c.coverage == nil {
+		rows, err := mailCoverageOf(c.st, c.rt.ctx)
+		if err != nil {
+			return time.Time{}, err
+		}
+		c.coverage = append([]store.CoverageRow{}, rows...)
+	}
+	var reach time.Time
+	for _, row := range c.coverage {
+		if row.Account == account && !row.OldestAt.IsZero() && a.Before(row.OldestAt) {
+			reach = laterTime(reach, earlierTime(b, row.OldestAt))
 		}
 	}
-	return reach
+	return reach, nil
 }
 
 // mailEntries judges each role of each account, in account order; no account gives the entries
-// that say why there is none. reach, when set, widens an account's window to what a read of the
-// range across every folder asks for.
-func (c *coverageRun) mailEntries(accounts, roles []string, a, b time.Time, reach map[string]time.Time) ([]coverageEntry, error) {
+// that say why there is none. widen widens an account's window to what a read of the range across
+// every folder asks for.
+func (c *coverageRun) mailEntries(accounts, roles []string, a, b time.Time, widen bool) ([]coverageEntry, error) {
 	if len(accounts) == 0 {
 		return noMailAccount(c.rt, roles), nil
 	}
@@ -297,7 +300,13 @@ func (c *coverageRun) mailEntries(accounts, roles []string, a, b time.Time, reac
 		if end.IsZero() {
 			continue
 		}
-		end = laterTime(end, reach[account])
+		if widen {
+			reach, err := c.readReach(account, a, b)
+			if err != nil {
+				return nil, err
+			}
+			end = laterTime(end, reach)
+		}
 		// One window per account and range holds what every judged role lacks, so a read prints
 		// the same command its entries name.
 		steps, key, err := c.mailSteps(account, a, end)
@@ -366,7 +375,7 @@ func (c *coverageRun) mailRangeCoverage(folders []store.MailFolderRow, since, un
 	if len(roles) == 0 {
 		return nil
 	}
-	entries, err := c.mailEntries(accounts, roles, since, until, nil)
+	entries, err := c.mailEntries(accounts, roles, since, until, false)
 	if err != nil {
 		return err
 	}

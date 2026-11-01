@@ -218,6 +218,7 @@ type coverageRun struct {
 	// legacy names the mail accounts whose verdict rests on the last read's ranges.
 	legacy      []string
 	mailFolders []store.MailFolderRow
+	coverage    []store.CoverageRow // every folder's cached range, read once when a window needs it
 }
 
 func (rt *runtime) newCoverageRun(st *store.Store) (*coverageRun, error) {
