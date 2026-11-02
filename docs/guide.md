@@ -1,5 +1,9 @@
 # Usage guide
 
+New agent or a fresh handoff? The [agent field guide](agent-field-guide.md)
+starts with a 30-second check, then shows how to tell missing evidence from a
+real zero without fetching a whole mailbox.
+
 ## Cached Teams compose bodies
 
 Use `m365crawl drafts list` to inspect narrow own cached regular-compose bodies
