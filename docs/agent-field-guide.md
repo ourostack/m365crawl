@@ -33,7 +33,7 @@ Choose the smallest next step:
 
 The [skill](../.agents/skills/m365crawl/SKILL.md) describes the search/thread
 workflow; [coverage](commands.md#coverage), [WorkIQ](commands.md#workiq),
-[content acquisition](content.md) and [directed writes](commands.md#writes)
+[Office file acquisition](commands.md#content-fetch-doc) and [directed writes](commands.md#writes)
 define the other rows.
 
 ## A worked example: "Did I send nothing that day?"
@@ -81,7 +81,7 @@ The [read workflow](../.agents/skills/m365crawl/SKILL.md#start-here),
 [WorkIQ reference](commands.md#workiq) and
 [write outcome contract](commands.md#writes) are the checks behind these rules.
 For protected documents, an extraction refusal is a boundary: do not switch
-readers to get around it. [Content acquisition](content.md) explains the rights check.
+readers to get around it. [Office file acquisition](commands.md#content-fetch-doc) explains the rights check.
 
 ## Leave a trail, not a transcript
 
