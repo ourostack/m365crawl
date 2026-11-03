@@ -4,6 +4,17 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-03
+
+### Added
+
+- An agent field guide with a quick start, a worked coverage example, common read and write pitfalls, and a privacy-aware handoff checklist.
+
+### Fixed
+
+- Writable archive opens share a read-only connection for their preflight integrity checks, avoiding repeated SQLite schema setup within the unchanged short-writer acquisition deadline.
+- Outlook for Mac mail sync now reads the measured `0x610` message-detail layout while retaining `0x60f` support and refusing unknown layouts.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
