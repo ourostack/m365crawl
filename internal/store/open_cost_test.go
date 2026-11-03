@@ -63,6 +63,34 @@ func TestOpenColdSchemaDoesNotCommitEveryDDLStatement(t *testing.T) {
 	}
 }
 
+// A short writer's acquisition budget includes Open. Parsing the same archive's schema on
+// separate connections for the version and attendee preflights needlessly consumes that budget.
+func TestShortWriterDoesNotReopenTheSchemaForEachPreflight(t *testing.T) {
+	path := filepath.Join(filepath.Dir(writableArchivePath(t)), "observed-warm-preflight.db")
+	must0(must(Open(context.Background(), path)).Close())
+	probe := &archiveOpenProbe{marker: filepath.Base(path)}
+	activeArchiveOpenProbe.Store(probe)
+	t.Cleanup(func() { activeArchiveOpenProbe.Store(nil) })
+	start := time.Now()
+	err := WithWorkIQWriter(context.Background(), path, func(ctx context.Context, s *Store) error {
+		return s.SetWorkIQEnabled(ctx, true)
+	})
+	activeArchiveOpenProbe.Store(nil)
+	t.Logf("warm short writer: connections=%d commits=%d elapsed=%s", probe.connections.Load(), probe.commits.Load(), time.Since(start))
+	if err != nil {
+		t.Fatal("warm short writer failed", err)
+	}
+	// One read-only preflight connection and one writable connection, not a connection per check.
+	if got := probe.connections.Load(); got != 2 {
+		t.Fatalf("short writer repeated schema setup: got %d connections, want 2", got)
+	}
+	s := must(OpenReadOnly(context.Background(), path))
+	defer func() { _ = s.Close() }()
+	if enabled := must(s.WorkIQEnabled(context.Background())); !enabled {
+		t.Fatal("short writer did not persist its operation")
+	}
+}
+
 func TestOpenMidSchemaFailureDoesNotLeavePartialTables(t *testing.T) {
 	path := writableArchivePath(t)
 	db, err := sql.Open("sqlite", sqliteFileURI(path, ""))
