@@ -110,9 +110,7 @@ func attendeeIntegrityError(ctx context.Context, cause error) error {
 	return &attendeeIntegrityFailure{cause: cause}
 }
 
-func checkAttendeeBeforeOpen(ctx context.Context, path string) error {
-	db, _ := sql.Open("sqlite", sqliteFileURI(path, "mode=ro"))
-	defer func() { _ = db.Close() }()
+func checkAttendeeBeforeOpen(ctx context.Context, db knowledgeReader) error {
 	var version int
 	if err := db.QueryRowContext(ctx, `select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil || version < 19 {
 		return nil

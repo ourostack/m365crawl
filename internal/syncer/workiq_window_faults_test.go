@@ -82,6 +82,9 @@ func TestWorkIQMailWindowEveryArchiveBoundaryFailsClosed(t *testing.T) {
 				db, account := workIQAcquisitionArchive(t)
 				workIQAcquisitionStub(t)
 				windowScenario(t)
+				releaseFixture := workIQBoundaryFixture(t, db)
+				defer releaseFixture()
+				fixtureRead, fixtureWrite := workIQRead, workIQWrite
 				failure := errors.New("synthetic archive boundary failure")
 				calls := 0
 				workIQRead = func(ctx context.Context, path string, op func(*store.Store) error) error {
@@ -90,7 +93,7 @@ func TestWorkIQMailWindowEveryArchiveBoundaryFailsClosed(t *testing.T) {
 							return failure
 						}
 					}
-					return originalRead(ctx, path, op)
+					return fixtureRead(ctx, path, op)
 				}
 				workIQWrite = func(ctx context.Context, path string, op func(context.Context, *store.Store) error) error {
 					if boundary.name == "write" {
@@ -98,7 +101,7 @@ func TestWorkIQMailWindowEveryArchiveBoundaryFailsClosed(t *testing.T) {
 							return failure
 						}
 					}
-					return originalWrite(ctx, path, op)
+					return fixtureWrite(ctx, path, op)
 				}
 				report, err := runWindow(t, db, account, "")
 				workIQRead, workIQWrite = originalRead, originalWrite
@@ -289,14 +292,19 @@ func TestWorkIQMailWindowEveryStepInsideAnArchiveCallFailsClosed(t *testing.T) {
 				db, account := workIQAcquisitionArchive(t)
 				workIQAcquisitionStub(t)
 				windowScenario(t)
+				releaseFixture := workIQBoundaryFixture(t, db)
+				defer releaseFixture()
+				fixtureRead, fixtureWrite := workIQRead, workIQWrite
 				calls := 0
 				workIQRead = func(ctx context.Context, path string, op func(*store.Store) error) error {
 					if boundary.name == "read" {
 						if calls++; calls == at {
+							// Only the faulted operation gets a disposable handle: closing the
+							// fixture's shared reader would also poison later outcome persistence.
 							return originalRead(ctx, path, func(s *store.Store) error { _ = s.Close(); return op(s) })
 						}
 					}
-					return originalRead(ctx, path, op)
+					return fixtureRead(ctx, path, op)
 				}
 				workIQWrite = func(ctx context.Context, path string, op func(context.Context, *store.Store) error) error {
 					if boundary.name == "write" {
@@ -304,10 +312,13 @@ func TestWorkIQMailWindowEveryStepInsideAnArchiveCallFailsClosed(t *testing.T) {
 							return originalWrite(ctx, path, func(writeCtx context.Context, s *store.Store) error { _ = s.Close(); return op(writeCtx, s) })
 						}
 					}
-					return originalWrite(ctx, path, op)
+					return fixtureWrite(ctx, path, op)
 				}
 				_, err := runWindow(t, db, account, "")
 				workIQRead, workIQWrite = originalRead, originalWrite
+				if calls < at {
+					t.Fatal("discovered archive step was not reached")
+				}
 				if err == nil {
 					t.Fatal("a step on a closed archive succeeded")
 				}
