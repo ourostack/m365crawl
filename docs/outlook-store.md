@@ -285,6 +285,7 @@ Mail objects sit in the same blocks as the calendar. The reader is `internal/out
 | --- | --- | --- | --- |
 | 0x4f | 0x430 (1072) | message header (what a list reads) | 2,241 (3,988 copies) |
 | 0xc9 | 0x60f (1551) | message detail: Message-ID, class, In-Reply-To, sent time | 2,564 |
+| 0xc9 | 0x610 (1552) | extended detail layout, measured separately | 20,644 copies; not a distinct-key census |
 | 0xca | 0x74e (1870), 0x752 (1874) | body record: inline HTML or the path of a body file | same key as the detail; original sample: 2,564 |
 | 0x16a | 0x318 (792) | attachment record | 4,269 |
 | 0x4d | 0x4d0 (1232) | folder | 171 (128 named, 43 unnamed) |
@@ -317,7 +318,7 @@ A string is a pair: an offset word at `w` (counted from the string area base: fi
 
 A message has one logical identity, its detail key (2,185 distinct in the copy). It can have several header copies, in To Me, Inbox and Sent Items (2,133 detail keys have one header key, 51 have two, 1 has six). Per key the copy with the highest +112 is current, ties by block offset; file order alone is not reliable. The archive shows the message from that copy and records every copy's folder, with its own read state, in `mail_message_folders` (schema 24).
 
-### Detail (class 0xc9, string base 1551 + lead)
+### Detail (class 0xc9, string base 1551 or 1552 + lead)
 
 | Field | Offset | Notes |
 | --- | --- | --- |
@@ -326,6 +327,8 @@ A message has one logical identity, its detail key (2,185 distinct in the copy).
 | In-Reply-To | +1212/+1216 | present in 231 of 2,568 detail objects; equals another message's Message-ID in 147 (likely) |
 | Sent time | +728 | ticks; about one second after the stated send time (likely) |
 | Received time | +288 | equals the header's in 2,192 of 2,241 |
+
+The `0x610` layout was measured on a separate private, consistent 176,160,768-byte snapshot with Outlook 16.116 on 2026-11-03. All 20,644 detail copies had valid Message-ID strings at +1228/+1232 with angle brackets and an `@`, and message classes at +1236/+1240 beginning with `IPM.` or `REPORT.IPM.`, using base `1552 + lead`. In-Reply-To at +1212/+1216 was present and valid with the same Message-ID shape in 6,483 copies. A byte-by-byte scan of the fixed region confirmed those word positions; base `1551 + lead` produced no strings with either shape, even though its byte-shifted text passed UTF-16 validation. Sent ticks at +728 were plausible in all 20,644 copies; received ticks at +288 matched a linked header's received time in 14,908 copies (historical copies were included). The mapped offsets are unchanged; only the fixed size and string base change. The additional fixed-region byte has no established semantic meaning and is not mapped. No transport-header comparison was available in these detail strings, and these counts do not establish server completeness. The reader explicitly supports both measured tags and refuses every other detail tag.
 
 ### Body (class 0xca, string base 1870 + lead)
 

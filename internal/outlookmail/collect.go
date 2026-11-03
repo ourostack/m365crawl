@@ -205,7 +205,8 @@ func (c *class[T]) see(o hxstore.Object, res *Result) bool {
 	}
 	switch {
 	case o.Tag != c.tag && (c.id != ClassFolder || o.Tag != TagFolderExtended) &&
-		(c.id != ClassBody || o.Tag != TagBodyExtended):
+		(c.id != ClassBody || o.Tag != TagBodyExtended) &&
+		(c.id != ClassDetail || o.Tag != TagDetailExtended):
 		c.badTags[o.Tag]++
 	case o.Resynced:
 		// An object reached after unknown bytes is a real object: when it maps cleanly it
