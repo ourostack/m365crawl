@@ -16,6 +16,7 @@ on:
           - assemble
           - windows-owner-coverage
           - native-build
+          - release-gate-profile
       version:
         description: Assembly version, unused for make-check
         required: false
@@ -33,6 +34,61 @@ env:
   M365CRAWL_REAL_CACHE: "0"
 
 jobs:
+  release-gate-profile:
+    if: inputs.operation == 'release-gate-profile'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate exact source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Profile unchanged synthetic failures
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, platform, subprocess, time
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-gate-profile"
+          root.mkdir()
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
+          cases = [
+              ("cli-race", ["-race", "-gcflags=modernc.org/...=-race=false", "-count=5", "-timeout=15m", "-run=^TestWorkIQConfigurationAndReadOutputFailuresRemainFailures$", "./internal/cli"]),
+              ("window-cover", ["-count=1", "-timeout=10m", "-coverprofile=" + str(root / "window.cover"), "-run=^TestWorkIQMailWindowEvery(ArchiveBoundary|StepInsideAnArchiveCall)FailsClosed$", "./internal/syncer"]),
+          ]
+          results = []
+          for name, args in cases:
+              profile = root / (name + ".cpu")
+              command = ["go", "test", "-json", "-cpuprofile=" + str(profile), "-o", str(root / (name + ".test"))] + args
+              start = time.monotonic()
+              with (root / (name + ".jsonl")).open("w") as log:
+                  result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+              results.append(dict(name=name, command=command, elapsed=time.monotonic()-start, code=result.returncode))
+              for options in (["-top"], ["-top", "-cum"]):
+                  result = subprocess.run(["go", "tool", "pprof"] + options + ["-nodecount=45", str(root / (name + ".test")), str(profile)], text=True, capture_output=True)
+                  (root / (name + ("-cum" if "-cum" in options else "-flat") + ".txt")).write_text(result.stdout + result.stderr)
+                  print(result.stdout)
+          (root / "results.json").write_text(json.dumps(dict(source=os.environ["SOURCE_SHA"], runner=platform.platform(), results=results), indent=2))
+          print((root / "results.json").read_text())
+          assert all(r["code"] == 0 for r in results)
+          PY
+      - name: Preserve bounded synthetic profiles
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-gate-profile
+          path: ${{ runner.temp }}/release-gate-profile
+          retention-days: 7
+
   make-check:
     if: inputs.operation == 'make-check'
     runs-on: ubuntu-latest
