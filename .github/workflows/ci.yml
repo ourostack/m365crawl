@@ -37,6 +37,8 @@ jobs:
     if: inputs.operation == 'make-check'
     runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      GOFLAGS: "-p=1"
     steps:
       - name: Validate exact source identity
         env:
