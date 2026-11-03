@@ -123,6 +123,7 @@ jobs:
           root.mkdir()
           assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
           cases = [
+              ("open-race", ["-race", "-gcflags=modernc.org/...=-race=false", "-count=1", "-timeout=15m", "-run=^TestShortWriterDoesNotReopenTheSchemaForEachPreflight$", "./internal/store"]),
               ("cli-race", ["-race", "-gcflags=modernc.org/...=-race=false", "-count=5", "-timeout=15m", "-run=^TestWorkIQConfigurationAndReadOutputFailuresRemainFailures$", "./internal/cli"]),
               ("window-cover", ["-count=1", "-timeout=10m", "-coverprofile=" + str(root / "window.cover"), "-run=^TestWorkIQMailWindowEvery(ArchiveBoundary|StepInsideAnArchiveCall)FailsClosed$", "./internal/syncer"]),
           ]
@@ -135,7 +136,7 @@ jobs:
                   result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
               results.append(dict(name=name, command=command, elapsed=time.monotonic()-start, code=result.returncode))
               for options in (["-top"], ["-top", "-cum"]):
-                  result = subprocess.run(["go", "tool", "pprof"] + options + ["-nodecount=45", str(root / (name + ".test")), str(profile)], text=True, capture_output=True)
+                  result = subprocess.run(["go", "tool", "pprof"] + options + ["-nodecount=100", str(root / (name + ".test")), str(profile)], text=True, capture_output=True)
                   (root / (name + ("-cum" if "-cum" in options else "-flat") + ".txt")).write_text(result.stdout + result.stderr)
                   print(result.stdout)
           (root / "results.json").write_text(json.dumps(dict(source=os.environ["SOURCE_SHA"], runner=platform.platform(), results=results), indent=2))
