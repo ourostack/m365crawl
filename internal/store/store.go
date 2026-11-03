@@ -55,10 +55,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := prepareArchiveForWrite(path); err != nil {
 		return nil, mapArchiveOpenError(err)
 	}
-	if err := checkSchemaNotNewer(ctx, path); err != nil {
-		return nil, err
-	}
-	if err := checkAttendeeBeforeOpen(ctx, path); err != nil {
+	if err := checkArchiveBeforeOpen(ctx, path, true); err != nil {
 		return nil, err
 	}
 	// Batch schema creation, writer pragmas included, so cold opens do not commit each DDL statement
@@ -109,6 +106,14 @@ insert into meta(key,value) select '` + vacuumKey + `',
 // A missing file, or one without a version, passes. Current WorkIQ identity state must exist
 // before writable DDL can recreate a missing table and erase evidence of corruption.
 func checkSchemaNotNewer(ctx context.Context, path string) error {
+	return checkArchiveBeforeOpen(ctx, path, false)
+}
+
+// checkArchiveBeforeOpen shares one read-only connection for the pre-DDL integrity checks.
+// Each new connection parses the whole SQLite schema; a separate connection per check spends
+// the short writer's acquisition budget doing the same setup again. No integrity check is
+// cached or moved after writable DDL, which could otherwise repair away evidence of corruption.
+func checkArchiveBeforeOpen(ctx context.Context, path string, writable bool) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
@@ -122,8 +127,12 @@ func checkSchemaNotNewer(ctx context.Context, path string) error {
 		return errs.ArchiveSchemaNewer(found, SchemaVersion)
 	}
 	if found >= WorkIQSchemaVersion {
-		_, err := (&Store{db: db}).hasWorkIQ(ctx)
-		return err
+		if _, err := (&Store{db: db}).hasWorkIQ(ctx); err != nil {
+			return err
+		}
+	}
+	if writable {
+		return checkAttendeeBeforeOpen(ctx, db)
 	}
 	return nil
 }
