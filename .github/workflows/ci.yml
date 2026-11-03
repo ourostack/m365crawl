@@ -17,6 +17,7 @@ on:
           - windows-owner-coverage
           - native-build
           - release-gate-profile
+          - release-gate-verify
       version:
         description: Assembly version, unused for make-check
         required: false
@@ -34,6 +35,66 @@ env:
   M365CRAWL_REAL_CACHE: "0"
 
 jobs:
+  release-gate-verify:
+    if: inputs.operation == 'release-gate-verify'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        gate: [nonrace, race-1, race-2, race-3, race-4]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate exact source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install shellcheck
+        if: matrix.gate == 'nonrace'
+        run: brew install shellcheck
+      - name: Run exact release verification command
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GATE: ${{ matrix.gate }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, platform, subprocess, time
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-gate-verify"
+          root.mkdir()
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
+          gate = os.environ["GATE"]
+          command = ["make", "tidy-check", "fmt-check", "vet", "lint", "coverage", "e2e"] if gate == "nonrace" else ["make", "test-shard", "SHARD=" + gate[-1], "SHARDS=4"]
+          start = time.monotonic()
+          with (root / (gate + ".log")).open("w") as log:
+              process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+              for line in process.stdout:
+                  print(line, end="", flush=True)
+                  log.write(line)
+              code = process.wait()
+          (root / (gate + ".json")).write_text(json.dumps(dict(source=os.environ["SOURCE_SHA"], runner=platform.platform(), command=command, elapsed=time.monotonic()-start, code=code), indent=2))
+          raise SystemExit(code)
+          PY
+      - name: Preserve exact gate logs and timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-gate-${{ matrix.gate }}
+          path: ${{ runner.temp }}/release-gate-verify
+          retention-days: 7
+
   release-gate-profile:
     if: inputs.operation == 'release-gate-profile'
     runs-on: macos-latest
