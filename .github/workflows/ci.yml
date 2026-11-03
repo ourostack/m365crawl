@@ -35,10 +35,8 @@ env:
 jobs:
   make-check:
     if: inputs.operation == 'make-check'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      GOFLAGS: "-p=1"
     steps:
       - name: Validate exact source identity
         env:
@@ -65,7 +63,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install shellcheck
-        run: brew install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: Run unchanged complete local gate
         run: make check
 
