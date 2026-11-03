@@ -19,8 +19,9 @@ import (
 
 // MapperVersion is raised whenever a mapping change alters derived mail data, so the archive can
 // re-read the store. Version 2 stopped labelling folders of the generic type 0x7a as junk;
-// version 3 reads the measured extended folder layout.
-const MapperVersion = 4
+// version 3 reads the measured extended folder layout; version 4 reads extended bodies;
+// version 5 reads the measured extended detail layout.
+const MapperVersion = 5
 
 // Class and tag of each mapped object. The tag is the size of the fixed region.
 const (
@@ -28,6 +29,7 @@ const (
 	TagHeader         = 0x430
 	ClassDetail       = 0xc9
 	TagDetail         = 0x60f
+	TagDetailExtended = 0x610
 	ClassBody         = 0xca
 	TagBody           = 0x74e
 	TagBodyExtended   = 0x752
@@ -220,9 +222,14 @@ func inviteID(o hxstore.Object) string {
 	return s
 }
 
-// MapDetail maps a class 0xc9 object.
+// MapDetail maps the measured 0x60f and 0x610 layouts of class 0xc9.
 func MapDetail(o hxstore.Object) (Detail, error) {
-	f, err := newFields(o, TagDetail)
+	switch o.Tag {
+	case TagDetail, TagDetailExtended:
+	default:
+		return Detail{}, unmapped("unknown detail layout")
+	}
+	f, err := newFields(o, int(o.Tag))
 	if err != nil {
 		return Detail{}, err
 	}
