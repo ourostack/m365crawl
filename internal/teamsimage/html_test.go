@@ -23,6 +23,26 @@ func TestImageInventoryMalformedEOF(t *testing.T) {
 	}
 }
 
+func TestImageInventoryDuplicateAttributeBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		repeats int
+		want    InspectionState
+	}{
+		{"exact", 62, InspectionComplete},
+		{"over", 63, InspectionPartial},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `<img itemid="synthetic-image" src="https://example.test/image"` +
+				strings.Repeat(` class="Emoji"`, tc.repeats) + `>`
+			inspection, err := InspectHTML(context.Background(), body)
+			if err != nil || inspection.State != tc.want {
+				t.Fatalf("raw duplicate attribute bound bypassed: %v %v", inspection, err)
+			}
+		})
+	}
+}
+
 func TestImageInventoryOpaqueBindingAndDecoration(t *testing.T) {
 	inspection, err := InspectHTML(context.Background(), generatedImage+generatedImage+`<img class="Emoji">`)
 	if err != nil || inspection.State != InspectionComplete || len(inspection.References) != 1 ||

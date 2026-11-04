@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -154,18 +153,15 @@ func (c *contentImagesCmd) inventory(rt *runtime, st *store.Store, conversation,
 		return nil, err
 	}
 	key := store.MessageKey{TenantID: a.TenantID, UserID: a.UserID, ConversationID: conversation, ID: message}
-	rows, err := st.MessagesByKey(rt.ctx, []string{strings.Join([]string{key.TenantID, key.UserID, key.ConversationID, key.ID}, "|")})
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) != 1 {
-		return nil, imageInventoryError("image_message_unknown")
-	}
 	bodies, err := st.MessageHTML(rt.ctx, []store.MessageKey{key})
 	if err != nil {
 		return nil, err
 	}
-	inspection, err := teamsimage.InspectHTML(rt.ctx, bodies[key])
+	body, exists := bodies[key]
+	if !exists {
+		return nil, imageInventoryError("image_message_unknown")
+	}
+	inspection, err := teamsimage.InspectHTML(rt.ctx, body)
 	if err != nil {
 		return nil, err
 	}
