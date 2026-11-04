@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"strconv"
 	"strings"
 	"unicode"
@@ -102,18 +101,15 @@ func InspectHTML(ctx context.Context, body string) (Inspection, error) {
 			return result, err
 		}
 		kind := tokenizer.Next()
-		if len(tokenizer.Raw()) > maxTokenBytes {
+		if len(tokenizer.Raw()) > maxTokenBytes || errors.Is(tokenizer.Err(), html.ErrBufferExceeded) {
 			incomplete("image_token_limit")
 			return result, nil
 		}
 		if kind == html.ErrorToken {
-			if errors.Is(tokenizer.Err(), io.EOF) {
-				if len(tokenizer.Raw()) != 0 {
-					incomplete("image_html_invalid")
-				}
-				return result, nil
+			// The in-memory reader ends at EOF; buffer exhaustion was handled above.
+			if len(tokenizer.Raw()) != 0 {
+				incomplete("image_html_invalid")
 			}
-			incomplete("image_token_limit")
 			return result, nil
 		}
 		if kind != html.StartTagToken && kind != html.SelfClosingTagToken {

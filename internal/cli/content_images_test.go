@@ -306,7 +306,7 @@ func TestImageInventoryFailureBoundaries(t *testing.T) {
 		t.Fatalf("missing archive fabricated inventory: %d %s %s", code, out, stderr)
 	}
 	e.exec(`insert into sync_runs(started_at,finished_at,status,accounts_json)
-values('2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','ok','["*"]')`)
+values('2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','ok','["*"]')`)
 	code, out, stderr = e.run("--json", "content", "images", imageConversation, imageMessage)
 	if code != 0 || decode(t, out)["archive_age_seconds"] == nil {
 		t.Fatalf("successful archive clock lost: %d %s %s", code, out, stderr)
