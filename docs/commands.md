@@ -177,6 +177,25 @@ A missing exact message exits 3 with `image_message_unknown` and no invented inv
 
 `--fields` keys: `account`, `conversation_id`, `message_id`, `scope`, `inspection_state`, `image_references`, `decorative_emoji_count`, `unsupported_reference_count`, `binary_media`, `reason_codes`.
 
+### content fetch image
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] content fetch image MESSAGE_LINK --image-id ID --output FILE
+m365crawl [--db PATH] [--account TENANT/USER] content fetch image CONVERSATION_ID MESSAGE_ID --image-id ID --output FILE
+```
+
+Explicitly exports one selected Teams PNG through enabled read-only WorkIQ. First inspect the exact archived message with `content images`; select its exact supported `image_id`, not a hosted-content ID, source URL or collection position. The whole bounded cached body must have been inspected. A message link is passed alone, and omission of `--account` requires exactly one archived Teams account. Outlook selectors are refused.
+
+Admission verifies the signed-in user, exact native chat ID, actual tenant, supported oneOnOne/group/meeting type and selected account/address. It reads only the selected live HTML message, its uniquely bound same-message hosted content and the same message again. A deleted/changed binding or inconsistent modification clocks refuses without retry. Both absent modification clocks remain null, not fresh. Cached AMS/CDN URLs, signed tickets and arbitrary URLs are never replayed.
+
+Only complete nonanimated `image/png` is supported: at most 4 MiB raw, 16,777,216 pixels, 16,384 per dimension and 64 MiB decoded pixel storage. Full PNG chunks/CRC/raster/IEND/EOF validation is required. JPEG/GIF/WebP, channels, OCR and automatic downloads are outside this slice; native Windows service acquisition remains unqualified.
+
+FILE needs an existing user-controlled parent. Windows additionally requires verified private user/SYSTEM effective and object-inheritable grants; no ACL is changed. Reserve privately before WorkIQ, close the native client before writing bytes, and publish by verified same-root no-clobber link. No directory creation, overwrite or `--force` fallback exists.
+
+The stdout receipt reports `status`, selected identity, `scope: selected_image`, `other_media: not_acquired`, validated content type/byte size/SHA256/pixel dimensions, nullable native/observation/fetch clocks, output and phase, nullable `file_published`/`output_verified`, and optional retained temporary identity/state. On errors, stderr's `image_acquisition` carries the receipt plus primary and additional close/cleanup codes. Metadata appears only after byte validation; observed clocks do not prove historical immutability.
+
+**A failed command may have published a complete file.** Inspect the receipt before retrying: cancellation, cleanup or stdout failure never deletes completed output, and a substituted temp is retained rather than removed. Both streams failing still returns nonzero. An existing output refuses before another native call. The archive, source health, sync cursors and completeness are unchanged. Text format renders the full receipt as readable JSON. `--fields` is not accepted for this acquisition command.
+
 ### content fetch doc
 
 ```text

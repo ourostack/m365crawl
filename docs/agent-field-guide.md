@@ -29,12 +29,20 @@ Choose the smallest next step:
 | Yesterday's work | `m365crawl --no-sync coverage --day yesterday` | No hits means no work |
 | Older mail | The read's `workiq_routes[].next` commands | A full mailbox fetch is always necessary |
 | A linked Office document | The explicit content workflow | Being able to view it grants permission to extract it |
+| An image in one exact Teams message | Offline `content images`, then explicit `content fetch image ... --image-id ID --output FILE` for one supported PNG | An HTML reference, successful selected PNG, or missing modification clock proves complete or historically immutable media |
 | To send something | The directed-write contract and the person's instruction | Installed tools or a prepared draft authorize sending |
 
 The [skill](../.agents/skills/m365crawl/SKILL.md) describes the search/thread
 workflow; [coverage](commands.md#coverage), [WorkIQ](commands.md#workiq),
 [Office file acquisition](commands.md#content-fetch-doc) and [directed writes](commands.md#writes)
 define the other rows.
+
+For a selected PNG, use a new file in an existing controlled private parent.
+On failure inspect `image_acquisition` before retrying: a complete published file
+may remain after cancellation, cleanup or stdout failure; a substituted temp is
+retained, not deleted. Never replay a cached source URL or overwrite an existing
+file. [Selected image acquisition](commands.md#content-fetch-image) defines
+identity, recheck, PNG/privacy bounds and the unqualified Windows service limit.
 
 ## A worked example: "Did I send nothing that day?"
 
