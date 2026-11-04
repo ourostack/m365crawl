@@ -13,6 +13,7 @@ on:
         type: choice
         options:
           - inventory-entrypoint
+          - inventory-cli
           - inventory
           - transport
           - png
@@ -47,7 +48,7 @@ jobs:
           import json, os, re
           source = os.environ["SOURCE_SHA"]
           group = os.environ["PROBE_GROUP"]
-          allowed = {"inventory-entrypoint", "inventory", "transport", "png",
+          allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "transport", "png",
                      "publisher", "orchestration", "coverage"}
           if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
               raise SystemExit("invalid source or diagnostic group")
@@ -95,6 +96,7 @@ jobs:
           import json, os, pathlib, subprocess, time
           groups = {
               "inventory-entrypoint": (["./internal/cli"], "^TestImageInventoryContentAndEmoji$"),
+              "inventory-cli": (["./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
               "inventory": (["./internal/teamsimage", "./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
               "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
