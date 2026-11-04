@@ -18,12 +18,13 @@ type StitchPart struct {
 // Segment is one part's stretch of a call's transcript. A part with no text is a segment with no
 // entries and the reason, so a gap keeps its place.
 type Segment struct {
-	Ordinal        int
-	TranscribeOnly bool
-	StartsAt       time.Time
-	FetchedAt      *time.Time
-	State, Reason  string
-	Entries        []Entry
+	Ordinal         int
+	TranscribeOnly  bool
+	StartsAt        time.Time
+	DurationSeconds float64
+	FetchedAt       *time.Time
+	State, Reason   string
+	Entries         []Entry
 }
 
 // Stitch lays a call's parts end to end in ordinal order, one segment per part.
@@ -33,7 +34,7 @@ func Stitch(parts []StitchPart) []Segment {
 	out := make([]Segment, len(ps))
 	for i, p := range ps {
 		state := PartState(p.Part, p.State, p.FetchedAt != nil)
-		seg := Segment{Ordinal: p.Ordinal, TranscribeOnly: p.TranscribeOnly, StartsAt: p.StartsAt, State: state, Reason: Reason(p.Part, state)}
+		seg := Segment{Ordinal: p.Ordinal, TranscribeOnly: p.TranscribeOnly, StartsAt: p.StartsAt, DurationSeconds: p.DurationSeconds, State: state, Reason: Reason(p.Part, state)}
 		if state == StateOK {
 			seg.FetchedAt, seg.Entries = p.FetchedAt, p.Entries
 		}

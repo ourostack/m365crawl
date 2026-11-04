@@ -12,8 +12,10 @@ func TestStitchOrdersAndMarksSeams(t *testing.T) {
 	fetched := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
 	one := drivePart("c", "a", "m1", at(10, 0), at(11, 0))
 	one.Ordinal, one.TranscribeOnly = 1, true
+	one.DurationSeconds = 12.75
 	two := drivePart("c", "b", "m2", at(10, 2), at(11, 0))
 	two.Ordinal = 2
+	two.DurationSeconds = 0
 	for _, p := range []*Part{&one, &two} {
 		p.Host, p.SiteRoot, p.TranscriptID = "h.sharepoint.example.invalid", "/teams/s", "t"
 	}
@@ -25,6 +27,9 @@ func TestStitchOrdersAndMarksSeams(t *testing.T) {
 		t.Fatalf("order %+v", segs)
 	}
 	a, b := segs[0], segs[1]
+	if a.DurationSeconds != 12.75 || b.DurationSeconds != 0 {
+		t.Fatalf("notice durations lost or reordered: %+v", segs)
+	}
 	if !a.TranscribeOnly || b.TranscribeOnly || !a.StartsAt.Equal(at(10, 0)) || !b.StartsAt.Equal(at(10, 2)) ||
 		a.State != StateOK || a.Reason != "" || a.FetchedAt == nil || len(a.Entries) != 1 || a.Entries[0].Text != "first" || b.Entries[0].Text != "second" {
 		t.Fatalf("segments %+v", segs)
@@ -36,6 +41,7 @@ func TestStitchUnfetchedPartKeepsPlace(t *testing.T) {
 	mk := func(ord int, edit func(*Part)) Part {
 		p := drivePart("call-x", "i", "m", at(10, ord), at(11, 0))
 		p.Ordinal, p.Host, p.SiteRoot, p.TranscriptID = ord, "h.sharepoint.example.invalid", "/teams/s", "t"
+		p.DurationSeconds = float64(ord) * 60
 		if edit != nil {
 			edit(&p)
 		}
@@ -79,7 +85,7 @@ func TestStitchUnfetchedPartKeepsPlace(t *testing.T) {
 	}
 	for i, w := range want {
 		s := segs[i]
-		if s.Ordinal != i+1 || s.State != w.state || s.Reason != w.reason {
+		if s.Ordinal != i+1 || s.State != w.state || s.Reason != w.reason || s.DurationSeconds != float64(i+1)*60 {
 			t.Errorf("segment %d: %q %q, want %q %q", i+1, s.State, s.Reason, w.state, w.reason)
 		}
 		if (s.State == StateOK) != (len(s.Entries) > 0 && s.FetchedAt != nil) {
