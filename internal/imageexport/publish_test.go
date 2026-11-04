@@ -10,6 +10,81 @@ import (
 	"testing"
 )
 
+func TestImagePublishPhaseFaults(t *testing.T) {
+	sentinel := errors.New("synthetic publication phase failure")
+	for _, phase := range []string{"write", "short-write", "sync", "close", "link", "link-after-publication", "cleanup", "root-close", "cancel-after-link"} {
+		t.Run(phase, func(t *testing.T) {
+			oldWrite, oldSync, oldClose := imageWrite, imageSync, imageClose
+			oldLink, oldRemove, oldRootClose := imageLink, imageRemove, imageRootClose
+			t.Cleanup(func() {
+				imageWrite, imageSync, imageClose = oldWrite, oldSync, oldClose
+				imageLink, imageRemove, imageRootClose = oldLink, oldRemove, oldRootClose
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dir := imagePrivateParent(t)
+			output := filepath.Join(dir, "selected.png")
+			reservation, _, err := Reserve(ctx, output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			published := false
+			switch phase {
+			case "write":
+				imageWrite = func(*os.File, []byte) (int, error) { return 0, sentinel }
+			case "short-write":
+				imageWrite = func(f *os.File, data []byte) (int, error) { return f.Write(data[:len(data)/2]) }
+			case "sync":
+				imageSync = func(*os.File) error { return sentinel }
+			case "close":
+				imageClose = func(f *os.File) error { return errors.Join(f.Close(), sentinel) }
+			case "link":
+				imageLink = func(*os.Root, string, string) error { return sentinel }
+			case "link-after-publication":
+				published = true
+				imageLink = func(root *os.Root, old, new string) error {
+					return errors.Join(root.Link(old, new), sentinel)
+				}
+			case "cleanup":
+				published = true
+				imageRemove = func(*os.Root, string) error { return sentinel }
+			case "root-close":
+				published = true
+				imageRootClose = func(root *os.Root) error { return errors.Join(root.Close(), sentinel) }
+			case "cancel-after-link":
+				published = true
+				imageLink = func(root *os.Root, old, new string) error {
+					err := root.Link(old, new)
+					cancel()
+					return err
+				}
+			}
+			data := []byte("complete validated selected bytes")
+			effect, err := reservation.Publish(ctx, data)
+			if err == nil || effect.FilePublished == nil || *effect.FilePublished != published {
+				t.Fatalf("phase %s lost actual publication: %+v %v", phase, effect, err)
+			}
+			actual, readErr := os.ReadFile(output)
+			if published {
+				if readErr != nil || !bytes.Equal(actual, data) {
+					t.Fatal("post-publication failure lost complete destination", readErr)
+				}
+			} else if !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatal("pre-publication failure exposed incomplete destination", readErr)
+			}
+			if _, err := reservation.Abort(); err != nil {
+				t.Log("secondary cleanup failure remains explicit:", err)
+			}
+			if published {
+				actual, readErr = os.ReadFile(output)
+				if readErr != nil || !bytes.Equal(actual, data) {
+					t.Fatal("secondary abort removed completed destination", readErr)
+				}
+			}
+		})
+	}
+}
+
 func TestImageReserveHandleAndEntryIdentity(t *testing.T) {
 	ctx := context.Background()
 	dir := imagePrivateParent(t)
@@ -132,6 +207,7 @@ func TestImageParentLocatorAndTempSubstitution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		moved := dir + "-moved"
 		before, err := os.Stat(dir)
 		if err != nil {
