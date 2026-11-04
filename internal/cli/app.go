@@ -402,6 +402,10 @@ func withSnapshotRetention(err error, coded *errs.Coded) *errs.Coded {
 
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
+	var imageFailure *imageFetchError
+	if errors.As(err, &imageFailure) {
+		return rt.failImage(imageFailure)
+	}
 	var coded *errs.Coded
 	if errors.Is(err, context.Canceled) {
 		// SIGINT or SIGTERM cancelled the context, possibly under a wrapping coded error.

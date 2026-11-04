@@ -229,7 +229,8 @@ func logLabel(label string) string {
 }
 
 type errorDoc struct {
-	Error errorBody `json:"error"`
+	Error            errorBody         `json:"error"`
+	ImageAcquisition *imageFetchResult `json:"image_acquisition,omitempty"`
 }
 
 type warningDoc struct {
