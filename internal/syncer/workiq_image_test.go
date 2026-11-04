@@ -139,3 +139,45 @@ func TestImageOutcomeAdditionalFaults(t *testing.T) {
 		t.Fatal("original reserved evidence was not retained", err)
 	}
 }
+
+func TestFetchChatImagePublicationIdentityFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, phaseCode string
+	}{
+		{"parent-moved", "image_output_changed"},
+		{"reservation-closed", "image_output_closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := workIQImageFixture(t, "good")
+			parent := filepath.Dir(options.Output)
+			observedParent := parent
+			prev := imagePublish
+			imagePublish = func(reservation *imageexport.Reservation, ctx context.Context, data []byte) (imageexport.Effect, error) {
+				if tc.name == "parent-moved" {
+					observedParent = parent + "-moved"
+					if err := os.Rename(parent, observedParent); err != nil {
+						t.Fatal(err)
+					}
+				} else if _, err := reservation.Abort(); err != nil {
+					t.Fatal(err)
+				}
+				return prev(reservation, ctx, data)
+			}
+			t.Cleanup(func() { imagePublish = prev })
+			report, err := FetchWorkIQChatImage(context.Background(), options)
+			var coded *errs.Coded
+			if !errors.As(err, &coded) || coded.Code != tc.phaseCode ||
+				report.Code != "image_output_failed" || report.Status != "failed" ||
+				!slices.Contains(report.AdditionalCodes, tc.phaseCode) || report.FetchedAt == nil {
+				t.Fatalf("publication identity failure escaped the stable runtime outcome: %+v %v", report, err)
+			}
+			if report.Effect.FilePublished == nil || *report.Effect.FilePublished ||
+				report.Effect.OutputVerified == nil || *report.Effect.OutputVerified {
+				t.Fatalf("failed publication invented file success or uncertainty: %+v", report.Effect)
+			}
+			if entries, err := os.ReadDir(observedParent); err != nil || len(entries) != 0 {
+				t.Fatal("owned failed reservation was not cleaned", entries, err)
+			}
+		})
+	}
+}
