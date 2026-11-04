@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,11 +145,11 @@ func TestImageInventoryTeamsAccounts(t *testing.T) {
 	}
 	broken := newStore(t)
 	if _, err := broken.db.ExecContext(ctx, `drop table accounts;
-create table accounts(tenant_id text,user_id text);
-insert into accounts values(null,'synthetic-user')`); err != nil {
+create table accounts(tenant_id text,user_id text,locale text);
+insert into accounts values(null,'synthetic-user','en-US')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := broken.TeamsAccounts(ctx); err == nil {
-		t.Fatal("invalid stored account row silently accepted")
+	if _, err := broken.TeamsAccounts(ctx); err == nil || !strings.Contains(err.Error(), "Scan error") {
+		t.Fatalf("invalid stored account row did not reach scan refusal: %v", err)
 	}
 }
