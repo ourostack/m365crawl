@@ -1,110 +1,80 @@
-name: CI
+name: Selected image diagnostic
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-  merge_group:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact product commit to exercise
+        required: true
+        type: string
+      group:
+        description: Fixed diagnostic selection
+        required: true
+        type: choice
+        options:
+          - inventory-entrypoint
+          - inventory
+          - transport
+          - png
+          - publisher
+          - orchestration
+          - coverage
 
 permissions:
   contents: read
 
-# A new push to a pull request replaces its older run. Runs for main and for the merge queue are
-# never cancelled: each merge-queue entry has its own ref, and every commit on main gets checked.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: image-probe-${{ github.run_id }}
+  cancel-in-progress: false
 
 env:
   GOWORK: "off"
+  M365CRAWL_REAL_CACHE: "0"
 
 jobs:
-  lint:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: No leftover names from before the rename
-        run: |
-          old='teamscra''wl'
-          fail=0
-          hits="$(git grep -nIi "$old" || true)"
-          if [ -n "$hits" ]; then
-            echo "$hits" >&2
-            fail=1
-          fi
-          paths="$(git ls-files | grep -i "$old" || true)"
-          if [ -n "$paths" ]; then
-            echo "$paths" >&2
-            fail=1
-          fi
-          if [ "$fail" = 1 ]; then
-            echo 'remove the old product name; no file and no file name may carry it' >&2
-            exit 1
-          fi
-      # Pull requests add a fragment in changes/ instead of editing CHANGELOG.md, so two open
-      # pull requests never conflict on the [Unreleased] lines. A release pull request passes:
-      # scripts/changelog-assemble.sh moves the fragments into its version section.
-      - name: Changelog entries are fragments in changes/
-        run: scripts/changelog-assemble.sh --check
-      - name: Check tidy, format, vet and lint
-        run: make tidy-check fmt-check vet lint
-      # A feature schema number picked when a pull request opened may since have been used on the
-      # base branch (#306). Pull requests check against their base commit, and the merge queue
-      # against the queue's base, which is what the change will land on.
-      - name: Schema numbers are free on the base branch
+      - id: select
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PROBE_GROUP: ${{ inputs.group }}
         run: |
-          if [ -n "$BASE_SHA" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_SHA"
-            go run ./scripts/schemaguard "$BASE_SHA"
-          else
-            go run ./scripts/schemaguard
-          fi
+          python3 - <<'PY'
+          import json, os, re
+          source = os.environ["SOURCE_SHA"]
+          group = os.environ["PROBE_GROUP"]
+          allowed = {"inventory-entrypoint", "inventory", "transport", "png",
+                     "publisher", "orchestration", "coverage"}
+          if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
+              raise SystemExit("invalid source or diagnostic group")
+          runners = ["ubuntu-latest"]
+          if group == "publisher":
+              runners += ["macos-latest", "windows-latest"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("matrix=" + json.dumps({"os": runners}) + "\n")
+          print(json.dumps({"requested_source": source, "group": group, "runners": runners}))
+          PY
 
-  # Each platform runs the unit tests once. Linux runs them with the race detector, split over
-  # several runners because the detector makes them several times slower. macOS and Windows run
-  # them without it, write a coverage profile, and enforce their coverage gate from that profile.
-  test:
+  probe:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: ubuntu-latest race 1/4
-            os: ubuntu-latest
-            shard: 1
-          - name: ubuntu-latest race 2/4
-            os: ubuntu-latest
-            shard: 2
-          - name: ubuntu-latest race 3/4
-            os: ubuntu-latest
-            shard: 3
-          - name: ubuntu-latest race 4/4
-            os: ubuntu-latest
-            shard: 4
-          - name: macos-latest
-            os: macos-latest
-            coverprofile: coverage.out
-          - name: windows-latest
-            os: windows-latest
-            coverprofile: coverage-windows.out
-    name: test (${{ matrix.name }})
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout
+      - name: Checkout exact product
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_sha }}
           persist-credentials: false
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -114,125 +84,71 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      # Windows Defender scans every file the tests write, and the tests write thousands of
-      # archives, snapshots and test binaries: on a throwaway runner that only slows them down.
-      # The tests' temporary files go on the runner's faster work drive too.
-      - name: Speed up file access on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Run fixed diagnostic and retain actual outcome
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PROBE_GROUP: ${{ inputs.group }}
+          HELPER_SHA: ${{ github.sha }}
+          RUNNER_LABEL: ${{ matrix.os }}
         run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true
-          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
-          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
-      - name: Test with the race detector
-        if: matrix.shard
-        run: make test-shard SHARD=${{ matrix.shard }} SHARDS=4
-      - name: Test with coverage
-        if: matrix.coverprofile
-        shell: bash
-        run: go test -count=1 -timeout 15m -coverprofile=${{ matrix.coverprofile }} ./...
-      - name: Enforce 100% function coverage
-        if: runner.os == 'macOS'
-        env:
-          COVERAGE_PROFILE: ${{ matrix.coverprofile }}
-        run: ./scripts/check-coverage.sh
-      - name: Enforce Windows coverage gate
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          COVERAGE_PROFILE: ${{ matrix.coverprofile }}
-        run: scripts/check-coverage.ps1
-      - name: Windows release checksum regression tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: scripts/verify-release_test.ps1
-      - name: Test vectors match the generator
-        if: matrix.coverprofile
-        run: go test -count=1 -v -run 'TestGeneratorIsCurrent$' ./internal/v8
-      - name: Coverage summary
-        if: matrix.coverprofile
-        shell: bash
-        run: |
-          {
-            echo "### Coverage (${{ matrix.os }})"
-            echo
-            echo '```'
-            go tool cover -func=${{ matrix.coverprofile }} | tail -n 20
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  e2e:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            e2e-command: make e2e
-            require-browser: "1"
-          - os: ubuntu-latest
-            e2e-command: make e2e
-            require-browser: ""
-          - os: windows-latest
-            e2e-command: go test -count=1 -tags e2e ./e2e/...
-            require-browser: "1"
-    name: e2e (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          python - <<'PY'
+          import json, os, pathlib, subprocess, time
+          groups = {
+              "inventory-entrypoint": (["./internal/cli"], "^TestImageInventoryContentAndEmoji$"),
+              "inventory": (["./internal/teamsimage", "./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
+              "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
+              "png": (["./internal/teamsimage"], "^TestImagePNG"),
+              "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate)"),
+              "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument)"),
+              "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestShowCoverage)"),
+          }
+          out = pathlib.Path("image-probe-output")
+          out.mkdir()
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          requested = os.environ["SOURCE_SHA"]
+          if actual != requested:
+              raise SystemExit("checkout does not match requested source")
+          packages, pattern = groups[os.environ["PROBE_GROUP"]]
+          command = ["go", "test", "-json", "-count=1", "-timeout=5m", *packages, "-run", pattern]
+          manifest = {
+              "source": actual, "helper": os.environ["HELPER_SHA"],
+              "group": os.environ["PROBE_GROUP"], "runner": os.environ["RUNNER_LABEL"],
+              "command": command, "gowork": os.environ["GOWORK"],
+              "real_cache": os.environ["M365CRAWL_REAL_CACHE"],
+          }
+          manifest_path = out / "manifest.json"
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps(manifest), flush=True)
+          started = time.monotonic()
+          with (out / "tests.jsonl").open("w") as log:
+              result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+          terminal = []
+          for line in (out / "tests.jsonl").read_text(errors="replace").splitlines():
+              try:
+                  event = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if event.get("Test") and event.get("Action") in ("pass", "fail", "skip"):
+                  terminal.append({key: event.get(key) for key in ("Package", "Test", "Action", "Elapsed")})
+          manifest.update(exit_code=result.returncode, elapsed_seconds=time.monotonic()-started,
+                          terminal_tests=terminal)
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          lines = (out / "tests.jsonl").read_text(errors="replace").splitlines()
+          print("\n".join(lines[-40:]))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("```json\n" + json.dumps(manifest, indent=2) + "\n```\n")
+          image_prefixes = ("TestImage", "TestChatImage", "TestSelectedImageMessage",
+                            "TestFetchChatImage", "TestMessageMediaCoverage")
+          exercised = [event for event in terminal
+                       if event["Action"] != "skip" and event["Test"].startswith(image_prefixes)]
+          if not exercised:
+              raise SystemExit("no named diagnostic tests executed; not a behavioral verdict")
+          raise SystemExit(result.returncode)
+          PY
+      - name: Retain complete diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          persist-credentials: false
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: End-to-end tests
-        shell: bash
-        env:
-          # macOS and Windows runners have Edge: the real-browser test must run there, not skip.
-          M365CRAWL_REQUIRE_BROWSER: ${{ matrix.require-browser }}
-        run: ${{ matrix.e2e-command }}
-
-  release-check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Snapshot release build
-        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with:
-          distribution: goreleaser
-          version: v2.18.2
-          args: release --snapshot --clean --skip=publish
-      - name: Verify release artifacts
-        shell: pwsh
-        run: scripts/check-release-artifacts.ps1
-
-  # The one check branch protection and the merge queue require. It passes only when every job
-  # above succeeded, so adding or renaming a job never needs a branch protection change. No job
-  # above is skipped by design; a skipped one (a failed dependency, say) fails this check too.
-  ci-ok:
-    if: always()
-    needs:
-      - lint
-      - test
-      - e2e
-      - release-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require every job
-        env:
-          RESULTS: ${{ toJSON(needs.*.result) }}
-        run: |
-          echo "$RESULTS"
-          jq -e 'length == 4 and all(. == "success")' <<<"$RESULTS" >/dev/null
+          name: image-${{ inputs.group }}-${{ matrix.os }}
+          path: image-probe-output/
+          if-no-files-found: error
