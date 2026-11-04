@@ -97,7 +97,7 @@ jobs:
           groups = {
               "inventory-entrypoint": (["./internal/cli"], "^TestImageInventoryContentAndEmoji$"),
               "inventory-cli": (["./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
-              "inventory": (["./internal/teamsimage", "./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
+              "inventory": (["./internal/teamsimage", "./internal/cli", "./internal/store"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
               "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
               "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate)"),
