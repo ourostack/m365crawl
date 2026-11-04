@@ -202,7 +202,13 @@ func TestImageOfflineWithoutFeatureTables(t *testing.T) {
 drop table workiq_census_members; drop table workiq_censuses; drop table workiq_folders;
 drop table workiq_source_keys; drop table workiq_aliases; drop table workiq_rows;
 drop table workiq_pages; drop table workiq_frontiers; drop table workiq_attempts; drop table workiq_accounts`)
-	code, out, stderr := e.run("--json", "--max-age", "1m", "content", "images", imageConversation, imageMessage)
+	code, out, stderr := e.run("--json", "content", "images", imageConversation, imageMessage)
+	if code != 1 || out != "" || errorCode(t, stderr) != "db_error" {
+		t.Fatalf("current archive lost all WorkIQ identity state without refusal: %d %s %s", code, out, stderr)
+	}
+	// Only a pre-WorkIQ archive can legitimately lack its identity and progress tables.
+	e.exec(fmt.Sprintf("update schema_migrations set version=%d", store.WorkIQSchemaVersion-1))
+	code, out, stderr = e.run("--json", "--max-age", "1m", "content", "images", imageConversation, imageMessage)
 	if code != 0 || decode(t, out)["implicit_sync"] != "disabled" {
 		t.Fatalf("offline inventory coupled to native feature tables or implicit sync: %d %s %s", code, out, stderr)
 	}
