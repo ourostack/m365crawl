@@ -94,6 +94,9 @@ func createOnce(name string) bool {
 }
 
 func fetch(path string) (any, int) {
+	if data, status, ok := imageFetch(path); ok {
+		return data, status
+	}
 	if os.Getenv("WORKIQ_PROBE_CASE") == "folder-limit" && strings.HasPrefix(path, "/me/mailFolders?") {
 		u, _ := url.ParseRequestURI(path)
 		page, _ := strconv.Atoi(u.Query().Get("$skiptoken"))
@@ -501,6 +504,10 @@ func main() {
 			reply["result"] = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}},
 				"serverInfo": map[string]any{"name": "synthetic-acquisition", "version": "1"}}
 		case "tools/call":
+			if result := imageTool(request.Params.Name, request.Params.Args.Path); result != nil {
+				reply["result"] = result
+				break
+			}
 			if result := documentTool(request.Params.Name, request.Params.Args.Query, request.Params.Args.Path, request.Params.Args.Caps); result != nil {
 				reply["result"] = result
 				break
