@@ -15,6 +15,7 @@ on:
           - inventory-entrypoint
           - inventory-cli
           - inventory
+          - inventory-complete
           - transport
           - png
           - publisher
@@ -48,7 +49,7 @@ jobs:
           import json, os, re
           source = os.environ["SOURCE_SHA"]
           group = os.environ["PROBE_GROUP"]
-          allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "transport", "png",
+          allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "inventory-complete", "transport", "png",
                      "publisher", "orchestration", "coverage"}
           if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
               raise SystemExit("invalid source or diagnostic group")
@@ -98,6 +99,7 @@ jobs:
               "inventory-entrypoint": (["./internal/cli"], "^TestImageInventoryContentAndEmoji$"),
               "inventory-cli": (["./internal/cli"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
               "inventory": (["./internal/teamsimage", "./internal/cli", "./internal/store"], "^(TestImageInventory|TestImageSelection|TestImageSelector|TestImageOffline)"),
+              "inventory-complete": (["./internal/teamsimage", "./internal/cli", "./internal/store"], "^Test"),
               "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
               "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate)"),
@@ -112,6 +114,9 @@ jobs:
               raise SystemExit("checkout does not match requested source")
           packages, pattern = groups[os.environ["PROBE_GROUP"]]
           command = ["go", "test", "-json", "-count=1", "-timeout=5m", *packages, "-run", pattern]
+          if os.environ["PROBE_GROUP"] == "inventory-complete":
+              command = ["go", "test", "-json", "-count=1", "-timeout=15m",
+                         "-coverprofile=image-probe-output/coverage.out", *packages]
           manifest = {
               "source": actual, "helper": os.environ["HELPER_SHA"],
               "group": os.environ["PROBE_GROUP"], "runner": os.environ["RUNNER_LABEL"],
@@ -134,6 +139,20 @@ jobs:
                   terminal.append({key: event.get(key) for key in ("Package", "Test", "Action", "Elapsed")})
           manifest.update(exit_code=result.returncode, elapsed_seconds=time.monotonic()-started,
                           terminal_tests=terminal)
+          if os.environ["PROBE_GROUP"] == "inventory-complete" and result.returncode == 0:
+              coverage_started = time.monotonic()
+              env = dict(os.environ, COVERAGE_PROFILE="image-probe-output/coverage.out",
+                         COVERAGE_PACKAGES=" ".join(packages))
+              with (out / "coverage-gate.txt").open("w") as log:
+                  coverage = subprocess.run(["bash", "scripts/check-coverage.sh"], env=env,
+                                            stdout=log, stderr=subprocess.STDOUT)
+              manifest["coverage_command"] = ["bash", "scripts/check-coverage.sh"]
+              manifest["coverage_exit_code"] = coverage.returncode
+              with (out / "coverage-functions.txt").open("w") as log:
+                  functions = subprocess.run(["go", "tool", "cover", "-func=image-probe-output/coverage.out"],
+                                             stdout=log, stderr=subprocess.STDOUT)
+              manifest["coverage_functions_exit_code"] = functions.returncode
+              manifest["coverage_elapsed_seconds"] = time.monotonic()-coverage_started
           manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
           lines = (out / "tests.jsonl").read_text(errors="replace").splitlines()
           print("\n".join(lines[-40:]))
@@ -145,7 +164,8 @@ jobs:
                        if event["Action"] != "skip" and event["Test"].startswith(image_prefixes)]
           if not exercised:
               raise SystemExit("no named diagnostic tests executed; not a behavioral verdict")
-          raise SystemExit(result.returncode)
+          raise SystemExit(result.returncode or manifest.get("coverage_exit_code", 0)
+                           or manifest.get("coverage_functions_exit_code", 0))
           PY
       - name: Retain complete diagnostic evidence
         if: always()
