@@ -37,11 +37,13 @@ func TestSelectedImageMessageIdentityAndFamily(t *testing.T) {
 		"system-event":  func(w map[string]any) { w["messageType"] = "systemEventMessage" },
 		"reply":         func(w map[string]any) { w["replyToId"] = "1000" },
 		"removed":       func(w map[string]any) { w["@removed"] = map[string]any{} },
+		"empty-removed": func(w map[string]any) { w["@removed"] = "" },
 		"deleted":       func(w map[string]any) { w["deletedDateTime"] = "2026-01-01T00:00:00Z" },
 		"missing-body":  func(w map[string]any) { delete(w, "body") },
 		"text-body":     func(w map[string]any) { w["body"] = map[string]any{"contentType": "text", "content": "hello"} },
 		"channel":       func(w map[string]any) { w["channelIdentity"] = map[string]any{"channelId": "synthetic-channel"} },
 		"invalid-clock": func(w map[string]any) { w["lastModifiedDateTime"] = "not-a-clock" },
+		"empty-clock":   func(w map[string]any) { w["lastModifiedDateTime"] = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var w map[string]any
@@ -76,6 +78,12 @@ func TestSelectedImageMessageIdentityAndFamily(t *testing.T) {
 	} {
 		if _, err := SelectChatAccount(user, chat, []AccountFact{mismatch}, fact.ID); err == nil {
 			t.Fatal("mismatched archived identity admitted")
+		}
+		for _, format := range []string{"%v", "%+v", "%#v"} {
+			if strings.Contains(fmt.Sprintf(format, message), "synthetic") ||
+				strings.Contains(fmt.Sprintf(format, ref), "synthetic") {
+				t.Fatal("private native observation or resource leaked through formatting")
+			}
 		}
 	}
 }
@@ -168,6 +176,19 @@ func TestChatImageClockRecheck(t *testing.T) {
 	if _, err := BindChatImage(ambiguous, "synthetic-image"); err == nil {
 		t.Fatal("ambiguous selected binding admitted")
 	}
+	body["content"] = `<img itemid="synthetic-image" src="` + imageTestPath + `">` +
+		strings.Repeat("x", 65537)
+	partialRaw, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", partialRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BindChatImage(partial, "synthetic-image"); err == nil {
+		t.Fatal("selected native prefix authorized despite incomplete inspection")
+	}
 }
 
 func TestChatImageBlobEnvelope(t *testing.T) {
@@ -195,12 +216,26 @@ func TestChatImageBlobEnvelope(t *testing.T) {
 	if err == nil || blob.HTTPStatus != 404 {
 		t.Fatal("service refusal status lost", err)
 	}
+	exact := fmt.Sprintf(`{"structuredContent":{"statusCode":200,"contentType":"image/png","sizeBytes":4194304,"base64Content":%q}}`,
+		base64.StdEncoding.EncodeToString(make([]byte, 4194304)))
+	blob, err = decodeImageBlob(ctx, []byte(exact))
+	if err != nil || len(blob.Data) != 4194304 {
+		t.Fatal("exact binary byte limit refused", err)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := decodeImageBlob(ctx, []byte(good)); err != context.Canceled {
+		t.Fatal("cancellation was not preserved", err)
+	}
+	if _, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, "")); err != context.Canceled {
+		t.Fatal("message cancellation was not preserved", err)
+	}
 }
 
 func TestChatImageLegacyDocumentUnchanged(t *testing.T) {
 	ctx := context.Background()
-	for _, contentType := range []string{"", "application/x", "image/jpeg"} {
-		raw := fmt.Sprintf(`{"structuredContent":{"statusCode":200,"contentType":%q,"sizeBytes":0,"base64Content":""}}`, contentType)
+	for _, contentType := range []string{`""`, `"application/x"`, `"image/jpeg"`, `17`, `{}`} {
+		raw := fmt.Sprintf(`{"structuredContent":{"statusCode":200,"contentType":%s,"sizeBytes":0,"base64Content":""}}`, contentType)
 		data, status, err := decodeBlob(ctx, []byte(raw))
 		if err != nil || status != 200 || len(data) != 0 {
 			t.Fatal("image constraints leaked into legacy document decoder", err)
