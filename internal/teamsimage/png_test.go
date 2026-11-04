@@ -67,6 +67,16 @@ func TestImagePNGIntegrity(t *testing.T) {
 	binary.BigEndian.PutUint32(badLength[8:12], ^uint32(0))
 	badRaster := append(bytes.Clone(good[:33]), imagePNGChunk("IDAT", []byte("not-zlib"))...)
 	badRaster = append(badRaster, imagePNGChunk("IEND", nil)...)
+	if string(good[37:41]) != "IDAT" {
+		t.Fatal("generated fixture no longer has expected first IDAT placement")
+	}
+	idatLength := int(binary.BigEndian.Uint32(good[33:37]))
+	idat := good[41 : 41+idatLength]
+	trailingIDAT := append(append(bytes.Clone(good[:len(good)-12]), imagePNGChunk("IDAT", []byte("garbage"))...), good[len(good)-12:]...)
+	nonconsecutive := append(bytes.Clone(good[:33]), imagePNGChunk("IDAT", idat[:len(idat)/2])...)
+	nonconsecutive = append(nonconsecutive, imagePNGChunk("tEXt", nil)...)
+	nonconsecutive = append(nonconsecutive, imagePNGChunk("IDAT", idat[len(idat)/2:])...)
+	nonconsecutive = append(nonconsecutive, imagePNGChunk("IEND", nil)...)
 	for name, data := range map[string][]byte{
 		"signature":        badSignature,
 		"crc":              badCRC,
@@ -77,6 +87,8 @@ func TestImagePNGIntegrity(t *testing.T) {
 		"second-header":    append(append(bytes.Clone(good[:33]), good[8:33]...), good[33:]...),
 		"missing-idat":     append(bytes.Clone(good[:33]), imagePNGChunk("IEND", nil)...),
 		"bad-raster":       badRaster,
+		"trailing-idat":    trailingIDAT,
+		"idat-sequence":    nonconsecutive,
 		"unknown-critical": append(append(bytes.Clone(good[:33]), imagePNGChunk("ABCD", nil)...), good[33:]...),
 		"animation":        append(append(bytes.Clone(good[:33]), imagePNGChunk("acTL", make([]byte, 8))...), good[33:]...),
 		"animation-frame":  append(append(bytes.Clone(good[:33]), imagePNGChunk("fcTL", make([]byte, 26))...), good[33:]...),
@@ -86,6 +98,12 @@ func TestImagePNGIntegrity(t *testing.T) {
 			_, err := ValidatePNG(ctx, data, "image/png")
 			imagePNGCode(t, err, "image_bytes_invalid")
 		})
+	}
+	split := append(bytes.Clone(good[:33]), imagePNGChunk("IDAT", idat[:len(idat)/2])...)
+	split = append(split, imagePNGChunk("IDAT", idat[len(idat)/2:])...)
+	split = append(split, imagePNGChunk("IEND", nil)...)
+	if _, err := ValidatePNG(ctx, split, "image/png"); err != nil {
+		t.Fatal("valid consecutive split IDAT refused", err)
 	}
 	if _, err := ValidatePNG(ctx, good, "image/jpeg"); err == nil {
 		t.Fatal("declared MIME mismatch admitted")
@@ -121,7 +139,8 @@ func TestImagePNGExpansionBounds(t *testing.T) {
 			}
 		})
 	}
-	padding := make([]byte, 4194304-len(small)-12)
+	padding := bytes.Repeat([]byte{'x'}, 4194304-len(small)-12)
+	copy(padding, "padding\x00")
 	exact := append(append(bytes.Clone(small[:33]), imagePNGChunk("tEXt", padding)...), small[33:]...)
 	info, err := ValidatePNG(ctx, exact, "image/png")
 	if err != nil || info.Size != 4194304 {
