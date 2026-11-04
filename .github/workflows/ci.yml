@@ -104,7 +104,7 @@ jobs:
               "inventory-complete": (["./internal/teamsimage", "./internal/cli", "./internal/store"], "^Test"),
               "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
-              "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate)"),
+              "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate|TestSnapshotOwner)"),
               "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument)"),
               "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestShowCoverage)"),
           }
