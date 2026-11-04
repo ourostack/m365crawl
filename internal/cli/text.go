@@ -119,6 +119,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		if c := r.ApplicationEvidenceCoverage; c != nil {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(appCoverageLine(c), color))
 		}
+		renderMediaCoverage(w, r.MediaCoverage)
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
 		rt.renderScoutCoverage(r.ScoutCoverage)
@@ -302,6 +303,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		metaLines(w, r.meta, color)
 	case *eventResult:
 		rt.eventBlock(r)
+		renderMediaCoverage(w, r.mediaCoverage)
 		coverage := r.nativeCoverage
 		if coverage == nil {
 			coverage = emptyAttendeeCoverage()

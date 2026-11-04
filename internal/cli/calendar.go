@@ -796,6 +796,7 @@ func (c *calendarEventCmd) Run(rt *runtime) error {
 		res.(*eventResult).nativeCoverage = nativeCoverage
 		if d.Chat != nil {
 			res.(*eventResult).appCoverage = applicationCoverageOf(envelopesOf(d.Chat.Recent))
+			res.(*eventResult).mediaCoverage = mediaCoverageForReturnedMessages(len(d.Chat.Recent))
 		}
 		if ev.MeetingChatID == "" {
 			res.(*eventResult).addNotice("this event has no Teams meeting chat, so chat is null")
@@ -933,6 +934,7 @@ type eventResult struct {
 	event          *calendarEvent
 	keys           []string
 	appCoverage    *applicationCoverage // of the chat's recent messages; nil without a meeting chat
+	mediaCoverage  *mediaCoverage
 	meta
 }
 
@@ -960,8 +962,9 @@ func (r *eventResult) MarshalJSON() ([]byte, error) {
 	}
 	withCoverage, _ := joinJSON(body, struct {
 		Coverage       *applicationCoverage      `json:"application_evidence_coverage,omitempty"`
+		MediaCoverage  *mediaCoverage            `json:"media_coverage,omitempty"`
 		NativeCoverage *AttendeeEvidenceCoverage `json:"native_attendee_evidence"`
-	}{r.appCoverage, nativeCoverage})
+	}{r.appCoverage, r.mediaCoverage, nativeCoverage})
 	return joinJSON(json.RawMessage(withCoverage), r.meta)
 }
 

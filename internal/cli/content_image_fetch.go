@@ -139,11 +139,14 @@ func (rt *runtime) failImage(failure *imageFetchError) int {
 		coded.Exit, coded.Fix = original.Exit, original.Fix
 	}
 	switch coded.Code {
+	case "workiq_account_invalid":
+		coded.Exit = errs.ExitEnvironment
 	case "interrupted":
 		coded.Exit = errs.ExitRuntime
 		coded.Message = "selected image acquisition interrupted; inspect the receipt for any retained or published file"
 		coded.Fix = "Inspect image_acquisition and retained files before retrying; nothing is overwritten."
-	case "image_invalid_bytes", "image_output_failed", "image_output_uncertain", "image_native_close_failed", "image_receipt_failed":
+	case "image_invalid_bytes", "image_output_failed", "image_output_uncertain", "image_native_close_failed",
+		"image_output_cleanup_failed", "image_output_cleanup_ownership_unknown", "image_receipt_failed":
 		coded.Exit = errs.ExitRuntime
 	}
 	doc := errorDoc{Error: bodyOf(coded), ImageAcquisition: &failure.result}

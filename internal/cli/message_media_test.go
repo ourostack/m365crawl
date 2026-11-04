@@ -22,6 +22,39 @@ func assertMessageMedia(t *testing.T, doc map[string]any, count int) {
 	}
 }
 
+func TestImageHelpFieldsAndLimits(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"content", "images", "--help"}, {"content", "fetch", "image", "--help"}} {
+		code, out, stderr := e.run(args...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("image command not discoverable offline: %v: %d %s", args, code, stderr)
+		}
+		if args[1] == "fetch" {
+			for _, required := range []string{"--image-id", "--output", "PNG", "4MiB", "16777216", "16384", "64MiB", "image_acquisition", "not_acquired"} {
+				if !strings.Contains(out, required) {
+					t.Fatalf("fetch help hides a required selector, bound or failure scope (%s): %s", required, out)
+				}
+			}
+		} else if !strings.Contains(out, "archive-only") || !strings.Contains(out, "Partial inspection") ||
+			!strings.Contains(out, "Source URLs are never returned") {
+			t.Fatalf("inventory help implies acquisition or complete partial results: %s", out)
+		}
+	}
+	for _, args := range [][]string{
+		{"messages"},
+		{"unread"},
+		{"thread", appChat, "app-1"},
+		{"search", "evidence", "--source", "chats"},
+		{"calendar", "event", "synthetic-event"},
+		{"watch"},
+	} {
+		code, _, stderr := e.run(append([]string{"--no-sync", "--json", "--fields", "media_coverage"}, args...)...)
+		if code != 2 || errorCode(t, stderr) != "usage" {
+			t.Fatalf("%v treated envelope media coverage as an item projection: %d %s", args, code, stderr)
+		}
+	}
+}
+
 func TestMessageMediaCoverageSurvivesProjectionAndWatch(t *testing.T) {
 	e := appEnv(t)
 	routes := []struct {

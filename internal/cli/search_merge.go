@@ -787,6 +787,9 @@ func (c *searchCmd) search(rt *runtime, p searchPlan, f store.Filter, st *store.
 		}
 	}
 	res := newList(shape(rt, out), truncated)
+	if p.chats {
+		res.MediaCoverage = mediaCoverageForReturnedMessages(count[searchChats])
+	}
 	if p.chats && st != nil {
 		res.ApplicationEvidenceCoverage = applicationCoverageOf(envs)
 		if res.WorkIQRoutes, err = rt.chatRoutes(st, f.Since); err != nil {

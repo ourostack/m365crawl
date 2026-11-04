@@ -44,9 +44,10 @@ type watchCmd struct {
 // changeLine is one message or activity change; item has the shape of the `messages` or `activity`
 // items, shaped by --fields and --max-text.
 type changeLine struct {
-	Kind   string `json:"kind"`   // message | activity
-	Change string `json:"change"` // new | edited | deleted
-	Item   any    `json:"item"`
+	Kind          string         `json:"kind"`   // message | activity
+	Change        string         `json:"change"` // new | edited | deleted
+	Item          any            `json:"item"`
+	MediaCoverage *mediaCoverage `json:"media_coverage,omitempty"`
 }
 
 type syncLine struct {
@@ -415,7 +416,11 @@ func (w *watcher) emit(rep syncer.Report, changes []syncer.Change) error {
 			w.textLine(c, it)
 			continue
 		}
-		w.line(changeLine{Kind: c.Kind, Change: c.Change, Item: shape(w.rt, []any{it.item})[0]})
+		line := changeLine{Kind: c.Kind, Change: c.Change, Item: shape(w.rt, []any{it.item})[0]}
+		if c.Kind == "message" {
+			line.MediaCoverage = mediaCoverageForReturnedMessages(1)
+		}
+		w.line(line)
 	}
 	if text {
 		_, _ = fmt.Fprintf(w.rt.stdout, "%s sync %s: %d new, %d updated messages; %d new, %d updated activity items\n",
@@ -502,6 +507,9 @@ func (w *watcher) textLine(c syncer.Change, it watchItem) {
 	}
 	text, _ := truncateRunes(oneLine(it.text), 200)
 	_, _ = fmt.Fprintf(w.rt.stdout, "%s %s %s  %s | %s: %s\n", time.Now().Format("15:04:05"), c.Change, what, it.conv, it.sender, text)
+	if c.Kind == "message" {
+		renderMediaCoverage(w.rt.stdout, mediaCoverageForReturnedMessages(1))
+	}
 }
 
 // fileEvents watches dirs with fsnotify (kqueue on macOS, inotify on Linux; no CGO) and sends on
