@@ -142,4 +142,13 @@ func TestImageInventoryTeamsAccounts(t *testing.T) {
 	if _, err := s.TeamsAccounts(ctx); err == nil {
 		t.Fatal("closed archive silently returned no accounts")
 	}
+	broken := newStore(t)
+	if _, err := broken.db.ExecContext(ctx, `drop table accounts;
+create table accounts(tenant_id text,user_id text);
+insert into accounts values(null,'synthetic-user')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broken.TeamsAccounts(ctx); err == nil {
+		t.Fatal("invalid stored account row silently accepted")
+	}
 }
