@@ -109,11 +109,11 @@ func TestMessageMediaCoverageZeroAndMixedSearch(t *testing.T) {
 			assertMessageMedia(t, searchJSON(t, e, append(test.args, fields...)...), test.count)
 		}
 	}
-	assertMessageMedia(t, jsonRun(t, e, "messages", "--conversation", "no-such-synthetic-chat"), 0)
+	assertMessageMedia(t, jsonRun(t, e, "messages", "--since", "2099-01-01"), 0)
 	for _, args := range [][]string{
 		{"search", "Hello", "--source", "mail"},
 		{"conversations"},
-		{"unread", "--summary"},
+		{"unread", "--by-conversation"},
 		{"activity"},
 		{"sql", "select 1 as synthetic_value"},
 	} {
@@ -190,7 +190,9 @@ func TestMessageMediaCoverageLegacyPayload(t *testing.T) {
 		t.Fatalf("additive media receipt changed a legacy payload: %v / %v", app, doc)
 	}
 	w, out, _ := jsonWatcher(t, e.root, e.db)
-	w.reportErr(context.Canceled)
+	if err := w.reportErr(context.Canceled); err != nil {
+		t.Fatal(err)
+	}
 	for _, line := range out.lines(t) {
 		if line["media_coverage"] != nil {
 			t.Fatal("watch error invented media coverage")

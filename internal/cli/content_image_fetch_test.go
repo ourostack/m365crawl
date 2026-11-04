@@ -12,9 +12,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openclaw/crawlkit/output"
+
+	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
+
+func TestImageOutcomeCleanupErrorClassification(t *testing.T) {
+	for _, code := range []string{"image_output_cleanup_failed", "image_output_cleanup_ownership_unknown", "image_native_close_failed"} {
+		t.Run(code, func(t *testing.T) {
+			var out, stderr bytes.Buffer
+			rt := newRuntime(context.Background(), &Globals{}, &out, &stderr)
+			rt.format = output.JSON
+			published, verified := true, true
+			failure := &imageFetchError{
+				result: imageFetchResult{Status: "failed", Code: code, Scope: "selected_image",
+					OtherMedia: "not_acquired", FilePublished: &published, OutputVerified: &verified},
+				cause: &errs.Coded{Code: code, Exit: errs.ExitEnvironment, Message: "private phase failure"},
+			}
+			exit := rt.fail(failure)
+			if exit != errs.ExitRuntime || out.Len() != 0 || strings.Contains(stderr.String(), "private phase failure") {
+				t.Fatalf("cleanup/close failure misclassified or leaked its underlying cause: %d %s", exit, &stderr)
+			}
+			doc := decode(t, stderr.String())
+			receipt := doc["image_acquisition"].(map[string]any)
+			if doc["error"].(map[string]any)["code"] != code || receipt["file_published"] != true ||
+				receipt["output_verified"] != true || receipt["status"] != "failed" {
+				t.Fatalf("runtime cleanup failure lost the published side effect: %s", &stderr)
+			}
+		})
+	}
+}
 
 func TestImageFetchAdmissionBeforeNative(t *testing.T) {
 	for _, tc := range []struct {
