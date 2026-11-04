@@ -21,6 +21,7 @@ on:
           - publisher
           - orchestration
           - coverage
+          - media-goldens
 
 permissions:
   contents: read
@@ -50,7 +51,7 @@ jobs:
           source = os.environ["SOURCE_SHA"]
           group = os.environ["PROBE_GROUP"]
           allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "inventory-complete", "transport", "png",
-                     "publisher", "orchestration", "coverage"}
+                     "publisher", "orchestration", "coverage", "media-goldens"}
           if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
               raise SystemExit("invalid source or diagnostic group")
           runners = ["ubuntu-latest"]
@@ -106,7 +107,8 @@ jobs:
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
               "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate|TestSnapshotOwner)"),
               "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument|TestFetchWorkIQDocument|TestContentFetchDoc|TestJudgeDocument|TestJudgeBytes|TestDocumentAccount)"),
-              "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestShowCoverage)"),
+              "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestApplication|TestCalendarApp|TestShowCoverage)"),
+              "media-goldens": (["./internal/cli"], "^(Test.*Golden|TestCommandsDocListsFields)"),
           }
           out = pathlib.Path("image-probe-output")
           out.mkdir()
@@ -116,6 +118,8 @@ jobs:
               raise SystemExit("checkout does not match requested source")
           packages, pattern = groups[os.environ["PROBE_GROUP"]]
           command = ["go", "test", "-json", "-count=1", "-timeout=5m", *packages, "-run", pattern]
+          if os.environ["PROBE_GROUP"] == "media-goldens":
+              command.append("-update")
           if os.environ["PROBE_GROUP"] == "inventory-complete":
               command = ["go", "test", "-json", "-count=1", "-timeout=15m",
                          "-coverprofile=image-probe-output/coverage.out", *packages]
@@ -141,6 +145,15 @@ jobs:
                   terminal.append({key: event.get(key) for key in ("Package", "Test", "Action", "Elapsed")})
           manifest.update(exit_code=result.returncode, elapsed_seconds=time.monotonic()-started,
                           terminal_tests=terminal)
+          if os.environ["PROBE_GROUP"] == "media-goldens":
+              generated = subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()
+              if any(path != "docs/commands.md" and not path.startswith("internal/cli/testdata/") for path in generated):
+                  raise SystemExit("golden generation changed an unapproved path")
+              with (out / "generated.patch").open("wb") as patch:
+                  subprocess.run(["git", "diff", "--binary", "--", "docs/commands.md", "internal/cli/testdata"],
+                                 stdout=patch, check=True)
+              manifest["generated_paths"] = generated
+              manifest["generated_patch"] = "generated.patch"
           if os.environ["PROBE_GROUP"] == "inventory-complete" and result.returncode == 0:
               coverage_started = time.monotonic()
               env = dict(os.environ, COVERAGE_PROFILE="image-probe-output/coverage.out",
@@ -164,6 +177,11 @@ jobs:
                             "TestFetchChatImage", "TestMessageMediaCoverage")
           exercised = [event for event in terminal
                        if event["Action"] != "skip" and event["Test"].startswith(image_prefixes)]
+          if os.environ["PROBE_GROUP"] == "media-goldens":
+              required = {"TestTextGoldens", "TestCalendarTextGoldens", "TestMetadataGolden", "TestCommandsDocListsFields"}
+              exercised = [event for event in terminal if event["Action"] != "skip" and event["Test"] in required]
+              if {event["Test"] for event in exercised} != required:
+                  raise SystemExit("required golden generators did not execute")
           if not exercised:
               raise SystemExit("no named diagnostic tests executed; not a behavioral verdict")
           raise SystemExit(result.returncode or manifest.get("coverage_exit_code", 0)
