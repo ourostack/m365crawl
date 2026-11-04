@@ -3,18 +3,18 @@ module github.com/ourostack/m365crawl
 go 1.27.3
 
 require (
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	github.com/coder/websocket v1.8.15
-	github.com/ebitengine/purego v0.11.2
+	github.com/ebitengine/purego v0.11.3
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/golang/snappy v1.0.0
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/openclaw/crawlkit v0.17.3
 	github.com/syndtr/goleveldb v1.0.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
