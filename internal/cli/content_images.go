@@ -153,15 +153,18 @@ func (c *contentImagesCmd) inventory(rt *runtime, st *store.Store, conversation,
 		return nil, err
 	}
 	key := store.MessageKey{TenantID: a.TenantID, UserID: a.UserID, ConversationID: conversation, ID: message}
+	exists, err := st.HasMessage(rt.ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, imageInventoryError("image_message_unknown")
+	}
 	bodies, err := st.MessageHTML(rt.ctx, []store.MessageKey{key})
 	if err != nil {
 		return nil, err
 	}
-	body, exists := bodies[key]
-	if !exists {
-		return nil, imageInventoryError("image_message_unknown")
-	}
-	inspection, err := teamsimage.InspectHTML(rt.ctx, body)
+	inspection, err := teamsimage.InspectHTML(rt.ctx, bodies[key])
 	if err != nil {
 		return nil, err
 	}

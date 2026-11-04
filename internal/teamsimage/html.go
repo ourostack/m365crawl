@@ -119,6 +119,7 @@ func InspectHTML(ctx context.Context, body string) (Inspection, error) {
 		if kind != html.StartTagToken && kind != html.SelfClosingTagToken {
 			continue
 		}
+		attributeCount, duplicate := rawImageAttributes(tokenizer.Raw())
 		token := tokenizer.Token()
 		if token.Data != "img" {
 			continue
@@ -128,11 +129,16 @@ func InspectHTML(ctx context.Context, body string) (Inspection, error) {
 			incomplete("image_element_limit")
 			return result, nil
 		}
-		if len(token.Attr) > maxAttributes {
+		if attributeCount > maxAttributes {
 			incomplete("image_attribute_limit")
 			return result, nil
 		}
 		ref, decorative := inspectImage(token.Attr)
+		if duplicate {
+			decorative = false
+			ref.Selection, ref.Code = "ambiguous", "image_reference_ambiguous"
+			ref.OccurrenceCount = 1
+		}
 		if decorative {
 			result.DecorativeEmojiCount++
 			continue
@@ -159,13 +165,74 @@ func InspectHTML(ctx context.Context, body string) (Inspection, error) {
 	}
 }
 
+// The tokenizer retains only the first attribute with each name. Inspect raw
+// declarations before normalization so duplicates cannot hide conflicts or bounds.
+func rawImageAttributes(raw []byte) (count int, duplicate bool) {
+	pos := 1
+	for pos < len(raw) && !imageHTMLSpace(raw[pos]) && raw[pos] != '/' && raw[pos] != '>' {
+		pos++
+	}
+	if pos > len(raw) || len(raw) < 2 || !strings.EqualFold(string(raw[1:pos]), "img") {
+		return 0, false
+	}
+	names := map[string]bool{}
+	for pos < len(raw) {
+		if imageHTMLSpace(raw[pos]) || raw[pos] == '/' {
+			pos++
+			continue
+		}
+		if raw[pos] == '>' {
+			break
+		}
+		start := pos
+		if raw[pos] == '=' {
+			pos++
+		}
+		for pos < len(raw) && !imageHTMLSpace(raw[pos]) && raw[pos] != '=' && raw[pos] != '/' && raw[pos] != '>' {
+			pos++
+		}
+		count++
+		if count > maxAttributes {
+			return count, duplicate
+		}
+		name := strings.ToLower(string(raw[start:pos]))
+		duplicate = duplicate || names[name]
+		names[name] = true
+		for pos < len(raw) && imageHTMLSpace(raw[pos]) {
+			pos++
+		}
+		if pos >= len(raw) || raw[pos] != '=' {
+			continue
+		}
+		pos++
+		for pos < len(raw) && imageHTMLSpace(raw[pos]) {
+			pos++
+		}
+		if pos < len(raw) && (raw[pos] == '"' || raw[pos] == '\'') {
+			quote := raw[pos]
+			pos++
+			for pos < len(raw) && raw[pos] != quote {
+				pos++
+			}
+			if pos < len(raw) {
+				pos++
+			}
+		} else {
+			for pos < len(raw) && !imageHTMLSpace(raw[pos]) && raw[pos] != '>' {
+				pos++
+			}
+		}
+	}
+	return count, duplicate
+}
+
+func imageHTMLSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+}
+
 func inspectImage(attributes []html.Attribute) (Reference, bool) {
 	values := map[string]string{}
-	conflicting := false
 	for _, attr := range attributes {
-		if old, exists := values[attr.Key]; exists && old != attr.Val {
-			conflicting = true
-		}
 		values[attr.Key] = attr.Val
 	}
 	id, source, itemType := values["itemid"], values["src"], values["itemtype"]
@@ -173,7 +240,7 @@ func inspectImage(attributes []html.Attribute) (Reference, bool) {
 	for _, class := range strings.Fields(values["class"]) {
 		emoji = emoji || strings.EqualFold(class, "Emoji")
 	}
-	if id == "" && emoji && !conflicting &&
+	if id == "" && emoji &&
 		(itemType == "" || strings.EqualFold(itemType, "http://schema.skype.com/Emoji")) {
 		return Reference{}, true
 	}
@@ -194,9 +261,6 @@ func inspectImage(attributes []html.Attribute) (Reference, bool) {
 	}
 	if len(source) > maxURLBytes {
 		ref.source, ref.binding = "", ""
-	}
-	if conflicting {
-		ref.Selection, ref.Code = "ambiguous", "image_reference_ambiguous"
 	}
 	return ref, false
 }

@@ -119,6 +119,15 @@ func (s *Store) TeamsAccounts(ctx context.Context) ([]teamsdesktop.Account, erro
 	return accounts, err
 }
 
+// HasMessage checks core message presence without optional source projections.
+func (s *Store) HasMessage(ctx context.Context, key MessageKey) (bool, error) {
+	var found bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from messages
+where tenant_id=? and user_id=? and conversation_id=? and id=?)`,
+		key.TenantID, key.UserID, key.ConversationID, key.ID).Scan(&found)
+	return found, err
+}
+
 // HasAccount says whether the archive holds the Teams account a.
 func (s *Store) HasAccount(ctx context.Context, a teamsdesktop.Account) (bool, error) {
 	var ok bool

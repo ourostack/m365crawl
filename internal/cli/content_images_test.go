@@ -198,10 +198,22 @@ func TestImageSelectorExactMessageAndAccount(t *testing.T) {
 
 func TestImageOfflineWithoutFeatureTables(t *testing.T) {
 	e := imageInventoryEnv(t, imageElement)
-	e.exec("drop table workiq_accounts")
+	e.exec(`drop table workiq_mail_receipts; drop table workiq_gaps;
+drop table workiq_census_members; drop table workiq_censuses; drop table workiq_folders;
+drop table workiq_source_keys; drop table workiq_aliases; drop table workiq_rows;
+drop table workiq_pages; drop table workiq_frontiers; drop table workiq_attempts; drop table workiq_accounts`)
 	code, out, stderr := e.run("--json", "--max-age", "1m", "content", "images", imageConversation, imageMessage)
 	if code != 0 || decode(t, out)["implicit_sync"] != "disabled" {
 		t.Fatalf("offline inventory coupled to native feature tables or implicit sync: %d %s %s", code, out, stderr)
+	}
+}
+
+func TestImageInventoryPreservesPartialFeatureRefusal(t *testing.T) {
+	e := imageInventoryEnv(t, imageElement)
+	e.exec("drop table workiq_accounts")
+	code, out, stderr := e.run("--json", "content", "images", imageConversation, imageMessage)
+	if code != 1 || out != "" || errorCode(t, stderr) != "db_error" {
+		t.Fatalf("partial feature corruption was treated as ordinary absence: %d %s %s", code, out, stderr)
 	}
 }
 

@@ -43,6 +43,43 @@ func TestImageInventoryDuplicateAttributeBudget(t *testing.T) {
 	}
 }
 
+func TestImageInventoryRawAttributeSyntax(t *testing.T) {
+	for _, body := range []string{
+		`<IMG ITEMID='synthetic-image' SRC='https://example.test/image'>`,
+		`<img itemid=synthetic-image src=https://example.test/image disabled>`,
+		"<img\titemid = \"synthetic-image\"\r\nsrc = \"https://example.test/image\"\f/>",
+		`<img itemid="synthetic-image" alt='itemid="another" > src="hidden"' src="https://example.test/image">`,
+	} {
+		inspection, err := InspectHTML(context.Background(), body)
+		if err != nil || inspection.State != InspectionComplete || len(inspection.References) != 1 ||
+			inspection.References[0].Selection != "supported" {
+			t.Fatalf("quoted, unquoted or boolean attributes changed selection: %v %v", inspection, err)
+		}
+	}
+	for _, body := range []string{
+		`<img ITEMID=synthetic-image itemid=another src=https://example.test/image>`,
+		`<img class=Emoji class=Emoji>`,
+	} {
+		inspection, err := InspectHTML(context.Background(), body)
+		if err != nil || inspection.DecorativeEmojiCount != 0 || len(inspection.References) != 1 ||
+			inspection.References[0].Selection != "ambiguous" {
+			t.Fatalf("duplicate declarations lost their refusal: %v %v", inspection, err)
+		}
+	}
+	for _, tc := range []struct {
+		raw   string
+		count int
+	}{
+		{"", 0}, {"<", 0}, {"<p>", 0}, {"<img flag", 1},
+		{"<img flag=", 1}, {"<img alt='unfinished", 1}, {"<img =odd=x>", 1},
+	} {
+		count, duplicate := rawImageAttributes([]byte(tc.raw))
+		if count != tc.count || duplicate {
+			t.Fatalf("bounded raw declaration accounting: %d %v", count, duplicate)
+		}
+	}
+}
+
 func TestImageInventoryOpaqueBindingAndDecoration(t *testing.T) {
 	inspection, err := InspectHTML(context.Background(), generatedImage+generatedImage+`<img class="Emoji">`)
 	if err != nil || inspection.State != InspectionComplete || len(inspection.References) != 1 ||

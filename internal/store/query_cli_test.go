@@ -102,6 +102,29 @@ func TestHasAccount(t *testing.T) {
 	}
 }
 
+func TestImageInventoryHasMessage(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m1", "", base)}))
+	for _, tc := range []struct {
+		key  MessageKey
+		want bool
+	}{
+		{MessageKey{acctA.TenantID, acctA.UserID, "c", "m1"}, true},
+		{MessageKey{acctB.TenantID, acctB.UserID, "c", "m1"}, false},
+		{MessageKey{acctA.TenantID, acctA.UserID, "c", "absent"}, false},
+	} {
+		found, err := s.HasMessage(ctx, tc.key)
+		if err != nil || found != tc.want {
+			t.Fatalf("exact core presence: %v %v", found, err)
+		}
+	}
+	_ = s.Close()
+	if _, err := s.HasMessage(ctx, MessageKey{}); err == nil {
+		t.Fatal("closed archive silently returned missing message")
+	}
+}
+
 func TestImageInventoryTeamsAccounts(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
