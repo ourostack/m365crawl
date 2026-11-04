@@ -59,7 +59,7 @@ func TestImageInventoryUnknownAndCancellation(t *testing.T) {
 }
 
 func TestImageSelectionAmbiguityAndUnsupported(t *testing.T) {
-	for _, body := range []string{
+	for index, body := range []string{
 		generatedImage + strings.Replace(generatedImage, `width="7"`, `width="8"`, 1),
 		generatedImage + strings.Replace(generatedImage, "example.test/image", "example.test/other", 1),
 		strings.Replace(generatedImage, `itemid="synthetic-image"`, `itemid="synthetic-image" itemid="conflicting"`, 1),
@@ -69,7 +69,7 @@ func TestImageSelectionAmbiguityAndUnsupported(t *testing.T) {
 	} {
 		inspection, err := InspectHTML(context.Background(), body)
 		if err != nil || inspection.State != InspectionComplete || inspection.UnsupportedReferenceCount == 0 {
-			t.Fatalf("unsupported reference was hidden: %v %v", inspection, err)
+			t.Fatalf("unsupported case %d was hidden: %v %v", index, inspection, err)
 		}
 		_, err = Select(inspection, "synthetic-image")
 		var coded *errs.Coded

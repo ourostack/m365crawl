@@ -108,6 +108,9 @@ func InspectHTML(ctx context.Context, body string) (Inspection, error) {
 		}
 		if kind == html.ErrorToken {
 			if errors.Is(tokenizer.Err(), io.EOF) {
+				if len(tokenizer.Raw()) != 0 {
+					incomplete("image_html_invalid")
+				}
 				return result, nil
 			}
 			incomplete("image_token_limit")

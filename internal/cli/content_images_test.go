@@ -49,7 +49,7 @@ func TestImageInventoryContentAndEmoji(t *testing.T) {
 		`<img itemtype="http://schema.skype.com/Emoji" class="Emoji" src="https://example.test/smile.png">` +
 		`<img itemtype="http://schema.skype.com/Emoji" class="Emoji" src="https://example.test/wave.png">`
 	e := imageInventoryEnv(t, body)
-	code, out, stderr := e.run("--json", "--max-age", "1", "content", "images", imageConversation, imageMessage)
+	code, out, stderr := e.run("--json", "--max-age", "1m", "content", "images", imageConversation, imageMessage)
 	if code != 0 {
 		t.Fatalf("offline selected-message image inventory exit %d: %s", code, stderr)
 	}
@@ -199,7 +199,7 @@ func TestImageSelectorExactMessageAndAccount(t *testing.T) {
 func TestImageOfflineWithoutFeatureTables(t *testing.T) {
 	e := imageInventoryEnv(t, imageElement)
 	e.exec("drop table workiq_accounts")
-	code, out, stderr := e.run("--json", "--max-age", "1", "content", "images", imageConversation, imageMessage)
+	code, out, stderr := e.run("--json", "--max-age", "1m", "content", "images", imageConversation, imageMessage)
 	if code != 0 || decode(t, out)["implicit_sync"] != "disabled" {
 		t.Fatalf("offline inventory coupled to native feature tables or implicit sync: %d %s %s", code, out, stderr)
 	}
@@ -224,5 +224,27 @@ func TestImageInventoryMissingIsNotZero(t *testing.T) {
 	refs, ok := doc["image_references"].([]any)
 	if doc["inspection_state"] != "complete" || !ok || len(refs) != 0 {
 		t.Fatalf("inspected zero references was not represented truthfully: %s", out)
+	}
+}
+
+func TestImageInventoryTextAndProjection(t *testing.T) {
+	e := imageInventoryEnv(t, imageElement)
+	for _, format := range []string{"json", "text"} {
+		code, out, stderr := e.run("--format", format, "--fields", "image_references", "content", "images", imageConversation, imageMessage)
+		if code != 0 || stderr != "" {
+			t.Fatalf("projected %s output failed: %d %s", format, code, stderr)
+		}
+		doc := decode(t, out)
+		refs, ok := doc["image_references"].([]any)
+		if !ok || len(refs) != 1 || doc["implicit_sync"] != "disabled" || doc["conversation_id"] != nil {
+			t.Fatalf("wrong projected %s inventory: %s", format, out)
+		}
+		if strings.Contains(out, "eu-api.asm.skype.com") {
+			t.Fatal("projection or text output revealed the source URL")
+		}
+	}
+	code, _, stderr := e.run("--fields", "not_an_inventory_field", "content", "images", imageConversation, imageMessage)
+	if code != 2 {
+		t.Fatalf("invalid inventory field accepted: %d %s", code, stderr)
 	}
 }
