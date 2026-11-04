@@ -1,11 +1,17 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl/internal/store"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
@@ -252,6 +258,7 @@ func TestImageInventoryTextAndProjection(t *testing.T) {
 		if code != 0 || stderr != "" {
 			t.Fatalf("projected %s output failed: %d %s", format, code, stderr)
 		}
+
 		doc := decode(t, out)
 		refs, ok := doc["image_references"].([]any)
 		if !ok || len(refs) != 1 || doc["implicit_sync"] != "disabled" || doc["conversation_id"] != nil {
@@ -264,5 +271,128 @@ func TestImageInventoryTextAndProjection(t *testing.T) {
 	code, _, stderr := e.run("--fields", "not_an_inventory_field", "content", "images", imageConversation, imageMessage)
 	if code != 2 {
 		t.Fatalf("invalid inventory field accepted: %d %s", code, stderr)
+	}
+}
+
+func TestImageInventoryFailureBoundaries(t *testing.T) {
+	e := imageInventoryEnv(t, imageElement)
+	cmd := &contentImagesCmd{Target: imageConversation, MessageID: imageMessage}
+	rt := &runtime{ctx: context.Background(), g: &Globals{}, dbPath: e.db,
+		stdout: failWriter{}, stderr: &bytes.Buffer{}, format: output.JSON, now: time.Now}
+	if err := cmd.Run(rt); err == nil {
+		t.Fatal("stdout failure hidden")
+	}
+	r := &imageInventoryResult{meta: meta{Synced: &syncedInfo{Seconds: math.NaN()}}}
+	if err := r.renderImages(rt); err == nil {
+		t.Fatal("encoding failure hidden")
+	}
+	r.Synced = nil
+	if err := r.renderImages(rt); err == nil {
+		t.Fatal("text stdout failure hidden")
+	}
+	for _, args := range [][]string{
+		{"https://teams.microsoft.com/l/message/malformed"},
+		{imageConversation, imageMessage, "--account", tenantA + "/00000000-0000-4000-8000-000000000099"},
+	} {
+		code, _, stderr := e.run(append([]string{"--json", "content", "images"}, args...)...)
+		if code == 0 {
+			t.Fatalf("invalid/missing selector accepted: %v %s", args, stderr)
+		}
+	}
+	missing := newEnv(t)
+	code, out, stderr := missing.run("--json", "content", "images", imageConversation, imageMessage)
+	if code != 3 || out != "" || errorCode(t, stderr) != "image_message_unknown" {
+		t.Fatalf("missing archive fabricated inventory: %d %s %s", code, out, stderr)
+	}
+	e.exec(`insert into sync_runs(started_at,finished_at,status,accounts_json)
+values('2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','ok','["*"]')`)
+	code, out, stderr = e.run("--json", "content", "images", imageConversation, imageMessage)
+	if code != 0 || decode(t, out)["archive_age_seconds"] == nil {
+		t.Fatalf("successful archive clock lost: %d %s %s", code, out, stderr)
+	}
+	for _, damage := range []string{
+		"drop table accounts", "drop table messages",
+		"alter table messages drop column content_html", "drop table sync_runs",
+	} {
+		t.Run(damage, func(t *testing.T) {
+			e := imageInventoryEnv(t, imageElement)
+			st, err := store.OpenReadOnly(context.Background(), e.db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = st.Close() }()
+			e.exec(damage)
+			rt := &runtime{ctx: context.Background(), now: time.Now}
+			if _, err := cmd.inventory(rt, st, imageConversation, imageMessage); err == nil {
+				t.Fatal("archive read failure hidden")
+			}
+		})
+	}
+}
+
+func TestImageInventoryAccountFailures(t *testing.T) {
+	e := imageInventoryEnv(t, imageElement)
+	st, err := store.OpenReadOnly(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	rt := &runtime{ctx: context.Background(), account: &teamsdesktop.Account{TenantID: "bad|tenant", UserID: userA}}
+	if _, err := imageAccount(rt, st); err == nil {
+		t.Fatal("invalid explicit account accepted")
+	}
+	rt.account.TenantID = tenantA
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := imageAccount(rt, st); err == nil {
+		t.Fatal("explicit account read failure hidden")
+	}
+	rt.account = nil
+	if _, err := imageAccount(rt, st); err == nil {
+		t.Fatal("account list read failure hidden")
+	}
+	e.exec("update accounts set tenant_id='bad|tenant'")
+	st, err = store.OpenReadOnly(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := imageAccount(rt, st); err == nil {
+		t.Fatal("invalid archived account accepted")
+	}
+}
+
+type imageCancelAtCheck struct {
+	context.Context
+	cancel context.CancelFunc
+	left   int
+}
+
+func (c *imageCancelAtCheck) Err() error {
+	c.left--
+	if c.left == 0 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestImageInventoryReadCancellation(t *testing.T) {
+	e := imageInventoryEnv(t, imageElement+strings.Repeat("<p>more</p>", 100))
+	st, err := store.OpenReadOnly(context.Background(), e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	cmd := &contentImagesCmd{}
+	for check := 1; check <= 50; check++ {
+		base, cancel := context.WithCancel(context.Background())
+		ctx := &imageCancelAtCheck{Context: base, cancel: cancel, left: check}
+		rt := &runtime{ctx: ctx, now: time.Now}
+		_, err := cmd.inventory(rt, st, imageConversation, imageMessage)
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation at check %d hidden: %v", check, err)
+		}
 	}
 }

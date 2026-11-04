@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"github.com/ourostack/m365crawl/internal/store"
@@ -44,26 +42,16 @@ type imageInventoryResult struct {
 func (r *imageInventoryResult) MarshalJSON() ([]byte, error) {
 	var item any = r.item
 	if len(r.keys) > 0 {
-		var err error
-		item, err = project(r.item, r.keys)
-		if err != nil {
-			return nil, err
-		}
+		item, _ = project(r.item, r.keys) // the typed inventory contains only JSON-safe scalar fields
 	}
 	return joinJSON(item, r.meta)
 }
 
 func (r *imageInventoryResult) renderImages(rt *runtime) error {
-	body, err := r.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	var text bytes.Buffer
-	if err := json.Indent(&text, body, "", "  "); err != nil {
-		return err
-	}
-	_, err = io.WriteString(rt.stdout, text.String()+"\n")
-	return err
+	enc := json.NewEncoder(rt.stdout)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r)
 }
 
 func (c *contentImagesCmd) selector(rt *runtime) (string, string, error) {

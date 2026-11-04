@@ -173,7 +173,9 @@ Bounds are 1,048,576 HTML bytes, 65,536 token bytes, 4,096 image elements, 64 ra
 
 A missing exact message exits 3 with `image_message_unknown` and no invented inventory. Unavailable HTML prints an unknown inventory and exits 3 with `image_body_unavailable`; other unknown/partial inspection prints its bounded result and exits 3 with `image_inspection_incomplete`. Image-free, fully inspected HTML is a real empty array, not an unavailable body. `reason_codes` preserves the specific inspection limits or invalid-input reasons.
 
-`--fields` keys: `account`, `conversation_id`, `message_id`, `scope`, `inspection_state`, `image_references`, `decorative_emoji_count`, `unsupported_reference_count`, `binary_media`, `reason_codes`. `implicit_sync: disabled` and archive-age metadata remain outside projection. Text format renders the same object as readable JSON.
+`implicit_sync: disabled` and archive-age metadata remain outside projection. Text format renders the same object as readable JSON.
+
+`--fields` keys: `account`, `conversation_id`, `message_id`, `scope`, `inspection_state`, `image_references`, `decorative_emoji_count`, `unsupported_reference_count`, `binary_media`, `reason_codes`.
 
 ### content fetch doc
 

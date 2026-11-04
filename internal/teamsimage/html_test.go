@@ -154,6 +154,7 @@ func TestImageInventoryBoundedComponentsAndDimensions(t *testing.T) {
 			t.Fatal("unsafe component admitted")
 		}
 	}
+
 	if !ValidComponent(strings.Repeat("x", 1024)) {
 		t.Fatal("exact component bound refused")
 	}
@@ -162,5 +163,62 @@ func TestImageInventoryBoundedComponentsAndDimensions(t *testing.T) {
 	if err != nil || len(inspection.References) != 1 || inspection.References[0].Width != nil ||
 		inspection.References[0].Height != nil {
 		t.Fatalf("unavailable presentation dimensions became pixels: %v %v", inspection, err)
+	}
+}
+
+func TestImageInventoryLibraryLimitsAndRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want InspectionState
+	}{
+		{strings.Repeat("<p>x</p>", 131072), InspectionComplete},
+		{strings.Repeat("x", MaxHTMLBytes+1), InspectionUnknown},
+		{strings.Repeat("x", maxTokenBytes+1), InspectionPartial},
+		{"<!--" + strings.Repeat("x", maxTokenBytes+1) + "-->", InspectionPartial},
+		{`<img alt="` + strings.Repeat("x", maxTokenBytes+1) + `">`, InspectionPartial},
+		{strings.Repeat(generatedImage, maxImages+1), InspectionPartial},
+	} {
+		inspection, err := InspectHTML(context.Background(), tc.body)
+		if err != nil || inspection.State != tc.want {
+			t.Fatalf("library bound: state=%s want=%s err=%v", inspection.State, tc.want, err)
+		}
+	}
+	for _, body := range []string{
+		strings.Replace(generatedImage, "synthetic-image", "bad|id", 1),
+		strings.Replace(generatedImage, "https://example.test/image", "https://"+strings.Repeat("x", maxURLBytes), 1),
+	} {
+		inspection, err := InspectHTML(context.Background(), body)
+		if err != nil || len(inspection.References) != 1 || inspection.References[0].Selection != "unsupported" {
+			t.Fatalf("unsupported library reference admitted: %v %v", inspection, err)
+		}
+	}
+	inspection := Inspection{State: InspectionComplete, References: []Reference{{ID: "synthetic-image", Selection: "unsupported"}}}
+	if _, err := Select(inspection, "synthetic-image"); err == nil {
+		t.Fatal("missing refusal code admitted a reference")
+	}
+}
+
+type imageCancelAfterChecks struct {
+	context.Context
+	cancel context.CancelFunc
+	left   int
+}
+
+func (c *imageCancelAfterChecks) Err() error {
+	c.left--
+	if c.left == 0 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestImageInventoryCancellationAfterPrefix(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &imageCancelAfterChecks{Context: base, cancel: cancel, left: 3}
+	inspection, err := InspectHTML(ctx, generatedImage+"<p>more</p>")
+	if !errors.Is(err, context.Canceled) || inspection.State != InspectionPartial ||
+		len(inspection.References) != 1 || inspection.References[0].Selection != "inspection_incomplete" {
+		t.Fatalf("cancelled prefix remained selectable: %v %v", inspection, err)
 	}
 }

@@ -81,6 +81,8 @@ var teamsHelp = map[string]string{
 	"unread --include-system":        "Teams-only: Teams' system conversations",
 	"writes":                         "names both: a Teams chat message or a mail draft",
 	"writes send-teams-message":      "Teams-only: sends a Teams chat message",
+	"content images":                 "Teams-only: exact archived message HTML image references",
+	"content images <target>":        "Teams-only: an exact message link or conversation ID",
 }
 
 // No help string says "Teams" where it means the archive: only the strings of teamsHelp may, and
