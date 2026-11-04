@@ -6,8 +6,19 @@ import (
 	"github.com/ourostack/m365crawl/internal/errs"
 )
 
-func Parent(*os.File) error    { return privateError() }
-func Temporary(*os.File) error { return privateError() }
+func Parent(f *os.File) error {
+	if f == nil {
+		return privateError()
+	}
+	return platformPrivate(f, true)
+}
+
+func Temporary(f *os.File) error {
+	if f == nil {
+		return privateError()
+	}
+	return platformPrivate(f, false)
+}
 
 func privateError() error {
 	return &errs.Coded{Code: "image_output_unprotected", Exit: errs.ExitEnvironment,
