@@ -177,6 +177,7 @@ func TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult(t *testing.T) {
 					return
 				}
 				t.Setenv("WORKIQ_ACQUISITION_FAIL_FROM", strconv.Itoa(from))
+				releaseFixture := workIQBoundaryFixture(t, db)
 				report, err := RunWorkIQ(context.Background(), tc.options(db, account))
 				if err == nil || len(report.Accounts) == 0 ||
 					count(t, db, `select count(*) from workiq_attempts where status='open'`) != 0 ||
@@ -185,6 +186,7 @@ func TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult(t *testing.T) {
 					t.Fatalf("failure from fetch %d of %d left no result, closed attempt or diagnostic: %v %+v", from, fetches, err, report.Accounts)
 				}
 				if tc.name == "chats-coverage" {
+					releaseFixture()
 					continue
 				}
 				// Every later fetch keeps failing, so reruns stop at the identity check. That is an
@@ -196,6 +198,7 @@ func TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult(t *testing.T) {
 					count(t, db, `select count(*) from workiq_attempts where status='open'`) != 0 {
 					t.Fatalf("a failure repeating from fetch %d of %d at the identity check was not a resumable stop: %v resumable %v", from, fetches, err, report.Resumable)
 				}
+				releaseFixture()
 			}
 		})
 	}

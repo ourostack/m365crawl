@@ -20,7 +20,7 @@ func workIQPageLimitCode(err error) bool {
 // A recorded removal owes two complete account censuses. When that rebuild needs more pages than one
 // run may fetch, later runs must continue it instead of retiring its cursors again.
 func TestWorkIQMailRecheckLargerThanTheCapContinuesAcrossRuns(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	t.Setenv("WORKIQ_ACQUISITION_MAIL_PAGES", "many")
 	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
@@ -67,7 +67,7 @@ func TestWorkIQMailRecheckLargerThanTheCapContinuesAcrossRuns(t *testing.T) {
 
 // A baseline restart after an expired delta keeps its position when it then reaches the page budget.
 func TestWorkIQExpiredRestartThenPageLimitIsResumable(t *testing.T) {
-	db, account := workIQAcquisitionArchive(t)
+	db, account := workIQContentFixture(t)
 	workIQAcquisitionStub(t)
 	t.Setenv("WORKIQ_ACQUISITION_MAIL_PAGES", "many")
 	t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
@@ -136,6 +136,9 @@ func TestWorkIQMailRecheckContinuesAfterEveryResumableStopAndFailedStart(t *test
 	for _, stop := range []string{"workiq_retry_later", "workiq_archive_busy", "failed-start"} {
 		t.Run(stop, func(t *testing.T) {
 			db, account := workIQAcquisitionArchive(t)
+			if stop != "workiq_archive_busy" {
+				workIQBoundaryFixture(t, db)
+			}
 			workIQAcquisitionStub(t)
 			t.Setenv("WORKIQ_ACQUISITION_MAIL_PAGES", "many")
 			t.Setenv("WORKIQ_ACQUISITION_MESSAGE_COUNT", "6")
