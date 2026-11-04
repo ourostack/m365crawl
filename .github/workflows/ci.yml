@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact product source for the cumulative syncer cost probe
+        description: Exact product source for the selected cost regression probe
         required: true
         type: string
 
@@ -16,7 +16,7 @@ env:
   M365CRAWL_REAL_CACHE: "0"
 
 jobs:
-  syncer-package-profile:
+  syncer-cost-probe:
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -33,24 +33,30 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Capture all syncer test timings and CPU profile
+      - name: Exercise unchanged failure samples and fixture safety
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           python3 - <<'PY'
           import json, os, pathlib, platform, subprocess, time
-          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "syncer-package-profile"
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "syncer-cost-probe"
           root.mkdir()
           source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           assert source == os.environ["SOURCE_SHA"]
+          names = [
+              "TestWorkIQEveryFetchFailureRecordsItsAttemptAndResult",
+              "TestWorkIQMailRecheckLargerThanTheCapContinuesAcrossRuns",
+              "TestWorkIQExpiredRestartThenPageLimitIsResumable",
+              "TestWorkIQMailRecheckContinuesAfterEveryResumableStopAndFailedStart",
+              "TestWorkIQBoundaryFixtureRetainsNativeLocksCancellationAndReadOnlyAccess",
+          ]
           command = [
               "go", "test", "-count=1", "-timeout=10m", "-json",
               "-coverprofile=" + str(root / "syncer.cover.out"),
-              "-cpuprofile=" + str(root / "syncer.cpu"),
-              "./internal/syncer",
+              "-run=^(" + "|".join(names) + ")$", "./internal/syncer",
           ]
           start = time.monotonic()
-          terminal = []
+          events = []
           with (root / "events.jsonl").open("w") as log:
               process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
               for line in process.stdout:
@@ -59,27 +65,19 @@ jobs:
                   if line.startswith("{"):
                       event = json.loads(line)
                       if event.get("Test") and event.get("Action") in ("pass", "fail", "skip"):
-                          terminal.append({key: event[key] for key in ("Test", "Action", "Elapsed") if key in event})
+                          events.append({key: event[key] for key in ("Test", "Action", "Elapsed") if key in event})
               code = process.wait()
           (root / "results.json").write_text(json.dumps(dict(
               source=source, runner=platform.platform(), command=command,
-              code=code, elapsed=time.monotonic()-start,
-              tests=terminal, profiling_overhead=True,
-              qualification="diagnostic only; not the complete release gate",
+              code=code, elapsed=time.monotonic()-start, tests=events,
+              qualification="selected regression probe, not full coverage or release qualification",
           ), indent=2))
-          if (root / "syncer.cpu").is_file() and (root / "syncer.cpu").stat().st_size > 0:
-              for order in ("flat", "cum"):
-                  with (root / ("cpu-" + order + ".txt")).open("w") as output:
-                      subprocess.run(
-                          ["go", "tool", "pprof", "-top", "-" + order, str(root / "syncer.cpu")],
-                          stdout=output, stderr=subprocess.STDOUT, check=True,
-                      )
           raise SystemExit(code)
           PY
-      - name: Preserve successful or failed diagnostic evidence
+      - name: Preserve success and failure evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: syncer-package-profile
-          path: ${{ runner.temp }}/syncer-package-profile
+          name: syncer-cost-probe
+          path: ${{ runner.temp }}/syncer-cost-probe
           if-no-files-found: error
