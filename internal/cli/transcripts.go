@@ -37,7 +37,7 @@ func (transcriptsCmd) Help() string {
 
 // Help is the long help of transcripts show.
 func (transcriptsShowCmd) Help() string {
-	return transcriptsSeeGroup + "\nThe transcript is one segment per part, in time order. A part with no text keeps its place as a segment with no entries and its reason, and complete is false. start and end are absolute times; offset is from the start of the part. When <meeting> names several recorded calls the newest is shown and a notice says how to pick another. --max-text cuts each entry's text and sets text_truncated."
+	return transcriptsSeeGroup + "\nThe transcript is one segment per discovered part, in time order. coverage_scope is discovered_parts: complete says only that every discovered part has fetched text, not that server discovery or recording speech is complete. A part with no text keeps its place as a segment with no entries and its reason, and complete is false. Each segment's notice_duration_seconds is a positive duration from the archived recording notice, or null when unavailable; it is not a live video measurement or a speech-content bound. start and end are absolute times; offset is from the start of the part. When <meeting> names several recorded calls the newest is shown and a notice says how to pick another. --max-text cuts each entry's text and sets text_truncated."
 }
 
 const maxTranscriptLimit = 1000
@@ -296,22 +296,24 @@ type transcriptEntry struct {
 }
 
 type transcriptSegment struct {
-	Ordinal        int               `json:"ordinal"`
-	TranscribeOnly bool              `json:"transcribe_only"`
-	StartsAt       *time.Time        `json:"starts_at"`
-	FetchedAt      *time.Time        `json:"fetched_at"`
-	State          string            `json:"state"`
-	Reason         *string           `json:"reason"`
-	Entries        []transcriptEntry `json:"entries"`
+	Ordinal               int               `json:"ordinal"`
+	TranscribeOnly        bool              `json:"transcribe_only"`
+	StartsAt              *time.Time        `json:"starts_at"`
+	NoticeDurationSeconds *float64          `json:"notice_duration_seconds"`
+	FetchedAt             *time.Time        `json:"fetched_at"`
+	State                 string            `json:"state"`
+	Reason                *string           `json:"reason"`
+	Entries               []transcriptEntry `json:"entries"`
 }
 
-// transcriptShow is one call's transcript. complete says every part's text is in the archive.
+// transcriptShow is one call's transcript. complete is limited to discovered parts with fetched text; neither server discovery nor recording speech coverage is established.
 type transcriptShow struct {
 	CallID        string              `json:"call_id"`
 	EventKey      *string             `json:"event_key"`
 	Title         *string             `json:"title"`
 	Source        string              `json:"source"`
 	Complete      bool                `json:"complete"`
+	CoverageScope string              `json:"coverage_scope"`
 	Segments      []transcriptSegment `json:"segments"`
 	TextTruncated bool                `json:"text_truncated,omitempty"`
 }
@@ -400,10 +402,13 @@ func (c *transcriptsShowCmd) Run(rt *runtime) error {
 				}
 			}
 		}
-		show := &transcriptShow{CallID: call.CallID, EventKey: nz(call.EventKey), Title: nz(call.Title), Source: sourceArchive, Complete: true, Segments: []transcriptSegment{}}
+		show := &transcriptShow{CallID: call.CallID, EventKey: nz(call.EventKey), Title: nz(call.Title), Source: sourceArchive, Complete: true, CoverageScope: "discovered_parts", Segments: []transcriptSegment{}}
 		for _, seg := range transcripts.Stitch(parts) {
 			out := transcriptSegment{Ordinal: seg.Ordinal, TranscribeOnly: seg.TranscribeOnly, StartsAt: tp(seg.StartsAt), FetchedAt: seg.FetchedAt,
 				State: seg.State, Reason: nz(seg.Reason), Entries: []transcriptEntry{}}
+			if seg.DurationSeconds > 0 {
+				out.NoticeDurationSeconds = &seg.DurationSeconds
+			}
 			for _, e := range seg.Entries {
 				eo := transcriptEntryOf(e, seg.StartsAt, rt.g.MaxText)
 				show.TextTruncated = show.TextTruncated || eo.TextTruncated
@@ -525,6 +530,7 @@ func (r *transcriptShowResult) renderTranscripts(rt *runtime) {
 		return
 	}
 	_, _ = fmt.Fprintf(w, "%s · %s · call %s\n", firstOf(oneLine(sv(r.show.Title)), "(untitled)"), stamp(r.startedAt), r.show.CallID)
+	_, _ = fmt.Fprintln(w, render.Dim("coverage: discovered parts only; recording speech coverage is unknown", rt.color))
 	fetched := 0
 	for _, seg := range r.show.Segments {
 		_, _ = fmt.Fprintf(w, "%s\n", render.Dim(seamLine(seg, len(r.show.Segments)), rt.color))
