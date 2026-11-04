@@ -4,16 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact product source commit
+        description: Exact product source for the cumulative syncer cost probe
         required: true
         type: string
-      operation:
-        description: Synthetic probe or complete release-equivalent verification
-        required: true
-        type: choice
-        options:
-          - transcript-probe
-          - release-gate-verify
 
 permissions:
   contents: read
@@ -23,16 +16,15 @@ env:
   M365CRAWL_REAL_CACHE: "0"
 
 jobs:
-  transcript-probe:
-    if: inputs.operation == 'transcript-probe'
-    runs-on: ubuntu-latest
+  syncer-package-profile:
+    runs-on: macos-latest
     timeout-minutes: 15
     steps:
-      - name: Validate exact source identity
+      - name: Validate source identity
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
-      - name: Checkout exact candidate
+      - name: Checkout exact product source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_sha }}
@@ -41,96 +33,53 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Run synthetic transcript regressions
+      - name: Capture all syncer test timings and CPU profile
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           python3 - <<'PY'
           import json, os, pathlib, platform, subprocess, time
-          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "transcript-probe"
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "syncer-package-profile"
           root.mkdir()
-          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
-          commands = [
-              ["go", "test", "-count=1", "-timeout=5m", "-v", "./internal/cli", "-run=^TestShowCoverage"],
-              ["go", "test", "-count=1", "-timeout=5m", "-v", "./internal/transcripts"],
+          source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert source == os.environ["SOURCE_SHA"]
+          command = [
+              "go", "test", "-count=1", "-timeout=10m", "-json",
+              "-coverprofile=" + str(root / "syncer.cover.out"),
+              "-cpuprofile=" + str(root / "syncer.cpu"),
+              "./internal/syncer",
           ]
-          results = []
-          for i, command in enumerate(commands):
-              start = time.monotonic()
-              with (root / ("probe-" + str(i) + ".log.txt")).open("w") as log:
-                  process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                  for line in process.stdout:
-                      print(line, end="", flush=True)
-                      log.write(line)
-                  code = process.wait()
-              results.append(dict(command=command, elapsed=time.monotonic()-start, code=code))
-          (root / "results.json").write_text(json.dumps(dict(source=os.environ["SOURCE_SHA"], runner=platform.platform(), results=results), indent=2))
-          raise SystemExit(any(r["code"] for r in results))
-          PY
-      - name: Preserve source-bound synthetic output
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: transcript-probe
-          path: ${{ runner.temp }}/transcript-probe
-          if-no-files-found: error
-
-  release-gate-verify:
-    if: inputs.operation == 'release-gate-verify'
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        gate: [nonrace, race-1, race-2, race-3, race-4]
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - name: Validate exact source identity
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
-      - name: Checkout exact candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.source_sha }}
-          persist-credentials: false
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Setup Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-      - name: Install shellcheck
-        if: matrix.gate == 'nonrace'
-        run: brew install shellcheck
-      - name: Run exact release verification command
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          GATE: ${{ matrix.gate }}
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib, platform, subprocess, time
-          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-gate-verify"
-          root.mkdir()
-          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
-          gate = os.environ["GATE"]
-          command = ["make", "tidy-check", "fmt-check", "vet", "lint", "coverage", "e2e"] if gate == "nonrace" else ["make", "test-shard", "SHARD=" + gate[-1], "SHARDS=4"]
           start = time.monotonic()
-          with (root / (gate + ".log.txt")).open("w") as log:
+          terminal = []
+          with (root / "events.jsonl").open("w") as log:
               process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
               for line in process.stdout:
-                  print(line, end="", flush=True)
                   log.write(line)
+                  print(line, end="", flush=True)
+                  if line.startswith("{"):
+                      event = json.loads(line)
+                      if event.get("Test") and event.get("Action") in ("pass", "fail", "skip"):
+                          terminal.append({key: event[key] for key in ("Test", "Action", "Elapsed") if key in event})
               code = process.wait()
-          (root / (gate + ".json")).write_text(json.dumps(dict(source=os.environ["SOURCE_SHA"], runner=platform.platform(), command=command, elapsed=time.monotonic()-start, code=code), indent=2))
+          (root / "results.json").write_text(json.dumps(dict(
+              source=source, runner=platform.platform(), command=command,
+              code=code, elapsed=time.monotonic()-start,
+              tests=terminal, profiling_overhead=True,
+              qualification="diagnostic only; not the complete release gate",
+          ), indent=2))
+          if (root / "syncer.cpu").is_file() and (root / "syncer.cpu").stat().st_size > 0:
+              for order in ("flat", "cum"):
+                  with (root / ("cpu-" + order + ".txt")).open("w") as output:
+                      subprocess.run(
+                          ["go", "tool", "pprof", "-top", "-" + order, str(root / "syncer.cpu")],
+                          stdout=output, stderr=subprocess.STDOUT, check=True,
+                      )
           raise SystemExit(code)
           PY
-      - name: Preserve exact gate logs and timings
+      - name: Preserve successful or failed diagnostic evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-gate-${{ matrix.gate }}
-          path: ${{ runner.temp }}/release-gate-verify
+          name: syncer-package-profile
+          path: ${{ runner.temp }}/syncer-package-profile
           if-no-files-found: error
