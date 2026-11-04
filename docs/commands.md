@@ -21,7 +21,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
 | Scout session history (opt-in) | [`scout sync`](#scout-sync), [`scout list`](#scout-list), [`scout search`](#scout-search), [`scout show`](#scout-show), [`scout sources`](#scout-sources) |
 | Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
-| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content fetch doc`](#content-fetch-doc), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
+| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content fetch doc`](#content-fetch-doc), [`content images`](#content-images), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## WorkIQ
@@ -155,6 +155,25 @@ activity/shared search or FTS and have no message actions.
 `--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`, `full_inspection_shell`.
 
 ## Content: explicit acquisition, offline reads
+
+### content images
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] content images MESSAGE_LINK
+m365crawl [--db PATH] [--account TENANT/USER] content images CONVERSATION_ID MESSAGE_ID
+```
+
+Inspects one exact archived Teams message's HTML image references. A message link is passed alone; its message ID, not its parent message ID, is selected. Without `--account`, exactly one archived Teams account is required. Outlook selectors are usage errors.
+
+This command always reads the archive only, even with a positive `--max-age`. It does not sync, start WorkIQ, sign in, fetch image bytes or change the archive. A legitimate pre-WorkIQ archive needs no WorkIQ tables, but existing archive integrity checks still refuse missing identity/progress state in a newer archive.
+
+`scope` is `selected_cached_message`, and `inspection_state` is `complete`, `partial` or `unknown`. Complete means the bounded cached HTML was inspected, not that server media is complete. `image_references` contains `image_id`, `occurrence_count`, nullable presentation `width`/`height`, `selection` and an optional refusal `code`; dimensions are not decoded image pixels. Content references with an image ID outrank an Emoji class. Decorative Emoji elements are counted separately. Identical repeated elements share an occurrence count; conflicting references or duplicate attribute declarations are ambiguous. Cached source URLs are never returned.
+
+Bounds are 1,048,576 HTML bytes, 65,536 token bytes, 4,096 image elements, 64 raw attributes per image, 1,024 image-ID bytes and 8,192 source-URL bytes. Partial inspection cannot authorize selecting a reference from its retained prefix. CSS images, attachments, OCR and image bytes are outside this inventory. `binary_media` is always `not_acquired_by_this_command`.
+
+A missing exact message exits 3 with `image_message_unknown` and no invented inventory. Unavailable HTML prints an unknown inventory and exits 3 with `image_body_unavailable`; other unknown/partial inspection prints its bounded result and exits 3 with `image_inspection_incomplete`. Image-free, fully inspected HTML is a real empty array, not an unavailable body. `reason_codes` preserves the specific inspection limits or invalid-input reasons.
+
+`--fields` keys: `account`, `conversation_id`, `message_id`, `scope`, `inspection_state`, `image_references`, `decorative_emoji_count`, `unsupported_reference_count`, `binary_media`, `reason_codes`. `implicit_sync: disabled` and archive-age metadata remain outside projection. Text format renders the same object as readable JSON.
 
 ### content fetch doc
 
