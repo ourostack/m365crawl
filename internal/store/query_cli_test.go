@@ -92,11 +92,31 @@ func TestHasAccount(t *testing.T) {
 	if ok, err := s.HasAccount(ctx, acctA); err != nil || !ok {
 		t.Fatalf("held account: %v %v", ok, err)
 	}
+
 	if ok, err := s.HasAccount(ctx, acctB); err != nil || ok {
 		t.Fatalf("other account: %v %v", ok, err)
 	}
 	_ = s.Close()
 	if _, err := s.HasAccount(ctx, acctA); err == nil {
 		t.Fatal("a closed archive must fail")
+	}
+}
+
+func TestImageInventoryTeamsAccounts(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must0(s.ApplyAccount(ctx, acctB))
+	must0(s.ApplyAccount(ctx, acctA))
+	_, err := s.db.ExecContext(ctx, "drop table workiq_accounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := s.TeamsAccounts(ctx)
+	if err != nil || len(accounts) != 2 || accounts[0] != acctA || accounts[1] != acctB {
+		t.Fatalf("core accounts depend on optional tables or people: %v %v", accounts, err)
+	}
+	_ = s.Close()
+	if _, err := s.TeamsAccounts(ctx); err == nil {
+		t.Fatal("closed archive silently returned no accounts")
 	}
 }

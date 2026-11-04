@@ -14,6 +14,7 @@ import (
 )
 
 type contentGroup struct {
+	Images  contentImagesCmd  `cmd:"" help:"Inspect bounded image references in one exact cached Teams message offline; never acquire bytes."`
 	Capture contentCaptureCmd `cmd:"" help:"Explicitly capture one guarded already-resident Office file or selected original native file reference."`
 	Fetch   contentFetchGroup `cmd:"" help:"Explicitly acquire a supported page, selected Stream transcript or bounded Engage session through the tool-owned headless browser."`
 	Signin  contentSigninCmd  `cmd:"" help:"Explicit user-agreed visible window for the tool-owned profile."`
@@ -35,7 +36,7 @@ const contentHelp = "Explicit fetch only: `content fetch page URL` or `content f
 	"registration_id selects an explicit retry, source_id an admitted file/account instance, cloud-observation:N an immutable representation. Distinct requested selections register separately. Generated retries/fixes/next commands name this same absolute --db archive; run them as printed. A retry preserves the original request, not an automatic format correction. Sign-in is only `content signin URL --user-agreed` after the user agrees; no credentials or auth state are exported. Native Windows acquisition remains unqualified; offline archive reads are portable.\n"
 
 func (contentGroup) Help() string {
-	return engageSelectedHelp + engageHelp + localContentHelp + contentHelp + documentHelp
+	return engageSelectedHelp + engageHelp + localContentHelp + contentHelp + documentHelp + imagesHelp
 }
 func (contentFetchGroup) Help() string {
 	return engageSelectedHelp + engageHelp + contentHelp + documentHelp

@@ -92,8 +92,8 @@ func TestImageInventoryLimits(t *testing.T) {
 			urlPrefix+strings.Repeat("x", size-len(urlPrefix)), 1)
 	}
 	for _, tc := range []struct {
-		name, body string
-		incomplete bool
+		name, body  string
+		incomplete  bool
 		unsupported int
 	}{
 		{"body-exact", strings.Repeat("<p>x</p>", 131072), false, 0},

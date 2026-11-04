@@ -72,6 +72,9 @@ var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, 
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
+	if r, ok := v.(interface{ renderImages(*runtime) error }); ok {
+		return r.renderImages(rt)
+	}
 	if r, ok := v.(interface{ renderWorkIQ(*runtime) error }); ok {
 		return r.renderWorkIQ(rt)
 	}

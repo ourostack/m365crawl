@@ -63,6 +63,7 @@ var commandFields = map[string][]fieldSet{
 	"scout show":                 {{keys: scoutDetailKeys}},
 	"scout sources":              {{keys: typeKeys[scoutSourceItem]}},
 	"content list":               {{keys: contentKeys}},
+	"content images":             {{keys: typeKeys[imageInventoryItem]}},
 	"content search":             {{keys: contentKeys}},
 	"content show":               {{keys: contentKeys}},
 	"content capture":            {{keys: typeKeys[LocalTextItem]}},
