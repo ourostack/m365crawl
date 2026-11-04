@@ -54,6 +54,8 @@ jobs:
           if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
               raise SystemExit("invalid source or diagnostic group")
           runners = ["ubuntu-latest"]
+          if group == "inventory-complete":
+              runners = ["macos-latest"]
           if group == "publisher":
               runners += ["macos-latest", "windows-latest"]
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
