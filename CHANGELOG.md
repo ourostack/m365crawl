@@ -4,6 +4,16 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-04
+
+### Added
+
+- `transcripts show` reports `coverage_scope: "discovered_parts"` and each segment's nullable `notice_duration_seconds` from archived recording notices. `complete` still means every discovered part has fetched text; neither field establishes server discovery or recording speech coverage. Plain output names this limited scope.
+
+### Fixed
+
+- Reduced repeated archive acquisition in synthetic WorkIQ fetch-failure and recheck tests while retaining all failure samples, real SQLite handles, native-lock checks and existing deadlines. This addresses cumulative verification cost without changing crawler acquisition or reducing release gates.
+
 ## [1.5.1] - 2026-11-03
 
 ### Added
