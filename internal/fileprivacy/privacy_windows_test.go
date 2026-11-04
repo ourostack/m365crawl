@@ -88,6 +88,42 @@ func TestPrivateImageWindowsHandlePolicy(t *testing.T) {
 	}
 }
 
+func TestPrivateImageWindowsOwnerAndQueryRefusal(t *testing.T) {
+	dir := privateWindowsFixture(t, "OICI", "")
+	parent, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := parent.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := Parent(parent); err != nil {
+		t.Fatal("valid native handle failed before injected boundary", err)
+	}
+	oldUser, oldSecurity := privateTokenUser, privateGetSecurity
+	t.Cleanup(func() { privateTokenUser, privateGetSecurity = oldUser, oldSecurity })
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateTokenUser = func() (*windows.Tokenuser, error) {
+		return &windows.Tokenuser{User: windows.SIDAndAttributes{Sid: system}}, nil
+	}
+	if err := Parent(parent); err == nil {
+		t.Fatal("handle owner mismatch admitted")
+	}
+	privateTokenUser = oldUser
+	privateGetSecurity = func(windows.Handle, windows.SE_OBJECT_TYPE, windows.SECURITY_INFORMATION) (*windows.SECURITY_DESCRIPTOR, error) {
+		return nil, errors.New("synthetic exact-handle security query failure")
+	}
+	if err := Parent(parent); err == nil {
+		t.Fatal("unknown handle protection admitted")
+	}
+	runtime.KeepAlive(system)
+}
+
 func TestPrivateImageWindowsACLAllocationAndLegacyPolicy(t *testing.T) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
