@@ -18,6 +18,14 @@ m365crawl mirrors desktop caches into one local SQLite archive and answers from 
 
 ## Selected Teams images
 
+Typed Teams message exports carry projection-independent `media_coverage`:
+`scope: returned_teams_messages`, an exact returned-message count,
+`binary_media: not_included`, `reference_inspection: not_requested`.
+Search counts only Teams hits after its merged limit; calendar scope is recent
+chat messages, and each watch message event counts one. Zero is not complete
+media; ordinary text/HTML does not acquire bytes. Aggregates, activity/sync/error,
+mail-only results, SQL and raw records gain no guessed image scope.
+
 `content images MESSAGE_LINK` (or `content images CONVERSATION_ID MESSAGE_ID`) inventories only one exact cached message's bounded HTML references, always offline even with `--max-age`. Select an exact `image_id` only from a complete, uniquely supported inventory; missing HTML is unknown, not zero. Cached source URLs are never returned or replayed.
 
 Explicit `content fetch image MESSAGE_LINK --image-id ID --output FILE` uses enabled read-only WorkIQ to bind that image to the selected current chat/message and recheck it after acquisition. Use `--account TENANT/USER` unless the archive has exactly one Teams account. Only fully validated nonanimated PNG within the command's byte/pixel/storage bounds is admitted; channels, other formats and OCR remain unsupported. Native Windows service acquisition is not qualified. The existing Office document EXTRACT/protection rules still apply to document acquisition.

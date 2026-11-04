@@ -38,6 +38,9 @@ workflow; [coverage](commands.md#coverage), [WorkIQ](commands.md#workiq),
 define the other rows.
 
 For a selected PNG, use a new file in an existing controlled private parent.
+Ordinary typed message exports disclose `media_coverage` outside projection:
+bytes are not included and references were not inspected, even for zero results.
+The count is only returned Teams messages, not complete history or media.
 On failure inspect `image_acquisition` before retrying: a complete published file
 may remain after cancellation, cleanup or stdout failure; a substituted temp is
 retained, not deleted. Never replay a cached source URL or overwrite an existing

@@ -156,6 +156,17 @@ activity/shared search or FTS and have no message actions.
 
 ## Content: explicit acquisition, offline reads
 
+Typed Teams message exports (`messages`, message-mode `unread`, `thread`, returned
+Teams search hits and calendar recent chat messages) carry `media_coverage` outside
+`--fields`: `returned_messages`, `scope: returned_teams_messages`,
+`binary_media: not_included`, `reference_inspection: not_requested`. Counts refer
+only to surviving returned messages, after search's merged limit; zero is not a
+claim of complete media. No additional HTML/native reads are performed.
+Each watch message event counts one; activity/sync/error events, aggregates,
+mail-only results, SQL and raw records gain no guessed scope. JSON/log retain the
+structured envelope, and text explicitly discloses missing bytes/reference
+inspection even when projection removes the message body or IDs.
+
 ### content images
 
 ```text
