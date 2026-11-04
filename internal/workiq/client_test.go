@@ -157,6 +157,10 @@ func serveStub() int {
 			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": documentStubResult(mode, req.Params)})
 			continue
 		}
+		if mode == "image" {
+			_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": imageStubResult(req.Params)})
+			continue
+		}
 		var params struct {
 			Name string `json:"name"`
 			Args struct {
