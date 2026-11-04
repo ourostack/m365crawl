@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/errs"
@@ -201,12 +202,11 @@ func TestImageInventoryLibraryLimitsAndRefusals(t *testing.T) {
 type imageCancelAfterChecks struct {
 	context.Context
 	cancel context.CancelFunc
-	left   int
+	left   atomic.Int32
 }
 
 func (c *imageCancelAfterChecks) Err() error {
-	c.left--
-	if c.left == 0 {
+	if c.left.Add(-1) == 0 {
 		c.cancel()
 	}
 	return c.Context.Err()
@@ -215,7 +215,8 @@ func (c *imageCancelAfterChecks) Err() error {
 func TestImageInventoryCancellationAfterPrefix(t *testing.T) {
 	base, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ctx := &imageCancelAfterChecks{Context: base, cancel: cancel, left: 3}
+	ctx := &imageCancelAfterChecks{Context: base, cancel: cancel}
+	ctx.left.Store(3)
 	inspection, err := InspectHTML(ctx, generatedImage+"<p>more</p>")
 	if !errors.Is(err, context.Canceled) || inspection.State != InspectionPartial ||
 		len(inspection.References) != 1 || inspection.References[0].Selection != "inspection_incomplete" {

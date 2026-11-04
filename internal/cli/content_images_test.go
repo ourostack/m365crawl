@@ -8,6 +8,7 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -366,12 +367,11 @@ func TestImageInventoryAccountFailures(t *testing.T) {
 type imageCancelAtCheck struct {
 	context.Context
 	cancel context.CancelFunc
-	left   int
+	left   atomic.Int32
 }
 
 func (c *imageCancelAtCheck) Err() error {
-	c.left--
-	if c.left == 0 {
+	if c.left.Add(-1) == 0 {
 		c.cancel()
 	}
 	return c.Context.Err()
@@ -385,9 +385,10 @@ func TestImageInventoryReadCancellation(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	cmd := &contentImagesCmd{}
-	for check := 1; check <= 50; check++ {
+	for check := int32(1); check <= 50; check++ {
 		base, cancel := context.WithCancel(context.Background())
-		ctx := &imageCancelAtCheck{Context: base, cancel: cancel, left: check}
+		ctx := &imageCancelAtCheck{Context: base, cancel: cancel}
+		ctx.left.Store(check)
 		rt := &runtime{ctx: ctx, now: time.Now}
 		_, err := cmd.inventory(rt, st, imageConversation, imageMessage)
 		cancel()
