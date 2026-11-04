@@ -105,7 +105,7 @@ jobs:
               "transport": (["./internal/workiq"], "^(TestChatImage|TestSelectedImageMessage|TestDecodeBlob|TestDocument)"),
               "png": (["./internal/teamsimage"], "^TestImagePNG"),
               "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate|TestSnapshotOwner)"),
-              "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument)"),
+              "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument|TestFetchWorkIQDocument|TestContentFetchDoc|TestJudgeDocument|TestJudgeBytes|TestDocumentAccount)"),
               "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestShowCoverage)"),
           }
           out = pathlib.Path("image-probe-output")
