@@ -103,7 +103,8 @@ jobs:
           if actual != requested:
               raise SystemExit("checkout does not match requested source")
           packages, pattern = groups[os.environ["PROBE_GROUP"]]
-          command = ["go", "test", "-json", "-count=1", "-timeout=5m", *packages, "-run", pattern]
+          command = ["go", "test", "-json", "-count=1", "-timeout=5m",
+                     "-coverprofile=image-probe-output/coverage.out", *packages, "-run", pattern]
           if os.environ["PROBE_GROUP"] == "media-goldens":
               command.append("-update")
           if os.environ["PROBE_GROUP"] in ("inventory-complete", "images-complete"):
@@ -149,11 +150,12 @@ jobs:
                                             stdout=log, stderr=subprocess.STDOUT)
               manifest["coverage_command"] = ["bash", "scripts/check-coverage.sh"]
               manifest["coverage_exit_code"] = coverage.returncode
+              manifest["coverage_elapsed_seconds"] = time.monotonic()-coverage_started
+          if (out / "coverage.out").is_file():
               with (out / "coverage-functions.txt").open("w") as log:
                   functions = subprocess.run(["go", "tool", "cover", "-func=image-probe-output/coverage.out"],
                                              stdout=log, stderr=subprocess.STDOUT)
               manifest["coverage_functions_exit_code"] = functions.returncode
-              manifest["coverage_elapsed_seconds"] = time.monotonic()-coverage_started
           manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
           lines = (out / "tests.jsonl").read_text(errors="replace").splitlines()
           print("\n".join(lines[-40:]))
