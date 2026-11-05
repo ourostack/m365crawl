@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"hash/crc32"
 	"image/png"
 	"io"
@@ -62,7 +63,7 @@ func ValidatePNG(ctx context.Context, data []byte, contentType string) (PNGInfo,
 	if err := ctx.Err(); err != nil {
 		return PNGInfo{}, err
 	}
-	if readErr != io.EOF || closeErr != nil || input.Len() != 0 {
+	if !errors.Is(readErr, io.EOF) || closeErr != nil || input.Len() != 0 {
 		return PNGInfo{}, pngError("image_bytes_invalid")
 	}
 	img, err := png.Decode(&pngReader{ctx: ctx, Reader: bytes.NewReader(data)})

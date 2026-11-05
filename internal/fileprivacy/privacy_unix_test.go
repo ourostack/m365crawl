@@ -13,7 +13,7 @@ func TestPrivateImageParentAndTemporaryPolicy(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	parent, err := os.Open(dir)
+	parent, err := os.Open(dir) //nolint:gosec // G304: test-owned private directory
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestPrivateImageParentAndTemporaryPolicy(t *testing.T) {
 		t.Fatal("controlled owned parent refused", err)
 	}
 	path := filepath.Join(dir, "temporary")
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: exclusively created test-owned temporary path
 	if err != nil {
 		t.Fatal(err)
 	}

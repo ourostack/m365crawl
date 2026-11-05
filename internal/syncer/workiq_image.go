@@ -304,10 +304,10 @@ func imageErrorCodes(err error) []string {
 		return nil
 	}
 	var codes []string
-	if coded, ok := err.(*errs.Coded); ok {
+	if coded, ok := err.(*errs.Coded); ok { //nolint:errorlint // inspect this node before walking every joined cause
 		codes = append(codes, coded.Code)
 	}
-	switch wrapped := err.(type) {
+	switch wrapped := err.(type) { //nolint:errorlint // traversal must preserve all direct branches, not the first match
 	case interface{ Unwrap() []error }:
 		for _, cause := range wrapped.Unwrap() {
 			codes = append(codes, imageErrorCodes(cause)...)

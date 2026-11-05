@@ -14,7 +14,7 @@ func TestPrivateImageHandleRefusal(t *testing.T) {
 		t.Fatal("missing temporary handle admitted")
 	}
 	path := filepath.Join(t.TempDir(), "closed")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600) //nolint:gosec // G304: exclusively created test-owned temporary path
 	if err != nil {
 		t.Fatal(err)
 	}

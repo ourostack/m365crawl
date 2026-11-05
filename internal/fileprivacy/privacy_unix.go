@@ -13,7 +13,7 @@ func platformPrivate(f *os.File, directory bool) error {
 		return err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || uint64(stat.Uid) != uint64(os.Geteuid()) {
+	if !ok || int64(stat.Uid) != int64(os.Geteuid()) {
 		return privateError()
 	}
 	if directory {

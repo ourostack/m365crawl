@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -224,10 +225,10 @@ func TestChatImageBlobEnvelope(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := decodeImageBlob(ctx, []byte(good)); err != context.Canceled {
+	if _, err := decodeImageBlob(ctx, []byte(good)); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation was not preserved", err)
 	}
-	if _, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, "")); err != context.Canceled {
+	if _, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, "")); !errors.Is(err, context.Canceled) {
 		t.Fatal("message cancellation was not preserved", err)
 	}
 }

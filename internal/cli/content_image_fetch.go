@@ -80,7 +80,7 @@ func imageFetchResultOf(r syncer.WorkIQImageReport) imageFetchResult {
 }
 
 func (c *contentFetchImageCmd) Run(rt *runtime) error {
-	conversation, message, err := c.contentImagesCmd.selector(rt)
+	conversation, message, err := c.selector(rt)
 	if err != nil {
 		return err
 	}
