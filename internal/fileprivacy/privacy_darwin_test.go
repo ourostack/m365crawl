@@ -108,6 +108,40 @@ func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
 	}
 }
 
+func TestPrivateImageDarwinIncompleteQueryIsNotAbsence(t *testing.T) {
+	file, err := os.OpenFile(filepath.Join(t.TempDir(), "incomplete-query.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if output, err := exec.Command("/bin/chmod", "+a", "group:staff allow read", file.Name()).CombinedOutput(); err != nil {
+		t.Fatal("controlled native foreign ACL fixture failed", err, string(output))
+	}
+	base, err := privateDarwinLoad()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Temporary(file); err == nil {
+		t.Fatal("actual foreign ACL fixture incorrectly admitted before query fault")
+	}
+	api := base
+	api.getFD = func(uintptr, int32) uintptr {
+		*base.errno() = int32(unix.ENOENT)
+		return 0
+	}
+	original := privateDarwinLoad
+	t.Cleanup(func() { privateDarwinLoad = original })
+	privateDarwinLoad = func() (darwinACL, error) { return api, nil }
+	var coded *errs.Coded
+	if err := Temporary(file); !errors.As(err, &coded) || coded.Code != "image_output_unprotected" {
+		t.Fatal("incomplete security query masquerading as absence admitted foreign ACL", err)
+	}
+}
+
 func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 	base, err := privateDarwinLoad()
 	if err != nil {
