@@ -13,11 +13,15 @@ import (
 )
 
 type darwinACL struct {
-	getFD func(uintptr, int32) uintptr
-	valid func(uintptr) int32
-	entry func(uintptr, int32, *uintptr) int32
-	free  func(uintptr) int32
-	errno func() *int32
+	getFD         func(uintptr, int32) uintptr
+	valid         func(uintptr) int32
+	entry         func(uintptr, int32, *uintptr) int32
+	free          func(uintptr) int32
+	errno         func() *int32
+	newSecurity   func() uintptr
+	statSecurity  func(uintptr, *unix.Stat_t, uintptr) int32
+	querySecurity func(uintptr, int32, *int32) int32
+	freeSecurity  func(uintptr)
 }
 
 var (
@@ -42,6 +46,10 @@ func loadDarwinACL() (darwinACL, error) {
 		{"acl_get_entry", &api.entry},
 		{"acl_free", &api.free},
 		{"__error", &api.errno},
+		{"filesec_init", &api.newSecurity},
+		{map[string]string{"amd64": "fstatx_np$INODE64", "arm64": "fstatx_np"}[runtime.GOARCH], &api.statSecurity},
+		{"filesec_query_property", &api.querySecurity},
+		{"filesec_free", &api.freeSecurity},
 	} {
 		address, err := privateDarwinSymbol(lib, binding.name)
 		if err != nil || address == 0 {
@@ -67,9 +75,9 @@ func privateACL(file *os.File) (err error) {
 	*errno = 0
 	acl := api.getFD(file.Fd(), 0x100) // ACL_TYPE_EXTENDED, queried on the already bound handle.
 	if acl == 0 {
-		// Darwin reports an absent ACL property as NULL/ENOENT, not an empty ACL copy.
+		// NULL/ENOENT can also follow an incomplete libc query; prove completion separately.
 		if *errno == int32(unix.ENOENT) {
-			return nil
+			return privateDarwinAbsent(file, api)
 		}
 		return privateError()
 	}
@@ -87,6 +95,30 @@ func privateACL(file *os.File) (err error) {
 	// A valid, privately owned ACL copy has no first entry only when the index
 	// is out of range (EINVAL). Any entry or other result refuses, including deny-only ACLs.
 	if api.entry(acl, 0, &entry) != -1 || entry != 0 || *errno != int32(unix.EINVAL) {
+		return privateError()
+	}
+	return nil
+}
+
+func privateDarwinAbsent(file *os.File, api darwinACL) error {
+	security := api.newSecurity()
+	if security == 0 {
+		return privateError()
+	}
+	defer api.freeSecurity(security)
+	defer runtime.KeepAlive(file)
+	var stat unix.Stat_t
+	if api.statSecurity(file.Fd(), &stat, security) != 0 {
+		return privateError()
+	}
+	// libc populates FILESEC_OWNER only after retrieving the complete security buffer.
+	// Its realloc-failure path can return success before populating any properties.
+	var owner int32
+	if api.querySecurity(security, 1, &owner) != 0 || owner == 0 {
+		return privateError()
+	}
+	present := int32(1)
+	if api.querySecurity(security, 5, &present) != 0 || present != 0 {
 		return privateError()
 	}
 	return nil

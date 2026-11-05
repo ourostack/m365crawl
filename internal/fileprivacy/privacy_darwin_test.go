@@ -142,6 +142,73 @@ func TestPrivateImageDarwinIncompleteQueryIsNotAbsence(t *testing.T) {
 	}
 }
 
+func TestPrivateImageDarwinAbsenceProofFailuresRefuse(t *testing.T) {
+	base, err := privateDarwinLoad()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, boundary := range []string{"allocation", "stat", "incomplete-stat", "owner-query", "owner-absent", "acl-query", "acl-unknown", "acl-present"} {
+		t.Run(boundary, func(t *testing.T) {
+			file, err := os.OpenFile(filepath.Join(t.TempDir(), "private.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := file.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := Temporary(file); err != nil {
+				t.Fatal("actual private fixture failed before absence-proof fault", err)
+			}
+			api := base
+			api.getFD = func(uintptr, int32) uintptr {
+				*base.errno() = int32(unix.ENOENT)
+				return 0
+			}
+			switch boundary {
+			case "allocation":
+				api.newSecurity = func() uintptr { return 0 }
+			case "stat":
+				api.statSecurity = func(uintptr, *unix.Stat_t, uintptr) int32 { return -1 }
+			case "incomplete-stat":
+				api.statSecurity = func(uintptr, *unix.Stat_t, uintptr) int32 { return 0 }
+			default:
+				api.querySecurity = func(security uintptr, property int32, value *int32) int32 {
+					if property == 1 {
+						switch boundary {
+						case "owner-query":
+							return -1
+						case "owner-absent":
+							*value = 0
+							return 0
+						}
+					}
+					if property == 5 {
+						switch boundary {
+						case "acl-query":
+							return -1
+						case "acl-unknown":
+							return 0
+						case "acl-present":
+							*value = 1
+							return 0
+						}
+					}
+					return base.querySecurity(security, property, value)
+				}
+			}
+			original := privateDarwinLoad
+			t.Cleanup(func() { privateDarwinLoad = original })
+			privateDarwinLoad = func() (darwinACL, error) { return api, nil }
+			var coded *errs.Coded
+			if err := Temporary(file); !errors.As(err, &coded) || coded.Code != "image_output_unprotected" {
+				t.Fatal("incomplete or uncertain security query became proved ACL absence", err)
+			}
+		})
+	}
+}
+
 func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 	base, err := privateDarwinLoad()
 	if err != nil {
