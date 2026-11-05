@@ -55,6 +55,9 @@ func ValidatePNG(ctx context.Context, data []byte, contentType string) (PNGInfo,
 	input := &pngReader{ctx: ctx, Reader: bytes.NewReader(compressed)}
 	stream, err := zlib.NewReader(input)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return PNGInfo{}, ctxErr
+		}
 		return PNGInfo{}, pngError("image_bytes_invalid")
 	}
 	limit := width*height*storagePerPixel + 14*height
