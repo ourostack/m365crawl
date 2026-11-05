@@ -91,7 +91,7 @@ jobs:
               "publisher": (["./internal/fileprivacy", "./internal/imageexport", "./internal/snapshotowner"], "^(TestImage|TestOwner|TestPrivate|TestSnapshotOwner)"),
               "orchestration": (["./internal/syncer", "./internal/cli"], "^(TestFetchChatImage|TestImageFetch|TestImagePublished|TestImageOutcome|TestWorkIQDocument|TestFetchWorkIQDocument|TestContentFetchDoc|TestJudgeDocument|TestJudgeBytes|TestDocumentAccount)"),
               "coverage": (["./internal/cli"], "^(TestMessageMediaCoverage|TestImageHelp|TestMessageApplication|TestApplication|TestCalendarApp|TestShowCoverage)"),
-              "media-goldens": (["./internal/cli"], "^(Test.*Golden|TestCommandsDocListsFields)"),
+              "media-goldens": (["./internal/cli"], "^(Test.*Golden|TestCommandsDocListsFields|TestSearchTextOutputs|TestSearchTranscriptsTextOutput)"),
           }
           out = pathlib.Path("image-probe-output")
           out.mkdir()
@@ -161,7 +161,8 @@ jobs:
           exercised = [event for event in terminal
                        if event["Action"] != "skip" and event["Test"].startswith(image_prefixes)]
           if os.environ["PROBE_GROUP"] == "media-goldens":
-              required = {"TestTextGoldens", "TestCalendarTextGoldens", "TestMetadataGolden", "TestCommandsDocListsFields"}
+              required = {"TestTextGoldens", "TestCalendarTextGoldens", "TestMetadataGolden", "TestCommandsDocListsFields",
+                          "TestSearchTextOutputs", "TestSearchTranscriptsTextOutput"}
               exercised = [event for event in terminal if event["Action"] != "skip" and event["Test"] in required]
               if {event["Test"] for event in exercised} != required:
                   raise SystemExit("required golden generators did not execute")
