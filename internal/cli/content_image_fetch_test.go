@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"github.com/ourostack/m365crawl/internal/imageexport"
 	"github.com/ourostack/m365crawl/internal/store"
+	"github.com/ourostack/m365crawl/internal/syncer"
 	"github.com/ourostack/m365crawl/internal/teamsdesktop"
 )
 
@@ -335,5 +338,85 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 				t.Fatalf("wrong post-publication error classification: %s", &stderr)
 			}
 		})
+	}
+}
+
+func TestImageFetchTextReceiptAndWriteFailure(t *testing.T) {
+	e, _ := imageNativeEnv(t, "good")
+	path := filepath.Join(t.TempDir(), "selected.png")
+	var args []string
+	for _, arg := range imageFetchArgs(e, path) {
+		if arg != "--json" {
+			args = append(args, arg)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI(context.Background(), args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("plain selected-image receipt failed: %d %s", code, &stderr)
+	}
+	doc := decode(t, stdout.String())
+	if doc["status"] != "acquired" || doc["file_published"] != true ||
+		doc["output_verified"] != true || doc["output"] != path || doc["scope"] != "selected_image" {
+		t.Fatalf("plain output lost verified acquisition effects: %s", &stdout)
+	}
+	rt := newRuntime(context.Background(), &Globals{}, failWriter{}, &stderr)
+	rt.format = output.Text
+	if err := rt.write("content fetch image", imageFetchResult{Status: "acquired"}); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("plain receipt hid stdout failure", err)
+	}
+}
+
+func TestImageOutcomeRetainedTempAndTextErrors(t *testing.T) {
+	original := fetchWorkIQChatImage
+	t.Cleanup(func() { fetchWorkIQChatImage = original })
+	sentinel := errors.New("private native failure")
+	verified := false
+	fetchWorkIQChatImage = func(context.Context, syncer.WorkIQImageOptions) (syncer.WorkIQImageReport, error) {
+		return syncer.WorkIQImageReport{
+			Status: "failed", Code: "image_output_failed", Output: "/synthetic/selected.png",
+			Effect: imageexport.Effect{Phase: "writing", OutputVerified: &verified,
+				RetainedTemp: &imageexport.RetainedTemp{State: "partial", LastKnownPath: "/synthetic/retained",
+					LocatorVerified: &verified}},
+		}, sentinel
+	}
+	command := &contentFetchImageCmd{
+		contentImagesCmd: contentImagesCmd{Target: "synthetic-chat", MessageID: "synthetic-message"},
+		ImageID:          "synthetic-image", Output: "/synthetic/selected.png",
+	}
+	for _, format := range []output.Format{output.JSON, output.Text} {
+		var stdout, stderr bytes.Buffer
+		rt := newRuntime(context.Background(), &Globals{}, &stdout, &stderr)
+		rt.format = format
+		err := command.Run(rt)
+		if !errors.Is(err, sentinel) || err.Error() != "selected image acquisition failed (image_output_failed)" {
+			t.Fatal("acquisition error lost its safe description or underlying cause", err)
+		}
+		if code := rt.fail(err); code != errs.ExitRuntime || stdout.Len() != 0 ||
+			strings.Contains(stderr.String(), "private native failure") {
+			t.Fatalf("retained-output failure was hidden or leaked: %d %s", code, &stderr)
+		}
+		start := strings.Index(stderr.String(), `{"error":`)
+		if start < 0 {
+			t.Fatal("failure lost machine-readable acquisition receipt", &stderr)
+		}
+		receipt := decode(t, stderr.String()[start:])["image_acquisition"].(map[string]any)
+		temp := receipt["retained_temp"].(map[string]any)
+		if receipt["file_published"] != nil || receipt["output_verified"] != false ||
+			receipt["phase"] != "writing" || temp["state"] != "partial" ||
+			temp["last_known_path"] != "/synthetic/retained" || temp["locator_verified"] != false {
+			t.Fatalf("retained/uncertain effect changed during CLI adaptation: %s", &stderr)
+		}
+		rt.stderr = failWriter{}
+		if code := rt.fail(err); code != errs.ExitRuntime {
+			t.Fatal("failed stderr was reported as success", code)
+		}
+	}
+	for _, id := range []string{"bad|id", "https://example.invalid/image", "bad\nid"} {
+		command.ImageID = id
+		rt := newRuntime(context.Background(), &Globals{}, &bytes.Buffer{}, &bytes.Buffer{})
+		var coded *errs.Coded
+		if err := command.Run(rt); !errors.As(err, &coded) || coded.Exit != errs.ExitUsage {
+			t.Fatal("unsafe image selector reached acquisition", err)
+		}
 	}
 }
