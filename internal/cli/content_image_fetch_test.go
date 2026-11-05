@@ -86,7 +86,7 @@ func TestImageFetchNoArchiveMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := imageOutputDir(t)
 	output := filepath.Join(dir, "existing.png")
 	const original = "keep this exact existing file"
 	if err := os.WriteFile(output, []byte(original), 0o600); err != nil {
@@ -134,6 +134,16 @@ func TestImageFetchSelectorUsage(t *testing.T) {
 			t.Fatalf("Outlook selector accepted: %s: %d %s", flag, code, stderr)
 		}
 	}
+}
+
+func imageOutputDir(t *testing.T) string {
+	t.Helper()
+	// newEnv owns the temporary root; the native creator also establishes Windows ACLs.
+	dir, err := teamsdesktop.NewPrivateSnapshotRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func imageNativeEnv(t *testing.T, mode string) (*env, string) {
@@ -187,7 +197,7 @@ func TestFetchChatImageAdmissionOrder(t *testing.T) {
 	for _, mode := range []string{"wrong-user", "invalid-address", "wrong-tenant", "wrong-chat", "channel", "unknown-kind", "deleted", "unsafe-reference"} {
 		t.Run(mode, func(t *testing.T) {
 			e, transcript := imageNativeEnv(t, mode)
-			dir := t.TempDir()
+			dir := imageOutputDir(t)
 			output := filepath.Join(dir, "selected.png")
 			var out, stderr bytes.Buffer
 			code := runCLI(context.Background(), imageFetchArgs(e, output), &out, &stderr)
@@ -221,7 +231,7 @@ func TestFetchChatImageRecheckAndClose(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dir := t.TempDir()
+			dir := imageOutputDir(t)
 			output := filepath.Join(dir, "selected.png")
 			var out, stderr bytes.Buffer
 			code := runCLI(context.Background(), imageFetchArgs(e, output), &out, &stderr)
@@ -309,7 +319,7 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 			if mode == "both-streams-fail" {
 				errWriter = imageResultFaultWriter{}
 			}
-			output := filepath.Join(t.TempDir(), "retained.png")
+			output := filepath.Join(imageOutputDir(t), "retained.png")
 			code := runCLI(ctx, imageFetchArgs(e, output), writer, errWriter)
 			if code == 0 || code == 2 {
 				t.Fatalf("result-write failure did not preserve nonzero outcome: %d %s", code, &stderr)

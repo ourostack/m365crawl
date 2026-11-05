@@ -40,11 +40,15 @@ func workIQImageFixture(t *testing.T, mode string) WorkIQImageOptions {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
+	outputDir, err := teamsdesktop.NewPrivateSnapshotRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
 	transcript := workIQAcquisitionStub(t)
 	t.Setenv("WORKIQ_IMAGE_CASE", mode)
 	t.Setenv("WORKIQ_DOCUMENT_TRANSCRIPT", transcript)
 	return WorkIQImageOptions{DBPath: db, Account: "synthetic-tenant/synthetic-user", ConversationID: "chat",
-		MessageID: "image-message", ImageID: "synthetic-image", Output: filepath.Join(t.TempDir(), "selected.png")}
+		MessageID: "image-message", ImageID: "synthetic-image", Output: filepath.Join(outputDir, "selected.png")}
 }
 
 func TestFetchChatImageCloseBeforePublication(t *testing.T) {
