@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	privateGetSecurity = windows.GetSecurityInfo
-	privateTokenUser   = func() (*windows.Tokenuser, error) {
+	privateGetFileInformation = windows.GetFileInformationByHandle
+	privateWellKnownSID       = windows.CreateWellKnownSid
+	privateGetSecurity        = windows.GetSecurityInfo
+	privateTokenUser          = func() (*windows.Tokenuser, error) {
 		return windows.GetCurrentProcessToken().GetTokenUser()
 	}
 )
@@ -27,7 +29,7 @@ func platformPrivate(f *os.File, directory bool) error {
 	}
 	h := windows.Handle(f.Fd())
 	var attributes windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(h, &attributes); err != nil {
+	if err := privateGetFileInformation(h, &attributes); err != nil {
 		return err
 	}
 	if attributes.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -52,7 +54,7 @@ func platformPrivate(f *os.File, directory bool) error {
 	if err != nil || owner == nil || !owner.Equals(user.User.Sid) {
 		return privateError()
 	}
-	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	system, err := privateWellKnownSID(windows.WinLocalSystemSid)
 	if err != nil {
 		return err
 	}

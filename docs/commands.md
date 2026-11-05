@@ -205,6 +205,8 @@ FILE needs an existing user-controlled parent. Windows additionally requires ver
 
 The stdout receipt reports `status`, selected identity, `scope: selected_image`, `other_media: not_acquired`, validated content type/byte size/SHA256/pixel dimensions, nullable native/observation/fetch clocks, output and phase, nullable `file_published`/`output_verified`, and optional retained temporary identity/state. On errors, stderr's `image_acquisition` carries the receipt plus primary and additional close/cleanup codes. Metadata appears only after byte validation; observed clocks do not prove historical immutability.
 
+If publication succeeds but the destination disappears before verification, `file_published` is null, not false. A created temporary that cannot be safely identified is retained with its last-known path, `state: empty` when no bytes were written, and `locator_verified: false`; that path is evidence to inspect, not proof the same file is still there.
+
 **A failed command may have published a complete file.** Inspect the receipt before retrying: cancellation, cleanup or stdout failure never deletes completed output, and a substituted temp is retained rather than removed. Both streams failing still returns nonzero. An existing output refuses before another native call. The archive, source health, sync cursors and completeness are unchanged. Text format renders the full receipt as readable JSON. `--fields` is not accepted for this acquisition command.
 
 ### content fetch doc
