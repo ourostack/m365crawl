@@ -353,7 +353,7 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 
 func TestImageFetchTextReceiptAndWriteFailure(t *testing.T) {
 	e, _ := imageNativeEnv(t, "good")
-	path := filepath.Join(t.TempDir(), "selected.png")
+	path := filepath.Join(imageOutputDir(t), "selected.png")
 	var args []string
 	for _, arg := range imageFetchArgs(e, path) {
 		if arg != "--json" {

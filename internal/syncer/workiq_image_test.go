@@ -2,9 +2,12 @@ package syncer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -155,12 +158,26 @@ func TestFetchChatImagePublicationIdentityFailure(t *testing.T) {
 			options := workIQImageFixture(t, "good")
 			parent := filepath.Dir(options.Output)
 			observedParent := parent
+			renamePrevented := false
 			prev := imagePublish
 			imagePublish = func(reservation *imageexport.Reservation, ctx context.Context, data []byte) (imageexport.Effect, error) {
 				if tc.name == "parent-moved" {
-					observedParent = parent + "-moved"
-					if err := os.Rename(parent, observedParent); err != nil {
+					before, err := os.Stat(parent)
+					if err != nil {
 						t.Fatal(err)
+					}
+					moved := parent + "-moved"
+					if err := os.Rename(parent, moved); err != nil {
+						if runtime.GOOS != "windows" {
+							t.Fatal(err)
+						}
+						after, statErr := os.Stat(parent)
+						if statErr != nil || !os.SameFile(before, after) {
+							t.Fatal("prevented Windows rename lost parent identity", statErr)
+						}
+						renamePrevented = true
+					} else {
+						observedParent = moved
 					}
 				} else if _, err := reservation.Abort(); err != nil {
 					t.Fatal(err)
@@ -169,6 +186,24 @@ func TestFetchChatImagePublicationIdentityFailure(t *testing.T) {
 			}
 			t.Cleanup(func() { imagePublish = prev })
 			report, err := FetchWorkIQChatImage(context.Background(), options)
+			if renamePrevented {
+				if err != nil || report.Status != "acquired" || report.FetchedAt == nil ||
+					report.Effect.FilePublished == nil || !*report.Effect.FilePublished ||
+					report.Effect.OutputVerified == nil || !*report.Effect.OutputVerified {
+					t.Fatalf("prevented Windows rename did not retain verified publication: %+v %v", report, err)
+				}
+				data, readErr := os.ReadFile(options.Output) // #nosec G304 -- Exact published synthetic PNG in the native-private fixture.
+				digest := sha256.Sum256(data)
+				if readErr != nil || len(data) == 0 || hex.EncodeToString(digest[:]) != report.Info.SHA256 {
+					t.Fatal("prevented rename lost the verified selected bytes", readErr)
+				}
+				entries, readErr := os.ReadDir(parent)
+				if readErr != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(options.Output) {
+					t.Fatal("verified publication left an unexpected entry", entries, readErr)
+				}
+				t.Log("Windows prevented the rename; bound-parent publication and bytes remain verified")
+				return
+			}
 			var coded *errs.Coded
 			if !errors.As(err, &coded) || coded.Code != tc.phaseCode ||
 				report.Code != "image_output_failed" || report.Status != "failed" ||
