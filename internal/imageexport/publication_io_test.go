@@ -192,6 +192,7 @@ func TestImagePublishVerificationFailuresRetainTruthfulEffects(t *testing.T) {
 				if effect.FilePublished != nil {
 					t.Fatal("unreadable or replaced destination guessed publication state", effect)
 				}
+				// #nosec G304 -- Exact synthetic destination in t.TempDir, including controlled replacement.
 				if actual, err := os.ReadFile(path); err != nil ||
 					phase == "destination-stat" && !bytes.Equal(actual, data) ||
 					phase == "destination-replaced" && string(actual) != "competing output" {

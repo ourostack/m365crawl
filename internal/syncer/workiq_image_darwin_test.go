@@ -15,6 +15,7 @@ import (
 func TestFetchChatImageDarwinInheritedACLRefusesBeforeNative(t *testing.T) {
 	options := workIQImageFixture(t, "good")
 	dir := filepath.Dir(options.Output)
+	// #nosec G204 -- Fixed native tool and ACL, exact output parent from owned synthetic fixture, no shell.
 	if output, err := osexec.Command("/bin/chmod", "+a", "group:staff allow read,file_inherit,only_inherit", dir).CombinedOutput(); err != nil {
 		t.Fatal("controlled native inherited ACL fixture failed", err, string(output))
 	}

@@ -37,6 +37,7 @@ func TestPrivateImageDarwinEmptyACLNativeContract(t *testing.T) {
 	}
 	for _, fixture := range []string{"as-created", "explicitly-absent"} {
 		if fixture == "explicitly-absent" {
+			// #nosec G204 -- Fixed native tool, exact owned synthetic fixture, no shell.
 			if output, err := exec.Command("/bin/chmod", "-N", file.Name()).CombinedOutput(); err != nil {
 				t.Fatal("controlled native absent ACL fixture failed", err, string(output))
 			}
@@ -70,13 +71,14 @@ func TestPrivateImageDarwinEmptyACLNativeContract(t *testing.T) {
 
 func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o755); err != nil {
+	if err := os.Chmod(dir, 0o755); err != nil { // #nosec G302 -- Owned directory fixture must be mode-safe but traversable to isolate ACL admission.
 		t.Fatal(err)
 	}
+	// #nosec G204 -- Fixed native tool and ACL, exact owned synthetic directory, no shell.
 	if output, err := exec.Command("/bin/chmod", "+a", "group:staff allow read,file_inherit,only_inherit", dir).CombinedOutput(); err != nil {
 		t.Fatal("controlled native inherited ACL fixture failed", err, string(output))
 	}
-	parent, err := os.Open(dir)
+	parent, err := os.Open(dir) // #nosec G304 -- Exact owned synthetic directory in t.TempDir.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +91,7 @@ func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
 	if err := Parent(parent); !errors.As(err, &coded) || coded.Code != "image_output_unprotected" {
 		t.Error("mode-safe parent with foreign file-inheritable ACL admitted", err)
 	}
-	file, err := os.OpenFile(filepath.Join(dir, "inherited.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(filepath.Join(dir, "inherited.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600) // #nosec G304 -- Exact owned synthetic child in t.TempDir.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +120,7 @@ func TestPrivateImageDarwinIncompleteQueryIsNotAbsence(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	// #nosec G204 -- Fixed native tool and ACL, exact owned synthetic fixture, no shell.
 	if output, err := exec.Command("/bin/chmod", "+a", "group:staff allow read", file.Name()).CombinedOutput(); err != nil {
 		t.Fatal("controlled native foreign ACL fixture failed", err, string(output))
 	}
