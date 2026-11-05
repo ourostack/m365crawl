@@ -1,0 +1,9 @@
+./collect.go
+./defaultroot_other.go
+./discover.go
+./fields.go
+./fingerprint.go
+./models.go
+./normalize.go
+./open.go
+./source_other.go

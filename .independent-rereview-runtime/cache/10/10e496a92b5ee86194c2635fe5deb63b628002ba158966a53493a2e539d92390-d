@@ -1,0 +1,4 @@
+./chunks.go
+./json.go
+./model.go
+./read.go

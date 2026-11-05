@@ -1,0 +1,17 @@
+./agenda.go
+./capture.go
+./classify.go
+./columns.go
+./event.go
+./find.go
+./key.go
+./merge.go
+./merge_lists.go
+./occurrence.go
+./principals.go
+./recap.go
+./rooms.go
+./schema.go
+./store.go
+./tri.go
+./unknown.go

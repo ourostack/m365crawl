@@ -1,0 +1,9 @@
+./model.go
+./observe.go
+./ready.go
+./result.go
+./script.go
+./selected.go
+./selected_model.go
+./selected_url.go
+./validate.go

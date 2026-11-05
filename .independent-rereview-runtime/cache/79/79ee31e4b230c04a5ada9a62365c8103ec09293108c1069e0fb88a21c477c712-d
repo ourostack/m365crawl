@@ -1,0 +1,8 @@
+./block.go
+./file.go
+./flags_unix.go
+./guard.go
+./lz4.go
+./object.go
+./stats.go
+./version.go

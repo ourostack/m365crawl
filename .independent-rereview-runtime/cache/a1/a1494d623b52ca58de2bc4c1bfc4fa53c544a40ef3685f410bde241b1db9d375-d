@@ -1,0 +1,6 @@
+./attachment.go
+./body.go
+./collect.go
+./folder.go
+./message.go
+./text.go

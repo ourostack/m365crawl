@@ -1,0 +1,8 @@
+./discover.go
+./fingerprint.go
+./flags_unix.go
+./readfile.go
+./root_darwin.go
+./snapshot.go
+./space_darwin.go
+./space_unix.go

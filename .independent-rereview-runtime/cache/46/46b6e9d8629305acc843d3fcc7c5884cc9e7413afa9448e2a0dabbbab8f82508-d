@@ -1,0 +1,15 @@
+./fetch.go
+./model.go
+./request.go
+./result.go
+./script.go
+./canonical_test.go
+./export_test.go
+./fetch_test.go
+./landing_test.go
+./landing_timeout_test.go
+./loss_order_test.go
+./offset_test.go
+./output_boundary_test.go
+./request_test.go
+./terminal_test.go

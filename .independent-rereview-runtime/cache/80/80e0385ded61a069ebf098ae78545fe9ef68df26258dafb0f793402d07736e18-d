@@ -1,0 +1,8 @@
+./excel.go
+./model.go
+./package.go
+./powerpoint.go
+./read.go
+./word.go
+./xml.go
+./zip.go

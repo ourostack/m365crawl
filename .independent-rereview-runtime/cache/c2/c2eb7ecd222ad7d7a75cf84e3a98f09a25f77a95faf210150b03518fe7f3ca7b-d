@@ -1,0 +1,6 @@
+./canon.go
+./collections.go
+./deserialize.go
+./special.go
+./strings.go
+./values.go

@@ -1,0 +1,3 @@
+./fts.go
+./query.go
+./store.go

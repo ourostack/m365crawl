@@ -1,0 +1,4 @@
+./detach_unix.go
+./fakebrowser.go
+./server.go
+./stdio.go

@@ -1,0 +1,15 @@
+./entries.go
+./fetch.go
+./order.go
+./parse.go
+./part.go
+./result.go
+./stitch.go
+./dogfood_test.go
+./entries_test.go
+./fetch_test.go
+./host_test.go
+./main_test.go
+./order_test.go
+./parse_test.go
+./stitch_test.go

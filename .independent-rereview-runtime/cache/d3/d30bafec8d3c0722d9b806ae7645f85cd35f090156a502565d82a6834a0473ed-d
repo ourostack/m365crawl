@@ -1,0 +1,7 @@
+./capture_bounds_test.go
+./identity_test.go
+./network_test.go
+./page_test.go
+./review_regression_test.go
+./script_aliases_test.go
+./stream_test.go

@@ -1,0 +1,11 @@
+./discovery.go
+./input_darwin.go
+./input_sqlite_darwin.go
+./json.go
+./onedrive_usage.go
+./read.go
+./registry.go
+./rollback.go
+./text.go
+./text_evidence.go
+./text_evidence_darwin.go

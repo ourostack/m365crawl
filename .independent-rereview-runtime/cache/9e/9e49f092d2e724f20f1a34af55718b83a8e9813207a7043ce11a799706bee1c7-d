@@ -1,0 +1,7 @@
+./entries.go
+./fetch.go
+./order.go
+./parse.go
+./part.go
+./result.go
+./stitch.go

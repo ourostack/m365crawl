@@ -1,0 +1,5 @@
+./fetch.go
+./model.go
+./request.go
+./result.go
+./script.go

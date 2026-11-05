@@ -1,0 +1,15 @@
+./documents.go
+./loop.go
+./memo.go
+./onenote.go
+./outlook.go
+./outlook_attendees.go
+./outlook_mail.go
+./outlook_optional.go
+./outlook_origin.go
+./outlook_owa.go
+./outlook_owa_calendar.go
+./outlook_people.go
+./report.go
+./source_health.go
+./syncer.go

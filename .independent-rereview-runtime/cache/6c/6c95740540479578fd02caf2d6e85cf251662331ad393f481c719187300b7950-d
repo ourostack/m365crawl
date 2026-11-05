@@ -1,0 +1,9 @@
+./allday.go
+./claimed.go
+./day.go
+./event.go
+./jsonx.go
+./recap.go
+./version.go
+./zone.go
+./zonelist.go

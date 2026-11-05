@@ -1,0 +1,5 @@
+./collect.go
+./detail.go
+./event.go
+./open.go
+./preview.go
