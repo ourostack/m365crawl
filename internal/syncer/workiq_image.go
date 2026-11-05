@@ -284,7 +284,8 @@ func (r *WorkIQImageReport) finish(err error) {
 	case "image_output_invalid", "image_output_unprotected":
 		r.Code = "image_output_unsafe"
 	case "image_output_write_failed", "image_output_sync_failed", "image_output_close_failed",
-		"image_output_publish_failed", "image_output_open_failed", "image_output_reserve_failed":
+		"image_output_publish_failed", "image_output_open_failed", "image_output_reserve_failed",
+		"image_output_changed", "image_output_closed":
 		r.Code, r.Status = "image_output_failed", "failed"
 	}
 	if r.Effect.FilePublished == nil || *r.Effect.FilePublished &&
