@@ -101,7 +101,7 @@ func TestImageFetchNoArchiveMutation(t *testing.T) {
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("explicit image fetch mutated the archive: %v", err)
 	}
-	data, err := os.ReadFile(output)
+	data, err := os.ReadFile(output) // #nosec G304 -- Exact pre-existing synthetic destination in t.TempDir.
 	if err != nil || string(data) != original {
 		t.Fatalf("explicit image fetch replaced existing output: %q %v", data, err)
 	}
@@ -165,7 +165,7 @@ func imageFetchArgs(e *env, output string) []string {
 
 func imageNativeCalls(t *testing.T, transcript string) []string {
 	t.Helper()
-	data, err := os.ReadFile(transcript)
+	data, err := os.ReadFile(transcript) // #nosec G304 -- Exact synthetic transport transcript created in t.TempDir.
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -255,7 +255,7 @@ func TestFetchChatImageRecheckAndClose(t *testing.T) {
 				t.Fatalf("acquisition made extra/missing native calls: %v", calls)
 			}
 			doc := decode(t, out.String())
-			data, err := os.ReadFile(output)
+			data, err := os.ReadFile(output) // #nosec G304 -- Exact published synthetic PNG destination in t.TempDir.
 			if err != nil || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 				t.Fatalf("published output not complete PNG: %v", err)
 			}
@@ -314,7 +314,7 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 			if code == 0 || code == 2 {
 				t.Fatalf("result-write failure did not preserve nonzero outcome: %d %s", code, &stderr)
 			}
-			data, err := os.ReadFile(output)
+			data, err := os.ReadFile(output) // #nosec G304 -- Exact retained synthetic PNG destination after controlled failure.
 			if err != nil || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 				t.Fatalf("post-publication failure removed complete destination: %v", err)
 			}

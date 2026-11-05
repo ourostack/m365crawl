@@ -131,7 +131,7 @@ func TestImageOutcomeAdditionalFaults(t *testing.T) {
 		*report.Effect.RetainedTemp.LocatorVerified {
 		t.Fatalf("retained temp lost truthful identity uncertainty: %+v", report.Effect)
 	}
-	data, readErr := os.ReadFile(temp)
+	data, readErr := os.ReadFile(temp) // #nosec G304 -- Exact controlled synthetic replacement inside the fixture's t.TempDir.
 	if readErr != nil || string(data) != "different test-owned object" {
 		t.Fatal("abort removed another object", readErr)
 	}
