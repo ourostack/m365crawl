@@ -14,6 +14,7 @@ on:
         options:
           - transcript-probe
           - release-gate-verify
+          - lint-diagnostic
 
 permissions:
   contents: read
@@ -76,12 +77,12 @@ jobs:
           if-no-files-found: error
 
   release-gate-verify:
-    if: inputs.operation == 'release-gate-verify'
+    if: inputs.operation == 'release-gate-verify' || inputs.operation == 'lint-diagnostic'
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        gate: [nonrace, race-1, race-2, race-3, race-4]
+        gate: ${{ fromJSON(inputs.operation == 'lint-diagnostic' && '["lint"]' || '["nonrace","race-1","race-2","race-3","race-4"]') }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -103,9 +104,9 @@ jobs:
         with:
           node-version: "22"
       - name: Install shellcheck
-        if: matrix.gate == 'nonrace'
+        if: matrix.gate == 'nonrace' || matrix.gate == 'lint'
         run: brew install shellcheck
-      - name: Run exact release verification command
+      - name: Run exact selected diagnostic or verification command
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           GATE: ${{ matrix.gate }}
@@ -117,6 +118,8 @@ jobs:
           assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["SOURCE_SHA"]
           gate = os.environ["GATE"]
           command = ["make", "tidy-check", "fmt-check", "vet", "lint", "coverage", "e2e"] if gate == "nonrace" else ["make", "test-shard", "SHARD=" + gate[-1], "SHARDS=4"]
+          if gate == "lint":
+              command = ["make", "tidy-check", "fmt-check", "vet", "lint"]
           start = time.monotonic()
           with (root / (gate + ".log.txt")).open("w") as log:
               process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
