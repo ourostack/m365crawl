@@ -7,13 +7,15 @@ import (
 	"syscall"
 )
 
+var privateUID = os.Geteuid
+
 func platformPrivate(f *os.File, directory bool) error {
 	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int64(stat.Uid) != int64(os.Geteuid()) {
+	if !ok || int64(stat.Uid) != int64(privateUID()) {
 		return privateError()
 	}
 	if directory {

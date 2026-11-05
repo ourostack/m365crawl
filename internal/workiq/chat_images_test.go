@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/ourostack/m365crawl/internal/teamsimage"
 )
 
 const imageTestPath = "/chats/19:synthetic-chat/messages/1001/hostedContents/opaque%3Dvalue/$value"
@@ -301,6 +303,22 @@ func TestSelectedImageMalformedEntityAndUnboundObservation(t *testing.T) {
 	}
 }
 
+func TestChatImageInspectionFailureCannotAuthorizeReference(t *testing.T) {
+	message, err := DecodeSelectedImageMessage(context.Background(), "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldInspect := chatImageInspect
+	t.Cleanup(func() { chatImageInspect = oldInspect })
+	sentinel := errors.New("synthetic image inspection failure")
+	chatImageInspect = func(context.Context, string) (teamsimage.Inspection, error) {
+		return teamsimage.Inspection{}, sentinel
+	}
+	ref, err := BindChatImage(message, "synthetic-image")
+	if !errors.Is(err, sentinel) || ref.resource != "" || ref.binding != "" {
+		t.Fatal("inspection failure produced an authorized native resource", err)
+	}
+}
 func TestChatImageTransportAndProtocolFailureCloseSession(t *testing.T) {
 	ctx := context.Background()
 	message, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, ""))

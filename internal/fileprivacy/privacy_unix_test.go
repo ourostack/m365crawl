@@ -38,6 +38,13 @@ func TestPrivateImageParentAndTemporaryPolicy(t *testing.T) {
 	if err := Temporary(file); err != nil {
 		t.Fatal("private regular temporary handle refused", err)
 	}
+	oldUID := privateUID
+	t.Cleanup(func() { privateUID = oldUID })
+	privateUID = func() int { return oldUID() + 1 }
+	if Parent(parent) == nil || Temporary(file) == nil {
+		t.Fatal("a handle owned by another user was admitted")
+	}
+	privateUID = oldUID
 	if Parent(file) == nil || Temporary(parent) == nil {
 		t.Fatal("wrong handle type admitted")
 	}

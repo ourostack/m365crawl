@@ -37,6 +37,8 @@ type WorkIQImageReport struct {
 var imageReserve = imageexport.Reserve
 var imagePublish = (*imageexport.Reservation).Publish
 var imageAbort = (*imageexport.Reservation).Abort
+var imageAbs = filepath.Abs
+var imageInspectHTML = teamsimage.InspectHTML
 
 func FetchWorkIQChatImage(ctx context.Context, options WorkIQImageOptions) (report WorkIQImageReport, err error) {
 	notPublished, notVerified := false, false
@@ -65,7 +67,7 @@ func FetchWorkIQChatImage(ctx context.Context, options WorkIQImageOptions) (repo
 			return report, errs.Usage("image fetch requires an exact Teams tenant/user account")
 		}
 	}
-	report.Output, err = filepath.Abs(options.Output)
+	report.Output, err = imageAbs(options.Output)
 	if err != nil {
 		return report, errors.Join(imageFailure("image_output_unsafe", errs.ExitEnvironment), err)
 	}
@@ -155,7 +157,7 @@ func (r *WorkIQImageReport) selectCached(ctx context.Context, options WorkIQImag
 		if strings.TrimSpace(bodies[key]) == "" {
 			return imageFailure("image_body_unavailable", errs.ExitEnvironment)
 		}
-		inspection, err := teamsimage.InspectHTML(ctx, bodies[key])
+		inspection, err := imageInspectHTML(ctx, bodies[key])
 		if err != nil {
 			return err
 		}

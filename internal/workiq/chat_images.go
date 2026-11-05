@@ -33,6 +33,8 @@ type ImageBlob struct {
 	HTTPStatus  int
 }
 
+var chatImageInspect = teamsimage.InspectHTML
+
 func (ImageMessage) String() string     { return "selected image message" }
 func (m ImageMessage) GoString() string { return m.String() }
 func (ChatImageRef) String() string     { return "selected native image reference" }
@@ -82,7 +84,7 @@ func BindChatImage(message ImageMessage, imageID string) (ChatImageRef, error) {
 	if !teamsimage.ValidComponent(message.chatID) || !teamsimage.ValidComponent(message.messageID) {
 		return ChatImageRef{}, imageFailure("image_message_unbindable")
 	}
-	inspection, err := teamsimage.InspectHTML(context.Background(), message.body)
+	inspection, err := chatImageInspect(context.Background(), message.body)
 	if err != nil {
 		return ChatImageRef{}, err
 	}
