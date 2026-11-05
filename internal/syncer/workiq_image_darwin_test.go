@@ -5,7 +5,7 @@ package syncer
 import (
 	"context"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +15,7 @@ import (
 func TestFetchChatImageDarwinInheritedACLRefusesBeforeNative(t *testing.T) {
 	options := workIQImageFixture(t, "good")
 	dir := filepath.Dir(options.Output)
-	if output, err := exec.Command("/bin/chmod", "+a", "group:staff allow read,file_inherit,only_inherit", dir).CombinedOutput(); err != nil {
+	if output, err := osexec.Command("/bin/chmod", "+a", "group:staff allow read,file_inherit,only_inherit", dir).CombinedOutput(); err != nil {
 		t.Fatal("controlled native inherited ACL fixture failed", err, string(output))
 	}
 	old := workIQOpen
