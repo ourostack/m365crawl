@@ -19,7 +19,7 @@ func mediaCoverageForReturnedMessages(count int) *mediaCoverage {
 
 func renderMediaCoverage(w io.Writer, coverage *mediaCoverage) {
 	if coverage != nil {
-		_, _ = fmt.Fprintf(w, "media bytes not included for %d returned Teams messages; reference inspection not requested\n",
+		_, _ = fmt.Fprintf(w, "media bytes not included for %d returned Teams messages\nreference inspection not requested\n",
 			coverage.ReturnedMessages)
 	}
 }
