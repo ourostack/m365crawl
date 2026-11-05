@@ -41,6 +41,13 @@ type Reservation struct {
 }
 
 var (
+	imageAbs       = filepath.Abs
+	imageLstat     = os.Lstat
+	imageOpenRoot  = os.OpenRoot
+	imageOpen      = (*os.Root).Open
+	imageOpenFile  = (*os.Root).OpenFile
+	imageRootLstat = (*os.Root).Lstat
+	imageTemporary = fileprivacy.Temporary
 	imageWrite     = (*os.File).Write
 	imageSync      = (*os.File).Sync
 	imageClose     = (*os.File).Close
@@ -57,7 +64,7 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 	if output == "" || strings.ContainsAny(output, "\x00\r\n") {
 		return nil, effect, publicationError("image_output_invalid", nil)
 	}
-	absolute, err := filepath.Abs(output)
+	absolute, err := imageAbs(output)
 	if err != nil {
 		return nil, effect, publicationError("image_output_invalid", err)
 	}
@@ -65,11 +72,11 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 	if name == "." || name == string(filepath.Separator) {
 		return nil, effect, publicationError("image_output_invalid", nil)
 	}
-	info, err := os.Lstat(dir)
+	info, err := imageLstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, effect, publicationError("image_output_unprotected", err)
 	}
-	root, err := os.OpenRoot(dir)
+	root, err := imageOpenRoot(dir)
 	if err != nil {
 		return nil, effect, publicationError("image_output_open_failed", err)
 	}
@@ -78,7 +85,7 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 		after, cleanupErr := r.Abort()
 		return nil, after, errors.Join(cause, cleanupErr)
 	}
-	r.parent, err = root.Open(".")
+	r.parent, err = imageOpen(root, ".")
 	if err != nil {
 		return fail(publicationError("image_output_open_failed", err))
 	}
@@ -89,11 +96,11 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 	if err := fileprivacy.Parent(r.parent); err != nil {
 		return fail(err)
 	}
-	if _, err := root.Lstat(name); !errors.Is(err, os.ErrNotExist) {
+	if _, err := imageRootLstat(root, name); !errors.Is(err, os.ErrNotExist) {
 		return fail(publicationError("image_output_exists", err))
 	}
 	r.temp = ".m365crawl-image-" + rand.Text()
-	r.file, err = root.OpenFile(r.temp, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	r.file, err = imageOpenFile(root, r.temp, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
 		r.temp = ""
 		return fail(publicationError("image_output_reserve_failed", err))
@@ -104,7 +111,7 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 	}
 	r.effect.Phase = "reserved"
 	r.effect.RetainedTemp = &RetainedTemp{State: "empty", LastKnownPath: filepath.Join(dir, r.temp), LocatorVerified: imageBool(true)}
-	if err := fileprivacy.Temporary(r.file); err != nil {
+	if err := imageTemporary(r.file); err != nil {
 		return fail(err)
 	}
 	if err := r.verify(); err != nil {
@@ -146,7 +153,7 @@ func (r *Reservation) Publish(ctx context.Context, data []byte) (Effect, error) 
 	if err := imageSync(r.file); err != nil {
 		return fail("image_output_sync_failed", err)
 	}
-	if err := fileprivacy.Temporary(r.file); err != nil {
+	if err := imageTemporary(r.file); err != nil {
 		return fail("image_output_unprotected", err)
 	}
 	r.effect.Phase = "closing"
@@ -164,9 +171,9 @@ func (r *Reservation) Publish(ctx context.Context, data []byte) (Effect, error) 
 	}
 	r.effect.Phase = "publishing"
 	linkErr := imageLink(r.root, r.temp, r.output)
-	destination, statErr := r.root.Lstat(r.output)
+	destination, statErr := imageRootLstat(r.root, r.output)
 	if statErr != nil {
-		if !errors.Is(statErr, os.ErrNotExist) {
+		if linkErr == nil || !errors.Is(statErr, os.ErrNotExist) {
 			r.effect.FilePublished = nil
 		}
 		return fail("image_output_publish_failed", errors.Join(linkErr, statErr))
@@ -181,7 +188,7 @@ func (r *Reservation) Publish(ctx context.Context, data []byte) (Effect, error) 
 	r.effect.Phase = "published"
 	verifyErr := r.verify()
 	if verifyErr == nil {
-		located, err := os.Lstat(filepath.Join(r.parentPath, r.output))
+		located, err := imageLstat(filepath.Join(r.parentPath, r.output))
 		if err != nil || !os.SameFile(located, r.tempInfo) {
 			verifyErr = publicationError("image_output_changed", err)
 		}
@@ -199,7 +206,7 @@ func (r *Reservation) verify() error {
 	if err := fileprivacy.Parent(r.parent); err != nil {
 		return err
 	}
-	located, err := os.Lstat(r.parentPath)
+	located, err := imageLstat(r.parentPath)
 	if err != nil || !os.SameFile(located, r.parentInfo) {
 		if r.effect.RetainedTemp != nil {
 			r.effect.RetainedTemp.LocatorVerified = imageBool(false)
@@ -207,7 +214,7 @@ func (r *Reservation) verify() error {
 		return publicationError("image_output_changed", err)
 	}
 	if r.temp != "" {
-		info, err := r.root.Lstat(r.temp)
+		info, err := imageRootLstat(r.root, r.temp)
 		if err != nil || !info.Mode().IsRegular() || !os.SameFile(info, r.tempInfo) {
 			if r.effect.RetainedTemp != nil {
 				r.effect.RetainedTemp.LocatorVerified = imageBool(false)
@@ -237,7 +244,7 @@ func (r *Reservation) Abort() (Effect, error) {
 		r.file = nil
 	}
 	if r.temp != "" && r.root != nil {
-		info, err := r.root.Lstat(r.temp)
+		info, err := imageRootLstat(r.root, r.temp)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			r.effect.RetainedTemp = nil

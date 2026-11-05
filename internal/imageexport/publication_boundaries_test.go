@@ -19,6 +19,11 @@ func TestImagePublishDisappearingDestinationIsUncertain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if _, err := reservation.Abort(); err != nil {
+			t.Error(err)
+		}
+	})
 	oldLink := imageLink
 	t.Cleanup(func() { imageLink = oldLink })
 	imageLink = func(root *os.Root, old, destination string) error {
