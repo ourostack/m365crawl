@@ -198,7 +198,7 @@ func watchSignals(sigs <-chan os.Signal, cancel func(), exit func(int)) {
 }
 
 // listCommands are the commands whose results are item lists; --fields and --max-text apply to them.
-var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "scout list", "scout search", "scout show", "scout sources", "content list", "content search", "content show", "content sources", "content capture", "drafts list"}
+var listCommands = []string{"search", "messages", "conversations", "teams", "people", "people show", "people sources", "activity", "stores", "records", "unread", "thread", "watch", "calendar", "calendar event", "calendar actions", "calendar sources", "calendar attendees list", "calendar attendees show", "calendar attendees sources", "mail list", "mail show", "mail thread", "mail folders", "mail unread", "transcripts", "transcripts show", "notes list", "notes search", "notes show", "notes sources", "docs list", "docs search", "docs show", "docs sources", "loop list", "loop search", "loop show", "loop sources", "scout list", "scout search", "scout show", "scout sources", "content list", "content images", "content search", "content show", "content sources", "content capture", "drafts list"}
 
 const issuesURL = "https://github.com/ourostack/m365crawl/issues"
 
@@ -402,6 +402,10 @@ func withSnapshotRetention(err error, coded *errs.Coded) *errs.Coded {
 
 // fail prints err as a coded error and returns its exit status.
 func (rt *runtime) fail(err error) int {
+	var imageFailure *imageFetchError
+	if errors.As(err, &imageFailure) {
+		return rt.failImage(imageFailure)
+	}
 	var coded *errs.Coded
 	if errors.Is(err, context.Canceled) {
 		// SIGINT or SIGTERM cancelled the context, possibly under a wrapping coded error.

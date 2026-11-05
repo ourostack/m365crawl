@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,11 +93,63 @@ func TestHasAccount(t *testing.T) {
 	if ok, err := s.HasAccount(ctx, acctA); err != nil || !ok {
 		t.Fatalf("held account: %v %v", ok, err)
 	}
+
 	if ok, err := s.HasAccount(ctx, acctB); err != nil || ok {
 		t.Fatalf("other account: %v %v", ok, err)
 	}
 	_ = s.Close()
 	if _, err := s.HasAccount(ctx, acctA); err == nil {
 		t.Fatal("a closed archive must fail")
+	}
+}
+
+func TestImageInventoryHasMessage(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must(s.ApplyMessages(ctx, []teamsdesktop.Message{msg(acctA, "c", "m1", "", base)}))
+	for _, tc := range []struct {
+		key  MessageKey
+		want bool
+	}{
+		{MessageKey{acctA.TenantID, acctA.UserID, "c", "m1"}, true},
+		{MessageKey{acctB.TenantID, acctB.UserID, "c", "m1"}, false},
+		{MessageKey{acctA.TenantID, acctA.UserID, "c", "absent"}, false},
+	} {
+		found, err := s.HasMessage(ctx, tc.key)
+		if err != nil || found != tc.want {
+			t.Fatalf("exact core presence: %v %v", found, err)
+		}
+	}
+	_ = s.Close()
+	if _, err := s.HasMessage(ctx, MessageKey{}); err == nil {
+		t.Fatal("closed archive silently returned missing message")
+	}
+}
+
+func TestImageInventoryTeamsAccounts(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	must0(s.ApplyAccount(ctx, acctB))
+	must0(s.ApplyAccount(ctx, acctA))
+	_, err := s.db.ExecContext(ctx, "drop table workiq_accounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := s.TeamsAccounts(ctx)
+	if err != nil || len(accounts) != 2 || accounts[0] != acctA || accounts[1] != acctB {
+		t.Fatalf("core accounts depend on optional tables or people: %v %v", accounts, err)
+	}
+	_ = s.Close()
+	if _, err := s.TeamsAccounts(ctx); err == nil {
+		t.Fatal("closed archive silently returned no accounts")
+	}
+	broken := newStore(t)
+	if _, err := broken.db.ExecContext(ctx, `drop table accounts;
+create table accounts(tenant_id text,user_id text,locale text);
+insert into accounts values(null,'synthetic-user','en-US')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broken.TeamsAccounts(ctx); err == nil || !strings.Contains(err.Error(), "Scan error") {
+		t.Fatalf("invalid stored account row did not reach scan refusal: %v", err)
 	}
 }

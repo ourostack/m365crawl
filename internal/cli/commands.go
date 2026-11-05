@@ -199,6 +199,7 @@ func (rt *runtime) messageList(_ context.Context, st *store.Store, rows []store.
 	}
 	res := newList(shape(rt, rt.withAppSummary(messageItems(rows, rt.g.MaxText, html, rt.archiveRef()))), truncated).withTotal(total)
 	res.ApplicationEvidenceCoverage = applicationCoverageOf(envelopesOf(rows))
+	res.MediaCoverage = mediaCoverageForReturnedMessages(len(rows))
 	return res, nil
 }
 
@@ -393,7 +394,9 @@ func (c *messagesCmd) Run(rt *runtime) error {
 	rt.query = listQuery{filtered: c.filtered() || c.MentionsMe || c.DirectMentions || c.Unread, since: f.Since, until: f.Until}
 	return rt.read("messages", func(st *store.Store) (result, error) {
 		if st == nil {
-			return newList(nil, false), nil
+			res := newList(nil, false)
+			res.MediaCoverage = mediaCoverageForReturnedMessages(0)
+			return res, nil
 		}
 		rows, trunc, err := st.Messages(rt.ctx, f)
 		if err != nil {
@@ -465,7 +468,11 @@ func (c *unreadCmd) Run(rt *runtime) error {
 	}
 	return rt.read("unread", func(st *store.Store) (result, error) {
 		if st == nil {
-			return newList(nil, false), nil
+			res := newList(nil, false)
+			if !c.ByConversation {
+				res.MediaCoverage = mediaCoverageForReturnedMessages(0)
+			}
+			return res, nil
 		}
 		if c.ByConversation {
 			rows, trunc, err := st.UnreadByConversation(rt.ctx, f)
@@ -513,7 +520,9 @@ func (c *threadCmd) Run(rt *runtime) error {
 	rt.query = listQuery{none: "no message of this thread is archived: check the conversation id and root message id (the thread column of search and messages text output gives both; conversation_id and reply_chain_id or id in JSON), or pass a Teams message link"}
 	return rt.read("thread", func(st *store.Store) (result, error) {
 		if st == nil {
-			return newList(nil, false), nil
+			res := newList(nil, false)
+			res.MediaCoverage = mediaCoverageForReturnedMessages(0)
+			return res, nil
 		}
 		var total int
 		rows, trunc, err := st.Thread(rt.ctx, conv, root, store.Filter{Account: rt.account, IncludeDeleted: c.IncludeDeleted, IncludeSystem: c.IncludeSystem, Limit: c.Limit, Total: &total})

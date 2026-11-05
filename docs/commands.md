@@ -21,7 +21,7 @@ Start with `m365crawl` (the overview) and `m365crawl --help`. Commands fall into
 | Cached Loop channels | [`loop sync`](#loop-sync), [`loop list`](#loop-list), [`loop search`](#loop-search), [`loop show`](#loop-show), [`loop sources`](#loop-sources) |
 | Scout session history (opt-in) | [`scout sync`](#scout-sync), [`scout list`](#scout-list), [`scout search`](#scout-search), [`scout show`](#scout-show), [`scout sources`](#scout-sources) |
 | Cached compose bodies | [`drafts list/show`](#drafts) (archive-only, never shared messages/search) |
-| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content fetch doc`](#content-fetch-doc), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
+| Explicit content | [`content capture`](#content-capture), [`content fetch/signin`](#content-explicit-acquisition-offline-reads), [`content fetch doc`](#content-fetch-doc), [`content images`](#content-images), [`content list`](#content-list), [`content search`](#content-search), [`content show`](#content-show), [`content sources`](#content-sources) |
 | Tooling | [`metadata`](#metadata), [`skill`](#skill), [`version`](#version) |
 
 ## WorkIQ
@@ -155,6 +155,59 @@ activity/shared search or FTS and have no message actions.
 `--fields` keys: `id`, `source`, `classification`, `archive_source`, `tenant_id`, `user_id`, `database`, `store`, `wrapper_conversation_id`, `wrapper_reply_chain_id`, `message_map_key`, `message_id`, `client_draft_id`, `body_state`, `text`, `html`, `text_origin`, `text_state`, `render_fidelity`, `body_revision`, `body_frame_complete`, `body_guard_scope`, `target_guarded`, `last_edit`, `versioning_timestamp`, `first_seen_at`, `record_updated_at`, `record_removed_at`, `archive_presence`, `target_claim`, `association`, `unsent_now`, `ui_state`, `text_truncated`, `html_truncated`, `full_inspection`, `full_inspection_shell`.
 
 ## Content: explicit acquisition, offline reads
+
+Typed Teams message exports (`messages`, message-mode `unread`, `thread`, returned
+Teams search hits and calendar recent chat messages) carry `media_coverage` outside
+`--fields`: `returned_messages`, `scope: returned_teams_messages`,
+`binary_media: not_included`, `reference_inspection: not_requested`. Counts refer
+only to surviving returned messages, after search's merged limit; zero is not a
+claim of complete media. No additional HTML/native reads are performed.
+Each watch message event counts one; activity/sync/error events, aggregates,
+mail-only results, SQL and raw records gain no guessed scope. JSON/log retain the
+structured envelope, and text explicitly discloses missing bytes/reference
+inspection even when projection removes the message body or IDs.
+
+### content images
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] content images MESSAGE_LINK
+m365crawl [--db PATH] [--account TENANT/USER] content images CONVERSATION_ID MESSAGE_ID
+```
+
+Inspects one exact archived Teams message's HTML image references. A message link is passed alone; its message ID, not its parent message ID, is selected. Without `--account`, exactly one archived Teams account is required. Outlook selectors are usage errors.
+
+This command always reads the archive only, even with a positive `--max-age`. It does not sync, start WorkIQ, sign in, fetch image bytes or change the archive. A legitimate pre-WorkIQ archive needs no WorkIQ tables, but existing archive integrity checks still refuse missing identity/progress state in a newer archive.
+
+`scope` is `selected_cached_message`, and `inspection_state` is `complete`, `partial` or `unknown`. Complete means the bounded cached HTML was inspected, not that server media is complete. `image_references` contains `image_id`, `occurrence_count`, nullable presentation `width`/`height`, `selection` and an optional refusal `code`; dimensions are not decoded image pixels. Content references with an image ID outrank an Emoji class. Decorative Emoji elements are counted separately. Identical repeated elements share an occurrence count; conflicting references or duplicate attribute declarations are ambiguous. Cached source URLs are never returned.
+
+Bounds are 1,048,576 HTML bytes, 65,536 token bytes, 4,096 image elements, 64 raw attributes per image, 1,024 image-ID bytes and 8,192 source-URL bytes. Partial inspection cannot authorize selecting a reference from its retained prefix. CSS images, attachments, OCR and image bytes are outside this inventory. `binary_media` is always `not_acquired_by_this_command`.
+
+A missing exact message exits 3 with `image_message_unknown` and no invented inventory. Unavailable HTML prints an unknown inventory and exits 3 with `image_body_unavailable`; other unknown/partial inspection prints its bounded result and exits 3 with `image_inspection_incomplete`. Image-free, fully inspected HTML is a real empty array, not an unavailable body. `reason_codes` preserves the specific inspection limits or invalid-input reasons.
+
+`implicit_sync: disabled` and archive-age metadata remain outside projection. Text format renders the same object as readable JSON.
+
+`--fields` keys: `account`, `conversation_id`, `message_id`, `scope`, `inspection_state`, `image_references`, `decorative_emoji_count`, `unsupported_reference_count`, `binary_media`, `reason_codes`.
+
+### content fetch image
+
+```text
+m365crawl [--db PATH] [--account TENANT/USER] content fetch image MESSAGE_LINK --image-id ID --output FILE
+m365crawl [--db PATH] [--account TENANT/USER] content fetch image CONVERSATION_ID MESSAGE_ID --image-id ID --output FILE
+```
+
+Explicitly exports one selected Teams PNG through enabled read-only WorkIQ. First inspect the exact archived message with `content images`; select its exact supported `image_id`, not a hosted-content ID, source URL or collection position. The whole bounded cached body must have been inspected. A message link is passed alone, and omission of `--account` requires exactly one archived Teams account. Outlook selectors are refused.
+
+Admission verifies the signed-in user, exact native chat ID, actual tenant, supported oneOnOne/group/meeting type and selected account/address. It reads only the selected live HTML message, its uniquely bound same-message hosted content and the same message again. A deleted/changed binding or inconsistent modification clocks refuses without retry. Both absent modification clocks remain null, not fresh. Cached AMS/CDN URLs, signed tickets and arbitrary URLs are never replayed.
+
+Only complete nonanimated `image/png` is supported: at most 4 MiB raw, 16,777,216 pixels, 16,384 per dimension and 64 MiB decoded pixel storage. Full PNG chunks/CRC/raster/IEND/EOF validation is required. JPEG/GIF/WebP, channels, OCR and automatic downloads are outside this slice; native Windows service acquisition remains unqualified.
+
+FILE needs an existing user-controlled parent. On macOS, exact-handle checks require an absent or empty extended ACL on both parent and created file; even user-only or deny-only ACLs conservatively refuse, as do unavailable ACL queries. Windows requires verified private user/SYSTEM effective and object-inheritable grants. No ACL is changed. Reserve privately before WorkIQ, close the native client before writing bytes, and publish by verified same-root no-clobber link. No directory creation, overwrite or `--force` fallback exists.
+
+The stdout receipt reports `status`, selected identity, `scope: selected_image`, `other_media: not_acquired`, validated content type/byte size/SHA256/pixel dimensions, nullable native/observation/fetch clocks, output and phase, nullable `file_published`/`output_verified`, and optional retained temporary identity/state. On errors, stderr's `image_acquisition` carries the receipt plus primary and additional close/cleanup codes. Metadata appears only after byte validation; observed clocks do not prove historical immutability.
+
+If publication succeeds but the destination disappears before verification, `file_published` is null, not false. A created temporary that cannot be safely identified is retained with its last-known path, `state: empty` when no bytes were written, and `locator_verified: false`; that path is evidence to inspect, not proof the same file is still there.
+
+**A failed command may have published a complete file.** Inspect the receipt before retrying: cancellation, cleanup or stdout failure never deletes completed output, and a substituted temp is retained rather than removed. Both streams failing still returns nonzero. An existing output refuses before another native call. The archive, source health, sync cursors and completeness are unchanged. Text format renders the full receipt as readable JSON. `--fields` is not accepted for this acquisition command.
 
 ### content fetch doc
 

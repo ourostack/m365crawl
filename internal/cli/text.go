@@ -72,6 +72,9 @@ var textBanners = map[string]bool{"doctor": true, "status": true, "sync": true, 
 
 // renderText prints a result for a person, in color when rt.color is set.
 func (rt *runtime) renderText(label string, v any) error {
+	if r, ok := v.(interface{ renderImages(*runtime) error }); ok {
+		return r.renderImages(rt)
+	}
 	if r, ok := v.(interface{ renderWorkIQ(*runtime) error }); ok {
 		return r.renderWorkIQ(rt)
 	}
@@ -116,6 +119,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		if c := r.ApplicationEvidenceCoverage; c != nil {
 			_, _ = fmt.Fprintf(w, "%s\n", render.Dim(appCoverageLine(c), color))
 		}
+		renderMediaCoverage(w, r.MediaCoverage)
 		rt.renderNoteCoverage(r.SourceCoverage)
 		rt.renderLoopCoverage(r.LoopCoverage)
 		rt.renderScoutCoverage(r.ScoutCoverage)
@@ -299,6 +303,7 @@ func (rt *runtime) renderText(label string, v any) error {
 		metaLines(w, r.meta, color)
 	case *eventResult:
 		rt.eventBlock(r)
+		renderMediaCoverage(w, r.mediaCoverage)
 		coverage := r.nativeCoverage
 		if coverage == nil {
 			coverage = emptyAttendeeCoverage()

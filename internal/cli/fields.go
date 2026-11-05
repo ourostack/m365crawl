@@ -63,6 +63,7 @@ var commandFields = map[string][]fieldSet{
 	"scout show":                 {{keys: scoutDetailKeys}},
 	"scout sources":              {{keys: typeKeys[scoutSourceItem]}},
 	"content list":               {{keys: contentKeys}},
+	"content images":             {{keys: typeKeys[imageInventoryItem]}},
 	"content search":             {{keys: contentKeys}},
 	"content show":               {{keys: contentKeys}},
 	"content capture":            {{keys: typeKeys[LocalTextItem]}},
@@ -116,6 +117,10 @@ func writeFieldsHelp(w io.Writer, cmd string) {
 	}
 	if cmd == "calendar" {
 		b.WriteString(wrapList("Only in `calendar event` (refused here): ", eventOnlyKeys))
+	}
+	switch cmd {
+	case "messages", "unread", "thread", "search", "calendar event", "watch":
+		b.WriteString("\n" + wrapWords("", messageMediaHelp))
 	}
 	_, _ = io.WriteString(w, b.String())
 }

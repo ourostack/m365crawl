@@ -255,37 +255,49 @@ func (c *Client) FetchDocumentBlob(ctx context.Context, ref DocumentRef) ([]byte
 	return data, status, err
 }
 
+type blobWire struct {
+	Base64      *string         `json:"base64Content"`
+	Size        *int64          `json:"sizeBytes"`
+	Status      int             `json:"statusCode"`
+	ContentType json.RawMessage `json:"contentType"`
+}
+
 func decodeBlob(ctx context.Context, raw []byte) ([]byte, int, error) {
-	budget := strictjson.Budget{Context: ctx, MaxDepth: 16, MaxMembers: 4096}
-	var envelope struct {
-		IsError    bool `json:"isError"`
-		Structured struct {
-			Base64 *string `json:"base64Content"`
-			Size   *int64  `json:"sizeBytes"`
-			Status int     `json:"statusCode"`
-		} `json:"structuredContent"`
+	wire, status, err := decodeBlobEnvelope(ctx, raw)
+	if err != nil {
+		return nil, status, err
 	}
-	if len(raw) > maxFrame {
-		return nil, 0, failure("workiq_page_too_large")
-	}
-	if _, err := budget.Parse(raw); err != nil || json.Unmarshal(raw, &envelope) != nil {
-		return nil, 0, failure("workiq_protocol")
-	}
-	status := envelope.Structured.Status
-	if status >= 400 && status <= 599 {
-		return nil, status, failure("workiq_failed")
-	}
-	if envelope.IsError {
-		return nil, 0, classify(raw)
-	}
-	if status != 200 || envelope.Structured.Base64 == nil || envelope.Structured.Size == nil {
-		return nil, 0, failure("workiq_protocol")
-	}
-	data, err := base64.StdEncoding.DecodeString(*envelope.Structured.Base64)
-	if err != nil || int64(len(data)) != *envelope.Structured.Size || len(data) > MaxDocumentBlob {
+	data, err := base64.StdEncoding.DecodeString(*wire.Base64)
+	if err != nil || int64(len(data)) != *wire.Size || len(data) > MaxDocumentBlob {
 		return nil, 0, failure("workiq_protocol")
 	}
 	return data, status, nil
+}
+
+func decodeBlobEnvelope(ctx context.Context, raw []byte) (blobWire, int, error) {
+	budget := strictjson.Budget{Context: ctx, MaxDepth: 16, MaxMembers: 4096}
+	var envelope struct {
+		IsError    bool     `json:"isError"`
+		Structured blobWire `json:"structuredContent"`
+	}
+	empty := blobWire{}
+	if len(raw) > maxFrame {
+		return empty, 0, failure("workiq_page_too_large")
+	}
+	if _, err := budget.Parse(raw); err != nil || json.Unmarshal(raw, &envelope) != nil {
+		return empty, 0, failure("workiq_protocol")
+	}
+	status := envelope.Structured.Status
+	if status >= 400 && status <= 599 {
+		return empty, status, failure("workiq_failed")
+	}
+	if envelope.IsError {
+		return empty, 0, classify(raw)
+	}
+	if status != 200 || envelope.Structured.Base64 == nil || envelope.Structured.Size == nil {
+		return empty, 0, failure("workiq_protocol")
+	}
+	return envelope.Structured, status, nil
 }
 
 // Protection states of a file's bytes.

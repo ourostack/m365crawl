@@ -105,6 +105,29 @@ func (s *Store) HasConversation(ctx context.Context, a *teamsdesktop.Account, id
 	return ok, err
 }
 
+// TeamsAccounts reads core account facts without optional WorkIQ tables or a people join.
+func (s *Store) TeamsAccounts(ctx context.Context) ([]teamsdesktop.Account, error) {
+	accounts := []teamsdesktop.Account{}
+	err := s.each(ctx, `select tenant_id,user_id,locale from accounts order by tenant_id,user_id`, func(rows *sql.Rows) error {
+		var account teamsdesktop.Account
+		if err := rows.Scan(&account.TenantID, &account.UserID, &account.Locale); err != nil {
+			return err
+		}
+		accounts = append(accounts, account)
+		return nil
+	})
+	return accounts, err
+}
+
+// HasMessage checks core message presence without optional source projections.
+func (s *Store) HasMessage(ctx context.Context, key MessageKey) (bool, error) {
+	var found bool
+	err := s.db.QueryRowContext(ctx, `select exists(select 1 from messages
+where tenant_id=? and user_id=? and conversation_id=? and id=?)`,
+		key.TenantID, key.UserID, key.ConversationID, key.ID).Scan(&found)
+	return found, err
+}
+
 // HasAccount says whether the archive holds the Teams account a.
 func (s *Store) HasAccount(ctx context.Context, a teamsdesktop.Account) (bool, error) {
 	var ok bool
