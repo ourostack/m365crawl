@@ -25,5 +25,5 @@ func platformPrivate(f *os.File, directory bool) error {
 	} else if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 		return privateError()
 	}
-	return nil
+	return privateACL(f)
 }

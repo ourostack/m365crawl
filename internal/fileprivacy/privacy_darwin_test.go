@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/errs"
+	"golang.org/x/sys/unix"
 )
 
 func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
@@ -49,5 +50,104 @@ func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
 	coded = nil
 	if err := Temporary(file); !errors.As(err, &coded) || coded.Code != "image_output_unprotected" {
 		t.Error("mode0600 child with inherited foreign read ACL admitted", err)
+	}
+}
+
+func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
+	base, err := privateDarwinLoad()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, boundary := range []string{"load", "nil-acl", "invalid-acl", "nil-errno", "entry-error", "unexpected-entry", "free"} {
+		t.Run(boundary, func(t *testing.T) {
+			file, err := os.OpenFile(filepath.Join(t.TempDir(), "private.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := file.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := Temporary(file); err != nil {
+				t.Fatal("actual empty-ACL private handle failed before query fault", err)
+			}
+			original := privateDarwinLoad
+			t.Cleanup(func() { privateDarwinLoad = original })
+			api := base
+			sentinel := errors.New("synthetic native ACL query failure")
+			var loadErr error
+			switch boundary {
+			case "load":
+				loadErr = sentinel
+			case "nil-acl":
+				api.getFD = func(uintptr, int32) uintptr { return 0 }
+			case "invalid-acl":
+				api.valid = func(uintptr) int32 { return -1 }
+			case "nil-errno":
+				api.errno = func() *int32 { return nil }
+			case "entry-error":
+				api.entry = func(acl uintptr, index int32, entry *uintptr) int32 {
+					result := base.entry(acl, index, entry)
+					*base.errno() = int32(unix.EIO)
+					return result
+				}
+			case "unexpected-entry":
+				api.entry = func(_ uintptr, _ int32, entry *uintptr) int32 {
+					*entry = 1
+					return 0
+				}
+			case "free":
+				api.free = func(acl uintptr) int32 {
+					if result := base.free(acl); result != 0 {
+						t.Error("actual native ACL fixture cleanup failed", result)
+					}
+					return -1
+				}
+			}
+			privateDarwinLoad = func() (darwinACL, error) { return api, loadErr }
+			err = Temporary(file)
+			var coded *errs.Coded
+			if !errors.As(err, &coded) || coded.Code != "image_output_unprotected" ||
+				boundary == "load" && !errors.Is(err, sentinel) {
+				t.Fatal("unknown native ACL query/cleanup became private output", err)
+			}
+		})
+	}
+}
+
+func TestPrivateImageDarwinACLLoaderFailuresRefuse(t *testing.T) {
+	if _, err := privateDarwinLoad(); err != nil {
+		t.Fatal("native library fixture unavailable", err)
+	}
+	for _, boundary := range []string{"open", "symbol", "zero-symbol", "close"} {
+		t.Run(boundary, func(t *testing.T) {
+			oldOpen, oldSymbol, oldClose := privateDarwinOpen, privateDarwinSymbol, privateDarwinClose
+			t.Cleanup(func() {
+				privateDarwinOpen, privateDarwinSymbol, privateDarwinClose = oldOpen, oldSymbol, oldClose
+			})
+			sentinel := errors.New("synthetic native ACL loader failure")
+			switch boundary {
+			case "open":
+				privateDarwinOpen = func(string, int) (uintptr, error) { return 0, sentinel }
+			default:
+				privateDarwinSymbol = func(lib uintptr, name string) (uintptr, error) {
+					if name == "acl_valid" {
+						if boundary == "zero-symbol" {
+							return 0, nil
+						}
+						return 0, sentinel
+					}
+					return oldSymbol(lib, name)
+				}
+				if boundary == "close" {
+					privateDarwinClose = func(lib uintptr) error { return errors.Join(oldClose(lib), sentinel) }
+				}
+			}
+			_, err := loadDarwinACL()
+			if err == nil || boundary != "zero-symbol" && !errors.Is(err, sentinel) {
+				t.Fatal("unavailable native ACL binding became successful admission", err)
+			}
+		})
 	}
 }
