@@ -64,7 +64,7 @@ func TestImagePublishPhaseFaults(t *testing.T) {
 			if err == nil || effect.FilePublished == nil || *effect.FilePublished != published {
 				t.Fatalf("phase %s lost actual publication: %+v %v", phase, effect, err)
 			}
-			actual, readErr := os.ReadFile(output)
+			actual, readErr := os.ReadFile(output) // #nosec G304 -- Exact published synthetic destination in t.TempDir.
 			if published {
 				if readErr != nil || !bytes.Equal(actual, data) {
 					t.Fatal("post-publication failure lost complete destination", readErr)
@@ -76,7 +76,7 @@ func TestImagePublishPhaseFaults(t *testing.T) {
 				t.Log("secondary cleanup failure remains explicit:", err)
 			}
 			if published {
-				actual, readErr = os.ReadFile(output)
+				actual, readErr = os.ReadFile(output) // #nosec G304 -- Same owned synthetic destination after controlled abort.
 				if readErr != nil || !bytes.Equal(actual, data) {
 					t.Fatal("secondary abort removed completed destination", readErr)
 				}
@@ -155,7 +155,7 @@ func TestImagePublishNoClobberRace(t *testing.T) {
 	if err == nil || effect.FilePublished == nil || *effect.FilePublished {
 		t.Fatalf("competing destination overwritten or effect lost: %+v %v", effect, err)
 	}
-	actual, err := os.ReadFile(output)
+	actual, err := os.ReadFile(output) // #nosec G304 -- Exact owned synthetic competing destination in t.TempDir.
 	if err != nil || !bytes.Equal(actual, competing) {
 		t.Fatal("competing destination changed", err)
 	}
@@ -181,7 +181,7 @@ func TestImagePublishCompleteAndNoOverwrite(t *testing.T) {
 		effect.OutputVerified == nil || !*effect.OutputVerified {
 		t.Fatalf("complete output/locator not verified: %+v %v", effect, err)
 	}
-	actual, err := os.ReadFile(output)
+	actual, err := os.ReadFile(output) // #nosec G304 -- Exact published synthetic destination in t.TempDir.
 	if err != nil || !bytes.Equal(actual, data) {
 		t.Fatal("published bytes incomplete", err)
 	}
@@ -192,7 +192,7 @@ func TestImagePublishCompleteAndNoOverwrite(t *testing.T) {
 	if _, err := reservation.Abort(); err != nil {
 		t.Fatal(err)
 	}
-	actual, err = os.ReadFile(output)
+	actual, err = os.ReadFile(output) // #nosec G304 -- Same owned synthetic destination after controlled abort.
 	if err != nil || !bytes.Equal(actual, data) {
 		t.Fatal("abort deleted a completed destination", err)
 	}
@@ -266,7 +266,7 @@ func TestImageParentLocatorAndTempSubstitution(t *testing.T) {
 			t.Fatalf("substituted temp published: %+v %v", effect, err)
 		}
 		_, _ = reservation.Abort()
-		actual, err := os.ReadFile(temp)
+		actual, err := os.ReadFile(temp) // #nosec G304 -- Exact controlled synthetic replacement entry in t.TempDir.
 		if err != nil || !bytes.Equal(actual, substituted) {
 			t.Fatal("cleanup removed or changed someone else's entry", err)
 		}
