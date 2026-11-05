@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ebitengine/purego"
 	"github.com/ourostack/m365crawl/internal/errs"
 	"golang.org/x/sys/unix"
 )
@@ -112,7 +113,22 @@ func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, boundary := range []string{"load", "nil-acl", "invalid-acl", "nil-errno", "entry-error", "unexpected-entry", "free"} {
+	lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_LOCAL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := purego.Dlclose(lib); err != nil {
+			t.Error(err)
+		}
+	})
+	address, err := purego.Dlsym(lib, "acl_init")
+	if err != nil || address == 0 {
+		t.Fatal("native empty ACL allocator unavailable", err)
+	}
+	var newACL func(int32) uintptr
+	purego.RegisterFunc(&newACL, address)
+	for _, boundary := range []string{"load", "nil-acl", "query-error", "invalid-acl", "nil-errno", "entry-error", "unexpected-entry", "unexpected-status", "free", "empty-acl-copy"} {
 		t.Run(boundary, func(t *testing.T) {
 			file, err := os.OpenFile(filepath.Join(t.TempDir(), "private.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 			if err != nil {
@@ -129,6 +145,13 @@ func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 			original := privateDarwinLoad
 			t.Cleanup(func() { privateDarwinLoad = original })
 			api := base
+			api.getFD = func(uintptr, int32) uintptr {
+				acl := newACL(0)
+				if acl == 0 {
+					t.Fatal("actual native empty ACL allocation failed")
+				}
+				return acl
+			}
 			sentinel := errors.New("synthetic native ACL query failure")
 			var loadErr error
 			switch boundary {
@@ -136,6 +159,11 @@ func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 				loadErr = sentinel
 			case "nil-acl":
 				api.getFD = func(uintptr, int32) uintptr { return 0 }
+			case "query-error":
+				api.getFD = func(uintptr, int32) uintptr {
+					*base.errno() = int32(unix.EIO)
+					return 0
+				}
 			case "invalid-acl":
 				api.valid = func(uintptr) int32 { return -1 }
 			case "nil-errno":
@@ -149,8 +177,11 @@ func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 			case "unexpected-entry":
 				api.entry = func(_ uintptr, _ int32, entry *uintptr) int32 {
 					*entry = 1
-					return 0
+					*base.errno() = int32(unix.EINVAL)
+					return -1
 				}
+			case "unexpected-status":
+				api.entry = func(uintptr, int32, *uintptr) int32 { return 1 }
 			case "free":
 				api.free = func(acl uintptr) int32 {
 					if result := base.free(acl); result != 0 {
@@ -161,6 +192,12 @@ func TestPrivateImageDarwinACLQueryFailuresRefuse(t *testing.T) {
 			}
 			privateDarwinLoad = func() (darwinACL, error) { return api, loadErr }
 			err = Temporary(file)
+			if boundary == "empty-acl-copy" {
+				if err != nil {
+					t.Fatal("valid native empty ACL copy failed admission", err)
+				}
+				return
+			}
 			var coded *errs.Coded
 			if !errors.As(err, &coded) || coded.Code != "image_output_unprotected" ||
 				boundary == "load" && !errors.Is(err, sentinel) {

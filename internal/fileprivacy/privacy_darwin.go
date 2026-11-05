@@ -60,8 +60,17 @@ func privateACL(file *os.File) (err error) {
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	errno := api.errno()
+	if errno == nil {
+		return privateError()
+	}
+	*errno = 0
 	acl := api.getFD(file.Fd(), 0x100) // ACL_TYPE_EXTENDED, queried on the already bound handle.
 	if acl == 0 {
+		// Darwin reports an absent ACL property as NULL/ENOENT, not an empty ACL copy.
+		if *errno == int32(unix.ENOENT) {
+			return nil
+		}
 		return privateError()
 	}
 	defer func() {
@@ -71,10 +80,6 @@ func privateACL(file *os.File) (err error) {
 		runtime.KeepAlive(file)
 	}()
 	if api.valid(acl) != 0 {
-		return privateError()
-	}
-	errno := api.errno()
-	if errno == nil {
 		return privateError()
 	}
 	*errno = 0
