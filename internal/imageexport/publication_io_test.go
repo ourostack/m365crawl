@@ -105,7 +105,7 @@ func TestImageReserveFilesystemFailureEffects(t *testing.T) {
 					*effect.RetainedTemp.LocatorVerified {
 					t.Fatal("unverifiable created temporary lost its retained locator/effect", effect, err)
 				}
-				if data, err := os.ReadFile(temporary); err != nil || len(data) != 0 {
+				if data, err := os.ReadFile(temporary); err != nil || len(data) != 0 { // #nosec G304 -- exact created synthetic fixture in t.TempDir.
 					t.Fatal("unverifiable temporary was removed or written", err)
 				}
 			} else if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 || effect.RetainedTemp != nil {
@@ -185,7 +185,7 @@ func TestImagePublishVerificationFailuresRetainTruthfulEffects(t *testing.T) {
 				if effect.FilePublished == nil || !*effect.FilePublished {
 					t.Fatal("lost absolute locator denied actual publication", effect)
 				}
-				if actual, err := os.ReadFile(path); err != nil || !bytes.Equal(actual, data) {
+				if actual, err := os.ReadFile(path); err != nil || !bytes.Equal(actual, data) { // #nosec G304 -- exact synthetic destination in t.TempDir.
 					t.Fatal("unverified locator lost complete destination", err)
 				}
 			default:

@@ -40,7 +40,7 @@ func TestImagePublishDisappearingDestinationIsUncertain(t *testing.T) {
 	if _, err := reservation.Abort(); err != nil {
 		t.Fatal(err)
 	}
-	actual, err := os.ReadFile(output + "-moved")
+	actual, err := os.ReadFile(output + "-moved") // #nosec G304 -- exact renamed synthetic fixture in t.TempDir.
 	if err != nil || !bytes.Equal(actual, data) {
 		t.Fatal("uncertain publication lost the completed file", err)
 	}

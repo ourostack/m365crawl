@@ -28,11 +28,12 @@ func imagePNGFixture(t *testing.T, img image.Image) []byte {
 }
 
 func imagePNGChunk(name string, data []byte) []byte {
-	if uint64(len(data)) > uint64(^uint32(0)) {
+	length := uint64(len(data))
+	if length > 0xffffffff {
 		panic("PNG fixture chunk length exceeds uint32")
 	}
 	result := make([]byte, 12+len(data))
-	binary.BigEndian.PutUint32(result[:4], uint32(len(data)))
+	binary.BigEndian.PutUint32(result[:4], uint32(length))
 	copy(result[4:8], name)
 	copy(result[8:], data)
 	binary.BigEndian.PutUint32(result[len(result)-4:], crc32.ChecksumIEEE(result[4:len(result)-4]))
