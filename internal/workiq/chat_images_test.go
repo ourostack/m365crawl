@@ -266,6 +266,76 @@ func imageStubResult(raw json.RawMessage) any {
 		"sizeBytes": 4, "base64Content": base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})}}
 }
 
+func TestSelectedImageMalformedEntityAndUnboundObservation(t *testing.T) {
+	ctx := context.Background()
+	if _, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", json.RawMessage(`{`)); err == nil {
+		t.Fatal("malformed native entity produced an image observation")
+	}
+	if _, err := BindChatImage(ImageMessage{}, "synthetic-image"); err == nil {
+		t.Fatal("unbound observation produced an authorized image reference")
+	}
+	message, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]ImageMessage{{{}, message}, {message, {}}} {
+		if err := SameImageObservation(pair[0], pair[1], "synthetic-image"); err == nil {
+			t.Fatal("invalid first or second native observation certified a stable reference")
+		}
+	}
+	for _, path := range []string{"chats/19:synthetic-chat/messages/1001/hostedContents/value/$value", ""} {
+		if resource, err := chatImageResource(path, "19:synthetic-chat", "1001"); err == nil || resource != "" {
+			t.Fatal("relative or absent native path authorized transport", resource, err)
+		}
+	}
+	ref, err := BindChatImage(message, "synthetic-image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range []string{imageTestPath + "?ticket=synthetic", "https://graph.microsoft.com/v1.0" + imageTestPath} {
+		forged := ref
+		forged.resource = resource
+		if blob, err := new(Client).FetchChatImageBlob(ctx, forged); err == nil || len(blob.Data) != 0 {
+			t.Fatal("forged/noncanonical reference reached an absent native transport", err)
+		}
+	}
+}
+
+func TestChatImageTransportAndProtocolFailureCloseSession(t *testing.T) {
+	ctx := context.Background()
+	message, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := BindChatImage(message, "synthetic-image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"rpc-error-write", "doc"} {
+		t.Run(mode, func(t *testing.T) {
+			useStub(t, mode)
+			client, err := Open(ctx, Invocation{ExplicitTeamsRoot: true}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := client.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			blob, err := client.FetchChatImageBlob(ctx, ref)
+			if err == nil || blob.HTTPStatus != 0 || len(blob.Data) != 0 ||
+				strings.Contains(err.Error(), "private-download") {
+				t.Fatal("native transport/protocol failure returned bytes or private diagnostics", blob.HTTPStatus, err)
+			}
+			select {
+			case <-client.drained:
+			default:
+				t.Fatal("failed image transport left its native session running")
+			}
+		})
+	}
+}
 func TestChatImageFixedBlobCall(t *testing.T) {
 	ctx := context.Background()
 	message, err := DecodeSelectedImageMessage(ctx, "19:synthetic-chat", "1001", imageTestMessage(imageTestPath, ""))

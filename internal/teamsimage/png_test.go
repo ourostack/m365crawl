@@ -2,6 +2,7 @@ package teamsimage
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -9,7 +10,9 @@ import (
 	"errors"
 	"hash/crc32"
 	"image"
+	"image/color"
 	"image/png"
+	"io"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/errs"
@@ -153,6 +156,92 @@ func TestImagePNGExpansionBounds(t *testing.T) {
 	imagePNGCode(t, err, "image_too_large")
 }
 
+func TestImagePNGStructuralAndRasterRefusals(t *testing.T) {
+	good := imagePNGFixture(t, image.NewGray(image.Rect(0, 0, 1, 1)))
+	withChunks := func(chunks ...[]byte) []byte {
+		result := bytes.Clone(good[:33])
+		for _, chunk := range chunks {
+			result = append(result, chunk...)
+		}
+		return append(result, imagePNGChunk("IEND", nil)...)
+	}
+	compressed := func(raster []byte) []byte {
+		var out bytes.Buffer
+		writer := zlib.NewWriter(&out)
+		if _, err := writer.Write(raster); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+	idat := bytes.Clone(good[33 : len(good)-12])
+	for name, data := range map[string][]byte{
+		"truncated-chunk": append(bytes.Clone(good[:8]), 0, 0, 0),
+		"nonletter-kind":  withChunks(imagePNGChunk("t1Xt", nil), idat),
+		"header-not-first": append(append(bytes.Clone(good[:8]),
+			imagePNGChunk("tEXt", nil)...), good[8:]...),
+		"zero-width":         imagePNGHeader(good, 0, 1, 8),
+		"palette-after-data": withChunks(idat, imagePNGChunk("PLTE", []byte{0, 0, 0})),
+		"invalid-filter":     withChunks(imagePNGChunk("IDAT", compressed([]byte{5, 0}))),
+		"expanded-garbage":   withChunks(imagePNGChunk("IDAT", compressed(bytes.Repeat([]byte{0}, 32)))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			info, err := ValidatePNG(context.Background(), data, "image/png")
+			imagePNGCode(t, err, "image_bytes_invalid")
+			if info != (PNGInfo{}) {
+				t.Fatal("invalid raster returned successful image metadata", info)
+			}
+		})
+	}
+	palette := image.NewPaletted(image.Rect(0, 0, 1, 1), color.Palette{color.Black, color.White})
+	if _, err := ValidatePNG(context.Background(), imagePNGFixture(t, palette), "image/png"); err != nil {
+		t.Fatal("valid indexed PNG with a palette before IDAT refused", err)
+	}
+}
+
+func TestImagePNGCancellationAtReadBoundaries(t *testing.T) {
+	good := imagePNGFixture(t, image.NewGray(image.Rect(0, 0, 1, 1)))
+	cancelled := 0
+	for boundary := int32(1); boundary <= 128; boundary++ {
+		base, cancel := context.WithCancel(context.Background())
+		ctx := &imageCancelAfterChecks{Context: base, cancel: cancel}
+		ctx.left.Store(boundary)
+		info, err := ValidatePNG(ctx, good, "image/png")
+		if base.Err() != nil {
+			cancelled++
+			if !errors.Is(err, context.Canceled) || info != (PNGInfo{}) {
+				t.Fatalf("cancellation at read boundary %d lost: %+v %v", boundary, info, err)
+			}
+		} else if err != nil || info.Width != 1 || info.Height != 1 {
+			t.Fatalf("uncancelled valid PNG refused at boundary %d: %+v %v", boundary, info, err)
+		}
+		cancel()
+	}
+	if cancelled < 2 {
+		t.Fatal("PNG validation no longer checks cancellation during processing")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if data, err := pngChunks(ctx, good); !errors.Is(err, context.Canceled) || data != nil {
+		t.Fatal("cancelled chunk inspection returned compressed content", err)
+	}
+	reader := &pngReader{ctx: ctx, Reader: bytes.NewReader(good)}
+	if n, err := reader.Read(make([]byte, 8)); n != 0 || !errors.Is(err, context.Canceled) || reader.Len() != len(good) {
+		t.Fatal("cancelled raster read consumed bytes", n, err)
+	}
+	if _, err := reader.ReadByte(); !errors.Is(err, context.Canceled) || reader.Len() != len(good) {
+		t.Fatal("cancelled raster byte read consumed bytes", err)
+	}
+	active := &pngReader{ctx: context.Background(), Reader: bytes.NewReader([]byte{17})}
+	if value, err := active.ReadByte(); value != 17 || err != nil {
+		t.Fatal("active byte read changed raster content", value, err)
+	}
+	if _, err := active.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatal("byte reader lost exact EOF", err)
+	}
+}
 func TestImagePNGCancellationAndEmpty(t *testing.T) {
 	good := imagePNGFixture(t, image.NewGray(image.Rect(0, 0, 1, 1)))
 	ctx, cancel := context.WithCancel(context.Background())
