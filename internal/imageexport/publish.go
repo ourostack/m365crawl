@@ -105,12 +105,13 @@ func Reserve(ctx context.Context, output string) (*Reservation, Effect, error) {
 		r.temp = ""
 		return fail(publicationError("image_output_reserve_failed", err))
 	}
+	r.effect.RetainedTemp = &RetainedTemp{State: "empty", LastKnownPath: filepath.Join(dir, r.temp), LocatorVerified: imageBool(false)}
 	r.tempInfo, err = r.file.Stat()
 	if err != nil {
 		return fail(publicationError("image_output_changed", err))
 	}
 	r.effect.Phase = "reserved"
-	r.effect.RetainedTemp = &RetainedTemp{State: "empty", LastKnownPath: filepath.Join(dir, r.temp), LocatorVerified: imageBool(true)}
+	r.effect.RetainedTemp.LocatorVerified = imageBool(true)
 	if err := imageTemporary(r.file); err != nil {
 		return fail(err)
 	}
