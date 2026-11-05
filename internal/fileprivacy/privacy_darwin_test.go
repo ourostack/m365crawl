@@ -7,11 +7,58 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/errs"
 	"golang.org/x/sys/unix"
 )
+
+func TestPrivateImageDarwinEmptyACLNativeContract(t *testing.T) {
+	file, err := os.OpenFile(filepath.Join(t.TempDir(), "empty-acl.png"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if output, err := exec.Command("/bin/chmod", "-N", file.Name()).CombinedOutput(); err != nil {
+		t.Fatal("controlled native empty ACL fixture failed", err, string(output))
+	}
+	api, err := privateDarwinLoad()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	acl := api.getFD(file.Fd(), 0x100)
+	if acl == 0 {
+		t.Fatal("actual native exact-handle ACL query failed")
+	}
+	valid := api.valid(acl)
+	errno := api.errno()
+	if errno == nil {
+		if err := api.free(acl); err != 0 {
+			t.Error("native ACL cleanup failed", err)
+		}
+		t.Fatal("native errno address unavailable")
+	}
+	*errno = 0
+	var entry uintptr
+	result := api.entry(acl, 0, &entry)
+	code := *errno
+	freed := api.free(acl)
+	runtime.KeepAlive(file)
+	t.Logf("explicitly empty native ACL: valid=%d first_entry=%d entry_present=%v errno=%d free=%d", valid, result, entry != 0, code, freed)
+	if valid != 0 || result != -1 || entry != 0 || code != int32(unix.EINVAL) || freed != 0 {
+		t.Fatal("native empty-ACL contract differs from documented admission assumption")
+	}
+	if err := Temporary(file); err != nil {
+		t.Fatal("explicitly empty native ACL failed private admission", err)
+	}
+}
 
 func TestPrivateImageDarwinInheritedACLRefused(t *testing.T) {
 	dir := t.TempDir()
@@ -144,6 +191,7 @@ func TestPrivateImageDarwinACLLoaderFailuresRefuse(t *testing.T) {
 					privateDarwinClose = func(lib uintptr) error { return errors.Join(oldClose(lib), sentinel) }
 				}
 			}
+
 			_, err := loadDarwinACL()
 			if err == nil || boundary != "zero-symbol" && !errors.Is(err, sentinel) {
 				t.Fatal("unavailable native ACL binding became successful admission", err)
