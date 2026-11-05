@@ -63,6 +63,7 @@ func TestFetchChatImageCachedAndOptionalReadFailures(t *testing.T) {
 		{"message-query", "drop table messages", "synthetic-tenant/synthetic-user", "image_acquisition_failed", 1, false},
 		{"body-query", "alter table messages drop column content_html", "synthetic-tenant/synthetic-user", "image_acquisition_failed", 1, false},
 		{"empty-body", "update messages set content_html=''", "synthetic-tenant/synthetic-user", "image_body_unavailable", 1, false},
+		{"missing-message", "update messages set id='other-message'", "synthetic-tenant/synthetic-user", "image_message_unknown", 1, false},
 		{"optional-query", "", "synthetic-tenant/synthetic-user", "image_acquisition_failed", 2, true},
 		{"disabled", "update meta set value='0' where key='workiq_enabled'", "synthetic-tenant/synthetic-user", "workiq_disabled", 2, false},
 		{"optional-accounts-query", "drop table accounts", "synthetic-tenant/synthetic-user", "image_acquisition_failed", 2, false},
@@ -138,7 +139,7 @@ func TestFetchChatImageInspectionAndOpenFailure(t *testing.T) {
 }
 
 func TestFetchChatImageNativeRefusalsPreserveArchive(t *testing.T) {
-	for _, mode := range []string{"wrong-user", "invalid-address", "wrong-tenant", "wrong-chat", "channel", "unknown-kind",
+	for _, mode := range []string{"wrong-user", "invalid-address", "wrong-tenant", "wrong-chat", "channel", "unknown-kind", "malformed-chat",
 		"deleted", "unsafe-reference", "changed-reference", "changed-clock", "lost-clock", "deleted-after-blob",
 		"invalid-bytes", "wrong-format", "blob-failure"} {
 		t.Run(mode, func(t *testing.T) {
@@ -207,6 +208,30 @@ func TestImageOutcomeNormalizesAdmissionAndUncertainty(t *testing.T) {
 		report, err := FetchWorkIQChatImage(context.Background(), options)
 		if err == nil || report.Code != "image_output_uncertain" || report.Status != "failed" {
 			t.Fatal("successful publisher without positive publication proof was accepted", report, err)
+		}
+	})
+	t.Run("published-output-with-uncertain-final-verification", func(t *testing.T) {
+		options := workIQImageFixture(t, "good")
+		oldPublish, oldAbort := imagePublish, imageAbort
+		t.Cleanup(func() { imagePublish, imageAbort = oldPublish, oldAbort })
+		sentinel := errors.New("synthetic post-publication failure")
+		imagePublish = func(reservation *imageexport.Reservation, ctx context.Context, data []byte) (imageexport.Effect, error) {
+			effect, err := oldPublish(reservation, ctx, data)
+			return effect, errors.Join(err, sentinel)
+		}
+		imageAbort = func(reservation *imageexport.Reservation) (imageexport.Effect, error) {
+			effect, err := oldAbort(reservation)
+			effect.OutputVerified = nil
+			return effect, err
+		}
+		report, err := FetchWorkIQChatImage(context.Background(), options)
+		if !errors.Is(err, sentinel) || report.Code != "image_output_uncertain" || report.Status != "failed" ||
+			report.Effect.FilePublished == nil || !*report.Effect.FilePublished || report.Effect.OutputVerified != nil {
+			t.Fatal("uncertain final verification lost actual publication or became success", report, err)
+		}
+		if data, err := os.ReadFile(options.Output); err != nil || len(data) < 8 ||
+			string(data[:8]) != "\x89PNG\r\n\x1a\n" {
+			t.Fatal("uncertain final verification removed the published PNG", err)
 		}
 	})
 }

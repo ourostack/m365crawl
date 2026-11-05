@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/ourostack/m365crawl/internal/errs"
@@ -27,6 +28,7 @@ func TestImageReserveFilesystemFailureEffects(t *testing.T) {
 		{"root", "image_output_open_failed"},
 		{"parent-open", "image_output_open_failed"},
 		{"parent-stat", "image_output_changed"},
+		{"parent-privacy", "image_output_unprotected"},
 		{"temporary-open", "image_output_reserve_failed"},
 		{"temporary-stat", "image_output_changed"},
 		{"temporary-privacy", "image_output_unprotected"},
@@ -50,6 +52,17 @@ func TestImageReserveFilesystemFailureEffects(t *testing.T) {
 					file, err := root.Open(name)
 					if err == nil {
 						err = file.Close()
+					}
+					return file, err
+				}
+			case "parent-privacy":
+				if runtime.GOOS == "windows" {
+					t.Skip("Unix permission-bit race; Windows private-parent ACL policy has native fileprivacy tests")
+				}
+				imageOpen = func(root *os.Root, name string) (*os.File, error) {
+					file, err := root.Open(name)
+					if err == nil {
+						err = file.Chmod(0o777)
 					}
 					return file, err
 				}
@@ -103,7 +116,7 @@ func TestImageReserveFilesystemFailureEffects(t *testing.T) {
 }
 
 func TestImagePublishVerificationFailuresRetainTruthfulEffects(t *testing.T) {
-	for _, phase := range []string{"privacy", "locator", "destination-stat", "destination-replaced"} {
+	for _, phase := range []string{"privacy", "prepublish-recheck", "locator", "destination-stat", "destination-replaced"} {
 		t.Run(phase, func(t *testing.T) {
 			imageRestoreIO(t)
 			dir := imagePrivateParent(t)
@@ -126,6 +139,13 @@ func TestImagePublishVerificationFailuresRetainTruthfulEffects(t *testing.T) {
 			case "locator":
 				imageLstat = func(name string) (os.FileInfo, error) {
 					if name == path {
+						return nil, os.ErrNotExist
+					}
+					return os.Lstat(name)
+				}
+			case "prepublish-recheck":
+				imageLstat = func(name string) (os.FileInfo, error) {
+					if name == dir && reservation.file == nil {
 						return nil, os.ErrNotExist
 					}
 					return os.Lstat(name)
@@ -154,7 +174,7 @@ func TestImagePublishVerificationFailuresRetainTruthfulEffects(t *testing.T) {
 				t.Fatal("failed verification claimed successful verified output", effect, err)
 			}
 			switch phase {
-			case "privacy":
+			case "privacy", "prepublish-recheck":
 				if effect.FilePublished == nil || *effect.FilePublished {
 					t.Fatal("unsafe temporary reached publication", effect)
 				}

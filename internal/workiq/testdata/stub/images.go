@@ -38,6 +38,8 @@ func imageFetch(path string) (any, int, bool) {
 			kind = "channel"
 		case "unknown-kind":
 			kind = ""
+		case "malformed-chat":
+			id = ""
 		}
 		return map[string]any{"id": id, "tenantId": tenant, "chatType": kind}, 200, true
 	case "/chats/chat/messages/image-message":
