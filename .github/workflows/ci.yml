@@ -35,47 +35,30 @@ env:
   M365CRAWL_REAL_CACHE: "0"
 
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      matrix: ${{ steps.select.outputs.matrix }}
-    steps:
-      - id: select
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          PROBE_GROUP: ${{ inputs.group }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re
-          source = os.environ["SOURCE_SHA"]
-          group = os.environ["PROBE_GROUP"]
-          allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "inventory-complete", "transport", "png",
-                     "publisher", "orchestration", "coverage", "media-goldens"}
-          if not re.fullmatch(r"[0-9a-f]{40}", source) or group not in allowed:
-              raise SystemExit("invalid source or diagnostic group")
-          runners = ["ubuntu-latest"]
-          if group == "inventory-complete":
-              runners = ["macos-latest"]
-          if group == "publisher":
-              runners += ["macos-latest", "windows-latest"]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write("matrix=" + json.dumps({"os": runners}) + "\n")
-          print(json.dumps({"requested_source": source, "group": group, "runners": runners}))
-          PY
-
   probe:
-    needs: plan
     strategy:
       fail-fast: false
       max-parallel: 2
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix:
+        os: ${{ fromJSON(inputs.group == 'publisher' && '["ubuntu-latest","macos-latest","windows-latest"]' || inputs.group == 'inventory-complete' && '["macos-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     defaults:
       run:
         shell: bash
     steps:
+      - name: Validate exact source and fixed diagnostic group
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PROBE_GROUP: ${{ inputs.group }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          allowed = {"inventory-entrypoint", "inventory-cli", "inventory", "inventory-complete", "transport", "png",
+                     "publisher", "orchestration", "coverage", "media-goldens"}
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"]) or os.environ["PROBE_GROUP"] not in allowed:
+              raise SystemExit("invalid source or diagnostic group")
+          PY
       - name: Checkout exact product
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
