@@ -11,10 +11,10 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request replaces its older run. Runs for main and for the merge queue are
-# never cancelled: each merge-queue entry has its own ref, and every commit on main gets checked.
+# A newer push to a pull request cancels its older run. Runs not triggered by a pull request each
+# get their own group, so they are never cancelled.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
