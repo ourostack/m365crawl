@@ -15,6 +15,8 @@
 
 Find the conversation. Recover the context. Walk into the meeting prepared.
 
+[Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
+
 `m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**, plus inspectable **native Outlook people observations**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
 **Stable 1.x release.** The supported commands and machine-readable contracts are stable within 1.x; incompatible public changes require a new major version. [Compatibility and archive migration](SPEC.md#10-versioning-and-compatibility) define that promise. Stable does not mean complete Microsoft 365 coverage or identical native sources on every platform; the [source limits](#limits) still apply.
