@@ -4,18 +4,18 @@
 </p>
 <!-- ourostack:brand:end -->
 
-# m365crawl — Your Microsoft 365 work, ready for your agents
+# m365crawl
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
+**Your Microsoft 365 work, ready for your agents.** Find the conversation. Recover the context. Walk into the meeting prepared.
+
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?style=flat-square)](https://github.com/ourostack/m365crawl/releases/latest)
-[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/m365crawl/releases)
-[![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
-[![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
-
-Find the conversation. Recover the context. Walk into the meeting prepared.
 
 [Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
+
+```sh
+brew install ourostack/tap/m365crawl   # macOS; Windows and setup in Install
+```
 
 `m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote notes** (from OneNote's search index), plus **the people you work with**, as Outlook records them. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
@@ -162,6 +162,11 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 m365crawl copies each app's cache to a private temporary location, decodes the copy with a built-in reader (LevelDB, IndexedDB and V8 for Teams and for Outlook's OWA cache on Windows; the `HxStore.hxd` block store for Outlook on Mac), and writes typed rows with full-text indexes into SQLite. Anything whose name looks like sign-in credentials is counted and never opened, and every copy is removed on every exit path. [`docs/how-it-works.md`](docs/how-it-works.md) has the details.
 
 ## Development
+
+[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
+[![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
+[![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
 ```sh
 make build      # bin/m365crawl
