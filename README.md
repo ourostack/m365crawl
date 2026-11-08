@@ -81,17 +81,17 @@ For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh 
 | Inspect one cached Loop channel and its snapshot version | `m365crawl loop show loop-channel:ID` · `m365crawl loop sources` |
 | What did my Scout agent do today? | Opt in with `m365crawl scout sync`, then `m365crawl scout list --since 24h`, `scout search "words"` and `scout show scout-session:ID`; [private, never downloads cloud-only files](docs/scout.md) |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
-| Read a Teams draft you started (experimental) | `m365crawl drafts list` · `m365crawl drafts show teams-draft:HASH`; a cached copy, which may differ from what is in the editor now ([details](docs/commands.md#drafts)) |
+| Read a Teams channel draft you started (experimental) | `m365crawl drafts list` · `m365crawl drafts show teams-draft:HASH`; a cached copy, which may differ from what is in the editor now ([details](docs/commands.md#drafts)) |
 
 ## What it covers
 
 | Source | How it arrives | Details |
 | --- | --- | --- |
 | Teams chats, channels, activity, unread state and mentions | `sync`, from the new Teams app's cache | [Usage guide: Teams](docs/guide.md#teams) |
-| Your own Teams drafts (experimental) | `drafts list/show`, over what ordinary `sync` already captured; not in shared `search` | Tested on one Mac case so far, not on Windows ([Drafts](docs/commands.md#drafts)) |
+| Your own Teams drafts (experimental) | `drafts list/show`, over what ordinary `sync` already captured; not in shared `search` | Tested on one Mac channel (team) draft; current chat drafts and Windows not yet ([Drafts](docs/commands.md#drafts)) |
 | Outlook mail | `sync`, from new Outlook's cache on Mac and Windows | [Usage guide: Outlook mail](docs/guide.md#outlook-mail) |
 | Calendar, recaps and action items | `sync`, from Teams and the new Outlook for Mac | [Usage guide: Calendar](docs/guide.md#calendar) |
-| Who attended a meeting, from Outlook (Mac) | Explicit discovery of new Outlook for Mac's local store, or a supported copied profile. Reading the archive works anywhere; capture from Windows or Outlook on the web is not tested. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
+| A meeting's attendee list, from Outlook (Mac) | Explicit discovery of new Outlook for Mac's local store, or a supported copied profile. Reading the archive works anywhere; capture from Windows or Outlook on the web is not tested. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
 | OneNote indexed notes, Office document metadata, cached Loop channels, native people observations | Their own explicit `notes`, `docs`, `loop` and `people sync` | [Notes, documents, people and Loop](docs/local-sources.md) |
 | Microsoft Scout session history (opt-in) | Explicit `scout sync`, from session files already in your local OneDrive folder on macOS and Windows (Linux: `--root`); never downloads a cloud-only file. | [Scout session history](docs/scout.md) |
 | Meeting transcript text | Explicit `transcripts fetch`, through the tool-owned browser | [Commands: transcripts](docs/commands.md#transcripts) |
