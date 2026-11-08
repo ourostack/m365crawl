@@ -61,22 +61,6 @@ Then hand it to your agent. `m365crawl skill` prints a compact, version-matched 
 
 For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. (`--max-age 0` still turns the sync off, but it does not mean fresh; `--no-sync` says what it does.) An explicit transcript fetch is a separate action, never a side effect of search. To try every command on synthetic data first, follow the [usage guide](docs/guide.md#try-it-on-synthetic-data).
 
-## Optional WorkIQ source
-
-The [optional-source contract](SPEC.md#planned-optional-workiq-source) adds explicit server reads through your separately installed and signed-in [WorkIQ CLI](https://github.com/microsoft/work-iq). It is disabled by default; ordinary reads, plain `sync` and `watch` never launch it. When a mail read asks for a range older than the Outlook cache, its JSON `workiq_routes` lists the commands below, so an agent can enable WorkIQ and sync on its own. Only installing WorkIQ, signing in and accepting its EULA need a person, once; m365crawl never does them.
-
-```sh
-m365crawl workiq enable
-m365crawl --account outlook/Main workiq sync --source mail
-m365crawl workiq coverage --source chats --since 365d --max-chats 200
-m365crawl workiq status
-m365crawl workiq disable
-```
-
-Replace `outlook/Main` with an existing profile from your archive. Stored address mismatches and several content mailboxes per profile are refused, without an override. Mail sync traverses all visible folders and needs room for the whole mailbox (about 35 GB per 100,000 items), refusing with `workiq_disk_space` when the archive's disk is too small. To fetch only a date range, add `--since` and optionally `--until` to mail sync (`m365crawl --account outlook/Main workiq sync --source mail --since 2026-09-01 --until 2026-09-08`): it fetches mail received in that range and, when it can follow every folder's changes, proves the range complete, which ends a read's route for it. Its result's `window` says whether the range was proven. Coverage prints folder totals, not a time-windowed mailbox count. Chat selection uses archived activity, and unqualified message-ID classes are counted with gaps rather than inserted as duplicate messages. Synthetic tests do not establish native WorkIQ/Windows or service qualification. See [command output and limits](docs/commands.md#workiq).
-
-Archived messages, conversations and mail name their `provenance`: `desktop_cache`, `workiq_server` or `both`. Disabling WorkIQ preserves those rows and their stable IDs. Server success does not claim that a failing Outlook reader recovered. The new download-URL/temporary-authentication scrub rules also apply to desktop records, causing one full reread under the new signature.
-
 ## What your agent can do with it
 
 | Ask | Command |
@@ -97,17 +81,17 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 | Inspect one cached Loop channel and its snapshot version | `m365crawl loop show loop-channel:ID` · `m365crawl loop sources` |
 | What did my Scout agent do today? | Opt in with `m365crawl scout sync`, then `m365crawl scout list --since 24h`, `scout search "words"` and `scout show scout-session:ID`; [private, never downloads cloud-only files](docs/scout.md) |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
-| Review a retained own Teams compose body | `m365crawl drafts list`, then its guarded `full_inspection` in the declared `full_inspection_shell` (Windows: PowerShell7.3+, not CMD), or `drafts show teams-draft:HASH`; [cached projection, not current-unsent/editor truth](docs/commands.md#drafts) |
+| Read a Teams draft you started (experimental) | `m365crawl drafts list` · `m365crawl drafts show teams-draft:HASH`; a cached copy, which may differ from what is in the editor now ([details](docs/commands.md#drafts)) |
 
 ## What it covers
 
 | Source | How it arrives | Details |
 | --- | --- | --- |
 | Teams chats, channels, activity, unread state and mentions | `sync`, from the new Teams app's cache | [Usage guide: Teams](docs/guide.md#teams) |
-| Narrow own Teams cached regular-compose bodies | Archive-only `drafts list/show` over generic records already captured by ordinary sync; no new acquisition or shared-search inclusion | One fresh Mac Space/team-side body qualified; historical removed Chat shapes only, not current chat/UI/lifecycle or native Windows qualification |
+| Your own Teams drafts (experimental) | `drafts list/show`, over what ordinary `sync` already captured; not in shared `search` | Tested on one Mac case so far, not on Windows ([Drafts](docs/commands.md#drafts)) |
 | Outlook mail | `sync`, from new Outlook's cache on Mac and Windows | [Usage guide: Outlook mail](docs/guide.md#outlook-mail) |
 | Calendar, recaps and action items | `sync`, from Teams and the new Outlook for Mac | [Usage guide: Calendar](docs/guide.md#calendar) |
-| Native meeting attendee evidence | Explicit Mac HxStore discovery or supported copied profiles; registered lanes reuse an ordinary Outlook copy. Offline archive reads are portable, not native Windows/OWA qualification. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
+| Who attended a meeting, from Outlook (Mac) | Explicit discovery of new Outlook for Mac's local store, or a supported copied profile. Reading the archive works anywhere; capture from Windows or Outlook on the web is not tested. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
 | OneNote indexed notes, Office document metadata, cached Loop channels, native people observations | Their own explicit `notes`, `docs`, `loop` and `people sync` | [Notes, documents, people and Loop](docs/local-sources.md) |
 | Microsoft Scout session history (opt-in) | Explicit `scout sync`, from session files already in your local OneDrive folder on macOS and Windows (Linux: `--root`); never downloads a cloud-only file. | [Scout session history](docs/scout.md) |
 | Meeting transcript text | Explicit `transcripts fetch`, through the tool-owned browser | [Commands: transcripts](docs/commands.md#transcripts) |
@@ -118,6 +102,20 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 - **Query locally.** Search and recall read SQLite, with full-text search or plain SQL, instead of making a service request for each question. Explicit transcript fetch and sign-in use the tool-owned browser; desktop-app and browser access can still be governed by your organization's policies.
 - **Read-only unless you turn writes on.** By default it cannot send, reply, react, move or mark messages read. If you run `m365crawl writes on` yourself, agents you direct can send Teams chat messages and reactions, send, reply to and reply-all to mail, and save, update or discard drafts as you through WorkIQ, each recorded with the agent and its reason; see [docs/commands.md](docs/commands.md#writes). Sync writes its own archive and private working files, never the source apps.
 - **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
+
+## Optional WorkIQ source
+
+The [optional-source contract](SPEC.md#planned-optional-workiq-source) adds explicit server reads through your separately installed and signed-in [WorkIQ CLI](https://github.com/microsoft/work-iq). It is disabled by default; ordinary reads, plain `sync` and `watch` never launch it. When a mail read asks for a range older than the Outlook cache, its JSON `workiq_routes` lists the commands below, so an agent can enable WorkIQ and sync on its own. Only installing WorkIQ, signing in and accepting its EULA need a person, once; m365crawl never does them.
+
+```sh
+m365crawl workiq enable
+m365crawl --account outlook/Main workiq sync --source mail
+m365crawl workiq coverage --source chats --since 365d --max-chats 200
+m365crawl workiq status
+m365crawl workiq disable
+```
+
+Replace `outlook/Main` with a profile from your archive. Mail sync needs room for the whole mailbox (about 35 GB per 100,000 items) unless you fetch a date range with `--since` and `--until`; reads then say where each item came from (`provenance`). The rules, errors and limits are in [WorkIQ commands](docs/commands.md#workiq).
 
 ## Scope and requesting support
 
