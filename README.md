@@ -17,11 +17,9 @@ Find the conversation. Recover the context. Walk into the meeting prepared.
 
 [Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
 
-`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**, plus inspectable **native Outlook people observations**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
+`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote notes**, plus **the people you work with**, as Outlook records them. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
-**Stable 1.x release.** The supported commands and machine-readable contracts are stable within 1.x; incompatible public changes require a new major version. [Compatibility and archive migration](SPEC.md#10-versioning-and-compatibility) define that promise. Stable does not mean complete Microsoft 365 coverage or identical native sources on every platform; the [source limits](#limits) still apply.
-
-**Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
+**Status:** stable 1.x: commands and JSON contracts hold within 1.x ([the promise](SPEC.md#10-versioning-and-compatibility)); coverage still has [limits](#limits).
 
 <p align="center"><img src="screenshot.png" alt="m365crawl doctor with every check green and a snapshot of the archive: Teams chats, channels, meetings and messages, Outlook mail, and the calendar" width="801"></p>
 
@@ -40,6 +38,8 @@ Published macOS binaries are always Developer ID signed and notarized by Apple. 
 Windows: download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`. No extra permission step is needed.
 
 [`docs/install.md`](docs/install.md) covers the macOS tarballs, building from source (Go 1.27.3 or newer), verifying a download, upgrading and removing m365crawl. crawlkit's `crawlctl discover --app m365crawl` finds it.
+
+**Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
 
 ## Quick start
 
