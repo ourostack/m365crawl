@@ -4,24 +4,22 @@
 </p>
 <!-- ourostack:brand:end -->
 
-# m365crawl — Your Microsoft 365 work, ready for your agents
+# m365crawl
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
+**Your Microsoft 365 work, ready for your agents.** Find the conversation. Recover the context. Walk into the meeting prepared.
+
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?style=flat-square)](https://github.com/ourostack/m365crawl/releases/latest)
-[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/m365crawl/releases)
-[![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
-[![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
-
-Find the conversation. Recover the context. Walk into the meeting prepared.
 
 [Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
 
-`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote indexed notes**, plus inspectable **native Outlook people observations**. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
+```sh
+brew install ourostack/tap/m365crawl   # macOS; Windows and setup in Install
+```
 
-**Stable 1.x release.** The supported commands and machine-readable contracts are stable within 1.x; incompatible public changes require a new major version. [Compatibility and archive migration](SPEC.md#10-versioning-and-compatibility) define that promise. Stable does not mean complete Microsoft 365 coverage or identical native sources on every platform; the [source limits](#limits) still apply.
+`m365crawl` gives your agent one local, searchable archive of **Teams chats and channels**, **Outlook mail**, **meetings with their recaps and action items**, and **OneNote notes** (from OneNote's search index), plus **the people you work with**, as Outlook records them. It captures what your signed-in desktop apps already cached, preserves history you synced, and returns focused results with IDs, links and coverage notes. Your agent can follow the work without opening every app or loading whole conversations into its context.
 
-**Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
+**Status:** stable 1.x: commands and JSON contracts hold within 1.x ([the promise](SPEC.md#10-versioning-and-compatibility)); coverage still has [limits](#limits).
 
 <p align="center"><img src="screenshot.png" alt="m365crawl doctor with every check green and a snapshot of the archive: Teams chats, channels, meetings and messages, Outlook mail, and the calendar" width="801"></p>
 
@@ -40,6 +38,8 @@ Published macOS binaries are always Developer ID signed and notarized by Apple. 
 Windows: download `m365crawl_<version>_windows_amd64.zip` or `m365crawl_<version>_windows_arm64.zip` from [GitHub Releases](https://github.com/ourostack/m365crawl/releases), unzip it under your user profile and run `m365crawl.exe`. Windows assets are intentionally unsigned; verify them with `checksums.txt` and `m365crawl.exe --json version`. No extra permission step is needed.
 
 [`docs/install.md`](docs/install.md) covers the macOS tarballs, building from source (Go 1.27.3 or newer), verifying a download, upgrading and removing m365crawl. crawlkit's `crawlctl discover --app m365crawl` finds it.
+
+**Local reads. Explicit fetches. No writes to your apps.** Normal queries read the archive offline. Desktop capture does not extract app credentials or change Teams or Outlook storage. Meeting transcript text is fetched only when requested, through a browser with m365crawl's own profile; subsequent reads use the archived text. This is an archive of available data, not a complete export of your Microsoft 365 account.
 
 ## Quick start
 
@@ -61,22 +61,6 @@ Then hand it to your agent. `m365crawl skill` prints a compact, version-matched 
 
 For an offline-only read, use `--no-sync`: ordinary reads can otherwise refresh the local desktop caches when the archive is stale. (`--max-age 0` still turns the sync off, but it does not mean fresh; `--no-sync` says what it does.) An explicit transcript fetch is a separate action, never a side effect of search. To try every command on synthetic data first, follow the [usage guide](docs/guide.md#try-it-on-synthetic-data).
 
-## Optional WorkIQ source
-
-The [optional-source contract](SPEC.md#planned-optional-workiq-source) adds explicit server reads through your separately installed and signed-in [WorkIQ CLI](https://github.com/microsoft/work-iq). It is disabled by default; ordinary reads, plain `sync` and `watch` never launch it. When a mail read asks for a range older than the Outlook cache, its JSON `workiq_routes` lists the commands below, so an agent can enable WorkIQ and sync on its own. Only installing WorkIQ, signing in and accepting its EULA need a person, once; m365crawl never does them.
-
-```sh
-m365crawl workiq enable
-m365crawl --account outlook/Main workiq sync --source mail
-m365crawl workiq coverage --source chats --since 365d --max-chats 200
-m365crawl workiq status
-m365crawl workiq disable
-```
-
-Replace `outlook/Main` with an existing profile from your archive. Stored address mismatches and several content mailboxes per profile are refused, without an override. Mail sync traverses all visible folders and needs room for the whole mailbox (about 35 GB per 100,000 items), refusing with `workiq_disk_space` when the archive's disk is too small. To fetch only a date range, add `--since` and optionally `--until` to mail sync (`m365crawl --account outlook/Main workiq sync --source mail --since 2026-09-01 --until 2026-09-08`): it fetches mail received in that range and, when it can follow every folder's changes, proves the range complete, which ends a read's route for it. Its result's `window` says whether the range was proven. Coverage prints folder totals, not a time-windowed mailbox count. Chat selection uses archived activity, and unqualified message-ID classes are counted with gaps rather than inserted as duplicate messages. Synthetic tests do not establish native WorkIQ/Windows or service qualification. See [command output and limits](docs/commands.md#workiq).
-
-Archived messages, conversations and mail name their `provenance`: `desktop_cache`, `workiq_server` or `both`. Disabling WorkIQ preserves those rows and their stable IDs. Server success does not claim that a failing Outlook reader recovered. The new download-URL/temporary-authentication scrub rules also apply to desktop records, causing one full reread under the new signature.
-
 ## What your agent can do with it
 
 | Ask | Command |
@@ -97,17 +81,17 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 | Inspect one cached Loop channel and its snapshot version | `m365crawl loop show loop-channel:ID` · `m365crawl loop sources` |
 | What did my Scout agent do today? | Opt in with `m365crawl scout sync`, then `m365crawl scout list --since 24h`, `scout search "words"` and `scout show scout-session:ID`; [private, never downloads cloud-only files](docs/scout.md) |
 | Inspect the people evidence behind a name | `m365crawl people sync` once · `m365crawl people --query "name or address"` · `m365crawl people show person-observation:ID` |
-| Review a retained own Teams compose body | `m365crawl drafts list`, then its guarded `full_inspection` in the declared `full_inspection_shell` (Windows: PowerShell7.3+, not CMD), or `drafts show teams-draft:HASH`; [cached projection, not current-unsent/editor truth](docs/commands.md#drafts) |
+| Read a Teams channel draft you started (experimental) | `m365crawl drafts list` · `m365crawl drafts show teams-draft:HASH`; a cached copy, which may differ from what is in the editor now ([details](docs/commands.md#drafts)) |
 
 ## What it covers
 
 | Source | How it arrives | Details |
 | --- | --- | --- |
 | Teams chats, channels, activity, unread state and mentions | `sync`, from the new Teams app's cache | [Usage guide: Teams](docs/guide.md#teams) |
-| Narrow own Teams cached regular-compose bodies | Archive-only `drafts list/show` over generic records already captured by ordinary sync; no new acquisition or shared-search inclusion | One fresh Mac Space/team-side body qualified; historical removed Chat shapes only, not current chat/UI/lifecycle or native Windows qualification |
+| Your own Teams drafts (experimental) | `drafts list/show`, over what ordinary `sync` already captured; not in shared `search` | Tested on one Mac channel (team) draft; current chat drafts and Windows not yet ([Drafts](docs/commands.md#drafts)) |
 | Outlook mail | `sync`, from new Outlook's cache on Mac and Windows | [Usage guide: Outlook mail](docs/guide.md#outlook-mail) |
 | Calendar, recaps and action items | `sync`, from Teams and the new Outlook for Mac | [Usage guide: Calendar](docs/guide.md#calendar) |
-| Native meeting attendee evidence | Explicit Mac HxStore discovery or supported copied profiles; registered lanes reuse an ordinary Outlook copy. Offline archive reads are portable, not native Windows/OWA qualification. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
+| A meeting's attendee list, from Outlook (Mac) | Explicit discovery of new Outlook for Mac's local store, or a supported copied profile. Reading the archive works anywhere; capture from Windows or Outlook on the web is not tested. | [Scope and workflow](docs/local-sources.md#native-meeting-attendee-evidence) |
 | OneNote indexed notes, Office document metadata, cached Loop channels, native people observations | Their own explicit `notes`, `docs`, `loop` and `people sync` | [Notes, documents, people and Loop](docs/local-sources.md) |
 | Microsoft Scout session history (opt-in) | Explicit `scout sync`, from session files already in your local OneDrive folder on macOS and Windows (Linux: `--root`); never downloads a cloud-only file. | [Scout session history](docs/scout.md) |
 | Meeting transcript text | Explicit `transcripts fetch`, through the tool-owned browser | [Commands: transcripts](docs/commands.md#transcripts) |
@@ -118,6 +102,20 @@ Archived messages, conversations and mail name their `provenance`: `desktop_cach
 - **Query locally.** Search and recall read SQLite, with full-text search or plain SQL, instead of making a service request for each question. Explicit transcript fetch and sign-in use the tool-owned browser; desktop-app and browser access can still be governed by your organization's policies.
 - **Read-only unless you turn writes on.** By default it cannot send, reply, react, move or mark messages read. If you run `m365crawl writes on` yourself, agents you direct can send Teams chat messages and reactions, send, reply to and reply-all to mail, and save, update or discard drafts as you through WorkIQ, each recorded with the agent and its reason; see [docs/commands.md](docs/commands.md#writes). Sync writes its own archive and private working files, never the source apps.
 - **Keeps what the apps evict.** Teams and Outlook trim their caches as they run. The archive keeps history as long as you sync regularly, and marks mail that aged out of Outlook's cache as `evicted` instead of pretending it was deleted.
+
+## Optional WorkIQ source
+
+The [optional-source contract](SPEC.md#planned-optional-workiq-source) adds explicit server reads through your separately installed and signed-in [WorkIQ CLI](https://github.com/microsoft/work-iq). It is disabled by default; ordinary reads, plain `sync` and `watch` never launch it. When a mail read asks for a range older than the Outlook cache, its JSON `workiq_routes` lists the commands below, so an agent can enable WorkIQ and sync on its own. Only installing WorkIQ, signing in and accepting its EULA need a person, once; m365crawl never does them.
+
+```sh
+m365crawl workiq enable
+m365crawl --account outlook/Main workiq sync --source mail
+m365crawl workiq coverage --source chats --since 365d --max-chats 200
+m365crawl workiq status
+m365crawl workiq disable
+```
+
+Replace `outlook/Main` with a profile from your archive. Mail sync needs room for the whole mailbox (about 35 GB per 100,000 items) unless you fetch a date range with `--since` and `--until`; reads then say where each item came from (`provenance`). The rules, errors and limits are in [WorkIQ commands](docs/commands.md#workiq).
 
 ## Scope and requesting support
 
@@ -164,6 +162,11 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 m365crawl copies each app's cache to a private temporary location, decodes the copy with a built-in reader (LevelDB, IndexedDB and V8 for Teams and for Outlook's OWA cache on Windows; the `HxStore.hxd` block store for Outlook on Mac), and writes typed rows with full-text indexes into SQLite. Anything whose name looks like sign-in credentials is counted and never opened, and every copy is removed on every exit path. [`docs/how-it-works.md`](docs/how-it-works.md) has the details.
 
 ## Development
+
+[![CI](https://img.shields.io/github/actions/workflow/status/ourostack/m365crawl/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/ourostack/m365crawl/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/ourostack/m365crawl?style=flat-square)](https://go.dev/)
+[![License](https://img.shields.io/github/license/ourostack/m365crawl?style=flat-square)](LICENSE)
+[![Homebrew](https://img.shields.io/badge/homebrew-ourostack%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ourostack/homebrew-tap)
 
 ```sh
 make build      # bin/m365crawl
