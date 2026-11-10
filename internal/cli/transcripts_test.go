@@ -61,6 +61,9 @@ func trEventID() string { return store.EventID(trAccount, calendar.Key(trEvent()
 //   - call-4 (ad hoc, Nov 12): one part, not fetched.
 func seedTranscripts(t *testing.T, e *env) {
 	t.Helper()
+	// The archive was last synced and fetched at trFetchedAt; read it then, not at the wall clock,
+	// so the archive's age, its staleness notice and which call is latest never drift (#341).
+	fixClock(t, trFetchedAt)
 	ctx := context.Background()
 	e.emptyArchive()
 	rec := transcripts.TypeRecording
