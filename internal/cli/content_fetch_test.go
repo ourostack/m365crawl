@@ -292,7 +292,7 @@ func TestContentStreamSelectionCandidates(t *testing.T) {
 			t.Fatalf("candidate has no exact selecting fetch: %q", next)
 		}
 	}
-	if !strings.Contains(second["next"].(string), "'second id'") {
+	if !strings.Contains(second["next"].(string), quoteArg("second id")) {
 		t.Fatalf("candidate ID not shell-quoted: %q", second["next"])
 	}
 	if code, out, stderr := e.run("--format", "text", "content", "fetch", "stream", target); code != 0 || !strings.Contains(out, "second id") {

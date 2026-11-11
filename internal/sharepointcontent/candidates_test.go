@@ -50,6 +50,11 @@ func TestTranscriptSelectionCandidates(t *testing.T) {
 	for i := range many {
 		many[i] = TranscriptCandidate{ID: fmt.Sprint("t", i)}
 	}
+	limit := strings.Repeat("x", 256<<10)
+	heavy := make([]TranscriptCandidate, 40)
+	for i := range heavy {
+		heavy[i] = TranscriptCandidate{ID: fmt.Sprint("h", i), DisplayName: &limit}
+	}
 	nul := "bad\x00label"
 	large := strings.Repeat("x", 262145)
 	for name, test := range map[string]struct {
@@ -63,6 +68,7 @@ func TestTranscriptSelectionCandidates(t *testing.T) {
 		"empty id":      {makeRaw("transcript_selection_required", TranscriptCandidate{ID: "a"}, TranscriptCandidate{}), "malformed"},
 		"nul":           {makeRaw("transcript_selection_required", TranscriptCandidate{ID: "a", DisplayName: &nul}, TranscriptCandidate{ID: "b"}), "malformed"},
 		"invalid utf-8": {makeRaw("transcript_selection_required", TranscriptCandidate{ID: "a\xff"}, TranscriptCandidate{ID: "b"}), "malformed"},
+		"aggregate":     {makeRaw("transcript_selection_required", heavy...), "too_large"},
 		"large":         {makeRaw("transcript_selection_required", TranscriptCandidate{ID: "a", LanguageTag: &large}, TranscriptCandidate{ID: "b"}), "too_large"},
 	} {
 		got, err := fetch(test.raw)
