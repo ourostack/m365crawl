@@ -42,6 +42,16 @@ type CloudFetchReport struct {
 	Losses                map[string]int `json:"losses"`
 	RetainedObservationID *string        `json:"retained_observation_id"`
 	Partial               bool           `json:"partial"`
+	// TranscriptCandidates appears only for transcript_selection_required: each native choice and the exact fetch that selects it.
+	TranscriptCandidates []CloudTranscriptCandidate `json:"transcript_candidates,omitempty"`
+}
+
+type CloudTranscriptCandidate struct {
+	ID          string  `json:"id"`
+	DisplayName *string `json:"display_name"`
+	LanguageTag *string `json:"language_tag"`
+	CreatedRaw  *string `json:"created_raw"`
+	Next        string  `json:"next"`
 }
 
 func (c *contentFetchOptions) run(rt *runtime, kind string, selection *string) error {
@@ -203,6 +213,11 @@ func (rt *runtime) fetchCloud(request sharepointcontent.CanonicalRequest, option
 	report.State, report.Partial = result.State, report.Scope != "selected_transcript"
 	for _, loss := range result.Losses {
 		report.Losses[loss.Code] += loss.Count
+	}
+	for _, candidate := range result.TranscriptCandidates {
+		report.TranscriptCandidates = append(report.TranscriptCandidates, CloudTranscriptCandidate{ID: candidate.ID,
+			DisplayName: candidate.DisplayName, LanguageTag: candidate.LanguageTag, CreatedRaw: candidate.CreatedRaw,
+			Next: rt.contentCommand("fetch", "stream", request.Request.URL, "--transcript-id", candidate.ID)})
 	}
 	return report, nil
 }

@@ -42,6 +42,14 @@ type Result struct {
 	Losses        []Loss
 	PageControls  []PageControl
 	Transcript    *Transcript
+	// TranscriptCandidates lists native transcript choices only when selection is required.
+	TranscriptCandidates []TranscriptCandidate `json:",omitempty"`
+}
+
+// TranscriptCandidate is one native transcript a caller can request by exact ID. Download URLs are never kept.
+type TranscriptCandidate struct {
+	ID                                   string
+	DisplayName, LanguageTag, CreatedRaw *string
 }
 
 type Transcript struct {
@@ -66,11 +74,12 @@ type PageControl struct {
 }
 
 type scriptResult struct {
-	State        string        `json:"state"`
-	HTTPStatus   int           `json:"status"`
-	Account      SourceAccount `json:"account"`
-	File         NativeFile    `json:"file"`
-	Losses       []Loss        `json:"losses"`
-	PageControls []PageControl `json:"pageControls"`
-	Transcript   *Transcript   `json:"transcript"`
+	State        string                `json:"state"`
+	HTTPStatus   int                   `json:"status"`
+	Account      SourceAccount         `json:"account"`
+	File         NativeFile            `json:"file"`
+	Losses       []Loss                `json:"losses"`
+	PageControls []PageControl         `json:"pageControls"`
+	Transcript   *Transcript           `json:"transcript"`
+	Candidates   []TranscriptCandidate `json:"candidates"`
 }

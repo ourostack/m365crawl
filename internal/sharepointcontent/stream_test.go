@@ -3,6 +3,7 @@ package sharepointcontent_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestNativeStreamCollectionAndEntries(t *testing.T) {
 				{entries:[{id:"entry-1",text:"First",startOffset:"00:00:01.125",endOffset:"00:00:02",speakerId:"ignored",speaker:"ignored"},
 					{id:"entry-2",text:"Second",speakerDisplayName:"Native speaker",startOffset:"invalid",endOffset:null}]}];
 			if(kind==="empty")payloads[4].value=[];
-			if(kind==="multiple"||kind==="selected")payloads[4].value.push({id:"second",temporaryDownloadUrl:"https://fixture.sharepoint.com/second"});
+			if(kind==="multiple"||kind==="selected")payloads[4].value.push({id:"second",languageTag:"en-US",displayName:7,temporaryDownloadUrl:"https://fixture.sharepoint.com/second"});
 			if(kind==="duplicate")payloads[4].value.push({...payloads[4].value[0]});
 			if(kind==="next-link")payloads[4]["@odata.nextLink"]="https://fixture.sharepoint.com/more";
 			if(kind==="foreign-download")payloads[4].value[0].temporaryDownloadUrl="https://other.sharepoint.com/download";
@@ -58,6 +59,16 @@ func TestNativeStreamCollectionAndEntries(t *testing.T) {
 	if got[0].Result.Transcript == nil || got[0].Result.Transcript.ID != "first" || len(got[0].Result.Transcript.Entries) != 2 ||
 		got[0].Result.Transcript.Entries[0].SpeakerDisplayName != nil || got[0].Result.Transcript.Entries[1].SpeakerDisplayName == nil {
 		t.Fatalf("native entry/speaker fields changed: %#v", got[0])
+	}
+	english := "en-US"
+	if want := []TranscriptCandidate{{ID: "first"}, {ID: "second", LanguageTag: &english}}; !reflect.DeepEqual(got[2].Result.Candidates, want) || len(got[2].URLs) != 5 {
+		t.Fatalf("selection candidates wrong or a download was attempted: %#v", got[2])
+	}
+	if encoded, _ := json.Marshal(got[2].Result); strings.Contains(string(encoded), "fixture.sharepoint.com/") {
+		t.Fatalf("selection candidates kept a download URL: %s", encoded)
+	}
+	if got[0].Result.Candidates != nil || got[3].Result.Candidates != nil {
+		t.Fatalf("candidates outside selection: %#v", got)
 	}
 	if len(got[0].URLs) != 6 || got[0].URLs[4] != "https://fixture.sharepoint.com/sites/sample/_api/v2.0/drives/drive/items/item/media/transcripts" ||
 		got[3].URLs[5] != "https://fixture.sharepoint.com/second?format=json" || len(got[6].URLs) != 5 {

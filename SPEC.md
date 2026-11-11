@@ -686,7 +686,11 @@ SourceObservedAt is null. Acquisition completion is not native modification.
 Pages always have partial scope, including empty supported projections. Stream
 complete scope `selected_transcript` means one verified selected body with no
 losses, never collection/service completeness. No-transcript and selection-required
-states are verified metadata, not invented transcript objects. Backend limits remain
+states are verified metadata, not invented transcript objects. Selection-required may
+carry 2 to 128 unique native transcript candidates (ID plus nullable display name,
+language tag and creation-time labels, never download URLs); the fetch report shows
+them as `transcript_candidates` with an exact `--transcript-id` next command each.
+Archived selection-required rows without candidates stay valid. Backend limits remain
 eight reads, 2MiB each/8MiB combined, 1MiB selected text, 256KiB retained string,
 4096 controls/65536 DOM nodes/depth128, 128 collection items/16384 entries.
 Write and read validation reuse the backend typed finite contract; corrupt state
