@@ -51,7 +51,9 @@ global clipping, with explicit file retry routes even after a failed first captu
 `m365crawl content fetch page URL` explicitly acquires one supported rich-text
 projection. `content fetch stream URL [--transcript-id ID]` acquires one verified
 selected native transcript, or verified file/account metadata with no selected
-body. Nothing is fetched by ordinary `content list`, `content search WORDS`,
+body. When a file has several transcripts and no `--transcript-id`, the report lists
+`transcript_candidates` (native ID and labels) with an exact selecting `next` command
+per candidate; it never picks one. Nothing is fetched by ordinary `content list`, `content search WORDS`,
 `content show cloud-observation:N`, `content sources` or `search WORDS --source content`,
 regardless of `--max-age`.
 

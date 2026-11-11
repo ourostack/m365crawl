@@ -62,7 +62,7 @@ func ValidateResult(ctx context.Context, request CanonicalRequest, result Result
 	}
 	a, _ := admit(request.Request)
 	raw := scriptResult{State: result.State, HTTPStatus: result.HTTPStatus, Account: result.SourceAccount,
-		File: result.File, PageControls: result.PageControls, Transcript: result.Transcript}
+		File: result.File, PageControls: result.PageControls, Transcript: result.Transcript, Candidates: result.TranscriptCandidates}
 	for _, loss := range result.Losses {
 		if loss.Code != "transcript_offset_unmapped" && loss.Code != "transcript_offset_reversed" {
 			raw.Losses = append(raw.Losses, loss)

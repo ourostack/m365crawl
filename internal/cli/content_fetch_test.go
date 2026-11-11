@@ -259,3 +259,51 @@ func TestContentFetchPublicationFaultDiscards(t *testing.T) {
 		t.Fatal("failed close published")
 	}
 }
+
+func TestContentStreamSelectionCandidates(t *testing.T) {
+	e := cloudCLIEnv(t)
+	closer := installCloudFixture(t, nil)
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(cloudStreamRaw(t, "transcript_selection_required")), &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["candidates"] = []any{map[string]any{"ID": "first", "DisplayName": "Main", "LanguageTag": "en-US"}, map[string]any{"ID": "second id"}}
+	encoded, _ := json.Marshal(raw)
+	openBrowser = func(context.Context, browser.LaunchOptions) (transcripts.PageDriver, io.Closer, error) {
+		return &cloudFixturePage{host: "fixture.sharepoint.com", raw: string(encoded)}, closer, nil
+	}
+	target := "https://fixture.sharepoint.com/sites/sample/_layouts/15/stream.aspx?id=%2Fsites%2Fsample%2FVideos%2FVideo.mp4"
+	code, out, stderr := e.run("content", "fetch", "stream", target)
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	doc := decode(t, out)
+	candidates, _ := doc["transcript_candidates"].([]any)
+	if doc["state"] != "transcript_selection_required" || len(candidates) != 2 {
+		t.Fatalf("selection candidates hidden: %s", out)
+	}
+	first, second := candidates[0].(map[string]any), candidates[1].(map[string]any)
+	if first["id"] != "first" || first["display_name"] != "Main" || first["language_tag"] != "en-US" || second["display_name"] != nil {
+		t.Fatalf("candidate labels changed: %s", out)
+	}
+	for _, candidate := range []map[string]any{first, second} {
+		next, _ := candidate["next"].(string)
+		if !strings.Contains(next, "content fetch stream") || !strings.Contains(next, "--transcript-id") || !strings.Contains(next, "Video.mp4") {
+			t.Fatalf("candidate has no exact selecting fetch: %q", next)
+		}
+	}
+	if !strings.Contains(second["next"].(string), quoteArg("second id")) {
+		t.Fatalf("candidate ID not shell-quoted: %q", second["next"])
+	}
+	if code, out, stderr := e.run("--format", "text", "content", "fetch", "stream", target); code != 0 || !strings.Contains(out, "second id") {
+		t.Fatalf("text report hides candidates: %s %s", out, stderr)
+	}
+	raw = nil
+	if err := json.Unmarshal([]byte(cloudStreamRaw(t, "no_transcript")), &raw); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ = json.Marshal(raw)
+	if code, out, stderr := e.run("content", "fetch", "stream", target); code != 0 || strings.Contains(out, "transcript_candidates") {
+		t.Fatalf("candidates outside selection: %s %s", out, stderr)
+	}
+}

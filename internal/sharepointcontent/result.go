@@ -243,12 +243,53 @@ func decode(ctx context.Context, request admittedRequest, raw scriptResult) (Res
 	} else if raw.Transcript != nil {
 		return Result{}, &ReadError{Code: "malformed"}
 	}
+	var candidates []TranscriptCandidate
+	if raw.Candidates != nil && raw.State != "transcript_selection_required" {
+		return Result{}, &ReadError{Code: "malformed"}
+	}
+	// Observations archived before candidates were kept have none; any list that is kept is complete.
+	if raw.Candidates != nil {
+		if len(raw.Candidates) < 2 || len(raw.Candidates) > 128 {
+			return Result{}, &ReadError{Code: "malformed"}
+		}
+		seen := map[string]bool{}
+		candidates = make([]TranscriptCandidate, 0, len(raw.Candidates))
+		for _, candidate := range raw.Candidates {
+			if candidate.ID == "" || seen[candidate.ID] {
+				return Result{}, &ReadError{Code: "malformed"}
+			}
+			seen[candidate.ID] = true
+			for _, value := range []*string{&candidate.ID, candidate.DisplayName, candidate.LanguageTag, candidate.CreatedRaw} {
+				if value == nil {
+					continue
+				}
+				if len(*value) > 256<<10 {
+					return Result{}, &ReadError{Code: "too_large"}
+				}
+				if !utf8.ValidString(*value) || strings.ContainsRune(*value, 0) {
+					return Result{}, &ReadError{Code: "malformed"}
+				}
+				retained += len(*value)
+				if retained > 8<<20 {
+					return Result{}, &ReadError{Code: "too_large"}
+				}
+			}
+			for _, field := range []**string{&candidate.DisplayName, &candidate.LanguageTag, &candidate.CreatedRaw} {
+				if *field != nil {
+					value := **field
+					*field = &value
+				}
+			}
+			candidates = append(candidates, candidate)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	slices.SortFunc(losses, func(a, b Loss) int { return strings.Compare(a.Code, b.Code) })
 	return Result{Kind: request.Kind, State: raw.State, HTTPStatus: raw.HTTPStatus, SourceAccount: raw.Account,
-		File: raw.File, Partial: len(losses) > 0, Losses: losses, PageControls: controls, Transcript: transcript}, nil
+		File: raw.File, Partial: len(losses) > 0, Losses: losses, PageControls: controls, Transcript: transcript,
+		TranscriptCandidates: candidates}, nil
 }
 
 var safeClock = regexp.MustCompile(`^[0-9]{1,6}:[0-5][0-9]:[0-5][0-9](\.[0-9]{1,7})?$`)

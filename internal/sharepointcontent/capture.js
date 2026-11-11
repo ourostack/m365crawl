@@ -153,7 +153,11 @@ async (args, readerFactory) => {
       let selected;
       if(args.TranscriptID) selected=collection.value.find(transcript=>transcript.id===args.TranscriptID);
       else if(collection.value.length===1) selected=collection.value[0];
-      else return {...result,state:"transcript_selection_required"};
+      else {
+        const label=value=>typeof value==="string"?value:null;
+        return {...result,state:"transcript_selection_required",candidates:collection.value.map(transcript=>({ID:transcript.id,
+          DisplayName:label(transcript.displayName),LanguageTag:label(transcript.languageTag),CreatedRaw:label(transcript.createdDateTime)}))};
+      }
       if(!selected) return {...result,state:"no_transcript"};
       if(!selected.temporaryDownloadUrl) return {...result,state:"metadata_only"};
       let download;

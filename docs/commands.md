@@ -290,7 +290,10 @@ All content reads and `search --source content` stay offline even when max-age
 is nonzero; `content sources` never migrates/captures. Pages are always partial
 supported rich-text projections. Stream complete covers one verified selected
 body, not all variants; metadata-only/no-transcript/selection-required has no
-selected body. Retained bodies keep their own file/account/native selection and
+selected body. Selection-required lists the native `transcript_candidates` (2 to
+128): each has an `id`, nullable native `display_name`/`language_tag`/`created_raw`
+labels and a `next` fetch with that exact `--transcript-id`. Candidates never carry
+download URLs, and fetch never picks one. Retained bodies keep their own file/account/native selection and
 clocks alongside latest metadata/source coverage. `selection_match` is matches,
 differs or unavailable, never a fabricated selected ID.
 

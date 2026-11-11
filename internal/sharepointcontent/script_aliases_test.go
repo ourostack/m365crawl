@@ -18,3 +18,4 @@ type Loss = sharepointcontent.Loss
 type Transcript = sharepointcontent.Transcript
 type TranscriptEntry = sharepointcontent.TranscriptEntry
 type PageControl = sharepointcontent.PageControl
+type TranscriptCandidate = sharepointcontent.TranscriptCandidate
