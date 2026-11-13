@@ -114,6 +114,19 @@ A tool reports `failed` only with proof that nothing happened; otherwise it repo
 
 m365crawl's `writes` commands use these exit numbers (SPEC section "Directed writes through WorkIQ").
 
+## For tool authors
+
+A tool implements this contract only when it gives the case's answer, code included, for every case. A rule never stops applying because a tool has no matching field or check of its own: the tool adds the check, or refuses with the contract's code. A tool never ignores a field it was given. Accepting a request whose field the tool did not check tells the agent a safeguard held when it didn't.
+
+These answer questions a second implementation raised (#349):
+
+- **The writes switch.** `turn_writes_on` and `turn_writes_off` are in the table so that a tool can answer `person_only`, which tells the agent to stop and ask the person (`person_needed`). `unknown_action` is a `request_problem`, which tells the agent to fix its request and try again. A tool with no switch actions of its own still recognizes these two.
+- **Identity on a single-account tool.** `identity` is required for `visible_to_others` actions even when the tool can act only as one account. The agent may be talking to a different tool, or a different signed-in account, from the one it believes, and naming the account is how it finds out before others see the result.
+- **The `contract` field.** Every request names the contract version, so a tool can refuse rules it doesn't implement rather than apply its own rules to a request written for a later version.
+- **What `expected_version` versions.** The target the table's "Version from" column names. A conversation's version changes when a message is added to it; m365crawl uses the id of its newest message (`none` when it has none). A chat message's version changes when its content does, not when it gets a reaction; m365crawl uses its last edit time, else its creation time. A mail message's version is its Exchange change key in m365crawl, and a draft's is a digest of what it says. A tool may use any value that changes when the target does in a way the request depends on. A tool that can't read a target's version refuses a request that names one as `stale_version`, since it can't show the version is current.
+- **Recipients on a Teams write.** A Teams write names a conversation, and `target.recipients` still lists who the agent expects to see it, compared with the conversation's current members. That is the audience check, and a blank recipient is refused.
+- **An audience change before a reaction.** A reaction is seen by everyone in the chat now, so a member added since the agent read the chat makes the reaction visible to someone the agent didn't expect. It is refused like a send: `recipients_changed`.
+
 ## Test cases
 
 Each file in `cases/` holds one case:
