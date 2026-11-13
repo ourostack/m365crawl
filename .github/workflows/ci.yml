@@ -75,32 +75,20 @@ jobs:
   # Each platform runs the unit tests once. Linux runs them with the race detector, split over
   # several runners because the detector makes them several times slower. macOS and Windows run
   # them without it, write a coverage profile, and enforce their coverage gate from that profile.
+  #
+  # A macOS runner waits 20 to 80 minutes for a slot and then works for about 14, so pull requests
+  # skip the macOS leg; the merge queue and pushes to main run it, and nothing reaches main without
+  # it (#335). The macOS leg also runs the macOS end-to-end tests, so a run waits for one macOS
+  # runner, not two. The Unix 100% coverage gate is in that leg: run `make coverage` before a pull
+  # request, or the queue finds the gap.
   test:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: ubuntu-latest race 1/4
-            os: ubuntu-latest
-            shard: 1
-          - name: ubuntu-latest race 2/4
-            os: ubuntu-latest
-            shard: 2
-          - name: ubuntu-latest race 3/4
-            os: ubuntu-latest
-            shard: 3
-          - name: ubuntu-latest race 4/4
-            os: ubuntu-latest
-            shard: 4
-          - name: macos-latest
-            os: macos-latest
-            coverprofile: coverage.out
-          - name: windows-latest
-            os: windows-latest
-            coverprofile: coverage-windows.out
+        include: ${{ fromJSON(format('[{0}{1}]', '{"name":"ubuntu-latest race 1/4","os":"ubuntu-latest","shard":1},{"name":"ubuntu-latest race 2/4","os":"ubuntu-latest","shard":2},{"name":"ubuntu-latest race 3/4","os":"ubuntu-latest","shard":3},{"name":"ubuntu-latest race 4/4","os":"ubuntu-latest","shard":4},{"name":"windows-latest","os":"windows-latest","coverprofile":"coverage-windows.out"}', github.event_name != 'pull_request' && ',{"name":"macos-latest","os":"macos-latest","coverprofile":"coverage.out","e2e":true}' || '')) }}
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.e2e && 25 || 20 }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,15 +148,19 @@ jobs:
             go tool cover -func=${{ matrix.coverprofile }} | tail -n 20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: End-to-end tests
+        if: matrix.e2e
+        env:
+          # macOS runners have Edge: the real-browser test must run there, not skip.
+          M365CRAWL_REQUIRE_BROWSER: "1"
+        run: make e2e
 
+  # The macOS end-to-end tests run in the macOS test leg above.
   e2e:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            e2e-command: make e2e
-            require-browser: "1"
           - os: ubuntu-latest
             e2e-command: make e2e
             require-browser: ""
@@ -190,7 +182,7 @@ jobs:
       - name: End-to-end tests
         shell: bash
         env:
-          # macOS and Windows runners have Edge: the real-browser test must run there, not skip.
+          # Windows runners have Edge: the real-browser test must run there, not skip.
           M365CRAWL_REQUIRE_BROWSER: ${{ matrix.require-browser }}
         run: ${{ matrix.e2e-command }}
 
