@@ -1,11 +1,13 @@
 name: Ouro AX X-ray
 
 # The X-ray checks the CLI from outside, the way an agent calls it, and the action claims check the declarations
-# in actions/. Both reports are uploaded: `xray` and `actions-xray`. Neither ever touches a real account: the CLI runs
+# in actions/. Both reports are uploaded: `xray` and `actions-xray`. The job fails when a must claim in either report
+# does not hold, so a change that breaks one can't merge. Neither ever touches a real account: the CLI runs
 # with an isolated home, no sync and no Teams or Outlook roots.
 
 on:
   pull_request:
+  merge_group:
   push:
     branches:
       - main
@@ -70,11 +72,13 @@ jobs:
             --sample "text=ax-xray probe" --sample "subject=ax-xray probe" --sample "reaction=👍" \
             --commit "$GITHUB_SHA" --json --md xray/xray.md > xray/report.json
           cp "$RUNNER_TEMP/inventory.json" xray/inventory.json
+          node -e "const s = require('./xray/report.json').summary; if (!s) process.exit(1); if (s.mustHolding !== s.must) { console.error('X-ray: ' + s.mustHolding + ' of ' + s.must + ' must claims hold'); process.exit(1); }"
       - name: Action claims
         run: |
           mkdir -p xray-actions
           node tools/ouro-actions/ouro-actions.mts check actions/m365crawl.actions.mts actions/generated \
             --report xray-actions/report.json --app m365crawl --commit "$GITHUB_SHA"
+          node -e "const s = require('./xray-actions/report.json').summary; if (!s) process.exit(1); if (s.mustHolding !== s.must) { console.error('Action claims: ' + s.mustHolding + ' of ' + s.must + ' must claims hold'); process.exit(1); }"
       - name: Upload the X-ray report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
