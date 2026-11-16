@@ -81,6 +81,9 @@ func (rt *runtime) renderText(label string, v any) error {
 	if r, ok := v.(interface{ renderWrites(*runtime) error }); ok {
 		return r.renderWrites(rt)
 	}
+	if r, ok := v.(interface{ renderWait(*runtime) error }); ok {
+		return r.renderWait(rt)
+	}
 	if r, ok := v.(interface{ renderDrafts(*runtime) error }); ok {
 		return r.renderDrafts(rt)
 	}

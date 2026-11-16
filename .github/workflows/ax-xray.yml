@@ -46,9 +46,15 @@ jobs:
           cp -R testdata/teams-fixture "$RUNNER_TEMP/fixture/teams"
           HOME="$RUNNER_TEMP/xray-home" "$RUNNER_TEMP/bin/m365crawl" \
             --teams-root "$RUNNER_TEMP/fixture/teams/EBWebView" --outlook-root none sync --json > "$RUNNER_TEMP/sync.json"
+      - name: Synthetic WorkIQ stub, the mock the writes call
+        run: |
+          mkdir -p "$RUNNER_TEMP/xray-home/bin"
+          cp tools/ax-mock/workiq-stub.sh "$RUNNER_TEMP/xray-home/bin/workiq-stub"
+          chmod 755 "$RUNNER_TEMP/xray-home/bin/workiq-stub"
       - name: Ouro AX X-ray
         run: |
           mkdir -p xray
+          stub="$RUNNER_TEMP/xray-home/bin/workiq-stub"
           node tools/ouro-ax/xray.ts \
             --cli "$RUNNER_TEMP/bin/m365crawl" --name m365crawl \
             --inventory "$RUNNER_TEMP/inventory.json" \
@@ -56,7 +62,12 @@ jobs:
             --env M365CRAWL_NO_SYNC=1 \
             --env M365CRAWL_TEAMS_ROOT="$RUNNER_TEMP/xray-home/no-teams" \
             --env M365CRAWL_OUTLOOK_ROOT=none \
+            --env M365CRAWL_WORKIQ_BIN="$stub" \
+            --guard "tools/ax-mock/assert-stub.sh $stub" \
             --state "status --json" --state "whoami --json" --volatile archive_age_seconds \
+            --sample "chat=19:00000000-0000-4000-8000-0000000000a1_00000000-0000-4000-8000-0000000000ff@unq.gbl.spaces" \
+            --sample message=1700000061000 --sample to=ana@example.com \
+            --sample "text=ax-xray probe" --sample "subject=ax-xray probe" --sample "reaction=👍" \
             --commit "$GITHUB_SHA" --json --md xray/xray.md > xray/report.json
           cp "$RUNNER_TEMP/inventory.json" xray/inventory.json
       - name: Action claims
