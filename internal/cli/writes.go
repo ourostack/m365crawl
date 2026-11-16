@@ -233,12 +233,28 @@ func (r writesTargetResult) renderWrites(rt *runtime) error {
 // writesRequest holds the flags every directed write shares. None is required by the parser, so a
 // missing one gets the contract's own refusal.
 type writesRequest struct {
+	writesWhy
 	Agent    string   `help:"The agent that is acting (recorded)."`
 	Reason   string   `help:"Why the agent acts (recorded)."`
 	Identity string   `help:"The account that acts: the signed-in account's address. Required for a chat message."`
 	To       []string `help:"A recipient address; repeat for each. For a chat message: every member, as writes target prints them."`
 	Text     string   `help:"The plain text to write."`
 	TextFile string   `name:"text-file" help:"Read the text from this file, or from standard input with -." placeholder:"PATH"`
+}
+
+// writesWhy is what every write takes: --why names who asked and what they said (--reason is the same, kept for
+// existing callers), and --dry-run previews the write without sending it or changing anything.
+type writesWhy struct {
+	Why    string `help:"Why the agent acts: who asked, and what they said (recorded). Same as --reason."`
+	DryRun bool   `name:"dry-run" help:"Preview the write: who would see it and the text. Sends nothing and changes nothing."`
+}
+
+// whyReason is the reason a write records: --why when it is given, else --reason.
+func (w writesWhy) whyReason(reason string) string {
+	if w.Why != "" {
+		return w.Why
+	}
+	return reason
 }
 
 func (w writesRequest) text() (string, error) {
@@ -260,7 +276,7 @@ func (w writesRequest) text() (string, error) {
 
 func (w writesRequest) request(action string) (da.Request, error) {
 	text, err := w.text()
-	return da.Request{Contract: da.Contract, Action: action, Agent: w.Agent, Reason: w.Reason, Identity: w.Identity,
+	return da.Request{Contract: da.Contract, Action: action, Agent: w.Agent, Reason: w.whyReason(w.Reason), Identity: w.Identity,
 		Target: da.Target{Recipients: w.To}, Content: da.Content{Text: text}}, err
 }
 
@@ -286,7 +302,7 @@ func (c writesReplyAllCmd) Run(rt *runtime) error {
 		return err
 	}
 	req.Target.Message, req.IntentKey, req.ExpectedVersion = c.Message, c.IntentKey, c.ExpectedVersion
-	return rt.directedWrite(req)
+	return rt.writeWithPreview(req, c.DryRun, "the reply-to addresses of mail "+c.Message+", else its sender, and its other To and Cc recipients", "send that reply to everyone on the mail", &previewTarget{Kind: "mail", ID: c.Message})
 }
 
 type writesSendMailCmd struct {
@@ -301,11 +317,12 @@ func (c writesSendMailCmd) Run(rt *runtime) error {
 		return err
 	}
 	req.Content.Subject, req.IntentKey = c.Subject, c.IntentKey
-	return rt.directedWrite(req)
+	return rt.writeWithPreview(req, c.DryRun, strings.Join(c.To, ", "), "send that mail", nil)
 }
 
 // writesActionFlags are the request flags of a write without text.
 type writesActionFlags struct {
+	writesWhy
 	Agent           string `help:"The agent that is acting (recorded)."`
 	Reason          string `help:"Why the agent acts (recorded)."`
 	Identity        string `help:"The account that acts: the signed-in account's address."`
@@ -313,7 +330,7 @@ type writesActionFlags struct {
 }
 
 func (f writesActionFlags) request(action string) da.Request {
-	return da.Request{Contract: da.Contract, Action: action, Agent: f.Agent, Reason: f.Reason, Identity: f.Identity, ExpectedVersion: f.ExpectedVersion}
+	return da.Request{Contract: da.Contract, Action: action, Agent: f.Agent, Reason: f.whyReason(f.Reason), Identity: f.Identity, ExpectedVersion: f.ExpectedVersion}
 }
 
 type writesDiscardCmd struct {
@@ -345,11 +362,11 @@ func (c writesReactCmd) reaction(action string) da.Request {
 }
 
 func (c writesReactCmd) Run(rt *runtime) error {
-	return rt.directedWrite(c.reaction(directedwrites.AddReaction))
+	return rt.writeWithPreview(c.reaction(directedwrites.AddReaction), c.DryRun, "everyone in chat "+c.Chat, "add the reaction "+c.Reaction+" to that message", &previewTarget{Kind: "chat", ID: c.Chat})
 }
 
 func (c writesUnreactCmd) Run(rt *runtime) error {
-	return rt.directedWrite(c.reaction(directedwrites.RemoveReaction))
+	return rt.writeWithPreview(c.reaction(directedwrites.RemoveReaction), c.DryRun, "everyone in chat "+c.Chat, "remove the reaction "+c.Reaction+" from that message", &previewTarget{Kind: "chat", ID: c.Chat})
 }
 
 func (c writesSendCmd) Run(rt *runtime) error {
@@ -358,7 +375,7 @@ func (c writesSendCmd) Run(rt *runtime) error {
 		return err
 	}
 	req.Target.Conversation, req.IntentKey, req.ExpectedVersion = c.Chat, c.IntentKey, c.ExpectedVersion
-	return rt.directedWrite(req)
+	return rt.writeWithPreview(req, c.DryRun, "everyone in chat "+c.Chat, "send that message", &previewTarget{Kind: "chat", ID: c.Chat})
 }
 
 type writesReplyCmd struct {
@@ -374,7 +391,7 @@ func (c writesReplyCmd) Run(rt *runtime) error {
 		return err
 	}
 	req.Target.Message, req.IntentKey, req.ExpectedVersion = c.Message, c.IntentKey, c.ExpectedVersion
-	return rt.directedWrite(req)
+	return rt.writeWithPreview(req, c.DryRun, "the sender and reply-to addresses of mail "+c.Message, "send that reply", &previewTarget{Kind: "mail", ID: c.Message})
 }
 
 func (c writesDraftCmd) Run(rt *runtime) error {
@@ -390,6 +407,9 @@ func (c writesDraftCmd) Run(rt *runtime) error {
 var sendDirected = directedwrites.Send
 
 func (rt *runtime) directedWrite(req da.Request) error {
+	if req.Reason == "" {
+		return missingWhyError()
+	}
 	result, err := sendDirected(rt.ctx, rt.writesOptions(), req)
 	if err != nil {
 		return asCoded(err)
@@ -422,7 +442,7 @@ func outcomeError(r directedwrites.Result) error {
 	switch r.ExitClass {
 	case da.ExitRequestProblem:
 		return &errs.Coded{Code: "write_request_problem", Exit: errs.ExitUsage, Message: "the directed write was refused: " + what + "; nothing was sent",
-			Fix: "Fix the request as the printed code and field say, then ask again."}
+			Fix: "Fix the request as the printed code and field say, then ask again; `m365crawl writes target --help` shows how to name the chat or mail it acts on."}
 	case da.ExitPersonNeeded:
 		return &errs.Coded{Code: "write_person_needed", Exit: errs.ExitEnvironment, Message: "the directed write was refused: " + what + "; nothing was sent",
 			Fix: "Stop and tell the person: only they can turn writes on or settle the earlier write."}

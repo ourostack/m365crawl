@@ -36,9 +36,12 @@ var (
 )
 
 type watchCmd struct {
-	Every       time.Duration `default:"60s" help:"Poll interval: the safety net when file events are missed. Syncs run only when the cache changed." placeholder:"DURATION"`
-	MinInterval time.Duration `name:"min-interval" env:"M365CRAWL_WATCH_MIN_INTERVAL" default:"60s" help:"Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause." placeholder:"DURATION"`
-	EmitInitial bool          `name:"emit-initial" help:"Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted)."`
+	Every        time.Duration `default:"60s" help:"Poll interval: the safety net when file events are missed. Syncs run only when the cache changed." placeholder:"DURATION"`
+	MinInterval  time.Duration `name:"min-interval" env:"M365CRAWL_WATCH_MIN_INTERVAL" default:"60s" help:"Least time between the end of one sync and the start of the next. A busy Teams cache changes constantly, so without a pause watch would sync back to back. Changes that arrive meanwhile are coalesced into one sync. 0 disables the pause." placeholder:"DURATION"`
+	EmitInitial  bool          `name:"emit-initial" help:"Also emit the first sync's changes (by default that sync is a silent baseline and only later changes are emitted)."`
+	Conversation string        `arg:"" optional:"" help:"Wait for a new message in this chat instead of streaming: the chat's id, as conversations prints it. Answers a wait/1 document, or with --json the same document."`
+	Timeout      time.Duration `help:"With a conversation: how long to wait for a message before answering that nothing came yet." default:"30s" placeholder:"DURATION"`
+	Cursor       string        `help:"With a conversation: the cursor of an earlier wait; only messages after it count." placeholder:"CURSOR"`
 }
 
 // changeLine is one message or activity change; item has the shape of the `messages` or `activity`
@@ -68,6 +71,9 @@ type errorLine struct {
 }
 
 func (c *watchCmd) Run(rt *runtime) error {
+	if c.Conversation != "" {
+		return c.waitOn(rt)
+	}
 	if c.Every <= 0 {
 		return errs.Usage("--every must be greater than 0")
 	}

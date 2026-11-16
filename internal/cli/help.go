@@ -88,6 +88,17 @@ func (helpCmd) Run(rt *runtime, kctx *kong.Context) error {
 	return nil
 }
 
+// writeUsage is the usage line of each write that names its target, so an agent (and the X-ray) sees which flags
+// name the chat or mail the write acts on.
+var writeUsage = map[string]string{
+	"writes send-teams-message": "m365crawl writes send-teams-message --chat <chat> --text <text> --why <why>",
+	"writes reply-mail":         "m365crawl writes reply-mail --message <message> --text <text> --why <why>",
+	"writes reply-all-mail":     "m365crawl writes reply-all-mail --message <message> --text <text> --why <why>",
+	"writes send-mail":          "m365crawl writes send-mail --to <to> --subject <subject> --text <text> --why <why>",
+	"writes add-reaction":       "m365crawl writes add-reaction --chat <chat> --message <message> --reaction <reaction> --why <why>",
+	"writes remove-reaction":    "m365crawl writes remove-reaction --chat <chat> --message <message> --reaction <reaction> --why <why>",
+}
+
 // commandsOf walks the parser's registered commands: every leaf, in registration order.
 func commandsOf(root *kong.Node) []helpCommand {
 	var out []helpCommand
@@ -105,7 +116,11 @@ func commandsOf(root *kong.Node) []helpCommand {
 			if consent == "consequential" {
 				effect = "others"
 			}
-			out = append(out, helpCommand{Name: name, Summary: c.Help, Effect: effect, ReadOnly: consent == "read", Usage: []string{"m365crawl " + name + " [flags]"}})
+			usage := "m365crawl " + name + " [flags]"
+			if u, ok := writeUsage[name]; ok {
+				usage = u
+			}
+			out = append(out, helpCommand{Name: name, Summary: c.Help, Effect: effect, ReadOnly: consent == "read", Usage: []string{usage}})
 		}
 	}
 	walk(root, nil)
