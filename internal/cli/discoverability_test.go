@@ -272,7 +272,7 @@ func TestApplicationTextIsPlainAndKeepsTheMarker(t *testing.T) {
 		t.Fatalf("a long app name is not bounded inside the marker: %q", marker)
 	}
 	help := helpOf(t, "messages")
-	for _, want := range []string{"total_admitted", "refused_citation_rows counts the citation rows of the message that could not be read"} {
+	for _, want := range []string{"total_admitted", "refused_citation_rows counts the citation rows of the message that are unreadable"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("messages --help lacks %q", want)
 		}

@@ -115,6 +115,7 @@ type cliApp struct {
 	Whoami        whoamiCmd        `cmd:"" help:"Show the accounts in the archive and the archive's state."`
 	SQL           sqlCmd           `cmd:"" name:"sql" help:"Run a read-only SQL query against the archive; --help lists its tables and how to see their columns."`
 	Skill         skillCmd         `cmd:"" help:"Print the agent guide (SKILL.md) for this version, as Markdown in every output mode."`
+	Help          helpCmd          `cmd:"" help:"Print every command as JSON, with who sees its effect, and the exit codes."`
 	Metadata      metadataCmd      `cmd:"" help:"Print the crawlkit app manifest (for crawlctl discovery)."`
 	VersionCmd    versionCmd       `cmd:"" name:"version" help:"Print the m365crawl version, commit and build date."`
 }
@@ -162,6 +163,8 @@ func (rt *runtime) printVersion() error {
 // SIGTERM or SIGHUP (a closed terminal) cancels the context every lower layer cleans up on; a second one force-quits at once
 // with status 130, in case that cleanup is stuck.
 func Main(args []string, stdout, stderr io.Writer) int {
+	// A closed pipe (`m365crawl --help | head`) must end the run with a documented status, not a signal.
+	signal.Ignore(syscall.SIGPIPE)
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -356,6 +359,14 @@ func (rt *runtime) checkListOnly() error {
 // commandSynonyms maps a word an agent is likely to try for a command to the command that does
 // that job. They are suggestions only, never aliases: the word stays a usage error, and the error
 // names the command in its message and its fix.
+// ambiguousVerbs answer the verbs an agent guesses for a change. Each names the commands that do the real thing,
+// since the verb alone could mean a private change or one other people see, so nothing runs.
+var ambiguousVerbs = map[string]string{
+	"edit":   "Use `m365crawl writes save-mail-draft` for a private draft, or `m365crawl writes reply-mail` for a reply others see.",
+	"delete": "Use `m365crawl writes discard-mail-draft` to discard one of your own drafts.",
+	"remove": "Use `m365crawl writes remove-reaction` to remove your reaction from a chat message.",
+}
+
 var commandSynonyms = map[string]string{
 	"chat": "conversations", "chats": "conversations",
 	"email": "mail", "emails": "mail", "inbox": "mail",
@@ -421,7 +432,10 @@ func (rt *runtime) fail(err error) int {
 			// A word that is no command lands on the default command as a stray argument.
 			msg, suggestion := unknownCommand(strings.TrimPrefix(pe.Error(), "unexpected argument "), rt.args, pe.Context)
 			coded = errs.Usage(msg)
-			if suggestion != "" {
+			word, _, _ := strings.Cut(strings.TrimPrefix(pe.Error(), "unexpected argument "), ", did you mean ")
+			if fix, ok := ambiguousVerbs[word]; ok {
+				coded.Fix = fix
+			} else if suggestion != "" {
 				coded.Fix = fmt.Sprintf("Run `m365crawl %s --help` to see what it does and its flags.", suggestion)
 			}
 		case errors.As(err, &pe):

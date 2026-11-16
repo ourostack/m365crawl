@@ -1,0 +1,552 @@
+{
+  "generator": "ouro-actions 0.16.0",
+  "set": "m365crawl",
+  "tool": "m365crawl",
+  "commands": [
+    {
+      "name": "overview",
+      "summary": "Show what the archive holds per source, how fresh it is, and where to start.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "doctor",
+      "summary": "Check that Teams, Outlook, Full Disk Access and the archive are ready.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "sync",
+      "summary": "Read Teams chats, Outlook mail and the calendar into the archive once; print what changed.",
+      "effect": "private"
+    },
+    {
+      "name": "status",
+      "summary": "Show archive counts per account, the last sync and other Teams origins.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "search",
+      "summary": "Full-text search over Teams chats, mail, transcripts, notes, documents and archived content.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "messages",
+      "summary": "List Teams messages in chronological order from the archive.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "conversations",
+      "summary": "List Teams conversations, newest activity first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "teams",
+      "summary": "List teams with channel counts, last activity and unread counts.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "people list",
+      "summary": "List Teams and mail people with native Outlook observations.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "people sync",
+      "summary": "Register and capture native Outlook people observations from supported profiles.",
+      "effect": "private"
+    },
+    {
+      "name": "people show",
+      "summary": "Inspect one native person observation with its copies and contradictions.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "people sources",
+      "summary": "Show registered native people sources and their coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "activity",
+      "summary": "List activity-feed items (mentions, replies, reactions) with their messages.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "coverage",
+      "summary": "Show, per day and source, whether the archive holds what the apps cached.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar agenda",
+      "summary": "List calendar events for a date range, offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar event",
+      "summary": "Show one calendar event with everything the archive holds about it.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar sources",
+      "summary": "Show, per account and source, the days the calendar archive holds.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar actions",
+      "summary": "List action items of meeting recaps for events in a range.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar attendees sync",
+      "summary": "Capture native selected-detail attendee evidence from supported Outlook sources.",
+      "effect": "private"
+    },
+    {
+      "name": "calendar attendees sources",
+      "summary": "Read registered native attendee sources and their archive coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar attendees list",
+      "summary": "List an event's native attendee observations from the selected source.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "calendar attendees show",
+      "summary": "Show one attendee observation with its snapshot and coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "mail list",
+      "summary": "List archived Outlook mail, newest first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "mail show",
+      "summary": "Show one message's headers, body and attachment names, sizes and types.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "mail thread",
+      "summary": "Show a mail conversation: its reply chain and shared subject.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "mail folders",
+      "summary": "List mail folders with message and unread counts.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "mail unread",
+      "summary": "List unread mail by folder.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "workiq enable",
+      "summary": "Enable the optional WorkIQ source for this archive.",
+      "effect": "private"
+    },
+    {
+      "name": "workiq disable",
+      "summary": "Disable WorkIQ acquisition without removing retained data.",
+      "effect": "private"
+    },
+    {
+      "name": "workiq sync",
+      "summary": "Acquire mail or selected chat history through WorkIQ fetch.",
+      "effect": "private"
+    },
+    {
+      "name": "workiq coverage",
+      "summary": "Count WorkIQ folders and chat messages without keeping payloads.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "workiq status",
+      "summary": "Probe WorkIQ identity and initial path access; never signs in.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "writes on",
+      "summary": "Turn writes on for this archive; the person types it on the controlling terminal.",
+      "effect": "private"
+    },
+    {
+      "name": "writes off",
+      "summary": "Turn writes off for this archive; the person types it on the controlling terminal.",
+      "effect": "private"
+    },
+    {
+      "name": "writes status",
+      "summary": "Show the writes switch and the newest directed writes, offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "writes target",
+      "summary": "Read a chat's recipients and version through WorkIQ; writes nothing.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "writes send-teams-message",
+      "summary": "Send a plain-text Teams chat message the person directed, through WorkIQ.",
+      "effect": "others"
+    },
+    {
+      "name": "writes save-mail-draft",
+      "summary": "Save a new plain-text mail draft in the person's own mailbox.",
+      "effect": "private"
+    },
+    {
+      "name": "writes reply-mail",
+      "summary": "Reply in plain text to one mail as the person directed.",
+      "effect": "others"
+    },
+    {
+      "name": "writes reply-all-mail",
+      "summary": "Reply to everyone on one mail in plain text as the person directed.",
+      "effect": "others"
+    },
+    {
+      "name": "writes send-mail",
+      "summary": "Send a new plain-text mail the person directed.",
+      "effect": "others"
+    },
+    {
+      "name": "writes discard-mail-draft",
+      "summary": "Discard one draft in the person's own mailbox as the person directed.",
+      "effect": "private"
+    },
+    {
+      "name": "writes add-reaction",
+      "summary": "Add the person's emoji reaction to one chat message as the person directed.",
+      "effect": "others"
+    },
+    {
+      "name": "writes remove-reaction",
+      "summary": "Remove the person's emoji reaction from one chat message as the person directed.",
+      "effect": "others"
+    },
+    {
+      "name": "writes verify",
+      "summary": "Re-read the server to settle a write whose outcome is unknown; sends nothing.",
+      "effect": "private"
+    },
+    {
+      "name": "writes settle",
+      "summary": "Settle an unknown write after the person checks it on the controlling terminal.",
+      "effect": "private"
+    },
+    {
+      "name": "notes sync",
+      "summary": "Capture OneNote indexed notes locally from default Mac indexes or a directory.",
+      "effect": "private"
+    },
+    {
+      "name": "notes list",
+      "summary": "List indexed notes with stable IDs and source coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "notes search",
+      "summary": "Search archived note titles, text and OCR.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "notes show",
+      "summary": "Show one note's text, elements and indexed hierarchy.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "notes sources",
+      "summary": "Show registered note sources, capture history and coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "docs sync",
+      "summary": "Register and capture Office document metadata and OneDrive usage records; never opens files.",
+      "effect": "private"
+    },
+    {
+      "name": "docs list",
+      "summary": "List document observations with stable IDs and source coverage.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "docs search",
+      "summary": "Search retained document metadata, URLs and sharing claims.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "docs show",
+      "summary": "Inspect one document observation and its raw claims.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "docs sources",
+      "summary": "Inspect registered document source health without capture.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "loop sync",
+      "summary": "Register archived cached Loop snapshot records and project their channels.",
+      "effect": "private"
+    },
+    {
+      "name": "loop list",
+      "summary": "List retained Loop channel observations with stable IDs.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "loop search",
+      "summary": "Search retained Loop channel text and paths.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "loop show",
+      "summary": "Inspect one Loop channel from one cached snapshot.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "loop sources",
+      "summary": "Inspect registered Loop sources, their raw-match state and failures.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "scout sync",
+      "summary": "Copy Scout session files already in the local OneDrive folder into the archive.",
+      "effect": "private"
+    },
+    {
+      "name": "scout list",
+      "summary": "List archived Scout sessions, most recent activity first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "scout search",
+      "summary": "Search the messages of archived Scout sessions.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "scout show",
+      "summary": "Show one Scout session with its messages.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "scout sources",
+      "summary": "Show each Scout folder read, its last scan and file counts.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "drafts list",
+      "summary": "List own cached compose-body projections already archived; never refreshes.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "drafts show",
+      "summary": "Inspect one cached compose-body frame.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "content images",
+      "summary": "List bounded image references in one cached Teams message, offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "content capture",
+      "summary": "Capture one guarded, already-resident Office file or native file reference.",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch image",
+      "summary": "Export one verified selected Teams PNG through read-only WorkIQ.",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch engage-thread",
+      "summary": "Capture one Engage thread link with its starter and replies.",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch engage-home",
+      "summary": "Capture bounded native Engage Home-session thread-starter observations.",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch page",
+      "summary": "Acquire a supported rich-text page projection (always partial).",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch stream",
+      "summary": "Acquire one verified selected transcript or its metadata.",
+      "effect": "private"
+    },
+    {
+      "name": "content fetch doc",
+      "summary": "Read one OneDrive or SharePoint Office file through WorkIQ, when its rights allow.",
+      "effect": "private"
+    },
+    {
+      "name": "content signin",
+      "summary": "Open a visible window for the tool-owned profile so the person can sign in.",
+      "effect": "private"
+    },
+    {
+      "name": "content list",
+      "summary": "List immutable retained content observations, newest first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "content search",
+      "summary": "Search retained content text, titles and native metadata offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "content show",
+      "summary": "Read one retained content observation offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "content sources",
+      "summary": "Read registered content source coverage offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "transcripts list",
+      "summary": "List meetings with recordings and their transcript parts, offline.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "transcripts show",
+      "summary": "Print a meeting's transcript from the archive in time order.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "transcripts fetch",
+      "summary": "Fetch a meeting's transcript parts from SharePoint and store them.",
+      "effect": "private"
+    },
+    {
+      "name": "transcripts signin",
+      "summary": "Open m365crawl's browser profile in a visible window so the person can sign in to SharePoint.",
+      "effect": "private"
+    },
+    {
+      "name": "stores",
+      "summary": "List archived databases and object stores without a typed table, with record counts.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "records",
+      "summary": "List archived records of one database, newest change first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "unread",
+      "summary": "List unread Teams messages, newest first.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "thread",
+      "summary": "Show one Teams thread from a conversation and root message, or a message link.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "watch",
+      "summary": "Stream one JSON line per new, edited or deleted Teams message or activity item.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "whoami",
+      "summary": "Show the accounts in the archive and the archive's state.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "sql",
+      "summary": "Run a read-only SQL query against the archive.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "skill",
+      "summary": "Print the agent guide (SKILL.md) for this version.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "metadata",
+      "summary": "Print the crawlkit app manifest.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "version",
+      "summary": "Print the m365crawl version, commit and build date.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "help",
+      "summary": "Print every command as JSON, with who sees its effect, and the exit codes.",
+      "effect": "private",
+      "readOnly": true
+    }
+  ],
+  "personOnly": {}
+}
