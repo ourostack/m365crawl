@@ -30,7 +30,7 @@ func TestVendoredMatchesCoreManifest(t *testing.T) {
 		t.Errorf("dist-manifest.json is for %s; the vendored generator is v0.16.0", manifest.CoreTag)
 	}
 	for file, distPath := range vendored {
-		body, err := os.ReadFile(file)
+		body, err := os.ReadFile(file) //nolint:gosec // a vendored file named in this test, read from the repository
 		if err != nil {
 			t.Fatal(err)
 		}
