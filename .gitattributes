@@ -8,3 +8,5 @@
 **/*.golden text diff merge eol=lf
 # The synthetic MCP executable's authored source is not a binary cache fixture.
 internal/workiq/testdata/stub/*.go text diff merge eol=lf
+# The vendored Ouro AX kit is checked by sha256 against upstream-sources.lock.json, so it keeps LF on every platform.
+tools/ouro-ax/** text eol=lf
