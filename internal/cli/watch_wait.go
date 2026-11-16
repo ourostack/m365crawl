@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -81,12 +82,17 @@ func (c *watchCmd) waitOn(rt *runtime) error {
 	})
 }
 
+// messagesAfter reads the chat's messages from the archive; a test seam for a store failure.
+var messagesAfter = func(ctx context.Context, st *store.Store, f store.Filter) ([]store.MessageRow, bool, error) {
+	return st.Messages(ctx, f)
+}
+
 // newMessages returns the messages the conversation got after since, as wait events.
 func (c *watchCmd) newMessages(rt *runtime, st *store.Store, since time.Time) ([]waitEvent, error) {
 	if st == nil {
 		return nil, nil
 	}
-	rows, _, err := st.Messages(rt.ctx, store.Filter{Conversation: c.Conversation, Since: since, Limit: 50})
+	rows, _, err := messagesAfter(rt.ctx, st, store.Filter{Conversation: c.Conversation, Since: since, Limit: 50})
 	if err != nil {
 		return nil, err
 	}

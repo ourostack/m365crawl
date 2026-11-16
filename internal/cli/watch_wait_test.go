@@ -1,8 +1,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ourostack/m365crawl/internal/store"
 )
 
 // A wait answers satisfied with the messages a chat got after the cursor, as a wait/1 document.
@@ -52,5 +57,28 @@ func TestWatchWaitRefusesABadCursor(t *testing.T) {
 	e := newEnv(t)
 	if code, _, stderr := e.run("watch", fixtureChat, "--cursor", "yesterday"); code != 2 || !strings.Contains(stderr, "--cursor") {
 		t.Fatalf("exit %d, stderr %q; want usage with --cursor named", code, stderr)
+	}
+}
+
+// A store failure while waiting is the command's error, not an answer.
+func TestWatchWaitReturnsAStoreFailure(t *testing.T) {
+	e := newEnv(t)
+	e.sync()
+	old := messagesAfter
+	messagesAfter = func(context.Context, *store.Store, store.Filter) ([]store.MessageRow, bool, error) {
+		return nil, false, errors.New("store went away")
+	}
+	t.Cleanup(func() { messagesAfter = old })
+	if code, _, stderr := e.run("watch", fixtureChat, "--timeout", "1s", "--json"); code == 0 || !strings.Contains(stderr, "store went away") {
+		t.Fatalf("exit %d, stderr %q; want the store failure as the error", code, stderr)
+	}
+}
+
+// With no archive there are no messages to wait for.
+func TestWatchWaitNewMessagesWithoutAnArchive(t *testing.T) {
+	c := &watchCmd{Conversation: fixtureChat}
+	events, err := c.newMessages(&runtime{ctx: context.Background()}, nil, time.Now())
+	if err != nil || events != nil {
+		t.Fatalf("events %v, err %v; want none", events, err)
 	}
 }
