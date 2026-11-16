@@ -1,0 +1,78 @@
+name: Ouro AX X-ray
+
+# The X-ray checks the CLI from outside, the way an agent calls it, and the action claims check the declarations
+# in actions/. Both reports are uploaded: `xray` and `actions-xray`. Neither ever touches a real account: the CLI runs
+# with an isolated home, no sync and no Teams or Outlook roots.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: "off"
+
+jobs:
+  xray:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build the CLI
+        run: go build -trimpath -o "$RUNNER_TEMP/bin/m365crawl" ./cmd/m365crawl
+      - name: Inventory from the CLI's registration
+        run: |
+          "$RUNNER_TEMP/bin/m365crawl" help --json > "$RUNNER_TEMP/help.json"
+          jq -e '{cli: [.commands[].name]}' "$RUNNER_TEMP/help.json" > "$RUNNER_TEMP/inventory.json"
+      - name: Synthetic archive from the repository's Teams fixture
+        run: |
+          mkdir -p "$RUNNER_TEMP/xray-home" "$RUNNER_TEMP/fixture"
+          cp -R testdata/teams-fixture "$RUNNER_TEMP/fixture/teams"
+          HOME="$RUNNER_TEMP/xray-home" "$RUNNER_TEMP/bin/m365crawl" \
+            --teams-root "$RUNNER_TEMP/fixture/teams/EBWebView" --outlook-root none sync --json > "$RUNNER_TEMP/sync.json"
+      - name: Ouro AX X-ray
+        run: |
+          mkdir -p xray
+          node tools/ouro-ax/xray.ts \
+            --cli "$RUNNER_TEMP/bin/m365crawl" --name m365crawl \
+            --inventory "$RUNNER_TEMP/inventory.json" \
+            --home "$RUNNER_TEMP/xray-home" \
+            --env M365CRAWL_NO_SYNC=1 \
+            --env M365CRAWL_TEAMS_ROOT="$RUNNER_TEMP/xray-home/no-teams" \
+            --env M365CRAWL_OUTLOOK_ROOT=none \
+            --state "status --json" --state "whoami --json" --volatile archive_age_seconds \
+            --commit "$GITHUB_SHA" --json --md xray/xray.md > xray/report.json
+          cp "$RUNNER_TEMP/inventory.json" xray/inventory.json
+      - name: Action claims
+        run: |
+          mkdir -p xray-actions
+          node tools/ouro-actions/ouro-actions.mts check actions/m365crawl.actions.mts actions/generated \
+            --report xray-actions/report.json --app m365crawl --commit "$GITHUB_SHA"
+      - name: Upload the X-ray report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: xray
+          path: xray/
+      - name: Upload the action claims report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: actions-xray
+          path: xray-actions/
