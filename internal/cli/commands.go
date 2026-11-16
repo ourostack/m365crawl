@@ -209,7 +209,7 @@ type msgFlags struct {
 	From          string `help:"Sender: a person id, or a case-insensitive part of the name."`
 	Since         string `help:"Only messages at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w)."`
 	Until         string `help:"Only messages before this time (same formats as --since); a date alone includes that whole local day, a time is exclusive."`
-	Team          string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
+	Team          string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. A name that matches no team, or more than one, is refused before anything is read."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
@@ -429,7 +429,7 @@ func excludingChannels(res result, err error) func(on bool) (result, error) {
 
 type unreadCmd struct {
 	Conversation    string `short:"c" help:"Conversation id, its exact title or display name, or a Teams link to it (a channel, chat, message or meeting link)."`
-	Team            string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
+	Team            string `help:"Only this team and its channels: the team's exact name (any case for ASCII letters) or its id. A name that matches no team, or more than one, is refused before anything is read."`
 	Since           string `help:"Count only unread messages sent at or after this time: RFC3339, YYYY-MM-DD (local midnight) or a relative duration (90m, 24h, 7d, 2w). Use it for \"what needs my attention\": old read markers leave stale conversations with hundreds of unread messages."`
 	Limit           int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	HTML            bool   `name:"html" help:"Add each message's HTML body as html."`
@@ -591,7 +591,7 @@ func parseThreadTarget(target, root string) (conversation, rootID string, err er
 type conversationsCmd struct {
 	Kind          string `help:"Only this kind, for example Chat, Topic (channel), Space (team) or Meeting."`
 	Query         string `help:"Find conversations by name, best match first: an exact name, then names that start with the query, then names that contain it, then conversations whose title holds all the words; ties go newest first."`
-	Team          string `help:"Only this team's own conversation and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
+	Team          string `help:"Only this team's own conversation and its channels: the team's exact name (any case for ASCII letters) or its id. A name that matches no team, or more than one, is refused before anything is read."`
 	Limit         int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`
 	IncludeSystem bool   `name:"include-system" help:"Also include Teams' system pseudo-conversations (48:notifications, 48:calllogs, 48:annotations), which mirror real messages and are left out by default."`
 }
@@ -708,7 +708,7 @@ func (c *peopleCmd) Run(rt *runtime) error {
 type activityCmd struct {
 	Unread         bool   `help:"Only unread items."`
 	Type           string `help:"Only these activity types, comma separated, matched exactly in any case. Seen in the cache: mention (you were @-mentioned in a channel, as a team or tag), mentionInChat (in a chat, or by @everyone), reply, replyToReply, follow, reaction, reactionInChat, msGraph (system notices such as meeting updates and approvals), teamMembershipChange, threadActivity. Example: --type mention,mentionInChat."`
-	Team           string `help:"Only items in this team and its channels: the team's exact name (any case for ASCII letters) or its id. An unknown or ambiguous name is a usage error."`
+	Team           string `help:"Only items in this team and its channels: the team's exact name (any case for ASCII letters) or its id. A name that matches no team, or more than one, is refused before anything is read."`
 	DirectMentions bool   `name:"direct-mentions" help:"Only mention items that name you (type mention or mentionInChat, subtype person, or a message that mentions you by name), not channel, team, tag or @everyone mentions."`
 	Since          string `help:"Only items at or after this time (RFC3339, YYYY-MM-DD or a relative duration such as 24h)."`
 	Limit          int    `default:"50" help:"Maximum items to return; truncated says whether more exist."`

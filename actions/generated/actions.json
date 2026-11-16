@@ -1,0 +1,967 @@
+{
+  "generator": "ouro-actions 0.16.0",
+  "set": "m365crawl",
+  "tool": "m365crawl",
+  "actions": [
+    {
+      "id": "overview",
+      "consent": "read",
+      "label": "Overview",
+      "description": "Show what the archive holds per source, how fresh it is, and where to start.",
+      "agent": "Show what the archive holds per source, how fresh it is, and where to start.",
+      "input": {},
+      "output": {},
+      "cli": "overview"
+    },
+    {
+      "id": "doctor",
+      "consent": "read",
+      "label": "Doctor",
+      "description": "Check that Teams, Outlook, Full Disk Access and the archive are ready.",
+      "agent": "Check that Teams, Outlook, Full Disk Access and the archive are ready.",
+      "input": {},
+      "output": {},
+      "cli": "doctor"
+    },
+    {
+      "id": "sync",
+      "consent": "write",
+      "label": "Sync",
+      "description": "Read Teams chats, Outlook mail and the calendar into the archive once; print what changed.",
+      "agent": "Read Teams chats, Outlook mail and the calendar into the archive once; print what changed.",
+      "input": {},
+      "output": {},
+      "cli": "sync"
+    },
+    {
+      "id": "status",
+      "consent": "read",
+      "label": "Status",
+      "description": "Show archive counts per account, the last sync and other Teams origins.",
+      "agent": "Show archive counts per account, the last sync and other Teams origins.",
+      "input": {},
+      "output": {},
+      "cli": "status"
+    },
+    {
+      "id": "search",
+      "consent": "read",
+      "label": "Search",
+      "description": "Full-text search over Teams chats, mail, transcripts, notes, documents and archived content.",
+      "agent": "Full-text search over Teams chats, mail, transcripts, notes, documents and archived content.",
+      "input": {},
+      "output": {},
+      "cli": "search"
+    },
+    {
+      "id": "messages",
+      "consent": "read",
+      "label": "Messages",
+      "description": "List Teams messages in chronological order from the archive.",
+      "agent": "List Teams messages in chronological order from the archive.",
+      "input": {},
+      "output": {},
+      "cli": "messages"
+    },
+    {
+      "id": "conversations",
+      "consent": "read",
+      "label": "Conversations",
+      "description": "List Teams conversations, newest activity first.",
+      "agent": "List Teams conversations, newest activity first.",
+      "input": {},
+      "output": {},
+      "cli": "conversations"
+    },
+    {
+      "id": "teams",
+      "consent": "read",
+      "label": "Teams",
+      "description": "List teams with channel counts, last activity and unread counts.",
+      "agent": "List teams with channel counts, last activity and unread counts.",
+      "input": {},
+      "output": {},
+      "cli": "teams"
+    },
+    {
+      "id": "people_list",
+      "consent": "read",
+      "label": "People list",
+      "description": "List Teams and mail people with native Outlook observations.",
+      "agent": "List Teams and mail people with native Outlook observations.",
+      "input": {},
+      "output": {},
+      "cli": "people list"
+    },
+    {
+      "id": "people_sync",
+      "consent": "write",
+      "label": "People sync",
+      "description": "Register and capture native Outlook people observations from supported profiles.",
+      "agent": "Register and capture native Outlook people observations from supported profiles.",
+      "input": {},
+      "output": {},
+      "cli": "people sync"
+    },
+    {
+      "id": "people_show",
+      "consent": "read",
+      "label": "People show",
+      "description": "Inspect one native person observation with its copies and contradictions.",
+      "agent": "Inspect one native person observation with its copies and contradictions.",
+      "input": {},
+      "output": {},
+      "cli": "people show"
+    },
+    {
+      "id": "people_sources",
+      "consent": "read",
+      "label": "People sources",
+      "description": "Show registered native people sources and their coverage.",
+      "agent": "Show registered native people sources and their coverage.",
+      "input": {},
+      "output": {},
+      "cli": "people sources"
+    },
+    {
+      "id": "activity",
+      "consent": "read",
+      "label": "Activity",
+      "description": "List activity-feed items (mentions, replies, reactions) with their messages.",
+      "agent": "List activity-feed items (mentions, replies, reactions) with their messages.",
+      "input": {},
+      "output": {},
+      "cli": "activity"
+    },
+    {
+      "id": "coverage",
+      "consent": "read",
+      "label": "Coverage",
+      "description": "Show, per day and source, whether the archive holds what the apps cached.",
+      "agent": "Show, per day and source, whether the archive holds what the apps cached.",
+      "input": {},
+      "output": {},
+      "cli": "coverage"
+    },
+    {
+      "id": "calendar_agenda",
+      "consent": "read",
+      "label": "Calendar agenda",
+      "description": "List calendar events for a date range, offline.",
+      "agent": "List calendar events for a date range, offline.",
+      "input": {},
+      "output": {},
+      "cli": "calendar agenda"
+    },
+    {
+      "id": "calendar_event",
+      "consent": "read",
+      "label": "Calendar event",
+      "description": "Show one calendar event with everything the archive holds about it.",
+      "agent": "Show one calendar event with everything the archive holds about it.",
+      "input": {},
+      "output": {},
+      "cli": "calendar event"
+    },
+    {
+      "id": "calendar_sources",
+      "consent": "read",
+      "label": "Calendar sources",
+      "description": "Show, per account and source, the days the calendar archive holds.",
+      "agent": "Show, per account and source, the days the calendar archive holds.",
+      "input": {},
+      "output": {},
+      "cli": "calendar sources"
+    },
+    {
+      "id": "calendar_actions",
+      "consent": "read",
+      "label": "Calendar actions",
+      "description": "List action items of meeting recaps for events in a range.",
+      "agent": "List action items of meeting recaps for events in a range.",
+      "input": {},
+      "output": {},
+      "cli": "calendar actions"
+    },
+    {
+      "id": "calendar_attendees_sync",
+      "consent": "write",
+      "label": "Calendar attendees sync",
+      "description": "Capture native selected-detail attendee evidence from supported Outlook sources.",
+      "agent": "Capture native selected-detail attendee evidence from supported Outlook sources.",
+      "input": {},
+      "output": {},
+      "cli": "calendar attendees sync"
+    },
+    {
+      "id": "calendar_attendees_sources",
+      "consent": "read",
+      "label": "Calendar attendees sources",
+      "description": "Read registered native attendee sources and their archive coverage.",
+      "agent": "Read registered native attendee sources and their archive coverage.",
+      "input": {},
+      "output": {},
+      "cli": "calendar attendees sources"
+    },
+    {
+      "id": "calendar_attendees_list",
+      "consent": "read",
+      "label": "Calendar attendees list",
+      "description": "List an event's native attendee observations from the selected source.",
+      "agent": "List an event's native attendee observations from the selected source.",
+      "input": {},
+      "output": {},
+      "cli": "calendar attendees list"
+    },
+    {
+      "id": "calendar_attendees_show",
+      "consent": "read",
+      "label": "Calendar attendees show",
+      "description": "Show one attendee observation with its snapshot and coverage.",
+      "agent": "Show one attendee observation with its snapshot and coverage.",
+      "input": {},
+      "output": {},
+      "cli": "calendar attendees show"
+    },
+    {
+      "id": "mail_list",
+      "consent": "read",
+      "label": "Mail list",
+      "description": "List archived Outlook mail, newest first.",
+      "agent": "List archived Outlook mail, newest first.",
+      "input": {},
+      "output": {},
+      "cli": "mail list"
+    },
+    {
+      "id": "mail_show",
+      "consent": "read",
+      "label": "Mail show",
+      "description": "Show one message's headers, body and attachment names, sizes and types.",
+      "agent": "Show one message's headers, body and attachment names, sizes and types.",
+      "input": {},
+      "output": {},
+      "cli": "mail show"
+    },
+    {
+      "id": "mail_thread",
+      "consent": "read",
+      "label": "Mail thread",
+      "description": "Show a mail conversation: its reply chain and shared subject.",
+      "agent": "Show a mail conversation: its reply chain and shared subject.",
+      "input": {},
+      "output": {},
+      "cli": "mail thread"
+    },
+    {
+      "id": "mail_folders",
+      "consent": "read",
+      "label": "Mail folders",
+      "description": "List mail folders with message and unread counts.",
+      "agent": "List mail folders with message and unread counts.",
+      "input": {},
+      "output": {},
+      "cli": "mail folders"
+    },
+    {
+      "id": "mail_unread",
+      "consent": "read",
+      "label": "Mail unread",
+      "description": "List unread mail by folder.",
+      "agent": "List unread mail by folder.",
+      "input": {},
+      "output": {},
+      "cli": "mail unread"
+    },
+    {
+      "id": "workiq_enable",
+      "consent": "write",
+      "label": "Workiq enable",
+      "description": "Enable the optional WorkIQ source for this archive.",
+      "agent": "Enable the optional WorkIQ source for this archive.",
+      "input": {},
+      "output": {},
+      "cli": "workiq enable"
+    },
+    {
+      "id": "workiq_disable",
+      "consent": "write",
+      "label": "Workiq disable",
+      "description": "Disable WorkIQ acquisition without removing retained data.",
+      "agent": "Disable WorkIQ acquisition without removing retained data.",
+      "input": {},
+      "output": {},
+      "cli": "workiq disable"
+    },
+    {
+      "id": "workiq_sync",
+      "consent": "write",
+      "label": "Workiq sync",
+      "description": "Acquire mail or selected chat history through WorkIQ fetch.",
+      "agent": "Acquire mail or selected chat history through WorkIQ fetch.",
+      "input": {},
+      "output": {},
+      "cli": "workiq sync"
+    },
+    {
+      "id": "workiq_coverage",
+      "consent": "read",
+      "label": "Workiq coverage",
+      "description": "Count WorkIQ folders and chat messages without keeping payloads.",
+      "agent": "Count WorkIQ folders and chat messages without keeping payloads.",
+      "input": {},
+      "output": {},
+      "cli": "workiq coverage"
+    },
+    {
+      "id": "workiq_status",
+      "consent": "read",
+      "label": "Workiq status",
+      "description": "Probe WorkIQ identity and initial path access; never signs in.",
+      "agent": "Probe WorkIQ identity and initial path access; never signs in.",
+      "input": {},
+      "output": {},
+      "cli": "workiq status"
+    },
+    {
+      "id": "writes_on",
+      "consent": "write",
+      "label": "Writes on",
+      "description": "Turn writes on for this archive; the person types it on the controlling terminal.",
+      "agent": "Turn writes on for this archive; the person types it on the controlling terminal.",
+      "input": {},
+      "output": {},
+      "cli": "writes on"
+    },
+    {
+      "id": "writes_off",
+      "consent": "write",
+      "label": "Writes off",
+      "description": "Turn writes off for this archive; the person types it on the controlling terminal.",
+      "agent": "Turn writes off for this archive; the person types it on the controlling terminal.",
+      "input": {},
+      "output": {},
+      "cli": "writes off"
+    },
+    {
+      "id": "writes_status",
+      "consent": "read",
+      "label": "Writes status",
+      "description": "Show the writes switch and the newest directed writes, offline.",
+      "agent": "Show the writes switch and the newest directed writes, offline.",
+      "input": {},
+      "output": {},
+      "cli": "writes status"
+    },
+    {
+      "id": "writes_target",
+      "consent": "read",
+      "label": "Writes target",
+      "description": "Read a chat's recipients and version through WorkIQ; writes nothing.",
+      "agent": "Read a chat's recipients and version through WorkIQ; writes nothing.",
+      "input": {},
+      "output": {},
+      "cli": "writes target"
+    },
+    {
+      "id": "writes_send_teams_message",
+      "consent": "consequential",
+      "label": "Writes send teams message",
+      "description": "Send a plain-text Teams chat message the person directed, through WorkIQ.",
+      "agent": "Send a plain-text Teams chat message the person directed, through WorkIQ.",
+      "input": {},
+      "output": {},
+      "cli": "writes send-teams-message"
+    },
+    {
+      "id": "writes_save_mail_draft",
+      "consent": "write",
+      "label": "Writes save mail draft",
+      "description": "Save a new plain-text mail draft in the person's own mailbox.",
+      "agent": "Save a new plain-text mail draft in the person's own mailbox.",
+      "input": {},
+      "output": {},
+      "cli": "writes save-mail-draft"
+    },
+    {
+      "id": "writes_reply_mail",
+      "consent": "consequential",
+      "label": "Writes reply mail",
+      "description": "Reply in plain text to one mail as the person directed.",
+      "agent": "Reply in plain text to one mail as the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes reply-mail"
+    },
+    {
+      "id": "writes_reply_all_mail",
+      "consent": "consequential",
+      "label": "Writes reply all mail",
+      "description": "Reply to everyone on one mail in plain text as the person directed.",
+      "agent": "Reply to everyone on one mail in plain text as the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes reply-all-mail"
+    },
+    {
+      "id": "writes_send_mail",
+      "consent": "consequential",
+      "label": "Writes send mail",
+      "description": "Send a new plain-text mail the person directed.",
+      "agent": "Send a new plain-text mail the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes send-mail"
+    },
+    {
+      "id": "writes_discard_mail_draft",
+      "consent": "write",
+      "label": "Writes discard mail draft",
+      "description": "Discard one draft in the person's own mailbox as the person directed.",
+      "agent": "Discard one draft in the person's own mailbox as the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes discard-mail-draft"
+    },
+    {
+      "id": "writes_add_reaction",
+      "consent": "consequential",
+      "label": "Writes add reaction",
+      "description": "Add the person's emoji reaction to one chat message as the person directed.",
+      "agent": "Add the person's emoji reaction to one chat message as the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes add-reaction"
+    },
+    {
+      "id": "writes_remove_reaction",
+      "consent": "consequential",
+      "label": "Writes remove reaction",
+      "description": "Remove the person's emoji reaction from one chat message as the person directed.",
+      "agent": "Remove the person's emoji reaction from one chat message as the person directed.",
+      "input": {},
+      "output": {},
+      "cli": "writes remove-reaction"
+    },
+    {
+      "id": "writes_verify",
+      "consent": "write",
+      "label": "Writes verify",
+      "description": "Re-read the server to settle a write whose outcome is unknown; sends nothing.",
+      "agent": "Re-read the server to settle a write whose outcome is unknown; sends nothing.",
+      "input": {},
+      "output": {},
+      "cli": "writes verify"
+    },
+    {
+      "id": "writes_settle",
+      "consent": "write",
+      "label": "Writes settle",
+      "description": "Settle an unknown write after the person checks it on the controlling terminal.",
+      "agent": "Settle an unknown write after the person checks it on the controlling terminal.",
+      "input": {},
+      "output": {},
+      "cli": "writes settle"
+    },
+    {
+      "id": "notes_sync",
+      "consent": "write",
+      "label": "Notes sync",
+      "description": "Capture OneNote indexed notes locally from default Mac indexes or a directory.",
+      "agent": "Capture OneNote indexed notes locally from default Mac indexes or a directory.",
+      "input": {},
+      "output": {},
+      "cli": "notes sync"
+    },
+    {
+      "id": "notes_list",
+      "consent": "read",
+      "label": "Notes list",
+      "description": "List indexed notes with stable IDs and source coverage.",
+      "agent": "List indexed notes with stable IDs and source coverage.",
+      "input": {},
+      "output": {},
+      "cli": "notes list"
+    },
+    {
+      "id": "notes_search",
+      "consent": "read",
+      "label": "Notes search",
+      "description": "Search archived note titles, text and OCR.",
+      "agent": "Search archived note titles, text and OCR.",
+      "input": {},
+      "output": {},
+      "cli": "notes search"
+    },
+    {
+      "id": "notes_show",
+      "consent": "read",
+      "label": "Notes show",
+      "description": "Show one note's text, elements and indexed hierarchy.",
+      "agent": "Show one note's text, elements and indexed hierarchy.",
+      "input": {},
+      "output": {},
+      "cli": "notes show"
+    },
+    {
+      "id": "notes_sources",
+      "consent": "read",
+      "label": "Notes sources",
+      "description": "Show registered note sources, capture history and coverage.",
+      "agent": "Show registered note sources, capture history and coverage.",
+      "input": {},
+      "output": {},
+      "cli": "notes sources"
+    },
+    {
+      "id": "docs_sync",
+      "consent": "write",
+      "label": "Docs sync",
+      "description": "Register and capture Office document metadata and OneDrive usage records; never opens files.",
+      "agent": "Register and capture Office document metadata and OneDrive usage records; never opens files.",
+      "input": {},
+      "output": {},
+      "cli": "docs sync"
+    },
+    {
+      "id": "docs_list",
+      "consent": "read",
+      "label": "Docs list",
+      "description": "List document observations with stable IDs and source coverage.",
+      "agent": "List document observations with stable IDs and source coverage.",
+      "input": {},
+      "output": {},
+      "cli": "docs list"
+    },
+    {
+      "id": "docs_search",
+      "consent": "read",
+      "label": "Docs search",
+      "description": "Search retained document metadata, URLs and sharing claims.",
+      "agent": "Search retained document metadata, URLs and sharing claims.",
+      "input": {},
+      "output": {},
+      "cli": "docs search"
+    },
+    {
+      "id": "docs_show",
+      "consent": "read",
+      "label": "Docs show",
+      "description": "Inspect one document observation and its raw claims.",
+      "agent": "Inspect one document observation and its raw claims.",
+      "input": {},
+      "output": {},
+      "cli": "docs show"
+    },
+    {
+      "id": "docs_sources",
+      "consent": "read",
+      "label": "Docs sources",
+      "description": "Inspect registered document source health without capture.",
+      "agent": "Inspect registered document source health without capture.",
+      "input": {},
+      "output": {},
+      "cli": "docs sources"
+    },
+    {
+      "id": "loop_sync",
+      "consent": "write",
+      "label": "Loop sync",
+      "description": "Register archived cached Loop snapshot records and project their channels.",
+      "agent": "Register archived cached Loop snapshot records and project their channels.",
+      "input": {},
+      "output": {},
+      "cli": "loop sync"
+    },
+    {
+      "id": "loop_list",
+      "consent": "read",
+      "label": "Loop list",
+      "description": "List retained Loop channel observations with stable IDs.",
+      "agent": "List retained Loop channel observations with stable IDs.",
+      "input": {},
+      "output": {},
+      "cli": "loop list"
+    },
+    {
+      "id": "loop_search",
+      "consent": "read",
+      "label": "Loop search",
+      "description": "Search retained Loop channel text and paths.",
+      "agent": "Search retained Loop channel text and paths.",
+      "input": {},
+      "output": {},
+      "cli": "loop search"
+    },
+    {
+      "id": "loop_show",
+      "consent": "read",
+      "label": "Loop show",
+      "description": "Inspect one Loop channel from one cached snapshot.",
+      "agent": "Inspect one Loop channel from one cached snapshot.",
+      "input": {},
+      "output": {},
+      "cli": "loop show"
+    },
+    {
+      "id": "loop_sources",
+      "consent": "read",
+      "label": "Loop sources",
+      "description": "Inspect registered Loop sources, their raw-match state and failures.",
+      "agent": "Inspect registered Loop sources, their raw-match state and failures.",
+      "input": {},
+      "output": {},
+      "cli": "loop sources"
+    },
+    {
+      "id": "scout_sync",
+      "consent": "write",
+      "label": "Scout sync",
+      "description": "Copy Scout session files already in the local OneDrive folder into the archive.",
+      "agent": "Copy Scout session files already in the local OneDrive folder into the archive.",
+      "input": {},
+      "output": {},
+      "cli": "scout sync"
+    },
+    {
+      "id": "scout_list",
+      "consent": "read",
+      "label": "Scout list",
+      "description": "List archived Scout sessions, most recent activity first.",
+      "agent": "List archived Scout sessions, most recent activity first.",
+      "input": {},
+      "output": {},
+      "cli": "scout list"
+    },
+    {
+      "id": "scout_search",
+      "consent": "read",
+      "label": "Scout search",
+      "description": "Search the messages of archived Scout sessions.",
+      "agent": "Search the messages of archived Scout sessions.",
+      "input": {},
+      "output": {},
+      "cli": "scout search"
+    },
+    {
+      "id": "scout_show",
+      "consent": "read",
+      "label": "Scout show",
+      "description": "Show one Scout session with its messages.",
+      "agent": "Show one Scout session with its messages.",
+      "input": {},
+      "output": {},
+      "cli": "scout show"
+    },
+    {
+      "id": "scout_sources",
+      "consent": "read",
+      "label": "Scout sources",
+      "description": "Show each Scout folder read, its last scan and file counts.",
+      "agent": "Show each Scout folder read, its last scan and file counts.",
+      "input": {},
+      "output": {},
+      "cli": "scout sources"
+    },
+    {
+      "id": "drafts_list",
+      "consent": "read",
+      "label": "Drafts list",
+      "description": "List own cached compose-body projections already archived; never refreshes.",
+      "agent": "List own cached compose-body projections already archived; never refreshes.",
+      "input": {},
+      "output": {},
+      "cli": "drafts list"
+    },
+    {
+      "id": "drafts_show",
+      "consent": "read",
+      "label": "Drafts show",
+      "description": "Inspect one cached compose-body frame.",
+      "agent": "Inspect one cached compose-body frame.",
+      "input": {},
+      "output": {},
+      "cli": "drafts show"
+    },
+    {
+      "id": "content_images",
+      "consent": "read",
+      "label": "Content images",
+      "description": "List bounded image references in one cached Teams message, offline.",
+      "agent": "List bounded image references in one cached Teams message, offline.",
+      "input": {},
+      "output": {},
+      "cli": "content images"
+    },
+    {
+      "id": "content_capture",
+      "consent": "write",
+      "label": "Content capture",
+      "description": "Capture one guarded, already-resident Office file or native file reference.",
+      "agent": "Capture one guarded, already-resident Office file or native file reference.",
+      "input": {},
+      "output": {},
+      "cli": "content capture"
+    },
+    {
+      "id": "content_fetch_image",
+      "consent": "write",
+      "label": "Content fetch image",
+      "description": "Export one verified selected Teams PNG through read-only WorkIQ.",
+      "agent": "Export one verified selected Teams PNG through read-only WorkIQ.",
+      "input": {},
+      "output": {},
+      "cli": "content fetch image"
+    },
+    {
+      "id": "content_fetch_engage_thread",
+      "consent": "write",
+      "label": "Content fetch engage thread",
+      "description": "Capture one Engage thread link with its starter and replies.",
+      "agent": "Capture one Engage thread link with its starter and replies.",
+      "input": {},
+      "output": {},
+      "cli": "content fetch engage-thread"
+    },
+    {
+      "id": "content_fetch_engage_home",
+      "consent": "write",
+      "label": "Content fetch engage home",
+      "description": "Capture bounded native Engage Home-session thread-starter observations.",
+      "agent": "Capture bounded native Engage Home-session thread-starter observations.",
+      "input": {},
+      "output": {},
+      "cli": "content fetch engage-home"
+    },
+    {
+      "id": "content_fetch_page",
+      "consent": "write",
+      "label": "Content fetch page",
+      "description": "Acquire a supported rich-text page projection (always partial).",
+      "agent": "Acquire a supported rich-text page projection (always partial).",
+      "input": {},
+      "output": {},
+      "cli": "content fetch page"
+    },
+    {
+      "id": "content_fetch_stream",
+      "consent": "write",
+      "label": "Content fetch stream",
+      "description": "Acquire one verified selected transcript or its metadata.",
+      "agent": "Acquire one verified selected transcript or its metadata.",
+      "input": {},
+      "output": {},
+      "cli": "content fetch stream"
+    },
+    {
+      "id": "content_fetch_doc",
+      "consent": "write",
+      "label": "Content fetch doc",
+      "description": "Read one OneDrive or SharePoint Office file through WorkIQ, when its rights allow.",
+      "agent": "Read one OneDrive or SharePoint Office file through WorkIQ, when its rights allow.",
+      "input": {},
+      "output": {},
+      "cli": "content fetch doc"
+    },
+    {
+      "id": "content_signin",
+      "consent": "write",
+      "label": "Content signin",
+      "description": "Open a visible window for the tool-owned profile so the person can sign in.",
+      "agent": "Open a visible window for the tool-owned profile so the person can sign in.",
+      "input": {},
+      "output": {},
+      "cli": "content signin"
+    },
+    {
+      "id": "content_list",
+      "consent": "read",
+      "label": "Content list",
+      "description": "List immutable retained content observations, newest first.",
+      "agent": "List immutable retained content observations, newest first.",
+      "input": {},
+      "output": {},
+      "cli": "content list"
+    },
+    {
+      "id": "content_search",
+      "consent": "read",
+      "label": "Content search",
+      "description": "Search retained content text, titles and native metadata offline.",
+      "agent": "Search retained content text, titles and native metadata offline.",
+      "input": {},
+      "output": {},
+      "cli": "content search"
+    },
+    {
+      "id": "content_show",
+      "consent": "read",
+      "label": "Content show",
+      "description": "Read one retained content observation offline.",
+      "agent": "Read one retained content observation offline.",
+      "input": {},
+      "output": {},
+      "cli": "content show"
+    },
+    {
+      "id": "content_sources",
+      "consent": "read",
+      "label": "Content sources",
+      "description": "Read registered content source coverage offline.",
+      "agent": "Read registered content source coverage offline.",
+      "input": {},
+      "output": {},
+      "cli": "content sources"
+    },
+    {
+      "id": "transcripts_list",
+      "consent": "read",
+      "label": "Transcripts list",
+      "description": "List meetings with recordings and their transcript parts, offline.",
+      "agent": "List meetings with recordings and their transcript parts, offline.",
+      "input": {},
+      "output": {},
+      "cli": "transcripts list"
+    },
+    {
+      "id": "transcripts_show",
+      "consent": "read",
+      "label": "Transcripts show",
+      "description": "Print a meeting's transcript from the archive in time order.",
+      "agent": "Print a meeting's transcript from the archive in time order.",
+      "input": {},
+      "output": {},
+      "cli": "transcripts show"
+    },
+    {
+      "id": "transcripts_fetch",
+      "consent": "write",
+      "label": "Transcripts fetch",
+      "description": "Fetch a meeting's transcript parts from SharePoint and store them.",
+      "agent": "Fetch a meeting's transcript parts from SharePoint and store them.",
+      "input": {},
+      "output": {},
+      "cli": "transcripts fetch"
+    },
+    {
+      "id": "transcripts_signin",
+      "consent": "write",
+      "label": "Transcripts signin",
+      "description": "Open m365crawl's browser profile in a visible window so the person can sign in to SharePoint.",
+      "agent": "Open m365crawl's browser profile in a visible window so the person can sign in to SharePoint.",
+      "input": {},
+      "output": {},
+      "cli": "transcripts signin"
+    },
+    {
+      "id": "stores",
+      "consent": "read",
+      "label": "Stores",
+      "description": "List archived databases and object stores without a typed table, with record counts.",
+      "agent": "List archived databases and object stores without a typed table, with record counts.",
+      "input": {},
+      "output": {},
+      "cli": "stores"
+    },
+    {
+      "id": "records",
+      "consent": "read",
+      "label": "Records",
+      "description": "List archived records of one database, newest change first.",
+      "agent": "List archived records of one database, newest change first.",
+      "input": {},
+      "output": {},
+      "cli": "records"
+    },
+    {
+      "id": "unread",
+      "consent": "read",
+      "label": "Unread",
+      "description": "List unread Teams messages, newest first.",
+      "agent": "List unread Teams messages, newest first.",
+      "input": {},
+      "output": {},
+      "cli": "unread"
+    },
+    {
+      "id": "thread",
+      "consent": "read",
+      "label": "Thread",
+      "description": "Show one Teams thread from a conversation and root message, or a message link.",
+      "agent": "Show one Teams thread from a conversation and root message, or a message link.",
+      "input": {},
+      "output": {},
+      "cli": "thread"
+    },
+    {
+      "id": "watch",
+      "consent": "read",
+      "label": "Watch",
+      "description": "Stream one JSON line per new, edited or deleted Teams message or activity item.",
+      "agent": "Stream one JSON line per new, edited or deleted Teams message or activity item.",
+      "input": {},
+      "output": {},
+      "cli": "watch"
+    },
+    {
+      "id": "whoami",
+      "consent": "read",
+      "label": "Whoami",
+      "description": "Show the accounts in the archive and the archive's state.",
+      "agent": "Show the accounts in the archive and the archive's state.",
+      "input": {},
+      "output": {},
+      "cli": "whoami"
+    },
+    {
+      "id": "sql",
+      "consent": "read",
+      "label": "Sql",
+      "description": "Run a read-only SQL query against the archive.",
+      "agent": "Run a read-only SQL query against the archive.",
+      "input": {},
+      "output": {},
+      "cli": "sql"
+    },
+    {
+      "id": "skill",
+      "consent": "read",
+      "label": "Skill",
+      "description": "Print the agent guide (SKILL.md) for this version.",
+      "agent": "Print the agent guide (SKILL.md) for this version.",
+      "input": {},
+      "output": {},
+      "cli": "skill"
+    },
+    {
+      "id": "metadata",
+      "consent": "read",
+      "label": "Metadata",
+      "description": "Print the crawlkit app manifest.",
+      "agent": "Print the crawlkit app manifest.",
+      "input": {},
+      "output": {},
+      "cli": "metadata"
+    },
+    {
+      "id": "version",
+      "consent": "read",
+      "label": "Version",
+      "description": "Print the m365crawl version, commit and build date.",
+      "agent": "Print the m365crawl version, commit and build date.",
+      "input": {},
+      "output": {},
+      "cli": "version"
+    },
+    {
+      "id": "help",
+      "consent": "read",
+      "label": "Help",
+      "description": "Print every command as JSON, with who sees its effect, and the exit codes.",
+      "agent": "Print every command as JSON, with who sees its effect, and the exit codes.",
+      "input": {},
+      "output": {},
+      "cli": "help"
+    }
+  ]
+}
