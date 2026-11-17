@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// The vendored generator and claims are the files ouro-ui-core v0.16.0 publishes under these names in its dist-manifest.
+// The vendored generator and claims are the files the ouro-ui-core release named in upstream-sources.lock.json publishes
+// under these names in its dist-manifest.
 var vendored = map[string]string{
 	"ouro-actions.mts":    "dist/actions/ouro-actions.mts",
 	"actions.claims.json": "dist/ax/actions.claims.json",
@@ -26,8 +27,8 @@ func TestVendoredMatchesCoreManifest(t *testing.T) {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.CoreTag != "v0.16.0" {
-		t.Errorf("dist-manifest.json is for %s; the vendored generator is v0.16.0", manifest.CoreTag)
+	if release := lockedRelease(t); manifest.CoreTag != release {
+		t.Errorf("dist-manifest.json is for %s; upstream-sources.lock.json vendors %s", manifest.CoreTag, release)
 	}
 	for file, distPath := range vendored {
 		body, err := os.ReadFile(file) //nolint:gosec // a vendored file named in this test, read from the repository
@@ -39,4 +40,29 @@ func TestVendoredMatchesCoreManifest(t *testing.T) {
 			t.Errorf("%s: sha256 %s, core's manifest says %s for %s", file, got, want, distPath)
 		}
 	}
+}
+
+// lockedRelease is the ouro-ui-core release upstream-sources.lock.json records for the vendored generator.
+func lockedRelease(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../upstream-sources.lock.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock struct {
+		Sources []struct {
+			ID      string `json:"id"`
+			Release string `json:"release"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range lock.Sources {
+		if source.ID == "ourostack-ouro-ui-core-actions" {
+			return source.Release
+		}
+	}
+	t.Fatal("upstream-sources.lock.json has no ourostack-ouro-ui-core-actions source")
+	return ""
 }
