@@ -35,7 +35,7 @@ import { AxError, isAxError } from "./problem.ts";
  * @claim "never by importing the interface's code" registry/ouro/ax/xray.test.mts verify:testExists(registry/ouro/ax/xray.test.mts::the kit's example tool conforms, and the X-ray acts on nothing)
  * @claim "only against a target that proves it is a mock" registry/ouro/ax/xray.test.mts verify:testExists(registry/ouro/ax/xray.test.mts::without proof of a mock, nothing other people see is called, and it does not conform)
  */
-const XRAY_VERSION = "1.5.0";
+const XRAY_VERSION = "1.6.0";
 
 type Verdict = "pass" | "fail" | "skip";
 
@@ -84,6 +84,7 @@ interface XrayOptions {
   inventory?: string | undefined;
   events?: string | undefined;
   commit?: string | undefined;
+  app?: string | undefined;
   failureCopyAllow?: string | undefined;
   conformance: boolean;
   state: string[];
@@ -519,6 +520,8 @@ const refusedNote = (safety: Safety) => `not run: the target is not proven a moc
 
 interface CliCommand {
   name: string;
+  /** The command's stdout is one JSON reply line for another program (help JSON `protocol`). */
+  protocol: boolean;
   /**
    * The words a call starts with: none for the one command of a tool defined with `command` (`single` in help JSON).
    *
@@ -549,7 +552,7 @@ function commandsOf(help: Record<string, unknown>, name: string): CliCommand[] {
     const cmd = String(c["name"]);
     const raw = Array.isArray(c["usage"]) ? c["usage"].map(String) : typeof c["usage"] === "string" ? [c["usage"]] : [cmd];
     const usage = raw.map((u) => (u.startsWith(`${name} `) ? u.slice(name.length + 1) : u));
-    return { name: cmd, words: c["single"] === true ? [] : cmd.split(" "), effect: typeof c["effect"] === "string" ? c["effect"] : null, readOnly: typeof c["readOnly"] === "boolean" ? c["readOnly"] : null, usage, scope: typeof c["scope"] === "string" ? c["scope"] : null };
+    return { name: cmd, protocol: c["protocol"] === true, words: c["single"] === true ? [] : cmd.split(" "), effect: typeof c["effect"] === "string" ? c["effect"] : null, readOnly: typeof c["readOnly"] === "boolean" ? c["readOnly"] : null, usage, scope: typeof c["scope"] === "string" ? c["scope"] : null };
   });
 }
 
@@ -615,7 +618,7 @@ async function checkCli(ctx: Context) {
     // Without help JSON, commands come from the text: an indented word, two spaces, then words.
     for (const l of overviewLines) {
       const m = /^ {2,4}([a-z][\w-]*):? {2,}\S/.exec(l);
-      if (m?.[1]) commands.push({ name: m[1], words: [m[1]], effect: null, readOnly: null, usage: [m[1]], scope: null });
+      if (m?.[1]) commands.push({ name: m[1], protocol: false, words: [m[1]], effect: null, readOnly: null, usage: [m[1]], scope: null });
     }
   }
   const names = commands.map((c) => c.name);
@@ -682,7 +685,9 @@ async function checkCli(ctx: Context) {
     const errLines = lines(c.stderr).filter((l) => l.trim());
     // With --json, stdout may carry the same error as one JSON document.
     const out = parseJson(c.stdout);
-    const quiet = !c.stdout.trim() || (c.args.includes("--json") && out.ok && isRecord(out.value) && isRecord(out.value["error"]));
+    // A protocol command's stdout is its one JSON reply line; any other command's is silent, or the --json error.
+    const reply = commands.some((x) => x.protocol && x.name === c.args[0]) && lines(c.stdout).filter(Boolean).length === 1 && parseJson(c.stdout.trim()).ok;
+    const quiet = !c.stdout.trim() || reply || (c.args.includes("--json") && out.ok && isRecord(out.value) && isRecord(out.value["error"]));
     const one = errLines.length === 1 && quiet;
     rec.add("cli.one-line-error", surface, one ? "pass" : "fail", one ? clip(errLines[0]!) : `${brief(c)} (${errLines.length} stderr lines, ${lines(c.stdout).filter(Boolean).length} stdout lines)`);
     const t = errLines.length > 0 && teaches(c.stderr);
@@ -1204,9 +1209,10 @@ async function checkCli(ctx: Context) {
     if (!loud.length) rec.add("cli.voice-off-when-piped", `all ${calls.length} calls`, "pass", `none of ${voiceLines.length} voice lines appears`);
   }
   {
+    // A row names a command by its first word ("draft", for a group with a summary) or its whole name ("peer send").
     const listedHeads = new Set(overviewLines.flatMap((l) => {
-      const m = /^ {2,4}([a-z][\w-]*(?:, [a-z][\w-]*)*):? {2,}\S/.exec(l);
-      return m ? m[1]!.split(", ") : [];
+      const m = /^ {2,4}([a-z][\w-]*(?: [a-z][\w-]*)*(?:, [a-z][\w-]*(?: [a-z][\w-]*)*)*):? {2,}\S/.exec(l);
+      return m ? m[1]!.split(", ").map((n) => n.split(" ")[0]!) : [];
     }));
     const heads = new Set(unique.map((n) => n.split(" ")[0]!));
     const namedBy = new Map<string, string>();
@@ -1542,7 +1548,7 @@ interface Report {
   checker: { version: string };
   claimSet: { version: string; hash: string };
   at: string;
-  target: { commit: string | null; cli?: { name: string; calls: number; commands: number }; http?: { origin: string; routes: number; requests: number }; mcp?: { tools: number } };
+  target: { commit: string | null; app?: { name: string }; cli?: { name: string; calls: number; commands: number }; http?: { origin: string; routes: number; requests: number }; mcp?: { tools: number } };
   safety: Safety;
   inventory: { given: boolean; surfaces: ClaimSurface[] };
   effects: { surface: string; note: string }[];
@@ -1705,6 +1711,7 @@ const CHECK_FLAGS: Readonly<Record<string, FlagSpec>> = Object.freeze({
   state: { type: "string", repeat: true, placeholder: '"<args>"', description: "CLI args whose output is the state that must not change." },
   events: { type: "string", placeholder: '"<args>"', description: "CLI args that list the interface's work events, to validate." },
   commit: { type: "string", placeholder: "<sha>", description: "The commit checked, recorded in the report." },
+  app: { type: "string", placeholder: "<name>", description: "The app the report is for, recorded as target.app.name, so a report reads as its own app's." },
   "failure-copy-allow": { type: "string", placeholder: "<file>", description: 'Failure copy that is precise but holds a vague phrase, each with its reason: [{ "match": "<part of the text>", "reason": "<why it is precise>" }].' },
   name: { type: "string", placeholder: "<name>", description: "The CLI's name in its messages (default: the command's file name)." },
   volatile: { type: "list", placeholder: "<k,k>", description: "JSON keys to ignore when comparing state." },
@@ -1809,6 +1816,7 @@ function optionsOf(input: Input, json: boolean): XrayOptions {
     inventory: text("inventory"),
     events: text("events"),
     commit: text("commit"),
+    app: text("app"),
     failureCopyAllow: text("failure-copy-allow"),
     md: text("md"),
     html: text("html"),
@@ -1858,7 +1866,7 @@ async function xray(opts: XrayOptions): Promise<Report> {
   const inventory = opts.inventory ? (JSON.parse(readFileSync(opts.inventory, "utf8")) as Inventory) : null;
   const allow = opts.failureCopyAllow ? readAllow(opts.failureCopyAllow) : [];
   const ctx: Context = { rec: new Recorder(), opts, env, safety: await checkSafety(opts, guardPassed), inventory, effects: [], allow };
-  const target: Report["target"] = { commit: opts.commit ?? null };
+  const target: Report["target"] = { commit: opts.commit ?? null, ...(opts.app ? { app: { name: opts.app } } : {}) };
   if (opts.cli) target.cli = await checkCli(ctx);
   if (opts.http) target.http = await checkHttp(ctx);
   if (opts.mcp) target.mcp = await checkMcp(ctx);
