@@ -45,4 +45,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          # An explicit message: GitHub's default appends bot Co-authored-by lines, which the ruleset rejects.
+          subject=$(gh pr view "$PR_URL" --json title,number --jq '"\(.title) (#\(.number))"')
+          message=$(gh pr view "$PR_URL" --json body --jq .body | tr -d '\r' | grep -v -i -E '^[[:space:]]*[A-Za-z-]+-by[[:space:]]*:.*(\[bot\]|(^|[^A-Za-z0-9])(copilot|claude|anthropic|openai|chatgpt|gpt|codex|gemini|cursor|devin|aider)([^A-Za-z]|$))' || true)
+          gh pr merge --auto --squash --subject "$subject" --body "$message" "$PR_URL"
