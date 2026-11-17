@@ -107,7 +107,7 @@ Each job has the narrowest `permissions` it needs: `contents: write` only in `re
 
 ## Dependency updates
 
-`.github/dependabot.yml` opens weekly, grouped pull requests for GitHub Actions and Go modules. `.github/workflows/dependabot-automerge.yml` turns on auto-merge (squash) only for Go module updates that are all semver patch or minor, decided by `dependabot/fetch-metadata` and `scripts/automerge-eligible.sh`, and only when both the pull request author and the actor are `dependabot[bot]`. GitHub Actions updates and major versions stay open for a person to read: a moved upstream action tag would otherwise reach the job that holds the Apple secrets. Pinned actions keep their commit SHA and version comment; Dependabot updates both.
+`.github/dependabot.yml` opens weekly, grouped pull requests for GitHub Actions and Go modules. `.github/workflows/dependabot-automerge.yml` turns on auto-merge (squash, with an explicit commit message so no bot credit line reaches `main`) only for Go module updates that are all semver patch or minor, decided by `dependabot/fetch-metadata` and `scripts/automerge-eligible.sh`, and only when both the pull request author and the actor are `dependabot[bot]`. GitHub Actions updates and major versions stay open for a person to read: a moved upstream action tag would otherwise reach the job that holds the Apple secrets. Pinned actions keep their commit SHA and version comment; Dependabot updates both.
 
 ## Secrets
 
