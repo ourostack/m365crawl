@@ -120,6 +120,9 @@ func (c *client) fail(err error) {
 // call sends one command, on the given session when sessionID is not empty, and decodes the
 // result into out when out is not nil.
 func (c *client) call(ctx context.Context, sessionID, method string, params, out any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, ok := ctx.Deadline(); !ok {
 		// A browser that stops answering must not hold the caller forever.
 		var cancel context.CancelFunc
