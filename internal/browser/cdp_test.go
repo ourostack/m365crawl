@@ -74,6 +74,37 @@ func TestClientDeadTransportContextPrecedence(t *testing.T) {
 	}
 }
 
+func TestCallAlreadyCancelledLeavesConnectionUsable(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, expire := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer expire()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{"canceled", canceled, context.Canceled},
+		{"deadline", expired, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := initScriptServer(t)
+			p := testPage(t, s)
+			if err := p.RemoveInitScript(tc.ctx, "native-registration"); !errors.Is(err, tc.want) {
+				t.Errorf("cancelled removal = %v, want %v", err, tc.want)
+			}
+			if err := p.c.call(context.Background(), p.session, "Page.enable", nil, nil); err != nil {
+				t.Fatalf("live call after cancelled removal = %v", err)
+			}
+			for _, r := range s.Requests() {
+				if r.Method == "Page.removeScriptToEvaluateOnNewDocument" {
+					t.Fatal("already cancelled removal reached the browser")
+				}
+			}
+		})
+	}
+}
+
 func TestClientNoOriginHeader(t *testing.T) {
 	s := browsertest.NewServer(t)
 	testPage(t, s)
