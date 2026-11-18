@@ -10,7 +10,7 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mattn/go-runewidth v0.0.31
-	github.com/openclaw/crawlkit v0.17.4
+	github.com/openclaw/crawlkit v0.18.0
 	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.50.0
