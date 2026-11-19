@@ -158,7 +158,8 @@ func imageNativeEnv(t *testing.T, mode string) (*env, string) {
 	}
 	_, err = st.ApplyMessages(context.Background(), []teamsdesktop.Message{{
 		TenantID: "synthetic-tenant", UserID: "synthetic-user", ConversationID: "chat", ID: "image-message",
-		MessageType: "Text", ContentType: "html", ContentHTML: imageElement,
+		MessageType: "Text", ContentType: "html", ContentHTML: imageElement +
+			`<img itemtype="http://schema.skype.com/AMSImage" itemid="second-image" src="https://example.invalid/second-source">`,
 	}})
 	closeErr := st.Close()
 	if err != nil || closeErr != nil {
@@ -265,6 +266,9 @@ func TestFetchChatImageRecheckAndClose(t *testing.T) {
 				t.Fatalf("acquisition made extra/missing native calls: %v", calls)
 			}
 			doc := decode(t, out.String())
+			if _, present := doc["team_id"]; present {
+				t.Fatal("chat receipt gained a channel team selector")
+			}
 			data, err := os.ReadFile(output) // #nosec G304 -- Exact published synthetic PNG destination in t.TempDir.
 			if err != nil || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 				t.Fatalf("published output not complete PNG: %v", err)

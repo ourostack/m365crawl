@@ -95,6 +95,43 @@ func TestFetchChatImageCloseBeforePublication(t *testing.T) {
 	}
 }
 
+func TestFetchChannelImageScopedAcquisition(t *testing.T) {
+	for _, mode := range []string{"good", "private", "wrong-tenant", "wrong-channel", "malformed-channel", "fetch-channel-failed", "wrong-team-after-blob"} {
+		t.Run(mode, func(t *testing.T) {
+			options := workIQImageFixture(t, "channel-"+mode)
+			options.TeamID = "synthetic-team"
+			report, err := FetchWorkIQChatImage(context.Background(), options)
+			if mode == "good" || mode == "private" {
+				if err != nil || report.Status != "acquired" || report.TeamID != options.TeamID ||
+					report.Effect.FilePublished == nil || !*report.Effect.FilePublished ||
+					report.VerificationObservedAt == nil || report.Info.ContentType != "image/png" {
+					t.Fatalf("channel root not acquired with provenance: %+v %v", report, err)
+				}
+			} else {
+				if err == nil || report.Effect.FilePublished == nil || *report.Effect.FilePublished {
+					t.Fatalf("unbound channel published output: %+v %v", report, err)
+				}
+				if entries, err := os.ReadDir(filepath.Dir(options.Output)); err != nil || len(entries) != 0 {
+					t.Fatal("failed channel acquisition retained reservation/output", entries, err)
+				}
+			}
+		})
+	}
+}
+
+func TestFetchChannelImageInvalidTeamBeforeNative(t *testing.T) {
+	for _, team := range []string{"../team", "team%2Fother"} {
+		options := workIQImageFixture(t, "channel-good")
+		options.TeamID = team
+		report, err := FetchWorkIQChatImage(context.Background(), options)
+		var coded *errs.Coded
+		if !errors.As(err, &coded) || coded.Exit != errs.ExitUsage ||
+			report.Effect.FilePublished == nil || *report.Effect.FilePublished {
+			t.Fatalf("invalid channel team reached acquisition: %+v %v", report, err)
+		}
+	}
+}
+
 func TestImageOutcomeAdditionalFaults(t *testing.T) {
 	options := workIQImageFixture(t, "blob-failure")
 	prevClose, prevReserve, prevAbort := workIQClose, imageReserve, imageAbort
