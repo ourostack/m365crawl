@@ -16,6 +16,8 @@ func imageFetch(path string) (any, int, bool) {
 	if mode == "" {
 		return nil, 0, false
 	}
+	channel := strings.HasPrefix(mode, "channel-")
+	mode = strings.TrimPrefix(mode, "channel-")
 	switch path {
 	case "/me":
 		user := "synthetic-user"
@@ -27,7 +29,7 @@ func imageFetch(path string) (any, int, bool) {
 			address = "not an address"
 		}
 		return map[string]any{"id": user, "mail": address}, 200, true
-	case "/chats/chat":
+	case "/chats/chat", "/teams/synthetic-team/channels/chat":
 		tenant, id, kind := "synthetic-tenant", "chat", "group"
 		switch mode {
 		case "wrong-tenant":
@@ -40,17 +42,43 @@ func imageFetch(path string) (any, int, bool) {
 			kind = ""
 		case "malformed-chat":
 			id = ""
+		case "missing-tenant":
+			tenant = ""
+		case "wrong-channel":
+			id = "another-channel"
+		case "malformed-channel":
+			id = ""
+		case "fetch-channel-failed":
+			return nil, 403, true
+		}
+		if channel {
+			membership := "standard"
+			switch mode {
+			case "shared":
+				membership = "shared"
+			case "unknown-membership":
+				membership = "unknownFutureValue"
+			case "missing-membership":
+				membership = ""
+			case "private":
+				membership = "private"
+			}
+			return map[string]any{"id": id, "tenantId": tenant, "membershipType": membership}, 200, true
 		}
 		return map[string]any{"id": id, "tenantId": tenant, "chatType": kind}, 200, true
-	case "/chats/chat/messages/image-message":
+	case "/chats/chat/messages/image-message", "/teams/synthetic-team/channels/chat/messages/image-message":
 		imageObservations++
 		hosted := "selected-content"
 		if mode == "changed-reference" && imageObservations == 2 {
 			hosted = "different-content"
 		}
 		body := `<img itemtype="http://schema.skype.com/AMSImage" itemid="synthetic-image" src="/chats/chat/messages/image-message/hostedContents/` + hosted + `/$value">`
+		if channel {
+			body = strings.ReplaceAll(body, "/chats/chat", "/teams/synthetic-team/channels/chat") +
+				`<img itemtype="http://schema.skype.com/AMSImage" itemid="second-image" src="/teams/synthetic-team/channels/chat/messages/image-message/hostedContents/second-content/$value">`
+		}
 		if mode == "unsafe-reference" {
-			body = strings.Replace(body, "/chats/chat/", "https://example.invalid/private?sig=private-ticket", 1)
+			body = strings.Replace(body, `src="/`, `src="https://example.invalid/private?sig=private-ticket/`, 1)
 		}
 		message := map[string]any{"id": "image-message", "messageType": "message",
 			"body": map[string]any{"contentType": "html", "content": body}}
@@ -64,6 +92,24 @@ func imageFetch(path string) (any, int, bool) {
 		if mode == "deleted" || mode == "deleted-after-blob" && imageObservations == 2 {
 			message["deletedDateTime"] = "2026-11-01T10:02:00Z"
 		}
+		if channel {
+			identity := map[string]any{"teamId": "synthetic-team", "channelId": "chat"}
+			message["channelIdentity"] = identity
+			switch {
+			case mode == "wrong-team" || mode == "wrong-team-after-blob" && imageObservations == 2:
+				identity["teamId"] = "another-team"
+			case mode == "wrong-message-channel" || mode == "wrong-channel-after-blob" && imageObservations == 2:
+				identity["channelId"] = "another-channel"
+			case mode == "missing-identity" || mode == "missing-identity-after-blob" && imageObservations == 2:
+				delete(message, "channelIdentity")
+			case mode == "wrong-message":
+				message["id"] = "another-message"
+			case mode == "reply":
+				message["replyToId"] = "parent-message"
+			case mode == "removed":
+				message["@removed"] = map[string]any{}
+			}
+		}
 		return message, 200, true
 	}
 	return nil, 404, true
@@ -74,7 +120,15 @@ func imageTool(name, path string) any {
 	if mode == "" || name != "fetch_blob" {
 		return nil
 	}
-	if path != "/chats/chat/messages/image-message/hostedContents/selected-content/$value" {
+	expected := "/chats/chat/messages/image-message/hostedContents/selected-content/$value"
+	if strings.HasPrefix(mode, "channel-") {
+		expected = "/teams/synthetic-team/channels/chat/messages/image-message/hostedContents/selected-content/$value"
+		if path == "/teams/synthetic-team/channels/chat/messages/image-message/hostedContents/second-content/$value" {
+			expected = path
+		}
+	}
+	mode = strings.TrimPrefix(mode, "channel-")
+	if path != expected {
 		os.Exit(89)
 	}
 	recordDocumentCall(map[string]any{"tool": name, "path": path})

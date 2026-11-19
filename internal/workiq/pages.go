@@ -50,7 +50,8 @@ func RelativePath(raw, scope string) (string, error) {
 		strings.Contains(u.Path, "/../") || strings.Contains(u.Path, "/./") || strings.Contains(u.Path, "\\") {
 		return "", failure("workiq_cursor_invalid")
 	}
-	if u.Path != "/me" && !strings.HasPrefix(u.Path, "/me/") && !strings.HasPrefix(u.Path, "/chats/") {
+	if u.Path != "/me" && !strings.HasPrefix(u.Path, "/me/") && !strings.HasPrefix(u.Path, "/chats/") &&
+		!selectedImageChannelPath(u) {
 		return "", failure("workiq_cursor_invalid")
 	}
 	if strings.ContainsAny(u.Path, "\r\n\t\x00") {

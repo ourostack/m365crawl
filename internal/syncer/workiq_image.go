@@ -18,20 +18,20 @@ import (
 )
 
 type WorkIQImageOptions struct {
-	DBPath, Account, ConversationID, MessageID, ImageID, Output string
-	Invocation                                                  workiq.Invocation
+	DBPath, Account, TeamID, ConversationID, MessageID, ImageID, Output string
+	Invocation                                                          workiq.Invocation
 }
 
 type WorkIQImageReport struct {
-	Account, ConversationID, MessageID, ImageID, Output string
-	Status, Code                                        string
-	AdditionalCodes                                     []string
-	Info                                                teamsimage.PNGInfo
-	NativeMessageModifiedAt                             *time.Time
-	NativeBodyObservedAt                                *time.Time
-	VerificationObservedAt                              *time.Time
-	FetchedAt                                           *time.Time
-	Effect                                              imageexport.Effect
+	Account, TeamID, ConversationID, MessageID, ImageID, Output string
+	Status, Code                                                string
+	AdditionalCodes                                             []string
+	Info                                                        teamsimage.PNGInfo
+	NativeMessageModifiedAt                                     *time.Time
+	NativeBodyObservedAt                                        *time.Time
+	VerificationObservedAt                                      *time.Time
+	FetchedAt                                                   *time.Time
+	Effect                                                      imageexport.Effect
 }
 
 var imageReserve = imageexport.Reserve
@@ -43,7 +43,7 @@ var imageInspectHTML = teamsimage.InspectHTML
 func FetchWorkIQChatImage(ctx context.Context, options WorkIQImageOptions) (report WorkIQImageReport, err error) {
 	notPublished, notVerified := false, false
 	report = WorkIQImageReport{
-		Account: options.Account, ConversationID: options.ConversationID, MessageID: options.MessageID,
+		Account: options.Account, TeamID: options.TeamID, ConversationID: options.ConversationID, MessageID: options.MessageID,
 		ImageID: options.ImageID, Output: options.Output,
 		Effect: imageexport.Effect{Phase: "admission", FilePublished: &notPublished, OutputVerified: &notVerified},
 	}
@@ -58,6 +58,7 @@ func FetchWorkIQChatImage(ctx context.Context, options WorkIQImageOptions) (repo
 		report.finish(err)
 	}()
 	if !teamsimage.ValidComponent(options.ConversationID) || !teamsimage.ValidComponent(options.MessageID) ||
+		options.TeamID != "" && (!teamsimage.ValidComponent(options.TeamID) || strings.Contains(options.TeamID, "%")) ||
 		!teamsimage.ValidComponent(options.ImageID) || options.Output == "" || strings.ContainsAny(options.Output, "\x00\r\n") {
 		return report, errs.Usage("image fetch requires bounded exact conversation/message/image IDs and an explicit output file")
 	}
@@ -175,18 +176,26 @@ func (r *WorkIQImageReport) acquire(ctx context.Context, client *workiq.Client, 
 		return nil, workIQFailure("workiq_identity_mismatch")
 	}
 	resource := "/chats/" + url.PathEscape(r.ConversationID)
+	if r.TeamID != "" {
+		resource = "/teams/" + url.PathEscape(r.TeamID) + "/channels/" + url.PathEscape(r.ConversationID)
+	}
 	page, err := client.Fetch(ctx, resource)
 	if err != nil {
 		return nil, err
 	}
-	chat, err := workiq.DecodeChat(ctx, page.Data)
+	var chat workiq.Chat
+	if r.TeamID != "" {
+		chat, err = workiq.DecodeImageChannel(ctx, page.Data)
+	} else {
+		chat, err = workiq.DecodeChat(ctx, page.Data)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if chat.ID != r.ConversationID {
 		return nil, imageFailure("image_reference_unsupported", errs.ExitEnvironment)
 	}
-	if chat.Type != "oneOnOne" && chat.Type != "group" && chat.Type != "meeting" {
+	if r.TeamID == "" && chat.Type != "oneOnOne" && chat.Type != "group" && chat.Type != "meeting" {
 		return nil, imageFailure("image_kind_unsupported", errs.ExitEnvironment)
 	}
 	if _, err := workiq.SelectChatAccount(user, chat, []workiq.AccountFact{fact}, r.Account); err != nil {
@@ -229,6 +238,9 @@ func (r *WorkIQImageReport) observe(ctx context.Context, client *workiq.Client, 
 	page, err := client.Fetch(ctx, resource)
 	if err != nil {
 		return workiq.ImageMessage{}, err
+	}
+	if r.TeamID != "" {
+		return workiq.DecodeSelectedChannelImageMessage(ctx, r.TeamID, r.ConversationID, r.MessageID, page.Data)
 	}
 	return workiq.DecodeSelectedImageMessage(ctx, r.ConversationID, r.MessageID, page.Data)
 }
