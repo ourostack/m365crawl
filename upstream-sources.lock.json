@@ -4,8 +4,8 @@
     {
       "id": "ourostack-ouro-ui-ax",
       "repository": "ourostack/ouro-ui",
-      "commit": "155737f90f5df5c42d9305dd8f916a93cdd5f17d",
-      "release": "v1.3.324",
+      "commit": "c62f673bf5757eab8cdb82c917f1babccc5e79dc",
+      "release": "v1.3.325",
       "license": "MIT",
       "files": [
         { "sourcePath": "registry/ouro/ax/checks.ts", "generatedPath": "tools/ouro-ax/checks.ts", "sha256": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4" },
@@ -22,7 +22,7 @@
         { "sourcePath": "registry/ouro/ax/flows.ts", "generatedPath": "tools/ouro-ax/flows.ts", "sha256": "a2baeeb8204e0e681900bc8e561eb869a9956bbfdae0d605ce567379e453e66e" },
         { "sourcePath": "registry/ouro/ax/help.ts", "generatedPath": "tools/ouro-ax/help.ts", "sha256": "62940b717f6876e731d2a9f6cd429feaca803c8567667268cdbd72ed44fd3134" },
         { "sourcePath": "registry/ouro/ax/lint.ts", "generatedPath": "tools/ouro-ax/lint.ts", "sha256": "3a0597475fa506a7d54c4fee52c49f3d3454ed07e8b013579d050ae3702dc7dc" },
-        { "sourcePath": "registry/ouro/ax/mcp.ts", "generatedPath": "tools/ouro-ax/mcp.ts", "sha256": "648563fbc2aac0912783533a385099adc8608d1f58a43b7a5450a73f9108a0ff" },
+        { "sourcePath": "registry/ouro/ax/mcp.ts", "generatedPath": "tools/ouro-ax/mcp.ts", "sha256": "d676dd5f592da5b7899790c2c633994442b230ce91ed806750025ee7ec6ebf63" },
         { "sourcePath": "registry/ouro/ax/outcome.ts", "generatedPath": "tools/ouro-ax/outcome.ts", "sha256": "ab83a9c4182039a7d23a176bdfc159c29aaf9b3515c7bb939190877bdbaefe60" },
         { "sourcePath": "registry/ouro/ax/output.ts", "generatedPath": "tools/ouro-ax/output.ts", "sha256": "fcee98161b3537d82043898d4139af0fa2b84f4a6fa52bc1bb9c0ed6615356a2" },
         { "sourcePath": "registry/ouro/ax/precise-copy.ts", "generatedPath": "tools/ouro-ax/precise-copy.ts", "sha256": "d93b0f3dc86634e3432b81f8709d1f0ce42e1c63a1554c059ae285f46792edee" },
